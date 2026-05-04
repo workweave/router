@@ -132,7 +132,6 @@ func TestProxy_StampsTimingMilestones(t *testing.T) {
 	assert.LessOrEqual(t, tm.UpstreamFirstByteNanos.Load(), tm.UpstreamEOFNanos.Load())
 }
 
-
 func TestPassthrough_ForwardsPathAndAuth(t *testing.T) {
 	var (
 		gotPath string

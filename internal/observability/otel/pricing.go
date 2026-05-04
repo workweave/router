@@ -43,9 +43,9 @@ var pricingTable = map[string]Pricing{
 	"gpt-4o-mini":  {InputUSDPer1M: 0.15, OutputUSDPer1M: 0.60},
 
 	// Google Gemini 3.x
-	"gemini-3-pro-preview":        {InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00},
-	"gemini-3.1-pro-preview":      {InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00},
-	"gemini-3-flash-preview":      {InputUSDPer1M: 0.50, OutputUSDPer1M: 2.00},
+	"gemini-3-pro-preview":          {InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00},
+	"gemini-3.1-pro-preview":        {InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00},
+	"gemini-3-flash-preview":        {InputUSDPer1M: 0.50, OutputUSDPer1M: 2.00},
 	"gemini-3.1-flash-lite-preview": {InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40},
 
 	// Google Gemini 2.x (legacy)

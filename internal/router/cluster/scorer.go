@@ -32,15 +32,15 @@ func DefaultConfig() Config {
 // Scorer is the cluster router for one frozen artifact version. Errors
 // delegate to the fallback router so the request stays serviceable.
 type Scorer struct {
-	version   string
-	cfg       Config
-	embed     Embedder
-	centroids *Centroids
-	rankings  Rankings
-	registry  *ModelRegistry
+	version    string
+	cfg        Config
+	embed      Embedder
+	centroids  *Centroids
+	rankings   Rankings
+	registry   *ModelRegistry
 	candidates []DeployedEntry
 	models     []string
-	fallback router.Router
+	fallback   router.Router
 }
 
 // Version returns the artifact version (e.g. "v0.2") for logging and

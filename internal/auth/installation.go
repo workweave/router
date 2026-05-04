@@ -8,13 +8,13 @@ import (
 )
 
 type Installation struct {
-	ID         string
-	ExternalID string
-	Name       string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	DeletedAt  *time.Time
-	CreatedBy  *string
+	ID                string
+	ExternalID        string
+	Name              string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time
+	CreatedBy         *string
 	IsEvalAllowlisted bool
 }
 

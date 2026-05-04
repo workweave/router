@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: router
+          POSTGRES_PASSWORD: router
+          POSTGRES_DB: router
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U router -d router"
+          --health-interval 1s
+          --health-timeout 3s
+          --health-retries 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Install golang-migrate
+        run: |
+          curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.1/migrate.linux-amd64.tar.gz \
+            | tar xvz
+          sudo mv migrate /usr/local/bin/migrate
+
+      - name: Install sqlc
+        run: |
+          curl -L https://downloads.sqlc.dev/sqlc_1.30.0_linux_amd64.tar.gz | tar xvz
+          sudo mv sqlc /usr/local/bin/sqlc
+
+      # The docker-compose stack pre-creates the router schema via an init
+      # script mounted into postgres. CI's service container has no such
+      # init hook, so we recreate that step explicitly here.
+      - name: Pre-create router schema
+        env:
+          PGPASSWORD: router
+        run: |
+          psql -h localhost -p 5432 -U router -d router \
+            -c "CREATE SCHEMA IF NOT EXISTS router;"
+
+      - name: Apply migrations
+        run: |
+          migrate -path ./db/migrations \
+            -database 'postgres://router:router@localhost:5432/router?sslmode=disable&search_path=router' \
+            up
+
+      # Round-trip catches reversible-migration regressions: a broken
+      # down.sql would silently rot until someone tries to roll back.
+      - name: Roll migrations down then back up
+        run: |
+          migrate -path ./db/migrations \
+            -database 'postgres://router:router@localhost:5432/router?sslmode=disable&search_path=router' \
+            down -all
+          migrate -path ./db/migrations \
+            -database 'postgres://router:router@localhost:5432/router?sslmode=disable&search_path=router' \
+            up
+
+      # Detects schema/query drift: if migrations or queries change
+      # without regenerating internal/sqlc/, this fails the build.
+      - name: Check sqlc generation is up to date
+        working-directory: db
+        run: |
+          sqlc generate
+          if ! git diff --quiet ../internal/sqlc/; then
+            echo "::error::sqlc generation is out of date. Run 'make generate' and commit."
+            git diff ../internal/sqlc/
+            exit 1
+          fi
+
+      - name: Check formatting
+        run: |
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "::error::Go files are not formatted. Run 'gofmt -w .' on:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Typecheck
+        run: go build -o /dev/null ./...
+
+      - name: Run tests
+        run: go test -count=1 ./...

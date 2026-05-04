@@ -1,0 +1,134 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Check Migrations
+
+on:
+  pull_request:
+    paths:
+      - 'db/migrations/**'
+
+jobs:
+  check-migrations:
+    name: Check Migrations
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: |
+          BASE_REF="${{ github.base_ref || 'main' }}"
+          git fetch origin ${BASE_REF}:refs/remotes/origin/${BASE_REF}
+          echo "BASE_REF=${BASE_REF}" >> $GITHUB_ENV
+
+      - name: Check migration format and ordering
+        run: |
+          set -o pipefail
+
+          CHANGED_MIGRATIONS=$(git diff --diff-filter=A --name-only origin/${BASE_REF}...HEAD -- db/migrations/*.sql | sort)
+
+          if [ -z "$CHANGED_MIGRATIONS" ]; then
+            echo "No new migration files in this PR"
+            exit 0
+          fi
+
+          echo "New migration files:"
+          echo "$CHANGED_MIGRATIONS"
+
+          # Check 1: Filename format (sequential 4-digit prefix)
+          echo ""
+          echo "Checking filename format..."
+          FORMAT_VALID=true
+          for file in $CHANGED_MIGRATIONS; do
+            FILENAME=$(basename "$file")
+            if ! echo "$FILENAME" | grep -qE '^[0-9]{4}_.*\.(up|down)\.sql$'; then
+              echo "::error::Invalid migration filename: $file"
+              echo "  Expected format: NNNN_description.{up|down}.sql"
+              echo "  Example: 0003_add_feature.up.sql"
+              FORMAT_VALID=false
+            fi
+          done
+          if [ "$FORMAT_VALID" = false ]; then
+            exit 1
+          fi
+          echo "  All filenames match NNNN_description.{up|down}.sql"
+
+          # Check 2: Up/down pairs
+          echo ""
+          echo "Checking for up/down pairs..."
+          PREFIXES=$(echo "$CHANGED_MIGRATIONS" | sed -E 's/\.(up|down)\.sql$//' | sort -u)
+          for prefix in $PREFIXES; do
+            if ! echo "$CHANGED_MIGRATIONS" | grep -qF "${prefix}.up.sql"; then
+              echo "::error::Missing .up.sql for: ${prefix}"
+              exit 1
+            fi
+            if ! echo "$CHANGED_MIGRATIONS" | grep -qF "${prefix}.down.sql"; then
+              echo "::error::Missing .down.sql for: ${prefix}"
+              exit 1
+            fi
+          done
+          echo "  All migrations have both .up.sql and .down.sql"
+
+          # Check 3: Single migration per PR
+          echo ""
+          echo "Checking for single migration..."
+          UNIQUE_NUMBERS=$(echo "$CHANGED_MIGRATIONS" | xargs -n1 basename | grep -oE '^[0-9]{4}' | sort -u)
+          NUM_COUNT=$(echo "$UNIQUE_NUMBERS" | wc -l | tr -d ' ')
+          if [ "$NUM_COUNT" -gt 1 ]; then
+            echo "::error::Multiple migrations found ($NUM_COUNT different sequence numbers)"
+            echo "  Only one new migration per PR. Numbers found:"
+            echo "$UNIQUE_NUMBERS"
+            exit 1
+          fi
+          echo "  Single migration check passed"
+
+          # Check 4: New migration has the highest sequence number
+          echo ""
+          echo "Checking sequence ordering..."
+          NEW_NUM=$(echo "$UNIQUE_NUMBERS" | head -1)
+          ALL_MIGRATIONS=$(ls db/migrations/*.sql 2>/dev/null | sort || true)
+          FAILED=false
+          for file in $ALL_MIGRATIONS; do
+            if echo "$CHANGED_MIGRATIONS" | grep -q "$file"; then
+              continue
+            fi
+            EXISTING_NUM=$(basename "$file" | grep -oE '^[0-9]{4}' || true)
+            if [ -n "$EXISTING_NUM" ] && [ "$EXISTING_NUM" -ge "$NEW_NUM" ]; then
+              echo "::error::Existing migration has same or higher number:"
+              echo "  Existing: $file ($EXISTING_NUM)"
+              echo "  New:      $NEW_NUM"
+              FAILED=true
+            fi
+          done
+          if [ "$FAILED" = true ]; then
+            exit 1
+          fi
+          echo "  New migration ($NEW_NUM) has the highest sequence number"
+
+          # Check 5: Transaction wrapping (BEGIN/COMMIT)
+          echo ""
+          echo "Checking transaction wrapping..."
+          TX_VALID=true
+          for file in $CHANGED_MIGRATIONS; do
+            FILTERED=$(grep -v '^[[:space:]]*$' "$file" | grep -v '^[[:space:]]*--' || true)
+            FIRST_LINE=$(echo "$FILTERED" | head -n 1 | sed 's/--.*$//' | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+            LAST_LINE=$(echo "$FILTERED" | tail -n 1 | sed 's/--.*$//' | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+
+            if [ "$FIRST_LINE" != "BEGIN;" ]; then
+              echo "::error::Migration missing BEGIN; at start: $file"
+              TX_VALID=false
+            fi
+            if [ "$LAST_LINE" != "COMMIT;" ]; then
+              echo "::error::Migration missing COMMIT; at end: $file"
+              TX_VALID=false
+            fi
+          done
+          if [ "$TX_VALID" = false ]; then
+            exit 1
+          fi
+          echo "  All migrations wrapped in BEGIN/COMMIT"
+
+          echo ""
+          echo "All migration checks passed."

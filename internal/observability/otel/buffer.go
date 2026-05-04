@@ -76,4 +76,3 @@ func Flush(ctx context.Context) {
 		buf.Flush()
 	}
 }
-
