@@ -5,6 +5,165 @@ to the most appropriate provider. The service proxies Anthropic Messages
 and OpenAI Chat Completions requests, selecting a model via the cluster
 scorer (AvengersPro-derived) or a deterministic heuristic fallback.
 
+## Getting started
+
+The router can run two ways: fully containerized via **Docker Compose**,
+or locally with **Go + Make**. Both produce a working router at
+`http://localhost:8082`.
+
+> **Provider API key required.** The router proxies requests to upstream
+> LLM providers. At least one of `ANTHROPIC_API_KEY`,
+> `OPENAI_PROVIDER_API_KEY`, or `GOOGLE_PROVIDER_API_KEY` must be set,
+> or the server refuses to boot. See [Configuration](#configuration) for
+> the full list.
+
+### Option A: Docker Compose (recommended for first run)
+
+No local Go toolchain needed — everything runs in containers.
+
+```bash
+cd router
+
+# 1. Export your provider API key (pick at least one).
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# 2. Start Postgres, run migrations, and boot the server.
+docker compose up --build -d
+
+# 3. Point Claude Code at the local router (writes ~/.claude/settings.json
+#    with ANTHROPIC_BASE_URL=http://localhost:8082 and the routed-model
+#    status line). Idempotent — re-run any time.
+make install-cc
+
+# 4. Verify.
+curl http://localhost:8082/health
+claude   # status line should show "WEAVE ROUTER — <model>"
+```
+
+`make install-cc` wraps `./install/install.sh --local`, which uses
+`ROUTER_DEV_MODE=true` so no API key seed is needed for local development.
+For the seeded-key path (or other tools like Cursor) see [Connecting
+clients](#connecting-clients) below.
+
+The stack runs three services:
+
+1. `postgres` — postgres:15-alpine, host port `5433`
+2. `migrate` — one-shot golang-migrate that applies `db/migrations/` and
+   exits 0
+3. `server` — built from the `Dockerfile`, host port `8082`
+
+Tear down:
+
+```bash
+make uninstall-cc         # remove the Claude Code → router config
+docker compose down       # keep the Postgres volume
+docker compose down -v    # drop the volume (fresh next time)
+```
+
+### Option B: Local development (Go + Make)
+
+Prerequisites: Go 1.25+,
+[golang-migrate](https://github.com/golang-migrate/migrate),
+[CompileDaemon](https://github.com/githubnemo/CompileDaemon) (for hot
+reload).
+
+#### 1. Start Postgres
+
+Use the bundled compose file to start Postgres only:
+
+```bash
+cd router
+make db
+```
+
+Then create `.env.local` with the matching connection string and your
+provider key:
+
+```
+DATABASE_URL=postgresql://router:router@localhost:5433/router?sslmode=disable
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Or point `DATABASE_URL` at any Postgres you already have running (the
+default in `.env.development` targets `localhost:5432/router_dev`).
+
+#### 2. Bootstrap the database
+
+```bash
+make setup
+```
+
+This runs three steps in order:
+
+| Step | Target | What it does |
+| ---- | ------ | ------------ |
+| 1 | `make initdb` | Creates the database and `router` schema (idempotent) |
+| 2 | `make migrate-up` | Applies all pending migrations via golang-migrate |
+| 3 | `make seed` | Creates an installation + API key and prints usage instructions |
+
+Save the printed token — it is shown only once.
+
+#### 3. Start the server
+
+```bash
+make dev
+```
+
+Verify:
+
+```bash
+curl http://localhost:8082/health
+curl -H "Authorization: Bearer <token>" http://localhost:8082/validate
+```
+
+### Connecting clients
+
+#### Claude Code (recommended: `make install-cc`)
+
+For the bundled docker-compose router, the one-shot installer is the
+shortest path:
+
+```bash
+make install-cc          # writes ~/.claude/settings.json + status line
+claude                   # routes through the local router
+make uninstall-cc        # revert
+```
+
+Under the hood it runs `./install/install.sh --local`, which sets
+`ANTHROPIC_BASE_URL=http://localhost:8082` and installs a status line
+script that surfaces the routed model and per-turn savings. Re-running is
+idempotent and preserves any other keys in your `settings.json`. For
+project-scope installs, hosted/self-hosted URLs, or seeded-key flows, see
+[`install/README.md`](install/README.md).
+
+If you'd rather wire it up by hand (e.g. against a `make setup`-seeded
+key):
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:8082
+export ANTHROPIC_API_KEY=<token>
+claude
+```
+
+#### Cursor
+
+1. Open Cursor Settings → Models → Override OpenAI Base URL
+   Set to: `http://localhost:8082/v1`
+2. Add an API key: `<token>` (from `make seed`, or any string when
+   `ROUTER_DEV_MODE=true`)
+
+### Other Makefile targets
+
+Run `make help` to see all available targets:
+
+```bash
+make generate    # regenerate SQLC (no live DB required)
+make build       # typecheck the whole module
+make test        # run all tests
+make check       # full CI-equivalent check (generate + build + test)
+make install-cc  # point Claude Code at the local router
+```
+
 ## What's running today
 
 
@@ -302,140 +461,6 @@ The CLEAN dependency rule: inner-ring packages (`auth`, `proxy`, `router`,
 `providers`, `translate`) don't depend on adapters or presentation;
 adapters depend only on the inner ring; the composition root depends on
 everything. See [AGENTS.md](AGENTS.md) for the full set of import rules.
-
-## Getting started
-
-The router can run two ways: fully containerized via **Docker Compose**,
-or locally with **Go + Make**. Both produce a working router at
-`http://localhost:8082`.
-
-> **Provider API key required.** The router proxies requests to upstream
-> LLM providers. At least one of `ANTHROPIC_API_KEY`,
-> `OPENAI_PROVIDER_API_KEY`, or `GOOGLE_PROVIDER_API_KEY` must be set,
-> or the server refuses to boot. See [Configuration](#configuration) for
-> the full list.
-
-### Option A: Docker Compose (recommended for first run)
-
-No local Go toolchain needed — everything runs in containers.
-
-```bash
-cd router
-
-# 1. Export your provider API key (pick at least one).
-export ANTHROPIC_API_KEY=sk-ant-...
-
-# 2. Start Postgres, run migrations, and boot the server.
-docker compose up --build -d
-
-# 3. Seed a local installation + API key.
-#    Save the printed token — it is shown only once.
-docker compose run --rm seed
-
-# 4. Verify.
-curl http://localhost:8082/health
-curl -H "Authorization: Bearer <token>" http://localhost:8082/validate
-```
-
-The stack runs three services:
-
-1. `postgres` — postgres:15-alpine, host port `5433` 
-2. `migrate` — one-shot golang-migrate that applies `db/migrations/` and
-   exits 0
-3. `server` — built from the `Dockerfile`, host port `8082`
-
-Tear down:
-
-```bash
-docker compose down       # keep the Postgres volume
-docker compose down -v    # drop the volume (fresh next time)
-```
-
-### Option B: Local development (Go + Make)
-
-Prerequisites: Go 1.25+,
-[golang-migrate](https://github.com/golang-migrate/migrate),
-[CompileDaemon](https://github.com/githubnemo/CompileDaemon) (for hot
-reload).
-
-#### 1. Start Postgres
-
-Use the bundled compose file to start Postgres only:
-
-```bash
-cd router
-make db
-```
-
-Then create `.env.local` with the matching connection string and your
-provider key:
-
-```
-DATABASE_URL=postgresql://router:router@localhost:5433/router?sslmode=disable
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-Or point `DATABASE_URL` at any Postgres you already have running (the
-default in `.env.development` targets `localhost:5432/router_dev`).
-
-#### 2. Bootstrap the database
-
-```bash
-make setup
-```
-
-This runs three steps in order:
-
-| Step | Target | What it does |
-| ---- | ------ | ------------ |
-| 1 | `make initdb` | Creates the database and `router` schema (idempotent) |
-| 2 | `make migrate-up` | Applies all pending migrations via golang-migrate |
-| 3 | `make seed` | Creates an installation + API key and prints usage instructions |
-
-Save the printed token — it is shown only once.
-
-#### 3. Start the server
-
-```bash
-make dev
-```
-
-Verify:
-
-```bash
-curl http://localhost:8082/health
-curl -H "Authorization: Bearer <token>" http://localhost:8082/validate
-```
-
-### Using the router with Claude Code or Cursor
-
-After seeding an API key (step 3 in either path above), the seed command
-prints paste-ready instructions. The short version:
-
-**Claude Code:**
-
-```bash
-export ANTHROPIC_BASE_URL=http://localhost:8082
-export ANTHROPIC_API_KEY=<token>
-claude
-```
-
-**Cursor:**
-
-1. Open Cursor Settings > Models > Override OpenAI Base URL
-   Set to: `http://localhost:8082/v1`
-2. Add an API key: `<token>`
-
-### Other Makefile targets
-
-Run `make help` to see all available targets:
-
-```bash
-make generate    # regenerate SQLC (no live DB required)
-make build       # typecheck the whole module
-make test        # run all tests
-make check       # full CI-equivalent check (generate + build + test)
-```
 
 ## Configuration
 
