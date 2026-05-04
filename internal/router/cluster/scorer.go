@@ -25,7 +25,7 @@ func DefaultConfig() Config {
 		TopP:           4,
 		MinPromptChars: 20,
 		MaxPromptChars: 1024,
-		EmbedTimeout:   200 * time.Millisecond,
+		EmbedTimeout:   1500 * time.Millisecond,
 	}
 }
 
