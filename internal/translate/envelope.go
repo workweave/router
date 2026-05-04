@@ -110,6 +110,13 @@ func (e *RequestEnvelope) Model() string {
 	return gjson.GetBytes(e.body, "model").String()
 }
 
+// MetadataUserID returns the raw metadata.user_id string from the request body.
+// Claude Code packs a JSON-encoded object here containing device_id,
+// account_uuid, and session_id. Returns "" when the field is absent.
+func (e *RequestEnvelope) MetadataUserID() string {
+	return gjson.GetBytes(e.body, "metadata.user_id").String()
+}
+
 // HasTools reports whether the request contains a non-empty tools array.
 func (e *RequestEnvelope) HasTools() bool {
 	r := gjson.GetBytes(e.body, "tools.#")

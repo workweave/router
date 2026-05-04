@@ -2,6 +2,7 @@
 package openai
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -31,6 +32,9 @@ func ChatCompletionHandler(svc *proxy.Service) gin.HandlerFunc {
 			writeOpenAIError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body too large")
 			return
 		}
+
+		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header)
+		c.Request = c.Request.WithContext(ctx)
 
 		if err := svc.ProxyOpenAIChatCompletion(c.Request.Context(), body, c.Writer, c.Request); err != nil {
 			var statusErr *providers.UpstreamStatusError
@@ -62,6 +66,18 @@ func ChatCompletionHandler(svc *proxy.Service) gin.HandlerFunc {
 			return
 		}
 	}
+}
+
+// stashClientIdentity extracts user identification signals from HTTP headers
+// and stashes them on the context. OpenAI-format requests don't carry the
+// Anthropic metadata.user_id body field, so only headers are inspected.
+func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
+	id := proxy.ClientIdentity{
+		SessionID: h.Get("X-Claude-Code-Session-Id"),
+		UserAgent: h.Get("User-Agent"),
+		ClientApp: h.Get("X-App"),
+	}
+	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
 }
 
 func writeOpenAIError(c *gin.Context, status int, errType, message string) {
