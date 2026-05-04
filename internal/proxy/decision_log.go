@@ -33,6 +33,8 @@ type DecisionLogEntry struct {
 	DecisionModel    string `json:"decision_model"`
 	DecisionReason   string `json:"decision_reason"`
 	DecisionProvider string `json:"decision_provider"`
+	DeviceID         string `json:"device_id,omitempty"`
+	SessionID        string `json:"session_id,omitempty"`
 }
 
 // NewDecisionLog returns a *DecisionLog when path is non-empty (and the

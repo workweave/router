@@ -225,6 +225,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
 	externalID, _ := ctx.Value(ExternalIDContextKey{}).(string)
+	clientID := ClientIdentityFrom(ctx)
 	bypassSticky := hasEvalOverrideHeader(r)
 	var (
 		decision   router.Decision
@@ -298,6 +299,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Attrs: map[string]any{
 			"request_id":                      requestID,
 			"external_id":                     externalID,
+			"client.device_id":                clientID.DeviceID,
+			"client.account_id":               clientID.AccountID,
+			"client.session_id":               clientID.SessionID,
+			"client.user_agent":               clientID.UserAgent,
+			"client.app":                      clientID.ClientApp,
 			"requested.model":                 feats.Model,
 			"decision.model":                  decision.Model,
 			"decision.provider":               decision.Provider,
@@ -391,6 +397,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	upstreamAttrs := map[string]any{
 		"request_id":                requestID,
 		"external_id":               externalID,
+		"client.device_id":          clientID.DeviceID,
+		"client.account_id":         clientID.AccountID,
+		"client.session_id":         clientID.SessionID,
+		"client.user_agent":         clientID.UserAgent,
+		"client.app":                clientID.ClientApp,
 		"usage.input_tokens":        in,
 		"usage.output_tokens":       out,
 		"cost.requested_input_usd":  float64(in) / 1_000_000 * reqPricing.InputUSDPer1M,
@@ -418,6 +429,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			DecisionModel:    decision.Model,
 			DecisionReason:   decision.Reason,
 			DecisionProvider: decision.Provider,
+			DeviceID:         clientID.DeviceID,
+			SessionID:        clientID.SessionID,
 		})
 	}
 
@@ -479,6 +492,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	ctx = buf.WithContext(ctx)
 
 	externalID, _ := ctx.Value(ExternalIDContextKey{}).(string)
+	clientID := ClientIdentityFrom(ctx)
 
 	env, parseErr := translate.ParseOpenAI(body)
 	if parseErr != nil {
@@ -541,6 +555,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Attrs: map[string]any{
 			"request_id":                      requestID,
 			"external_id":                     externalID,
+			"client.device_id":                clientID.DeviceID,
+			"client.account_id":               clientID.AccountID,
+			"client.session_id":               clientID.SessionID,
+			"client.user_agent":               clientID.UserAgent,
+			"client.app":                      clientID.ClientApp,
 			"requested.model":                 feats.Model,
 			"decision.model":                  decision.Model,
 			"decision.provider":               decision.Provider,
@@ -627,6 +646,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	openaiUpstreamAttrs := map[string]any{
 		"request_id":                requestID,
 		"external_id":               externalID,
+		"client.device_id":          clientID.DeviceID,
+		"client.account_id":         clientID.AccountID,
+		"client.session_id":         clientID.SessionID,
+		"client.user_agent":         clientID.UserAgent,
+		"client.app":                clientID.ClientApp,
 		"usage.input_tokens":        in,
 		"usage.output_tokens":       out,
 		"cost.requested_input_usd":  float64(in) / 1_000_000 * reqPricing.InputUSDPer1M,

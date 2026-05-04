@@ -4,6 +4,7 @@
 package anthropic
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"workweave/router/internal/translate"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 var writerTraceEnabled = os.Getenv("ROUTER_DEBUG_WRITER_TRACE") == "true"
@@ -62,6 +64,9 @@ func MessagesHandler(svc *proxy.Service) gin.HandlerFunc {
 			return
 		}
 
+		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header, body)
+		c.Request = c.Request.WithContext(ctx)
+
 		var w http.ResponseWriter = c.Writer
 		if writerTraceEnabled {
 			w = &tracingWriter{ResponseWriter: c.Writer}
@@ -92,6 +97,25 @@ func MessagesHandler(svc *proxy.Service) gin.HandlerFunc {
 			return
 		}
 	}
+}
+
+// stashClientIdentity extracts user identification signals from HTTP headers
+// and the Anthropic metadata.user_id body field, then stashes them on the
+// context for downstream OTEL spans and the decision sidecar log.
+func stashClientIdentity(ctx context.Context, h http.Header, body []byte) context.Context {
+	metaRaw := gjson.GetBytes(body, "metadata.user_id").String()
+	deviceID, accountID, sessionID := proxy.ParseClaudeCodeMetadata(metaRaw)
+	if sessionID == "" {
+		sessionID = h.Get("X-Claude-Code-Session-Id")
+	}
+	id := proxy.ClientIdentity{
+		DeviceID:  deviceID,
+		AccountID: accountID,
+		SessionID: sessionID,
+		UserAgent: h.Get("User-Agent"),
+		ClientApp: h.Get("X-App"),
+	}
+	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
 }
 
 func writeAnthropicError(c *gin.Context, status int, errType, message string) {
