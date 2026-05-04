@@ -151,17 +151,17 @@ func (r *ModelRegistry) Models() []string {
 // field is informational at runtime; the routing decision is a function
 // of centroids + rankings + registry only.
 type ArtifactMetadata struct {
-	Version           string               `yaml:"version"`
-	Parent            string               `yaml:"parent,omitempty"`
-	Status            string               `yaml:"status,omitempty"`
-	PromotedDate      string               `yaml:"promoted_date,omitempty"`
-	FrozenDate        string               `yaml:"frozen_date,omitempty"`
-	Embedder          ArtifactEmbedder     `yaml:"embedder"`
-	Training          ArtifactTraining     `yaml:"training"`
-	DeployedProviders []string             `yaml:"deployed_providers,omitempty"`
-	DeployedModels    []string             `yaml:"deployed_models,omitempty"`
-	CostPer1KInputUSD map[string]float64   `yaml:"cost_per_1k_input_usd,omitempty"`
-	Changelog         string               `yaml:"changelog,omitempty"`
+	Version           string             `yaml:"version"`
+	Parent            string             `yaml:"parent,omitempty"`
+	Status            string             `yaml:"status,omitempty"`
+	PromotedDate      string             `yaml:"promoted_date,omitempty"`
+	FrozenDate        string             `yaml:"frozen_date,omitempty"`
+	Embedder          ArtifactEmbedder   `yaml:"embedder"`
+	Training          ArtifactTraining   `yaml:"training"`
+	DeployedProviders []string           `yaml:"deployed_providers,omitempty"`
+	DeployedModels    []string           `yaml:"deployed_models,omitempty"`
+	CostPer1KInputUSD map[string]float64 `yaml:"cost_per_1k_input_usd,omitempty"`
+	Changelog         string             `yaml:"changelog,omitempty"`
 	// CacheConfig is optional. Absence means "use the runtime default
 	// threshold" (a single global value applied to every cluster).
 	// Each artifact version may tune thresholds independently — a

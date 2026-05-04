@@ -73,12 +73,12 @@ const semanticCacheMaxBodyBytes = 1 << 20
 // reused. x-router-* are set fresh on the hit path so the client
 // always sees the current decision rather than a stale one.
 var headersToSkipOnHit = map[string]struct{}{
-	"Request-Id":         {},
-	"X-Request-Id":       {},
-	"X-Router-Decision":  {},
-	"X-Router-Provider":  {},
-	"X-Router-Model":     {},
-	"X-Router-Cache":     {},
+	"Request-Id":        {},
+	"X-Request-Id":      {},
+	"X-Router-Decision": {},
+	"X-Router-Provider": {},
+	"X-Router-Model":    {},
+	"X-Router-Cache":    {},
 }
 
 // cloneCacheHeaders snapshots a header set for storage, dropping
