@@ -29,6 +29,7 @@ import (
 	openaiProvider "workweave/router/internal/providers/openai"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/evalswitch"
 	"workweave/router/internal/router/heuristic"
@@ -157,7 +158,8 @@ func main() {
 		logger.Info("Decision sidecar log enabled", "path", decisionsLogPath)
 	}
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog)
+	semanticCache := buildSemanticCache(primary)
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache)
 
 	engine := gin.New()
 	engine.UnescapePathValues = true
@@ -456,6 +458,77 @@ func buildHeuristicFallback(providerMap map[string]providers.Client) *heuristic.
 		LargeModel:      "gemini-3.1-pro-preview",
 		ThresholdTokens: thresholdTokens,
 	})
+}
+
+// buildSemanticCache constructs the cross-request semantic cache, or
+// returns nil when disabled. Wiring honors:
+//
+//	ROUTER_SEMANTIC_CACHE_ENABLED — "false" disables; default enabled.
+//	ROUTER_SEMANTIC_CACHE_TTL_SEC — per-entry TTL in seconds (default 3600).
+//	ROUTER_SEMANTIC_CACHE_BUCKET  — per-(installation, format, cluster)
+//	                                 LRU capacity (default 1024).
+//
+// The cache is wired only when `primary` is the cluster router (or
+// wraps one), because the cache keys on the cluster scorer's
+// embeddings; a heuristic-only deployment has nothing to key on. When
+// primary is anything other than *cluster.Multiversion (heuristic-only,
+// or cluster build failed at boot) the cache is disabled.
+//
+// Per-cluster cosine thresholds are pulled from the default version's
+// metadata.yaml `cache_config` block. Other built versions reuse the
+// default's thresholds at runtime — keeping the cache config tied to
+// the default version means promotion (flipping `artifacts/latest`)
+// also flips cache thresholds atomically.
+func buildSemanticCache(primary router.Router) *cache.Cache {
+	logger := observability.Get()
+	if config.GetOr("ROUTER_SEMANTIC_CACHE_ENABLED", "true") != "true" {
+		logger.Info("Semantic cache disabled (ROUTER_SEMANTIC_CACHE_ENABLED=false)")
+		return nil
+	}
+	multi, ok := primary.(*cluster.Multiversion)
+	if !ok {
+		logger.Info("Semantic cache disabled: cluster router not active (no embeddings to key on)")
+		return nil
+	}
+	defaultScorer, ok := multi.Versions[multi.Default]
+	if !ok {
+		// Defensive: NewMultiversion guarantees the default is built.
+		logger.Warn("Semantic cache disabled: default cluster scorer not found", "default_version", multi.Default)
+		return nil
+	}
+	perCluster, defaultThreshold := defaultScorer.CacheThresholds()
+
+	cfg := cache.DefaultConfig()
+	cfg.PerClusterThreshold = perCluster
+	if defaultThreshold > 0 {
+		cfg.DefaultThreshold = defaultThreshold
+	}
+	if v := config.GetOr("ROUTER_SEMANTIC_CACHE_TTL_SEC", ""); v != "" {
+		secs, err := strconv.Atoi(v)
+		if err != nil || secs <= 0 {
+			logger.Warn("Invalid ROUTER_SEMANTIC_CACHE_TTL_SEC; using default", "value", v, "default_sec", int(cfg.TTL.Seconds()))
+		} else {
+			cfg.TTL = time.Duration(secs) * time.Second
+		}
+	}
+	if v := config.GetOr("ROUTER_SEMANTIC_CACHE_BUCKET", ""); v != "" {
+		size, err := strconv.Atoi(v)
+		if err != nil || size <= 0 {
+			logger.Warn("Invalid ROUTER_SEMANTIC_CACHE_BUCKET; using default", "value", v, "default", cfg.BucketSize)
+		} else {
+			cfg.BucketSize = size
+		}
+	}
+	logger.Info(
+		"Semantic cache enabled",
+		"default_threshold", cfg.DefaultThreshold,
+		"per_cluster_overrides", len(cfg.PerClusterThreshold),
+		"bucket_size", cfg.BucketSize,
+		"ttl_sec", int(cfg.TTL.Seconds()),
+		"max_body_kib", cfg.MaxBodyBytes/1024,
+		"version", multi.Default,
+	)
+	return cache.New(cfg)
 }
 
 // envVarForProvider returns the env var name for a provider's API key.

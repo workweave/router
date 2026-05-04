@@ -41,11 +41,35 @@ type Scorer struct {
 	candidates []DeployedEntry
 	models     []string
 	fallback   router.Router
+	// metadata carries the parsed metadata.yaml for this version. May
+	// be nil when the bundle had no metadata.yaml. Currently used only
+	// by the semantic cache (CacheThresholds()).
+	metadata *ArtifactMetadata
 }
 
 // Version returns the artifact version (e.g. "v0.2") for logging and
 // /health-style endpoints.
 func (s *Scorer) Version() string { return s.version }
+
+// CacheThresholds returns the per-version semantic-cache thresholds
+// parsed from the bundle's metadata.yaml `cache_config` block. The
+// returned (perCluster, defaultThreshold) pair drives the cache's
+// per-cluster threshold lookup. defaultThreshold is 0 when the bundle
+// has no cache_config or its DefaultThreshold field is unset; callers
+// substitute their own runtime default in that case.
+func (s *Scorer) CacheThresholds() (perCluster map[int]float32, defaultThreshold float32) {
+	if s.metadata == nil || s.metadata.CacheConfig == nil {
+		return nil, 0
+	}
+	cfg := s.metadata.CacheConfig
+	if len(cfg.PerClusterThreshold) > 0 {
+		perCluster = make(map[int]float32, len(cfg.PerClusterThreshold))
+		for k, v := range cfg.PerClusterThreshold {
+			perCluster[k] = v
+		}
+	}
+	return perCluster, cfg.DefaultThreshold
+}
 
 // NewScorer wires a Scorer from a pre-loaded artifact Bundle. Entries whose
 // provider is not in availableProviders are filtered out of the candidate set.
@@ -129,6 +153,7 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, fallback router.Route
 		candidates: candidates,
 		models:     models,
 		fallback:   fallback,
+		metadata:   bundle.Metadata,
 	}, nil
 }
 
@@ -247,6 +272,14 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		return s.fallback.Route(ctx, req)
 	}
 
+	// Hand off the embedding + top-p clusters so downstream consumers
+	// (semantic cache) can reuse them without re-embedding. Both slices
+	// are short-lived inside this Route call; copy into heap-allocated
+	// metadata slices that survive the return.
+	embedCopy := make([]float32, len(vec))
+	copy(embedCopy, vec)
+	clustersCopy := make([]int, len(topClusters))
+	copy(clustersCopy, topClusters)
 	decision := router.Decision{
 		Provider: chosen.Provider,
 		Model:    chosen.Model,
@@ -254,6 +287,10 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			"cluster:%s top_p=%s model=%s provider=%s",
 			s.version, clusterIDsString(topClusters), chosen.Model, chosen.Provider,
 		),
+		Metadata: &router.RoutingMetadata{
+			Embedding:  embedCopy,
+			ClusterIDs: clustersCopy,
+		},
 	}
 	log.Info(
 		"Cluster routing decision",

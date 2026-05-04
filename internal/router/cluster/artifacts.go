@@ -162,6 +162,27 @@ type ArtifactMetadata struct {
 	DeployedModels    []string           `yaml:"deployed_models,omitempty"`
 	CostPer1KInputUSD map[string]float64 `yaml:"cost_per_1k_input_usd,omitempty"`
 	Changelog         string             `yaml:"changelog,omitempty"`
+	// CacheConfig is optional. Absence means "use the runtime default
+	// threshold" (a single global value applied to every cluster).
+	// Each artifact version may tune thresholds independently — a
+	// version with looser cluster geometry can ship lower thresholds
+	// without affecting other versions.
+	CacheConfig *ArtifactCacheConfig `yaml:"cache_config,omitempty"`
+}
+
+// ArtifactCacheConfig carries the per-version semantic-cache knobs the
+// runtime needs at boot. Not load-bearing for routing itself; consumed
+// only by the cache subsystem when enabled.
+type ArtifactCacheConfig struct {
+	// DefaultThreshold is the cosine-similarity floor below which a
+	// candidate cache entry is rejected, applied to every cluster
+	// without an explicit override. 0 means "fall back to the
+	// runtime's compiled-in default".
+	DefaultThreshold float32 `yaml:"default_threshold,omitempty"`
+	// PerClusterThreshold overrides DefaultThreshold for individual
+	// cluster IDs. Sparse: only list the outliers. Map keys are
+	// cluster ids; values are cosine thresholds in [0, 1].
+	PerClusterThreshold map[int]float32 `yaml:"per_cluster_threshold,omitempty"`
 }
 
 type ArtifactEmbedder struct {
