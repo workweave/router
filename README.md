@@ -16,9 +16,8 @@ scorer (AvengersPro-derived) or a deterministic heuristic fallback.
 ### Setup
 
 ```bash
-cd router
 
-# 1. Write your upstream provider API key to .env.local (pick at least one).
+# 1. Write your upstream provider API keys to .env.local (pick at least one).
 echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env.local
 
 # 2. Boot the stack, seed a Weave Router key, and wire Claude Code.
@@ -61,7 +60,6 @@ make down                  # stop the local stack
 For iterating on router code itself with `CompileDaemon` hot reload:
 
 ```bash
-cd router
 make db                                       # start Postgres only
 echo "DATABASE_URL=postgresql://router:router@localhost:5433/router?sslmode=disable" >> .env.local
 echo "ANTHROPIC_API_KEY=sk-ant-..."           >> .env.local
