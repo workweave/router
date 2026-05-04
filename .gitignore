@@ -22,6 +22,7 @@ vendor/
 .env.production
 .env.staging
 .env*.local
+.weave-router-key
 
 # ONNX model assets (pulled at build/dev time, not committed)
 assets/

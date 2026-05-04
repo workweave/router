@@ -166,6 +166,7 @@ func main() {
 	engine.UseRawPath = true
 	engine.Use(
 		observability.Middleware(),
+		observability.AccessLog(),
 		gin.Recovery(),
 	)
 

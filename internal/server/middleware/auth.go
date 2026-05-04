@@ -65,9 +65,9 @@ func handleAuthError(c *gin.Context, err error) {
 	logger := observability.FromGin(c)
 	switch {
 	case errors.Is(err, auth.ErrInvalidPrefix):
-		logger.Debug("Auth rejected: invalid bearer prefix")
+		logger.Info("Auth rejected: invalid bearer prefix (expected rk_...)")
 	case errors.Is(err, auth.ErrInvalidToken):
-		logger.Debug("Auth rejected: bearer token did not match an active key")
+		logger.Info("Auth rejected: bearer token did not match an active key")
 	default:
 		// Genuine infrastructure failure (DB unreachable, etc.). Still 401 to
 		// the caller; logged as Error for on-call.

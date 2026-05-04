@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -56,5 +57,20 @@ func Middleware() gin.HandlerFunc {
 		)
 		c.Set(ginContextKey, logger)
 		c.Next()
+	}
+}
+
+// AccessLog logs one INFO line per request after handlers run. Without this,
+// a 401 from WithAuth produces zero output at LOG_LEVEL=info, making "no
+// logs" look like "the server isn't being hit" when it actually is.
+func AccessLog() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		FromGin(c).Info("http request",
+			"status", c.Writer.Status(),
+			"latency_ms", time.Since(start).Milliseconds(),
+			"client_ip", c.ClientIP(),
+		)
 	}
 }
