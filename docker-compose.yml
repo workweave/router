@@ -1,0 +1,126 @@
+# Local docker stack for the router. Brings up Postgres, applies migrations, and
+# starts the server end-to-end. Suitable for `docker compose up` smoke tests; not
+# tuned for production (single-instance Postgres, no resource limits).
+#
+# Usage:
+#   docker compose up --build
+#
+# Health checks:
+#   curl http://localhost:8082/health
+#   curl -H 'Authorization: Bearer rk_invalid' http://localhost:8082/validate  # 401
+#
+# To seed an installation + API key for testing:
+#   docker compose run --rm seed
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: router
+      POSTGRES_PASSWORD: router
+      POSTGRES_DB: router
+    # Host port 5433 to avoid colliding with the Weave backend's local Postgres
+    # on 5432. The router service inside the compose network still talks on the
+    # internal :5432, so this only affects manual `psql` from the host.
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U router -d router"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - router_postgres_data:/var/lib/postgresql/data
+      # Init script runs once on first DB creation. Creates the `router` schema
+      # so the migrate sidecar can land its `schema_migrations` table there.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+
+  # One-shot migration runner. Exits with status 0 once all pending migrations
+  # are applied. The `server` service waits on this via service_completed_successfully
+  # so it never starts against an unmigrated DB.
+  migrate:
+    image: migrate/migrate:v4.17.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./db/migrations:/migrations
+    # `search_path=router` makes both the migrations themselves and the
+    # `schema_migrations` bookkeeping table land in the router schema, so
+    # nothing leaks into public. The migrations create the schema themselves
+    # (CREATE SCHEMA IF NOT EXISTS router) before any table DDL runs.
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://router:router@postgres:5432/router?sslmode=disable&search_path=router"
+      - "up"
+    restart: "no"
+
+  server:
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Load API keys from the same .env files `make dev` uses, so
+    # docker compose up and make dev resolve identically. Compose
+    # evaluates env_file entries in order; .env.local wins on
+    # collisions because it's listed second.
+    #
+    # NOTE: do not add ANTHROPIC_API_KEY / OPENAI_PROVIDER_API_KEY /
+    # GOOGLE_PROVIDER_API_KEY to the `environment:` block below — that
+    # block overrides env_file values, and any "${VAR:-}" form there
+    # would silently zero out the env_file value when run in a shell
+    # without the var exported. Let env_file be authoritative for the
+    # provider keys; main.go will panic if ANTHROPIC_API_KEY ends up
+    # unset and loud-warn for any unregistered provider.
+    env_file:
+      - path: .env.development
+        required: false
+      - path: .env.local
+        required: false
+    environment:
+      DATABASE_URL: postgres://router:router@postgres:5432/router?sslmode=disable
+      PORT: "8080"
+      LOG_LEVEL: info
+      # .env.development sets ROUTER_ONNX_ASSETS_DIR to a repo-relative path
+      # that's correct for `make dev` outside Docker but wrong inside the
+      # container, where the Dockerfile populates /opt/router/assets/. The
+      # `environment:` block overrides env_file values, so we pin the
+      # in-container path here. Without this override, the Go embedder's
+      # resolveAssetsDir() picks up the dev-only path, the cluster scorer
+      # fails to load, and the router silently falls open to the heuristic.
+      ROUTER_ONNX_ASSETS_DIR: /opt/router/assets
+    # Host port 8082 matches the .env.development default for local non-docker
+    # runs, so the same curl commands work against either.
+    ports:
+      - "8082:8080"
+    restart: unless-stopped
+
+  # One-shot seed runner. Creates a local-dev installation + API key and
+  # prints the raw token with paste-ready configuration for Claude Code and
+  # Cursor. Not started by `docker compose up`; invoke explicitly:
+  #   docker compose run --rm seed
+  seed:
+    image: golang:1.25-bookworm
+    working_dir: /app
+    volumes:
+      - .:/app
+      - go_modules:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      CGO_ENABLED: "0"
+      DATABASE_URL: postgres://router:router@postgres:5432/router?sslmode=disable
+    command: ["go", "run", "./cmd/seed"]
+    profiles:
+      - tools
+    restart: "no"
+
+volumes:
+  router_postgres_data:
+  go_modules:

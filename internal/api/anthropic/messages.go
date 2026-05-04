@@ -1,0 +1,105 @@
+// Package anthropic holds HTTP handlers for the Anthropic Messages surface.
+// The handler is intentionally thin: it adapts gin ↔ proxy.Service and shapes
+// errors back into Anthropic's wire format.
+package anthropic
+
+import (
+	"errors"
+	"io"
+	"net/http"
+	"os"
+	"runtime/debug"
+
+	"workweave/router/internal/observability"
+	"workweave/router/internal/providers"
+	"workweave/router/internal/proxy"
+	"workweave/router/internal/translate"
+
+	"github.com/gin-gonic/gin"
+)
+
+var writerTraceEnabled = os.Getenv("ROUTER_DEBUG_WRITER_TRACE") == "true"
+
+type tracingWriter struct {
+	gin.ResponseWriter
+}
+
+func (t *tracingWriter) WriteHeader(code int) {
+	observability.Get().Debug("ResponseWriter WriteHeader called",
+		"code", code,
+		"already_written", t.ResponseWriter.Written(),
+		"current_status", t.ResponseWriter.Status(),
+		"stack", string(debug.Stack()),
+	)
+	t.ResponseWriter.WriteHeader(code)
+}
+
+func (t *tracingWriter) Write(b []byte) (int, error) {
+	if !t.ResponseWriter.Written() {
+		observability.Get().Debug("ResponseWriter implicit-200 via Write",
+			"bytes", len(b),
+			"stack", string(debug.Stack()),
+		)
+	}
+	return t.ResponseWriter.Write(b)
+}
+
+const maxBodyBytes = 10 * 1024 * 1024
+
+// MessagesHandler wires POST /v1/messages to proxy.Service.ProxyMessages.
+func MessagesHandler(svc *proxy.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		log := observability.FromGin(c)
+
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes+1))
+		if err != nil {
+			log.Debug("Failed to read request body", "err", err)
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "failed to read request body")
+			return
+		}
+		if len(body) > maxBodyBytes {
+			writeAnthropicError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body too large")
+			return
+		}
+
+		var w http.ResponseWriter = c.Writer
+		if writerTraceEnabled {
+			w = &tracingWriter{ResponseWriter: c.Writer}
+		}
+		if err := svc.ProxyMessages(c.Request.Context(), body, w, c.Request); err != nil {
+			var statusErr *providers.UpstreamStatusError
+			if errors.As(err, &statusErr) {
+				if c.Writer.Written() {
+					return
+				}
+				writeAnthropicError(c, statusErr.Status, "api_error", "upstream call failed")
+				return
+			}
+			if c.Writer.Written() {
+				log.Error("Proxy failed mid-stream", "err", err)
+				return
+			}
+			if errors.Is(err, providers.ErrNotImplemented) {
+				writeAnthropicError(c, http.StatusNotImplemented, "api_error", "provider not configured")
+				return
+			}
+			if errors.Is(err, translate.ErrNotJSONObject) {
+				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "request body must be a JSON object")
+				return
+			}
+			log.Error("Proxy failed", "err", err)
+			writeAnthropicError(c, http.StatusBadGateway, "api_error", "upstream call failed")
+			return
+		}
+	}
+}
+
+func writeAnthropicError(c *gin.Context, status int, errType, message string) {
+	c.AbortWithStatusJSON(status, gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    errType,
+			"message": message,
+		},
+	})
+}

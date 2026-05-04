@@ -1,0 +1,130 @@
+{
+  "meta": {
+    "alpha": 0.53,
+    "cost_per_1k_input_usd": {
+      "claude-haiku-4-5": 0.8,
+      "claude-opus-4-7": 15.0,
+      "claude-sonnet-4-5": 3.0,
+      "gemini-3-flash-preview": 0.5,
+      "gemini-3.1-flash-lite-preview": 0.1,
+      "gemini-3.1-pro-preview": 2.0,
+      "gpt-4.1": 2.0,
+      "gpt-5.5": 5.0
+    },
+    "embedder_model": "jina-v2-base-code-int8",
+    "k": 10,
+    "n_prompts": 15354,
+    "router_version": "weave-router-v0.1-bootstrap",
+    "score_normalization": "per_prompt_minmax_across_bench_columns",
+    "seed": 42,
+    "shrinkage_k0": 10.0,
+    "top_p": 4,
+    "training_data_mix": {
+      "d1": 1.0,
+      "d2": 0.0,
+      "d3": 0.0
+    }
+  },
+  "rankings": {
+    "0": {
+      "claude-haiku-4-5": 0.48712733713196466,
+      "claude-opus-4-7": 0.4104316556298617,
+      "claude-sonnet-4-5": 0.42895033619455103,
+      "gemini-3-flash-preview": 0.49659042438028683,
+      "gemini-3.1-flash-lite-preview": 0.5092078740447163,
+      "gemini-3.1-pro-preview": 0.9400671140939598,
+      "gpt-4.1": 0.41006711409395974,
+      "gpt-5.5": 0.7437457827840164
+    },
+    "1": {
+      "claude-haiku-4-5": 0.5389746078966146,
+      "claude-opus-4-7": 0.5295828501622967,
+      "claude-sonnet-4-5": 0.37852348993288587,
+      "gemini-3-flash-preview": 0.5484376951449368,
+      "gemini-3.1-flash-lite-preview": 0.5610551448093662,
+      "gemini-3.1-pro-preview": 0.8335336623059382,
+      "gpt-4.1": 0.5417451469752834,
+      "gpt-5.5": 0.8454362416107382
+    },
+    "2": {
+      "claude-haiku-4-5": 0.6410033232796704,
+      "claude-opus-4-7": 0.44116644766701724,
+      "claude-sonnet-4-5": 0.37852348993288587,
+      "gemini-3-flash-preview": 0.6504664105279926,
+      "gemini-3.1-flash-lite-preview": 0.663083860192422,
+      "gemini-3.1-pro-preview": 0.9400671140939598,
+      "gpt-4.1": 0.7199956015005563,
+      "gpt-5.5": 0.7581839561112311
+    },
+    "3": {
+      "claude-haiku-4-5": 0.65500106269449,
+      "claude-opus-4-7": 0.434236826093304,
+      "claude-sonnet-4-5": 0.37852348993288587,
+      "gemini-3-flash-preview": 0.6644641499428121,
+      "gemini-3.1-flash-lite-preview": 0.6770815996072417,
+      "gemini-3.1-pro-preview": 0.9400671140939598,
+      "gpt-4.1": 0.669131601054145,
+      "gpt-5.5": 0.7508558504763615
+    },
+    "4": {
+      "claude-haiku-4-5": 0.4856380292889677,
+      "claude-opus-4-7": 0.0,
+      "claude-sonnet-4-5": 0.876720601576787,
+      "gemini-3-flash-preview": 0.4951011165372899,
+      "gemini-3.1-flash-lite-preview": 0.5077185662017194,
+      "gemini-3.1-pro-preview": 0.9400671140939598,
+      "gpt-4.1": 0.5549691039327856,
+      "gpt-5.5": 0.31691383197344014
+    },
+    "5": {
+      "claude-haiku-4-5": 0.4479194630872483,
+      "claude-opus-4-7": 0.529272882160052,
+      "claude-sonnet-4-5": 0.5520946911498315,
+      "gemini-3-flash-preview": 0.45738255033557046,
+      "gemini-3.1-flash-lite-preview": 0.47,
+      "gemini-3.1-pro-preview": 0.8163890907472867,
+      "gpt-4.1": 0.519980023281149,
+      "gpt-5.5": 0.8454362416107382
+    },
+    "6": {
+      "claude-haiku-4-5": 0.5202700885716058,
+      "claude-opus-4-7": 0.5284663852980919,
+      "claude-sonnet-4-5": 0.4192781878626297,
+      "gemini-3-flash-preview": 0.529733175819928,
+      "gemini-3.1-flash-lite-preview": 0.5423506254843575,
+      "gemini-3.1-pro-preview": 0.8126608122852016,
+      "gpt-4.1": 0.41006711409395974,
+      "gpt-5.5": 0.8454362416107382
+    },
+    "7": {
+      "claude-haiku-4-5": 0.4479194630872483,
+      "claude-opus-4-7": 0.53,
+      "claude-sonnet-4-5": 0.5327136473526686,
+      "gemini-3-flash-preview": 0.45738255033557046,
+      "gemini-3.1-flash-lite-preview": 0.47,
+      "gemini-3.1-pro-preview": 0.8256123496123708,
+      "gpt-4.1": 0.6407497932326286,
+      "gpt-5.5": 0.8449480465843318
+    },
+    "8": {
+      "claude-haiku-4-5": 0.5204699283122515,
+      "claude-opus-4-7": 0.53,
+      "claude-sonnet-4-5": 0.37852348993288587,
+      "gemini-3-flash-preview": 0.5299330155605736,
+      "gemini-3.1-flash-lite-preview": 0.5425504652250032,
+      "gemini-3.1-pro-preview": 0.8849536099611398,
+      "gpt-4.1": 0.5278058914127219,
+      "gpt-5.5": 0.8441633634534322
+    },
+    "9": {
+      "claude-haiku-4-5": 0.4479194630872483,
+      "claude-opus-4-7": 0.5159031291363232,
+      "claude-sonnet-4-5": 0.5034565093204674,
+      "gemini-3-flash-preview": 0.45738255033557046,
+      "gemini-3.1-flash-lite-preview": 0.47,
+      "gemini-3.1-pro-preview": 0.6914063227379199,
+      "gpt-4.1": 0.6076710926832114,
+      "gpt-5.5": 0.8454362416107382
+    }
+  }
+}

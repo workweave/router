@@ -1,0 +1,67 @@
+# Compiled binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build/test artifacts
+*.test
+*.out
+cover.html
+coverage.out
+
+# Vendor (we use modules, not vendoring)
+vendor/
+
+# Environment files (templates are .env.example)
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+.env*.local
+
+# ONNX model assets (pulled at build/dev time, not committed)
+assets/
+*.onnx
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local caches
+.bench-cache/
+.embedding-cache/
+.local/
+
+# Logs
+logs/
+*.log
+
+# Docker overrides
+docker-compose.override.yml
+
+# Node (eval/scripts tooling)
+node_modules/
+
+# Eval results (stored in GCS, not git)
+eval/results/
+scripts/results/
+results/

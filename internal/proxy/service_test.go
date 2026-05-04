@@ -1,0 +1,415 @@
+package proxy_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"workweave/router/internal/providers"
+	"workweave/router/internal/proxy"
+	"workweave/router/internal/router"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type fakeRouter struct {
+	decision    router.Decision
+	err         error
+	capturedReq *router.Request
+	routeCalls  int
+}
+
+func (f *fakeRouter) Route(ctx context.Context, req router.Request) (router.Decision, error) {
+	f.capturedReq = &req
+	f.routeCalls++
+	return f.decision, f.err
+}
+
+type fakeProvider struct {
+	completeCalls []providers.Request
+	respond       providers.Response
+	respondErr    error
+
+	proxyBodies   [][]byte
+	proxyResponse func(w http.ResponseWriter)
+	proxyErr      error
+}
+
+func (f *fakeProvider) Complete(ctx context.Context, req providers.Request) (providers.Response, error) {
+	f.completeCalls = append(f.completeCalls, req)
+	return f.respond, f.respondErr
+}
+
+func (f *fakeProvider) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
+	saved := make([]byte, len(prep.Body))
+	copy(saved, prep.Body)
+	f.proxyBodies = append(f.proxyBodies, saved)
+	if f.proxyResponse != nil {
+		f.proxyResponse(w)
+	}
+	return f.proxyErr
+}
+
+func (f *fakeProvider) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
+	return nil
+}
+
+func makeProxyService(decision router.Decision, p map[string]providers.Client) *proxy.Service {
+	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, 0, nil)
+}
+
+func TestService_Dispatch_ForwardsRequestToProvider(t *testing.T) {
+	provider := &fakeProvider{
+		respond: providers.Response{
+			Model:        "noop-1",
+			Content:      "hello back",
+			InputTokens:  3,
+			OutputTokens: 2,
+			StopReason:   "stop",
+		},
+	}
+	svc := makeProxyService(
+		router.Decision{Provider: "noop", Model: "noop-1"},
+		map[string]providers.Client{"noop": provider},
+	)
+
+	req := providers.Request{
+		Model:    "noop-1",
+		Messages: []providers.Message{{Role: "user", Content: "hi"}},
+	}
+	resp, err := svc.Dispatch(
+		context.Background(),
+		router.Decision{Provider: "noop", Model: "noop-1"},
+		req,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, provider.completeCalls, 1,
+		"Dispatch must call providers.Client.Complete exactly once")
+	assert.Equal(t, req, provider.completeCalls[0],
+		"Dispatch must forward the request verbatim to the adapter")
+	assert.Equal(t, "hello back", resp.Content,
+		"Dispatch must return the adapter's response unchanged")
+}
+
+func TestService_Dispatch_PropagatesProviderError(t *testing.T) {
+	providerErr := errors.New("upstream 503")
+	provider := &fakeProvider{respondErr: providerErr}
+	svc := makeProxyService(
+		router.Decision{Provider: "noop", Model: "noop-1"},
+		map[string]providers.Client{"noop": provider},
+	)
+
+	_, err := svc.Dispatch(
+		context.Background(),
+		router.Decision{Provider: "noop", Model: "noop-1"},
+		providers.Request{},
+	)
+
+	require.ErrorIs(t, err, providerErr,
+		"Dispatch must surface the underlying provider error so handlers can map it")
+}
+
+func TestService_Dispatch_UnknownProviderReturnsErrProviderNotConfigured(t *testing.T) {
+	svc := proxy.NewService(&fakeRouter{}, map[string]providers.Client{}, nil, false, 0, nil)
+
+	_, err := svc.Dispatch(
+		context.Background(),
+		router.Decision{Provider: "ghost", Model: "ghost-1"},
+		providers.Request{},
+	)
+
+	require.ErrorIs(t, err, proxy.ErrProviderNotConfigured)
+}
+
+func TestService_ProxyMessages_PropagatesUpstreamStatusError(t *testing.T) {
+	upstreamErr := &providers.UpstreamStatusError{Status: 400}
+	provider := &fakeProvider{proxyErr: upstreamErr}
+	svc := makeProxyService(
+		router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"},
+		map[string]providers.Client{"anthropic": provider},
+	)
+
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+
+	err := svc.ProxyMessages(context.Background(), body, rec, httpReq)
+
+	var got *providers.UpstreamStatusError
+	require.ErrorAs(t, err, &got,
+		"ProxyMessages must surface the typed UpstreamStatusError so "+
+			"observability can log upstream_status alongside proxy_err")
+	assert.Equal(t, 400, got.Status)
+}
+
+func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
+	const userPrompt = "Walk every Go file under router/internal/ and produce a one-paragraph summary of each."
+	// A realistic CC-shaped body: system preamble + an earlier user
+	// prompt + a long tool_result the cluster scorer would otherwise
+	// fingerprint on. The most recent user-authored text is the original
+	// prompt, several messages back.
+	body := []byte(`{
+		"model":"claude-opus-4-7",
+		"system":"You are Claude Code. CLAUDE.md says: do not use emojis...",
+		"messages":[
+			{"role":"user","content":"` + userPrompt + `"},
+			{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"path":"go.mod"}}]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"module workweave/router\n\ngo 1.23\n\nrequire (\n\tgithub.com/gin-gonic/gin v1.10.0\n)"}]}
+		]
+	}`)
+
+	t.Run("flag off uses concatenated stream", func(t *testing.T) {
+		fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"}}
+		svc := proxy.NewService(fr,
+			map[string]providers.Client{"anthropic": &fakeProvider{}},
+			nil,
+			false,
+			0,
+			nil,
+		)
+
+		rec := httptest.NewRecorder()
+		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+
+		require.NotNil(t, fr.capturedReq)
+		got := fr.capturedReq.PromptText
+		assert.Contains(t, got, "You are Claude Code",
+			"flag=off must keep including the system prompt — that's the legacy concatenated-stream shape")
+		assert.Contains(t, got, userPrompt,
+			"flag=off must keep including each user message's text content")
+	})
+
+	t.Run("flag on uses last user message only", func(t *testing.T) {
+		fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"}}
+		svc := proxy.NewService(fr,
+			map[string]providers.Client{"anthropic": &fakeProvider{}},
+			nil,
+			true,
+			0,
+			nil,
+		)
+
+		rec := httptest.NewRecorder()
+		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+
+		require.NotNil(t, fr.capturedReq)
+		got := fr.capturedReq.PromptText
+		assert.Equal(t, userPrompt, got,
+			"flag=on must hand the cluster scorer the most recent user-typed text verbatim, "+
+				"with no system preamble or assistant content; that's the whole point of the flag")
+	})
+}
+
+func TestService_ProxyMessages_EmbedLastUserMessageContextOverride(t *testing.T) {
+	const userPrompt = "Find the race condition in main.go"
+	body := []byte(`{
+		"model":"claude-opus-4-7",
+		"system":"You are Claude Code preamble...",
+		"messages":[{"role":"user","content":"` + userPrompt + `"}]
+	}`)
+
+	cases := []struct {
+		name           string
+		startupFlag    bool
+		ctxOverride    *bool // nil = no override
+		wantPromptText string
+	}{
+		{
+			name:           "ctx=true overrides startup=false",
+			startupFlag:    false,
+			ctxOverride:    boolPtr(true),
+			wantPromptText: userPrompt,
+		},
+		{
+			name:           "ctx=false overrides startup=true",
+			startupFlag:    true,
+			ctxOverride:    boolPtr(false),
+			wantPromptText: "You are Claude Code preamble...\n" + userPrompt,
+		},
+		{
+			name:           "no ctx override falls back to startup=true",
+			startupFlag:    true,
+			ctxOverride:    nil,
+			wantPromptText: userPrompt,
+		},
+		{
+			name:           "no ctx override falls back to startup=false",
+			startupFlag:    false,
+			ctxOverride:    nil,
+			wantPromptText: "You are Claude Code preamble...\n" + userPrompt,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"}}
+			svc := proxy.NewService(fr,
+				map[string]providers.Client{"anthropic": &fakeProvider{}},
+				nil,
+				tc.startupFlag,
+				0,
+				nil,
+			)
+
+			ctx := context.Background()
+			if tc.ctxOverride != nil {
+				ctx = context.WithValue(ctx, proxy.EmbedLastUserMessageContextKey{}, *tc.ctxOverride)
+			}
+
+			rec := httptest.NewRecorder()
+			httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+			require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+
+			require.NotNil(t, fr.capturedReq)
+			assert.Equal(t, tc.wantPromptText, fr.capturedReq.PromptText,
+				"context override (%v) must beat startup flag (%v)", tc.ctxOverride, tc.startupFlag)
+		})
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+func TestService_ProxyMessages_StickyBypassedByEvalOverrideHeaders(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+
+	type runConfig struct {
+		name           string
+		header         string
+		wantRouteCalls int
+	}
+	cases := []runConfig{
+		{name: "no override → second call hits sticky cache", header: "", wantRouteCalls: 1},
+		{name: "x-weave-disable-cluster bypasses sticky", header: "x-weave-disable-cluster", wantRouteCalls: 2},
+		{name: "x-weave-cluster-version bypasses sticky", header: "x-weave-cluster-version", wantRouteCalls: 2},
+		{name: "x-weave-embed-last-user-message bypasses sticky", header: "x-weave-embed-last-user-message", wantRouteCalls: 2},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"}}
+			svc := proxy.NewService(fr,
+				map[string]providers.Client{"anthropic": &fakeProvider{}},
+				nil,
+				false,
+				time.Hour, // long TTL so sticky window stays open across both calls
+				nil,
+			)
+
+			ctx := context.WithValue(context.Background(), proxy.APIKeyIDContextKey{}, "key-1")
+
+			for i := 0; i < 2; i++ {
+				rec := httptest.NewRecorder()
+				httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+				if tc.header != "" {
+					httpReq.Header.Set(tc.header, "true")
+				}
+				require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+			}
+
+			assert.Equal(t, tc.wantRouteCalls, fr.routeCalls,
+				"router.Route call count must reflect whether sticky cache short-circuited the second call")
+		})
+	}
+}
+
+func TestService_ProxyOpenAIChatCompletion_AnthropicCrossFormat(t *testing.T) {
+	anthropicResp := `{"id":"msg_abc","type":"message","role":"assistant","content":[{"type":"text","text":"Hello!"}],"model":"claude-opus-4-7","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}`
+
+	provider := &fakeProvider{
+		proxyResponse: func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(anthropicResp))
+		},
+	}
+	svc := makeProxyService(
+		router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "test"},
+		map[string]providers.Client{"anthropic": provider},
+	)
+
+	openAIReq := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"max_tokens":100}`
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(openAIReq))
+
+	err := svc.ProxyOpenAIChatCompletion(context.Background(), []byte(openAIReq), rec, httpReq)
+	require.NoError(t, err)
+
+	require.Len(t, provider.proxyBodies, 1, "provider.Proxy must be called exactly once")
+	var translated map[string]any
+	require.NoError(t, json.Unmarshal(provider.proxyBodies[0], &translated))
+	assert.Equal(t, float64(100), translated["max_tokens"],
+		"OpenAI max_tokens must be preserved on the translated Anthropic body")
+	msgs, _ := translated["messages"].([]any)
+	require.Len(t, msgs, 1, "translated Anthropic body must carry one user message")
+
+	var openAIOut map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &openAIOut))
+	assert.Equal(t, "chat.completion", openAIOut["object"],
+		"response must be translated back to OpenAI chat.completion shape")
+	choices, _ := openAIOut["choices"].([]any)
+	require.Len(t, choices, 1)
+	choice, _ := choices[0].(map[string]any)
+	message, _ := choice["message"].(map[string]any)
+	assert.Equal(t, "Hello!", message["content"])
+	assert.Equal(t, "stop", choice["finish_reason"])
+}
+
+func TestService_ProxyOpenAIChatCompletion_AnthropicProxyError_PropagatesError(t *testing.T) {
+	upstreamErr := errors.New("dial tcp: connection refused")
+	provider := &fakeProvider{
+		proxyErr: upstreamErr,
+	}
+	svc := makeProxyService(
+		router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "test"},
+		map[string]providers.Client{"anthropic": provider},
+	)
+
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+
+	err := svc.ProxyOpenAIChatCompletion(context.Background(), []byte(body), rec, httpReq)
+
+	require.ErrorIs(t, err, upstreamErr,
+		"the upstream Proxy error must propagate so the handler can shape the correct OpenAI-format error")
+	assert.NotContains(t, rec.Body.String(), "translation failed",
+		"a Proxy error must not be masked by a synthesized 'translation failed' body from Finalize")
+}
+
+func TestService_ProxyOpenAIChatCompletion_NativeOpenAI(t *testing.T) {
+	provider := &fakeProvider{
+		proxyResponse: func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion"}`)
+		},
+	}
+	svc := makeProxyService(
+		router.Decision{Provider: "openai", Model: "gpt-4o", Reason: "test"},
+		map[string]providers.Client{"openai": provider},
+	)
+
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+
+	err := svc.ProxyOpenAIChatCompletion(context.Background(), []byte(body), rec, httpReq)
+	require.NoError(t, err)
+
+	require.Len(t, provider.proxyBodies, 1)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(provider.proxyBodies[0], &got))
+	assert.Equal(t, "gpt-4o", got["model"], "envelope must rewrite model to decision.Model")
+	msgs, _ := got["messages"].([]any)
+	require.Len(t, msgs, 1, "user message must be preserved")
+	assert.Contains(t, rec.Body.String(), `"chat.completion"`)
+}

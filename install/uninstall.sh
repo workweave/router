@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+#
+# Weave Router uninstaller for Claude Code.
+#
+# Removes the env vars, statusLine, and apiKeyHelper that install.sh added.
+# Leaves the rest of settings.json untouched.
+#
+# Usage:
+#   ./uninstall.sh                  # user scope
+#   ./uninstall.sh --scope project  # run inside the repo
+
+set -euo pipefail
+
+scope="user"
+
+err()  { printf "\033[31merror:\033[0m %s\n" "$*" >&2; }
+info() { printf "\033[36m==>\033[0m %s\n" "$*"; }
+ok()   { printf "\033[32m✓\033[0m %s\n" "$*"; }
+
+# Refuse to write/delete through a symlink. Project scope reads paths from the
+# user's git repo; a hostile checkout could ship `.claude/settings.json` (or
+# `.claude/cc-statusline.sh`) as a symlink to e.g. `~/.ssh/authorized_keys`,
+# and the uninstaller's `>` redirect or `rm` would silently follow that link.
+refuse_if_symlink() {
+  local target="$1"
+  if [ -L "$target" ]; then
+    err "$target is a symlink (-> $(readlink "$target")). Refusing to operate on it."
+    exit 1
+  fi
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --scope)
+      scope="${2:-}"; shift 2
+      [ "$scope" = "user" ] || [ "$scope" = "project" ] || { err "--scope must be 'user' or 'project'"; exit 2; }
+      ;;
+    -h|--help)
+      # awk avoids GNU `head -n -<N>` (rejected by BSD head on macOS).
+      awk 'NR<2 { next } /^set -euo/ { exit } { sub(/^# ?/, ""); print }' "$0"
+      exit 0
+      ;;
+    *)
+      err "unknown flag: $1"; exit 2
+      ;;
+  esac
+done
+
+if ! command -v jq >/dev/null 2>&1; then
+  err "jq is required."
+  exit 1
+fi
+
+case "$scope" in
+  user)
+    settings_file="$HOME/.claude/settings.json"
+    statusline_file="$HOME/.weave/cc-statusline.sh"
+    keyhelper_file=""
+    ;;
+  project)
+    if ! git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+      err "--scope project must be run inside a git repo."
+      exit 1
+    fi
+    settings_file="$git_root/.claude/settings.json"
+    statusline_file="$git_root/.claude/cc-statusline.sh"
+    keyhelper_file="$git_root/.claude/weave-key.sh"
+    # Symlink containment: paths come from a git repo that may be hostile. The
+    # later `>` redirect on settings_file and `rm -f` on the scripts would
+    # otherwise follow links out of the repo.
+    refuse_if_symlink "$git_root/.claude"
+    refuse_if_symlink "$settings_file"
+    refuse_if_symlink "$statusline_file"
+    refuse_if_symlink "$keyhelper_file"
+    ;;
+esac
+
+if [ -f "$settings_file" ]; then
+  # Only remove keys we actually installed: scrub our two env vars, and only
+  # delete `statusLine` / `apiKeyHelper` when they point at the scripts the
+  # installer shipped (cc-statusline.sh / weave-key.sh). Otherwise an unrelated
+  # user-configured statusLine or apiKeyHelper would be silently clobbered.
+  cleaned="$(jq '
+    if .env then
+      .env |= (del(.ANTHROPIC_BASE_URL, .ANTHROPIC_AUTH_TOKEN))
+      | (if (.env | length) == 0 then del(.env) else . end)
+    else . end
+    | (if (.statusLine.command // "" | tostring | endswith("cc-statusline.sh"))
+         then del(.statusLine) else . end)
+    | (if (.apiKeyHelper // "" | tostring | endswith("weave-key.sh"))
+         then del(.apiKeyHelper) else . end)
+  ' "$settings_file")"
+  printf '%s\n' "$cleaned" >"$settings_file"
+  ok "Cleaned $settings_file"
+else
+  info "No settings file at $settings_file (already uninstalled?)"
+fi
+
+for f in "$statusline_file" "$keyhelper_file"; do
+  if [ -n "$f" ] && [ -f "$f" ]; then
+    rm -f "$f"
+    ok "Removed $f"
+  fi
+done
+
+ok "Weave Router uninstalled (scope=$scope)."

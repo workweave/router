@@ -1,0 +1,88 @@
+package otel
+
+import (
+	"math"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+// TestStatuslinePricingMatchesTable enforces that the prices block in
+// router/install/cc-statusline.sh stays in lockstep with pricingTable.
+// pricing.go is the source of truth (USD/1M tokens); cc-statusline.sh
+// stores USD/1k. When prices change, edit pricing.go and propagate the
+// USD/1M ÷ 1000 values into the BEGIN_GENERATED_PRICES block in the
+// shell script.
+func TestStatuslinePricingMatchesTable(t *testing.T) {
+	const path = "../../../install/cc-statusline.sh"
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err, "read cc-statusline.sh")
+
+	body := string(raw)
+	const beginMarker = "# BEGIN_GENERATED_PRICES"
+	const endMarker = "# END_GENERATED_PRICES"
+	start := strings.Index(body, beginMarker)
+	end := strings.Index(body, endMarker)
+	require.True(t, start >= 0 && end > start, "BEGIN/END_GENERATED_PRICES markers missing in cc-statusline.sh")
+
+	block := body[start:end]
+	inputPrices := parseStatuslineSection(t, block, "input")
+	outputPrices := parseStatuslineSection(t, block, "output")
+
+	for model, want := range pricingTable {
+		gotIn, ok := inputPrices[model]
+		require.True(t, ok, "cc-statusline.sh missing input price for %q", model)
+		requireUSDPer1MEqual(t, want.InputUSDPer1M, gotIn, model+" input")
+
+		gotOut, ok := outputPrices[model]
+		require.True(t, ok, "cc-statusline.sh missing output price for %q", model)
+		requireUSDPer1MEqual(t, want.OutputUSDPer1M, gotOut, model+" output")
+	}
+
+	for model := range inputPrices {
+		_, ok := pricingTable[model]
+		require.True(t, ok, "cc-statusline.sh has input price for unknown model %q (add to pricing.go or remove from script)", model)
+	}
+	for model := range outputPrices {
+		_, ok := pricingTable[model]
+		require.True(t, ok, "cc-statusline.sh has output price for unknown model %q", model)
+	}
+}
+
+// parseStatuslineSection pulls one of the "input"/"output" jq sub-objects
+// out of the prices block. The block is a literal JSON-ish dict embedded
+// in a shell heredoc, so a small regex is enough.
+func parseStatuslineSection(t *testing.T, block, name string) map[string]float64 {
+	t.Helper()
+	sectionRe := regexp.MustCompile(`(?s)"` + name + `"\s*:\s*\{(.*?)\}`)
+	m := sectionRe.FindStringSubmatch(block)
+	require.NotNil(t, m, "section %q not found in prices block", name)
+
+	entryRe := regexp.MustCompile(`"([^"]+)"\s*:\s*([0-9.eE+-]+)`)
+	out := make(map[string]float64)
+	for _, e := range entryRe.FindAllStringSubmatch(m[1], -1) {
+		v, err := strconv.ParseFloat(e[2], 64)
+		require.NoError(t, err, "parse price for %q", e[1])
+		out[e[1]] = v
+	}
+	return out
+}
+
+// requireUSDPer1MEqual asserts pricing.go's per-1M value matches the
+// statusline's per-1k value (after ×1000), using a relative tolerance to
+// absorb shell-formatting precision (e.g. 0.000075 round-trips fine but
+// trailing-zero variants would not under exact equality).
+func requireUSDPer1MEqual(t *testing.T, wantPer1M, gotPer1k float64, label string) {
+	t.Helper()
+	got := gotPer1k * 1000
+	if wantPer1M == 0 {
+		require.Equal(t, 0.0, got, label)
+		return
+	}
+	rel := math.Abs(got-wantPer1M) / wantPer1M
+	require.Less(t, rel, 1e-9, "%s: pricing.go=%v USD/1M vs cc-statusline=%v USD/1k (×1000=%v)", label, wantPer1M, gotPer1k, got)
+}
