@@ -84,6 +84,12 @@ services:
       DATABASE_URL: postgres://router:router@postgres:5432/router?sslmode=disable
       PORT: "8080"
       LOG_LEVEL: info
+      # Local docker-compose is for dev only — bypass router-side bearer auth
+      # on /v1/* so `install.sh --local` and ad-hoc curl just work without
+      # seeding a key. install.sh's --local flag assumes this. Override by
+      # setting ROUTER_DEV_MODE=false in .env.local (then run
+      # `docker compose run --rm seed` and use the printed rk_ token).
+      ROUTER_DEV_MODE: "true"
       # .env.development sets ROUTER_ONNX_ASSETS_DIR to a repo-relative path
       # that's correct for `make dev` outside Docker but wrong inside the
       # container, where the Dockerfile populates /opt/router/assets/. The
