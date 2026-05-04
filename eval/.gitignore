@@ -1,0 +1,13 @@
+# Local Poetry venv
+.venv/
+
+# .env (committed template is .env.example)
+.env
+
+# Local mirror of GCS results dir
+results/
+
+# Pyc / caches
+__pycache__/
+*.pyc
+.pytest_cache/

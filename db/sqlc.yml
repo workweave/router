@@ -1,0 +1,36 @@
+# reference: https://docs.sqlc.dev/en/latest/reference/config.html
+#
+# Note: schema-only validation (no live DB connection). SQLC parses the migration
+# files in `migrations/` to build its type model, which means generation works
+# without a running Postgres — different from the Weave backend's sqlc.yml that
+# requires a live connection. Trade-off: less accurate type inference for
+# DB-time features (functions/triggers), but the router's schema is plain
+# enough that this doesn't matter and the simpler setup wins.
+
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "queries"
+    schema: "migrations"
+    gen:
+      go:
+        package: "sqlc"
+        out: "../internal/sqlc"
+        sql_package: "pgx/v5"
+        overrides:
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+        # Tables live in the `router` schema, so sqlc emits row structs with a
+        # `Router` prefix (`RouterModelRouterInstallation`). The doubled prefix
+        # is awkward but not wrong, and sqlc's `rename:` map doesn't apply to
+        # schema-prefixed table types. The postgres adapter consumes the names
+        # as-is; nothing else in the project references these row types.
+        emit_pointers_for_null_types: true
+        emit_sql_as_comment: true
+        initialisms:
+          - "api"
+          - "id"
+          - "url"
+          - "uuid"
