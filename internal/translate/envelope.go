@@ -29,7 +29,7 @@ var ErrNotJSONObject = errors.New("request body must be a JSON object")
 type Format int
 
 const (
-	FormatOpenAI    Format = iota
+	FormatOpenAI Format = iota
 	FormatAnthropic
 )
 
@@ -400,15 +400,15 @@ var modelMaxOutputTokens = map[string]int{
 	"gpt-5.4-mini": 128000, "gpt-5.4-nano": 128000,
 	"gpt-5.5": 128000, "gpt-5.5-pro": 128000, "gpt-5.5-mini": 128000,
 	"gpt-5.5-nano": 128000,
-	"o1": 100000, "o1-pro": 100000, "o1-mini": 65536,
+	"o1":           100000, "o1-pro": 100000, "o1-mini": 65536,
 	"o3": 100000, "o3-pro": 100000, "o3-mini": 100000,
-	"o4-mini": 100000,
+	"o4-mini":              100000,
 	"gemini-3-pro-preview": 65536, "gemini-3.1-pro-preview": 65536,
 	"gemini-3-flash-preview": 65536, "gemini-3.1-flash-lite-preview": 65536,
 	"gemini-3.1-flash-live-preview": 65536,
-	"gemini-2.5-pro": 65536, "gemini-2.5-flash": 65536,
+	"gemini-2.5-pro":                65536, "gemini-2.5-flash": 65536,
 	"gemini-2.5-flash-lite": 65536,
-	"gemini-2.0-flash": 8192, "gemini-2.0-flash-lite": 8192,
+	"gemini-2.0-flash":      8192, "gemini-2.0-flash-lite": 8192,
 }
 
 const defaultMaxOutputTokenCap = 8192
@@ -433,4 +433,3 @@ func clampOutputTokens(doc map[string]any, model string) {
 		}
 	}
 }
-

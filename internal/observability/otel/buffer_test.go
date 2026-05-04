@@ -166,4 +166,3 @@ func TestBuffer_FlushDrainsSpans(t *testing.T) {
 	assert.Len(t, names, 3)
 	assert.ElementsMatch(t, []string{"first", "second", "third"}, names)
 }
-

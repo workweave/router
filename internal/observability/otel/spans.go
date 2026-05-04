@@ -38,13 +38,13 @@ func generateSpanID() [8]byte {
 func spanToProto(s Span, traceID [16]byte) *tracev1.Span {
 	spanID := generateSpanID()
 	return &tracev1.Span{
-		TraceId:            traceID[:],
-		SpanId:             spanID[:],
-		Name:               s.Name,
-		StartTimeUnixNano:  uint64(s.Start.UnixNano()),
-		EndTimeUnixNano:    uint64(s.End.UnixNano()),
-		Attributes:         attrsToKeyValues(s.Attrs),
-		Kind:               tracev1.Span_SPAN_KIND_INTERNAL,
+		TraceId:           traceID[:],
+		SpanId:            spanID[:],
+		Name:              s.Name,
+		StartTimeUnixNano: uint64(s.Start.UnixNano()),
+		EndTimeUnixNano:   uint64(s.End.UnixNano()),
+		Attributes:        attrsToKeyValues(s.Attrs),
+		Kind:              tracev1.Span_SPAN_KIND_INTERNAL,
 	}
 }
 

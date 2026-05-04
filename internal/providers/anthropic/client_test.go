@@ -185,4 +185,3 @@ func TestProxy_StampsTimingOnError(t *testing.T) {
 	assert.NotZero(t, tm.UpstreamFirstByteNanos.Load(), "must stamp UpstreamFirstByteNanos on error body read")
 	assert.NotZero(t, tm.UpstreamEOFNanos.Load(), "must stamp UpstreamEOFNanos after error body is drained")
 }
-

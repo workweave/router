@@ -268,7 +268,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	in, out := extractor.Tokens()
 	upstreamAttrs := map[string]any{
-		"request_id":                 requestID,
+		"request_id":                requestID,
 		"external_id":               externalID,
 		"usage.input_tokens":        in,
 		"usage.output_tokens":       out,
@@ -458,7 +458,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	in, out := extractor.Tokens()
 	openaiUpstreamAttrs := map[string]any{
-		"request_id":                 requestID,
+		"request_id":                requestID,
 		"external_id":               externalID,
 		"usage.input_tokens":        in,
 		"usage.output_tokens":       out,

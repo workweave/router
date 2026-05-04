@@ -471,5 +471,3 @@ func envVarForProvider(provider string) string {
 		return "<unknown provider " + provider + ">"
 	}
 }
-
-

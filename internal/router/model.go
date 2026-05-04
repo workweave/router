@@ -140,11 +140,11 @@ var registry = map[string]ModelSpec{
 	// `-preview` suffix is the canonical model ID Google's OpenAI-compat
 	// endpoint accepts. Gemini 3 Pro Preview is itself deprecated
 	// 2026-03-09 in favor of gemini-3.1-pro-preview.
-	"gemini-3-pro-preview":           googleBase,
-	"gemini-3.1-pro-preview":         googleBase,
-	"gemini-3-flash-preview":         googleBase,
-	"gemini-3.1-flash-lite-preview":  googleBase,
-	"gemini-3.1-flash-live-preview":  googleBase,
+	"gemini-3-pro-preview":          googleBase,
+	"gemini-3.1-pro-preview":        googleBase,
+	"gemini-3-flash-preview":        googleBase,
+	"gemini-3.1-flash-lite-preview": googleBase,
+	"gemini-3.1-flash-live-preview": googleBase,
 
 	// ── Google: Gemini 2.x families (still routable; bench-trained) ──
 	"gemini-2.5-pro":        googleBase,

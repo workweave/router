@@ -27,11 +27,11 @@ type DecisionLog struct {
 // transcript JSONL) — the join key that lets a consumer correlate the
 // two streams.
 type DecisionLogEntry struct {
-	Timestamp       string `json:"ts"`
-	RequestID       string `json:"request_id"`
-	RequestedModel  string `json:"requested_model"`
-	DecisionModel   string `json:"decision_model"`
-	DecisionReason  string `json:"decision_reason"`
+	Timestamp        string `json:"ts"`
+	RequestID        string `json:"request_id"`
+	RequestedModel   string `json:"requested_model"`
+	DecisionModel    string `json:"decision_model"`
+	DecisionReason   string `json:"decision_reason"`
 	DecisionProvider string `json:"decision_provider"`
 }
 
