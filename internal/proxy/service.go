@@ -11,6 +11,7 @@ import (
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/cache"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -25,6 +26,10 @@ type Service struct {
 	embedLastUserMessage bool
 	stickyDecisions      *expirable.LRU[string, router.Decision]
 	decisionLog          *DecisionLog
+	// semanticCache short-circuits non-streaming requests on a
+	// cosine-similarity hit against a stored response. Nil disables
+	// the cache entirely. Always nil-check before use.
+	semanticCache *cache.Cache
 }
 
 // APIKeyIDContextKey is the request-context key for the authenticated api_key_id.
@@ -34,7 +39,7 @@ type APIKeyIDContextKey struct{}
 type ExternalIDContextKey struct{}
 
 // NewService constructs the proxy service.
-func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog) *Service {
+func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache) *Service {
 	var sticky *expirable.LRU[string, router.Decision]
 	if stickyDecisionTTL > 0 {
 		sticky = expirable.NewLRU[string, router.Decision](10000, nil, stickyDecisionTTL)
@@ -46,12 +51,75 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		embedLastUserMessage: embedLastUserMessage,
 		stickyDecisions:      sticky,
 		decisionLog:          decisionLog,
+		semanticCache:        semanticCache,
 	}
 }
 
 // ErrProviderNotConfigured is returned when a routing decision selects a
 // provider that is not present in the registry.
 var ErrProviderNotConfigured = errors.New("provider not configured")
+
+// semanticCacheMaxBodyBytes caps how large a non-streaming response
+// the cache will store. Bodies larger than this stream through to the
+// client unchanged, but the post-Proxy Store call is skipped to keep
+// peak memory bounded. 1 MiB covers typical Anthropic Messages and
+// OpenAI Chat Completions responses; the long-tail of large bodies
+// pays full provider cost on subsequent identical prompts.
+const semanticCacheMaxBodyBytes = 1 << 20
+
+// headersToSkipOnHit lists response headers the cache must NOT replay
+// on a hit. request-id ties to a specific upstream call and would
+// confuse downstream consumers (decisionLog, OTel correlation) if
+// reused. x-router-* are set fresh on the hit path so the client
+// always sees the current decision rather than a stale one.
+var headersToSkipOnHit = map[string]struct{}{
+	"Request-Id":         {},
+	"X-Request-Id":       {},
+	"X-Router-Decision":  {},
+	"X-Router-Provider":  {},
+	"X-Router-Model":     {},
+	"X-Router-Cache":     {},
+}
+
+// cloneCacheHeaders snapshots a header set for storage, dropping
+// transient identifiers that must not survive replay (see
+// headersToSkipOnHit).
+func cloneCacheHeaders(h http.Header) http.Header {
+	out := make(http.Header, len(h))
+	for k, vs := range h {
+		if _, skip := headersToSkipOnHit[http.CanonicalHeaderKey(k)]; skip {
+			continue
+		}
+		copied := make([]string, len(vs))
+		copy(copied, vs)
+		out[k] = copied
+	}
+	return out
+}
+
+// writeCachedResponse emits a stored CachedResponse to the client.
+// Caller-set router headers (x-router-*) are written from the live
+// decision (not the cached entry) so the client always sees an
+// accurate routing trace; the x-router-cache marker advertises the
+// hit. Body is written verbatim — already in the inbound wire format.
+func (s *Service) writeCachedResponse(w http.ResponseWriter, resp cache.CachedResponse, decision router.Decision) {
+	for k, vs := range resp.Headers {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	w.Header().Set("x-router-decision", decision.Reason)
+	w.Header().Set("x-router-provider", decision.Provider)
+	w.Header().Set("x-router-model", decision.Model)
+	w.Header().Set("x-router-cache", "hit")
+	if resp.StatusCode != 0 && resp.StatusCode != http.StatusOK {
+		w.WriteHeader(resp.StatusCode)
+	}
+	_, _ = w.Write(resp.Body)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
 
 // EmbedLastUserMessageContextKey is the context key for the per-request embed flag override.
 type EmbedLastUserMessageContextKey struct{}
@@ -187,6 +255,33 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 	routeMs := time.Since(routeStart).Milliseconds()
 
+	// Semantic-cache lookup. Eligible when the cache is configured at
+	// boot, the request is non-streaming, the routing decision carries
+	// metadata (cluster scorer was used; heuristic decisions don't have
+	// an embedding to key on), and the caller has an externalID for
+	// per-tenant isolation.
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != ""
+	if cacheEligible {
+		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
+			s.writeCachedResponse(w, resp, decision)
+			otel.Record(ctx, otel.Span{
+				Name: "router.cache_hit", Start: requestStart, End: time.Now(),
+				Attrs: map[string]any{
+					"request_id":        requestID,
+					"external_id":       externalID,
+					"decision.model":    decision.Model,
+					"decision.provider": decision.Provider,
+					"cache.hit":         true,
+					"cache.format":      string(cache.FormatAnthropic),
+					"latency.total_ms":  time.Since(requestStart).Milliseconds(),
+				},
+			})
+			otel.Flush(ctx)
+			log.Info("ProxyMessages cache hit", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "external_id", externalID, "total_ms", time.Since(requestStart).Milliseconds())
+			return nil
+		}
+	}
+
 	w.Header().Set("x-router-decision", decision.Reason)
 	w.Header().Set("x-router-provider", decision.Provider)
 	w.Header().Set("x-router-model", decision.Model)
@@ -225,6 +320,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		IncludeStreamUsage: s.emitter != nil,
 	}
 
+	// Wrap w with a captureWriter when the cache is eligible so the
+	// post-translation wire bytes get mirrored into a buffer for
+	// post-Proxy storage. captureW.captured() is the source of truth
+	// for whether storage should happen.
+	var captureW *captureWriter
+	var sink http.ResponseWriter = w
+	if cacheEligible {
+		captureW = newCaptureWriter(w, semanticCacheMaxBodyBytes)
+		sink = captureW
+	}
+
 	proxyStart := time.Now()
 	var proxyErr error
 	crossFormat := false
@@ -237,9 +343,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			log.Error("Failed to emit Anthropic body", "err", emitErr)
 			return fmt.Errorf("emit body: %w", emitErr)
 		}
-		proxyWriter := w
+		proxyWriter := sink
 		if s.emitter != nil {
-			extractor = otel.NewUsageExtractor(w, decision.Provider)
+			extractor = otel.NewUsageExtractor(sink, decision.Provider)
 			proxyWriter = extractor
 		}
 		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
@@ -250,18 +356,33 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			log.Error("Failed to translate Anthropic request to OpenAI format", "err", emitErr, "decision_provider", decision.Provider)
 			return fmt.Errorf("translate anthropic request: %w", emitErr)
 		}
-		var sink otel.UsageSink
+		var usage otel.UsageSink
 		if s.emitter != nil {
 			extractor = otel.NewUsageExtractor(nil, decision.Provider)
-			sink = extractor
+			usage = extractor
 		}
-		translator := translate.NewAnthropicSSETranslator(w, decision.Model, sink)
+		translator := translate.NewAnthropicSSETranslator(sink, decision.Model, usage)
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
 		if proxyErr == nil {
 			proxyErr = translator.Finalize()
 		}
 	default:
 		return fmt.Errorf("%w: %s (no translation path defined for inbound Anthropic Messages)", ErrProviderNotConfigured, decision.Provider)
+	}
+
+	// Cache store. Only on success and when the captured body fits
+	// within MaxBodyBytes (captureW.captured returns false on
+	// overflow). Use the smallest top-p cluster id for storage; the
+	// LRU.Lookup path scans every top-p cluster, so any one is fine.
+	if cacheEligible && proxyErr == nil && captureW != nil {
+		if body, status, ok := captureW.captured(); ok && status == http.StatusOK {
+			storeResp := cache.CachedResponse{
+				StatusCode: status,
+				Headers:    cloneCacheHeaders(w.Header()),
+				Body:       body,
+			}
+			s.semanticCache.Store(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs[0], storeResp)
+		}
 	}
 
 	proxyMs := time.Since(proxyStart).Milliseconds()
@@ -379,6 +500,31 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		return err
 	}
 
+	// Semantic-cache lookup — same eligibility rules as ProxyMessages
+	// (see that handler for rationale). Inbound format is FormatOpenAI
+	// so an Anthropic-stored response is never replayed here.
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != ""
+	if cacheEligible {
+		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
+			s.writeCachedResponse(w, resp, decision)
+			otel.Record(ctx, otel.Span{
+				Name: "router.cache_hit", Start: requestStart, End: time.Now(),
+				Attrs: map[string]any{
+					"request_id":        requestID,
+					"external_id":       externalID,
+					"decision.model":    decision.Model,
+					"decision.provider": decision.Provider,
+					"cache.hit":         true,
+					"cache.format":      string(cache.FormatOpenAI),
+					"latency.total_ms":  time.Since(requestStart).Milliseconds(),
+				},
+			})
+			otel.Flush(ctx)
+			log.Info("ProxyOpenAIChatCompletion cache hit", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "external_id", externalID, "total_ms", time.Since(requestStart).Milliseconds())
+			return nil
+		}
+	}
+
 	p, provErr := s.provider(decision.Provider)
 	if provErr != nil {
 		return provErr
@@ -415,6 +561,16 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		IncludeStreamUsage: s.emitter != nil,
 	}
 
+	// Wrap w with a captureWriter when the cache is eligible so the
+	// post-translation wire bytes get mirrored into a buffer for
+	// post-Proxy storage.
+	var captureW *captureWriter
+	var sink http.ResponseWriter = w
+	if cacheEligible {
+		captureW = newCaptureWriter(w, semanticCacheMaxBodyBytes)
+		sink = captureW
+	}
+
 	proxyStart := time.Now()
 	var proxyErr error
 	crossFormat := false
@@ -427,9 +583,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			log.Error("Failed to emit OpenAI body", "err", emitErr)
 			return fmt.Errorf("emit body: %w", emitErr)
 		}
-		proxyWriter := w
+		proxyWriter := sink
 		if s.emitter != nil {
-			extractor = otel.NewUsageExtractor(w, decision.Provider)
+			extractor = otel.NewUsageExtractor(sink, decision.Provider)
 			proxyWriter = extractor
 		}
 		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
@@ -440,18 +596,29 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			log.Error("Failed to translate OpenAI request to Anthropic format", "err", emitErr)
 			return fmt.Errorf("translate openai request: %w", emitErr)
 		}
-		var sink otel.UsageSink
+		var usage otel.UsageSink
 		if s.emitter != nil {
 			extractor = otel.NewUsageExtractor(nil, "anthropic")
-			sink = extractor
+			usage = extractor
 		}
-		translator := translate.NewSSETranslator(w, decision.Model, sink)
+		translator := translate.NewSSETranslator(sink, decision.Model, usage)
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
 		if proxyErr == nil {
 			proxyErr = translator.Finalize()
 		}
 	default:
 		return fmt.Errorf("%w: %s (no translation path defined)", ErrProviderNotConfigured, decision.Provider)
+	}
+
+	if cacheEligible && proxyErr == nil && captureW != nil {
+		if body, status, ok := captureW.captured(); ok && status == http.StatusOK {
+			storeResp := cache.CachedResponse{
+				StatusCode: status,
+				Headers:    cloneCacheHeaders(w.Header()),
+				Body:       body,
+			}
+			s.semanticCache.Store(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs[0], storeResp)
+		}
 	}
 
 	proxyMs := time.Since(proxyStart).Milliseconds()

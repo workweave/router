@@ -62,7 +62,7 @@ func (f *fakeProvider) Passthrough(ctx context.Context, prep providers.PreparedR
 }
 
 func makeProxyService(decision router.Decision, p map[string]providers.Client) *proxy.Service {
-	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, 0, nil)
+	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, 0, nil, nil)
 }
 
 func TestService_Dispatch_ForwardsRequestToProvider(t *testing.T) {
@@ -118,7 +118,7 @@ func TestService_Dispatch_PropagatesProviderError(t *testing.T) {
 }
 
 func TestService_Dispatch_UnknownProviderReturnsErrProviderNotConfigured(t *testing.T) {
-	svc := proxy.NewService(&fakeRouter{}, map[string]providers.Client{}, nil, false, 0, nil)
+	svc := proxy.NewService(&fakeRouter{}, map[string]providers.Client{}, nil, false, 0, nil, nil)
 
 	_, err := svc.Dispatch(
 		context.Background(),
@@ -174,6 +174,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 			false,
 			0,
 			nil,
+			nil,
 		)
 
 		rec := httptest.NewRecorder()
@@ -195,6 +196,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 			nil,
 			true,
 			0,
+			nil,
 			nil,
 		)
 
@@ -258,6 +260,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageContextOverride(t *testing.T)
 				tc.startupFlag,
 				0,
 				nil,
+				nil,
 			)
 
 			ctx := context.Background()
@@ -301,6 +304,7 @@ func TestService_ProxyMessages_StickyBypassedByEvalOverrideHeaders(t *testing.T)
 				nil,
 				false,
 				time.Hour, // long TTL so sticky window stays open across both calls
+				nil,
 				nil,
 			)
 
