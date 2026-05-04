@@ -7,150 +7,97 @@ scorer (AvengersPro-derived) or a deterministic heuristic fallback.
 
 ## Getting started
 
-The router can run two ways: fully containerized via **Docker Compose**,
-or locally with **Go + Make**. Both produce a working router at
-`http://localhost:8082`.
-
 > **Provider API key required.** The router proxies requests to upstream
 > LLM providers. At least one of `ANTHROPIC_API_KEY`,
 > `OPENAI_PROVIDER_API_KEY`, or `GOOGLE_PROVIDER_API_KEY` must be set,
 > or the server refuses to boot. See [Configuration](#configuration) for
 > the full list.
 
-### Option A: Docker Compose (recommended for first run)
-
-No local Go toolchain needed — everything runs in containers.
+### Setup
 
 ```bash
 cd router
 
-# 1. Export your provider API key (pick at least one).
-export ANTHROPIC_API_KEY=sk-ant-...
+# 1. Write your upstream provider API key to .env.local (pick at least one).
+echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env.local
 
-# 2. Start Postgres, run migrations, and boot the server.
-docker compose up --build -d
-
-# 3. Point Claude Code at the local router (writes ~/.claude/settings.json
-#    with ANTHROPIC_BASE_URL=http://localhost:8082 and the routed-model
-#    status line). Idempotent — re-run any time.
-make install-cc
-
-# 4. Verify.
-curl http://localhost:8082/health
-claude   # status line should show "WEAVE ROUTER — <model>"
+# 2. Boot the stack, seed a Weave Router key, and wire Claude Code.
+make full-setup PLATFORM=cc
 ```
 
-`make install-cc` wraps `./install/install.sh --local`, which uses
-`ROUTER_DEV_MODE=true` so no API key seed is needed for local development.
-For the seeded-key path (or other tools like Cursor) see [Connecting
-clients](#connecting-clients) below.
+That's it — `claude` will now route through your local router at
+`http://localhost:8082` with no shell exports needed.
 
-The stack runs three services:
-
-1. `postgres` — postgres:15-alpine, host port `5433`
-2. `migrate` — one-shot golang-migrate that applies `db/migrations/` and
-   exits 0
-3. `server` — built from the `Dockerfile`, host port `8082`
-
-Tear down:
+Variants:
 
 ```bash
-make uninstall-cc         # remove the Claude Code → router config
-docker compose down       # keep the Postgres volume
-docker compose down -v    # drop the volume (fresh next time)
+make full-setup                                             # boot + seed + print Claude Code/Cursor instructions
+make full-setup PLATFORM=cc                                 # boot + seed + auto-wire Claude Code (default)
+make full-setup KEY=rk_... BASE_URL=http://...              # skip boot; print instructions for an existing router
+make full-setup PLATFORM=cc KEY=rk_... BASE_URL=http://...  # wire Claude Code at an existing router
 ```
 
-### Option B: Local development (Go + Make)
+The two `KEY` + `BASE_URL` forms are how teammates onboard against a
+shared/deployed router — they don't boot anything locally.
 
-Prerequisites: Go 1.25+,
+Useful follow-ups:
+
+```bash
+make logs                  # tail the server logs (per-request access lines show at INFO)
+make down                  # stop the local stack
+```
+
+> **Two different keys, do not confuse them.**
+>
+> - `sk-ant-...` (or `sk-...` / Google) — your **upstream provider** key.
+>   The router uses it to call the LLM API. Lives in `.env.local`. Never
+>   sent to clients.
+> - `rk_...` — your **Weave Router** key (saved in `.weave-router-key`).
+>   Clients (Claude Code, Cursor) send this to the router. Not an
+>   Anthropic key — it gates traffic to your router.
+
+### Local development (hot reload)
+
+For iterating on router code itself with `CompileDaemon` hot reload:
+
+```bash
+cd router
+make db                                       # start Postgres only
+echo "DATABASE_URL=postgresql://router:router@localhost:5433/router?sslmode=disable" >> .env.local
+echo "ANTHROPIC_API_KEY=sk-ant-..."           >> .env.local
+make setup                                    # init schema + migrate + seed an rk_ key
+make dev                                      # run the server with hot reload
+```
+
+Prerequisites for `make dev`: Go 1.25+,
 [golang-migrate](https://github.com/golang-migrate/migrate),
-[CompileDaemon](https://github.com/githubnemo/CompileDaemon) (for hot
-reload).
+[CompileDaemon](https://github.com/githubnemo/CompileDaemon).
 
-#### 1. Start Postgres
+### Using the router with Claude Code or Cursor
 
-Use the bundled compose file to start Postgres only:
+The cleanest path is `make full-setup PLATFORM=cc` (above) — it wires
+`~/.claude/settings.json` directly so `claude` works in every directory
+with no shell exports.
 
-```bash
-cd router
-make db
-```
+Manual fallback (e.g. for one-off shells):
 
-Then create `.env.local` with the matching connection string and your
-provider key:
-
-```
-DATABASE_URL=postgresql://router:router@localhost:5433/router?sslmode=disable
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-Or point `DATABASE_URL` at any Postgres you already have running (the
-default in `.env.development` targets `localhost:5432/router_dev`).
-
-#### 2. Bootstrap the database
-
-```bash
-make setup
-```
-
-This runs three steps in order:
-
-| Step | Target | What it does |
-| ---- | ------ | ------------ |
-| 1 | `make initdb` | Creates the database and `router` schema (idempotent) |
-| 2 | `make migrate-up` | Applies all pending migrations via golang-migrate |
-| 3 | `make seed` | Creates an installation + API key and prints usage instructions |
-
-Save the printed token — it is shown only once.
-
-#### 3. Start the server
-
-```bash
-make dev
-```
-
-Verify:
-
-```bash
-curl http://localhost:8082/health
-curl -H "Authorization: Bearer <token>" http://localhost:8082/validate
-```
-
-### Connecting clients
-
-#### Claude Code (recommended: `make install-cc`)
-
-For the bundled docker-compose router, the one-shot installer is the
-shortest path:
-
-```bash
-make install-cc          # writes ~/.claude/settings.json + status line
-claude                   # routes through the local router
-make uninstall-cc        # revert
-```
-
-Under the hood it runs `./install/install.sh --local`, which sets
-`ANTHROPIC_BASE_URL=http://localhost:8082` and installs a status line
-script that surfaces the routed model and per-turn savings. Re-running is
-idempotent and preserves any other keys in your `settings.json`. For
-project-scope installs, hosted/self-hosted URLs, or seeded-key flows, see
-[`install/README.md`](install/README.md).
-
-If you'd rather wire it up by hand (e.g. against a `make setup`-seeded
-key):
+**Claude Code:**
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:8082
-export ANTHROPIC_API_KEY=<token>
+export ANTHROPIC_AUTH_TOKEN=rk_...   # the Weave Router key, NOT an Anthropic key
 claude
 ```
 
-#### Cursor
+> Claude Code reads its bearer from `ANTHROPIC_AUTH_TOKEN` (preferred)
+> or `ANTHROPIC_API_KEY`. We use `ANTHROPIC_AUTH_TOKEN` to avoid
+> collision with the router's upstream `ANTHROPIC_API_KEY` env var.
 
-1. Open Cursor Settings → Models → Override OpenAI Base URL
+**Cursor:**
+
+1. Open Cursor Settings > Models > Override OpenAI Base URL
    Set to: `http://localhost:8082/v1`
-2. Add an API key: `<token>` (from `make seed`, or any string when
-   `ROUTER_DEV_MODE=true`)
+2. Add an API key: `rk_...` (the Weave Router key)
 
 ### Other Makefile targets
 
@@ -161,7 +108,6 @@ make generate    # regenerate SQLC (no live DB required)
 make build       # typecheck the whole module
 make test        # run all tests
 make check       # full CI-equivalent check (generate + build + test)
-make install-cc  # point Claude Code at the local router
 ```
 
 ## What's running today
@@ -705,8 +651,9 @@ public HF repo:
 
 ```bash
 git clone https://github.com/workweave/router.git
-docker build -t weave-router .
-docker compose up
+cd router
+echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env.local
+make full-setup PLATFORM=cc
 ```
 
 If the public HF rate limit ever bites you in CI, supply an HF token
@@ -761,10 +708,7 @@ make migrate-create NAME=add-xyz
 $EDITOR db/migrations/<ts>_add-xyz.up.sql
 $EDITOR db/migrations/<ts>_add-xyz.down.sql
 
-# Apply via the compose stack (drops + recreates the postgres volume for a clean run):
-docker compose down -v && docker compose up --build -d
-
-# Or via the Makefile against the DB pointed at by DATABASE_URL:
+# Apply via the Makefile against the DB pointed at by DATABASE_URL:
 make migrate-up      # apply all pending
 make migrate-down    # roll back the most recent
 ```
