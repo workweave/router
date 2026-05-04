@@ -1,0 +1,23 @@
+README.md
+  b549a8c33156104b 8-166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "47db72dd16d9907c57ea16176e8c32e230c5536e",
+  "prompts": {
+    "b549a8c33156104b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f16ef988-9650-474b-baf8-a0879984a687",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 938,
+      "total_deletions": 134,
+      "accepted_lines": 963,
+      "overriden_lines": 0
+    }
+  }
+}
