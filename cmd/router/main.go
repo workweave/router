@@ -72,7 +72,21 @@ func main() {
 	}
 	defer pool.Close()
 
-	repo := postgres.NewRepository(pool)
+	// Load Tink keyset for external API key encryption.
+	keysetJSON := config.GetOr("EXTERNAL_KEY_ENCRYPTION_KEY", "")
+	var encryptor auth.Encryptor
+	if keysetJSON == "" {
+		logger.Warn("EXTERNAL_KEY_ENCRYPTION_KEY not set, using no-op encryptor (dev only)")
+		encryptor = auth.NoOpEncryptor{}
+	} else {
+		encryptor, err = auth.NewTinkEncryptor(keysetJSON)
+		if err != nil {
+			logger.Error("Failed to create Tink encryptor from keyset", "err", err)
+			os.Exit(1)
+		}
+	}
+
+	repo := postgres.NewRepository(pool, encryptor)
 
 	providerMap := make(map[string]providers.Client)
 
