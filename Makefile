@@ -96,7 +96,7 @@ full-setup: ## Bootstrap router: docker compose + seed + optional Claude Code wi
 		done; \
 		echo "==> Seeding a Weave Router key for your installation..."; \
 		SEED_OUTPUT=$$(docker compose run --rm seed 2>&1); \
-		WEAVE_KEY=$$(echo "$$SEED_OUTPUT" | grep -oP "^  rk_[a-zA-Z0-9_-]+$$" | head -1 | xargs); \
+		WEAVE_KEY=$$(echo "$$SEED_OUTPUT" | grep -oE "^  rk_[a-zA-Z0-9_-]+$$" | head -1 | xargs); \
 		if [ -z "$$WEAVE_KEY" ]; then \
 			echo "error: failed to extract router key from seed output."; \
 			echo "$$SEED_OUTPUT"; \
