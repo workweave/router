@@ -1,6 +1,6 @@
 version: "v0.6"
 parent: "v0.5"
-status: "latest"
+status: "frozen"
 promoted_date: "2026-05-02"
 embedder:
   model: "jina-v2-base-code-int8"

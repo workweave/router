@@ -226,13 +226,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
 	externalID, _ := ctx.Value(ExternalIDContextKey{}).(string)
 	clientID := ClientIdentityFrom(ctx)
-	bypassSticky := hasEvalOverrideHeader(r)
+	bypassEval := hasEvalOverrideHeader(r)
 	var (
 		decision   router.Decision
 		stickyHit  bool
 		routeStart = time.Now()
 	)
-	if s.stickyDecisions != nil && apiKeyID != "" && !bypassSticky {
+	if s.stickyDecisions != nil && apiKeyID != "" && !bypassEval {
 		if d, ok := s.stickyDecisions.Get(apiKeyID); ok {
 			decision = d
 			stickyHit = true
@@ -250,7 +250,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			log.Error("Routing failed", "err", err, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "estimated_input_tokens", feats.Tokens)
 			return err
 		}
-		if s.stickyDecisions != nil && apiKeyID != "" && !bypassSticky {
+		if s.stickyDecisions != nil && apiKeyID != "" && !bypassEval {
 			s.stickyDecisions.Add(apiKeyID, decision)
 		}
 	}
@@ -260,8 +260,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// boot, the request is non-streaming, the routing decision carries
 	// metadata (cluster scorer was used; heuristic decisions don't have
 	// an embedding to key on), and the caller has an externalID for
-	// per-tenant isolation.
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != ""
+	// per-tenant isolation. Eval-harness traffic bypasses the cache so
+	// per-prompt accuracy attribution isn't polluted by cosine-near-
+	// neighbor replays of an unrelated stored response.
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
 			s.writeCachedResponse(w, resp, decision)
@@ -516,8 +518,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	// Semantic-cache lookup — same eligibility rules as ProxyMessages
 	// (see that handler for rationale). Inbound format is FormatOpenAI
-	// so an Anthropic-stored response is never replayed here.
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != ""
+	// so an Anthropic-stored response is never replayed here. Eval-
+	// harness traffic bypasses the cache; see ProxyMessages.
+	bypassEval := hasEvalOverrideHeader(r)
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
 			s.writeCachedResponse(w, resp, decision)
