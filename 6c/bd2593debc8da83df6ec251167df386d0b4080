@@ -1,0 +1,75 @@
+internal/router/cluster/artifacts/v0.13/rankings.json
+  44f8aeec331db047 1-146
+internal/router/cluster/artifacts/v0.10/model_registry.json
+  44f8aeec331db047 1-46
+internal/router/cluster/artifacts/v0.14/model_registry.json
+  44f8aeec331db047 1-46
+internal/router/cluster/artifacts/v0.10/metadata.yaml
+  44f8aeec331db047 1-78
+internal/router/cluster/artifacts/v0.16/metadata.yaml
+  44f8aeec331db047 1-78
+internal/router/cluster/artifacts/v0.15/model_registry.json
+  44f8aeec331db047 1-46
+internal/router/cluster/artifacts/v0.11/model_registry.json
+  44f8aeec331db047 1-46
+internal/proxy/service.go
+  44f8aeec331db047 229,235,253,263-266,521-524
+internal/router/cluster/artifacts/v0.10/rankings.json
+  44f8aeec331db047 1-146
+internal/router/cluster/artifacts/v0.11/rankings.json
+  44f8aeec331db047 1-146
+internal/router/cluster/artifacts/v0.12/rankings.json
+  44f8aeec331db047 1-146
+internal/router/cluster/artifacts/v0.13/metadata.yaml
+  44f8aeec331db047 1-78
+internal/router/cluster/artifacts/latest
+  44f8aeec331db047 1
+internal/router/cluster/artifacts/v0.12/model_registry.json
+  44f8aeec331db047 1-46
+internal/router/cluster/artifacts/v0.15/rankings.json
+  44f8aeec331db047 1-146
+internal/router/cluster/artifacts/v0.13/model_registry.json
+  44f8aeec331db047 1-46
+internal/router/cluster/artifacts/v0.6/metadata.yaml
+  44f8aeec331db047 3
+internal/router/cluster/artifacts/v0.16/rankings.json
+  44f8aeec331db047 1-146
+internal/router/cluster/artifacts/v0.14/rankings.json
+  44f8aeec331db047 1-146
+internal/router/cluster/artifacts/v0.14/metadata.yaml
+  44f8aeec331db047 1-78
+internal/router/cluster/artifacts/v0.15/metadata.yaml
+  44f8aeec331db047 1-78
+internal/router/cluster/artifacts/v0.16/model_registry.json
+  44f8aeec331db047 1-46
+internal/router/cluster/artifacts/v0.12/metadata.yaml
+  44f8aeec331db047 1-78
+internal/router/cluster/artifacts/v0.17/model_registry.json
+  44f8aeec331db047 1-46
+internal/router/cluster/artifacts/v0.17/rankings.json
+  44f8aeec331db047 1-146
+internal/router/cluster/artifacts/v0.17/metadata.yaml
+  44f8aeec331db047 1-80
+internal/router/cluster/artifacts/v0.11/metadata.yaml
+  44f8aeec331db047 1-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "6cbd2593debc8da83df6ec251167df386d0b4080",
+  "prompts": {
+    "44f8aeec331db047": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2497e777-6a8f-45a4-886d-0915ffcc2896",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 3286,
+      "total_deletions": 9,
+      "accepted_lines": 3286,
+      "overriden_lines": 0
+    }
+  }
+}
