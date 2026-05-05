@@ -268,16 +268,18 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
 			s.writeCachedResponse(w, resp, decision)
 			otel.Record(ctx, otel.Span{
-				Name: "router.cache_hit", Start: requestStart, End: time.Now(),
-				Attrs: map[string]any{
-					"request_id":        requestID,
-					"external_id":       externalID,
-					"decision.model":    decision.Model,
-					"decision.provider": decision.Provider,
-					"cache.hit":         true,
-					"cache.format":      string(cache.FormatAnthropic),
-					"latency.total_ms":  time.Since(requestStart).Milliseconds(),
-				},
+				Name:  "router.cache_hit",
+				Start: requestStart,
+				End:   time.Now(),
+				Attrs: otel.NewAttrBuilder(7).
+					String("request_id", requestID).
+					String("external_id", externalID).
+					String("decision.model", decision.Model).
+					String("decision.provider", decision.Provider).
+					Bool("cache.hit", true).
+					String("cache.format", string(cache.FormatAnthropic)).
+					Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
+					Build(),
 			})
 			otel.Flush(ctx)
 			log.Info("ProxyMessages cache hit", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "external_id", externalID, "total_ms", time.Since(requestStart).Milliseconds())
@@ -297,28 +299,30 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	reqPricing := otel.Lookup(feats.Model)
 	actPricing := otel.Lookup(decision.Model)
 	otel.Record(ctx, otel.Span{
-		Name: "router.decision", Start: requestStart, End: time.Now(),
-		Attrs: map[string]any{
-			"request_id":                      requestID,
-			"external_id":                     externalID,
-			"client.device_id":                clientID.DeviceID,
-			"client.account_id":               clientID.AccountID,
-			"client.session_id":               clientID.SessionID,
-			"client.user_agent":               clientID.UserAgent,
-			"client.app":                      clientID.ClientApp,
-			"requested.model":                 feats.Model,
-			"decision.model":                  decision.Model,
-			"decision.provider":               decision.Provider,
-			"decision.reason":                 decision.Reason,
-			"routing.sticky_hit":              stickyHit,
-			"routing.embed_input":             embedInput,
-			"routing.estimated_input_tokens":  feats.Tokens,
-			"pricing.requested_input_per_1m":  reqPricing.InputUSDPer1M,
-			"pricing.requested_output_per_1m": reqPricing.OutputUSDPer1M,
-			"pricing.actual_input_per_1m":     actPricing.InputUSDPer1M,
-			"pricing.actual_output_per_1m":    actPricing.OutputUSDPer1M,
-			"latency.route_ms":                routeMs,
-		},
+		Name:  "router.decision",
+		Start: requestStart,
+		End:   time.Now(),
+		Attrs: otel.NewAttrBuilder(19).
+			String("request_id", requestID).
+			String("external_id", externalID).
+			String("client.device_id", clientID.DeviceID).
+			String("client.account_id", clientID.AccountID).
+			String("client.session_id", clientID.SessionID).
+			String("client.user_agent", clientID.UserAgent).
+			String("client.app", clientID.ClientApp).
+			String("requested.model", feats.Model).
+			String("decision.model", decision.Model).
+			String("decision.provider", decision.Provider).
+			String("decision.reason", decision.Reason).
+			Bool("routing.sticky_hit", stickyHit).
+			String("routing.embed_input", embedInput).
+			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
+			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
+			Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
+			Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
+			Float64("pricing.actual_output_per_1m", actPricing.OutputUSDPer1M).
+			Int64("latency.route_ms", routeMs).
+			Build(),
 	})
 	otel.Flush(ctx)
 
@@ -396,31 +400,30 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	proxyMs := time.Since(proxyStart).Milliseconds()
 
 	in, out := extractor.Tokens()
-	upstreamAttrs := map[string]any{
-		"request_id":                requestID,
-		"external_id":               externalID,
-		"client.device_id":          clientID.DeviceID,
-		"client.account_id":         clientID.AccountID,
-		"client.session_id":         clientID.SessionID,
-		"client.user_agent":         clientID.UserAgent,
-		"client.app":                clientID.ClientApp,
-		"usage.input_tokens":        in,
-		"usage.output_tokens":       out,
-		"cost.requested_input_usd":  float64(in) / 1_000_000 * reqPricing.InputUSDPer1M,
-		"cost.requested_output_usd": float64(out) / 1_000_000 * reqPricing.OutputUSDPer1M,
-		"cost.actual_input_usd":     float64(in) / 1_000_000 * actPricing.InputUSDPer1M,
-		"cost.actual_output_usd":    float64(out) / 1_000_000 * actPricing.OutputUSDPer1M,
-		"latency.upstream_ms":       proxyMs,
-		"latency.total_ms":          time.Since(requestStart).Milliseconds(),
-		"upstream.status_code":      upstreamStatus(proxyErr),
-		"routing.cross_format":      crossFormat,
-	}
-	for k, v := range timingAttrs(ctx) {
-		upstreamAttrs[k] = v
-	}
+	upstreamBuilder := otel.NewAttrBuilder(24).
+		String("request_id", requestID).
+		String("external_id", externalID).
+		String("client.device_id", clientID.DeviceID).
+		String("client.account_id", clientID.AccountID).
+		String("client.session_id", clientID.SessionID).
+		String("client.user_agent", clientID.UserAgent).
+		String("client.app", clientID.ClientApp).
+		Int64("usage.input_tokens", int64(in)).
+		Int64("usage.output_tokens", int64(out)).
+		Float64("cost.requested_input_usd", float64(in)/1_000_000*reqPricing.InputUSDPer1M).
+		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
+		Float64("cost.actual_input_usd", float64(in)/1_000_000*actPricing.InputUSDPer1M).
+		Float64("cost.actual_output_usd", float64(out)/1_000_000*actPricing.OutputUSDPer1M).
+		Int64("latency.upstream_ms", proxyMs).
+		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
+		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
+		Bool("routing.cross_format", crossFormat)
+	addTimingAttrs(ctx, upstreamBuilder)
 	otel.Record(ctx, otel.Span{
-		Name: "router.upstream", Start: proxyStart, End: time.Now(),
-		Attrs: upstreamAttrs,
+		Name:  "router.upstream",
+		Start: proxyStart,
+		End:   time.Now(),
+		Attrs: upstreamBuilder.Build(),
 	})
 	otel.Flush(ctx)
 
@@ -450,11 +453,13 @@ func hasEvalOverrideHeader(r *http.Request) bool {
 		r.Header.Get("x-weave-embed-last-user-message") != ""
 }
 
-// timingAttrs returns derived latency attributes from the request Timing, or nil if absent.
-func timingAttrs(ctx context.Context) map[string]any {
+// addTimingAttrs appends derived latency attributes from the request Timing
+// to the builder. No-op when no Timing is attached (middleware not wired or
+// OTel disabled).
+func addTimingAttrs(ctx context.Context, b *otel.AttrBuilder) {
 	t := otel.TimingFrom(ctx)
 	if t == nil {
-		return nil
+		return
 	}
 	upstreamTotal := t.Ms(&t.UpstreamRequestNanos, &t.UpstreamEOFNanos)
 	fullE2E := t.MsSince(&t.EntryNanos)
@@ -464,15 +469,13 @@ func timingAttrs(ctx context.Context) map[string]any {
 		overhead = fullE2E - upstreamTotal
 	}
 
-	return map[string]any{
-		"latency.full_e2e_ms":            fullE2E,
-		"latency.preupstream_ms":         t.Ms(&t.EntryNanos, &t.UpstreamRequestNanos),
-		"latency.upstream_headers_ms":    t.Ms(&t.UpstreamRequestNanos, &t.UpstreamHeadersNanos),
-		"latency.upstream_first_byte_ms": t.Ms(&t.UpstreamRequestNanos, &t.UpstreamFirstByteNanos),
-		"latency.upstream_total_ms":      upstreamTotal,
-		"latency.postupstream_ms":        t.MsSince(&t.UpstreamEOFNanos),
-		"latency.router_overhead_ms":     overhead,
-	}
+	b.Int64("latency.full_e2e_ms", fullE2E).
+		Int64("latency.preupstream_ms", t.Ms(&t.EntryNanos, &t.UpstreamRequestNanos)).
+		Int64("latency.upstream_headers_ms", t.Ms(&t.UpstreamRequestNanos, &t.UpstreamHeadersNanos)).
+		Int64("latency.upstream_first_byte_ms", t.Ms(&t.UpstreamRequestNanos, &t.UpstreamFirstByteNanos)).
+		Int64("latency.upstream_total_ms", upstreamTotal).
+		Int64("latency.postupstream_ms", t.MsSince(&t.UpstreamEOFNanos)).
+		Int64("latency.router_overhead_ms", overhead)
 }
 
 // upstreamStatus extracts the HTTP status from an UpstreamStatusError, or 0.
@@ -526,16 +529,18 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
 			s.writeCachedResponse(w, resp, decision)
 			otel.Record(ctx, otel.Span{
-				Name: "router.cache_hit", Start: requestStart, End: time.Now(),
-				Attrs: map[string]any{
-					"request_id":        requestID,
-					"external_id":       externalID,
-					"decision.model":    decision.Model,
-					"decision.provider": decision.Provider,
-					"cache.hit":         true,
-					"cache.format":      string(cache.FormatOpenAI),
-					"latency.total_ms":  time.Since(requestStart).Milliseconds(),
-				},
+				Name:  "router.cache_hit",
+				Start: requestStart,
+				End:   time.Now(),
+				Attrs: otel.NewAttrBuilder(7).
+					String("request_id", requestID).
+					String("external_id", externalID).
+					String("decision.model", decision.Model).
+					String("decision.provider", decision.Provider).
+					Bool("cache.hit", true).
+					String("cache.format", string(cache.FormatOpenAI)).
+					Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
+					Build(),
 			})
 			otel.Flush(ctx)
 			log.Info("ProxyOpenAIChatCompletion cache hit", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "external_id", externalID, "total_ms", time.Since(requestStart).Milliseconds())
@@ -555,26 +560,28 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	reqPricing := otel.Lookup(feats.Model)
 	actPricing := otel.Lookup(decision.Model)
 	otel.Record(ctx, otel.Span{
-		Name: "router.decision", Start: requestStart, End: time.Now(),
-		Attrs: map[string]any{
-			"request_id":                      requestID,
-			"external_id":                     externalID,
-			"client.device_id":                clientID.DeviceID,
-			"client.account_id":               clientID.AccountID,
-			"client.session_id":               clientID.SessionID,
-			"client.user_agent":               clientID.UserAgent,
-			"client.app":                      clientID.ClientApp,
-			"requested.model":                 feats.Model,
-			"decision.model":                  decision.Model,
-			"decision.provider":               decision.Provider,
-			"decision.reason":                 decision.Reason,
-			"routing.estimated_input_tokens":  feats.Tokens,
-			"pricing.requested_input_per_1m":  reqPricing.InputUSDPer1M,
-			"pricing.requested_output_per_1m": reqPricing.OutputUSDPer1M,
-			"pricing.actual_input_per_1m":     actPricing.InputUSDPer1M,
-			"pricing.actual_output_per_1m":    actPricing.OutputUSDPer1M,
-			"latency.route_ms":                routeMs,
-		},
+		Name:  "router.decision",
+		Start: requestStart,
+		End:   time.Now(),
+		Attrs: otel.NewAttrBuilder(17).
+			String("request_id", requestID).
+			String("external_id", externalID).
+			String("client.device_id", clientID.DeviceID).
+			String("client.account_id", clientID.AccountID).
+			String("client.session_id", clientID.SessionID).
+			String("client.user_agent", clientID.UserAgent).
+			String("client.app", clientID.ClientApp).
+			String("requested.model", feats.Model).
+			String("decision.model", decision.Model).
+			String("decision.provider", decision.Provider).
+			String("decision.reason", decision.Reason).
+			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
+			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
+			Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
+			Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
+			Float64("pricing.actual_output_per_1m", actPricing.OutputUSDPer1M).
+			Int64("latency.route_ms", routeMs).
+			Build(),
 	})
 	otel.Flush(ctx)
 
@@ -647,31 +654,30 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	proxyMs := time.Since(proxyStart).Milliseconds()
 
 	in, out := extractor.Tokens()
-	openaiUpstreamAttrs := map[string]any{
-		"request_id":                requestID,
-		"external_id":               externalID,
-		"client.device_id":          clientID.DeviceID,
-		"client.account_id":         clientID.AccountID,
-		"client.session_id":         clientID.SessionID,
-		"client.user_agent":         clientID.UserAgent,
-		"client.app":                clientID.ClientApp,
-		"usage.input_tokens":        in,
-		"usage.output_tokens":       out,
-		"cost.requested_input_usd":  float64(in) / 1_000_000 * reqPricing.InputUSDPer1M,
-		"cost.requested_output_usd": float64(out) / 1_000_000 * reqPricing.OutputUSDPer1M,
-		"cost.actual_input_usd":     float64(in) / 1_000_000 * actPricing.InputUSDPer1M,
-		"cost.actual_output_usd":    float64(out) / 1_000_000 * actPricing.OutputUSDPer1M,
-		"latency.upstream_ms":       proxyMs,
-		"latency.total_ms":          time.Since(requestStart).Milliseconds(),
-		"upstream.status_code":      upstreamStatus(proxyErr),
-		"routing.cross_format":      crossFormat,
-	}
-	for k, v := range timingAttrs(ctx) {
-		openaiUpstreamAttrs[k] = v
-	}
+	openaiUpstreamBuilder := otel.NewAttrBuilder(24).
+		String("request_id", requestID).
+		String("external_id", externalID).
+		String("client.device_id", clientID.DeviceID).
+		String("client.account_id", clientID.AccountID).
+		String("client.session_id", clientID.SessionID).
+		String("client.user_agent", clientID.UserAgent).
+		String("client.app", clientID.ClientApp).
+		Int64("usage.input_tokens", int64(in)).
+		Int64("usage.output_tokens", int64(out)).
+		Float64("cost.requested_input_usd", float64(in)/1_000_000*reqPricing.InputUSDPer1M).
+		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
+		Float64("cost.actual_input_usd", float64(in)/1_000_000*actPricing.InputUSDPer1M).
+		Float64("cost.actual_output_usd", float64(out)/1_000_000*actPricing.OutputUSDPer1M).
+		Int64("latency.upstream_ms", proxyMs).
+		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
+		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
+		Bool("routing.cross_format", crossFormat)
+	addTimingAttrs(ctx, openaiUpstreamBuilder)
 	otel.Record(ctx, otel.Span{
-		Name: "router.upstream", Start: proxyStart, End: time.Now(),
-		Attrs: openaiUpstreamAttrs,
+		Name:  "router.upstream",
+		Start: proxyStart,
+		End:   time.Now(),
+		Attrs: openaiUpstreamBuilder.Build(),
 	})
 	otel.Flush(ctx)
 
