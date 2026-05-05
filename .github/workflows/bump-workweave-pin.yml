@@ -1,0 +1,103 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# When a router PR merges to main, open a pin-bump PR in the WorkWeave repo
+# pointing the `router-internal/router` submodule at the new merge commit,
+# and enable auto-merge so the bump rides through CI + the merge queue
+# without human review.
+#
+# Why pull_request_target (and not pull_request):
+#   pull_request_target runs in the base repo's context with full secrets
+#   access, even for PRs opened from forks. The bump itself never executes
+#   any code from the PR — we only read merge_commit_sha from the event
+#   payload — so the usual security caveat ("don't run untrusted PR code
+#   under pull_request_target") does not apply here.
+#
+# Required secret:
+#   WORKWEAVE_PIN_BUMP_PAT — fine-grained PAT scoped to workweave/WorkWeave
+#   with Contents:write + PullRequests:write + Metadata:read.
+
+name: Bump WorkWeave router pin
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  bump:
+    name: Bump pin
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout WorkWeave
+        uses: actions/checkout@v4
+        with:
+          repository: workweave/WorkWeave
+          token: ${{ secrets.WORKWEAVE_PIN_BUMP_PAT }}
+          submodules: recursive
+          fetch-depth: 0
+          path: WorkWeave
+
+      - name: Configure git identity
+        working-directory: WorkWeave
+        run: |
+          git config user.name "workweave-bot"
+          git config user.email "bot@workweave.ai"
+
+      - name: Bump router submodule
+        id: bump
+        working-directory: WorkWeave
+        env:
+          NEW_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          git -C router-internal/router fetch origin "$NEW_SHA"
+          git -C router-internal/router checkout "$NEW_SHA"
+
+          SHORT_SHA="${NEW_SHA:0:7}"
+          BRANCH="bump-router-${SHORT_SHA}"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+          git checkout -b "$BRANCH"
+          git add router-internal/router
+          git commit \
+            -m "Bump router pin to ${SHORT_SHA}" \
+            -m "Source: ${{ github.event.pull_request.title }}" \
+            -m "Upstream PR: ${{ github.event.pull_request.html_url }}"
+          git push --set-upstream origin "$BRANCH"
+
+      - name: Open WorkWeave PR
+        working-directory: WorkWeave
+        env:
+          GH_TOKEN: ${{ secrets.WORKWEAVE_PIN_BUMP_PAT }}
+          BRANCH: ${{ steps.bump.outputs.branch }}
+          SHORT_SHA: ${{ steps.bump.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          gh pr create \
+            --repo workweave/WorkWeave \
+            --base main \
+            --head "$BRANCH" \
+            --title "Bump router pin to ${SHORT_SHA}" \
+            --body "Auto-generated from upstream router PR.
+
+          - Router PR: ${{ github.event.pull_request.html_url }}
+          - Title: ${{ github.event.pull_request.title }}
+          - Author: @${{ github.event.pull_request.user.login }}
+
+          This PR will auto-merge once required checks pass."
+
+      - name: Enable auto-merge
+        working-directory: WorkWeave
+        env:
+          GH_TOKEN: ${{ secrets.WORKWEAVE_PIN_BUMP_PAT }}
+          BRANCH: ${{ steps.bump.outputs.branch }}
+        run: |
+          gh pr merge "$BRANCH" \
+            --repo workweave/WorkWeave \
+            --auto \
+            --squash \
+            --delete-branch
