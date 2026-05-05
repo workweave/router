@@ -1,0 +1,73 @@
+version: "v0.19"
+parent: "v0.17"
+status: "latest"
+promoted_date: "2026-05-05"
+embedder:
+  model: "jina-v2-base-code-int8"
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 10
+  top_p: 4
+  alpha: 0.25
+  shrinkage_k0: 10.0
+  score_normalization: "per_prompt_zscore_across_bench_columns"
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 8013
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  include_routerarena_labels: "/Users/steventohme/Desktop/workweave4/router-internal/eval/results/_unsorted/routerarena_labels_full.jsonl"
+  routerarena_only: true
+  exclude_prompts: null
+  n_excluded_prompts: 0
+deployed_providers:
+  - anthropic
+  - google
+  - openai
+deployed_models:
+  - claude-haiku-4-5
+  - claude-opus-4-7
+  - claude-sonnet-4-5
+  - gemini-3-flash-preview
+  - gemini-3.1-flash-lite-preview
+  - gemini-3.1-pro-preview
+  - gpt-4.1
+  - gpt-5.4-mini
+  - gpt-5.5
+cost_per_1k_input_usd:
+  claude-haiku-4-5: 0.8
+  claude-opus-4-7: 15.0
+  claude-sonnet-4-5: 3.0
+  gemini-3-flash-preview: 0.5
+  gemini-3.1-flash-lite-preview: 0.1
+  gemini-3.1-pro-preview: 2.0
+  gpt-4.1: 2.0
+  gpt-5.4-mini: 0.4
+  gpt-5.5: 5.0
+changelog: |
+  v0.19 alpha sweep winner. Same training data, k, top_p, normalization,
+  and PMZ flag as v0.17, with alpha reduced from 0.53 -> 0.25 to weight cost
+  more heavily in the per-cluster blend.
+
+  Promotion driver: v0.17 collapsed onto gemini-3.1-pro-preview for 99% of
+  prompts on full RouterArena, costing $2.00/1k input and earning arena=72.76.
+  v0.19 routes 96% to gemini-3.1-flash-lite-preview, 3% to pro, ~1% to
+  claude-haiku-4-5, costs $0.17/1k input (12x cheaper), and scores arena=73.31
+  (+0.55) on the same 8,398 prompts. Accuracy drops from 0.7819 -> 0.7413
+  (-4.06pp), but RouterArena's beta=0.1 weighting strongly rewards the cost
+  reduction.
+
+  Alpha sweep on sub_10 (RouterArena hard slice, 809 prompts):
+    v0.17 alpha=0.53 -> acc=0.8083  $2.00/1k  arena=74.83  (pro=100%)
+    v0.18 alpha=0.10 -> acc=0.7613  $0.10/1k  arena=75.62  (flash-lite=100%)
+    v0.19 alpha=0.25 -> acc=0.7730  $0.17/1k  arena=76.12  (flash-lite=96%, pro=3%) <- promoted
+    v0.20 alpha=0.35 -> acc=0.7888  $0.54/1k  arena=75.92
+    v0.21 alpha=0.45 -> acc=0.8004  $1.41/1k  arena=75.04
+
+  Full-split validation:
+    v0.17 -> acc=0.7819  $2.00/1k  arena=72.76  (pro=99%)
+    v0.19 -> acc=0.7413  $0.17/1k  arena=73.31  (flash-lite=96%, pro=3%, haiku=1%)
+
