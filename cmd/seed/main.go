@@ -129,11 +129,10 @@ func main() {
 	fmt.Printf("  claude  # the installer wires settings.json — no shell exports needed afterwards\n\n")
 
 	fmt.Printf("=== Claude Code (manual fallback) ===\n")
-	fmt.Printf("  Claude Code reads its bearer from ANTHROPIC_AUTH_TOKEN (or\n")
-	fmt.Printf("  ANTHROPIC_API_KEY); the value below is a Weave Router key, not\n")
-	fmt.Printf("  an Anthropic key.\n")
+	fmt.Printf("  Keep Claude Code's Anthropic auth unchanged; send the router key\n")
+	fmt.Printf("  in a router-only custom header.\n")
 	fmt.Printf("    export ANTHROPIC_BASE_URL=%s\n", baseURL)
-	fmt.Printf("    export ANTHROPIC_AUTH_TOKEN=%s\n", rawToken)
+	fmt.Printf("    export ANTHROPIC_CUSTOM_HEADERS='X-Weave-Router-Key: %s'\n", rawToken)
 	fmt.Printf("    claude\n\n")
 
 	fmt.Printf("=== Cursor ===\n")

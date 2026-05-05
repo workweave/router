@@ -2,7 +2,7 @@
 #
 # Weave Router uninstaller for Claude Code.
 #
-# Removes the env vars, statusLine, and apiKeyHelper that install.sh added.
+# Removes the env vars, statusLine, and local router auth that install.sh added.
 # Leaves the rest of settings.json untouched.
 #
 # Usage:
@@ -54,8 +54,8 @@ fi
 case "$scope" in
   user)
     settings_file="$HOME/.claude/settings.json"
+    local_settings_file=""
     statusline_file="$HOME/.weave/cc-statusline.sh"
-    keyhelper_file=""
     ;;
   project)
     if ! git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -63,26 +63,26 @@ case "$scope" in
       exit 1
     fi
     settings_file="$git_root/.claude/settings.json"
+    local_settings_file="$git_root/.claude/settings.local.json"
     statusline_file="$git_root/.claude/cc-statusline.sh"
-    keyhelper_file="$git_root/.claude/weave-key.sh"
     # Symlink containment: paths come from a git repo that may be hostile. The
     # later `>` redirect on settings_file and `rm -f` on the scripts would
     # otherwise follow links out of the repo.
     refuse_if_symlink "$git_root/.claude"
     refuse_if_symlink "$settings_file"
+    refuse_if_symlink "$local_settings_file"
     refuse_if_symlink "$statusline_file"
-    refuse_if_symlink "$keyhelper_file"
     ;;
 esac
 
 if [ -f "$settings_file" ]; then
   # Only remove keys we actually installed: scrub our two env vars, and only
-  # delete `statusLine` / `apiKeyHelper` when they point at the scripts the
-  # installer shipped (cc-statusline.sh / weave-key.sh). Otherwise an unrelated
-  # user-configured statusLine or apiKeyHelper would be silently clobbered.
+  # delete `statusLine` / `apiKeyHelper` when they point at scripts this
+  # installer used in older versions. Otherwise an unrelated user-configured
+  # statusLine or apiKeyHelper would be silently clobbered.
   cleaned="$(jq '
     if .env then
-      .env |= (del(.ANTHROPIC_BASE_URL, .ANTHROPIC_AUTH_TOKEN))
+      .env |= (del(.ANTHROPIC_BASE_URL, .ANTHROPIC_AUTH_TOKEN, .ANTHROPIC_CUSTOM_HEADERS))
       | (if (.env | length) == 0 then del(.env) else . end)
     else . end
     | (if (.statusLine.command // "" | tostring | endswith("cc-statusline.sh"))
@@ -96,8 +96,20 @@ else
   info "No settings file at $settings_file (already uninstalled?)"
 fi
 
-for f in "$statusline_file" "$keyhelper_file"; do
-  if [ -n "$f" ] && [ -f "$f" ]; then
+if [ -n "$local_settings_file" ] && [ -f "$local_settings_file" ]; then
+  cleaned="$(jq '
+    if .env then
+      .env |= (del(.ANTHROPIC_AUTH_TOKEN, .ANTHROPIC_CUSTOM_HEADERS))
+      | (if (.env | length) == 0 then del(.env) else . end)
+    else . end
+    | del(.apiKeyHelper)
+  ' "$local_settings_file")"
+  printf '%s\n' "$cleaned" >"$local_settings_file"
+  ok "Cleaned $local_settings_file"
+fi
+
+for f in "$statusline_file"; do
+  if [ -f "$f" ]; then
     rm -f "$f"
     ok "Removed $f"
   fi

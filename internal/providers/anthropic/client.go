@@ -56,8 +56,9 @@ func NewClient(apiKey, baseURL string) *Client {
 //  1. Per-request BYOK credentials in ctx (proxy layer attaches these for
 //     plan-customers that bring their own key).
 //  2. The router's deployment-level API key, when configured.
-//  3. Passthrough: forward the client's own auth headers (OAuth bearer or
-//     x-api-key) so the user's credentials reach Anthropic directly.
+//  3. Passthrough: forward the client's own Anthropic auth headers (OAuth
+//     bearer or x-api-key) so the user's credentials reach Anthropic
+//     directly. Router-only credentials are deliberately not forwarded.
 func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("x-api-key", string(creds.APIKey))

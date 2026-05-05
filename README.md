@@ -9,8 +9,11 @@ scorer (AvengersPro-derived) or a deterministic heuristic fallback.
 
 > **Provider API keys are optional.** The router always registers the
 > Anthropic provider. When `ANTHROPIC_API_KEY` is set the router uses
-> its own key; when omitted, client auth headers (`Authorization` or
-> `x-api-key`) are passed through to `api.anthropic.com` directly.
+> its own key; when omitted, Anthropic auth headers (`Authorization` or
+> `x-api-key`) are passed through to `api.anthropic.com` directly. Protected
+> router deployments should put the `rk_...` router key in
+> `X-Weave-Router-Key` so Claude Code can keep using the logged-in user's
+> Anthropic plan.
 > OpenAI and Google providers are enabled when their respective keys
 > are set. See [Configuration](#configuration) for the full list.
 
@@ -19,7 +22,7 @@ scorer (AvengersPro-derived) or a deterministic heuristic fallback.
 ```bash
 
 # 1. (Optional) Write your upstream provider API keys to .env.local.
-#    Without ANTHROPIC_API_KEY the router passes through client auth headers.
+#    Without ANTHROPIC_API_KEY the router passes through Anthropic auth headers.
 echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env.local
 
 # 2. Boot the stack, seed a Weave Router key, and wire Claude Code.
@@ -69,10 +72,11 @@ make dev                                      # run the server with hot reload
 ```
 
 Without any provider API keys, the router boots in **client auth
-passthrough** mode — Anthropic is always registered and client
-`Authorization` / `x-api-key` headers are forwarded to
-`api.anthropic.com`. To use the router's own key instead, add it to
-`.env.local`:
+passthrough** mode — Anthropic is always registered and Anthropic
+`Authorization` / `x-api-key` headers are forwarded to `api.anthropic.com`.
+If router auth is enabled too, send the Weave Router key separately in
+`X-Weave-Router-Key`. To use the router's own upstream key instead, add it
+to `.env.local`:
 
 ```bash
 echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env.local
@@ -111,13 +115,14 @@ Manual fallback (e.g. for one-off shells):
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:8082
-export ANTHROPIC_AUTH_TOKEN=rk_...   # the Weave Router key, NOT an Anthropic key
+export ANTHROPIC_CUSTOM_HEADERS="X-Weave-Router-Key: rk_..."
 claude
 ```
 
-> Claude Code reads its bearer from `ANTHROPIC_AUTH_TOKEN` (preferred)
-> or `ANTHROPIC_API_KEY`. We use `ANTHROPIC_AUTH_TOKEN` to avoid
-> collision with the router's upstream `ANTHROPIC_API_KEY` env var.
+> Do not put the Weave Router key in `ANTHROPIC_AUTH_TOKEN` for protected
+> passthrough deployments. Claude Code uses `ANTHROPIC_AUTH_TOKEN` /
+> `ANTHROPIC_API_KEY` for Anthropic auth; leaving those under Claude Code's
+> control preserves the user's Team/Pro/Max/individual plan.
 
 **Cursor:**
 
@@ -459,7 +464,7 @@ no CLI flags.
 
 | Variable                   | Default                                                   | Purpose                                                              |
 | -------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`        | *(none)*                                                  | Router's own Anthropic key. When set, used for all Anthropic requests. When omitted, client auth headers are passed through. |
+| `ANTHROPIC_API_KEY`        | *(none)*                                                  | Router's own Anthropic key. When set, used for all Anthropic requests. When omitted, Anthropic auth headers are passed through. |
 | `OPENAI_PROVIDER_API_KEY`  | *(none)*                                                  | Enables the OpenAI provider (Chat Completions API).                  |
 | `OPENAI_PROVIDER_BASE_URL` | `https://api.openai.com`                                  | Override the OpenAI base URL (useful for Azure OpenAI).              |
 | `GOOGLE_PROVIDER_API_KEY`  | *(none)*                                                  | Enables the Google Gemini provider (via OpenAI-compatible endpoint). |

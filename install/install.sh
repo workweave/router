@@ -3,9 +3,9 @@
 # Weave Router installer for Claude Code.
 #
 # Configures Claude Code to permanently route through the Weave Router by
-# writing the standard Anthropic env vars + a status line into Claude Code's
-# settings.json. After running, `claude` Just Works — no shell exports, no
-# manual settings edits.
+# writing the router base URL, router auth header, and a status line into
+# Claude Code's settings.json. After running, `claude` Just Works — no shell
+# exports, no manual settings edits.
 #
 # Two scopes:
 #   - user (default):  ~/.claude/settings.json  + ~/.weave/cc-statusline.sh
@@ -36,6 +36,7 @@ scope="user"
 base_url=""
 non_interactive="false"
 dev_mode="false"
+router_key_header="X-Weave-Router-Key"
 
 # ---------- helpers ----------
 
@@ -133,6 +134,7 @@ case "$scope" in
   user)
     settings_dir="$HOME/.claude"
     settings_file="$settings_dir/settings.json"
+    local_settings_file=""
     statusline_dir="$HOME/.weave"
     statusline_file="$statusline_dir/cc-statusline.sh"
     statusline_path_for_settings="$statusline_file"
@@ -144,11 +146,11 @@ case "$scope" in
     fi
     settings_dir="$git_root/.claude"
     settings_file="$settings_dir/settings.json"
+    local_settings_file="$settings_dir/settings.local.json"
     statusline_dir="$git_root/.claude"
     statusline_file="$statusline_dir/cc-statusline.sh"
     # Use a path that's portable across teammates' machines (relative to repo root).
     statusline_path_for_settings="\${CLAUDE_PROJECT_DIR}/.claude/cc-statusline.sh"
-    keyhelper_file="$statusline_dir/weave-key.sh"
     ;;
 esac
 
@@ -158,8 +160,8 @@ esac
 if [ "$scope" = "project" ]; then
   refuse_if_symlink "$settings_dir"
   refuse_if_symlink "$settings_file"
+  refuse_if_symlink "$local_settings_file"
   refuse_if_symlink "$statusline_file"
-  refuse_if_symlink "$keyhelper_file"
 fi
 
 mkdir -p "$settings_dir" "$statusline_dir"
@@ -169,7 +171,7 @@ mkdir -p "$settings_dir" "$statusline_dir"
 api_key=""
 if [ "$dev_mode" = "true" ]; then
   info "Dev mode — skipping API key (router has ROUTER_DEV_MODE=true)."
-elif [ "$scope" = "user" ]; then
+else
   if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
     api_key="$WEAVE_ROUTER_KEY"
     info "Using WEAVE_ROUTER_KEY from environment."
@@ -211,28 +213,11 @@ fi
 chmod +x "$statusline_file"
 ok "Statusline installed at $statusline_file"
 
-# ---------- write the project-scope key helper ----------
-
-if [ "$scope" = "project" ]; then
-  cat >"$keyhelper_file" <<'EOF'
-#!/usr/bin/env bash
-# Weave Router API key helper for Claude Code (project scope).
-# Reads $WEAVE_ROUTER_KEY from the user's environment and prints it.
-# Each teammate sets WEAVE_ROUTER_KEY in their own shell rc / dotenv / 1Password.
-if [ -z "${WEAVE_ROUTER_KEY:-}" ]; then
-  printf "Weave Router: WEAVE_ROUTER_KEY not set. Export it in your shell to use the router.\n" >&2
-  exit 1
-fi
-printf '%s' "$WEAVE_ROUTER_KEY"
-EOF
-  chmod +x "$keyhelper_file"
-  ok "Key helper installed at $keyhelper_file"
-fi
-
 # ---------- patch settings.json ----------
 
-# Build the merge patch. Project scope uses apiKeyHelper (no token in repo);
-# user scope writes the token directly. Dev mode skips auth entirely.
+# Build the merge patch. Claude Code keeps its own Anthropic auth in
+# Authorization/x-api-key; the router key rides in ANTHROPIC_CUSTOM_HEADERS.
+# Project scope writes the key to settings.local.json (gitignored).
 tmp_patch="$(mktemp)"
 trap 'rm -f "$tmp_patch"' EXIT
 
@@ -243,47 +228,56 @@ if [ "$scope" = "user" ]; then
       statusLine: { type: "command", command: $sl }
     }' >"$tmp_patch"
   else
-    jq -n --arg url "$base_url" --arg key "$api_key" --arg sl "$statusline_path_for_settings" '{
-      env: { ANTHROPIC_BASE_URL: $url, ANTHROPIC_AUTH_TOKEN: $key },
+    jq -n --arg url "$base_url" --arg header "$router_key_header: $api_key" --arg sl "$statusline_path_for_settings" '{
+      env: { ANTHROPIC_BASE_URL: $url, ANTHROPIC_CUSTOM_HEADERS: $header },
       statusLine: { type: "command", command: $sl }
     }' >"$tmp_patch"
   fi
 else
   # project scope
-  helper_path="\${CLAUDE_PROJECT_DIR}/.claude/weave-key.sh"
-  if [ "$dev_mode" = "true" ]; then
-    jq -n --arg url "$base_url" --arg sl "$statusline_path_for_settings" '{
-      env: { ANTHROPIC_BASE_URL: $url },
-      statusLine: { type: "command", command: $sl }
-    }' >"$tmp_patch"
-  else
-    jq -n --arg url "$base_url" --arg helper "$helper_path" --arg sl "$statusline_path_for_settings" '{
-      env: { ANTHROPIC_BASE_URL: $url },
-      apiKeyHelper: $helper,
-      statusLine: { type: "command", command: $sl }
-    }' >"$tmp_patch"
-  fi
+  jq -n --arg url "$base_url" --arg sl "$statusline_path_for_settings" '{
+    env: { ANTHROPIC_BASE_URL: $url },
+    statusLine: { type: "command", command: $sl }
+  }' >"$tmp_patch"
 fi
 
-# Merge with existing settings. Deep-merge env, replace statusLine/apiKeyHelper.
-# We always strip ANTHROPIC_AUTH_TOKEN and apiKeyHelper from the existing
-# settings BEFORE merging — otherwise switching scope (user→project) or
-# auth mode (key→dev-mode) would leave stale credentials behind. The patch
-# re-adds whichever of the two we actually want for this install.
+# Merge with existing settings. Deep-merge env and replace statusLine.
+# We strip router-owned auth from the existing settings BEFORE merging —
+# otherwise switching auth mode (key→dev-mode) would leave stale credentials
+# behind. ANTHROPIC_AUTH_TOKEN/apiKeyHelper are also removed to migrate older
+# installs that used them for router auth.
 if [ -f "$settings_file" ]; then
   merged="$(jq -s '.[0] as $a | .[1] as $b
     | $a
-    | .env = (($a.env // {} | del(.ANTHROPIC_AUTH_TOKEN)) + ($b.env // {}))
+    | .env = (($a.env // {} | del(.ANTHROPIC_AUTH_TOKEN, .ANTHROPIC_CUSTOM_HEADERS)) + ($b.env // {}))
     | (if (.env | length) == 0 then del(.env) else . end)
     | del(.apiKeyHelper)
     | (if $b.statusLine then .statusLine = $b.statusLine else . end)
-    | (if $b.apiKeyHelper then .apiKeyHelper = $b.apiKeyHelper else . end)
   ' "$settings_file" "$tmp_patch")"
   printf '%s\n' "$merged" >"$settings_file"
 else
   cp "$tmp_patch" "$settings_file"
 fi
 ok "Settings written to $settings_file"
+
+if [ "$scope" = "project" ] && [ "$dev_mode" != "true" ]; then
+  jq -n --arg header "$router_key_header: $api_key" '{
+    env: { ANTHROPIC_CUSTOM_HEADERS: $header }
+  }' >"$tmp_patch"
+  if [ -f "$local_settings_file" ]; then
+    merged="$(jq -s '.[0] as $a | .[1] as $b
+      | $a
+      | .env = (($a.env // {} | del(.ANTHROPIC_AUTH_TOKEN, .ANTHROPIC_CUSTOM_HEADERS)) + ($b.env // {}))
+      | (if (.env | length) == 0 then del(.env) else . end)
+      | del(.apiKeyHelper)
+    ' "$local_settings_file" "$tmp_patch")"
+    printf '%s\n' "$merged" >"$local_settings_file"
+  else
+    cp "$tmp_patch" "$local_settings_file"
+  fi
+  chmod 600 "$local_settings_file"
+  ok "Router key header written to $local_settings_file"
+fi
 
 # ---------- gitignore for project scope ----------
 
@@ -292,24 +286,18 @@ if [ "$scope" = "project" ]; then
   # Same symlink containment as the .claude/ paths above: a hostile repo could
   # commit .gitignore as a symlink so the >> below writes outside the repo.
   refuse_if_symlink "$gitignore"
-  # Gitignore the executable scripts (cc-statusline.sh, weave-key.sh) so they
-  # are NEVER committed. Otherwise a malicious PR could change either to
-  # exfiltrate WEAVE_ROUTER_KEY or run arbitrary code on teammates' machines —
-  # both run on every claude session. Each teammate re-runs install.sh once
-  # after cloning to materialize their own copy from the verified installer
-  # source. Only the declarative settings.json (URL + relative paths) is
-  # committed and shared.
+  # Keep the statusline script and per-teammate local settings out of git. The
+  # local settings carry the router key header; each teammate gets their own.
   for entry in \
     ".claude/settings.local.json" \
     ".claude/.credentials.json" \
-    ".claude/cc-statusline.sh" \
-    ".claude/weave-key.sh"
+    ".claude/cc-statusline.sh"
   do
     if [ ! -f "$gitignore" ] || ! grep -qxF "$entry" "$gitignore"; then
       printf '%s\n' "$entry" >>"$gitignore"
     fi
   done
-  ok "Updated $gitignore (ignored credentials + executable helpers)"
+  ok "Updated $gitignore (ignored credentials + local helpers)"
 fi
 
 # ---------- post-install verification ----------
@@ -321,11 +309,11 @@ else
   warn "Could not reach $base_url/health within 5s. Settings are written; verify the router is running."
 fi
 
-if [ "$dev_mode" != "true" ] && [ "$scope" = "user" ] && [ -n "$api_key" ]; then
-  # Pass the bearer token via stdin (`@-`) instead of a -H argument so the key
+if [ "$dev_mode" != "true" ] && [ -n "$api_key" ]; then
+  # Pass the router key via stdin (`@-`) instead of a -H argument so the key
   # never appears in the process arg list (visible via `ps` / /proc to other
   # local users on shared machines).
-  if printf 'Authorization: Bearer %s\n' "$api_key" \
+  if printf '%s: %s\n' "$router_key_header" "$api_key" \
       | curl -fsS --max-time 5 --header @- "$base_url/validate" >/dev/null 2>&1; then
     ok "API key validated."
   else
@@ -343,8 +331,8 @@ case "$scope" in
     ;;
   project)
     echo "  Commit .claude/settings.json + the .gitignore changes."
-    echo "  Executable helpers (cc-statusline.sh, weave-key.sh) are gitignored — each"
-    echo "  teammate runs './router/install/install.sh --scope project' once after cloning."
+    echo "  Local helpers/settings are gitignored — each teammate runs"
+    echo "  './router/install/install.sh --scope project' once after cloning."
     if [ "$dev_mode" != "true" ]; then
       echo "  Each teammate also adds this to their shell rc:"
       echo "    export WEAVE_ROUTER_KEY=rk_..."
