@@ -1,0 +1,25 @@
+.github/workflows/check_migrations.yml
+  7488a1a12733f669 1-134
+.github/workflows/test.yml
+  7488a1a12733f669 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "9d756503739d523b89f4f273e92a261a4a00f29c",
+  "prompts": {
+    "7488a1a12733f669": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "587bdf85-7d03-4fcb-afad-90753f550342",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Drew Bailey",
+      "messages": [],
+      "total_additions": 238,
+      "total_deletions": 0,
+      "accepted_lines": 238,
+      "overriden_lines": 0
+    }
+  }
+}

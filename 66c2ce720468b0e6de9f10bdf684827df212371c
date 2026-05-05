@@ -1,0 +1,57 @@
+internal/server/middleware/auth.go
+  ffc58b1164ac40dc 21-45
+internal/api/openai/completions.go
+  ffc58b1164ac40dc 19
+internal/providers/anthropic/client.go
+  ffc58b1164ac40dc 1-134
+internal/api/anthropic/passthrough.go
+  ffc58b1164ac40dc 15
+internal/server/server.go
+  ffc58b1164ac40dc 22-28
+internal/router/evalswitch/switch.go
+  ffc58b1164ac40dc 1-19
+internal/server/middleware/eval_override.go
+  ffc58b1164ac40dc 13-18
+internal/api/anthropic/messages.go
+  ffc58b1164ac40dc 49
+.gitignore
+  ffc58b1164ac40dc 1-67
+internal/router/cluster/scorer.go
+  ffc58b1164ac40dc 14-341
+internal/server/middleware/cluster_version_override.go
+  ffc58b1164ac40dc 12-17
+cmd/router/main.go
+  ffc58b1164ac40dc 242-461
+internal/api/admin/health.go
+  ffc58b1164ac40dc 11
+internal/router/cluster/multiversion.go
+  ffc58b1164ac40dc 14-69
+internal/server/middleware/embed_override.go
+  ffc58b1164ac40dc 13-18
+internal/proxy/service.go
+  ffc58b1164ac40dc 20-342
+internal/proxy/service_test.go
+  ffc58b1164ac40dc 23-26
+internal/router/heuristic/rules.go
+  ffc58b1164ac40dc 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "66c2ce720468b0e6de9f10bdf684827df212371c",
+  "prompts": {
+    "ffc58b1164ac40dc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ab879d40-9565-4119-b661-86b85f199afa",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 143,
+      "total_deletions": 753,
+      "accepted_lines": 143,
+      "overriden_lines": 0
+    }
+  }
+}

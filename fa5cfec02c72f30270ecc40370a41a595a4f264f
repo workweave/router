@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "fa5cfec02c72f30270ecc40370a41a595a4f264f",
+  "prompts": {
+    "1328e3724520feda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "453321f9-0597-4667-ab0e-344450b7382e",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      "human_author": "Drew Bailey",
+      "messages": [],
+      "total_additions": 329,
+      "total_deletions": 0,
+      "accepted_lines": 329,
+      "overriden_lines": 0
+    }
+  }
+}

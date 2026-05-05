@@ -1,0 +1,23 @@
+.gitignore
+  ffc58b1164ac40dc 1-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "5f0995bdddfbb152801c72ae6615bd217eda3a42",
+  "prompts": {
+    "ffc58b1164ac40dc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ab879d40-9565-4119-b661-86b85f199afa",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Drew Bailey",
+      "messages": [],
+      "total_additions": 67,
+      "total_deletions": 0,
+      "accepted_lines": 67,
+      "overriden_lines": 0
+    }
+  }
+}
