@@ -1,7 +1,8 @@
 version: "v0.17"
 parent: "v0.10"
-status: "latest"
+status: "frozen"
 promoted_date: "2026-05-04"
+frozen_date: "2026-05-05"
 embedder:
   model: "jina-v2-base-code-int8"
   embed_dim: 768
