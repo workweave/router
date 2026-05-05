@@ -32,6 +32,7 @@ import (
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/cluster"
+	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/server"
 
 	_ "time/tzdata"
@@ -57,9 +58,13 @@ func main() {
 		_, err := conn.Exec(ctx, "SET search_path TO router, public")
 		return err
 	}
-	// 4 conns at ~5ms/UPDATE handles ~800 RPS per instance; the auth cache
-	// absorbs almost all reads, so this pool is sized for MarkUsed writes.
-	cfg.MaxConns = 4
+	// 6 conns covers MarkUsed writes (sparse, auth-cache absorbs most
+	// reads) plus session-pin reads/writes when ROUTER_SESSION_PIN_ENABLED
+	// is on (~1 read + 1 async write per pin miss). The 30s in-proc LRU
+	// in proxy.Service collapses the steady-state read load. If pgxpool
+	// wait p95 climbs above 1ms with the flag on, that's the
+	// migrate-to-Memorystore signal — not a bigger pool.
+	cfg.MaxConns = 6
 	cfg.MinConns = 1
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.MaxConnIdleTime = 10 * time.Minute
@@ -178,7 +183,15 @@ func main() {
 	}
 
 	semanticCache := buildSemanticCache(rtr)
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache)
+
+	var pinStore sessionpin.Store
+	if config.GetOr("ROUTER_SESSION_PIN_ENABLED", "false") == "true" {
+		pinStore = postgres.NewSessionPinRepo(pool)
+		go runSessionPinSweep(context.Background(), pinStore)
+		logger.Info("Session pin store enabled (sliding 1h TTL, hourly sweep)")
+	}
+
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache, pinStore)
 
 	engine := gin.New()
 	engine.UnescapePathValues = true
@@ -516,6 +529,30 @@ func buildSemanticCache(rtr router.Router) *cache.Cache {
 	return cache.New(cfg)
 }
 
+// runSessionPinSweep deletes pins that have been expired for >24h on
+// an hourly cadence. Bounded: row count is one per active session.
+// Runs under context.Background() so the sweep keeps draining stale
+// rows even during a graceful shutdown — the work is idempotent and
+// short.
+func runSessionPinSweep(ctx context.Context, store sessionpin.Store) {
+	logger := observability.Get()
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sweepCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := store.SweepExpired(sweepCtx); err != nil {
+				logger.Error("Session pin sweep failed", "err", err)
+			}
+			cancel()
+		}
+	}
+}
+
+// envVarForProvider returns the env var name for a provider's API key.
 func envVarForProvider(provider string) string {
 	switch provider {
 	case "anthropic":
