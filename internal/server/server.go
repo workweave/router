@@ -22,6 +22,7 @@ const (
 	messagesTimeout       = 600 * time.Second
 	chatCompletionTimeout = 600 * time.Second
 	passthroughTimeout    = 10 * time.Second
+	routeTimeout          = 5 * time.Second
 )
 
 // Register wires routes onto the engine. devModeNoAuth skips bearer-auth on
@@ -62,4 +63,15 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	passthroughGroup.POST("/v1/messages/count_tokens", anthropicapi.PassthroughHandler(proxySvc))
 	passthroughGroup.GET("/v1/models", anthropicapi.PassthroughHandler(proxySvc))
 	passthroughGroup.GET("/v1/models/:model", anthropicapi.PassthroughHandler(proxySvc))
+
+	routeAuth := []gin.HandlerFunc{middleware.WithTimeout(routeTimeout)}
+	if !devModeNoAuth {
+		routeAuth = append(routeAuth, middleware.WithAuth(authSvc))
+	}
+	routeAuth = append(routeAuth,
+		middleware.WithEmbedLastUserMessageOverride(),
+		middleware.WithClusterVersionOverride(),
+	)
+	routeGroup := engine.Group("", routeAuth...)
+	routeGroup.POST("/v1/route", anthropicapi.RouteHandler(proxySvc))
 }
