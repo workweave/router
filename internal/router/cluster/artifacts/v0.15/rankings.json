@@ -1,0 +1,146 @@
+{
+  "meta": {
+    "alpha": 0.53,
+    "cost_per_1k_input_usd": {
+      "claude-haiku-4-5": 0.8,
+      "claude-opus-4-7": 15.0,
+      "claude-sonnet-4-5": 3.0,
+      "gemini-3-flash-preview": 0.5,
+      "gemini-3.1-flash-lite-preview": 0.1,
+      "gemini-3.1-pro-preview": 2.0,
+      "gpt-4.1": 2.0,
+      "gpt-5.4-mini": 0.4,
+      "gpt-5.5": 5.0
+    },
+    "embedder_model": "jina-v2-base-code-int8",
+    "exclude_prompts": null,
+    "include_routerarena_labels": "/Users/steventohme/Desktop/workweave4/router-internal/eval/results/_unsorted/routerarena_labels_full.jsonl",
+    "k": 10,
+    "n_excluded_prompts": 0,
+    "n_prompts": 21027,
+    "per_model_zscore": false,
+    "router_version": "weave-router-v0.1-bootstrap",
+    "routerarena_only": false,
+    "score_normalization": "per_prompt_zscore_across_bench_columns",
+    "seed": 42,
+    "shrinkage_k0": 10.0,
+    "top_p": 4,
+    "training_data_mix": {
+      "d1": 1.0,
+      "d2": 0.0,
+      "d3": 0.0
+    }
+  },
+  "rankings": {
+    "0": {
+      "claude-haiku-4-5": 0.5470738892311509,
+      "claude-opus-4-7": 0.06982342139581035,
+      "claude-sonnet-4-5": 0.9085234899328859,
+      "gemini-3-flash-preview": 0.5558416147536183,
+      "gemini-3.1-flash-lite-preview": 0.5706019689506536,
+      "gemini-3.1-pro-preview": 0.8645885170160597,
+      "gpt-4.1": 0.4840404543532208,
+      "gpt-5.4-mini": 0.46053691275167785,
+      "gpt-5.5": 0.3848043742580084
+    },
+    "1": {
+      "claude-haiku-4-5": 0.643233790073459,
+      "claude-opus-4-7": 0.53,
+      "claude-sonnet-4-5": 0.798706973244196,
+      "gemini-3-flash-preview": 0.45738255033557046,
+      "gemini-3.1-flash-lite-preview": 0.8253955118627514,
+      "gemini-3.1-pro-preview": 0.8891579324692377,
+      "gpt-4.1": 0.6105373604109441,
+      "gpt-5.4-mini": 0.5173245182678098,
+      "gpt-5.5": 0.8420420737572609
+    },
+    "2": {
+      "claude-haiku-4-5": 0.6913732997312824,
+      "claude-opus-4-7": 0.53,
+      "claude-sonnet-4-5": 0.37852348993288587,
+      "gemini-3-flash-preview": 0.7020173445507947,
+      "gemini-3.1-flash-lite-preview": 0.7137709819382579,
+      "gemini-3.1-pro-preview": 0.7761698175584288,
+      "gpt-4.1": 0.5006016828416087,
+      "gpt-5.4-mini": 0.6046235975733711,
+      "gpt-5.5": 0.8453364914109929
+    },
+    "3": {
+      "claude-haiku-4-5": 0.5343960490651102,
+      "claude-opus-4-7": 0.53,
+      "claude-sonnet-4-5": 0.37852348993288587,
+      "gemini-3-flash-preview": 0.5436581034509314,
+      "gemini-3.1-flash-lite-preview": 0.5568950784878948,
+      "gemini-3.1-pro-preview": 0.7922091650301587,
+      "gpt-4.1": 0.48904246602021145,
+      "gpt-5.4-mini": 0.48058080350003046,
+      "gpt-5.5": 0.8453046151536292
+    },
+    "4": {
+      "claude-haiku-4-5": 0.5280975005337473,
+      "claude-opus-4-7": 0.53,
+      "claude-sonnet-4-5": 0.4280847323848077,
+      "gemini-3-flash-preview": 0.5297713404174071,
+      "gemini-3.1-flash-lite-preview": 0.5444496724006407,
+      "gemini-3.1-pro-preview": 0.661225179257477,
+      "gpt-4.1": 0.41006711409395974,
+      "gpt-5.4-mini": 0.5192254742320754,
+      "gpt-5.5": 0.843579907090027
+    },
+    "5": {
+      "claude-haiku-4-5": 0.44832282013775,
+      "claude-opus-4-7": 0.53,
+      "claude-sonnet-4-5": 0.5206874285306488,
+      "gemini-3-flash-preview": 0.45738255033557046,
+      "gemini-3.1-flash-lite-preview": 0.4712430302382778,
+      "gemini-3.1-pro-preview": 0.7362272879548273,
+      "gpt-4.1": 0.5607854393391871,
+      "gpt-5.4-mini": 0.5771517413911247,
+      "gpt-5.5": 0.8451721431999262
+    },
+    "6": {
+      "claude-haiku-4-5": 0.4482793447476341,
+      "claude-opus-4-7": 0.43116546333389577,
+      "claude-sonnet-4-5": 0.5324183567149471,
+      "gemini-3-flash-preview": 0.45738255033557046,
+      "gemini-3.1-flash-lite-preview": 0.4711090516094978,
+      "gemini-3.1-pro-preview": 0.9400671140939598,
+      "gpt-4.1": 0.43370116525965946,
+      "gpt-5.4-mini": 0.9438482314344175,
+      "gpt-5.5": 0.7463660720866734
+    },
+    "7": {
+      "claude-haiku-4-5": 0.526171000035885,
+      "claude-opus-4-7": 0.5283241543787238,
+      "claude-sonnet-4-5": 0.48754001865043756,
+      "gemini-3-flash-preview": 0.52281129553102,
+      "gemini-3.1-flash-lite-preview": 0.5540789838762261,
+      "gemini-3.1-pro-preview": 0.8606674885705469,
+      "gpt-4.1": 0.5210109106469166,
+      "gpt-5.4-mini": 0.46053691275167785,
+      "gpt-5.5": 0.8454362416107382
+    },
+    "8": {
+      "claude-haiku-4-5": 0.4790601960298407,
+      "claude-opus-4-7": 0.46175828513988365,
+      "claude-sonnet-4-5": 0.6613660822938264,
+      "gemini-3-flash-preview": 0.6374058010640077,
+      "gemini-3.1-flash-lite-preview": 0.7337570410394564,
+      "gemini-3.1-pro-preview": 0.9400671140939598,
+      "gpt-4.1": 0.41006711409395974,
+      "gpt-5.4-mini": 0.5276154197798819,
+      "gpt-5.5": 0.5890094561732179
+    },
+    "9": {
+      "claude-haiku-4-5": 0.685645918980561,
+      "claude-opus-4-7": 0.53,
+      "claude-sonnet-4-5": 0.37852348993288587,
+      "gemini-3-flash-preview": 0.6950327523345587,
+      "gemini-3.1-flash-lite-preview": 0.7078851945355362,
+      "gemini-3.1-pro-preview": 0.7919860623274022,
+      "gpt-4.1": 0.6095746205482478,
+      "gpt-5.4-mini": 0.5840339454931345,
+      "gpt-5.5": 0.8453863143012132
+    }
+  }
+}
