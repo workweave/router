@@ -87,6 +87,7 @@ func makeSpan(name string) otel.Span {
 		Name:  name,
 		Start: now,
 		End:   now.Add(10 * time.Millisecond),
+		Attrs: nil,
 	}
 }
 

@@ -2,7 +2,6 @@ package otel
 
 import (
 	"crypto/rand"
-	"fmt"
 	"time"
 
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
@@ -16,7 +15,7 @@ type Span struct {
 	Name  string
 	Start time.Time
 	End   time.Time
-	Attrs map[string]any
+	Attrs []*commonv1.KeyValue
 }
 
 func generateTraceID() [16]byte {
@@ -35,6 +34,59 @@ func generateSpanID() [8]byte {
 	return id
 }
 
+// AttrBuilder constructs OTLP KeyValue attributes directly without
+// intermediate map allocations. Not safe for concurrent use.
+type AttrBuilder struct {
+	attrs []*commonv1.KeyValue
+}
+
+// NewAttrBuilder returns a builder pre-sized for cap attributes.
+func NewAttrBuilder(cap int) *AttrBuilder {
+	return &AttrBuilder{attrs: make([]*commonv1.KeyValue, 0, cap)}
+}
+
+// String appends a string attribute.
+func (b *AttrBuilder) String(key, val string) *AttrBuilder {
+	b.attrs = append(b.attrs, &commonv1.KeyValue{
+		Key:   key,
+		Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: val}},
+	})
+	return b
+}
+
+// Int64 appends an int64 attribute.
+func (b *AttrBuilder) Int64(key string, val int64) *AttrBuilder {
+	b.attrs = append(b.attrs, &commonv1.KeyValue{
+		Key:   key,
+		Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: val}},
+	})
+	return b
+}
+
+// Float64 appends a float64 attribute.
+func (b *AttrBuilder) Float64(key string, val float64) *AttrBuilder {
+	b.attrs = append(b.attrs, &commonv1.KeyValue{
+		Key:   key,
+		Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_DoubleValue{DoubleValue: val}},
+	})
+	return b
+}
+
+// Bool appends a bool attribute.
+func (b *AttrBuilder) Bool(key string, val bool) *AttrBuilder {
+	b.attrs = append(b.attrs, &commonv1.KeyValue{
+		Key:   key,
+		Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_BoolValue{BoolValue: val}},
+	})
+	return b
+}
+
+// Build returns the accumulated KeyValue slice. The slice is valid until
+// the next method call on the builder.
+func (b *AttrBuilder) Build() []*commonv1.KeyValue {
+	return b.attrs
+}
+
 func spanToProto(s Span, traceID [16]byte) *tracev1.Span {
 	spanID := generateSpanID()
 	return &tracev1.Span{
@@ -43,39 +95,8 @@ func spanToProto(s Span, traceID [16]byte) *tracev1.Span {
 		Name:              s.Name,
 		StartTimeUnixNano: uint64(s.Start.UnixNano()),
 		EndTimeUnixNano:   uint64(s.End.UnixNano()),
-		Attributes:        attrsToKeyValues(s.Attrs),
+		Attributes:        s.Attrs,
 		Kind:              tracev1.Span_SPAN_KIND_INTERNAL,
-	}
-}
-
-func attrsToKeyValues(attrs map[string]any) []*commonv1.KeyValue {
-	if len(attrs) == 0 {
-		return nil
-	}
-	kvs := make([]*commonv1.KeyValue, 0, len(attrs))
-	for k, v := range attrs {
-		kvs = append(kvs, &commonv1.KeyValue{
-			Key:   k,
-			Value: anyToValue(v),
-		})
-	}
-	return kvs
-}
-
-func anyToValue(v any) *commonv1.AnyValue {
-	switch val := v.(type) {
-	case string:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: val}}
-	case int:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(val)}}
-	case int64:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: val}}
-	case float64:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_DoubleValue{DoubleValue: val}}
-	case bool:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_BoolValue{BoolValue: val}}
-	default:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: fmt.Sprintf("%v", v)}}
 	}
 }
 
