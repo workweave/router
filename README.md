@@ -7,17 +7,19 @@ scorer (AvengersPro-derived) or a deterministic heuristic fallback.
 
 ## Getting started
 
-> **Provider API key required.** The router proxies requests to upstream
-> LLM providers. At least one of `ANTHROPIC_API_KEY`,
-> `OPENAI_PROVIDER_API_KEY`, or `GOOGLE_PROVIDER_API_KEY` must be set,
-> or the server refuses to boot. See [Configuration](#configuration) for
-> the full list.
+> **Provider API keys are optional.** The router always registers the
+> Anthropic provider. When `ANTHROPIC_API_KEY` is set the router uses
+> its own key; when omitted, client auth headers (`Authorization` or
+> `x-api-key`) are passed through to `api.anthropic.com` directly.
+> OpenAI and Google providers are enabled when their respective keys
+> are set. See [Configuration](#configuration) for the full list.
 
 ### Setup
 
 ```bash
 
-# 1. Write your upstream provider API keys to .env.local (pick at least one).
+# 1. (Optional) Write your upstream provider API keys to .env.local.
+#    Without ANTHROPIC_API_KEY the router passes through client auth headers.
 echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env.local
 
 # 2. Boot the stack, seed a Weave Router key, and wire Claude Code.
@@ -62,10 +64,36 @@ For iterating on router code itself with `CompileDaemon` hot reload:
 ```bash
 make db                                       # start Postgres only
 echo "DATABASE_URL=postgresql://router:router@localhost:5433/router?sslmode=disable" >> .env.local
-echo "ANTHROPIC_API_KEY=sk-ant-..."           >> .env.local
 make setup                                    # init schema + migrate + seed an rk_ key
 make dev                                      # run the server with hot reload
 ```
+
+Without any provider API keys, the router boots in **client auth
+passthrough** mode — Anthropic is always registered and client
+`Authorization` / `x-api-key` headers are forwarded to
+`api.anthropic.com`. To use the router's own key instead, add it to
+`.env.local`:
+
+```bash
+echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env.local
+```
+
+For the cluster scorer (ONNX-based routing), you also need these in
+`.env.local` on macOS / Apple Silicon:
+
+```bash
+# Point at the ONNX model file (downloaded by scripts/download_from_hf.py)
+ROUTER_ONNX_ASSETS_DIR=/path/to/router/assets
+
+# libtokenizers location (https://github.com/daulet/tokenizers/releases)
+CGO_LDFLAGS=-L/path/to/libtokenizers
+
+# libonnxruntime location (brew install onnxruntime)
+ROUTER_ONNX_LIBRARY_DIR=/opt/homebrew/lib
+```
+
+Without these, the cluster scorer fails at boot and the router
+falls back to the deterministic heuristic — still fully functional.
 
 Prerequisites for `make dev`: Go 1.25+,
 [golang-migrate](https://github.com/golang-migrate/migrate),
@@ -120,6 +148,7 @@ make check       # full CI-equivalent check (generate + build + test)
 | `/v1/messages/count_tokens` | POST   | bearer or dev | Anthropic passthrough — forwarded as-is with service credentials.                                                |
 | `/v1/models`                | GET    | bearer or dev | Anthropic passthrough — model availability list.                                                                 |
 | `/v1/models/:model`         | GET    | bearer or dev | Anthropic passthrough — single-model lookup.                                                                     |
+| `/v1/route`                 | POST   | bearer or dev | Returns the routing decision (model, provider, reason) without proxying upstream.                                 |
 
 
 "bearer or dev" means auth is required unless `ROUTER_DEV_MODE=true`,
@@ -152,6 +181,7 @@ flowchart TB
     subgraph anthapi_pkg ["internal/api/anthropic"]
         MessagesH["MessagesHandler"]
         PassthroughH["PassthroughHandler"]
+        RouteH["RouteHandler"]
     end
 
     subgraph oaiapi_pkg ["internal/api/openai"]
@@ -168,6 +198,7 @@ flowchart TB
     EmbedOverrideMW --> ClusterVersionMW
     ClusterVersionMW --> MessagesH
     ClusterVersionMW --> ChatCompH
+    ClusterVersionMW --> RouteH
     AuthMW --> PassthroughH
 
     subgraph auth_pkg ["internal/auth (identity domain)"]
@@ -193,6 +224,7 @@ flowchart TB
     MessagesH --> ProxyService
     ChatCompH --> ProxyService
     PassthroughH --> ProxyService
+    RouteH --> ProxyService
 
     subgraph router_pkg ["internal/router"]
         RouterIface[("Router interface
@@ -391,7 +423,7 @@ Strict dependency direction (outer → inner):
 | Adapter           | `[internal/providers/google](internal/providers/google)`       | `providers`, `router`                               | Implements `providers.Client` over Google's Gemini API via its OpenAI-compatible endpoint, so the OpenAI translator + adapter stripping logic apply unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Adapter           | `[internal/providers/noop](internal/providers/noop)`           | `providers`                                         | Implements `providers.Client`; used as a test double in `proxy.Service`'s unit tests. Not wired in `cmd/router/main.go`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Presentation      | `[internal/api/admin](internal/api/admin)`                     | `gin`                                               | Operational handlers (`HealthHandler`, `ValidateHandler`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Presentation      | `[internal/api/anthropic](internal/api/anthropic)`             | `proxy`, `providers`, `gin`                         | Anthropic Messages handlers (`MessagesHandler`, `PassthroughHandler`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Presentation      | `[internal/api/anthropic](internal/api/anthropic)`             | `proxy`, `providers`, `gin`                         | Anthropic Messages handlers (`MessagesHandler`, `PassthroughHandler`, `RouteHandler`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Presentation      | `[internal/api/openai](internal/api/openai)`                   | `proxy`, `providers`, `gin`                         | OpenAI Chat Completions handler                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Presentation      | `[internal/server](internal/server)`                           | `auth`, `proxy`, `api/*`, `server/middleware`       | Wires the gin engine and route registration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Presentation      | `[internal/server/middleware](internal/server/middleware)`     | `auth`, `observability`, `evalswitch`, `gin`        | Auth, timeout, eval-routing-override, embed-last-user-message-override, and cluster-version-override middleware (Chain of Responsibility)                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -427,14 +459,14 @@ no CLI flags.
 
 | Variable                   | Default                                                   | Purpose                                                              |
 | -------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`        | *(none)*                                                  | Enables the Anthropic provider (Messages API).                       |
+| `ANTHROPIC_API_KEY`        | *(none)*                                                  | Router's own Anthropic key. When set, used for all Anthropic requests. When omitted, client auth headers are passed through. |
 | `OPENAI_PROVIDER_API_KEY`  | *(none)*                                                  | Enables the OpenAI provider (Chat Completions API).                  |
 | `OPENAI_PROVIDER_BASE_URL` | `https://api.openai.com`                                  | Override the OpenAI base URL (useful for Azure OpenAI).              |
 | `GOOGLE_PROVIDER_API_KEY`  | *(none)*                                                  | Enables the Google Gemini provider (via OpenAI-compatible endpoint). |
 | `GOOGLE_PROVIDER_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` | Override the Gemini base URL.                                        |
 
 
-At least one provider key must be set or the router refuses to boot.
+Anthropic is always registered. OpenAI and Google require their respective keys.
 
 #### Postgres
 
@@ -593,7 +625,7 @@ router/
 ├── internal/
 │   ├── api/                   # gin handlers, grouped by surface
 │   │   ├── admin/             # /health, /validate
-│   │   ├── anthropic/         # /v1/messages, metadata passthrough
+│   │   ├── anthropic/         # /v1/messages, metadata passthrough, /v1/route
 │   │   └── openai/            # /v1/chat/completions
 │   ├── auth/                  # identity domain: Service.VerifyAPIKey, APIKeyCache, id/hashing
 │   ├── proxy/                 # routing/dispatch service: Route, Dispatch, ProxyMessages, ProxyOpenAIChatCompletion
@@ -650,7 +682,8 @@ public HF repo:
 ```bash
 git clone https://github.com/workweave/router.git
 cd router
-echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env.local
+# Optional: add your own provider key. Without it, client auth is passed through.
+# echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env.local
 make full-setup PLATFORM=cc
 ```
 
