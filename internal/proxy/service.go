@@ -44,6 +44,12 @@ type Service struct {
 	// remains the source of truth for "is this still valid"; the LRU
 	// is pure latency optimization.
 	pinCache *expirable.LRU[string, sessionpin.Pin]
+	// pinWriteSem bounds concurrent async pin-upsert goroutines. Writes
+	// are dropped (non-blocking select) when the semaphore is full;
+	// pins are best-effort so a dropped write degrades gracefully to a
+	// fresh route on the next turn rather than accumulating goroutines
+	// under slow/unavailable Postgres.
+	pinWriteSem chan struct{}
 }
 
 // pinSessionTTL is the sliding TTL written into pinned_until on every
@@ -87,8 +93,10 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		sticky = expirable.NewLRU[string, router.Decision](10000, nil, stickyDecisionTTL)
 	}
 	var pinCache *expirable.LRU[string, sessionpin.Pin]
+	var pinWriteSem chan struct{}
 	if pinStore != nil {
 		pinCache = expirable.NewLRU[string, sessionpin.Pin](10000, nil, 30*time.Second)
+		pinWriteSem = make(chan struct{}, 64)
 	}
 	return &Service{
 		router:               r,
@@ -100,6 +108,7 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		semanticCache:        semanticCache,
 		pinStore:             pinStore,
 		pinCache:             pinCache,
+		pinWriteSem:          pinWriteSem,
 	}
 }
 
@@ -362,11 +371,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				TurnCount:      1, // ON CONFLICT increments; only meaningful on first insert
 				PinnedUntil:    time.Now().Add(pinSessionTTL),
 			}
-			go func(p sessionpin.Pin) {
-				if err := s.pinStore.Upsert(context.Background(), p); err != nil {
-					observability.Get().Error("session pin upsert failed", "err", err)
-				}
-			}(pin)
+			select {
+			case s.pinWriteSem <- struct{}{}:
+				go func(p sessionpin.Pin) {
+					defer func() { <-s.pinWriteSem }()
+					if err := s.pinStore.Upsert(context.Background(), p); err != nil {
+						observability.Get().Error("session pin upsert failed", "err", err)
+					}
+				}(pin)
+			default:
+				observability.Get().Debug("session pin upsert dropped: semaphore full")
+			}
 			if s.pinCache != nil {
 				s.pinCache.Add(pinCacheKey, pin)
 			}
@@ -610,8 +625,7 @@ func hasEvalOverrideHeader(r *http.Request) bool {
 		return false
 	}
 	return r.Header.Get("x-weave-cluster-version") != "" ||
-		r.Header.Get("x-weave-embed-last-user-message") != "" ||
-		r.Header.Get("x-weave-disable-cluster") != ""
+		r.Header.Get("x-weave-embed-last-user-message") != ""
 }
 
 // externalKeysFromContext reads the external API keys stashed by the auth

@@ -189,7 +189,7 @@ func TestService_SessionPin_EvalOverrideHeaderBypassesAllTiers(t *testing.T) {
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	httpReq.Header.Set("x-weave-disable-cluster", "true")
+	httpReq.Header.Set("x-weave-cluster-version", "v0.2")
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls,
