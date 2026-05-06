@@ -92,6 +92,28 @@ func TestResolveCredentials_RouterKeyDoesNotLeakWhenBYOKAbsent(t *testing.T) {
 		"when no BYOK is configured and the inbound bearer is a router key, ResolveCredentials must NOT fall back to forwarding it upstream")
 }
 
+func TestExtractClientCredentials_RejectsRouterBearerWithLeadingWhitespace(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer  rk_whitespace_bypass"}}
+	creds := proxy.ExtractClientCredentials("openai", headers)
+	assert.Nil(t, creds,
+		"the router-key guard must canonicalize whitespace; the auth middleware accepts 'Bearer  rk_...' as a router credential, so this path must not forward it upstream")
+}
+
+func TestExtractClientCredentials_RejectsRouterKeyWithLeadingWhitespaceForAnthropic(t *testing.T) {
+	headers := http.Header{"X-Api-Key": []string{"  rk_whitespace_bypass"}}
+	creds := proxy.ExtractClientCredentials("anthropic", headers)
+	assert.Nil(t, creds,
+		"x-api-key values must be TrimSpace'd before the prefix check to match the auth middleware's normalization")
+}
+
+func TestExtractClientCredentials_TrimsWhitespaceFromForwardedKey(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer  sk-oai-client  "}}
+	creds := proxy.ExtractClientCredentials("openai", headers)
+	require.NotNil(t, creds)
+	assert.Equal(t, []byte("sk-oai-client"), creds.APIKey,
+		"the forwarded credential must be canonicalized; passing through embedded whitespace risks confusing upstream providers and inviting normalization-bypass bugs")
+}
+
 func TestResolveCredentials_BYOKTakesPrecedence(t *testing.T) {
 	byok := map[string]*proxy.Credentials{
 		"anthropic": {APIKey: []byte("sk-ant-byok"), Source: "byok"},

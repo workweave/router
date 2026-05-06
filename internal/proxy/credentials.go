@@ -40,16 +40,24 @@ func BuildCredentialsMap(keys []*auth.ExternalAPIKey) map[string]*Credentials {
 // would otherwise leak to the upstream provider when BYOK is absent.
 // Reject any token carrying auth.APIKeyPrefix so router credentials never
 // cross the trust boundary into third-party provider infrastructure.
+//
+// Header values are TrimSpace'd before the prefix check to match the auth
+// middleware's normalization — without this, embedded whitespace (e.g.
+// "Bearer  rk_xxx") would authenticate as a router key but slip past the
+// HasAPIKeyPrefix guard and leak upstream.
 func ExtractClientCredentials(provider string, headers http.Header) *Credentials {
 	switch provider {
 	case "anthropic":
-		if key := headers.Get("x-api-key"); key != "" && !auth.HasAPIKeyPrefix(key) {
+		if key := strings.TrimSpace(headers.Get("x-api-key")); key != "" && !auth.HasAPIKeyPrefix(key) {
 			return &Credentials{APIKey: []byte(key), Source: "client"}
 		}
 	case "openai", "google":
 		authHeader := headers.Get("Authorization")
-		if key, found := strings.CutPrefix(authHeader, "Bearer "); found && !auth.HasAPIKeyPrefix(key) {
-			return &Credentials{APIKey: []byte(key), Source: "client"}
+		if raw, found := strings.CutPrefix(authHeader, "Bearer "); found {
+			key := strings.TrimSpace(raw)
+			if key != "" && !auth.HasAPIKeyPrefix(key) {
+				return &Credentials{APIKey: []byte(key), Source: "client"}
+			}
 		}
 	}
 	return nil
