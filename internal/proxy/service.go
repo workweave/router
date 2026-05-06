@@ -15,6 +15,7 @@ import (
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/sessionpin"
+	"workweave/router/internal/router/turntype"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -50,6 +51,10 @@ type Service struct {
 	// fresh route on the next turn rather than accumulating goroutines
 	// under slow/unavailable Postgres.
 	pinWriteSem chan struct{}
+	// hardPinExplore gates the §3.4 Explore sub-agent hard-pin to Haiku.
+	// Off by default; enable via ROUTER_HARD_PIN_EXPLORE=true after one
+	// week of shadow validation (see docs/plans/AGENTIC_CODING.md §3.4).
+	hardPinExplore bool
 }
 
 // pinSessionTTL is the sliding TTL written into pinned_until on every
@@ -87,7 +92,7 @@ type InstallationIDContextKey struct{}
 // NewService constructs the proxy service. pinStore may be nil when the
 // session-pin feature flag is off; the tiered lookup transparently
 // short-circuits past tiers 1–2 in that case.
-func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache, pinStore sessionpin.Store) *Service {
+func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool) *Service {
 	var sticky *expirable.LRU[string, router.Decision]
 	if stickyDecisionTTL > 0 {
 		sticky = expirable.NewLRU[string, router.Decision](10000, nil, stickyDecisionTTL)
@@ -109,6 +114,7 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		pinStore:             pinStore,
 		pinCache:             pinCache,
 		pinWriteSem:          pinWriteSem,
+		hardPinExplore:       hardPinExplore,
 	}
 }
 
@@ -259,6 +265,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
 
+	tt := turntype.Detect(body)
+
 	embedFlag := s.embedLastUserMessage
 	if v, ok := embedLastUserMessageOverride(ctx); ok {
 		embedFlag = v
@@ -278,15 +286,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	bypassEval := hasEvalOverrideHeader(r)
 	bypassSticky := bypassEval
 
-	// Tiered routing-decision lookup (see docs/plans/SESSION_PIN.md §5).
-	//   Tier 1 — pinCache (in-proc, 30s):   absorbs same-instance burst.
-	//   Tier 2 — pinStore (Postgres, 1h):   survives Cloud Run restarts.
-	//   Tier 3 — stickyDecisions (legacy):  apiKeyID-keyed LRU; kept
-	//                                        during rollout, removed in
-	//                                        a follow-up.
-	// Tier 3 is only consulted on a tier-2 *miss*, never on a tier-2
-	// *error* — papering over store errors with the legacy cache would
-	// mask the migrate-to-Memorystore trigger criteria.
+	// §3.4: hard pins for turn types whose optimal model is known a priori.
+	// These bypass all session-pin tiers and the cluster scorer, and must NOT
+	// write a pin upsert (they must not overwrite the session's main-loop model).
+	//   Compaction — always Haiku (short-out-of-long-in cost profile).
+	//   SubAgentDispatch — Haiku when ROUTER_HARD_PIN_EXPLORE is set; gated
+	//     until one week of shadow validation confirms no quality regression.
 	var (
 		decision    router.Decision
 		stickyHit   bool
@@ -296,7 +301,28 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		pinCacheKey string
 		routeStart  = time.Now()
 	)
-	pinEligible := s.pinStore != nil && !bypassSticky
+	if tt == turntype.Compaction || (tt == turntype.SubAgentDispatch && s.hardPinExplore) {
+		decision = router.Decision{
+			Provider: "anthropic",
+			Model:    "claude-haiku-4-5",
+			Reason:   string(tt) + "_hard_pin",
+		}
+		stickyHit = true
+		pinTier = string(tt) + "_hard_pin"
+	}
+
+	// Tiered routing-decision lookup (see docs/plans/SESSION_PIN.md §5).
+	//   Tier 1 — pinCache (in-proc, 30s):   absorbs same-instance burst.
+	//   Tier 2 — pinStore (Postgres, 1h):   survives Cloud Run restarts.
+	//   Tier 3 — stickyDecisions (legacy):  apiKeyID-keyed LRU; kept
+	//                                        during rollout, removed in
+	//                                        a follow-up.
+	// Tier 3 is only consulted on a tier-2 *miss*, never on a tier-2
+	// *error* — papering over store errors with the legacy cache would
+	// mask the migrate-to-Memorystore trigger criteria.
+	// pinEligible is false for hard-pinned turns (stickyHit already set above),
+	// which also suppresses the async pin upsert for those turns.
+	pinEligible := s.pinStore != nil && !bypassSticky && !stickyHit
 	if pinEligible {
 		sessionKey = DeriveSessionKey(env, apiKeyID)
 		pinCacheKey = sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
@@ -351,6 +377,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		if s.stickyDecisions != nil && apiKeyID != "" && !bypassSticky {
 			s.stickyDecisions.Add(apiKeyID, decision)
 		}
+	}
+
+	// §3.3: annotate pin tier when a tool-result turn short-circuits to an
+	// existing session pin, so the routing.session_pin_tier OTel attribute
+	// reflects the bypass in dashboards.
+	if stickyHit && tt == turntype.ToolResult {
+		pinTier += "_tool_result_sc"
 	}
 
 	// Async upsert on every routed request — refreshes the sliding TTL
@@ -436,7 +469,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(23).
+		Attrs: otel.NewAttrBuilder(24).
 			String("request_id", requestID).
 			String("external_id", externalID).
 			String("client.device_id", clientID.DeviceID).
@@ -452,6 +485,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			Bool("routing.session_pin_hit", pinTier == "in_proc" || pinTier == "postgres").
 			String("routing.session_pin_tier", pinTier).
 			Int64("routing.session_pin_age_s", pinAgeSec).
+			String("routing.turn_type", string(tt)).
 			String("routing.embed_input", embedInput).
 			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).

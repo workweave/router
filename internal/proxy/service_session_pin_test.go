@@ -82,6 +82,7 @@ func newPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 		nil,   // decisionLog
 		nil,   // semanticCache
 		store,
+		false, // hardPinExplore
 	)
 }
 
@@ -196,4 +197,94 @@ func TestService_SessionPin_EvalOverrideHeaderBypassesAllTiers(t *testing.T) {
 		"eval-override header must bypass the pin tiers so the harness can compare router strategies on the same prompt")
 	assert.Equal(t, 0, store.getCalls,
 		"the pin store must not even be consulted when bypass is active")
+}
+
+// compactionBody is a minimal Anthropic request whose system prompt triggers
+// the compaction detector (§3.4).
+const compactionBody = `{
+	"model":"claude-opus-4-7",
+	"system":"Your task is to create a detailed summary of the conversation so far.",
+	"messages":[{"role":"user","content":"go"}]
+}`
+
+// exploreBody is a minimal Anthropic request whose metadata marks it as an
+// Explore sub-agent dispatch (§3.4).
+const exploreBody = `{
+	"model":"claude-opus-4-7",
+	"metadata":{"user_id":"subagent:Explore"},
+	"messages":[{"role":"user","content":"list go files"}]
+}`
+
+func TestService_HardPin_CompactionAlwaysRoutesToHaiku(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(compactionBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls,
+		"compaction turns must bypass the cluster scorer entirely")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"),
+		"compaction must hard-pin to Haiku")
+	assert.Equal(t, 0, store.getCalls,
+		"compaction turns must not consult the pin store")
+
+	// Give any async goroutine a moment to fire (there should be none).
+	select {
+	case <-store.upsertCh:
+		t.Fatal("compaction turn must not write a session pin (would overwrite main-loop model)")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestService_HardPin_ExploreRoutesToHaikuWhenFlagOn(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
+	svc := proxy.NewService(
+		fr,
+		map[string]providers.Client{"anthropic": &fakeProvider{}},
+		nil,
+		false,
+		0,
+		nil,
+		nil,
+		store,
+		true, // hardPinExplore = on
+	)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(exploreBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls,
+		"Explore sub-agent turns must bypass the cluster scorer when hardPinExplore is on")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"),
+		"Explore hard-pin must select Haiku")
+
+	select {
+	case <-store.upsertCh:
+		t.Fatal("Explore hard-pin turn must not write a session pin")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestService_HardPin_ExploreFallsThroughWhenFlagOff(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
+	// hardPinExplore = false (default via newPinSvc)
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(exploreBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls,
+		"Explore sub-agent must fall through to the cluster scorer when hardPinExplore is off")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"),
+		"cluster scorer decision must be used when hardPinExplore is off")
 }

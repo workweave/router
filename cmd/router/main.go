@@ -191,7 +191,12 @@ func main() {
 		logger.Info("Session pin store enabled (sliding 1h TTL, hourly sweep)")
 	}
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache, pinStore)
+	hardPinExplore := config.GetOr("ROUTER_HARD_PIN_EXPLORE", "false") == "true"
+	if hardPinExplore {
+		logger.Info("Explore sub-agent hard-pin enabled (claude-haiku-4-5)")
+	}
+
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache, pinStore, hardPinExplore)
 
 	engine := gin.New()
 	engine.UnescapePathValues = true
