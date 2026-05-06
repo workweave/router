@@ -63,7 +63,7 @@ to mix-and-match flags (e.g. project scope on a local router):
 
 | Path                                  | Purpose                                                       |
 | ------------------------------------- | ------------------------------------------------------------- |
-| `~/.claude/settings.json`             | Sets `env.ANTHROPIC_BASE_URL`, `env.ANTHROPIC_AUTH_TOKEN`, `statusLine`. Other keys preserved. |
+| `~/.claude/settings.json`             | Sets `env.ANTHROPIC_BASE_URL`, `env.ANTHROPIC_CUSTOM_HEADERS` with `X-Weave-Router-Key`, and `statusLine`. Other keys preserved. |
 | `~/.weave/cc-statusline.sh`           | The status line script. Reads the router's decisions log + the CC transcript to show routed-model + savings. |
 
 Re-running the installer overwrites those keys idempotently. Other settings
@@ -73,26 +73,22 @@ Re-running the installer overwrites those keys idempotently. Other settings
 
 | Path                                | Committed? | Purpose                                                       |
 | ----------------------------------- | ---------- | ------------------------------------------------------------- |
-| `<repo>/.claude/settings.json`      | ✅ commit  | Sets `env.ANTHROPIC_BASE_URL`, `apiKeyHelper`, `statusLine` (relative paths). **No token.** |
+| `<repo>/.claude/settings.json`      | ✅ commit  | Sets `env.ANTHROPIC_BASE_URL`, `statusLine` (relative paths). **No token.** |
 | `<repo>/.gitignore`                 | ✅ commit  | Adds the four `.claude/` paths below to the ignore list.       |
 | `<repo>/.claude/cc-statusline.sh`   | ❌ ignored | Status line script — runs on every CC session.                 |
-| `<repo>/.claude/weave-key.sh`       | ❌ ignored | API-key helper that prints `$WEAVE_ROUTER_KEY` — runs on every request. |
-| `<repo>/.claude/settings.local.json`| ❌ ignored | Per-teammate overrides.                                        |
+| `<repo>/.claude/settings.local.json`| ❌ ignored | Stores your local `ANTHROPIC_CUSTOM_HEADERS` router-key header and any other per-teammate overrides. |
 | `<repo>/.claude/.credentials.json`  | ❌ ignored | CC's per-user credentials cache.                               |
 
-**Why the executables are gitignored:** `cc-statusline.sh` and `weave-key.sh`
-are both shell scripts that Claude Code runs on every session / request. If
-they were committed, a malicious PR could land changes that exfiltrate
-`WEAVE_ROUTER_KEY` or run arbitrary code on every teammate's machine. Keeping
-them gitignored means each teammate's copy comes from a verified `install.sh`
-run, not from potentially-tampered repo content.
+The router key lives in `ANTHROPIC_CUSTOM_HEADERS` so Claude Code can keep
+using its normal Anthropic auth (`Authorization` / `x-api-key`) for the
+logged-in user's Team/Pro/Max/individual plan.
 
 **Onboarding flow for a new teammate:**
 
 ```bash
 git clone <repo>
 cd <repo>
-./router/install/install.sh --scope project   # writes the local helpers
+./router/install/install.sh --scope project   # writes shared settings + local router key header
 export WEAVE_ROUTER_KEY=rk_...                 # in shell rc / dotenv / 1Password
 claude                                          # routes through Weave
 ```

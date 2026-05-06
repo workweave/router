@@ -59,6 +59,72 @@ func TestProxy_RewritesModelAndForwardsAuth(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"id":"msg_1"`)
 }
 
+func TestProxy_PassesThroughAnthropicAuthWithoutRouterKey(t *testing.T) {
+	var (
+		gotAuth      string
+		gotAPIKey    string
+		gotRouterKey string
+	)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("x-api-key")
+		gotRouterKey = r.Header.Get("X-Weave-Router-Key")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1"}`))
+	}))
+	defer upstream.Close()
+
+	c := anthropic.NewClient("", upstream.URL)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	clientReq.Header.Set("Authorization", "Bearer anthropic-oauth-token")
+	clientReq.Header.Set("X-Weave-Router-Key", "rk_router")
+
+	prep := providers.PreparedRequest{
+		Body:    []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`),
+		Headers: make(http.Header),
+	}
+	err := c.Proxy(context.Background(), router.Decision{Model: "claude-haiku-4-5"}, prep, rec, clientReq)
+
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer anthropic-oauth-token", gotAuth)
+	assert.Empty(t, gotAPIKey)
+	assert.Empty(t, gotRouterKey, "router auth must not be forwarded to Anthropic")
+}
+
+func TestProxy_RouterKeyDoesNotOverrideConfiguredAnthropicKey(t *testing.T) {
+	var (
+		gotAuth   string
+		gotAPIKey string
+	)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("x-api-key")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1"}`))
+	}))
+	defer upstream.Close()
+
+	c := anthropic.NewClient("router-anthropic-key", upstream.URL)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	clientReq.Header.Set("Authorization", "Bearer anthropic-oauth-token")
+	clientReq.Header.Set("x-api-key", "anthropic-api-key")
+	clientReq.Header.Set("X-Weave-Router-Key", "rk_router")
+
+	prep := providers.PreparedRequest{
+		Body:    []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`),
+		Headers: make(http.Header),
+	}
+	err := c.Proxy(context.Background(), router.Decision{Model: "claude-haiku-4-5"}, prep, rec, clientReq)
+
+	require.NoError(t, err)
+	assert.Empty(t, gotAuth, "configured router Anthropic key should own upstream auth")
+	assert.Equal(t, "router-anthropic-key", gotAPIKey)
+}
+
 func TestProxy_ReturnsUpstreamStatusErrorOn4xx(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

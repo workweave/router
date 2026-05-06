@@ -52,6 +52,30 @@ func NewClient(apiKey, baseURL string) *Client {
 	}
 }
 
+// setAuth applies authentication to the upstream request. Precedence:
+//  1. Per-request BYOK credentials in ctx (proxy layer attaches these for
+//     plan-customers that bring their own key).
+//  2. The router's deployment-level API key, when configured.
+//  3. Passthrough: forward the client's own Anthropic auth headers (OAuth
+//     bearer or x-api-key) so the user's credentials reach Anthropic
+//     directly. Router-only credentials are deliberately not forwarded.
+func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) {
+	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
+		upstream.Header.Set("x-api-key", string(creds.APIKey))
+		return
+	}
+	if c.apiKey != "" {
+		upstream.Header.Set("x-api-key", c.apiKey)
+		return
+	}
+	if v := inbound.Header.Get("authorization"); v != "" {
+		upstream.Header.Set("authorization", v)
+	}
+	if v := inbound.Header.Get("x-api-key"); v != "" {
+		upstream.Header.Set("x-api-key", v)
+	}
+}
+
 func (c *Client) Complete(ctx context.Context, req providers.Request) (providers.Response, error) {
 	return providers.Response{}, providers.ErrNotImplemented
 }
@@ -62,13 +86,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		return fmt.Errorf("build upstream request: %w", err)
 	}
 	upstream.Header.Set("content-type", "application/json")
-	// Use per-request BYOK credentials when available; fall back to the
-	// deployment-level API key (plan-based auth).
-	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
-		upstream.Header.Set("x-api-key", string(creds.APIKey))
-	} else if c.apiKey != "" {
-		upstream.Header.Set("x-api-key", c.apiKey)
-	}
+	c.setAuth(ctx, upstream, r)
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
@@ -152,13 +170,7 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	if ct := r.Header.Get("content-type"); ct != "" {
 		upstream.Header.Set("content-type", ct)
 	}
-	// Use per-request BYOK credentials when available; fall back to the
-	// deployment-level API key (plan-based auth).
-	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
-		upstream.Header.Set("x-api-key", string(creds.APIKey))
-	} else if c.apiKey != "" {
-		upstream.Header.Set("x-api-key", c.apiKey)
-	}
+	c.setAuth(ctx, upstream, r)
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}

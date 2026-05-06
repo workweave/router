@@ -18,8 +18,13 @@ const (
 	ctxKeyAPIKey       = "router_api_key"
 )
 
-// WithAuth validates the inbound API key from either Authorization: Bearer
-// or x-api-key headers. On failure, short-circuits with a generic 401.
+// RouterKeyHeader carries the Weave Router key when clients need to preserve
+// Authorization / x-api-key for the upstream provider.
+const RouterKeyHeader = "X-Weave-Router-Key"
+
+// WithAuth validates the inbound API key from X-Weave-Router-Key,
+// Authorization: Bearer, or x-api-key headers. On failure, short-circuits with
+// a generic 401.
 func WithAuth(svc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractToken(c)
@@ -45,8 +50,12 @@ func WithAuth(svc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// extractToken pulls the bearer token from Authorization: Bearer or x-api-key.
+// extractToken pulls the router token from the router-only header first, then
+// falls back to legacy Authorization: Bearer or x-api-key credentials.
 func extractToken(c *gin.Context) string {
+	if t := strings.TrimSpace(c.GetHeader(RouterKeyHeader)); t != "" {
+		return t
+	}
 	if t := extractBearer(c.GetHeader("Authorization")); t != "" {
 		return t
 	}

@@ -99,9 +99,15 @@ func main() {
 
 	providerMap := make(map[string]providers.Client)
 
-	if anthropicKey := config.GetOr("ANTHROPIC_API_KEY", ""); anthropicKey != "" {
-		providerMap["anthropic"] = anthropic.NewClient(anthropicKey, anthropic.DefaultBaseURL)
-		logger.Info("Anthropic provider enabled", "base_url", anthropic.DefaultBaseURL)
+	// Anthropic is always registered. With ANTHROPIC_API_KEY the router uses
+	// its own key; without it, the client's auth headers (OAuth / x-api-key)
+	// are passed through to api.anthropic.com directly.
+	anthropicKey := config.GetOr("ANTHROPIC_API_KEY", "")
+	providerMap["anthropic"] = anthropic.NewClient(anthropicKey, anthropic.DefaultBaseURL)
+	if anthropicKey != "" {
+		logger.Info("Anthropic provider enabled (router key)", "base_url", anthropic.DefaultBaseURL)
+	} else {
+		logger.Info("Anthropic provider enabled (client auth passthrough)", "base_url", anthropic.DefaultBaseURL)
 	}
 
 	if openaiKey := config.GetOr("OPENAI_PROVIDER_API_KEY", ""); openaiKey != "" {
