@@ -45,6 +45,9 @@ func WithAuth(svc *auth.Service) gin.HandlerFunc {
 		if externalKeys != nil {
 			ctx = context.WithValue(ctx, proxy.ExternalAPIKeysContextKey{}, externalKeys)
 		}
+		if installation != nil && installation.ID != "" {
+			ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, installation.ID)
+		}
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}

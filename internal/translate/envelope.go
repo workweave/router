@@ -117,6 +117,42 @@ func (e *RequestEnvelope) MetadataUserID() string {
 	return gjson.GetBytes(e.body, "metadata.user_id").String()
 }
 
+// SystemText returns the concatenated system-prompt text (Anthropic
+// format only). Empty for OpenAI-format requests, which carry the
+// system prompt as messages[0]. Used by session-pin keying as one of
+// the two stable inputs that don't change across turns of the same
+// session.
+func (e *RequestEnvelope) SystemText() string {
+	if e.format != FormatAnthropic {
+		return ""
+	}
+	return systemTextGJSON(gjson.GetBytes(e.body, "system"))
+}
+
+// FirstUserMessageText returns the text of messages[0] when role is
+// "user", honoring both the bare-string and content-array shapes.
+// Format-aware: OpenAI uses a flat list with a top-level "content"
+// field; Anthropic uses content blocks. Returns "" if there is no
+// first user message.
+func (e *RequestEnvelope) FirstUserMessageText() string {
+	first := gjson.GetBytes(e.body, "messages.0")
+	if !first.Exists() {
+		return ""
+	}
+	if first.Get("role").String() != "user" {
+		return ""
+	}
+	content := first.Get("content")
+	switch e.format {
+	case FormatAnthropic:
+		return userPromptTextGJSON(content)
+	case FormatOpenAI:
+		return openAIContentTextGJSON(content)
+	default:
+		return ""
+	}
+}
+
 // HasTools reports whether the request contains a non-empty tools array.
 func (e *RequestEnvelope) HasTools() bool {
 	r := gjson.GetBytes(e.body, "tools.#")

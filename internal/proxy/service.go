@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
+	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -31,7 +33,30 @@ type Service struct {
 	// cosine-similarity hit against a stored response. Nil disables
 	// the cache entirely. Always nil-check before use.
 	semanticCache *cache.Cache
+	// pinStore persists session-sticky routing decisions across Cloud
+	// Run instance restarts (see docs/plans/SESSION_PIN.md). Nil when
+	// the ROUTER_SESSION_PIN_ENABLED flag is off; tiered lookup
+	// degrades to the legacy apiKeyID LRU below.
+	pinStore sessionpin.Store
+	// pinCache absorbs the hot path so a 50-turn session keyed on the
+	// same instance only hits Postgres ~5–10 times. 30s TTL is short
+	// enough that pinned_until-driven invalidation in the pin store
+	// remains the source of truth for "is this still valid"; the LRU
+	// is pure latency optimization.
+	pinCache *expirable.LRU[string, sessionpin.Pin]
+	// pinWriteSem bounds concurrent async pin-upsert goroutines. Writes
+	// are dropped (non-blocking select) when the semaphore is full;
+	// pins are best-effort so a dropped write degrades gracefully to a
+	// fresh route on the next turn rather than accumulating goroutines
+	// under slow/unavailable Postgres.
+	pinWriteSem chan struct{}
 }
+
+// pinSessionTTL is the sliding TTL written into pinned_until on every
+// pin upsert. Mirrors Anthropic's prompt-cache TTL on Sonnet 4.5+ /
+// Haiku 4.5+ / Opus 4.5+ so the pin lifecycle tracks the cache it's
+// trying to keep warm.
+const pinSessionTTL = time.Hour
 
 // APIKeyIDContextKey is the request-context key for the authenticated api_key_id.
 type APIKeyIDContextKey struct{}
@@ -54,11 +79,24 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 	return creds
 }
 
-// NewService constructs the proxy service.
-func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache) *Service {
+// InstallationIDContextKey is the request-context key for the authed
+// installation's UUID. Stashed by middleware.WithAuth and read by
+// ProxyMessages so session pins can be FK'd to the installation.
+type InstallationIDContextKey struct{}
+
+// NewService constructs the proxy service. pinStore may be nil when the
+// session-pin feature flag is off; the tiered lookup transparently
+// short-circuits past tiers 1–2 in that case.
+func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache, pinStore sessionpin.Store) *Service {
 	var sticky *expirable.LRU[string, router.Decision]
 	if stickyDecisionTTL > 0 {
 		sticky = expirable.NewLRU[string, router.Decision](10000, nil, stickyDecisionTTL)
+	}
+	var pinCache *expirable.LRU[string, sessionpin.Pin]
+	var pinWriteSem chan struct{}
+	if pinStore != nil {
+		pinCache = expirable.NewLRU[string, sessionpin.Pin](10000, nil, 30*time.Second)
+		pinWriteSem = make(chan struct{}, 64)
 	}
 	return &Service{
 		router:               r,
@@ -68,6 +106,9 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		stickyDecisions:      sticky,
 		decisionLog:          decisionLog,
 		semanticCache:        semanticCache,
+		pinStore:             pinStore,
+		pinCache:             pinCache,
+		pinWriteSem:          pinWriteSem,
 	}
 }
 
@@ -232,19 +273,68 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
 	externalID, _ := ctx.Value(ExternalIDContextKey{}).(string)
+	installationID, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	clientID := ClientIdentityFrom(ctx)
 	bypassEval := hasEvalOverrideHeader(r)
+	bypassSticky := bypassEval
+
+	// Tiered routing-decision lookup (see docs/plans/SESSION_PIN.md §5).
+	//   Tier 1 — pinCache (in-proc, 30s):   absorbs same-instance burst.
+	//   Tier 2 — pinStore (Postgres, 1h):   survives Cloud Run restarts.
+	//   Tier 3 — stickyDecisions (legacy):  apiKeyID-keyed LRU; kept
+	//                                        during rollout, removed in
+	//                                        a follow-up.
+	// Tier 3 is only consulted on a tier-2 *miss*, never on a tier-2
+	// *error* — papering over store errors with the legacy cache would
+	// mask the migrate-to-Memorystore trigger criteria.
 	var (
-		decision   router.Decision
-		stickyHit  bool
-		routeStart = time.Now()
+		decision    router.Decision
+		stickyHit   bool
+		pinTier     = "miss"
+		pinAgeSec   int64
+		sessionKey  [sessionpin.SessionKeyLen]byte
+		pinCacheKey string
+		routeStart  = time.Now()
 	)
-	if s.stickyDecisions != nil && apiKeyID != "" && !bypassEval {
+	pinEligible := s.pinStore != nil && !bypassSticky
+	if pinEligible {
+		sessionKey = DeriveSessionKey(env, apiKeyID)
+		pinCacheKey = sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
+
+		if s.pinCache != nil {
+			if pin, ok := s.pinCache.Get(pinCacheKey); ok {
+				decision = pinDecision(pin)
+				stickyHit = true
+				pinTier = "in_proc"
+				pinAgeSec = pinAge(pin)
+			}
+		}
+		if !stickyHit {
+			pin, found, err := s.pinStore.Get(ctx, sessionKey, sessionpin.DefaultRole)
+			if err != nil {
+				log.Error("session pin store unavailable; falling through to cluster scorer", "err", err)
+			} else if found && pin.PinnedUntil.After(time.Now()) {
+				decision = pinDecision(pin)
+				stickyHit = true
+				pinTier = "postgres"
+				pinAgeSec = pinAge(pin)
+				if s.pinCache != nil {
+					s.pinCache.Add(pinCacheKey, pin)
+				}
+			}
+		}
+	}
+
+	// Tier 3: legacy apiKeyID LRU. Consulted only on tier-2 miss (or
+	// when pinStore is nil).
+	if !stickyHit && s.stickyDecisions != nil && apiKeyID != "" && !bypassSticky {
 		if d, ok := s.stickyDecisions.Get(apiKeyID); ok {
 			decision = d
 			stickyHit = true
+			pinTier = "legacy_apikey"
 		}
 	}
+
 	if !stickyHit {
 		var err error
 		decision, err = s.router.Route(ctx, router.Request{
@@ -258,10 +348,46 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			log.Error("Routing failed", "err", err, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "estimated_input_tokens", feats.Tokens)
 			return err
 		}
-		if s.stickyDecisions != nil && apiKeyID != "" && !bypassEval {
+		if s.stickyDecisions != nil && apiKeyID != "" && !bypassSticky {
 			s.stickyDecisions.Add(apiKeyID, decision)
 		}
 	}
+
+	// Async upsert on every routed request — refreshes the sliding TTL
+	// for sticky hits, records new pins for fresh routes. Uses
+	// context.Background() per repo convention so a request cancel
+	// never drops the pin write (would force re-route on the next turn
+	// and break cache continuity).
+	if pinEligible && installationID != "" {
+		instUUID, parseErr := uuid.Parse(installationID)
+		if parseErr == nil {
+			pin := sessionpin.Pin{
+				SessionKey:     sessionKey,
+				Role:           sessionpin.DefaultRole,
+				InstallationID: instUUID,
+				Provider:       decision.Provider,
+				Model:          decision.Model,
+				Reason:         decision.Reason,
+				TurnCount:      1, // ON CONFLICT increments; only meaningful on first insert
+				PinnedUntil:    time.Now().Add(pinSessionTTL),
+			}
+			select {
+			case s.pinWriteSem <- struct{}{}:
+				go func(p sessionpin.Pin) {
+					defer func() { <-s.pinWriteSem }()
+					if err := s.pinStore.Upsert(context.Background(), p); err != nil {
+						observability.Get().Error("session pin upsert failed", "err", err)
+					}
+				}(pin)
+			default:
+				observability.Get().Debug("session pin upsert dropped: semaphore full")
+			}
+			if s.pinCache != nil {
+				s.pinCache.Add(pinCacheKey, pin)
+			}
+		}
+	}
+
 	routeMs := time.Since(routeStart).Milliseconds()
 
 	// Semantic-cache lookup. Eligible when the cache is configured at
@@ -310,7 +436,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(19).
+		Attrs: otel.NewAttrBuilder(23).
 			String("request_id", requestID).
 			String("external_id", externalID).
 			String("client.device_id", clientID.DeviceID).
@@ -323,6 +449,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			String("decision.provider", decision.Provider).
 			String("decision.reason", decision.Reason).
 			Bool("routing.sticky_hit", stickyHit).
+			Bool("routing.session_pin_hit", pinTier == "in_proc" || pinTier == "postgres").
+			String("routing.session_pin_tier", pinTier).
+			Int64("routing.session_pin_age_s", pinAgeSec).
 			String("routing.embed_input", embedInput).
 			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
@@ -454,6 +583,40 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	log.Info("ProxyMessages complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
+}
+
+// sessionPinCacheKey produces the in-proc LRU key for a (session_key,
+// role) pair. Hex-encoding the key keeps the LRU's string-keyed
+// generic API; the role suffix preserves the schema's role dimension
+// for when §3.3 starts emitting non-default roles.
+func sessionPinCacheKey(key [sessionpin.SessionKeyLen]byte, role string) string {
+	return hex.EncodeToString(key[:]) + ":" + role
+}
+
+// pinDecision rehydrates a router.Decision from a stored pin.
+// Metadata is intentionally nil — the cluster scorer's embedding
+// is not persisted, so semantic-cache lookups won't fire on a
+// pinned-route turn. Acceptable: cache hits are an optimization, the
+// pin already short-circuits the routing decision.
+func pinDecision(p sessionpin.Pin) router.Decision {
+	return router.Decision{
+		Provider: p.Provider,
+		Model:    p.Model,
+		Reason:   p.Reason,
+	}
+}
+
+// pinAge returns seconds since first_pinned_at; zero if the timestamp
+// is unset (fresh pin).
+func pinAge(p sessionpin.Pin) int64 {
+	if p.FirstPinnedAt.IsZero() {
+		return 0
+	}
+	d := time.Since(p.FirstPinnedAt)
+	if d < 0 {
+		return 0
+	}
+	return int64(d.Seconds())
 }
 
 // hasEvalOverrideHeader reports whether the request carries any eval-harness override headers.
