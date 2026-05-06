@@ -28,21 +28,6 @@ func (f *fakeEmbedder) Embed(_ context.Context, text string) ([]float32, error) 
 	return f.vec, f.err
 }
 
-// recordingFallback records every Route call so tests can assert
-// fallback delegation.
-type recordingFallback struct {
-	decision router.Decision
-	err      error
-	calls    int
-	lastReq  router.Request
-}
-
-func (r *recordingFallback) Route(_ context.Context, req router.Request) (router.Decision, error) {
-	r.calls++
-	r.lastReq = req
-	return r.decision, r.err
-}
-
 // l2norm normalizes v in place. Centroids and embeddings are L2-normed
 // at training/embed time so the scorer's dot product is cosine
 // similarity. Test fixtures honor that contract.
@@ -64,8 +49,6 @@ func l2norm(v []float32) {
 // a float64 round-trip for fixture math (the production path uses
 // Float32 throughout).
 func float32Sqrt(x float32) float32 {
-	// Newton iteration — three steps is plenty for unit-norm test
-	// vectors built from small ints.
 	guess := x / 2
 	for i := 0; i < 5; i++ {
 		guess = 0.5 * (guess + x/guess)
@@ -74,9 +57,7 @@ func float32Sqrt(x float32) float32 {
 }
 
 // bundleFromBlobs runs the real loaders against caller-built blobs and
-// returns a *Bundle the scorer can be constructed against. Replaces the
-// old "swap package-level embed vars" hack — bundles are now first-class
-// arguments so each test can assemble one without mutating package state.
+// returns a *Bundle the scorer can be constructed against.
 func bundleFromBlobs(t *testing.T, version string, centroidsBlob, rankingsBlob, registryBlob []byte) *Bundle {
 	t.Helper()
 	c, err := loadCentroids(centroidsBlob)
@@ -96,8 +77,7 @@ func bundleFromBlobs(t *testing.T, version string, centroidsBlob, rankingsBlob, 
 // twoClusterArtifacts builds a minimal artifact set with K=2 distinct
 // centroids in EmbedDim space. Cluster 0 is the +e1 direction; cluster
 // 1 is the +e2 direction. Cluster 0 prefers Opus; cluster 1 prefers
-// Haiku. This is the canonical fixture for "embedding near cluster X
-// routes to its preferred model" tests.
+// Haiku.
 func twoClusterArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBlob []byte) {
 	t.Helper()
 	dim := EmbedDim
@@ -123,8 +103,7 @@ func twoClusterArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBlo
 	return
 }
 
-// allProviders is the test-default availableProviders set. Most tests want
-// every provider key registered so filtering doesn't drop fixture entries.
+// allProviders is the test-default availableProviders set.
 func allProviders() map[string]struct{} {
 	return map[string]struct{}{
 		"anthropic": {},
@@ -145,11 +124,11 @@ func makeHaikuVec() []float32 {
 	return v
 }
 
-func newScorerForTest(t *testing.T, embedder Embedder, fallback router.Router, cfg Config) *Scorer {
+func newScorerForTest(t *testing.T, embedder Embedder, cfg Config) *Scorer {
 	t.Helper()
 	cb, rb, regb := twoClusterArtifacts(t)
 	bundle := bundleFromBlobs(t, "v-test", cb, rb, regb)
-	s, err := NewScorer(bundle, cfg, embedder, fallback, allProviders())
+	s, err := NewScorer(bundle, cfg, embedder, allProviders())
 	require.NoError(t, err)
 	return s
 }
@@ -163,8 +142,7 @@ func cfgForTest() Config {
 
 func TestScorer_PicksClusterAlignedModel(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
-	fb := &recordingFallback{decision: router.Decision{Model: "fallback"}}
-	s := newScorerForTest(t, emb, fb, cfgForTest())
+	s := newScorerForTest(t, emb, cfgForTest())
 
 	got, err := s.Route(context.Background(), router.Request{
 		PromptText: strings.Repeat("x", 100),
@@ -174,13 +152,11 @@ func TestScorer_PicksClusterAlignedModel(t *testing.T) {
 	assert.Equal(t, "anthropic", got.Provider)
 	assert.Contains(t, got.Reason, "cluster:v-test top_p=[0]")
 	assert.Contains(t, got.Reason, "model=claude-opus-4-7")
-	assert.Equal(t, 0, fb.calls, "fallback should not run on the success path")
 }
 
 func TestScorer_PicksOtherClusterWhenAligned(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeHaikuVec()}
-	fb := &recordingFallback{decision: router.Decision{Model: "fallback"}}
-	s := newScorerForTest(t, emb, fb, cfgForTest())
+	s := newScorerForTest(t, emb, cfgForTest())
 
 	got, err := s.Route(context.Background(), router.Request{
 		PromptText: strings.Repeat("y", 100),
@@ -189,49 +165,43 @@ func TestScorer_PicksOtherClusterWhenAligned(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", got.Model)
 }
 
-func TestScorer_FallsBackOnShortPrompt(t *testing.T) {
+// TestScorer_ReturnsErrOnShortPrompt: the scorer fails loud rather than
+// silently degrading to a default model — silent fallback masked real
+// regressions in eval.
+func TestScorer_ReturnsErrOnShortPrompt(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
-	fbDec := router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5", Reason: "heuristic:short_prompt"}
-	fb := &recordingFallback{decision: fbDec}
-	s := newScorerForTest(t, emb, fb, cfgForTest())
+	s := newScorerForTest(t, emb, cfgForTest())
 
-	got, err := s.Route(context.Background(), router.Request{PromptText: "hi"})
-	require.NoError(t, err)
-	assert.Equal(t, fbDec, got)
-	assert.Equal(t, 1, fb.calls)
+	_, err := s.Route(context.Background(), router.Request{PromptText: "hi"})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrClusterUnavailable))
 	assert.Equal(t, 0, emb.calls, "embedder should not be called for short prompts")
 }
 
-func TestScorer_FallsBackOnEmbedderError(t *testing.T) {
+func TestScorer_ReturnsErrOnEmbedderError(t *testing.T) {
 	emb := &fakeEmbedder{err: errors.New("ort exploded")}
-	fbDec := router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5", Reason: "heuristic:short_prompt"}
-	fb := &recordingFallback{decision: fbDec}
-	s := newScorerForTest(t, emb, fb, cfgForTest())
+	s := newScorerForTest(t, emb, cfgForTest())
 
-	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
-	require.NoError(t, err)
-	assert.Equal(t, fbDec, got)
-	assert.Equal(t, 1, fb.calls)
+	_, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrClusterUnavailable))
 }
 
-func TestScorer_FallsBackOnDimMismatch(t *testing.T) {
+func TestScorer_ReturnsErrOnDimMismatch(t *testing.T) {
 	emb := &fakeEmbedder{vec: make([]float32, 7)} // wrong size
-	fbDec := router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5", Reason: "heuristic:short_prompt"}
-	fb := &recordingFallback{decision: fbDec}
-	s := newScorerForTest(t, emb, fb, cfgForTest())
+	s := newScorerForTest(t, emb, cfgForTest())
 
-	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
-	require.NoError(t, err)
-	assert.Equal(t, fbDec, got)
+	_, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrClusterUnavailable))
 }
 
 func TestScorer_TailTruncatesBeforeEmbed(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
-	fb := &recordingFallback{decision: router.Decision{Model: "fallback"}}
 	cfg := cfgForTest()
 	cfg.MaxPromptChars = 32
 
-	s := newScorerForTest(t, emb, fb, cfg)
+	s := newScorerForTest(t, emb, cfg)
 
 	prompt := strings.Repeat("HEAD-", 50) + "TAIL_END"
 	_, err := s.Route(context.Background(), router.Request{PromptText: prompt})
@@ -270,15 +240,12 @@ func TestScorer_TopPSumsAcrossClusters(t *testing.T) {
 		]
 	}`)
 
-	// Embed: equally close to clusters 0, 1, 2 (third closest is the
-	// cluster that ties with the others when normalized).
 	vec := make([]float32, dim)
 	vec[0] = 1
 	vec[1] = 1
 	vec[2] = 1
 	l2norm(vec)
 	emb := &fakeEmbedder{vec: vec}
-	fb := &recordingFallback{decision: router.Decision{Model: "fallback"}}
 
 	for _, tc := range []struct {
 		topP    int
@@ -294,7 +261,7 @@ func TestScorer_TopPSumsAcrossClusters(t *testing.T) {
 			cfg.TopP = tc.topP
 			emb.calls = 0
 			bundle := bundleFromBlobs(t, "v-test", centroidsBlob, rankingsBlob, registryBlob)
-			s, err := NewScorer(bundle, cfg, emb, fb, allProviders())
+			s, err := NewScorer(bundle, cfg, emb, allProviders())
 			require.NoError(t, err)
 			got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("z", 100)})
 			require.NoError(t, err)
@@ -307,32 +274,26 @@ func TestNewScorer_RejectsTopPExceedingK(t *testing.T) {
 	cb, rb, regb := twoClusterArtifacts(t) // K=2
 	cfg := cfgForTest()
 	cfg.TopP = 5
-	_, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{}, &recordingFallback{}, allProviders())
+	_, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{}, allProviders())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "TopP")
 }
 
 func TestNewScorer_RejectsNilBundle(t *testing.T) {
-	_, err := NewScorer(nil, cfgForTest(), &fakeEmbedder{}, &recordingFallback{}, allProviders())
+	_, err := NewScorer(nil, cfgForTest(), &fakeEmbedder{}, allProviders())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bundle")
 }
 
 func TestNewScorer_RejectsNilEmbedder(t *testing.T) {
 	cb, rb, regb := twoClusterArtifacts(t)
-	_, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfgForTest(), nil, &recordingFallback{}, allProviders())
-	require.Error(t, err)
-}
-
-func TestNewScorer_RejectsNilFallback(t *testing.T) {
-	cb, rb, regb := twoClusterArtifacts(t)
-	_, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfgForTest(), &fakeEmbedder{}, nil, allProviders())
+	_, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfgForTest(), nil, allProviders())
 	require.Error(t, err)
 }
 
 func TestNewScorer_RejectsEmptyAvailableProviders(t *testing.T) {
 	cb, rb, regb := twoClusterArtifacts(t)
-	_, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfgForTest(), &fakeEmbedder{}, &recordingFallback{}, map[string]struct{}{})
+	_, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfgForTest(), &fakeEmbedder{}, map[string]struct{}{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "availableProviders")
 }
@@ -342,7 +303,6 @@ func TestNewScorer_RejectsRankingsMissingDeployedModel(t *testing.T) {
 	c0 := make([]float32, dim)
 	c0[0] = 1
 	cb := buildCentroidsBlob(t, 1, dim, c0)
-	// Rankings only knows Opus, but registry advertises Haiku too.
 	rb := []byte(`{"rankings": {"0": {"claude-opus-4-7": 1.0}}}`)
 	regb := []byte(`{
 		"deployed_models": [
@@ -352,28 +312,19 @@ func TestNewScorer_RejectsRankingsMissingDeployedModel(t *testing.T) {
 	}`)
 	cfg := cfgForTest()
 	cfg.TopP = 1
-	_, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{}, &recordingFallback{}, allProviders())
+	_, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{}, allProviders())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing model")
 }
 
-// TestScorer_FiltersByAvailableProviders proves that when an entry's provider
-// is absent from availableProviders, argmax never selects it. With both
-// Anthropic candidates filtered out (only "openai" registered, but the fixture
-// has no openai entry), boot must error so misconfigured deployments fail loud.
 func TestScorer_BootFailsWhenNoCandidatesMatchProviders(t *testing.T) {
 	cb, rb, regb := twoClusterArtifacts(t)
-	_, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfgForTest(), &fakeEmbedder{}, &recordingFallback{},
+	_, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfgForTest(), &fakeEmbedder{},
 		map[string]struct{}{"openai": {}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no deployed entry matches")
 }
 
-// TestScorer_FiltersOutUnregisteredProvider proves that an entry whose
-// provider is not registered is silently dropped from argmax candidates,
-// even if it has the higher score. With a 3-entry fixture (one Anthropic, one
-// OpenAI, one Google) and only "anthropic" registered, the Anthropic entry must
-// win regardless of score.
 func TestScorer_FiltersOutUnregisteredProvider(t *testing.T) {
 	dim := EmbedDim
 	c0 := make([]float32, dim)
@@ -395,7 +346,7 @@ func TestScorer_FiltersOutUnregisteredProvider(t *testing.T) {
 	cfg.TopP = 1
 
 	// Only Anthropic registered: must pick Anthropic despite gpt-5 having a higher score.
-	s, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()}, &recordingFallback{},
+	s, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()},
 		map[string]struct{}{"anthropic": {}})
 	require.NoError(t, err)
 	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
@@ -404,7 +355,7 @@ func TestScorer_FiltersOutUnregisteredProvider(t *testing.T) {
 	assert.Equal(t, "anthropic", got.Provider)
 
 	// Both Anthropic and OpenAI registered: gpt-5 wins on score.
-	s, err = NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()}, &recordingFallback{},
+	s, err = NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()},
 		map[string]struct{}{"anthropic": {}, "openai": {}})
 	require.NoError(t, err)
 	got, err = s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
@@ -414,18 +365,6 @@ func TestScorer_FiltersOutUnregisteredProvider(t *testing.T) {
 	assert.Contains(t, got.Reason, "provider=openai")
 }
 
-// TestScorer_DedupesDuplicateRegistryEntries proves the scoring loop
-// iterates each model exactly once even when the registry lists the
-// same model under multiple bench_column entries (proxy chains).
-// Without dedup the scoring loop's `scores[m] += row[m]` accumulator
-// would collapse on the model-name map key and effectively multiply
-// the model's argmax weight by its registry-entry count.
-//
-// The fixture: one cluster, claude-opus-4-7 listed twice (gpt-5 +
-// claude-opus-4-5 proxies, the actual v0.6+ pattern), claude-haiku-4-5
-// once. Rankings give haiku=0.6 and opus=0.35. Without dedup, opus
-// would accumulate to 0.70 (×2) and beat haiku's 0.6. With dedup,
-// haiku's 0.6 wins.
 func TestScorer_DedupesDuplicateRegistryEntries(t *testing.T) {
 	dim := EmbedDim
 	c0 := make([]float32, dim)
@@ -444,11 +383,9 @@ func TestScorer_DedupesDuplicateRegistryEntries(t *testing.T) {
 	}`)
 	cfg := cfgForTest()
 	cfg.TopP = 1
-	s, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()}, &recordingFallback{}, allProviders())
+	s, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()}, allProviders())
 	require.NoError(t, err)
 
-	// Direct assertion: each model name appears exactly once in the
-	// iteration list, regardless of how many registry entries it had.
 	counts := make(map[string]int, len(s.models))
 	for _, m := range s.models {
 		counts[m]++
@@ -458,28 +395,22 @@ func TestScorer_DedupesDuplicateRegistryEntries(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"claude-opus-4-7", "claude-haiku-4-5"}, s.models)
 
-	// End-to-end: argmax must pick haiku (0.6), not opus (which
-	// would win at 0.7 if double-counted).
 	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
 	require.NoError(t, err)
 	assert.Equal(t, "claude-haiku-4-5", got.Model, "haiku should win at 0.6 vs opus 0.35; if opus wins, the scoring loop is double-counting its two registry entries")
 }
 
-// TestScorer_ContextCanceledDuringEmbed proves the per-request
-// EmbedTimeout bounds the call. Uses a slow embedder + a short timeout.
-func TestScorer_ContextCanceledDuringEmbed(t *testing.T) {
+// TestScorer_ReturnsErrOnEmbedTimeout proves the per-request EmbedTimeout
+// causes ErrClusterUnavailable rather than a silent heuristic fallback.
+func TestScorer_ReturnsErrOnEmbedTimeout(t *testing.T) {
 	slow := &slowEmbedder{delay: 100 * time.Millisecond, vec: makeOpusVec()}
-	fbDec := router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5", Reason: "heuristic:short_prompt"}
-	fb := &recordingFallback{decision: fbDec}
 	cfg := cfgForTest()
 	cfg.EmbedTimeout = 10 * time.Millisecond
-	s := newScorerForTest(t, slow, fb, cfg)
+	s := newScorerForTest(t, slow, cfg)
 
-	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
-	require.NoError(t, err)
-	// Slow embedder honors ctx and returns its error; scorer falls open.
-	assert.Equal(t, fbDec, got)
-	assert.Equal(t, 1, fb.calls)
+	_, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrClusterUnavailable))
 }
 
 type slowEmbedder struct {
@@ -497,17 +428,11 @@ func (s *slowEmbedder) Embed(ctx context.Context, _ string) ([]float32, error) {
 }
 
 func TestTailTruncate(t *testing.T) {
-	// ASCII case: keeps the last n bytes verbatim.
 	got := tailTruncate("abcdef", 3)
 	assert.Equal(t, "def", got)
 
-	// Short input is returned as-is.
 	assert.Equal(t, "ab", tailTruncate("ab", 5))
 
-	// UTF-8 boundary: cutting in the middle of "é" (0xC3 0xA9) must not
-	// produce malformed output. We tail-truncate "héllo" (6 bytes:
-	// 0x68 0xC3 0xA9 0x6C 0x6C 0x6F) to maxChars=4. Naive cut at byte 2
-	// would give "\xA9llo"; the snap-forward should produce "llo".
 	in := "héllo"
 	got = tailTruncate(in, 4)
 	assert.True(t, len(got) <= 4)
@@ -518,8 +443,6 @@ func TestTailTruncate(t *testing.T) {
 }
 
 func TestTopPNearest_DeterministicOnTies(t *testing.T) {
-	// Two centroids at the same distance from a vec — the lower index
-	// must win deterministically so log replay is stable.
 	dim := EmbedDim
 	c0 := make([]float32, dim)
 	c0[0] = 1
@@ -536,7 +459,6 @@ func TestTopPNearest_DeterministicOnTies(t *testing.T) {
 }
 
 func TestArgmax_TiebreakUsesOrderSlice(t *testing.T) {
-	// Tied scores between A and B: the model first in `order` wins.
 	scores := map[string]float32{"A": 1.0, "B": 1.0}
 	gotA, _ := argmax(scores, []string{"A", "B"})
 	gotB, _ := argmax(scores, []string{"B", "A"})

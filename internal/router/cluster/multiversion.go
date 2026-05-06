@@ -30,11 +30,10 @@ func VersionFromContext(ctx context.Context) string {
 type Multiversion struct {
 	Default  string
 	Versions map[string]*Scorer
-	Fallback router.Router
 }
 
 // NewMultiversion requires defaultVersion to be a key in versions.
-func NewMultiversion(defaultVersion string, versions map[string]*Scorer, fallback router.Router) (*Multiversion, error) {
+func NewMultiversion(defaultVersion string, versions map[string]*Scorer) (*Multiversion, error) {
 	if defaultVersion == "" {
 		return nil, fmt.Errorf("cluster multiversion: default version must not be empty")
 	}
@@ -46,13 +45,9 @@ func NewMultiversion(defaultVersion string, versions map[string]*Scorer, fallbac
 		sort.Strings(built)
 		return nil, fmt.Errorf("cluster multiversion: default %q not in built versions %v", defaultVersion, built)
 	}
-	if fallback == nil {
-		return nil, fmt.Errorf("cluster multiversion: fallback must not be nil")
-	}
 	return &Multiversion{
 		Default:  defaultVersion,
 		Versions: versions,
-		Fallback: fallback,
 	}, nil
 }
 
@@ -85,13 +80,14 @@ func (m *Multiversion) Route(ctx context.Context, req router.Request) (router.De
 	scorer, ok := m.Versions[chosen]
 	if !ok {
 		// Defensive: NewMultiversion enforces that Default is in Versions
-		// at construction time. Log and fail-open to the package fallback
-		// rather than panic if a future refactor breaks that invariant.
-		observability.Get().Warn(
-			"Cluster scorer: chosen version missing; falling back to heuristic",
+		// at construction time. If a future refactor breaks that invariant,
+		// surface the bug as ErrClusterUnavailable rather than silently
+		// degrading.
+		observability.Get().Error(
+			"Cluster scorer: chosen version missing; returning ErrClusterUnavailable",
 			"chosen_version", chosen,
 		)
-		return m.Fallback.Route(ctx, req)
+		return router.Decision{}, fmt.Errorf("cluster multiversion: chosen version %q not built: %w", chosen, ErrClusterUnavailable)
 	}
 	return scorer.Route(ctx, req)
 }
