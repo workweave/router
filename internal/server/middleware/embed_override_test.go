@@ -47,38 +47,28 @@ func runEmbedOverride(t *testing.T, installation *auth.Installation, header stri
 	return observedSet, observedValue
 }
 
-func TestEmbedOverride_AppliesTrueForAllowListedInstallation(t *testing.T) {
-	allow := &auth.Installation{ID: "inst-eval", IsEvalAllowlisted: true}
-	set, val := runEmbedOverride(t, allow, "true")
-	assert.True(t, set, "header=true on allow-listed installation must set context override")
+func TestEmbedOverride_AppliesTrue(t *testing.T) {
+	set, val := runEmbedOverride(t, &auth.Installation{ID: "inst-eval"}, "true")
+	assert.True(t, set, "header=true must set context override")
 	assert.True(t, val)
 }
 
-func TestEmbedOverride_AppliesFalseForAllowListedInstallation(t *testing.T) {
-	allow := &auth.Installation{ID: "inst-eval", IsEvalAllowlisted: true}
-	set, val := runEmbedOverride(t, allow, "false")
-	assert.True(t, set, "header=false on allow-listed installation must set context override")
+func TestEmbedOverride_AppliesFalse(t *testing.T) {
+	set, val := runEmbedOverride(t, &auth.Installation{ID: "inst-eval"}, "false")
+	assert.True(t, set, "header=false must set context override")
 	assert.False(t, val)
 }
 
 func TestEmbedOverride_NoHeaderLeavesDefault(t *testing.T) {
-	allow := &auth.Installation{ID: "inst-eval", IsEvalAllowlisted: true}
-	set, _ := runEmbedOverride(t, allow, "")
+	set, _ := runEmbedOverride(t, &auth.Installation{ID: "inst-eval"}, "")
 	assert.False(t, set, "no header must leave the context untouched so the server config wins")
 }
 
 func TestEmbedOverride_IgnoresUnknownHeaderValue(t *testing.T) {
-	allow := &auth.Installation{ID: "inst-eval", IsEvalAllowlisted: true}
 	for _, header := range []string{"yes", "0", "1", "TRUE-ish"} {
-		set, _ := runEmbedOverride(t, allow, header)
+		set, _ := runEmbedOverride(t, &auth.Installation{ID: "inst-eval"}, header)
 		assert.Falsef(t, set, "header=%q must not set the context override (only true/false honored)", header)
 	}
-}
-
-func TestEmbedOverride_SilentlyIgnoresNonAllowListedInstallation(t *testing.T) {
-	customer := &auth.Installation{ID: "inst-customer", IsEvalAllowlisted: false}
-	set, _ := runEmbedOverride(t, customer, "true")
-	assert.False(t, set, "non-allow-listed installation must not get override even with header=true")
 }
 
 func TestEmbedOverride_NoOpsWhenInstallationMissing(t *testing.T) {

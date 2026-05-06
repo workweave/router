@@ -15,47 +15,37 @@ const createModelRouterInstallation = `-- name: CreateModelRouterInstallation :o
 INSERT INTO router.model_router_installations (
     external_id,
     name,
-    created_by,
-    is_eval_allowlisted
+    created_by
 )
 VALUES (
     $1::varchar,
     $2::varchar,
-    $3,
-    $4::boolean
+    $3
 )
-RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by, is_eval_allowlisted
+RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by
 `
 
 type CreateModelRouterInstallationParams struct {
-	ExternalID        string
-	Name              string
-	CreatedBy         *string
-	IsEvalAllowlisted bool
+	ExternalID string
+	Name       string
+	CreatedBy  *string
 }
 
-// Creates a new model router installation.
+// CreateModelRouterInstallation
 //
 //	INSERT INTO router.model_router_installations (
 //	    external_id,
 //	    name,
-//	    created_by,
-//	    is_eval_allowlisted
+//	    created_by
 //	)
 //	VALUES (
 //	    $1::varchar,
 //	    $2::varchar,
-//	    $3,
-//	    $4::boolean
+//	    $3
 //	)
-//	RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by, is_eval_allowlisted
+//	RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by
 func (q *Queries) CreateModelRouterInstallation(ctx context.Context, arg CreateModelRouterInstallationParams) (RouterModelRouterInstallation, error) {
-	row := q.db.QueryRow(ctx, createModelRouterInstallation,
-		arg.ExternalID,
-		arg.Name,
-		arg.CreatedBy,
-		arg.IsEvalAllowlisted,
-	)
+	row := q.db.QueryRow(ctx, createModelRouterInstallation, arg.ExternalID, arg.Name, arg.CreatedBy)
 	var i RouterModelRouterInstallation
 	err := row.Scan(
 		&i.ID,
@@ -65,13 +55,12 @@ func (q *Queries) CreateModelRouterInstallation(ctx context.Context, arg CreateM
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.CreatedBy,
-		&i.IsEvalAllowlisted,
 	)
 	return i, err
 }
 
 const getModelRouterInstallation = `-- name: GetModelRouterInstallation :one
-SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, is_eval_allowlisted
+SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by
 FROM router.model_router_installations
 WHERE id = $1::uuid
   AND external_id = $2::varchar
@@ -85,7 +74,7 @@ type GetModelRouterInstallationParams struct {
 
 // Gets an installation by id, scoped to an external_id to prevent cross-tenant access.
 //
-//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, is_eval_allowlisted
+//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by
 //	FROM router.model_router_installations
 //	WHERE id = $1::uuid
 //	  AND external_id = $2::varchar
@@ -101,22 +90,21 @@ func (q *Queries) GetModelRouterInstallation(ctx context.Context, arg GetModelRo
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.CreatedBy,
-		&i.IsEvalAllowlisted,
 	)
 	return i, err
 }
 
 const listModelRouterInstallationsForExternalID = `-- name: ListModelRouterInstallationsForExternalID :many
-SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, is_eval_allowlisted
+SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by
 FROM router.model_router_installations
 WHERE external_id = $1::varchar
   AND deleted_at IS NULL
 ORDER BY created_at DESC
 `
 
-// Lists active installations for an external_id.
+// ListModelRouterInstallationsForExternalID
 //
-//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, is_eval_allowlisted
+//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by
 //	FROM router.model_router_installations
 //	WHERE external_id = $1::varchar
 //	  AND deleted_at IS NULL
@@ -138,7 +126,6 @@ func (q *Queries) ListModelRouterInstallationsForExternalID(ctx context.Context,
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.CreatedBy,
-			&i.IsEvalAllowlisted,
 		); err != nil {
 			return nil, err
 		}
@@ -148,38 +135,6 @@ func (q *Queries) ListModelRouterInstallationsForExternalID(ctx context.Context,
 		return nil, err
 	}
 	return items, nil
-}
-
-const setModelRouterInstallationEvalAllowlisted = `-- name: SetModelRouterInstallationEvalAllowlisted :exec
-UPDATE router.model_router_installations
-SET is_eval_allowlisted = $1::boolean,
-    updated_at           = NOW()
-WHERE id = $2::uuid
-  AND external_id = $3::varchar
-  AND deleted_at IS NULL
-`
-
-type SetModelRouterInstallationEvalAllowlistedParams struct {
-	IsEvalAllowlisted bool
-	ID                uuid.UUID
-	ExternalID        string
-}
-
-// Toggles the per-installation eval-override allowlist flag. Used by
-// the eval harness seeding flow (seed-key with --eval-allowlist) to
-// promote an installation without a redeploy. Scoped by
-// external_id so a mismatched (external_id, installation) pair refuses to
-// update instead of silently flipping a row in another tenant.
-//
-//	UPDATE router.model_router_installations
-//	SET is_eval_allowlisted = $1::boolean,
-//	    updated_at           = NOW()
-//	WHERE id = $2::uuid
-//	  AND external_id = $3::varchar
-//	  AND deleted_at IS NULL
-func (q *Queries) SetModelRouterInstallationEvalAllowlisted(ctx context.Context, arg SetModelRouterInstallationEvalAllowlistedParams) error {
-	_, err := q.db.Exec(ctx, setModelRouterInstallationEvalAllowlisted, arg.IsEvalAllowlisted, arg.ID, arg.ExternalID)
-	return err
 }
 
 const softDeleteModelRouterInstallation = `-- name: SoftDeleteModelRouterInstallation :exec

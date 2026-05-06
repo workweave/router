@@ -160,15 +160,6 @@ func (s *Service) Route(ctx context.Context, req router.Request) (router.Decisio
 	return s.router.Route(ctx, req)
 }
 
-// Dispatch sends a request to the provider named in the routing decision.
-func (s *Service) Dispatch(ctx context.Context, decision router.Decision, req providers.Request) (providers.Response, error) {
-	p, err := s.provider(decision.Provider)
-	if err != nil {
-		return providers.Response{}, err
-	}
-	return p.Complete(ctx, req)
-}
-
 // PassthroughToProvider forwards a non-routing-path request to the default
 // provider ("anthropic") for backward compatibility with existing Anthropic
 // metadata endpoints (count_tokens, models).

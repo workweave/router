@@ -128,12 +128,6 @@ func main() {
 		logger.Info("Google (Gemini) provider enabled", "base_url", googleBaseURL)
 	}
 
-	if len(providerMap) == 0 {
-		err := errors.New("no provider API keys configured: set at least one of ANTHROPIC_API_KEY, OPENAI_PROVIDER_API_KEY, OPENROUTER_API_KEY, GOOGLE_PROVIDER_API_KEY")
-		logger.Error("No upstream provider available; refusing to boot", "err", err)
-		panic(err)
-	}
-
 	availableProviders := make(map[string]struct{}, len(providerMap))
 	for name := range providerMap {
 		availableProviders[name] = struct{}{}
@@ -141,9 +135,7 @@ func main() {
 
 	rtr, err := buildClusterScorer(availableProviders)
 	if err != nil {
-		// Fail loud at boot rather than serve a degraded heuristic.
-		// Ops alerts on Cloud Run boot failures; silent degradation
-		// would mask quality regressions for hours.
+		// Ops alerts on Cloud Run boot failures; silent degradation would mask quality regressions.
 		logger.Error("Cluster scorer failed to build; refusing to boot", "err", err)
 		panic(err)
 	}
@@ -524,7 +516,6 @@ func buildSemanticCache(rtr router.Router) *cache.Cache {
 	return cache.New(cfg)
 }
 
-// envVarForProvider returns the env var name for a provider's API key.
 func envVarForProvider(provider string) string {
 	switch provider {
 	case "anthropic":

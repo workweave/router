@@ -9,7 +9,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"time"
@@ -17,13 +16,12 @@ import (
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
+	"workweave/router/internal/providers/httputil"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 )
 
 const DefaultBaseURL = "https://api.openai.com"
-
-const flushChunk = 4 * 1024
 
 // upstreamTraceEnabled mirrors ROUTER_DEBUG_UPSTREAM_TRACE=true. When on, the
 // OpenAI/Google adapter dumps response status, headers, and a body preview
@@ -42,31 +40,11 @@ func NewClient(apiKey, baseURL string) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   5 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		MaxIdleConnsPerHost:   64,
-		MaxIdleConns:          256,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   5 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		ForceAttemptHTTP2:     true,
-	}
 	return &Client{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		http:    &http.Client{Transport: transport},
+		http:    &http.Client{Transport: httputil.NewTransport(5*time.Second, 5*time.Second)},
 	}
-}
-
-// Complete is intentionally unimplemented — all chat completions traffic flows
-// through Proxy. Satisfies providers.Client.
-func (c *Client) Complete(_ context.Context, _ providers.Request) (providers.Response, error) {
-	return providers.Response{}, providers.ErrNotImplemented
 }
 
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
@@ -112,14 +90,18 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	w.WriteHeader(resp.StatusCode)
 	status := resp.StatusCode
 
+	if !upstreamTraceEnabled {
+		return httputil.StreamBody(resp.Body, status, w, t)
+	}
+
 	flusher, _ := w.(http.Flusher)
-	buf := make([]byte, flushChunk)
+	buf := make([]byte, httputil.FlushChunk)
 	bytesRead := 0
 	for {
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
 			t.StampUpstreamFirstByte()
-			if upstreamTraceEnabled && bytesRead == 0 {
+			if bytesRead == 0 {
 				observability.Get().Debug("OpenAI upstream first chunk",
 					"bytes", n,
 					"preview", truncateBytes(buf[:n], 320),
@@ -127,9 +109,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 			}
 			bytesRead += n
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				if upstreamTraceEnabled {
-					observability.Get().Debug("OpenAI upstream write failed", "err", writeErr, "bytes_read", bytesRead)
-				}
+				observability.Get().Debug("OpenAI upstream write failed", "err", writeErr, "bytes_read", bytesRead)
 				return writeErr
 			}
 			if flusher != nil {
@@ -138,18 +118,14 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		}
 		if readErr == io.EOF {
 			t.StampUpstreamEOF()
-			if upstreamTraceEnabled {
-				observability.Get().Debug("OpenAI upstream stream complete", "bytes_total", bytesRead)
-			}
+			observability.Get().Debug("OpenAI upstream stream complete", "bytes_total", bytesRead)
 			if status < 200 || status >= 300 {
 				return &providers.UpstreamStatusError{Status: status}
 			}
 			return nil
 		}
 		if readErr != nil {
-			if upstreamTraceEnabled {
-				observability.Get().Debug("OpenAI upstream read failed", "err", readErr, "bytes_read", bytesRead)
-			}
+			observability.Get().Debug("OpenAI upstream read failed", "err", readErr, "bytes_read", bytesRead)
 			return readErr
 		}
 	}

@@ -9,7 +9,7 @@
 #   (and .env.local if present). Start Postgres via `make db` or point
 #   DATABASE_URL at any Postgres you already have running.
 
-.PHONY: generate build test test-verbose initdb migrate-up migrate-down migrate-create seed setup full-setup db dev check help install-cc uninstall-cc up down logs
+.PHONY: generate generate-statusline build test test-verbose initdb migrate-up migrate-down migrate-create seed setup full-setup db dev check help install-cc uninstall-cc up down logs
 
 # Load DATABASE_URL from .env files (matches docker-compose defaults).
 -include .env.development
@@ -20,8 +20,11 @@ help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 
-generate: ## Regenerate SQLC (no live DB required)
+generate: generate-statusline ## Regenerate all generated files (SQLC + statusline prices)
 	cd db && sqlc generate
+
+generate-statusline: ## Sync cc-statusline.sh prices block from pricing.go
+	go run ./cmd/genprices
 
 build: ## Typecheck the entire module
 	go build -o /dev/null ./...
@@ -52,7 +55,7 @@ seed: ## Create a local dev installation + API key and print usage instructions
 
 setup: migrate-up seed ## Bootstrap (host DB): init DB, run migrations, seed an API key
 
-full-setup: ## Bootstrap router: docker compose + seed + optional Claude Code wiring (see below)
+full-setup: generate-statusline ## Bootstrap router: docker compose + seed + optional Claude Code wiring (see below)
 	## Usage:
 	##   make full-setup                                  # boot compose, seed, print instructions
 	##   make full-setup PLATFORM=cc                      # boot + seed + auto-wire Claude Code
@@ -199,7 +202,7 @@ down: ## Stop the compose stack (keeps the postgres volume)
 logs: ## Tail the server logs
 	docker compose logs -f server
 
-install-cc: ## Wire only Claude Code at the local docker-compose router (assumes it's already running)
+install-cc: generate-statusline ## Wire only Claude Code at the local docker-compose router (assumes it's already running)
 	./install/install.sh --local
 
 uninstall-cc: ## Remove the local Claude Code → router config

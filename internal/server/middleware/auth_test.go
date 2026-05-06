@@ -74,10 +74,6 @@ func (fakeInstallationRepository) SoftDelete(ctx context.Context, externalID, id
 	return errors.New("not used")
 }
 
-func (fakeInstallationRepository) SetEvalAllowlisted(ctx context.Context, externalID, id string, allowlisted bool) error {
-	return errors.New("not used")
-}
-
 func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const routerToken = "rk_router"

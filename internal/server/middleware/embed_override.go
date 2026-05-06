@@ -10,12 +10,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// EmbedLastUserMessageOverrideHeader flips the cluster scorer's PromptText
-// source per-request. Only honored for allow-listed installations.
+// EmbedLastUserMessageOverrideHeader flips the cluster scorer's PromptText source per-request.
 const EmbedLastUserMessageOverrideHeader = "x-weave-embed-last-user-message"
 
 // WithEmbedLastUserMessageOverride attaches a bool override to the request
-// context when the installation is allow-listed and the header is "true" or "false".
+// context when the header is "true" or "false".
 func WithEmbedLastUserMessageOverride() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw := strings.TrimSpace(c.GetHeader(EmbedLastUserMessageOverrideHeader))
@@ -30,23 +29,13 @@ func WithEmbedLastUserMessageOverride() gin.HandlerFunc {
 		case "false":
 			override = false
 		default:
-			// Unrecognized values — ignore rather than 400. The harness
-			// is the only legitimate caller and only sends "true"/"false";
-			// any other value is misconfigured client noise we'd rather
-			// not break the request on.
+			// Unrecognized values — ignore rather than 400. Only "true"/"false" are
+			// valid; anything else is misconfigured client noise we'd rather not break the request on.
 			c.Next()
 			return
 		}
 		installation := InstallationFrom(c)
 		if installation == nil {
-			c.Next()
-			return
-		}
-		if !installation.IsEvalAllowlisted {
-			observability.FromGin(c).Debug(
-				"Ignored embed-last-user-message override from non-allow-listed installation",
-				"installation_id", installation.ID,
-			)
 			c.Next()
 			return
 		}

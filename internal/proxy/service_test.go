@@ -33,18 +33,9 @@ func (f *fakeRouter) Route(ctx context.Context, req router.Request) (router.Deci
 }
 
 type fakeProvider struct {
-	completeCalls []providers.Request
-	respond       providers.Response
-	respondErr    error
-
 	proxyBodies   [][]byte
 	proxyResponse func(w http.ResponseWriter)
 	proxyErr      error
-}
-
-func (f *fakeProvider) Complete(ctx context.Context, req providers.Request) (providers.Response, error) {
-	f.completeCalls = append(f.completeCalls, req)
-	return f.respond, f.respondErr
 }
 
 func (f *fakeProvider) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
@@ -63,70 +54,6 @@ func (f *fakeProvider) Passthrough(ctx context.Context, prep providers.PreparedR
 
 func makeProxyService(decision router.Decision, p map[string]providers.Client) *proxy.Service {
 	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, 0, nil, nil)
-}
-
-func TestService_Dispatch_ForwardsRequestToProvider(t *testing.T) {
-	provider := &fakeProvider{
-		respond: providers.Response{
-			Model:        "noop-1",
-			Content:      "hello back",
-			InputTokens:  3,
-			OutputTokens: 2,
-			StopReason:   "stop",
-		},
-	}
-	svc := makeProxyService(
-		router.Decision{Provider: "noop", Model: "noop-1"},
-		map[string]providers.Client{"noop": provider},
-	)
-
-	req := providers.Request{
-		Model:    "noop-1",
-		Messages: []providers.Message{{Role: "user", Content: "hi"}},
-	}
-	resp, err := svc.Dispatch(
-		context.Background(),
-		router.Decision{Provider: "noop", Model: "noop-1"},
-		req,
-	)
-
-	require.NoError(t, err)
-	require.Len(t, provider.completeCalls, 1,
-		"Dispatch must call providers.Client.Complete exactly once")
-	assert.Equal(t, req, provider.completeCalls[0],
-		"Dispatch must forward the request verbatim to the adapter")
-	assert.Equal(t, "hello back", resp.Content,
-		"Dispatch must return the adapter's response unchanged")
-}
-
-func TestService_Dispatch_PropagatesProviderError(t *testing.T) {
-	providerErr := errors.New("upstream 503")
-	provider := &fakeProvider{respondErr: providerErr}
-	svc := makeProxyService(
-		router.Decision{Provider: "noop", Model: "noop-1"},
-		map[string]providers.Client{"noop": provider},
-	)
-
-	_, err := svc.Dispatch(
-		context.Background(),
-		router.Decision{Provider: "noop", Model: "noop-1"},
-		providers.Request{},
-	)
-
-	require.ErrorIs(t, err, providerErr,
-		"Dispatch must surface the underlying provider error so handlers can map it")
-}
-
-func TestService_Dispatch_UnknownProviderReturnsErrProviderNotConfigured(t *testing.T) {
-	svc := proxy.NewService(&fakeRouter{}, map[string]providers.Client{}, nil, false, 0, nil, nil)
-
-	_, err := svc.Dispatch(
-		context.Background(),
-		router.Decision{Provider: "ghost", Model: "ghost-1"},
-		providers.Request{},
-	)
-
-	require.ErrorIs(t, err, proxy.ErrProviderNotConfigured)
 }
 
 func TestService_ProxyMessages_PropagatesUpstreamStatusError(t *testing.T) {

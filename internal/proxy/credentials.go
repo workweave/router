@@ -72,18 +72,3 @@ func ResolveCredentials(provider string, byok map[string]*Credentials, headers h
 	return ExtractClientCredentials(provider, headers)
 }
 
-// AvailableProviders returns the subset of registeredProviders for which
-// credentials are available — either from BYOK or from the inbound request.
-func AvailableProviders(byok map[string]*Credentials, headers http.Header, registeredProviders []string) []string {
-	available := make([]string, 0, len(registeredProviders))
-	for _, p := range registeredProviders {
-		if _, ok := byok[p]; ok {
-			available = append(available, p)
-			continue
-		}
-		if ExtractClientCredentials(p, headers) != nil {
-			available = append(available, p)
-		}
-	}
-	return available
-}

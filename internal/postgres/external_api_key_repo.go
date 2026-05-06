@@ -20,7 +20,6 @@ func NewExternalAPIKeyRepo(tx sqlc.DBTX, encryptor auth.Encryptor) *ExternalAPIK
 	return &ExternalAPIKeyRepo{tx: tx, encryptor: encryptor}
 }
 
-// Create inserts a new external API key.
 func (r *ExternalAPIKeyRepo) Create(ctx context.Context, params auth.CreateExternalAPIKeyParams) (*auth.ExternalAPIKey, error) {
 	installationUUID, err := uuid.Parse(params.InstallationID)
 	if err != nil {
@@ -46,7 +45,6 @@ func (r *ExternalAPIKeyRepo) Create(ctx context.Context, params auth.CreateExter
 	return toExternalAPIKey(row), nil
 }
 
-// GetForInstallation returns all active keys for an installation with Plaintext populated.
 func (r *ExternalAPIKeyRepo) GetForInstallation(ctx context.Context, installationID string) ([]*auth.ExternalAPIKey, error) {
 	installationUUID, err := uuid.Parse(installationID)
 	if err != nil {
@@ -72,7 +70,6 @@ func (r *ExternalAPIKeyRepo) GetForInstallation(ctx context.Context, installatio
 	return keys, nil
 }
 
-// SoftDeleteByProvider soft-deletes the existing key for a provider.
 func (r *ExternalAPIKeyRepo) SoftDeleteByProvider(ctx context.Context, installationID, provider string) error {
 	installationUUID, err := uuid.Parse(installationID)
 	if err != nil {
@@ -85,7 +82,6 @@ func (r *ExternalAPIKeyRepo) SoftDeleteByProvider(ctx context.Context, installat
 	})
 }
 
-// SoftDelete soft-deletes a specific key by ID.
 func (r *ExternalAPIKeyRepo) SoftDelete(ctx context.Context, installationID, id string) error {
 	installationUUID, err := uuid.Parse(installationID)
 	if err != nil {
@@ -102,7 +98,6 @@ func (r *ExternalAPIKeyRepo) SoftDelete(ctx context.Context, installationID, id 
 	})
 }
 
-// MarkUsed updates last_used_at for the given key.
 func (r *ExternalAPIKeyRepo) MarkUsed(ctx context.Context, id string) error {
 	keyUUID, err := uuid.Parse(id)
 	if err != nil {
@@ -122,9 +117,7 @@ func toExternalAPIKey(row sqlc.RouterModelRouterExternalAPIKey) *auth.ExternalAP
 		KeyFingerprint: row.KeyFingerprint,
 		CreatedAt:      timestampOrZero(row.CreatedAt),
 	}
-	if row.Name != nil {
-		key.Name = row.Name
-	}
+	key.Name = row.Name
 	key.LastUsedAt = timestampPtr(row.LastUsedAt)
 	return key
 }

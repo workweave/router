@@ -12,19 +12,17 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
+	"workweave/router/internal/providers/httputil"
 	"workweave/router/internal/router"
 )
 
 const DefaultBaseURL = "https://openrouter.ai/api/v1"
-
-const flushChunk = 4 * 1024
 
 type Client struct {
 	apiKey  string
@@ -37,32 +35,11 @@ func NewClient(apiKey, baseURL string) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
-	baseURL = strings.TrimRight(baseURL, "/")
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   5 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		MaxIdleConnsPerHost:   64,
-		MaxIdleConns:          256,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   5 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		ForceAttemptHTTP2:     true,
-	}
 	return &Client{
 		apiKey:  apiKey,
-		baseURL: baseURL,
-		http:    &http.Client{Transport: transport},
+		baseURL: strings.TrimRight(baseURL, "/"),
+		http:    &http.Client{Transport: httputil.NewTransport(5*time.Second, 5*time.Second)},
 	}
-}
-
-// Complete is intentionally unimplemented. All chat completions traffic flows
-// through Proxy after the request envelope has been translated.
-func (c *Client) Complete(_ context.Context, _ providers.Request) (providers.Response, error) {
-	return providers.Response{}, providers.ErrNotImplemented
 }
 
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
@@ -90,32 +67,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
-	status := resp.StatusCode
-
-	flusher, _ := w.(http.Flusher)
-	buf := make([]byte, flushChunk)
-	for {
-		n, readErr := resp.Body.Read(buf)
-		if n > 0 {
-			t.StampUpstreamFirstByte()
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return writeErr
-			}
-			if flusher != nil {
-				flusher.Flush()
-			}
-		}
-		if readErr == io.EOF {
-			t.StampUpstreamEOF()
-			if status < 200 || status >= 300 {
-				return &providers.UpstreamStatusError{Status: status}
-			}
-			return nil
-		}
-		if readErr != nil {
-			return readErr
-		}
-	}
+	return httputil.StreamBody(resp.Body, resp.StatusCode, w, t)
 }
 
 // Passthrough forwards an inbound request to the same resource suffix on the

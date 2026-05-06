@@ -55,6 +55,4 @@ type RouterModelRouterInstallation struct {
 	UpdatedAt  pgtype.Timestamp
 	DeletedAt  pgtype.Timestamp
 	CreatedBy  *string
-	// Allows x-weave-disable-cluster header override for eval harness
-	IsEvalAllowlisted bool
 }

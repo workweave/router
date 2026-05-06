@@ -51,8 +51,7 @@ The router uses three concentric layers. Imports must flow inward only.
 |  |  |                      repos, Service.VerifyAPIKey,     |  |  |
 |  |  |                      APIKeyCache, id/hashing)         |  |  |
 |  |  |  internal/proxy     (routing/dispatch service:        |  |  |
-|  |  |                      Route, Dispatch,                 |  |  |
-|  |  |                      ProxyMessages,                   |  |  |
+|  |  |                      Route, ProxyMessages,            |  |  |
 |  |  |                      ProxyOpenAIChatCompletion)       |  |  |
 |  |  |  internal/router    (routing types + Router iface     |  |  |
 |  |  |                      + ModelSpec/ModelRegistry)       |  |  |
@@ -74,8 +73,7 @@ The router uses three concentric layers. Imports must flow inward only.
   Inner-ring packages must not import any adapter or presentation package;
   adapters never import each other; only `cmd/router/main.go` constructs
   concrete things. Inner-ring packages may import each other (e.g.
-  `proxy.Service.Route` returns a `router.Decision`; `proxy.Service.Dispatch`
-  passes a `providers.Request` through to a `providers.Client`;
+  `proxy.Service.Route` returns a `router.Decision`;
   `proxy.Service.ProxyOpenAIChatCompletion` calls into `translate` when the
   inbound and outbound wire formats differ).
 - **Small utility third-party libraries are allowed at every layer.** The
@@ -201,18 +199,19 @@ whose wire format differs:
 1. **Create `internal/providers/<name>/client.go`** with a `Client` struct
    and `NewClient(...)` constructor that takes whatever credentials it
    needs (typically an API key string).
-2. **Implement `Complete(ctx, providers.Request) (providers.Response, error)`.**
-   The adapter is responsible for translating `providers.Request` → the
-   provider's wire format, sending it (with a pooled `http.Client`), and
-   translating the response back. Do not let provider-specific types leak
-   across the package boundary.
+2. **Implement `Proxy` and `Passthrough`.** The adapter is responsible for
+   translating the prepared request body to the provider's wire format,
+   sending it with a pooled `http.Client` (use `httputil.NewTransport` and
+   `httputil.StreamBody` from `internal/providers/httputil/`), and streaming
+   the response back. Do not let provider-specific types leak across the
+   package boundary.
 3. **Add a compile-time check:**
    `var _ providers.Client = (*Client)(nil)`
 4. **Add the new client to the `map[string]providers.Client` registry in
    `cmd/router/main.go`** keyed by the same name the routing strategy
-   emits in `decision.Provider`. `proxy.Service.Dispatch` looks up by
-   name; `"anthropic"`, `"openai"`, and `"google"` are the existing
-   wired keys (each registered only when its API key env var is set).
+   emits in `decision.Provider`. `"anthropic"`, `"openai"`, and `"google"`
+   are the existing wired keys (each registered only when its API key env
+   var is set).
 5. **Wire it in `cmd/router/main.go`.** This is the only place that
    imports the provider package directly.
 
@@ -444,9 +443,9 @@ the rules-for-AI subset.
   one-line edit to `latest` plus a redeploy.
 - The Go runtime builds **one Scorer per committed bundle** at boot
   (`cluster.NewMultiversion` in `cmd/router/main.go`); customer traffic
-  hits the default version, allowlisted callers can pin per-request to
-  any sibling version with `x-weave-cluster-version: v0.X` (gated by
-  `middleware.WithClusterVersionOverride`). This is the
+  hits the default version; any caller can pin per-request to a sibling
+  version with `x-weave-cluster-version: v0.X` via
+  `middleware.WithClusterVersionOverride`. This is the
   "compare-against-each-other" mechanism — a single staging deployment
   carries every committed bundle and the eval harness flips between
   them per-request.
@@ -593,19 +592,16 @@ runs as a Modal app (`modal_app.py`); see [`eval/README.md`](eval/README.md).
 **Per-request router selection:**
 
 - `internal/server/middleware.WithClusterVersionOverride` reads the
-  trusted `x-weave-cluster-version: v0.X` header from installations
-  whose `model_router_installations.is_eval_allowlisted` column is
-  `true`, then stashes the version on the request context.
-  `cluster.Multiversion.Route` reads it via `cluster.VersionFromContext`
-  and dispatches to the matching `Scorer`. Customer traffic (no header)
-  always serves the deployment's default version
-  (`ROUTER_CLUSTER_VERSION` → `artifacts/latest`).
+  `x-weave-cluster-version: v0.X` header and stashes the version on
+  the request context. `cluster.Multiversion.Route` reads it via
+  `cluster.VersionFromContext` and dispatches to the matching `Scorer`.
+  Customer traffic (no header) always serves the deployment's default
+  version (`ROUTER_CLUSTER_VERSION` → `artifacts/latest`).
 - `internal/server/middleware.WithEmbedLastUserMessageOverride` honors
-  the trusted `x-weave-embed-last-user-message: true` header for the
-  same allowlisted installations, flipping the proxy to embed the
-  last-user-typed message instead of the concatenated stream. Used
-  for orthogonal feature-extraction A/Bs against the artifact-version
-  axis.
+  the `x-weave-embed-last-user-message: true` header, flipping the
+  proxy to embed the last-user-typed message instead of the concatenated
+  stream. Used for orthogonal feature-extraction A/Bs against the
+  artifact-version axis.
 - The eval harness names cluster routers as `vX.Y-cluster` — any
   committed artifact directory under
   `internal/router/cluster/artifacts/` is reachable by name, no Python
@@ -616,9 +612,6 @@ runs as a Modal app (`modal_app.py`); see [`eval/README.md`](eval/README.md).
 
 **What to NOT do:**
 
-- **Do NOT broaden the overrides beyond the allowlist.** Customer
-  installations should never be allowlisted; the eval API key belongs
-  to a dedicated installation seeded for that purpose.
 - **Do NOT re-introduce a heuristic-vs-cluster A/B switch.** The
   heuristic was retired because its silent-fallback behavior masked
   cluster regressions. If you need to compare strategies, ship the

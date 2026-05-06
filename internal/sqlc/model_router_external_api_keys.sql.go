@@ -159,56 +159,6 @@ func (q *Queries) GetActiveExternalAPIKeysForInstallation(ctx context.Context, i
 	return items, nil
 }
 
-const listActiveExternalAPIKeysForInstallation = `-- name: ListActiveExternalAPIKeysForInstallation :many
-SELECT id, installation_id, external_id, provider, key_ciphertext, key_prefix, key_suffix, key_fingerprint, name, last_used_at, created_at, updated_at, deleted_at, created_by
-FROM router.model_router_external_api_keys
-WHERE installation_id = $1::uuid
-  AND deleted_at IS NULL
-ORDER BY provider, created_at DESC
-`
-
-// Returns all active external API keys for listing in the UI.
-//
-//	SELECT id, installation_id, external_id, provider, key_ciphertext, key_prefix, key_suffix, key_fingerprint, name, last_used_at, created_at, updated_at, deleted_at, created_by
-//	FROM router.model_router_external_api_keys
-//	WHERE installation_id = $1::uuid
-//	  AND deleted_at IS NULL
-//	ORDER BY provider, created_at DESC
-func (q *Queries) ListActiveExternalAPIKeysForInstallation(ctx context.Context, installationID uuid.UUID) ([]RouterModelRouterExternalAPIKey, error) {
-	rows, err := q.db.Query(ctx, listActiveExternalAPIKeysForInstallation, installationID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []RouterModelRouterExternalAPIKey
-	for rows.Next() {
-		var i RouterModelRouterExternalAPIKey
-		if err := rows.Scan(
-			&i.ID,
-			&i.InstallationID,
-			&i.ExternalID,
-			&i.Provider,
-			&i.KeyCiphertext,
-			&i.KeyPrefix,
-			&i.KeySuffix,
-			&i.KeyFingerprint,
-			&i.Name,
-			&i.LastUsedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-			&i.CreatedBy,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const markExternalAPIKeyUsed = `-- name: MarkExternalAPIKeyUsed :exec
 UPDATE router.model_router_external_api_keys
 SET last_used_at = NOW()

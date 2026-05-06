@@ -83,8 +83,6 @@ type PreparedRequest struct {
 }
 
 type Client interface {
-	Complete(ctx context.Context, req Request) (Response, error)
-
 	// Proxy forwards a fully-prepared request body to the upstream provider
 	// and streams the response into w. The prep.Body is the final wire-format
 	// JSON; implementations send it verbatim (no decode/re-encode). prep.Headers
@@ -99,24 +97,4 @@ type Client interface {
 	// (`/v1/messages/count_tokens`) on Anthropic. Path/method/query come from
 	// r; prep contains the (possibly scrubbed) body and derived headers.
 	Passthrough(ctx context.Context, prep PreparedRequest, w http.ResponseWriter, r *http.Request) error
-}
-
-type Request struct {
-	Model     string
-	Messages  []Message
-	MaxTokens int
-	System    string
-}
-
-type Message struct {
-	Role    string
-	Content string
-}
-
-type Response struct {
-	Model        string
-	Content      string
-	InputTokens  int
-	OutputTokens int
-	StopReason   string
 }

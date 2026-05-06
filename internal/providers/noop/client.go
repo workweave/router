@@ -11,18 +11,10 @@ import (
 	"workweave/router/internal/router"
 )
 
-// ErrNotImplemented is re-exported for callers that historically referenced
-// it from this package. New code should use providers.ErrNotImplemented.
-var ErrNotImplemented = providers.ErrNotImplemented
-
 type Client struct{}
 
 func NewClient() *Client {
 	return &Client{}
-}
-
-func (c *Client) Complete(ctx context.Context, req providers.Request) (providers.Response, error) {
-	return providers.Response{}, providers.ErrNotImplemented
 }
 
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {

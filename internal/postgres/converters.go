@@ -11,14 +11,13 @@ import (
 
 func toAuthInstallation(row sqlc.RouterModelRouterInstallation) *auth.Installation {
 	return &auth.Installation{
-		ID:                row.ID.String(),
-		ExternalID:        row.ExternalID,
-		Name:              row.Name,
-		CreatedAt:         timestampOrZero(row.CreatedAt),
-		UpdatedAt:         timestampOrZero(row.UpdatedAt),
-		DeletedAt:         timestampPtr(row.DeletedAt),
-		CreatedBy:         row.CreatedBy,
-		IsEvalAllowlisted: row.IsEvalAllowlisted,
+		ID:         row.ID.String(),
+		ExternalID: row.ExternalID,
+		Name:       row.Name,
+		CreatedAt:  timestampOrZero(row.CreatedAt),
+		UpdatedAt:  timestampOrZero(row.UpdatedAt),
+		DeletedAt:  timestampPtr(row.DeletedAt),
+		CreatedBy:  row.CreatedBy,
 	}
 }
 

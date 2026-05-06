@@ -1,4 +1,3 @@
--- Creates a new model router API key bound to an installation.
 -- name: CreateModelRouterAPIKey :one
 INSERT INTO router.model_router_api_keys (
     installation_id,
@@ -49,7 +48,6 @@ SET last_used_at = NOW()
 WHERE id = @id::uuid
   AND deleted_at IS NULL;
 
--- Soft-deletes a key.
 -- name: SoftDeleteModelRouterAPIKey :exec
 UPDATE router.model_router_api_keys
 SET deleted_at = NOW()
