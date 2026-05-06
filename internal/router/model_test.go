@@ -28,6 +28,7 @@ func TestLookup_DateSuffixNormalization(t *testing.T) {
 		{"openai dated", "gpt-4o-2024-08-06", false, false, false},
 		{"google flash registered", "gemini-2.5-flash", false, false, false},
 		{"google pro registered", "gemini-2.5-pro", false, false, false},
+		{"openrouter qwen registered", "qwen/qwen3-coder-next", false, false, false},
 		{"unknown with date suffix", "mystery-model-20250101", false, false, false},
 	}
 	for _, tc := range tests {
