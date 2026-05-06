@@ -36,7 +36,6 @@ jobs:
         with:
           repository: workweave/WorkWeave
           token: ${{ secrets.WORKWEAVE_PIN_BUMP_PAT }}
-          submodules: recursive
           fetch-depth: 0
           path: WorkWeave
 
@@ -46,23 +45,20 @@ jobs:
           git config user.name "workweave-bot"
           git config user.email "bot@workweave.ai"
 
-      - name: Bump router submodule
+      - name: Bump router gitlink
         id: bump
         working-directory: WorkWeave
         env:
           NEW_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
-          git -C router-internal/router fetch origin "$NEW_SHA"
-          git -C router-internal/router checkout "$NEW_SHA"
-
           SHORT_SHA="${NEW_SHA:0:7}"
           BRANCH="bump-router-${SHORT_SHA}"
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
 
           git checkout -b "$BRANCH"
-          git add router-internal/router
+          git update-index --add --cacheinfo 160000,"$NEW_SHA",router-internal/router
           git commit \
             -m "Bump router pin to ${SHORT_SHA}" \
             -m "Source: ${{ github.event.pull_request.title }}" \
