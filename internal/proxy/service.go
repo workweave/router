@@ -258,11 +258,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	// Semantic-cache lookup. Eligible when the cache is configured at
 	// boot, the request is non-streaming, the routing decision carries
-	// metadata (cluster scorer was used; heuristic decisions don't have
-	// an embedding to key on), and the caller has an externalID for
-	// per-tenant isolation. Eval-harness traffic bypasses the cache so
-	// per-prompt accuracy attribution isn't polluted by cosine-near-
-	// neighbor replays of an unrelated stored response.
+	// metadata (always set by the cluster scorer on success), and the
+	// caller has an externalID for per-tenant isolation. Eval-harness
+	// traffic bypasses the cache so per-prompt accuracy attribution
+	// isn't polluted by cosine-near-neighbor replays of an unrelated
+	// stored response.
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
@@ -448,8 +448,7 @@ func hasEvalOverrideHeader(r *http.Request) bool {
 	if r == nil {
 		return false
 	}
-	return r.Header.Get("x-weave-disable-cluster") != "" ||
-		r.Header.Get("x-weave-cluster-version") != "" ||
+	return r.Header.Get("x-weave-cluster-version") != "" ||
 		r.Header.Get("x-weave-embed-last-user-message") != ""
 }
 

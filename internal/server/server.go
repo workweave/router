@@ -37,7 +37,6 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		messagesAuth = append(messagesAuth, middleware.WithAuth(authSvc))
 	}
 	messagesAuth = append(messagesAuth,
-		middleware.WithEvalRoutingOverride(),
 		middleware.WithEmbedLastUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
 	)
@@ -49,7 +48,6 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		chatCompletionAuth = append(chatCompletionAuth, middleware.WithAuth(authSvc))
 	}
 	chatCompletionAuth = append(chatCompletionAuth,
-		middleware.WithEvalRoutingOverride(),
 		middleware.WithEmbedLastUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
 	)

@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,6 +11,14 @@ import (
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router"
 )
+
+// ErrClusterUnavailable is returned by Scorer.Route when the cluster
+// scorer cannot produce a routing decision (embed timeout, embedder
+// error, dim mismatch, prompt too short, empty argmax). Callers map
+// this to HTTP 503: silent fallback to a default model is a worse
+// failure mode than surfacing the unavailability — it masks real
+// regressions in eval and lets quality silently degrade in prod.
+var ErrClusterUnavailable = errors.New("cluster: routing unavailable")
 
 // Config carries the scorer's runtime knobs.
 type Config struct {
@@ -29,8 +38,10 @@ func DefaultConfig() Config {
 	}
 }
 
-// Scorer is the cluster router for one frozen artifact version. Errors
-// delegate to the fallback router so the request stays serviceable.
+// Scorer is the cluster router for one frozen artifact version.
+// Failure modes (embed timeout, dim mismatch, empty argmax, prompt too
+// short) return ErrClusterUnavailable rather than silently falling back
+// to a default model.
 type Scorer struct {
 	version    string
 	cfg        Config
@@ -40,7 +51,6 @@ type Scorer struct {
 	registry   *ModelRegistry
 	candidates []DeployedEntry
 	models     []string
-	fallback   router.Router
 	// metadata carries the parsed metadata.yaml for this version. May
 	// be nil when the bundle had no metadata.yaml. Currently used only
 	// by the semantic cache (CacheThresholds()).
@@ -73,15 +83,12 @@ func (s *Scorer) CacheThresholds() (perCluster map[int]float32, defaultThreshold
 
 // NewScorer wires a Scorer from a pre-loaded artifact Bundle. Entries whose
 // provider is not in availableProviders are filtered out of the candidate set.
-func NewScorer(bundle *Bundle, cfg Config, embed Embedder, fallback router.Router, availableProviders map[string]struct{}) (*Scorer, error) {
+func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders map[string]struct{}) (*Scorer, error) {
 	if bundle == nil {
 		return nil, fmt.Errorf("cluster: bundle must not be nil")
 	}
 	if embed == nil {
 		return nil, fmt.Errorf("cluster: embedder must not be nil")
-	}
-	if fallback == nil {
-		return nil, fmt.Errorf("cluster: fallback must not be nil")
 	}
 	if cfg.TopP <= 0 {
 		return nil, fmt.Errorf("cluster: TopP must be positive, got %d", cfg.TopP)
@@ -152,7 +159,6 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, fallback router.Route
 		registry:   bundle.Registry,
 		candidates: candidates,
 		models:     models,
-		fallback:   fallback,
 		metadata:   bundle.Metadata,
 	}, nil
 }
@@ -183,13 +189,13 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	log := observability.Get()
 
 	if len(req.PromptText) < s.cfg.MinPromptChars {
-		log.Debug(
-			"Cluster scorer: prompt too short, falling through to heuristic",
+		log.Warn(
+			"Cluster scorer: prompt too short; returning ErrClusterUnavailable",
 			"prompt_chars", len(req.PromptText),
 			"min_prompt_chars", s.cfg.MinPromptChars,
 			"requested_model", req.RequestedModel,
 		)
-		return s.fallback.Route(ctx, req)
+		return router.Decision{}, fmt.Errorf("prompt has %d chars, minimum is %d: %w", len(req.PromptText), s.cfg.MinPromptChars, ErrClusterUnavailable)
 	}
 
 	text := tailTruncate(req.PromptText, s.cfg.MaxPromptChars)
@@ -219,24 +225,24 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	}
 	embedMs := time.Since(embedStart).Milliseconds()
 	if err != nil {
-		log.Warn(
-			"Cluster scorer: embed failed; falling back to heuristic",
+		log.Error(
+			"Cluster scorer: embed failed; returning ErrClusterUnavailable",
 			"err", err,
 			"embed_ms", embedMs,
 			"prompt_chars", len(text),
 			"prompt_truncated", truncated,
 			"requested_model", req.RequestedModel,
 		)
-		return s.fallback.Route(ctx, req)
+		return router.Decision{}, fmt.Errorf("embed failed after %dms: %w (cause: %v)", embedMs, ErrClusterUnavailable, err)
 	}
 	if len(vec) != s.centroids.Dim {
-		log.Warn(
-			"Cluster scorer: embedding dim mismatch; falling back to heuristic",
+		log.Error(
+			"Cluster scorer: embedding dim mismatch; returning ErrClusterUnavailable",
 			"got_dim", len(vec),
 			"want_dim", s.centroids.Dim,
 			"embed_ms", embedMs,
 		)
-		return s.fallback.Route(ctx, req)
+		return router.Decision{}, fmt.Errorf("embedding dim %d != expected %d: %w", len(vec), s.centroids.Dim, ErrClusterUnavailable)
 	}
 
 	scoreStart := time.Now()
@@ -253,23 +259,23 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 
 	if chosenModel == "" {
 		// Defensive: only reachable if rankings.json contains NaN scores.
-		// Treat as a fail-open path so we don't return a zero-Decision.
-		log.Warn(
-			"Cluster scorer: argmax produced empty model; falling back to heuristic",
+		log.Error(
+			"Cluster scorer: argmax produced empty model; returning ErrClusterUnavailable",
 			"requested_model", req.RequestedModel,
 		)
-		return s.fallback.Route(ctx, req)
+		return router.Decision{}, fmt.Errorf("argmax produced empty model (likely NaN in rankings.json): %w", ErrClusterUnavailable)
 	}
 	chosen := s.lookupCandidate(chosenModel)
 	if chosen == nil {
 		// Unreachable in practice: argmax only picks from s.models which
 		// is built directly from s.candidates. Guard so a future refactor
-		// that decouples them still fail-opens cleanly.
-		log.Warn(
-			"Cluster scorer: argmax model not found in candidates; falling back to heuristic",
+		// that decouples them still surfaces the bug instead of silently
+		// degrading.
+		log.Error(
+			"Cluster scorer: argmax model not found in candidates; returning ErrClusterUnavailable",
 			"chosen_model", chosenModel,
 		)
-		return s.fallback.Route(ctx, req)
+		return router.Decision{}, fmt.Errorf("argmax model %q not found in candidates: %w", chosenModel, ErrClusterUnavailable)
 	}
 
 	// Hand off the embedding + top-p clusters so downstream consumers

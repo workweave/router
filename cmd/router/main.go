@@ -31,8 +31,6 @@ import (
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/cluster"
-	"workweave/router/internal/router/evalswitch"
-	"workweave/router/internal/router/heuristic"
 	"workweave/router/internal/server"
 
 	_ "time/tzdata"
@@ -105,22 +103,15 @@ func main() {
 		availableProviders[name] = struct{}{}
 	}
 
-	fallback := buildHeuristicFallback(providerMap)
-
-	var primary router.Router = fallback
-	clusterDisabled := config.GetOr("ROUTER_DISABLE_CLUSTER", "false") == "true"
-	if clusterDisabled {
-		logger.Info("ROUTER_DISABLE_CLUSTER=true; using heuristic router only (cluster scorer skipped)")
-	} else {
-		clusterRouter, err := buildClusterScorer(fallback, availableProviders)
-		if err != nil {
-			logger.Error("Cluster scorer unavailable; falling open to heuristic", "err", err)
-		} else {
-			primary = clusterRouter
-			logger.Info("Routing via cluster scorer", "embedder", "jina-v2-base-code-int8")
-		}
+	rtr, err := buildClusterScorer(availableProviders)
+	if err != nil {
+		// Fail loud at boot rather than serve a degraded heuristic.
+		// Ops alerts on Cloud Run boot failures; silent degradation
+		// would mask quality regressions for hours.
+		logger.Error("Cluster scorer failed to build; refusing to boot", "err", err)
+		panic(err)
 	}
-	rtr := evalswitch.New(primary, fallback)
+	logger.Info("Routing via cluster scorer", "embedder", "jina-v2-base-code-int8")
 
 	cache := auth.NewLRUAPIKeyCache(10000, 50000, 5*time.Minute, 60*time.Second)
 	authSvc := auth.NewService(repo.Installations, repo.APIKeys, cache, time.Now)
@@ -158,7 +149,7 @@ func main() {
 		logger.Info("Decision sidecar log enabled", "path", decisionsLogPath)
 	}
 
-	semanticCache := buildSemanticCache(primary)
+	semanticCache := buildSemanticCache(rtr)
 	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache)
 
 	engine := gin.New()
@@ -243,10 +234,10 @@ func parseOtelHeaders(raw string) map[string]string {
 }
 
 // buildClusterScorer constructs the cluster.Multiversion router. One ONNX
-// embedder is shared across all artifact versions. Returns an error (fail-
-// opened to heuristic by the caller) on any artifact, embedder, or warmup
-// failure.
-func buildClusterScorer(fallback router.Router, availableProviders map[string]struct{}) (router.Router, error) {
+// embedder is shared across all artifact versions. Returns an error on any
+// artifact, embedder, or warmup failure; the caller panics so the boot
+// fails loud rather than silently degrading to a default model.
+func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, error) {
 	logger := observability.Get()
 
 	requestedVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
@@ -300,7 +291,7 @@ func buildClusterScorer(fallback router.Router, availableProviders map[string]st
 			)
 		}
 
-		scorer, err := cluster.NewScorer(bundle, cfg, embedder, fallback, availableProviders)
+		scorer, err := cluster.NewScorer(bundle, cfg, embedder, availableProviders)
 		if err != nil {
 			logger.Warn("Cluster scorer version skipped", "cluster_version", v, "err", err)
 			continue
@@ -314,7 +305,7 @@ func buildClusterScorer(fallback router.Router, availableProviders map[string]st
 		return nil, fmt.Errorf("default cluster version %q failed to build (likely no registered provider covers its deployed_models); set ROUTER_CLUSTER_VERSION to a version that does, or register the missing provider key", defaultVersion)
 	}
 
-	multi, err := cluster.NewMultiversion(defaultVersion, scorers, fallback)
+	multi, err := cluster.NewMultiversion(defaultVersion, scorers)
 	if err != nil {
 		_ = embedder.Close()
 		return nil, fmt.Errorf("build multiversion router: %w", err)
@@ -429,38 +420,6 @@ func parseEnvDurationMs(key string, fallback time.Duration) time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-// buildHeuristicFallback constructs the deterministic short/long-prompt
-// router targeting the first registered provider (anthropic > openai > google).
-func buildHeuristicFallback(providerMap map[string]providers.Client) *heuristic.Rules {
-	logger := observability.Get()
-	const thresholdTokens = 1000
-
-	if _, ok := providerMap["anthropic"]; ok {
-		return heuristic.NewRules(heuristic.Config{
-			Provider:        "anthropic",
-			SmallModel:      "claude-haiku-4-5",
-			LargeModel:      "claude-opus-4-7",
-			ThresholdTokens: thresholdTokens,
-		})
-	}
-	if _, ok := providerMap["openai"]; ok {
-		logger.Info("Heuristic fallback targeting OpenAI (Anthropic not registered)")
-		return heuristic.NewRules(heuristic.Config{
-			Provider:        "openai",
-			SmallModel:      "gpt-4.1",
-			LargeModel:      "gpt-5.5",
-			ThresholdTokens: thresholdTokens,
-		})
-	}
-	logger.Info("Heuristic fallback targeting Google (Anthropic and OpenAI not registered)")
-	return heuristic.NewRules(heuristic.Config{
-		Provider:        "google",
-		SmallModel:      "gemini-3-flash-preview",
-		LargeModel:      "gemini-3.1-pro-preview",
-		ThresholdTokens: thresholdTokens,
-	})
-}
-
 // buildSemanticCache constructs the cross-request semantic cache, or
 // returns nil when disabled. Wiring honors:
 //
@@ -469,26 +428,24 @@ func buildHeuristicFallback(providerMap map[string]providers.Client) *heuristic.
 //	ROUTER_SEMANTIC_CACHE_BUCKET  — per-(installation, format, cluster)
 //	                                 LRU capacity (default 1024).
 //
-// The cache is wired only when `primary` is the cluster router (or
-// wraps one), because the cache keys on the cluster scorer's
-// embeddings; a heuristic-only deployment has nothing to key on. When
-// primary is anything other than *cluster.Multiversion (heuristic-only,
-// or cluster build failed at boot) the cache is disabled.
-//
 // Per-cluster cosine thresholds are pulled from the default version's
 // metadata.yaml `cache_config` block. Other built versions reuse the
 // default's thresholds at runtime — keeping the cache config tied to
 // the default version means promotion (flipping `artifacts/latest`)
 // also flips cache thresholds atomically.
-func buildSemanticCache(primary router.Router) *cache.Cache {
+func buildSemanticCache(rtr router.Router) *cache.Cache {
 	logger := observability.Get()
 	if config.GetOr("ROUTER_SEMANTIC_CACHE_ENABLED", "true") != "true" {
 		logger.Info("Semantic cache disabled (ROUTER_SEMANTIC_CACHE_ENABLED=false)")
 		return nil
 	}
-	multi, ok := primary.(*cluster.Multiversion)
+	multi, ok := rtr.(*cluster.Multiversion)
 	if !ok {
-		logger.Info("Semantic cache disabled: cluster router not active (no embeddings to key on)")
+		// Defensive: main.go always wires *cluster.Multiversion now that
+		// the heuristic fallback is removed, but keep the guard so a
+		// future refactor that introduces another router shape doesn't
+		// silently disable the cache.
+		logger.Warn("Semantic cache disabled: router is not a cluster.Multiversion")
 		return nil
 	}
 	defaultScorer, ok := multi.Versions[multi.Default]

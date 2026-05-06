@@ -291,7 +291,6 @@ func TestService_ProxyMessages_StickyBypassedByEvalOverrideHeaders(t *testing.T)
 	}
 	cases := []runConfig{
 		{name: "no override → second call hits sticky cache", header: "", wantRouteCalls: 1},
-		{name: "x-weave-disable-cluster bypasses sticky", header: "x-weave-disable-cluster", wantRouteCalls: 2},
 		{name: "x-weave-cluster-version bypasses sticky", header: "x-weave-cluster-version", wantRouteCalls: 2},
 		{name: "x-weave-embed-last-user-message bypasses sticky", header: "x-weave-embed-last-user-message", wantRouteCalls: 2},
 	}

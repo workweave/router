@@ -40,12 +40,10 @@ The router uses three concentric layers. Imports must flow inward only.
 |  |  internal/api/anthropic   (/v1/messages, passthrough)       |  |
 |  |  internal/api/openai      (/v1/chat/completions)            |  |
 |  |  internal/server          (route registration)              |  |
-|  |  internal/server/middleware (auth, timeout, eval override)   |  |
+|  |  internal/server/middleware (auth, timeout, eval overrides)  |  |
 |  |  internal/postgres        (adapter: SQLC over pgx)          |  |
 |  |  internal/sqlc            (generated; regenerate via `make generate`)|  |
-|  |  internal/router/heuristic  (Router impl: token threshold)  |  |
 |  |  internal/router/cluster    (Router impl: AvengersPro)      |  |
-|  |  internal/router/evalswitch (Router impl: A/B switch)       |  |
 |  |  internal/providers/*     (Client impls)                    |  |
 |  |                                                             |  |
 |  |  +-------------------------------------------------------+  |  |
@@ -97,13 +95,17 @@ The router uses three concentric layers. Imports must flow inward only.
 - **`internal/api/*` and `internal/server`** depend on `internal/auth`
   (for the Service handle and middleware-context types) and on
   `internal/proxy` (for the routing/dispatch service handle). They may
-  import `internal/observability` for logging and `internal/providers` for
-  shared sentinel errors. They must not import `internal/postgres`,
-  `internal/router/heuristic`, `internal/router/cluster`,
+  import `internal/observability` for logging, `internal/providers` for
+  shared sentinel errors, and `internal/router/cluster` for the
+  `ErrClusterUnavailable` sentinel (the API handlers map it to HTTP
+  503). They must not import `internal/postgres`,
   any concrete `internal/providers/*` adapter, or `internal/translate`
   directly. Concrete instances reach the
   presentation layer only via constructor parameters from the composition
   root.
+  (`internal/router/heuristic` and `internal/router/evalswitch` previously
+  lived here; both were removed when the heuristic fallback was retired
+  in favor of `cluster.ErrClusterUnavailable` → HTTP 503.)
 - **`internal/config` and `internal/observability` are leaf utilities** —
   they must not import any other package under `internal/`. Third-party
   utility deps are fine; today they pull only stdlib + gin (for the
@@ -216,18 +218,21 @@ whose wire format differs:
 
 ### Adding a new `router.Router` implementation
 
-1. **Create a sibling subpackage to `internal/router/heuristic/`** (the
-   existing siblings are `cluster/`, the AvengersPro primary, and
-   `heuristic/`, the deterministic fallback). New ones might be e.g.
-   `internal/router/shadow/` for one that wraps two others (see
+1. **Create a sibling subpackage to `internal/router/cluster/`.** Today
+   `cluster/` (AvengersPro) is the only `Router` impl; new ones might be
+   e.g. `internal/router/shadow/` for one that wraps two others (see
    `docs/plans/archive/CLUSTER_ROUTING_PLAN.md` "Shadow / promotion gates").
 2. **Implement `Route(ctx, router.Request) (router.Decision, error)`.**
 3. **Add the compile-time check:** `var _ router.Router = (*X)(nil)`.
-4. **Wire it in `cmd/router/main.go`** (replacing or wrapping
-   `heuristic.NewRules()` / the cluster scorer as needed).
+4. **Wire it in `cmd/router/main.go`** (replacing or wrapping the
+   cluster scorer as needed).
 5. **If your impl needs CGO or external libraries**, follow the
    build-tag pattern in `cluster/embedder_onnx.go` + `embedder_stub.go`
    so contributors without the library can still `go test` locally.
+6. **Failure modes return errors, not silent fallbacks.** The cluster
+   scorer's `ErrClusterUnavailable` → HTTP 503 pattern is the model:
+   silent fallback to a default model masks regressions and lets
+   quality silently degrade in eval and prod.
 
 ### Adding a column or query
 
@@ -466,11 +471,10 @@ the rules-for-AI subset.
   CI) and `required=false` in the Dockerfile. The Go embedder reads
   from `/opt/router/assets/model.onnx` (override via
   `ROUTER_ONNX_ASSETS_DIR`). If the file is missing or <1 MiB,
-  `cluster.NewEmbedder` errors at boot and `main.go` fail-opens to
-  the heuristic — the router stays serviceable but the cluster
-  scorer is inactive. `HF_MODEL_REVISION` is pinned to a Jina SHA
-  by default; bump it deliberately if you want to pick up a new
-  upstream export.
+  `cluster.NewEmbedder` errors at boot and `main.go` panics —
+  the router refuses to start rather than silently degrading.
+  `HF_MODEL_REVISION` is pinned to a Jina SHA by default; bump
+  it deliberately if you want to pick up a new upstream export.
 - The **cost values** used in the α-blend live in
   `train_cluster_router.py`'s `DEFAULT_COST_PER_1K_INPUT`. They are
   baked into `rankings.json` at training time, not looked up at
@@ -486,10 +490,15 @@ the rules-for-AI subset.
 - **Don't loosen the `MaxPromptChars = 1024` cap** without re-running
   the latency test. BERT inference is O(n²) attention; the cap is
   load-bearing.
-- **Don't add new fail-open paths.** The cluster scorer's only fallback
-  is `s.fallback.Route(ctx, req)` (the heuristic, supplied by main.go).
-  Adding a third option (e.g. "fail to always-Opus") fragments the
-  recovery story.
+- **Don't add fail-open fallbacks.** The cluster scorer returns
+  `ErrClusterUnavailable` on every failure path (embed timeout, embed
+  error, dim mismatch, prompt too short, empty argmax). The API
+  handlers map that to HTTP 503. The previous `heuristic` fallback was
+  removed because it silently degraded routing decisions — every
+  request that should have hit the cluster scorer instead got
+  `claude-haiku-4-5`, which masked real regressions in eval and
+  production. New failure modes return the sentinel; do not add a
+  default-model shortcut "for safety".
 - **Don't change the centroid format without bumping the magic
   string.** `loadCentroids` uses the magic + version header to refuse
   loading mismatched binaries; if you change the layout, bump
@@ -557,12 +566,6 @@ dispatches accordingly. Cross-format translation lives in
   time.** Filter happens in `NewScorer`; runtime argmax is unchanged.
   An empty filtered set is a hard boot error so misconfigured
   deployments fail loud.
-- **Heuristic stays Anthropic-only by default.** `heuristic.Config.Provider`
-  is configurable, but without bench data the heuristic is just two
-  hardcoded models — making it cross-provider would be a guess. The
-  cluster scorer covers cross-provider routing when active; the
-  heuristic remains the deterministic fallback.
-
 **What to NOT do:**
 
 - **Don't bypass the provider filter.** If you need to route to a
@@ -587,30 +590,22 @@ dispatches accordingly. Cross-format translation lives in
 Phase 1a's go/no-go gate. Sibling Poetry package to `router/scripts/`,
 runs as a Modal app (`modal_app.py`); see [`eval/README.md`](eval/README.md).
 
-**Per-request router selection (the small Go change that enables it):**
+**Per-request router selection:**
 
-- `internal/router/evalswitch.Router` wraps two `router.Router`
-  implementations (primary + fallback) and dispatches per-request based
-  on a `Decision` attached to `c.Request.Context()` under
-  `evalswitch.ContextKey{}`.
-- `internal/server/middleware.WithEvalRoutingOverride` reads the
-  trusted `x-weave-disable-cluster: true` header from installations
-  whose `model_router_installations.is_eval_allowlisted` column is
-  `true`, then stashes the override on the request context. The flag
-  defaults to `false` (production-safe), is set when seeding the eval
-  installation (seed via SQL — see `db/seed.sql`), and survives
-  redeploys because it lives in the DB rather than env.
-- `cmd/router/main.go` wires `evalswitch.New(cluster_or_heuristic,
-  heuristic)` so a single staging deployment can serve both routers
-  per-request — the eval harness compares them on the same prompts
-  through the same staging binary.
 - `internal/server/middleware.WithClusterVersionOverride` reads the
-  trusted `x-weave-cluster-version: v0.X` header from the same
-  allowlisted installations and stashes the version on the context.
+  trusted `x-weave-cluster-version: v0.X` header from installations
+  whose `model_router_installations.is_eval_allowlisted` column is
+  `true`, then stashes the version on the request context.
   `cluster.Multiversion.Route` reads it via `cluster.VersionFromContext`
   and dispatches to the matching `Scorer`. Customer traffic (no header)
   always serves the deployment's default version
   (`ROUTER_CLUSTER_VERSION` → `artifacts/latest`).
+- `internal/server/middleware.WithEmbedLastUserMessageOverride` honors
+  the trusted `x-weave-embed-last-user-message: true` header for the
+  same allowlisted installations, flipping the proxy to embed the
+  last-user-typed message instead of the concatenated stream. Used
+  for orthogonal feature-extraction A/Bs against the artifact-version
+  axis.
 - The eval harness names cluster routers as `vX.Y-cluster` — any
   committed artifact directory under
   `internal/router/cluster/artifacts/` is reachable by name, no Python
@@ -621,12 +616,14 @@ runs as a Modal app (`modal_app.py`); see [`eval/README.md`](eval/README.md).
 
 **What to NOT do:**
 
-- **Do NOT broaden the override beyond the allowlist.** Customer
-  installations should never be in the allowlist; the eval API key
-  belongs to a dedicated installation seeded for that purpose.
-- **Do NOT add a third primary path through the switch.** The switch
-  is a binary primary/fallback selector. New routers (e.g. shadow,
-  v0.5) wrap the switch from the outside, not below it.
+- **Do NOT broaden the overrides beyond the allowlist.** Customer
+  installations should never be allowlisted; the eval API key belongs
+  to a dedicated installation seeded for that purpose.
+- **Do NOT re-introduce a heuristic-vs-cluster A/B switch.** The
+  heuristic was retired because its silent-fallback behavior masked
+  cluster regressions. If you need to compare strategies, ship the
+  alternate strategy as another `internal/router/X` package and
+  promote on its own merits, not as a runtime fallback.
 - **Do NOT add a runtime override that picks a specific model
   directly.** The whole point is to compare *router strategies*, not
   to do per-request model overrides — that's a different feature

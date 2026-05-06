@@ -10,6 +10,7 @@ import (
 	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/translate"
 
 	"github.com/gin-gonic/gin"
@@ -59,6 +60,12 @@ func ChatCompletionHandler(svc *proxy.Service) gin.HandlerFunc {
 			}
 			if errors.Is(err, translate.ErrNotJSONObject) {
 				writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "request body must be a JSON object")
+				return
+			}
+			if errors.Is(err, cluster.ErrClusterUnavailable) {
+				log.Error("Cluster routing unavailable", "err", err)
+				c.Header("Retry-After", "1")
+				writeOpenAIError(c, http.StatusServiceUnavailable, "api_error", "router unavailable: cluster scorer failed and no fallback is configured")
 				return
 			}
 			log.Error("Proxy failed", "err", err)
