@@ -1,4 +1,5 @@
 // Package otel provides the OTel span emitter and model pricing.
+//
 //go:generate go run ../../../cmd/genprices
 package otel
 

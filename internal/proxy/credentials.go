@@ -71,4 +71,3 @@ func ResolveCredentials(provider string, byok map[string]*Credentials, headers h
 	}
 	return ExtractClientCredentials(provider, headers)
 }
-
