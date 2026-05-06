@@ -1,3 +1,6 @@
+// Package otel provides the OTel span emitter and model pricing.
+//
+//go:generate go run ../../../cmd/genprices
 package otel
 
 // Pricing holds the per-1M-token USD costs for a single model.
@@ -9,6 +12,15 @@ type Pricing struct {
 // TODO: Unify all model configuration that is indexed by model name
 // (this pricing table, model_registry.json, heuristic config, etc.)
 // into a single shared model registry so additions/removals stay in sync.
+
+// AllPricing returns a copy of the full pricing table keyed by model name.
+func AllPricing() map[string]Pricing {
+	out := make(map[string]Pricing, len(pricingTable))
+	for k, v := range pricingTable {
+		out[k] = v
+	}
+	return out
+}
 
 // Values from provider pricing pages. Output costs are typically 4-5× input.
 var pricingTable = map[string]Pricing{

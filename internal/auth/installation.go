@@ -8,21 +8,19 @@ import (
 )
 
 type Installation struct {
-	ID                string
-	ExternalID        string
-	Name              string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	DeletedAt         *time.Time
-	CreatedBy         *string
-	IsEvalAllowlisted bool
+	ID         string
+	ExternalID string
+	Name       string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	DeletedAt  *time.Time
+	CreatedBy  *string
 }
 
 type CreateInstallationParams struct {
-	ExternalID        string
-	Name              string
-	CreatedBy         *string
-	IsEvalAllowlisted bool
+	ExternalID string
+	Name       string
+	CreatedBy  *string
 }
 
 type InstallationRepository interface {
@@ -32,5 +30,4 @@ type InstallationRepository interface {
 	ListForExternalID(ctx context.Context, externalID string) ([]*Installation, error)
 	// SoftDelete is scoped to externalID.
 	SoftDelete(ctx context.Context, externalID, id string) error
-	SetEvalAllowlisted(ctx context.Context, externalID, id string, allowlisted bool) error
 }

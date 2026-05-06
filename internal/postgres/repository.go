@@ -35,28 +35,14 @@ type installationRepo struct {
 func (r *installationRepo) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
 	q := sqlc.New(r.tx)
 	row, err := q.CreateModelRouterInstallation(ctx, sqlc.CreateModelRouterInstallationParams{
-		ExternalID:        params.ExternalID,
-		Name:              params.Name,
-		CreatedBy:         params.CreatedBy,
-		IsEvalAllowlisted: params.IsEvalAllowlisted,
+		ExternalID: params.ExternalID,
+		Name:       params.Name,
+		CreatedBy:  params.CreatedBy,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return toAuthInstallation(row), nil
-}
-
-func (r *installationRepo) SetEvalAllowlisted(ctx context.Context, externalID, id string, allowlisted bool) error {
-	parsed, err := uuid.Parse(id)
-	if err != nil {
-		return err
-	}
-	q := sqlc.New(r.tx)
-	return q.SetModelRouterInstallationEvalAllowlisted(ctx, sqlc.SetModelRouterInstallationEvalAllowlistedParams{
-		ID:                parsed,
-		ExternalID:        externalID,
-		IsEvalAllowlisted: allowlisted,
-	})
 }
 
 func (r *installationRepo) Get(ctx context.Context, externalID, id string) (*auth.Installation, error) {

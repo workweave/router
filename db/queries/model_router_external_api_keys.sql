@@ -35,14 +35,6 @@ WHERE installation_id = @installation_id::uuid
   AND deleted_at IS NULL
 ORDER BY provider, created_at DESC;
 
--- Returns all active external API keys for listing in the UI.
--- name: ListActiveExternalAPIKeysForInstallation :many
-SELECT *
-FROM router.model_router_external_api_keys
-WHERE installation_id = @installation_id::uuid
-  AND deleted_at IS NULL
-ORDER BY provider, created_at DESC;
-
 -- Soft-deletes an external API key. Cross-tenant safe via installation_id predicate.
 -- name: SoftDeleteExternalAPIKey :exec
 UPDATE router.model_router_external_api_keys

@@ -1,31 +1,15 @@
--- Creates a new model router installation.
 -- name: CreateModelRouterInstallation :one
 INSERT INTO router.model_router_installations (
     external_id,
     name,
-    created_by,
-    is_eval_allowlisted
+    created_by
 )
 VALUES (
     @external_id::varchar,
     @name::varchar,
-    @created_by,
-    @is_eval_allowlisted::boolean
+    @created_by
 )
 RETURNING *;
-
--- Toggles the per-installation eval-override allowlist flag. Used by
--- the eval harness seeding flow (seed-key with --eval-allowlist) to
--- promote an installation without a redeploy. Scoped by
--- external_id so a mismatched (external_id, installation) pair refuses to
--- update instead of silently flipping a row in another tenant.
--- name: SetModelRouterInstallationEvalAllowlisted :exec
-UPDATE router.model_router_installations
-SET is_eval_allowlisted = @is_eval_allowlisted::boolean,
-    updated_at           = NOW()
-WHERE id = @id::uuid
-  AND external_id = @external_id::varchar
-  AND deleted_at IS NULL;
 
 -- Gets an installation by id, scoped to an external_id to prevent cross-tenant access.
 -- name: GetModelRouterInstallation :one
@@ -35,7 +19,6 @@ WHERE id = @id::uuid
   AND external_id = @external_id::varchar
   AND deleted_at IS NULL;
 
--- Lists active installations for an external_id.
 -- name: ListModelRouterInstallationsForExternalID :many
 SELECT *
 FROM router.model_router_installations

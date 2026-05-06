@@ -107,9 +107,6 @@ func (fakeInstallationRepository) ListForExternalID(ctx context.Context, externa
 func (fakeInstallationRepository) SoftDelete(ctx context.Context, externalID, id string) error {
 	return errors.New("not used")
 }
-func (fakeInstallationRepository) SetEvalAllowlisted(ctx context.Context, externalID, id string, allowlisted bool) error {
-	return errors.New("not used")
-}
 
 func frozenClock() auth.Clock {
 	t := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
