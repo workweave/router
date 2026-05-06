@@ -11,6 +11,7 @@ import (
 type CachedKey struct {
 	APIKey       *APIKey
 	Installation *Installation
+	ExternalKeys []*ExternalAPIKey
 	Negative     bool
 }
 

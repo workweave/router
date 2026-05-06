@@ -23,7 +23,7 @@ const (
 func WithAuth(svc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractToken(c)
-		installation, apiKey, err := svc.VerifyAPIKey(c.Request.Context(), token)
+		installation, apiKey, _, err := svc.VerifyAPIKey(c.Request.Context(), token)
 		if err != nil {
 			handleAuthError(c, err)
 			return

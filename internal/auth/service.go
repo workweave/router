@@ -16,6 +16,7 @@ type Clock func() time.Time
 type Service struct {
 	installations InstallationRepository
 	apiKeys       APIKeyRepository
+	externalKeys  ExternalAPIKeyRepository
 	cache         APIKeyCache
 	now           Clock
 }
@@ -23,12 +24,14 @@ type Service struct {
 func NewService(
 	installations InstallationRepository,
 	apiKeys APIKeyRepository,
+	externalKeys ExternalAPIKeyRepository,
 	cache APIKeyCache,
 	now Clock,
 ) *Service {
 	return &Service{
 		installations: installations,
 		apiKeys:       apiKeys,
+		externalKeys:  externalKeys,
 		cache:         cache,
 		now:           now,
 	}
@@ -41,20 +44,24 @@ func NewService(
 // Reads through s.cache: hits short-circuit the DB. ErrNoRows populates a
 // negative entry (defends against credential-stuffing); transport errors
 // are not cached so the next request can retry.
-func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installation, *APIKey, error) {
+//
+// The returned []*ExternalAPIKey slice contains the installation's active
+// customer-owned provider keys (with Plaintext populated). It is nil when no
+// external keys exist or when s.externalKeys is nil.
+func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installation, *APIKey, []*ExternalAPIKey, error) {
 	if !HasAPIKeyPrefix(rawToken) {
-		return nil, nil, ErrInvalidPrefix
+		return nil, nil, nil, ErrInvalidPrefix
 	}
 
 	keyHash := HashAPIKeySHA256(rawToken)
 
 	if cached, ok := s.cache.Get(keyHash); ok {
 		if cached.Negative {
-			return nil, nil, ErrInvalidToken
+			return nil, nil, nil, ErrInvalidToken
 		}
 		if cached.APIKey != nil {
 			s.fireMarkUsed(cached.APIKey.ID)
-			return cached.Installation, cached.APIKey, nil
+			return cached.Installation, cached.APIKey, cached.ExternalKeys, nil
 		}
 		// Malformed positive entry (nil APIKey): fall through to DB lookup.
 	}
@@ -63,14 +70,24 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			s.cache.Set(keyHash, CachedKey{Negative: true})
-			return nil, nil, ErrInvalidToken
+			return nil, nil, nil, ErrInvalidToken
 		}
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	s.cache.Set(keyHash, CachedKey{APIKey: apiKey, Installation: installation})
+	// Fetch external API keys for this installation.
+	var externalKeys []*ExternalAPIKey
+	if s.externalKeys != nil {
+		externalKeys, err = s.externalKeys.GetForInstallation(ctx, apiKey.InstallationID)
+		if err != nil {
+			observability.Get().Warn("Failed to fetch external API keys", "installation_id", apiKey.InstallationID, "err", err)
+			// Non-fatal: proceed without external keys.
+		}
+	}
+
+	s.cache.Set(keyHash, CachedKey{APIKey: apiKey, Installation: installation, ExternalKeys: externalKeys})
 	s.fireMarkUsed(apiKey.ID)
-	return installation, apiKey, nil
+	return installation, apiKey, externalKeys, nil
 }
 
 // fireMarkUsed runs the last_used_at update off the request path. We use
