@@ -1,0 +1,27 @@
+internal/proxy/credentials_test.go
+  42e480cf6e0e0e11 67-94
+cmd/router/main.go
+  42e480cf6e0e0e11 75-79,83-88,194,197
+internal/proxy/credentials.go
+  42e480cf6e0e0e11 37-42,46,51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "8975fc9763d9c61ddd59da531744a0176bd27a0d",
+  "prompts": {
+    "42e480cf6e0e0e11": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a3bc192b-6ae4-4d91-b542-f4515d4a5daa",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Drew Bailey",
+      "messages": [],
+      "total_additions": 49,
+      "total_deletions": 7,
+      "accepted_lines": 49,
+      "overriden_lines": 0
+    }
+  }
+}
