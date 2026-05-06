@@ -19,6 +19,7 @@ import (
 
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
+	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 )
 
@@ -73,7 +74,13 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		return fmt.Errorf("build upstream request: %w", err)
 	}
 	upstream.Header.Set("Content-Type", "application/json")
-	upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
+	// Use per-request BYOK credentials when available; fall back to the
+	// deployment-level API key (plan-based auth).
+	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
+		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
+	} else if c.apiKey != "" {
+		upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
@@ -142,7 +149,13 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		upstream.Header.Set("Content-Type", ct)
 	}
-	upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
+	// Use per-request BYOK credentials when available; fall back to the
+	// deployment-level API key (plan-based auth).
+	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
+		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
+	} else if c.apiKey != "" {
+		upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}

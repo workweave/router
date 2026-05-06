@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
@@ -37,6 +38,21 @@ type APIKeyIDContextKey struct{}
 
 // ExternalIDContextKey is the request-context key for the installation's external_id.
 type ExternalIDContextKey struct{}
+
+// CredentialsContextKey is the request-context key for resolved per-request credentials.
+type CredentialsContextKey struct{}
+
+// CredentialsFromContext retrieves the resolved credentials stashed on a
+// request context by the proxy service. Returns nil when no credentials have
+// been stashed (plan-based auth path).
+func CredentialsFromContext(ctx context.Context) *Credentials {
+	v := ctx.Value(CredentialsContextKey{})
+	if v == nil {
+		return nil
+	}
+	creds, _ := v.(*Credentials)
+	return creds
+}
 
 // NewService constructs the proxy service.
 func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache) *Service {
@@ -332,6 +348,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		IncludeStreamUsage: s.emitter != nil,
 	}
 
+	// Resolve per-request credentials for the chosen provider. When BYOK keys
+	// are configured for this installation they take precedence; otherwise the
+	// inbound request headers supply the credentials (plan-based auth).
+	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
+
 	// Wrap w with a captureWriter when the cache is eligible so the
 	// post-translation wire bytes get mirrored into a buffer for
 	// post-Proxy storage. captureW.captured() is the source of truth
@@ -450,6 +471,30 @@ func hasEvalOverrideHeader(r *http.Request) bool {
 	}
 	return r.Header.Get("x-weave-cluster-version") != "" ||
 		r.Header.Get("x-weave-embed-last-user-message") != ""
+}
+
+// externalKeysFromContext reads the external API keys stashed by the auth
+// middleware. Returns nil when none are present (plan-based auth path).
+func externalKeysFromContext(ctx context.Context) []*auth.ExternalAPIKey {
+	v := ctx.Value(ExternalAPIKeysContextKey{})
+	if v == nil {
+		return nil
+	}
+	keys, _ := v.([]*auth.ExternalAPIKey)
+	return keys
+}
+
+// resolveAndInjectCredentials builds a BYOK credentials map from the external
+// keys on ctx, resolves the best credentials for provider, and returns a
+// context with the credentials stashed under CredentialsContextKey. When no
+// credentials are available for the provider, ctx is returned unchanged.
+func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
+	byok := BuildCredentialsMap(externalKeysFromContext(ctx))
+	creds := ResolveCredentials(provider, byok, headers)
+	if creds != nil {
+		return context.WithValue(ctx, CredentialsContextKey{}, creds)
+	}
+	return ctx
 }
 
 // addTimingAttrs appends derived latency attributes from the request Timing
@@ -589,6 +634,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.emitter != nil,
 	}
+
+	// Resolve per-request credentials for the chosen provider.
+	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
 	// Wrap w with a captureWriter when the cache is eligible so the
 	// post-translation wire bytes get mirrored into a buffer for

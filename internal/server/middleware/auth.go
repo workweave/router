@@ -23,7 +23,7 @@ const (
 func WithAuth(svc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractToken(c)
-		installation, apiKey, _, err := svc.VerifyAPIKey(c.Request.Context(), token)
+		installation, apiKey, externalKeys, err := svc.VerifyAPIKey(c.Request.Context(), token)
 		if err != nil {
 			handleAuthError(c, err)
 			return
@@ -36,6 +36,9 @@ func WithAuth(svc *auth.Service) gin.HandlerFunc {
 		}
 		if installation != nil && installation.ExternalID != "" {
 			ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, installation.ExternalID)
+		}
+		if externalKeys != nil {
+			ctx = context.WithValue(ctx, proxy.ExternalAPIKeysContextKey{}, externalKeys)
 		}
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
@@ -74,6 +77,18 @@ func handleAuthError(c *gin.Context, err error) {
 		logger.Error("Auth check errored", "err", err)
 	}
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_key"})
+}
+
+// ExternalAPIKeysFrom retrieves the external API keys stashed by WithAuth.
+// Returns nil when the request never went through WithAuth or when the
+// installation has no BYOK keys configured.
+func ExternalAPIKeysFrom(c *gin.Context) []*auth.ExternalAPIKey {
+	v := c.Request.Context().Value(proxy.ExternalAPIKeysContextKey{})
+	if v == nil {
+		return nil
+	}
+	keys, _ := v.([]*auth.ExternalAPIKey)
+	return keys
 }
 
 // InstallationFrom retrieves the authed installation set by WithAuth. Returns
