@@ -71,6 +71,7 @@ jobs:
           GH_TOKEN: ${{ secrets.WORKWEAVE_PIN_BUMP_PAT }}
           BRANCH: ${{ steps.bump.outputs.branch }}
           SHORT_SHA: ${{ steps.bump.outputs.short_sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
           gh pr create \
@@ -82,9 +83,10 @@ jobs:
 
           - Router PR: ${{ github.event.pull_request.html_url }}
           - Title: ${{ github.event.pull_request.title }}
-          - Author: @${{ github.event.pull_request.user.login }}
+          - Author: @${PR_AUTHOR}
 
-          This PR will auto-merge once required checks pass."
+          This PR will auto-merge once required checks pass." \
+            --reviewer "$PR_AUTHOR"
 
       - name: Enable auto-merge
         working-directory: WorkWeave
