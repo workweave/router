@@ -72,11 +72,20 @@ func main() {
 	}
 	defer pool.Close()
 
-	// Load Tink keyset for external API key encryption.
+	// Load Tink keyset for external API key encryption. Fail-closed: a missing
+	// keyset is only acceptable under ROUTER_DEV_MODE=true, which the bundled
+	// docker-compose stack sets explicitly. Without this guard a deploy/config
+	// mistake would silently store customer BYOK secrets unencrypted.
+	devMode := config.GetOr("ROUTER_DEV_MODE", "false") == "true"
 	keysetJSON := config.GetOr("EXTERNAL_KEY_ENCRYPTION_KEY", "")
 	var encryptor auth.Encryptor
 	if keysetJSON == "" {
-		logger.Warn("EXTERNAL_KEY_ENCRYPTION_KEY not set, using no-op encryptor (dev only)")
+		if !devMode {
+			err := errors.New("EXTERNAL_KEY_ENCRYPTION_KEY not set; refusing to boot without BYOK encryption (set ROUTER_DEV_MODE=true to allow the no-op encryptor in local dev)")
+			logger.Error("Refusing to boot without BYOK encryption key", "err", err)
+			panic(err)
+		}
+		logger.Warn("EXTERNAL_KEY_ENCRYPTION_KEY not set, using no-op encryptor (ROUTER_DEV_MODE=true)")
 		encryptor = auth.NoOpEncryptor{}
 	} else {
 		encryptor, err = auth.NewTinkEncryptor(keysetJSON)
@@ -182,11 +191,10 @@ func main() {
 		gin.Recovery(),
 	)
 
-	devModeNoAuth := config.GetOr("ROUTER_DEV_MODE", "false") == "true"
-	if devModeNoAuth {
+	if devMode {
 		logger.Info("ROUTER_DEV_MODE=true; bypassing bearer auth on /v1/* (DO NOT use in production)")
 	}
-	server.Register(engine, authSvc, proxySvc, devModeNoAuth)
+	server.Register(engine, authSvc, proxySvc, devMode)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),

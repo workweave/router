@@ -64,6 +64,34 @@ func TestExtractClientCredentials_MissingHeader(t *testing.T) {
 		"ExtractClientCredentials must return nil when the required header is absent")
 }
 
+func TestExtractClientCredentials_RejectsRouterBearerForOpenAI(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer rk_should_not_leak_upstream"}}
+	creds := proxy.ExtractClientCredentials("openai", headers)
+	assert.Nil(t, creds,
+		"router-issued bearer tokens (rk_...) must never be forwarded as upstream OpenAI credentials")
+}
+
+func TestExtractClientCredentials_RejectsRouterBearerForGoogle(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer rk_should_not_leak_upstream"}}
+	creds := proxy.ExtractClientCredentials("google", headers)
+	assert.Nil(t, creds,
+		"router-issued bearer tokens (rk_...) must never be forwarded as upstream Google credentials")
+}
+
+func TestExtractClientCredentials_RejectsRouterKeyForAnthropic(t *testing.T) {
+	headers := http.Header{"X-Api-Key": []string{"rk_should_not_leak_upstream"}}
+	creds := proxy.ExtractClientCredentials("anthropic", headers)
+	assert.Nil(t, creds,
+		"router-issued tokens (rk_...) supplied via x-api-key must never be forwarded as upstream Anthropic credentials")
+}
+
+func TestResolveCredentials_RouterKeyDoesNotLeakWhenBYOKAbsent(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer rk_authed_router_key"}}
+	creds := proxy.ResolveCredentials("openai", nil, headers)
+	assert.Nil(t, creds,
+		"when no BYOK is configured and the inbound bearer is a router key, ResolveCredentials must NOT fall back to forwarding it upstream")
+}
+
 func TestResolveCredentials_BYOKTakesPrecedence(t *testing.T) {
 	byok := map[string]*proxy.Credentials{
 		"anthropic": {APIKey: []byte("sk-ant-byok"), Source: "byok"},

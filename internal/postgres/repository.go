@@ -13,8 +13,8 @@ import (
 
 // Repository aggregates all auth repositories backed by the same DBTX.
 type Repository struct {
-	Installations auth.InstallationRepository
-	APIKeys       auth.APIKeyRepository
+	Installations   auth.InstallationRepository
+	APIKeys         auth.APIKeyRepository
 	ExternalAPIKeys auth.ExternalAPIKeyRepository
 }
 
