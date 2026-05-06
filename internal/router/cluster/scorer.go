@@ -111,7 +111,7 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 		return nil, fmt.Errorf(
 			"cluster %s: no deployed entry matches the registered providers %v; "+
 				"add a provider key (ANTHROPIC_API_KEY / OPENAI_PROVIDER_API_KEY / "+
-				"GOOGLE_PROVIDER_API_KEY) or re-run train_cluster_router.py to "+
+				"OPENROUTER_API_KEY / GOOGLE_PROVIDER_API_KEY) or re-run train_cluster_router.py to "+
 				"include a model from a registered provider",
 			bundle.Version, sortedKeys(availableProviders),
 		)

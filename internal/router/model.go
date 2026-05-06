@@ -73,6 +73,11 @@ var (
 	googleBase = NewSpec()
 )
 
+// OpenAI-compatible aggregator / vLLM capability sets.
+var (
+	openAICompatBase = NewSpec()
+)
+
 var registry = map[string]ModelSpec{
 	// ── Anthropic: current (adaptive + extended) ──
 	"claude-opus-4-7":   anthropicFull,
@@ -152,4 +157,10 @@ var registry = map[string]ModelSpec{
 	"gemini-2.5-flash-lite": googleBase,
 	"gemini-2.0-flash":      googleBase,
 	"gemini-2.0-flash-lite": googleBase,
+
+	// -- OpenRouter / OpenAI-compatible OSS pool: Qwen3 R2-Router clone --
+	"qwen/qwen3-235b-a22b-2507":        openAICompatBase,
+	"qwen/qwen3-30b-a3b-instruct-2507": openAICompatBase,
+	"qwen/qwen3-coder-next":            openAICompatBase,
+	"qwen/qwen3-next-80b-a3b-instruct": openAICompatBase,
 }

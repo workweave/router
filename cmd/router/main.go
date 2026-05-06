@@ -27,6 +27,7 @@ import (
 	"workweave/router/internal/providers/anthropic"
 	googleProvider "workweave/router/internal/providers/google"
 	openaiProvider "workweave/router/internal/providers/openai"
+	openaiCompatProvider "workweave/router/internal/providers/openaicompat"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
@@ -86,6 +87,12 @@ func main() {
 		logger.Info("OpenAI provider enabled", "base_url", openaiBaseURL)
 	}
 
+	if openRouterKey := config.GetOr("OPENROUTER_API_KEY", ""); openRouterKey != "" {
+		openRouterBaseURL := config.GetOr("OPENROUTER_BASE_URL", openaiCompatProvider.DefaultBaseURL)
+		providerMap["openrouter"] = openaiCompatProvider.NewClient(openRouterKey, openRouterBaseURL)
+		logger.Info("OpenRouter provider enabled", "base_url", openRouterBaseURL)
+	}
+
 	if googleKey := config.GetOr("GOOGLE_PROVIDER_API_KEY", ""); googleKey != "" {
 		googleBaseURL := config.GetOr("GOOGLE_PROVIDER_BASE_URL", googleProvider.DefaultBaseURL)
 		providerMap["google"] = googleProvider.NewClient(googleKey, googleBaseURL)
@@ -93,7 +100,7 @@ func main() {
 	}
 
 	if len(providerMap) == 0 {
-		err := errors.New("no provider API keys configured: set at least one of ANTHROPIC_API_KEY, OPENAI_PROVIDER_API_KEY, GOOGLE_PROVIDER_API_KEY")
+		err := errors.New("no provider API keys configured: set at least one of ANTHROPIC_API_KEY, OPENAI_PROVIDER_API_KEY, OPENROUTER_API_KEY, GOOGLE_PROVIDER_API_KEY")
 		logger.Error("No upstream provider available; refusing to boot", "err", err)
 		panic(err)
 	}
@@ -496,6 +503,8 @@ func envVarForProvider(provider string) string {
 		return "ANTHROPIC_API_KEY"
 	case "openai":
 		return "OPENAI_PROVIDER_API_KEY"
+	case "openrouter":
+		return "OPENROUTER_API_KEY"
 	case "google":
 		return "GOOGLE_PROVIDER_API_KEY"
 	default:
