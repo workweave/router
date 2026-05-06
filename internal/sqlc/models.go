@@ -26,6 +26,26 @@ type RouterModelRouterAPIKey struct {
 	CreatedBy  *string
 }
 
+// Customer-owned provider API keys for BYOK routing
+type RouterModelRouterExternalAPIKey struct {
+	ID             uuid.UUID
+	InstallationID uuid.UUID
+	ExternalID     string
+	Provider       string
+	// AES-256-GCM encrypted API key with 12-byte nonce prepended
+	KeyCiphertext []byte
+	KeyPrefix     string
+	KeySuffix     string
+	// SHA-256 of plaintext for deduplication display
+	KeyFingerprint string
+	Name           *string
+	LastUsedAt     pgtype.Timestamp
+	CreatedAt      pgtype.Timestamp
+	UpdatedAt      pgtype.Timestamp
+	DeletedAt      pgtype.Timestamp
+	CreatedBy      *string
+}
+
 // Customer router installations; owns API keys
 type RouterModelRouterInstallation struct {
 	ID         uuid.UUID

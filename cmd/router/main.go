@@ -72,7 +72,30 @@ func main() {
 	}
 	defer pool.Close()
 
-	repo := postgres.NewRepository(pool)
+	// Load Tink keyset for external API key encryption. Fail-closed: a missing
+	// keyset is only acceptable under ROUTER_DEV_MODE=true, which the bundled
+	// docker-compose stack sets explicitly. Without this guard a deploy/config
+	// mistake would silently store customer BYOK secrets unencrypted.
+	devMode := config.GetOr("ROUTER_DEV_MODE", "false") == "true"
+	keysetJSON := config.GetOr("EXTERNAL_KEY_ENCRYPTION_KEY", "")
+	var encryptor auth.Encryptor
+	if keysetJSON == "" {
+		if !devMode {
+			err := errors.New("EXTERNAL_KEY_ENCRYPTION_KEY not set; refusing to boot without BYOK encryption (set ROUTER_DEV_MODE=true to allow the no-op encryptor in local dev)")
+			logger.Error("Refusing to boot without BYOK encryption key", "err", err)
+			panic(err)
+		}
+		logger.Warn("EXTERNAL_KEY_ENCRYPTION_KEY not set, using no-op encryptor (ROUTER_DEV_MODE=true)")
+		encryptor = auth.NoOpEncryptor{}
+	} else {
+		encryptor, err = auth.NewTinkEncryptor(keysetJSON)
+		if err != nil {
+			logger.Error("Failed to create Tink encryptor from keyset", "err", err)
+			os.Exit(1)
+		}
+	}
+
+	repo := postgres.NewRepository(pool, encryptor)
 
 	providerMap := make(map[string]providers.Client)
 
@@ -121,7 +144,7 @@ func main() {
 	logger.Info("Routing via cluster scorer", "embedder", "jina-v2-base-code-int8")
 
 	cache := auth.NewLRUAPIKeyCache(10000, 50000, 5*time.Minute, 60*time.Second)
-	authSvc := auth.NewService(repo.Installations, repo.APIKeys, cache, time.Now)
+	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, cache, time.Now)
 	embedLastUser := config.GetOr("ROUTER_EMBED_LAST_USER_MESSAGE", "false") == "true"
 	if embedLastUser {
 		logger.Info("Cluster scorer embedding the last user message (ROUTER_EMBED_LAST_USER_MESSAGE=true)")
@@ -168,11 +191,10 @@ func main() {
 		gin.Recovery(),
 	)
 
-	devModeNoAuth := config.GetOr("ROUTER_DEV_MODE", "false") == "true"
-	if devModeNoAuth {
+	if devMode {
 		logger.Info("ROUTER_DEV_MODE=true; bypassing bearer auth on /v1/* (DO NOT use in production)")
 	}
-	server.Register(engine, authSvc, proxySvc, devModeNoAuth)
+	server.Register(engine, authSvc, proxySvc, devMode)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),

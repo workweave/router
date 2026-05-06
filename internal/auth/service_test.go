@@ -65,6 +65,34 @@ func (f *fakeAPIKeyRepository) SoftDelete(ctx context.Context, id string) error 
 	return errors.New("not used by these tests")
 }
 
+type fakeExternalAPIKeyRepo struct {
+	keys []*auth.ExternalAPIKey
+	err  error
+}
+
+func (f *fakeExternalAPIKeyRepo) Create(ctx context.Context, params auth.CreateExternalAPIKeyParams) (*auth.ExternalAPIKey, error) {
+	return nil, nil
+}
+
+func (f *fakeExternalAPIKeyRepo) GetForInstallation(ctx context.Context, installationID string) ([]*auth.ExternalAPIKey, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.keys, nil
+}
+
+func (f *fakeExternalAPIKeyRepo) SoftDeleteByProvider(ctx context.Context, installationID, provider string) error {
+	return nil
+}
+
+func (f *fakeExternalAPIKeyRepo) SoftDelete(ctx context.Context, installationID, id string) error {
+	return nil
+}
+
+func (f *fakeExternalAPIKeyRepo) MarkUsed(ctx context.Context, id string) error {
+	return nil
+}
+
 type fakeInstallationRepository struct{}
 
 func (fakeInstallationRepository) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
@@ -97,6 +125,7 @@ func makeService(t *testing.T, rows ...fakeKeyRow) (*auth.Service, *fakeAPIKeyRe
 	svc := auth.NewService(
 		fakeInstallationRepository{},
 		apiKeys,
+		nil,
 		auth.NoOpAPIKeyCache{},
 		frozenClock(),
 	)
@@ -172,7 +201,7 @@ func (r *repoCallCounter) getCallCount() int {
 func TestService_VerifyAPIKey_RejectsTokenWithWrongPrefix(t *testing.T) {
 	svc, apiKeys := makeService(t)
 
-	_, _, err := svc.VerifyAPIKey(context.Background(), "wcckey_irrelevant")
+	_, _, _, err := svc.VerifyAPIKey(context.Background(), "wcckey_irrelevant")
 
 	require.ErrorIs(t, err, auth.ErrInvalidPrefix,
 		"non-rk_ tokens must be rejected with ErrInvalidPrefix")
@@ -183,7 +212,7 @@ func TestService_VerifyAPIKey_RejectsTokenWithWrongPrefix(t *testing.T) {
 func TestService_VerifyAPIKey_RejectsEmptyToken(t *testing.T) {
 	svc, _ := makeService(t)
 
-	_, _, err := svc.VerifyAPIKey(context.Background(), "")
+	_, _, _, err := svc.VerifyAPIKey(context.Background(), "")
 
 	require.ErrorIs(t, err, auth.ErrInvalidPrefix,
 		"empty tokens must be rejected with ErrInvalidPrefix (no prefix)")
@@ -192,7 +221,7 @@ func TestService_VerifyAPIKey_RejectsEmptyToken(t *testing.T) {
 func TestService_VerifyAPIKey_RejectsUnknownToken(t *testing.T) {
 	svc, _ := makeService(t)
 
-	_, _, err := svc.VerifyAPIKey(context.Background(), "rk_unknown")
+	_, _, _, err := svc.VerifyAPIKey(context.Background(), "rk_unknown")
 
 	require.ErrorIs(t, err, auth.ErrInvalidToken,
 		"a rk_ token whose hash isn't in the repo must return ErrInvalidToken")
@@ -203,7 +232,7 @@ func TestService_VerifyAPIKey_PropagatesNonNotFoundRepoError(t *testing.T) {
 	repoErr := errors.New("postgres connection refused")
 	apiKeys.override = repoErr
 
-	_, _, err := svc.VerifyAPIKey(context.Background(), "rk_anything")
+	_, _, _, err := svc.VerifyAPIKey(context.Background(), "rk_anything")
 
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, auth.ErrInvalidToken,
@@ -236,7 +265,7 @@ func TestService_VerifyAPIKey_HappyPathReturnsInstallationAndKey(t *testing.T) {
 
 	svc, apiKeys := makeService(t, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
 
-	gotInstall, gotKey, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	gotInstall, gotKey, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.NoError(t, err)
 	require.NotNil(t, gotInstall)
@@ -264,6 +293,7 @@ func makeServiceWithCacheAndCounter(t *testing.T, cache auth.APIKeyCache, rows .
 	svc := auth.NewService(
 		fakeInstallationRepository{},
 		counter,
+		nil,
 		cache,
 		frozenClock(),
 	)
@@ -290,7 +320,7 @@ func TestService_VerifyAPIKey_CacheHitSkipsRepo(t *testing.T) {
 
 	svc, repo := makeServiceWithCacheAndCounter(t, cache, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
 
-	gotInstall, gotKey, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	gotInstall, gotKey, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.NoError(t, err)
 	assert.Equal(t, "install_cached", gotInstall.ID,
@@ -312,7 +342,7 @@ func TestService_VerifyAPIKey_NegativeCacheHitSkipsRepo(t *testing.T) {
 
 	svc, repo := makeServiceWithCacheAndCounter(t, cache)
 
-	_, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	_, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.ErrorIs(t, err, auth.ErrInvalidToken,
 		"a negative cache hit must return ErrInvalidToken without consulting the DB")
@@ -329,7 +359,7 @@ func TestService_VerifyAPIKey_PopulatesCacheOnSuccessfulMiss(t *testing.T) {
 	cache := newRecordingAPIKeyCache()
 	svc, repo := makeServiceWithCacheAndCounter(t, cache, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
 
-	_, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	_, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, repo.getCallCount(),
@@ -353,7 +383,7 @@ func TestService_VerifyAPIKey_PopulatesNegativeCacheOnNotFound(t *testing.T) {
 	cache := newRecordingAPIKeyCache()
 	svc, repo := makeServiceWithCacheAndCounter(t, cache)
 
-	_, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	_, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.ErrorIs(t, err, auth.ErrInvalidToken)
 	assert.Equal(t, 1, repo.getCallCount())
@@ -371,11 +401,134 @@ func TestService_VerifyAPIKey_DoesNotCacheTransportErrors(t *testing.T) {
 	svc, repo := makeServiceWithCacheAndCounter(t, cache)
 	repo.fakeAPIKeyRepository.override = errors.New("postgres connection refused")
 
-	_, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	_, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, auth.ErrInvalidToken,
 		"a transport error must not collapse into ErrInvalidToken")
 	assert.Empty(t, cache.setSnapshot(),
 		"transport errors must NOT populate the cache; the next request might succeed")
+}
+
+func makeServiceWithExternalKeys(t *testing.T, externalRepo auth.ExternalAPIKeyRepository, rows ...fakeKeyRow) *auth.Service {
+	t.Helper()
+	apiKeys := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}
+	for _, row := range rows {
+		apiKeys.byHash[row.apiKey.KeyHash] = row
+	}
+	return auth.NewService(
+		fakeInstallationRepository{},
+		apiKeys,
+		externalRepo,
+		auth.NoOpAPIKeyCache{},
+		frozenClock(),
+	)
+}
+
+func TestService_VerifyAPIKey_WithExternalKeys(t *testing.T) {
+	rawToken := "rk_byok_test_token"
+	keyHash := auth.HashAPIKeySHA256(rawToken)
+	wantInstall := &auth.Installation{
+		ID:         "install_byok",
+		ExternalID: "org_byok",
+		Name:       "byok-tenant",
+	}
+	wantKey := &auth.APIKey{
+		ID:             "key_byok",
+		InstallationID: wantInstall.ID,
+		ExternalID:     wantInstall.ExternalID,
+		KeyHash:        keyHash,
+	}
+	externalKey := &auth.ExternalAPIKey{
+		ID:             "ext-key-1",
+		InstallationID: wantInstall.ID,
+		Provider:       "anthropic",
+		Plaintext:      []byte("sk-ant-test-key"),
+	}
+	fakeExternal := &fakeExternalAPIKeyRepo{keys: []*auth.ExternalAPIKey{externalKey}}
+	svc := makeServiceWithExternalKeys(t, fakeExternal, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
+
+	_, _, externalKeys, err := svc.VerifyAPIKey(context.Background(), rawToken)
+
+	require.NoError(t, err)
+	require.Len(t, externalKeys, 1,
+		"VerifyAPIKey must return external keys fetched for the installation")
+	assert.Equal(t, "anthropic", externalKeys[0].Provider)
+	assert.Equal(t, []byte("sk-ant-test-key"), externalKeys[0].Plaintext)
+}
+
+func TestService_VerifyAPIKey_ExternalKeyErrorIsNonFatal(t *testing.T) {
+	rawToken := "rk_extkey_error_test"
+	keyHash := auth.HashAPIKeySHA256(rawToken)
+	wantInstall := &auth.Installation{
+		ID:         "install_extfail",
+		ExternalID: "org_extfail",
+		Name:       "extfail-tenant",
+	}
+	wantKey := &auth.APIKey{
+		ID:             "key_extfail",
+		InstallationID: wantInstall.ID,
+		ExternalID:     wantInstall.ExternalID,
+		KeyHash:        keyHash,
+	}
+	fakeExternal := &fakeExternalAPIKeyRepo{err: errors.New("external key repo unavailable")}
+	svc := makeServiceWithExternalKeys(t, fakeExternal, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
+
+	gotInstall, gotKey, externalKeys, err := svc.VerifyAPIKey(context.Background(), rawToken)
+
+	require.NoError(t, err,
+		"an external key fetch error must not fail authentication")
+	require.NotNil(t, gotInstall)
+	require.NotNil(t, gotKey)
+	assert.Nil(t, externalKeys,
+		"when external key fetch fails, externalKeys must be nil rather than an error")
+}
+
+func TestService_VerifyAPIKey_ExternalKeysAreCached(t *testing.T) {
+	rawToken := "rk_extkey_cache_test"
+	keyHash := auth.HashAPIKeySHA256(rawToken)
+	wantInstall := &auth.Installation{
+		ID:         "install_extcache",
+		ExternalID: "org_extcache",
+		Name:       "extcache-tenant",
+	}
+	wantKey := &auth.APIKey{
+		ID:             "key_extcache",
+		InstallationID: wantInstall.ID,
+		ExternalID:     wantInstall.ExternalID,
+		KeyHash:        keyHash,
+	}
+	externalKey := &auth.ExternalAPIKey{
+		ID:             "ext-cached-1",
+		InstallationID: wantInstall.ID,
+		Provider:       "openai",
+		Plaintext:      []byte("sk-openai-test"),
+	}
+	fakeExternal := &fakeExternalAPIKeyRepo{keys: []*auth.ExternalAPIKey{externalKey}}
+
+	cache := newRecordingAPIKeyCache()
+	bare := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
+		keyHash: {apiKey: wantKey, installation: wantInstall},
+	}}
+	counter := &repoCallCounter{fakeAPIKeyRepository: bare}
+	svc := auth.NewService(
+		fakeInstallationRepository{},
+		counter,
+		fakeExternal,
+		cache,
+		frozenClock(),
+	)
+
+	// First call: populates cache with external keys.
+	_, _, externalKeys1, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	require.NoError(t, err)
+	require.Len(t, externalKeys1, 1)
+
+	// Second call: should hit the cache — DB must not be called again.
+	_, _, externalKeys2, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	require.NoError(t, err)
+	require.Len(t, externalKeys2, 1,
+		"external keys must be returned on a cache hit")
+	assert.Equal(t, 1, counter.getCallCount(),
+		"the repo must only be called once; the second call must be served from cache")
 }
