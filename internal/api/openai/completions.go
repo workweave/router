@@ -62,6 +62,11 @@ func ChatCompletionHandler(svc *proxy.Service) gin.HandlerFunc {
 				writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "request body must be a JSON object")
 				return
 			}
+			if errors.Is(err, cluster.ErrNoEligibleProvider) {
+				log.Warn("No eligible provider for request", "err", err)
+				writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "no provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header")
+				return
+			}
 			if errors.Is(err, cluster.ErrClusterUnavailable) {
 				log.Error("Cluster routing unavailable", "err", err)
 				c.Header("Retry-After", "1")

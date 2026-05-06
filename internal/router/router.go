@@ -12,6 +12,13 @@ type Request struct {
 	// used by content-aware routers (e.g. RouteLLM). Empty for routers
 	// that key only on token count or other features.
 	PromptText string
+	// EnabledProviders is the set of provider names whose credentials are
+	// resolvable for this request — boot-time env keys, BYOK keys on the
+	// installation, or per-request client headers. When non-nil, routers
+	// must restrict argmax to providers in this set so we never return a
+	// decision the upstream call would 401 on. Nil means "no per-request
+	// gating; use whatever the router was constructed with."
+	EnabledProviders map[string]struct{}
 }
 
 type Decision struct {
