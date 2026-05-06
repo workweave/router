@@ -465,3 +465,93 @@ func TestArgmax_TiebreakUsesOrderSlice(t *testing.T) {
 	assert.Equal(t, "A", gotA)
 	assert.Equal(t, "B", gotB)
 }
+
+// twoProviderArtifacts builds a 2-cluster fixture with one candidate per
+// provider (anthropic / openai), where the openai model would otherwise
+// outscore the anthropic model on the cluster the prompt aligns to. Used
+// to exercise per-request EnabledProviders gating.
+func twoProviderArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBlob []byte) {
+	t.Helper()
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	c1 := make([]float32, dim)
+	c1[1] = 1
+	full := append(append([]float32{}, c0...), c1...)
+	centroidsBlob = buildCentroidsBlob(t, 2, dim, full)
+
+	rankingsBlob = []byte(`{
+		"rankings": {
+			"0": {"claude-opus-4-7": 0.5, "gpt-5": 0.9},
+			"1": {"claude-opus-4-7": 0.1, "gpt-5": 0.05}
+		}
+	}`)
+	registryBlob = []byte(`{
+		"deployed_models": [
+			{"model": "claude-opus-4-7", "provider": "anthropic", "bench_column": "gpt-5", "proxy": true},
+			{"model": "gpt-5", "provider": "openai", "bench_column": "gpt-5"}
+		]
+	}`)
+	return
+}
+
+func newTwoProviderScorer(t *testing.T, emb Embedder) *Scorer {
+	t.Helper()
+	cb, rb, regb := twoProviderArtifacts(t)
+	bundle := bundleFromBlobs(t, "v-test-2p", cb, rb, regb)
+	available := map[string]struct{}{"anthropic": {}, "openai": {}}
+	s, err := NewScorer(bundle, cfgForTest(), emb, available)
+	require.NoError(t, err)
+	return s
+}
+
+// TestScorer_NilEnabledProvidersPreservesBootBehavior is the regression
+// guard for the gating opt-in: when the proxy passes no per-request
+// provider set, argmax runs unrestricted over the boot-time candidates.
+func TestScorer_NilEnabledProvidersPreservesBootBehavior(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s := newTwoProviderScorer(t, emb)
+
+	got, err := s.Route(context.Background(), router.Request{
+		PromptText: strings.Repeat("x", 100),
+	})
+	require.NoError(t, err)
+	// Cluster 0 ranks gpt-5 above opus; without gating, gpt-5 wins.
+	assert.Equal(t, "gpt-5", got.Model)
+	assert.Equal(t, "openai", got.Provider)
+}
+
+// TestScorer_EnabledProvidersGatesArgmax is the load-bearing assertion:
+// even when the unrestricted argmax would pick openai, restricting
+// EnabledProviders to {anthropic} forces argmax onto anthropic candidates.
+func TestScorer_EnabledProvidersGatesArgmax(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s := newTwoProviderScorer(t, emb)
+
+	got, err := s.Route(context.Background(), router.Request{
+		PromptText:       strings.Repeat("x", 100),
+		EnabledProviders: map[string]struct{}{"anthropic": {}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", got.Model)
+	assert.Equal(t, "anthropic", got.Provider)
+}
+
+// TestScorer_EmptyEnabledProvidersReturnsErrNoEligibleProvider asserts
+// the typed error: an installation with no resolvable provider keys
+// must surface a 4xx-mappable error rather than picking a model the
+// upstream call would 401 on.
+func TestScorer_EmptyEnabledProvidersReturnsErrNoEligibleProvider(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s := newTwoProviderScorer(t, emb)
+
+	_, err := s.Route(context.Background(), router.Request{
+		PromptText:       strings.Repeat("x", 100),
+		EnabledProviders: map[string]struct{}{"google": {}},
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNoEligibleProvider))
+	// Must NOT also surface as ErrClusterUnavailable; the API layer
+	// maps these two sentinels to different status codes (400 vs 503).
+	assert.False(t, errors.Is(err, ErrClusterUnavailable))
+}

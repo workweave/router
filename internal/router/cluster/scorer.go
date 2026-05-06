@@ -20,6 +20,14 @@ import (
 // regressions in eval and lets quality silently degrade in prod.
 var ErrClusterUnavailable = errors.New("cluster: routing unavailable")
 
+// ErrNoEligibleProvider is returned by Scorer.Route when the per-request
+// EnabledProviders set has no overlap with the scorer's boot-time
+// candidates. Callers map this to HTTP 4xx: the customer's request can't
+// be served because no provider keys are resolvable for any deployed
+// model, and silently routing to an unavailable provider would 401 at
+// the upstream call.
+var ErrNoEligibleProvider = errors.New("cluster: no eligible provider for request")
+
 // Config carries the scorer's runtime knobs.
 type Config struct {
 	TopP           int
@@ -245,16 +253,40 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		return router.Decision{}, fmt.Errorf("embedding dim %d != expected %d: %w", len(vec), s.centroids.Dim, ErrClusterUnavailable)
 	}
 
+	// Per-request provider gating: when the caller has resolved which
+	// providers they have credentials for, restrict argmax to that
+	// subset. This is the runtime complement to NewScorer's boot-time
+	// filterByProviders — boot gating excludes providers the deployment
+	// has no env key for, request gating excludes providers this
+	// installation has no BYOK / client key for.
+	eligibleModels := s.models
+	if req.EnabledProviders != nil {
+		eligibleModels = eligibleModels[:0:0]
+		for _, c := range s.candidates {
+			if _, ok := req.EnabledProviders[c.Provider]; ok {
+				eligibleModels = append(eligibleModels, c.Model)
+			}
+		}
+		if len(eligibleModels) == 0 {
+			log.Warn(
+				"Cluster scorer: no eligible provider for request; returning ErrNoEligibleProvider",
+				"enabled_providers", sortedKeys(req.EnabledProviders),
+				"requested_model", req.RequestedModel,
+			)
+			return router.Decision{}, fmt.Errorf("enabled providers %v have no overlap with deployed candidates: %w", sortedKeys(req.EnabledProviders), ErrNoEligibleProvider)
+		}
+	}
+
 	scoreStart := time.Now()
 	topClusters := topPNearest(vec, s.centroids, s.cfg.TopP)
-	scores := make(map[string]float32, len(s.models))
+	scores := make(map[string]float32, len(eligibleModels))
 	for _, k := range topClusters {
 		row := s.rankings[k]
-		for _, m := range s.models {
+		for _, m := range eligibleModels {
 			scores[m] += row[m]
 		}
 	}
-	chosenModel, chosenScore := argmax(scores, s.models)
+	chosenModel, chosenScore := argmax(scores, eligibleModels)
 	scoreUs := time.Since(scoreStart).Microseconds()
 
 	if chosenModel == "" {

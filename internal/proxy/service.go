@@ -261,6 +261,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			EstimatedInputTokens: feats.Tokens,
 			HasTools:             feats.HasTools,
 			PromptText:           promptText,
+			EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
 		})
 		if err != nil {
 			log.Error("Routing failed", "err", err, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "estimated_input_tokens", feats.Tokens)
@@ -484,6 +485,32 @@ func externalKeysFromContext(ctx context.Context) []*auth.ExternalAPIKey {
 	return keys
 }
 
+// enabledProvidersForRequest returns the set of provider names whose
+// credentials are resolvable for this request: any provider the router
+// has a boot-time env key for, any provider with a BYOK key on the
+// installation, and any provider whose client-supplied header carries a
+// non-router bearer/x-api-key. The cluster scorer intersects this set
+// with its boot-time candidates so argmax never picks a model the
+// upstream call would 401 on.
+func (s *Service) enabledProvidersForRequest(ctx context.Context, headers http.Header) map[string]struct{} {
+	out := make(map[string]struct{}, len(s.providers))
+	for p := range s.providers {
+		out[p] = struct{}{}
+	}
+	for _, k := range externalKeysFromContext(ctx) {
+		out[k.Provider] = struct{}{}
+	}
+	for _, p := range []string{"anthropic", "openai", "google", "openrouter"} {
+		if _, already := out[p]; already {
+			continue
+		}
+		if ExtractClientCredentials(p, headers) != nil {
+			out[p] = struct{}{}
+		}
+	}
+	return out
+}
+
 // resolveAndInjectCredentials builds a BYOK credentials map from the external
 // keys on ctx, resolves the best credentials for provider, and returns a
 // context with the credentials stashed under CredentialsContextKey. When no
@@ -556,6 +583,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		PromptText:           feats.PromptText,
+		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {
