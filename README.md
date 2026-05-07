@@ -514,6 +514,14 @@ Set `DATABASE_URL` directly, or compose it from the individual vars:
 | `ROUTER_DECISIONS_LOG_PATH`    | `~/.weave-router/decisions.jsonl`    | Path for the JSON-lines decision sidecar log (one line per routed request). Set to `off` to disable.                                        |
 
 
+#### BYOK encryption
+
+
+| Variable                       | Default    | Purpose                                                                                                                                                                                                                                                                          |
+| ------------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXTERNAL_KEY_ENCRYPTION_KEY`  | *(unset)*  | Tink AES-256-GCM keyset (JSON) used to encrypt customer-supplied upstream provider keys (BYOK secrets) at rest. **If unset, the router boots with a no-op encryptor and stores BYOK secrets unencrypted** — the router logs a `WARN` at startup. Set this in any deployment that handles real customer BYOK secrets. A *malformed* keyset still fails closed (the router refuses to boot); only a genuinely absent value triggers the bypass. Generate with `tinkey create-keyset --key-template AES256_GCM --out-format json`. |
+
+
 #### Telemetry (OpenTelemetry)
 
 The router can export per-request trace spans to any OTLP-compatible

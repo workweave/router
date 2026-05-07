@@ -78,20 +78,19 @@ func main() {
 	}
 	defer pool.Close()
 
-	// Load Tink keyset for external API key encryption. Fail-closed: a missing
-	// keyset is only acceptable under ROUTER_DEV_MODE=true, which the bundled
-	// docker-compose stack sets explicitly. Without this guard a deploy/config
-	// mistake would silently store customer BYOK secrets unencrypted.
 	devMode := config.GetOr("ROUTER_DEV_MODE", "false") == "true"
+
+	// Load Tink keyset for external API key encryption. The keyset is optional:
+	// if EXTERNAL_KEY_ENCRYPTION_KEY is unset the router boots with the no-op
+	// encryptor and stores BYOK secrets unencrypted at rest. This is convenient
+	// for self-hosters and local dev; for production deployments handling
+	// customer BYOK secrets, set the keyset so ciphertext is at-rest encrypted.
+	// A malformed keyset is still fail-closed — we only bypass when the var is
+	// genuinely absent, never when it's set-but-broken.
 	keysetJSON := config.GetOr("EXTERNAL_KEY_ENCRYPTION_KEY", "")
 	var encryptor auth.Encryptor
 	if keysetJSON == "" {
-		if !devMode {
-			err := errors.New("EXTERNAL_KEY_ENCRYPTION_KEY not set; refusing to boot without BYOK encryption (set ROUTER_DEV_MODE=true to allow the no-op encryptor in local dev)")
-			logger.Error("Refusing to boot without BYOK encryption key", "err", err)
-			panic(err)
-		}
-		logger.Warn("EXTERNAL_KEY_ENCRYPTION_KEY not set, using no-op encryptor (ROUTER_DEV_MODE=true)")
+		logger.Warn("EXTERNAL_KEY_ENCRYPTION_KEY not set; BYOK secrets will be stored unencrypted at rest. Set EXTERNAL_KEY_ENCRYPTION_KEY to a Tink AES-256-GCM keyset to enable encryption.")
 		encryptor = auth.NoOpEncryptor{}
 	} else {
 		encryptor, err = auth.NewTinkEncryptor(keysetJSON)
