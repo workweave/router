@@ -545,7 +545,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			proxyWriter = extractor
 		}
 		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
-	case providers.ProviderOpenAI, providers.ProviderGoogle:
+	case providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter:
 		crossFormat = true
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
 		if emitErr != nil {
