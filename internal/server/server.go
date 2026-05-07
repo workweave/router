@@ -3,6 +3,7 @@
 package server
 
 import (
+	"net/http"
 	"time"
 
 	"workweave/router/internal/api/admin"
@@ -23,6 +24,7 @@ const (
 	chatCompletionTimeout = 600 * time.Second
 	passthroughTimeout    = 10 * time.Second
 	routeTimeout          = 5 * time.Second
+	adminTimeout          = 10 * time.Second
 )
 
 // Register wires routes onto the engine. devModeNoAuth skips bearer-auth on
@@ -30,8 +32,34 @@ const (
 func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, devModeNoAuth bool) {
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
 
+	// Redirect bare root to the UI.
+	engine.GET("/", func(c *gin.Context) { c.Redirect(http.StatusFound, "/ui/") })
+	engine.Static("/ui", "./assets/ui")
+
 	adminAuthed := engine.Group("", middleware.WithTimeout(validateTimeout), middleware.WithAuth(authSvc))
 	adminAuthed.GET("/validate", admin.ValidateHandler)
+
+	// Admin dashboard auth (login/logout/me). Public — these endpoints
+	// either accept a password and mint a cookie, or report whether the
+	// caller already has one. Putting them inside the WithAuth group would
+	// be a chicken-and-egg deadlock for users who don't yet have a cookie.
+	authPublic := engine.Group("/admin/v1/auth", middleware.WithTimeout(adminTimeout))
+	authPublic.POST("/login", admin.LoginHandler(authSvc))
+	authPublic.POST("/logout", admin.LogoutHandler())
+	authPublic.GET("/me", admin.MeHandler(authSvc))
+
+	// Management API — all routes require auth (cookie or rk_ bearer) and
+	// use the admin timeout.
+	mgmt := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAuth(authSvc))
+	mgmt.GET("/metrics/summary", admin.MetricsSummaryHandler(proxySvc))
+	mgmt.GET("/metrics/timeseries", admin.MetricsTimeseriesHandler(proxySvc))
+	mgmt.GET("/keys", admin.ListAPIKeysHandler(authSvc))
+	mgmt.POST("/keys", admin.IssueAPIKeyHandler(authSvc))
+	mgmt.DELETE("/keys/:id", admin.DeleteAPIKeyHandler(authSvc))
+	mgmt.GET("/provider-keys", admin.ListExternalKeysHandler(authSvc))
+	mgmt.POST("/provider-keys", admin.UpsertExternalKeyHandler(authSvc))
+	mgmt.DELETE("/provider-keys/:id", admin.DeleteExternalKeyHandler(authSvc))
+	mgmt.GET("/config", admin.ConfigHandler)
 
 	messagesAuth := []gin.HandlerFunc{middleware.WithTimingEntry(), middleware.WithTimeout(messagesTimeout)}
 	if !devModeNoAuth {

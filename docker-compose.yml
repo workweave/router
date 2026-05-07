@@ -98,6 +98,10 @@ services:
       # resolveAssetsDir() picks up the dev-only path, the cluster scorer
       # fails to load, and the router silently falls open to the heuristic.
       ROUTER_ONNX_ASSETS_DIR: /opt/router/assets
+      # .env.local may set ROUTER_ONNX_LIBRARY_DIR to a macOS Homebrew path
+      # that doesn't exist inside the container. The Dockerfile copies
+      # libonnxruntime.so to /usr/lib which is on the default linker path.
+      ROUTER_ONNX_LIBRARY_DIR: /usr/lib
     # Host port 8082 matches the .env.development default for local non-docker
     # runs, so the same curl commands work against either.
     ports:

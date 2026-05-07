@@ -1,0 +1,126 @@
+package admin
+
+import (
+	"net/http"
+	"time"
+
+	"workweave/router/internal/proxy"
+	"workweave/router/internal/server/middleware"
+
+	"github.com/gin-gonic/gin"
+)
+
+type metricsSummaryResponse struct {
+	RequestCount          int64   `json:"request_count"`
+	TotalTokens           int64   `json:"total_tokens"`
+	TotalRequestedCostUSD float64 `json:"total_requested_cost_usd"`
+	TotalActualCostUSD    float64 `json:"total_actual_cost_usd"`
+	TotalSavingsUSD       float64 `json:"total_savings_usd"`
+}
+
+type timeseriesBucket struct {
+	Bucket           string  `json:"bucket"`
+	RequestedCostUSD float64 `json:"requested_cost_usd"`
+	ActualCostUSD    float64 `json:"actual_cost_usd"`
+}
+
+type metricsTimeseriesResponse struct {
+	Buckets []timeseriesBucket `json:"buckets"`
+}
+
+// MetricsSummaryHandler returns aggregated cost/token totals. Admin-cookie
+// sessions see totals across every installation; rk_-keyed callers see
+// totals for their own installation only.
+func MetricsSummaryHandler(proxySvc *proxy.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		from, to := parseTimeWindow(c)
+
+		var (
+			summary proxy.TelemetrySummary
+			err     error
+		)
+		if admin := middleware.AdminPrincipalFrom(c); admin != nil {
+			summary, err = proxySvc.MetricsSummaryAll(c.Request.Context(), from, to)
+		} else {
+			installation := middleware.InstallationFrom(c)
+			if installation == nil {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_key"})
+				return
+			}
+			summary, err = proxySvc.MetricsSummary(c.Request.Context(), installation.ID, from, to)
+		}
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch metrics"})
+			return
+		}
+
+		c.JSON(http.StatusOK, metricsSummaryResponse{
+			RequestCount:          summary.RequestCount,
+			TotalTokens:           summary.TotalTokens,
+			TotalRequestedCostUSD: summary.TotalRequestedCostUSD,
+			TotalActualCostUSD:    summary.TotalActualCostUSD,
+			TotalSavingsUSD:       summary.TotalSavingsUSD,
+		})
+	}
+}
+
+// MetricsTimeseriesHandler returns bucketed cost data for the cost savings
+// chart. Admin-cookie sessions aggregate across every installation; rk_-keyed
+// callers see only their own installation.
+func MetricsTimeseriesHandler(proxySvc *proxy.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		granularity := c.DefaultQuery("granularity", "hour")
+		if granularity != "hour" && granularity != "day" {
+			granularity = "hour"
+		}
+		from, to := parseTimeWindow(c)
+
+		var (
+			buckets []proxy.TelemetryBucket
+			err     error
+		)
+		if admin := middleware.AdminPrincipalFrom(c); admin != nil {
+			buckets, err = proxySvc.MetricsTimeseriesAll(c.Request.Context(), from, to, granularity)
+		} else {
+			installation := middleware.InstallationFrom(c)
+			if installation == nil {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_key"})
+				return
+			}
+			buckets, err = proxySvc.MetricsTimeseries(c.Request.Context(), installation.ID, from, to, granularity)
+		}
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch timeseries"})
+			return
+		}
+
+		out := make([]timeseriesBucket, 0, len(buckets))
+		for _, b := range buckets {
+			out = append(out, timeseriesBucket{
+				Bucket:           b.Bucket.UTC().Format(time.RFC3339),
+				RequestedCostUSD: b.RequestedCostUSD,
+				ActualCostUSD:    b.ActualCostUSD,
+			})
+		}
+		c.JSON(http.StatusOK, metricsTimeseriesResponse{Buckets: out})
+	}
+}
+
+// parseTimeWindow reads optional ?from= and ?to= RFC3339 query params.
+// Defaults to the last 7 days when absent or unparseable.
+func parseTimeWindow(c *gin.Context) (from, to time.Time) {
+	to = time.Now().UTC()
+	from = to.AddDate(0, 0, -7)
+
+	if raw := c.Query("from"); raw != "" {
+		if t, err := time.Parse(time.RFC3339, raw); err == nil {
+			from = t.UTC()
+		}
+	}
+	if raw := c.Query("to"); raw != "" {
+		if t, err := time.Parse(time.RFC3339, raw); err == nil {
+			to = t.UTC()
+		}
+	}
+	return from, to
+}

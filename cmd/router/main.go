@@ -151,7 +151,23 @@ func main() {
 	logger.Info("Routing via cluster scorer", "embedder", "jina-v2-base-code-int8")
 
 	cache := auth.NewLRUAPIKeyCache(10000, 50000, 5*time.Minute, 60*time.Second)
-	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, cache, time.Now)
+	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, cache, time.Now).WithEncryptor(encryptor)
+
+	// Admin dashboard password. Required outside dev mode so a self-hoster
+	// who simply runs the binary cannot end up with an unauthenticated
+	// dashboard exposed to the internet. In dev mode we fall back to a
+	// well-known default and warn loudly.
+	adminPassword := config.GetOr("ROUTER_ADMIN_PASSWORD", "")
+	if adminPassword == "" {
+		if !devMode {
+			err := errors.New("ROUTER_ADMIN_PASSWORD not set; refusing to boot without admin dashboard credentials (set ROUTER_DEV_MODE=true to use the default 'admin' password in local dev)")
+			logger.Error("Refusing to boot without admin password", "err", err)
+			panic(err)
+		}
+		adminPassword = "admin"
+		logger.Warn("ROUTER_ADMIN_PASSWORD not set; using default 'admin' (ROUTER_DEV_MODE=true)")
+	}
+	authSvc.WithAdminPassword(adminPassword)
 	embedLastUser := config.GetOr("ROUTER_EMBED_LAST_USER_MESSAGE", "false") == "true"
 	if embedLastUser {
 		logger.Info("Cluster scorer embedding the last user message (ROUTER_EMBED_LAST_USER_MESSAGE=true)")
@@ -202,7 +218,7 @@ func main() {
 	}
 	logger.Info("Hard-pin model resolved", "provider", hardPinProvider, "model", hardPinModel)
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel)
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry)
 
 	engine := gin.New()
 	engine.UnescapePathValues = true

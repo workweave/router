@@ -61,6 +61,9 @@ type Service struct {
 	// overridable via ROUTER_HARD_PIN_PROVIDER / ROUTER_HARD_PIN_MODEL.
 	hardPinProvider string
 	hardPinModel    string
+	// telemetry is an optional repository for persisting per-request telemetry.
+	// Nil disables persistence (e.g. no DB in some test environments).
+	telemetry TelemetryRepository
 }
 
 // pinSessionTTL is the sliding TTL written into pinned_until on every
@@ -90,15 +93,10 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 	return creds
 }
 
-// InstallationIDContextKey is the request-context key for the authed
-// installation's UUID. Stashed by middleware.WithAuth and read by
-// ProxyMessages so session pins can be FK'd to the installation.
-type InstallationIDContextKey struct{}
-
 // NewService constructs the proxy service. pinStore may be nil when the
 // session-pin feature flag is off; the tiered lookup transparently
 // short-circuits past tiers 1–2 in that case.
-func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string) *Service {
+func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
 	var sticky *expirable.LRU[string, router.Decision]
 	if stickyDecisionTTL > 0 {
 		sticky = expirable.NewLRU[string, router.Decision](10000, nil, stickyDecisionTTL)
@@ -123,7 +121,42 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		hardPinExplore:       hardPinExplore,
 		hardPinProvider:      hardPinProvider,
 		hardPinModel:         hardPinModel,
+		telemetry:            telemetry,
 	}
+}
+
+// MetricsSummary returns aggregated cost/token totals for the given installation and time window.
+func (s *Service) MetricsSummary(ctx context.Context, installationID string, from, to time.Time) (TelemetrySummary, error) {
+	if s.telemetry == nil {
+		return TelemetrySummary{}, nil
+	}
+	return s.telemetry.GetTelemetrySummary(ctx, installationID, from, to)
+}
+
+// MetricsTimeseries returns per-bucket cost rows for the cost savings chart.
+func (s *Service) MetricsTimeseries(ctx context.Context, installationID string, from, to time.Time, granularity string) ([]TelemetryBucket, error) {
+	if s.telemetry == nil {
+		return nil, nil
+	}
+	return s.telemetry.GetTelemetryTimeseries(ctx, installationID, from, to, granularity)
+}
+
+// MetricsSummaryAll aggregates totals across every installation. Used by
+// admin-cookie sessions on the dashboard.
+func (s *Service) MetricsSummaryAll(ctx context.Context, from, to time.Time) (TelemetrySummary, error) {
+	if s.telemetry == nil {
+		return TelemetrySummary{}, nil
+	}
+	return s.telemetry.GetTelemetrySummaryAll(ctx, from, to)
+}
+
+// MetricsTimeseriesAll returns per-bucket cost rows aggregated across every
+// installation. Admin-only counterpart to MetricsTimeseries.
+func (s *Service) MetricsTimeseriesAll(ctx context.Context, from, to time.Time, granularity string) ([]TelemetryBucket, error) {
+	if s.telemetry == nil {
+		return nil, nil
+	}
+	return s.telemetry.GetTelemetryTimeseriesAll(ctx, from, to, granularity)
 }
 
 // ErrProviderNotConfigured is returned when a routing decision selects a
@@ -654,6 +687,34 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		})
 	}
 
+	if installationID != "" {
+		s.fireTelemetry(InsertTelemetryParams{
+			InstallationID:         installationID,
+			RequestID:              requestID,
+			SpanType:               "router.upstream",
+			TraceID:                requestID,
+			Timestamp:              requestStart,
+			RequestedModel:         feats.Model,
+			DecisionModel:          decision.Model,
+			DecisionProvider:       decision.Provider,
+			DecisionReason:         decision.Reason,
+			EstimatedInputTokens:   int32(feats.Tokens),
+			StickyHit:              stickyHit,
+			EmbedInput:             embedInput,
+			InputTokens:            int32(in),
+			OutputTokens:           int32(out),
+			RequestedInputCostUSD:  float64(in) / 1_000_000 * reqPricing.InputUSDPer1M,
+			RequestedOutputCostUSD: float64(out) / 1_000_000 * reqPricing.OutputUSDPer1M,
+			ActualInputCostUSD:     float64(in) / 1_000_000 * actPricing.InputUSDPer1M,
+			ActualOutputCostUSD:    float64(out) / 1_000_000 * actPricing.OutputUSDPer1M,
+			RouteLatencyMs:         routeMs,
+			UpstreamLatencyMs:      proxyMs,
+			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
+			CrossFormat:            crossFormat,
+			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
+		})
+	}
+
 	log.Info("ProxyMessages complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
@@ -774,6 +835,21 @@ func addTimingAttrs(ctx context.Context, b *otel.AttrBuilder) {
 		Int64("latency.upstream_total_ms", upstreamTotal).
 		Int64("latency.postupstream_ms", t.MsSince(&t.UpstreamEOFNanos)).
 		Int64("latency.router_overhead_ms", overhead)
+}
+
+// fireTelemetry persists a telemetry row asynchronously so it never blocks
+// the response path. Errors are logged at Debug — telemetry loss is acceptable.
+func (s *Service) fireTelemetry(p InsertTelemetryParams) {
+	if s.telemetry == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.telemetry.InsertRequestTelemetry(ctx, p); err != nil {
+			observability.Get().Debug("Telemetry insert failed", "err", err, "request_id", p.RequestID)
+		}
+	}()
 }
 
 // upstreamStatus extracts the HTTP status from an UpstreamStatusError, or 0.
@@ -999,6 +1075,34 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Attrs: openaiUpstreamBuilder.Build(),
 	})
 	otel.Flush(ctx)
+
+	installationIDOAI, _ := ctx.Value(InstallationIDContextKey{}).(string)
+	if installationIDOAI != "" {
+		s.fireTelemetry(InsertTelemetryParams{
+			InstallationID:         installationIDOAI,
+			RequestID:              requestID,
+			SpanType:               "router.upstream",
+			TraceID:                requestID,
+			Timestamp:              requestStart,
+			RequestedModel:         feats.Model,
+			DecisionModel:          decision.Model,
+			DecisionProvider:       decision.Provider,
+			DecisionReason:         decision.Reason,
+			EstimatedInputTokens:   int32(feats.Tokens),
+			StickyHit:              false,
+			InputTokens:            int32(in),
+			OutputTokens:           int32(out),
+			RequestedInputCostUSD:  float64(in) / 1_000_000 * reqPricing.InputUSDPer1M,
+			RequestedOutputCostUSD: float64(out) / 1_000_000 * reqPricing.OutputUSDPer1M,
+			ActualInputCostUSD:     float64(in) / 1_000_000 * actPricing.InputUSDPer1M,
+			ActualOutputCostUSD:    float64(out) / 1_000_000 * actPricing.OutputUSDPer1M,
+			RouteLatencyMs:         routeMs,
+			UpstreamLatencyMs:      proxyMs,
+			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
+			CrossFormat:            crossFormat,
+			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
+		})
+	}
 
 	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "cross_format", crossFormat, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr

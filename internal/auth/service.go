@@ -19,6 +19,13 @@ type Service struct {
 	externalKeys  ExternalAPIKeyRepository
 	cache         APIKeyCache
 	now           Clock
+	encryptor     Encryptor
+
+	// Admin dashboard auth: a single shared password (typically from the
+	// ROUTER_ADMIN_PASSWORD env var) plus a derived HMAC key used to sign
+	// session cookies. Empty when admin login is disabled.
+	adminPassword   string
+	adminSessionKey []byte
 }
 
 func NewService(
@@ -34,7 +41,86 @@ func NewService(
 		externalKeys:  externalKeys,
 		cache:         cache,
 		now:           now,
+		encryptor:     NoOpEncryptor{},
 	}
+}
+
+// WithEncryptor sets the encryptor used when creating external API keys.
+func (s *Service) WithEncryptor(e Encryptor) *Service {
+	s.encryptor = e
+	return s
+}
+
+// IssueAPIKey creates a new router API key and returns the domain object plus
+// the raw token (only time it is visible; not stored in plaintext).
+func (s *Service) IssueAPIKey(ctx context.Context, installationID string, name *string, createdBy *string) (*APIKey, string, error) {
+	rawToken := GenerateID(APIKeyPrefix)
+	keyHash, keyPrefix, keySuffix := APITokenFingerprint(rawToken)
+	externalID := GenerateID("kid")
+	key, err := s.apiKeys.Create(ctx, CreateAPIKeyParams{
+		InstallationID: installationID,
+		ExternalID:     externalID,
+		Name:           name,
+		KeyPrefix:      keyPrefix,
+		KeyHash:        keyHash,
+		KeySuffix:      keySuffix,
+		CreatedBy:      createdBy,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return key, rawToken, nil
+}
+
+// ListAPIKeys returns all active API keys for an installation.
+func (s *Service) ListAPIKeys(ctx context.Context, installationID string) ([]*APIKey, error) {
+	return s.apiKeys.ListForInstallation(ctx, installationID)
+}
+
+// DeleteAPIKey soft-deletes an API key. The LRU cache will TTL-expire the
+// entry; any in-flight request using the key within the TTL window will still
+// succeed, which is acceptable for the rare delete-key path.
+func (s *Service) DeleteAPIKey(ctx context.Context, id string) error {
+	return s.apiKeys.SoftDelete(ctx, id)
+}
+
+// ListExternalAPIKeys returns all active provider API keys for an installation.
+func (s *Service) ListExternalAPIKeys(ctx context.Context, installationID string) ([]*ExternalAPIKey, error) {
+	return s.externalKeys.GetForInstallation(ctx, installationID)
+}
+
+// UpsertExternalAPIKey replaces any existing key for the provider and inserts a
+// new one. The raw key is encrypted before storage.
+func (s *Service) UpsertExternalAPIKey(ctx context.Context, installationID, provider, rawKey string, name *string, createdBy *string) (*ExternalAPIKey, error) {
+	ciphertext, err := s.encryptor.Encrypt([]byte(rawKey))
+	if err != nil {
+		return nil, err
+	}
+	if err := s.externalKeys.SoftDeleteByProvider(ctx, installationID, provider); err != nil {
+		return nil, err
+	}
+	hash, prefix, suffix := APITokenFingerprint(rawKey)
+	externalID := GenerateID("ekid")
+	key, err := s.externalKeys.Create(ctx, CreateExternalAPIKeyParams{
+		InstallationID: installationID,
+		ExternalID:     externalID,
+		Provider:       provider,
+		KeyCiphertext:  ciphertext,
+		KeyPrefix:      prefix,
+		KeySuffix:      suffix,
+		KeyFingerprint: hash,
+		Name:           name,
+		CreatedBy:      createdBy,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return key, nil
+}
+
+// DeleteExternalAPIKey soft-deletes a specific provider API key.
+func (s *Service) DeleteExternalAPIKey(ctx context.Context, installationID, id string) error {
+	return s.externalKeys.SoftDelete(ctx, installationID, id)
 }
 
 // VerifyAPIKey authenticates a raw bearer token. Returns ErrInvalidPrefix or

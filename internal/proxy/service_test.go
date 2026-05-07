@@ -53,7 +53,7 @@ func (f *fakeProvider) Passthrough(ctx context.Context, prep providers.PreparedR
 }
 
 func makeProxyService(decision router.Decision, p map[string]providers.Client) *proxy.Service {
-	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, 0, nil, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5")
+	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, 0, nil, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 }
 
 func TestService_ProxyMessages_PropagatesUpstreamStatusError(t *testing.T) {
@@ -105,6 +105,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 			nil,
 			false,
 			providers.ProviderAnthropic, "claude-haiku-4-5",
+			nil,
 		)
 
 		rec := httptest.NewRecorder()
@@ -131,6 +132,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 			nil,
 			false,
 			providers.ProviderAnthropic, "claude-haiku-4-5",
+			nil,
 		)
 
 		rec := httptest.NewRecorder()
@@ -197,6 +199,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageContextOverride(t *testing.T)
 				nil,
 				false,
 				"anthropic", "claude-haiku-4-5",
+				nil,
 			)
 
 			ctx := context.Background()
@@ -244,6 +247,7 @@ func TestService_ProxyMessages_StickyBypassedByEvalOverrideHeaders(t *testing.T)
 				nil,
 				false,
 				providers.ProviderAnthropic, "claude-haiku-4-5",
+				nil,
 			)
 
 			ctx := context.WithValue(context.Background(), proxy.APIKeyIDContextKey{}, "key-1")

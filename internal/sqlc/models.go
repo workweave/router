@@ -72,3 +72,31 @@ type RouterSessionPin struct {
 	FirstPinnedAt  pgtype.Timestamp
 	LastSeenAt     pgtype.Timestamp
 }
+
+type RouterModelRouterRequestTelemetry struct {
+	ID                     uuid.UUID
+	InstallationID         uuid.UUID
+	RequestID              string
+	SpanType               string
+	TraceID                string
+	Timestamp              pgtype.Timestamptz
+	RequestedModel         *string
+	DecisionModel          *string
+	DecisionProvider       *string
+	DecisionReason         *string
+	EstimatedInputTokens   *int32
+	StickyHit              *bool
+	EmbedInput             *string
+	InputTokens            *int32
+	OutputTokens           *int32
+	RequestedInputCostUsd  pgtype.Numeric
+	RequestedOutputCostUsd pgtype.Numeric
+	ActualInputCostUsd     pgtype.Numeric
+	ActualOutputCostUsd    pgtype.Numeric
+	RouteLatencyMs         *int64
+	UpstreamLatencyMs      *int64
+	TotalLatencyMs         *int64
+	CrossFormat            *bool
+	UpstreamStatusCode     *int32
+	CreatedAt              pgtype.Timestamptz
+}

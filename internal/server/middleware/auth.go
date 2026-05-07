@@ -14,19 +14,29 @@ import (
 )
 
 const (
-	ctxKeyInstallation = "router_installation"
-	ctxKeyAPIKey       = "router_api_key"
+	ctxKeyInstallation   = "router_installation"
+	ctxKeyAPIKey         = "router_api_key"
+	ctxKeyAdminPrincipal = "router_admin_principal"
 )
 
 // RouterKeyHeader carries the Weave Router key when clients need to preserve
 // Authorization / x-api-key for the upstream provider.
 const RouterKeyHeader = "X-Weave-Router-Key"
 
-// WithAuth validates the inbound API key from X-Weave-Router-Key,
-// Authorization: Bearer, or x-api-key headers. On failure, short-circuits with
-// a generic 401.
+// WithAuth validates the inbound request via either a signed admin session
+// cookie or a bearer rk_ token. On failure, short-circuits with a 401.
+//
+// Cookie sessions are admin-scoped (no installation context). rk_ keys are
+// installation-scoped and surface their installation/api-key/external-keys
+// onto the request context the way they always have.
 func WithAuth(svc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if principal := tryAdminCookie(c, svc); principal != nil {
+			c.Set(ctxKeyAdminPrincipal, principal)
+			c.Next()
+			return
+		}
+
 		token := extractToken(c)
 		installation, apiKey, externalKeys, err := svc.VerifyAPIKey(c.Request.Context(), token)
 		if err != nil {
@@ -39,8 +49,13 @@ func WithAuth(svc *auth.Service) gin.HandlerFunc {
 		if apiKey != nil {
 			ctx = context.WithValue(ctx, proxy.APIKeyIDContextKey{}, apiKey.ID)
 		}
-		if installation != nil && installation.ExternalID != "" {
-			ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, installation.ExternalID)
+		if installation != nil {
+			if installation.ExternalID != "" {
+				ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, installation.ExternalID)
+			}
+			if installation.ID != "" {
+				ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, installation.ID)
+			}
 		}
 		if externalKeys != nil {
 			ctx = context.WithValue(ctx, proxy.ExternalAPIKeysContextKey{}, externalKeys)
@@ -51,6 +66,26 @@ func WithAuth(svc *auth.Service) gin.HandlerFunc {
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
+}
+
+// tryAdminCookie verifies the admin session cookie if present. Returns nil
+// (caller falls through to bearer auth) when there is no cookie, when admin
+// login isn't configured, or when the cookie is invalid/expired.
+func tryAdminCookie(c *gin.Context, svc *auth.Service) *auth.AdminPrincipal {
+	if !svc.AdminLoginEnabled() {
+		return nil
+	}
+	cookie, err := c.Cookie(auth.AdminSessionCookieName)
+	if err != nil || cookie == "" {
+		return nil
+	}
+	principal, err := svc.VerifyAdminSession(cookie)
+	if err != nil {
+		// Stale or tampered cookie: don't fail the request here — the user
+		// might still be sending a valid rk_ bearer alongside it.
+		return nil
+	}
+	return principal
 }
 
 // extractToken pulls the router token from the router-only header first, then
@@ -104,7 +139,8 @@ func ExternalAPIKeysFrom(c *gin.Context) []*auth.ExternalAPIKey {
 }
 
 // InstallationFrom retrieves the authed installation set by WithAuth. Returns
-// nil when the request never went through WithAuth.
+// nil for admin-cookie sessions (which are unscoped) and for requests that
+// never went through WithAuth.
 func InstallationFrom(c *gin.Context) *auth.Installation {
 	v, ok := c.Get(ctxKeyInstallation)
 	if !ok {
@@ -121,4 +157,16 @@ func APIKeyFrom(c *gin.Context) *auth.APIKey {
 	}
 	apiKey, _ := v.(*auth.APIKey)
 	return apiKey
+}
+
+// AdminPrincipalFrom retrieves the admin principal stashed by WithAuth when
+// the request authenticated via the session cookie. Returns nil for
+// rk_-keyed requests and for requests that never went through WithAuth.
+func AdminPrincipalFrom(c *gin.Context) *auth.AdminPrincipal {
+	v, ok := c.Get(ctxKeyAdminPrincipal)
+	if !ok {
+		return nil
+	}
+	principal, _ := v.(*auth.AdminPrincipal)
+	return principal
 }
