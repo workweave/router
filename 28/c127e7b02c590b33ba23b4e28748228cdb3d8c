@@ -1,0 +1,27 @@
+README.md
+  s_554a14a1bf7a18::t_06f3596f7fa9b9 517-524
+cmd/router/main.go
+  s_554a14a1bf7a18::t_d44a06a05ce6be 83-89,93
+  s_554a14a1bf7a18::t_95f96d04f3e55d 82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "28c127e7b02c590b33ba23b4e28748228cdb3d8c",
+  "prompts": {},
+  "humans": {
+    "h_6e20dcf5f4a808": {
+      "author": "steventohme"
+    }
+  },
+  "sessions": {
+    "s_554a14a1bf7a18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dd070d11-1b8c-4efc-9c11-9193fcaa4a0c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
