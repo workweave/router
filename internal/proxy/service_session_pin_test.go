@@ -76,11 +76,11 @@ func newPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 	return proxy.NewService(
 		fr,
 		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
-		nil,                         // emitter
-		false,                       // embedLastUserMessage
-		0,                           // stickyDecisionTTL — disable legacy LRU for clarity
-		nil,                         // decisionLog
-		nil,                         // semanticCache
+		nil,   // emitter
+		false, // embedLastUserMessage
+		0,     // stickyDecisionTTL — disable legacy LRU for clarity
+		nil,   // decisionLog
+		nil,   // semanticCache
 		store,
 		false,                       // hardPinExplore
 		providers.ProviderAnthropic, // hardPinProvider
