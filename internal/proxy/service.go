@@ -545,7 +545,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			proxyWriter = extractor
 		}
 		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
-	case providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter:
+	case providers.ProviderOpenAI, providers.ProviderOpenRouter:
 		crossFormat = true
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
 		if emitErr != nil {
@@ -561,6 +561,28 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
 		if proxyErr == nil {
 			proxyErr = translator.Finalize()
+		}
+	case providers.ProviderGoogle:
+		crossFormat = true
+		prep, emitErr := env.PrepareGemini(r.Header, opts)
+		if emitErr != nil {
+			log.Error("Failed to translate Anthropic request to Gemini format", "err", emitErr)
+			return fmt.Errorf("translate anthropic request to gemini: %w", emitErr)
+		}
+		var usage otel.UsageSink
+		if s.emitter != nil {
+			extractor = otel.NewUsageExtractor(nil, decision.Provider)
+			usage = extractor
+		}
+		// Chain: Gemini SSE → OpenAI SSE → Anthropic SSE.
+		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage)
+		geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, decision.Model, nil)
+		proxyErr = p.Proxy(ctx, decision, prep, geminiTr, r)
+		if proxyErr == nil {
+			proxyErr = geminiTr.Finalize()
+		}
+		if proxyErr == nil {
+			proxyErr = anthropicTr.Finalize()
 		}
 	default:
 		return fmt.Errorf("%w: %s (no translation path defined for inbound Anthropic Messages)", ErrProviderNotConfigured, decision.Provider)
@@ -878,7 +900,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	var extractor *otel.UsageExtractor
 
 	switch decision.Provider {
-	case providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter:
+	case providers.ProviderOpenAI, providers.ProviderOpenRouter:
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
 		if emitErr != nil {
 			log.Error("Failed to emit OpenAI body", "err", emitErr)
@@ -890,6 +912,23 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			proxyWriter = extractor
 		}
 		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
+	case providers.ProviderGoogle:
+		crossFormat = true
+		prep, emitErr := env.PrepareGemini(r.Header, opts)
+		if emitErr != nil {
+			log.Error("Failed to translate OpenAI request to Gemini format", "err", emitErr)
+			return fmt.Errorf("translate openai request to gemini: %w", emitErr)
+		}
+		var usage otel.UsageSink
+		if s.emitter != nil {
+			extractor = otel.NewUsageExtractor(nil, decision.Provider)
+			usage = extractor
+		}
+		translator := translate.NewGeminiToOpenAISSETranslator(sink, decision.Model, usage)
+		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
+		if proxyErr == nil {
+			proxyErr = translator.Finalize()
+		}
 	case providers.ProviderAnthropic:
 		crossFormat = true
 		prep, emitErr := env.PrepareAnthropic(r.Header, opts)
