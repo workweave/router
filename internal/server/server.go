@@ -7,6 +7,7 @@ import (
 
 	"workweave/router/internal/api/admin"
 	anthropicapi "workweave/router/internal/api/anthropic"
+	geminiapi "workweave/router/internal/api/gemini"
 	openaiapi "workweave/router/internal/api/openai"
 	"workweave/router/internal/auth"
 	"workweave/router/internal/proxy"
@@ -54,6 +55,11 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	)
 	chatCompletionGroup := engine.Group("", chatCompletionAuth...)
 	chatCompletionGroup.POST("/v1/chat/completions", openaiapi.ChatCompletionHandler(proxySvc))
+	// Native Gemini ingress shares the chat-completion timeout and
+	// middleware budget. The action suffix (:generateContent or
+	// :streamGenerateContent) lives inside the modelAction parameter
+	// because Gin treats `:` outside the leading position as a literal.
+	chatCompletionGroup.POST("/v1beta/models/:modelAction", geminiapi.GenerateContentHandler(proxySvc))
 
 	passthroughAuth := []gin.HandlerFunc{middleware.WithTimeout(passthroughTimeout)}
 	if !devModeNoAuth {

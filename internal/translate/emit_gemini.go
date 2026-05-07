@@ -10,6 +10,7 @@ import (
 	"workweave/router/internal/providers"
 
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // PrepareGemini builds a fully-prepared request body for Google Gemini's native
@@ -22,6 +23,29 @@ import (
 // In both cases we walk the parsed body map (e.ensureSrc) and write a fresh
 // Gemini native body.
 func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
+	// Same-format passthrough: a Gemini-source envelope already carries
+	// canonical Gemini wire-format bytes. The synthetic top-level "model"
+	// and "stream" fields injected by the Gemini handler get stripped here
+	// by sjson before forwarding, since neither belongs in the upstream
+	// generateContent body.
+	if e.format == FormatGemini {
+		body := e.body
+		var err error
+		body, err = sjson.DeleteBytes(body, "model")
+		if err != nil {
+			return providers.PreparedRequest{}, fmt.Errorf("strip model field: %w", err)
+		}
+		body, err = sjson.DeleteBytes(body, "stream")
+		if err != nil {
+			return providers.PreparedRequest{}, fmt.Errorf("strip stream field: %w", err)
+		}
+		headers := make(http.Header)
+		if e.Stream() {
+			headers.Set(GeminiStreamHintHeader, "true")
+		}
+		return providers.PreparedRequest{Body: body, Headers: headers}, nil
+	}
+
 	src, err := e.ensureSrc()
 	if err != nil {
 		return providers.PreparedRequest{}, err

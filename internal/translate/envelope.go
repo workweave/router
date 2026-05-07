@@ -31,6 +31,7 @@ type Format int
 const (
 	FormatOpenAI Format = iota
 	FormatAnthropic
+	FormatGemini
 )
 
 // EmitOptions parameterizes how the envelope constructs an output body.
@@ -67,6 +68,17 @@ func ParseAnthropic(body []byte) (*RequestEnvelope, error) {
 	return &RequestEnvelope{body: body, format: FormatAnthropic}, nil
 }
 
+// ParseGemini validates body as a JSON object and wraps it in a
+// RequestEnvelope sourced from Gemini's native generateContent shape
+// ({contents, systemInstruction, tools, generationConfig}). The full
+// json.Unmarshal is deferred until a cross-format emit is requested.
+func ParseGemini(body []byte) (*RequestEnvelope, error) {
+	if err := validateJSONObject(body); err != nil {
+		return nil, err
+	}
+	return &RequestEnvelope{body: body, format: FormatGemini}, nil
+}
+
 // validateJSONObject checks that body is valid JSON and specifically an object
 // (rejects arrays, scalars, and null).
 func validateJSONObject(body []byte) error {
@@ -96,7 +108,11 @@ func (e *RequestEnvelope) SourceFormat() Format { return e.format }
 
 // Stream reports whether the request has "stream": true.
 // Accepts JSON booleans and string values ("true"/"false") but rejects
-// numeric coercion (e.g. 1 is not treated as true).
+// numeric coercion (e.g. 1 is not treated as true). For Gemini ingress
+// the streaming choice is encoded in the URL path
+// (:generateContent vs :streamGenerateContent), not the body, so the
+// Gemini handler injects a synthetic top-level "stream": true into the
+// body before parsing — the same field this method reads.
 func (e *RequestEnvelope) Stream() bool {
 	r := gjson.GetBytes(e.body, "stream")
 	if r.Type == gjson.Number {
@@ -129,6 +145,8 @@ func (e *RequestEnvelope) SystemText() string {
 		return systemTextGJSON(gjson.GetBytes(e.body, "system"))
 	case FormatOpenAI:
 		return openAISystemText(e.body)
+	case FormatGemini:
+		return geminiSystemText(e.body)
 	default:
 		return ""
 	}
@@ -158,17 +176,21 @@ func (e *RequestEnvelope) LastUserMessage() LastUserMessageInfo {
 		return anthropicLastUserMessage(e.body)
 	case FormatOpenAI:
 		return openAILastUserMessage(e.body)
+	case FormatGemini:
+		return geminiLastUserMessage(e.body)
 	default:
 		return LastUserMessageInfo{}
 	}
 }
 
-// FirstUserMessageText returns the text of messages[0] when role is
-// "user", honoring both the bare-string and content-array shapes.
-// Format-aware: OpenAI uses a flat list with a top-level "content"
-// field; Anthropic uses content blocks. Returns "" if there is no
+// FirstUserMessageText returns the text of the first user-authored
+// message. Format-aware: OpenAI/Anthropic walk messages[0]; Gemini
+// walks contents[0] when role=="user". Returns "" if there is no
 // first user message.
 func (e *RequestEnvelope) FirstUserMessageText() string {
+	if e.format == FormatGemini {
+		return geminiFirstUserMessageText(e.body)
+	}
 	first := gjson.GetBytes(e.body, "messages.0")
 	if !first.Exists() {
 		return ""
