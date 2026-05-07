@@ -188,8 +188,18 @@ func main() {
 
 	semanticCache := buildSemanticCache(rtr)
 
+	// Default-on: the cluster scorer's α-blend is baked at training time on
+	// per-prompt cost numbers that don't account for prompt-cache continuity.
+	// Without session pinning, mid-conversation provider switches discard the
+	// cache prefix (Anthropic's cache is keyed per-model) and pay the cache-
+	// write penalty on the new model — over a 30-turn agentic trajectory that
+	// dominates routing-decision savings. Until cost models reflect cache-warm
+	// economics, leaving pinning off makes the router optimize a number that
+	// doesn't match production.
+	//
+	// Set ROUTER_SESSION_PIN_ENABLED=false to opt out (kill switch).
 	var pinStore sessionpin.Store
-	if config.GetOr("ROUTER_SESSION_PIN_ENABLED", "false") == "true" {
+	if config.GetOr("ROUTER_SESSION_PIN_ENABLED", "true") == "true" {
 		pinStore = postgres.NewSessionPinRepo(pool)
 		go runSessionPinSweep(context.Background(), pinStore)
 		logger.Info("Session pin store enabled (sliding 1h TTL, hourly sweep)")
