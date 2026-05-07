@@ -878,7 +878,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	var extractor *otel.UsageExtractor
 
 	switch decision.Provider {
-	case providers.ProviderOpenAI, providers.ProviderGoogle:
+	case providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter:
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
 		if emitErr != nil {
 			log.Error("Failed to emit OpenAI body", "err", emitErr)
