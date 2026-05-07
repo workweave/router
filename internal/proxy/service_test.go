@@ -355,3 +355,38 @@ func TestService_ProxyOpenAIChatCompletion_NativeOpenAI(t *testing.T) {
 	require.Len(t, msgs, 1, "user message must be preserved")
 	assert.Contains(t, rec.Body.String(), `"chat.completion"`)
 }
+
+// OpenRouter speaks OpenAI Chat Completions natively. When an OpenAI-format
+// inbound (e.g. mini-swe-agent / litellm) lands on an OpenRouter decision,
+// the proxy must take the same no-translation path it does for native
+// OpenAI — not error out with "no translation path defined". This regression
+// surfaced when the eval harness ran v0.27 (which routes a chunk of traffic
+// to OpenRouter-hosted OSS models) through mini-swe-agent's OpenAI client.
+func TestService_ProxyOpenAIChatCompletion_NativeOpenRouter(t *testing.T) {
+	provider := &fakeProvider{
+		proxyResponse: func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion"}`)
+		},
+	}
+	svc := makeProxyService(
+		router.Decision{Provider: providers.ProviderOpenRouter, Model: "qwen/qwen3-coder", Reason: "test"},
+		map[string]providers.Client{providers.ProviderOpenRouter: provider},
+	)
+
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+
+	err := svc.ProxyOpenAIChatCompletion(context.Background(), []byte(body), rec, httpReq)
+	require.NoError(t, err)
+
+	require.Len(t, provider.proxyBodies, 1, "provider.Proxy must be called once for the OpenRouter decision")
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(provider.proxyBodies[0], &got))
+	assert.Equal(t, "qwen/qwen3-coder", got["model"],
+		"envelope must rewrite the inbound model to decision.Model so OpenRouter sees the routed pick")
+	assert.Contains(t, rec.Body.String(), `"chat.completion"`,
+		"OpenRouter response is already OpenAI-format and must pass through verbatim")
+}
