@@ -19,6 +19,20 @@ const nextConfig: NextConfig = {
             },
           ];
         },
+        // Bare-root convenience redirect so visiting localhost:3000
+        // lands on the dashboard. In production the Go server does
+        // this; in `next dev` requests hit Next directly and never
+        // reach the Go backend, so we replicate it here.
+        async redirects() {
+          return [
+            {
+              source: "/",
+              destination: "/ui/",
+              basePath: false,
+              permanent: false,
+            },
+          ];
+        },
       }
     : {
         output: "export",
