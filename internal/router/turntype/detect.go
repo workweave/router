@@ -1,12 +1,13 @@
-// Package turntype classifies inbound Anthropic-format request bodies by
-// conversation role. It is a pure, I/O-free helper used by the proxy service
-// to enable role-conditioned routing (§3.3–§3.4 of docs/plans/AGENTIC_CODING.md).
+// Package turntype classifies inbound conversation requests by role,
+// independent of wire format. It is a pure, I/O-free helper used by
+// the proxy service to enable role-conditioned routing (§3.3–§3.4 of
+// docs/plans/AGENTIC_CODING.md).
 package turntype
 
 import (
 	"strings"
 
-	"github.com/tidwall/gjson"
+	"workweave/router/internal/translate"
 )
 
 // TurnType classifies an inbound conversation turn.
@@ -15,7 +16,7 @@ type TurnType string
 const (
 	// MainLoop is the default — a regular user prompt scored by the cluster scorer.
 	MainLoop TurnType = "main_loop"
-	// ToolResult indicates the last user message consists entirely of
+	// ToolResult indicates the last user-side input consists entirely of
 	// tool_result blocks with no text. The cluster scorer embedding is mostly
 	// noise on these turns; they short-circuit to the session pin when one exists.
 	ToolResult TurnType = "tool_result"
@@ -28,18 +29,28 @@ const (
 	Compaction TurnType = "compaction"
 )
 
-// Detect classifies the inbound Anthropic-format request body.
-// Conservative: false negatives (returning MainLoop) are safe — the cluster
-// scorer runs normally. False positives are the real risk; each heuristic is
-// intentionally tight.
-func Detect(body []byte) TurnType {
-	if isCompaction(body) {
+// DetectFromEnvelope classifies an inbound request using a parsed
+// envelope and its already-computed routing features. subAgentHint is
+// the optional `x-weave-subagent-type` header value: clients that
+// can't pack subagent identity into Anthropic's metadata.user_id (e.g.
+// OpenAI / Gemini ingress) use the header instead. Empty hint is
+// ignored.
+//
+// Conservative: false negatives (returning MainLoop) are safe — the
+// cluster scorer runs normally. False positives are the real risk; each
+// heuristic is intentionally tight.
+func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingFeatures, subAgentHint string) TurnType {
+	if env == nil {
+		return MainLoop
+	}
+	systemText := env.SystemText()
+	if isCompaction(systemText) {
 		return Compaction
 	}
-	if isSubAgentDispatch(body) {
+	if isSubAgentDispatch(env.MetadataUserID(), systemText, subAgentHint) {
 		return SubAgentDispatch
 	}
-	if isToolResult(body) {
+	if feats.LastKind == "tool_result" {
 		return ToolResult
 	}
 	return MainLoop
@@ -47,76 +58,24 @@ func Detect(body []byte) TurnType {
 
 // isCompaction returns true when the system prompt contains Claude Code's
 // context-compaction instruction markers.
-func isCompaction(body []byte) bool {
-	text := systemText(body)
-	lower := strings.ToLower(text)
+func isCompaction(systemText string) bool {
+	lower := strings.ToLower(systemText)
 	return strings.Contains(lower, "your task is to create a detailed summary") ||
 		(strings.Contains(lower, "compact") && strings.Contains(lower, "conversation"))
 }
 
-// isSubAgentDispatch returns true when the request originates from a Claude
-// Code sub-agent. Claude Code encodes sub-agent identity in metadata.user_id
-// as "subagent:<type>", or marks it in the system prompt.
-func isSubAgentDispatch(body []byte) bool {
-	if strings.HasPrefix(gjson.GetBytes(body, "metadata.user_id").String(), "subagent:") {
+// isSubAgentDispatch returns true when the request originates from a
+// sub-agent dispatch. Claude Code packs sub-agent identity into
+// metadata.user_id as "subagent:<type>"; non-Anthropic clients pass it
+// via the x-weave-subagent-type header (subAgentHint). The system
+// prompt also carries marker phrases as a third fallback.
+func isSubAgentDispatch(metadataUserID, systemText, subAgentHint string) bool {
+	if subAgentHint != "" {
 		return true
 	}
-	lower := strings.ToLower(systemText(body))
+	if strings.HasPrefix(metadataUserID, "subagent:") {
+		return true
+	}
+	lower := strings.ToLower(systemText)
 	return strings.Contains(lower, "subagent_type") || strings.Contains(lower, "sub-agent")
-}
-
-// isToolResult returns true when the last user message contains only
-// tool_result blocks and no text blocks.
-func isToolResult(body []byte) bool {
-	msgs := gjson.GetBytes(body, "messages")
-	if !msgs.IsArray() {
-		return false
-	}
-	var lastMsg gjson.Result
-	msgs.ForEach(func(_, msg gjson.Result) bool {
-		lastMsg = msg
-		return true
-	})
-	if !lastMsg.Exists() || lastMsg.Get("role").String() != "user" {
-		return false
-	}
-	content := lastMsg.Get("content")
-	if !content.IsArray() {
-		return false
-	}
-	hasToolResult := false
-	hasText := false
-	content.ForEach(func(_, block gjson.Result) bool {
-		switch block.Get("type").String() {
-		case "tool_result":
-			hasToolResult = true
-		case "text":
-			hasText = true
-		}
-		return true
-	})
-	return hasToolResult && !hasText
-}
-
-// systemText extracts plain text from the system field, which may be a string
-// or an array of content blocks.
-func systemText(body []byte) string {
-	sys := gjson.GetBytes(body, "system")
-	if sys.Type == gjson.String {
-		return sys.String()
-	}
-	if !sys.IsArray() {
-		return ""
-	}
-	var b strings.Builder
-	sys.ForEach(func(_, block gjson.Result) bool {
-		if block.Get("type").String() == "text" {
-			if b.Len() > 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString(block.Get("text").String())
-		}
-		return true
-	})
-	return b.String()
 }

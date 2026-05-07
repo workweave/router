@@ -117,16 +117,50 @@ func (e *RequestEnvelope) MetadataUserID() string {
 	return gjson.GetBytes(e.body, "metadata.user_id").String()
 }
 
-// SystemText returns the concatenated system-prompt text (Anthropic
-// format only). Empty for OpenAI-format requests, which carry the
-// system prompt as messages[0]. Used by session-pin keying as one of
-// the two stable inputs that don't change across turns of the same
-// session.
+// SystemText returns the concatenated system-prompt text in a
+// format-neutral way. For Anthropic, reads the top-level `system`
+// field. For OpenAI, walks `messages[]` collecting every `system`-role
+// message's text content (OpenAI carries the system prompt as a
+// message rather than a separate field, and may have multiple). Used
+// by session-pin keying and turn-type detection (compaction markers).
 func (e *RequestEnvelope) SystemText() string {
-	if e.format != FormatAnthropic {
+	switch e.format {
+	case FormatAnthropic:
+		return systemTextGJSON(gjson.GetBytes(e.body, "system"))
+	case FormatOpenAI:
+		return openAISystemText(e.body)
+	default:
 		return ""
 	}
-	return systemTextGJSON(gjson.GetBytes(e.body, "system"))
+}
+
+// LastUserMessageInfo summarizes the trailing user-side input on a
+// request. HasText is true when the last user-side input contains any
+// human-authored text; HasToolResult is true when it contains tool
+// results (tool_result blocks for Anthropic, role=="tool" messages for
+// OpenAI). Both flags can be true at once (mixed turn). Text holds the
+// extracted human text (empty when HasText is false). ToolResultCount
+// counts the contributing tool-result blocks/messages.
+type LastUserMessageInfo struct {
+	HasText         bool
+	HasToolResult   bool
+	ToolResultCount int
+	Text            string
+}
+
+// LastUserMessage returns format-neutral information about the last
+// user-side input. Used by turn-type detection to classify tool-result
+// short-circuit turns and by future per-format helpers. Returns the
+// zero value when messages is absent or empty.
+func (e *RequestEnvelope) LastUserMessage() LastUserMessageInfo {
+	switch e.format {
+	case FormatAnthropic:
+		return anthropicLastUserMessage(e.body)
+	case FormatOpenAI:
+		return openAILastUserMessage(e.body)
+	default:
+		return LastUserMessageInfo{}
+	}
 }
 
 // FirstUserMessageText returns the text of messages[0] when role is
