@@ -292,7 +292,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	installationID, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	clientID := ClientIdentityFrom(ctx)
 	bypassEval := hasEvalOverrideHeader(r)
-	bypassSticky := bypassEval
+	// Tier-1/2 (session-key-based) pinning stays enabled for eval traffic. The
+	// session_key is derived from the system text + first user message, so each
+	// eval prompt produces a unique key; pinning per-session is exactly what an
+	// agentic harness needs to keep multi-turn tool-use on a single provider
+	// (mid-conversation provider switches break Gemini, which rejects function
+	// calls without thoughtSignature emitted by other providers). Tier-3 (the
+	// legacy apiKeyID LRU) stays bypassed because the eval harness shares one
+	// apiKeyID across all 500 instances — without that bypass, the first
+	// decision would stick across unrelated instances.
+	bypassLegacySticky := bypassEval
 
 	// §3.4: hard pins for turn types whose optimal model is known a priori.
 	// These bypass all session-pin tiers and the cluster scorer, and must NOT
@@ -330,7 +339,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// mask the migrate-to-Memorystore trigger criteria.
 	// pinEligible is false for hard-pinned turns (stickyHit already set above),
 	// which also suppresses the async pin upsert for those turns.
-	pinEligible := s.pinStore != nil && !bypassSticky && !stickyHit
+	pinEligible := s.pinStore != nil && !stickyHit
 	if pinEligible {
 		sessionKey = DeriveSessionKey(env, apiKeyID)
 		pinCacheKey = sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
@@ -361,7 +370,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	// Tier 3: legacy apiKeyID LRU. Consulted only on tier-2 miss (or
 	// when pinStore is nil).
-	if !stickyHit && s.stickyDecisions != nil && apiKeyID != "" && !bypassSticky {
+	if !stickyHit && s.stickyDecisions != nil && apiKeyID != "" && !bypassLegacySticky {
 		if d, ok := s.stickyDecisions.Get(apiKeyID); ok {
 			decision = d
 			stickyHit = true
@@ -382,7 +391,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			log.Error("Routing failed", "err", err, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "estimated_input_tokens", feats.Tokens)
 			return err
 		}
-		if s.stickyDecisions != nil && apiKeyID != "" && !bypassSticky {
+		if s.stickyDecisions != nil && apiKeyID != "" && !bypassLegacySticky {
 			s.stickyDecisions.Add(apiKeyID, decision)
 		}
 	}
