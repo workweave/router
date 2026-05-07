@@ -301,3 +301,177 @@ func TestService_HardPin_ExploreFallsThroughWhenFlagOff(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"),
 		"cluster scorer decision must be used when hardPinExplore is off")
 }
+
+// --- OpenAI ingress: same Stage 1 path as Anthropic, exercised through
+// ProxyOpenAIChatCompletion. Before the routeWithSession unification,
+// this handler ran the cluster scorer on every turn with no session
+// memory; the assertions below codify the unblock.
+
+const openAIPinTestBody = `{
+	"model":"gpt-4o",
+	"messages":[
+		{"role":"system","content":"You are helpful."},
+		{"role":"user","content":"original prompt"}
+	]
+}`
+
+func newOpenAIPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
+	// Register fakeProvider under both Anthropic (default decision target
+	// for cross-format paths) and OpenAI (matches the test decisions).
+	return proxy.NewService(
+		fr,
+		map[string]providers.Client{
+			providers.ProviderAnthropic: &fakeProvider{},
+			providers.ProviderOpenAI:    &fakeProvider{},
+		},
+		nil, false, 0, nil, nil,
+		store,
+		false, providers.ProviderAnthropic, "claude-haiku-4-5",
+	)
+}
+
+func TestService_SessionPin_OpenAI_PostgresHitShortCircuitsRoute(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:      providers.ProviderOpenAI,
+		Model:         "gpt-5",
+		Reason:        "cluster:v0.2",
+		PinnedUntil:   time.Now().Add(30 * time.Minute),
+		FirstPinnedAt: time.Now().Add(-5 * time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-4o", Reason: "cluster:v0.2"}}
+	svc := newOpenAIPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(openAIPinTestBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls,
+		"OpenAI ingress: tier-2 hit must short-circuit the cluster scorer "+
+			"(this is the SWE-Bench unblock — without it every turn re-runs "+
+			"the cluster scorer cold)")
+	assert.Equal(t, "gpt-5", rec.Header().Get("x-router-model"),
+		"the response must reflect the pinned model, not the fresh-route model")
+	waitForUpsert(t, store)
+}
+
+func TestService_SessionPin_OpenAI_FreshRouteCreatesPin(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-4o", Reason: "fresh"}}
+	svc := newOpenAIPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(openAIPinTestBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "first turn must route fresh")
+	waitForUpsert(t, store)
+	require.Len(t, store.upserts, 1)
+	assert.Equal(t, providers.ProviderOpenAI, store.upserts[0].Provider)
+	assert.Equal(t, "gpt-4o", store.upserts[0].Model)
+}
+
+func TestService_SessionPin_OpenAI_ToolResultShortCircuit(t *testing.T) {
+	// Trailing role=="tool" message — turntype.ToolResult on the OpenAI
+	// path. With a pin present, this must short-circuit the cluster
+	// scorer (the embedding for a tool-result-only turn is mostly noise
+	// and would otherwise flip the decision mid-session).
+	const toolResultBody = `{
+		"model":"gpt-4o",
+		"messages":[
+			{"role":"system","content":"You are helpful."},
+			{"role":"user","content":"original prompt"},
+			{"role":"assistant","content":null,"tool_calls":[{"id":"t1","type":"function","function":{"name":"Bash","arguments":"{}"}}]},
+			{"role":"tool","tool_call_id":"t1","content":"ls output"}
+		]
+	}`
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderOpenAI,
+		Model:       "gpt-5",
+		Reason:      "cluster:v0.2",
+		PinnedUntil: time.Now().Add(30 * time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-4o", Reason: "fresh"}}
+	svc := newOpenAIPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(toolResultBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls,
+		"tool-result turn with an existing pin must not re-run the cluster scorer")
+	assert.Equal(t, "gpt-5", rec.Header().Get("x-router-model"),
+		"the pinned model must serve the tool-result turn")
+}
+
+// newOpenAIHardPinSvc configures a service whose hard-pin target is on
+// the OpenAI provider, so the OpenAI ingress hard-pin path stays
+// same-format and doesn't exercise the cross-format Anthropic
+// translator (which would need a real upstream response body to
+// finalize). The test scope is the routing decision; the cross-format
+// path has its own coverage in service_test.go.
+func newOpenAIHardPinSvc(fr *fakeRouter, store *fakePinStore, hardPinExplore bool) *proxy.Service {
+	return proxy.NewService(
+		fr,
+		map[string]providers.Client{
+			providers.ProviderAnthropic: &fakeProvider{},
+			providers.ProviderOpenAI:    &fakeProvider{},
+		},
+		nil, false, 0, nil, nil,
+		store,
+		hardPinExplore,
+		providers.ProviderOpenAI,
+		"gpt-4o-mini",
+	)
+}
+
+func TestService_HardPin_OpenAI_CompactionRoutesToHardPin(t *testing.T) {
+	const compactionOpenAIBody = `{
+		"model":"gpt-4o",
+		"messages":[
+			{"role":"system","content":"Your task is to create a detailed summary of the conversation so far."},
+			{"role":"user","content":"go"}
+		]
+	}`
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-4o", Reason: "cluster"}}
+	svc := newOpenAIHardPinSvc(fr, store, false)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(compactionOpenAIBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls,
+		"OpenAI compaction turns must bypass the cluster scorer entirely")
+	assert.Equal(t, "gpt-4o-mini", rec.Header().Get("x-router-model"),
+		"compaction must hard-pin to the configured hard-pin model regardless of inbound format")
+
+	select {
+	case <-store.upsertCh:
+		t.Fatal("compaction turn must not write a session pin")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestService_HardPin_OpenAI_SubAgentHeaderHintRoutesToHardPin(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-4o", Reason: "cluster"}}
+	svc := newOpenAIHardPinSvc(fr, store, true)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	httpReq.Header.Set("x-weave-subagent-type", "Explore")
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(openAIPinTestBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls,
+		"x-weave-subagent-type header must trigger Explore hard-pin on OpenAI ingress")
+	assert.Equal(t, "gpt-4o-mini", rec.Header().Get("x-router-model"))
+}
