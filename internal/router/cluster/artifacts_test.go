@@ -92,18 +92,37 @@ func TestLoadCentroids_SizeMismatch(t *testing.T) {
 }
 
 func TestLoadRankings_Roundtrip(t *testing.T) {
-	raw := []byte(`{
+	// Legacy format: per-model value is a plain float32.
+	// Loaded with Uncached == Cached for backwards compatibility.
+	rawLegacy := []byte(`{
 		"meta": {"router_version": "weave-router-v0.1-bootstrap"},
 		"rankings": {
 			"0": {"claude-opus-4-7": 0.8, "claude-sonnet-4-5": 0.5},
 			"1": {"claude-opus-4-7": 0.3, "claude-sonnet-4-5": 0.6}
 		}
 	}`)
-	got, err := loadRankings(raw)
+	got, err := loadRankings(rawLegacy)
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
-	assert.InDelta(t, 0.8, got[0]["claude-opus-4-7"], 1e-6)
-	assert.InDelta(t, 0.6, got[1]["claude-sonnet-4-5"], 1e-6)
+	assert.InDelta(t, 0.8, got[0]["claude-opus-4-7"].Uncached, 1e-6)
+	assert.InDelta(t, 0.8, got[0]["claude-opus-4-7"].Cached, 1e-6, "legacy format: Cached == Uncached")
+	assert.InDelta(t, 0.6, got[1]["claude-sonnet-4-5"].Uncached, 1e-6)
+
+	// v0.22+ format: per-model value is {"cost_uncached": f, "cost_cached": f}.
+	rawDual := []byte(`{
+		"rankings": {
+			"0": {
+				"claude-opus-4-7": {"cost_uncached": 0.4, "cost_cached": 0.9},
+				"claude-sonnet-4-5": {"cost_uncached": 0.5, "cost_cached": 0.7}
+			}
+		}
+	}`)
+	gotDual, err := loadRankings(rawDual)
+	require.NoError(t, err)
+	assert.InDelta(t, 0.4, gotDual[0]["claude-opus-4-7"].Uncached, 1e-6)
+	assert.InDelta(t, 0.9, gotDual[0]["claude-opus-4-7"].Cached, 1e-6)
+	assert.InDelta(t, 0.5, gotDual[0]["claude-sonnet-4-5"].Uncached, 1e-6)
+	assert.InDelta(t, 0.7, gotDual[0]["claude-sonnet-4-5"].Cached, 1e-6)
 }
 
 func TestLoadRankings_NonIntegerKey(t *testing.T) {

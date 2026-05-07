@@ -555,3 +555,121 @@ func TestScorer_EmptyEnabledProvidersReturnsErrNoEligibleProvider(t *testing.T) 
 	// maps these two sentinels to different status codes (400 vs 503).
 	assert.False(t, errors.Is(err, ErrClusterUnavailable))
 }
+
+// cacheWarmArtifacts builds a 1-cluster fixture with two models where
+// Haiku has a slightly higher uncached score but Opus has a much higher
+// cached score (reflecting the real-world case where warm Sonnet/Opus
+// is cheaper than uncached Haiku).
+func cacheWarmArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBlob []byte) {
+	t.Helper()
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	centroidsBlob = buildCentroidsBlob(t, 1, dim, c0)
+
+	// Opus: uncached=0.4 (expensive cold), cached=0.9 (cheap warm).
+	// Haiku: uncached=0.6 (cheap cold), cached=0.63 (marginal benefit when warm).
+	// Without cache context → Haiku wins (0.6 > 0.4).
+	// With Opus cache-warm → Opus wins (0.9 > 0.63).
+	rankingsBlob = []byte(`{
+		"rankings": {
+			"0": {
+				"claude-opus-4-7":  {"cost_uncached": 0.4, "cost_cached": 0.9},
+				"claude-haiku-4-5": {"cost_uncached": 0.6, "cost_cached": 0.63}
+			}
+		}
+	}`)
+	registryBlob = []byte(`{
+		"deployed_models": [
+			{"model": "claude-opus-4-7",  "provider": "anthropic", "bench_column": "gpt-5", "proxy": true},
+			{"model": "claude-haiku-4-5", "provider": "anthropic", "bench_column": "gemini-2.5-flash", "proxy": true}
+		]
+	}`)
+	return
+}
+
+// TestScorer_NilCacheWarmModelsUsesUncachedColumn asserts that without
+// cache context the scorer picks the model with the higher uncached
+// score, preserving pre-v0.22 behaviour.
+func TestScorer_NilCacheWarmModelsUsesUncachedColumn(t *testing.T) {
+	cb, rb, regb := cacheWarmArtifacts(t)
+	bundle := bundleFromBlobs(t, "v-test-cw", cb, rb, regb)
+	cfg := cfgForTest()
+	cfg.TopP = 1
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s, err := NewScorer(bundle, cfg, emb, allProviders())
+	require.NoError(t, err)
+
+	got, err := s.Route(context.Background(), router.Request{
+		PromptText:      strings.Repeat("x", 100),
+		CacheWarmModels: nil, // no cache context → use uncached column
+	})
+	require.NoError(t, err)
+	// Haiku wins: uncached 0.6 > uncached Opus 0.4.
+	assert.Equal(t, "claude-haiku-4-5", got.Model)
+}
+
+// TestScorer_WarmModelUsedCachedColumn asserts that when a model is
+// flagged warm in CacheWarmModels the scorer substitutes the cached
+// column, allowing a previously-expensive model to outcompete cheap ones.
+func TestScorer_WarmModelUsedCachedColumn(t *testing.T) {
+	cb, rb, regb := cacheWarmArtifacts(t)
+	bundle := bundleFromBlobs(t, "v-test-cw", cb, rb, regb)
+	cfg := cfgForTest()
+	cfg.TopP = 1
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s, err := NewScorer(bundle, cfg, emb, allProviders())
+	require.NoError(t, err)
+
+	got, err := s.Route(context.Background(), router.Request{
+		PromptText:      strings.Repeat("x", 100),
+		CacheWarmModels: map[string]bool{"claude-opus-4-7": true},
+	})
+	require.NoError(t, err)
+	// Opus wins: cached 0.9 > cold Haiku's penalised score (0.6 - penalty).
+	assert.Equal(t, "claude-opus-4-7", got.Model)
+}
+
+// TestScorer_ColdModelInSessionPenalised asserts that a cold model in a
+// session with known cache context scores lower than the uncached column
+// alone, pushing the argmax toward the warm model.
+func TestScorer_ColdModelInSessionPenalised(t *testing.T) {
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	centroidsBlob := buildCentroidsBlob(t, 1, dim, c0)
+
+	// Model A: uncached=0.7, cached=0.75 — warm A would win.
+	// Model B: uncached=0.65, cached=0.66 — cold B in a session context
+	//          gets penalised: 0.65 - (0.66-0.65)*0.25 = ~0.6475 < 0.65.
+	// With CacheWarmModels = {A: true}:
+	//   A = 0.75 (cached), B = 0.6475 (penalised uncached) → A wins.
+	// Without CacheWarmModels: A = 0.7, B = 0.65 → A still wins, but closer.
+	rankingsBlob := []byte(`{
+		"rankings": {
+			"0": {
+				"model-a": {"cost_uncached": 0.70, "cost_cached": 0.75},
+				"model-b": {"cost_uncached": 0.65, "cost_cached": 0.66}
+			}
+		}
+	}`)
+	registryBlob := []byte(`{
+		"deployed_models": [
+			{"model": "model-a", "provider": "anthropic", "bench_column": "col-a"},
+			{"model": "model-b", "provider": "anthropic", "bench_column": "col-b"}
+		]
+	}`)
+	bundle := bundleFromBlobs(t, "v-test-pen", centroidsBlob, rankingsBlob, registryBlob)
+	cfg := cfgForTest()
+	cfg.TopP = 1
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s, err := NewScorer(bundle, cfg, emb, allProviders())
+	require.NoError(t, err)
+
+	got, err := s.Route(context.Background(), router.Request{
+		PromptText:      strings.Repeat("x", 100),
+		CacheWarmModels: map[string]bool{"model-a": true},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "model-a", got.Model, "warm model-a must beat penalised cold model-b")
+}

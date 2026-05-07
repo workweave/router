@@ -77,19 +77,37 @@ func (c *Centroids) Row(k int) []float32 {
 	return c.Data[k*c.Dim : (k+1)*c.Dim]
 }
 
+// RankedEntry holds the two pre-baked α-blend scores for one (cluster,
+// model) pair. Training emits both columns so the runtime scorer can
+// substitute the cheaper column for cache-warm models without any
+// per-request cost lookup (paper §3.2).
+//
+//   - Uncached: blend using 1.25× standard input cost (cache-write
+//     premium baked in). Used for cold models on their first session
+//     turn.
+//   - Cached: blend using 10% of standard input cost (cache-hit price).
+//     Used for models whose prompt cache is already warm.
+type RankedEntry struct {
+	Uncached float32
+	Cached   float32
+}
+
 // Rankings is the per-(cluster, model) α-blended score table. Outer key
 // is cluster id (string-encoded so the JSON file is human-readable); inner
 // key is the deployed model name as it appears in model_registry.json's
 // deployed_models[].model field.
 //
-// Stored values are already min-max-normalized per cluster and α-blended
-// at training time (paper §3): xⱼⁱ = α · p̃ⱼⁱ + (1 − α) · (1 − q̃ⱼⁱ).
-// The runtime scorer just sums + argmaxes.
-type Rankings map[int]map[string]float32
+// Each entry carries two pre-baked scores (see RankedEntry). The runtime
+// scorer selects the appropriate column per model based on cache warmth
+// signalled in the routing request. Legacy artifacts (pre-v0.22) that
+// store a single float are loaded with Uncached == Cached.
+type Rankings map[int]map[string]RankedEntry
 
 // rankingsFile is the on-disk JSON representation. Cluster ids ship as
 // strings because JSON object keys must be strings; we parse them back
-// into ints in loadRankings so callers get a typed map.
+// into ints in loadRankings so callers get a typed map. Each per-model
+// value is either a plain float32 (legacy v0.21-) or a
+// {"cost_uncached": f, "cost_cached": f} object (v0.22+).
 type rankingsFile struct {
 	// Meta carries provenance. Helpful for debugging "which artifact is
 	// loaded?" without redeploying.
@@ -104,7 +122,7 @@ type rankingsFile struct {
 			D3 float64 `json:"d3,omitempty"`
 		} `json:"training_data_mix,omitempty"`
 	} `json:"meta,omitempty"`
-	Rankings map[string]map[string]float32 `json:"rankings"`
+	Rankings map[string]map[string]json.RawMessage `json:"rankings"`
 }
 
 // DeployedEntry is one routable target the cluster scorer may emit. Each
@@ -160,7 +178,8 @@ type ArtifactMetadata struct {
 	Training          ArtifactTraining   `yaml:"training"`
 	DeployedProviders []string           `yaml:"deployed_providers,omitempty"`
 	DeployedModels    []string           `yaml:"deployed_models,omitempty"`
-	CostPer1KInputUSD map[string]float64 `yaml:"cost_per_1k_input_usd,omitempty"`
+	CostPer1KInputUSD       map[string]float64 `yaml:"cost_per_1k_input_usd,omitempty"`
+	CostCachedPer1KInputUSD map[string]float64 `yaml:"cost_cached_per_1k_input_usd,omitempty"`
 	Changelog         string             `yaml:"changelog,omitempty"`
 	// CacheConfig is optional. Absence means "use the runtime default
 	// threshold" (a single global value applied to every cluster).
@@ -342,6 +361,12 @@ func loadCentroids(raw []byte) (*Centroids, error) {
 
 // loadRankings returns an error on malformed JSON, non-integer cluster
 // keys, empty rankings (no clusters), or empty per-cluster entries.
+// It accepts two on-disk formats:
+//
+//   - Legacy (pre-v0.22): each per-model value is a plain float32.
+//     Loaded with Uncached == Cached so the scorer's argmax behaves
+//     identically to the previous single-column implementation.
+//   - v0.22+: each per-model value is {"cost_uncached": f, "cost_cached": f}.
 func loadRankings(raw []byte) (Rankings, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("rankings.json is empty")
@@ -354,7 +379,7 @@ func loadRankings(raw []byte) (Rankings, error) {
 		return nil, fmt.Errorf("rankings.json has no clusters")
 	}
 	out := make(Rankings, len(f.Rankings))
-	for kStr, models := range f.Rankings {
+	for kStr, rawModels := range f.Rankings {
 		var k int
 		// fmt.Sscanf("12abc", "%d", &k) succeeds with k=12, so we round-trip
 		// the parsed int through Sprintf to reject keys with trailing junk.
@@ -362,12 +387,40 @@ func loadRankings(raw []byte) (Rankings, error) {
 		if err != nil || fmt.Sprintf("%d", k) != kStr {
 			return nil, fmt.Errorf("rankings.json: non-integer cluster key %q", kStr)
 		}
-		if len(models) == 0 {
+		if len(rawModels) == 0 {
 			return nil, fmt.Errorf("rankings.json: cluster %d has no models", k)
 		}
-		out[k] = models
+		row := make(map[string]RankedEntry, len(rawModels))
+		for model, entryRaw := range rawModels {
+			entry, err := parseRankedEntry(entryRaw)
+			if err != nil {
+				return nil, fmt.Errorf("rankings.json: cluster %d model %q: %w", k, model, err)
+			}
+			row[model] = entry
+		}
+		out[k] = row
 	}
 	return out, nil
+}
+
+// parseRankedEntry decodes one per-model value from rankings.json.
+// Accepts either a plain float32 (legacy format, pre-v0.22) or a
+// {"cost_uncached": f, "cost_cached": f} object (v0.22+).
+func parseRankedEntry(raw json.RawMessage) (RankedEntry, error) {
+	// Try legacy float32 first — most common first byte is a digit or '-'.
+	var score float32
+	if err := json.Unmarshal(raw, &score); err == nil {
+		return RankedEntry{Uncached: score, Cached: score}, nil
+	}
+	// v0.22+ dual-column object.
+	var obj struct {
+		Uncached float32 `json:"cost_uncached"`
+		Cached   float32 `json:"cost_cached"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return RankedEntry{}, fmt.Errorf("expected float32 or {cost_uncached,cost_cached} object: %w", err)
+	}
+	return RankedEntry{Uncached: obj.Uncached, Cached: obj.Cached}, nil
 }
 
 // CheapestModel returns the provider and model whose cost-per-1k-input is

@@ -19,6 +19,14 @@ type Request struct {
 	// decision the upstream call would 401 on. Nil means "no per-request
 	// gating; use whatever the router was constructed with."
 	EnabledProviders map[string]struct{}
+	// CacheWarmModels is the set of models whose prompt cache is believed
+	// warm for this session. When non-nil, the cluster scorer uses the
+	// cached-cost scoring column for models present in the map and the
+	// uncached-cost column (with 1.25× write-premium baked in) for absent
+	// models. Nil means no cache-state context — all models use the
+	// uncached-cost column (backwards-compatible behaviour, matching all
+	// requests that lack session-pin history).
+	CacheWarmModels map[string]bool
 }
 
 type Decision struct {

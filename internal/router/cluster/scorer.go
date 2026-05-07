@@ -20,6 +20,19 @@ import (
 // regressions in eval and lets quality silently degrade in prod.
 var ErrClusterUnavailable = errors.New("cluster: routing unavailable")
 
+// cacheWritePenaltyFactor is the fraction of the (cached − uncached)
+// score gap deducted from a cold model's accumulated score when the
+// request carries session-pin cache-warmth context. It represents the
+// 1.25× cache-creation premium baked at training time: the uncached
+// column already uses 1.25× standard cost, so models that would
+// benefit most from warmth (expensive ones with large cached-uncached
+// gaps) are also the ones most penalised when cold.
+//
+// Applied only when req.CacheWarmModels is non-nil (session-pin
+// context present); nil requests use the uncached column without
+// penalty for backwards compatibility.
+const cacheWritePenaltyFactor float32 = 0.25
+
 // ErrNoEligibleProvider is returned by Scorer.Route when the per-request
 // EnabledProviders set has no overlap with the scorer's boot-time
 // candidates. Callers map this to HTTP 4xx: the customer's request can't
@@ -283,7 +296,32 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	for _, k := range topClusters {
 		row := s.rankings[k]
 		for _, m := range eligibleModels {
-			scores[m] += row[m]
+			entry := row[m]
+			var score float32
+			if req.CacheWarmModels != nil {
+				if req.CacheWarmModels[m] {
+					// Cache-warm model: use the cached-cost column (10% of
+					// standard input price). Much cheaper → much higher score
+					// for expensive models that are already pinned warm.
+					score = entry.Cached
+				} else {
+					// Cold model in a session with known cache context: use
+					// the uncached column (1.25× write-premium already baked
+					// in at training time) and apply an additional penalty
+					// proportional to the cached-uncached gap. Expensive
+					// models with large gaps are the ones most worth keeping
+					// warm — penalising them here steers the argmax back
+					// toward the previously-warm model when it is available.
+					penalty := (entry.Cached - entry.Uncached) * cacheWritePenaltyFactor
+					score = entry.Uncached - penalty
+				}
+			} else {
+				// No cache-warmth context: use the uncached-cost column
+				// unchanged. Preserves pre-v0.22 behaviour for all requests
+				// that do not carry session-pin history.
+				score = entry.Uncached
+			}
+			scores[m] += score
 		}
 	}
 	chosenModel, chosenScore := argmax(scores, eligibleModels)

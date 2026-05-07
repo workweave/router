@@ -1,0 +1,427 @@
+{
+  "meta": {
+    "alpha": 0.45,
+    "cost_cached_per_1k_input_usd": {
+      "claude-haiku-4-5": 0.08,
+      "claude-opus-4-7": 1.5,
+      "claude-sonnet-4-5": 0.3,
+      "gemini-3-flash-preview": 0.05,
+      "gemini-3.1-flash-lite-preview": 0.01,
+      "gemini-3.1-pro-preview": 0.2,
+      "gpt-4.1": 0.2,
+      "gpt-5.4-mini": 0.04,
+      "gpt-5.5": 0.5
+    },
+    "cost_per_1k_input_usd": {
+      "claude-haiku-4-5": 0.8,
+      "claude-opus-4-7": 15.0,
+      "claude-sonnet-4-5": 3.0,
+      "gemini-3-flash-preview": 0.5,
+      "gemini-3.1-flash-lite-preview": 0.1,
+      "gemini-3.1-pro-preview": 2.0,
+      "gpt-4.1": 2.0,
+      "gpt-5.4-mini": 0.4,
+      "gpt-5.5": 5.0
+    },
+    "embedder_model": "jina-v2-base-code-int8",
+    "exclude_prompts": null,
+    "include_routerarena_labels": "routerarena_labels_full.jsonl",
+    "k": 10,
+    "n_excluded_prompts": 0,
+    "n_prompts": 8013,
+    "per_model_zscore": false,
+    "router_version": "weave-router-v0.1-bootstrap",
+    "routerarena_only": true,
+    "score_normalization": "per_prompt_zscore_across_bench_columns",
+    "seed": 42,
+    "shrinkage_k0": 10.0,
+    "top_p": 4,
+    "training_data_mix": {
+      "d1": 1.0,
+      "d2": 0.0,
+      "d3": 0.0
+    }
+  },
+  "rankings": {
+    "0": {
+      "claude-haiku-4-5": {
+        "cost_cached": 0.6355073957027414,
+        "cost_uncached": 0.6096684695282447
+      },
+      "claude-opus-4-7": {
+        "cost_cached": 0.9051119062654529,
+        "cost_uncached": 0.4067897586144462
+      },
+      "claude-sonnet-4-5": {
+        "cost_cached": 0.9057289716326462,
+        "cost_uncached": 0.8060645421024448
+      },
+      "gemini-3-flash-preview": {
+        "cost_cached": 0.7705810765627047,
+        "cost_uncached": 0.7558159758915638
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "cost_cached": 0.8472952672619765,
+        "cost_uncached": 0.8472952672619765
+      },
+      "gemini-3.1-pro-preview": {
+        "cost_cached": 0.9676100376465091,
+        "cost_uncached": 0.9011670846263748
+      },
+      "gpt-4.1": {
+        "cost_cached": 0.7430293979180143,
+        "cost_uncached": 0.67658644489788
+      },
+      "gpt-5.4-mini": {
+        "cost_cached": 0.55,
+        "cost_uncached": 0.5389261744966444
+      },
+      "gpt-5.5": {
+        "cost_cached": 0.9852348993288591,
+        "cost_uncached": 0.8191275167785235
+      }
+    },
+    "1": {
+      "claude-haiku-4-5": {
+        "cost_cached": 0.5809401319922493,
+        "cost_uncached": 0.5551012058177526
+      },
+      "claude-opus-4-7": {
+        "cost_cached": 0.8449618228378344,
+        "cost_uncached": 0.3466396751868277
+      },
+      "claude-sonnet-4-5": {
+        "cost_cached": 0.7443940043380417,
+        "cost_uncached": 0.6447295748078403
+      },
+      "gemini-3-flash-preview": {
+        "cost_cached": 0.6748488961646014,
+        "cost_uncached": 0.6600837954934605
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "cost_cached": 0.7915578874699701,
+        "cost_uncached": 0.7915578874699701
+      },
+      "gemini-3.1-pro-preview": {
+        "cost_cached": 0.9963087248322149,
+        "cost_uncached": 0.9298657718120806
+      },
+      "gpt-4.1": {
+        "cost_cached": 0.5463087248322148,
+        "cost_uncached": 0.4798657718120806
+      },
+      "gpt-5.4-mini": {
+        "cost_cached": 0.6729625598197879,
+        "cost_uncached": 0.6618887343164322
+      },
+      "gpt-5.5": {
+        "cost_cached": 0.7756454955793122,
+        "cost_uncached": 0.6095381130289766
+      }
+    },
+    "2": {
+      "claude-haiku-4-5": {
+        "cost_cached": 0.5806234095477394,
+        "cost_uncached": 0.5547844833732427
+      },
+      "claude-opus-4-7": {
+        "cost_cached": 0.8012882357820202,
+        "cost_uncached": 0.3029660881310135
+      },
+      "claude-sonnet-4-5": {
+        "cost_cached": 0.809279988579741,
+        "cost_uncached": 0.7096155590495397
+      },
+      "gemini-3-flash-preview": {
+        "cost_cached": 0.8990390070932128,
+        "cost_uncached": 0.8842739064220719
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "cost_cached": 0.7326537369417631,
+        "cost_uncached": 0.7326537369417631
+      },
+      "gemini-3.1-pro-preview": {
+        "cost_cached": 0.9963087248322149,
+        "cost_uncached": 0.9298657718120806
+      },
+      "gpt-4.1": {
+        "cost_cached": 0.6361628124473802,
+        "cost_uncached": 0.5697198594272459
+      },
+      "gpt-5.4-mini": {
+        "cost_cached": 0.55,
+        "cost_uncached": 0.5389261744966444
+      },
+      "gpt-5.5": {
+        "cost_cached": 0.6825586207620888,
+        "cost_uncached": 0.5164512382117533
+      }
+    },
+    "3": {
+      "claude-haiku-4-5": {
+        "cost_cached": 0.55,
+        "cost_uncached": 0.5241610738255034
+      },
+      "claude-opus-4-7": {
+        "cost_cached": 0.8877439397584705,
+        "cost_uncached": 0.38942179210746375
+      },
+      "claude-sonnet-4-5": {
+        "cost_cached": 0.8133002093520612,
+        "cost_uncached": 0.7136357798218598
+      },
+      "gemini-3-flash-preview": {
+        "cost_cached": 0.8324427364938953,
+        "cost_uncached": 0.8176776358227544
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "cost_cached": 0.8706458757378446,
+        "cost_uncached": 0.8706458757378446
+      },
+      "gemini-3.1-pro-preview": {
+        "cost_cached": 0.9963087248322149,
+        "cost_uncached": 0.9298657718120806
+      },
+      "gpt-4.1": {
+        "cost_cached": 0.7527974974437097,
+        "cost_uncached": 0.6863545444235755
+      },
+      "gpt-5.4-mini": {
+        "cost_cached": 0.656361279325527,
+        "cost_uncached": 0.6452874538221713
+      },
+      "gpt-5.5": {
+        "cost_cached": 0.918276555487189,
+        "cost_uncached": 0.7521691729368535
+      }
+    },
+    "4": {
+      "claude-haiku-4-5": {
+        "cost_cached": 0.7557049283325167,
+        "cost_uncached": 0.72986600215802
+      },
+      "claude-opus-4-7": {
+        "cost_cached": 0.9346620625520226,
+        "cost_uncached": 0.4363399149010158
+      },
+      "claude-sonnet-4-5": {
+        "cost_cached": 0.9926174496644296,
+        "cost_uncached": 0.8929530201342282
+      },
+      "gemini-3-flash-preview": {
+        "cost_cached": 0.55,
+        "cost_uncached": 0.5352348993288591
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "cost_cached": 0.9526689212148745,
+        "cost_uncached": 0.9526689212148745
+      },
+      "gemini-3.1-pro-preview": {
+        "cost_cached": 0.905977404101935,
+        "cost_uncached": 0.8395344510818007
+      },
+      "gpt-4.1": {
+        "cost_cached": 0.7842675102618761,
+        "cost_uncached": 0.7178245572417419
+      },
+      "gpt-5.4-mini": {
+        "cost_cached": 0.8805002859589854,
+        "cost_uncached": 0.8694264604556298
+      },
+      "gpt-5.5": {
+        "cost_cached": 0.9323313857702251,
+        "cost_uncached": 0.7662240032198895
+      }
+    },
+    "5": {
+      "claude-haiku-4-5": {
+        "cost_cached": 0.8613776960819876,
+        "cost_uncached": 0.8355387699074909
+      },
+      "claude-opus-4-7": {
+        "cost_cached": 0.9483221476510068,
+        "cost_uncached": 0.45
+      },
+      "claude-sonnet-4-5": {
+        "cost_cached": 0.9247751085294532,
+        "cost_uncached": 0.8251106789992518
+      },
+      "gemini-3-flash-preview": {
+        "cost_cached": 0.55,
+        "cost_uncached": 0.5352348993288591
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "cost_cached": 0.9049224644726948,
+        "cost_uncached": 0.9049224644726948
+      },
+      "gemini-3.1-pro-preview": {
+        "cost_cached": 0.9171630557961321,
+        "cost_uncached": 0.8507201027759979
+      },
+      "gpt-4.1": {
+        "cost_cached": 0.8005365709253403,
+        "cost_uncached": 0.734093617905206
+      },
+      "gpt-5.4-mini": {
+        "cost_cached": 0.7694321355013132,
+        "cost_uncached": 0.7583583099979575
+      },
+      "gpt-5.5": {
+        "cost_cached": 0.9743294672094709,
+        "cost_uncached": 0.8082220846591354
+      }
+    },
+    "6": {
+      "claude-haiku-4-5": {
+        "cost_cached": 0.8840584399122913,
+        "cost_uncached": 0.8582195137377946
+      },
+      "claude-opus-4-7": {
+        "cost_cached": 0.9338421761604611,
+        "cost_uncached": 0.4355200285094543
+      },
+      "claude-sonnet-4-5": {
+        "cost_cached": 0.8772977138476851,
+        "cost_uncached": 0.7776332843174837
+      },
+      "gemini-3-flash-preview": {
+        "cost_cached": 0.55,
+        "cost_uncached": 0.5352348993288591
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "cost_cached": 0.8353768961411578,
+        "cost_uncached": 0.8353768961411578
+      },
+      "gemini-3.1-pro-preview": {
+        "cost_cached": 0.9637470761506219,
+        "cost_uncached": 0.8973041231304877
+      },
+      "gpt-4.1": {
+        "cost_cached": 0.6017864269495724,
+        "cost_uncached": 0.5353434739294382
+      },
+      "gpt-5.4-mini": {
+        "cost_cached": 1.0,
+        "cost_uncached": 0.9889261744966444
+      },
+      "gpt-5.5": {
+        "cost_cached": 0.9285947593768784,
+        "cost_uncached": 0.7624873768265428
+      }
+    },
+    "7": {
+      "claude-haiku-4-5": {
+        "cost_cached": 0.7529347624587384,
+        "cost_uncached": 0.7270958362842417
+      },
+      "claude-opus-4-7": {
+        "cost_cached": 0.9483221476510068,
+        "cost_uncached": 0.45
+      },
+      "claude-sonnet-4-5": {
+        "cost_cached": 0.8732316969894978,
+        "cost_uncached": 0.7735672674592964
+      },
+      "gemini-3-flash-preview": {
+        "cost_cached": 0.55,
+        "cost_uncached": 0.5352348993288591
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "cost_cached": 0.8876438354050141,
+        "cost_uncached": 0.8876438354050141
+      },
+      "gemini-3.1-pro-preview": {
+        "cost_cached": 0.9536315149371034,
+        "cost_uncached": 0.8871885619169692
+      },
+      "gpt-4.1": {
+        "cost_cached": 0.8201537146268114,
+        "cost_uncached": 0.7537107616066772
+      },
+      "gpt-5.4-mini": {
+        "cost_cached": 0.6736280315916648,
+        "cost_uncached": 0.6625542060883092
+      },
+      "gpt-5.5": {
+        "cost_cached": 0.9250715202042807,
+        "cost_uncached": 0.7589641376539451
+      }
+    },
+    "8": {
+      "claude-haiku-4-5": {
+        "cost_cached": 0.6849666033977011,
+        "cost_uncached": 0.6591276772232044
+      },
+      "claude-opus-4-7": {
+        "cost_cached": 0.9483221476510068,
+        "cost_uncached": 0.45
+      },
+      "claude-sonnet-4-5": {
+        "cost_cached": 0.7876389101358654,
+        "cost_uncached": 0.687974480605664
+      },
+      "gemini-3-flash-preview": {
+        "cost_cached": 0.6132935414947831,
+        "cost_uncached": 0.5985284408236422
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "cost_cached": 0.6918420521474699,
+        "cost_uncached": 0.6918420521474699
+      },
+      "gemini-3.1-pro-preview": {
+        "cost_cached": 0.7684963520433685,
+        "cost_uncached": 0.7020533990232343
+      },
+      "gpt-4.1": {
+        "cost_cached": 0.5463087248322148,
+        "cost_uncached": 0.4798657718120806
+      },
+      "gpt-5.4-mini": {
+        "cost_cached": 0.6031587169060973,
+        "cost_uncached": 0.5920848914027417
+      },
+      "gpt-5.5": {
+        "cost_cached": 0.6313207741943989,
+        "cost_uncached": 0.4652133916440633
+      }
+    },
+    "9": {
+      "claude-haiku-4-5": {
+        "cost_cached": 0.7763802005139221,
+        "cost_uncached": 0.7505412743394254
+      },
+      "claude-opus-4-7": {
+        "cost_cached": 0.9326950560377522,
+        "cost_uncached": 0.4343729083867454
+      },
+      "claude-sonnet-4-5": {
+        "cost_cached": 0.9261354451759114,
+        "cost_uncached": 0.82647101564571
+      },
+      "gemini-3-flash-preview": {
+        "cost_cached": 0.55,
+        "cost_uncached": 0.5352348993288591
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "cost_cached": 0.8521982263035066,
+        "cost_uncached": 0.8521982263035066
+      },
+      "gemini-3.1-pro-preview": {
+        "cost_cached": 0.9099787545273961,
+        "cost_uncached": 0.8435358015072618
+      },
+      "gpt-4.1": {
+        "cost_cached": 0.7399294759193822,
+        "cost_uncached": 0.6734865228992479
+      },
+      "gpt-5.4-mini": {
+        "cost_cached": 0.560089411949855,
+        "cost_uncached": 0.5490155864464993
+      },
+      "gpt-5.5": {
+        "cost_cached": 0.9852348993288591,
+        "cost_uncached": 0.8191275167785235
+      }
+    }
+  }
+}

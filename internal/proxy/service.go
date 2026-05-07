@@ -301,13 +301,19 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	//   SubAgentDispatch — Haiku when ROUTER_HARD_PIN_EXPLORE is set; gated
 	//     until one week of shadow validation confirms no quality regression.
 	var (
-		decision    router.Decision
-		stickyHit   bool
-		pinTier     = "miss"
-		pinAgeSec   int64
-		sessionKey  [sessionpin.SessionKeyLen]byte
-		pinCacheKey string
-		routeStart  = time.Now()
+		decision        router.Decision
+		stickyHit       bool
+		pinTier         = "miss"
+		pinAgeSec       int64
+		sessionKey      [sessionpin.SessionKeyLen]byte
+		pinCacheKey     string
+		routeStart      = time.Now()
+		// expiredPinModel is the model from a recently-expired session pin.
+		// Even though the pin has lapsed, the upstream prompt cache may
+		// still be warm (Anthropic cache TTL matches pinSessionTTL). We
+		// pass it to the scorer so it can prefer the warm model rather than
+		// switching mid-session on cost grounds alone.
+		expiredPinModel string
 	)
 	if tt == turntype.Compaction || (tt == turntype.SubAgentDispatch && s.hardPinExplore) {
 		decision = router.Decision{
@@ -347,13 +353,21 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			pin, found, err := s.pinStore.Get(ctx, sessionKey, sessionpin.DefaultRole)
 			if err != nil {
 				log.Error("session pin store unavailable; falling through to cluster scorer", "err", err)
-			} else if found && pin.PinnedUntil.After(time.Now()) {
-				decision = pinDecision(pin)
-				stickyHit = true
-				pinTier = "postgres"
-				pinAgeSec = pinAge(pin)
-				if s.pinCache != nil {
-					s.pinCache.Add(pinCacheKey, pin)
+			} else if found {
+				if pin.PinnedUntil.After(time.Now()) {
+					decision = pinDecision(pin)
+					stickyHit = true
+					pinTier = "postgres"
+					pinAgeSec = pinAge(pin)
+					if s.pinCache != nil {
+						s.pinCache.Add(pinCacheKey, pin)
+					}
+				} else {
+					// Pin has expired but the model's prompt cache may still
+					// be warm (Anthropic cache TTL == pinSessionTTL). Record
+					// the model so the scorer can prefer it over a cold
+					// alternative with the same quality score.
+					expiredPinModel = pin.Model
 				}
 			}
 		}
@@ -370,6 +384,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	if !stickyHit {
+		var cacheWarmModels map[string]bool
+		if expiredPinModel != "" {
+			cacheWarmModels = map[string]bool{expiredPinModel: true}
+		}
 		var err error
 		decision, err = s.router.Route(ctx, router.Request{
 			RequestedModel:       feats.Model,
@@ -377,6 +395,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			HasTools:             feats.HasTools,
 			PromptText:           promptText,
 			EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
+			CacheWarmModels:      cacheWarmModels,
 		})
 		if err != nil {
 			log.Error("Routing failed", "err", err, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "estimated_input_tokens", feats.Tokens)
