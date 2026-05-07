@@ -129,9 +129,13 @@ func main() {
 	}
 
 	if googleKey := config.GetOr("GOOGLE_PROVIDER_API_KEY", ""); googleKey != "" {
-		googleBaseURL := config.GetOr("GOOGLE_PROVIDER_BASE_URL", googleProvider.DefaultBaseURL)
-		providerMap[providers.ProviderGoogle] = googleProvider.NewClient(googleKey, googleBaseURL)
-		logger.Info("Google (Gemini) provider enabled", "base_url", googleBaseURL)
+		// Native Generative Language REST surface — required for multi-turn
+		// tool use against Gemini 3.x preview models, whose opaque
+		// thought_signature field is not exposed by the OpenAI-compat
+		// surface. See router/internal/providers/google/native_client.go.
+		googleBaseURL := config.GetOr("GOOGLE_PROVIDER_BASE_URL", googleProvider.NativeBaseURL)
+		providerMap[providers.ProviderGoogle] = googleProvider.NewNativeClient(googleKey, googleBaseURL)
+		logger.Info("Google (Gemini) native provider enabled", "base_url", googleBaseURL)
 	}
 
 	availableProviders := make(map[string]struct{}, len(providerMap))
