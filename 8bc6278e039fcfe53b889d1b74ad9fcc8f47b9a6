@@ -1,0 +1,44 @@
+internal/proxy/service.go
+  s_1834c694151f4a::t_a5c00115e0eeff 304-316
+  s_1834c694151f4a::t_cfdc390626abe3 387-390,398
+  s_1834c694151f4a::t_6a42241878030d 356-370
+internal/router/cluster/artifacts/latest
+  s_1834c694151f4a::t_0f704201d5177d 1
+internal/router/cluster/artifacts_test.go
+  s_1834c694151f4a::t_6f8c42d69bbea7 95-97,104,107-125
+internal/router/cluster/artifacts.go
+  s_1834c694151f4a::t_0e1660eb529ae7 80-94,100-104,108-110,125
+  s_1834c694151f4a::t_92b94add26649e 364-369,382,390,393-401,406-423
+  s_1834c694151f4a::t_06fbfc552f9b9b 181-182
+internal/router/cluster/artifacts/v0.22/model_registry.json
+  s_1834c694151f4a::t_944e91b267fbde 1-46
+internal/router/cluster/artifacts/v0.22/rankings.json
+  s_1834c694151f4a::t_944e91b267fbde 1-3,15-46,83-84,121-122,159-160,197-198,235-236,273-274,311-312,349-350,387-388,425-426
+  s_1834c694151f4a::t_94ac916c36126f 4-14,47-82,85-120,123-158,161-196,199-234,237-272,275-310,313-348,351-386,389-424,427
+internal/router/router.go
+  s_1834c694151f4a::t_a59ab72f309102 22-29
+internal/router/cluster/scorer.go
+  s_1834c694151f4a::t_6b072b16d6c03e 23-35
+  s_1834c694151f4a::t_84402367dccf06 299-324
+internal/router/cluster/scorer_test.go
+  s_1834c694151f4a::t_ad09024e3be1d6 558-675
+internal/router/cluster/artifacts/v0.22/metadata.yaml
+  s_1834c694151f4a::t_34bbb98920d522 1-2,4,50-60
+  s_1834c694151f4a::t_944e91b267fbde 3,5-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "8bc6278e039fcfe53b889d1b74ad9fcc8f47b9a6",
+  "prompts": {},
+  "sessions": {
+    "s_1834c694151f4a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e5a3daeb-8519-4a67-a668-71d34aab7065",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
