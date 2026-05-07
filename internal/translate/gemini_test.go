@@ -130,9 +130,9 @@ func TestPrepareGemini_ToolsMappedToFunctionDeclarations(t *testing.T) {
 
 func TestPrepareGemini_ToolChoiceVariants(t *testing.T) {
 	cases := map[string]string{
-		`"tool_choice":"auto"`:                                        "AUTO",
-		`"tool_choice":"none"`:                                        "NONE",
-		`"tool_choice":"required"`:                                    "ANY",
+		`"tool_choice":"auto"`:     "AUTO",
+		`"tool_choice":"none"`:     "NONE",
+		`"tool_choice":"required"`: "ANY",
 		`"tool_choice":{"type":"function","function":{"name":"bash"}}`: "ANY",
 	}
 	for tc, mode := range cases {
