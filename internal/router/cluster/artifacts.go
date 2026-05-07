@@ -370,6 +370,30 @@ func loadRankings(raw []byte) (Rankings, error) {
 	return out, nil
 }
 
+// CheapestModel returns the provider and model whose cost-per-1k-input is
+// lowest among all entries in registry whose provider appears in available.
+// The cost lookup uses meta.CostPer1KInputUSD. Entries missing a cost entry
+// are skipped. Returns ("", "", false) if no matching entry is found.
+func CheapestModel(meta *ArtifactMetadata, registry *ModelRegistry, available map[string]struct{}) (provider, model string, ok bool) {
+	var bestCost float64 = -1
+	for _, e := range registry.DeployedModels {
+		if _, inSet := available[e.Provider]; !inSet {
+			continue
+		}
+		cost, hasCost := meta.CostPer1KInputUSD[e.Model]
+		if !hasCost {
+			continue
+		}
+		if bestCost < 0 || cost < bestCost {
+			bestCost = cost
+			provider = e.Provider
+			model = e.Model
+			ok = true
+		}
+	}
+	return
+}
+
 // loadRegistry validates that every entry carries a non-empty (model,
 // provider, bench_column) triple. Empty fields are loud errors at boot
 // rather than silent "decision routes to nothing" at request time.

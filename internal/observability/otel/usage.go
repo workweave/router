@@ -9,6 +9,16 @@ import (
 	"workweave/router/internal/sse"
 )
 
+// providerAnthropic / providerOpenAI / providerGoogle are local mirrors of the
+// providers.Provider* constants. This package is a leaf utility (must not
+// import internal/providers), so we duplicate the short strings rather than
+// introduce a circular import. Keep in sync with internal/providers/provider.go.
+const (
+	providerAnthropic = "anthropic"
+	providerOpenAI    = "openai"
+	providerGoogle    = "google"
+)
+
 // UsageSink receives extracted token usage. Translators call RecordUsage
 // when they encounter usage data in already-parsed events, eliminating
 // the need for a separate parse pass.
@@ -120,9 +130,9 @@ func (u *UsageExtractor) scanBuffer() {
 
 func (u *UsageExtractor) extractFromSSEEvent(eventType []byte, data []byte) {
 	switch u.provider {
-	case "anthropic":
+	case providerAnthropic:
 		u.extractAnthropicSSE(eventType, data)
-	case "openai", "google":
+	case providerOpenAI, providerGoogle:
 		u.extractOpenAISSE(data)
 	}
 }
@@ -133,7 +143,7 @@ func (u *UsageExtractor) extractAnthropicSSE(eventType []byte, data []byte) {
 		return
 	}
 
-	input, output, found := extractUsageGJSON(data, "anthropic")
+	input, output, found := extractUsageGJSON(data, providerAnthropic)
 	if !found {
 		return
 	}
@@ -184,7 +194,7 @@ func (u *UsageExtractor) tryExtractFromJSON() {
 // json.Unmarshal and map[string]any allocations entirely.
 func extractUsageGJSON(data []byte, provider string) (input, output int, found bool) {
 	usage := gjson.GetBytes(data, "usage")
-	if !usage.Exists() && provider == "anthropic" {
+	if !usage.Exists() && provider == providerAnthropic {
 		usage = gjson.GetBytes(data, "message.usage")
 	}
 	if !usage.Exists() {
@@ -192,10 +202,10 @@ func extractUsageGJSON(data []byte, provider string) (input, output int, found b
 	}
 
 	switch provider {
-	case "anthropic":
+	case providerAnthropic:
 		input = int(usage.Get("input_tokens").Int())
 		output = int(usage.Get("output_tokens").Int())
-	case "openai", "google":
+	case providerOpenAI, providerGoogle:
 		input = int(usage.Get("prompt_tokens").Int())
 		output = int(usage.Get("completion_tokens").Int())
 	default:

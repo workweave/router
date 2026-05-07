@@ -203,3 +203,53 @@ func TestResolveVersion_UnknownErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "v99.99")
 }
+
+func TestCheapestModel(t *testing.T) {
+	meta := &ArtifactMetadata{
+		CostPer1KInputUSD: map[string]float64{
+			"model-a": 3.00,
+			"model-b": 0.50,
+			"model-c": 0.10,
+		},
+	}
+	registry := &ModelRegistry{
+		DeployedModels: []DeployedEntry{
+			{Model: "model-a", Provider: "anthropic", BenchColumn: "col-a"},
+			{Model: "model-b", Provider: "google", BenchColumn: "col-b"},
+			{Model: "model-c", Provider: "google", BenchColumn: "col-c"},
+		},
+	}
+
+	t.Run("picks cheapest across providers", func(t *testing.T) {
+		available := map[string]struct{}{"anthropic": {}, "google": {}}
+		p, m, ok := CheapestModel(meta, registry, available)
+		require.True(t, ok)
+		assert.Equal(t, "google", p)
+		assert.Equal(t, "model-c", m)
+	})
+
+	t.Run("filters by available providers", func(t *testing.T) {
+		available := map[string]struct{}{"anthropic": {}}
+		p, m, ok := CheapestModel(meta, registry, available)
+		require.True(t, ok)
+		assert.Equal(t, "anthropic", p)
+		assert.Equal(t, "model-a", m)
+	})
+
+	t.Run("returns false when no provider matches", func(t *testing.T) {
+		available := map[string]struct{}{"openai": {}}
+		_, _, ok := CheapestModel(meta, registry, available)
+		assert.False(t, ok)
+	})
+
+	t.Run("skips entries with no cost annotation", func(t *testing.T) {
+		metaNoCost := &ArtifactMetadata{
+			CostPer1KInputUSD: map[string]float64{"model-a": 1.00},
+		}
+		available := map[string]struct{}{"anthropic": {}, "google": {}}
+		p, m, ok := CheapestModel(metaNoCost, registry, available)
+		require.True(t, ok)
+		assert.Equal(t, "anthropic", p)
+		assert.Equal(t, "model-a", m)
+	})
+}

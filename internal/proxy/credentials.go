@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/providers"
 )
 
 // Credentials holds the API key to use for an upstream request.
@@ -47,11 +48,11 @@ func BuildCredentialsMap(keys []*auth.ExternalAPIKey) map[string]*Credentials {
 // HasAPIKeyPrefix guard and leak upstream.
 func ExtractClientCredentials(provider string, headers http.Header) *Credentials {
 	switch provider {
-	case "anthropic":
+	case providers.ProviderAnthropic:
 		if key := strings.TrimSpace(headers.Get("x-api-key")); key != "" && !auth.HasAPIKeyPrefix(key) {
 			return &Credentials{APIKey: []byte(key), Source: "client"}
 		}
-	case "openai", "google":
+	case providers.ProviderOpenAI, providers.ProviderGoogle:
 		authHeader := headers.Get("Authorization")
 		if raw, found := strings.CutPrefix(authHeader, "Bearer "); found {
 			key := strings.TrimSpace(raw)
