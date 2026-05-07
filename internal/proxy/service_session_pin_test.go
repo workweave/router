@@ -182,10 +182,17 @@ func TestService_SessionPin_ExpiredPinIsIgnored(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
 }
 
-func TestService_SessionPin_EvalOverrideHeaderBypassesAllTiers(t *testing.T) {
+func TestService_SessionPin_EvalOverrideHeaderKeepsSessionKeyPinning(t *testing.T) {
+	// Tier-1/2 (session-key-based) session pinning must stay active under
+	// eval-harness traffic. The session_key is derived from system text +
+	// first user message, so each eval prompt produces a unique key — pinning
+	// per-session is exactly what an agentic harness needs to keep multi-turn
+	// tool-use on a single provider. Without this, mid-conversation provider
+	// switches break Gemini, which rejects function calls without
+	// thoughtSignature emitted by other providers.
 	store := newFakePinStore()
 	store.hasPin = true
-	store.pin = sessionpin.Pin{Provider: "anthropic", Model: "claude-haiku-4-5", PinnedUntil: time.Now().Add(time.Hour)}
+	store.pin = sessionpin.Pin{Provider: "anthropic", Model: "claude-haiku-4-5", PinnedUntil: time.Now().Add(time.Hour), Reason: "pinned"}
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "fresh"}}
 	svc := newPinSvc(fr, store)
 
@@ -195,10 +202,12 @@ func TestService_SessionPin_EvalOverrideHeaderBypassesAllTiers(t *testing.T) {
 	httpReq.Header.Set("x-weave-cluster-version", "v0.2")
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	assert.Equal(t, 1, fr.routeCalls,
-		"eval-override header must bypass the pin tiers so the harness can compare router strategies on the same prompt")
-	assert.Equal(t, 0, store.getCalls,
-		"the pin store must not even be consulted when bypass is active")
+	assert.Equal(t, 0, fr.routeCalls,
+		"eval-override header must NOT bypass session-key-based pinning; the pin must short-circuit the cluster scorer")
+	assert.Equal(t, 1, store.getCalls,
+		"the pin store must be consulted even when eval-override headers are present")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"),
+		"the pinned model must win over the cluster-scorer's fresh decision")
 }
 
 // compactionBody is a minimal Anthropic request whose system prompt triggers
