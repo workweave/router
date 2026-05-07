@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -192,11 +193,13 @@ func main() {
 	}
 
 	hardPinExplore := config.GetOr("ROUTER_HARD_PIN_EXPLORE", "false") == "true"
+	hardPinProvider, hardPinModel := resolveHardPinModel(availableProviders, logger)
 	if hardPinExplore {
-		logger.Info("Explore sub-agent hard-pin enabled (claude-haiku-4-5)")
+		logger.Info("Explore sub-agent hard-pin enabled", "provider", hardPinProvider, "model", hardPinModel)
 	}
+	logger.Info("Hard-pin model resolved", "provider", hardPinProvider, "model", hardPinModel)
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache, pinStore, hardPinExplore)
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel)
 
 	engine := gin.New()
 	engine.UnescapePathValues = true
@@ -555,6 +558,38 @@ func runSessionPinSweep(ctx context.Context, store sessionpin.Store) {
 			cancel()
 		}
 	}
+}
+
+// resolveHardPinModel returns the (provider, model) to use for compaction and
+// Explore hard-pins. Operator override wins; otherwise the cheapest model in
+// the default artifact bundle among available providers is selected.
+// Falls back to ("anthropic", "claude-haiku-4-5") when no bundle is loadable.
+func resolveHardPinModel(available map[string]struct{}, logger *slog.Logger) (provider, model string) {
+	const defaultProvider = "anthropic"
+	const defaultModel = "claude-haiku-4-5"
+
+	if m := config.GetOr("ROUTER_HARD_PIN_MODEL", ""); m != "" {
+		p := config.GetOr("ROUTER_HARD_PIN_PROVIDER", defaultProvider)
+		return p, m
+	}
+
+	reqVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
+	defaultVersion, err := cluster.ResolveVersion(reqVersion)
+	if err != nil {
+		logger.Warn("Hard-pin model: could not resolve cluster version; using default", "err", err, "default_model", defaultModel)
+		return defaultProvider, defaultModel
+	}
+	bundle, err := cluster.LoadBundle(defaultVersion)
+	if err != nil {
+		logger.Warn("Hard-pin model: could not load bundle; using default", "err", err, "default_model", defaultModel)
+		return defaultProvider, defaultModel
+	}
+	p, m, ok := cluster.CheapestModel(bundle.Metadata, bundle.Registry, available)
+	if !ok {
+		logger.Warn("Hard-pin model: no cost-annotated model found for available providers; using default", "default_model", defaultModel)
+		return defaultProvider, defaultModel
+	}
+	return p, m
 }
 
 // envVarForProvider returns the env var name for a provider's API key.

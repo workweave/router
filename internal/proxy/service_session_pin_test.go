@@ -76,13 +76,15 @@ func newPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 	return proxy.NewService(
 		fr,
 		map[string]providers.Client{"anthropic": &fakeProvider{}},
-		nil,   // emitter
-		false, // embedLastUserMessage
-		0,     // stickyDecisionTTL — disable legacy LRU for clarity
-		nil,   // decisionLog
-		nil,   // semanticCache
+		nil,              // emitter
+		false,            // embedLastUserMessage
+		0,                // stickyDecisionTTL — disable legacy LRU for clarity
+		nil,              // decisionLog
+		nil,              // semanticCache
 		store,
-		false, // hardPinExplore
+		false,            // hardPinExplore
+		"anthropic",      // hardPinProvider
+		"claude-haiku-4-5", // hardPinModel
 	)
 }
 
@@ -252,7 +254,9 @@ func TestService_HardPin_ExploreRoutesToHaikuWhenFlagOn(t *testing.T) {
 		nil,
 		nil,
 		store,
-		true, // hardPinExplore = on
+		true,              // hardPinExplore = on
+		"anthropic",       // hardPinProvider
+		"claude-haiku-4-5", // hardPinModel
 	)
 
 	ctx := authedCtx(uuid.New().String())

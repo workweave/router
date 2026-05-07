@@ -51,10 +51,16 @@ type Service struct {
 	// fresh route on the next turn rather than accumulating goroutines
 	// under slow/unavailable Postgres.
 	pinWriteSem chan struct{}
-	// hardPinExplore gates the §3.4 Explore sub-agent hard-pin to Haiku.
+	// hardPinExplore gates the §3.4 Explore sub-agent hard-pin.
 	// Off by default; enable via ROUTER_HARD_PIN_EXPLORE=true after one
 	// week of shadow validation (see docs/plans/AGENTIC_CODING.md §3.4).
 	hardPinExplore bool
+	// hardPinProvider and hardPinModel are the (provider, model) routed to
+	// for compaction and (when hardPinExplore is on) Explore sub-agent turns.
+	// Derived at boot from the cheapest available model in the cluster bundle;
+	// overridable via ROUTER_HARD_PIN_PROVIDER / ROUTER_HARD_PIN_MODEL.
+	hardPinProvider string
+	hardPinModel    string
 }
 
 // pinSessionTTL is the sliding TTL written into pinned_until on every
@@ -92,7 +98,7 @@ type InstallationIDContextKey struct{}
 // NewService constructs the proxy service. pinStore may be nil when the
 // session-pin feature flag is off; the tiered lookup transparently
 // short-circuits past tiers 1–2 in that case.
-func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool) *Service {
+func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string) *Service {
 	var sticky *expirable.LRU[string, router.Decision]
 	if stickyDecisionTTL > 0 {
 		sticky = expirable.NewLRU[string, router.Decision](10000, nil, stickyDecisionTTL)
@@ -115,6 +121,8 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		pinCache:             pinCache,
 		pinWriteSem:          pinWriteSem,
 		hardPinExplore:       hardPinExplore,
+		hardPinProvider:      hardPinProvider,
+		hardPinModel:         hardPinModel,
 	}
 }
 
@@ -303,8 +311,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	)
 	if tt == turntype.Compaction || (tt == turntype.SubAgentDispatch && s.hardPinExplore) {
 		decision = router.Decision{
-			Provider: "anthropic",
-			Model:    "claude-haiku-4-5",
+			Provider: s.hardPinProvider,
+			Model:    s.hardPinModel,
 			Reason:   string(tt) + "_hard_pin",
 		}
 		stickyHit = true
