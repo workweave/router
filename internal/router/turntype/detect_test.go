@@ -200,6 +200,70 @@ func TestDetectFromEnvelope_OpenAI(t *testing.T) {
 	}
 }
 
+func TestDetectFromEnvelope_Gemini(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		hint string
+		want turntype.TurnType
+	}{
+		{
+			name: "regular user prompt is main_loop",
+			body: `{"contents":[{"role":"user","parts":[{"text":"explain recursion"}]}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			name: "trailing functionResponse is tool_result",
+			body: `{"contents":[
+				{"role":"user","parts":[{"text":"run grep"}]},
+				{"role":"model","parts":[{"functionCall":{"name":"Bash","args":{}}}]},
+				{"role":"user","parts":[{"functionResponse":{"name":"Bash","response":{"out":"x"}}}]}
+			]}`,
+			want: turntype.ToolResult,
+		},
+		{
+			name: "compaction via systemInstruction",
+			body: `{
+				"systemInstruction":{"parts":[{"text":"Your task is to create a detailed summary of the conversation so far."}]},
+				"contents":[{"role":"user","parts":[{"text":"go"}]}]
+			}`,
+			want: turntype.Compaction,
+		},
+		{
+			name: "sub-agent via header hint",
+			body: `{"contents":[{"role":"user","parts":[{"text":"grep"}]}]}`,
+			hint: "Explore",
+			want: turntype.SubAgentDispatch,
+		},
+		{
+			name: "sub-agent via systemInstruction marker",
+			body: `{
+				"systemInstruction":{"parts":[{"text":"You are a sub-agent for the Explore task."}]},
+				"contents":[{"role":"user","parts":[{"text":"list files"}]}]
+			}`,
+			want: turntype.SubAgentDispatch,
+		},
+		{
+			name: "trailing model message is main_loop",
+			body: `{"contents":[
+				{"role":"user","parts":[{"text":"hi"}]},
+				{"role":"model","parts":[{"text":"hello"}]}
+			]}`,
+			want: turntype.MainLoop,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env, err := translate.ParseGemini([]byte(tc.body))
+			require.NoError(t, err)
+			feats := env.RoutingFeatures(false)
+			got := turntype.DetectFromEnvelope(env, feats, tc.hint)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestDetectFromEnvelope_NilEnv(t *testing.T) {
 	got := turntype.DetectFromEnvelope(nil, translate.RoutingFeatures{}, "")
 	assert.Equal(t, turntype.MainLoop, got)

@@ -31,6 +31,8 @@ func (e *RequestEnvelope) RoutingFeatures(extractLastUser bool) RoutingFeatures 
 		return e.anthropicRoutingFeatures(extractLastUser)
 	case FormatOpenAI:
 		return e.openAIRoutingFeatures()
+	case FormatGemini:
+		return e.geminiRoutingFeatures()
 	default:
 		return RoutingFeatures{}
 	}

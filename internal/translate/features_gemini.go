@@ -1,0 +1,194 @@
+package translate
+
+import (
+	"strings"
+
+	"github.com/tidwall/gjson"
+)
+
+// Gemini wire format reference:
+//   - systemInstruction: { parts: [ {text: ...}, ... ] } (or absent)
+//   - contents: [ { role: "user"|"model", parts: [ {text|functionCall|functionResponse|inlineData|thoughtSignature: ...} ] }, ... ]
+//   - tools / generationConfig: top-level
+// Streaming choice is encoded in the URL path (:generateContent vs
+// :streamGenerateContent), not the body.
+
+func (e *RequestEnvelope) geminiRoutingFeatures() RoutingFeatures {
+	contents := gjson.GetBytes(e.body, "contents")
+
+	var b strings.Builder
+	appendText(&b, geminiSystemText(e.body))
+
+	var (
+		msgCount int
+		lastMsg  gjson.Result
+	)
+	contents.ForEach(func(_, msg gjson.Result) bool {
+		msgCount++
+		appendText(&b, geminiPartsText(msg.Get("parts")))
+		lastMsg = msg
+		return true
+	})
+	text := b.String()
+
+	feats := RoutingFeatures{
+		Tokens:       len(text) / 4,
+		Model:        e.Model(),
+		HasTools:     e.HasTools(),
+		PromptText:   text,
+		MessageCount: msgCount,
+	}
+
+	if msgCount > 0 {
+		feats.LastKind = classifyLastMessageGemini(lastMsg)
+		feats.LastPreview = previewText(geminiPartsText(lastMsg.Get("parts")))
+	}
+
+	return feats
+}
+
+// classifyLastMessageGemini maps a Gemini contents[] entry onto the
+// shared three-value LastKind enum.
+//   - role=="model"                                            → "assistant"
+//   - role=="user" with all parts being functionResponse        → "tool_result"
+//   - otherwise                                                  → "user_prompt"
+func classifyLastMessageGemini(msg gjson.Result) string {
+	if msg.Get("role").String() == "model" {
+		return "assistant"
+	}
+	parts := msg.Get("parts")
+	if !parts.IsArray() {
+		return "user_prompt"
+	}
+	hasToolResult := false
+	hasText := false
+	parts.ForEach(func(_, part gjson.Result) bool {
+		if part.Get("functionResponse").Exists() {
+			hasToolResult = true
+		}
+		if part.Get("text").Exists() {
+			hasText = true
+		}
+		return true
+	})
+	if hasToolResult && !hasText {
+		return "tool_result"
+	}
+	return "user_prompt"
+}
+
+// geminiSystemText concatenates every text part inside systemInstruction.
+func geminiSystemText(body []byte) string {
+	parts := gjson.GetBytes(body, "systemInstruction.parts")
+	if !parts.IsArray() {
+		// Some clients send systemInstruction as a bare string or {text}.
+		text := gjson.GetBytes(body, "systemInstruction.text")
+		if text.Exists() {
+			return text.String()
+		}
+		return ""
+	}
+	var b strings.Builder
+	parts.ForEach(func(_, part gjson.Result) bool {
+		text := part.Get("text").String()
+		if text == "" {
+			return true
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(text)
+		return true
+	})
+	return b.String()
+}
+
+// geminiPartsText concatenates every text-bearing part inside a
+// contents[] message's parts array. Tool-call / tool-response /
+// thoughtSignature parts contribute no text and are skipped.
+func geminiPartsText(parts gjson.Result) string {
+	if !parts.IsArray() {
+		return ""
+	}
+	var b strings.Builder
+	parts.ForEach(func(_, part gjson.Result) bool {
+		text := part.Get("text").String()
+		if text == "" {
+			return true
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(text)
+		return true
+	})
+	return b.String()
+}
+
+// geminiLastUserMessage walks contents[] backwards for the last
+// role=="user" entry and reports whether it contains text and/or
+// functionResponse parts.
+func geminiLastUserMessage(body []byte) LastUserMessageInfo {
+	contents := gjson.GetBytes(body, "contents")
+	if !contents.IsArray() {
+		return LastUserMessageInfo{}
+	}
+	var lastUser gjson.Result
+	contents.ForEach(func(_, msg gjson.Result) bool {
+		if msg.Get("role").String() == "user" {
+			lastUser = msg
+		}
+		return true
+	})
+	if !lastUser.Exists() {
+		return LastUserMessageInfo{}
+	}
+	parts := lastUser.Get("parts")
+	if !parts.IsArray() {
+		return LastUserMessageInfo{}
+	}
+	info := LastUserMessageInfo{}
+	var b strings.Builder
+	parts.ForEach(func(_, part gjson.Result) bool {
+		if part.Get("functionResponse").Exists() {
+			info.HasToolResult = true
+			info.ToolResultCount++
+			return true
+		}
+		text := part.Get("text").String()
+		if text == "" {
+			return true
+		}
+		info.HasText = true
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(text)
+		return true
+	})
+	if info.HasText {
+		info.Text = b.String()
+	}
+	return info
+}
+
+// geminiFirstUserMessageText returns the concatenated text of the first
+// contents[] entry whose role is "user".
+func geminiFirstUserMessageText(body []byte) string {
+	contents := gjson.GetBytes(body, "contents")
+	if !contents.IsArray() {
+		return ""
+	}
+	var firstUser gjson.Result
+	contents.ForEach(func(_, msg gjson.Result) bool {
+		if msg.Get("role").String() == "user" {
+			firstUser = msg
+			return false
+		}
+		return true
+	})
+	if !firstUser.Exists() {
+		return ""
+	}
+	return geminiPartsText(firstUser.Get("parts"))
+}
