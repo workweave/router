@@ -130,20 +130,43 @@ func (s *Service) IssueAdminSession() (token string, expiresAt time.Time, err er
 // dashboard's first interaction (issuing a key, saving a provider key,
 // etc.) so operators don't have to seed an installation by hand before
 // the UI works.
+//
+// Concurrent first-hit dashboard requests will race here: both see no
+// existing row, both try to Create, one wins and the other hits the
+// unique constraint on (name, external_id). On Create failure we re-run
+// the lookup so the loser returns the winner's row instead of bubbling
+// up a 500.
 func (s *Service) EnsureAdminInstallation(ctx context.Context) (*Installation, error) {
-	existing, err := s.installations.ListForExternalID(ctx, AdminInstallationExternalID)
-	if err != nil {
+	if inst, ok, err := s.findAdminInstallation(ctx); err != nil {
 		return nil, err
+	} else if ok {
+		return inst, nil
 	}
-	for _, inst := range existing {
-		if inst != nil && inst.DeletedAt == nil {
-			return inst, nil
-		}
-	}
-	return s.installations.Create(ctx, CreateInstallationParams{
+	created, createErr := s.installations.Create(ctx, CreateInstallationParams{
 		ExternalID: AdminInstallationExternalID,
 		Name:       AdminInstallationName,
 	})
+	if createErr == nil {
+		return created, nil
+	}
+	// Lost a concurrent race — the row exists now. Re-list and return it.
+	if inst, ok, err := s.findAdminInstallation(ctx); err == nil && ok {
+		return inst, nil
+	}
+	return nil, createErr
+}
+
+func (s *Service) findAdminInstallation(ctx context.Context) (*Installation, bool, error) {
+	existing, err := s.installations.ListForExternalID(ctx, AdminInstallationExternalID)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, inst := range existing {
+		if inst != nil && inst.DeletedAt == nil {
+			return inst, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 // VerifyAdminSession parses and authenticates a session cookie value.

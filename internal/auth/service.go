@@ -92,7 +92,12 @@ func (s *Service) ListExternalAPIKeys(ctx context.Context, installationID string
 // UpsertExternalAPIKey replaces any existing key for the provider and inserts a
 // new one. The raw key is encrypted before storage.
 func (s *Service) UpsertExternalAPIKey(ctx context.Context, installationID, provider, rawKey string, name *string, createdBy *string) (*ExternalAPIKey, error) {
-	ciphertext, err := s.encryptor.Encrypt([]byte(rawKey))
+	// Generate the external ID first so it can be bound into the
+	// ciphertext as AAD. Decrypt callers re-derive the AAD from
+	// (external_id, provider) on the row, so the binding is verified
+	// on every read.
+	externalID := GenerateID("ekid")
+	ciphertext, err := s.encryptor.Encrypt([]byte(rawKey), externalID, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +105,6 @@ func (s *Service) UpsertExternalAPIKey(ctx context.Context, installationID, prov
 		return nil, err
 	}
 	hash, prefix, suffix := APITokenFingerprint(rawKey)
-	externalID := GenerateID("ekid")
 	key, err := s.externalKeys.Create(ctx, CreateExternalAPIKeyParams{
 		InstallationID: installationID,
 		ExternalID:     externalID,
