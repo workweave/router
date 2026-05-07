@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "comment": "v0.22 candidate (alpha=0.20). Strict superset of v0.19's 5-model deployed set: adds the v0.20-plan OSS pool (4 Qwen3 variants via OpenRouter + gemini-2.5-flash via Google's OpenAI-compat endpoint) plus three carry-over models that already had RouterArena coverage from earlier candidate artifacts (gpt-4.1, gpt-5.4-mini, gpt-5.5, gemini-3-flash-preview). Trained --routerarena-only against routerarena_labels_full.jsonl, so every entry uses the direct routerarena_<model> bench column — no OpenRouterBench proxies. Anthropic-routing additivity guarantee per the v0.20 plan: the 5 v0.19 entries are unchanged.",
+    "last_refreshed": "2026-05-05",
+    "training_recipe": "v0.21 recipe (k=10 zscore shrinkage_k0=10 routerarena_only) with alpha=0.20."
+  },
+  "deployed_models": [
+    {"model": "claude-haiku-4-5",                 "provider": "anthropic",  "bench_column": "routerarena_claude-haiku-4-5",                 "direct_label": "routerarena"},
+    {"model": "claude-sonnet-4-5",                "provider": "anthropic",  "bench_column": "routerarena_claude-sonnet-4-5",                "direct_label": "routerarena"},
+    {"model": "claude-opus-4-7",                  "provider": "anthropic",  "bench_column": "routerarena_claude-opus-4-7",                  "direct_label": "routerarena"},
+    {"model": "gemini-3.1-flash-lite-preview",    "provider": "google",     "bench_column": "routerarena_gemini-3.1-flash-lite-preview",    "direct_label": "routerarena"},
+    {"model": "gemini-3.1-pro-preview",           "provider": "google",     "bench_column": "routerarena_gemini-3.1-pro-preview",           "direct_label": "routerarena"},
+    {"model": "gemini-3-flash-preview",           "provider": "google",     "bench_column": "routerarena_gemini-3-flash-preview",           "direct_label": "routerarena"},
+    {"model": "gpt-4.1",                          "provider": "openai",     "bench_column": "routerarena_gpt-4.1",                          "direct_label": "routerarena"},
+    {"model": "gpt-5.4-mini",                     "provider": "openai",     "bench_column": "routerarena_gpt-5.4-mini",                     "direct_label": "routerarena"},
+    {"model": "gpt-5.5",                          "provider": "openai",     "bench_column": "routerarena_gpt-5.5",                          "direct_label": "routerarena"},
+    {"model": "gemini-2.5-flash",                 "provider": "google",     "bench_column": "routerarena_gemini-2.5-flash",                 "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-235b-a22b-2507",        "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-235b-a22b-2507",        "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-30b-a3b-instruct-2507", "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-30b-a3b-instruct-2507", "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-coder-next",            "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-coder-next",            "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-next-80b-a3b-instruct", "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-next-80b-a3b-instruct", "direct_label": "routerarena"}
+  ]
+}

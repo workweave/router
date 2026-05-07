@@ -1,0 +1,73 @@
+version: "v0.25"
+parent: null
+status: "candidate"
+promoted_date: "2026-05-06"
+embedder:
+  model: "jina-v2-base-code-int8"
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 10
+  top_p: 4
+  alpha: 0.2
+  shrinkage_k0: 10.0
+  score_normalization: "per_prompt_zscore_across_bench_columns"
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 8013
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  include_routerarena_labels: "/Users/steventohme/Desktop/workweave4/router-internal/eval/results/_unsorted/routerarena_labels_full.jsonl"
+  routerarena_only: true
+  exclude_prompts: null
+  n_excluded_prompts: 0
+deployed_providers:
+  - anthropic
+  - google
+  - openai
+  - openrouter
+deployed_models:
+  - claude-haiku-4-5
+  - claude-opus-4-7
+  - claude-sonnet-4-5
+  - deepseek/deepseek-v4-flash
+  - deepseek/deepseek-v4-pro
+  - gemini-2.5-flash
+  - gemini-3-flash-preview
+  - gemini-3.1-flash-lite-preview
+  - gemini-3.1-pro-preview
+  - gpt-4.1
+  - gpt-5.4-mini
+  - gpt-5.5
+  - mistralai/mistral-small-2603
+  - moonshotai/kimi-k2.5
+  - qwen/qwen3-235b-a22b-2507
+  - qwen/qwen3-30b-a3b-instruct-2507
+  - qwen/qwen3-coder
+  - qwen/qwen3-coder-next
+  - qwen/qwen3-next-80b-a3b-instruct
+  - qwen/qwen3.5-flash-02-23
+cost_per_1k_input_usd:
+  claude-haiku-4-5: 0.0008
+  claude-opus-4-7: 0.015
+  claude-sonnet-4-5: 0.003
+  deepseek/deepseek-v4-flash: 0.00014
+  deepseek/deepseek-v4-pro: 0.000435
+  gemini-2.5-flash: 0.0003
+  gemini-3-flash-preview: 0.0005
+  gemini-3.1-flash-lite-preview: 0.0001
+  gemini-3.1-pro-preview: 0.002
+  gpt-4.1: 0.002
+  gpt-5.4-mini: 0.0004
+  gpt-5.5: 0.005
+  mistralai/mistral-small-2603: 0.00015
+  moonshotai/kimi-k2.5: 0.00044
+  qwen/qwen3-235b-a22b-2507: 7.1e-05
+  qwen/qwen3-30b-a3b-instruct-2507: 8e-05
+  qwen/qwen3-coder: 0.00022
+  qwen/qwen3-coder-next: 7e-05
+  qwen/qwen3-next-80b-a3b-instruct: 9e-05
+  qwen/qwen3.5-flash-02-23: 6.5e-05
+changelog: "Initial training run for v0.25."
