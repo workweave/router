@@ -1,0 +1,59 @@
+internal/router/sessionpin/store.go
+  304a1fdb547d0e74 1-51
+internal/sqlc/session_pins.sql.go
+  304a1fdb547d0e74 1-133
+db/queries/session_pins.sql
+  304a1fdb547d0e74 1-39
+internal/server/middleware/auth.go
+  304a1fdb547d0e74 48-50
+internal/proxy/service.go
+  304a1fdb547d0e74 5,17,36-46,49-54,76-84,89-92,101-102,267,270-280,282-288,290-321,325,328,342,346-375,424,437-439,573-606
+  s_f9607ec6d0e27d::t_34c801fc50f2f3 613-614
+internal/proxy/service_cache_test.go
+  304a1fdb547d0e74 92,123,147,170,195
+internal/proxy/session_key_test.go
+  304a1fdb547d0e74 1-136
+internal/sqlc/models.go
+  304a1fdb547d0e74 59-74
+internal/postgres/session_pin_repo.go
+  304a1fdb547d0e74 1-79
+internal/proxy/service_session_pin_test.go
+  304a1fdb547d0e74 1-199
+internal/proxy/service_test.go
+  304a1fdb547d0e74 56,105,129,193,238
+internal/proxy/session_key.go
+  304a1fdb547d0e74 1-58
+cmd/router/main.go
+  304a1fdb547d0e74 35,61-67,186-194,532-554
+internal/translate/envelope.go
+  304a1fdb547d0e74 120-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "29d1f8d45b659b89a59bf7980112229aa97e5c33",
+  "prompts": {
+    "304a1fdb547d0e74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c393fe31-9f98-473e-940f-898f180f7de8",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "total_additions": 999,
+      "total_deletions": 33,
+      "accepted_lines": 956,
+      "overriden_lines": 0
+    }
+  },
+  "sessions": {
+    "s_f9607ec6d0e27d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1e6deab2-4124-43b6-97ae-ac9a980a309b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
