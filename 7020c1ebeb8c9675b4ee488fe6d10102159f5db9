@@ -1,0 +1,76 @@
+internal/router/turntype/detect.go
+  s_18e3f40203cbfc::t_e47435a90f6da4 1-122
+internal/router/turntype/detect_test.go
+  s_18e3f40203cbfc::t_92aa6dd75e36c6 1-116
+internal/proxy/service_session_pin_test.go
+  304a1fdb547d0e74 1-84,86-192,194-200
+  s_18e3f40203cbfc::t_59f3f798149a72 85
+  s_f9607ec6d0e27d::t_ca9b20a72adb11 193
+  s_18e3f40203cbfc::t_a7d0bd72354223 201-290
+internal/proxy/service.go
+  304a1fdb547d0e74 5,17,37-47,58-59,81-89,94,96-97,106-107,275,278-288,295-303,326-347,351,354,368,372-381,389-406,457,470-471,607-640
+  s_18e3f40203cbfc::t_d06da3811a2f28 18
+  s_f9607ec6d0e27d::t_adfbed99826540 48-53
+  s_18e3f40203cbfc::t_6b6cfa09c5390e 54-57
+  s_18e3f40203cbfc::t_053cc1838acbf6 95
+  s_f9607ec6d0e27d::t_0779fb2f0843e4 101,104
+  s_f9607ec6d0e27d::t_42e59154528ea6 116
+  s_18e3f40203cbfc::t_f2c3c4a2babd3c 117
+  s_18e3f40203cbfc::t_27a7943a7e9b38 268-269
+  s_18e3f40203cbfc::t_5fcb8dab63c779 289-294,304-325
+  s_18e3f40203cbfc::t_b49f7d4aad6864 382-388
+  s_f9607ec6d0e27d::t_93a7cf806c21a2 407-417
+  s_18e3f40203cbfc::t_1930d26fcda02b 472,488
+  s_f9607ec6d0e27d::t_34c801fc50f2f3 647-648
+  s_f9607ec6d0e27d::t_696d975082f5a4 662
+internal/proxy/service_test.go
+  s_18e3f40203cbfc::t_658f71e187d11d 56
+  304a1fdb547d0e74 105,130,195,241
+  s_18e3f40203cbfc::t_f95455baf685fd 106
+  s_18e3f40203cbfc::t_a9eb977c28fa05 131
+  s_18e3f40203cbfc::t_4b79a0a572149f 196
+  s_18e3f40203cbfc::t_16c92c6afa4de8 242
+internal/proxy/service_cache_test.go
+  s_18e3f40203cbfc::t_0101cd30b14d14 92,123,147,170
+  s_18e3f40203cbfc::t_3614647bf16c8f 195
+cmd/router/main.go
+  304a1fdb547d0e74 35,61-67,186-193,537-559
+  s_18e3f40203cbfc::t_3078bdd8c83447 194-199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "7020c1ebeb8c9675b4ee488fe6d10102159f5db9",
+  "prompts": {
+    "304a1fdb547d0e74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c393fe31-9f98-473e-940f-898f180f7de8",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "total_additions": 999,
+      "total_deletions": 33,
+      "accepted_lines": 339,
+      "overriden_lines": 0
+    }
+  },
+  "sessions": {
+    "s_18e3f40203cbfc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ef3e74f-d410-4e73-87e1-e5c37122a3e2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_f9607ec6d0e27d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1e6deab2-4124-43b6-97ae-ac9a980a309b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}

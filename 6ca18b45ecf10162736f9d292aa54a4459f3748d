@@ -1,0 +1,25 @@
+internal/proxy/service.go
+  s_f9607ec6d0e27d::t_adfbed99826540 47-52
+  s_f9607ec6d0e27d::t_0779fb2f0843e4 96,99
+  s_f9607ec6d0e27d::t_696d975082f5a4 628
+  s_f9607ec6d0e27d::t_42e59154528ea6 111
+  s_f9607ec6d0e27d::t_93a7cf806c21a2 374-384
+internal/proxy/service_session_pin_test.go
+  s_f9607ec6d0e27d::t_ca9b20a72adb11 192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "6ca18b45ecf10162736f9d292aa54a4459f3748d",
+  "prompts": {},
+  "sessions": {
+    "s_f9607ec6d0e27d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1e6deab2-4124-43b6-97ae-ac9a980a309b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}

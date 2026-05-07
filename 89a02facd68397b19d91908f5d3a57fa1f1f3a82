@@ -1,0 +1,87 @@
+internal/router/cluster/artifacts_test.go
+  s_1834c694151f4a::t_6f8c42d69bbea7 95-97,104,107-125
+  s_18e3f40203cbfc::t_e3a517e248d779 225-274
+internal/router/cluster/artifacts.go
+  s_1834c694151f4a::t_0e1660eb529ae7 80-94,100-104,108-110,125
+  s_1834c694151f4a::t_06fbfc552f9b9b 181-182
+  s_1834c694151f4a::t_92b94add26649e 364-369,382,390,393-401,406-423
+  s_18e3f40203cbfc::t_5c210ea2ef1cee 426-449
+internal/router/cluster/scorer.go
+  s_1834c694151f4a::t_6b072b16d6c03e 23-35
+  s_1834c694151f4a::t_84402367dccf06 299-324
+internal/router/cluster/scorer_test.go
+  s_1834c694151f4a::t_ad09024e3be1d6 558-675
+internal/router/cluster/artifacts/v0.22/model_registry.json
+  s_1834c694151f4a::t_944e91b267fbde 1-46
+internal/router/cluster/artifacts/latest
+  s_1834c694151f4a::t_0f704201d5177d 1
+internal/router/router.go
+  s_1834c694151f4a::t_a59ab72f309102 22-29
+internal/proxy/service.go
+  304a1fdb547d0e74 5,17,37-47,81-89,94,96-97,106-107,275,278-288,295-303,332-353,382,386,391-397,399-400,408-425,476,489-490,626-659
+  s_18e3f40203cbfc::t_d06da3811a2f28 18
+  s_f9607ec6d0e27d::t_adfbed99826540 48-53
+  s_18e3f40203cbfc::t_7987d03ef13477 54,58-63
+  s_18e3f40203cbfc::t_6b6cfa09c5390e 55-57
+  s_18e3f40203cbfc::t_053cc1838acbf6 95
+  s_18e3f40203cbfc::t_61b2f8f22a97e3 101
+  s_f9607ec6d0e27d::t_0779fb2f0843e4 104
+  s_f9607ec6d0e27d::t_42e59154528ea6 116
+  s_18e3f40203cbfc::t_f2c3c4a2babd3c 117
+  s_18e3f40203cbfc::t_e41a26441cc156 124-125
+  s_18e3f40203cbfc::t_97d941e2b9f13f 222
+  s_18e3f40203cbfc::t_910b25c1197718 237
+  s_18e3f40203cbfc::t_2b09425bf56ebf 247
+  s_18e3f40203cbfc::t_27a7943a7e9b38 268-269
+  s_18e3f40203cbfc::t_5fcb8dab63c779 289-294,317-319,322-331
+  s_1834c694151f4a::t_a5c00115e0eeff 304-316
+  s_18e3f40203cbfc::t_067f320fb03d3d 320-321
+  s_1834c694151f4a::t_6a42241878030d 356-370
+  s_1834c694151f4a::t_cfdc390626abe3 387-390,398
+  s_18e3f40203cbfc::t_b49f7d4aad6864 401-407
+  s_f9607ec6d0e27d::t_93a7cf806c21a2 426-436
+  s_18e3f40203cbfc::t_1930d26fcda02b 491,507
+  s_18e3f40203cbfc::t_5999668f92a660 555,567
+  s_f9607ec6d0e27d::t_34c801fc50f2f3 666-667
+  s_f9607ec6d0e27d::t_696d975082f5a4 681
+  s_18e3f40203cbfc::t_fcf0230c4d0aea 718
+  s_18e3f40203cbfc::t_3ebb331224a6bc 900,912,921
+internal/router/cluster/artifacts/v0.22/metadata.yaml
+  s_1834c694151f4a::t_34bbb98920d522 1-2,4,50-60
+  s_1834c694151f4a::t_944e91b267fbde 3,5-49
+internal/router/cluster/artifacts/v0.22/rankings.json
+  s_1834c694151f4a::t_944e91b267fbde 1-3,15-46,83-84,121-122,159-160,197-198,235-236,273-274,311-312,349-350,387-388,425-426
+  s_1834c694151f4a::t_94ac916c36126f 4-14,47-82,85-120,123-158,161-196,199-234,237-272,275-310,313-348,351-386,389-424,427
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "89a02facd68397b19d91908f5d3a57fa1f1f3a82",
+  "prompts": {},
+  "sessions": {
+    "s_1834c694151f4a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e5a3daeb-8519-4a67-a668-71d34aab7065",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_18e3f40203cbfc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ef3e74f-d410-4e73-87e1-e5c37122a3e2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_f9607ec6d0e27d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1e6deab2-4124-43b6-97ae-ac9a980a309b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
