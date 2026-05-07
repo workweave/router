@@ -11,9 +11,11 @@ import (
 )
 
 // Encryptor handles AES-256-GCM encryption and decryption using Google Tink.
+// AAD binds each ciphertext to its (externalID, provider) so a stolen row
+// can't be decrypted for a different installation or provider.
 type Encryptor interface {
-	Encrypt(plaintext []byte) (ciphertext []byte, err error)
-	Decrypt(ciphertext []byte) (plaintext []byte, err error)
+	Encrypt(plaintext []byte, externalID, provider string) (ciphertext []byte, err error)
+	Decrypt(ciphertext []byte, externalID, provider string) (plaintext []byte, err error)
 }
 
 type tinkEncryptor struct {
@@ -35,21 +37,28 @@ func NewTinkEncryptor(keysetJSON string) (Encryptor, error) {
 	return &tinkEncryptor{aead: primitive}, nil
 }
 
-// Encrypt encrypts plaintext using AES-256-GCM. Tink handles nonce generation.
-func (e *tinkEncryptor) Encrypt(plaintext []byte) ([]byte, error) {
-	return e.aead.Encrypt(plaintext, nil)
+func (e *tinkEncryptor) Encrypt(plaintext []byte, externalID, provider string) ([]byte, error) {
+	return e.aead.Encrypt(plaintext, aadFor(externalID, provider))
 }
 
-// Decrypt decrypts ciphertext using AES-256-GCM.
-func (e *tinkEncryptor) Decrypt(ciphertext []byte) ([]byte, error) {
-	return e.aead.Decrypt(ciphertext, nil)
+func (e *tinkEncryptor) Decrypt(ciphertext []byte, externalID, provider string) ([]byte, error) {
+	return e.aead.Decrypt(ciphertext, aadFor(externalID, provider))
+}
+
+// aadFor MUST stay byte-identical with the Weave-side helper at
+// backend/internal/app/weaverouter/crypto.go. Drift bricks BYOK decrypt with
+// tag mismatch; crypto_test.go on both sides pins the format.
+func aadFor(externalID, provider string) []byte {
+	return []byte(externalID + "\x00" + provider)
 }
 
 // NoOpEncryptor is a passthrough for local development without encryption.
 type NoOpEncryptor struct{}
 
-// Encrypt returns plaintext unchanged.
-func (NoOpEncryptor) Encrypt(plaintext []byte) ([]byte, error) { return plaintext, nil }
+func (NoOpEncryptor) Encrypt(plaintext []byte, _, _ string) ([]byte, error) {
+	return plaintext, nil
+}
 
-// Decrypt returns ciphertext unchanged.
-func (NoOpEncryptor) Decrypt(ciphertext []byte) ([]byte, error) { return ciphertext, nil }
+func (NoOpEncryptor) Decrypt(ciphertext []byte, _, _ string) ([]byte, error) {
+	return ciphertext, nil
+}
