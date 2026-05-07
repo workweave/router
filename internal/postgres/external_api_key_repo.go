@@ -60,7 +60,7 @@ func (r *ExternalAPIKeyRepo) GetForInstallation(ctx context.Context, installatio
 	keys := make([]*auth.ExternalAPIKey, 0, len(rows))
 	for _, row := range rows {
 		key := toExternalAPIKey(row)
-		plaintext, err := r.encryptor.Decrypt(row.KeyCiphertext)
+		plaintext, err := r.encryptor.Decrypt(row.KeyCiphertext, row.ExternalID, row.Provider)
 		if err != nil {
 			return nil, err
 		}
