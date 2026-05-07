@@ -12,6 +12,16 @@ import (
 	"workweave/router/internal/router"
 )
 
+// Provider name constants are the canonical keys used in
+// map[string]providers.Client registries and router.Decision.Provider.
+// Always use these instead of raw string literals.
+const (
+	ProviderAnthropic  = "anthropic"
+	ProviderOpenAI     = "openai"
+	ProviderGoogle     = "google"
+	ProviderOpenRouter = "openrouter"
+)
+
 // HopByHopHeaders are stripped from upstream responses per RFC 7230.
 // Connection-specific headers must not be forwarded by a proxy.
 var HopByHopHeaders = map[string]struct{}{

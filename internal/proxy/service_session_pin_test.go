@@ -75,16 +75,16 @@ func waitForUpsert(t *testing.T, store *fakePinStore) {
 func newPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 	return proxy.NewService(
 		fr,
-		map[string]providers.Client{"anthropic": &fakeProvider{}},
-		nil,              // emitter
-		false,            // embedLastUserMessage
-		0,                // stickyDecisionTTL — disable legacy LRU for clarity
-		nil,              // decisionLog
-		nil,              // semanticCache
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil,                         // emitter
+		false,                       // embedLastUserMessage
+		0,                           // stickyDecisionTTL — disable legacy LRU for clarity
+		nil,                         // decisionLog
+		nil,                         // semanticCache
 		store,
-		false,            // hardPinExplore
-		"anthropic",      // hardPinProvider
-		"claude-haiku-4-5", // hardPinModel
+		false,                       // hardPinExplore
+		providers.ProviderAnthropic, // hardPinProvider
+		"claude-haiku-4-5",          // hardPinModel
 	)
 }
 
@@ -247,16 +247,16 @@ func TestService_HardPin_ExploreRoutesToHaikuWhenFlagOn(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
 	svc := proxy.NewService(
 		fr,
-		map[string]providers.Client{"anthropic": &fakeProvider{}},
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 		nil,
 		false,
 		0,
 		nil,
 		nil,
 		store,
-		true,              // hardPinExplore = on
-		"anthropic",       // hardPinProvider
-		"claude-haiku-4-5", // hardPinModel
+		true,                        // hardPinExplore = on
+		providers.ProviderAnthropic, // hardPinProvider
+		"claude-haiku-4-5",          // hardPinModel
 	)
 
 	ctx := authedCtx(uuid.New().String())

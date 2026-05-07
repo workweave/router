@@ -219,7 +219,7 @@ func (s *Service) Route(ctx context.Context, req router.Request) (router.Decisio
 // provider ("anthropic") for backward compatibility with existing Anthropic
 // metadata endpoints (count_tokens, models).
 func (s *Service) PassthroughToProvider(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
-	return s.PassthroughToNamedProvider(ctx, "anthropic", body, w, r)
+	return s.PassthroughToNamedProvider(ctx, providers.ProviderAnthropic, body, w, r)
 }
 
 // PassthroughToNamedProvider forwards a non-routing-path request to a specific
@@ -234,7 +234,7 @@ func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName s
 	}
 
 	var prep providers.PreparedRequest
-	if providerName == "anthropic" && len(body) > 0 {
+	if providerName == providers.ProviderAnthropic && len(body) > 0 {
 		env, parseErr := translate.ParseAnthropic(body)
 		if parseErr == nil {
 			prep, err = env.PrepareAnthropicPassthrough(r.Header)
@@ -244,7 +244,7 @@ func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName s
 		} else {
 			prep = providers.PreparedRequest{Body: body, Headers: translate.AnthropicPassthroughHeaders(r.Header)}
 		}
-	} else if providerName == "anthropic" {
+	} else if providerName == providers.ProviderAnthropic {
 		prep = providers.PreparedRequest{Body: body, Headers: translate.AnthropicPassthroughHeaders(r.Header)}
 	} else {
 		prep = providers.PreparedRequest{Body: body, Headers: make(http.Header)}
@@ -533,7 +533,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	var extractor *otel.UsageExtractor
 
 	switch decision.Provider {
-	case "anthropic":
+	case providers.ProviderAnthropic:
 		prep, emitErr := env.PrepareAnthropic(r.Header, opts)
 		if emitErr != nil {
 			log.Error("Failed to emit Anthropic body", "err", emitErr)
@@ -545,7 +545,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			proxyWriter = extractor
 		}
 		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
-	case "openai", "google":
+	case providers.ProviderOpenAI, providers.ProviderGoogle:
 		crossFormat = true
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
 		if emitErr != nil {
@@ -696,7 +696,7 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, headers http.H
 	for _, k := range externalKeysFromContext(ctx) {
 		out[k.Provider] = struct{}{}
 	}
-	for _, p := range []string{"anthropic", "openai", "google", "openrouter"} {
+	for _, p := range []string{providers.ProviderAnthropic, providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter} {
 		if _, already := out[p]; already {
 			continue
 		}
@@ -878,7 +878,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	var extractor *otel.UsageExtractor
 
 	switch decision.Provider {
-	case "openai", "google":
+	case providers.ProviderOpenAI, providers.ProviderGoogle:
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
 		if emitErr != nil {
 			log.Error("Failed to emit OpenAI body", "err", emitErr)
@@ -890,7 +890,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			proxyWriter = extractor
 		}
 		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
-	case "anthropic":
+	case providers.ProviderAnthropic:
 		crossFormat = true
 		prep, emitErr := env.PrepareAnthropic(r.Header, opts)
 		if emitErr != nil {
@@ -899,7 +899,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		}
 		var usage otel.UsageSink
 		if s.emitter != nil {
-			extractor = otel.NewUsageExtractor(nil, "anthropic")
+			extractor = otel.NewUsageExtractor(nil, providers.ProviderAnthropic)
 			usage = extractor
 		}
 		translator := translate.NewSSETranslator(sink, decision.Model, usage)

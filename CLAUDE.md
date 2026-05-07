@@ -301,6 +301,14 @@ code comment before creating it.
 
 ### Go style
 
+- **No magic strings for provider names or model names.** Use the named
+  constants from `internal/providers` (`providers.ProviderAnthropic`,
+  `providers.ProviderOpenAI`, `providers.ProviderGoogle`,
+  `providers.ProviderOpenRouter`) everywhere provider names appear as
+  values — map keys, switch cases, `router.Decision.Provider` literals,
+  log fields, test fixtures. For new model name constants, add them to the
+  appropriate package before using them. Bare string literals for these
+  values are a review-blocking issue.
 - Keep files small. Split distinct logic into separate files, especially
   when shared between multiple places.
 - Avoid unnecessary nesting — flatten conditionals with early returns and

@@ -53,7 +53,7 @@ func (f *fakeProvider) Passthrough(ctx context.Context, prep providers.PreparedR
 }
 
 func makeProxyService(decision router.Decision, p map[string]providers.Client) *proxy.Service {
-	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, 0, nil, nil, nil, false, "anthropic", "claude-haiku-4-5")
+	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, 0, nil, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5")
 }
 
 func TestService_ProxyMessages_PropagatesUpstreamStatusError(t *testing.T) {
@@ -96,7 +96,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 	t.Run("flag off uses concatenated stream", func(t *testing.T) {
 		fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"}}
 		svc := proxy.NewService(fr,
-			map[string]providers.Client{"anthropic": &fakeProvider{}},
+			map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 			nil,
 			false,
 			0,
@@ -104,7 +104,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 			nil,
 			nil,
 			false,
-			"anthropic", "claude-haiku-4-5",
+			providers.ProviderAnthropic, "claude-haiku-4-5",
 		)
 
 		rec := httptest.NewRecorder()
@@ -122,7 +122,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 	t.Run("flag on uses last user message only", func(t *testing.T) {
 		fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"}}
 		svc := proxy.NewService(fr,
-			map[string]providers.Client{"anthropic": &fakeProvider{}},
+			map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 			nil,
 			true,
 			0,
@@ -130,7 +130,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 			nil,
 			nil,
 			false,
-			"anthropic", "claude-haiku-4-5",
+			providers.ProviderAnthropic, "claude-haiku-4-5",
 		)
 
 		rec := httptest.NewRecorder()
@@ -235,7 +235,7 @@ func TestService_ProxyMessages_StickyBypassedByEvalOverrideHeaders(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"}}
 			svc := proxy.NewService(fr,
-				map[string]providers.Client{"anthropic": &fakeProvider{}},
+				map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 				nil,
 				false,
 				time.Hour, // long TTL so sticky window stays open across both calls
@@ -243,7 +243,7 @@ func TestService_ProxyMessages_StickyBypassedByEvalOverrideHeaders(t *testing.T)
 				nil,
 				nil,
 				false,
-				"anthropic", "claude-haiku-4-5",
+				providers.ProviderAnthropic, "claude-haiku-4-5",
 			)
 
 			ctx := context.WithValue(context.Background(), proxy.APIKeyIDContextKey{}, "key-1")

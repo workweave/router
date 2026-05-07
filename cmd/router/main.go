@@ -109,7 +109,7 @@ func main() {
 	// its own key; without it, the client's auth headers (OAuth / x-api-key)
 	// are passed through to api.anthropic.com directly.
 	anthropicKey := config.GetOr("ANTHROPIC_API_KEY", "")
-	providerMap["anthropic"] = anthropic.NewClient(anthropicKey, anthropic.DefaultBaseURL)
+	providerMap[providers.ProviderAnthropic] = anthropic.NewClient(anthropicKey, anthropic.DefaultBaseURL)
 	if anthropicKey != "" {
 		logger.Info("Anthropic provider enabled (router key)", "base_url", anthropic.DefaultBaseURL)
 	} else {
@@ -118,19 +118,19 @@ func main() {
 
 	if openaiKey := config.GetOr("OPENAI_PROVIDER_API_KEY", ""); openaiKey != "" {
 		openaiBaseURL := config.GetOr("OPENAI_PROVIDER_BASE_URL", openaiProvider.DefaultBaseURL)
-		providerMap["openai"] = openaiProvider.NewClient(openaiKey, openaiBaseURL)
+		providerMap[providers.ProviderOpenAI] = openaiProvider.NewClient(openaiKey, openaiBaseURL)
 		logger.Info("OpenAI provider enabled", "base_url", openaiBaseURL)
 	}
 
 	if openRouterKey := config.GetOr("OPENROUTER_API_KEY", ""); openRouterKey != "" {
 		openRouterBaseURL := config.GetOr("OPENROUTER_BASE_URL", openaiCompatProvider.DefaultBaseURL)
-		providerMap["openrouter"] = openaiCompatProvider.NewClient(openRouterKey, openRouterBaseURL)
+		providerMap[providers.ProviderOpenRouter] = openaiCompatProvider.NewClient(openRouterKey, openRouterBaseURL)
 		logger.Info("OpenRouter provider enabled", "base_url", openRouterBaseURL)
 	}
 
 	if googleKey := config.GetOr("GOOGLE_PROVIDER_API_KEY", ""); googleKey != "" {
 		googleBaseURL := config.GetOr("GOOGLE_PROVIDER_BASE_URL", googleProvider.DefaultBaseURL)
-		providerMap["google"] = googleProvider.NewClient(googleKey, googleBaseURL)
+		providerMap[providers.ProviderGoogle] = googleProvider.NewClient(googleKey, googleBaseURL)
 		logger.Info("Google (Gemini) provider enabled", "base_url", googleBaseURL)
 	}
 
@@ -560,34 +560,38 @@ func runSessionPinSweep(ctx context.Context, store sessionpin.Store) {
 	}
 }
 
+// defaultHardPinProvider and defaultHardPinModel are the fallback (provider,
+// model) used by resolveHardPinModel when the cluster bundle can't be loaded.
+const (
+	defaultHardPinProvider = providers.ProviderAnthropic
+	defaultHardPinModel    = "claude-haiku-4-5"
+)
+
 // resolveHardPinModel returns the (provider, model) to use for compaction and
 // Explore hard-pins. Operator override wins; otherwise the cheapest model in
 // the default artifact bundle among available providers is selected.
-// Falls back to ("anthropic", "claude-haiku-4-5") when no bundle is loadable.
+// Falls back to (defaultHardPinProvider, defaultHardPinModel) when no bundle is loadable.
 func resolveHardPinModel(available map[string]struct{}, logger *slog.Logger) (provider, model string) {
-	const defaultProvider = "anthropic"
-	const defaultModel = "claude-haiku-4-5"
-
 	if m := config.GetOr("ROUTER_HARD_PIN_MODEL", ""); m != "" {
-		p := config.GetOr("ROUTER_HARD_PIN_PROVIDER", defaultProvider)
+		p := config.GetOr("ROUTER_HARD_PIN_PROVIDER", defaultHardPinProvider)
 		return p, m
 	}
 
 	reqVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
 	defaultVersion, err := cluster.ResolveVersion(reqVersion)
 	if err != nil {
-		logger.Warn("Hard-pin model: could not resolve cluster version; using default", "err", err, "default_model", defaultModel)
-		return defaultProvider, defaultModel
+		logger.Warn("Hard-pin model: could not resolve cluster version; using default", "err", err, "default_model", defaultHardPinModel)
+		return defaultHardPinProvider, defaultHardPinModel
 	}
 	bundle, err := cluster.LoadBundle(defaultVersion)
 	if err != nil {
-		logger.Warn("Hard-pin model: could not load bundle; using default", "err", err, "default_model", defaultModel)
-		return defaultProvider, defaultModel
+		logger.Warn("Hard-pin model: could not load bundle; using default", "err", err, "default_model", defaultHardPinModel)
+		return defaultHardPinProvider, defaultHardPinModel
 	}
 	p, m, ok := cluster.CheapestModel(bundle.Metadata, bundle.Registry, available)
 	if !ok {
-		logger.Warn("Hard-pin model: no cost-annotated model found for available providers; using default", "default_model", defaultModel)
-		return defaultProvider, defaultModel
+		logger.Warn("Hard-pin model: no cost-annotated model found for available providers; using default", "default_model", defaultHardPinModel)
+		return defaultHardPinProvider, defaultHardPinModel
 	}
 	return p, m
 }
@@ -595,13 +599,13 @@ func resolveHardPinModel(available map[string]struct{}, logger *slog.Logger) (pr
 // envVarForProvider returns the env var name for a provider's API key.
 func envVarForProvider(provider string) string {
 	switch provider {
-	case "anthropic":
+	case providers.ProviderAnthropic:
 		return "ANTHROPIC_API_KEY"
-	case "openai":
+	case providers.ProviderOpenAI:
 		return "OPENAI_PROVIDER_API_KEY"
-	case "openrouter":
+	case providers.ProviderOpenRouter:
 		return "OPENROUTER_API_KEY"
-	case "google":
+	case providers.ProviderGoogle:
 		return "GOOGLE_PROVIDER_API_KEY"
 	default:
 		return "<unknown provider " + provider + ">"
