@@ -4,14 +4,17 @@ import (
 	"testing"
 
 	"workweave/router/internal/router/turntype"
+	"workweave/router/internal/translate"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestDetect(t *testing.T) {
+func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
+		hint string
 		want turntype.TurnType
 	}{
 		{
@@ -82,6 +85,12 @@ func TestDetect(t *testing.T) {
 			want: turntype.SubAgentDispatch,
 		},
 		{
+			name: "sub-agent via x-weave-subagent-type header hint",
+			body: `{"model":"claude-haiku-4-5","messages":[{"role":"user","content":"grep"}]}`,
+			hint: "Explore",
+			want: turntype.SubAgentDispatch,
+		},
+		{
 			name: "empty body is main_loop",
 			body: `{}`,
 			want: turntype.MainLoop,
@@ -109,8 +118,89 @@ func TestDetect(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := turntype.Detect([]byte(tc.body))
+			env, err := translate.ParseAnthropic([]byte(tc.body))
+			require.NoError(t, err)
+			feats := env.RoutingFeatures(false)
+			got := turntype.DetectFromEnvelope(env, feats, tc.hint)
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestDetectFromEnvelope_OpenAI(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		hint string
+		want turntype.TurnType
+	}{
+		{
+			name: "regular user prompt is main_loop",
+			body: `{"model":"gpt-4o","messages":[{"role":"user","content":"explain recursion"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			name: "trailing tool message is tool_result",
+			body: `{"model":"gpt-4o","messages":[
+				{"role":"user","content":"run the grep"},
+				{"role":"assistant","content":null,"tool_calls":[{"id":"t1","type":"function","function":{"name":"Bash","arguments":"{}"}}]},
+				{"role":"tool","tool_call_id":"t1","content":"file.go:12: foo"}
+			]}`,
+			want: turntype.ToolResult,
+		},
+		{
+			name: "tool followed by user message is main_loop",
+			body: `{"model":"gpt-4o","messages":[
+				{"role":"assistant","content":null,"tool_calls":[{"id":"t1","type":"function","function":{"name":"Bash","arguments":"{}"}}]},
+				{"role":"tool","tool_call_id":"t1","content":"out"},
+				{"role":"user","content":"keep going"}
+			]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			name: "compaction via system message",
+			body: `{"model":"gpt-4o","messages":[
+				{"role":"system","content":"Your task is to create a detailed summary of the conversation so far."},
+				{"role":"user","content":"go"}
+			]}`,
+			want: turntype.Compaction,
+		},
+		{
+			name: "sub-agent via header hint",
+			body: `{"model":"gpt-4o","messages":[{"role":"user","content":"grep"}]}`,
+			hint: "Explore",
+			want: turntype.SubAgentDispatch,
+		},
+		{
+			name: "sub-agent via system message marker",
+			body: `{"model":"gpt-4o","messages":[
+				{"role":"system","content":"You are a sub-agent for the Explore task."},
+				{"role":"user","content":"list files"}
+			]}`,
+			want: turntype.SubAgentDispatch,
+		},
+		{
+			name: "last message assistant is main_loop",
+			body: `{"model":"gpt-4o","messages":[
+				{"role":"user","content":"hi"},
+				{"role":"assistant","content":"hello"}
+			]}`,
+			want: turntype.MainLoop,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env, err := translate.ParseOpenAI([]byte(tc.body))
+			require.NoError(t, err)
+			feats := env.RoutingFeatures(false)
+			got := turntype.DetectFromEnvelope(env, feats, tc.hint)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestDetectFromEnvelope_NilEnv(t *testing.T) {
+	got := turntype.DetectFromEnvelope(nil, translate.RoutingFeatures{}, "")
+	assert.Equal(t, turntype.MainLoop, got)
 }
