@@ -277,9 +277,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		embedFlag = v
 	}
 	feats := env.RoutingFeatures(embedFlag)
-	// Anthropic clients pack sub-agent identity into metadata.user_id;
-	// the x-weave-subagent-type header is for non-Anthropic ingress.
-	tt := turntype.DetectFromEnvelope(env, feats, "")
 	promptText := feats.PromptText
 	embedInput := "concatenated_stream"
 	if embedFlag && feats.LastUserMessageText != "" {
