@@ -59,11 +59,15 @@ function LoginInner() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-3">
+      <form onSubmit={handleSubmit} className="space-y-3" autoComplete="off">
         <Input
           label="Admin password"
           type="password"
-          autoComplete="current-password"
+          name="router-admin-password"
+          autoComplete="off"
+          data-1p-ignore
+          data-lpignore="true"
+          data-form-type="other"
           autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}

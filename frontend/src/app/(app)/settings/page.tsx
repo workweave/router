@@ -15,55 +15,10 @@ import {
   type ExternalKey,
   type RouterConfig,
 } from "@/lib/api";
-import { cn } from "@/lib/cn";
-import { ChevronDown, Copy, Trash2 } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
-
-type TabId = "router-keys" | "provider-keys" | "config";
-
-const TABS: Array<{ id: TabId; label: string; description: string }> = [
-  {
-    id: "router-keys",
-    label: "Router API keys",
-    description: "Keys used to authenticate requests to this router.",
-  },
-  {
-    id: "provider-keys",
-    label: "Provider API keys",
-    description: "Bring your own keys for Anthropic, OpenAI, Google, OpenRouter.",
-  },
-  {
-    id: "config",
-    label: "Configuration",
-    description: "Runtime values set via environment variables.",
-  },
-];
-
-function isTabId(v: string | null): v is TabId {
-  return v === "router-keys" || v === "provider-keys" || v === "config";
-}
+import { ChevronDown, Copy, KeyRound, Plug, Settings as SettingsIcon, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 
 export default function SettingsPage() {
-  return (
-    <Suspense fallback={null}>
-      <SettingsInner />
-    </Suspense>
-  );
-}
-
-function SettingsInner() {
-  const params = useSearchParams();
-  const router = useRouter();
-  const tabParam = params.get("tab");
-  const tab: TabId = isTabId(tabParam) ? tabParam : "router-keys";
-
-  function setTab(next: TabId) {
-    const sp = new URLSearchParams(params.toString());
-    sp.set("tab", next);
-    router.replace(`/settings?${sp.toString()}`, { scroll: false });
-  }
-
   return (
     <Page
       header={
@@ -79,30 +34,59 @@ function SettingsInner() {
           }
         />
       }
-      subheader={
-        <div className="flex w-full max-w-content-width items-center gap-1 px-3">
-          {TABS.map(t => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              aria-selected={tab === t.id}
-              className={cn(
-                "relative -mb-px border-b-2 border-transparent px-3 py-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground",
-                "aria-selected:border-foreground aria-selected:text-foreground",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      }
     >
-      <Page.Section>
-        {tab === "router-keys" && <RouterKeysPanel />}
-        {tab === "provider-keys" && <ProviderKeysPanel />}
-        {tab === "config" && <ConfigPanel />}
-      </Page.Section>
+      <div className="flex w-full max-w-text-width flex-col gap-2">
+        <Page.Section
+          className="py-3"
+          header={
+            <Page.SectionHeader>
+              <KeyRound className="size-4" />
+              <Text variant="h4" as="h3">
+                Router API keys
+              </Text>
+            </Page.SectionHeader>
+          }
+        >
+          <Text className="text-xs text-muted-foreground">
+            Keys used to authenticate requests to this router.
+          </Text>
+          <RouterKeysPanel />
+        </Page.Section>
+
+        <Page.Section
+          className="py-3"
+          header={
+            <Page.SectionHeader>
+              <Plug className="size-4" />
+              <Text variant="h4" as="h3">
+                Provider API keys
+              </Text>
+            </Page.SectionHeader>
+          }
+        >
+          <Text className="text-xs text-muted-foreground">
+            Bring your own keys for Anthropic, OpenAI, Google, OpenRouter.
+          </Text>
+          <ProviderKeysPanel />
+        </Page.Section>
+
+        <Page.Section
+          className="py-3"
+          header={
+            <Page.SectionHeader>
+              <SettingsIcon className="size-4" />
+              <Text variant="h4" as="h3">
+                Configuration
+              </Text>
+            </Page.SectionHeader>
+          }
+        >
+          <Text className="text-xs text-muted-foreground">
+            Runtime values set via environment variables.
+          </Text>
+          <ConfigPanel />
+        </Page.Section>
+      </div>
     </Page>
   );
 }
@@ -198,10 +182,15 @@ function RouterKeysPanel() {
           <Card.Title variant="h4">Issue a new key</Card.Title>
         </Card.Header>
         <Card.Content>
-          <form onSubmit={handleCreate} className="flex items-end gap-3">
+          <form onSubmit={handleCreate} className="flex items-end gap-3" autoComplete="off">
             <div className="flex-1">
               <Input
                 label="Name (optional)"
+                name="router-key-label"
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                data-form-type="other"
                 placeholder="My API key"
                 value={name}
                 onChange={e => setName(e.target.value)}
@@ -211,6 +200,7 @@ function RouterKeysPanel() {
               type="submit"
               appearance={Appearance.Filled}
               intent={Intent.Primary}
+              className="!border-brand !bg-brand !text-white hover:!bg-brand/90"
               disabled={creating}
             >
               {creating ? "Creating…" : "Create key"}
@@ -268,8 +258,15 @@ function RouterKeysPanel() {
 const PROVIDERS = ["anthropic", "openai", "google", "openrouter"] as const;
 type Provider = (typeof PROVIDERS)[number];
 
+const PROVIDER_LABEL: Record<Provider, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  google: "Google",
+  openrouter: "OpenRouter",
+};
+
 function providerLabel(p: Provider): string {
-  return p.charAt(0).toUpperCase() + p.slice(1);
+  return PROVIDER_LABEL[p];
 }
 
 function ProviderKeysPanel() {
@@ -329,12 +326,17 @@ function ProviderKeysPanel() {
           <Card.Title variant="h4">Add or replace a key</Card.Title>
         </Card.Header>
         <Card.Content>
-          <form onSubmit={handleSave} className="space-y-3">
+          <form onSubmit={handleSave} className="space-y-3" autoComplete="off">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[200px_1fr]">
               <ProviderPicker value={provider} onChange={setProvider} />
               <Input
                 label="API key"
                 type="password"
+                name="provider-api-key"
+                autoComplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
+                data-form-type="other"
                 placeholder="sk-..."
                 value={keyValue}
                 onChange={e => setKeyValue(e.target.value)}
@@ -343,6 +345,11 @@ function ProviderKeysPanel() {
             </div>
             <Input
               label="Name (optional)"
+              name="provider-key-label"
+              autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              data-form-type="other"
               placeholder="My Anthropic key"
               value={name}
               onChange={e => setName(e.target.value)}
@@ -352,6 +359,7 @@ function ProviderKeysPanel() {
                 type="submit"
                 appearance={Appearance.Filled}
                 intent={Intent.Primary}
+                className="!border-brand !bg-brand !text-white hover:!bg-brand/90"
                 disabled={saving || keyValue.trim() === ""}
               >
                 {saving ? "Saving…" : "Save key"}
@@ -372,8 +380,8 @@ function ProviderKeysPanel() {
                 <li key={k.id} className="flex items-center justify-between px-5 py-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium capitalize text-foreground">
-                        {k.provider}
+                      <span className="text-xs font-medium text-foreground">
+                        {PROVIDER_LABEL[k.provider as Provider] ?? k.provider}
                       </span>
                       {k.name != null && (
                         <span className="text-2xs text-muted-foreground">· {k.name}</span>
@@ -420,10 +428,10 @@ function ProviderPicker({
           <Button
             type="button"
             appearance={Appearance.Outlined}
-            className="w-full justify-between"
+            className="h-9 w-full justify-between border-input px-3 text-sm font-normal"
           >
             <span>{providerLabel(value)}</span>
-            <ChevronDown className="size-3.5" />
+            <ChevronDown className="size-3.5 text-muted-foreground" />
           </Button>
         </Popover.Trigger>
         <Popover.Content className="w-56 p-1" align="start">
@@ -555,7 +563,7 @@ function ErrorBanner({ children }: { children: React.ReactNode }) {
 
 function EmptyHint({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-dashed border-border-darker px-5 py-8 text-center text-2xs text-muted-foreground">
+    <div className="rounded-lg border-2 border-dashed border-border-darker px-5 py-8 text-center text-2xs text-muted-foreground">
       {children}
     </div>
   );
