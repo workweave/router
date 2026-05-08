@@ -81,6 +81,22 @@ func (b *AttrBuilder) Bool(key string, val bool) *AttrBuilder {
 	return b
 }
 
+// IntSlice appends an int slice as an OTLP array of int64 values.
+// A nil or empty slice still emits the attribute with an empty array, so
+// downstream consumers can distinguish "field present, no clusters" from
+// "field absent" (e.g. pinned-route turns where Metadata is nil).
+func (b *AttrBuilder) IntSlice(key string, vals []int) *AttrBuilder {
+	values := make([]*commonv1.AnyValue, len(vals))
+	for i, v := range vals {
+		values[i] = &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(v)}}
+	}
+	b.attrs = append(b.attrs, &commonv1.KeyValue{
+		Key:   key,
+		Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_ArrayValue{ArrayValue: &commonv1.ArrayValue{Values: values}}},
+	})
+	return b
+}
+
 // Build returns the accumulated KeyValue slice. The slice is valid until
 // the next method call on the builder.
 func (b *AttrBuilder) Build() []*commonv1.KeyValue {

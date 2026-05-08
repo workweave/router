@@ -368,7 +368,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(24).
+		Attrs: otel.NewAttrBuilder(25).
 			String("request_id", requestID).
 			String("external_id", externalID).
 			String("client.device_id", clientID.DeviceID).
@@ -387,6 +387,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			String("routing.turn_type", string(tt)).
 			String("routing.embed_input", embedInput).
 			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
+			IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
 			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
 			Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
 			Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
@@ -559,6 +560,16 @@ func pinDecision(p sessionpin.Pin) router.Decision {
 		Model:    p.Model,
 		Reason:   p.Reason,
 	}
+}
+
+// clusterIDsFromDecision returns the cluster ids stamped on a routing
+// decision, or nil for decisions without metadata (pinned-route turns,
+// heuristic fallback).
+func clusterIDsFromDecision(d router.Decision) []int {
+	if d.Metadata == nil {
+		return nil
+	}
+	return d.Metadata.ClusterIDs
 }
 
 // pinAge returns seconds since first_pinned_at; zero if the timestamp
@@ -757,7 +768,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(22).
+		Attrs: otel.NewAttrBuilder(23).
 			String("request_id", requestID).
 			String("external_id", externalID).
 			String("client.device_id", clientID.DeviceID).
@@ -775,6 +786,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			Int64("routing.session_pin_age_s", pinAgeSec).
 			String("routing.turn_type", string(tt)).
 			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
+			IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
 			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
 			Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
 			Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
