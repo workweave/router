@@ -20,7 +20,6 @@
     "date-fns-tz": "^3.2.0",
     "lucide-react": "^0.408.0",
     "next": "15.3.2",
-    "pluralize": "^8.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^3.7.0",
@@ -30,7 +29,6 @@
   "devDependencies": {
     "@tailwindcss/container-queries": "^0.1.1",
     "@types/node": "^20",
-    "@types/pluralize": "^0.0.33",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.19",

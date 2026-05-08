@@ -105,7 +105,7 @@ const ModalOverlay = React.forwardRef<
 ));
 ModalOverlay.displayName = Dialog.Overlay.displayName;
 
-export interface ModalContentProps extends React.ComponentPropsWithoutRef<typeof Dialog.Content> {
+interface ModalContentProps extends React.ComponentPropsWithoutRef<typeof Dialog.Content> {
   /**
    * Whether to hide the close button in the top right of the modal.
    *
@@ -114,7 +114,7 @@ export interface ModalContentProps extends React.ComponentPropsWithoutRef<typeof
   hideCloseButton?: boolean;
 }
 
-export const ModalContent = React.forwardRef<
+const ModalContent = React.forwardRef<
   React.ElementRef<typeof Dialog.Content>,
   ModalContentProps
 >(({ children, className, hideCloseButton = false, ...props }, ref) => (

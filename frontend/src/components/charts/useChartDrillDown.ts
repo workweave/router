@@ -12,7 +12,7 @@ interface DrillDownState {
 }
 
 /** Returns the [from, to) ISO bounds for a chart bucket of the given granularity. */
-export function bucketBounds(time: DateTime, granularity: ChartGranularity): [string, string] {
+function bucketBounds(time: DateTime, granularity: ChartGranularity): [string, string] {
   const start = new Date(time);
   const end = new Date(start);
   switch (granularity) {
