@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"workweave/router/internal/auth"
 
@@ -45,6 +46,7 @@ func makeServiceWithUsers(t *testing.T, users auth.UserRepository) *auth.Service
 		nil,
 		users,
 		auth.NoOpAPIKeyCache{},
+		nil,
 		frozenClock(),
 	)
 }
@@ -109,4 +111,45 @@ func TestResolveAndStashUser_NilUsersIsNoOp(t *testing.T) {
 	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "")
 
 	assert.Equal(t, "", auth.UserIDFrom(ctx))
+}
+
+func TestResolveAndStashUser_CacheHitSkipsRepo(t *testing.T) {
+	repo := &fakeUserRepo{user: &auth.User{ID: "user-1"}}
+	cache := auth.NewLRUUserCache(8, 5*time.Minute)
+	svc := auth.NewService(
+		fakeInstallationRepository{},
+		&fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}},
+		nil,
+		repo,
+		auth.NoOpAPIKeyCache{},
+		cache,
+		frozenClock(),
+	)
+
+	// First call hits repo and populates cache.
+	ctx1 := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "")
+	require.Equal(t, "user-1", auth.UserIDFrom(ctx1))
+	require.Len(t, repo.upserts, 1)
+
+	// Second call must hit cache and skip the upsert entirely.
+	ctx2 := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "")
+	assert.Equal(t, "user-1", auth.UserIDFrom(ctx2))
+	assert.Len(t, repo.upserts, 1, "cache hit must not call repo.Upsert again")
+}
+
+func TestLRUUserCache_KeysIncludeInstallation(t *testing.T) {
+	cache := auth.NewLRUUserCache(8, time.Minute)
+	cache.Set("inst-A", "alice@example.com", "user-1")
+	cache.Set("inst-B", "alice@example.com", "user-2")
+
+	got, ok := cache.Get("inst-A", "alice@example.com")
+	require.True(t, ok)
+	assert.Equal(t, "user-1", got)
+
+	got, ok = cache.Get("inst-B", "alice@example.com")
+	require.True(t, ok)
+	assert.Equal(t, "user-2", got)
+
+	_, ok = cache.Get("inst-C", "alice@example.com")
+	assert.False(t, ok, "unrelated installation must miss")
 }

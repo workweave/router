@@ -8,4 +8,10 @@ import "errors"
 var (
 	ErrInvalidPrefix = errors.New("invalid bearer key prefix")
 	ErrInvalidToken  = errors.New("invalid bearer key")
+
+	// ErrActiveKeyExists is returned by APIKeyRepository.Create when the
+	// installation already has an active (non-soft-deleted) key. Callers
+	// should rotate (soft-delete the old key, then create a new one) rather
+	// than create a second.
+	ErrActiveKeyExists = errors.New("installation already has an active api key")
 )
