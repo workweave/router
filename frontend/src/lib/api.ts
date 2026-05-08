@@ -16,7 +16,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // but in-flight calls (chart refreshes, mutations) need their own
     // bounce so users don't sit on a broken page.
     if (!window.location.pathname.startsWith("/ui/login")) {
-      const next = encodeURIComponent(window.location.pathname);
+      // Strip the /ui basePath so Next's router.replace() doesn't re-prepend
+      // it after login (which would yield /ui/ui/...). Anything outside the
+      // basePath isn't an app path; default to /dashboard.
+      const path = window.location.pathname;
+      const internal = path.startsWith("/ui/") ? path.slice(3) : "/dashboard";
+      const next = encodeURIComponent(internal);
       window.location.href = `/ui/login?next=${next}`;
       throw new Error("401: redirecting to login");
     }

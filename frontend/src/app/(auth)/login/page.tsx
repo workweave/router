@@ -17,10 +17,22 @@ export default function LoginPage() {
   );
 }
 
+/**
+ * Reject anything that isn't a same-origin internal path (e.g. `javascript:`,
+ * `//attacker.com`, `https://...`). After basePath stripping in api.ts the
+ * value should look like `/dashboard` or `/settings?tab=keys`.
+ */
+function safeNext(raw: string | null): string {
+  if (raw == null) return "/dashboard";
+  if (!raw.startsWith("/")) return "/dashboard";
+  if (raw.startsWith("//") || raw.startsWith("/\\")) return "/dashboard";
+  return raw;
+}
+
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/dashboard";
+  const next = safeNext(params.get("next"));
 
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);

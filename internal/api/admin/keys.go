@@ -85,15 +85,34 @@ func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// DeleteAPIKeyHandler soft-deletes a router API key by ID.
+// DeleteAPIKeyHandler soft-deletes a router API key by ID. Scoped to
+// the authed installation: rejects with 404 if the key belongs to another
+// installation, so a tenant who learns a foreign key UUID cannot revoke it.
 func DeleteAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if _, ok := resolveInstallation(c, authSvc); !ok {
+		installation, ok := resolveInstallation(c, authSvc)
+		if !ok {
 			return
 		}
 		id := c.Param("id")
 		if id == "" {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing id"})
+			return
+		}
+		keys, err := authSvc.ListAPIKeys(c.Request.Context(), installation.ID)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to look up api key"})
+			return
+		}
+		owned := false
+		for _, k := range keys {
+			if k.ID == id {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "api key not found"})
 			return
 		}
 		if err := authSvc.DeleteAPIKey(c.Request.Context(), id); err != nil {

@@ -329,6 +329,7 @@ func newOpenAIPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 		nil, false, 0, nil, nil,
 		store,
 		false, providers.ProviderAnthropic, "claude-haiku-4-5",
+		nil,
 	)
 }
 
@@ -430,6 +431,7 @@ func newOpenAIHardPinSvc(fr *fakeRouter, store *fakePinStore, hardPinExplore boo
 		hardPinExplore,
 		providers.ProviderOpenAI,
 		"gpt-4o-mini",
+		nil,
 	)
 }
 
