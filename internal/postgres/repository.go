@@ -14,7 +14,7 @@ import (
 )
 
 // activeKeyUniqueIndex matches the partial unique index added in
-// migration 0006 (one active key per installation).
+// migration 0007 (one active key per installation).
 const activeKeyUniqueIndex = "model_router_api_keys_installation_active_unique"
 
 // uniqueViolation is the SQLSTATE 23505 returned by Postgres when a

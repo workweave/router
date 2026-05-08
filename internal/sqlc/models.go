@@ -57,6 +57,34 @@ type RouterModelRouterInstallation struct {
 	CreatedBy  *string
 }
 
+type RouterModelRouterRequestTelemetry struct {
+	ID                     uuid.UUID
+	InstallationID         uuid.UUID
+	RequestID              string
+	SpanType               string
+	TraceID                string
+	Timestamp              pgtype.Timestamptz
+	RequestedModel         *string
+	DecisionModel          *string
+	DecisionProvider       *string
+	DecisionReason         *string
+	EstimatedInputTokens   *int32
+	StickyHit              *bool
+	EmbedInput             *string
+	InputTokens            *int32
+	OutputTokens           *int32
+	RequestedInputCostUsd  pgtype.Numeric
+	RequestedOutputCostUsd pgtype.Numeric
+	ActualInputCostUsd     pgtype.Numeric
+	ActualOutputCostUsd    pgtype.Numeric
+	RouteLatencyMs         *int64
+	UpstreamLatencyMs      *int64
+	TotalLatencyMs         *int64
+	CrossFormat            *bool
+	UpstreamStatusCode     *int32
+	CreatedAt              pgtype.Timestamptz
+}
+
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.
 type RouterModelRouterUser struct {
 	ID             uuid.UUID
