@@ -84,3 +84,35 @@ func TestAttrBuilder_TypedValuesMatchProtobuf(t *testing.T) {
 	assert.False(t, boolVal.GetBoolValue())
 	assert.IsType(t, &commonv1.AnyValue_BoolValue{}, boolVal.Value)
 }
+
+func TestAttrBuilder_IntSliceEmitsArrayOfInts(t *testing.T) {
+	attrs := otel.NewAttrBuilder(1).
+		IntSlice("routing.cluster_ids", []int{7, 0, 42}).
+		Build()
+
+	assert.Len(t, attrs, 1)
+	assert.Equal(t, "routing.cluster_ids", attrs[0].Key)
+	assert.IsType(t, &commonv1.AnyValue_ArrayValue{}, attrs[0].Value.Value)
+
+	arr := attrs[0].Value.GetArrayValue()
+	assert.NotNil(t, arr)
+	assert.Len(t, arr.Values, 3)
+	assert.Equal(t, int64(7), arr.Values[0].GetIntValue())
+	assert.Equal(t, int64(0), arr.Values[1].GetIntValue())
+	assert.Equal(t, int64(42), arr.Values[2].GetIntValue())
+	for _, v := range arr.Values {
+		assert.IsType(t, &commonv1.AnyValue_IntValue{}, v.Value)
+	}
+}
+
+func TestAttrBuilder_IntSliceNilEmitsEmptyArray(t *testing.T) {
+	attrs := otel.NewAttrBuilder(1).
+		IntSlice("routing.cluster_ids", nil).
+		Build()
+
+	assert.Len(t, attrs, 1)
+	assert.Equal(t, "routing.cluster_ids", attrs[0].Key)
+	arr := attrs[0].Value.GetArrayValue()
+	assert.NotNil(t, arr)
+	assert.Len(t, arr.Values, 0)
+}
