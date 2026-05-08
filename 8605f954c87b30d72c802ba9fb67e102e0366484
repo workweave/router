@@ -1,0 +1,26 @@
+internal/observability/otel/spans_test.go
+  s_c4cf64ef8235e8::t_6a3e6eb015cfba 87-118
+internal/observability/otel/spans.go
+  s_c4cf64ef8235e8::t_41acc6384ac08e 84-99
+internal/proxy/service.go
+  s_c4cf64ef8235e8::t_c621e383c6d27b 371
+  s_c4cf64ef8235e8::t_7628bfded735fd 390,789
+  s_c4cf64ef8235e8::t_7dfdaef5a39305 565-574
+  s_c4cf64ef8235e8::t_2557e6a350376f 771
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "8605f954c87b30d72c802ba9fb67e102e0366484",
+  "prompts": {},
+  "sessions": {
+    "s_c4cf64ef8235e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "49bc5d11-bbfe-4f14-a583-d49c92a668ef",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
