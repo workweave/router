@@ -1,0 +1,24 @@
+frontend/src/components/Sidebar.tsx
+  s_b19420d3dd2686::t_30d8716e579bbb 75
+frontend/src/app/(app)/settings/page.tsx
+  s_b19420d3dd2686::t_e0a721cec6e174 160
+  s_b19420d3dd2686::t_113ca842c33e85 425-427,431
+frontend/src/components/DashboardPageFilters/DashboardPageFilters.tsx
+  s_b19420d3dd2686::t_ad17c9a8d2e506 98,156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "31d4974c98b007ec65b0dafe8f76b085626e38dc",
+  "prompts": {},
+  "sessions": {
+    "s_b19420d3dd2686": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "24be8415-a425-4b0d-916e-5c4cbe1ca9f9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
