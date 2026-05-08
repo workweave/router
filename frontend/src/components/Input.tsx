@@ -1,6 +1,5 @@
-import { type InputHTMLAttributes, type SelectHTMLAttributes, forwardRef } from "react";
-
 import { cn } from "@/lib/cn";
+import { forwardRef, type InputHTMLAttributes } from "react";
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -16,39 +15,16 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     const inputId = id ?? label?.toLowerCase().replace(/\s+/g, "-");
     return (
       <div className="flex flex-col gap-1.5">
-        {label && (
+        {label != null && (
           <label htmlFor={inputId} className="text-xs font-medium text-foreground">
             {label}
           </label>
         )}
         <input ref={ref} id={inputId} className={cn(FIELD, className)} {...props} />
-        {hint && !error && <p className="text-2xs text-muted-foreground">{hint}</p>}
-        {error && <p className="text-2xs text-danger">{error}</p>}
+        {hint != null && error == null && <p className="text-2xs text-muted-foreground">{hint}</p>}
+        {error != null && <p className="text-2xs text-danger">{error}</p>}
       </div>
     );
   },
 );
 Input.displayName = "Input";
-
-interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
-  label?: string;
-}
-
-export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ label, className, id, children, ...props }, ref) => {
-    const selectId = id ?? label?.toLowerCase().replace(/\s+/g, "-");
-    return (
-      <div className="flex flex-col gap-1.5">
-        {label && (
-          <label htmlFor={selectId} className="text-xs font-medium text-foreground">
-            {label}
-          </label>
-        )}
-        <select ref={ref} id={selectId} className={cn(FIELD, "appearance-none pr-8", className)} {...props}>
-          {children}
-        </select>
-      </div>
-    );
-  },
-);
-Select.displayName = "Select";

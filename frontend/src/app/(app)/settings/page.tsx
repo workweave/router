@@ -1,20 +1,24 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import { Copy, Trash2 } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
-
-import { Button } from "@/components/Button";
-import { Card } from "@/components/Card";
-import { Input, Select } from "@/components/Input";
-import { PageBody, PageHeader } from "@/components/PageHeader";
-import { cn } from "@/lib/cn";
+import { Text } from "@/components/atoms/Text";
+import { Input } from "@/components/Input";
+import { Button } from "@/components/molecules/Button";
+import { Card } from "@/components/molecules/Card";
+import { Command } from "@/components/molecules/Command";
+import { Popover } from "@/components/molecules/Popover";
+import { Page } from "@/components/Page";
+import { PageHeader } from "@/components/PageHeader";
+import { Appearance, Intent } from "@/components/types";
 import {
   api,
   type APIKey,
   type ExternalKey,
   type RouterConfig,
 } from "@/lib/api";
+import { cn } from "@/lib/cn";
+import { ChevronDown, Copy, Trash2 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
 type TabId = "router-keys" | "provider-keys" | "config";
 
@@ -53,7 +57,6 @@ function SettingsInner() {
   const router = useRouter();
   const tabParam = params.get("tab");
   const tab: TabId = isTabId(tabParam) ? tabParam : "router-keys";
-  const active = TABS.find((t) => t.id === tab) ?? TABS[0];
 
   function setTab(next: TabId) {
     const sp = new URLSearchParams(params.toString());
@@ -62,30 +65,45 @@ function SettingsInner() {
   }
 
   return (
-    <>
-      <PageHeader title="Settings" description={active.description} />
-      <div className="flex items-center gap-1 border-b border-border px-8">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            aria-selected={tab === t.id}
-            className={cn(
-              "relative -mb-px border-b-2 border-transparent px-3 py-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground",
-              "aria-selected:border-foreground aria-selected:text-foreground",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <PageBody>
+    <Page
+      header={
+        <PageHeader
+          left={
+            <Text
+              variant="h4"
+              as="h2"
+              className="flex flex-row items-center gap-1 whitespace-nowrap"
+            >
+              Settings
+            </Text>
+          }
+        />
+      }
+      subheader={
+        <div className="flex w-full max-w-content-width items-center gap-1 px-3">
+          {TABS.map(t => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              aria-selected={tab === t.id}
+              className={cn(
+                "relative -mb-px border-b-2 border-transparent px-3 py-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground",
+                "aria-selected:border-foreground aria-selected:text-foreground",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      }
+    >
+      <Page.Section>
         {tab === "router-keys" && <RouterKeysPanel />}
         {tab === "provider-keys" && <ProviderKeysPanel />}
         {tab === "config" && <ConfigPanel />}
-      </PageBody>
-    </>
+      </Page.Section>
+    </Page>
   );
 }
 
@@ -105,7 +123,7 @@ function RouterKeysPanel() {
   function load() {
     api.keys
       .list()
-      .then((r) => setKeys(r.keys ?? []))
+      .then(r => setKeys(r.keys ?? []))
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Failed to load keys"),
       );
@@ -141,7 +159,7 @@ function RouterKeysPanel() {
   }
 
   function handleCopy() {
-    if (!newToken) return;
+    if (newToken == null) return;
     navigator.clipboard.writeText(newToken).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -152,17 +170,17 @@ function RouterKeysPanel() {
     <>
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
-      {newToken && (
+      {newToken != null && (
         <div className="rounded-lg border border-success/30 bg-success/5 p-4">
-          <p className="mb-2 text-xs font-medium text-success">
+          <Text className="mb-2 text-xs font-medium text-success">
             Key created — copy it now, it won&apos;t be shown again.
-          </p>
+          </Text>
           <div className="flex items-center gap-2">
             <code className="flex-1 rounded bg-muted px-3 py-1.5 font-mono text-2xs text-foreground">
               {newToken}
             </code>
-            <Button variant="outline" size="sm" onClick={handleCopy}>
-              <Copy size={12} />
+            <Button appearance={Appearance.Outlined} size="sm" onClick={handleCopy}>
+              <Copy className="size-3.5" />
               {copied ? "Copied" : "Copy"}
             </Button>
           </div>
@@ -175,51 +193,66 @@ function RouterKeysPanel() {
         </div>
       )}
 
-      <Card title="Issue a new key">
-        <form onSubmit={handleCreate} className="flex items-end gap-3">
-          <div className="flex-1">
-            <Input
-              label="Name (optional)"
-              placeholder="My API key"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <Button type="submit" variant="filled" disabled={creating}>
-            {creating ? "Creating…" : "Create key"}
-          </Button>
-        </form>
+      <Card>
+        <Card.Header>
+          <Card.Title variant="h4">Issue a new key</Card.Title>
+        </Card.Header>
+        <Card.Content>
+          <form onSubmit={handleCreate} className="flex items-end gap-3">
+            <div className="flex-1">
+              <Input
+                label="Name (optional)"
+                placeholder="My API key"
+                value={name}
+                onChange={e => setName(e.target.value)}
+              />
+            </div>
+            <Button
+              type="submit"
+              appearance={Appearance.Filled}
+              intent={Intent.Primary}
+              disabled={creating}
+            >
+              {creating ? "Creating…" : "Create key"}
+            </Button>
+          </form>
+        </Card.Content>
       </Card>
 
       {keys.length > 0 ? (
-        <Card title="Active router keys" contentClassName="p-0">
-          <ul className="divide-y divide-border">
-            {keys.map((k) => (
-              <li key={k.id} className="flex items-center justify-between px-5 py-3">
-                <div>
-                  <div className="text-xs font-medium text-foreground">
-                    {k.name ?? "Unnamed key"}
+        <Card className="p-0">
+          <Card.Header className="border-b border-border px-5 py-3">
+            <Card.Title variant="h4">Active router keys</Card.Title>
+          </Card.Header>
+          <Card.Content>
+            <ul className="divide-y divide-border">
+              {keys.map(k => (
+                <li key={k.id} className="flex items-center justify-between px-5 py-3">
+                  <div>
+                    <div className="text-xs font-medium text-foreground">
+                      {k.name ?? "Unnamed key"}
+                    </div>
+                    <p className="mt-0.5 font-mono text-2xs text-muted-foreground">
+                      {k.key_prefix}…{k.key_suffix}
+                      <span className="ml-2 font-sans">
+                        · created {formatDate(k.created_at)}
+                        {k.last_used_at != null && ` · last used ${formatDate(k.last_used_at)}`}
+                      </span>
+                    </p>
                   </div>
-                  <p className="mt-0.5 font-mono text-2xs text-muted-foreground">
-                    {k.key_prefix}…{k.key_suffix}
-                    <span className="ml-2 font-sans">
-                      · created {formatDate(k.created_at)}
-                      {k.last_used_at && ` · last used ${formatDate(k.last_used_at)}`}
-                    </span>
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleDelete(k.id)}
-                  disabled={deleting === k.id}
-                  className="text-muted-foreground hover:text-danger"
-                >
-                  <Trash2 size={14} />
-                </Button>
-              </li>
-            ))}
-          </ul>
+                  <Button
+                    appearance={Appearance.Hollow}
+                    intent={Intent.Danger}
+                    size="icon"
+                    onClick={() => handleDelete(k.id)}
+                    disabled={deleting === k.id}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </Card.Content>
         </Card>
       ) : (
         <EmptyHint>No router keys yet.</EmptyHint>
@@ -235,6 +268,10 @@ function RouterKeysPanel() {
 const PROVIDERS = ["anthropic", "openai", "google", "openrouter"] as const;
 type Provider = (typeof PROVIDERS)[number];
 
+function providerLabel(p: Provider): string {
+  return p.charAt(0).toUpperCase() + p.slice(1);
+}
+
 function ProviderKeysPanel() {
   const [keys, setKeys] = useState<ExternalKey[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -247,7 +284,7 @@ function ProviderKeysPanel() {
   function load() {
     api.providerKeys
       .list()
-      .then((r) => setKeys(r.keys ?? []))
+      .then(r => setKeys(r.keys ?? []))
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Failed to load keys"),
       );
@@ -257,7 +294,7 @@ function ProviderKeysPanel() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!keyValue.trim()) return;
+    if (keyValue.trim() === "") return;
     setSaving(true);
     try {
       await api.providerKeys.upsert(provider, keyValue.trim(), name.trim() || undefined);
@@ -287,78 +324,127 @@ function ProviderKeysPanel() {
     <>
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
-      <Card title="Add or replace a key">
-        <form onSubmit={handleSave} className="space-y-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[160px_1fr]">
-            <Select
-              label="Provider"
-              value={provider}
-              onChange={(e) => setProvider(e.target.value as Provider)}
-            >
-              {PROVIDERS.map((p) => (
-                <option key={p} value={p}>
-                  {p.charAt(0).toUpperCase() + p.slice(1)}
-                </option>
-              ))}
-            </Select>
+      <Card>
+        <Card.Header>
+          <Card.Title variant="h4">Add or replace a key</Card.Title>
+        </Card.Header>
+        <Card.Content>
+          <form onSubmit={handleSave} className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[200px_1fr]">
+              <ProviderPicker value={provider} onChange={setProvider} />
+              <Input
+                label="API key"
+                type="password"
+                placeholder="sk-..."
+                value={keyValue}
+                onChange={e => setKeyValue(e.target.value)}
+                required
+              />
+            </div>
             <Input
-              label="API key"
-              type="password"
-              placeholder="sk-..."
-              value={keyValue}
-              onChange={(e) => setKeyValue(e.target.value)}
-              required
+              label="Name (optional)"
+              placeholder="My Anthropic key"
+              value={name}
+              onChange={e => setName(e.target.value)}
             />
-          </div>
-          <Input
-            label="Name (optional)"
-            placeholder="My Anthropic key"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <div>
-            <Button type="submit" variant="filled" disabled={saving || !keyValue.trim()}>
-              {saving ? "Saving…" : "Save key"}
-            </Button>
-          </div>
-        </form>
+            <div>
+              <Button
+                type="submit"
+                appearance={Appearance.Filled}
+                intent={Intent.Primary}
+                disabled={saving || keyValue.trim() === ""}
+              >
+                {saving ? "Saving…" : "Save key"}
+              </Button>
+            </div>
+          </form>
+        </Card.Content>
       </Card>
 
       {keys.length > 0 ? (
-        <Card title="Active provider keys" contentClassName="p-0">
-          <ul className="divide-y divide-border">
-            {keys.map((k) => (
-              <li key={k.id} className="flex items-center justify-between px-5 py-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium capitalize text-foreground">
-                      {k.provider}
-                    </span>
-                    {k.name && (
-                      <span className="text-2xs text-muted-foreground">· {k.name}</span>
-                    )}
+        <Card className="p-0">
+          <Card.Header className="border-b border-border px-5 py-3">
+            <Card.Title variant="h4">Active provider keys</Card.Title>
+          </Card.Header>
+          <Card.Content>
+            <ul className="divide-y divide-border">
+              {keys.map(k => (
+                <li key={k.id} className="flex items-center justify-between px-5 py-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium capitalize text-foreground">
+                        {k.provider}
+                      </span>
+                      {k.name != null && (
+                        <span className="text-2xs text-muted-foreground">· {k.name}</span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 font-mono text-2xs text-muted-foreground">
+                      {k.key_prefix}…{k.key_suffix}
+                    </p>
                   </div>
-                  <p className="mt-0.5 font-mono text-2xs text-muted-foreground">
-                    {k.key_prefix}…{k.key_suffix}
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleDelete(k.id)}
-                  disabled={deleting === k.id}
-                  className="text-muted-foreground hover:text-danger"
-                >
-                  <Trash2 size={14} />
-                </Button>
-              </li>
-            ))}
-          </ul>
+                  <Button
+                    appearance={Appearance.Hollow}
+                    intent={Intent.Danger}
+                    size="icon"
+                    onClick={() => handleDelete(k.id)}
+                    disabled={deleting === k.id}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </Card.Content>
         </Card>
       ) : (
         <EmptyHint>No provider keys configured.</EmptyHint>
       )}
     </>
+  );
+}
+
+function ProviderPicker({
+  value,
+  onChange,
+}: {
+  value: Provider;
+  onChange: (p: Provider) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-medium text-foreground">Provider</label>
+      <Popover open={open} onOpenChange={setOpen}>
+        <Popover.Trigger>
+          <Button
+            type="button"
+            appearance={Appearance.Outlined}
+            className="w-full justify-between"
+          >
+            <span>{providerLabel(value)}</span>
+            <ChevronDown className="size-3.5" />
+          </Button>
+        </Popover.Trigger>
+        <Popover.Content className="w-56 p-1" align="start">
+          <Command>
+            <Command.List>
+              {PROVIDERS.map(p => (
+                <Command.Item
+                  key={p}
+                  onSelect={() => {
+                    onChange(p);
+                    setOpen(false);
+                  }}
+                >
+                  {providerLabel(p)}
+                </Command.Item>
+              ))}
+            </Command.List>
+          </Command>
+        </Popover.Content>
+      </Popover>
+    </div>
   );
 }
 
@@ -424,24 +510,32 @@ function ConfigPanel() {
     <>
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
-      <Card title="Runtime values" contentClassName="p-0">
-        {config == null ? (
-          <div className="px-5 py-8 text-center text-2xs text-muted-foreground">
-            {error ? "Failed to load" : "Loading…"}
-          </div>
-        ) : (
-          <ul className="divide-y divide-border">
-            {buildRows(config).map((row) => (
-              <li key={row.label} className="flex items-start justify-between gap-6 px-5 py-4">
-                <div className="flex-1">
-                  <p className="text-xs font-medium text-foreground">{row.label}</p>
-                  <p className="mt-0.5 text-2xs text-muted-foreground">{row.description}</p>
-                </div>
-                <span className="shrink-0 font-mono text-xs text-foreground">{row.value}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+      <Card className="p-0">
+        <Card.Header className="border-b border-border px-5 py-3">
+          <Card.Title variant="h4">Runtime values</Card.Title>
+        </Card.Header>
+        <Card.Content>
+          {config == null ? (
+            <div className="px-5 py-8 text-center text-2xs text-muted-foreground">
+              {error != null ? "Failed to load" : "Loading…"}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {buildRows(config).map(row => (
+                <li
+                  key={row.label}
+                  className="flex items-start justify-between gap-6 px-5 py-4"
+                >
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-foreground">{row.label}</p>
+                    <p className="mt-0.5 text-2xs text-muted-foreground">{row.description}</p>
+                  </div>
+                  <span className="shrink-0 font-mono text-xs text-foreground">{row.value}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card.Content>
       </Card>
     </>
   );

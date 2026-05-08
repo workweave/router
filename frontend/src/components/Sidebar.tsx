@@ -1,13 +1,12 @@
 "use client";
 
+import { Logo } from "./Logo";
+import { api } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import { BarChart2, LogOut, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode } from "react";
-
-import { Logo } from "./Logo";
-import { api } from "@/lib/api";
-import { cn } from "@/lib/cn";
 
 interface NavItem {
   href: string;
@@ -16,15 +15,20 @@ interface NavItem {
   matchPrefix?: string;
 }
 
-const NAV_ITEMS: NavItem[] = [
+const PRIMARY_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: <BarChart2 size={16} /> },
 ];
 
-function NavButton({ item }: { item: NavItem }) {
+const SECONDARY_NAV: NavItem[] = [
+  { href: "/settings", label: "Settings", icon: <Settings size={16} />, matchPrefix: "/settings" },
+];
+
+function NavLink({ item }: { item: NavItem }) {
   const pathname = usePathname();
-  const active = item.matchPrefix
-    ? pathname.startsWith(item.matchPrefix)
-    : pathname === item.href || pathname.startsWith(item.href + "/");
+  const active =
+    item.matchPrefix != null
+      ? pathname.startsWith(item.matchPrefix)
+      : pathname === item.href || pathname.startsWith(item.href + "/");
 
   return (
     <Link
@@ -32,9 +36,9 @@ function NavButton({ item }: { item: NavItem }) {
       aria-selected={active}
       title={item.label}
       className={cn(
-        "relative flex h-7 w-full items-center gap-2 rounded-md px-3 text-xs font-medium text-foreground transition-colors",
-        "hover:bg-foreground/5 active:bg-foreground/10",
-        "aria-selected:bg-foreground/5",
+        "relative flex h-8 w-full items-center gap-2 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors",
+        "hover:bg-foreground/5 hover:text-foreground",
+        "aria-selected:bg-foreground/5 aria-selected:text-foreground",
       )}
     >
       <span className="shrink-0">{item.icon}</span>
@@ -44,9 +48,7 @@ function NavButton({ item }: { item: NavItem }) {
 }
 
 export function Sidebar() {
-  const pathname = usePathname();
   const router = useRouter();
-  const settingsActive = pathname.startsWith("/settings");
 
   async function handleSignOut() {
     try {
@@ -64,39 +66,29 @@ export function Sidebar() {
         <Logo href="/dashboard" />
       </header>
 
-      <div className="relative z-10 flex w-full flex-1 flex-col gap-4 overflow-y-auto md:p-2 md:pt-0">
-        <nav className="flex w-full flex-col gap-4">
-          <div className="flex w-full flex-col gap-1">
-            {NAV_ITEMS.map((item) => (
-              <NavButton key={item.href} item={item} />
-            ))}
-          </div>
-        </nav>
-      </div>
+      <nav className="relative z-10 flex w-full flex-1 flex-col gap-1 overflow-y-auto md:p-2 md:pt-0">
+        {PRIMARY_NAV.map(item => (
+          <NavLink key={item.href} item={item} />
+        ))}
+      </nav>
 
-      <div className="fixed bottom-4 left-4 right-4 z-10 flex items-center gap-2 md:right-auto">
-        <Link
-          href="/settings"
-          aria-selected={settingsActive}
-          title="Settings"
-          className={cn(
-            "inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border-darker bg-background p-0 text-muted-foreground transition-colors",
-            "hover:bg-foreground/5 hover:text-foreground",
-            "aria-selected:bg-foreground/5 aria-selected:text-foreground",
-          )}
-        >
-          <Settings size={16} />
-        </Link>
+      <div className="relative z-10 flex w-full flex-col gap-1 border-t border-border-darker md:p-2">
+        {SECONDARY_NAV.map(item => (
+          <NavLink key={item.href} item={item} />
+        ))}
         <button
           type="button"
           onClick={handleSignOut}
           title="Sign out"
           className={cn(
-            "inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border-darker bg-background p-0 text-muted-foreground transition-colors",
+            "relative flex h-8 w-full items-center gap-2 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors",
             "hover:bg-foreground/5 hover:text-foreground",
           )}
         >
-          <LogOut size={16} />
+          <span className="shrink-0">
+            <LogOut size={16} />
+          </span>
+          <span className="hidden whitespace-nowrap md:inline">Sign out</span>
         </button>
       </div>
     </div>

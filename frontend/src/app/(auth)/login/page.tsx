@@ -4,8 +4,9 @@ import { Suspense, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { Button } from "@/components/Button";
 import { Input } from "@/components/Input";
+import { Button } from "@/components/molecules/Button";
+import { Appearance, Intent } from "@/components/types";
 import { api } from "@/lib/api";
 
 export default function LoginPage() {
@@ -74,7 +75,13 @@ function LoginInner() {
             {error}
           </p>
         )}
-        <Button type="submit" variant="filled" className="w-full" disabled={submitting || !password}>
+        <Button
+          type="submit"
+          appearance={Appearance.Filled}
+          intent={Intent.Primary}
+          className="w-full"
+          disabled={submitting || password === ""}
+        >
           {submitting ? "Signing in…" : "Sign in"}
         </Button>
       </form>
