@@ -1,0 +1,43 @@
+frontend/src/components/Input.tsx
+  s_01720a0399bbb1::t_010665623b143e 2,18,24-25
+frontend/src/app/(auth)/login/page.tsx
+  s_01720a0399bbb1::t_53a9b5b68d2ae4 8-9
+  s_01720a0399bbb1::t_228300a495c81e 78-84
+frontend/src/components/DashboardPageFilters/DashboardPageFilters.tsx
+  s_01720a0399bbb1::t_14ba9ba6969080 1-122
+frontend/src/components/DashboardPageFilters/index.ts
+  s_01720a0399bbb1::t_c4b30f6a48a317 1-12
+frontend/src/components/DashboardPageFilters/useDashboardFilters.ts
+  s_01720a0399bbb1::t_a57ddb3ac828fe 1-79
+frontend/src/components/Sidebar.tsx
+  s_01720a0399bbb1::t_66d35d6e74bc4b 3-5,18,22-26,28-31,39-41,69-73,75-78,84,88-91
+frontend/src/components/DashboardPageFilters/FilterPill.tsx
+  s_01720a0399bbb1::t_f0a46405046934 1-23,25-36
+  s_01720a0399bbb1::t_e832ad710b7eb0 24,37-53
+frontend/src/app/(app)/settings/page.tsx
+  s_01720a0399bbb1::t_40acf279abaa3a 417
+  s_01720a0399bbb1::t_842ab6867cc3c6 3-11,18-21,68-101,105-106,126,162,173,175,177,182-183,196-219,223-241,243-255,271-274,287,297,327-343,345-348,350-361,365-384,386-398,407-416,418-450,513-538
+frontend/src/app/(app)/dashboard/page.tsx
+  s_01720a0399bbb1::t_52c4b51bb90518 3,8-15,17,33-35,41-42,45,48,53,56-59,63-70,72-83,98-115,117,127-133,136,140,144,150-174,177,179,181-184,189,193-196,200-247,249-274,276-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "7a1d0c9ecd2d67f6dd3e45a59dcb29be9c584136",
+  "prompts": {},
+  "humans": {
+    "h_16c9377d4ebc00": {
+      "author": "steventohme <steven@workweave.ai>"
+    }
+  },
+  "sessions": {
+    "s_01720a0399bbb1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1bc5b49e-bb10-4dfe-9a25-0a5e865076b0",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
