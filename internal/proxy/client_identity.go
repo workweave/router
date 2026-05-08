@@ -56,9 +56,36 @@ func ParseClaudeCodeMetadata(raw string) ClaudeCodeMetadata {
 	return meta
 }
 
-// NormalizeEmail trims whitespace and lower-cases an email so it matches the
-// case-sensitive unique index on (installation_id, email). Returns "" when the
-// input is empty after trimming.
+// MaxEmailLen is the upper bound on email length we accept into
+// router.model_router_users. RFC 5321 §4.5.3.1.3 caps a Mail-From path at
+// 256 bytes; we use 254 to be safe and to bound row growth from
+// caller-controlled inputs (handlers accept metadata.user_id.email and the
+// X-Weave-User-Email header from any authenticated caller, so an unbounded
+// shape would let a single API key flood the table with distinct strings).
+const MaxEmailLen = 254
+
+// NormalizeEmail trims whitespace, lower-cases, and structurally validates an
+// email so it matches the case-sensitive unique index on
+// (installation_id, email) without letting a caller-controlled input drive
+// unbounded growth in router.model_router_users. Returns "" for any input
+// that is empty, longer than MaxEmailLen, missing a single '@', or has an
+// empty local-part or domain. Callers treat "" as "no email signal" and skip
+// the upsert (see auth.Service.ResolveAndStashUser).
+//
+// We deliberately do NOT validate deliverability — the email is an opaque
+// identifier, not a contact channel. The shape check is a flood-protection
+// floor, not RFC 5322 parsing.
 func NormalizeEmail(s string) string {
-	return strings.ToLower(strings.TrimSpace(s))
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" || len(s) > MaxEmailLen {
+		return ""
+	}
+	at := strings.IndexByte(s, '@')
+	if at <= 0 || at == len(s)-1 {
+		return ""
+	}
+	if strings.IndexByte(s[at+1:], '@') >= 0 {
+		return ""
+	}
+	return s
 }
