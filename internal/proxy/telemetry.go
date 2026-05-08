@@ -15,6 +15,8 @@ type TelemetryRepository interface {
 	GetTelemetryTimeseries(ctx context.Context, installationID string, from, to time.Time, granularity string) ([]TelemetryBucket, error)
 	GetTelemetrySummaryAll(ctx context.Context, from, to time.Time) (TelemetrySummary, error)
 	GetTelemetryTimeseriesAll(ctx context.Context, from, to time.Time, granularity string) ([]TelemetryBucket, error)
+	GetTelemetryRows(ctx context.Context, installationID string, from, to time.Time, limit int32) ([]TelemetryRow, error)
+	GetTelemetryRowsAll(ctx context.Context, from, to time.Time, limit int32) ([]TelemetryRow, error)
 }
 
 // InsertTelemetryParams mirrors one router.upstream span row.
@@ -58,4 +60,22 @@ type TelemetryBucket struct {
 	Bucket           time.Time
 	RequestedCostUSD float64
 	ActualCostUSD    float64
+}
+
+// TelemetryRow is one individual upstream span returned by the drill-down
+// endpoint to show what happened inside a chart bucket.
+type TelemetryRow struct {
+	Timestamp          time.Time
+	RequestID          string
+	RequestedModel     string
+	DecisionModel      string
+	DecisionProvider   string
+	DecisionReason     string
+	StickyHit          bool
+	InputTokens        int32
+	OutputTokens       int32
+	RequestedCostUSD   float64
+	ActualCostUSD      float64
+	TotalLatencyMs     int64
+	UpstreamStatusCode int32
 }

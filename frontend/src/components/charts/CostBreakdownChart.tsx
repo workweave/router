@@ -1,24 +1,32 @@
 "use client";
 
-import { type TimeseriesBucket } from "@/lib/api";
-import { useMemo } from "react";
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+  Chart,
+  ChartAxisType,
+  ChartColor,
+  ChartSeriesConfig,
+  ChartSeriesType,
+} from "@/components/Chart";
+import { type TimeseriesBucket } from "@/lib/api";
+import { DateTime } from "@/objects/scalars/DateTime";
+import { TimeGranularity, formatInterval, formatTime } from "@/objects/TimeGranularity";
+import { LoadState } from "@/tools/LoadState";
+import { useMemo } from "react";
 
-import { AXIS_TICK, CHART_COLORS, TOOLTIP_STYLE } from "./chartTheme";
+import { DrillDownModal } from "./DrillDownModal";
+import { useChartDrillDown } from "./useChartDrillDown";
+
+const TIME_KEY = "time" as const;
+const ACTUAL_KEY = "actual" as const;
+const SAVINGS_KEY = "savings" as const;
+
+type DependentKey = typeof ACTUAL_KEY | typeof SAVINGS_KEY;
+
+type RouterGranularity = "hour" | "day" | "week";
 
 interface Props {
   buckets: TimeseriesBucket[];
-  granularity: "hour" | "day";
-  height?: number;
+  granularity: RouterGranularity;
 }
 
 function formatUSD(v: number): string {
@@ -27,63 +35,82 @@ function formatUSD(v: number): string {
   return `$${v.toFixed(2)}`;
 }
 
-function formatBucket(iso: string, granularity: "hour" | "day"): string {
-  const d = new Date(iso);
-  if (granularity === "day") {
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  }
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+function formatUSDCompact(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1000) return `$${(v / 1000).toFixed(1)}K`;
+  if (abs >= 1) return `$${v.toFixed(0)}`;
+  return `$${v.toFixed(2)}`;
 }
 
-export function CostBreakdownChart({ buckets, granularity, height = 220 }: Props) {
-  const data = useMemo(
-    () =>
-      buckets.map((b) => {
-        const savings = Math.max(0, b.requested_cost_usd - b.actual_cost_usd);
-        return {
-          label: formatBucket(b.bucket, granularity),
-          actual: b.actual_cost_usd,
-          savings,
-        };
-      }),
-    [buckets, granularity],
-  );
+const SERIES_CONFIG: Partial<Record<DependentKey, ChartSeriesConfig<DateTime, number>>> = {
+  [ACTUAL_KEY]: {
+    color: ChartColor.Scale2,
+    formatValue: v => formatUSD(typeof v === "number" ? v : v[0]),
+    label: "Actual cost",
+    type: ChartSeriesType.Bar,
+  },
+  [SAVINGS_KEY]: {
+    color: ChartColor.Green,
+    formatValue: v => formatUSD(typeof v === "number" ? v : v[0]),
+    label: "Saved",
+    opacity: 0.55,
+    type: ChartSeriesType.Bar,
+  },
+};
+
+const DEPENDENT_KEYS = LoadState.loaded([ACTUAL_KEY, SAVINGS_KEY] as readonly DependentKey[]);
+
+// Stack actual + savings into one bar per bucket.
+const GROUPS = LoadState.loaded([[ACTUAL_KEY, SAVINGS_KEY]] as readonly (readonly DependentKey[])[]);
+
+function toTimeGranularity(g: RouterGranularity): TimeGranularity {
+  return g === "week" ? TimeGranularity.Week : TimeGranularity.Day;
+}
+
+export function CostBreakdownChart({ buckets, granularity }: Props) {
+  const wwGranularity = toTimeGranularity(granularity);
+  const drilldown = useChartDrillDown(granularity);
+
+  const chartData = useMemo(() => {
+    const sorted = [...buckets].sort(
+      (a, b) => new Date(a.bucket).getTime() - new Date(b.bucket).getTime(),
+    );
+    return LoadState.loaded(
+      sorted.map(b => ({
+        [TIME_KEY]: new Date(b.bucket).getTime() as DateTime,
+        [ACTUAL_KEY]: b.actual_cost_usd,
+        [SAVINGS_KEY]: Math.max(0, b.requested_cost_usd - b.actual_cost_usd),
+      })),
+    );
+  }, [buckets]);
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 4, right: 16, left: 8, bottom: 0 }} barCategoryGap={6}>
-        <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.border} vertical={false} />
-        <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
-        <YAxis
-          tickFormatter={(v) => formatUSD(v as number)}
-          tick={AXIS_TICK}
-          axisLine={false}
-          tickLine={false}
-          width={64}
+    <>
+      <Chart
+        data={chartData}
+        dependentKeys={DEPENDENT_KEYS}
+        groups={GROUPS}
+        independentKey={TIME_KEY}
+        independentType={ChartAxisType.Category}
+        config={SERIES_CONFIG}
+        formatValue={v => formatUSDCompact(typeof v === "number" ? v : v[1])}
+        formatIndependentValue={value => formatTime(value, wwGranularity)}
+        formatIndependentValueTooltip={value => formatInterval(value, wwGranularity)}
+        legend
+        onClickDataPoint={time => drilldown.open(time)}
+      />
+      {drilldown.state != null && (
+        <DrillDownModal
+          fromISO={drilldown.state.fromISO}
+          toISO={drilldown.state.toISO}
+          title={drilldown.state.title}
+          subtitle="Cost breakdown — requests in this bucket"
+          open={drilldown.isOpen}
+          onOpenChange={isOpen => {
+            if (!isOpen) drilldown.close();
+          }}
         />
-        <Tooltip
-          contentStyle={TOOLTIP_STYLE}
-          formatter={(value, name) => [formatUSD(value as number), name]}
-        />
-        <Legend wrapperStyle={{ fontSize: 12 }} iconType="square" />
-        <Bar
-          dataKey="actual"
-          name="Actual cost"
-          stackId="cost"
-          fill={CHART_COLORS.primary}
-          radius={[0, 0, 0, 0]}
-          isAnimationActive={false}
-        />
-        <Bar
-          dataKey="savings"
-          name="Saved"
-          stackId="cost"
-          fill={CHART_COLORS.success}
-          fillOpacity={0.55}
-          radius={[3, 3, 0, 0]}
-          isAnimationActive={false}
-        />
-      </BarChart>
-    </ResponsiveContainer>
+      )}
+    </>
   );
 }

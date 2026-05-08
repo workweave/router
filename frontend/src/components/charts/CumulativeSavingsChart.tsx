@@ -1,23 +1,31 @@
 "use client";
 
-import { type TimeseriesBucket } from "@/lib/api";
-import { useMemo } from "react";
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+  Chart,
+  ChartAxisType,
+  ChartColor,
+  ChartSeriesConfig,
+  ChartSeriesType,
+} from "@/components/Chart";
+import { type TimeseriesBucket } from "@/lib/api";
+import { DateTime } from "@/objects/scalars/DateTime";
+import { TimeGranularity, addGranularity, formatInterval, formatTime } from "@/objects/TimeGranularity";
+import { LoadState } from "@/tools/LoadState";
+import { useMemo } from "react";
 
-import { AXIS_TICK, CHART_COLORS, TOOLTIP_STYLE } from "./chartTheme";
+import { DrillDownModal } from "./DrillDownModal";
+import { useChartDrillDown } from "./useChartDrillDown";
+
+const TIME_KEY = "time" as const;
+const CUMULATIVE_KEY = "cumulative" as const;
+
+type DependentKey = typeof CUMULATIVE_KEY;
+
+type RouterGranularity = "hour" | "day" | "week";
 
 interface Props {
   buckets: TimeseriesBucket[];
-  granularity: "hour" | "day";
-  height?: number;
+  granularity: RouterGranularity;
 }
 
 function formatUSD(v: number): string {
@@ -26,57 +34,77 @@ function formatUSD(v: number): string {
   return `$${v.toFixed(2)}`;
 }
 
-function formatBucket(iso: string, granularity: "hour" | "day"): string {
-  const d = new Date(iso);
-  if (granularity === "day") {
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  }
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+function formatUSDCompact(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1000) return `$${(v / 1000).toFixed(1)}K`;
+  if (abs >= 1) return `$${v.toFixed(0)}`;
+  return `$${v.toFixed(2)}`;
 }
 
-export function CumulativeSavingsChart({ buckets, granularity, height = 220 }: Props) {
-  const data = useMemo(() => {
+const SERIES_CONFIG: Partial<Record<DependentKey, ChartSeriesConfig<DateTime, number>>> = {
+  [CUMULATIVE_KEY]: {
+    color: ChartColor.Green,
+    formatValue: v => formatUSD(typeof v === "number" ? v : v[0]),
+    label: "Cumulative savings",
+    type: ChartSeriesType.Area,
+  },
+};
+
+const DEPENDENT_KEYS = LoadState.loaded([CUMULATIVE_KEY] as readonly DependentKey[]);
+
+function toTimeGranularity(g: RouterGranularity): TimeGranularity {
+  return g === "week" ? TimeGranularity.Week : TimeGranularity.Day;
+}
+
+export function CumulativeSavingsChart({ buckets, granularity }: Props) {
+  const wwGranularity = toTimeGranularity(granularity);
+  const drilldown = useChartDrillDown(granularity);
+
+  const chartData = useMemo(() => {
+    const sorted = [...buckets].sort(
+      (a, b) => new Date(a.bucket).getTime() - new Date(b.bucket).getTime(),
+    );
     let cum = 0;
-    return buckets.map((b) => {
-      cum += b.requested_cost_usd - b.actual_cost_usd;
-      return {
-        label: formatBucket(b.bucket, granularity),
-        cumulative: cum,
-      };
-    });
-  }, [buckets, granularity]);
+    return LoadState.loaded(
+      sorted.map(b => {
+        cum += b.requested_cost_usd - b.actual_cost_usd;
+        return {
+          [TIME_KEY]: new Date(b.bucket).getTime() as DateTime,
+          [CUMULATIVE_KEY]: cum,
+        };
+      }),
+    );
+  }, [buckets]);
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
-        <defs>
-          <linearGradient id="gradCumSavings" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={CHART_COLORS.success} stopOpacity={0.35} />
-            <stop offset="100%" stopColor={CHART_COLORS.success} stopOpacity={0.02} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.border} vertical={false} />
-        <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
-        <YAxis
-          tickFormatter={(v) => formatUSD(v as number)}
-          tick={AXIS_TICK}
-          axisLine={false}
-          tickLine={false}
-          width={64}
+    <>
+      <Chart
+        data={chartData}
+        dependentKeys={DEPENDENT_KEYS}
+        independentKey={TIME_KEY}
+        independentType={ChartAxisType.Time}
+        independentDomain={([min, max]) => [
+          DateTime.fromDate(addGranularity(min, wwGranularity, -1)),
+          DateTime.fromDate(addGranularity(max, wwGranularity, 1)),
+        ]}
+        config={SERIES_CONFIG}
+        formatValue={v => formatUSDCompact(typeof v === "number" ? v : v[1])}
+        formatIndependentValue={value => formatTime(value, wwGranularity)}
+        formatIndependentValueTooltip={value => formatInterval(value, wwGranularity)}
+        onClickDataPoint={time => drilldown.open(time)}
+      />
+      {drilldown.state != null && (
+        <DrillDownModal
+          fromISO={drilldown.state.fromISO}
+          toISO={drilldown.state.toISO}
+          title={drilldown.state.title}
+          subtitle="Cumulative savings — requests in this bucket"
+          open={drilldown.isOpen}
+          onOpenChange={isOpen => {
+            if (!isOpen) drilldown.close();
+          }}
         />
-        <Tooltip
-          contentStyle={TOOLTIP_STYLE}
-          formatter={(value) => [formatUSD(value as number), "Cumulative savings"]}
-        />
-        <Area
-          type="monotone"
-          dataKey="cumulative"
-          stroke={CHART_COLORS.success}
-          strokeWidth={2}
-          fill="url(#gradCumSavings)"
-          isAnimationActive={false}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
+      )}
+    </>
   );
 }

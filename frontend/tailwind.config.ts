@@ -48,6 +48,8 @@ const config: Config = {
         foreground: "hsl(var(--primary-foreground))",
       },
       ring: "hsl(var(--ring))",
+      shortcuts: "hsl(var(--shortcuts))",
+      "shortcuts-foreground": "hsl(var(--shortcuts-foreground))",
       success: {
         DEFAULT: "hsl(var(--success))",
         foreground: "hsl(var(--success-foreground))",

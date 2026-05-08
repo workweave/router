@@ -26,6 +26,8 @@
     --primary-foreground: 0 0% 98%;
     --primary: 221 63% 55%;
     --ring: 0 0% 3.9%;
+    --shortcuts: 0 0% 90%;
+    --shortcuts-foreground: 0 0% 75%;
     --success-foreground: 0 0% 98%;
     --success: 142 72% 29%;
     --tooltip-foreground: 222.2 5% 27%;
@@ -56,6 +58,8 @@
     --primary-foreground: 0 0% 98%;
     --primary: 221 63% 55%;
     --ring: 0 0% 83.1%;
+    --shortcuts: 0 0% 18%;
+    --shortcuts-foreground: 0 0% 40%;
     --success-foreground: 0 0% 98%;
     --success: 143 86% 35%;
     --tooltip-foreground: 222.2 5% 27%;

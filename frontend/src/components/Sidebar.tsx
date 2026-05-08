@@ -1,6 +1,10 @@
 "use client";
 
 import { Logo } from "./Logo";
+import { Button } from "@/components/molecules/Button";
+import { Popover } from "@/components/molecules/Popover";
+import { Tooltip } from "@/components/molecules/Tooltip";
+import { Appearance, Intent } from "@/components/types";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { BarChart2, LogOut, Settings } from "lucide-react";
@@ -17,10 +21,6 @@ interface NavItem {
 
 const PRIMARY_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: <BarChart2 size={16} /> },
-];
-
-const SECONDARY_NAV: NavItem[] = [
-  { href: "/settings", label: "Settings", icon: <Settings size={16} />, matchPrefix: "/settings" },
 ];
 
 function NavLink({ item }: { item: NavItem }) {
@@ -72,24 +72,44 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="relative z-10 flex w-full flex-col gap-1 border-t border-border-darker md:p-2">
-        {SECONDARY_NAV.map(item => (
-          <NavLink key={item.href} item={item} />
-        ))}
-        <button
-          type="button"
-          onClick={handleSignOut}
-          title="Sign out"
-          className={cn(
-            "relative flex h-8 w-full items-center gap-2 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors",
-            "hover:bg-foreground/5 hover:text-foreground",
-          )}
-        >
-          <span className="shrink-0">
-            <LogOut size={16} />
-          </span>
-          <span className="hidden whitespace-nowrap md:inline">Sign out</span>
-        </button>
+      <div className="relative z-10 flex w-full items-center px-2 py-2 md:p-2">
+        <Popover>
+          <Tooltip content="Menu" side="right" interactiveChild>
+            <Popover.Trigger>
+              <Button
+                appearance={Appearance.Hollow}
+                className="size-8 shrink-0 justify-center rounded-md border border-border-darker bg-muted p-0 text-muted-foreground hover:bg-border-darker hover:text-foreground"
+                title="Menu"
+              >
+                <Settings className="size-4" />
+              </Button>
+            </Popover.Trigger>
+          </Tooltip>
+
+          <Popover.Content side="top" align="start" sideOffset={8} className="w-64 p-1">
+            <div className="flex flex-col">
+              <Button
+                href="/settings"
+                appearance={Appearance.Hollow}
+                className="h-7 w-full justify-start gap-2 px-2 text-xs"
+              >
+                <Settings className="size-4 shrink-0 text-muted-foreground" />
+                <span>Settings</span>
+              </Button>
+
+              <Button
+                appearance={Appearance.Hollow}
+                className="h-7 w-full justify-start gap-2 px-2 text-xs"
+                onClick={() => {
+                  void handleSignOut();
+                }}
+              >
+                <LogOut className="size-4 shrink-0 text-muted-foreground" />
+                <span>Sign out</span>
+              </Button>
+            </div>
+          </Popover.Content>
+        </Popover>
       </div>
     </div>
   );

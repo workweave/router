@@ -159,6 +159,24 @@ func (s *Service) MetricsTimeseriesAll(ctx context.Context, from, to time.Time, 
 	return s.telemetry.GetTelemetryTimeseriesAll(ctx, from, to, granularity)
 }
 
+// MetricsRows returns individual telemetry rows for the given installation in
+// [from, to). Used by the dashboard drill-down modal.
+func (s *Service) MetricsRows(ctx context.Context, installationID string, from, to time.Time, limit int32) ([]TelemetryRow, error) {
+	if s.telemetry == nil {
+		return nil, nil
+	}
+	return s.telemetry.GetTelemetryRows(ctx, installationID, from, to, limit)
+}
+
+// MetricsRowsAll returns individual telemetry rows across every installation.
+// Admin-only counterpart to MetricsRows.
+func (s *Service) MetricsRowsAll(ctx context.Context, from, to time.Time, limit int32) ([]TelemetryRow, error) {
+	if s.telemetry == nil {
+		return nil, nil
+	}
+	return s.telemetry.GetTelemetryRowsAll(ctx, from, to, limit)
+}
+
 // ErrProviderNotConfigured is returned when a routing decision selects a
 // provider that is not present in the registry.
 var ErrProviderNotConfigured = errors.New("provider not configured")

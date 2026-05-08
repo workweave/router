@@ -49,6 +49,26 @@ export interface MetricsTimeseries {
   buckets: TimeseriesBucket[];
 }
 
+export interface MetricsDetailRow {
+  timestamp: string;
+  request_id: string;
+  requested_model: string;
+  decision_model: string;
+  decision_provider: string;
+  decision_reason: string;
+  sticky_hit: boolean;
+  input_tokens: number;
+  output_tokens: number;
+  requested_cost_usd: number;
+  actual_cost_usd: number;
+  total_latency_ms: number;
+  upstream_status_code: number;
+}
+
+export interface MetricsDetails {
+  rows: MetricsDetailRow[];
+}
+
 export interface APIKey {
   id: string;
   name: string | null;
@@ -107,11 +127,15 @@ export const api = {
       const qs = params.toString();
       return request<MetricsSummary>(`/metrics/summary${qs ? `?${qs}` : ""}`);
     },
-    timeseries: (granularity: "hour" | "day", from?: string, to?: string) => {
+    timeseries: (granularity: "hour" | "day" | "week", from?: string, to?: string) => {
       const params = new URLSearchParams({ granularity });
       if (from) params.set("from", from);
       if (to) params.set("to", to);
       return request<MetricsTimeseries>(`/metrics/timeseries?${params.toString()}`);
+    },
+    details: (from: string, to: string, limit: number = 100) => {
+      const params = new URLSearchParams({ from, to, limit: String(limit) });
+      return request<MetricsDetails>(`/metrics/details?${params.toString()}`);
     },
   },
   keys: {

@@ -1,4 +1,5 @@
-import { cn } from "@/lib/cn";
+import { cn } from "@/tools/cn";
+
 import { cva, VariantProps } from "class-variance-authority";
 import React from "react";
 
@@ -22,8 +23,8 @@ export interface TextProps
     VariantProps<typeof textVariants>,
     React.HTMLAttributes<HTMLHeadingElement> {
   /**
-   * Override the rendered HTML element. By default the element matches the
-   * variant (h1 -> <h1>, p -> <p>, etc.).
+   * If you need to render the text as a different HTML element than its variant, use this prop.
+   * Otherwise stick with defining the variant only.
    */
   as?: "h1" | "h2" | "h3" | "h4" | "p" | null;
 }
@@ -31,6 +32,7 @@ export interface TextProps
 export const Text = React.forwardRef<HTMLHeadingElement, TextProps>(
   ({ as, children, className, variant, ...props }, ref) => {
     const Element = as ?? variant ?? "p";
+
     return (
       <Element ref={ref} className={cn(textVariants({ variant }), className)} {...props}>
         {children}

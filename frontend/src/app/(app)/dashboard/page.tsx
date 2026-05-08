@@ -1,6 +1,7 @@
 "use client";
 
 import { Text } from "@/components/atoms/Text";
+import { ChartCard } from "@/components/ChartCard";
 import { CostBreakdownChart } from "@/components/charts/CostBreakdownChart";
 import { CumulativeSavingsChart } from "@/components/charts/CumulativeSavingsChart";
 import { RouterCostSavingsChart } from "@/components/charts/RouterCostSavingsChart";
@@ -13,8 +14,10 @@ import { Card } from "@/components/molecules/Card";
 import { Page } from "@/components/Page";
 import { PageHeader } from "@/components/PageHeader";
 import { ResponsiveGrid } from "@/components/ResponsiveGrid";
+import { Statistic } from "@/components/Statistic";
 import { api, type MetricsSummary, type TimeseriesBucket } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { LoadState } from "@/tools/LoadState";
 import { useEffect, useState } from "react";
 
 function formatUSD(v: number): string {
@@ -109,9 +112,9 @@ export default function DashboardPage() {
           }
         />
       }
-      subheader={<DashboardPageFilters result={dashboardFilters} />}
     >
-      <Page.Section className="pt-0">
+      <Page.Section>
+        <DashboardPageFilters result={dashboardFilters} />
         <ResponsiveGrid>
           <MetricCard
             className={ResponsiveGrid.Small}
@@ -150,20 +153,20 @@ export default function DashboardPage() {
           <ChartCard
             className={ResponsiveGrid.Full}
             title="Router cost savings"
-            description="Actual cost vs. what would have been charged for the requested model."
-            action={
-              summary != null && summary.total_savings_usd !== 0 ? (
-                <span
-                  className={cn(
-                    "text-2xs font-medium",
-                    summary.total_savings_usd >= 0 ? "text-success" : "text-danger",
-                  )}
-                >
-                  {summary.total_savings_usd >= 0
-                    ? `${formatUSD(summary.total_savings_usd)} saved`
-                    : `${formatUSD(Math.abs(summary.total_savings_usd))} extra`}
-                </span>
-              ) : null
+            subtitle="Actual cost vs. what would have been charged for the requested model."
+            topRight={
+              <Statistic
+                statistic={
+                  summary == null
+                    ? LoadState.loading()
+                    : LoadState.loaded({
+                        total:
+                          summary.total_savings_usd >= 0
+                            ? `${formatUSD(summary.total_savings_usd)} saved`
+                            : `${formatUSD(Math.abs(summary.total_savings_usd))} extra`,
+                      })
+                }
+              />
             }
           >
             {empty ? (
@@ -176,7 +179,7 @@ export default function DashboardPage() {
           <ChartCard
             className={ResponsiveGrid.Medium}
             title="Cumulative savings"
-            description={`Running total of dollars saved across the ${range.label.toLowerCase()}.`}
+            subtitle={`Running total of dollars saved across the ${range.label.toLowerCase()}.`}
           >
             {empty ? (
               <EmptyChart height={220} />
@@ -188,7 +191,7 @@ export default function DashboardPage() {
           <ChartCard
             className={ResponsiveGrid.Medium}
             title="Savings rate"
-            description="Percent of requested cost avoided per bucket."
+            subtitle="Percent of requested cost avoided per bucket."
           >
             {empty ? (
               <EmptyChart height={200} />
@@ -200,7 +203,7 @@ export default function DashboardPage() {
           <ChartCard
             className={ResponsiveGrid.Full}
             title="Cost breakdown per bucket"
-            description="Actual cost stacked with realized savings."
+            subtitle="Actual cost stacked with realized savings."
           >
             {empty ? (
               <EmptyChart height={220} />
@@ -252,31 +255,6 @@ function MetricCard({ className, label, value, sub, accent = "default" }: Metric
           <Text className="mt-1 text-2xs text-muted-foreground">{sub}</Text>
         )}
       </Card.Content>
-    </Card>
-  );
-}
-
-interface ChartCardProps {
-  className?: string;
-  title: string;
-  description?: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}
-
-function ChartCard({ className, title, description, action, children }: ChartCardProps) {
-  return (
-    <Card size="sm" className={className}>
-      <Card.Header className="flex-row items-start justify-between gap-3">
-        <div className="min-w-0">
-          <Card.Title variant="h4">{title}</Card.Title>
-          {description != null && (
-            <Card.Description className="mt-0.5 text-2xs">{description}</Card.Description>
-          )}
-        </div>
-        {action != null && <div className="shrink-0">{action}</div>}
-      </Card.Header>
-      <Card.Content>{children}</Card.Content>
     </Card>
   );
 }

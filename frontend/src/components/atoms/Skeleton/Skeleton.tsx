@@ -1,11 +1,23 @@
-import { cn } from "@/lib/cn";
-import React from "react";
+import { cn } from "@/tools/cn";
 
 export interface SkeletonProps extends React.ComponentProps<"div"> {
+  /**
+   * The element to render.
+   *
+   * @default "div"
+   */
   as?: "div" | "span";
+  /**
+   * Whether to use a darker variant.
+   *
+   * @default false
+   */
   darker?: boolean;
 }
 
+/**
+ * Renders a loading skeleton.
+ */
 export function Skeleton({
   as: Element = "div",
   className,
@@ -23,3 +35,46 @@ export function Skeleton({
     />
   );
 }
+
+export interface SkeletonTextProps extends SkeletonProps {
+  /**
+   * Corresponds with Tailwind text sizes or `Text` component sizes.
+   *
+   * @default "base"
+   */
+  size?: "2xl" | "4xl" | "base" | "h1" | "h2" | "h3" | "h4" | "lg" | "p" | "sm" | "xl" | "xs";
+}
+
+/**
+ * Renders a skeleton exactly matching the size and spacing of text.
+ */
+Skeleton.Text = function SkeletonText({
+  as: Element = "div",
+  children,
+  className,
+  darker = false,
+  size = "base",
+  ...props
+}: SkeletonTextProps) {
+  return (
+    <Element
+      className={cn(
+        {
+          "h-[1.5rem] py-[0.25rem]": size === "base" || size === "p" || size === "h4",
+          "h-[1.25rem] py-[0.1875rem]": size === "sm",
+          "h-[1.75rem] py-[0.25rem]": size === "xl" || size === "h3",
+          "h-[1.75rem] py-[0.3125rem]": size === "lg",
+          "h-[1rem] py-[0.09375rem]": size === "xs",
+          "h-[2.5rem] py-[0.125rem]": size === "4xl" || size === "h1",
+          "h-[2rem] py-[0.25rem]": size === "h2" || size === "2xl",
+        },
+        className,
+      )}
+      {...props}
+    >
+      <Skeleton className="h-full w-full" as={Element} darker={darker}>
+        {children}
+      </Skeleton>
+    </Element>
+  );
+};

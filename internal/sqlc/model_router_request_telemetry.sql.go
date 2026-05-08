@@ -12,6 +12,218 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getTelemetryRows = `-- name: GetTelemetryRows :many
+SELECT
+    timestamp,
+    request_id,
+    requested_model,
+    decision_model,
+    decision_provider,
+    decision_reason,
+    sticky_hit,
+    input_tokens,
+    output_tokens,
+    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
+    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
+    total_latency_ms,
+    upstream_status_code
+FROM router.model_router_request_telemetry
+WHERE installation_id = $1::uuid
+  AND span_type = 'router.upstream'
+  AND timestamp >= $2::timestamptz
+  AND timestamp < $3::timestamptz
+ORDER BY timestamp DESC
+LIMIT $4::int
+`
+
+type GetTelemetryRowsParams struct {
+	InstallationID uuid.UUID
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+	RowLimit       int32
+}
+
+type GetTelemetryRowsRow struct {
+	Timestamp          pgtype.Timestamptz
+	RequestID          string
+	RequestedModel     *string
+	DecisionModel      *string
+	DecisionProvider   *string
+	DecisionReason     *string
+	StickyHit          *bool
+	InputTokens        *int32
+	OutputTokens       *int32
+	RequestedCostUsd   pgtype.Numeric
+	ActualCostUsd      pgtype.Numeric
+	TotalLatencyMs     *int64
+	UpstreamStatusCode *int32
+}
+
+// Returns individual telemetry rows scoped to a single installation.
+//
+//	SELECT
+//	    timestamp,
+//	    request_id,
+//	    requested_model,
+//	    decision_model,
+//	    decision_provider,
+//	    decision_reason,
+//	    sticky_hit,
+//	    input_tokens,
+//	    output_tokens,
+//	    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
+//	    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
+//	    total_latency_ms,
+//	    upstream_status_code
+//	FROM router.model_router_request_telemetry
+//	WHERE installation_id = $1::uuid
+//	  AND span_type = 'router.upstream'
+//	  AND timestamp >= $2::timestamptz
+//	  AND timestamp < $3::timestamptz
+//	ORDER BY timestamp DESC
+//	LIMIT $4::int
+func (q *Queries) GetTelemetryRows(ctx context.Context, arg GetTelemetryRowsParams) ([]GetTelemetryRowsRow, error) {
+	rows, err := q.db.Query(ctx, getTelemetryRows,
+		arg.InstallationID,
+		arg.FromTime,
+		arg.ToTime,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTelemetryRowsRow
+	for rows.Next() {
+		var i GetTelemetryRowsRow
+		if err := rows.Scan(
+			&i.Timestamp,
+			&i.RequestID,
+			&i.RequestedModel,
+			&i.DecisionModel,
+			&i.DecisionProvider,
+			&i.DecisionReason,
+			&i.StickyHit,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.RequestedCostUsd,
+			&i.ActualCostUsd,
+			&i.TotalLatencyMs,
+			&i.UpstreamStatusCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTelemetryRowsAll = `-- name: GetTelemetryRowsAll :many
+SELECT
+    timestamp,
+    request_id,
+    requested_model,
+    decision_model,
+    decision_provider,
+    decision_reason,
+    sticky_hit,
+    input_tokens,
+    output_tokens,
+    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
+    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
+    total_latency_ms,
+    upstream_status_code
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= $1::timestamptz
+  AND timestamp < $2::timestamptz
+ORDER BY timestamp DESC
+LIMIT $3::int
+`
+
+type GetTelemetryRowsAllParams struct {
+	FromTime pgtype.Timestamptz
+	ToTime   pgtype.Timestamptz
+	RowLimit int32
+}
+
+type GetTelemetryRowsAllRow struct {
+	Timestamp          pgtype.Timestamptz
+	RequestID          string
+	RequestedModel     *string
+	DecisionModel      *string
+	DecisionProvider   *string
+	DecisionReason     *string
+	StickyHit          *bool
+	InputTokens        *int32
+	OutputTokens       *int32
+	RequestedCostUsd   pgtype.Numeric
+	ActualCostUsd      pgtype.Numeric
+	TotalLatencyMs     *int64
+	UpstreamStatusCode *int32
+}
+
+// Returns individual telemetry rows for a time window. Used by the
+// dashboard drill-down modal to show the underlying requests behind a
+// chart bucket. Admin scope: spans every installation.
+//
+//	SELECT
+//	    timestamp,
+//	    request_id,
+//	    requested_model,
+//	    decision_model,
+//	    decision_provider,
+//	    decision_reason,
+//	    sticky_hit,
+//	    input_tokens,
+//	    output_tokens,
+//	    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
+//	    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
+//	    total_latency_ms,
+//	    upstream_status_code
+//	FROM router.model_router_request_telemetry
+//	WHERE span_type = 'router.upstream'
+//	  AND timestamp >= $1::timestamptz
+//	  AND timestamp < $2::timestamptz
+//	ORDER BY timestamp DESC
+//	LIMIT $3::int
+func (q *Queries) GetTelemetryRowsAll(ctx context.Context, arg GetTelemetryRowsAllParams) ([]GetTelemetryRowsAllRow, error) {
+	rows, err := q.db.Query(ctx, getTelemetryRowsAll, arg.FromTime, arg.ToTime, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTelemetryRowsAllRow
+	for rows.Next() {
+		var i GetTelemetryRowsAllRow
+		if err := rows.Scan(
+			&i.Timestamp,
+			&i.RequestID,
+			&i.RequestedModel,
+			&i.DecisionModel,
+			&i.DecisionProvider,
+			&i.DecisionReason,
+			&i.StickyHit,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.RequestedCostUsd,
+			&i.ActualCostUsd,
+			&i.TotalLatencyMs,
+			&i.UpstreamStatusCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getTelemetrySummary = `-- name: GetTelemetrySummary :one
 SELECT
     COUNT(*)::bigint                                            AS request_count,
@@ -350,6 +562,121 @@ func (q *Queries) GetTelemetryTimeseriesHourlyAll(ctx context.Context, arg GetTe
 	var items []GetTelemetryTimeseriesHourlyAllRow
 	for rows.Next() {
 		var i GetTelemetryTimeseriesHourlyAllRow
+		if err := rows.Scan(&i.Bucket, &i.RequestedCostUsd, &i.ActualCostUsd); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTelemetryTimeseriesWeekly = `-- name: GetTelemetryTimeseriesWeekly :many
+SELECT
+    date_trunc('week', timestamp)::timestamptz                                       AS bucket,
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+FROM router.model_router_request_telemetry
+WHERE installation_id = $1::uuid
+  AND span_type = 'router.upstream'
+  AND timestamp >= $2::timestamptz
+  AND timestamp < $3::timestamptz
+GROUP BY date_trunc('week', timestamp)
+ORDER BY bucket ASC
+`
+
+type GetTelemetryTimeseriesWeeklyParams struct {
+	InstallationID uuid.UUID
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+}
+
+type GetTelemetryTimeseriesWeeklyRow struct {
+	Bucket           pgtype.Timestamptz
+	RequestedCostUsd pgtype.Numeric
+	ActualCostUsd    pgtype.Numeric
+}
+
+// Returns per-ISO-week cost buckets for the cost savings chart.
+//
+//	SELECT
+//	    date_trunc('week', timestamp)::timestamptz                                       AS bucket,
+//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+//	FROM router.model_router_request_telemetry
+//	WHERE installation_id = $1::uuid
+//	  AND span_type = 'router.upstream'
+//	  AND timestamp >= $2::timestamptz
+//	  AND timestamp < $3::timestamptz
+//	GROUP BY date_trunc('week', timestamp)
+//	ORDER BY bucket ASC
+func (q *Queries) GetTelemetryTimeseriesWeekly(ctx context.Context, arg GetTelemetryTimeseriesWeeklyParams) ([]GetTelemetryTimeseriesWeeklyRow, error) {
+	rows, err := q.db.Query(ctx, getTelemetryTimeseriesWeekly, arg.InstallationID, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTelemetryTimeseriesWeeklyRow
+	for rows.Next() {
+		var i GetTelemetryTimeseriesWeeklyRow
+		if err := rows.Scan(&i.Bucket, &i.RequestedCostUsd, &i.ActualCostUsd); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTelemetryTimeseriesWeeklyAll = `-- name: GetTelemetryTimeseriesWeeklyAll :many
+SELECT
+    date_trunc('week', timestamp)::timestamptz                                       AS bucket,
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= $1::timestamptz
+  AND timestamp < $2::timestamptz
+GROUP BY date_trunc('week', timestamp)
+ORDER BY bucket ASC
+`
+
+type GetTelemetryTimeseriesWeeklyAllParams struct {
+	FromTime pgtype.Timestamptz
+	ToTime   pgtype.Timestamptz
+}
+
+type GetTelemetryTimeseriesWeeklyAllRow struct {
+	Bucket           pgtype.Timestamptz
+	RequestedCostUsd pgtype.Numeric
+	ActualCostUsd    pgtype.Numeric
+}
+
+// Per-ISO-week cost buckets across every installation. Admin-only.
+//
+//	SELECT
+//	    date_trunc('week', timestamp)::timestamptz                                       AS bucket,
+//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+//	FROM router.model_router_request_telemetry
+//	WHERE span_type = 'router.upstream'
+//	  AND timestamp >= $1::timestamptz
+//	  AND timestamp < $2::timestamptz
+//	GROUP BY date_trunc('week', timestamp)
+//	ORDER BY bucket ASC
+func (q *Queries) GetTelemetryTimeseriesWeeklyAll(ctx context.Context, arg GetTelemetryTimeseriesWeeklyAllParams) ([]GetTelemetryTimeseriesWeeklyAllRow, error) {
+	rows, err := q.db.Query(ctx, getTelemetryTimeseriesWeeklyAll, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTelemetryTimeseriesWeeklyAllRow
+	for rows.Next() {
+		var i GetTelemetryTimeseriesWeeklyAllRow
 		if err := rows.Scan(&i.Bucket, &i.RequestedCostUsd, &i.ActualCostUsd); err != nil {
 			return nil, err
 		}

@@ -77,6 +77,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		mgmt := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAuth(authSvc))
 		mgmt.GET("/metrics/summary", admin.MetricsSummaryHandler(proxySvc))
 		mgmt.GET("/metrics/timeseries", admin.MetricsTimeseriesHandler(proxySvc))
+		mgmt.GET("/metrics/details", admin.MetricsDetailsHandler(proxySvc))
 		mgmt.GET("/keys", admin.ListAPIKeysHandler(authSvc))
 		mgmt.POST("/keys", admin.IssueAPIKeyHandler(authSvc))
 		mgmt.DELETE("/keys/:id", admin.DeleteAPIKeyHandler(authSvc))

@@ -1,74 +1,108 @@
 "use client";
 
-import { type TimeseriesBucket } from "@/lib/api";
-import { useMemo } from "react";
 import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+  Chart,
+  ChartAxisType,
+  ChartColor,
+  ChartSeriesConfig,
+  ChartSeriesType,
+} from "@/components/Chart";
+import { type TimeseriesBucket } from "@/lib/api";
+import { DateTime } from "@/objects/scalars/DateTime";
+import { TimeGranularity, addGranularity, formatInterval, formatTime } from "@/objects/TimeGranularity";
+import { LoadState } from "@/tools/LoadState";
+import { useMemo } from "react";
 
-import { AXIS_TICK, CHART_COLORS, TOOLTIP_STYLE } from "./chartTheme";
+import { DrillDownModal } from "./DrillDownModal";
+import { useChartDrillDown } from "./useChartDrillDown";
+
+const TIME_KEY = "time" as const;
+const RATE_KEY = "rate" as const;
+
+type DependentKey = typeof RATE_KEY;
+
+type RouterGranularity = "hour" | "day" | "week";
 
 interface Props {
   buckets: TimeseriesBucket[];
-  granularity: "hour" | "day";
-  height?: number;
+  granularity: RouterGranularity;
 }
 
-function formatBucket(iso: string, granularity: "hour" | "day"): string {
-  const d = new Date(iso);
-  if (granularity === "day") {
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  }
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+const SERIES_CONFIG: Partial<Record<DependentKey, ChartSeriesConfig<DateTime, number>>> = {
+  [RATE_KEY]: {
+    color: ChartColor.Orange1,
+    formatValue: v => `${(typeof v === "number" ? v : v[0]).toFixed(1)}%`,
+    label: "Savings rate",
+    type: ChartSeriesType.Line,
+  },
+};
+
+const DEPENDENT_KEYS = LoadState.loaded([RATE_KEY] as readonly DependentKey[]);
+
+function toTimeGranularity(g: RouterGranularity): TimeGranularity {
+  return g === "week" ? TimeGranularity.Week : TimeGranularity.Day;
 }
 
-export function SavingsRateChart({ buckets, granularity, height = 200 }: Props) {
-  const data = useMemo(
-    () =>
-      buckets.map((b) => {
+export function SavingsRateChart({ buckets, granularity }: Props) {
+  const wwGranularity = toTimeGranularity(granularity);
+  const drilldown = useChartDrillDown(granularity);
+
+  const chartData = useMemo(() => {
+    const sorted = [...buckets].sort(
+      (a, b) => new Date(a.bucket).getTime() - new Date(b.bucket).getTime(),
+    );
+    return LoadState.loaded(
+      sorted.map(b => {
         const rate =
           b.requested_cost_usd > 0
             ? ((b.requested_cost_usd - b.actual_cost_usd) / b.requested_cost_usd) * 100
             : 0;
-        return { label: formatBucket(b.bucket, granularity), rate };
+        return {
+          [TIME_KEY]: new Date(b.bucket).getTime() as DateTime,
+          [RATE_KEY]: rate,
+        };
       }),
-    [buckets, granularity],
+    );
+  }, [buckets]);
+
+  const referenceLines = useMemo(
+    () =>
+      LoadState.loaded([
+        { type: "dependent" as const, value: 0, dashed: true, label: undefined, side: undefined },
+      ]),
+    [],
   );
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={data} margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.border} vertical={false} />
-        <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
-        <YAxis
-          tickFormatter={(v) => `${(v as number).toFixed(0)}%`}
-          tick={AXIS_TICK}
-          axisLine={false}
-          tickLine={false}
-          width={48}
-          domain={["auto", "auto"]}
+    <>
+      <Chart
+        data={chartData}
+        dependentKeys={DEPENDENT_KEYS}
+        independentKey={TIME_KEY}
+        independentType={ChartAxisType.Time}
+        independentDomain={([min, max]) => [
+          DateTime.fromDate(addGranularity(min, wwGranularity, -1)),
+          DateTime.fromDate(addGranularity(max, wwGranularity, 1)),
+        ]}
+        config={SERIES_CONFIG}
+        formatValue={v => `${(typeof v === "number" ? v : v[0]).toFixed(0)}%`}
+        formatIndependentValue={value => formatTime(value, wwGranularity)}
+        formatIndependentValueTooltip={value => formatInterval(value, wwGranularity)}
+        referenceLines={referenceLines}
+        onClickDataPoint={time => drilldown.open(time)}
+      />
+      {drilldown.state != null && (
+        <DrillDownModal
+          fromISO={drilldown.state.fromISO}
+          toISO={drilldown.state.toISO}
+          title={drilldown.state.title}
+          subtitle="Savings rate — requests in this bucket"
+          open={drilldown.isOpen}
+          onOpenChange={isOpen => {
+            if (!isOpen) drilldown.close();
+          }}
         />
-        <ReferenceLine y={0} stroke={CHART_COLORS.borderDarker} strokeDasharray="2 2" />
-        <Tooltip
-          contentStyle={TOOLTIP_STYLE}
-          formatter={(value) => [`${(value as number).toFixed(1)}%`, "Savings rate"]}
-        />
-        <Line
-          type="monotone"
-          dataKey="rate"
-          stroke={CHART_COLORS.brand}
-          strokeWidth={2}
-          dot={false}
-          isAnimationActive={false}
-        />
-      </LineChart>
-    </ResponsiveContainer>
+      )}
+    </>
   );
 }
