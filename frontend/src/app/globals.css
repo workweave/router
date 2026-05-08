@@ -10,7 +10,7 @@
     --border: 0 0% 94.8%;
     --border-darker: 0 0% 90%;
 
-    --brand: 12 82% 59%; /* #EC6341 */
+    --brand: 12 82% 59%;
     --card-foreground: 222.2 47.4% 11.2%;
     --card: 0 0% 100%;
     --danger-foreground: 0 0% 98%;
@@ -30,6 +30,7 @@
     --success: 142 72% 29%;
     --tooltip-foreground: 222.2 5% 27%;
     --tooltip: 0 0% 100%;
+    --text-width: 78ch;
     --warning-foreground: 0 0% 98%;
     --warning: 25 95% 53%;
   }
@@ -79,5 +80,25 @@
 
   ::selection {
     @apply bg-brand/70;
+  }
+}
+
+@layer components {
+  .link {
+    @apply text-primary;
+
+    &:hover {
+      @apply underline;
+    }
+  }
+
+  .button {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-foreground ring-offset-2 ring-offset-background transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 active:bg-foreground/10 disabled:pointer-events-none disabled:opacity-50;
+  }
+}
+
+@layer utilities {
+  .absolute-center {
+    @apply absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2;
   }
 }
