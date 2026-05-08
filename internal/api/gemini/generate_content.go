@@ -71,7 +71,7 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 		}
 
 		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header)
-		ctx = resolveUser(ctx, authSvc, middleware.InstallationFrom(c))
+		ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		c.Request = c.Request.WithContext(ctx)
 
 		if err := svc.ProxyGeminiGenerateContent(c.Request.Context(), body, c.Writer, c.Request); err != nil {
@@ -155,20 +155,6 @@ func injectModelAndStream(body []byte, model string, stream bool) ([]byte, error
 		return nil, err
 	}
 	return out, nil
-}
-
-// resolveUser upserts the router user keyed on (installation, email) and
-// returns a ctx with the user_id stashed. No-op when authSvc, installation,
-// or the email signal is missing.
-func resolveUser(ctx context.Context, authSvc *auth.Service, installation *auth.Installation) context.Context {
-	if authSvc == nil || installation == nil {
-		return ctx
-	}
-	id := proxy.ClientIdentityFrom(ctx)
-	if id.Email == "" {
-		return ctx
-	}
-	return authSvc.ResolveAndStashUser(ctx, installation.ID, id.Email, id.AccountID)
 }
 
 // stashClientIdentity stashes user-identification signals from HTTP

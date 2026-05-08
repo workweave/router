@@ -70,7 +70,7 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 		}
 
 		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header, body)
-		ctx = resolveUser(ctx, authSvc, middleware.InstallationFrom(c))
+		ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		c.Request = c.Request.WithContext(ctx)
 
 		var w http.ResponseWriter = c.Writer
@@ -139,20 +139,6 @@ func stashClientIdentity(ctx context.Context, h http.Header, body []byte) contex
 		ClientApp: h.Get("X-App"),
 	}
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
-}
-
-// resolveUser upserts the router user keyed on (installation, email) and
-// returns a ctx with the user_id stashed. No-op when authSvc, installation,
-// or the email signal on the existing ClientIdentity is missing.
-func resolveUser(ctx context.Context, authSvc *auth.Service, installation *auth.Installation) context.Context {
-	if authSvc == nil || installation == nil {
-		return ctx
-	}
-	id := proxy.ClientIdentityFrom(ctx)
-	if id.Email == "" {
-		return ctx
-	}
-	return authSvc.ResolveAndStashUser(ctx, installation.ID, id.Email, id.AccountID)
 }
 
 func writeAnthropicError(c *gin.Context, status int, errType, message string) {

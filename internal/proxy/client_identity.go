@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+
+	"workweave/router/internal/auth"
 )
 
 // ClientIdentity holds per-request user identification signals extracted from
@@ -30,6 +32,28 @@ type ClientIdentityContextKey struct{}
 func ClientIdentityFrom(ctx context.Context) ClientIdentity {
 	id, _ := ctx.Value(ClientIdentityContextKey{}).(ClientIdentity)
 	return id
+}
+
+// ResolveUserFromContext is the glue every inbound handler runs after
+// stashing ClientIdentity: pull the email out of ctx, hand it to
+// auth.Service.ResolveAndStashUser, return the (possibly enriched) ctx.
+//
+// Lives here rather than in each handler subpackage so the resolution
+// rules (when to skip, what to forward) stay in one place — diverging
+// copies between Anthropic / OpenAI / Gemini handlers would silently
+// break per-protocol attribution.
+//
+// No-op when authSvc, installation, or the email on the existing
+// ClientIdentity is missing; in those cases ctx is returned unchanged.
+func ResolveUserFromContext(ctx context.Context, authSvc *auth.Service, installation *auth.Installation) context.Context {
+	if authSvc == nil || installation == nil {
+		return ctx
+	}
+	id := ClientIdentityFrom(ctx)
+	if id.Email == "" {
+		return ctx
+	}
+	return authSvc.ResolveAndStashUser(ctx, installation.ID, id.Email, id.AccountID)
 }
 
 // ClaudeCodeMetadata mirrors the JSON structure Claude Code (and friends) encode
