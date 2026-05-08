@@ -17,6 +17,7 @@ type Service struct {
 	installations InstallationRepository
 	apiKeys       APIKeyRepository
 	externalKeys  ExternalAPIKeyRepository
+	users         UserRepository
 	cache         APIKeyCache
 	now           Clock
 }
@@ -25,6 +26,7 @@ func NewService(
 	installations InstallationRepository,
 	apiKeys APIKeyRepository,
 	externalKeys ExternalAPIKeyRepository,
+	users UserRepository,
 	cache APIKeyCache,
 	now Clock,
 ) *Service {
@@ -32,6 +34,7 @@ func NewService(
 		installations: installations,
 		apiKeys:       apiKeys,
 		externalKeys:  externalKeys,
+		users:         users,
 		cache:         cache,
 		now:           now,
 	}
@@ -88,6 +91,37 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 	s.cache.Set(keyHash, CachedKey{APIKey: apiKey, Installation: installation, ExternalKeys: externalKeys})
 	s.fireMarkUsed(apiKey.ID)
 	return installation, apiKey, externalKeys, nil
+}
+
+// ResolveAndStashUser upserts a router user keyed on (installationID, email)
+// and stashes the resolved user ID on ctx via UserIDContextKey. Returns the
+// original ctx unchanged when email is empty or the upsert fails — user
+// resolution is best-effort and must never fail an authenticated request.
+//
+// Callers normalize email (lower-case, trim) before calling. claudeAccountUUID
+// is optional; pass "" when the client isn't Claude Code.
+func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email, claudeAccountUUID string) context.Context {
+	if s.users == nil || installationID == "" || email == "" {
+		return ctx
+	}
+	var accountPtr *string
+	if claudeAccountUUID != "" {
+		accountPtr = &claudeAccountUUID
+	}
+	user, err := s.users.Upsert(ctx, UpsertUserParams{
+		InstallationID:    installationID,
+		Email:             email,
+		ClaudeAccountUUID: accountPtr,
+	})
+	if err != nil {
+		observability.Get().Warn(
+			"Failed to resolve router user",
+			"installation_id", installationID,
+			"err", err,
+		)
+		return ctx
+	}
+	return context.WithValue(ctx, UserIDContextKey{}, user.ID)
 }
 
 // fireMarkUsed runs the last_used_at update off the request path. We use

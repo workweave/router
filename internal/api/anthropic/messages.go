@@ -11,10 +11,12 @@ import (
 	"os"
 	"runtime/debug"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router/cluster"
+	"workweave/router/internal/server/middleware"
 	"workweave/router/internal/translate"
 
 	"github.com/gin-gonic/gin"
@@ -50,7 +52,9 @@ func (t *tracingWriter) Write(b []byte) (int, error) {
 const maxBodyBytes = 10 * 1024 * 1024
 
 // MessagesHandler wires POST /v1/messages to proxy.Service.ProxyMessages.
-func MessagesHandler(svc *proxy.Service) gin.HandlerFunc {
+// authSvc is used to upsert the end-user identity (router.model_router_users)
+// once email is parsed from the body; pass nil to skip user resolution (tests).
+func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)
 
@@ -66,6 +70,7 @@ func MessagesHandler(svc *proxy.Service) gin.HandlerFunc {
 		}
 
 		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header, body)
+		ctx = resolveUser(ctx, authSvc, middleware.InstallationFrom(c))
 		c.Request = c.Request.WithContext(ctx)
 
 		var w http.ResponseWriter = c.Writer
@@ -116,18 +121,38 @@ func MessagesHandler(svc *proxy.Service) gin.HandlerFunc {
 // context for downstream OTEL spans and the decision sidecar log.
 func stashClientIdentity(ctx context.Context, h http.Header, body []byte) context.Context {
 	metaRaw := gjson.GetBytes(body, "metadata.user_id").String()
-	deviceID, accountID, sessionID := proxy.ParseClaudeCodeMetadata(metaRaw)
+	meta := proxy.ParseClaudeCodeMetadata(metaRaw)
+	sessionID := meta.SessionID
 	if sessionID == "" {
 		sessionID = h.Get("X-Claude-Code-Session-Id")
 	}
+	email := proxy.NormalizeEmail(meta.Email)
+	if email == "" {
+		email = proxy.NormalizeEmail(h.Get("X-Weave-User-Email"))
+	}
 	id := proxy.ClientIdentity{
-		DeviceID:  deviceID,
-		AccountID: accountID,
+		DeviceID:  meta.DeviceID,
+		AccountID: meta.AccountID,
 		SessionID: sessionID,
+		Email:     email,
 		UserAgent: h.Get("User-Agent"),
 		ClientApp: h.Get("X-App"),
 	}
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
+}
+
+// resolveUser upserts the router user keyed on (installation, email) and
+// returns a ctx with the user_id stashed. No-op when authSvc, installation,
+// or the email signal on the existing ClientIdentity is missing.
+func resolveUser(ctx context.Context, authSvc *auth.Service, installation *auth.Installation) context.Context {
+	if authSvc == nil || installation == nil {
+		return ctx
+	}
+	id := proxy.ClientIdentityFrom(ctx)
+	if id.Email == "" {
+		return ctx
+	}
+	return authSvc.ResolveAndStashUser(ctx, installation.ID, id.Email, id.AccountID)
 }
 
 func writeAnthropicError(c *gin.Context, status int, errType, message string) {

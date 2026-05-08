@@ -16,6 +16,7 @@ type Repository struct {
 	Installations   auth.InstallationRepository
 	APIKeys         auth.APIKeyRepository
 	ExternalAPIKeys auth.ExternalAPIKeyRepository
+	Users           auth.UserRepository
 }
 
 // NewRepository constructs a Repository. encryptor is used to decrypt external
@@ -25,6 +26,7 @@ func NewRepository(tx sqlc.DBTX, encryptor auth.Encryptor) *Repository {
 		Installations:   &installationRepo{tx: tx},
 		APIKeys:         &apiKeyRepo{tx: tx},
 		ExternalAPIKeys: NewExternalAPIKeyRepo(tx, encryptor),
+		Users:           NewUserRepository(tx),
 	}
 }
 
