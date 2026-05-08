@@ -31,6 +31,7 @@ type Format int
 const (
 	FormatOpenAI Format = iota
 	FormatAnthropic
+	FormatGemini
 )
 
 // EmitOptions parameterizes how the envelope constructs an output body.
@@ -67,6 +68,17 @@ func ParseAnthropic(body []byte) (*RequestEnvelope, error) {
 	return &RequestEnvelope{body: body, format: FormatAnthropic}, nil
 }
 
+// ParseGemini validates body as a JSON object and wraps it in a
+// RequestEnvelope sourced from Gemini's native generateContent shape
+// ({contents, systemInstruction, tools, generationConfig}). The full
+// json.Unmarshal is deferred until a cross-format emit is requested.
+func ParseGemini(body []byte) (*RequestEnvelope, error) {
+	if err := validateJSONObject(body); err != nil {
+		return nil, err
+	}
+	return &RequestEnvelope{body: body, format: FormatGemini}, nil
+}
+
 // validateJSONObject checks that body is valid JSON and specifically an object
 // (rejects arrays, scalars, and null).
 func validateJSONObject(body []byte) error {
@@ -96,7 +108,11 @@ func (e *RequestEnvelope) SourceFormat() Format { return e.format }
 
 // Stream reports whether the request has "stream": true.
 // Accepts JSON booleans and string values ("true"/"false") but rejects
-// numeric coercion (e.g. 1 is not treated as true).
+// numeric coercion (e.g. 1 is not treated as true). For Gemini ingress
+// the streaming choice is encoded in the URL path
+// (:generateContent vs :streamGenerateContent), not the body, so the
+// Gemini handler injects a synthetic top-level "stream": true into the
+// body before parsing — the same field this method reads.
 func (e *RequestEnvelope) Stream() bool {
 	r := gjson.GetBytes(e.body, "stream")
 	if r.Type == gjson.Number {
@@ -117,24 +133,64 @@ func (e *RequestEnvelope) MetadataUserID() string {
 	return gjson.GetBytes(e.body, "metadata.user_id").String()
 }
 
-// SystemText returns the concatenated system-prompt text (Anthropic
-// format only). Empty for OpenAI-format requests, which carry the
-// system prompt as messages[0]. Used by session-pin keying as one of
-// the two stable inputs that don't change across turns of the same
-// session.
+// SystemText returns the concatenated system-prompt text in a
+// format-neutral way. For Anthropic, reads the top-level `system`
+// field. For OpenAI, walks `messages[]` collecting every `system`-role
+// message's text content (OpenAI carries the system prompt as a
+// message rather than a separate field, and may have multiple). Used
+// by session-pin keying and turn-type detection (compaction markers).
 func (e *RequestEnvelope) SystemText() string {
-	if e.format != FormatAnthropic {
+	switch e.format {
+	case FormatAnthropic:
+		return systemTextGJSON(gjson.GetBytes(e.body, "system"))
+	case FormatOpenAI:
+		return openAISystemText(e.body)
+	case FormatGemini:
+		return geminiSystemText(e.body)
+	default:
 		return ""
 	}
-	return systemTextGJSON(gjson.GetBytes(e.body, "system"))
 }
 
-// FirstUserMessageText returns the text of messages[0] when role is
-// "user", honoring both the bare-string and content-array shapes.
-// Format-aware: OpenAI uses a flat list with a top-level "content"
-// field; Anthropic uses content blocks. Returns "" if there is no
+// LastUserMessageInfo summarizes the trailing user-side input on a
+// request. HasText is true when the last user-side input contains any
+// human-authored text; HasToolResult is true when it contains tool
+// results (tool_result blocks for Anthropic, role=="tool" messages for
+// OpenAI). Both flags can be true at once (mixed turn). Text holds the
+// extracted human text (empty when HasText is false). ToolResultCount
+// counts the contributing tool-result blocks/messages.
+type LastUserMessageInfo struct {
+	HasText         bool
+	HasToolResult   bool
+	ToolResultCount int
+	Text            string
+}
+
+// LastUserMessage returns format-neutral information about the last
+// user-side input. Used by turn-type detection to classify tool-result
+// short-circuit turns and by future per-format helpers. Returns the
+// zero value when messages is absent or empty.
+func (e *RequestEnvelope) LastUserMessage() LastUserMessageInfo {
+	switch e.format {
+	case FormatAnthropic:
+		return anthropicLastUserMessage(e.body)
+	case FormatOpenAI:
+		return openAILastUserMessage(e.body)
+	case FormatGemini:
+		return geminiLastUserMessage(e.body)
+	default:
+		return LastUserMessageInfo{}
+	}
+}
+
+// FirstUserMessageText returns the text of the first user-authored
+// message. Format-aware: OpenAI/Anthropic walk messages[0]; Gemini
+// walks contents[0] when role=="user". Returns "" if there is no
 // first user message.
 func (e *RequestEnvelope) FirstUserMessageText() string {
+	if e.format == FormatGemini {
+		return geminiFirstUserMessageText(e.body)
+	}
 	first := gjson.GetBytes(e.body, "messages.0")
 	if !first.Exists() {
 		return ""

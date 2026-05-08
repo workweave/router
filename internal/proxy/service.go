@@ -15,7 +15,6 @@ import (
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/sessionpin"
-	"workweave/router/internal/router/turntype"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -324,8 +323,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
 
-	tt := turntype.Detect(body)
-
 	embedFlag := s.embedLastUserMessage
 	if v, ok := embedLastUserMessageOverride(ctx); ok {
 		embedFlag = v
@@ -340,7 +337,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
 	externalID, _ := ctx.Value(ExternalIDContextKey{}).(string)
-	installationID, _ := ctx.Value(InstallationIDContextKey{}).(string)
+	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 	bypassEval := hasEvalOverrideHeader(r)
 	// Tier-1/2 (session-key-based) pinning stays enabled for eval traffic. The
@@ -354,141 +351,26 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// decision would stick across unrelated instances.
 	bypassLegacySticky := bypassEval
 
-	// §3.4: hard pins for turn types whose optimal model is known a priori.
-	// These bypass all session-pin tiers and the cluster scorer, and must NOT
-	// write a pin upsert (they must not overwrite the session's main-loop model).
-	//   Compaction — always Haiku (short-out-of-long-in cost profile).
-	//   SubAgentDispatch — Haiku when ROUTER_HARD_PIN_EXPLORE is set; gated
-	//     until one week of shadow validation confirms no quality regression.
-	var (
-		decision    router.Decision
-		stickyHit   bool
-		pinTier     = "miss"
-		pinAgeSec   int64
-		sessionKey  [sessionpin.SessionKeyLen]byte
-		pinCacheKey string
-		routeStart  = time.Now()
-	)
-	if tt == turntype.Compaction || (tt == turntype.SubAgentDispatch && s.hardPinExplore) {
-		decision = router.Decision{
-			Provider: s.hardPinProvider,
-			Model:    s.hardPinModel,
-			Reason:   string(tt) + "_hard_pin",
-		}
-		stickyHit = true
-		pinTier = string(tt) + "_hard_pin"
+	// Anthropic clients pack sub-agent identity into metadata.user_id; the
+	// x-weave-subagent-type header is for non-Anthropic ingress, so this
+	// call passes "".
+	routeStart := time.Now()
+	routeRes, routeErr := s.routeWithSession(ctx, env, feats, apiKeyID, installationID, "", bypassLegacySticky, router.Request{
+		RequestedModel:       feats.Model,
+		EstimatedInputTokens: feats.Tokens,
+		HasTools:             feats.HasTools,
+		PromptText:           promptText,
+		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
+	})
+	if routeErr != nil {
+		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "estimated_input_tokens", feats.Tokens)
+		return routeErr
 	}
-
-	// Tiered routing-decision lookup (see docs/plans/SESSION_PIN.md §5).
-	//   Tier 1 — pinCache (in-proc, 30s):   absorbs same-instance burst.
-	//   Tier 2 — pinStore (Postgres, 1h):   survives Cloud Run restarts.
-	//   Tier 3 — stickyDecisions (legacy):  apiKeyID-keyed LRU; kept
-	//                                        during rollout, removed in
-	//                                        a follow-up.
-	// Tier 3 is only consulted on a tier-2 *miss*, never on a tier-2
-	// *error* — papering over store errors with the legacy cache would
-	// mask the migrate-to-Memorystore trigger criteria.
-	// pinEligible is false for hard-pinned turns (stickyHit already set above),
-	// which also suppresses the async pin upsert for those turns.
-	pinEligible := s.pinStore != nil && !stickyHit
-	if pinEligible {
-		sessionKey = DeriveSessionKey(env, apiKeyID)
-		pinCacheKey = sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
-
-		if s.pinCache != nil {
-			if pin, ok := s.pinCache.Get(pinCacheKey); ok {
-				decision = pinDecision(pin)
-				stickyHit = true
-				pinTier = "in_proc"
-				pinAgeSec = pinAge(pin)
-			}
-		}
-		if !stickyHit {
-			pin, found, err := s.pinStore.Get(ctx, sessionKey, sessionpin.DefaultRole)
-			if err != nil {
-				log.Error("session pin store unavailable; falling through to cluster scorer", "err", err)
-			} else if found && pin.PinnedUntil.After(time.Now()) {
-				decision = pinDecision(pin)
-				stickyHit = true
-				pinTier = "postgres"
-				pinAgeSec = pinAge(pin)
-				if s.pinCache != nil {
-					s.pinCache.Add(pinCacheKey, pin)
-				}
-			}
-		}
-	}
-
-	// Tier 3: legacy apiKeyID LRU. Consulted only on tier-2 miss (or
-	// when pinStore is nil).
-	if !stickyHit && s.stickyDecisions != nil && apiKeyID != "" && !bypassLegacySticky {
-		if d, ok := s.stickyDecisions.Get(apiKeyID); ok {
-			decision = d
-			stickyHit = true
-			pinTier = "legacy_apikey"
-		}
-	}
-
-	if !stickyHit {
-		var err error
-		decision, err = s.router.Route(ctx, router.Request{
-			RequestedModel:       feats.Model,
-			EstimatedInputTokens: feats.Tokens,
-			HasTools:             feats.HasTools,
-			PromptText:           promptText,
-			EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
-		})
-		if err != nil {
-			log.Error("Routing failed", "err", err, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "estimated_input_tokens", feats.Tokens)
-			return err
-		}
-		if s.stickyDecisions != nil && apiKeyID != "" && !bypassLegacySticky {
-			s.stickyDecisions.Add(apiKeyID, decision)
-		}
-	}
-
-	// §3.3: annotate pin tier when a tool-result turn short-circuits to an
-	// existing session pin, so the routing.session_pin_tier OTel attribute
-	// reflects the bypass in dashboards.
-	if stickyHit && tt == turntype.ToolResult {
-		pinTier += "_tool_result_sc"
-	}
-
-	// Async upsert on every routed request — refreshes the sliding TTL
-	// for sticky hits, records new pins for fresh routes. Uses
-	// context.Background() per repo convention so a request cancel
-	// never drops the pin write (would force re-route on the next turn
-	// and break cache continuity).
-	if pinEligible && installationID != "" {
-		instUUID, parseErr := uuid.Parse(installationID)
-		if parseErr == nil {
-			pin := sessionpin.Pin{
-				SessionKey:     sessionKey,
-				Role:           sessionpin.DefaultRole,
-				InstallationID: instUUID,
-				Provider:       decision.Provider,
-				Model:          decision.Model,
-				Reason:         decision.Reason,
-				TurnCount:      1, // ON CONFLICT increments; only meaningful on first insert
-				PinnedUntil:    time.Now().Add(pinSessionTTL),
-			}
-			select {
-			case s.pinWriteSem <- struct{}{}:
-				go func(p sessionpin.Pin) {
-					defer func() { <-s.pinWriteSem }()
-					if err := s.pinStore.Upsert(context.Background(), p); err != nil {
-						observability.Get().Error("session pin upsert failed", "err", err)
-					}
-				}(pin)
-			default:
-				observability.Get().Debug("session pin upsert dropped: semaphore full")
-			}
-			if s.pinCache != nil {
-				s.pinCache.Add(pinCacheKey, pin)
-			}
-		}
-	}
-
+	decision := routeRes.Decision
+	tt := routeRes.TurnType
+	stickyHit := routeRes.StickyHit
+	pinTier := routeRes.PinTier
+	pinAgeSec := routeRes.PinAgeSec
 	routeMs := time.Since(routeStart).Milliseconds()
 
 	// Semantic-cache lookup. Eligible when the cache is configured at
@@ -705,9 +587,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		})
 	}
 
-	if installationID != "" {
+	if installationID != uuid.Nil {
 		s.fireTelemetry(InsertTelemetryParams{
-			InstallationID:         installationID,
+			InstallationID:         installationID.String(),
 			RequestID:              requestID,
 			SpanType:               "router.upstream",
 			TraceID:                requestID,
@@ -888,7 +770,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	buf := otel.NewBuffer(s.emitter)
 	ctx = buf.WithContext(ctx)
 
+	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
 	externalID, _ := ctx.Value(ExternalIDContextKey{}).(string)
+	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 
 	env, parseErr := translate.ParseOpenAI(body)
@@ -898,8 +782,15 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 	feats := env.RoutingFeatures(false)
 
+	bypassEval := hasEvalOverrideHeader(r)
+	bypassLegacySticky := bypassEval
+
+	// OpenAI clients can't pack subagent identity into metadata.user_id;
+	// they signal it via the x-weave-subagent-type header instead.
+	subAgentHint := r.Header.Get("x-weave-subagent-type")
+
 	routeStart := time.Now()
-	decision, err := s.router.Route(ctx, router.Request{
+	routeRes, err := s.routeWithSession(ctx, env, feats, apiKeyID, installationID, subAgentHint, bypassLegacySticky, router.Request{
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
@@ -911,12 +802,16 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		log.Error("Routing failed for OpenAI request", "err", err, "route_ms", routeMs, "requested_model", feats.Model, "estimated_input_tokens", feats.Tokens)
 		return err
 	}
+	decision := routeRes.Decision
+	tt := routeRes.TurnType
+	stickyHit := routeRes.StickyHit
+	pinTier := routeRes.PinTier
+	pinAgeSec := routeRes.PinAgeSec
 
 	// Semantic-cache lookup — same eligibility rules as ProxyMessages
 	// (see that handler for rationale). Inbound format is FormatOpenAI
 	// so an Anthropic-stored response is never replayed here. Eval-
 	// harness traffic bypasses the cache; see ProxyMessages.
-	bypassEval := hasEvalOverrideHeader(r)
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
@@ -956,7 +851,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(17).
+		Attrs: otel.NewAttrBuilder(22).
 			String("request_id", requestID).
 			String("external_id", externalID).
 			String("client.device_id", clientID.DeviceID).
@@ -968,6 +863,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			String("decision.model", decision.Model).
 			String("decision.provider", decision.Provider).
 			String("decision.reason", decision.Reason).
+			Bool("routing.sticky_hit", stickyHit).
+			Bool("routing.session_pin_hit", pinTier == "in_proc" || pinTier == "postgres").
+			String("routing.session_pin_tier", pinTier).
+			Int64("routing.session_pin_age_s", pinAgeSec).
+			String("routing.turn_type", string(tt)).
 			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
 			Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
@@ -1107,7 +1007,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			DecisionProvider:       decision.Provider,
 			DecisionReason:         decision.Reason,
 			EstimatedInputTokens:   int32(feats.Tokens),
-			StickyHit:              false,
+			StickyHit:              stickyHit,
 			InputTokens:            int32(in),
 			OutputTokens:           int32(out),
 			RequestedInputCostUSD:  float64(in) / 1_000_000 * reqPricing.InputUSDPer1M,
@@ -1122,6 +1022,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "cross_format", crossFormat, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
