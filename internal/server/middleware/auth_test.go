@@ -83,7 +83,7 @@ func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
 		hash: {apiKey: apiKey, installation: installation},
 	}}
-	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, auth.NoOpAPIKeyCache{}, func() time.Time {
+	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, func() time.Time {
 		return time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC)
 	})
 
@@ -113,7 +113,7 @@ func TestWithAuthKeepsLegacyBearerFallback(t *testing.T) {
 	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
 		hash: {apiKey: apiKey, installation: installation},
 	}}
-	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, auth.NoOpAPIKeyCache{}, func() time.Time { return time.Now() })
+	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, func() time.Time { return time.Now() })
 
 	engine := gin.New()
 	engine.Use(middleware.WithAuth(svc))

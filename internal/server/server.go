@@ -103,7 +103,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithClusterVersionOverride(),
 	)
 	messagesGroup := engine.Group("", messagesAuth...)
-	messagesGroup.POST("/v1/messages", anthropicapi.MessagesHandler(proxySvc))
+	messagesGroup.POST("/v1/messages", anthropicapi.MessagesHandler(proxySvc, authSvc))
 
 	chatCompletionAuth := []gin.HandlerFunc{middleware.WithTimingEntry(), middleware.WithTimeout(chatCompletionTimeout)}
 	if !devModeNoAuth {
@@ -114,12 +114,12 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithClusterVersionOverride(),
 	)
 	chatCompletionGroup := engine.Group("", chatCompletionAuth...)
-	chatCompletionGroup.POST("/v1/chat/completions", openaiapi.ChatCompletionHandler(proxySvc))
+	chatCompletionGroup.POST("/v1/chat/completions", openaiapi.ChatCompletionHandler(proxySvc, authSvc))
 	// Native Gemini ingress shares the chat-completion timeout and
 	// middleware budget. The action suffix (:generateContent or
 	// :streamGenerateContent) lives inside the modelAction parameter
 	// because Gin treats `:` outside the leading position as a literal.
-	chatCompletionGroup.POST("/v1beta/models/:modelAction", geminiapi.GenerateContentHandler(proxySvc))
+	chatCompletionGroup.POST("/v1beta/models/:modelAction", geminiapi.GenerateContentHandler(proxySvc, authSvc))
 
 	passthroughAuth := []gin.HandlerFunc{middleware.WithTimeout(passthroughTimeout)}
 	if !devModeNoAuth {
