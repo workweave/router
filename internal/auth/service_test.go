@@ -125,6 +125,7 @@ func makeService(t *testing.T, rows ...fakeKeyRow) (*auth.Service, *fakeAPIKeyRe
 		nil,
 		nil,
 		auth.NoOpAPIKeyCache{},
+		nil,
 		frozenClock(),
 	)
 	return svc, apiKeys
@@ -294,6 +295,7 @@ func makeServiceWithCacheAndCounter(t *testing.T, cache auth.APIKeyCache, rows .
 		nil,
 		nil,
 		cache,
+		nil,
 		frozenClock(),
 	)
 	return svc, counter
@@ -421,6 +423,7 @@ func makeServiceWithExternalKeys(t *testing.T, externalRepo auth.ExternalAPIKeyR
 		externalRepo,
 		nil,
 		auth.NoOpAPIKeyCache{},
+		nil,
 		frozenClock(),
 	)
 }
@@ -517,6 +520,7 @@ func TestService_VerifyAPIKey_ExternalKeysAreCached(t *testing.T) {
 		fakeExternal,
 		nil,
 		cache,
+		nil,
 		frozenClock(),
 	)
 

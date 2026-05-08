@@ -19,6 +19,7 @@ type Service struct {
 	externalKeys  ExternalAPIKeyRepository
 	users         UserRepository
 	cache         APIKeyCache
+	userCache     UserCache
 	now           Clock
 }
 
@@ -28,14 +29,19 @@ func NewService(
 	externalKeys ExternalAPIKeyRepository,
 	users UserRepository,
 	cache APIKeyCache,
+	userCache UserCache,
 	now Clock,
 ) *Service {
+	if userCache == nil {
+		userCache = NoOpUserCache{}
+	}
 	return &Service{
 		installations: installations,
 		apiKeys:       apiKeys,
 		externalKeys:  externalKeys,
 		users:         users,
 		cache:         cache,
+		userCache:     userCache,
 		now:           now,
 	}
 }
@@ -98,11 +104,18 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 // original ctx unchanged when email is empty or the upsert fails — user
 // resolution is best-effort and must never fail an authenticated request.
 //
+// Reads through s.userCache: hits skip the DB upsert entirely. The trade-off
+// is that last_seen_at lags by up to the cache TTL, which is fine for a
+// dashboard timestamp.
+//
 // Callers normalize email (lower-case, trim) before calling. claudeAccountUUID
 // is optional; pass "" when the client isn't Claude Code.
 func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email, claudeAccountUUID string) context.Context {
 	if s.users == nil || installationID == "" || email == "" {
 		return ctx
+	}
+	if cached, ok := s.userCache.Get(installationID, email); ok {
+		return context.WithValue(ctx, UserIDContextKey{}, cached)
 	}
 	var accountPtr *string
 	if claudeAccountUUID != "" {
@@ -121,6 +134,7 @@ func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email
 		)
 		return ctx
 	}
+	s.userCache.Set(installationID, email, user.ID)
 	return context.WithValue(ctx, UserIDContextKey{}, user.ID)
 }
 
