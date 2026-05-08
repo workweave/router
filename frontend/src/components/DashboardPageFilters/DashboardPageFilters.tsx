@@ -95,7 +95,7 @@ function DateRangePill({ result }: { result: UseDashboardFiltersResult }) {
                       }}
                     >
                       <div className="flex items-center gap-2">
-                        <div className="flex h-4 w-4 items-center justify-center">
+                        <div className="flex size-4 items-center justify-center">
                           {currentId === opt.id && <Check className="size-3.5" />}
                         </div>
                         {opt.label}
@@ -153,7 +153,7 @@ function GranularityPill({ result }: { result: UseDashboardFiltersResult }) {
                       }}
                     >
                       <div className="flex items-center gap-2">
-                        <div className="flex h-4 w-4 items-center justify-center">
+                        <div className="flex size-4 items-center justify-center">
                           {current === g && <Check className="size-3.5" />}
                         </div>
                         {GRANULARITY_LABELS[g]}

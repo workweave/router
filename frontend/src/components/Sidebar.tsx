@@ -72,7 +72,7 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="relative z-10 flex w-full items-center px-2 py-2 md:p-2">
+      <div className="relative z-10 flex w-full items-center p-2">
         <Popover>
           <Tooltip content="Menu" side="right" interactiveChild>
             <Popover.Trigger>

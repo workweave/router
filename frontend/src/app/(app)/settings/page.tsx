@@ -157,7 +157,7 @@ function RouterKeysPanel() {
       {newToken != null && (
         <div className="rounded-lg border border-success/30 bg-success/5 p-4">
           <Text className="mb-2 text-xs font-medium text-success">
-            Key created — copy it now, it won&apos;t be shown again.
+            Key created. Copy it now, it won&apos;t be shown again.
           </Text>
           <div className="flex items-center gap-2">
             <code className="flex-1 rounded bg-muted px-3 py-1.5 font-mono text-2xs text-foreground">
@@ -422,10 +422,13 @@ function ProviderPicker({
   const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-medium text-foreground">Provider</label>
+      <label htmlFor="provider-picker" className="text-xs font-medium text-foreground">
+        Provider
+      </label>
       <Popover open={open} onOpenChange={setOpen}>
         <Popover.Trigger>
           <Button
+            id="provider-picker"
             type="button"
             appearance={Appearance.Outlined}
             className="h-9 w-full justify-between border-input px-3 text-sm font-normal"
