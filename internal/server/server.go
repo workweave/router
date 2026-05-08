@@ -75,7 +75,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 
 		// Management API — all routes require auth (cookie or rk_ bearer) and
 		// use the admin timeout.
-		mgmt := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAuth(authSvc))
+		mgmt := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAdminOrAuth(authSvc))
 		mgmt.GET("/metrics/summary", admin.MetricsSummaryHandler(proxySvc))
 		mgmt.GET("/metrics/timeseries", admin.MetricsTimeseriesHandler(proxySvc))
 		mgmt.GET("/metrics/details", admin.MetricsDetailsHandler(proxySvc))

@@ -23,20 +23,42 @@ const (
 // Authorization / x-api-key for the upstream provider.
 const RouterKeyHeader = "X-Weave-Router-Key"
 
-// WithAuth validates the inbound request via either a signed admin session
-// cookie or a bearer rk_ token. On failure, short-circuits with a 401.
+// WithAuth validates the inbound request via a bearer rk_ token only. Used
+// on data-plane routes (`/v1/*`) where the trust boundary is "valid router
+// API key", not "logged-in admin browser." On failure, short-circuits 401.
 //
-// Cookie sessions are admin-scoped (no installation context). rk_ keys are
-// installation-scoped and surface their installation/api-key/external-keys
-// onto the request context the way they always have.
+// rk_ keys are installation-scoped and surface their
+// installation/api-key/external-keys onto the request context the way they
+// always have.
 func WithAuth(svc *auth.Service) gin.HandlerFunc {
+	return withAPIKey(svc)
+}
+
+// WithAdminOrAuth accepts either a signed admin session cookie OR a bearer
+// rk_ token. Used on control-plane routes (`/admin/v1/*`, `/health`,
+// `/validate`) so the dashboard can authenticate via the cookie set at
+// `/admin/v1/auth/login`, while service-to-service callers can still pass
+// `rk_...`.
+//
+// **Do not use on `/v1/*` data-plane routes** — that would let a dashboard
+// cookie call provider proxy endpoints, blurring control-plane and
+// data-plane trust boundaries.
+func WithAdminOrAuth(svc *auth.Service) gin.HandlerFunc {
+	apiKeyMW := withAPIKey(svc)
 	return func(c *gin.Context) {
 		if principal := tryAdminCookie(c, svc); principal != nil {
 			c.Set(ctxKeyAdminPrincipal, principal)
 			c.Next()
 			return
 		}
+		apiKeyMW(c)
+	}
+}
 
+// withAPIKey is the bearer-only auth path shared by WithAuth and the
+// fall-through branch of WithAdminOrAuth.
+func withAPIKey(svc *auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		token := extractToken(c)
 		installation, apiKey, externalKeys, err := svc.VerifyAPIKey(c.Request.Context(), token)
 		if err != nil {
