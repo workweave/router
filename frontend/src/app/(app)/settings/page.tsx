@@ -15,7 +15,7 @@ import {
   type ExternalKey,
   type RouterConfig,
 } from "@/lib/api";
-import { ChevronDown, Copy, KeyRound, Plug, Settings as SettingsIcon, Trash2 } from "lucide-react";
+import { ChevronDown, Copy, KeyRound, Plug, RotateCw, Settings as SettingsIcon, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export default function SettingsPage() {
@@ -97,26 +97,39 @@ export default function SettingsPage() {
 
 function RouterKeysPanel() {
   const [keys, setKeys] = useState<APIKey[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [rotating, setRotating] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // hasKey is only meaningful once the list has loaded. Without the loaded
+  // gate, the "Issue a new key" form would flash on every page load even
+  // when an active key exists, implying multi-key support that the
+  // installation_id-scoped partial unique index now forbids.
+  const hasKey = keys.length > 0;
+
   function load() {
     api.keys
       .list()
-      .then(r => setKeys(r.keys ?? []))
-      .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "Failed to load keys"),
-      );
+      .then(r => {
+        setKeys(r.keys ?? []);
+        setLoaded(true);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Failed to load keys");
+        setLoaded(true);
+      });
   }
 
   useEffect(load, []);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    if (hasKey) return; // Belt-and-suspenders against a stale-render submit.
     setCreating(true);
     try {
       const res = await api.keys.issue(name.trim() || undefined);
@@ -130,7 +143,29 @@ function RouterKeysPanel() {
     }
   }
 
+  async function handleRotate() {
+    if (!hasKey) return;
+    const confirmed = window.confirm(
+      "Rotate this API key?\n\nThe current token will stop working immediately. A new token will be shown once.",
+    );
+    if (!confirmed) return;
+    setRotating(true);
+    try {
+      const res = await api.keys.rotate();
+      setNewToken(res.token);
+      load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to rotate key");
+    } finally {
+      setRotating(false);
+    }
+  }
+
   async function handleDelete(id: string) {
+    const confirmed = window.confirm(
+      "Revoke this API key?\n\nThe token will stop working immediately. You will need to issue a new key before clients can authenticate again.",
+    );
+    if (!confirmed) return;
     setDeleting(id);
     try {
       await api.keys.delete(id);
@@ -177,52 +212,54 @@ function RouterKeysPanel() {
         </div>
       )}
 
-      <Card>
-        <Card.Header>
-          <Card.Title variant="h4">Issue a new key</Card.Title>
-        </Card.Header>
-        <Card.Content>
-          <form onSubmit={handleCreate} className="flex items-end gap-3" autoComplete="off">
-            <div className="flex-1">
-              <Input
-                label="Name (optional)"
-                name="router-key-label"
-                autoComplete="off"
-                data-1p-ignore
-                data-lpignore="true"
-                data-form-type="other"
-                placeholder="My API key"
-                value={name}
-                onChange={e => setName(e.target.value)}
-              />
-            </div>
-            <Button
-              type="submit"
-              appearance={Appearance.Filled}
-              intent={Intent.Primary}
-              className="!border-brand !bg-brand !text-white hover:!bg-brand/90"
-              disabled={creating}
-            >
-              {creating ? "Creating…" : "Create key"}
-            </Button>
-          </form>
-        </Card.Content>
-      </Card>
+      {loaded && !hasKey && (
+        <Card>
+          <Card.Header>
+            <Card.Title variant="h4">Issue a new key</Card.Title>
+          </Card.Header>
+          <Card.Content>
+            <form onSubmit={handleCreate} className="flex items-end gap-3" autoComplete="off">
+              <div className="flex-1">
+                <Input
+                  label="Name (optional)"
+                  name="router-key-label"
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-form-type="other"
+                  placeholder="My API key"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                />
+              </div>
+              <Button
+                type="submit"
+                appearance={Appearance.Filled}
+                intent={Intent.Primary}
+                className="!border-brand !bg-brand !text-white hover:!bg-brand/90"
+                disabled={creating}
+              >
+                {creating ? "Creating…" : "Create key"}
+              </Button>
+            </form>
+          </Card.Content>
+        </Card>
+      )}
 
-      {keys.length > 0 ? (
+      {hasKey ? (
         <Card className="p-0">
           <Card.Header className="border-b border-border px-5 py-3">
-            <Card.Title variant="h4">Active router keys</Card.Title>
+            <Card.Title variant="h4">Active router key</Card.Title>
           </Card.Header>
           <Card.Content>
             <ul className="divide-y divide-border">
               {keys.map(k => (
-                <li key={k.id} className="flex items-center justify-between px-5 py-3">
-                  <div>
+                <li key={k.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                  <div className="min-w-0 flex-1">
                     <div className="text-xs font-medium text-foreground">
                       {k.name ?? "Unnamed key"}
                     </div>
-                    <p className="mt-0.5 font-mono text-2xs text-muted-foreground">
+                    <p className="mt-0.5 truncate font-mono text-2xs text-muted-foreground">
                       {k.key_prefix}…{k.key_suffix}
                       <span className="ml-2 font-sans">
                         · created {formatDate(k.created_at)}
@@ -230,23 +267,35 @@ function RouterKeysPanel() {
                       </span>
                     </p>
                   </div>
-                  <Button
-                    appearance={Appearance.Hollow}
-                    intent={Intent.Danger}
-                    size="icon"
-                    onClick={() => handleDelete(k.id)}
-                    disabled={deleting === k.id}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      appearance={Appearance.Outlined}
+                      size="sm"
+                      onClick={handleRotate}
+                      disabled={rotating || deleting != null}
+                    >
+                      <RotateCw className="size-3.5" />
+                      {rotating ? "Rotating…" : "Rotate"}
+                    </Button>
+                    <Button
+                      appearance={Appearance.Hollow}
+                      intent={Intent.Danger}
+                      size="icon"
+                      onClick={() => handleDelete(k.id)}
+                      disabled={deleting === k.id || rotating}
+                      title="Revoke key"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
                 </li>
               ))}
             </ul>
           </Card.Content>
         </Card>
-      ) : (
+      ) : loaded ? (
         <EmptyHint>No router keys yet.</EmptyHint>
-      )}
+      ) : null}
     </>
   );
 }

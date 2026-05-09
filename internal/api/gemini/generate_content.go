@@ -12,10 +12,12 @@ import (
 	"net/http"
 	"strings"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router/cluster"
+	"workweave/router/internal/server/middleware"
 	"workweave/router/internal/translate"
 
 	"github.com/gin-gonic/gin"
@@ -38,7 +40,7 @@ const (
 // The handler parses out the model name and the streaming choice,
 // injects them as synthetic body fields ("model", "stream") so the
 // envelope's format-neutral accessors work, and forwards.
-func GenerateContentHandler(svc *proxy.Service) gin.HandlerFunc {
+func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)
 
@@ -69,6 +71,7 @@ func GenerateContentHandler(svc *proxy.Service) gin.HandlerFunc {
 		}
 
 		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header)
+		ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		c.Request = c.Request.WithContext(ctx)
 
 		if err := svc.ProxyGeminiGenerateContent(c.Request.Context(), body, c.Writer, c.Request); err != nil {
@@ -160,6 +163,7 @@ func injectModelAndStream(body []byte, model string, stream bool) ([]byte, error
 func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
 	id := proxy.ClientIdentity{
 		SessionID: h.Get("X-Claude-Code-Session-Id"),
+		Email:     proxy.NormalizeEmail(h.Get("X-Weave-User-Email")),
 		UserAgent: h.Get("User-Agent"),
 		ClientApp: h.Get("X-App"),
 	}

@@ -84,6 +84,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// One active key per installation (migration 0007). Soft-delete any
+	// existing key so re-running `make seed` rotates the local-dev token
+	// instead of erroring on the partial unique index.
+	if _, err := tx.Exec(ctx, `
+		UPDATE model_router_api_keys
+		SET deleted_at = CURRENT_TIMESTAMP
+		WHERE installation_id = @installation_id::uuid
+		  AND deleted_at IS NULL`,
+		pgx.NamedArgs{"installation_id": installationID},
+	); err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot soft-delete existing api keys: %v\n", err)
+		os.Exit(1)
+	}
+
 	var apiKeyID string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO model_router_api_keys

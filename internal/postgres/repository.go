@@ -4,18 +4,29 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/sqlc"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// activeKeyUniqueIndex matches the partial unique index added in
+// migration 0007 (one active key per installation).
+const activeKeyUniqueIndex = "model_router_api_keys_installation_active_unique"
+
+// uniqueViolation is the SQLSTATE 23505 returned by Postgres when a
+// unique constraint or partial unique index is violated.
+const uniqueViolation = "23505"
 
 // Repository aggregates all repositories backed by the same DBTX.
 type Repository struct {
 	Installations   auth.InstallationRepository
 	APIKeys         auth.APIKeyRepository
 	ExternalAPIKeys auth.ExternalAPIKeyRepository
+	Users           auth.UserRepository
 	Telemetry       *TelemetryRepo
 }
 
@@ -26,6 +37,7 @@ func NewRepository(tx sqlc.DBTX, encryptor auth.Encryptor) *Repository {
 		Installations:   &installationRepo{tx: tx},
 		APIKeys:         &apiKeyRepo{tx: tx},
 		ExternalAPIKeys: NewExternalAPIKeyRepo(tx, encryptor),
+		Users:           NewUserRepository(tx),
 		Telemetry:       NewTelemetryRepo(tx),
 	}
 }
@@ -108,6 +120,10 @@ func (r *apiKeyRepo) Create(ctx context.Context, params auth.CreateAPIKeyParams)
 		CreatedBy:      params.CreatedBy,
 	})
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == activeKeyUniqueIndex {
+			return nil, auth.ErrActiveKeyExists
+		}
 		return nil, err
 	}
 	return toAuthAPIKey(row), nil

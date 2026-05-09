@@ -165,7 +165,8 @@ func main() {
 	logger.Info("Routing via cluster scorer", "embedder", "jina-v2-base-code-int8")
 
 	cache := auth.NewLRUAPIKeyCache(10000, 50000, 5*time.Minute, 60*time.Second)
-	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, cache, time.Now).WithEncryptor(encryptor)
+	userCache := auth.NewLRUUserCache(50000, 10*time.Minute)
+	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, repo.Users, cache, userCache, time.Now).WithEncryptor(encryptor)
 
 	// Admin dashboard password. Required outside dev mode so a self-hoster
 	// who simply runs the binary cannot end up with an unauthenticated

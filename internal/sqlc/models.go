@@ -85,6 +85,19 @@ type RouterModelRouterRequestTelemetry struct {
 	CreatedAt              pgtype.Timestamptz
 }
 
+// End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.
+type RouterModelRouterUser struct {
+	ID             uuid.UUID
+	InstallationID uuid.UUID
+	// Lowercased, trimmed user email (typically git user.email). Application-normalized; column is plain TEXT.
+	Email string
+	// Optional Claude Code account_uuid carried in metadata.user_id; informational only.
+	ClaudeAccountUUID pgtype.UUID
+	FirstSeenAt       pgtype.Timestamp
+	LastSeenAt        pgtype.Timestamp
+	DeletedAt         pgtype.Timestamp
+}
+
 // Session-sticky routing pins; sliding 1h TTL matching Anthropic prompt cache
 type RouterSessionPin struct {
 	// 16-byte digest derived from api_key_id + (metadata.user_id | system+first-user hashes)

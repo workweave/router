@@ -20,7 +20,9 @@ type Service struct {
 	installations InstallationRepository
 	apiKeys       APIKeyRepository
 	externalKeys  ExternalAPIKeyRepository
+	users         UserRepository
 	cache         APIKeyCache
+	userCache     UserCache
 	now           Clock
 	encryptor     Encryptor
 
@@ -43,14 +45,21 @@ func NewService(
 	installations InstallationRepository,
 	apiKeys APIKeyRepository,
 	externalKeys ExternalAPIKeyRepository,
+	users UserRepository,
 	cache APIKeyCache,
+	userCache UserCache,
 	now Clock,
 ) *Service {
+	if userCache == nil {
+		userCache = NoOpUserCache{}
+	}
 	return &Service{
 		installations: installations,
 		apiKeys:       apiKeys,
 		externalKeys:  externalKeys,
+		users:         users,
 		cache:         cache,
+		userCache:     userCache,
 		now:           now,
 		encryptor:     NoOpEncryptor{},
 	}
@@ -86,6 +95,33 @@ func (s *Service) IssueAPIKey(ctx context.Context, installationID string, name *
 // ListAPIKeys returns all active API keys for an installation.
 func (s *Service) ListAPIKeys(ctx context.Context, installationID string) ([]*APIKey, error) {
 	return s.apiKeys.ListForInstallation(ctx, installationID)
+}
+
+// RotateAPIKey soft-deletes the installation's active key (if any) and
+// issues a new one. Carries forward the previous key's name so the admin
+// dashboard label survives the rotation.
+//
+// The two writes are not wrapped in a tx; the brief "no active key" window
+// between them is acceptable because (a) the partial unique index on
+// (installation_id) WHERE deleted_at IS NULL means the new insert can't
+// collide, and (b) rotation is an admin-driven action whose entire purpose
+// is to invalidate the old token, so a concurrent auth check failing
+// against the old token is the user-visible expectation.
+func (s *Service) RotateAPIKey(ctx context.Context, installationID string, createdBy *string) (*APIKey, string, error) {
+	existing, err := s.apiKeys.ListForInstallation(ctx, installationID)
+	if err != nil {
+		return nil, "", err
+	}
+	var name *string
+	for _, k := range existing {
+		if k.Name != nil && name == nil {
+			name = k.Name
+		}
+		if err := s.apiKeys.SoftDelete(ctx, k.ID); err != nil {
+			return nil, "", err
+		}
+	}
+	return s.IssueAPIKey(ctx, installationID, name, createdBy)
 }
 
 // DeleteAPIKey soft-deletes an API key. The LRU cache will TTL-expire the
@@ -189,6 +225,45 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 	s.cache.Set(keyHash, CachedKey{APIKey: apiKey, Installation: installation, ExternalKeys: externalKeys})
 	s.fireMarkUsed(apiKey.ID)
 	return installation, apiKey, externalKeys, nil
+}
+
+// ResolveAndStashUser upserts a router user keyed on (installationID, email)
+// and stashes the resolved user ID on ctx via UserIDContextKey. Returns the
+// original ctx unchanged when email is empty or the upsert fails — user
+// resolution is best-effort and must never fail an authenticated request.
+//
+// Reads through s.userCache: hits skip the DB upsert entirely. The trade-off
+// is that last_seen_at lags by up to the cache TTL, which is fine for a
+// dashboard timestamp.
+//
+// Callers normalize email (lower-case, trim) before calling. claudeAccountUUID
+// is optional; pass "" when the client isn't Claude Code.
+func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email, claudeAccountUUID string) context.Context {
+	if s.users == nil || installationID == "" || email == "" {
+		return ctx
+	}
+	if cached, ok := s.userCache.Get(installationID, email); ok {
+		return context.WithValue(ctx, UserIDContextKey{}, cached)
+	}
+	var accountPtr *string
+	if claudeAccountUUID != "" {
+		accountPtr = &claudeAccountUUID
+	}
+	user, err := s.users.Upsert(ctx, UpsertUserParams{
+		InstallationID:    installationID,
+		Email:             email,
+		ClaudeAccountUUID: accountPtr,
+	})
+	if err != nil {
+		observability.Get().Warn(
+			"Failed to resolve router user",
+			"installation_id", installationID,
+			"err", err,
+		)
+		return ctx
+	}
+	s.userCache.Set(installationID, email, user.ID)
+	return context.WithValue(ctx, UserIDContextKey{}, user.ID)
 }
 
 // fireMarkUsed runs the last_used_at update off the request path. We use
