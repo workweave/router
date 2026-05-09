@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"time"
 
 	"workweave/router/internal/observability"
+
+	"github.com/hashicorp/golang-lru/v2/expirable"
 )
 
 type Clock func() time.Time
@@ -26,6 +29,14 @@ type Service struct {
 	// session cookies. Empty when admin login is disabled.
 	adminPassword   string
 	adminSessionKey []byte
+
+	// adminLoginFailures throttles per-IP brute-force attempts on
+	// VerifyAdminPassword. The map is created lazily inside
+	// WithAdminPassword (rate limiting is a property of the admin login
+	// surface, so constructing it before that surface is enabled is
+	// pointless). adminLoginMu guards lazy init.
+	adminLoginFailures *expirable.LRU[string, int]
+	adminLoginMu       sync.Mutex
 }
 
 func NewService(

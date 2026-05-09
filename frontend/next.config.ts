@@ -35,8 +35,11 @@ const nextConfig: NextConfig = {
         },
       }
     : {
+        // Static export → frontend/out/ (Next.js default). The Dockerfile
+        // copies that into the Go server's assets/ui at the next stage.
+        // Keep distDir at its default (`.next`) so we don't write outside
+        // the project directory, which newer Next.js versions reject.
         output: "export",
-        distDir: "../assets/ui",
       }),
   basePath: "/ui",
   devIndicators: false,

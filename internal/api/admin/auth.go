@@ -3,6 +3,7 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"os"
 	"time"
 
 	"workweave/router/internal/auth"
@@ -43,8 +44,16 @@ func LoginHandler(authSvc *auth.Service) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_password"})
 			return
 		}
-		if err := authSvc.VerifyAdminPassword(req.Password); err != nil {
-			observability.FromGin(c).Info("Admin login rejected: wrong password")
+		if err := authSvc.VerifyAdminPasswordFromIP(c.ClientIP(), req.Password); err != nil {
+			if errors.Is(err, auth.ErrAdminLoginRateLimited) {
+				observability.FromGin(c).Info("Admin login rejected: rate limited", "remote_ip", c.ClientIP())
+				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+					"error": "too_many_attempts",
+					"hint":  "wait a few minutes before trying again",
+				})
+				return
+			}
+			observability.FromGin(c).Info("Admin login rejected: wrong password", "remote_ip", c.ClientIP())
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_credentials"})
 			return
 		}
@@ -96,31 +105,26 @@ func MeHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// setAdminSessionCookie writes the session cookie. Secure is set when the
-// request arrived over TLS so local-dev http://localhost still works.
+// cookieSecure controls whether admin session cookies are minted with the
+// Secure flag. Default true (production-safe) so a self-hoster can never
+// accidentally serve plaintext cookies. Operators running behind a
+// non-HTTPS reverse proxy in dev can set ROUTER_COOKIE_INSECURE=true to
+// disable. We deliberately do not derive this from per-request headers
+// like X-Forwarded-Proto: that header is attacker-controlled when the
+// router is reached directly, and a wrong value silently downgrades the
+// cookie's transport guarantee on a single bad request.
+var cookieSecure = os.Getenv("ROUTER_COOKIE_INSECURE") != "true"
+
 func setAdminSessionCookie(c *gin.Context, token string, expiresAt time.Time) {
 	maxAge := int(time.Until(expiresAt).Seconds())
 	if maxAge < 0 {
 		maxAge = 0
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(auth.AdminSessionCookieName, token, maxAge, "/", "", isHTTPS(c), true)
+	c.SetCookie(auth.AdminSessionCookieName, token, maxAge, "/", "", cookieSecure, true)
 }
 
 func clearAdminSessionCookie(c *gin.Context) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(auth.AdminSessionCookieName, "", -1, "/", "", isHTTPS(c), true)
-}
-
-// isHTTPS reports whether to mark the cookie Secure. Trusts X-Forwarded-Proto
-// because the router typically sits behind a reverse proxy in self-hosted
-// deploys (Cloud Run, fronting nginx, etc.).
-func isHTTPS(c *gin.Context) bool {
-	if c.Request.TLS != nil {
-		return true
-	}
-	if proto := c.GetHeader("X-Forwarded-Proto"); proto == "https" {
-		return true
-	}
-	return false
+	c.SetCookie(auth.AdminSessionCookieName, "", -1, "/", "", cookieSecure, true)
 }

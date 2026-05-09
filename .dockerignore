@@ -1,0 +1,32 @@
+# Keep host build artifacts out of the Docker build context so they
+# can't shadow the clean `npm ci` install or the Go vendor cache inside
+# the builder stages.
+**/node_modules
+**/.next
+**/.next-static
+**/out
+**/dist
+**/build
+
+# Local-only dev files.
+**/.env
+**/.env.local
+**/.env.*.local
+**/.git
+**/.idea
+**/.vscode
+**/coverage
+**/.turbo
+**/.cache
+
+# Logs / OS junk.
+**/*.log
+**/.DS_Store
+
+# Repo-internal helpers that aren't needed at build time.
+docs/
+docker-compose*.yml
+docker-compose.override.yml
+README.md
+CLAUDE.md
+AGENTS.md

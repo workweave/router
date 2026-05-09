@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/hashicorp/golang-lru/v2/expirable"
 )
 
 // AdminSessionCookieName is the HttpOnly cookie name used to carry signed
@@ -32,6 +34,21 @@ var ErrAdminSessionInvalid = errors.New("admin session invalid")
 // attempted but no ROUTER_ADMIN_PASSWORD was provided to the service. The
 // dashboard treats this as "admin login disabled".
 var ErrAdminPasswordNotConfigured = errors.New("admin password not configured")
+
+// ErrAdminLoginRateLimited is returned by VerifyAdminPassword when the
+// caller's recent failure count for this IP has exceeded the threshold.
+// Handlers map it to HTTP 429 so a brute-force attempt against
+// ROUTER_ADMIN_PASSWORD pays a real cost between guesses.
+var ErrAdminLoginRateLimited = errors.New("admin login rate limited")
+
+// adminLoginMaxFailures and adminLoginFailureTTL govern the per-IP
+// brute-force lockout. 5 failures inside 5 minutes triggers the limiter;
+// the entry self-expires off the LRU after the TTL so legitimate users who
+// mistyped a few times eventually clear without restart.
+const (
+	adminLoginMaxFailures = 5
+	adminLoginFailureTTL  = 5 * time.Minute
+)
 
 // adminSessionLabel is mixed into the signing key derivation so the same
 // admin password can never collide with a different signing context (e.g.
@@ -77,6 +94,14 @@ func (s *Service) WithAdminPassword(password string) *Service {
 	mac := hmac.New(sha256.New, []byte(password))
 	mac.Write([]byte(adminSessionLabel))
 	s.adminSessionKey = mac.Sum(nil)
+	s.adminLoginMu.Lock()
+	if s.adminLoginFailures == nil {
+		// 1024 unique remote IPs is plenty for a single self-hosted router; the
+		// LRU evicts the oldest entry when full so a flood of distinct IPs can't
+		// blow up memory.
+		s.adminLoginFailures = expirable.NewLRU[string, int](1024, nil, adminLoginFailureTTL)
+	}
+	s.adminLoginMu.Unlock()
 	return s
 }
 
@@ -88,7 +113,9 @@ func (s *Service) AdminLoginEnabled() bool {
 }
 
 // VerifyAdminPassword returns nil iff password equals the configured admin
-// password. Constant-time compare to avoid trivial timing oracles.
+// password. Constant-time compare to avoid trivial timing oracles. Callers
+// in front of HTTP should prefer VerifyAdminPasswordFromIP, which also
+// throttles brute-force attempts.
 func (s *Service) VerifyAdminPassword(password string) error {
 	if !s.AdminLoginEnabled() {
 		return ErrAdminPasswordNotConfigured
@@ -97,6 +124,35 @@ func (s *Service) VerifyAdminPassword(password string) error {
 		return nil
 	}
 	return ErrAdminSessionInvalid
+}
+
+// VerifyAdminPasswordFromIP wraps VerifyAdminPassword with a per-IP failure
+// counter. After adminLoginMaxFailures unsuccessful attempts inside
+// adminLoginFailureTTL, all further attempts from that IP return
+// ErrAdminLoginRateLimited until the entry expires. A successful login
+// clears the counter so a legitimate user who mistyped is not punished
+// indefinitely. Callers should pass the result of gin's c.ClientIP(),
+// which already honors the configured trusted-proxy list.
+func (s *Service) VerifyAdminPasswordFromIP(remoteIP, password string) error {
+	if !s.AdminLoginEnabled() {
+		return ErrAdminPasswordNotConfigured
+	}
+	if s.adminLoginFailures != nil && remoteIP != "" {
+		if count, ok := s.adminLoginFailures.Get(remoteIP); ok && count >= adminLoginMaxFailures {
+			return ErrAdminLoginRateLimited
+		}
+	}
+	if err := s.VerifyAdminPassword(password); err != nil {
+		if s.adminLoginFailures != nil && remoteIP != "" && errors.Is(err, ErrAdminSessionInvalid) {
+			count, _ := s.adminLoginFailures.Get(remoteIP)
+			s.adminLoginFailures.Add(remoteIP, count+1)
+		}
+		return err
+	}
+	if s.adminLoginFailures != nil && remoteIP != "" {
+		s.adminLoginFailures.Remove(remoteIP)
+	}
+	return nil
 }
 
 // IssueAdminSession returns a signed session token plus its expiry. Tokens

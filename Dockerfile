@@ -30,7 +30,9 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci --prefer-offline
 COPY frontend/ ./
-# next.config.ts sets distDir: '../assets/ui' so output lands at /app/assets/ui
+# next.config.ts sets `output: "export"` so the static export lands at
+# /app/frontend/out/; the build-stage below copies it into /app/assets/ui
+# where the Go server reads it.
 RUN npm run build
 
 FROM golang:1.25.9-bookworm AS build-stage
@@ -126,7 +128,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY cmd ./cmd
 COPY internal ./internal
 # Mini UI static export built by the ui-builder stage.
-COPY --from=ui-builder /app/assets/ui ./assets/ui
+COPY --from=ui-builder /app/frontend/out ./assets/ui
 
 # CGO_ENABLED=1 (default on bookworm but be explicit) so onnxruntime_go's
 # and daulet/tokenizers' CGO bridges compile. CGO_LDFLAGS adds both

@@ -24,7 +24,6 @@ const GRANULARITY_LABELS: Record<Granularity, string> = {
 export interface DashboardPageFiltersProps {
   className?: string;
   result: UseDashboardFiltersResult;
-  right?: React.ReactNode;
 }
 
 /**
@@ -33,24 +32,11 @@ export interface DashboardPageFiltersProps {
  * with a Command list, and the bar itself is a flat row that wraps on
  * narrow screens. Rendered inline with the page content (no separator).
  */
-export function DashboardPageFilters({
-  className,
-  result,
-  right,
-}: DashboardPageFiltersProps) {
+export function DashboardPageFilters({ className, result }: DashboardPageFiltersProps) {
   return (
-    <div
-      className={cn(
-        "flex flex-row items-start gap-4 gap-y-2",
-        right != null && "justify-between",
-        className,
-      )}
-    >
-      <div className="flex flex-row flex-wrap items-start gap-4 gap-y-2">
-        <GranularityPill result={result} />
-        <DateRangePill result={result} />
-      </div>
-      {right}
+    <div className={cn("flex flex-row flex-wrap items-start gap-4 gap-y-2", className)}>
+      <GranularityPill result={result} />
+      <DateRangePill result={result} />
     </div>
   );
 }
