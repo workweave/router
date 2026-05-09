@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -60,11 +61,27 @@ func ListAPIKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// IssueAPIKeyHandler creates a new router API key. Returns the raw token once.
+// IssueAPIKeyHandler creates the installation's first router API key. Refuses
+// with 409 if an active key already exists — admins should rotate instead, and
+// the partial unique index on (installation_id) WHERE deleted_at IS NULL would
+// reject a second insert at the database layer anyway. Returns the raw token
+// once.
 func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
 		if !ok {
+			return
+		}
+		// Pre-check belongs in front of the DB constraint so the user gets a
+		// clean 409 + actionable message rather than a generic 500 mapped from
+		// auth.ErrActiveKeyExists.
+		existing, err := authSvc.ListAPIKeys(c.Request.Context(), installation.ID)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to look up existing api key"})
+			return
+		}
+		if len(existing) > 0 {
+			c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "installation already has an active api key; rotate it instead"})
 			return
 		}
 		var req issueAPIKeyRequest
@@ -75,7 +92,33 @@ func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 		}
 		key, rawToken, err := authSvc.IssueAPIKey(c.Request.Context(), installation.ID, name, nil)
 		if err != nil {
+			if errors.Is(err, auth.ErrActiveKeyExists) {
+				c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "installation already has an active api key; rotate it instead"})
+				return
+			}
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to issue api key"})
+			return
+		}
+		c.JSON(http.StatusCreated, issueAPIKeyResponse{
+			Key:   toAPIKeyResponse(key),
+			Token: rawToken,
+		})
+	}
+}
+
+// RotateAPIKeyHandler soft-deletes the installation's current active key (if
+// any) and issues a replacement. Carries forward the previous key's name.
+// Same response shape as IssueAPIKeyHandler so the admin frontend can reuse
+// the raw-token-reveal path.
+func RotateAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		installation, ok := resolveInstallation(c, authSvc)
+		if !ok {
+			return
+		}
+		key, rawToken, err := authSvc.RotateAPIKey(c.Request.Context(), installation.ID, nil)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to rotate api key"})
 			return
 		}
 		c.JSON(http.StatusCreated, issueAPIKeyResponse{

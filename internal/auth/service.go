@@ -97,6 +97,33 @@ func (s *Service) ListAPIKeys(ctx context.Context, installationID string) ([]*AP
 	return s.apiKeys.ListForInstallation(ctx, installationID)
 }
 
+// RotateAPIKey soft-deletes the installation's active key (if any) and
+// issues a new one. Carries forward the previous key's name so the admin
+// dashboard label survives the rotation.
+//
+// The two writes are not wrapped in a tx; the brief "no active key" window
+// between them is acceptable because (a) the partial unique index on
+// (installation_id) WHERE deleted_at IS NULL means the new insert can't
+// collide, and (b) rotation is an admin-driven action whose entire purpose
+// is to invalidate the old token, so a concurrent auth check failing
+// against the old token is the user-visible expectation.
+func (s *Service) RotateAPIKey(ctx context.Context, installationID string, createdBy *string) (*APIKey, string, error) {
+	existing, err := s.apiKeys.ListForInstallation(ctx, installationID)
+	if err != nil {
+		return nil, "", err
+	}
+	var name *string
+	for _, k := range existing {
+		if k.Name != nil && name == nil {
+			name = k.Name
+		}
+		if err := s.apiKeys.SoftDelete(ctx, k.ID); err != nil {
+			return nil, "", err
+		}
+	}
+	return s.IssueAPIKey(ctx, installationID, name, createdBy)
+}
+
 // DeleteAPIKey soft-deletes an API key. The LRU cache will TTL-expire the
 // entry; any in-flight request using the key within the TTL window will still
 // succeed, which is acceptable for the rare delete-key path.
