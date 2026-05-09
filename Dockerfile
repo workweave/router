@@ -6,6 +6,9 @@
 # library out of the box. Builder is bookworm-glibc; runtime is
 # distroless/cc-debian12 so we get the C runtime without the rest of
 # Debian's userland.
+#
+# The mini UI is a Next.js static export built by a Node.js stage and
+# copied into assets/ui/ before the Go binary is assembled.
 
 ARG ONNXRUNTIME_VERSION=1.25.1
 ARG TOKENIZERS_VERSION=v1.27.0
@@ -20,6 +23,17 @@ ARG HF_MODEL_REPO=jinaai/jina-embeddings-v2-base-code
 # Apr 2024 so drift risk is low, but pinning eliminates "the build
 # silently picked up new weights" surprises. Bump deliberately.
 ARG HF_MODEL_REVISION=516f4baf13dec4ddddda8631e019b5737c8bc250
+
+# --- Stage 1: build the Next.js mini UI ---
+FROM node:22-alpine AS ui-builder
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci --prefer-offline
+COPY frontend/ ./
+# next.config.ts sets `output: "export"` so the static export lands at
+# /app/frontend/out/; the build-stage below copies it into /app/assets/ui
+# where the Go server reads it.
+RUN npm run build
 
 FROM golang:1.25.9-bookworm AS build-stage
 
@@ -113,6 +127,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 COPY cmd ./cmd
 COPY internal ./internal
+# Mini UI static export built by the ui-builder stage.
+COPY --from=ui-builder /app/frontend/out ./assets/ui
 
 # CGO_ENABLED=1 (default on bookworm but be explicit) so onnxruntime_go's
 # and daulet/tokenizers' CGO bridges compile. CGO_LDFLAGS adds both
@@ -146,6 +162,9 @@ COPY --from=build-stage /opt/router/assets/ /opt/router/assets/
 
 WORKDIR /
 COPY --from=build-stage /server /server
+# Mini UI static files served by gin at /ui; path must match the
+# gin.Static("/ui", "./assets/ui") call in internal/server/server.go.
+COPY --from=build-stage /app/assets/ui ./assets/ui
 
 ARG VERSION
 ENV VERSION=$VERSION

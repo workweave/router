@@ -11,11 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// Repository aggregates all auth repositories backed by the same DBTX.
+// Repository aggregates all repositories backed by the same DBTX.
 type Repository struct {
 	Installations   auth.InstallationRepository
 	APIKeys         auth.APIKeyRepository
 	ExternalAPIKeys auth.ExternalAPIKeyRepository
+	Telemetry       *TelemetryRepo
 }
 
 // NewRepository constructs a Repository. encryptor is used to decrypt external
@@ -25,6 +26,7 @@ func NewRepository(tx sqlc.DBTX, encryptor auth.Encryptor) *Repository {
 		Installations:   &installationRepo{tx: tx},
 		APIKeys:         &apiKeyRepo{tx: tx},
 		ExternalAPIKeys: NewExternalAPIKeyRepo(tx, encryptor),
+		Telemetry:       NewTelemetryRepo(tx),
 	}
 }
 

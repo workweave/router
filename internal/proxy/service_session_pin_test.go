@@ -85,6 +85,7 @@ func newPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 		false,                       // hardPinExplore
 		providers.ProviderAnthropic, // hardPinProvider
 		"claude-haiku-4-5",          // hardPinModel
+		nil,                         // telemetry
 	)
 }
 
@@ -266,6 +267,7 @@ func TestService_HardPin_ExploreRoutesToHaikuWhenFlagOn(t *testing.T) {
 		true,                        // hardPinExplore = on
 		providers.ProviderAnthropic, // hardPinProvider
 		"claude-haiku-4-5",          // hardPinModel
+		nil,                         // telemetry
 	)
 
 	ctx := authedCtx(uuid.New().String())
@@ -327,6 +329,7 @@ func newOpenAIPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 		nil, false, 0, nil, nil,
 		store,
 		false, providers.ProviderAnthropic, "claude-haiku-4-5",
+		nil,
 	)
 }
 
@@ -428,6 +431,7 @@ func newOpenAIHardPinSvc(fr *fakeRouter, store *fakePinStore, hardPinExplore boo
 		hardPinExplore,
 		providers.ProviderOpenAI,
 		"gpt-4o-mini",
+		nil,
 	)
 }
 

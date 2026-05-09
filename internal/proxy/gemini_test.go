@@ -37,6 +37,7 @@ func TestProxyGeminiGenerateContent_RoutesToGoogleProvider(t *testing.T) {
 		nil, false, 0, nil, nil,
 		store,
 		false, providers.ProviderGoogle, "gemini-2.5-flash",
+		nil,
 	)
 
 	ctx := authedCtx("00000000-0000-0000-0000-000000000001")
@@ -69,6 +70,7 @@ func TestProxyGeminiGenerateContent_CrossFormatReturnsSentinel(t *testing.T) {
 		nil, false, 0, nil, nil,
 		store,
 		false, providers.ProviderGoogle, "gemini-2.5-flash",
+		nil,
 	)
 
 	ctx := authedCtx("00000000-0000-0000-0000-000000000001")

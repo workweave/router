@@ -130,21 +130,31 @@ inner-ring package and implement it in an adapter subpackage instead.
 2. **Decide whether it needs auth.** If yes, register it under the `authed`
    group in `Register` (so `WithAuth` runs against `*auth.Service`). If no,
    register it on the engine directly.
-3. **Pick (or create) the right `internal/api/<group>/` subpackage.**
+3. **Decide whether it's part of the self-hoster dashboard surface.** The
+   `/ui/*` static dashboard, `/admin/v1/auth/*`, and the `/admin/v1` mgmt
+   group (metrics, keys, provider-keys, config) are mounted only when
+   `mode == server.DeploymentModeSelfHosted`. New endpoints whose only
+   consumer is the self-hosted dashboard go inside that block; endpoints
+   that are part of the product surface (`/v1/*`, `/health`, `/validate`)
+   stay outside it so they're available in `managed` mode too. **Do not**
+   add a new `/admin/v1/*` route outside the selfhosted block — that
+   would re-expose the redundant control plane on Weave-managed
+   deployments.
+4. **Pick (or create) the right `internal/api/<group>/` subpackage.**
    Operational endpoints live in `internal/api/admin/`; the Anthropic
    Messages surface lives in `internal/api/anthropic/`; the OpenAI Chat
    Completions surface lives in `internal/api/openai/`. New surfaces get
    their own subpackage.
-4. **Use `observability.FromGin(c)` for the request-scoped logger.** If you
+5. **Use `observability.FromGin(c)` for the request-scoped logger.** If you
    need the authed installation, call `middleware.InstallationFrom(c)`
    (returns nil if `WithAuth` wasn't applied — your handler should be on
    the authed group).
-5. **Pick the right service.** Identity-only operations go on
+6. **Pick the right service.** Identity-only operations go on
    `*auth.Service`. Operations that route/dispatch/translate go on
    `*proxy.Service`. Don't touch repositories, the router, or providers
    from the handler. The handler adapts HTTP ↔ service; the service does
    the work.
-6. **Test with in-memory fakes and the gin testing harness**
+7. **Test with in-memory fakes and the gin testing harness**
    (`httptest.NewRequest`/`ResponseRecorder`). Don't spin up a real DB for
    handler tests — use the fakes from
    [`internal/auth/service_test.go`](internal/auth/service_test.go) and

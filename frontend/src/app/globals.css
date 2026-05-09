@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --accent-foreground: 0 0% 9%;
+    --accent: 0 0% 96.1%;
+    --background: 0 0% 100%;
+    --border: 0 0% 94.8%;
+    --border-darker: 0 0% 90%;
+
+    --brand: 12 82% 59%;
+    --card-foreground: 222.2 47.4% 11.2%;
+    --card: 0 0% 100%;
+    --danger-foreground: 0 0% 98%;
+    --danger: 0 84.2% 60.2%;
+    --foreground: 0 0% 3.9%;
+    --info: 48 96% 53%;
+    --info-foreground: 0 0% 10%;
+    --input: 0 0% 89.8%;
+    --muted-foreground: 0 0% 45.1%;
+    --muted: 0 0% 96.1%;
+    --popover-foreground: 222.2 47.4% 11.2%;
+    --popover: 0 0% 100%;
+    --primary-foreground: 0 0% 98%;
+    --primary: 221 63% 55%;
+    --ring: 0 0% 3.9%;
+    --shortcuts: 0 0% 90%;
+    --shortcuts-foreground: 0 0% 75%;
+    --success-foreground: 0 0% 98%;
+    --success: 142 72% 29%;
+    --tooltip-foreground: 222.2 5% 27%;
+    --tooltip: 0 0% 100%;
+    --text-width: 78ch;
+    --warning-foreground: 0 0% 98%;
+    --warning: 25 95% 53%;
+  }
+
+  .dark {
+    --accent-foreground: 0 0% 98%;
+    --accent: 0 0% 14.9%;
+    --background: 0 0% 3.9%;
+    --border: 0 0% 14.9%;
+    --border-darker: 0 0% 30%;
+    --card-foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --danger-foreground: 0 0% 98%;
+    --danger: 0 69% 48%;
+    --foreground: 0 0% 98%;
+    --info: 48 96% 53%;
+    --info-foreground: 0 0% 10%;
+    --input: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --muted: 0 0% 14.9%;
+    --popover-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --primary-foreground: 0 0% 98%;
+    --primary: 221 63% 55%;
+    --ring: 0 0% 83.1%;
+    --shortcuts: 0 0% 18%;
+    --shortcuts-foreground: 0 0% 40%;
+    --success-foreground: 0 0% 98%;
+    --success: 143 86% 35%;
+    --tooltip-foreground: 222.2 5% 27%;
+    --tooltip: 0 0% 100%;
+    --warning-foreground: 0 0% 98%;
+    --warning: 25 95% 53%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-muted font-sans text-foreground;
+  }
+
+  :focus-visible {
+    @apply outline-primary;
+  }
+
+  ::selection {
+    @apply bg-brand/70;
+  }
+}
+
+@layer components {
+  .link {
+    @apply text-primary;
+
+    &:hover {
+      @apply underline;
+    }
+  }
+
+  .button {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-foreground ring-offset-2 ring-offset-background transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 active:bg-foreground/10 disabled:pointer-events-none disabled:opacity-50;
+  }
+}
+
+@layer utilities {
+  .absolute-center {
+    @apply absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2;
+  }
+}

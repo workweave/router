@@ -511,6 +511,7 @@ Set `DATABASE_URL` directly, or compose it from the individual vars:
 | ------------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PORT`                         | `8080`                               | HTTP listen port.                                                                                                                           |
 | `ROUTER_DEV_MODE`              | `false`                              | Bypass bearer auth on `/v1/`* for local development.                                                                                        |
+| `ROUTER_DEPLOYMENT_MODE`       | `selfhosted`                         | `selfhosted` mounts the admin dashboard at `/ui/*` and the `/admin/v1/*` API (login, stats, `rk_` key rotation, BYOK provider keys, config). `managed` skips both — Weave-managed (SaaS) deployments set this so the redundant control plane isn't exposed alongside the Weave app frontend. In managed mode `ROUTER_ADMIN_PASSWORD` is not required at boot. |
 | `ROUTER_DECISIONS_LOG_PATH`    | `~/.weave-router/decisions.jsonl`    | Path for the JSON-lines decision sidecar log (one line per routed request). Set to `off` to disable.                                        |
 
 

@@ -80,6 +80,20 @@ func main() {
 
 	devMode := config.GetOr("ROUTER_DEV_MODE", "false") == "true"
 
+	// Deployment mode gates the self-hoster dashboard + /admin/v1/* API.
+	// Default is selfhosted so docker-compose / bare-binary deployments
+	// "just work"; Weave-managed Cloud Run services explicitly set
+	// ROUTER_DEPLOYMENT_MODE=managed to drop the redundant admin surface.
+	deploymentMode := server.DeploymentMode(config.GetOr("ROUTER_DEPLOYMENT_MODE", string(server.DeploymentModeSelfHosted)))
+	switch deploymentMode {
+	case server.DeploymentModeSelfHosted, server.DeploymentModeManaged:
+	default:
+		err := fmt.Errorf("invalid ROUTER_DEPLOYMENT_MODE %q (expected %q or %q)", deploymentMode, server.DeploymentModeSelfHosted, server.DeploymentModeManaged)
+		logger.Error("Refusing to boot with invalid deployment mode", "err", err)
+		panic(err)
+	}
+	logger.Info("Router deployment mode", "mode", deploymentMode)
+
 	// Load Tink keyset for external API key encryption. The keyset is optional:
 	// if EXTERNAL_KEY_ENCRYPTION_KEY is unset the router boots with the no-op
 	// encryptor and stores BYOK secrets unencrypted at rest. This is convenient
@@ -151,7 +165,26 @@ func main() {
 	logger.Info("Routing via cluster scorer", "embedder", "jina-v2-base-code-int8")
 
 	cache := auth.NewLRUAPIKeyCache(10000, 50000, 5*time.Minute, 60*time.Second)
-	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, cache, time.Now)
+	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, cache, time.Now).WithEncryptor(encryptor)
+
+	// Admin dashboard password. Required outside dev mode so a self-hoster
+	// who simply runs the binary cannot end up with an unauthenticated
+	// dashboard exposed to the internet. In dev mode we fall back to a
+	// well-known default and warn loudly. In managed mode the dashboard
+	// is not mounted at all, so the password is irrelevant.
+	if deploymentMode == server.DeploymentModeSelfHosted {
+		adminPassword := config.GetOr("ROUTER_ADMIN_PASSWORD", "")
+		if adminPassword == "" {
+			if !devMode {
+				err := errors.New("ROUTER_ADMIN_PASSWORD not set; refusing to boot without admin dashboard credentials (set ROUTER_DEV_MODE=true to use the default 'admin' password in local dev, or ROUTER_DEPLOYMENT_MODE=managed to disable the dashboard)")
+				logger.Error("Refusing to boot without admin password", "err", err)
+				panic(err)
+			}
+			adminPassword = "admin"
+			logger.Warn("ROUTER_ADMIN_PASSWORD not set; using default 'admin' (ROUTER_DEV_MODE=true)")
+		}
+		authSvc.WithAdminPassword(adminPassword)
+	}
 	embedLastUser := config.GetOr("ROUTER_EMBED_LAST_USER_MESSAGE", "false") == "true"
 	if embedLastUser {
 		logger.Info("Cluster scorer embedding the last user message (ROUTER_EMBED_LAST_USER_MESSAGE=true)")
@@ -212,7 +245,7 @@ func main() {
 	}
 	logger.Info("Hard-pin model resolved", "provider", hardPinProvider, "model", hardPinModel)
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel)
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry)
 
 	engine := gin.New()
 	engine.UnescapePathValues = true
@@ -226,7 +259,7 @@ func main() {
 	if devMode {
 		logger.Info("ROUTER_DEV_MODE=true; bypassing bearer auth on /v1/* (DO NOT use in production)")
 	}
-	server.Register(engine, authSvc, proxySvc, devMode)
+	server.Register(engine, authSvc, proxySvc, devMode, deploymentMode)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),
