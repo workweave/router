@@ -35,14 +35,20 @@ func WithAuth(svc *auth.Service) gin.HandlerFunc {
 }
 
 // WithAdminOrAuth accepts either a signed admin session cookie OR a bearer
-// rk_ token. Used on control-plane routes (`/admin/v1/*`, `/health`,
-// `/validate`) so the dashboard can authenticate via the cookie set at
-// `/admin/v1/auth/login`, while service-to-service callers can still pass
-// `rk_...`.
+// rk_ token. Used on control-plane *read* routes (e.g. `/admin/v1/metrics/*`)
+// so an installation can fetch its own metrics via its router API key,
+// while the dashboard authenticates via the cookie set at
+// `/admin/v1/auth/login`.
 //
 // **Do not use on `/v1/*` data-plane routes** — that would let a dashboard
 // cookie call provider proxy endpoints, blurring control-plane and
 // data-plane trust boundaries.
+//
+// **Do not use on control-plane *mutations*** (key issue/delete, provider
+// key upsert/delete, config) — `rk_` holders should not be able to mint
+// fresh API keys or rotate provider credentials for their installation;
+// that path turns a leaked data-plane key into persistent control-plane
+// access. Mount those endpoints under `WithAdminOnly` instead.
 func WithAdminOrAuth(svc *auth.Service) gin.HandlerFunc {
 	apiKeyMW := withAPIKey(svc)
 	return func(c *gin.Context) {
@@ -52,6 +58,27 @@ func WithAdminOrAuth(svc *auth.Service) gin.HandlerFunc {
 			return
 		}
 		apiKeyMW(c)
+	}
+}
+
+// WithAdminOnly requires a valid admin session cookie. Bearer rk_ tokens
+// are explicitly rejected. Used on control-plane mutation endpoints
+// (`/admin/v1/keys/*`, `/admin/v1/provider-keys/*`, `/admin/v1/config`) so
+// a leaked installation API key can't be used to mint fresh credentials
+// or rotate provider keys.
+func WithAdminOnly(svc *auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !svc.AdminLoginEnabled() {
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "admin_login_disabled"})
+			return
+		}
+		principal := tryAdminCookie(c, svc)
+		if principal == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "admin_session_required"})
+			return
+		}
+		c.Set(ctxKeyAdminPrincipal, principal)
+		c.Next()
 	}
 }
 

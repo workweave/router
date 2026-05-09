@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -11,6 +12,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// remotePeerIP returns the immediate TCP peer's IP — the raw RemoteAddr
+// stripped of port — so rate limiting can't be bypassed by spoofing
+// X-Forwarded-For. Returns the unstripped address as a fallback if the
+// peer lacks the standard "host:port" shape.
+func remotePeerIP(c *gin.Context) string {
+	addr := c.Request.RemoteAddr
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
+	return addr
+}
 
 type loginRequest struct {
 	Password string `json:"password"`
@@ -44,16 +57,22 @@ func LoginHandler(authSvc *auth.Service) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_password"})
 			return
 		}
-		if err := authSvc.VerifyAdminPasswordFromIP(c.ClientIP(), req.Password); err != nil {
+		// Use the raw TCP peer for rate limiting, NOT c.ClientIP(). The
+		// latter parses X-Forwarded-For, which is attacker-controlled when
+		// the router is reached directly (no SetTrustedProxies configured)
+		// — that would let a brute-forcer rotate apparent client IPs and
+		// bypass the per-IP failure cap.
+		peerIP := remotePeerIP(c)
+		if err := authSvc.VerifyAdminPasswordFromIP(peerIP, req.Password); err != nil {
 			if errors.Is(err, auth.ErrAdminLoginRateLimited) {
-				observability.FromGin(c).Info("Admin login rejected: rate limited", "remote_ip", c.ClientIP())
+				observability.FromGin(c).Info("Admin login rejected: rate limited", "remote_ip", peerIP)
 				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 					"error": "too_many_attempts",
 					"hint":  "wait a few minutes before trying again",
 				})
 				return
 			}
-			observability.FromGin(c).Info("Admin login rejected: wrong password", "remote_ip", c.ClientIP())
+			observability.FromGin(c).Info("Admin login rejected: wrong password", "remote_ip", peerIP)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_credentials"})
 			return
 		}

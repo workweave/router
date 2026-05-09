@@ -73,12 +73,18 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		authPublic.POST("/logout", admin.LogoutHandler())
 		authPublic.GET("/me", admin.MeHandler(authSvc))
 
-		// Management API — all routes require auth (cookie or rk_ bearer) and
-		// use the admin timeout.
-		mgmt := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAdminOrAuth(authSvc))
-		mgmt.GET("/metrics/summary", admin.MetricsSummaryHandler(proxySvc))
-		mgmt.GET("/metrics/timeseries", admin.MetricsTimeseriesHandler(proxySvc))
-		mgmt.GET("/metrics/details", admin.MetricsDetailsHandler(proxySvc))
+		// Read-only metrics: dashboard cookie OR rk_ bearer (so an installation
+		// can fetch its own data via its router API key for monitoring scripts).
+		// Per-installation scoping is enforced inside the handlers.
+		metrics := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAdminOrAuth(authSvc))
+		metrics.GET("/metrics/summary", admin.MetricsSummaryHandler(proxySvc))
+		metrics.GET("/metrics/timeseries", admin.MetricsTimeseriesHandler(proxySvc))
+		metrics.GET("/metrics/details", admin.MetricsDetailsHandler(proxySvc))
+
+		// Control-plane mutations: admin session cookie REQUIRED. rk_ tokens
+		// are rejected so a leaked data-plane key can't issue fresh router
+		// keys or rotate provider credentials for its installation.
+		mgmt := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAdminOnly(authSvc))
 		mgmt.GET("/keys", admin.ListAPIKeysHandler(authSvc))
 		mgmt.POST("/keys", admin.IssueAPIKeyHandler(authSvc))
 		mgmt.DELETE("/keys/:id", admin.DeleteAPIKeyHandler(authSvc))
