@@ -1,0 +1,45 @@
+install/README.md
+  s_c7534c973e3a3e::t_d55306bdef2ff1 22-24,27-32
+  s_c7534c973e3a3e::t_0f17ace59f7285 109
+Makefile
+  s_c7534c973e3a3e::t_860925afbf3b09 63-64,68-73
+install/install.sh
+  s_c7534c973e3a3e::t_4c18392f6e63ff 389,397
+  s_c7534c973e3a3e::t_b6ab557776bf87 109-112
+  s_c7534c973e3a3e::t_0c53806d781938 40
+  s_c7534c973e3a3e::t_bbaf7508deed61 376-379,381,390-391,395
+  s_c7534c973e3a3e::t_ecbd1bb473e9ae 332
+  s_c7534c973e3a3e::t_01729f3f6fd3f7 394
+  s_c7534c973e3a3e::t_b5609ce62aeeb7 133
+  s_c7534c973e3a3e::t_3750664f738810 161-163,166,170,174,177,181,184,187,192,195,200-203,207-209
+  s_c7534c973e3a3e::t_bf4fc233e98127 380
+  s_c7534c973e3a3e::t_6569652c6554d1 164-165,167-169,171-173,175-176,178-180
+  s_c7534c973e3a3e::t_a94253b160fad5 41
+  s_c7534c973e3a3e::t_c9913f22fee752 271,275,280-287
+  s_c7534c973e3a3e::t_5aed3b45746c80 14-16,20
+  s_c7534c973e3a3e::t_990f50aa3b25de 197-199
+  s_c7534c973e3a3e::t_b5953c64b3abdc 128-132,134-145
+  s_c7534c973e3a3e::t_56c78251a0d415 90
+  s_c7534c973e3a3e::t_2334712980e413 392-393,396,398
+install/uninstall.sh
+  s_c7534c973e3a3e::t_5875073078a6a8 11,16
+  s_c7534c973e3a3e::t_9cb42ebe959eaa 40-43
+  s_c7534c973e3a3e::t_5124567afd6187 60-86
+  s_c7534c973e3a3e::t_daed973d7e3828 128-132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "fbe8a22bd0e6280cfe8d3eeb5e5fbe9833637cbe",
+  "prompts": {},
+  "sessions": {
+    "s_c7534c973e3a3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70ac6a66-46c0-4809-8286-8781bfb617a8",
+        "model": "deepseek/deepseek-v4-pro-20260423"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
