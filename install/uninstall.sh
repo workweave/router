@@ -6,9 +6,10 @@
 # Leaves the rest of settings.json untouched.
 #
 # Usage:
-#   ./uninstall.sh                  # user scope
-#   ./uninstall.sh --scope project  # run inside the repo
-#   ./uninstall.sh --dir /tmp/test  # remove from arbitrary directory
+#   ./uninstall.sh                            # user scope
+#   ./uninstall.sh --scope project            # run inside the repo
+#   ./uninstall.sh --dir /tmp/test            # --dir alone (user scope, .weave/)
+#   ./uninstall.sh --scope project --dir /tmp # --dir + project scope (.claude/)
 
 set -euo pipefail
 
@@ -62,7 +63,13 @@ if [ -n "$install_dir" ]; then
   install_dir="$(cd "$install_dir" 2>/dev/null && pwd || echo "$install_dir")"
   settings_file="$install_dir/.claude/settings.json"
   local_settings_file=""
-  statusline_file="$install_dir/.claude/cc-statusline.sh"
+  # --dir alone (scope defaults to "user") uses .weave/; --dir --scope project
+  # uses .claude/. Match the installer's scope-dependent statusline placement.
+  if [ "$scope" = "project" ]; then
+    statusline_file="$install_dir/.claude/cc-statusline.sh"
+  else
+    statusline_file="$install_dir/.weave/cc-statusline.sh"
+  fi
   # Symlink containment: --dir paths come from a user-supplied directory that may
   # be hostile. The later `>` redirect on settings_file and `rm -f` on the
   # statusline script would otherwise follow links out of the directory.
