@@ -60,11 +60,17 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + opt
 	##   make full-setup                                  # boot compose, seed, print instructions
 	##   make full-setup PLATFORM=cc                      # boot + seed + auto-wire Claude Code
 	##   make full-setup PLATFORM=cc KEY=rk_... BASE_URL=http://...  # wire existing router to Claude Code
+	##   make full-setup PLATFORM=cc KEY=rk_... BASE_URL=http://... DIR=/tmp/test  # isolated throwaway install
+	##   make full-setup PLATFORM=cc KEY=rk_... BASE_URL=http://... SCOPE=project NON_INTERACTIVE=1  # CI-friendly
 	##   make full-setup KEY=rk_... BASE_URL=http://...  # print instructions for existing router
 	@if [ -n "$(KEY)" ] && [ -n "$(BASE_URL)" ]; then \
 		if [ "$(PLATFORM)" = "cc" ]; then \
-			echo "==> Wiring Claude Code → $(BASE_URL) with provided key..."; \
-			WEAVE_ROUTER_KEY="$(KEY)" ./install/install.sh --base-url "$(BASE_URL)"; \
+			INSTALL_CMD='WEAVE_ROUTER_KEY="$(KEY)" ./install/install.sh --base-url "$(BASE_URL)"'; \
+			[ -n "$(SCOPE)" ] && INSTALL_CMD="$$INSTALL_CMD --scope $(SCOPE)"; \
+			[ -n "$(DIR)" ] && INSTALL_CMD="$$INSTALL_CMD --dir $(DIR)"; \
+			[ "$(NON_INTERACTIVE)" = "1" ] && INSTALL_CMD="$$INSTALL_CMD --non-interactive"; \
+			echo "==> Wiring Claude Code → $(BASE_URL)..."; \
+			eval "$$INSTALL_CMD"; \
 		else \
 			echo "Weave Router key:"; \
 			echo "  $(KEY)"; \
