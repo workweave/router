@@ -207,7 +207,7 @@ esac
 # Symlink containment: refuse if any target path is a symlink. User-scope paths
 # under $HOME are trusted; project-scope and --dir paths come from a git repo or
 # user-supplied directory that may be hostile, so we check those.
-if [ "$scope" = "project" ]; then
+if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
   refuse_if_symlink "$settings_dir"
   refuse_if_symlink "$settings_file"
   refuse_if_symlink "$local_settings_file"
@@ -267,12 +267,13 @@ ok "Statusline installed at $statusline_file"
 
 # Build the merge patch. Claude Code keeps its own Anthropic auth in
 # Authorization/x-api-key; the router key rides in ANTHROPIC_CUSTOM_HEADERS.
-# Project scope writes the key to settings.local.json (gitignored).
-# --dir and user scope write the key directly into settings.json.
+# Project scope (no --dir) writes the key to settings.local.json (gitignored)
+# so teammates can share settings.json. --dir and user scope inline the key
+# directly into settings.json since there's no team to coordinate with.
 tmp_patch="$(mktemp)"
 trap 'rm -f "$tmp_patch"' EXIT
 
-if [ "$scope" = "project" ]; then
+if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
   jq -n --arg url "$base_url" --arg sl "$statusline_path_for_settings" '{
     env: { ANTHROPIC_BASE_URL: $url },
     statusLine: { type: "command", command: $sl }
@@ -308,7 +309,7 @@ else
 fi
 ok "Settings written to $settings_file"
 
-if [ "$scope" = "project" ] && [ "$dev_mode" != "true" ]; then
+if [ "$scope" = "project" ] && [ -z "$install_dir" ] && [ "$dev_mode" != "true" ]; then
   jq -n --arg header "$router_key_header: $api_key" '{
     env: { ANTHROPIC_CUSTOM_HEADERS: $header }
   }' >"$tmp_patch"

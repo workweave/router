@@ -63,6 +63,12 @@ if [ -n "$install_dir" ]; then
   settings_file="$install_dir/.claude/settings.json"
   local_settings_file=""
   statusline_file="$install_dir/.claude/cc-statusline.sh"
+  # Symlink containment: --dir paths come from a user-supplied directory that may
+  # be hostile. The later `>` redirect on settings_file and `rm -f` on the
+  # statusline script would otherwise follow links out of the directory.
+  refuse_if_symlink "$install_dir/.claude"
+  refuse_if_symlink "$settings_file"
+  refuse_if_symlink "$statusline_file"
 elif [ "$scope" = "user" ]; then
   settings_file="$HOME/.claude/settings.json"
   local_settings_file=""
