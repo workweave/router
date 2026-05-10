@@ -8,10 +8,12 @@
 # Usage:
 #   ./uninstall.sh                  # user scope
 #   ./uninstall.sh --scope project  # run inside the repo
+#   ./uninstall.sh --dir /tmp/test  # remove from arbitrary directory
 
 set -euo pipefail
 
 scope="user"
+install_dir=""
 
 err()  { printf "\033[31merror:\033[0m %s\n" "$*" >&2; }
 info() { printf "\033[36m==>\033[0m %s\n" "$*"; }
@@ -35,6 +37,10 @@ while [ $# -gt 0 ]; do
       scope="${2:-}"; shift 2
       [ "$scope" = "user" ] || [ "$scope" = "project" ] || { err "--scope must be 'user' or 'project'"; exit 2; }
       ;;
+    --dir)
+      install_dir="${2:-}"; shift 2
+      [ -n "$install_dir" ] || { err "--dir requires a path"; exit 2; }
+      ;;
     -h|--help)
       # awk avoids GNU `head -n -<N>` (rejected by BSD head on macOS).
       awk 'NR<2 { next } /^set -euo/ { exit } { sub(/^# ?/, ""); print }' "$0"
@@ -51,29 +57,33 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-case "$scope" in
-  user)
-    settings_file="$HOME/.claude/settings.json"
-    local_settings_file=""
-    statusline_file="$HOME/.weave/cc-statusline.sh"
-    ;;
-  project)
-    if ! git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-      err "--scope project must be run inside a git repo."
-      exit 1
-    fi
-    settings_file="$git_root/.claude/settings.json"
-    local_settings_file="$git_root/.claude/settings.local.json"
-    statusline_file="$git_root/.claude/cc-statusline.sh"
-    # Symlink containment: paths come from a git repo that may be hostile. The
-    # later `>` redirect on settings_file and `rm -f` on the scripts would
-    # otherwise follow links out of the repo.
-    refuse_if_symlink "$git_root/.claude"
-    refuse_if_symlink "$settings_file"
-    refuse_if_symlink "$local_settings_file"
-    refuse_if_symlink "$statusline_file"
-    ;;
-esac
+# Resolve the base directory. When --dir is given, use it directly.
+if [ -n "$install_dir" ]; then
+  install_dir="$(cd "$install_dir" 2>/dev/null && pwd || echo "$install_dir")"
+  settings_file="$install_dir/.claude/settings.json"
+  local_settings_file=""
+  statusline_file="$install_dir/.claude/cc-statusline.sh"
+elif [ "$scope" = "user" ]; then
+  settings_file="$HOME/.claude/settings.json"
+  local_settings_file=""
+  statusline_file="$HOME/.weave/cc-statusline.sh"
+else
+  # project
+  if ! git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    err "--scope project must be run inside a git repo, or use --dir <path>."
+    exit 1
+  fi
+  settings_file="$git_root/.claude/settings.json"
+  local_settings_file="$git_root/.claude/settings.local.json"
+  statusline_file="$git_root/.claude/cc-statusline.sh"
+  # Symlink containment: paths come from a git repo that may be hostile. The
+  # later `>` redirect on settings_file and `rm -f` on the scripts would
+  # otherwise follow links out of the repo.
+  refuse_if_symlink "$git_root/.claude"
+  refuse_if_symlink "$settings_file"
+  refuse_if_symlink "$local_settings_file"
+  refuse_if_symlink "$statusline_file"
+fi
 
 if [ -f "$settings_file" ]; then
   # Only remove keys we actually installed: scrub our two env vars, and only
@@ -115,4 +125,8 @@ for f in "$statusline_file"; do
   fi
 done
 
-ok "Weave Router uninstalled (scope=$scope)."
+if [ -n "$install_dir" ]; then
+  ok "Weave Router uninstalled from $install_dir."
+else
+  ok "Weave Router uninstalled (scope=$scope)."
+fi

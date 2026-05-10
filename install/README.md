@@ -19,11 +19,17 @@ curl -fsSL https://weave.ai/cc/install.sh | sh -s -- --scope project
 Or from a clone of this repo:
 
 ```bash
-./router/install/install.sh                  # user scope (default)
-./router/install/install.sh --scope project  # project scope
+./router/install/install.sh                  # prompts: user or project
+./router/install/install.sh --scope user     # skip prompt — user scope
+./router/install/install.sh --scope project  # skip prompt — project scope
 ```
 
-The installer prompts for your API key (or reads `$WEAVE_ROUTER_KEY` for
+When run interactively without `--scope`, the installer asks whether to install
+at **user** scope (everywhere) or **project** scope (this repo only) and
+defaults to `user` on Enter. Pass `--scope` explicitly (or `--non-interactive`)
+to skip the prompt — useful for CI and `curl | sh` pipelines.
+
+The installer also prompts for your API key (or reads `$WEAVE_ROUTER_KEY` for
 non-interactive installs).
 
 ### Self-hosted via `docker compose` (zero-config)
@@ -100,7 +106,7 @@ The `install.sh --scope project` step only needs to run once per checkout
 
 | Flag                       | Default                       | Meaning                                                                |
 | -------------------------- | ----------------------------- | ---------------------------------------------------------------------- |
-| `--scope user\|project`    | `user`                        | User-level install (everywhere) vs project-level (this repo only).      |
+| `--scope user\|project`    | interactive prompt (default `user`) | User-level install (everywhere) vs project-level (this repo only). If omitted on a TTY, the installer asks; defaults to `user` non-interactively. |
 | `--local`                  | off                           | Shortcut for the bundled docker-compose router (`localhost:8082`, dev mode). |
 | `--base-url <url>`         | `https://router.weave.ai`     | Override the router endpoint. Use for self-hosted / custom port.        |
 | `--dev-mode`               | off                           | Router has `ROUTER_DEV_MODE=true`; skip the API key prompt entirely.    |
