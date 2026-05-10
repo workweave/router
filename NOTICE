@@ -1,0 +1,16 @@
+router
+Copyright 2026 Workweave, Inc.
+
+This product includes software developed by Workweave, Inc.
+(https://workweave.ai/).
+
+This product includes a routing strategy derived from the AvengersPro
+paper (arXiv:2508.12631, DAI 2025): a cluster-based router using K-means
+on text embeddings with α-blended cost-aware ranking.
+
+This product uses the Jina Embeddings v2 (base, code) model from
+Jina AI for prompt embedding (Apache License 2.0):
+https://huggingface.co/jinaai/jina-embeddings-v2-base-code
+
+This product uses ONNX Runtime via the hugot Go binding (Apache
+License 2.0) and tokenizers via daulet/tokenizers (Apache License 2.0).
