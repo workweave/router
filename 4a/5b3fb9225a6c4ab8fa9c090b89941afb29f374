@@ -1,0 +1,27 @@
+CONTRIBUTING.md
+  s_2ca6ef11e05ca0::t_e165bf7bd0aede 1-176
+LICENSE
+  s_2ca6ef11e05ca0::t_e165bf7bd0aede 1-200
+.env.example
+  s_2ca6ef11e05ca0::t_e165bf7bd0aede 1-150
+README.md
+  s_2ca6ef11e05ca0::t_e165bf7bd0aede 3-6,8-12,14,16,18-22,24-25,27,29-33,35-37,39-41,44-69,75-76,79,81-83,86-87,89-90,92-93,96,98,100-104,106-114,116,118-120,122-124,126,138-140,142-143,146,149-156,158,160,162-166,169-171,173,175-178,181-198,200-231,235-236,238,242-314,316,318-335,346-348,356,358,361-362,366-369,374-376,380-381,383-388,390-401,403-407
+NOTICE
+  s_2ca6ef11e05ca0::t_e165bf7bd0aede 1-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "4a5b3fb9225a6c4ab8fa9c090b89941afb29f374",
+  "prompts": {},
+  "sessions": {
+    "s_2ca6ef11e05ca0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c8290169-6c43-403c-9796-2c0aa557aec5",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
