@@ -19,11 +19,12 @@ const (
 	providerGoogle    = "google"
 )
 
-// UsageSink receives extracted token usage. Translators call RecordUsage
-// when they encounter usage data in already-parsed events, eliminating
-// the need for a separate parse pass.
+// UsageSink receives extracted token usage. Translators call RecordUsage /
+// RecordCacheUsage when they encounter usage data in already-parsed events,
+// eliminating the need for a separate parse pass.
 type UsageSink interface {
 	RecordUsage(inputTokens, outputTokens int)
+	RecordCacheUsage(cacheCreationTokens, cacheReadTokens int)
 }
 
 var (
@@ -40,8 +41,10 @@ type UsageExtractor struct {
 	inner    http.ResponseWriter
 	provider string
 
-	input  int
-	output int
+	input         int
+	output        int
+	cacheCreation int
+	cacheRead     int
 
 	leftover []byte
 }
@@ -93,6 +96,20 @@ func (u *UsageExtractor) RecordUsage(inputTokens, outputTokens int) {
 	}
 }
 
+// RecordCacheUsage sets cache token counts directly. Sibling to RecordUsage
+// for translators that already parsed cache usage (Anthropic
+// cache_creation_input_tokens / cache_read_input_tokens; OpenAI
+// prompt_tokens_details.cached_tokens — passed as cacheReadTokens with
+// cacheCreationTokens=0 since OpenAI has no creation concept).
+func (u *UsageExtractor) RecordCacheUsage(cacheCreationTokens, cacheReadTokens int) {
+	if cacheCreationTokens > 0 {
+		u.cacheCreation = cacheCreationTokens
+	}
+	if cacheReadTokens > 0 {
+		u.cacheRead = cacheReadTokens
+	}
+}
+
 // Tokens returns the extracted input and output token counts. Nil receiver
 // returns (0, 0) so callers can skip the extractor when OTel is disabled.
 func (u *UsageExtractor) Tokens() (input, output int) {
@@ -100,6 +117,16 @@ func (u *UsageExtractor) Tokens() (input, output int) {
 		return 0, 0
 	}
 	return u.input, u.output
+}
+
+// CacheTokens returns the extracted cache creation and cache read token
+// counts. Nil receiver returns (0, 0); zero values indicate the provider
+// does not emit cache tokens (Google) or the response had no cache hits.
+func (u *UsageExtractor) CacheTokens() (creation, read int) {
+	if u == nil {
+		return 0, 0
+	}
+	return u.cacheCreation, u.cacheRead
 }
 
 // scanBuffer splits buffered data on SSE event boundaries and extracts
@@ -137,19 +164,27 @@ func (u *UsageExtractor) extractFromSSEEvent(eventType []byte, data []byte) {
 	}
 }
 
-// message_start carries input_tokens; message_delta carries output_tokens.
+// message_start carries input_tokens + cache tokens; message_delta carries output_tokens.
 func (u *UsageExtractor) extractAnthropicSSE(eventType []byte, data []byte) {
 	if !bytes.Equal(eventType, []byte("message_start")) && !bytes.Equal(eventType, []byte("message_delta")) {
 		return
 	}
 
-	input, output, found := extractUsageGJSON(data, providerAnthropic)
+	input, output, cacheCreation, cacheRead, found := extractUsageGJSON(data, providerAnthropic)
 	if !found {
 		return
 	}
 
-	if bytes.Equal(eventType, []byte("message_start")) && input > 0 {
-		u.input = input
+	if bytes.Equal(eventType, []byte("message_start")) {
+		if input > 0 {
+			u.input = input
+		}
+		if cacheCreation > 0 {
+			u.cacheCreation = cacheCreation
+		}
+		if cacheRead > 0 {
+			u.cacheRead = cacheRead
+		}
 	}
 	if bytes.Equal(eventType, []byte("message_delta")) && output > 0 {
 		u.output = output
@@ -163,13 +198,19 @@ func (u *UsageExtractor) extractOpenAISSE(data []byte) {
 		return
 	}
 
-	input, output, found := extractUsageGJSON(trimmed, u.provider)
+	input, output, cacheCreation, cacheRead, found := extractUsageGJSON(trimmed, u.provider)
 	if !found {
 		return
 	}
 
 	u.input = input
 	u.output = output
+	if cacheCreation > 0 {
+		u.cacheCreation = cacheCreation
+	}
+	if cacheRead > 0 {
+		u.cacheRead = cacheRead
+	}
 }
 
 func (u *UsageExtractor) tryExtractFromJSON() {
@@ -177,7 +218,7 @@ func (u *UsageExtractor) tryExtractFromJSON() {
 		return
 	}
 
-	input, output, found := extractUsageGJSON(u.leftover, u.provider)
+	input, output, cacheCreation, cacheRead, found := extractUsageGJSON(u.leftover, u.provider)
 	if !found {
 		return
 	}
@@ -188,29 +229,40 @@ func (u *UsageExtractor) tryExtractFromJSON() {
 	if output > 0 {
 		u.output = output
 	}
+	if cacheCreation > 0 {
+		u.cacheCreation = cacheCreation
+	}
+	if cacheRead > 0 {
+		u.cacheRead = cacheRead
+	}
 }
 
 // extractUsageGJSON probes for token usage fields using gjson, avoiding
-// json.Unmarshal and map[string]any allocations entirely.
-func extractUsageGJSON(data []byte, provider string) (input, output int, found bool) {
+// json.Unmarshal and map[string]any allocations entirely. OpenAI has no
+// cache-creation concept; cacheRead maps to prompt_tokens_details.cached_tokens.
+// Google emits neither and returns zeros for both cache values.
+func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreation, cacheRead int, found bool) {
 	usage := gjson.GetBytes(data, "usage")
 	if !usage.Exists() && provider == providerAnthropic {
 		usage = gjson.GetBytes(data, "message.usage")
 	}
 	if !usage.Exists() {
-		return 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 
 	switch provider {
 	case providerAnthropic:
 		input = int(usage.Get("input_tokens").Int())
 		output = int(usage.Get("output_tokens").Int())
+		cacheCreation = int(usage.Get("cache_creation_input_tokens").Int())
+		cacheRead = int(usage.Get("cache_read_input_tokens").Int())
 	case providerOpenAI, providerGoogle:
 		input = int(usage.Get("prompt_tokens").Int())
 		output = int(usage.Get("completion_tokens").Int())
+		cacheRead = int(usage.Get("prompt_tokens_details.cached_tokens").Int())
 	default:
-		return 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 
-	return input, output, true
+	return input, output, cacheCreation, cacheRead, true
 }
