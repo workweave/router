@@ -62,6 +62,13 @@ type Service struct {
 	// telemetry is an optional repository for persisting per-request telemetry.
 	// Nil disables persistence (e.g. no DB in some test environments).
 	telemetry TelemetryRepository
+	// byokOnly disables the deployment-level credential fallback. When true,
+	// a provider is only eligible for a request if BYOK credentials or
+	// client-supplied (Bearer/x-api-key) credentials are present. Set on
+	// Weave-managed deployments via WithByokOnly so customer requests never
+	// silently consume the platform's API key budget; self-hosted
+	// deployments leave it false so operator-set env keys serve traffic.
+	byokOnly bool
 }
 
 // pinSessionTTL is the sliding TTL written into pinned_until on every
@@ -120,6 +127,15 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		hardPinModel:         hardPinModel,
 		telemetry:            telemetry,
 	}
+}
+
+// WithByokOnly enables BYOK-only credential resolution. When on, the proxy
+// service refuses to route a request to any provider for which the caller has
+// not supplied credentials (BYOK or client-supplied Bearer/x-api-key) — the
+// deployment-level env key is ignored even if registered.
+func (s *Service) WithByokOnly(byokOnly bool) *Service {
+	s.byokOnly = byokOnly
+	return s
 }
 
 // MetricsSummary returns aggregated cost/token totals for the given installation and time window.
@@ -699,13 +715,20 @@ func externalKeysFromContext(ctx context.Context) []*auth.ExternalAPIKey {
 // upstream call would 401 on.
 func (s *Service) enabledProvidersForRequest(ctx context.Context, headers http.Header) map[string]struct{} {
 	out := make(map[string]struct{}, len(s.providers))
-	for p := range s.providers {
-		out[p] = struct{}{}
+	// In BYOK-only mode the deployment-level env key never serves customer
+	// traffic, so a registered provider with no per-request creds must not
+	// be eligible — otherwise argmax happily picks it and the upstream call
+	// 401/402s with the platform's exhausted key. Without that mode the
+	// historical baseline stands: every registered provider is eligible.
+	if !s.byokOnly {
+		for p := range s.providers {
+			out[p] = struct{}{}
+		}
 	}
 	for _, k := range externalKeysFromContext(ctx) {
 		out[k.Provider] = struct{}{}
 	}
-	for _, p := range []string{providers.ProviderAnthropic, providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter} {
+	for _, p := range []string{providers.ProviderAnthropic, providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter, providers.ProviderFireworks} {
 		if _, already := out[p]; already {
 			continue
 		}
