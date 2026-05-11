@@ -14,9 +14,9 @@ import "testing"
 // arithmetic which silently uses higher-than-float64 precision.
 func TestFmtPriceRoundsAwayFloat64Artifacts(t *testing.T) {
 	cases := []struct {
-		name           string
-		inputUSDPer1M  float64
-		want           string
+		name          string
+		inputUSDPer1M float64
+		want          string
 	}{
 		// USD/1M values that, divided by 1000 at runtime, leak IEEE 754 noise.
 		{"qwen3-235b input", 0.071, "0.000071"},
