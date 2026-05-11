@@ -20,6 +20,7 @@ const (
 	ProviderOpenAI     = "openai"
 	ProviderGoogle     = "google"
 	ProviderOpenRouter = "openrouter"
+	ProviderFireworks  = "fireworks"
 )
 
 // HopByHopHeaders are stripped from upstream responses per RFC 7230.

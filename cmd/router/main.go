@@ -141,6 +141,12 @@ func main() {
 		logger.Info("OpenRouter provider enabled", "base_url", openRouterBaseURL)
 	}
 
+	if fireworksKey := config.GetOr("FIREWORKS_API_KEY", ""); fireworksKey != "" {
+		fireworksBaseURL := config.GetOr("FIREWORKS_BASE_URL", openaiCompatProvider.FireworksBaseURL)
+		providerMap[providers.ProviderFireworks] = openaiCompatProvider.NewClient(fireworksKey, fireworksBaseURL)
+		logger.Info("Fireworks provider enabled", "base_url", fireworksBaseURL)
+	}
+
 	if googleKey := config.GetOr("GOOGLE_PROVIDER_API_KEY", ""); googleKey != "" {
 		// Native Generative Language REST surface — required for multi-turn
 		// tool use against Gemini 3.x preview models, whose opaque
