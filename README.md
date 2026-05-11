@@ -1,4 +1,4 @@
-# router
+# Weave Router
 
 [![Go Version](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](go.mod)
 [![Tests](https://github.com/workweave/router/actions/workflows/test.yml/badge.svg)](https://github.com/workweave/router/actions/workflows/test.yml)
