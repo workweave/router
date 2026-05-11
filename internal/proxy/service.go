@@ -550,7 +550,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	proxyMs := time.Since(proxyStart).Milliseconds()
 
 	in, out := extractor.Tokens()
-	upstreamBuilder := otel.NewAttrBuilder(25).
+	cacheCreation, cacheRead := extractor.CacheTokens()
+	upstreamBuilder := otel.NewAttrBuilder(27).
 		String("request_id", requestID).
 		String("external_id", externalID).
 		String("router_user_id", auth.UserIDFrom(ctx)).
@@ -561,6 +562,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		String("client.app", clientID.ClientApp).
 		Int64("usage.input_tokens", int64(in)).
 		Int64("usage.output_tokens", int64(out)).
+		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
+		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
 		Float64("cost.requested_input_usd", float64(in)/1_000_000*reqPricing.InputUSDPer1M).
 		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
 		Float64("cost.actual_input_usd", float64(in)/1_000_000*actPricing.InputUSDPer1M).
@@ -982,7 +985,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	proxyMs := time.Since(proxyStart).Milliseconds()
 
 	in, out := extractor.Tokens()
-	openaiUpstreamBuilder := otel.NewAttrBuilder(25).
+	cacheCreation, cacheRead := extractor.CacheTokens()
+	openaiUpstreamBuilder := otel.NewAttrBuilder(27).
 		String("request_id", requestID).
 		String("external_id", externalID).
 		String("router_user_id", auth.UserIDFrom(ctx)).
@@ -993,6 +997,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		String("client.app", clientID.ClientApp).
 		Int64("usage.input_tokens", int64(in)).
 		Int64("usage.output_tokens", int64(out)).
+		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
+		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
 		Float64("cost.requested_input_usd", float64(in)/1_000_000*reqPricing.InputUSDPer1M).
 		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
 		Float64("cost.actual_input_usd", float64(in)/1_000_000*actPricing.InputUSDPer1M).

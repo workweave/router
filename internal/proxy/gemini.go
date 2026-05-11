@@ -150,7 +150,8 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	proxyMs := time.Since(proxyStart).Milliseconds()
 
 	in, out := extractor.Tokens()
-	geminiUpstreamBuilder := otel.NewAttrBuilder(20).
+	cacheCreation, cacheRead := extractor.CacheTokens()
+	geminiUpstreamBuilder := otel.NewAttrBuilder(22).
 		String("request_id", requestID).
 		String("external_id", externalID).
 		String("client.device_id", clientID.DeviceID).
@@ -160,6 +161,8 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		String("client.app", clientID.ClientApp).
 		Int64("usage.input_tokens", int64(in)).
 		Int64("usage.output_tokens", int64(out)).
+		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
+		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
 		Float64("cost.requested_input_usd", float64(in)/1_000_000*reqPricing.InputUSDPer1M).
 		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
 		Float64("cost.actual_input_usd", float64(in)/1_000_000*actPricing.InputUSDPer1M).

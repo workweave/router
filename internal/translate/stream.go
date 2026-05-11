@@ -116,6 +116,10 @@ func (t *SSETranslator) Finalize() error {
 				int(usage.Get("input_tokens").Int()),
 				int(usage.Get("output_tokens").Int()),
 			)
+			t.usageSink.RecordCacheUsage(
+				int(usage.Get("cache_creation_input_tokens").Int()),
+				int(usage.Get("cache_read_input_tokens").Int()),
+			)
 		}
 	}
 
@@ -195,6 +199,10 @@ func (t *SSETranslator) handleMessageStart(data []byte) error {
 		t.bw.WriteByte('}')
 		if t.usageSink != nil {
 			t.usageSink.RecordUsage(int(inputTokens), 0)
+			t.usageSink.RecordCacheUsage(
+				int(usageResult.Get("cache_creation_input_tokens").Int()),
+				int(usageResult.Get("cache_read_input_tokens").Int()),
+			)
 		}
 	}
 
@@ -453,6 +461,10 @@ func (t *AnthropicSSETranslator) Finalize() error {
 				int(usage.Get("prompt_tokens").Int()),
 				int(usage.Get("completion_tokens").Int()),
 			)
+			t.usageSink.RecordCacheUsage(
+				0,
+				int(usage.Get("prompt_tokens_details.cached_tokens").Int()),
+			)
 		}
 	}
 
@@ -540,11 +552,13 @@ func (t *AnthropicSSETranslator) extractAndForwardUsage(data []byte) {
 	}
 	prompt := usage.Get("prompt_tokens").Int()
 	completion := usage.Get("completion_tokens").Int()
+	cachedRead := usage.Get("prompt_tokens_details.cached_tokens").Int()
 	t.usageInputTokens = int(prompt)
 	t.usageOutputTokens = int(completion)
 	t.hasUsage = true
 	if t.usageSink != nil {
 		t.usageSink.RecordUsage(int(prompt), int(completion))
+		t.usageSink.RecordCacheUsage(0, int(cachedRead))
 	}
 }
 
