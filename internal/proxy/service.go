@@ -28,7 +28,6 @@ type Service struct {
 	emitter              *otel.Emitter
 	embedLastUserMessage bool
 	stickyDecisions      *expirable.LRU[string, router.Decision]
-	decisionLog          *DecisionLog
 	// semanticCache short-circuits non-streaming requests on a
 	// cosine-similarity hit against a stored response. Nil disables
 	// the cache entirely. Always nil-check before use.
@@ -95,7 +94,7 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 // NewService constructs the proxy service. pinStore may be nil when the
 // session-pin feature flag is off; the tiered lookup transparently
 // short-circuits past tiers 1–2 in that case.
-func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
+func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
 	var sticky *expirable.LRU[string, router.Decision]
 	if stickyDecisionTTL > 0 {
 		sticky = expirable.NewLRU[string, router.Decision](10000, nil, stickyDecisionTTL)
@@ -112,7 +111,6 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		emitter:              emitter,
 		embedLastUserMessage: embedLastUserMessage,
 		stickyDecisions:      sticky,
-		decisionLog:          decisionLog,
 		semanticCache:        semanticCache,
 		pinStore:             pinStore,
 		pinCache:             pinCache,
@@ -190,7 +188,7 @@ const semanticCacheMaxBodyBytes = 1 << 20
 
 // headersToSkipOnHit lists response headers the cache must NOT replay
 // on a hit. request-id ties to a specific upstream call and would
-// confuse downstream consumers (decisionLog, OTel correlation) if
+// confuse downstream consumers (telemetry rows, OTel correlation) if
 // reused. x-router-* are set fresh on the hit path so the client
 // always sees the current decision rather than a stale one.
 var headersToSkipOnHit = map[string]struct{}{
@@ -570,6 +568,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
 		Bool("routing.cross_format", crossFormat)
 	addTimingAttrs(ctx, upstreamBuilder)
+
+	// Routing observability — span attrs + telemetry-row fields share
+	// the same source data (decision.Metadata + Timing). buildObservation
+	// captures once; applySpanAttrs and the InsertTelemetryParams below
+	// both consume from the bundle so the span and DB row stay symmetric.
+	obs := buildObservationContext(ctx, decision)
+	obs.applySpanAttrs(upstreamBuilder)
+
 	otel.Record(ctx, otel.Span{
 		Name:  "router.upstream",
 		Start: proxyStart,
@@ -577,18 +583,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Attrs: upstreamBuilder.Build(),
 	})
 	otel.Flush(ctx)
-
-	if reqID := w.Header().Get("request-id"); reqID != "" {
-		s.decisionLog.Append(DecisionLogEntry{
-			RequestID:        reqID,
-			RequestedModel:   feats.Model,
-			DecisionModel:    decision.Model,
-			DecisionReason:   decision.Reason,
-			DecisionProvider: decision.Provider,
-			DeviceID:         clientID.DeviceID,
-			SessionID:        clientID.SessionID,
-		})
-	}
 
 	if installationID != uuid.Nil {
 		s.fireTelemetry(InsertTelemetryParams{
@@ -615,6 +609,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
 			CrossFormat:            crossFormat,
 			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
+			ClusterIDs:             obs.ClusterIDs,
+			CandidateModels:        obs.CandidateModels,
+			ChosenScore:            obs.ChosenScore,
+			ClusterRouterVersion:   obs.ClusterRouterVersion,
+			TTFTMs:                 obs.TTFTMs,
+			DeviceID:               clientID.DeviceID,
+			SessionID:              clientID.SessionID,
 		})
 	}
 
@@ -1002,6 +1003,13 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
 		Bool("routing.cross_format", crossFormat)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
+
+	// Routing observability — shared bundle keeps the OpenAI path in
+	// lockstep with ProxyMessages. See observation.go for the shape;
+	// W-1335 / W-1309 extend the bundle (not this call site).
+	openaiObs := buildObservationContext(ctx, decision)
+	openaiObs.applySpanAttrs(openaiUpstreamBuilder)
+
 	otel.Record(ctx, otel.Span{
 		Name:  "router.upstream",
 		Start: proxyStart,
@@ -1035,6 +1043,13 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
 			CrossFormat:            crossFormat,
 			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
+			ClusterIDs:             openaiObs.ClusterIDs,
+			CandidateModels:        openaiObs.CandidateModels,
+			ChosenScore:            openaiObs.ChosenScore,
+			ClusterRouterVersion:   openaiObs.ClusterRouterVersion,
+			TTFTMs:                 openaiObs.TTFTMs,
+			DeviceID:               clientID.DeviceID,
+			SessionID:              clientID.SessionID,
 		})
 	}
 

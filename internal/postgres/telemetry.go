@@ -54,6 +54,16 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		TotalLatencyMs:         p.TotalLatencyMs,
 		CrossFormat:            p.CrossFormat,
 		UpstreamStatusCode:     p.UpstreamStatusCode,
+		ClusterIds:             p.ClusterIDs,
+		CandidateModels:        p.CandidateModels,
+		ChosenScore:            p.ChosenScore,
+		AlphaBreakdown:         p.AlphaBreakdown,
+		ClusterRouterVersion:   stringPtrOrNil(p.ClusterRouterVersion),
+		TtftMs:                 p.TTFTMs,
+		CacheCreationTokens:    p.CacheCreationTokens,
+		CacheReadTokens:        p.CacheReadTokens,
+		DeviceID:               stringPtrOrNil(p.DeviceID),
+		SessionID:              stringPtrOrNil(p.SessionID),
 	})
 }
 

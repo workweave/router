@@ -88,6 +88,31 @@ func ParseClaudeCodeMetadata(raw string) ClaudeCodeMetadata {
 // shape would let a single API key flood the table with distinct strings).
 const MaxEmailLen = 254
 
+// MaxClientIdentifierLen bounds caller-controlled opaque identifiers
+// (device_id, session_id) before they reach storage or trace
+// attributes. Claude Code emits short UUID-shaped ids (~36 chars); 128
+// is generous overhead. Mirrors the MaxEmailLen flood-protection
+// pattern: an authenticated caller could otherwise spam high-cardinality
+// strings into router.model_router_request_telemetry and force
+// avoidable storage growth.
+const MaxClientIdentifierLen = 128
+
+// NormalizeClientIdentifier returns the input unchanged when it fits
+// inside MaxClientIdentifierLen, and the empty string otherwise.
+// Rejection (rather than truncation) keeps the shape honest — a
+// truncated identifier looks valid but no longer correlates, which is
+// worse than a missing one. Callers treat "" as "no signal" and skip
+// downstream persistence/correlation.
+//
+// As with NormalizeEmail, this is a flood-protection floor, not a
+// format check. Identifiers are opaque tokens; we don't parse them.
+func NormalizeClientIdentifier(s string) string {
+	if len(s) > MaxClientIdentifierLen {
+		return ""
+	}
+	return s
+}
+
 // NormalizeEmail trims whitespace, lower-cases, and structurally validates an
 // email so it matches the case-sensitive unique index on
 // (installation_id, email) without letting a caller-controlled input drive

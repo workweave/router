@@ -79,7 +79,6 @@ func newPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 		nil,   // emitter
 		false, // embedLastUserMessage
 		0,     // stickyDecisionTTL — disable legacy LRU for clarity
-		nil,   // decisionLog
 		nil,   // semanticCache
 		store,
 		false,                       // hardPinExplore
@@ -262,7 +261,6 @@ func TestService_HardPin_ExploreRoutesToHaikuWhenFlagOn(t *testing.T) {
 		false,
 		0,
 		nil,
-		nil,
 		store,
 		true,                        // hardPinExplore = on
 		providers.ProviderAnthropic, // hardPinProvider
@@ -326,7 +324,7 @@ func newOpenAIPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 			providers.ProviderAnthropic: &fakeProvider{},
 			providers.ProviderOpenAI:    &fakeProvider{},
 		},
-		nil, false, 0, nil, nil,
+		nil, false, 0, nil,
 		store,
 		false, providers.ProviderAnthropic, "claude-haiku-4-5",
 		nil,
@@ -426,7 +424,7 @@ func newOpenAIHardPinSvc(fr *fakeRouter, store *fakePinStore, hardPinExplore boo
 			providers.ProviderAnthropic: &fakeProvider{},
 			providers.ProviderOpenAI:    &fakeProvider{},
 		},
-		nil, false, 0, nil, nil,
+		nil, false, 0, nil,
 		store,
 		hardPinExplore,
 		providers.ProviderOpenAI,

@@ -45,6 +45,17 @@ type RoutingMetadata struct {
 	// the scorer sorts them ascending for log determinism, so callers
 	// that care about "closest centroid" should not assume order.
 	ClusterIDs []int
+	// CandidateModels is the eligible-model set the scorer's argmax ran
+	// over for this request. Captured so routing observations can record
+	// what was on the table at decision time, not just what was picked.
+	CandidateModels []string
+	// ChosenScore is the argmax score on the chosen model — the sum of
+	// rankings across the top-p clusters. Surfaced so downstream
+	// analytics can grade picks against margin-of-victory.
+	ChosenScore float32
+	// ClusterRouterVersion is the artifact version (e.g. "v0.27") that
+	// produced this decision. Empty for non-cluster routers.
+	ClusterRouterVersion string
 }
 
 type Router interface {

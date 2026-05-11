@@ -712,7 +712,17 @@ INSERT INTO router.model_router_request_telemetry (
     upstream_latency_ms,
     total_latency_ms,
     cross_format,
-    upstream_status_code
+    upstream_status_code,
+    cluster_ids,
+    candidate_models,
+    chosen_score,
+    alpha_breakdown,
+    cluster_router_version,
+    ttft_ms,
+    cache_creation_tokens,
+    cache_read_tokens,
+    device_id,
+    session_id
 ) VALUES (
     $1::uuid,
     $2::varchar,
@@ -736,7 +746,17 @@ INSERT INTO router.model_router_request_telemetry (
     $20::bigint,
     $21::bigint,
     $22::boolean,
-    $23::int
+    $23::int,
+    $24::int[],
+    $25::text[],
+    $26::double precision,
+    $27::jsonb,
+    $28::varchar,
+    $29::bigint,
+    $30::int,
+    $31::int,
+    $32::varchar,
+    $33::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -765,9 +785,23 @@ type InsertRequestTelemetryParams struct {
 	TotalLatencyMs         int64
 	CrossFormat            bool
 	UpstreamStatusCode     int32
+	ClusterIds             []int32
+	CandidateModels        []string
+	ChosenScore            *float64
+	AlphaBreakdown         []byte
+	ClusterRouterVersion   *string
+	TtftMs                 *int64
+	CacheCreationTokens    *int32
+	CacheReadTokens        *int32
+	DeviceID               *string
+	SessionID              *string
 }
 
-// Records a completed proxied request for the dashboard UI.
+// Records a completed proxied request for the dashboard UI and routing
+// observability. Routing-brain fields (cluster_ids, candidate_models,
+// chosen_score, alpha_breakdown, cluster_router_version, ttft_ms,
+// cache_*_tokens, device_id, session_id) are nullable; non-cluster
+// decisions and pinned-route turns leave them NULL.
 //
 //	INSERT INTO router.model_router_request_telemetry (
 //	    installation_id,
@@ -792,7 +826,17 @@ type InsertRequestTelemetryParams struct {
 //	    upstream_latency_ms,
 //	    total_latency_ms,
 //	    cross_format,
-//	    upstream_status_code
+//	    upstream_status_code,
+//	    cluster_ids,
+//	    candidate_models,
+//	    chosen_score,
+//	    alpha_breakdown,
+//	    cluster_router_version,
+//	    ttft_ms,
+//	    cache_creation_tokens,
+//	    cache_read_tokens,
+//	    device_id,
+//	    session_id
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::varchar,
@@ -816,7 +860,17 @@ type InsertRequestTelemetryParams struct {
 //	    $20::bigint,
 //	    $21::bigint,
 //	    $22::boolean,
-//	    $23::int
+//	    $23::int,
+//	    $24::int[],
+//	    $25::text[],
+//	    $26::double precision,
+//	    $27::jsonb,
+//	    $28::varchar,
+//	    $29::bigint,
+//	    $30::int,
+//	    $31::int,
+//	    $32::varchar,
+//	    $33::varchar
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -844,6 +898,16 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.TotalLatencyMs,
 		arg.CrossFormat,
 		arg.UpstreamStatusCode,
+		arg.ClusterIds,
+		arg.CandidateModels,
+		arg.ChosenScore,
+		arg.AlphaBreakdown,
+		arg.ClusterRouterVersion,
+		arg.TtftMs,
+		arg.CacheCreationTokens,
+		arg.CacheReadTokens,
+		arg.DeviceID,
+		arg.SessionID,
 	)
 	return err
 }
