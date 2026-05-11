@@ -643,6 +643,8 @@ func envVarForProvider(provider string) string {
 		return "OPENAI_PROVIDER_API_KEY"
 	case providers.ProviderOpenRouter:
 		return "OPENROUTER_API_KEY"
+	case providers.ProviderFireworks:
+		return "FIREWORKS_API_KEY"
 	case providers.ProviderGoogle:
 		return "GOOGLE_PROVIDER_API_KEY"
 	default:

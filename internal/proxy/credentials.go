@@ -52,7 +52,7 @@ func ExtractClientCredentials(provider string, headers http.Header) *Credentials
 		if key := strings.TrimSpace(headers.Get("x-api-key")); key != "" && !auth.HasAPIKeyPrefix(key) {
 			return &Credentials{APIKey: []byte(key), Source: "client"}
 		}
-	case providers.ProviderOpenAI, providers.ProviderGoogle:
+	case providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter, providers.ProviderFireworks:
 		authHeader := headers.Get("Authorization")
 		if raw, found := strings.CutPrefix(authHeader, "Bearer "); found {
 			key := strings.TrimSpace(raw)
