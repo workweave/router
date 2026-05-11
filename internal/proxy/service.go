@@ -488,7 +488,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			proxyWriter = extractor
 		}
 		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
-	case providers.ProviderOpenAI, providers.ProviderOpenRouter:
+	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks:
 		crossFormat = true
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
 		if emitErr != nil {
@@ -915,7 +915,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	var extractor *otel.UsageExtractor
 
 	switch decision.Provider {
-	case providers.ProviderOpenAI, providers.ProviderOpenRouter:
+	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks:
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
 		if emitErr != nil {
 			log.Error("Failed to emit OpenAI body", "err", emitErr)
