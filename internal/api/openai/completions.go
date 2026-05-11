@@ -90,7 +90,7 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 // Anthropic metadata.user_id body field, so only headers are inspected.
 func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
 	id := proxy.ClientIdentity{
-		SessionID: h.Get("X-Claude-Code-Session-Id"),
+		SessionID: proxy.NormalizeClientIdentifier(h.Get("X-Claude-Code-Session-Id")),
 		Email:     proxy.NormalizeEmail(h.Get("X-Weave-User-Email")),
 		UserAgent: h.Get("User-Agent"),
 		ClientApp: h.Get("X-App"),

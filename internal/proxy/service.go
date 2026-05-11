@@ -1034,6 +1034,46 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
 		Bool("routing.cross_format", crossFormat)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
+
+	// Routing observability attrs — keep the OpenAI path in lockstep
+	// with ProxyMessages so analytics over routing decisions doesn't
+	// have to special-case the inbound wire format. Pinned routes
+	// leave Metadata nil and the attrs are skipped.
+	var (
+		oaiClusterIDs           []int32
+		oaiCandidateModels      []string
+		oaiChosenScore          *float64
+		oaiClusterRouterVersion string
+		oaiTTFTMs               *int64
+	)
+	if md := decision.Metadata; md != nil {
+		if len(md.ClusterIDs) > 0 {
+			oaiClusterIDs = make([]int32, len(md.ClusterIDs))
+			for i, k := range md.ClusterIDs {
+				oaiClusterIDs[i] = int32(k)
+			}
+			openaiUpstreamBuilder.IntSlice("routing.cluster_ids", md.ClusterIDs)
+		}
+		if len(md.CandidateModels) > 0 {
+			oaiCandidateModels = append([]string(nil), md.CandidateModels...)
+		}
+		if md.ChosenScore != 0 {
+			score := float64(md.ChosenScore)
+			oaiChosenScore = &score
+			openaiUpstreamBuilder.Float64("routing.chosen_score", score)
+		}
+		oaiClusterRouterVersion = md.ClusterRouterVersion
+		if oaiClusterRouterVersion != "" {
+			openaiUpstreamBuilder.String("routing.cluster_version", oaiClusterRouterVersion)
+		}
+	}
+	if t := otel.TimingFrom(ctx); t != nil {
+		if ms := t.Ms(&t.UpstreamRequestNanos, &t.UpstreamFirstByteNanos); ms > 0 {
+			oaiTTFTMs = &ms
+			openaiUpstreamBuilder.Int64("latency.ttft_ms", ms)
+		}
+	}
+
 	otel.Record(ctx, otel.Span{
 		Name:  "router.upstream",
 		Start: proxyStart,
@@ -1067,6 +1107,13 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
 			CrossFormat:            crossFormat,
 			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
+			ClusterIDs:             oaiClusterIDs,
+			CandidateModels:        oaiCandidateModels,
+			ChosenScore:            oaiChosenScore,
+			ClusterRouterVersion:   oaiClusterRouterVersion,
+			TTFTMs:                 oaiTTFTMs,
+			DeviceID:               clientID.DeviceID,
+			SessionID:              clientID.SessionID,
 		})
 	}
 

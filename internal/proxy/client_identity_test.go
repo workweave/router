@@ -63,3 +63,29 @@ func TestNormalizeEmail_RejectsOverLength(t *testing.T) {
 	require.Greater(t, len(overCap), proxy.MaxEmailLen)
 	assert.Equal(t, "", proxy.NormalizeEmail(overCap))
 }
+
+func TestNormalizeClientIdentifier_PassesThroughShortValues(t *testing.T) {
+	// Typical Claude Code device_id / session_id shapes (UUIDs and
+	// short tokens) flow through unchanged. The cap is a flood-
+	// protection floor, not a format check.
+	assert.Equal(t, "dev-abc123", proxy.NormalizeClientIdentifier("dev-abc123"))
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000",
+		proxy.NormalizeClientIdentifier("550e8400-e29b-41d4-a716-446655440000"))
+	// Empty input flows through as empty — no signal stays no signal.
+	assert.Equal(t, "", proxy.NormalizeClientIdentifier(""))
+}
+
+func TestNormalizeClientIdentifier_RejectsOverLength(t *testing.T) {
+	// Right at the cap — accepted.
+	atCap := strings.Repeat("a", proxy.MaxClientIdentifierLen)
+	require.Len(t, atCap, proxy.MaxClientIdentifierLen)
+	assert.Equal(t, atCap, proxy.NormalizeClientIdentifier(atCap))
+
+	// One byte over the cap — rejected (empty string). Without this an
+	// authenticated caller could pad device_id/session_id to arbitrary
+	// length and inflate router.model_router_request_telemetry storage
+	// per request.
+	overCap := strings.Repeat("a", proxy.MaxClientIdentifierLen+1)
+	require.Greater(t, len(overCap), proxy.MaxClientIdentifierLen)
+	assert.Equal(t, "", proxy.NormalizeClientIdentifier(overCap))
+}

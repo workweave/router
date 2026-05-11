@@ -131,9 +131,9 @@ func stashClientIdentity(ctx context.Context, h http.Header, body []byte) contex
 		email = proxy.NormalizeEmail(h.Get("X-Weave-User-Email"))
 	}
 	id := proxy.ClientIdentity{
-		DeviceID:  meta.DeviceID,
-		AccountID: meta.AccountID,
-		SessionID: sessionID,
+		DeviceID:  proxy.NormalizeClientIdentifier(meta.DeviceID),
+		AccountID: proxy.NormalizeClientIdentifier(meta.AccountID),
+		SessionID: proxy.NormalizeClientIdentifier(sessionID),
 		Email:     email,
 		UserAgent: h.Get("User-Agent"),
 		ClientApp: h.Get("X-App"),
