@@ -39,6 +39,7 @@ The router uses three concentric layers. Imports must flow inward only.
 |  |  internal/api/admin       (presentation: /health, /validate)|  |
 |  |  internal/api/anthropic   (/v1/messages, passthrough)       |  |
 |  |  internal/api/openai      (/v1/chat/completions)            |  |
+|  |  internal/api/gemini      (/v1beta/models/:modelAction)     |  |
 |  |  internal/server          (route registration)              |  |
 |  |  internal/server/middleware (auth, timeout, eval overrides)  |  |
 |  |  internal/postgres        (adapter: SQLC over pgx)          |  |
@@ -143,7 +144,8 @@ inner-ring package and implement it in an adapter subpackage instead.
 4. **Pick (or create) the right `internal/api/<group>/` subpackage.**
    Operational endpoints live in `internal/api/admin/`; the Anthropic
    Messages surface lives in `internal/api/anthropic/`; the OpenAI Chat
-   Completions surface lives in `internal/api/openai/`. New surfaces get
+   Completions surface lives in `internal/api/openai/`; the Gemini
+   native surface lives in `internal/api/gemini/`. New surfaces get
    their own subpackage.
 5. **Use `observability.FromGin(c)` for the request-scoped logger.** If you
    need the authed installation, call `middleware.InstallationFrom(c)`

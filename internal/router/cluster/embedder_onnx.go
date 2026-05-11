@@ -80,7 +80,7 @@ func NewEmbedder() (*onnxEmbedder, error) {
 
 	info, err := os.Stat(modelPath)
 	if err != nil {
-		return nil, fmt.Errorf("cluster: stat model.onnx at %s: %w (run scripts/download_from_hf.py or set ROUTER_ONNX_ASSETS_DIR)", modelPath, err)
+		return nil, fmt.Errorf("cluster: stat model.onnx at %s: %w (set ROUTER_ONNX_ASSETS_DIR to a directory containing model.onnx and tokenizer.json)", modelPath, err)
 	}
 	if info.Size() < minModelSizeBytes {
 		return nil, fmt.Errorf("cluster: model.onnx at %s is %d bytes (< %d); likely a placeholder or interrupted download", modelPath, info.Size(), minModelSizeBytes)
