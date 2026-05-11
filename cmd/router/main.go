@@ -117,40 +117,72 @@ func main() {
 
 	providerMap := make(map[string]providers.Client)
 
-	// Anthropic is always registered. With ANTHROPIC_API_KEY the router uses
-	// its own key; without it, the client's auth headers (OAuth / x-api-key)
-	// are passed through to api.anthropic.com directly.
-	anthropicKey := config.GetOr("ANTHROPIC_API_KEY", "")
+	// In managed mode every provider is registered unconditionally with no
+	// deployment-level API key. The proxy service is also flipped into
+	// BYOK-only mode below, so a request without BYOK or client-supplied
+	// credentials for the chosen provider 400s at the scorer rather than
+	// silently spending the platform's API budget on customer traffic.
+	// Self-hosted mode keeps the historical per-env-key gating: an operator
+	// who sets ANTHROPIC_API_KEY/etc. on their own deployment expects those
+	// keys to serve traffic without per-installation BYOK plumbing.
+	byokOnly := deploymentMode == server.DeploymentModeManaged
+
+	// Anthropic is always registered. With ANTHROPIC_API_KEY (selfhosted only)
+	// the router uses its own key; otherwise the client's auth headers
+	// (OAuth / x-api-key) are passed through to api.anthropic.com directly.
+	anthropicKey := ""
+	if !byokOnly {
+		anthropicKey = config.GetOr("ANTHROPIC_API_KEY", "")
+	}
 	providerMap[providers.ProviderAnthropic] = anthropic.NewClient(anthropicKey, anthropic.DefaultBaseURL)
-	if anthropicKey != "" {
+	switch {
+	case byokOnly:
+		logger.Info("Anthropic provider enabled (BYOK only)", "base_url", anthropic.DefaultBaseURL)
+	case anthropicKey != "":
 		logger.Info("Anthropic provider enabled (router key)", "base_url", anthropic.DefaultBaseURL)
-	} else {
+	default:
 		logger.Info("Anthropic provider enabled (client auth passthrough)", "base_url", anthropic.DefaultBaseURL)
 	}
 
-	if openaiKey := config.GetOr("OPENAI_PROVIDER_API_KEY", ""); openaiKey != "" {
+	if byokOnly {
+		openaiBaseURL := config.GetOr("OPENAI_PROVIDER_BASE_URL", openaiProvider.DefaultBaseURL)
+		providerMap[providers.ProviderOpenAI] = openaiProvider.NewClient("", openaiBaseURL)
+		logger.Info("OpenAI provider enabled (BYOK only)", "base_url", openaiBaseURL)
+	} else if openaiKey := config.GetOr("OPENAI_PROVIDER_API_KEY", ""); openaiKey != "" {
 		openaiBaseURL := config.GetOr("OPENAI_PROVIDER_BASE_URL", openaiProvider.DefaultBaseURL)
 		providerMap[providers.ProviderOpenAI] = openaiProvider.NewClient(openaiKey, openaiBaseURL)
 		logger.Info("OpenAI provider enabled", "base_url", openaiBaseURL)
 	}
 
-	if openRouterKey := config.GetOr("OPENROUTER_API_KEY", ""); openRouterKey != "" {
+	if byokOnly {
+		openRouterBaseURL := config.GetOr("OPENROUTER_BASE_URL", openaiCompatProvider.DefaultBaseURL)
+		providerMap[providers.ProviderOpenRouter] = openaiCompatProvider.NewClient("", openRouterBaseURL)
+		logger.Info("OpenRouter provider enabled (BYOK only)", "base_url", openRouterBaseURL)
+	} else if openRouterKey := config.GetOr("OPENROUTER_API_KEY", ""); openRouterKey != "" {
 		openRouterBaseURL := config.GetOr("OPENROUTER_BASE_URL", openaiCompatProvider.DefaultBaseURL)
 		providerMap[providers.ProviderOpenRouter] = openaiCompatProvider.NewClient(openRouterKey, openRouterBaseURL)
 		logger.Info("OpenRouter provider enabled", "base_url", openRouterBaseURL)
 	}
 
-	if fireworksKey := config.GetOr("FIREWORKS_API_KEY", ""); fireworksKey != "" {
+	if byokOnly {
+		fireworksBaseURL := config.GetOr("FIREWORKS_BASE_URL", openaiCompatProvider.FireworksBaseURL)
+		providerMap[providers.ProviderFireworks] = openaiCompatProvider.NewClient("", fireworksBaseURL)
+		logger.Info("Fireworks provider enabled (BYOK only)", "base_url", fireworksBaseURL)
+	} else if fireworksKey := config.GetOr("FIREWORKS_API_KEY", ""); fireworksKey != "" {
 		fireworksBaseURL := config.GetOr("FIREWORKS_BASE_URL", openaiCompatProvider.FireworksBaseURL)
 		providerMap[providers.ProviderFireworks] = openaiCompatProvider.NewClient(fireworksKey, fireworksBaseURL)
 		logger.Info("Fireworks provider enabled", "base_url", fireworksBaseURL)
 	}
 
-	if googleKey := config.GetOr("GOOGLE_PROVIDER_API_KEY", ""); googleKey != "" {
+	if byokOnly {
 		// Native Generative Language REST surface — required for multi-turn
 		// tool use against Gemini 3.x preview models, whose opaque
 		// thought_signature field is not exposed by the OpenAI-compat
 		// surface. See router/internal/providers/google/native_client.go.
+		googleBaseURL := config.GetOr("GOOGLE_PROVIDER_BASE_URL", googleProvider.NativeBaseURL)
+		providerMap[providers.ProviderGoogle] = googleProvider.NewNativeClient("", googleBaseURL)
+		logger.Info("Google (Gemini) native provider enabled (BYOK only)", "base_url", googleBaseURL)
+	} else if googleKey := config.GetOr("GOOGLE_PROVIDER_API_KEY", ""); googleKey != "" {
 		googleBaseURL := config.GetOr("GOOGLE_PROVIDER_BASE_URL", googleProvider.NativeBaseURL)
 		providerMap[providers.ProviderGoogle] = googleProvider.NewNativeClient(googleKey, googleBaseURL)
 		logger.Info("Google (Gemini) native provider enabled", "base_url", googleBaseURL)
@@ -237,7 +269,7 @@ func main() {
 	}
 	logger.Info("Hard-pin model resolved", "provider", hardPinProvider, "model", hardPinModel)
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry)
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).WithByokOnly(byokOnly)
 
 	engine := gin.New()
 	engine.UnescapePathValues = true

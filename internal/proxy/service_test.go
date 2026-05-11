@@ -390,3 +390,66 @@ func TestService_ProxyOpenAIChatCompletion_NativeOpenRouter(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"chat.completion"`,
 		"OpenRouter response is already OpenAI-format and must pass through verbatim")
 }
+
+// TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer asserts the
+// managed-deployment guard: when WithByokOnly(true) is set, a registered
+// provider must NOT appear in req.EnabledProviders unless the caller
+// supplied BYOK credentials or a client-supplied Bearer/x-api-key for that
+// provider. Without this guard, the cluster scorer happily picks
+// e.g. OpenRouter for an installation with no OpenRouter key and the
+// upstream call 402s on the platform's exhausted deployment key —
+// exactly the regression this flag fixes.
+func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+	providerMap := map[string]providers.Client{
+		providers.ProviderAnthropic:  &fakeProvider{},
+		providers.ProviderOpenRouter: &fakeProvider{},
+	}
+
+	t.Run("byok-off keeps every registered provider eligible (selfhost baseline)", func(t *testing.T) {
+		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+
+		rec := httptest.NewRecorder()
+		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+
+		require.NotNil(t, fr.capturedReq)
+		assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic)
+		assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderOpenRouter,
+			"selfhost default: registered providers are eligible without per-request BYOK")
+	})
+
+	t.Run("byok-on with no creds yields empty eligible set", func(t *testing.T) {
+		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+			WithByokOnly(true)
+
+		rec := httptest.NewRecorder()
+		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+
+		require.NotNil(t, fr.capturedReq)
+		assert.Empty(t, fr.capturedReq.EnabledProviders,
+			"managed/BYOK-only: a registered provider must not be eligible without BYOK or client-supplied creds")
+	})
+
+	t.Run("byok-on with client-supplied Bearer enables only that provider", func(t *testing.T) {
+		// Anthropic decision so the proxy completes; this subtest only asserts
+		// on req.EnabledProviders captured at Route() time.
+		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+			WithByokOnly(true)
+
+		rec := httptest.NewRecorder()
+		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		httpReq.Header.Set("Authorization", "Bearer sk-or-v1-customer-key")
+		_ = svc.ProxyMessages(context.Background(), body, rec, httpReq)
+
+		require.NotNil(t, fr.capturedReq)
+		assert.NotContains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic,
+			"managed/BYOK-only: Anthropic must not be eligible without anthropic-specific creds")
+		assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderOpenRouter,
+			"managed/BYOK-only: a client-supplied Bearer for OpenRouter must make it eligible")
+	})
+}
