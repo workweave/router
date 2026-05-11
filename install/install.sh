@@ -152,6 +152,7 @@ if ! command -v claude >/dev/null 2>&1; then
   warn "Continuing — settings.json will be written and will take effect once Claude Code is installed."
 fi
 
+script_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)"
 
 # Resolve the base directory. User scope always uses $HOME. Project scope uses
 # --dir if given, otherwise the CWD's git root. --dir alone (no --scope) is a
@@ -423,13 +424,13 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
       .requestId as $req_id |
       ($decisions[$req_id] // null) as $requested_raw |
       .message as $m |
-      ($m.model // "" | sub("\[[^]]*\]$"; "") | sub("-[0-9]{8}$"; "")) as $rm |
+      ($m.model // "" | sub("\\[[^]]*\\]$"; "") | sub("-[0-9]{8}$"; "")) as $rm |
       # Emit one number per assistant turn so awk’s "last" tracks the
       # actually-most-recent turn, not the last *rerouted* turn.
       # Non-rerouted / unmeasurable turns emit 0.
       if $requested_raw == null then 0
       else
-        ($requested_raw | sub("\[[^]]*\]$"; "") | sub("-[0-9]{8}$"; "")) as $requested |
+        ($requested_raw | sub("\\[[^]]*\\]$"; "") | sub("-[0-9]{8}$"; "")) as $requested |
         if $requested == $rm then 0
         else
           {
