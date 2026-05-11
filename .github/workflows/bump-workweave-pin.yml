@@ -44,6 +44,7 @@ jobs:
           path: router
           sparse-checkout: |
             install
+            internal/observability/otel
           sparse-checkout-cone-mode: true
 
       - name: Checkout WorkWeave
@@ -60,7 +61,7 @@ jobs:
           git config user.name "workweave-bot"
           git config user.email "bot@workweave.ai"
 
-      - name: Bump router gitlink and sync install files
+      - name: Bump router gitlink, sync install files and pricing
         id: bump
         working-directory: WorkWeave
         env:
@@ -83,6 +84,12 @@ jobs:
             cp ../router/install/install.sh backend/internal/app/syncrouterinstall/install_template.sh
             git add backend/internal/app/syncrouterinstall/install_template.sh
           fi
+
+          # Regenerate eval/pricing.py from the updated pricing.go so the two
+          # files never drift. Router is already sparse-checked-out above.
+          python3 scripts/sync_router_pricing.py \
+            --pricing-go ../router/internal/observability/otel/pricing.go
+          git add router-internal/eval/pricing.py
 
           git commit \
             -m "Bump router pin to ${SHORT_SHA}" \

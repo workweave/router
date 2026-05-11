@@ -67,23 +67,19 @@ var pricingTable = map[string]Pricing{
 	"gemini-2.0-flash":      {InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40},
 	"gemini-2.0-flash-lite": {InputUSDPer1M: 0.075, OutputUSDPer1M: 0.30},
 
-	// OpenRouter — DeepSeek (estimates based on OpenRouter pricing; verify against openrouter.ai/models)
-	"deepseek/deepseek-v4-flash": {InputUSDPer1M: 0.27, OutputUSDPer1M: 1.10},
-	"deepseek/deepseek-v4-pro":   {InputUSDPer1M: 0.55, OutputUSDPer1M: 2.19},
+	// OpenRouter OSS pool: Qwen3 R2-Router clone candidates
+	"qwen/qwen3-235b-a22b-2507":        {InputUSDPer1M: 0.071, OutputUSDPer1M: 0.463},
+	"qwen/qwen3-30b-a3b-instruct-2507": {InputUSDPer1M: 0.080, OutputUSDPer1M: 0.330},
+	"qwen/qwen3-coder-next":            {InputUSDPer1M: 0.070, OutputUSDPer1M: 0.300},
+	"qwen/qwen3-next-80b-a3b-instruct": {InputUSDPer1M: 0.090, OutputUSDPer1M: 1.100},
 
-	// OpenRouter — Qwen3 (estimates)
-	"qwen/qwen3-235b-a22b-2507":        {InputUSDPer1M: 0.40, OutputUSDPer1M: 1.20},
-	"qwen/qwen3-30b-a3b-instruct-2507": {InputUSDPer1M: 0.10, OutputUSDPer1M: 0.30},
-	"qwen/qwen3-coder-next":            {InputUSDPer1M: 0.30, OutputUSDPer1M: 1.20},
-	"qwen/qwen3-next-80b-a3b-instruct": {InputUSDPer1M: 0.20, OutputUSDPer1M: 0.60},
-	"qwen/qwen3.5-flash-02-23":         {InputUSDPer1M: 0.10, OutputUSDPer1M: 0.30},
-	"qwen/qwen3-coder":                 {InputUSDPer1M: 0.30, OutputUSDPer1M: 1.20},
-
-	// OpenRouter — Kimi (estimates)
-	"moonshotai/kimi-k2.5": {InputUSDPer1M: 0.15, OutputUSDPer1M: 2.00},
-
-	// OpenRouter — Mistral (estimates)
-	"mistralai/mistral-small-2603": {InputUSDPer1M: 0.10, OutputUSDPer1M: 0.30},
+	// OpenRouter OSS pool: v0.25 expansion
+	"qwen/qwen3.5-flash-02-23":     {InputUSDPer1M: 0.065, OutputUSDPer1M: 0.260},
+	"qwen/qwen3-coder":             {InputUSDPer1M: 0.220, OutputUSDPer1M: 1.800},
+	"deepseek/deepseek-v4-flash":   {InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280},
+	"deepseek/deepseek-v4-pro":     {InputUSDPer1M: 0.435, OutputUSDPer1M: 0.870},
+	"moonshotai/kimi-k2.5":         {InputUSDPer1M: 0.440, OutputUSDPer1M: 2.000},
+	"mistralai/mistral-small-2603": {InputUSDPer1M: 0.150, OutputUSDPer1M: 0.600},
 }
 
 // Lookup returns pricing for the given model. If the exact name is not found,
