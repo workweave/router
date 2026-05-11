@@ -66,6 +66,24 @@ var pricingTable = map[string]Pricing{
 	"gemini-2.5-flash-lite": {InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40},
 	"gemini-2.0-flash":      {InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40},
 	"gemini-2.0-flash-lite": {InputUSDPer1M: 0.075, OutputUSDPer1M: 0.30},
+
+	// OpenRouter — DeepSeek (estimates based on OpenRouter pricing; verify against openrouter.ai/models)
+	"deepseek/deepseek-v4-flash": {InputUSDPer1M: 0.27, OutputUSDPer1M: 1.10},
+	"deepseek/deepseek-v4-pro":   {InputUSDPer1M: 0.55, OutputUSDPer1M: 2.19},
+
+	// OpenRouter — Qwen3 (estimates)
+	"qwen/qwen3-235b-a22b-2507":        {InputUSDPer1M: 0.40, OutputUSDPer1M: 1.20},
+	"qwen/qwen3-30b-a3b-instruct-2507": {InputUSDPer1M: 0.10, OutputUSDPer1M: 0.30},
+	"qwen/qwen3-coder-next":            {InputUSDPer1M: 0.30, OutputUSDPer1M: 1.20},
+	"qwen/qwen3-next-80b-a3b-instruct": {InputUSDPer1M: 0.20, OutputUSDPer1M: 0.60},
+	"qwen/qwen3.5-flash-02-23":         {InputUSDPer1M: 0.10, OutputUSDPer1M: 0.30},
+	"qwen/qwen3-coder":                 {InputUSDPer1M: 0.30, OutputUSDPer1M: 1.20},
+
+	// OpenRouter — Kimi (estimates)
+	"moonshotai/kimi-k2.5": {InputUSDPer1M: 0.15, OutputUSDPer1M: 2.00},
+
+	// OpenRouter — Mistral (estimates)
+	"mistralai/mistral-small-2603": {InputUSDPer1M: 0.10, OutputUSDPer1M: 0.30},
 }
 
 // Lookup returns pricing for the given model. If the exact name is not found,
