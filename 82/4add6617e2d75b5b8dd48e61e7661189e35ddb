@@ -1,0 +1,30 @@
+.github/workflows/bump-workweave-pin.yml
+  s_f390d664e577e2::t_ba0910135059ab 8-13,40-48,63,77,79,82-86
+  s_f390d664e577e2::t_f8e8c804dd84bb 78,80-81
+install/cc-statusline.sh
+  s_f390d664e577e2::t_b6c6c91e185f86 45-83,86-124
+install/install.sh
+  s_f390d664e577e2::t_9c324355e61a20 250-425,428-431,433-453,456-458,460-461,463-486,488-489,491,495
+  s_f390d664e577e2::t_43e2b266be9cc4 426-427,432,454-455,459,462,487,490,493
+cmd/genprices/main.go
+  s_f390d664e577e2::t_91e2d936cd4ac7 1-3,22-29,31-37,39,41-42,44,46-48,50
+  s_f390d664e577e2::t_8151cad3a1f6ff 92,96
+internal/observability/otel/pricing.go
+  s_f390d664e577e2::t_dae6f8c83391fb 69-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "824add6617e2d75b5b8dd48e61e7661189e35ddb",
+  "prompts": {},
+  "sessions": {
+    "s_f390d664e577e2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "910bccc7-e07f-4705-ba8e-bb431e50d0d1",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

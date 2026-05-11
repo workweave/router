@@ -1,0 +1,38 @@
+frontend/src/components/DashboardPageFilters/DashboardPageFilters.tsx
+  s_b19420d3dd2686::t_615ebdca290975 35,37-39
+internal/auth/admin.go
+  s_b19420d3dd2686::t_3429c35f4e4e23 38-52
+  s_b19420d3dd2686::t_b7121640d4c990 116-118,129-155
+  s_b19420d3dd2686::t_98ff3a96e286de 14-15
+  s_b19420d3dd2686::t_55e8f1ec646fe8 97-104
+internal/api/admin/auth.go
+  s_b19420d3dd2686::t_8f08daff574398 6
+  s_b19420d3dd2686::t_50d512ddee3813 47-56
+  s_b19420d3dd2686::t_4559a61dcba0e7 108-117,124,129
+Dockerfile
+  s_b19420d3dd2686::t_c353776e77ec37 33-35
+  s_b19420d3dd2686::t_9a0c493f4610c5 131
+frontend/next.config.ts
+  s_b19420d3dd2686::t_8a78d8ae90bf36 38-41
+.dockerignore
+  s_b19420d3dd2686::t_2d21a4bffab697 1-32
+internal/auth/service.go
+  s_b19420d3dd2686::t_a19d29233f0c3d 7,11-12
+  s_b19420d3dd2686::t_3951535fa7ce0a 32-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "5dcc82320fe322448c9cf2c0c2192e16cd26a9b6",
+  "prompts": {},
+  "sessions": {
+    "s_b19420d3dd2686": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "24be8415-a425-4b0d-916e-5c4cbe1ca9f9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
