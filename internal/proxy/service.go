@@ -419,9 +419,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(25).
+		Attrs: otel.NewAttrBuilder(26).
 			String("request_id", requestID).
 			String("external_id", externalID).
+			String("router_user_id", auth.UserIDFrom(ctx)).
 			String("client.device_id", clientID.DeviceID).
 			String("client.account_id", clientID.AccountID).
 			String("client.session_id", clientID.SessionID).
@@ -549,9 +550,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	proxyMs := time.Since(proxyStart).Milliseconds()
 
 	in, out := extractor.Tokens()
-	upstreamBuilder := otel.NewAttrBuilder(24).
+	upstreamBuilder := otel.NewAttrBuilder(25).
 		String("request_id", requestID).
 		String("external_id", externalID).
+		String("router_user_id", auth.UserIDFrom(ctx)).
 		String("client.device_id", clientID.DeviceID).
 		String("client.account_id", clientID.AccountID).
 		String("client.session_id", clientID.SessionID).
@@ -862,9 +864,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(23).
+		Attrs: otel.NewAttrBuilder(24).
 			String("request_id", requestID).
 			String("external_id", externalID).
+			String("router_user_id", auth.UserIDFrom(ctx)).
 			String("client.device_id", clientID.DeviceID).
 			String("client.account_id", clientID.AccountID).
 			String("client.session_id", clientID.SessionID).
@@ -979,9 +982,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	proxyMs := time.Since(proxyStart).Milliseconds()
 
 	in, out := extractor.Tokens()
-	openaiUpstreamBuilder := otel.NewAttrBuilder(24).
+	openaiUpstreamBuilder := otel.NewAttrBuilder(25).
 		String("request_id", requestID).
 		String("external_id", externalID).
+		String("router_user_id", auth.UserIDFrom(ctx)).
 		String("client.device_id", clientID.DeviceID).
 		String("client.account_id", clientID.AccountID).
 		String("client.session_id", clientID.SessionID).
