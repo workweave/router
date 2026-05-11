@@ -19,10 +19,14 @@ import (
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/providers/httputil"
+	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 )
 
-const DefaultBaseURL = "https://openrouter.ai/api/v1"
+const (
+	DefaultBaseURL   = "https://openrouter.ai/api/v1"
+	FireworksBaseURL = "https://api.fireworks.ai/inference/v1"
+)
 
 type Client struct {
 	apiKey  string
@@ -42,13 +46,25 @@ func NewClient(apiKey, baseURL string) *Client {
 	}
 }
 
+// setAuth applies authentication to the upstream request. Precedence:
+//  1. Per-request BYOK credentials in ctx (proxy layer attaches these for
+//     installations that bring their own key).
+//  2. The router's deployment-level API key, when configured.
+func (c *Client) setAuth(ctx context.Context, upstream *http.Request) {
+	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
+		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
+		return
+	}
+	upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
+}
+
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(prep.Body))
 	if err != nil {
 		return fmt.Errorf("build upstream request: %w", err)
 	}
 	upstream.Header.Set("Content-Type", "application/json")
-	upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
+	c.setAuth(ctx, upstream)
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
@@ -88,7 +104,7 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		upstream.Header.Set("Content-Type", ct)
 	}
-	upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
+	c.setAuth(ctx, upstream)
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
