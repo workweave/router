@@ -569,43 +569,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Bool("routing.cross_format", crossFormat)
 	addTimingAttrs(ctx, upstreamBuilder)
 
-	// Routing observability attrs — surfaced for cluster-routed
-	// requests so trace UIs see the same picture the DB row carries.
-	// Pinned routes leave Metadata nil and the attrs are skipped.
-	var (
-		clusterIDs           []int32
-		candidateModels      []string
-		chosenScore          *float64
-		clusterRouterVersion string
-		ttftMs               *int64
-	)
-	if md := decision.Metadata; md != nil {
-		if len(md.ClusterIDs) > 0 {
-			clusterIDs = make([]int32, len(md.ClusterIDs))
-			for i, k := range md.ClusterIDs {
-				clusterIDs[i] = int32(k)
-			}
-			upstreamBuilder.IntSlice("routing.cluster_ids", md.ClusterIDs)
-		}
-		if len(md.CandidateModels) > 0 {
-			candidateModels = append([]string(nil), md.CandidateModels...)
-		}
-		if md.ChosenScore != 0 {
-			score := float64(md.ChosenScore)
-			chosenScore = &score
-			upstreamBuilder.Float64("routing.chosen_score", score)
-		}
-		clusterRouterVersion = md.ClusterRouterVersion
-		if clusterRouterVersion != "" {
-			upstreamBuilder.String("routing.cluster_version", clusterRouterVersion)
-		}
-	}
-	if t := otel.TimingFrom(ctx); t != nil {
-		if ms := t.Ms(&t.UpstreamRequestNanos, &t.UpstreamFirstByteNanos); ms > 0 {
-			ttftMs = &ms
-			upstreamBuilder.Int64("latency.ttft_ms", ms)
-		}
-	}
+	// Routing observability — span attrs + telemetry-row fields share
+	// the same source data (decision.Metadata + Timing). buildObservation
+	// captures once; applySpanAttrs and the InsertTelemetryParams below
+	// both consume from the bundle so the span and DB row stay symmetric.
+	obs := buildObservationContext(ctx, decision)
+	obs.applySpanAttrs(upstreamBuilder)
 
 	otel.Record(ctx, otel.Span{
 		Name:  "router.upstream",
@@ -640,11 +609,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
 			CrossFormat:            crossFormat,
 			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
-			ClusterIDs:             clusterIDs,
-			CandidateModels:        candidateModels,
-			ChosenScore:            chosenScore,
-			ClusterRouterVersion:   clusterRouterVersion,
-			TTFTMs:                 ttftMs,
+			ClusterIDs:             obs.ClusterIDs,
+			CandidateModels:        obs.CandidateModels,
+			ChosenScore:            obs.ChosenScore,
+			ClusterRouterVersion:   obs.ClusterRouterVersion,
+			TTFTMs:                 obs.TTFTMs,
 			DeviceID:               clientID.DeviceID,
 			SessionID:              clientID.SessionID,
 		})
@@ -1035,44 +1004,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Bool("routing.cross_format", crossFormat)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
 
-	// Routing observability attrs — keep the OpenAI path in lockstep
-	// with ProxyMessages so analytics over routing decisions doesn't
-	// have to special-case the inbound wire format. Pinned routes
-	// leave Metadata nil and the attrs are skipped.
-	var (
-		oaiClusterIDs           []int32
-		oaiCandidateModels      []string
-		oaiChosenScore          *float64
-		oaiClusterRouterVersion string
-		oaiTTFTMs               *int64
-	)
-	if md := decision.Metadata; md != nil {
-		if len(md.ClusterIDs) > 0 {
-			oaiClusterIDs = make([]int32, len(md.ClusterIDs))
-			for i, k := range md.ClusterIDs {
-				oaiClusterIDs[i] = int32(k)
-			}
-			openaiUpstreamBuilder.IntSlice("routing.cluster_ids", md.ClusterIDs)
-		}
-		if len(md.CandidateModels) > 0 {
-			oaiCandidateModels = append([]string(nil), md.CandidateModels...)
-		}
-		if md.ChosenScore != 0 {
-			score := float64(md.ChosenScore)
-			oaiChosenScore = &score
-			openaiUpstreamBuilder.Float64("routing.chosen_score", score)
-		}
-		oaiClusterRouterVersion = md.ClusterRouterVersion
-		if oaiClusterRouterVersion != "" {
-			openaiUpstreamBuilder.String("routing.cluster_version", oaiClusterRouterVersion)
-		}
-	}
-	if t := otel.TimingFrom(ctx); t != nil {
-		if ms := t.Ms(&t.UpstreamRequestNanos, &t.UpstreamFirstByteNanos); ms > 0 {
-			oaiTTFTMs = &ms
-			openaiUpstreamBuilder.Int64("latency.ttft_ms", ms)
-		}
-	}
+	// Routing observability — shared bundle keeps the OpenAI path in
+	// lockstep with ProxyMessages. See observation.go for the shape;
+	// W-1335 / W-1309 extend the bundle (not this call site).
+	openaiObs := buildObservationContext(ctx, decision)
+	openaiObs.applySpanAttrs(openaiUpstreamBuilder)
 
 	otel.Record(ctx, otel.Span{
 		Name:  "router.upstream",
@@ -1107,11 +1043,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
 			CrossFormat:            crossFormat,
 			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
-			ClusterIDs:             oaiClusterIDs,
-			CandidateModels:        oaiCandidateModels,
-			ChosenScore:            oaiChosenScore,
-			ClusterRouterVersion:   oaiClusterRouterVersion,
-			TTFTMs:                 oaiTTFTMs,
+			ClusterIDs:             openaiObs.ClusterIDs,
+			CandidateModels:        openaiObs.CandidateModels,
+			ChosenScore:            openaiObs.ChosenScore,
+			ClusterRouterVersion:   openaiObs.ClusterRouterVersion,
+			TTFTMs:                 openaiObs.TTFTMs,
 			DeviceID:               clientID.DeviceID,
 			SessionID:              clientID.SessionID,
 		})

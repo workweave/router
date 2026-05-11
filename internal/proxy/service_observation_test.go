@@ -137,6 +137,46 @@ func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 	assert.Nil(t, row.CacheReadTokens)
 }
 
+// TestProxyMessages_ChosenScoreZeroIsPersisted guards the semantics of
+// the *float64 ChosenScore pointer: nil means "not a cluster decision"
+// and a non-nil &0 means "argmax produced a literal zero". Earlier
+// code collapsed these with a `!= 0` guard, silently dropping
+// legitimate zero scores. Cursor Bugbot caught the bug; this test
+// pins it so a future "simplification" can't reintroduce it.
+func TestProxyMessages_ChosenScoreZeroIsPersisted(t *testing.T) {
+	const installID = "33333333-3333-3333-3333-333333333333"
+	decision := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "cluster:v-test top_p=[0] model=claude-haiku-4-5 provider=anthropic",
+		Metadata: &router.RoutingMetadata{
+			ClusterIDs:           []int{0},
+			CandidateModels:      []string{"claude-haiku-4-5"},
+			ChosenScore:          0, // legitimate zero — must persist as &0, not nil
+			ClusterRouterVersion: "v-test",
+		},
+	}
+	telem := newCaptureTelemetry()
+	svc := proxy.NewService(
+		&fakeRouter{decision: decision},
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil, false, 0, nil, nil, false,
+		providers.ProviderAnthropic, "claude-haiku-4-5",
+		telem,
+	)
+
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
+	rec := httptest.NewRecorder()
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`)
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+
+	row := telem.firstRow(t)
+	require.NotNil(t, row.ChosenScore,
+		"zero-valued ChosenScore on a cluster-routed decision must persist as &0, not be dropped to nil")
+	assert.Equal(t, 0.0, *row.ChosenScore)
+}
+
 // TestProxyMessages_NoMetadataOmitsClusterFields covers the pinned-route /
 // heuristic path: when the router returns a Decision without Metadata,
 // the telemetry row must leave the routing-brain columns empty rather
