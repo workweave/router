@@ -1,0 +1,29 @@
+cmd/genprices/main.go
+  s_0fa552ea12b070::t_4c0b474f3fb3ca 9
+  s_0fa552ea12b070::t_c44012aab7747c 113-118,120-126
+cmd/genprices/main_test.go
+  s_0fa552ea12b070::t_b63bc213295237 11-14,17-19,21-29,32-35,40,42,45-50
+  s_0fa552ea12b070::t_b7a34e79b22633 1-10,15-16,20,30-31,36-39,41,43-44,51-52
+install/install.sh
+  s_0fa552ea12b070::t_11e7e20c289be2 455-456
+  s_0fa552ea12b070::t_cef43fbc86f316 299,329,332-334,340,370,375
+install/cc-statusline.sh
+  s_0fa552ea12b070::t_1e121047a078b5 205
+  s_0fa552ea12b070::t_cef43fbc86f316 48,78,81-83,89,119,124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "e0e6ac9d3f758e26f3eadf39501f62f79db79783",
+  "prompts": {},
+  "sessions": {
+    "s_0fa552ea12b070": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5e9b7c1b-3b2e-40c8-a316-e05954df0d6b",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}
