@@ -1,0 +1,25 @@
+internal/proxy/service_observation_test.go
+  s_baa9be4173b803::t_87c98c4fb77352 140-179
+internal/proxy/service.go
+  s_baa9be4173b803::t_722b3f45b05c86 1046-1050
+  s_baa9be4173b803::t_c670872ecf9883 1007-1011
+  s_baa9be4173b803::t_d4715107d38ea4 572-577,612-616
+internal/proxy/observation.go
+  s_baa9be4173b803::t_2bdcd1bd4dc9f6 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "626cd0fef82633ebe8cda345c0be2165ec84966f",
+  "prompts": {},
+  "sessions": {
+    "s_baa9be4173b803": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9456ca5e-1ec4-4c6c-be05-89ec4c148873",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}
