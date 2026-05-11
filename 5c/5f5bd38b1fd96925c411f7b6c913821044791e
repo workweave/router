@@ -1,0 +1,31 @@
+internal/translate/emit_anthropic.go
+  s_fb8e02d3b4bb1c::t_4f55b2d964cd04 102
+  s_fb8e02d3b4bb1c::t_598f6f998ddace 132,141
+internal/translate/default_max_tokens_test.go
+  s_fb8e02d3b4bb1c::t_e163efd5f9eaba 74,79-80
+  s_fb8e02d3b4bb1c::t_01ab591a37dbe4 1-73,75-78,81-172
+internal/translate/emit_openai.go
+  s_fb8e02d3b4bb1c::t_131239d45d3e86 66-67
+internal/translate/envelope.go
+  s_fb8e02d3b4bb1c::t_48dafb59b6af6a 231-237
+  s_fb8e02d3b4bb1c::t_0eedecdb7e2cc0 490-494
+  s_fb8e02d3b4bb1c::t_194218e331be47 549-559
+  s_fb8e02d3b4bb1c::t_ef44623649a0ea 279-287
+  s_fb8e02d3b4bb1c::t_c422e7071b676f 414-419,430-431,435,439-445
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "5c5f5bd38b1fd96925c411f7b6c913821044791e",
+  "prompts": {},
+  "sessions": {
+    "s_fb8e02d3b4bb1c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "44c32c27-fa30-4bcf-adac-cef61cb310e1",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}

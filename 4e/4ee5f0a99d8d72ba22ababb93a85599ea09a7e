@@ -1,0 +1,19 @@
+cmd/genprices/main_test.go
+  s_0fa552ea12b070::t_7d69223447021e 17-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "4e4ee5f0a99d8d72ba22ababb93a85599ea09a7e",
+  "prompts": {},
+  "sessions": {
+    "s_0fa552ea12b070": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5e9b7c1b-3b2e-40c8-a316-e05954df0d6b",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}
