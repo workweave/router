@@ -296,7 +296,7 @@ prices='{
     "claude-haiku-4-5":                 0.0008,
     "claude-opus-4-7":                  0.015,
     "claude-sonnet-4-5":                0.003,
-    "deepseek/deepseek-v4-flash":       0.00014000000000000001,
+    "deepseek/deepseek-v4-flash":       0.00014,
     "deepseek/deepseek-v4-pro":         0.000435,
     "gemini-2.0-flash":                 0.0001,
     "gemini-2.0-flash-lite":            0.000075,
@@ -326,18 +326,18 @@ prices='{
     "gpt-5.5-pro":                      0.03,
     "mistralai/mistral-small-2603":     0.00015,
     "moonshotai/kimi-k2.5":             0.00044,
-    "qwen/qwen3-235b-a22b-2507":        0.00007099999999999999,
+    "qwen/qwen3-235b-a22b-2507":        0.000071,
     "qwen/qwen3-30b-a3b-instruct-2507": 0.00008,
     "qwen/qwen3-coder":                 0.00022,
-    "qwen/qwen3-coder-next":            0.00007000000000000001,
-    "qwen/qwen3-next-80b-a3b-instruct": 0.00008999999999999999,
-    "qwen/qwen3.5-flash-02-23":         0.00006500000000000001
+    "qwen/qwen3-coder-next":            0.00007,
+    "qwen/qwen3-next-80b-a3b-instruct": 0.00009,
+    "qwen/qwen3.5-flash-02-23":         0.000065
   },
   "output": {
     "claude-haiku-4-5":                 0.004,
     "claude-opus-4-7":                  0.075,
     "claude-sonnet-4-5":                0.015,
-    "deepseek/deepseek-v4-flash":       0.00028000000000000003,
+    "deepseek/deepseek-v4-flash":       0.00028,
     "deepseek/deepseek-v4-pro":         0.00087,
     "gemini-2.0-flash":                 0.0004,
     "gemini-2.0-flash-lite":            0.0003,
@@ -367,12 +367,12 @@ prices='{
     "gpt-5.5-pro":                      0.12,
     "mistralai/mistral-small-2603":     0.0006,
     "moonshotai/kimi-k2.5":             0.002,
-    "qwen/qwen3-235b-a22b-2507":        0.00046300000000000003,
+    "qwen/qwen3-235b-a22b-2507":        0.000463,
     "qwen/qwen3-30b-a3b-instruct-2507": 0.00033,
     "qwen/qwen3-coder":                 0.0018,
     "qwen/qwen3-coder-next":            0.0003,
     "qwen/qwen3-next-80b-a3b-instruct": 0.0011,
-    "qwen/qwen3.5-flash-02-23":         0.00026000000000000003
+    "qwen/qwen3.5-flash-02-23":         0.00026
   }
 }'
 # END_GENERATED_PRICES
@@ -452,9 +452,8 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
         end
       end
     ' "$transcript_path" 2>/dev/null \
-    | awk 'BEGIN{tot=0; last=0} {tot+=$1; last=$1} END{printf "%.4f %.4f
-", last, tot}'
-  )
+    | awk 'BEGIN{tot=0; last=0} {tot+=$1; last=$1} END{printf "%.4f %.4f\n", last, tot}'
+  ) || true
 fi
 
 # Brand color (#FF6C47) on terminals that grok 24-bit truecolor — that's
