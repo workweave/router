@@ -5,6 +5,12 @@
 # and enable auto-merge so the bump rides through CI + the merge queue
 # without human review.
 #
+# If install/install.sh or install/cc-statusline.sh changed in the merged PR,
+# this workflow also copies them into their WorkWeave counterparts:
+#   install/install.sh       → backend/internal/app/syncrouterinstall/install_template.sh
+#   install/cc-statusline.sh → .weave/cc-statusline.sh
+# Both are included in the same bump commit so the drift test never fails.
+#
 # Why pull_request_target (and not pull_request):
 #   pull_request_target runs in the base repo's context with full secrets
 #   access, even for PRs opened from forks. The bump itself never executes
@@ -31,6 +37,15 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout router at merge commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          path: router
+          sparse-checkout: |
+            install
+          sparse-checkout-cone-mode: true
+
       - name: Checkout WorkWeave
         uses: actions/checkout@v4
         with:
@@ -45,7 +60,7 @@ jobs:
           git config user.name "workweave-bot"
           git config user.email "bot@workweave.ai"
 
-      - name: Bump router gitlink
+      - name: Bump router gitlink and sync install files
         id: bump
         working-directory: WorkWeave
         env:
@@ -59,6 +74,16 @@ jobs:
 
           git checkout -b "$BRANCH"
           git update-index --add --cacheinfo 160000,"$NEW_SHA",router-internal/router
+
+          # Copy install.sh if it changed; include in the same commit so the
+          # drift test (TestInstallTemplateDoesNotDriftFromRouterCopy) never fails.
+          # cc-statusline.sh content is embedded as a heredoc inside install.sh,
+          # so this single copy covers both.
+          if ! cmp -s ../router/install/install.sh backend/internal/app/syncrouterinstall/install_template.sh; then
+            cp ../router/install/install.sh backend/internal/app/syncrouterinstall/install_template.sh
+            git add backend/internal/app/syncrouterinstall/install_template.sh
+          fi
+
           git commit \
             -m "Bump router pin to ${SHORT_SHA}" \
             -m "Source: ${{ github.event.pull_request.title }}" \
