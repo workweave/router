@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -109,8 +110,18 @@ func maxLen(models []string) int {
 	return n
 }
 
-// fmtPrice formats a USD/1k price with enough precision for the jq math in
-// cc-statusline.sh. Uses the shortest decimal representation that round-trips.
+// fmtPrice formats a USD/1k price for the jq math in cc-statusline.sh.
+// Rounds to 6 significant figures before formatting so the generated block
+// doesn't carry IEEE 754 representation artifacts (e.g. 0.071/1000 would
+// otherwise render as 0.00007099999999999999). 6 sig figs gives ~10×
+// headroom over the smallest input we ever serialize (~6.5e-5 USD/k) and
+// stays well within the precision the downstream jq calculation needs.
 func fmtPrice(v float64) string {
-	return strconv.FormatFloat(v, 'f', -1, 64)
+	if v == 0 {
+		return "0"
+	}
+	const sigFigs = 6
+	scale := math.Pow10(sigFigs - 1 - int(math.Floor(math.Log10(math.Abs(v)))))
+	rounded := math.Round(v*scale) / scale
+	return strconv.FormatFloat(rounded, 'f', -1, 64)
 }
