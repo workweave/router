@@ -228,6 +228,13 @@ type EmitOverrides struct {
 	ClampMaxTokensValue     int64
 	ClampMaxCompTokensValue int64 // applied after SetMaxCompletionTokens
 
+	// DefaultMaxTokensKey / DefaultMaxTokensValue inject the named field only
+	// when it is absent in the source body. Anthropic Messages requires
+	// max_tokens; downstream routing/cost accounting also benefits from a
+	// deterministic value being present.
+	DefaultMaxTokensKey   string
+	DefaultMaxTokensValue int64
+
 	InjectStreamUsage   bool // set stream_options.include_usage = true
 	StripThinkingBlocks bool // filter thinking/redacted_thinking from messages[*].content[*]
 }
@@ -267,6 +274,15 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 	}
 	if ov.ClampMaxCompTokensValue > 0 {
 		out = clampFieldBytes(out, "max_completion_tokens", ov.ClampMaxCompTokensValue)
+	}
+
+	if ov.DefaultMaxTokensKey != "" && ov.DefaultMaxTokensValue > 0 {
+		if !gjson.GetBytes(out, ov.DefaultMaxTokensKey).Exists() {
+			out, err = sjson.SetBytes(out, ov.DefaultMaxTokensKey, ov.DefaultMaxTokensValue)
+			if err != nil {
+				return nil, fmt.Errorf("set default %s: %w", ov.DefaultMaxTokensKey, err)
+			}
+		}
 	}
 
 	if ov.InjectStreamUsage {
@@ -395,8 +411,12 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		ov.DeleteKeys = append(ov.DeleteKeys, "reasoning_effort")
 	}
 
-	if gjson.GetBytes(body, "max_tokens").Exists() && opts.Capabilities.Supports(router.CapReasoning) {
-		if !gjson.GetBytes(body, "max_completion_tokens").Exists() {
+	hasMaxTokens := gjson.GetBytes(body, "max_tokens").Exists()
+	hasMaxComp := gjson.GetBytes(body, "max_completion_tokens").Exists()
+	supportsReasoning := opts.Capabilities.Supports(router.CapReasoning)
+
+	if hasMaxTokens && supportsReasoning {
+		if !hasMaxComp {
 			val := gjson.GetBytes(body, "max_tokens").Int()
 			ov.SetMaxCompletionTokens = &val
 		}
@@ -407,13 +427,22 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	if cap == 0 {
 		cap = defaultMaxOutputTokenCap
 	}
-	maxTokensDeleted := gjson.GetBytes(body, "max_tokens").Exists() && opts.Capabilities.Supports(router.CapReasoning)
-	if gjson.GetBytes(body, "max_tokens").Exists() && !maxTokensDeleted {
+	maxTokensDeleted := hasMaxTokens && supportsReasoning
+	if hasMaxTokens && !maxTokensDeleted {
 		ov.ClampMaxTokensKey = "max_tokens"
 		ov.ClampMaxTokensValue = int64(cap)
 	}
-	if gjson.GetBytes(body, "max_completion_tokens").Exists() || ov.SetMaxCompletionTokens != nil {
+	if hasMaxComp || ov.SetMaxCompletionTokens != nil {
 		ov.ClampMaxCompTokensValue = int64(cap)
+	}
+
+	if !hasMaxTokens && !hasMaxComp {
+		if supportsReasoning {
+			ov.DefaultMaxTokensKey = "max_completion_tokens"
+		} else {
+			ov.DefaultMaxTokensKey = "max_tokens"
+		}
+		ov.DefaultMaxTokensValue = defaultOutputTokens(opts.TargetModel)
 	}
 
 	if opts.IncludeStreamUsage {
@@ -456,6 +485,11 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 
 	if !opts.Capabilities.Supports(router.CapAdaptiveThinking) && !opts.Capabilities.Supports(router.CapExtendedThinking) {
 		ov.StripThinkingBlocks = true
+	}
+
+	if !gjson.GetBytes(body, "max_tokens").Exists() {
+		ov.DefaultMaxTokensKey = "max_tokens"
+		ov.DefaultMaxTokensValue = defaultOutputTokens(opts.TargetModel)
 	}
 
 	return ov
@@ -511,6 +545,17 @@ var modelMaxOutputTokens = map[string]int{
 }
 
 const defaultMaxOutputTokenCap = 8192
+
+// defaultOutputTokens returns the default max output tokens for a model,
+// floored by the model's own cap and globally at defaultMaxOutputTokenCap.
+// Returns defaultMaxOutputTokenCap for models not in modelMaxOutputTokens.
+// Used to inject a value when the source request omits max_tokens entirely.
+func defaultOutputTokens(model string) int64 {
+	if cap, ok := modelMaxOutputTokens[model]; ok && cap < defaultMaxOutputTokenCap {
+		return int64(cap)
+	}
+	return defaultMaxOutputTokenCap
+}
 
 // clampOutputTokens caps max_tokens/max_completion_tokens in a map. Cross-format only.
 func clampOutputTokens(doc map[string]any, model string) {

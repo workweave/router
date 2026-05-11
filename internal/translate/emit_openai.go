@@ -63,6 +63,8 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	}
 	if r := gjson.GetBytes(e.body, "max_tokens"); r.Exists() {
 		out["max_tokens"] = r.Value()
+	} else {
+		out["max_tokens"] = defaultOutputTokens(opts.TargetModel)
 	}
 
 	if mt, ok := out["max_tokens"]; ok && opts.Capabilities.Supports(router.CapReasoning) {

@@ -12,8 +12,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const defaultMaxTokens = 4096
-
 // PrepareAnthropic builds a fully-prepared Anthropic Messages request.
 // Same-format requests use byte-level overrides; cross-format requests
 // pull fields from the parsed map.
@@ -101,7 +99,7 @@ func (e *RequestEnvelope) buildAnthropicFromOpenAI(opts EmitOptions) (map[string
 	if err := e.pullOpenAIMessages(out); err != nil {
 		return nil, err
 	}
-	pullMaxTokens(e.body, out)
+	pullMaxTokens(e.body, out, opts.TargetModel)
 	pullStopSequences(e.body, out)
 	if err := e.pullOpenAITools(out); err != nil {
 		return nil, err
@@ -131,7 +129,7 @@ func (e *RequestEnvelope) pullOpenAIMessages(out map[string]any) error {
 	return nil
 }
 
-func pullMaxTokens(body []byte, out map[string]any) {
+func pullMaxTokens(body []byte, out map[string]any, targetModel string) {
 	if r := gjson.GetBytes(body, "max_tokens"); r.Exists() {
 		out["max_tokens"] = r.Value()
 		return
@@ -140,7 +138,7 @@ func pullMaxTokens(body []byte, out map[string]any) {
 		out["max_tokens"] = r.Value()
 		return
 	}
-	out["max_tokens"] = defaultMaxTokens
+	out["max_tokens"] = defaultOutputTokens(targetModel)
 }
 
 func pullStopSequences(body []byte, out map[string]any) {
