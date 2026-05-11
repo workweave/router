@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -212,20 +211,6 @@ func main() {
 		panic(err)
 	}
 
-	decisionsLogPath := config.GetOr("ROUTER_DECISIONS_LOG_PATH", "")
-	if decisionsLogPath == "" {
-		if home, hErr := os.UserHomeDir(); hErr == nil {
-			decisionsLogPath = filepath.Join(home, ".weave-router", "decisions.jsonl")
-		}
-	}
-	if decisionsLogPath == "off" {
-		decisionsLogPath = ""
-	}
-	decisionLog := proxy.NewDecisionLog(decisionsLogPath)
-	if decisionLog != nil {
-		logger.Info("Decision sidecar log enabled", "path", decisionsLogPath)
-	}
-
 	semanticCache := buildSemanticCache(rtr)
 
 	// Default-on: the cluster scorer's α-blend is baked at training time on
@@ -252,7 +237,7 @@ func main() {
 	}
 	logger.Info("Hard-pin model resolved", "provider", hardPinProvider, "model", hardPinModel)
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, decisionLog, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry)
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry)
 
 	engine := gin.New()
 	engine.UnescapePathValues = true

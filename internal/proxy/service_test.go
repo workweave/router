@@ -53,7 +53,7 @@ func (f *fakeProvider) Passthrough(ctx context.Context, prep providers.PreparedR
 }
 
 func makeProxyService(decision router.Decision, p map[string]providers.Client) *proxy.Service {
-	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, 0, nil, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 }
 
 func TestService_ProxyMessages_PropagatesUpstreamStatusError(t *testing.T) {
@@ -102,7 +102,6 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 			0,
 			nil,
 			nil,
-			nil,
 			false,
 			providers.ProviderAnthropic, "claude-haiku-4-5",
 			nil,
@@ -127,7 +126,6 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 			nil,
 			true,
 			0,
-			nil,
 			nil,
 			nil,
 			false,
@@ -196,7 +194,6 @@ func TestService_ProxyMessages_EmbedLastUserMessageContextOverride(t *testing.T)
 				0,
 				nil,
 				nil,
-				nil,
 				false,
 				"anthropic", "claude-haiku-4-5",
 				nil,
@@ -242,7 +239,6 @@ func TestService_ProxyMessages_StickyBypassedByEvalOverrideHeaders(t *testing.T)
 				nil,
 				false,
 				time.Hour, // long TTL so sticky window stays open across both calls
-				nil,
 				nil,
 				nil,
 				false,

@@ -318,6 +318,8 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	copy(embedCopy, vec)
 	clustersCopy := make([]int, len(topClusters))
 	copy(clustersCopy, topClusters)
+	candidatesCopy := make([]string, len(eligibleModels))
+	copy(candidatesCopy, eligibleModels)
 	decision := router.Decision{
 		Provider: chosen.Provider,
 		Model:    chosen.Model,
@@ -326,8 +328,11 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			s.version, clusterIDsString(topClusters), chosen.Model, chosen.Provider,
 		),
 		Metadata: &router.RoutingMetadata{
-			Embedding:  embedCopy,
-			ClusterIDs: clustersCopy,
+			Embedding:            embedCopy,
+			ClusterIDs:           clustersCopy,
+			CandidateModels:      candidatesCopy,
+			ChosenScore:          chosenScore,
+			ClusterRouterVersion: s.version,
 		},
 	}
 	log.Info(

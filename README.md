@@ -258,7 +258,6 @@ Set `DATABASE_URL` directly, or compose it from the individual vars:
 | `ROUTER_DEPLOYMENT_MODE`    | `selfhosted`                      | `selfhosted` mounts `/ui/*` and `/admin/v1/*`. `managed` skips both (for SaaS deployments with a separate admin UI). |
 | `ROUTER_ADMIN_PASSWORD`     | *(required in `selfhosted` mode)* | Password for the admin dashboard. The router refuses to boot without it unless `ROUTER_DEV_MODE=true`.           |
 | `ROUTER_DEV_MODE`           | `false`                           | Bypass bearer auth on `/v1/*` and default the admin password to `admin`. Local dev only.                         |
-| `ROUTER_DECISIONS_LOG_PATH` | `~/.weave-router/decisions.jsonl` | JSON-lines decision sidecar log (one line per routed request). Set to `off` to disable.                          |
 
 ### Routing
 

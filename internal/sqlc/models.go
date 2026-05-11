@@ -83,6 +83,16 @@ type RouterModelRouterRequestTelemetry struct {
 	CrossFormat            *bool
 	UpstreamStatusCode     *int32
 	CreatedAt              pgtype.Timestamptz
+	ClusterIds             []int32
+	CandidateModels        []string
+	ChosenScore            *float64
+	AlphaBreakdown         []byte
+	ClusterRouterVersion   *string
+	TtftMs                 *int64
+	CacheCreationTokens    *int32
+	CacheReadTokens        *int32
+	DeviceID               *string
+	SessionID              *string
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.

@@ -154,6 +154,27 @@ func TestScorer_PicksClusterAlignedModel(t *testing.T) {
 	assert.Contains(t, got.Reason, "model=claude-opus-4-7")
 }
 
+// TestScorer_PopulatesRoutingMetadata asserts the scorer surfaces
+// candidate set, chosen score, and artifact version so the proxy can
+// record routing observations without reaching into private scorer state.
+// Removing any of these breaks routing telemetry rows downstream.
+func TestScorer_PopulatesRoutingMetadata(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s := newScorerForTest(t, emb, cfgForTest())
+
+	got, err := s.Route(context.Background(), router.Request{
+		PromptText: strings.Repeat("x", 100),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got.Metadata, "scorer must populate Metadata for cluster-routed decisions")
+	assert.Equal(t, "v-test", got.Metadata.ClusterRouterVersion)
+	assert.ElementsMatch(t, []string{"claude-opus-4-7", "claude-haiku-4-5"}, got.Metadata.CandidateModels,
+		"candidate_models must mirror the eligible argmax set")
+	assert.NotZero(t, got.Metadata.ChosenScore, "chosen_score must be non-zero for a real decision")
+	assert.Equal(t, []int{0}, got.Metadata.ClusterIDs,
+		"with cfgForTest TopP=1, only the closest cluster (Opus-aligned) is summed")
+}
+
 func TestScorer_PicksOtherClusterWhenAligned(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeHaikuVec()}
 	s := newScorerForTest(t, emb, cfgForTest())

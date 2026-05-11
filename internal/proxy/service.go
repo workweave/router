@@ -28,7 +28,6 @@ type Service struct {
 	emitter              *otel.Emitter
 	embedLastUserMessage bool
 	stickyDecisions      *expirable.LRU[string, router.Decision]
-	decisionLog          *DecisionLog
 	// semanticCache short-circuits non-streaming requests on a
 	// cosine-similarity hit against a stored response. Nil disables
 	// the cache entirely. Always nil-check before use.
@@ -95,7 +94,7 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 // NewService constructs the proxy service. pinStore may be nil when the
 // session-pin feature flag is off; the tiered lookup transparently
 // short-circuits past tiers 1–2 in that case.
-func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, decisionLog *DecisionLog, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
+func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
 	var sticky *expirable.LRU[string, router.Decision]
 	if stickyDecisionTTL > 0 {
 		sticky = expirable.NewLRU[string, router.Decision](10000, nil, stickyDecisionTTL)
@@ -112,7 +111,6 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		emitter:              emitter,
 		embedLastUserMessage: embedLastUserMessage,
 		stickyDecisions:      sticky,
-		decisionLog:          decisionLog,
 		semanticCache:        semanticCache,
 		pinStore:             pinStore,
 		pinCache:             pinCache,
@@ -190,7 +188,7 @@ const semanticCacheMaxBodyBytes = 1 << 20
 
 // headersToSkipOnHit lists response headers the cache must NOT replay
 // on a hit. request-id ties to a specific upstream call and would
-// confuse downstream consumers (decisionLog, OTel correlation) if
+// confuse downstream consumers (telemetry rows, OTel correlation) if
 // reused. x-router-* are set fresh on the hit path so the client
 // always sees the current decision rather than a stale one.
 var headersToSkipOnHit = map[string]struct{}{
@@ -570,6 +568,45 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
 		Bool("routing.cross_format", crossFormat)
 	addTimingAttrs(ctx, upstreamBuilder)
+
+	// Routing observability attrs — surfaced for cluster-routed
+	// requests so trace UIs see the same picture the DB row carries.
+	// Pinned routes leave Metadata nil and the attrs are skipped.
+	var (
+		clusterIDs           []int32
+		candidateModels      []string
+		chosenScore          *float64
+		clusterRouterVersion string
+		ttftMs               *int64
+	)
+	if md := decision.Metadata; md != nil {
+		if len(md.ClusterIDs) > 0 {
+			clusterIDs = make([]int32, len(md.ClusterIDs))
+			for i, k := range md.ClusterIDs {
+				clusterIDs[i] = int32(k)
+			}
+			upstreamBuilder.IntSlice("routing.cluster_ids", md.ClusterIDs)
+		}
+		if len(md.CandidateModels) > 0 {
+			candidateModels = append([]string(nil), md.CandidateModels...)
+		}
+		if md.ChosenScore != 0 {
+			score := float64(md.ChosenScore)
+			chosenScore = &score
+			upstreamBuilder.Float64("routing.chosen_score", score)
+		}
+		clusterRouterVersion = md.ClusterRouterVersion
+		if clusterRouterVersion != "" {
+			upstreamBuilder.String("routing.cluster_version", clusterRouterVersion)
+		}
+	}
+	if t := otel.TimingFrom(ctx); t != nil {
+		if ms := t.Ms(&t.UpstreamRequestNanos, &t.UpstreamFirstByteNanos); ms > 0 {
+			ttftMs = &ms
+			upstreamBuilder.Int64("latency.ttft_ms", ms)
+		}
+	}
+
 	otel.Record(ctx, otel.Span{
 		Name:  "router.upstream",
 		Start: proxyStart,
@@ -577,18 +614,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Attrs: upstreamBuilder.Build(),
 	})
 	otel.Flush(ctx)
-
-	if reqID := w.Header().Get("request-id"); reqID != "" {
-		s.decisionLog.Append(DecisionLogEntry{
-			RequestID:        reqID,
-			RequestedModel:   feats.Model,
-			DecisionModel:    decision.Model,
-			DecisionReason:   decision.Reason,
-			DecisionProvider: decision.Provider,
-			DeviceID:         clientID.DeviceID,
-			SessionID:        clientID.SessionID,
-		})
-	}
 
 	if installationID != uuid.Nil {
 		s.fireTelemetry(InsertTelemetryParams{
@@ -615,6 +640,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
 			CrossFormat:            crossFormat,
 			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
+			ClusterIDs:             clusterIDs,
+			CandidateModels:        candidateModels,
+			ChosenScore:            chosenScore,
+			ClusterRouterVersion:   clusterRouterVersion,
+			TTFTMs:                 ttftMs,
+			DeviceID:               clientID.DeviceID,
+			SessionID:              clientID.SessionID,
 		})
 	}
 

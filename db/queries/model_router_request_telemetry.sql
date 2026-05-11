@@ -1,4 +1,8 @@
--- Records a completed proxied request for the dashboard UI.
+-- Records a completed proxied request for the dashboard UI and routing
+-- observability. Routing-brain fields (cluster_ids, candidate_models,
+-- chosen_score, alpha_breakdown, cluster_router_version, ttft_ms,
+-- cache_*_tokens, device_id, session_id) are nullable; non-cluster
+-- decisions and pinned-route turns leave them NULL.
 -- name: InsertRequestTelemetry :exec
 INSERT INTO router.model_router_request_telemetry (
     installation_id,
@@ -23,7 +27,17 @@ INSERT INTO router.model_router_request_telemetry (
     upstream_latency_ms,
     total_latency_ms,
     cross_format,
-    upstream_status_code
+    upstream_status_code,
+    cluster_ids,
+    candidate_models,
+    chosen_score,
+    alpha_breakdown,
+    cluster_router_version,
+    ttft_ms,
+    cache_creation_tokens,
+    cache_read_tokens,
+    device_id,
+    session_id
 ) VALUES (
     @installation_id::uuid,
     @request_id::varchar,
@@ -47,7 +61,17 @@ INSERT INTO router.model_router_request_telemetry (
     @upstream_latency_ms::bigint,
     @total_latency_ms::bigint,
     @cross_format::boolean,
-    @upstream_status_code::int
+    @upstream_status_code::int,
+    sqlc.narg('cluster_ids')::int[],
+    sqlc.narg('candidate_models')::text[],
+    sqlc.narg('chosen_score')::double precision,
+    sqlc.narg('alpha_breakdown')::jsonb,
+    sqlc.narg('cluster_router_version')::varchar,
+    sqlc.narg('ttft_ms')::bigint,
+    sqlc.narg('cache_creation_tokens')::int,
+    sqlc.narg('cache_read_tokens')::int,
+    sqlc.narg('device_id')::varchar,
+    sqlc.narg('session_id')::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 
