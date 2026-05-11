@@ -1,0 +1,21 @@
+db/migrations/0006_router_user_identity.up.sql
+  s_31c42848655666::t_b79c1ba57eef98 3-8,30-53
+db/migrations/0006_router_user_identity.down.sql
+  s_31c42848655666::t_79003a9e9adfdf 5-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "6a24746a77d07276b34d760bd4c6faef1a882043",
+  "prompts": {},
+  "sessions": {
+    "s_31c42848655666": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "313f0d67-15b7-431a-8c69-c0d98360b5b4",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

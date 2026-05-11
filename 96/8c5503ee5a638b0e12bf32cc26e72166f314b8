@@ -1,0 +1,26 @@
+internal/auth/admin.go
+  s_01720a0399bbb1::t_029271ce865e8b 133-138,140-159,162,166,169
+internal/auth/service.go
+  s_01720a0399bbb1::t_c3fd14b1c22e89 95-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "968c5503ee5a638b0e12bf32cc26e72166f314b8",
+  "prompts": {},
+  "humans": {
+    "h_16c9377d4ebc00": {
+      "author": "steventohme <steven@workweave.ai>"
+    }
+  },
+  "sessions": {
+    "s_01720a0399bbb1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1bc5b49e-bb10-4dfe-9a25-0a5e865076b0",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

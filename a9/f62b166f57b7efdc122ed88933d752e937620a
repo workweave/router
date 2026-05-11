@@ -1,0 +1,19 @@
+cmd/router/main.go
+  s_3521915a751012::t_8518629f118103 191-200,202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "a9f62b166f57b7efdc122ed88933d752e937620a",
+  "prompts": {},
+  "sessions": {
+    "s_3521915a751012": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "147f5fe2-fef0-4751-b250-dd4909360d0c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

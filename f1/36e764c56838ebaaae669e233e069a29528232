@@ -1,0 +1,21 @@
+db/migrations/0008_add_openrouter_to_external_api_keys.up.sql
+  s_321af93f24f314::t_2d1ff9cc64bba5 1-10
+db/migrations/0008_add_openrouter_to_external_api_keys.down.sql
+  s_321af93f24f314::t_c1120525fd9b92 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "f136e764c56838ebaaae669e233e069a29528232",
+  "prompts": {},
+  "sessions": {
+    "s_321af93f24f314": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7d9c5ecd-c8ed-4c47-af18-e280f15ae7a1",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

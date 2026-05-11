@@ -1,0 +1,23 @@
+frontend/src/components/Chart/helpers/getDefaultSeriesColor.ts
+  s_b19420d3dd2686::t_043c608f2635a3 3,6-12,16-17
+frontend/src/components/molecules/Modal/Modal.tsx
+  s_b19420d3dd2686::t_141b131f4e243c 108,117
+frontend/src/components/charts/useChartDrillDown.ts
+  s_b19420d3dd2686::t_b8f340060f6b84 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "579b78fa9a0e3cc6df912b1c6514403df681de83",
+  "prompts": {},
+  "sessions": {
+    "s_b19420d3dd2686": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "24be8415-a425-4b0d-916e-5c4cbe1ca9f9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

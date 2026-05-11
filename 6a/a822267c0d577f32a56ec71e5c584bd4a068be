@@ -1,0 +1,24 @@
+frontend/next.config.ts
+  s_01720a0399bbb1::t_4941570fcff756 22-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "6aa822267c0d577f32a56ec71e5c584bd4a068be",
+  "prompts": {},
+  "humans": {
+    "h_16c9377d4ebc00": {
+      "author": "steventohme <steven@workweave.ai>"
+    }
+  },
+  "sessions": {
+    "s_01720a0399bbb1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1bc5b49e-bb10-4dfe-9a25-0a5e865076b0",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,44 @@
+CLAUDE.md
+  663b5dd12e1f7f48 43,98-101,106-108,221-223,227-228,232-235,474-477,493-501,593,596-598,603-608,619-626
+internal/router/cluster/scorer.go
+  663b5dd12e1f7f48 5,15-22,41-44,86,192-193,198,228-229,236,239-240,245,262-263,266,272-275,278
+internal/router/cluster/scorer_test.go
+  663b5dd12e1f7f48 60,80,106,127,131,145,159,168-171,173,175-177,181,183,185-187,190,192,194-196,204,264,277,283,290,296,315,322,349,358,386,403-405,409,411-413
+cmd/router/main.go
+  663b5dd12e1f7f48 106-112,114,152,237-240,294,308,436,442,444-448
+internal/proxy/service.go
+  663b5dd12e1f7f48 261-265,451
+internal/api/openai/completions.go
+  663b5dd12e1f7f48 13,65-70
+internal/api/anthropic/messages.go
+  663b5dd12e1f7f48 17,96-101
+internal/router/cluster/multiversion.go
+  663b5dd12e1f7f48 36,83-87,90
+internal/router/cluster/multiversion_test.go
+  663b5dd12e1f7f48 18,22,29-30,32,44-45,47,56-59,62,64,75-76,82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "41bdfb74dc07a77f3a0b70fd0f2061beee8bce6b",
+  "prompts": {
+    "663b5dd12e1f7f48": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "41869338-409a-4a5e-8e1a-a6888a00ccd9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 848,
+      "total_deletions": 315,
+      "accepted_lines": 844,
+      "overriden_lines": 4
+    }
+  },
+  "humans": {
+    "h_6e20dcf5f4a808": {
+      "author": "steventohme"
+    }
+  }
+}

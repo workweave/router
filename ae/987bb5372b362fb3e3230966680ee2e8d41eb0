@@ -1,0 +1,222 @@
+internal/api/admin/metrics.go
+  s_b19420d3dd2686::t_9fc131cccae1fb 74
+  s_b19420d3dd2686::t_8a98b082ec2f8b 110-189
+  s_b19420d3dd2686::t_7408389eec684d 5
+scripts/seed_dashboard_data.sql
+  s_b19420d3dd2686::t_4b91b7edce05ea 1-137
+frontend/src/components/molecules/Modal/index.ts
+  s_b19420d3dd2686::t_3cc21b79c7fafa 1
+frontend/src/components/atoms/Kbd/index.ts
+  s_b19420d3dd2686::t_688cebac202c2b 1-2
+frontend/src/app/layout.tsx
+  s_b19420d3dd2686::t_8a9516af757f21 21-23
+  s_b19420d3dd2686::t_6744f36c1dc77d 1
+frontend/src/components/charts/CostBreakdownChart.tsx
+  s_b19420d3dd2686::t_f11c276b597ddc 88-111,113-114
+  s_b19420d3dd2686::t_941bb7131ab646 3-9,11,13,19-25,29,38-42,45-71,74-85
+  s_b19420d3dd2686::t_919392e460b8ab 16-18
+  s_b19420d3dd2686::t_db59e3bb827f89 12
+  s_b19420d3dd2686::t_7a68e69a0b9879 72
+frontend/src/components/atoms/Kbd/Kbd.tsx
+  s_b19420d3dd2686::t_9bff87f6b34612 1-37
+frontend/src/components/Chart/ChartContext.ts
+  s_b19420d3dd2686::t_e0d98011a03157 1-53
+frontend/src/components/Statistic/Statistic.tsx
+  s_b19420d3dd2686::t_b83292ccce3007 4,15-16,20-29
+  s_b19420d3dd2686::t_e0d98011a03157 1-3,5-14,17-19,30-32
+frontend/src/components/Chart/ChartMessageCard.tsx
+  s_b19420d3dd2686::t_13a8175c00afa9 5
+  s_b19420d3dd2686::t_e0d98011a03157 1-4,6-64,66-80,82-85,89-92
+  s_b19420d3dd2686::t_8016adfcfbc4e3 65
+  s_b19420d3dd2686::t_f8fca453c111ef 81,86-88
+frontend/src/components/charts/useChartDrillDown.ts
+  s_b19420d3dd2686::t_a02c1218321280 1-82
+frontend/src/tools/cn.ts
+  s_b19420d3dd2686::t_d5b3faf28101b2 1
+frontend/src/components/Chart/ChartTick.tsx
+  s_b19420d3dd2686::t_e0d98011a03157 1-46
+frontend/tailwind.config.ts
+  s_b19420d3dd2686::t_26f0233b3100a9 51-52
+internal/sqlc/models.go
+  s_b19420d3dd2686::t_ce3103a5256bbd 87-101
+internal/proxy/service.go
+  s_b19420d3dd2686::t_11b789175c1933 162-179
+frontend/src/components/atoms/Skeleton/Skeleton.tsx
+  s_b19420d3dd2686::t_7775199431f684 1,4-8,10-14,18-20,38-80
+frontend/src/components/charts/CumulativeSavingsChart.tsx
+  s_b19420d3dd2686::t_b0ee8980f4228a 61
+  s_b19420d3dd2686::t_1c4b27b11b4943 80-105,107-108
+  s_b19420d3dd2686::t_db59e3bb827f89 12
+  s_b19420d3dd2686::t_3750b96595dc87 3-9,11,13,19-24,28,37-41,44-60,63-66,68-77
+  s_b19420d3dd2686::t_957b00253d3a3a 16-18
+frontend/src/components/Sidebar.tsx
+  s_b19420d3dd2686::t_632243b2ad6ae2 76,78-79,83,85-88,99,111-112
+  s_b19420d3dd2686::t_410b9e8036c7dc 4-7
+  s_b19420d3dd2686::t_6bfa6387735052 75,77,80-82,84,89-98,100-110
+frontend/src/app/(app)/dashboard/page.tsx
+  s_b19420d3dd2686::t_22bb96612dc2fc 4,17,20
+  s_b19420d3dd2686::t_a970971c044f90 156-169
+  s_b19420d3dd2686::t_3fed846b457e83 116-117
+  s_b19420d3dd2686::t_9409ce492f1bce 182
+  s_b19420d3dd2686::t_a998b6af93fd03 194,206
+frontend/src/components/Chart/index.ts
+  s_b19420d3dd2686::t_c45e7a8e51d6fe 3-4
+  s_b19420d3dd2686::t_e0d98011a03157 1-2
+frontend/src/components/Statistic/index.ts
+  s_b19420d3dd2686::t_e0d98011a03157 1
+frontend/src/tools/map/groupBy.ts
+  s_b19420d3dd2686::t_ed887b4ddb2795 10-16
+  s_b19420d3dd2686::t_1ffee4be67346f 1-9,17-19
+frontend/src/components/Chart/ChartReferenceLineLabel.tsx
+  s_b19420d3dd2686::t_e0d98011a03157 1-41
+frontend/src/components/atoms/Text/Text.tsx
+  s_b19420d3dd2686::t_76a6a4bb1d9fdf 1-2,26-27,35
+frontend/src/components/charts/SavingsRateChart.tsx
+  s_b19420d3dd2686::t_db59e3bb827f89 12
+  s_b19420d3dd2686::t_5d16bb4dc4afe6 48
+  s_b19420d3dd2686::t_953671cfeb100d 3-9,11,13,19-24,28,31-43,46-47,49-55,60-63,65-73
+  s_b19420d3dd2686::t_0d5e2c9dda8f88 77-103,105-106
+  s_b19420d3dd2686::t_b829ad825a0f3e 16-18
+frontend/src/components/Chart/helpers/getRechartsDomain.ts
+  s_b19420d3dd2686::t_e0d98011a03157 1-19
+db/queries/model_router_request_telemetry.sql
+  s_b19420d3dd2686::t_a0cec76c9d54ec 155-168
+  s_b19420d3dd2686::t_071f2e99517c78 98-110
+  s_b19420d3dd2686::t_a7f0d2f97c5c37 169-217
+frontend/src/tools/types/index.ts
+  s_b19420d3dd2686::t_1ffee4be67346f 1-2
+frontend/src/components/ChartCard/ChartCard.tsx
+  s_b19420d3dd2686::t_c45e7a8e51d6fe 137
+  s_b19420d3dd2686::t_e0d98011a03157 1-136,138-149
+frontend/src/components/DashboardPageFilters/DashboardPageFilters.tsx
+  s_b19420d3dd2686::t_65767ce6d1b408 3,6,31-34,44,60,62-74,76-111,118,120-169
+  s_b19420d3dd2686::t_4fc887a216fbe4 8
+  s_b19420d3dd2686::t_59d39c9efeef2c 45,49-50,52
+  s_b19420d3dd2686::t_0edd2e443acca5 51
+  s_b19420d3dd2686::t_9350b401cc5e0d 75
+  s_b19420d3dd2686::t_73969f4687acc8 117
+  s_b19420d3dd2686::t_c2e2c247454fea 21
+frontend/src/objects/scalars/DateTime.ts
+  s_b19420d3dd2686::t_e21de572c1a502 1,6
+  s_b19420d3dd2686::t_76a6a4bb1d9fdf 2,11-12
+  s_b19420d3dd2686::t_30fabcb04df0bc 3-5,7-10
+frontend/src/components/atoms/Skeleton/index.ts
+  s_b19420d3dd2686::t_7775199431f684 1
+frontend/src/tools/types/unreachable.ts
+  s_b19420d3dd2686::t_1ffee4be67346f 1-17
+frontend/src/lib/api.ts
+  s_b19420d3dd2686::t_39b49a314e086b 130
+  s_b19420d3dd2686::t_b746936cbcae38 136-139
+  s_b19420d3dd2686::t_d568d042816595 52-71
+frontend/src/components/DashboardPageFilters/useDashboardFilters.ts
+  s_b19420d3dd2686::t_a8a14c58bc8364 5
+  s_b19420d3dd2686::t_70f41b1b538271 13-14,17-46,48-83,86-87,110-112,117-120,136,138
+frontend/src/components/Chart/helpers/parseChartTimeValue.ts
+  s_b19420d3dd2686::t_e0d98011a03157 1-26
+frontend/src/components/Chart/types.ts
+  s_b19420d3dd2686::t_e0d98011a03157 1-266
+frontend/src/app/globals.css
+  s_b19420d3dd2686::t_8d884da7313ed4 61-62
+  s_b19420d3dd2686::t_bfb2d4fa0c0dbc 29-30
+frontend/src/components/Chart/useToggleSeriesVisibility.ts
+  s_b19420d3dd2686::t_e0d98011a03157 1-71
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_b19420d3dd2686::t_55a77ee0f2e0f8 15-226
+  s_b19420d3dd2686::t_ce3103a5256bbd 576-690
+frontend/src/components/Chart/ChartContainer.tsx
+  s_b19420d3dd2686::t_e0d98011a03157 1-30
+frontend/src/components/atoms/Text/index.ts
+  s_b19420d3dd2686::t_76a6a4bb1d9fdf 1
+frontend/src/components/Chart/ChartTooltip.tsx
+  s_b19420d3dd2686::t_e0d98011a03157 1-285,287-304
+  s_b19420d3dd2686::t_95bf1e6d9b9818 286
+frontend/src/components/Chart/color.ts
+  s_b19420d3dd2686::t_e0d98011a03157 1-109
+frontend/src/components/Chart/ChartLegend.tsx
+  s_b19420d3dd2686::t_e0d98011a03157 1-32,35-101,103-121
+  s_b19420d3dd2686::t_95bf1e6d9b9818 102
+  s_b19420d3dd2686::t_f8308960e4c403 33-34
+frontend/src/tools/map/index.ts
+  s_b19420d3dd2686::t_1ffee4be67346f 1
+frontend/src/components/charts/RouterCostSavingsChart.tsx
+  s_b19420d3dd2686::t_b4a9ec4835ea45 143
+  s_b19420d3dd2686::t_126f211c0504c7 3-9,11,13,19-34,38,54-103,105,108-113,117-131,135-139,141-142,144-151,156,159,167,169-170,174-195
+  s_b19420d3dd2686::t_03d493095286fd 49
+  s_b19420d3dd2686::t_ffeeeef33435a1 132-134,140,196
+  s_b19420d3dd2686::t_db59e3bb827f89 12
+  s_b19420d3dd2686::t_19f4713450b554 16-18
+  s_b19420d3dd2686::t_c053843915859a 199-231,234-235
+  s_b19420d3dd2686::t_4f8f237133462c 47-48,50
+internal/postgres/telemetry.go
+  s_b19420d3dd2686::t_97825a175c2f51 228-305,313-314,317,321,323,328,330,334,336-339,347-348,351-353
+  s_b19420d3dd2686::t_ac5058c1df3d50 173-191
+  s_b19420d3dd2686::t_bcfcf364137ae3 306-312,315-316,318-320,322,324-327,329,331-333,335,340-346,349-350
+  s_b19420d3dd2686::t_75f416e78689b5 362-364,369-370,373
+  s_b19420d3dd2686::t_d04bce76a026a6 90-109
+frontend/src/tools/once.ts
+  s_b19420d3dd2686::t_1ffee4be67346f 1-19
+frontend/src/objects/TimeGranularity/index.ts
+  s_b19420d3dd2686::t_76a6a4bb1d9fdf 1
+frontend/src/components/Chart/helpers/getDefaultSeriesColor.ts
+  s_b19420d3dd2686::t_e0d98011a03157 1-45
+frontend/src/components/ChartCard/index.ts
+  s_b19420d3dd2686::t_e0d98011a03157 1
+frontend/package.json
+  s_b19420d3dd2686::t_626cec38b1c0c5 12
+  s_b19420d3dd2686::t_ffd487508285e1 19-20,23,33
+  s_b19420d3dd2686::t_8de2e6eee1db12 26
+frontend/src/components/charts/DrillDownModal.tsx
+  s_b19420d3dd2686::t_38fddfc6241ce5 194,206,215,221
+  s_b19420d3dd2686::t_60fd227dd03f3f 207
+  s_b19420d3dd2686::t_336c02fcf37b58 33-41
+  s_b19420d3dd2686::t_c7eb2037a65738 1-2,4-12,14,16-32,42-43,107-144,151,153,155-156,158-161,163-166,182-184,186-190,193,195-196,198-199,201-205,208,210-211,213-214,216-217,219-220,222-225,227-239,242-243
+  s_b19420d3dd2686::t_65c8dae1b47ff8 44-52,54-56,58-60,62-64,66-86
+  s_b19420d3dd2686::t_77c532d264fc4b 53,57,61,65
+  s_b19420d3dd2686::t_09879d852d8995 146,152
+  s_b19420d3dd2686::t_99752d9b0b49d9 3,145,154,157,162,168,185,191,240-241
+  s_b19420d3dd2686::t_02dbbd47c1c2d8 13,15,87-106,147-150,167,169-181,192
+  s_b19420d3dd2686::t_fd77086d0aeab0 197,200,209,212,218,226
+frontend/src/components/molecules/Modal/Modal.tsx
+  s_b19420d3dd2686::t_7c02fefb70b2ec 135
+  s_b19420d3dd2686::t_b3b2a2d50d9091 6
+  s_b19420d3dd2686::t_3cc21b79c7fafa 1-5,7-134,136-189
+frontend/src/tools/LoadState.ts
+  s_b19420d3dd2686::t_28481b576d0747 1-254
+internal/server/server.go
+  s_b19420d3dd2686::t_4b1a055780716e 80
+frontend/src/components/Chart/Chart.tsx
+  s_b19420d3dd2686::t_e0d98011a03157 1-856
+frontend/src/components/Chart/helpers/zeroValueBars.ts
+  s_b19420d3dd2686::t_e0d98011a03157 1-199
+frontend/src/objects/TimeGranularity/TimeGranularity.ts
+  s_b19420d3dd2686::t_76a6a4bb1d9fdf 3,6,10-16,18-19,22-24,30
+  s_b19420d3dd2686::t_029af61fb17f36 1-2,4-5,7-9,17,20-21,25-29
+frontend/src/components/Chart/constants.ts
+  s_b19420d3dd2686::t_e0d98011a03157 1-6
+frontend/src/tools/types/SafeOmit.ts
+  s_b19420d3dd2686::t_1ffee4be67346f 1-5
+internal/proxy/telemetry.go
+  s_b19420d3dd2686::t_9020ad7fa9173f 18-19
+  s_b19420d3dd2686::t_a95d7f4b02d21b 64-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "ae987bb5372b362fb3e3230966680ee2e8d41eb0",
+  "prompts": {},
+  "humans": {
+    "h_16c9377d4ebc00": {
+      "author": "steventohme <steven@workweave.ai>"
+    }
+  },
+  "sessions": {
+    "s_b19420d3dd2686": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "24be8415-a425-4b0d-916e-5c4cbe1ca9f9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
