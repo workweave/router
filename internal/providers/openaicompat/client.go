@@ -55,7 +55,9 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request) {
 		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
 		return
 	}
-	upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if c.apiKey != "" {
+		upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 }
 
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
