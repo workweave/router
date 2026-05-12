@@ -14,11 +14,11 @@ import (
 )
 
 type fakeUserRepo struct {
-	mu              sync.Mutex
-	upserts         []auth.UpsertUserParams
-	accountUpserts  []auth.UpsertUserByAccountUUIDParams
-	user            *auth.User
-	err             error
+	mu             sync.Mutex
+	upserts        []auth.UpsertUserParams
+	accountUpserts []auth.UpsertUserByAccountUUIDParams
+	user           *auth.User
+	err            error
 }
 
 func (f *fakeUserRepo) UpsertByEmail(ctx context.Context, params auth.UpsertUserParams) (*auth.User, error) {
