@@ -173,6 +173,7 @@ Prerequisites: Go 1.25+,
 The cluster scorer uses an ONNX embedder; on Apple Silicon you also need:
 
 ```bash
+# Populate ./assets/ first — see "Cluster-routing artifacts" below.
 echo "ROUTER_ONNX_ASSETS_DIR=$(pwd)/assets" >> .env.local
 echo "CGO_LDFLAGS=-L/path/to/libtokenizers" >> .env.local
 echo "ROUTER_ONNX_LIBRARY_DIR=/opt/homebrew/lib" >> .env.local
@@ -196,6 +197,7 @@ only matters for the `make dev` flow.
 | `/v1/models`                | GET    | bearer or dev | Anthropic passthrough — model availability list.                                    |
 | `/v1/models/:model`         | GET    | bearer or dev | Anthropic passthrough — single-model lookup.                                        |
 | `/v1/route`                 | POST   | bearer or dev | Returns the routing decision (model, provider, reason) without proxying upstream.   |
+| `/v1beta/models/:modelAction` | POST | bearer or dev | Google Gemini native format (`generateContent` / `streamGenerateContent`). Same routing logic as `/v1/messages`. |
 
 "bearer or dev" means auth is required unless `ROUTER_DEV_MODE=true`,
 which bypasses bearer auth on `/v1/*` for local development. `/validate`
@@ -324,8 +326,11 @@ The router uses three concentric layers with imports flowing inward only:
 - **Adapters** — `internal/postgres` (SQLC over pgx), `internal/router/cluster`
   (AvengersPro-derived scorer with embedded versioned artifacts), and
   the per-provider clients under `internal/providers/{anthropic,openai,google,openaicompat}`.
-- **Presentation** — `internal/api/{admin,anthropic,openai}` for HTTP
-  handlers and `internal/server` for route registration.
+- **Presentation** — `internal/api/{admin,anthropic,openai,gemini}` for
+  HTTP handlers, `internal/server` for route registration, and
+  `internal/server/middleware` for auth, request timeouts, and the
+  per-request cluster-version / embed-strategy overrides used by the
+  eval harness.
 - **Composition** — `cmd/router/main.go` is the only place that
   constructs concrete adapters and wires them into the services.
 
@@ -381,21 +386,35 @@ required.
 
 ### Cluster-routing artifacts
 
-The cluster scorer's INT8-quantized ONNX model is **not** committed to
-git. The Docker build pulls it anonymously from the public
+The cluster scorer needs two files at runtime: `model.onnx` (the
+INT8-quantized embedder) and `tokenizer.json`. Neither is committed to
+git — both come from the public
 [`jinaai/jina-embeddings-v2-base-code`](https://huggingface.co/jinaai/jina-embeddings-v2-base-code)
-HF repo. For local `make dev`, populate the assets directory once:
+HuggingFace repo. We use Jina's own INT8 export; we don't maintain our
+own quantization.
+
+**Docker (default):** the Dockerfile downloads both files at image
+build time into `/opt/router/assets/`. Nothing for you to do.
+
+**`make dev` (host-mode hot reload):** fetch them once into a local
+directory and point `ROUTER_ONNX_ASSETS_DIR` at it:
 
 ```bash
-cd scripts
-poetry install
-poetry run python download_from_hf.py
+mkdir -p assets
+BASE="https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/516f4baf13dec4ddddda8631e019b5737c8bc250"
+curl -L "$BASE/onnx/model_quantized.onnx" -o assets/model.onnx
+curl -L "$BASE/tokenizer.json" -o assets/tokenizer.json
+echo "ROUTER_ONNX_ASSETS_DIR=$(pwd)/assets" >> .env.local
 ```
 
-To **retrain the cluster centroids/rankings** (Python pipeline,
-~30 minutes on a laptop), see [`scripts/README.md`](scripts/README.md).
-The embedder weights themselves come from Jina — we don't maintain
-our own quantization.
+The pinned revision matches `HF_MODEL_REVISION` in the Dockerfile, so
+local dev and the container build use the same weights. Bump both
+together if you want a newer upstream export.
+
+The committed cluster artifacts (centroids, rankings, model registry,
+metadata) live under `internal/router/cluster/artifacts/v<X.Y>/`. The
+`artifacts/latest` pointer selects the default served version;
+`ROUTER_CLUSTER_VERSION` overrides per-deployment.
 
 ## Roadmap
 
