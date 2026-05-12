@@ -53,6 +53,12 @@ type Service struct {
 	// present. Set on Weave-managed deployments so customer requests never
 	// silently consume the platform's API key budget.
 	byokOnly bool
+	// deploymentKeyedProviders is the subset of registered providers whose
+	// upstream API key is actually configured at the deployment level (env
+	// var). It's the "default eligible" set used by enabledProvidersForRequest
+	// in non-BYOK-only mode. When nil, all registered providers are treated
+	// as deployment-keyed (legacy behavior preserved for tests).
+	deploymentKeyedProviders map[string]struct{}
 }
 
 // pinSessionTTL is the sliding TTL on pinned_until. Mirrors Anthropic's
@@ -115,6 +121,38 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 // key is registered.
 func (s *Service) WithByokOnly(byokOnly bool) *Service {
 	s.byokOnly = byokOnly
+	return s
+}
+
+// usageRequired reports whether per-request token usage must be captured.
+// Both OTel export and DB telemetry persistence need it; without either, we
+// can skip the SSE include_usage flag + extractor wiring.
+//
+// This used to be gated on s.emitter alone, which meant local deployments
+// without OTEL_EXPORTER_OTLP_ENDPOINT silently persisted every telemetry
+// row with input/output_tokens = 0 (and therefore $0 cost). Telemetry
+// persistence is the source of truth for the dashboard's cost panel — it
+// can't depend on OTel being configured.
+func (s *Service) usageRequired() bool {
+	return s.emitter != nil || s.telemetry != nil
+}
+
+// WithDeploymentKeyedProviders restricts the "default eligible" set for
+// non-BYOK-only requests to providers whose deployment env key is actually
+// set. Without this, every registered provider is eligible by default —
+// which is wrong when we register a provider with an empty key purely so
+// BYOK keys can route to it. Passing nil restores the legacy "all
+// registered providers eligible" behavior.
+func (s *Service) WithDeploymentKeyedProviders(set map[string]struct{}) *Service {
+	if set == nil {
+		s.deploymentKeyedProviders = nil
+		return s
+	}
+	copied := make(map[string]struct{}, len(set))
+	for p := range set {
+		copied[p] = struct{}{}
+	}
+	s.deploymentKeyedProviders = copied
 	return s
 }
 
@@ -420,7 +458,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	opts := translate.EmitOptions{
 		TargetModel:        decision.Model,
 		Capabilities:       router.Lookup(decision.Model),
-		IncludeStreamUsage: s.emitter != nil,
+		IncludeStreamUsage: s.usageRequired(),
 	}
 
 	// BYOK takes precedence; inbound headers supply fallback credentials.
@@ -447,7 +485,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			return fmt.Errorf("emit body: %w", emitErr)
 		}
 		proxyWriter := sink
-		if s.emitter != nil {
+		if s.usageRequired() {
 			extractor = otel.NewUsageExtractor(sink, decision.Provider)
 			proxyWriter = extractor
 		}
@@ -460,7 +498,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			return fmt.Errorf("translate anthropic request: %w", emitErr)
 		}
 		var usage otel.UsageSink
-		if s.emitter != nil {
+		if s.usageRequired() {
 			extractor = otel.NewUsageExtractor(nil, decision.Provider)
 			usage = extractor
 		}
@@ -477,7 +515,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			return fmt.Errorf("translate anthropic request to gemini: %w", emitErr)
 		}
 		var usage otel.UsageSink
-		if s.emitter != nil {
+		if s.usageRequired() {
 			extractor = otel.NewUsageExtractor(nil, decision.Provider)
 			usage = extractor
 		}
@@ -653,8 +691,17 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, headers http.H
 	// In BYOK-only mode the deployment-level env key must not make a provider
 	// eligible — otherwise argmax could pick it and 401 with the platform key.
 	if !s.byokOnly {
-		for p := range s.providers {
-			out[p] = struct{}{}
+		// Prefer the explicit env-keyed set when configured (selfhosted mode
+		// with BYOK-routable providers registered but unkeyed). Fall back to
+		// "every registered provider" for legacy callers that don't set it.
+		if s.deploymentKeyedProviders != nil {
+			for p := range s.deploymentKeyedProviders {
+				out[p] = struct{}{}
+			}
+		} else {
+			for p := range s.providers {
+				out[p] = struct{}{}
+			}
 		}
 	}
 	for _, k := range externalKeysFromContext(ctx) {
@@ -869,7 +916,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	opts := translate.EmitOptions{
 		TargetModel:        decision.Model,
 		Capabilities:       router.Lookup(decision.Model),
-		IncludeStreamUsage: s.emitter != nil,
+		IncludeStreamUsage: s.usageRequired(),
 	}
 
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
@@ -895,7 +942,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			return fmt.Errorf("emit body: %w", emitErr)
 		}
 		proxyWriter := sink
-		if s.emitter != nil {
+		if s.usageRequired() {
 			extractor = otel.NewUsageExtractor(sink, decision.Provider)
 			proxyWriter = extractor
 		}
@@ -908,7 +955,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			return fmt.Errorf("translate openai request to gemini: %w", emitErr)
 		}
 		var usage otel.UsageSink
-		if s.emitter != nil {
+		if s.usageRequired() {
 			extractor = otel.NewUsageExtractor(nil, decision.Provider)
 			usage = extractor
 		}
@@ -925,7 +972,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			return fmt.Errorf("translate openai request: %w", emitErr)
 		}
 		var usage otel.UsageSink
-		if s.emitter != nil {
+		if s.usageRequired() {
 			extractor = otel.NewUsageExtractor(nil, providers.ProviderAnthropic)
 			usage = extractor
 		}

@@ -13,28 +13,42 @@ Together, Fireworks, etc.).
 
 ## Quick start
 
+**1. Add at least one upstream provider key to `.env.local` first.**
+OpenRouter is the recommended baseline — it unlocks the full OSS-model
+pool the cluster scorer is trained against:
+
 ```bash
-# Boot Postgres + the router, run migrations, and seed a router API key.
+echo "OPENROUTER_API_KEY=sk-or-v1-..." >> .env.local
+# optionally add provider-direct keys too:
+# echo "ANTHROPIC_API_KEY=sk-ant-..."  >> .env.local
+# echo "OPENAI_API_KEY=sk-..."         >> .env.local
+# echo "GOOGLE_API_KEY=..."            >> .env.local
+```
+
+See [Configuring API keys](#configuring-api-keys) for all supported
+providers. These keys are loaded into the router process at boot; doing
+this before `full-setup` means the router comes up already able to serve
+traffic.
+
+**2. Boot the stack and seed a router API key.**
+
+```bash
 make full-setup
 ```
 
-`make full-setup` starts the stack on `http://localhost:8080`, seeds one
-installation, and prints the `rk_...` key.
+`make full-setup` starts Postgres + the router on
+`http://localhost:8080`, runs migrations, and seeds one installation +
+`rk_...` key (printed to stdout). The seeded key lives on the dashboard's
+admin installation, so it shows up under <http://localhost:8080/ui/> →
+**Router keys** and can be rotated from there.
 
-**Provider keys — two ways to add them:**
-
-- **Via `.env.local` (no browser needed):** add keys before or after booting and
-  restart the stack. OpenRouter is the recommended baseline — it unlocks the full
-  OSS-model pool the cluster scorer is trained against:
-  ```bash
-  echo "OPENROUTER_API_KEY=sk-or-v1-..." >> .env.local
-  docker compose restart server   # pick up the new key
-  ```
-  See [Configuring API keys](#configuring-api-keys) for all supported providers.
-
-- **Via the dashboard:** open <http://localhost:8080/ui/> (default password:
-  `admin`), navigate to **Provider keys**, and paste in your keys. No restart
-  needed — BYOK keys are stored in Postgres and resolved per-request.
+**3. (Optional) Add or rotate keys from the dashboard.**
+Open <http://localhost:8080/ui/> (default password: `admin`) → **Provider
+keys** to add BYOK keys without editing `.env.local` or restarting. BYOK
+keys are stored in Postgres (encrypted at rest when
+`EXTERNAL_KEY_ENCRYPTION_KEY` is set) and resolved per-request. If you
+later change a key in `.env.local`, run `docker compose restart server`
+to pick it up.
 
 Once you have at least one provider key in place, you can call the router:
 

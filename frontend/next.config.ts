@@ -44,7 +44,7 @@ const nextConfig: NextConfig = {
   basePath: "/ui",
   devIndicators: false,
   images: { unoptimized: true },
-  trailingSlash: true,
+  trailingSlash: false,
 };
 
 export default nextConfig;

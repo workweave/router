@@ -114,15 +114,19 @@ func main() {
 	repo := postgres.NewRepository(pool, encryptor)
 
 	providerMap := make(map[string]providers.Client)
+	// envKeyedProviders tracks providers whose deployment-level API key is
+	// actually configured (env var present). In selfhosted mode we now
+	// register every provider unconditionally so that BYOK keys added via
+	// the dashboard can route there — but only env-keyed providers are
+	// eligible "by default"; everything else needs a per-installation BYOK
+	// (or client-supplied) credential at request time.
+	envKeyedProviders := make(map[string]struct{})
 
 	// In managed mode every provider is registered unconditionally with no
 	// deployment-level API key. The proxy service is also flipped into
 	// BYOK-only mode below, so a request without BYOK or client-supplied
 	// credentials for the chosen provider 400s at the scorer rather than
 	// silently spending the platform's API budget on customer traffic.
-	// Self-hosted mode keeps the historical per-env-key gating: an operator
-	// who sets ANTHROPIC_API_KEY/etc. on their own deployment expects those
-	// keys to serve traffic without per-installation BYOK plumbing.
 	byokOnly := deploymentMode == server.DeploymentModeManaged
 
 	// Anthropic is always registered. With ANTHROPIC_API_KEY (selfhosted only)
@@ -137,53 +141,90 @@ func main() {
 	case byokOnly:
 		logger.Info("Anthropic provider enabled (BYOK only)", "base_url", anthropic.DefaultBaseURL)
 	case anthropicKey != "":
+		envKeyedProviders[providers.ProviderAnthropic] = struct{}{}
 		logger.Info("Anthropic provider enabled (router key)", "base_url", anthropic.DefaultBaseURL)
 	default:
+		// Anthropic in selfhosted with no env key still serves the
+		// passthrough path on client OAuth/x-api-key — treat it as "keyed"
+		// for default-eligibility so routing to it doesn't require BYOK.
+		envKeyedProviders[providers.ProviderAnthropic] = struct{}{}
 		logger.Info("Anthropic provider enabled (client auth passthrough)", "base_url", anthropic.DefaultBaseURL)
 	}
 
-	if byokOnly {
+	{
 		openaiBaseURL := config.GetOr("OPENAI_BASE_URL", openaiProvider.DefaultBaseURL)
-		providerMap[providers.ProviderOpenAI] = openaiProvider.NewClient("", openaiBaseURL)
-		logger.Info("OpenAI provider enabled (BYOK only)", "base_url", openaiBaseURL)
-	} else if openaiKey := config.GetOr("OPENAI_API_KEY", ""); openaiKey != "" {
-		openaiBaseURL := config.GetOr("OPENAI_BASE_URL", openaiProvider.DefaultBaseURL)
+		openaiKey := ""
+		if !byokOnly {
+			openaiKey = config.GetOr("OPENAI_API_KEY", "")
+		}
 		providerMap[providers.ProviderOpenAI] = openaiProvider.NewClient(openaiKey, openaiBaseURL)
-		logger.Info("OpenAI provider enabled", "base_url", openaiBaseURL)
+		switch {
+		case byokOnly:
+			logger.Info("OpenAI provider enabled (BYOK only)", "base_url", openaiBaseURL)
+		case openaiKey != "":
+			envKeyedProviders[providers.ProviderOpenAI] = struct{}{}
+			logger.Info("OpenAI provider enabled", "base_url", openaiBaseURL)
+		default:
+			logger.Info("OpenAI provider registered (BYOK only — set OPENAI_API_KEY for deployment-level use)", "base_url", openaiBaseURL)
+		}
 	}
 
-	if byokOnly {
+	{
 		openRouterBaseURL := config.GetOr("OPENROUTER_BASE_URL", openaiCompatProvider.DefaultBaseURL)
-		providerMap[providers.ProviderOpenRouter] = openaiCompatProvider.NewClient("", openRouterBaseURL)
-		logger.Info("OpenRouter provider enabled (BYOK only)", "base_url", openRouterBaseURL)
-	} else if openRouterKey := config.GetOr("OPENROUTER_API_KEY", ""); openRouterKey != "" {
-		openRouterBaseURL := config.GetOr("OPENROUTER_BASE_URL", openaiCompatProvider.DefaultBaseURL)
+		openRouterKey := ""
+		if !byokOnly {
+			openRouterKey = config.GetOr("OPENROUTER_API_KEY", "")
+		}
 		providerMap[providers.ProviderOpenRouter] = openaiCompatProvider.NewClient(openRouterKey, openRouterBaseURL)
-		logger.Info("OpenRouter provider enabled", "base_url", openRouterBaseURL)
+		switch {
+		case byokOnly:
+			logger.Info("OpenRouter provider enabled (BYOK only)", "base_url", openRouterBaseURL)
+		case openRouterKey != "":
+			envKeyedProviders[providers.ProviderOpenRouter] = struct{}{}
+			logger.Info("OpenRouter provider enabled", "base_url", openRouterBaseURL)
+		default:
+			logger.Info("OpenRouter provider registered (BYOK only — set OPENROUTER_API_KEY for deployment-level use)", "base_url", openRouterBaseURL)
+		}
 	}
 
-	if byokOnly {
+	{
 		fireworksBaseURL := config.GetOr("FIREWORKS_BASE_URL", openaiCompatProvider.FireworksBaseURL)
-		providerMap[providers.ProviderFireworks] = openaiCompatProvider.NewClient("", fireworksBaseURL)
-		logger.Info("Fireworks provider enabled (BYOK only)", "base_url", fireworksBaseURL)
-	} else if fireworksKey := config.GetOr("FIREWORKS_API_KEY", ""); fireworksKey != "" {
-		fireworksBaseURL := config.GetOr("FIREWORKS_BASE_URL", openaiCompatProvider.FireworksBaseURL)
+		fireworksKey := ""
+		if !byokOnly {
+			fireworksKey = config.GetOr("FIREWORKS_API_KEY", "")
+		}
 		providerMap[providers.ProviderFireworks] = openaiCompatProvider.NewClient(fireworksKey, fireworksBaseURL)
-		logger.Info("Fireworks provider enabled", "base_url", fireworksBaseURL)
+		switch {
+		case byokOnly:
+			logger.Info("Fireworks provider enabled (BYOK only)", "base_url", fireworksBaseURL)
+		case fireworksKey != "":
+			envKeyedProviders[providers.ProviderFireworks] = struct{}{}
+			logger.Info("Fireworks provider enabled", "base_url", fireworksBaseURL)
+		default:
+			logger.Info("Fireworks provider registered (BYOK only — set FIREWORKS_API_KEY for deployment-level use)", "base_url", fireworksBaseURL)
+		}
 	}
 
-	if byokOnly {
+	{
 		// Native Generative Language REST surface — required for multi-turn
 		// tool use against Gemini 3.x preview models, whose opaque
 		// thought_signature field is not exposed by the OpenAI-compat
 		// surface. See router/internal/providers/google/native_client.go.
 		googleBaseURL := config.GetOr("GOOGLE_BASE_URL", googleProvider.NativeBaseURL)
-		providerMap[providers.ProviderGoogle] = googleProvider.NewNativeClient("", googleBaseURL)
-		logger.Info("Google (Gemini) native provider enabled (BYOK only)", "base_url", googleBaseURL)
-	} else if googleKey := config.GetOr("GOOGLE_API_KEY", ""); googleKey != "" {
-		googleBaseURL := config.GetOr("GOOGLE_BASE_URL", googleProvider.NativeBaseURL)
+		googleKey := ""
+		if !byokOnly {
+			googleKey = config.GetOr("GOOGLE_API_KEY", "")
+		}
 		providerMap[providers.ProviderGoogle] = googleProvider.NewNativeClient(googleKey, googleBaseURL)
-		logger.Info("Google (Gemini) native provider enabled", "base_url", googleBaseURL)
+		switch {
+		case byokOnly:
+			logger.Info("Google (Gemini) native provider enabled (BYOK only)", "base_url", googleBaseURL)
+		case googleKey != "":
+			envKeyedProviders[providers.ProviderGoogle] = struct{}{}
+			logger.Info("Google (Gemini) native provider enabled", "base_url", googleBaseURL)
+		default:
+			logger.Info("Google (Gemini) native provider registered (BYOK only — set GOOGLE_API_KEY for deployment-level use)", "base_url", googleBaseURL)
+		}
 	}
 
 	availableProviders := make(map[string]struct{}, len(providerMap))
@@ -255,13 +296,22 @@ func main() {
 	}
 
 	hardPinExplore := config.GetOr("ROUTER_HARD_PIN_EXPLORE", "false") == "true"
-	hardPinProvider, hardPinModel := resolveHardPinModel(availableProviders, logger)
+	// Pin to a model whose provider has actual deployment-level auth — a
+	// BYOK-only registered provider would 401 here since hard-pin compaction
+	// runs on every installation, including ones without their own BYOK.
+	hardPinAvailable := envKeyedProviders
+	if byokOnly {
+		hardPinAvailable = availableProviders
+	}
+	hardPinProvider, hardPinModel := resolveHardPinModel(hardPinAvailable, logger)
 	if hardPinExplore {
 		logger.Info("Explore sub-agent hard-pin enabled", "provider", hardPinProvider, "model", hardPinModel)
 	}
 	logger.Info("Hard-pin model resolved", "provider", hardPinProvider, "model", hardPinModel)
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).WithByokOnly(byokOnly)
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
+		WithByokOnly(byokOnly).
+		WithDeploymentKeyedProviders(envKeyedProviders)
 
 	engine := gin.New()
 	engine.UnescapePathValues = true

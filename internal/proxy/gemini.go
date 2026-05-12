@@ -121,7 +121,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	opts := translate.EmitOptions{
 		TargetModel:        decision.Model,
 		Capabilities:       router.Lookup(decision.Model),
-		IncludeStreamUsage: s.emitter != nil,
+		IncludeStreamUsage: s.usageRequired(),
 	}
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
@@ -134,7 +134,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	proxyStart := time.Now()
 	var extractor *otel.UsageExtractor
 	proxyWriter := http.ResponseWriter(w)
-	if s.emitter != nil {
+	if s.usageRequired() {
 		extractor = otel.NewUsageExtractor(w, decision.Provider)
 		proxyWriter = extractor
 	}
