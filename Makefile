@@ -118,12 +118,12 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + opt
 		echo ""; \
 		if [ "$(PLATFORM)" = "cc" ]; then \
 			echo "==> Wiring Claude Code → router..."; \
-			WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --local; \
+			WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --base-url http://localhost:8082 --scope project --non-interactive; \
 			echo ""; \
 			echo "Done. Your local setup:"; \
-			echo "  • Router runs on http://localhost:8082 (ROUTER_DEV_MODE=true)"; \
+			echo "  • Router runs on http://localhost:8082"; \
 			echo "  • Weave Router key saved in .weave-router-key (gitignored)"; \
-			echo "  • Claude Code is wired (see ~/.claude/settings.json)"; \
+			echo "  • Claude Code is wired (.claude/settings.json + .claude/settings.local.json)"; \
 			echo ""; \
 			echo "Share with teammates (replace BASE_URL with a host they can reach,"; \
 			echo "e.g. an ngrok tunnel or a deployed router — localhost only works on this machine):"; \

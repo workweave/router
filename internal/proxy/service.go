@@ -677,12 +677,26 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, headers http.H
 	return out
 }
 
-// resolveAndInjectCredentials resolves credentials for provider (BYOK or
-// header-supplied) and stashes them on ctx. Returns ctx unchanged when none
-// are available.
+// resolveAndInjectCredentials resolves credentials for provider and stashes
+// them on ctx. Returns ctx unchanged when none are available.
+//
+// When the request was authenticated via a router key (installation ID present
+// on ctx), client-header extraction is skipped. This prevents the client's
+// inbound Anthropic key (Authorization: Bearer sk-ant-...) from being
+// mistakenly forwarded as credentials to a different upstream provider
+// (OpenRouter, Fireworks, etc.). In that case the deployment-level env key
+// on the provider client is the correct fallback.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	byok := BuildCredentialsMap(externalKeysFromContext(ctx))
-	creds := ResolveCredentials(provider, byok, headers)
+	var creds *Credentials
+	if byok != nil {
+		creds = byok[provider]
+	}
+	if creds == nil && installationIDFromContext(ctx) == (uuid.UUID{}) {
+		// No router-key auth — allow client-supplied bearer as provider creds
+		// (plan-based / dev-mode passthrough scenario).
+		creds = ExtractClientCredentials(provider, headers)
+	}
 	if creds != nil {
 		return context.WithValue(ctx, CredentialsContextKey{}, creds)
 	}
