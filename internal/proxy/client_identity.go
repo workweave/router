@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/observability"
 )
 
 // ClientIdentity holds per-request user identification signals extracted from
@@ -51,13 +52,28 @@ func ClientIdentityFrom(ctx context.Context) ClientIdentity {
 // the entire account_uuid attribution path; Service.ResolveAndStashUser
 // is responsible for picking the right upsert based on what's set.
 func ResolveUserFromContext(ctx context.Context, authSvc *auth.Service, installation *auth.Installation) context.Context {
+	log := observability.Get()
 	if authSvc == nil || installation == nil {
+		log.Info("ResolveUserFromContext bailout",
+			"reason", "nil_dep",
+			"authsvc_nil", authSvc == nil,
+			"installation_nil", installation == nil,
+		)
 		return ctx
 	}
 	id := ClientIdentityFrom(ctx)
 	if id.Email == "" && id.AccountID == "" {
+		log.Info("ResolveUserFromContext bailout",
+			"reason", "no_identity_signal",
+			"installation_id", installation.ID,
+		)
 		return ctx
 	}
+	log.Info("ResolveUserFromContext dispatch",
+		"installation_id", installation.ID,
+		"email_present", id.Email != "",
+		"account_present", id.AccountID != "",
+	)
 	return authSvc.ResolveAndStashUser(ctx, installation.ID, id.Email, id.AccountID)
 }
 
