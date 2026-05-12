@@ -68,8 +68,8 @@ services:
     # evaluates env_file entries in order; .env.local wins on
     # collisions because it's listed second.
     #
-    # NOTE: do not add ANTHROPIC_API_KEY / OPENAI_PROVIDER_API_KEY /
-    # GOOGLE_PROVIDER_API_KEY to the `environment:` block below — that
+    # NOTE: do not add ANTHROPIC_API_KEY / OPENAI_API_KEY /
+    # GOOGLE_API_KEY to the `environment:` block below — that
     # block overrides env_file values, and any "${VAR:-}" form there
     # would silently zero out the env_file value when run in a shell
     # without the var exported. Let env_file be authoritative for the

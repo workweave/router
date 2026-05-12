@@ -145,11 +145,11 @@ func main() {
 	}
 
 	if byokOnly {
-		openaiBaseURL := config.GetOr("OPENAI_PROVIDER_BASE_URL", openaiProvider.DefaultBaseURL)
+		openaiBaseURL := config.GetOr("OPENAI_BASE_URL", openaiProvider.DefaultBaseURL)
 		providerMap[providers.ProviderOpenAI] = openaiProvider.NewClient("", openaiBaseURL)
 		logger.Info("OpenAI provider enabled (BYOK only)", "base_url", openaiBaseURL)
-	} else if openaiKey := config.GetOr("OPENAI_PROVIDER_API_KEY", ""); openaiKey != "" {
-		openaiBaseURL := config.GetOr("OPENAI_PROVIDER_BASE_URL", openaiProvider.DefaultBaseURL)
+	} else if openaiKey := config.GetOr("OPENAI_API_KEY", ""); openaiKey != "" {
+		openaiBaseURL := config.GetOr("OPENAI_BASE_URL", openaiProvider.DefaultBaseURL)
 		providerMap[providers.ProviderOpenAI] = openaiProvider.NewClient(openaiKey, openaiBaseURL)
 		logger.Info("OpenAI provider enabled", "base_url", openaiBaseURL)
 	}
@@ -179,11 +179,11 @@ func main() {
 		// tool use against Gemini 3.x preview models, whose opaque
 		// thought_signature field is not exposed by the OpenAI-compat
 		// surface. See router/internal/providers/google/native_client.go.
-		googleBaseURL := config.GetOr("GOOGLE_PROVIDER_BASE_URL", googleProvider.NativeBaseURL)
+		googleBaseURL := config.GetOr("GOOGLE_BASE_URL", googleProvider.NativeBaseURL)
 		providerMap[providers.ProviderGoogle] = googleProvider.NewNativeClient("", googleBaseURL)
 		logger.Info("Google (Gemini) native provider enabled (BYOK only)", "base_url", googleBaseURL)
-	} else if googleKey := config.GetOr("GOOGLE_PROVIDER_API_KEY", ""); googleKey != "" {
-		googleBaseURL := config.GetOr("GOOGLE_PROVIDER_BASE_URL", googleProvider.NativeBaseURL)
+	} else if googleKey := config.GetOr("GOOGLE_API_KEY", ""); googleKey != "" {
+		googleBaseURL := config.GetOr("GOOGLE_BASE_URL", googleProvider.NativeBaseURL)
 		providerMap[providers.ProviderGoogle] = googleProvider.NewNativeClient(googleKey, googleBaseURL)
 		logger.Info("Google (Gemini) native provider enabled", "base_url", googleBaseURL)
 	}
@@ -672,13 +672,13 @@ func envVarForProvider(provider string) string {
 	case providers.ProviderAnthropic:
 		return "ANTHROPIC_API_KEY"
 	case providers.ProviderOpenAI:
-		return "OPENAI_PROVIDER_API_KEY"
+		return "OPENAI_API_KEY"
 	case providers.ProviderOpenRouter:
 		return "OPENROUTER_API_KEY"
 	case providers.ProviderFireworks:
 		return "FIREWORKS_API_KEY"
 	case providers.ProviderGoogle:
-		return "GOOGLE_PROVIDER_API_KEY"
+		return "GOOGLE_API_KEY"
 	default:
 		return "<unknown provider " + provider + ">"
 	}

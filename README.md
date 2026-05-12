@@ -216,10 +216,10 @@ This lets Claude Code keep using the user's logged-in plan.
 | `OPENROUTER_API_KEY`       | *(none)*                                                  | **Recommended.** Enables the OpenRouter provider, unlocking the OSS-model pool the cluster scorer is trained against.           |
 | `OPENROUTER_BASE_URL`      | `https://openrouter.ai/api/v1`                            | Override for OpenRouter (or any OpenAI-compatible endpoint — vLLM, Together, Fireworks, customer-hosted).                       |
 | `ANTHROPIC_API_KEY`        | *(none — passthrough)*                                    | Router's own Anthropic key. When set, used for all Anthropic requests. When unset, client `Authorization` headers are passed through. |
-| `OPENAI_PROVIDER_API_KEY`  | *(none)*                                                  | Enables the OpenAI provider (Chat Completions API).                                                                             |
-| `OPENAI_PROVIDER_BASE_URL` | `https://api.openai.com`                                  | Override for OpenAI (e.g. Azure OpenAI).                                                                                        |
-| `GOOGLE_PROVIDER_API_KEY`  | *(none)*                                                  | Enables the Google Gemini provider via its OpenAI-compatible endpoint.                                                          |
-| `GOOGLE_PROVIDER_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` | Override for Gemini.                                                                                                            |
+| `OPENAI_API_KEY`  | *(none)*                                                  | Enables the OpenAI provider (Chat Completions API).                                                                             |
+| `OPENAI_BASE_URL` | `https://api.openai.com`                                  | Override for OpenAI (e.g. Azure OpenAI).                                                                                        |
+| `GOOGLE_API_KEY`  | *(none)*                                                  | Enables the Google Gemini provider via its OpenAI-compatible endpoint.                                                          |
+| `GOOGLE_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` | Override for Gemini.                                                                                                            |
 
 **Recommended baseline:** set `OPENROUTER_API_KEY` only. That's enough
 to exercise the cluster scorer end-to-end against the full OSS-model

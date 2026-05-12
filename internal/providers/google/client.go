@@ -21,7 +21,7 @@ import (
 )
 
 // DefaultBaseURL is the public OpenAI-compatible endpoint for Gemini. Override
-// via GOOGLE_PROVIDER_BASE_URL for a regional endpoint or Vertex AI proxy.
+// via GOOGLE_BASE_URL for a regional endpoint or Vertex AI proxy.
 const DefaultBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
 type Client struct {
