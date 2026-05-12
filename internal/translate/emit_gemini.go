@@ -332,7 +332,7 @@ func pullOpenAIToolsToGemini(src map[string]any, out map[string]any) error {
 			decl["description"] = d
 		}
 		if p, ok := fn["parameters"]; ok && p != nil {
-			decl["parameters"] = p
+			decl["parameters"] = sanitizeSchemaForGemini(p)
 		}
 		decls = append(decls, decl)
 	}
@@ -668,7 +668,7 @@ func pullAnthropicToolsToGemini(src map[string]any, out map[string]any) error {
 			decl["description"] = d
 		}
 		if p, ok := tool["input_schema"]; ok && p != nil {
-			decl["parameters"] = p
+			decl["parameters"] = sanitizeSchemaForGemini(p)
 		}
 		decls = append(decls, decl)
 	}
@@ -677,6 +677,76 @@ func pullAnthropicToolsToGemini(src map[string]any, out map[string]any) error {
 	}
 	out["tools"] = []any{map[string]any{"functionDeclarations": decls}}
 	return nil
+}
+
+// geminiUnsupportedSchemaKeys lists JSON Schema keywords that Google's
+// function-calling API rejects with 400 "Cannot find field". Claude Code
+// tool definitions routinely include these (Anthropic accepts full JSON
+// Schema), so they must be stripped before sending upstream. The set is
+// derived from upstream error responses observed in prod plus Google's
+// documented OpenAPI 3.0 schema subset for function declarations.
+//
+// Keep the list conservative — strip only what we've seen Google reject;
+// fields like description / nullable / enum / format are valid and must
+// pass through.
+var geminiUnsupportedSchemaKeys = map[string]struct{}{
+	"$schema":               {},
+	"$id":                   {},
+	"$ref":                  {},
+	"$defs":                 {},
+	"definitions":           {},
+	"additionalProperties":  {},
+	"propertyNames":         {},
+	"unevaluatedProperties": {},
+	"patternProperties":     {},
+	"dependencies":          {},
+	"dependentRequired":     {},
+	"dependentSchemas":      {},
+	"if":                    {},
+	"then":                  {},
+	"else":                  {},
+	"not":                   {},
+	"allOf":                 {},
+	"oneOf":                 {},
+	"const":                 {},
+	"contentEncoding":       {},
+	"contentMediaType":      {},
+	"contentSchema":         {},
+	"readOnly":              {},
+	"writeOnly":             {},
+	"examples":              {},
+	"deprecated":            {},
+}
+
+// sanitizeSchemaForGemini returns a deep copy of v with JSON Schema fields
+// Google's function-calling surface rejects removed. Walks into properties,
+// items, and anyOf children recursively. Non-map / non-slice nodes are
+// passed through unchanged.
+//
+// The function does NOT short-circuit when a node has no unsupported keys —
+// we always return a copy so the caller can mutate the result without
+// touching the original input_schema (which the translate envelope holds
+// onto for other emitters that DO accept full JSON Schema).
+func sanitizeSchemaForGemini(v any) any {
+	switch node := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(node))
+		for k, child := range node {
+			if _, drop := geminiUnsupportedSchemaKeys[k]; drop {
+				continue
+			}
+			out[k] = sanitizeSchemaForGemini(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(node))
+		for i, child := range node {
+			out[i] = sanitizeSchemaForGemini(child)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 func pullAnthropicToolChoiceToGemini(body []byte, out map[string]any) {
