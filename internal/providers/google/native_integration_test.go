@@ -25,11 +25,11 @@ import (
 // tool-use loop succeeds against the real Gemini native API: the model emits
 // a functionCall with a thoughtSignature; we round-trip that signature with a
 // functionResponse; turn 2 must not 400 on a missing signature. Run with
-// `GOOGLE_PROVIDER_API_KEY=... go test -tags=google_integration`.
+// `GOOGLE_API_KEY=... go test -tags=google_integration`.
 func TestNative_TwoTurnToolUseRoundTripsThoughtSignature(t *testing.T) {
-	key := os.Getenv("GOOGLE_PROVIDER_API_KEY")
+	key := os.Getenv("GOOGLE_API_KEY")
 	if key == "" {
-		t.Skip("GOOGLE_PROVIDER_API_KEY not set")
+		t.Skip("GOOGLE_API_KEY not set")
 	}
 
 	const model = "gemini-2.5-flash"
@@ -129,9 +129,9 @@ func TestNative_TwoTurnToolUseRoundTripsThoughtSignature(t *testing.T) {
 }
 
 func TestNative_GenerateContentTextOnly(t *testing.T) {
-	key := os.Getenv("GOOGLE_PROVIDER_API_KEY")
+	key := os.Getenv("GOOGLE_API_KEY")
 	if key == "" {
-		t.Skip("GOOGLE_PROVIDER_API_KEY not set")
+		t.Skip("GOOGLE_API_KEY not set")
 	}
 	c := google.NewNativeClient(key, "")
 	body, _ := json.Marshal(map[string]any{
@@ -150,9 +150,9 @@ func TestNative_GenerateContentTextOnly(t *testing.T) {
 
 // TestNative_StreamGenerateContent verifies the streaming hint flips the URL to :streamGenerateContent?alt=sse.
 func TestNative_StreamGenerateContent(t *testing.T) {
-	key := os.Getenv("GOOGLE_PROVIDER_API_KEY")
+	key := os.Getenv("GOOGLE_API_KEY")
 	if key == "" {
-		t.Skip("GOOGLE_PROVIDER_API_KEY not set")
+		t.Skip("GOOGLE_API_KEY not set")
 	}
 	c := google.NewNativeClient(key, "")
 	body, _ := json.Marshal(map[string]any{

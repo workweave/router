@@ -545,8 +545,8 @@ dispatches accordingly. Cross-format translation lives in
 **Architecture:**
 
 - `cmd/router/main.go` registers each provider client only when its
-  API key is set: `ANTHROPIC_API_KEY` (mandatory), `OPENAI_PROVIDER_API_KEY`
-  and `GOOGLE_PROVIDER_API_KEY` (optional). The set of registered
+  API key is set: `ANTHROPIC_API_KEY` (mandatory), `OPENAI_API_KEY`
+  and `GOOGLE_API_KEY` (optional). The set of registered
   provider names is passed to the cluster scorer as `availableProviders`.
 - `cluster.NewScorer` filters `model_registry.json`'s `deployed_models`
   list to entries whose `provider` is in `availableProviders`. argmax
