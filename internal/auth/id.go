@@ -8,7 +8,6 @@ import (
 // APIKeyPrefix fronts every router-issued bearer token: "<prefix>_<24 random chars>".
 const APIKeyPrefix = "rk"
 
-
 const (
 	idLength               = 24
 	alphaNumericCharacters = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
