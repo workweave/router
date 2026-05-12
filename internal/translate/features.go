@@ -329,6 +329,9 @@ func userPromptTextGJSON(content gjson.Result) string {
 		if text == "" {
 			return true
 		}
+		if isClaudeCodeInjectedBlock(text) {
+			return true
+		}
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}
@@ -336,6 +339,31 @@ func userPromptTextGJSON(content gjson.Result) string {
 		return true
 	})
 	return b.String()
+}
+
+// claudeCodeInjectedBlockPrefixes are wrapper tags Claude Code injects into
+// user-message content arrays (system reminders, slash-command echoes, local
+// command output). They carry no routing signal and dwarf the user's typed
+// text, so we skip them when building the embed input. The full untouched
+// request body is still proxied to the upstream model.
+var claudeCodeInjectedBlockPrefixes = []string{
+	"<system-reminder>",
+	"<command-name>",
+	"<command-message>",
+	"<command-args>",
+	"<local-command-stdout>",
+	"<local-command-stderr>",
+	"<local-command-caveat>",
+}
+
+func isClaudeCodeInjectedBlock(text string) bool {
+	trimmed := strings.TrimLeft(text, " \t\r\n")
+	for _, prefix := range claudeCodeInjectedBlockPrefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func openAIContentTextGJSON(v gjson.Result) string {
