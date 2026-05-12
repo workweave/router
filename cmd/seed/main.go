@@ -25,7 +25,7 @@ const (
 	defaultOrgID = "local-dev"
 	defaultName  = "local-dev-seed"
 	createdBy    = "make seed"
-	baseURL      = "http://localhost:8082"
+	baseURL      = "http://localhost:8080"
 )
 
 func main() {

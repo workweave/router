@@ -18,8 +18,8 @@
 #   ./install.sh                                  # hosted router, user scope
 #   ./install.sh --scope project                  # commit-with-team install
 #   ./install.sh --dir /tmp/my-sandbox            # isolated throwaway install
-#   ./install.sh --local                          # local router on localhost:8080, dev-mode
-#   ./install.sh --base-url http://localhost:8080 # self-hosted, custom port / non-dev-mode
+#   ./install.sh --local                          # local router on localhost:8080
+#   ./install.sh --base-url http://localhost:8080 # self-hosted, custom port
 #   ./install.sh --non-interactive                # require WEAVE_ROUTER_KEY env var
 #
 #   curl -fsSL https://weave.ai/cc/install.sh | sh
@@ -38,7 +38,6 @@ scope_explicit="false"
 install_dir=""
 base_url=""
 non_interactive="false"
-dev_mode="false"
 router_key_header="X-Weave-Router-Key"
 
 # ---------- helpers ----------
@@ -90,14 +89,9 @@ while [ $# -gt 0 ]; do
       base_url="${2:-}"; shift 2
       [ -n "$base_url" ] || { err "--base-url requires a value"; exit 2; }
       ;;
-    --dev-mode)
-      dev_mode="true"; shift
-      ;;
     --local)
-      # Shorthand for local dev: ROUTER_DEV_MODE=true on localhost:8080
-      # (matches `wv mr` / `make dev` default PORT). No key required.
+      # Shorthand for local dev: localhost:8080 (matches `wv mr` / `make dev` default PORT).
       base_url="http://localhost:8080"
-      dev_mode="true"
       shift
       ;;
     --non-interactive)
@@ -215,10 +209,7 @@ mkdir -p "$settings_dir" "$statusline_dir"
 # ---------- token handling ----------
 
 api_key=""
-if [ "$dev_mode" = "true" ]; then
-  info "Dev mode — skipping API key (router has ROUTER_DEV_MODE=true)."
-else
-  if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
+if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
     api_key="$WEAVE_ROUTER_KEY"
     info "Using WEAVE_ROUTER_KEY from environment."
   elif [ "$non_interactive" = "true" ]; then
@@ -244,7 +235,6 @@ else
     printf "\n"
     [ -n "$api_key" ] || { err "no key provided"; exit 1; }
   fi
-fi
 
 # ---------- write the statusline script ----------
 
@@ -511,11 +501,6 @@ if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
     env: { ANTHROPIC_BASE_URL: $url },
     statusLine: { type: "command", command: $sl }
   }' >"$tmp_patch"
-elif [ "$dev_mode" = "true" ]; then
-  jq -n --arg url "$base_url" --arg sl "$statusline_path_for_settings" '{
-    env: { ANTHROPIC_BASE_URL: $url },
-    statusLine: { type: "command", command: $sl }
-  }' >"$tmp_patch"
 else
   jq -n --arg url "$base_url" --arg header "$router_key_header: $api_key" --arg sl "$statusline_path_for_settings" '{
     env: { ANTHROPIC_BASE_URL: $url, ANTHROPIC_CUSTOM_HEADERS: $header },
@@ -542,7 +527,7 @@ else
 fi
 ok "Settings written to $settings_file"
 
-if [ "$scope" = "project" ] && [ -z "$install_dir" ] && [ "$dev_mode" != "true" ]; then
+if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
   jq -n --arg header "$router_key_header: $api_key" '{
     env: { ANTHROPIC_CUSTOM_HEADERS: $header }
   }' >"$tmp_patch"
@@ -591,7 +576,7 @@ else
   warn "Could not reach $base_url/health within 5s. Settings are written; verify the router is running."
 fi
 
-if [ "$dev_mode" != "true" ] && [ -n "$api_key" ]; then
+if [ -n "$api_key" ]; then
   # Pass the router key via stdin (`@-`) instead of a -H argument so the key
   # never appears in the process arg list (visible via `ps` / /proc to other
   # local users on shared machines).
@@ -599,7 +584,7 @@ if [ "$dev_mode" != "true" ] && [ -n "$api_key" ]; then
       | curl -fsS --max-time 5 --header @- "$base_url/validate" >/dev/null 2>&1; then
     ok "API key validated."
   else
-    warn "Router rejected the API key (check it matches the dashboard, or pass --dev-mode for a local ROUTER_DEV_MODE server)."
+    warn "Router rejected the API key (check it matches the dashboard at $base_url/ui/)."
   fi
 fi
 
@@ -616,10 +601,7 @@ if [ "$scope" = "project" ]; then
     echo "  Commit .claude/settings.json + the .gitignore changes."
     echo "  Local helpers/settings are gitignored — each teammate runs"
     echo "  './router/install/install.sh --scope project' once after cloning."
-    if [ "$dev_mode" != "true" ]; then
-      echo "  Each teammate also adds this to their shell rc:"
-      echo "    export WEAVE_ROUTER_KEY=rk_..."
-    fi
+    echo "  Each teammate also sets WEAVE_ROUTER_KEY=rk_... or pastes it when prompted."
     echo "  Uninstall with: $script_dir/uninstall.sh --scope project"
   fi
 elif [ -n "$install_dir" ]; then

@@ -93,7 +93,7 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + opt
 		docker compose up --build -d; \
 		echo "==> Waiting for the router to become healthy..."; \
 		for i in $$(seq 1 60); do \
-			if curl -fsS --max-time 2 http://localhost:8082/health >/dev/null 2>&1; then \
+			if curl -fsS --max-time 2 http://localhost:8080/health >/dev/null 2>&1; then \
 				echo "    healthy after $${i}s"; \
 				break; \
 			fi; \
@@ -118,16 +118,16 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + opt
 		echo ""; \
 		if [ "$(PLATFORM)" = "cc" ]; then \
 			echo "==> Wiring Claude Code → router..."; \
-			WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --base-url http://localhost:8082 --scope project --non-interactive; \
+			WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --base-url http://localhost:8080 --scope project --non-interactive; \
 			echo ""; \
 			echo "Done. Your local setup:"; \
-			echo "  • Router runs on http://localhost:8082"; \
+			echo "  • Router runs on http://localhost:8080"; \
 			echo "  • Weave Router key saved in .weave-router-key (gitignored)"; \
 			echo "  • Claude Code is wired (.claude/settings.json + .claude/settings.local.json)"; \
 			echo ""; \
 			echo "Share with teammates (replace BASE_URL with a host they can reach,"; \
 			echo "e.g. an ngrok tunnel or a deployed router — localhost only works on this machine):"; \
-			echo "  make full-setup PLATFORM=cc KEY=$$WEAVE_KEY BASE_URL=http://localhost:8082"; \
+			echo "  make full-setup PLATFORM=cc KEY=$$WEAVE_KEY BASE_URL=http://localhost:8080"; \
 			echo ""; \
 			echo "Useful follow-ups:"; \
 			echo "  make logs    # tail server logs"; \
@@ -136,16 +136,16 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + opt
 			echo "Your local Weave Router is ready. Set up Claude Code or Cursor:"; \
 			echo ""; \
 			echo "=== Claude Code ==="; \
-			echo "  make full-setup PLATFORM=cc KEY=$$WEAVE_KEY BASE_URL=http://localhost:8082"; \
+			echo "  make full-setup PLATFORM=cc KEY=$$WEAVE_KEY BASE_URL=http://localhost:8080"; \
 			echo ""; \
 			echo "=== Cursor ==="; \
 			echo "  1. Open Cursor Settings > Models > Override OpenAI Base URL"; \
-			echo "     Set to: http://localhost:8082/v1"; \
+			echo "     Set to: http://localhost:8080/v1"; \
 			echo "  2. Add API key: $$WEAVE_KEY"; \
 			echo ""; \
 			echo "Share with teammates (replace BASE_URL with a host they can reach,"; \
 			echo "e.g. an ngrok tunnel or a deployed router — localhost only works on this machine):"; \
-			echo "  make full-setup PLATFORM=cc KEY=$$WEAVE_KEY BASE_URL=http://localhost:8082"; \
+			echo "  make full-setup PLATFORM=cc KEY=$$WEAVE_KEY BASE_URL=http://localhost:8080"; \
 			echo ""; \
 			echo "Useful follow-ups:"; \
 			echo "  make logs    # tail server logs"; \
