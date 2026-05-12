@@ -377,3 +377,103 @@ func must(t *testing.T, m map[string]any, k string) any {
 	require.True(t, ok, "missing key %s", k)
 	return v
 }
+
+func TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects(t *testing.T) {
+	// Regression: Claude Code tool definitions include JSON Schema fields
+	// like $schema, additionalProperties, and propertyNames. Anthropic's
+	// API accepts these; Google's function-calling API rejects them with
+	// 400 "Cannot find field". Production saw this on every tools-bearing
+	// request that landed on a Gemini decision.
+	body := []byte(`{
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [{
+			"name":"WebFetch",
+			"description":"Fetch a URL",
+			"input_schema":{
+				"$schema":"http://json-schema.org/draft-07/schema#",
+				"type":"object",
+				"additionalProperties":false,
+				"properties":{
+					"url":{"type":"string","description":"URL to fetch"},
+					"params":{
+						"type":"object",
+						"additionalProperties":{"type":"string"},
+						"propertyNames":{"pattern":"^[A-Za-z]+$"}
+					}
+				},
+				"required":["url"]
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	tools := out["tools"].([]any)
+	require.Len(t, tools, 1)
+	decls := tools[0].(map[string]any)["functionDeclarations"].([]any)
+	require.Len(t, decls, 1)
+	params := decls[0].(map[string]any)["parameters"].(map[string]any)
+
+	// Survivors: type, properties, required, description on leaf nodes.
+	assert.Equal(t, "object", params["type"])
+	assert.NotNil(t, params["properties"])
+	assert.Equal(t, []any{"url"}, params["required"])
+
+	// Casualties at the root level — these are exactly the keys Google
+	// rejects with "Cannot find field".
+	assert.NotContains(t, params, "$schema", "$schema must be stripped at every level")
+	assert.NotContains(t, params, "additionalProperties", "additionalProperties must be stripped at every level")
+
+	// Nested object: same stripping must apply, otherwise a request with
+	// a Map<string,string> shaped tool argument would still 400.
+	props := params["properties"].(map[string]any)
+	paramsField := props["params"].(map[string]any)
+	assert.NotContains(t, paramsField, "additionalProperties",
+		"additionalProperties on a nested schema must also be stripped")
+	assert.NotContains(t, paramsField, "propertyNames",
+		"propertyNames must be stripped — Google doesn't recognize it")
+	// The nested leaf's own description / type passes through.
+	url := props["url"].(map[string]any)
+	assert.Equal(t, "string", url["type"])
+	assert.Equal(t, "URL to fetch", url["description"])
+}
+
+func TestSanitizeSchemaForGemini_PreservesSupportedFields(t *testing.T) {
+	// Defense-in-depth: a single test that exhaustively confirms which
+	// keys survive. If a future PR adds a strip rule that's too aggressive
+	// and drops a valid field, this test fails before traffic does.
+	body := []byte(`{
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [{
+			"name":"Edit",
+			"input_schema":{
+				"type":"object",
+				"description":"Edit a file",
+				"properties":{
+					"path":{"type":"string","format":"uri"},
+					"mode":{"type":"string","enum":["replace","append"]},
+					"line":{"type":"integer","nullable":true}
+				},
+				"required":["path","mode"]
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+
+	assert.Equal(t, "object", params["type"])
+	assert.Equal(t, "Edit a file", params["description"])
+	props := params["properties"].(map[string]any)
+	assert.Equal(t, "uri", props["path"].(map[string]any)["format"], "format must survive")
+	assert.Equal(t, []any{"replace", "append"}, props["mode"].(map[string]any)["enum"], "enum must survive")
+	assert.Equal(t, true, props["line"].(map[string]any)["nullable"], "nullable must survive")
+	assert.Equal(t, []any{"path", "mode"}, params["required"], "required must survive")
+}
