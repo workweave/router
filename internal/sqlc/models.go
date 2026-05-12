@@ -99,8 +99,8 @@ type RouterModelRouterRequestTelemetry struct {
 type RouterModelRouterUser struct {
 	ID             uuid.UUID
 	InstallationID uuid.UUID
-	// Lowercased, trimmed user email (typically git user.email). Application-normalized; column is plain TEXT.
-	Email string
+	// Lowercased, trimmed user email (typically git user.email). Nullable: Claude CLI versions that send only account_uuid in metadata.user_id produce email-NULL rows keyed on (installation_id, claude_account_uuid).
+	Email *string
 	// Optional Claude Code account_uuid carried in metadata.user_id; informational only.
 	ClaudeAccountUUID pgtype.UUID
 	FirstSeenAt       pgtype.Timestamp

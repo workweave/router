@@ -227,10 +227,17 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 	return installation, apiKey, externalKeys, nil
 }
 
-// ResolveAndStashUser upserts a router user keyed on (installationID, email)
-// and stashes the resolved user ID on ctx via UserIDContextKey. Returns the
-// original ctx unchanged when email is empty or the upsert fails — user
-// resolution is best-effort and must never fail an authenticated request.
+// ResolveAndStashUser upserts a router user and stashes the resolved user ID
+// on ctx via UserIDContextKey. Email takes precedence when present:
+// (installationID, email) keys the row and account_uuid enriches it. When
+// email is empty but claudeAccountUUID is present (Claude CLI v2.1.x packs
+// only account_uuid + device_id + session_id into metadata.user_id), the
+// row is keyed on (installationID, claude_account_uuid) with NULL email so
+// per-seat attribution still works.
+//
+// Returns the original ctx unchanged when no identifying signal is present
+// or the upsert fails — user resolution is best-effort and must never fail
+// an authenticated request.
 //
 // Reads through s.userCache: hits skip the DB upsert entirely. The trade-off
 // is that last_seen_at lags by up to the cache TTL, which is fine for a
@@ -239,21 +246,36 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 // Callers normalize email (lower-case, trim) before calling. claudeAccountUUID
 // is optional; pass "" when the client isn't Claude Code.
 func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email, claudeAccountUUID string) context.Context {
-	if s.users == nil || installationID == "" || email == "" {
+	if s.users == nil || installationID == "" {
 		return ctx
 	}
-	if cached, ok := s.userCache.Get(installationID, email); ok {
+	if email == "" && claudeAccountUUID == "" {
+		return ctx
+	}
+
+	identityKey := userIdentityKey(email, claudeAccountUUID)
+	if cached, ok := s.userCache.Get(installationID, identityKey); ok {
 		return context.WithValue(ctx, UserIDContextKey{}, cached)
 	}
-	var accountPtr *string
-	if claudeAccountUUID != "" {
-		accountPtr = &claudeAccountUUID
+
+	var user *User
+	var err error
+	if email != "" {
+		var accountPtr *string
+		if claudeAccountUUID != "" {
+			accountPtr = &claudeAccountUUID
+		}
+		user, err = s.users.UpsertByEmail(ctx, UpsertUserParams{
+			InstallationID:    installationID,
+			Email:             email,
+			ClaudeAccountUUID: accountPtr,
+		})
+	} else {
+		user, err = s.users.UpsertByAccountUUID(ctx, UpsertUserByAccountUUIDParams{
+			InstallationID:    installationID,
+			ClaudeAccountUUID: claudeAccountUUID,
+		})
 	}
-	user, err := s.users.Upsert(ctx, UpsertUserParams{
-		InstallationID:    installationID,
-		Email:             email,
-		ClaudeAccountUUID: accountPtr,
-	})
 	if err != nil {
 		observability.Get().Warn(
 			"Failed to resolve router user",
@@ -262,8 +284,19 @@ func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email
 		)
 		return ctx
 	}
-	s.userCache.Set(installationID, email, user.ID)
+	s.userCache.Set(installationID, identityKey, user.ID)
 	return context.WithValue(ctx, UserIDContextKey{}, user.ID)
+}
+
+// userIdentityKey produces a stable cache key for a (email, account_uuid) pair.
+// Email-bearing rows and account-only rows live in disjoint key spaces so a
+// future request from the same seat that finally carries email doesn't
+// false-hit the account-only cache entry.
+func userIdentityKey(email, claudeAccountUUID string) string {
+	if email != "" {
+		return "email:" + email
+	}
+	return "account:" + claudeAccountUUID
 }
 
 // fireMarkUsed runs the last_used_at update off the request path. We use

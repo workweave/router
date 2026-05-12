@@ -19,16 +19,36 @@ func NewUserRepository(tx sqlc.DBTX) auth.UserRepository {
 	return &userRepo{tx: tx}
 }
 
-func (r *userRepo) Upsert(ctx context.Context, params auth.UpsertUserParams) (*auth.User, error) {
+func (r *userRepo) UpsertByEmail(ctx context.Context, params auth.UpsertUserParams) (*auth.User, error) {
 	installationID, err := uuid.Parse(params.InstallationID)
 	if err != nil {
 		return nil, err
 	}
 	q := sqlc.New(r.tx)
-	row, err := q.UpsertModelRouterUser(ctx, sqlc.UpsertModelRouterUserParams{
+	row, err := q.UpsertModelRouterUserByEmail(ctx, sqlc.UpsertModelRouterUserByEmailParams{
 		InstallationID:    installationID,
 		Email:             params.Email,
 		ClaudeAccountUUID: claudeAccountUUIDArg(params.ClaudeAccountUUID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toAuthUser(row), nil
+}
+
+func (r *userRepo) UpsertByAccountUUID(ctx context.Context, params auth.UpsertUserByAccountUUIDParams) (*auth.User, error) {
+	installationID, err := uuid.Parse(params.InstallationID)
+	if err != nil {
+		return nil, err
+	}
+	accountUUID, err := uuid.Parse(params.ClaudeAccountUUID)
+	if err != nil {
+		return nil, err
+	}
+	q := sqlc.New(r.tx)
+	row, err := q.UpsertModelRouterUserByAccountUUID(ctx, sqlc.UpsertModelRouterUserByAccountUUIDParams{
+		InstallationID:    installationID,
+		ClaudeAccountUUID: accountUUID,
 	})
 	if err != nil {
 		return nil, err
@@ -70,10 +90,12 @@ func toAuthUser(row sqlc.RouterModelRouterUser) *auth.User {
 	user := &auth.User{
 		ID:             row.ID.String(),
 		InstallationID: row.InstallationID.String(),
-		Email:          row.Email,
 		FirstSeenAt:    timestampOrZero(row.FirstSeenAt),
 		LastSeenAt:     timestampOrZero(row.LastSeenAt),
 		DeletedAt:      timestampPtr(row.DeletedAt),
+	}
+	if row.Email != nil {
+		user.Email = *row.Email
 	}
 	if row.ClaudeAccountUUID.Valid {
 		s := uuid.UUID(row.ClaudeAccountUUID.Bytes).String()
