@@ -15,11 +15,12 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// sseTraceEnabled enables verbose SSE translation logging; read once at init to avoid hot-path os.Getenv.
+// sseTraceEnabled enables verbose SSE translation logging; read once at init
+// to avoid hot-path os.Getenv.
 var sseTraceEnabled = os.Getenv("ROUTER_DEBUG_SSE_TRACE") == "true"
 
-// SSETranslator translates Anthropic streaming SSE to OpenAI chat.completion.chunk
-// on the fly. Non-streaming responses buffer for Finalize.
+// SSETranslator translates Anthropic streaming SSE to OpenAI
+// chat.completion.chunk on the fly. Non-streaming responses buffer for Finalize.
 type SSETranslator struct {
 	inner   http.ResponseWriter
 	flusher http.Flusher
@@ -32,15 +33,15 @@ type SSETranslator struct {
 	msgID   string
 	model   string
 	created int64
-	// toolIdx advances on content_block_stop for tool_use blocks, ensuring
-	// the start chunk and all input_json_deltas share the same index.
+	// toolIdx advances on content_block_stop for tool_use blocks so the start
+	// chunk and all input_json_deltas share the same index.
 	toolIdx       int
 	currentIsTool bool
 
 	usageSink otel.UsageSink
 }
 
-// NewSSETranslator wraps w. Call Finalize after upstream returns to flush non-streaming bodies.
+// NewSSETranslator wraps w. Call Finalize after upstream returns.
 func NewSSETranslator(w http.ResponseWriter, model string, sink otel.UsageSink) *SSETranslator {
 	flusher, _ := w.(http.Flusher)
 	return &SSETranslator{
@@ -64,7 +65,7 @@ func (t *SSETranslator) WriteHeader(code int) {
 	ct := t.inner.Header().Get("Content-Type")
 	t.streaming = strings.Contains(ct, "text/event-stream") && code < 400
 
-	// Stale: we re-encode the body to a different size.
+	// Stale once we re-encode the body to a different size.
 	t.inner.Header().Del("Content-Length")
 	t.inner.Header().Del("Content-Encoding")
 
@@ -94,8 +95,8 @@ func (t *SSETranslator) Flush() {
 	}
 }
 
-// Finalize translates and writes the buffered body for non-streaming responses.
-// Streaming is a no-op — [DONE] was already emitted on message_stop.
+// Finalize writes the buffered body for non-streaming responses. Streaming
+// is a no-op — [DONE] was already emitted on message_stop.
 func (t *SSETranslator) Finalize() error {
 	if t.streaming {
 		return nil
@@ -174,7 +175,7 @@ func (t *SSETranslator) translateEvent(raw []byte) error {
 }
 
 func (t *SSETranslator) handleMessageStart(data []byte) error {
-	// strings.Clone: gjson may return strings backed by the buffer via unsafe;
+	// strings.Clone: gjson returns strings backed by the buffer via unsafe;
 	// these fields outlive the event, so copy to survive buffer compaction.
 	if id := gjson.GetBytes(data, "message.id").Str; id != "" {
 		t.msgID = strings.Clone(id)
@@ -330,8 +331,8 @@ func (t *SSETranslator) flushEvent() error {
 var _ http.ResponseWriter = (*SSETranslator)(nil)
 var _ http.Flusher = (*SSETranslator)(nil)
 
-// AnthropicSSETranslator translates OpenAI Chat Completions responses to
-// Anthropic Messages format on the fly. Non-streaming responses buffer for Finalize.
+// AnthropicSSETranslator translates OpenAI Chat Completions SSE to Anthropic
+// Messages format on the fly. Non-streaming responses buffer for Finalize.
 type AnthropicSSETranslator struct {
 	inner   http.ResponseWriter
 	flusher http.Flusher
@@ -348,8 +349,8 @@ type AnthropicSSETranslator struct {
 	// mid-stream, and Finalize runs again after Proxy returns.
 	closed   bool
 	blockIdx int
-	// textOpen tracks whether a text content_block is open; lazily opened on
-	// first content delta to avoid empty blocks for tool-only responses.
+	// textOpen is lazily set on first content delta to avoid empty blocks for
+	// tool-only responses.
 	textOpen   bool
 	toolBlocks map[int]int
 
@@ -363,7 +364,7 @@ type AnthropicSSETranslator struct {
 	usageSink otel.UsageSink
 }
 
-// NewAnthropicSSETranslator wraps w. Call Finalize after upstream returns to flush non-streaming bodies.
+// NewAnthropicSSETranslator wraps w. Call Finalize after upstream returns.
 func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink otel.UsageSink) *AnthropicSSETranslator {
 	flusher, _ := w.(http.Flusher)
 	return &AnthropicSSETranslator{
@@ -412,8 +413,6 @@ func (t *AnthropicSSETranslator) Write(data []byte) (int, error) {
 	return n, t.processOpenAISSEBuffer()
 }
 
-// Flush only forwards once committed to streaming; flushing during buffered
-// non-streaming would prematurely commit gin's default 200 status.
 func (t *AnthropicSSETranslator) Flush() {
 	if !t.streaming {
 		return
@@ -423,8 +422,8 @@ func (t *AnthropicSSETranslator) Flush() {
 	}
 }
 
-// Finalize translates and writes the buffered body for non-streaming responses.
-// For streaming, emits trailing message_delta/message_stop if not already closed.
+// Finalize writes the buffered body for non-streaming responses; for streaming,
+// emits trailing message_delta/message_stop if not already closed.
 func (t *AnthropicSSETranslator) Finalize() error {
 	if sseTraceEnabled {
 		observability.Get().Debug("AnthropicSSE Finalize entry",
@@ -504,7 +503,7 @@ func (t *AnthropicSSETranslator) translateOpenAIEvent(raw []byte) error {
 		return t.finishStream()
 	}
 
-	// strings.Clone: gjson may return strings backed by the buffer via unsafe;
+	// strings.Clone: gjson returns strings backed by the buffer via unsafe;
 	// these fields outlive the event, so copy to survive buffer compaction.
 	if id := gjson.GetBytes(data, "id"); id.Exists() && t.messageID == "" {
 		t.messageID = strings.Clone(id.Str)
@@ -612,7 +611,6 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 	return emitErr
 }
 
-// finishStream emits trailing content_block_stop / message_delta / message_stop.
 func (t *AnthropicSSETranslator) finishStream() error {
 	if !t.started {
 		if err := t.emitMessageStart(); err != nil {
@@ -759,7 +757,6 @@ func (t *AnthropicSSETranslator) flushEvent() error {
 	return nil
 }
 
-// openAIFinishToAnthropic maps OpenAI finish_reason to Anthropic stop_reason.
 func openAIFinishToAnthropic(reason string) string {
 	switch reason {
 	case "length":

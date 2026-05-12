@@ -13,8 +13,8 @@ import (
 	"workweave/router/internal/router"
 )
 
-// fakeEmbedder returns a fixed vector or error. Captures the last
-// argument so tests can assert tail-truncation happened upstream.
+// fakeEmbedder returns a fixed vector or error; captures last text so
+// tests can assert tail-truncation happened upstream.
 type fakeEmbedder struct {
 	vec      []float32
 	err      error
@@ -28,9 +28,8 @@ func (f *fakeEmbedder) Embed(_ context.Context, text string) ([]float32, error) 
 	return f.vec, f.err
 }
 
-// l2norm normalizes v in place. Centroids and embeddings are L2-normed
-// at training/embed time so the scorer's dot product is cosine
-// similarity. Test fixtures honor that contract.
+// l2norm normalizes v in place; test fixtures honor the L2-normed
+// contract so dot product is cosine similarity.
 func l2norm(v []float32) {
 	var s float32
 	for _, x := range v {
@@ -45,9 +44,8 @@ func l2norm(v []float32) {
 	}
 }
 
-// float32Sqrt is the obvious thing; using it instead of math.Sqrt avoids
-// a float64 round-trip for fixture math (the production path uses
-// Float32 throughout).
+// float32Sqrt avoids the float64 round-trip of math.Sqrt; production
+// path uses float32 throughout.
 func float32Sqrt(x float32) float32 {
 	guess := x / 2
 	for i := 0; i < 5; i++ {
@@ -56,8 +54,7 @@ func float32Sqrt(x float32) float32 {
 	return guess
 }
 
-// bundleFromBlobs runs the real loaders against caller-built blobs and
-// returns a *Bundle the scorer can be constructed against.
+// bundleFromBlobs runs real loaders against caller-built blobs.
 func bundleFromBlobs(t *testing.T, version string, centroidsBlob, rankingsBlob, registryBlob []byte) *Bundle {
 	t.Helper()
 	c, err := loadCentroids(centroidsBlob)
@@ -74,10 +71,8 @@ func bundleFromBlobs(t *testing.T, version string, centroidsBlob, rankingsBlob, 
 	}
 }
 
-// twoClusterArtifacts builds a minimal artifact set with K=2 distinct
-// centroids in EmbedDim space. Cluster 0 is the +e1 direction; cluster
-// 1 is the +e2 direction. Cluster 0 prefers Opus; cluster 1 prefers
-// Haiku.
+// twoClusterArtifacts: K=2 fixture. Cluster 0 (+e1) prefers Opus;
+// cluster 1 (+e2) prefers Haiku.
 func twoClusterArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBlob []byte) {
 	t.Helper()
 	dim := EmbedDim
@@ -103,7 +98,6 @@ func twoClusterArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBlo
 	return
 }
 
-// allProviders is the test-default availableProviders set.
 func allProviders() map[string]struct{} {
 	return map[string]struct{}{
 		"anthropic": {},
@@ -135,7 +129,7 @@ func newScorerForTest(t *testing.T, embedder Embedder, cfg Config) *Scorer {
 
 func cfgForTest() Config {
 	c := DefaultConfig()
-	// K=2 in test fixtures; default TopP=4 would be > K. Tighten.
+	// K=2 fixtures; default TopP=4 > K. Tighten.
 	c.TopP = 1
 	return c
 }
@@ -154,10 +148,7 @@ func TestScorer_PicksClusterAlignedModel(t *testing.T) {
 	assert.Contains(t, got.Reason, "model=claude-opus-4-7")
 }
 
-// TestScorer_PopulatesRoutingMetadata asserts the scorer surfaces
-// candidate set, chosen score, and artifact version so the proxy can
-// record routing observations without reaching into private scorer state.
-// Removing any of these breaks routing telemetry rows downstream.
+// Removing any populated metadata field breaks routing telemetry rows.
 func TestScorer_PopulatesRoutingMetadata(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	s := newScorerForTest(t, emb, cfgForTest())
@@ -186,8 +177,7 @@ func TestScorer_PicksOtherClusterWhenAligned(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", got.Model)
 }
 
-// TestScorer_ReturnsErrOnShortPrompt: the scorer fails loud rather than
-// silently degrading to a default model — silent fallback masked real
+// Fail loud rather than silently degrade — silent fallback masked real
 // regressions in eval.
 func TestScorer_ReturnsErrOnShortPrompt(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
@@ -228,15 +218,12 @@ func TestScorer_TailTruncatesBeforeEmbed(t *testing.T) {
 	_, err := s.Route(context.Background(), router.Request{PromptText: prompt})
 	require.NoError(t, err)
 	require.LessOrEqual(t, len(emb.lastText), cfg.MaxPromptChars)
-	// We keep the *tail*; the suffix of the input must be the suffix of
-	// what reached the embedder.
 	assert.True(t, strings.HasSuffix(prompt, emb.lastText), "tail-truncate must preserve suffix")
 }
 
 func TestScorer_TopPSumsAcrossClusters(t *testing.T) {
-	// Build a 3-cluster artifact where cluster 2 has overwhelming Haiku
-	// preference; with TopP=2 (clusters 0+1 nearest), Opus wins; with
-	// TopP=3, Haiku takes over once cluster 2's row is summed in.
+	// 3 clusters; cluster 2 has overwhelming Haiku preference. TopP=2
+	// → Opus wins; TopP=3 → Haiku wins once cluster 2 is summed.
 	dim := EmbedDim
 	c0 := make([]float32, dim)
 	c0[0] = 1
@@ -366,7 +353,7 @@ func TestScorer_FiltersOutUnregisteredProvider(t *testing.T) {
 	cfg := cfgForTest()
 	cfg.TopP = 1
 
-	// Only Anthropic registered: must pick Anthropic despite gpt-5 having a higher score.
+	// Anthropic only: must pick Anthropic despite gpt-5 scoring higher.
 	s, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()},
 		map[string]struct{}{"anthropic": {}})
 	require.NoError(t, err)
@@ -375,7 +362,7 @@ func TestScorer_FiltersOutUnregisteredProvider(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", got.Model)
 	assert.Equal(t, "anthropic", got.Provider)
 
-	// Both Anthropic and OpenAI registered: gpt-5 wins on score.
+	// Anthropic + OpenAI: gpt-5 wins on score.
 	s, err = NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()},
 		map[string]struct{}{"anthropic": {}, "openai": {}})
 	require.NoError(t, err)
@@ -421,8 +408,8 @@ func TestScorer_DedupesDuplicateRegistryEntries(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", got.Model, "haiku should win at 0.6 vs opus 0.35; if opus wins, the scoring loop is double-counting its two registry entries")
 }
 
-// TestScorer_ReturnsErrOnEmbedTimeout proves the per-request EmbedTimeout
-// causes ErrClusterUnavailable rather than a silent heuristic fallback.
+// Per-request EmbedTimeout must cause ErrClusterUnavailable, not a
+// silent fallback.
 func TestScorer_ReturnsErrOnEmbedTimeout(t *testing.T) {
 	slow := &slowEmbedder{delay: 100 * time.Millisecond, vec: makeOpusVec()}
 	cfg := cfgForTest()
@@ -487,10 +474,9 @@ func TestArgmax_TiebreakUsesOrderSlice(t *testing.T) {
 	assert.Equal(t, "B", gotB)
 }
 
-// twoProviderArtifacts builds a 2-cluster fixture with one candidate per
-// provider (anthropic / openai), where the openai model would otherwise
-// outscore the anthropic model on the cluster the prompt aligns to. Used
-// to exercise per-request EnabledProviders gating.
+// twoProviderArtifacts: 2 clusters, one candidate per provider. OpenAI
+// outscores Anthropic on the aligned cluster — exercises per-request
+// EnabledProviders gating.
 func twoProviderArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBlob []byte) {
 	t.Helper()
 	dim := EmbedDim
@@ -526,9 +512,8 @@ func newTwoProviderScorer(t *testing.T, emb Embedder) *Scorer {
 	return s
 }
 
-// TestScorer_NilEnabledProvidersPreservesBootBehavior is the regression
-// guard for the gating opt-in: when the proxy passes no per-request
-// provider set, argmax runs unrestricted over the boot-time candidates.
+// Regression guard for gating opt-in: nil EnabledProviders → argmax
+// runs unrestricted over boot-time candidates.
 func TestScorer_NilEnabledProvidersPreservesBootBehavior(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	s := newTwoProviderScorer(t, emb)
@@ -542,9 +527,8 @@ func TestScorer_NilEnabledProvidersPreservesBootBehavior(t *testing.T) {
 	assert.Equal(t, "openai", got.Provider)
 }
 
-// TestScorer_EnabledProvidersGatesArgmax is the load-bearing assertion:
-// even when the unrestricted argmax would pick openai, restricting
-// EnabledProviders to {anthropic} forces argmax onto anthropic candidates.
+// Load-bearing: restricting EnabledProviders to {anthropic} forces
+// argmax onto anthropic even when openai would otherwise win.
 func TestScorer_EnabledProvidersGatesArgmax(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	s := newTwoProviderScorer(t, emb)
@@ -558,10 +542,8 @@ func TestScorer_EnabledProvidersGatesArgmax(t *testing.T) {
 	assert.Equal(t, "anthropic", got.Provider)
 }
 
-// TestScorer_EmptyEnabledProvidersReturnsErrNoEligibleProvider asserts
-// the typed error: an installation with no resolvable provider keys
-// must surface a 4xx-mappable error rather than picking a model the
-// upstream call would 401 on.
+// Installation with no resolvable provider keys must surface a
+// 4xx-mappable error, not pick a model that 401s upstream.
 func TestScorer_EmptyEnabledProvidersReturnsErrNoEligibleProvider(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	s := newTwoProviderScorer(t, emb)
@@ -572,7 +554,7 @@ func TestScorer_EmptyEnabledProvidersReturnsErrNoEligibleProvider(t *testing.T) 
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNoEligibleProvider))
-	// Must NOT also surface as ErrClusterUnavailable; the API layer
-	// maps these two sentinels to different status codes (400 vs 503).
+	// Must not also surface as ErrClusterUnavailable; API maps these
+	// sentinels to different status codes (400 vs 503).
 	assert.False(t, errors.Is(err, ErrClusterUnavailable))
 }

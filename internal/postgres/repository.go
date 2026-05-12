@@ -1,5 +1,4 @@
-// Package postgres implements auth.InstallationRepository and
-// auth.APIKeyRepository over the SQLC-generated *sqlc.Queries.
+// Package postgres implements auth repositories over the SQLC-generated *sqlc.Queries.
 package postgres
 
 import (
@@ -13,12 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// activeKeyUniqueIndex matches the partial unique index added in
-// migration 0007 (one active key per installation).
+// activeKeyUniqueIndex enforces one active key per installation (migration 0007).
 const activeKeyUniqueIndex = "model_router_api_keys_installation_active_unique"
 
-// uniqueViolation is the SQLSTATE 23505 returned by Postgres when a
-// unique constraint or partial unique index is violated.
+// uniqueViolation is Postgres SQLSTATE 23505.
 const uniqueViolation = "23505"
 
 // Repository aggregates all repositories backed by the same DBTX.
@@ -30,8 +27,7 @@ type Repository struct {
 	Telemetry       *TelemetryRepo
 }
 
-// NewRepository constructs a Repository. encryptor is used to decrypt external
-// API key ciphertexts; pass auth.NoOpEncryptor{} for local dev without a keyset.
+// NewRepository constructs a Repository. Pass auth.NoOpEncryptor{} for local dev without a keyset.
 func NewRepository(tx sqlc.DBTX, encryptor auth.Encryptor) *Repository {
 	return &Repository{
 		Installations:   &installationRepo{tx: tx},

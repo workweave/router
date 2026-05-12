@@ -14,47 +14,29 @@ import (
 	"github.com/knights-analytics/hugot/pipelines"
 )
 
-// model.onnx and tokenizer.json are both hosted on HuggingFace Hub
-// (see scripts/upload_to_hf.py), pulled into the runtime image by the
-// Dockerfile, and into local dev via scripts/download_from_hf.py.
-// They're loaded together because they're paired: a tokenizer must
-// match the model it was trained against, so versioning them as one
-// HF revision is the correct unit. Override the directory via
-// ROUTER_ONNX_ASSETS_DIR for local dev (the export/download scripts
-// write to assets/ under the repo root by default).
+// model.onnx and tokenizer.json are paired (tokenizer must match the
+// model it was trained against); versioned together on HF Hub.
+// Override with ROUTER_ONNX_ASSETS_DIR for local dev.
 const defaultAssetsDir = "/opt/router/assets"
 
-// minModelSizeBytes is a sanity floor that catches an unpopulated
-// HF download or a stray pointer/placeholder. The real INT8-quantized
-// jina-v2-base-code is ~160 MB; even a smaller drop-in embedder is
-// going to be tens of MB. If the file is under this threshold
-// something has gone wrong and we want to fail loudly at boot rather
-// than silently miscalibrating embeddings.
+// minModelSizeBytes is a sanity floor catching an unpopulated HF
+// download or placeholder. Real INT8-quantized jina-v2-base-code is
+// ~160 MB; failing loudly at boot beats silently miscalibrating.
 const minModelSizeBytes = 1 << 20 // 1 MiB
 
-// onnxEmbedder is the production Embedder implementation. It owns one
-// hugot session and one feature-extraction pipeline; both are
-// goroutine-safe so a single instance is shared across all requests.
-//
-// The hugot pipeline already handles:
-//   - tokenization (BERT WordPiece via the embedded tokenizer.json)
-//   - ONNX inference through onnxruntime_go (CGO; needs
-//     libonnxruntime.so at link time)
-//   - mean pooling over the token axis
-//   - L2 normalization (via WithNormalization)
-//
-// so Embed reduces to a one-call wrapper plus type-shape sanity checks.
+// onnxEmbedder is the production Embedder. Owns one hugot session and
+// pipeline; both goroutine-safe so one instance is shared across all
+// requests. hugot handles tokenization, ONNX inference, mean pooling,
+// and L2 normalization.
 type onnxEmbedder struct {
 	session  *hugot.Session
 	pipeline *pipelines.FeatureExtractionPipeline
 
-	// closeOnce guards Close so a double-close from tests or shutdown
-	// hooks doesn't try to destroy the underlying ORT session twice.
+	// closeOnce guards against double-close from tests/shutdown hooks.
 	closeOnce sync.Once
 }
 
-// resolveAssetsDir returns the directory containing model.onnx and
-// tokenizer.json. ROUTER_ONNX_ASSETS_DIR wins; otherwise defaultAssetsDir.
+// resolveAssetsDir returns ROUTER_ONNX_ASSETS_DIR if set, else defaultAssetsDir.
 func resolveAssetsDir() string {
 	if d := os.Getenv("ROUTER_ONNX_ASSETS_DIR"); d != "" {
 		return d
@@ -63,16 +45,8 @@ func resolveAssetsDir() string {
 }
 
 // NewEmbedder reads model.onnx and tokenizer.json from disk and
-// constructs the shared session + pipeline. Hugot loads from the
-// directory directly, so no temp-dir copy is needed. Callers are
-// expected to call Close on shutdown so the underlying ORT session is
-// released.
-//
-// Returns an error on any of: missing/undersized model.onnx, missing
-// tokenizer.json (the HF download or local export hasn't run; main.go
-// fail-opens to the heuristic on these paths), ONNX session creation
-// failure (libonnxruntime missing or wrong version), or pipeline
-// construction failure.
+// constructs the shared session + pipeline. Callers must Close on
+// shutdown to release the ORT session.
 func NewEmbedder() (*onnxEmbedder, error) {
 	assetsDir := resolveAssetsDir()
 	modelPath := filepath.Join(assetsDir, "model.onnx")
@@ -89,13 +63,10 @@ func NewEmbedder() (*onnxEmbedder, error) {
 		return nil, fmt.Errorf("cluster: stat tokenizer.json at %s: %w", tokenizerPath, err)
 	}
 
-	// hugot defaults to looking for libonnxruntime at fixed OS-specific
-	// paths (/usr/lib/libonnxruntime.so on Linux,
-	// /usr/local/lib/libonnxruntime.dylib on macOS). The Dockerfile
-	// arranges the Linux default; on macOS dev boxes brew installs to
-	// /opt/homebrew/lib which is *not* the default. ROUTER_ONNX_LIBRARY_DIR
-	// is an opt-in dev escape hatch that overrides the lookup directory
-	// (per hugot v0.7.0 the option takes a *directory*, not a file).
+	// hugot defaults to /usr/lib (Linux) / /usr/local/lib (macOS).
+	// macOS brew installs to /opt/homebrew/lib — not the default — so
+	// ROUTER_ONNX_LIBRARY_DIR is the dev escape hatch (hugot v0.7.0
+	// takes a *directory*, not a file).
 	var sessOpts []options.WithOption
 	if dir := os.Getenv("ROUTER_ONNX_LIBRARY_DIR"); dir != "" {
 		sessOpts = append(sessOpts, options.WithOnnxLibraryPath(dir))
@@ -110,9 +81,8 @@ func NewEmbedder() (*onnxEmbedder, error) {
 		Name:         "weave-router-jina-v2",
 		OnnxFilename: "model.onnx",
 		Options: []hugot.FeatureExtractionOption{
-			// Mean pooling + L2 normalization is the standard
-			// sentence-transformers contract; jina-embeddings-v2-base-code
-			// is trained against that pooling so we hard-pin it here.
+			// jina-embeddings-v2-base-code is trained with mean pooling +
+			// L2 normalization; hard-pin to match.
 			pipelines.WithNormalization(),
 		},
 	}
@@ -128,12 +98,9 @@ func NewEmbedder() (*onnxEmbedder, error) {
 	}, nil
 }
 
-// Embed runs the pipeline on a single text. Returns a [EmbedDim]float32
-// L2-normalized vector or an error. ctx is ignored here — hugot v0.7.0's
-// RunPipeline doesn't accept a context. The request-path timeout is
-// enforced by scorer.Route, which races this call against
-// context.WithTimeout in a goroutine; a slow inference still runs to
-// completion in the background but the request returns on timeout.
+// Embed runs the pipeline on a single text. ctx is ignored — hugot
+// v0.7.0's RunPipeline doesn't accept one; scorer.Route races this call
+// against context.WithTimeout in a goroutine instead.
 func (e *onnxEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
 	out, err := e.pipeline.RunPipeline([]string{text})
 	if err != nil {

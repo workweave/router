@@ -23,8 +23,7 @@ type RoutingFeatures struct {
 	LastUserMessageText string
 }
 
-// RoutingFeatures extracts routing inputs from the envelope. Format-aware:
-// dispatches to Anthropic or OpenAI extraction based on source format.
+// RoutingFeatures extracts routing inputs from the envelope.
 func (e *RequestEnvelope) RoutingFeatures(extractLastUser bool) RoutingFeatures {
 	switch e.format {
 	case FormatAnthropic:
@@ -113,10 +112,8 @@ func (e *RequestEnvelope) openAIRoutingFeatures() RoutingFeatures {
 	return feats
 }
 
-// classifyLastMessageOpenAI maps an OpenAI message role onto the
-// shared three-value LastKind enum. OpenAI uses dedicated `tool` and
-// `assistant` roles, so unlike Anthropic there is no need to inspect
-// content blocks.
+// classifyLastMessageOpenAI maps an OpenAI message role onto the shared
+// three-value LastKind enum.
 func classifyLastMessageOpenAI(role string) string {
 	switch role {
 	case "assistant":
@@ -129,8 +126,7 @@ func classifyLastMessageOpenAI(role string) string {
 }
 
 // previewText returns the first previewMaxChars of text with newlines
-// collapsed to single spaces. Shared by Anthropic and OpenAI feature
-// extraction so LastPreview has identical semantics across formats.
+// collapsed to spaces.
 func previewText(text string) string {
 	if text == "" {
 		return ""
@@ -143,9 +139,8 @@ func previewText(text string) string {
 	return string(runes[:previewMaxChars]) + "…"
 }
 
-// anthropicLastUserMessage walks messages backwards for the last role
-// "user" entry and reports whether it contains text and/or tool_result
-// blocks. The bare-string content shape counts as text.
+// anthropicLastUserMessage walks messages backwards for the last user entry.
+// The bare-string content shape counts as text.
 func anthropicLastUserMessage(body []byte) LastUserMessageInfo {
 	msgs := gjson.GetBytes(body, "messages")
 	if !msgs.IsArray() {
@@ -195,11 +190,10 @@ func anthropicLastUserMessage(body []byte) LastUserMessageInfo {
 	return info
 }
 
-// openAILastUserMessage scans the trailing run of role=="tool"
-// messages and the most recent role=="user" message. OpenAI splits
-// tool returns into separate messages, so a tool-result-only turn is
-// one or more trailing role=="tool" messages with no role=="user"
-// after them.
+// openAILastUserMessage scans the trailing run of role=="tool" messages and
+// the most recent role=="user" message. OpenAI splits tool returns into
+// separate messages, so a tool-result-only turn is trailing role=="tool"
+// messages with no role=="user" after them.
 func openAILastUserMessage(body []byte) LastUserMessageInfo {
 	msgs := gjson.GetBytes(body, "messages")
 	if !msgs.IsArray() {
@@ -224,16 +218,12 @@ func openAILastUserMessage(body []byte) LastUserMessageInfo {
 				info.Text = text
 			}
 		}
-		// Stop at the first non-tool message regardless of role.
 		break
 	}
 	return info
 }
 
-// openAISystemText concatenates every role=="system" message's text
-// content. OpenAI carries the system prompt inline rather than in a
-// separate field, and may have multiple system messages (e.g. one
-// from the framework, one from the developer).
+// openAISystemText concatenates every role=="system" message's text content.
 func openAISystemText(body []byte) string {
 	msgs := gjson.GetBytes(body, "messages")
 	if !msgs.IsArray() {
@@ -256,8 +246,6 @@ func openAISystemText(body []byte) string {
 	})
 	return b.String()
 }
-
-// --- gjson-based content text helpers (zero allocation from e.body) ---
 
 func systemTextGJSON(v gjson.Result) string {
 	if !v.Exists() {
@@ -349,8 +337,6 @@ func userPromptTextGJSON(content gjson.Result) string {
 	})
 	return b.String()
 }
-
-// --- OpenAI content text helpers ---
 
 func openAIContentTextGJSON(v gjson.Result) string {
 	if !v.Exists() {

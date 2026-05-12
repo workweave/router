@@ -12,10 +12,6 @@ import (
 )
 
 // fakeUsageSink records the last RecordUsage / RecordCacheUsage calls.
-// Translators forward parsed token counts to whichever sink the proxy
-// installed (in prod: *otel.UsageExtractor); these tests verify the
-// translator passes the right JSON-extracted values to the sink without
-// constructing a real extractor.
 type fakeUsageSink struct {
 	input         int
 	output        int
@@ -33,9 +29,8 @@ func (f *fakeUsageSink) RecordCacheUsage(creation, read int) {
 	f.cacheRead = read
 }
 
-// SSETranslator forwards Anthropic message_start cache tokens to the sink
-// (cache_creation_input_tokens, cache_read_input_tokens). Catches typos in
-// either JSON path.
+// Catches typos in the message_start cache_creation_input_tokens /
+// cache_read_input_tokens JSON paths.
 func TestSSETranslator_ForwardsAnthropicCacheTokens(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sink := &fakeUsageSink{}
@@ -53,9 +48,8 @@ func TestSSETranslator_ForwardsAnthropicCacheTokens(t *testing.T) {
 	assert.Equal(t, 2048, sink.cacheRead)
 }
 
-// AnthropicSSETranslator forwards OpenAI prompt_tokens_details.cached_tokens
-// to the sink as cacheRead (no cache_creation on OpenAI). Catches typos in
-// the nested JSON path that gjson would otherwise silently return 0 for.
+// Catches typos in the prompt_tokens_details.cached_tokens nested path that
+// gjson would otherwise silently return 0 for.
 func TestAnthropicSSETranslator_ForwardsOpenAICachedTokens(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sink := &fakeUsageSink{}

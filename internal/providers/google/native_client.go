@@ -18,27 +18,22 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// NativeBaseURL is Google's native Generative Language base URL. Native
-// endpoints sit under /v1beta/models/{model}:generateContent — distinct from
-// the OpenAI-compat surface (which lives under /v1beta/openai). NativeClient
-// composes the per-request URL.
+// NativeBaseURL is Google's native Generative Language base URL. Endpoints sit
+// under /v1beta/models/{model}:generateContent — distinct from the OpenAI-compat
+// surface under /v1beta/openai.
 const NativeBaseURL = "https://generativelanguage.googleapis.com"
 
-// NativeClient is the providers.Client adapter for Google Gemini's native
-// REST surface. The native API both returns and accepts the opaque
-// thought_signature field that multi-turn tool use against Gemini 3.x preview
-// models requires; the OpenAI-compat surface (see Client) does not.
-//
-// Auth is via the x-goog-api-key request header. BYOK credentials on the
-// request context take precedence over the deployment-level key.
+// NativeClient is the providers.Client adapter for Gemini's native REST surface.
+// The native API returns and accepts the opaque thought_signature field that
+// multi-turn tool use against Gemini 3.x preview models requires; the
+// OpenAI-compat surface does not. Auth is via x-goog-api-key.
 type NativeClient struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
 }
 
-// NewNativeClient is pooled for sustained traffic to a single host. baseURL
-// defaults to NativeBaseURL when empty.
+// NewNativeClient returns a NativeClient; baseURL defaults to NativeBaseURL when empty.
 func NewNativeClient(apiKey, baseURL string) *NativeClient {
 	if baseURL == "" {
 		baseURL = NativeBaseURL
@@ -50,15 +45,9 @@ func NewNativeClient(apiKey, baseURL string) *NativeClient {
 	}
 }
 
-// Proxy posts the prepared Gemini-native body to :generateContent (or
-// :streamGenerateContent?alt=sse when the inbound request was streaming) and
-// streams the response back via the provided ResponseWriter.
-//
-// The streaming/non-streaming choice is communicated by the caller: the
-// translate.GeminiToOpenAISSETranslator wrapping w expects Gemini SSE only
-// when the upstream Content-Type advertises text/event-stream. Callers select
-// streaming by setting "X-Stream" on prep.Headers; we strip that synthetic
-// header before forwarding.
+// Proxy posts the prepared body to :generateContent, or
+// :streamGenerateContent?alt=sse when prep.Headers[GeminiStreamHintHeader] is
+// "true". The synthetic hint header is stripped before forwarding upstream.
 func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	stream := prep.Headers.Get(translate.GeminiStreamHintHeader) == "true"
 	prep.Headers.Del(translate.GeminiStreamHintHeader)
@@ -127,9 +116,8 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 	return httputil.StreamBody(resp.Body, resp.StatusCode, w, t)
 }
 
-// Passthrough forwards an inbound non-routing request (e.g. /v1/models) to the
-// native surface unchanged. The native API exposes /v1beta/models for model
-// discovery; the inbound /v1/... prefix is rewritten to /v1beta/.
+// Passthrough forwards to the native surface, rewriting the inbound /v1/
+// prefix to /v1beta/ since the native API exposes /v1beta/models for discovery.
 func (c *NativeClient) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	suffix := r.URL.Path
 	if rest, ok := strings.CutPrefix(suffix, "/v1/"); ok {
@@ -189,9 +177,8 @@ func (c *NativeClient) Passthrough(ctx context.Context, prep providers.PreparedR
 	return err
 }
 
-// logUpstreamStatus emits an Error log for upstream 4xx/5xx, Warn for 429s.
-// Mirrors the Anthropic adapter's helper so non-2xx upstream responses are
-// surfaced to ops with a body preview rather than blackholing into a generic
+// logUpstreamStatus emits Error for 4xx/5xx and Warn for 429s, surfacing a
+// body preview so non-2xx upstream responses don't blackhole into a generic
 // "upstream call failed" string at the client.
 func logUpstreamStatus(msg string, status int, attrs ...any) {
 	merged := append([]any{"status", status}, attrs...)
@@ -202,8 +189,7 @@ func logUpstreamStatus(msg string, status int, attrs ...any) {
 	observability.Get().Warn(msg, merged...)
 }
 
-// applyAPIKey sets x-goog-api-key from BYOK credentials when present, falling
-// back to the deployment-level key. Mirrors Client.Proxy's resolution order.
+// applyAPIKey sets x-goog-api-key, preferring BYOK credentials over the deployment-level key.
 func (c *NativeClient) applyAPIKey(ctx context.Context, req *http.Request) {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil && len(creds.APIKey) > 0 {
 		req.Header.Set("x-goog-api-key", string(creds.APIKey))

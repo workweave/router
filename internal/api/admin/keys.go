@@ -61,20 +61,16 @@ func ListAPIKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// IssueAPIKeyHandler creates the installation's first router API key. Refuses
-// with 409 if an active key already exists — admins should rotate instead, and
-// the partial unique index on (installation_id) WHERE deleted_at IS NULL would
-// reject a second insert at the database layer anyway. Returns the raw token
-// once.
+// IssueAPIKeyHandler creates the installation's first router API key. Returns 409 if an active key
+// exists — admins should rotate instead (the partial unique index on (installation_id) WHERE
+// deleted_at IS NULL would reject the insert regardless). Returns the raw token once.
 func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
 		if !ok {
 			return
 		}
-		// Pre-check belongs in front of the DB constraint so the user gets a
-		// clean 409 + actionable message rather than a generic 500 mapped from
-		// auth.ErrActiveKeyExists.
+		// Pre-check in front of the DB constraint so callers get a clean 409 instead of a generic 500.
 		existing, err := authSvc.ListAPIKeys(c.Request.Context(), installation.ID)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to look up existing api key"})
@@ -106,10 +102,8 @@ func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// RotateAPIKeyHandler soft-deletes the installation's current active key (if
-// any) and issues a replacement. Carries forward the previous key's name.
-// Same response shape as IssueAPIKeyHandler so the admin frontend can reuse
-// the raw-token-reveal path.
+// RotateAPIKeyHandler soft-deletes the current active key and issues a replacement, carrying forward
+// the previous name. Same response shape as IssueAPIKeyHandler.
 func RotateAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -128,8 +122,7 @@ func RotateAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// DeleteAPIKeyHandler soft-deletes a router API key by ID. Scoped to
-// the authed installation: rejects with 404 if the key belongs to another
+// DeleteAPIKeyHandler soft-deletes a router API key by ID. Returns 404 if the key belongs to another
 // installation, so a tenant who learns a foreign key UUID cannot revoke it.
 func DeleteAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {

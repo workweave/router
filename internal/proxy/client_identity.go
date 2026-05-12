@@ -9,11 +9,9 @@ import (
 	"workweave/router/internal/observability"
 )
 
-// ClientIdentity holds per-request user identification signals extracted from
-// inbound headers and the Anthropic metadata.user_id body field. Claude Code
-// populates DeviceID/AccountID/SessionID; Email is the cross-protocol identity
-// the router persists as router.model_router_users.email and the only signal
-// reliable enough to link to a Weave account.
+// ClientIdentity holds per-request user identification signals. Email is the
+// cross-protocol identity persisted as router.model_router_users.email and
+// the only signal reliable enough to link to a Weave account.
 type ClientIdentity struct {
 	DeviceID  string
 	AccountID string
@@ -24,33 +22,22 @@ type ClientIdentity struct {
 }
 
 // ClientIdentityContextKey is the request-context key for client identity.
-// The handler layer writes it; the proxy service reads it for OTEL spans
-// and the decision sidecar log.
 type ClientIdentityContextKey struct{}
 
-// ClientIdentityFrom reads the ClientIdentity stashed on ctx by the handler.
-// Returns a zero-value identity when absent.
+// ClientIdentityFrom reads the ClientIdentity stashed on ctx, or a zero value when absent.
 func ClientIdentityFrom(ctx context.Context) ClientIdentity {
 	id, _ := ctx.Value(ClientIdentityContextKey{}).(ClientIdentity)
 	return id
 }
 
-// ResolveUserFromContext is the glue every inbound handler runs after
-// stashing ClientIdentity: pull whatever identity signal the request
-// carried (email and/or Claude account_uuid) out of ctx, hand it to
-// auth.Service.ResolveAndStashUser, return the (possibly enriched) ctx.
+// ResolveUserFromContext pulls identity signals (email and/or Claude
+// account_uuid) from ctx and hands them to auth.Service.ResolveAndStashUser,
+// returning the (possibly enriched) ctx. Centralized here so resolution rules
+// don't diverge across protocol handlers.
 //
-// Lives here rather than in each handler subpackage so the resolution
-// rules (when to skip, what to forward) stay in one place — diverging
-// copies between Anthropic / OpenAI / Gemini handlers would silently
-// break per-protocol attribution.
-//
-// No-op when authSvc / installation are missing, or when the client
-// supplied neither an email nor a Claude account_uuid — there's nothing
-// to attribute a row to in that case. Claude CLI v2.1.x packs only
-// account_uuid (no email), so guarding on email alone here would defeat
-// the entire account_uuid attribution path; Service.ResolveAndStashUser
-// is responsible for picking the right upsert based on what's set.
+// No-op when deps are missing, or when neither email nor account_uuid is set.
+// Claude CLI v2.1.x packs only account_uuid (no email), so guarding on email
+// alone would defeat the account_uuid attribution path.
 func ResolveUserFromContext(ctx context.Context, authSvc *auth.Service, installation *auth.Installation) context.Context {
 	log := observability.Get()
 	if authSvc == nil || installation == nil {
@@ -77,9 +64,9 @@ func ResolveUserFromContext(ctx context.Context, authSvc *auth.Service, installa
 	return authSvc.ResolveAndStashUser(ctx, installation.ID, id.Email, id.AccountID)
 }
 
-// ClaudeCodeMetadata mirrors the JSON structure Claude Code (and friends) encode
-// into the Anthropic metadata.user_id string field. Email is the field we
-// promote into router.model_router_users; the others stay request-scoped.
+// ClaudeCodeMetadata mirrors the JSON Claude Code encodes into the Anthropic
+// metadata.user_id field. Email is promoted into router.model_router_users;
+// the others stay request-scoped.
 type ClaudeCodeMetadata struct {
 	DeviceID  string `json:"device_id"`
 	AccountID string `json:"account_uuid"`
@@ -87,9 +74,8 @@ type ClaudeCodeMetadata struct {
 	Email     string `json:"email"`
 }
 
-// ParseClaudeCodeMetadata extracts device_id, account_uuid, session_id, and
-// email from the JSON string Claude Code packs into metadata.user_id. Returns
-// a zero-value struct on any parse failure (best-effort, not request-blocking).
+// ParseClaudeCodeMetadata extracts identity fields from the JSON Claude Code
+// packs into metadata.user_id. Best-effort: returns a zero value on parse failure.
 func ParseClaudeCodeMetadata(raw string) ClaudeCodeMetadata {
 	if raw == "" {
 		return ClaudeCodeMetadata{}
@@ -101,32 +87,18 @@ func ParseClaudeCodeMetadata(raw string) ClaudeCodeMetadata {
 	return meta
 }
 
-// MaxEmailLen is the upper bound on email length we accept into
-// router.model_router_users. RFC 5321 §4.5.3.1.3 caps a Mail-From path at
-// 256 bytes; we use 254 to be safe and to bound row growth from
-// caller-controlled inputs (handlers accept metadata.user_id.email and the
-// X-Weave-User-Email header from any authenticated caller, so an unbounded
-// shape would let a single API key flood the table with distinct strings).
+// MaxEmailLen caps email length per RFC 5321 §4.5.3.1.3 (256 bytes); we use
+// 254 to bound row growth from caller-controlled inputs flooding the table.
 const MaxEmailLen = 254
 
 // MaxClientIdentifierLen bounds caller-controlled opaque identifiers
-// (device_id, session_id) before they reach storage or trace
-// attributes. Claude Code emits short UUID-shaped ids (~36 chars); 128
-// is generous overhead. Mirrors the MaxEmailLen flood-protection
-// pattern: an authenticated caller could otherwise spam high-cardinality
-// strings into router.model_router_request_telemetry and force
-// avoidable storage growth.
+// (device_id, session_id). Claude Code emits ~36-char UUIDs; 128 is overhead.
+// Flood-protection floor against high-cardinality spam into telemetry storage.
 const MaxClientIdentifierLen = 128
 
-// NormalizeClientIdentifier returns the input unchanged when it fits
-// inside MaxClientIdentifierLen, and the empty string otherwise.
-// Rejection (rather than truncation) keeps the shape honest — a
-// truncated identifier looks valid but no longer correlates, which is
-// worse than a missing one. Callers treat "" as "no signal" and skip
-// downstream persistence/correlation.
-//
-// As with NormalizeEmail, this is a flood-protection floor, not a
-// format check. Identifiers are opaque tokens; we don't parse them.
+// NormalizeClientIdentifier returns the input unchanged when it fits inside
+// MaxClientIdentifierLen, else "". Rejection (not truncation) keeps the shape
+// honest: a truncated identifier looks valid but no longer correlates.
 func NormalizeClientIdentifier(s string) string {
 	if len(s) > MaxClientIdentifierLen {
 		return ""
@@ -135,16 +107,11 @@ func NormalizeClientIdentifier(s string) string {
 }
 
 // NormalizeEmail trims whitespace, lower-cases, and structurally validates an
-// email so it matches the case-sensitive unique index on
-// (installation_id, email) without letting a caller-controlled input drive
-// unbounded growth in router.model_router_users. Returns "" for any input
-// that is empty, longer than MaxEmailLen, missing a single '@', or has an
-// empty local-part or domain. Callers treat "" as "no email signal" and skip
-// the upsert (see auth.Service.ResolveAndStashUser).
-//
-// We deliberately do NOT validate deliverability — the email is an opaque
-// identifier, not a contact channel. The shape check is a flood-protection
-// floor, not RFC 5322 parsing.
+// email so it matches the case-sensitive unique index on (installation_id,
+// email). Returns "" when empty, oversized, or shaped wrong (missing or
+// duplicate '@', empty local-part or domain). Callers treat "" as "no email
+// signal" and skip the upsert. Deliverability is not checked: email here is
+// an opaque identifier, and the shape check is a flood-protection floor.
 func NormalizeEmail(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if s == "" || len(s) > MaxEmailLen {

@@ -28,53 +28,36 @@ type Service struct {
 	emitter              *otel.Emitter
 	embedLastUserMessage bool
 	stickyDecisions      *expirable.LRU[string, router.Decision]
-	// semanticCache short-circuits non-streaming requests on a
-	// cosine-similarity hit against a stored response. Nil disables
-	// the cache entirely. Always nil-check before use.
+	// semanticCache short-circuits non-streaming requests on a cosine-similarity hit.
 	semanticCache *cache.Cache
-	// pinStore persists session-sticky routing decisions across Cloud
-	// Run instance restarts (see docs/plans/SESSION_PIN.md). Nil when
-	// the ROUTER_SESSION_PIN_ENABLED flag is off; tiered lookup
-	// degrades to the legacy apiKeyID LRU below.
+	// pinStore persists session-sticky routing decisions across instance restarts.
+	// Nil when the feature flag is off; tiered lookup degrades to the legacy LRU.
 	pinStore sessionpin.Store
-	// pinCache absorbs the hot path so a 50-turn session keyed on the
-	// same instance only hits Postgres ~5–10 times. 30s TTL is short
-	// enough that pinned_until-driven invalidation in the pin store
-	// remains the source of truth for "is this still valid"; the LRU
-	// is pure latency optimization.
+	// pinCache absorbs the hot path; 30s TTL is short enough that pinned_until
+	// in the pin store remains source of truth for validity.
 	pinCache *expirable.LRU[string, sessionpin.Pin]
-	// pinWriteSem bounds concurrent async pin-upsert goroutines. Writes
-	// are dropped (non-blocking select) when the semaphore is full;
-	// pins are best-effort so a dropped write degrades gracefully to a
-	// fresh route on the next turn rather than accumulating goroutines
-	// under slow/unavailable Postgres.
+	// pinWriteSem bounds concurrent async pin-upsert goroutines. Writes drop
+	// (non-blocking) when full so a slow Postgres can't accumulate goroutines.
 	pinWriteSem chan struct{}
-	// hardPinExplore gates the §3.4 Explore sub-agent hard-pin.
-	// Off by default; enable via ROUTER_HARD_PIN_EXPLORE=true after one
-	// week of shadow validation (see docs/plans/AGENTIC_CODING.md §3.4).
+	// hardPinExplore gates the Explore sub-agent hard-pin.
 	hardPinExplore bool
-	// hardPinProvider and hardPinModel are the (provider, model) routed to
-	// for compaction and (when hardPinExplore is on) Explore sub-agent turns.
-	// Derived at boot from the cheapest available model in the cluster bundle;
-	// overridable via ROUTER_HARD_PIN_PROVIDER / ROUTER_HARD_PIN_MODEL.
+	// hardPinProvider/hardPinModel route compaction (and, when hardPinExplore is
+	// on, Explore sub-agent turns). Derived at boot from the cheapest available
+	// model; overridable via ROUTER_HARD_PIN_PROVIDER / ROUTER_HARD_PIN_MODEL.
 	hardPinProvider string
 	hardPinModel    string
 	// telemetry is an optional repository for persisting per-request telemetry.
-	// Nil disables persistence (e.g. no DB in some test environments).
 	telemetry TelemetryRepository
-	// byokOnly disables the deployment-level credential fallback. When true,
-	// a provider is only eligible for a request if BYOK credentials or
-	// client-supplied (Bearer/x-api-key) credentials are present. Set on
-	// Weave-managed deployments via WithByokOnly so customer requests never
-	// silently consume the platform's API key budget; self-hosted
-	// deployments leave it false so operator-set env keys serve traffic.
+	// byokOnly disables deployment-level credential fallback. When true, a
+	// provider is only eligible if BYOK or client-supplied credentials are
+	// present. Set on Weave-managed deployments so customer requests never
+	// silently consume the platform's API key budget.
 	byokOnly bool
 }
 
-// pinSessionTTL is the sliding TTL written into pinned_until on every
-// pin upsert. Mirrors Anthropic's prompt-cache TTL on Sonnet 4.5+ /
-// Haiku 4.5+ / Opus 4.5+ so the pin lifecycle tracks the cache it's
-// trying to keep warm.
+// pinSessionTTL is the sliding TTL on pinned_until. Mirrors Anthropic's
+// prompt-cache TTL on Sonnet/Haiku/Opus 4.5+ so the pin lifecycle tracks
+// the cache it's keeping warm.
 const pinSessionTTL = time.Hour
 
 // APIKeyIDContextKey is the request-context key for the authenticated api_key_id.
@@ -86,9 +69,8 @@ type ExternalIDContextKey struct{}
 // CredentialsContextKey is the request-context key for resolved per-request credentials.
 type CredentialsContextKey struct{}
 
-// CredentialsFromContext retrieves the resolved credentials stashed on a
-// request context by the proxy service. Returns nil when no credentials have
-// been stashed (plan-based auth path).
+// CredentialsFromContext returns the resolved credentials stashed on ctx,
+// or nil when none are present (plan-based auth path).
 func CredentialsFromContext(ctx context.Context) *Credentials {
 	v := ctx.Value(CredentialsContextKey{})
 	if v == nil {
@@ -99,8 +81,7 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 }
 
 // NewService constructs the proxy service. pinStore may be nil when the
-// session-pin feature flag is off; the tiered lookup transparently
-// short-circuits past tiers 1–2 in that case.
+// session-pin feature flag is off.
 func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
 	var sticky *expirable.LRU[string, router.Decision]
 	if stickyDecisionTTL > 0 {
@@ -129,10 +110,9 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 	}
 }
 
-// WithByokOnly enables BYOK-only credential resolution. When on, the proxy
-// service refuses to route a request to any provider for which the caller has
-// not supplied credentials (BYOK or client-supplied Bearer/x-api-key) — the
-// deployment-level env key is ignored even if registered.
+// WithByokOnly enables BYOK-only credential resolution: providers without
+// caller-supplied credentials are ineligible, even if a deployment-level env
+// key is registered.
 func (s *Service) WithByokOnly(byokOnly bool) *Service {
 	s.byokOnly = byokOnly
 	return s
@@ -154,8 +134,7 @@ func (s *Service) MetricsTimeseries(ctx context.Context, installationID string, 
 	return s.telemetry.GetTelemetryTimeseries(ctx, installationID, from, to, granularity)
 }
 
-// MetricsSummaryAll aggregates totals across every installation. Used by
-// admin-cookie sessions on the dashboard.
+// MetricsSummaryAll aggregates totals across every installation. Admin-only.
 func (s *Service) MetricsSummaryAll(ctx context.Context, from, to time.Time) (TelemetrySummary, error) {
 	if s.telemetry == nil {
 		return TelemetrySummary{}, nil
@@ -163,8 +142,7 @@ func (s *Service) MetricsSummaryAll(ctx context.Context, from, to time.Time) (Te
 	return s.telemetry.GetTelemetrySummaryAll(ctx, from, to)
 }
 
-// MetricsTimeseriesAll returns per-bucket cost rows aggregated across every
-// installation. Admin-only counterpart to MetricsTimeseries.
+// MetricsTimeseriesAll returns per-bucket cost rows across every installation.
 func (s *Service) MetricsTimeseriesAll(ctx context.Context, from, to time.Time, granularity string) ([]TelemetryBucket, error) {
 	if s.telemetry == nil {
 		return nil, nil
@@ -172,8 +150,7 @@ func (s *Service) MetricsTimeseriesAll(ctx context.Context, from, to time.Time, 
 	return s.telemetry.GetTelemetryTimeseriesAll(ctx, from, to, granularity)
 }
 
-// MetricsRows returns individual telemetry rows for the given installation in
-// [from, to). Used by the dashboard drill-down modal.
+// MetricsRows returns individual telemetry rows for an installation in [from, to).
 func (s *Service) MetricsRows(ctx context.Context, installationID string, from, to time.Time, limit int32) ([]TelemetryRow, error) {
 	if s.telemetry == nil {
 		return nil, nil
@@ -182,7 +159,6 @@ func (s *Service) MetricsRows(ctx context.Context, installationID string, from, 
 }
 
 // MetricsRowsAll returns individual telemetry rows across every installation.
-// Admin-only counterpart to MetricsRows.
 func (s *Service) MetricsRowsAll(ctx context.Context, from, to time.Time, limit int32) ([]TelemetryRow, error) {
 	if s.telemetry == nil {
 		return nil, nil
@@ -194,19 +170,13 @@ func (s *Service) MetricsRowsAll(ctx context.Context, from, to time.Time, limit 
 // provider that is not present in the registry.
 var ErrProviderNotConfigured = errors.New("provider not configured")
 
-// semanticCacheMaxBodyBytes caps how large a non-streaming response
-// the cache will store. Bodies larger than this stream through to the
-// client unchanged, but the post-Proxy Store call is skipped to keep
-// peak memory bounded. 1 MiB covers typical Anthropic Messages and
-// OpenAI Chat Completions responses; the long-tail of large bodies
-// pays full provider cost on subsequent identical prompts.
+// semanticCacheMaxBodyBytes caps how large a response the cache will store;
+// larger bodies stream through but skip the Store call to bound peak memory.
 const semanticCacheMaxBodyBytes = 1 << 20
 
-// headersToSkipOnHit lists response headers the cache must NOT replay
-// on a hit. request-id ties to a specific upstream call and would
-// confuse downstream consumers (telemetry rows, OTel correlation) if
-// reused. x-router-* are set fresh on the hit path so the client
-// always sees the current decision rather than a stale one.
+// headersToSkipOnHit lists response headers the cache must NOT replay.
+// request-id ties to a specific upstream call; x-router-* are set fresh from
+// the live decision so the client sees current routing, not stale.
 var headersToSkipOnHit = map[string]struct{}{
 	"Request-Id":        {},
 	"X-Request-Id":      {},
@@ -216,9 +186,8 @@ var headersToSkipOnHit = map[string]struct{}{
 	"X-Router-Cache":    {},
 }
 
-// cloneCacheHeaders snapshots a header set for storage, dropping
-// transient identifiers that must not survive replay (see
-// headersToSkipOnHit).
+// cloneCacheHeaders snapshots a header set for storage, dropping transient
+// identifiers that must not survive replay.
 func cloneCacheHeaders(h http.Header) http.Header {
 	out := make(http.Header, len(h))
 	for k, vs := range h {
@@ -232,11 +201,8 @@ func cloneCacheHeaders(h http.Header) http.Header {
 	return out
 }
 
-// writeCachedResponse emits a stored CachedResponse to the client.
-// Caller-set router headers (x-router-*) are written from the live
-// decision (not the cached entry) so the client always sees an
-// accurate routing trace; the x-router-cache marker advertises the
-// hit. Body is written verbatim — already in the inbound wire format.
+// writeCachedResponse emits a stored CachedResponse. x-router-* headers come
+// from the live decision so the client sees an accurate routing trace.
 func (s *Service) writeCachedResponse(w http.ResponseWriter, resp cache.CachedResponse, decision router.Decision) {
 	for k, vs := range resp.Headers {
 		for _, v := range vs {
@@ -259,7 +225,7 @@ func (s *Service) writeCachedResponse(w http.ResponseWriter, resp cache.CachedRe
 // EmbedLastUserMessageContextKey is the context key for the per-request embed flag override.
 type EmbedLastUserMessageContextKey struct{}
 
-// embedLastUserMessageOverride reads the per-request embed flag from context, if set by the eval middleware.
+// embedLastUserMessageOverride reads the per-request embed flag from ctx.
 func embedLastUserMessageOverride(ctx context.Context) (bool, bool) {
 	v, ok := ctx.Value(EmbedLastUserMessageContextKey{}).(bool)
 	return v, ok
@@ -273,23 +239,21 @@ func (s *Service) provider(name string) (providers.Client, error) {
 	return p, nil
 }
 
-// Route exposes the underlying router strategy for callers that need a
-// decision without dispatching (e.g. admin endpoints).
+// Route exposes the underlying router for callers that need a decision
+// without dispatching (e.g. admin endpoints).
 func (s *Service) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	return s.router.Route(ctx, req)
 }
 
-// PassthroughToProvider forwards a non-routing-path request to the default
-// provider ("anthropic") for backward compatibility with existing Anthropic
-// metadata endpoints (count_tokens, models).
+// PassthroughToProvider forwards a non-routing request to the default
+// (Anthropic) provider for metadata endpoints (count_tokens, models).
 func (s *Service) PassthroughToProvider(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
 	return s.PassthroughToNamedProvider(ctx, providers.ProviderAnthropic, body, w, r)
 }
 
-// PassthroughToNamedProvider forwards a non-routing-path request to a specific
-// provider by name. No model rewriting; no routing decision. For Anthropic
-// targets the body is parsed into an envelope to scrub unsupported fields
-// and derive filtered headers; other providers receive the body verbatim.
+// PassthroughToNamedProvider forwards a non-routing request to a specific
+// provider. No model rewriting, no routing decision. Anthropic targets get
+// the body scrubbed via envelope parsing; others receive it verbatim.
 func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName string, body []byte, w http.ResponseWriter, r *http.Request) error {
 	log := observability.Get()
 	p, err := s.provider(providerName)
@@ -322,8 +286,7 @@ func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName s
 }
 
 // ProxyMessages routes a raw Anthropic-Messages request body and streams the
-// upstream response back. The routing decision is reflected in `x-router-*`
-// response headers for client-side debugging.
+// upstream response back. The routing decision is reflected in x-router-* headers.
 func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
 	log := observability.Get()
 	requestStart := time.Now()
@@ -354,20 +317,15 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 	bypassEval := hasEvalOverrideHeader(r)
-	// Tier-1/2 (session-key-based) pinning stays enabled for eval traffic. The
-	// session_key is derived from the system text + first user message, so each
-	// eval prompt produces a unique key; pinning per-session is exactly what an
-	// agentic harness needs to keep multi-turn tool-use on a single provider
-	// (mid-conversation provider switches break Gemini, which rejects function
-	// calls without thoughtSignature emitted by other providers). Tier-3 (the
-	// legacy apiKeyID LRU) stays bypassed because the eval harness shares one
-	// apiKeyID across all 500 instances — without that bypass, the first
-	// decision would stick across unrelated instances.
+	// Tier-1/2 pinning stays on for eval traffic (unique session_key per prompt).
+	// Tier-3 (legacy apiKeyID LRU) bypassed: eval shares one apiKeyID across
+	// 500 instances and the first decision would otherwise stick to all of them.
+	// Mid-conversation provider switches break Gemini (rejects function calls
+	// without thoughtSignature), so per-session pinning is required.
 	bypassLegacySticky := bypassEval
 
-	// Anthropic clients pack sub-agent identity into metadata.user_id; the
-	// x-weave-subagent-type header is for non-Anthropic ingress, so this
-	// call passes "".
+	// Anthropic packs sub-agent identity into metadata.user_id; the
+	// x-weave-subagent-type header is for non-Anthropic ingress only.
 	routeStart := time.Now()
 	routeRes, routeErr := s.routeWithSession(ctx, env, feats, apiKeyID, installationID, "", bypassLegacySticky, router.Request{
 		RequestedModel:       feats.Model,
@@ -387,13 +345,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	pinAgeSec := routeRes.PinAgeSec
 	routeMs := time.Since(routeStart).Milliseconds()
 
-	// Semantic-cache lookup. Eligible when the cache is configured at
-	// boot, the request is non-streaming, the routing decision carries
-	// metadata (always set by the cluster scorer on success), and the
-	// caller has an externalID for per-tenant isolation. Eval-harness
-	// traffic bypasses the cache so per-prompt accuracy attribution
-	// isn't polluted by cosine-near-neighbor replays of an unrelated
-	// stored response.
+	// Semantic-cache eligibility: configured, non-streaming, decision has
+	// metadata, externalID present, not eval traffic (eval bypasses to keep
+	// per-prompt accuracy attribution clean).
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
@@ -469,15 +423,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		IncludeStreamUsage: s.emitter != nil,
 	}
 
-	// Resolve per-request credentials for the chosen provider. When BYOK keys
-	// are configured for this installation they take precedence; otherwise the
-	// inbound request headers supply the credentials (plan-based auth).
+	// BYOK takes precedence; inbound headers supply fallback credentials.
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
-	// Wrap w with a captureWriter when the cache is eligible so the
-	// post-translation wire bytes get mirrored into a buffer for
-	// post-Proxy storage. captureW.captured() is the source of truth
-	// for whether storage should happen.
+	// Mirror post-translation wire bytes into a buffer for post-Proxy storage.
 	var captureW *captureWriter
 	var sink http.ResponseWriter = w
 	if cacheEligible {
@@ -532,7 +481,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			extractor = otel.NewUsageExtractor(nil, decision.Provider)
 			usage = extractor
 		}
-		// Chain: Gemini SSE → OpenAI SSE → Anthropic SSE.
+		// SSE chain: Gemini → OpenAI → Anthropic.
 		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage)
 		geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, decision.Model, nil)
 		proxyErr = p.Proxy(ctx, decision, prep, geminiTr, r)
@@ -546,10 +495,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return fmt.Errorf("%w: %s (no translation path defined for inbound Anthropic Messages)", ErrProviderNotConfigured, decision.Provider)
 	}
 
-	// Cache store. Only on success and when the captured body fits
-	// within MaxBodyBytes (captureW.captured returns false on
-	// overflow). Use the smallest top-p cluster id for storage; the
-	// LRU.Lookup path scans every top-p cluster, so any one is fine.
+	// Cache store: only on success when body fits. Any top-p cluster id
+	// works for storage since LRU.Lookup scans all of them.
 	if cacheEligible && proxyErr == nil && captureW != nil {
 		if body, status, ok := captureW.captured(); ok && status == http.StatusOK {
 			storeResp := cache.CachedResponse{
@@ -588,10 +535,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Bool("routing.cross_format", crossFormat)
 	addTimingAttrs(ctx, upstreamBuilder)
 
-	// Routing observability — span attrs + telemetry-row fields share
-	// the same source data (decision.Metadata + Timing). buildObservation
-	// captures once; applySpanAttrs and the InsertTelemetryParams below
-	// both consume from the bundle so the span and DB row stay symmetric.
+	// Span attrs and telemetry row share the same source; bundle keeps them symmetric.
 	obs := buildObservationContext(ctx, decision)
 	obs.applySpanAttrs(upstreamBuilder)
 
@@ -642,19 +586,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	return proxyErr
 }
 
-// sessionPinCacheKey produces the in-proc LRU key for a (session_key,
-// role) pair. Hex-encoding the key keeps the LRU's string-keyed
-// generic API; the role suffix preserves the schema's role dimension
-// for when §3.3 starts emitting non-default roles.
+// sessionPinCacheKey produces the in-proc LRU key for a (session_key, role)
+// pair. Hex-encoded for the string-keyed LRU; role suffix preserves the
+// schema's role dimension for non-default roles.
 func sessionPinCacheKey(key [sessionpin.SessionKeyLen]byte, role string) string {
 	return hex.EncodeToString(key[:]) + ":" + role
 }
 
-// pinDecision rehydrates a router.Decision from a stored pin.
-// Metadata is intentionally nil — the cluster scorer's embedding
-// is not persisted, so semantic-cache lookups won't fire on a
-// pinned-route turn. Acceptable: cache hits are an optimization, the
-// pin already short-circuits the routing decision.
+// pinDecision rehydrates a router.Decision from a stored pin. Metadata is
+// nil intentionally — the embedding isn't persisted, so semantic-cache won't
+// fire on a pinned turn (acceptable: the pin already short-circuits routing).
 func pinDecision(p sessionpin.Pin) router.Decision {
 	return router.Decision{
 		Provider: p.Provider,
@@ -663,9 +604,8 @@ func pinDecision(p sessionpin.Pin) router.Decision {
 	}
 }
 
-// clusterIDsFromDecision returns the cluster ids stamped on a routing
-// decision, or nil for decisions without metadata (pinned-route turns,
-// heuristic fallback).
+// clusterIDsFromDecision returns the cluster ids on a decision, or nil for
+// decisions without metadata.
 func clusterIDsFromDecision(d router.Decision) []int {
 	if d.Metadata == nil {
 		return nil
@@ -673,8 +613,7 @@ func clusterIDsFromDecision(d router.Decision) []int {
 	return d.Metadata.ClusterIDs
 }
 
-// pinAge returns seconds since first_pinned_at; zero if the timestamp
-// is unset (fresh pin).
+// pinAge returns seconds since first_pinned_at, or zero for fresh pins.
 func pinAge(p sessionpin.Pin) int64 {
 	if p.FirstPinnedAt.IsZero() {
 		return 0
@@ -695,8 +634,7 @@ func hasEvalOverrideHeader(r *http.Request) bool {
 		r.Header.Get("x-weave-embed-last-user-message") != ""
 }
 
-// externalKeysFromContext reads the external API keys stashed by the auth
-// middleware. Returns nil when none are present (plan-based auth path).
+// externalKeysFromContext reads external API keys stashed by auth middleware.
 func externalKeysFromContext(ctx context.Context) []*auth.ExternalAPIKey {
 	v := ctx.Value(ExternalAPIKeysContextKey{})
 	if v == nil {
@@ -706,20 +644,14 @@ func externalKeysFromContext(ctx context.Context) []*auth.ExternalAPIKey {
 	return keys
 }
 
-// enabledProvidersForRequest returns the set of provider names whose
-// credentials are resolvable for this request: any provider the router
-// has a boot-time env key for, any provider with a BYOK key on the
-// installation, and any provider whose client-supplied header carries a
-// non-router bearer/x-api-key. The cluster scorer intersects this set
-// with its boot-time candidates so argmax never picks a model the
-// upstream call would 401 on.
+// enabledProvidersForRequest returns providers whose credentials are
+// resolvable for this request (boot-time env key, BYOK, or client-supplied
+// header). The cluster scorer intersects this set with its boot-time
+// candidates so argmax never picks a model the upstream call would 401 on.
 func (s *Service) enabledProvidersForRequest(ctx context.Context, headers http.Header) map[string]struct{} {
 	out := make(map[string]struct{}, len(s.providers))
-	// In BYOK-only mode the deployment-level env key never serves customer
-	// traffic, so a registered provider with no per-request creds must not
-	// be eligible — otherwise argmax happily picks it and the upstream call
-	// 401/402s with the platform's exhausted key. Without that mode the
-	// historical baseline stands: every registered provider is eligible.
+	// In BYOK-only mode the deployment-level env key must not make a provider
+	// eligible — otherwise argmax could pick it and 401 with the platform key.
 	if !s.byokOnly {
 		for p := range s.providers {
 			out[p] = struct{}{}
@@ -739,10 +671,9 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, headers http.H
 	return out
 }
 
-// resolveAndInjectCredentials builds a BYOK credentials map from the external
-// keys on ctx, resolves the best credentials for provider, and returns a
-// context with the credentials stashed under CredentialsContextKey. When no
-// credentials are available for the provider, ctx is returned unchanged.
+// resolveAndInjectCredentials resolves credentials for provider (BYOK or
+// header-supplied) and stashes them on ctx. Returns ctx unchanged when none
+// are available.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	byok := BuildCredentialsMap(externalKeysFromContext(ctx))
 	creds := ResolveCredentials(provider, byok, headers)
@@ -752,9 +683,8 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	return ctx
 }
 
-// addTimingAttrs appends derived latency attributes from the request Timing
-// to the builder. No-op when no Timing is attached (middleware not wired or
-// OTel disabled).
+// addTimingAttrs appends derived latency attributes from the request Timing.
+// No-op when no Timing is attached.
 func addTimingAttrs(ctx context.Context, b *otel.AttrBuilder) {
 	t := otel.TimingFrom(ctx)
 	if t == nil {
@@ -777,8 +707,7 @@ func addTimingAttrs(ctx context.Context, b *otel.AttrBuilder) {
 		Int64("latency.router_overhead_ms", overhead)
 }
 
-// fireTelemetry persists a telemetry row asynchronously so it never blocks
-// the response path. Errors are logged at Debug — telemetry loss is acceptable.
+// fireTelemetry persists a telemetry row asynchronously. Telemetry loss is acceptable.
 func (s *Service) fireTelemetry(p InsertTelemetryParams) {
 	if s.telemetry == nil {
 		return
@@ -801,8 +730,8 @@ func upstreamStatus(err error) int {
 	return 0
 }
 
-// ProxyOpenAIChatCompletion routes an OpenAI Chat Completion request, translating
-// cross-format when the decision selects a non-OpenAI provider.
+// ProxyOpenAIChatCompletion routes an OpenAI Chat Completion request,
+// translating cross-format when the decision picks a non-OpenAI provider.
 func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
 	log := observability.Get()
 	requestStart := time.Now()
@@ -825,8 +754,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	bypassEval := hasEvalOverrideHeader(r)
 	bypassLegacySticky := bypassEval
 
-	// OpenAI clients can't pack subagent identity into metadata.user_id;
-	// they signal it via the x-weave-subagent-type header instead.
+	// OpenAI signals sub-agent identity via x-weave-subagent-type (no metadata.user_id).
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
 	routeStart := time.Now()
@@ -848,10 +776,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	pinTier := routeRes.PinTier
 	pinAgeSec := routeRes.PinAgeSec
 
-	// Semantic-cache lookup — same eligibility rules as ProxyMessages
-	// (see that handler for rationale). Inbound format is FormatOpenAI
-	// so an Anthropic-stored response is never replayed here. Eval-
-	// harness traffic bypasses the cache; see ProxyMessages.
+	// Same eligibility rules as ProxyMessages. FormatOpenAI keeps replays
+	// scoped: an Anthropic-stored response is never served here.
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
@@ -926,12 +852,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		IncludeStreamUsage: s.emitter != nil,
 	}
 
-	// Resolve per-request credentials for the chosen provider.
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
-	// Wrap w with a captureWriter when the cache is eligible so the
-	// post-translation wire bytes get mirrored into a buffer for
-	// post-Proxy storage.
+	// Mirror post-translation wire bytes into a buffer for post-Proxy storage.
 	var captureW *captureWriter
 	var sink http.ResponseWriter = w
 	if cacheEligible {
@@ -1033,9 +956,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Bool("routing.cross_format", crossFormat)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
 
-	// Routing observability — shared bundle keeps the OpenAI path in
-	// lockstep with ProxyMessages. See observation.go for the shape;
-	// W-1335 / W-1309 extend the bundle (not this call site).
+	// Shared bundle keeps the OpenAI path in lockstep with ProxyMessages.
 	openaiObs := buildObservationContext(ctx, decision)
 	openaiObs.applySpanAttrs(openaiUpstreamBuilder)
 

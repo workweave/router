@@ -21,16 +21,12 @@ func GetOr(key, defaultValue string) string {
 	return defaultValue
 }
 
-// PostgresDSN returns DATABASE_URL when set, otherwise composes one from the
-// POSTGRES_* env vars used by the rest of the platform.
+// PostgresDSN returns DATABASE_URL when set, otherwise composes one from POSTGRES_* env vars.
 //
-// On Cloud Run with Cloud SQL, the Auth Proxy is mounted as a Unix socket at
-// /cloudsql/<connection-name>. We connect through the socket so the proxy
-// handles TLS + IAM to the upstream DB, and our local connection is plain —
-// this bypasses pg_hba.conf's client-cert requirement that bites the
-// VPC-private-IP path. Self-hosters don't set POSTGRES_CONNECTION_NAME, so
-// they fall through to the standard TCP+sslmode branch and can wire any
-// managed Postgres (RDS, Supabase, Neon, plain Docker) without certs.
+// On Cloud Run with Cloud SQL, POSTGRES_CONNECTION_NAME routes through the Auth Proxy Unix
+// socket at /cloudsql/<connection-name>, which handles TLS+IAM upstream and bypasses
+// pg_hba.conf's client-cert requirement on the VPC-private-IP path. Self-hosters omit it
+// and fall through to TCP+sslmode for any managed Postgres without certs.
 func PostgresDSN() string {
 	if v := os.Getenv("DATABASE_URL"); v != "" {
 		return v
@@ -51,9 +47,7 @@ func PostgresDSN() string {
 
 	host := MustGet("POSTGRES_HOST")
 	port := GetOr("POSTGRES_PORT", "5432")
-	// Default to `require` so managed Postgres works out of the box.
-	// Self-hosters running plain local Docker must set
-	// POSTGRES_SSLMODE=disable explicitly.
+	// Default to require so managed Postgres works out of the box; local Docker must set POSTGRES_SSLMODE=disable.
 	sslMode := GetOr("POSTGRES_SSLMODE", "require")
 	return fmt.Sprintf(
 		"postgres://%s:%s@%s:%s/%s?sslmode=%s",

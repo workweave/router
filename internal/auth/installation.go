@@ -28,6 +28,6 @@ type InstallationRepository interface {
 	// Get is scoped to externalID to prevent cross-tenant access.
 	Get(ctx context.Context, externalID, id string) (*Installation, error)
 	ListForExternalID(ctx context.Context, externalID string) ([]*Installation, error)
-	// SoftDelete is scoped to externalID.
+	// SoftDelete is scoped to externalID to prevent cross-tenant deletes.
 	SoftDelete(ctx context.Context, externalID, id string) error
 }

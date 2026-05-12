@@ -14,8 +14,7 @@ import (
 
 type Clock func() time.Time
 
-// Service authenticates incoming bearer tokens. Routing and provider dispatch
-// live one ring out in proxy.Service; this package owns identity only.
+// Service authenticates incoming bearer tokens. Identity only; routing/dispatch lives in proxy.Service.
 type Service struct {
 	installations InstallationRepository
 	apiKeys       APIKeyRepository
@@ -26,17 +25,11 @@ type Service struct {
 	now           Clock
 	encryptor     Encryptor
 
-	// Admin dashboard auth: a single shared password (typically from the
-	// ROUTER_ADMIN_PASSWORD env var) plus a derived HMAC key used to sign
-	// session cookies. Empty when admin login is disabled.
+	// Admin dashboard auth: shared password (ROUTER_ADMIN_PASSWORD) plus derived HMAC key for session cookies. Empty when admin login is disabled.
 	adminPassword   string
 	adminSessionKey []byte
 
-	// adminLoginFailures throttles per-IP brute-force attempts on
-	// VerifyAdminPassword. The map is created lazily inside
-	// WithAdminPassword (rate limiting is a property of the admin login
-	// surface, so constructing it before that surface is enabled is
-	// pointless). adminLoginMu guards lazy init.
+	// adminLoginFailures throttles per-IP brute-force attempts; lazy-init in WithAdminPassword guarded by adminLoginMu.
 	adminLoginFailures *expirable.LRU[string, int]
 	adminLoginMu       sync.Mutex
 }
@@ -71,8 +64,7 @@ func (s *Service) WithEncryptor(e Encryptor) *Service {
 	return s
 }
 
-// IssueAPIKey creates a new router API key and returns the domain object plus
-// the raw token (only time it is visible; not stored in plaintext).
+// IssueAPIKey creates a new router API key and returns the raw token (only visible here; not stored in plaintext).
 func (s *Service) IssueAPIKey(ctx context.Context, installationID string, name *string, createdBy *string) (*APIKey, string, error) {
 	rawToken := GenerateID(APIKeyPrefix)
 	keyHash, keyPrefix, keySuffix := APITokenFingerprint(rawToken)
@@ -97,16 +89,11 @@ func (s *Service) ListAPIKeys(ctx context.Context, installationID string) ([]*AP
 	return s.apiKeys.ListForInstallation(ctx, installationID)
 }
 
-// RotateAPIKey soft-deletes the installation's active key (if any) and
-// issues a new one. Carries forward the previous key's name so the admin
-// dashboard label survives the rotation.
+// RotateAPIKey soft-deletes the active key and issues a new one, carrying forward its name.
 //
-// The two writes are not wrapped in a tx; the brief "no active key" window
-// between them is acceptable because (a) the partial unique index on
-// (installation_id) WHERE deleted_at IS NULL means the new insert can't
-// collide, and (b) rotation is an admin-driven action whose entire purpose
-// is to invalidate the old token, so a concurrent auth check failing
-// against the old token is the user-visible expectation.
+// Not wrapped in a tx: the brief "no active key" window is acceptable because (a) the partial unique
+// index on (installation_id) WHERE deleted_at IS NULL prevents collision, and (b) rotation's purpose
+// is to invalidate the old token, so a concurrent auth failure against it is expected.
 func (s *Service) RotateAPIKey(ctx context.Context, installationID string, createdBy *string) (*APIKey, string, error) {
 	existing, err := s.apiKeys.ListForInstallation(ctx, installationID)
 	if err != nil {
@@ -124,9 +111,7 @@ func (s *Service) RotateAPIKey(ctx context.Context, installationID string, creat
 	return s.IssueAPIKey(ctx, installationID, name, createdBy)
 }
 
-// DeleteAPIKey soft-deletes an API key. The LRU cache will TTL-expire the
-// entry; any in-flight request using the key within the TTL window will still
-// succeed, which is acceptable for the rare delete-key path.
+// DeleteAPIKey soft-deletes an API key. The LRU entry TTL-expires; in-flight requests within the TTL window still succeed, acceptable for this rare path.
 func (s *Service) DeleteAPIKey(ctx context.Context, id string) error {
 	return s.apiKeys.SoftDelete(ctx, id)
 }
@@ -136,13 +121,9 @@ func (s *Service) ListExternalAPIKeys(ctx context.Context, installationID string
 	return s.externalKeys.GetForInstallation(ctx, installationID)
 }
 
-// UpsertExternalAPIKey replaces any existing key for the provider and inserts a
-// new one. The raw key is encrypted before storage.
+// UpsertExternalAPIKey replaces any existing key for the provider and inserts a new one. Raw key is encrypted before storage.
 func (s *Service) UpsertExternalAPIKey(ctx context.Context, installationID, provider, rawKey string, name *string, createdBy *string) (*ExternalAPIKey, error) {
-	// Generate the external ID first so it can be bound into the
-	// ciphertext as AAD. Decrypt callers re-derive the AAD from
-	// (external_id, provider) on the row, so the binding is verified
-	// on every read.
+	// Generate external ID first so it binds into the ciphertext as AAD; decrypt re-derives AAD from (external_id, provider) on every read.
 	externalID := GenerateID("ekid")
 	ciphertext, err := s.encryptor.Encrypt([]byte(rawKey), externalID, provider)
 	if err != nil {
@@ -174,17 +155,12 @@ func (s *Service) DeleteExternalAPIKey(ctx context.Context, installationID, id s
 	return s.externalKeys.SoftDelete(ctx, installationID, id)
 }
 
-// VerifyAPIKey authenticates a raw bearer token. Returns ErrInvalidPrefix or
-// ErrInvalidToken for unauthenticated cases; repo transport errors propagate
-// as-is so they aren't masked as 401s.
+// VerifyAPIKey authenticates a raw bearer token.
 //
-// Reads through s.cache: hits short-circuit the DB. ErrNoRows populates a
-// negative entry (defends against credential-stuffing); transport errors
-// are not cached so the next request can retry.
-//
-// The returned []*ExternalAPIKey slice contains the installation's active
-// customer-owned provider keys (with Plaintext populated). It is nil when no
-// external keys exist or when s.externalKeys is nil.
+// Returns ErrInvalidPrefix/ErrInvalidToken for unauthenticated cases; repo transport errors propagate
+// as-is so they aren't masked as 401s. Reads through s.cache: ErrNoRows populates a negative entry
+// (defends against credential-stuffing); transport errors are not cached so the next request can retry.
+// Returned ExternalAPIKey slice has Plaintext populated; nil when none exist or s.externalKeys is nil.
 func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installation, *APIKey, []*ExternalAPIKey, error) {
 	if !HasAPIKeyPrefix(rawToken) {
 		return nil, nil, nil, ErrInvalidPrefix
@@ -212,13 +188,12 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 		return nil, nil, nil, err
 	}
 
-	// Fetch external API keys for this installation.
 	var externalKeys []*ExternalAPIKey
 	if s.externalKeys != nil {
 		externalKeys, err = s.externalKeys.GetForInstallation(ctx, apiKey.InstallationID)
 		if err != nil {
-			observability.Get().Warn("Failed to fetch external API keys", "installation_id", apiKey.InstallationID, "err", err)
 			// Non-fatal: proceed without external keys.
+			observability.Get().Warn("Failed to fetch external API keys", "installation_id", apiKey.InstallationID, "err", err)
 		}
 	}
 
@@ -227,24 +202,16 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 	return installation, apiKey, externalKeys, nil
 }
 
-// ResolveAndStashUser upserts a router user and stashes the resolved user ID
-// on ctx via UserIDContextKey. Email takes precedence when present:
-// (installationID, email) keys the row and account_uuid enriches it. When
-// email is empty but claudeAccountUUID is present (Claude CLI v2.1.x packs
-// only account_uuid + device_id + session_id into metadata.user_id), the
-// row is keyed on (installationID, claude_account_uuid) with NULL email so
-// per-seat attribution still works.
+// ResolveAndStashUser upserts a router user and stashes the resolved ID on ctx via UserIDContextKey.
 //
-// Returns the original ctx unchanged when no identifying signal is present
-// or the upsert fails — user resolution is best-effort and must never fail
-// an authenticated request.
+// Email takes precedence: (installationID, email) keys the row and account_uuid enriches it.
+// When email is empty but claudeAccountUUID is present (Claude CLI v2.1.x packs only
+// account_uuid+device_id+session_id into metadata.user_id), the row is keyed on
+// (installationID, claude_account_uuid) with NULL email so per-seat attribution still works.
 //
-// Reads through s.userCache: hits skip the DB upsert entirely. The trade-off
-// is that last_seen_at lags by up to the cache TTL, which is fine for a
-// dashboard timestamp.
-//
-// Callers normalize email (lower-case, trim) before calling. claudeAccountUUID
-// is optional; pass "" when the client isn't Claude Code.
+// Best-effort: returns the original ctx unchanged on no signal or upsert failure — must never fail an authenticated request.
+// Reads through s.userCache; last_seen_at lags by up to the cache TTL.
+// Callers must normalize email (lowercase, trim). claudeAccountUUID is optional.
 func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email, claudeAccountUUID string) context.Context {
 	log := observability.Get()
 	if s.users == nil || installationID == "" {
@@ -294,10 +261,8 @@ func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email
 	return context.WithValue(ctx, UserIDContextKey{}, user.ID)
 }
 
-// userIdentityKey produces a stable cache key for a (email, account_uuid) pair.
-// Email-bearing rows and account-only rows live in disjoint key spaces so a
-// future request from the same seat that finally carries email doesn't
-// false-hit the account-only cache entry.
+// userIdentityKey produces a stable cache key. Email-bearing and account-only rows live in disjoint
+// key spaces so a later request that finally carries email doesn't false-hit the account-only entry.
 func userIdentityKey(email, claudeAccountUUID string) string {
 	if email != "" {
 		return "email:" + email
@@ -305,9 +270,8 @@ func userIdentityKey(email, claudeAccountUUID string) string {
 	return "account:" + claudeAccountUUID
 }
 
-// fireMarkUsed runs the last_used_at update off the request path. We use
-// context.Background because the parent context is often canceled (response
-// already written) before the UPDATE completes.
+// fireMarkUsed runs the last_used_at update off the request path. Uses context.Background because
+// the parent ctx is often canceled (response written) before the UPDATE completes.
 func (s *Service) fireMarkUsed(apiKeyID string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

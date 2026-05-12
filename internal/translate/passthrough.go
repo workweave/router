@@ -8,7 +8,7 @@ import (
 )
 
 // PrepareAnthropicPassthrough builds a PreparedRequest for non-routing
-// Anthropic endpoints. Strips inference-time fields and thinking-related betas.
+// Anthropic endpoints, stripping inference-time fields and thinking betas.
 func (e *RequestEnvelope) PrepareAnthropicPassthrough(in http.Header) (providers.PreparedRequest, error) {
 	ov, changed := resolvePassthroughOverrides(e.body)
 	if !changed {
@@ -21,7 +21,7 @@ func (e *RequestEnvelope) PrepareAnthropicPassthrough(in http.Header) (providers
 	return providers.PreparedRequest{Body: body, Headers: AnthropicPassthroughHeaders(in)}, nil
 }
 
-// AnthropicPassthroughHeaders returns header overrides for Anthropic passthrough.
+// AnthropicPassthroughHeaders returns header overrides for the passthrough path.
 func AnthropicPassthroughHeaders(in http.Header) http.Header {
 	h := make(http.Header)
 	if v := in.Get("anthropic-version"); v != "" {

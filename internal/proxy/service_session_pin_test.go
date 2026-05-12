@@ -76,15 +76,15 @@ func newPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 	return proxy.NewService(
 		fr,
 		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
-		nil,   // emitter
-		false, // embedLastUserMessage
-		0,     // stickyDecisionTTL — disable legacy LRU for clarity
-		nil,   // semanticCache
+		nil,
+		false,
+		0, // stickyDecisionTTL=0 disables legacy LRU
+		nil,
 		store,
-		false,                       // hardPinExplore
-		providers.ProviderAnthropic, // hardPinProvider
-		"claude-haiku-4-5",          // hardPinModel
-		nil,                         // telemetry
+		false,
+		providers.ProviderAnthropic,
+		"claude-haiku-4-5",
+		nil,
 	)
 }
 
@@ -118,8 +118,7 @@ func TestService_SessionPin_PostgresHitShortCircuitsRoute(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
 	assert.Equal(t, 0, fr.routeCalls, "tier-2 hit must short-circuit s.router.Route")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"),
-		"the response must reflect the pinned model, not the fresh-route model")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
 	waitForUpsert(t, store)
 }
 
@@ -130,7 +129,7 @@ func TestService_SessionPin_InProcCacheAvoidsPostgresOnSecondTurn(t *testing.T) 
 
 	ctx := authedCtx(uuid.New().String())
 
-	// Turn 1: no pin yet → fresh route + async upsert + LRU populate.
+	// Turn 1: fresh route + async upsert + LRU populate.
 	rec1 := httptest.NewRecorder()
 	httpReq1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec1, httpReq1))
@@ -138,7 +137,7 @@ func TestService_SessionPin_InProcCacheAvoidsPostgresOnSecondTurn(t *testing.T) 
 	require.Equal(t, 1, fr.routeCalls)
 	require.Equal(t, 1, store.getCalls, "tier-1 miss must consult tier-2 once")
 
-	// Turn 2: same session — must hit the in-proc LRU and skip Postgres.
+	// Turn 2: in-proc LRU hit; tier-2 must not be consulted.
 	rec2 := httptest.NewRecorder()
 	httpReq2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec2, httpReq2))
@@ -157,8 +156,7 @@ func TestService_SessionPin_StoreErrorFallsThroughToFreshRoute(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	assert.Equal(t, 1, fr.routeCalls,
-		"a pin-store error must fall through to the cluster scorer (fail-open per D5), not block routing")
+	assert.Equal(t, 1, fr.routeCalls, "pin-store error must fall through to the cluster scorer (fail-open per D5)")
 }
 
 func TestService_SessionPin_ExpiredPinIsIgnored(t *testing.T) {
@@ -177,19 +175,14 @@ func TestService_SessionPin_ExpiredPinIsIgnored(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	assert.Equal(t, 1, fr.routeCalls,
-		"a pin past its pinned_until must not be served — sweep races mean expired rows can sit in the table")
+	assert.Equal(t, 1, fr.routeCalls, "expired pin must not be served (sweep races leave stale rows)")
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
 }
 
 func TestService_SessionPin_EvalOverrideHeaderKeepsSessionKeyPinning(t *testing.T) {
-	// Tier-1/2 (session-key-based) session pinning must stay active under
-	// eval-harness traffic. The session_key is derived from system text +
-	// first user message, so each eval prompt produces a unique key — pinning
-	// per-session is exactly what an agentic harness needs to keep multi-turn
-	// tool-use on a single provider. Without this, mid-conversation provider
-	// switches break Gemini, which rejects function calls without
-	// thoughtSignature emitted by other providers.
+	// Tier-1/2 pinning must stay active under eval traffic to keep multi-turn
+	// tool-use on a single provider (Gemini rejects function calls without
+	// thoughtSignature emitted by other providers).
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{Provider: "anthropic", Model: "claude-haiku-4-5", PinnedUntil: time.Now().Add(time.Hour), Reason: "pinned"}
@@ -202,24 +195,19 @@ func TestService_SessionPin_EvalOverrideHeaderKeepsSessionKeyPinning(t *testing.
 	httpReq.Header.Set("x-weave-cluster-version", "v0.2")
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls,
-		"eval-override header must NOT bypass session-key-based pinning; the pin must short-circuit the cluster scorer")
-	assert.Equal(t, 1, store.getCalls,
-		"the pin store must be consulted even when eval-override headers are present")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"),
-		"the pinned model must win over the cluster-scorer's fresh decision")
+	assert.Equal(t, 0, fr.routeCalls, "eval-override must not bypass session-key pinning")
+	assert.Equal(t, 1, store.getCalls)
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
 }
 
-// compactionBody is a minimal Anthropic request whose system prompt triggers
-// the compaction detector (§3.4).
+// compactionBody triggers the compaction detector (§3.4).
 const compactionBody = `{
 	"model":"claude-opus-4-7",
 	"system":"Your task is to create a detailed summary of the conversation so far.",
 	"messages":[{"role":"user","content":"go"}]
 }`
 
-// exploreBody is a minimal Anthropic request whose metadata marks it as an
-// Explore sub-agent dispatch (§3.4).
+// exploreBody marks an Explore sub-agent dispatch (§3.4).
 const exploreBody = `{
 	"model":"claude-opus-4-7",
 	"metadata":{"user_id":"subagent:Explore"},
@@ -236,14 +224,10 @@ func TestService_HardPin_CompactionAlwaysRoutesToHaiku(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(compactionBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls,
-		"compaction turns must bypass the cluster scorer entirely")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"),
-		"compaction must hard-pin to Haiku")
-	assert.Equal(t, 0, store.getCalls,
-		"compaction turns must not consult the pin store")
+	assert.Equal(t, 0, fr.routeCalls, "compaction must bypass the cluster scorer")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
+	assert.Equal(t, 0, store.getCalls, "compaction must not consult the pin store")
 
-	// Give any async goroutine a moment to fire (there should be none).
 	select {
 	case <-store.upsertCh:
 		t.Fatal("compaction turn must not write a session pin (would overwrite main-loop model)")
@@ -262,10 +246,10 @@ func TestService_HardPin_ExploreRoutesToHaikuWhenFlagOn(t *testing.T) {
 		0,
 		nil,
 		store,
-		true,                        // hardPinExplore = on
-		providers.ProviderAnthropic, // hardPinProvider
-		"claude-haiku-4-5",          // hardPinModel
-		nil,                         // telemetry
+		true,
+		providers.ProviderAnthropic,
+		"claude-haiku-4-5",
+		nil,
 	)
 
 	ctx := authedCtx(uuid.New().String())
@@ -273,10 +257,8 @@ func TestService_HardPin_ExploreRoutesToHaikuWhenFlagOn(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(exploreBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls,
-		"Explore sub-agent turns must bypass the cluster scorer when hardPinExplore is on")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"),
-		"Explore hard-pin must select Haiku")
+	assert.Equal(t, 0, fr.routeCalls, "Explore must bypass cluster scorer when hardPinExplore=on")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
 
 	select {
 	case <-store.upsertCh:
@@ -288,24 +270,18 @@ func TestService_HardPin_ExploreRoutesToHaikuWhenFlagOn(t *testing.T) {
 func TestService_HardPin_ExploreFallsThroughWhenFlagOff(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
-	// hardPinExplore = false (default via newPinSvc)
-	svc := newPinSvc(fr, store)
+	svc := newPinSvc(fr, store) // hardPinExplore=false
 
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(exploreBody), rec, httpReq))
 
-	assert.Equal(t, 1, fr.routeCalls,
-		"Explore sub-agent must fall through to the cluster scorer when hardPinExplore is off")
-	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"),
-		"cluster scorer decision must be used when hardPinExplore is off")
+	assert.Equal(t, 1, fr.routeCalls, "Explore must fall through when hardPinExplore=off")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
 }
 
-// --- OpenAI ingress: same Stage 1 path as Anthropic, exercised through
-// ProxyOpenAIChatCompletion. Before the routeWithSession unification,
-// this handler ran the cluster scorer on every turn with no session
-// memory; the assertions below codify the unblock.
+// OpenAI ingress: same Stage 1 path via ProxyOpenAIChatCompletion.
 
 const openAIPinTestBody = `{
 	"model":"gpt-4o",
@@ -316,8 +292,6 @@ const openAIPinTestBody = `{
 }`
 
 func newOpenAIPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
-	// Register fakeProvider under both Anthropic (default decision target
-	// for cross-format paths) and OpenAI (matches the test decisions).
 	return proxy.NewService(
 		fr,
 		map[string]providers.Client{
@@ -349,12 +323,8 @@ func TestService_SessionPin_OpenAI_PostgresHitShortCircuitsRoute(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(openAIPinTestBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls,
-		"OpenAI ingress: tier-2 hit must short-circuit the cluster scorer "+
-			"(this is the SWE-Bench unblock — without it every turn re-runs "+
-			"the cluster scorer cold)")
-	assert.Equal(t, "gpt-5", rec.Header().Get("x-router-model"),
-		"the response must reflect the pinned model, not the fresh-route model")
+	assert.Equal(t, 0, fr.routeCalls, "OpenAI tier-2 hit must short-circuit the cluster scorer")
+	assert.Equal(t, "gpt-5", rec.Header().Get("x-router-model"))
 	waitForUpsert(t, store)
 }
 
@@ -376,10 +346,8 @@ func TestService_SessionPin_OpenAI_FreshRouteCreatesPin(t *testing.T) {
 }
 
 func TestService_SessionPin_OpenAI_ToolResultShortCircuit(t *testing.T) {
-	// Trailing role=="tool" message — turntype.ToolResult on the OpenAI
-	// path. With a pin present, this must short-circuit the cluster
-	// scorer (the embedding for a tool-result-only turn is mostly noise
-	// and would otherwise flip the decision mid-session).
+	// Trailing role=="tool" → turntype.ToolResult. With a pin, short-circuit
+	// the scorer (tool-result embeddings are noisy and flip decisions).
 	const toolResultBody = `{
 		"model":"gpt-4o",
 		"messages":[
@@ -405,18 +373,13 @@ func TestService_SessionPin_OpenAI_ToolResultShortCircuit(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(toolResultBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls,
-		"tool-result turn with an existing pin must not re-run the cluster scorer")
-	assert.Equal(t, "gpt-5", rec.Header().Get("x-router-model"),
-		"the pinned model must serve the tool-result turn")
+	assert.Equal(t, 0, fr.routeCalls, "tool-result with existing pin must not re-run the scorer")
+	assert.Equal(t, "gpt-5", rec.Header().Get("x-router-model"))
 }
 
-// newOpenAIHardPinSvc configures a service whose hard-pin target is on
-// the OpenAI provider, so the OpenAI ingress hard-pin path stays
-// same-format and doesn't exercise the cross-format Anthropic
-// translator (which would need a real upstream response body to
-// finalize). The test scope is the routing decision; the cross-format
-// path has its own coverage in service_test.go.
+// newOpenAIHardPinSvc configures a service whose hard-pin target is on the
+// OpenAI provider, keeping the path same-format (the cross-format Anthropic
+// translator needs a real response body to finalize).
 func newOpenAIHardPinSvc(fr *fakeRouter, store *fakePinStore, hardPinExplore bool) *proxy.Service {
 	return proxy.NewService(
 		fr,
@@ -450,10 +413,8 @@ func TestService_HardPin_OpenAI_CompactionRoutesToHardPin(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(compactionOpenAIBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls,
-		"OpenAI compaction turns must bypass the cluster scorer entirely")
-	assert.Equal(t, "gpt-4o-mini", rec.Header().Get("x-router-model"),
-		"compaction must hard-pin to the configured hard-pin model regardless of inbound format")
+	assert.Equal(t, 0, fr.routeCalls, "OpenAI compaction must bypass the scorer")
+	assert.Equal(t, "gpt-4o-mini", rec.Header().Get("x-router-model"))
 
 	select {
 	case <-store.upsertCh:
@@ -473,7 +434,6 @@ func TestService_HardPin_OpenAI_SubAgentHeaderHintRoutesToHardPin(t *testing.T) 
 	httpReq.Header.Set("x-weave-subagent-type", "Explore")
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(openAIPinTestBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls,
-		"x-weave-subagent-type header must trigger Explore hard-pin on OpenAI ingress")
+	assert.Equal(t, 0, fr.routeCalls, "x-weave-subagent-type must trigger Explore hard-pin")
 	assert.Equal(t, "gpt-4o-mini", rec.Header().Get("x-router-model"))
 }

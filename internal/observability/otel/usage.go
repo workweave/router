@@ -9,10 +9,10 @@ import (
 	"workweave/router/internal/sse"
 )
 
-// providerAnthropic / providerOpenAI / providerGoogle are local mirrors of the
-// providers.Provider* constants. This package is a leaf utility (must not
-// import internal/providers), so we duplicate the short strings rather than
-// introduce a circular import. Keep in sync with internal/providers/provider.go.
+// Local mirrors of the providers.Provider* constants. This package is a leaf
+// utility (must not import internal/providers), so we duplicate the short
+// strings rather than introduce a circular import. Keep in sync with
+// internal/providers/provider.go.
 const (
 	providerAnthropic = "anthropic"
 	providerOpenAI    = "openai"
@@ -33,10 +33,10 @@ var (
 	_ UsageSink           = (*UsageExtractor)(nil)
 )
 
-// UsageExtractor wraps an http.ResponseWriter and sniffs token usage
-// from upstream responses (SSE and JSON) as bytes flow through.
-// Only the unconsumed tail of the most recent Write is retained;
-// complete SSE events are parsed and discarded immediately.
+// UsageExtractor wraps an http.ResponseWriter and sniffs token usage from
+// upstream responses (SSE and JSON) as bytes flow through. Only the unconsumed
+// tail of the most recent Write is retained; complete SSE events are parsed
+// and discarded immediately.
 type UsageExtractor struct {
 	inner    http.ResponseWriter
 	provider string
@@ -49,10 +49,10 @@ type UsageExtractor struct {
 	leftover []byte
 }
 
-// NewUsageExtractor creates a usage-extracting writer. Provider determines
-// the response format to parse. When inner is nil the extractor operates in
-// sink-only mode: only RecordUsage and Tokens are valid; the ResponseWriter
-// methods must not be called.
+// NewUsageExtractor creates a usage-extracting writer. Provider determines the
+// response format to parse. When inner is nil the extractor operates in sink-only
+// mode: only RecordUsage and Tokens are valid; the ResponseWriter methods must
+// not be called.
 func NewUsageExtractor(inner http.ResponseWriter, provider string) *UsageExtractor {
 	return &UsageExtractor{
 		inner:    inner,
@@ -75,7 +75,6 @@ func (u *UsageExtractor) Write(p []byte) (int, error) {
 	return u.inner.Write(p)
 }
 
-// Flush delegates to the inner writer's http.Flusher if present.
 func (u *UsageExtractor) Flush() {
 	if u.inner == nil {
 		return
@@ -96,11 +95,9 @@ func (u *UsageExtractor) RecordUsage(inputTokens, outputTokens int) {
 	}
 }
 
-// RecordCacheUsage sets cache token counts directly. Sibling to RecordUsage
-// for translators that already parsed cache usage (Anthropic
-// cache_creation_input_tokens / cache_read_input_tokens; OpenAI
-// prompt_tokens_details.cached_tokens — passed as cacheReadTokens with
-// cacheCreationTokens=0 since OpenAI has no creation concept).
+// RecordCacheUsage sets cache token counts directly. OpenAI has no creation
+// concept, so it passes cacheCreationTokens=0 with prompt_tokens_details.cached_tokens
+// as cacheReadTokens.
 func (u *UsageExtractor) RecordCacheUsage(cacheCreationTokens, cacheReadTokens int) {
 	if cacheCreationTokens > 0 {
 		u.cacheCreation = cacheCreationTokens
@@ -110,8 +107,7 @@ func (u *UsageExtractor) RecordCacheUsage(cacheCreationTokens, cacheReadTokens i
 	}
 }
 
-// Tokens returns the extracted input and output token counts. Nil receiver
-// returns (0, 0) so callers can skip the extractor when OTel is disabled.
+// Tokens returns the extracted input and output token counts.
 func (u *UsageExtractor) Tokens() (input, output int) {
 	if u == nil {
 		return 0, 0
@@ -119,9 +115,9 @@ func (u *UsageExtractor) Tokens() (input, output int) {
 	return u.input, u.output
 }
 
-// CacheTokens returns the extracted cache creation and cache read token
-// counts. Nil receiver returns (0, 0); zero values indicate the provider
-// does not emit cache tokens (Google) or the response had no cache hits.
+// CacheTokens returns the extracted cache creation and cache read token counts.
+// Zero values indicate the provider does not emit cache tokens (Google) or the
+// response had no cache hits.
 func (u *UsageExtractor) CacheTokens() (creation, read int) {
 	if u == nil {
 		return 0, 0
@@ -129,8 +125,8 @@ func (u *UsageExtractor) CacheTokens() (creation, read int) {
 	return u.cacheCreation, u.cacheRead
 }
 
-// scanBuffer splits buffered data on SSE event boundaries and extracts
-// token usage from each complete event using zero-alloc gjson probes.
+// scanBuffer splits buffered data on SSE event boundaries and extracts token
+// usage from each complete event using zero-alloc gjson probes.
 func (u *UsageExtractor) scanBuffer() {
 	data := u.leftover
 
@@ -239,8 +235,8 @@ func (u *UsageExtractor) tryExtractFromJSON() {
 
 // extractUsageGJSON probes for token usage fields using gjson, avoiding
 // json.Unmarshal and map[string]any allocations entirely. OpenAI has no
-// cache-creation concept; cacheRead maps to prompt_tokens_details.cached_tokens.
-// Google emits neither and returns zeros for both cache values.
+// cache-creation concept (cacheRead maps to prompt_tokens_details.cached_tokens);
+// Google emits neither cache field.
 func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreation, cacheRead int, found bool) {
 	usage := gjson.GetBytes(data, "usage")
 	if !usage.Exists() && provider == providerAnthropic {

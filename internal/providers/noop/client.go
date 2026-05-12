@@ -1,6 +1,4 @@
-// Package noop is a placeholder providers.Client that always returns
-// providers.ErrNotImplemented. Useful as a default in dev/tests before real
-// adapters land.
+// Package noop is a placeholder providers.Client that always returns providers.ErrNotImplemented.
 package noop
 
 import (

@@ -21,7 +21,6 @@ func NewTelemetryRepo(tx sqlc.DBTX) *TelemetryRepo {
 	return &TelemetryRepo{tx: tx}
 }
 
-// Compile-time interface check.
 var _ proxy.TelemetryRepository = (*TelemetryRepo)(nil)
 
 func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.InsertTelemetryParams) error {
@@ -155,8 +154,7 @@ func (r *TelemetryRepo) GetTelemetryTimeseries(ctx context.Context, installation
 	return out, nil
 }
 
-// GetTelemetrySummaryAll aggregates across every installation. Used by the
-// admin dashboard, which is not scoped to a single rk_ key.
+// GetTelemetrySummaryAll aggregates across every installation for the admin dashboard.
 func (r *TelemetryRepo) GetTelemetrySummaryAll(ctx context.Context, from, to time.Time) (proxy.TelemetrySummary, error) {
 	q := sqlc.New(r.tx)
 	row, err := q.GetTelemetrySummaryAll(ctx, sqlc.GetTelemetrySummaryAllParams{
@@ -175,8 +173,7 @@ func (r *TelemetryRepo) GetTelemetrySummaryAll(ctx context.Context, from, to tim
 	}, nil
 }
 
-// GetTelemetryTimeseriesAll returns per-bucket cost rows aggregated across
-// every installation. Admin-only counterpart to GetTelemetryTimeseries.
+// GetTelemetryTimeseriesAll is the admin-only counterpart to GetTelemetryTimeseries.
 func (r *TelemetryRepo) GetTelemetryTimeseriesAll(ctx context.Context, from, to time.Time, granularity string) ([]proxy.TelemetryBucket, error) {
 	q := sqlc.New(r.tx)
 
@@ -235,8 +232,7 @@ func (r *TelemetryRepo) GetTelemetryTimeseriesAll(ctx context.Context, from, to 
 	return out, nil
 }
 
-// GetTelemetryRows returns individual telemetry rows for a single
-// installation in [from, to). Used by the drill-down modal.
+// GetTelemetryRows returns individual telemetry rows for an installation in [from, to) for the drill-down modal.
 func (r *TelemetryRepo) GetTelemetryRows(ctx context.Context, installationID string, from, to time.Time, limit int32) ([]proxy.TelemetryRow, error) {
 	id, err := uuid.Parse(installationID)
 	if err != nil {
@@ -273,8 +269,7 @@ func (r *TelemetryRepo) GetTelemetryRows(ctx context.Context, installationID str
 	return out, nil
 }
 
-// GetTelemetryRowsAll returns individual telemetry rows across every
-// installation. Admin-only counterpart to GetTelemetryRows.
+// GetTelemetryRowsAll is the admin-only counterpart to GetTelemetryRows.
 func (r *TelemetryRepo) GetTelemetryRowsAll(ctx context.Context, from, to time.Time, limit int32) ([]proxy.TelemetryRow, error) {
 	q := sqlc.New(r.tx)
 	rows, err := q.GetTelemetryRowsAll(ctx, sqlc.GetTelemetryRowsAllParams{
@@ -306,10 +301,8 @@ func (r *TelemetryRepo) GetTelemetryRowsAll(ctx context.Context, from, to time.T
 	return out, nil
 }
 
-// telemetryRowFromRow centralizes the SQLC -> domain row conversion. The two
-// query variants ({all, per-installation}) emit isomorphic row structs but
-// SQLC generates distinct named types per query, so we accept individual
-// fields rather than a generic interface.
+// telemetryRowFromRow centralizes SQLC -> domain conversion. The {all, per-installation}
+// queries emit isomorphic but distinctly named row types, so we accept individual fields.
 func telemetryRowFromRow(
 	ts time.Time,
 	requestID string,
@@ -361,7 +354,7 @@ func telemetryRowFromRow(
 	}
 }
 
-// toNumeric converts a float64 cost value to pgtype.Numeric via string round-trip.
+// toNumeric converts a float64 cost value to pgtype.Numeric.
 func toNumeric(f float64) pgtype.Numeric {
 	var n pgtype.Numeric
 	_ = n.Scan(f)
@@ -369,9 +362,7 @@ func toNumeric(f float64) pgtype.Numeric {
 }
 
 // numericToFloat converts a pgtype.Numeric to float64, returning 0 on failure.
-// Uses Float64Value (the value-out direction); Scan is the value-in direction
-// and silently no-ops on a *float64 destination, which is why every aggregate
-// cost previously came back as 0.
+// Uses Float64Value because Scan silently no-ops on a *float64 destination.
 func numericToFloat(n pgtype.Numeric) float64 {
 	if !n.Valid {
 		return 0

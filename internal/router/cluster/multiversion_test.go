@@ -11,10 +11,8 @@ import (
 	"workweave/router/internal/router"
 )
 
-// scorerForVersion builds a real Scorer using the canonical 2-cluster
-// fixture but tagged with an arbitrary version label. Lets the
-// multiversion test assert that per-request override actually picks the
-// requested instance rather than always serving the default.
+// scorerForVersion tags the canonical 2-cluster fixture with an
+// arbitrary version label so override-picks-requested can be asserted.
 func scorerForVersion(t *testing.T, version string, embedder Embedder) *Scorer {
 	t.Helper()
 	cb, rb, regb := twoClusterArtifacts(t)
@@ -53,10 +51,8 @@ func TestMultiversion_OverridePicksRequestedVersion(t *testing.T) {
 	assert.Contains(t, got.Reason, "cluster:v0.1", "context override → that version's scorer answers")
 }
 
-// TestMultiversion_UnknownVersionFallsBackToDefault: an unknown override
-// version still serves traffic via the default scorer (logged at WARN).
-// This is the soft-degradation we keep — eval harness typos shouldn't
-// 503; the production-safe behavior is to serve the deployment default.
+// Soft-degradation we keep: unknown override → default scorer (WARN
+// logged). Eval harness typos shouldn't 503.
 func TestMultiversion_UnknownVersionFallsBackToDefault(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	v02 := scorerForVersion(t, "v0.2", emb)

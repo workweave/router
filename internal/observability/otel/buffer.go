@@ -5,8 +5,8 @@ import (
 	"sync"
 )
 
-// Buffer accumulates spans for a single request and flushes them to an
-// Emitter in bulk. All methods are nil-safe (zero overhead when disabled).
+// Buffer accumulates spans for a single request and flushes them to an Emitter
+// in bulk. All methods are nil-safe (zero overhead when disabled).
 type Buffer struct {
 	emitter *Emitter
 	traceID [16]byte
@@ -14,8 +14,8 @@ type Buffer struct {
 	spans   []Span
 }
 
-// NewBuffer creates a request-scoped span buffer. Returns nil when emitter
-// is nil (OTel disabled).
+// NewBuffer creates a request-scoped span buffer. Returns nil when emitter is
+// nil (OTel disabled).
 func NewBuffer(emitter *Emitter) *Buffer {
 	if emitter == nil {
 		return nil
@@ -62,8 +62,8 @@ func (b *Buffer) WithContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, bufferKey{}, b)
 }
 
-// Record retrieves the Buffer from ctx and appends the span. No-op when
-// the context does not carry a buffer (OTel disabled or pre-buffer middleware).
+// Record retrieves the Buffer from ctx and appends the span. No-op when the
+// context does not carry a buffer (OTel disabled or pre-buffer middleware).
 func Record(ctx context.Context, s Span) {
 	if buf, ok := ctx.Value(bufferKey{}).(*Buffer); ok {
 		buf.Record(s)

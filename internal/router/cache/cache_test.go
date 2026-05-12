@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// l2Normalize returns vec / ||vec||₂ so callers can build test
-// fixtures the same way the cluster scorer's embedder does.
+// l2Normalize returns vec / ||vec||₂; matches the cluster scorer's
+// embedder output shape.
 func l2Normalize(v []float32) []float32 {
 	var sum float32
 	for _, x := range v {
@@ -30,9 +30,8 @@ func l2Normalize(v []float32) []float32 {
 	return out
 }
 
-// blendVectors returns alpha*a + (1-alpha)*b, L2-normalized. Used to
-// generate near-duplicates with a tunable cosine to either side of a
-// threshold.
+// blendVectors returns L2-normalized alpha*a + (1-alpha)*b — used to
+// generate near-duplicates with tunable cosine.
 func blendVectors(a, b []float32, alpha float32) []float32 {
 	out := make([]float32, len(a))
 	for i := range a {
@@ -70,11 +69,9 @@ func TestCache_NearDuplicateHitsAboveThreshold(t *testing.T) {
 	c := cache.New(cfg)
 
 	a := l2Normalize([]float32{1, 0, 0, 0})
-	// Build a near-duplicate at cosine ≈ 0.97 by mixing in a small
-	// orthogonal component.
+	// Near-duplicate at cosine ≈ 0.97.
 	b := blendVectors(a, l2Normalize([]float32{0, 1, 0, 0}), 0.95)
 
-	// Sanity: the blend's cosine to a should clear 0.95.
 	var sim float32
 	for i := range a {
 		sim += a[i] * b[i]
@@ -93,7 +90,7 @@ func TestCache_BelowThresholdMisses(t *testing.T) {
 	c := cache.New(cfg)
 
 	a := l2Normalize([]float32{1, 0, 0, 0})
-	// Distant vector — cosine ~0.5 between a and the blend.
+	// Distant — cosine ~0.5.
 	b := blendVectors(a, l2Normalize([]float32{0, 1, 0, 0}), 0.5)
 
 	c.Store("inst-1", cache.FormatAnthropic, a, 0, sampleResponse(`{"id":"resp"}`))
@@ -113,12 +110,10 @@ func TestCache_PerClusterThresholdOverride(t *testing.T) {
 	a := l2Normalize([]float32{1, 0, 0, 0})
 	b := blendVectors(a, l2Normalize([]float32{0, 1, 0, 0}), 0.7) // cosine ≈ 0.7
 
-	// Cluster 0 uses the strict default → miss.
 	c.Store("inst-1", cache.FormatAnthropic, a, 0, sampleResponse(`{"id":"strict"}`))
 	_, hitStrict := c.Lookup("inst-1", cache.FormatAnthropic, b, []int{0})
 	assert.False(t, hitStrict, "default 0.99 threshold should reject 0.7 cosine")
 
-	// Cluster 7 uses the override → hit.
 	c.Store("inst-1", cache.FormatAnthropic, a, 7, sampleResponse(`{"id":"loose"}`))
 	resp, hitLoose := c.Lookup("inst-1", cache.FormatAnthropic, b, []int{7})
 	require.True(t, hitLoose, "cluster 7 override 0.5 threshold should accept 0.7 cosine")
@@ -131,7 +126,6 @@ func TestCache_BucketIsolationAcrossInstallations(t *testing.T) {
 
 	c.Store("inst-A", cache.FormatAnthropic, emb, 0, sampleResponse(`{"who":"A"}`))
 
-	// Same embedding, different installation → must miss.
 	_, hit := c.Lookup("inst-B", cache.FormatAnthropic, emb, []int{0})
 	assert.False(t, hit, "embeddings must not cross installations")
 }
@@ -142,8 +136,6 @@ func TestCache_BucketIsolationAcrossFormats(t *testing.T) {
 
 	c.Store("inst-1", cache.FormatAnthropic, emb, 0, sampleResponse(`{"fmt":"anth"}`))
 
-	// Same embedding, OpenAI inbound → must miss; Anthropic-shaped
-	// bytes are not safe to replay to an OpenAI client.
 	_, hit := c.Lookup("inst-1", cache.FormatOpenAI, emb, []int{0})
 	assert.False(t, hit, "cached Anthropic response must not replay for OpenAI")
 }
@@ -156,11 +148,9 @@ func TestCache_TTLExpiry(t *testing.T) {
 	emb := l2Normalize([]float32{1, 0, 0, 0})
 	c.Store("inst-1", cache.FormatAnthropic, emb, 0, sampleResponse(`{"id":"old"}`))
 
-	// Immediately: hit.
 	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0})
 	require.True(t, hit, "fresh entry should hit")
 
-	// After TTL: must miss.
 	time.Sleep(80 * time.Millisecond)
 	_, hit = c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0})
 	assert.False(t, hit, "expired entry must miss")
@@ -170,9 +160,7 @@ func TestCache_LookupScansAllTopPClusters(t *testing.T) {
 	c := cache.New(cache.DefaultConfig())
 	emb := l2Normalize([]float32{1, 0, 0, 0})
 
-	// Store in cluster 5 only. Lookup with top-p clusters [2, 3, 5, 7]
-	// should still find it because the cache scans every listed
-	// cluster.
+	// Store in cluster 5; top-p lookup must find it via the scan.
 	c.Store("inst-1", cache.FormatAnthropic, emb, 5, sampleResponse(`{"id":"in-5"}`))
 
 	got, hit := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{2, 3, 5, 7})
@@ -182,7 +170,7 @@ func TestCache_LookupScansAllTopPClusters(t *testing.T) {
 
 func TestCache_StoreDropsOversizedBodies(t *testing.T) {
 	cfg := cache.DefaultConfig()
-	cfg.MaxBodyBytes = 16 // tiny cap so we trip it deterministically
+	cfg.MaxBodyBytes = 16
 	c := cache.New(cfg)
 
 	emb := l2Normalize([]float32{1, 0, 0, 0})
@@ -198,13 +186,12 @@ func TestCache_StoreDropsOversizedBodies(t *testing.T) {
 }
 
 func TestCache_NilCacheLookupAndStoreAreSafe(t *testing.T) {
-	// Disabled-mode cache: callers pass nil and expect no-op behavior.
+	// Disabled-mode: callers pass nil and expect no-op.
 	var c *cache.Cache
 
 	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, []float32{1}, []int{0})
 	assert.False(t, hit, "nil cache must report a miss without panicking")
 
-	// Store on nil must not panic either.
 	c.Store("inst-1", cache.FormatAnthropic, []float32{1}, 0, sampleResponse(`x`))
 }
 

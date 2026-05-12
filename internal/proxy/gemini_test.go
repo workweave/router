@@ -19,8 +19,7 @@ const geminiPassthroughBody = `{
 	"contents":[{"role":"user","parts":[{"text":"hello"}]}]
 }`
 
-// The handler injects "model" and "stream" before this method runs, so
-// the test passes the post-injection body shape.
+// Post-injection body shape: handler adds "model" and "stream" before calling.
 const geminiInjectedBody = `{
 	"model":"gemini-1.5-pro",
 	"stream":false,
@@ -48,18 +47,16 @@ func TestProxyGeminiGenerateContent_RoutesToGoogleProvider(t *testing.T) {
 	assert.Equal(t, "gemini-2.5-pro", rec.Header().Get("x-router-model"))
 	assert.Equal(t, providers.ProviderGoogle, rec.Header().Get("x-router-provider"))
 	require.Len(t, googleProv.proxyBodies, 1, "the upstream Google client must be invoked once")
-	// Synthetic injected fields must not reach the upstream body.
 	body := string(googleProv.proxyBodies[0])
 	assert.NotContains(t, body, `"model"`,
-		"the model field is encoded in the upstream URL, not the body")
+		"model is encoded in the upstream URL, not the body")
 	assert.NotContains(t, body, `"stream"`,
-		"streaming choice is signalled via the GeminiStreamHintHeader")
+		"streaming is signalled via GeminiStreamHintHeader")
 }
 
 func TestProxyGeminiGenerateContent_CrossFormatReturnsSentinel(t *testing.T) {
 	store := newFakePinStore()
-	// Decision picks Anthropic — cross-format emit from a Gemini envelope
-	// is intentionally deferred. The handler maps the sentinel to HTTP 501.
+	// Cross-format from a Gemini envelope is deferred; handler maps to HTTP 501.
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
 	svc := proxy.NewService(
 		fr,
@@ -79,7 +76,5 @@ func TestProxyGeminiGenerateContent_CrossFormatReturnsSentinel(t *testing.T) {
 	err := svc.ProxyGeminiGenerateContent(ctx, []byte(geminiInjectedBody), rec, httpReq)
 
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, proxy.ErrGeminiCrossFormatUnsupported),
-		"cross-format Gemini-in→non-Google routing must surface the typed sentinel "+
-			"so the handler can map it to HTTP 501")
+	assert.True(t, errors.Is(err, proxy.ErrGeminiCrossFormatUnsupported))
 }

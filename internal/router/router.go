@@ -1,5 +1,4 @@
-// Package router defines the routing brain: the Router interface and its
-// Decision/Request types. Implementations live in subpackages (heuristic, judge).
+// Package router defines the Router interface and its Decision/Request types.
 package router
 
 import "context"
@@ -8,16 +7,10 @@ type Request struct {
 	RequestedModel       string
 	EstimatedInputTokens int
 	HasTools             bool
-	// PromptText is the concatenated user/system text from the request,
-	// used by content-aware routers (e.g. RouteLLM). Empty for routers
-	// that key only on token count or other features.
+	// PromptText is the concatenated user/system text, used by content-aware routers.
 	PromptText string
-	// EnabledProviders is the set of provider names whose credentials are
-	// resolvable for this request — boot-time env keys, BYOK keys on the
-	// installation, or per-request client headers. When non-nil, routers
-	// must restrict argmax to providers in this set so we never return a
-	// decision the upstream call would 401 on. Nil means "no per-request
-	// gating; use whatever the router was constructed with."
+	// EnabledProviders restricts argmax so we never return a decision the
+	// upstream call would 401 on. Nil means no per-request gating.
 	EnabledProviders map[string]struct{}
 }
 
@@ -25,36 +18,24 @@ type Decision struct {
 	Provider string
 	Model    string
 	Reason   string
-	// Metadata carries optional per-decision context populated by
-	// content-aware routers (cluster scorer). Nil for routers that
-	// don't compute it (heuristic, evalswitch passthrough); downstream
-	// consumers (semantic cache, observability) must nil-check before
-	// dereferencing.
+	// Metadata is populated by content-aware routers; nil for others.
+	// Downstream consumers must nil-check before dereferencing.
 	Metadata *RoutingMetadata
 }
 
-// RoutingMetadata is populated by cluster-based routers so downstream
-// components can reuse the embedding + cluster context without
-// recomputing it. Always nil-check before reading.
+// RoutingMetadata lets downstream components reuse the embedding + cluster
+// context without recomputing. Always nil-check before reading.
 type RoutingMetadata struct {
-	// Embedding is the L2-normalized prompt vector used for cluster
-	// selection. Length matches the artifact's embed_dim (768 today).
 	Embedding []float32
-	// ClusterIDs are the top-p nearest cluster ids the scorer summed
-	// over. ClusterIDs[0] is not necessarily the closest centroid:
-	// the scorer sorts them ascending for log determinism, so callers
-	// that care about "closest centroid" should not assume order.
+	// ClusterIDs are sorted ascending for log determinism; ClusterIDs[0]
+	// is NOT necessarily the closest centroid.
 	ClusterIDs []int
-	// CandidateModels is the eligible-model set the scorer's argmax ran
-	// over for this request. Captured so routing observations can record
-	// what was on the table at decision time, not just what was picked.
+	// CandidateModels is the eligible-model set argmax ran over; captured
+	// so observations record what was on the table, not just what was picked.
 	CandidateModels []string
-	// ChosenScore is the argmax score on the chosen model — the sum of
-	// rankings across the top-p clusters. Surfaced so downstream
-	// analytics can grade picks against margin-of-victory.
-	ChosenScore float32
-	// ClusterRouterVersion is the artifact version (e.g. "v0.27") that
-	// produced this decision. Empty for non-cluster routers.
+	// ChosenScore is the sum of rankings across top-p clusters; used for
+	// margin-of-victory analytics.
+	ChosenScore          float32
 	ClusterRouterVersion string
 }
 

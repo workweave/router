@@ -12,8 +12,7 @@ import (
 // ClusterVersionOverrideHeader pins a request to a specific cluster artifact version.
 const ClusterVersionOverrideHeader = "x-weave-cluster-version"
 
-// WithClusterVersionOverride stashes the requested cluster version on the
-// request context when the header is set.
+// WithClusterVersionOverride stashes the requested cluster version on the request context when the header is set.
 func WithClusterVersionOverride() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw := strings.TrimSpace(c.GetHeader(ClusterVersionOverrideHeader))

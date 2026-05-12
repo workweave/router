@@ -13,8 +13,6 @@ import (
 )
 
 // PrepareOpenAI builds a fully-prepared OpenAI Chat Completions request.
-// Same-format requests use byte-level overrides; cross-format requests
-// pull fields from the parsed map.
 func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
 	var body []byte
 	var err error
@@ -32,8 +30,6 @@ func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (provi
 	return providers.PreparedRequest{Body: body, Headers: make(http.Header)}, nil
 }
 
-// buildOpenAIFromOpenAI applies byte-level overrides to the immutable body.
-// Unknown fields pass through unchanged.
 func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error) {
 	ov := resolveOpenAIOverrides(e.body, opts)
 	return e.emitSameFormat(ov)
@@ -82,8 +78,6 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	return json.Marshal(out)
 }
 
-// injectStreamUsageOption sets stream_options.include_usage=true.
-// Cross-format path only; same-format uses EmitOverrides.
 func injectStreamUsageOption(doc map[string]any) {
 	if stream, _ := doc["stream"].(bool); !stream {
 		return
@@ -276,8 +270,6 @@ func anthropicImageToOpenAI(block map[string]any) map[string]any {
 	return nil
 }
 
-// pullAnthropicSystemAndMessages translates Anthropic system + messages into
-// OpenAI format. Requires the full parsed map for deep traversal.
 func (e *RequestEnvelope) pullAnthropicSystemAndMessages(out map[string]any) error {
 	src, err := e.ensureSrc()
 	if err != nil {
@@ -294,8 +286,6 @@ func (e *RequestEnvelope) pullAnthropicSystemAndMessages(out map[string]any) err
 
 const openAIMaxTools = 128
 
-// pullAnthropicTools converts Anthropic tool definitions to OpenAI format.
-// Requires the full parsed map for recursive schema sanitization.
 func (e *RequestEnvelope) pullAnthropicTools(out map[string]any) error {
 	src, err := e.ensureSrc()
 	if err != nil {

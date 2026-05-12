@@ -10,15 +10,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// resolveInstallation returns the installation that admin operations should
-// act on. rk_-keyed callers see their own installation. Admin-cookie
-// sessions resolve to the singleton dashboard-owned installation, creating
-// it on first call so the UI is usable on a fresh self-hosted deploy
-// without any out-of-band setup.
-//
-// Returns false (and writes a 401) when no identity is present, or false
-// (and writes a 500) when the lookup fails. Callers should `return` when
-// `ok == false`.
+// resolveInstallation returns the installation admin operations should act on. rk_-keyed callers see
+// their own; admin-cookie sessions resolve to the singleton dashboard-owned installation, creating it
+// on first call so the UI is usable on a fresh self-hosted deploy without out-of-band setup.
+// Writes a 401 when no identity is present or 500 on lookup failure; callers return when ok == false.
 func resolveInstallation(c *gin.Context, authSvc *auth.Service) (*auth.Installation, bool) {
 	if installation := middleware.InstallationFrom(c); installation != nil {
 		return installation, true

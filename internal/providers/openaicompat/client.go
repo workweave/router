@@ -1,10 +1,8 @@
 // Package openaicompat is a generic providers.Client adapter for upstreams
-// that expose the OpenAI Chat Completions wire shape.
-//
-// OpenRouter, vLLM, Together, Fireworks, DeepInfra, and customer-hosted
-// OpenAI-compatible endpoints all use the same request/response path. Keeping
-// this separate from the first-party OpenAI adapter lets the composition root
-// register those pools under their own provider names and API keys.
+// that expose the OpenAI Chat Completions wire shape (OpenRouter, vLLM,
+// Together, Fireworks, DeepInfra, customer-hosted endpoints). Kept separate
+// from the first-party OpenAI adapter so the composition root can register
+// these pools under their own provider names and API keys.
 package openaicompat
 
 import (
@@ -35,7 +33,6 @@ type Client struct {
 	http    *http.Client
 }
 
-// NewClient is pooled for sustained traffic to a single OpenAI-compatible host.
 func NewClient(apiKey, baseURL string) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
@@ -47,10 +44,8 @@ func NewClient(apiKey, baseURL string) *Client {
 	}
 }
 
-// setAuth applies authentication to the upstream request. Precedence:
-//  1. Per-request BYOK credentials in ctx (proxy layer attaches these for
-//     installations that bring their own key).
-//  2. The router's deployment-level API key, when configured.
+// setAuth applies authentication: BYOK credentials in ctx take precedence
+// over the deployment-level API key.
 func (c *Client) setAuth(ctx context.Context, upstream *http.Request) {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
@@ -118,10 +113,10 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	return httputil.StreamBody(resp.Body, resp.StatusCode, w, t)
 }
 
-// Passthrough forwards an inbound request to the same resource suffix on the
-// upstream OpenAI-compatible endpoint. The configured baseURL already includes
-// the provider's version prefix (for example /api/v1), so strip the inbound
-// /v1 before joining.
+// Passthrough forwards to the same resource suffix on the upstream. The
+// configured baseURL already includes the provider's version prefix (e.g.
+// /api/v1), so the inbound /v1 must be stripped before joining or the upstream
+// URL would double-prefix.
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	suffix := strings.TrimPrefix(r.URL.Path, "/v1")
 	url := c.baseURL + suffix
@@ -177,9 +172,8 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	return err
 }
 
-// logUpstreamStatus emits an Error log for upstream 4xx/5xx, Warn for 429s.
-// Mirrors the Anthropic adapter's helper so non-2xx upstream responses are
-// surfaced to ops with a body preview rather than blackholing into a generic
+// logUpstreamStatus emits Error for 4xx/5xx and Warn for 429s, surfacing a
+// body preview so non-2xx upstream responses don't blackhole into a generic
 // "upstream call failed" string at the client.
 func logUpstreamStatus(msg string, status int, attrs ...any) {
 	merged := append([]any{"status", status}, attrs...)

@@ -14,61 +14,42 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// centroidsMagic is the 4-byte header on centroids.bin so a malformed
-// or truncated file is caught at load time rather than producing
-// silently-wrong routing.
-//
-// File format (little-endian):
+// centroids.bin file format (little-endian):
 //
 //	magic     [4]byte  = "CRT1"
 //	version   uint32   = 1
 //	k         uint32   number of centroids
 //	dim       uint32   embedding dimension (must equal EmbedDim)
 //	data      [k][dim]float32  L2-normalized centroids, row-major
+//
+// Magic + version header catches malformed/truncated files at load time
+// rather than producing silently-wrong routing.
 const (
 	centroidsMagic   = "CRT1"
 	centroidsVersion = uint32(1)
 )
 
-// LatestPointer is the filename inside artifacts/ that pins the version
-// served when the runtime is asked to resolve "latest". Single-line text
-// holding a directory name (e.g. "v0.2"). Updating this file is what
-// promotes a newly trained version to production.
+// LatestPointer names the file inside artifacts/ pinning the default
+// served version. Promoting a trained version is a one-line edit.
 const LatestPointer = "latest"
 
-// LatestVersion is the sentinel string ROUTER_CLUSTER_VERSION accepts to
-// mean "read whatever artifacts/latest currently points at". Code that
-// resolves a version string should treat this value identically to an
-// empty string for default-handling.
+// LatestVersion is the sentinel ROUTER_CLUSTER_VERSION accepts to mean
+// "read artifacts/latest". Treat identically to empty string.
 const LatestVersion = "latest"
 
 // embeddedArtifacts is the entire artifacts/ tree compiled into the
-// binary. Each subdirectory is one frozen, comparable bundle:
-//
-//	artifacts/
-//	  latest                — single line: "v0.2"
-//	  v0.1/
-//	    centroids.bin
-//	    rankings.json
-//	    model_registry.json
-//	    metadata.yaml
-//	  v0.2/
-//	    ...
-//
-// Promotion is a one-line edit to artifacts/latest plus a redeploy.
+// binary; each subdir is one frozen, comparable bundle.
 //
 //go:embed all:artifacts
 var embeddedArtifacts embed.FS
 
-// Centroids is K cluster centroids in EmbedDim space, L2-normalized at
-// training time so the runtime scorer can use plain dot product as a
-// cosine-distance signal.
+// Centroids are L2-normalized at training time so the runtime can use
+// dot product as a cosine-distance signal.
 type Centroids struct {
 	K   int
 	Dim int
-	// Data is laid out row-major: centroid k at Data[k*Dim : (k+1)*Dim].
-	// Single contiguous allocation keeps the per-request distance loop
-	// cache-friendly.
+	// Data is row-major: centroid k at Data[k*Dim : (k+1)*Dim]. Single
+	// contiguous allocation keeps the distance loop cache-friendly.
 	Data []float32
 }
 
@@ -77,22 +58,14 @@ func (c *Centroids) Row(k int) []float32 {
 	return c.Data[k*c.Dim : (k+1)*c.Dim]
 }
 
-// Rankings is the per-(cluster, model) α-blended score table. Outer key
-// is cluster id (string-encoded so the JSON file is human-readable); inner
-// key is the deployed model name as it appears in model_registry.json's
-// deployed_models[].model field.
-//
-// Stored values are already min-max-normalized per cluster and α-blended
-// at training time (paper §3): xⱼⁱ = α · p̃ⱼⁱ + (1 − α) · (1 − q̃ⱼⁱ).
-// The runtime scorer just sums + argmaxes.
+// Rankings is the per-(cluster, model) α-blended score table.
+// Values are min-max-normalized per cluster and α-blended at training
+// time (paper §3): xⱼⁱ = α · p̃ⱼⁱ + (1 − α) · (1 − q̃ⱼⁱ).
+// Runtime scorer just sums + argmaxes.
 type Rankings map[int]map[string]float32
 
-// rankingsFile is the on-disk JSON representation. Cluster ids ship as
-// strings because JSON object keys must be strings; we parse them back
-// into ints in loadRankings so callers get a typed map.
+// rankingsFile is the on-disk JSON form; cluster ids parsed back to int.
 type rankingsFile struct {
-	// Meta carries provenance. Helpful for debugging "which artifact is
-	// loaded?" without redeploying.
 	Meta struct {
 		RouterVersion   string  `json:"router_version,omitempty"`
 		EmbedderModel   string  `json:"embedder_model,omitempty"`
@@ -107,12 +80,9 @@ type rankingsFile struct {
 	Rankings map[string]map[string]float32 `json:"rankings"`
 }
 
-// DeployedEntry is one routable target the cluster scorer may emit. Each
-// entry pairs a deployed model name with the provider that should dispatch
-// it and the OpenRouterBench column whose scores trained its ranking row.
-// Direct columns are 1:1 (Model == BenchColumn); proxy entries reuse
-// another column's scores until enough D3 traffic accumulates to rank the
-// deployed model directly.
+// DeployedEntry is one routable target. Direct columns are 1:1
+// (Model == BenchColumn); proxy entries reuse another column's scores
+// until enough D3 traffic accumulates to rank directly.
 type DeployedEntry struct {
 	Model       string `json:"model"`
 	Provider    string `json:"provider"`
@@ -121,17 +91,14 @@ type DeployedEntry struct {
 	ProxyNote   string `json:"proxy_note,omitempty"`
 }
 
-// ModelRegistry is the deserialized form of model_registry.json. The
-// scorer iterates DeployedModels at request time after filtering by which
-// providers were registered at boot. The rankings.json table keys off
-// Entry.Model — the canonical name surfaced in router.Decision.Model.
+// ModelRegistry is the deserialized model_registry.json.
 type ModelRegistry struct {
 	DeployedModels []DeployedEntry `json:"deployed_models"`
 }
 
-// Models returns the deduplicated, deployed-model-name set. Order is
-// preserved from DeployedModels (the on-disk artifact order is meaningful:
-// it pins tie-breaking when two providers share a bench column score).
+// Models returns the deduplicated model-name set in DeployedModels order.
+// Order is meaningful: it pins tie-breaking when providers share a
+// bench column score.
 func (r *ModelRegistry) Models() []string {
 	seen := make(map[string]struct{}, len(r.DeployedModels))
 	out := make([]string, 0, len(r.DeployedModels))
@@ -145,11 +112,8 @@ func (r *ModelRegistry) Models() []string {
 	return out
 }
 
-// ArtifactMetadata is the parsed metadata.yaml that ships alongside each
-// artifact bundle. It exists so debug logs and the eval harness can read
-// "what is this version?" without re-parsing rankings + registry. Every
-// field is informational at runtime; the routing decision is a function
-// of centroids + rankings + registry only.
+// ArtifactMetadata is the parsed metadata.yaml. Informational at
+// runtime; routing decisions depend only on centroids + rankings + registry.
 type ArtifactMetadata struct {
 	Version           string             `yaml:"version"`
 	Parent            string             `yaml:"parent,omitempty"`
@@ -162,26 +126,17 @@ type ArtifactMetadata struct {
 	DeployedModels    []string           `yaml:"deployed_models,omitempty"`
 	CostPer1KInputUSD map[string]float64 `yaml:"cost_per_1k_input_usd,omitempty"`
 	Changelog         string             `yaml:"changelog,omitempty"`
-	// CacheConfig is optional. Absence means "use the runtime default
-	// threshold" (a single global value applied to every cluster).
-	// Each artifact version may tune thresholds independently — a
-	// version with looser cluster geometry can ship lower thresholds
-	// without affecting other versions.
+	// CacheConfig is optional. Each version may tune thresholds
+	// independently — looser geometry can ship lower thresholds.
 	CacheConfig *ArtifactCacheConfig `yaml:"cache_config,omitempty"`
 }
 
-// ArtifactCacheConfig carries the per-version semantic-cache knobs the
-// runtime needs at boot. Not load-bearing for routing itself; consumed
-// only by the cache subsystem when enabled.
+// ArtifactCacheConfig carries per-version semantic-cache knobs.
 type ArtifactCacheConfig struct {
-	// DefaultThreshold is the cosine-similarity floor below which a
-	// candidate cache entry is rejected, applied to every cluster
-	// without an explicit override. 0 means "fall back to the
-	// runtime's compiled-in default".
+	// DefaultThreshold is the cosine floor applied to clusters without
+	// override; 0 means fall back to the runtime's compiled-in default.
 	DefaultThreshold float32 `yaml:"default_threshold,omitempty"`
-	// PerClusterThreshold overrides DefaultThreshold for individual
-	// cluster IDs. Sparse: only list the outliers. Map keys are
-	// cluster ids; values are cosine thresholds in [0, 1].
+	// PerClusterThreshold is sparse; only list outliers. Values in [0, 1].
 	PerClusterThreshold map[int]float32 `yaml:"per_cluster_threshold,omitempty"`
 }
 
@@ -200,8 +155,8 @@ type ArtifactTraining struct {
 	TrainingDataMix map[string]float64 `yaml:"training_data_mix,omitempty"`
 }
 
-// Bundle is one fully-loaded artifact set. The Scorer holds one of these
-// per version; the Multiversion router dispatches between them.
+// Bundle is one fully-loaded artifact set, held by one Scorer per
+// version; the Multiversion router dispatches between them.
 type Bundle struct {
 	Version   string
 	Centroids *Centroids
@@ -210,11 +165,9 @@ type Bundle struct {
 	Metadata  *ArtifactMetadata
 }
 
-// ListVersions returns the sorted version directories under artifacts/.
-// Order is lexicographic on the directory name (so v0.1 < v0.2 < v0.10
-// would NOT sort numerically — keep names monotonic and zero-padded if
-// you ever exceed 9 minor versions). The "latest" pointer file is not
-// returned.
+// ListVersions returns sorted version directories under artifacts/.
+// Order is lexicographic — keep names monotonic and zero-padded past
+// 9 minor versions. The "latest" pointer file is not returned.
 func ListVersions() ([]string, error) {
 	entries, err := fs.ReadDir(embeddedArtifacts, "artifacts")
 	if err != nil {
@@ -235,10 +188,8 @@ func ListVersions() ([]string, error) {
 }
 
 // ResolveVersion turns a user-supplied version string into a concrete
-// version directory name. An empty string or the literal "latest"
-// reads artifacts/latest and returns its trimmed contents. Anything
-// else is returned verbatim after a sanity check that the directory
-// exists.
+// directory name. Empty or "latest" reads artifacts/latest; anything
+// else is returned verbatim after verifying the directory exists.
 func ResolveVersion(requested string) (string, error) {
 	if requested == "" || requested == LatestVersion {
 		raw, err := fs.ReadFile(embeddedArtifacts, path.Join("artifacts", LatestPointer))
@@ -261,8 +212,7 @@ func ResolveVersion(requested string) (string, error) {
 }
 
 // LoadBundle reads centroids + rankings + registry + metadata for one
-// version and returns them as a Bundle. The version must already be
-// resolved (no "latest" handling here — call ResolveVersion first).
+// version. Version must already be resolved (call ResolveVersion first).
 func LoadBundle(version string) (*Bundle, error) {
 	dir := path.Join("artifacts", version)
 	rawCentroids, err := fs.ReadFile(embeddedArtifacts, path.Join(dir, "centroids.bin"))
@@ -289,8 +239,7 @@ func LoadBundle(version string) (*Bundle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("artifacts %s: %w", version, err)
 	}
-	// metadata.yaml is best-effort: a bundle without one still routes,
-	// it just won't appear with full provenance in /health-style logs.
+	// metadata.yaml is best-effort: a bundle without one still routes.
 	var meta *ArtifactMetadata
 	if rawMeta, err := fs.ReadFile(embeddedArtifacts, path.Join(dir, "metadata.yaml")); err == nil {
 		var m ArtifactMetadata
@@ -340,8 +289,8 @@ func loadCentroids(raw []byte) (*Centroids, error) {
 	return &Centroids{K: int(k), Dim: int(dim), Data: data}, nil
 }
 
-// loadRankings returns an error on malformed JSON, non-integer cluster
-// keys, empty rankings (no clusters), or empty per-cluster entries.
+// loadRankings errors on malformed JSON, non-integer cluster keys,
+// empty rankings, or empty per-cluster entries.
 func loadRankings(raw []byte) (Rankings, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("rankings.json is empty")
@@ -356,8 +305,8 @@ func loadRankings(raw []byte) (Rankings, error) {
 	out := make(Rankings, len(f.Rankings))
 	for kStr, models := range f.Rankings {
 		var k int
-		// fmt.Sscanf("12abc", "%d", &k) succeeds with k=12, so we round-trip
-		// the parsed int through Sprintf to reject keys with trailing junk.
+		// Sscanf("12abc",...) succeeds with k=12; round-trip via Sprintf
+		// to reject keys with trailing junk.
 		_, err := fmt.Sscanf(kStr, "%d", &k)
 		if err != nil || fmt.Sprintf("%d", k) != kStr {
 			return nil, fmt.Errorf("rankings.json: non-integer cluster key %q", kStr)
@@ -370,10 +319,9 @@ func loadRankings(raw []byte) (Rankings, error) {
 	return out, nil
 }
 
-// CheapestModel returns the provider and model whose cost-per-1k-input is
-// lowest among all entries in registry whose provider appears in available.
-// The cost lookup uses meta.CostPer1KInputUSD. Entries missing a cost entry
-// are skipped. Returns ("", "", false) if no matching entry is found.
+// CheapestModel returns the lowest cost-per-1k-input entry among
+// registry entries whose provider is in available. Entries missing a
+// cost are skipped. Returns ok=false if nothing matches.
 func CheapestModel(meta *ArtifactMetadata, registry *ModelRegistry, available map[string]struct{}) (provider, model string, ok bool) {
 	var bestCost float64 = -1
 	for _, e := range registry.DeployedModels {
@@ -394,9 +342,8 @@ func CheapestModel(meta *ArtifactMetadata, registry *ModelRegistry, available ma
 	return
 }
 
-// loadRegistry validates that every entry carries a non-empty (model,
-// provider, bench_column) triple. Empty fields are loud errors at boot
-// rather than silent "decision routes to nothing" at request time.
+// loadRegistry validates every entry has a non-empty (model, provider,
+// bench_column) triple — loud at boot beats silent "routes to nothing".
 func loadRegistry(raw []byte) (*ModelRegistry, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("model_registry.json is empty")

@@ -9,8 +9,7 @@ import (
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
 )
 
-// Span is a lightweight telemetry record converted to OTLP protobuf at
-// flush time.
+// Span is a lightweight telemetry record converted to OTLP protobuf at flush time.
 type Span struct {
 	Name  string
 	Start time.Time
@@ -34,8 +33,8 @@ func generateSpanID() [8]byte {
 	return id
 }
 
-// AttrBuilder constructs OTLP KeyValue attributes directly without
-// intermediate map allocations. Not safe for concurrent use.
+// AttrBuilder constructs OTLP KeyValue attributes directly without intermediate
+// map allocations. Not safe for concurrent use.
 type AttrBuilder struct {
 	attrs []*commonv1.KeyValue
 }
@@ -45,7 +44,6 @@ func NewAttrBuilder(cap int) *AttrBuilder {
 	return &AttrBuilder{attrs: make([]*commonv1.KeyValue, 0, cap)}
 }
 
-// String appends a string attribute.
 func (b *AttrBuilder) String(key, val string) *AttrBuilder {
 	b.attrs = append(b.attrs, &commonv1.KeyValue{
 		Key:   key,
@@ -54,7 +52,6 @@ func (b *AttrBuilder) String(key, val string) *AttrBuilder {
 	return b
 }
 
-// Int64 appends an int64 attribute.
 func (b *AttrBuilder) Int64(key string, val int64) *AttrBuilder {
 	b.attrs = append(b.attrs, &commonv1.KeyValue{
 		Key:   key,
@@ -63,7 +60,6 @@ func (b *AttrBuilder) Int64(key string, val int64) *AttrBuilder {
 	return b
 }
 
-// Float64 appends a float64 attribute.
 func (b *AttrBuilder) Float64(key string, val float64) *AttrBuilder {
 	b.attrs = append(b.attrs, &commonv1.KeyValue{
 		Key:   key,
@@ -72,7 +68,6 @@ func (b *AttrBuilder) Float64(key string, val float64) *AttrBuilder {
 	return b
 }
 
-// Bool appends a bool attribute.
 func (b *AttrBuilder) Bool(key string, val bool) *AttrBuilder {
 	b.attrs = append(b.attrs, &commonv1.KeyValue{
 		Key:   key,
@@ -81,10 +76,10 @@ func (b *AttrBuilder) Bool(key string, val bool) *AttrBuilder {
 	return b
 }
 
-// IntSlice appends an int slice as an OTLP array of int64 values.
-// A nil or empty slice still emits the attribute with an empty array, so
-// downstream consumers can distinguish "field present, no clusters" from
-// "field absent" (e.g. pinned-route turns where Metadata is nil).
+// IntSlice appends an int slice as an OTLP array of int64 values. A nil or
+// empty slice still emits the attribute with an empty array, so downstream
+// consumers can distinguish "field present, no clusters" from "field absent"
+// (e.g. pinned-route turns where Metadata is nil).
 func (b *AttrBuilder) IntSlice(key string, vals []int) *AttrBuilder {
 	values := make([]*commonv1.AnyValue, len(vals))
 	for i, v := range vals {
@@ -97,8 +92,8 @@ func (b *AttrBuilder) IntSlice(key string, vals []int) *AttrBuilder {
 	return b
 }
 
-// Build returns the accumulated KeyValue slice. The slice is valid until
-// the next method call on the builder.
+// Build returns the accumulated KeyValue slice. The slice is valid until the
+// next method call on the builder.
 func (b *AttrBuilder) Build() []*commonv1.KeyValue {
 	return b.attrs
 }

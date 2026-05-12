@@ -16,24 +16,18 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrGeminiCrossFormatUnsupported is returned when a Gemini-source
-// request lands on a non-Google provider. Cross-format emit from a
-// Gemini envelope (Gemini-in → Anthropic-out, Gemini-in → OpenAI-out)
-// is intentionally deferred until traffic asks for it; the helper
-// presently routes only through the same-format passthrough path.
+// ErrGeminiCrossFormatUnsupported is returned when a Gemini-source request
+// lands on a non-Google provider. Cross-format emit is deferred until
+// traffic asks for it.
 var ErrGeminiCrossFormatUnsupported = errors.New("gemini cross-format emit not implemented")
 
-// ProxyGeminiGenerateContent routes a native Gemini generateContent
-// request. Same-format passthrough (Gemini-in → Google-out) is fully
-// supported; cross-format directions return
-// ErrGeminiCrossFormatUnsupported (handler maps to HTTP 501) until a
-// downstream consumer needs them.
+// ProxyGeminiGenerateContent routes a native Gemini generateContent request.
+// Only same-format passthrough (Gemini-in → Google-out) is supported;
+// cross-format returns ErrGeminiCrossFormatUnsupported.
 //
-// The handler must inject a synthetic top-level "model" field (from
-// the URL path :model segment) and a synthetic "stream" boolean (true
-// when the URL action is :streamGenerateContent) into body before
-// calling this method. Both fields get stripped before the body is
-// forwarded upstream — see emit_gemini.go's same-format branch.
+// The handler must inject synthetic top-level "model" (URL :model segment)
+// and "stream" (true for :streamGenerateContent) fields into body before
+// calling; both are stripped before forwarding upstream.
 func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
 	log := observability.Get()
 	requestStart := time.Now()
@@ -119,9 +113,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	})
 	otel.Flush(ctx)
 
-	// Cross-format emit from a Gemini envelope is deferred. Reject early
-	// with a typed error the handler can map to HTTP 501. The Google
-	// branch below uses PrepareGemini's same-format passthrough.
+	// Cross-format from a Gemini envelope is deferred; handler maps to HTTP 501.
 	if decision.Provider != providers.ProviderGoogle {
 		return fmt.Errorf("%w: decision picked provider %q for Gemini-source request", ErrGeminiCrossFormatUnsupported, decision.Provider)
 	}

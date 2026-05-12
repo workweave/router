@@ -151,11 +151,8 @@ func TestRequestEnvelope_FirstUserMessageText_Gemini(t *testing.T) {
 }
 
 func TestPrepareGemini_SameFormatStripsSyntheticFields(t *testing.T) {
-	// The handler injects "model" and "stream" so the envelope's
-	// format-neutral accessors work; PrepareGemini must strip both
-	// before forwarding upstream. The native Google adapter takes the
-	// model from decision.Model and the streaming choice from
-	// GeminiStreamHintHeader.
+	// The handler injects "model" and "stream" for format-neutral accessors;
+	// PrepareGemini must strip both before forwarding upstream.
 	body := `{
 		"model":"gemini-1.5-pro",
 		"stream":true,

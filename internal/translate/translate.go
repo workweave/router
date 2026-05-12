@@ -1,8 +1,7 @@
 // Package translate converts request and response bodies between the OpenAI
 // Chat Completions and Anthropic Messages wire formats. Request-side
-// translation is handled by the RequestEnvelope (envelope.go, emit_*.go);
-// this file retains response-side helpers used by the SSE translators and
-// the non-streaming proxy path.
+// translation lives in RequestEnvelope (envelope.go, emit_*.go); this file
+// retains response-side helpers.
 package translate
 
 import (
@@ -12,10 +11,9 @@ import (
 	"time"
 )
 
-// AnthropicToOpenAIResponse converts a non-streaming Anthropic Messages
-// response to an OpenAI Chat Completion response. requestModel is the model
-// the client originally asked for; used as a fallback when the upstream body
-// doesn't echo a model field.
+// AnthropicToOpenAIResponse converts a non-streaming Anthropic Messages response
+// to an OpenAI Chat Completion response. requestModel is the fallback when the
+// upstream body omits a model field.
 func AnthropicToOpenAIResponse(body []byte, requestModel string) ([]byte, error) {
 	var resp map[string]any
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -50,7 +48,6 @@ func AnthropicToOpenAIResponse(body []byte, requestModel string) ([]byte, error)
 	return json.Marshal(out)
 }
 
-// buildOpenAIMessage converts Anthropic content blocks to an OpenAI assistant message.
 func buildOpenAIMessage(resp map[string]any) map[string]any {
 	content, _ := resp["content"].([]any)
 	message := map[string]any{"role": "assistant"}
@@ -73,9 +70,7 @@ func buildOpenAIMessage(resp map[string]any) map[string]any {
 			input, _ := json.Marshal(b["input"])
 			id, _ := b["id"].(string)
 			name, _ := b["name"].(string)
-			// Per OpenAI's API spec, non-streaming tool_calls have only
-			// id/type/function. The `index` field is for streaming delta
-			// chunks and lives in the SSETranslator instead.
+			// Non-streaming tool_calls omit `index`; that field is for streaming deltas.
 			toolCalls = append(toolCalls, map[string]any{
 				"id":   id,
 				"type": "function",
@@ -115,8 +110,8 @@ func mapStopReason(reason any) string {
 	}
 }
 
-// AnthropicToOpenAIError re-wraps an Anthropic error as OpenAI format.
-// Returns original bytes unchanged if the input isn't valid Anthropic error JSON.
+// AnthropicToOpenAIError re-wraps an Anthropic error as OpenAI format. Returns
+// the input unchanged when it isn't a valid Anthropic error envelope.
 func AnthropicToOpenAIError(body []byte) []byte {
 	var anthropic struct {
 		Error struct {
@@ -159,9 +154,8 @@ func translateUsage(usage any) map[string]any {
 }
 
 // OpenAIToAnthropicResponse converts a non-streaming OpenAI Chat Completion
-// response to an Anthropic Messages response. requestModel is the model the
-// client originally asked for; used as a fallback when the upstream body
-// doesn't echo a model field.
+// response to an Anthropic Messages response. requestModel is the fallback when
+// the upstream body omits a model field.
 func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
 	var resp map[string]any
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -202,7 +196,6 @@ func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error)
 	return json.Marshal(out)
 }
 
-// buildAnthropicContent converts an OpenAI assistant message to Anthropic content blocks.
 func buildAnthropicContent(message map[string]any) []any {
 	if message == nil {
 		return []any{}
@@ -238,9 +231,8 @@ func buildAnthropicContent(message map[string]any) []any {
 	return blocks
 }
 
-// openAIFinishToAnthropicResponse maps OpenAI finish_reason to Anthropic
-// stop_reason for non-streaming responses. Differs from the streaming variant
-// only in accepting an `any` value coming directly out of the JSON map.
+// openAIFinishToAnthropicResponse is the non-streaming variant; it takes an
+// `any` directly out of the JSON map.
 func openAIFinishToAnthropicResponse(reason any) string {
 	s, _ := reason.(string)
 	switch s {
@@ -255,8 +247,6 @@ func openAIFinishToAnthropicResponse(reason any) string {
 	}
 }
 
-// openAIUsageToAnthropicResponse converts a non-streaming OpenAI usage object
-// to Anthropic usage. Mirrors translateUsage in reverse.
 func openAIUsageToAnthropicResponse(usage any) map[string]any {
 	u, _ := usage.(map[string]any)
 	if u == nil {
@@ -270,8 +260,8 @@ func openAIUsageToAnthropicResponse(usage any) map[string]any {
 	}
 }
 
-// OpenAIToAnthropicError re-wraps an OpenAI error as Anthropic format.
-// Returns original bytes unchanged if the input isn't valid OpenAI error JSON.
+// OpenAIToAnthropicError re-wraps an OpenAI error as Anthropic format. Returns
+// the input unchanged when it isn't a valid OpenAI error envelope.
 func OpenAIToAnthropicError(body []byte) []byte {
 	var openai struct {
 		Error struct {

@@ -13,10 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// remotePeerIP returns the immediate TCP peer's IP — the raw RemoteAddr
-// stripped of port — so rate limiting can't be bypassed by spoofing
-// X-Forwarded-For. Returns the unstripped address as a fallback if the
-// peer lacks the standard "host:port" shape.
+// remotePeerIP returns the immediate TCP peer's IP so rate limiting can't be bypassed by spoofing
+// X-Forwarded-For. Returns the unstripped address if the peer lacks "host:port" shape.
 func remotePeerIP(c *gin.Context) string {
 	addr := c.Request.RemoteAddr
 	if host, _, err := net.SplitHostPort(addr); err == nil {
@@ -39,10 +37,8 @@ type meResponse struct {
 	Subject       string `json:"subject,omitempty"`
 }
 
-// LoginHandler verifies the supplied password against ROUTER_ADMIN_PASSWORD
-// and, on success, sets a signed HttpOnly session cookie. Returns 503 when
-// admin login isn't configured so the dashboard can render a "set
-// ROUTER_ADMIN_PASSWORD to enable login" hint instead of a 401 loop.
+// LoginHandler verifies the password against ROUTER_ADMIN_PASSWORD and sets a signed HttpOnly session cookie.
+// Returns 503 when admin login isn't configured so the dashboard can render a hint instead of a 401 loop.
 func LoginHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !authSvc.AdminLoginEnabled() {
@@ -57,11 +53,8 @@ func LoginHandler(authSvc *auth.Service) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_password"})
 			return
 		}
-		// Use the raw TCP peer for rate limiting, NOT c.ClientIP(). The
-		// latter parses X-Forwarded-For, which is attacker-controlled when
-		// the router is reached directly (no SetTrustedProxies configured)
-		// — that would let a brute-forcer rotate apparent client IPs and
-		// bypass the per-IP failure cap.
+		// Use raw TCP peer (not c.ClientIP) — X-Forwarded-For is attacker-controlled when the
+		// router is reached directly, letting a brute-forcer rotate IPs and bypass the per-IP cap.
 		peerIP := remotePeerIP(c)
 		if err := authSvc.VerifyAdminPasswordFromIP(peerIP, req.Password); err != nil {
 			if errors.Is(err, auth.ErrAdminLoginRateLimited) {
@@ -88,8 +81,7 @@ func LoginHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// LogoutHandler clears the admin session cookie. Always returns 200 — the
-// caller wanted to be logged out, and they are.
+// LogoutHandler clears the admin session cookie. Always returns 200.
 func LogoutHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		clearAdminSessionCookie(c)
@@ -97,9 +89,7 @@ func LogoutHandler() gin.HandlerFunc {
 	}
 }
 
-// MeHandler reports whether the current request carries a valid admin
-// session cookie. Used by the dashboard on initial load to decide between
-// rendering the app shell vs. redirecting to /login.
+// MeHandler reports whether the request carries a valid admin session cookie.
 func MeHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !authSvc.AdminLoginEnabled() {
@@ -124,14 +114,10 @@ func MeHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// cookieSecure controls whether admin session cookies are minted with the
-// Secure flag. Default true (production-safe) so a self-hoster can never
-// accidentally serve plaintext cookies. Operators running behind a
-// non-HTTPS reverse proxy in dev can set ROUTER_COOKIE_INSECURE=true to
-// disable. We deliberately do not derive this from per-request headers
-// like X-Forwarded-Proto: that header is attacker-controlled when the
-// router is reached directly, and a wrong value silently downgrades the
-// cookie's transport guarantee on a single bad request.
+// cookieSecure controls whether admin session cookies are minted with the Secure flag. Default true so
+// self-hosters never accidentally serve plaintext cookies; dev behind non-HTTPS can set
+// ROUTER_COOKIE_INSECURE=true. Not derived from X-Forwarded-Proto: that header is attacker-controlled
+// when the router is reached directly, and a wrong value silently downgrades cookie transport.
 var cookieSecure = os.Getenv("ROUTER_COOKIE_INSECURE") != "true"
 
 func setAdminSessionCookie(c *gin.Context, token string, expiresAt time.Time) {
