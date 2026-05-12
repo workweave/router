@@ -104,6 +104,47 @@ func TestExtractClientCredentials_RejectsRouterBearerForGoogle(t *testing.T) {
 		"router-issued bearer tokens (rk_...) must never be forwarded as upstream Google credentials")
 }
 
+func TestExtractClientCredentials_OpenRouter(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer sk-or-v1-byok-openrouter-key"}}
+	creds := proxy.ExtractClientCredentials("openrouter", headers)
+	require.NotNil(t, creds)
+	assert.Equal(t, []byte("sk-or-v1-byok-openrouter-key"), creds.APIKey)
+	assert.Equal(t, "client", creds.Source)
+}
+
+func TestExtractClientCredentials_Fireworks(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer fw_byok-fireworks-key"}}
+	creds := proxy.ExtractClientCredentials("fireworks", headers)
+	require.NotNil(t, creds)
+	assert.Equal(t, []byte("fw_byok-fireworks-key"), creds.APIKey)
+	assert.Equal(t, "client", creds.Source)
+}
+
+func TestExtractClientCredentials_RejectsRouterBearerForOpenRouter(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer rk_should_not_leak_upstream"}}
+	creds := proxy.ExtractClientCredentials("openrouter", headers)
+	assert.Nil(t, creds,
+		"router-issued bearer tokens (rk_...) must never be forwarded as upstream OpenRouter credentials")
+}
+
+func TestExtractClientCredentials_RejectsRouterBearerForFireworks(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer rk_should_not_leak_upstream"}}
+	creds := proxy.ExtractClientCredentials("fireworks", headers)
+	assert.Nil(t, creds,
+		"router-issued bearer tokens (rk_...) must never be forwarded as upstream Fireworks credentials")
+}
+
+func TestExtractClientCredentials_OpenRouterNoAuthHeader(t *testing.T) {
+	// Anthropic-format clients (Claude Code with x-api-key) have no Authorization
+	// header. ExtractClientCredentials must return nil so the caller falls back to
+	// the deployment-level env key rather than injecting empty credentials.
+	headers := http.Header{"X-Api-Key": []string{"rk_router_key"}}
+	creds := proxy.ExtractClientCredentials("openrouter", headers)
+	assert.Nil(t, creds,
+		"when no Authorization header is present, ExtractClientCredentials must return nil for openrouter "+
+			"so setAuth falls back to the deployment-level OPENROUTER_API_KEY env key")
+}
+
 func TestExtractClientCredentials_RejectsRouterKeyForAnthropic(t *testing.T) {
 	headers := http.Header{"X-Api-Key": []string{"rk_should_not_leak_upstream"}}
 	creds := proxy.ExtractClientCredentials("anthropic", headers)

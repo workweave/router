@@ -70,3 +70,6 @@ tsconfig.tsbuildinfo
 eval/results/
 scripts/results/
 results/
+.claude/settings.local.json
+.claude/.credentials.json
+.claude/cc-statusline.sh

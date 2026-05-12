@@ -62,10 +62,13 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		return fmt.Errorf("build upstream request: %w", err)
 	}
 	upstream.Header.Set("Content-Type", "application/json")
-	c.setAuth(ctx, upstream)
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
+	// setAuth is applied after prep.Headers so the resolved credential
+	// always wins — prep.Headers must never clobber the Authorization
+	// header set here (currently empty, but belt-and-suspenders).
+	c.setAuth(ctx, upstream)
 	if v := r.Header.Get("Accept"); v != "" {
 		upstream.Header.Set("Accept", v)
 	}
@@ -131,10 +134,12 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		upstream.Header.Set("Content-Type", ct)
 	}
-	c.setAuth(ctx, upstream)
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
+	// setAuth is applied after prep.Headers so the resolved credential
+	// always wins.
+	c.setAuth(ctx, upstream)
 	if v := r.Header.Get("Accept"); v != "" {
 		upstream.Header.Set("Accept", v)
 	}

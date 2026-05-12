@@ -18,8 +18,8 @@
 #   ./install.sh                                  # hosted router, user scope
 #   ./install.sh --scope project                  # commit-with-team install
 #   ./install.sh --dir /tmp/my-sandbox            # isolated throwaway install
-#   ./install.sh --local                          # docker-compose router on localhost:8082, dev-mode
-#   ./install.sh --base-url http://localhost:8082 # self-hosted, custom port / non-dev-mode
+#   ./install.sh --local                          # local router on localhost:8080, dev-mode
+#   ./install.sh --base-url http://localhost:8080 # self-hosted, custom port / non-dev-mode
 #   ./install.sh --non-interactive                # require WEAVE_ROUTER_KEY env var
 #
 #   curl -fsSL https://weave.ai/cc/install.sh | sh
@@ -94,9 +94,9 @@ while [ $# -gt 0 ]; do
       dev_mode="true"; shift
       ;;
     --local)
-      # Shorthand for the docker-compose default: ROUTER_DEV_MODE=true on
-      # localhost:8082 (matches router/docker-compose.yml). No key required.
-      base_url="http://localhost:8082"
+      # Shorthand for local dev: ROUTER_DEV_MODE=true on localhost:8080
+      # (matches `wv mr` / `make dev` default PORT). No key required.
+      base_url="http://localhost:8080"
       dev_mode="true"
       shift
       ;;
