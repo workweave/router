@@ -13,38 +13,36 @@ Together, Fireworks, etc.).
 
 ## Quick start
 
-There are two local-dev paths:
-
-- **[Headless](#headless-quick-start)** — boot the proxy in Docker, hit
-  `/v1/messages` from `curl` or any LLM client. No browser involved.
-- **[With UI](#ui-quick-start)** — same boot, plus the self-hoster
-  admin dashboard at `http://localhost:8082/ui/` for managing API keys,
-  viewing routing decisions, and configuring BYOK provider credentials.
-
-Both paths use Docker Compose (Postgres + router) and `.env.local` for
-secrets. Pick whichever fits.
-
-### Headless quick start
-
 ```bash
-# 1. (Recommended) Add an OpenRouter key — this unlocks the OSS-model
-#    pool the cluster scorer is trained against. See "Configuring API
-#    keys" below for the full set of supported providers.
-echo "OPENROUTER_API_KEY=sk-or-v1-..." >> .env.local
-
-# 2. Boot the stack and seed a router API key (rk_...).
+# Boot Postgres + the router, run migrations, and seed a router API key.
 make full-setup
 ```
 
-`make full-setup` boots Postgres + the router on `http://localhost:8082`,
-runs migrations, seeds one installation, and prints the `rk_...` key on
-stdout. Use that key as a `Bearer` token from any client:
+`make full-setup` starts the stack on `http://localhost:8080`, seeds one
+installation, and prints the `rk_...` key.
+
+**Provider keys — two ways to add them:**
+
+- **Via `.env.local` (no browser needed):** add keys before or after booting and
+  restart the stack. OpenRouter is the recommended baseline — it unlocks the full
+  OSS-model pool the cluster scorer is trained against:
+  ```bash
+  echo "OPENROUTER_API_KEY=sk-or-v1-..." >> .env.local
+  docker compose restart server   # pick up the new key
+  ```
+  See [Configuring API keys](#configuring-api-keys) for all supported providers.
+
+- **Via the dashboard:** open <http://localhost:8080/ui/> (default password:
+  `admin`), navigate to **Provider keys**, and paste in your keys. No restart
+  needed — BYOK keys are stored in Postgres and resolved per-request.
+
+Once you have at least one provider key in place, you can call the router:
 
 ```bash
 ROUTER_KEY=rk_...
 
 # Anthropic Messages format
-curl -sS http://localhost:8082/v1/messages \
+curl -sS http://localhost:8080/v1/messages \
   -H "Authorization: Bearer $ROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -54,7 +52,7 @@ curl -sS http://localhost:8082/v1/messages \
   }'
 
 # OpenAI Chat Completions format
-curl -sS http://localhost:8082/v1/chat/completions \
+curl -sS http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer $ROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -63,7 +61,7 @@ curl -sS http://localhost:8082/v1/chat/completions \
   }'
 
 # Get the routing decision without proxying upstream
-curl -sS http://localhost:8082/v1/route \
+curl -sS http://localhost:8080/v1/route \
   -H "Authorization: Bearer $ROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model": "claude-sonnet-4-5", "messages": [{"role":"user","content":"Hello"}]}'
@@ -76,37 +74,10 @@ make logs   # tail server logs (per-request access lines at INFO)
 make down   # stop the stack (keeps the postgres volume)
 ```
 
-### UI quick start
-
-The router ships with a Next.js admin dashboard mounted at `/ui/*` when
-running in self-hosted mode (the default). It needs an admin password to
-boot.
-
-```bash
-# 1. Provider key (same as headless).
-echo "OPENROUTER_API_KEY=sk-or-v1-..." >> .env.local
-
-# 2. Set an admin password for the dashboard.
-echo "ROUTER_ADMIN_PASSWORD=your-strong-password" >> .env.local
-
-# 3. Boot.
-make full-setup
-```
-
-Then open <http://localhost:8082/ui/> and log in with the password you set.
-
-The dashboard covers:
-
-- API-key issuance and rotation (replaces `make seed` for ongoing use).
-- BYOK provider credentials (per-installation upstream keys, encrypted
-  at rest when `EXTERNAL_KEY_ENCRYPTION_KEY` is set — see [BYOK encryption](#byok-encryption)).
-- Live routing-decision feed and aggregate stats.
-- Server config inspection (read-only view of effective env config).
-
-> **Skipping `ROUTER_ADMIN_PASSWORD` in local dev.** Set
-> `ROUTER_DEV_MODE=true` in `.env.local` and the router will boot with
-> the default password `admin`. Don't do this outside local dev — it's a
-> known-default and the router logs a warning at startup.
+> **Dashboard password.** Defaults to `admin` when `ROUTER_ADMIN_PASSWORD`
+> is not set (the router logs a warning). Set it in `.env.local` for any
+> deployment you care about securing:
+> `echo "ROUTER_ADMIN_PASSWORD=your-strong-password" >> .env.local`
 >
 > **Disabling the dashboard entirely.** Set
 > `ROUTER_DEPLOYMENT_MODE=managed` to skip mounting `/ui/*` and the
@@ -115,9 +86,8 @@ The dashboard covers:
 
 ### Wiring Claude Code or Cursor
 
-The headless and UI quick starts both leave you with a router on
-`localhost:8082` and an `rk_...` key. To point Claude Code or Cursor at
-it:
+`make full-setup` leaves you with a router on `localhost:8080` and an
+`rk_...` key. To point Claude Code or Cursor at it:
 
 ```bash
 make full-setup PLATFORM=cc        # auto-wires ~/.claude/settings.json
@@ -128,7 +98,7 @@ Or manually:
 **Claude Code:**
 
 ```bash
-export ANTHROPIC_BASE_URL=http://localhost:8082
+export ANTHROPIC_BASE_URL=http://localhost:8080
 export ANTHROPIC_CUSTOM_HEADERS="X-Weave-Router-Key: rk_..."
 claude
 ```
@@ -136,7 +106,7 @@ claude
 **Cursor:**
 
 1. Open Cursor Settings → Models → Override OpenAI Base URL.
-   Set to `http://localhost:8082/v1`.
+   Set to `http://localhost:8080/v1`.
 2. Add an API key: paste the `rk_...` value.
 
 To wire an already-running router (e.g. a shared/staging deployment)
@@ -193,15 +163,11 @@ only matters for the `make dev` flow.
 | `/validate`                 | GET    | bearer        | Bearer-key validity check. Returns the matched installation on success.             |
 | `/v1/messages`              | POST   | bearer or dev | Anthropic Messages proxy. Routes to a model, dispatches to the upstream provider.   |
 | `/v1/chat/completions`      | POST   | bearer or dev | OpenAI Chat Completions proxy. Same routing logic as `/v1/messages`.                |
-| `/v1/messages/count_tokens` | POST   | bearer or dev | Anthropic passthrough — forwarded as-is.                                            |
-| `/v1/models`                | GET    | bearer or dev | Anthropic passthrough — model availability list.                                    |
-| `/v1/models/:model`         | GET    | bearer or dev | Anthropic passthrough — single-model lookup.                                        |
-| `/v1/route`                 | POST   | bearer or dev | Returns the routing decision (model, provider, reason) without proxying upstream.   |
-| `/v1beta/models/:modelAction` | POST | bearer or dev | Google Gemini native format (`generateContent` / `streamGenerateContent`). Same routing logic as `/v1/messages`. |
-
-"bearer or dev" means auth is required unless `ROUTER_DEV_MODE=true`,
-which bypasses bearer auth on `/v1/*` for local development. `/validate`
-stays protected regardless.
+| `/v1/messages/count_tokens` | POST   | bearer | Anthropic passthrough — forwarded as-is.                                            |
+| `/v1/models`                | GET    | bearer | Anthropic passthrough — model availability list.                                    |
+| `/v1/models/:model`         | GET    | bearer | Anthropic passthrough — single-model lookup.                                        |
+| `/v1/route`                 | POST   | bearer | Returns the routing decision (model, provider, reason) without proxying upstream.   |
+| `/v1beta/models/:modelAction` | POST | bearer | Google Gemini native format (`generateContent` / `streamGenerateContent`). Same routing logic as `/v1/messages`. |
 
 ## Configuring API keys
 
@@ -254,12 +220,11 @@ Set `DATABASE_URL` directly, or compose it from the individual vars:
 
 ### Server
 
-| Variable                    | Default                           | Purpose                                                                                                          |
-| --------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `PORT`                      | `8080`                            | HTTP listen port.                                                                                                |
-| `ROUTER_DEPLOYMENT_MODE`    | `selfhosted`                      | `selfhosted` mounts `/ui/*` and `/admin/v1/*`. `managed` skips both (for SaaS deployments with a separate admin UI). |
-| `ROUTER_ADMIN_PASSWORD`     | *(required in `selfhosted` mode)* | Password for the admin dashboard. The router refuses to boot without it unless `ROUTER_DEV_MODE=true`.           |
-| `ROUTER_DEV_MODE`           | `false`                           | Bypass bearer auth on `/v1/*` and default the admin password to `admin`. Local dev only.                         |
+| Variable                    | Default      | Purpose                                                                                                          |
+| --------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `PORT`                      | `8080`       | HTTP listen port.                                                                                                |
+| `ROUTER_DEPLOYMENT_MODE`    | `selfhosted` | `selfhosted` mounts `/ui/*` and `/admin/v1/*`. `managed` skips both (for SaaS deployments with a separate admin UI). |
+| `ROUTER_ADMIN_PASSWORD`     | `admin`      | Password for the admin dashboard. Defaults to `admin` with a warning when unset — set this for any internet-facing deployment. |
 
 ### Routing
 

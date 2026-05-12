@@ -40,10 +40,9 @@ const (
 	DeploymentModeManaged DeploymentMode = "managed"
 )
 
-// Register wires routes onto the engine. devModeNoAuth skips bearer-auth on
-// /v1/* for local development. In managed mode the dashboard + /admin/v1/*
-// routes are not registered at all.
-func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, devModeNoAuth bool, mode DeploymentMode) {
+// Register wires routes onto the engine. In managed mode the dashboard +
+// /admin/v1/* routes are not registered at all.
+func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, mode DeploymentMode) {
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
 
 	// /validate is a token-validity probe used by clients (not the dashboard), so it stays mounted in both modes.
@@ -79,47 +78,39 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		mgmt.GET("/config", admin.ConfigHandler)
 	}
 
-	messagesAuth := []gin.HandlerFunc{middleware.WithTimingEntry(), middleware.WithTimeout(messagesTimeout)}
-	if !devModeNoAuth {
-		messagesAuth = append(messagesAuth, middleware.WithAuth(authSvc))
-	}
-	messagesAuth = append(messagesAuth,
+	messagesGroup := engine.Group("",
+		middleware.WithTimingEntry(),
+		middleware.WithTimeout(messagesTimeout),
+		middleware.WithAuth(authSvc),
 		middleware.WithEmbedLastUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
 	)
-	messagesGroup := engine.Group("", messagesAuth...)
 	messagesGroup.POST("/v1/messages", anthropicapi.MessagesHandler(proxySvc, authSvc))
 
-	chatCompletionAuth := []gin.HandlerFunc{middleware.WithTimingEntry(), middleware.WithTimeout(chatCompletionTimeout)}
-	if !devModeNoAuth {
-		chatCompletionAuth = append(chatCompletionAuth, middleware.WithAuth(authSvc))
-	}
-	chatCompletionAuth = append(chatCompletionAuth,
+	chatCompletionGroup := engine.Group("",
+		middleware.WithTimingEntry(),
+		middleware.WithTimeout(chatCompletionTimeout),
+		middleware.WithAuth(authSvc),
 		middleware.WithEmbedLastUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
 	)
-	chatCompletionGroup := engine.Group("", chatCompletionAuth...)
 	chatCompletionGroup.POST("/v1/chat/completions", openaiapi.ChatCompletionHandler(proxySvc, authSvc))
 	// Action suffix (:generateContent or :streamGenerateContent) lives inside modelAction because Gin treats `:` outside the leading position as a literal.
 	chatCompletionGroup.POST("/v1beta/models/:modelAction", geminiapi.GenerateContentHandler(proxySvc, authSvc))
 
-	passthroughAuth := []gin.HandlerFunc{middleware.WithTimeout(passthroughTimeout)}
-	if !devModeNoAuth {
-		passthroughAuth = append(passthroughAuth, middleware.WithAuth(authSvc))
-	}
-	passthroughGroup := engine.Group("", passthroughAuth...)
+	passthroughGroup := engine.Group("",
+		middleware.WithTimeout(passthroughTimeout),
+		middleware.WithAuth(authSvc),
+	)
 	passthroughGroup.POST("/v1/messages/count_tokens", anthropicapi.PassthroughHandler(proxySvc))
 	passthroughGroup.GET("/v1/models", anthropicapi.PassthroughHandler(proxySvc))
 	passthroughGroup.GET("/v1/models/:model", anthropicapi.PassthroughHandler(proxySvc))
 
-	routeAuth := []gin.HandlerFunc{middleware.WithTimeout(routeTimeout)}
-	if !devModeNoAuth {
-		routeAuth = append(routeAuth, middleware.WithAuth(authSvc))
-	}
-	routeAuth = append(routeAuth,
+	routeGroup := engine.Group("",
+		middleware.WithTimeout(routeTimeout),
+		middleware.WithAuth(authSvc),
 		middleware.WithEmbedLastUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
 	)
-	routeGroup := engine.Group("", routeAuth...)
 	routeGroup.POST("/v1/route", anthropicapi.RouteHandler(proxySvc))
 }

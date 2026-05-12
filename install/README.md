@@ -35,19 +35,18 @@ non-interactive installs).
 ### Self-hosted via `docker compose` (zero-config)
 
 If you're running the router locally with the bundled `docker-compose.yml`
-(`ROUTER_DEV_MODE=true` on `localhost:8082`), use the shortcut:
+(`localhost:8080`), use the shortcut:
 
 ```bash
 cd router
-docker compose up -d            # start the router
+make full-setup                 # boot the stack and seed a router key
 make install-cc                 # → ./install/install.sh --local
 claude                          # routes through your local router
 ```
 
-`make install-cc` is just a wrapper around `./install/install.sh --local`,
-which is itself shorthand for
-`--base-url http://localhost:8082 --dev-mode`. Use the long form if you want
-to mix-and-match flags (e.g. project scope on a local router):
+`make install-cc` is a wrapper around `./install/install.sh --local`,
+which is shorthand for `--base-url http://localhost:8080`. Use the long
+form if you want to mix-and-match flags (e.g. project scope on a local router):
 
 ```bash
 ./router/install/install.sh --local --scope project
@@ -107,9 +106,8 @@ The `install.sh --scope project` step only needs to run once per checkout
 | Flag                       | Default                       | Meaning                                                                |
 | -------------------------- | ----------------------------- | ---------------------------------------------------------------------- |
 | `--scope user\|project`    | interactive prompt (default `user`) | User-level install (everywhere) vs project-level (this repo only). If omitted on a TTY, the installer asks; defaults to `user` non-interactively. |
-| `--local`                  | off                           | Shortcut for the bundled docker-compose router (`localhost:8082`, dev mode). |
+| `--local`                  | off                           | Shortcut for the bundled docker-compose router (`localhost:8080`).      |
 | `--base-url <url>`         | `https://router.weave.ai`     | Override the router endpoint. Use for self-hosted / custom port.        |
-| `--dev-mode`               | off                           | Router has `ROUTER_DEV_MODE=true`; skip the API key prompt entirely.    |
 | `--non-interactive`        | off                           | Fail if `$WEAVE_ROUTER_KEY` isn't set instead of prompting. CI-friendly. |
 
 Override the default base URL globally by setting `$WEAVE_ROUTER_URL` before

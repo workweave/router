@@ -77,8 +77,6 @@ func main() {
 	}
 	defer pool.Close()
 
-	devMode := config.GetOr("ROUTER_DEV_MODE", "false") == "true"
-
 	// Deployment mode gates the self-hoster dashboard + /admin/v1/* API.
 	// Default is selfhosted so docker-compose / bare-binary deployments
 	// "just work"; Weave-managed Cloud Run services explicitly set
@@ -205,21 +203,15 @@ func main() {
 	userCache := auth.NewLRUUserCache(50000, 10*time.Minute)
 	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, repo.Users, cache, userCache, time.Now).WithEncryptor(encryptor)
 
-	// Admin dashboard password. Required outside dev mode so a self-hoster
-	// who simply runs the binary cannot end up with an unauthenticated
-	// dashboard exposed to the internet. In dev mode we fall back to a
-	// well-known default and warn loudly. In managed mode the dashboard
-	// is not mounted at all, so the password is irrelevant.
+	// Admin dashboard password. In managed mode the dashboard is not mounted
+	// at all so the password is irrelevant. In selfhosted mode, fall back to
+	// "admin" when unset and warn — operators that care about securing the
+	// dashboard should always set ROUTER_ADMIN_PASSWORD explicitly.
 	if deploymentMode == server.DeploymentModeSelfHosted {
 		adminPassword := config.GetOr("ROUTER_ADMIN_PASSWORD", "")
 		if adminPassword == "" {
-			if !devMode {
-				err := errors.New("ROUTER_ADMIN_PASSWORD not set; refusing to boot without admin dashboard credentials (set ROUTER_DEV_MODE=true to use the default 'admin' password in local dev, or ROUTER_DEPLOYMENT_MODE=managed to disable the dashboard)")
-				logger.Error("Refusing to boot without admin password", "err", err)
-				panic(err)
-			}
 			adminPassword = "admin"
-			logger.Warn("ROUTER_ADMIN_PASSWORD not set; using default 'admin' (ROUTER_DEV_MODE=true)")
+			logger.Warn("ROUTER_ADMIN_PASSWORD not set; using default 'admin'. Set ROUTER_ADMIN_PASSWORD to secure the dashboard.")
 		}
 		authSvc.WithAdminPassword(adminPassword)
 	}
@@ -280,10 +272,7 @@ func main() {
 		gin.Recovery(),
 	)
 
-	if devMode {
-		logger.Info("ROUTER_DEV_MODE=true; bypassing bearer auth on /v1/* (DO NOT use in production)")
-	}
-	server.Register(engine, authSvc, proxySvc, devMode, deploymentMode)
+	server.Register(engine, authSvc, proxySvc, deploymentMode)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),
