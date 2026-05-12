@@ -14,6 +14,7 @@
 set -euo pipefail
 
 scope="user"
+scope_explicit="false"
 install_dir=""
 
 err()  { printf "\033[31merror:\033[0m %s\n" "$*" >&2; }
@@ -37,6 +38,7 @@ while [ $# -gt 0 ]; do
     --scope)
       scope="${2:-}"; shift 2
       [ "$scope" = "user" ] || [ "$scope" = "project" ] || { err "--scope must be 'user' or 'project'"; exit 2; }
+      scope_explicit="true"
       ;;
     --dir)
       install_dir="${2:-}"; shift 2
@@ -81,11 +83,11 @@ elif [ "$scope" = "user" ]; then
   local_settings_file=""
   statusline_file="$HOME/.weave/cc-statusline.sh"
 else
-  # project. Ask which directory rather than silently assuming CWD's git root —
-  # matches install.sh's interactive project prompt so the user can't accidentally
-  # clean a different repo than the one they installed into.
+  # Project scope without --dir: mirror install.sh — directory prompt only when
+  # scope_explicit is false (interactive install path); explicit --scope project
+  # uses the git root of CWD with no prompt.
   project_dir=""
-  if [ -r /dev/tty ]; then
+  if [ "$scope_explicit" = "false" ] && [ -r /dev/tty ]; then
     default_project_dir="$(pwd)"
     printf "Project directory to uninstall from [default: %s]: " "$default_project_dir"
     read -r project_dir_choice </dev/tty || project_dir_choice=""
@@ -99,6 +101,8 @@ else
       exit 1
     fi
     project_dir="$(cd "$project_dir" && pwd)"
+  fi
+  if [ -n "${project_dir:-}" ]; then
     settings_base="$project_dir"
   else
     if ! git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
