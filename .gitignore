@@ -63,9 +63,6 @@ node_modules/
 .next/
 tsconfig.tsbuildinfo
 
-# Dashboard router admin key (issued by `wv mr seed-key`, never commit)
-.weave-router-key
-
 # Eval results (stored in GCS, not git)
 eval/results/
 scripts/results/

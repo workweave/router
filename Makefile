@@ -112,9 +112,6 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + opt
 			exit 1; \
 		fi; \
 		echo "    key: $$WEAVE_KEY"; \
-		echo "$$WEAVE_KEY" > .weave-router-key; \
-		chmod 600 .weave-router-key; \
-		echo "    saved to .weave-router-key"; \
 		echo ""; \
 		if [ "$(PLATFORM)" = "cc" ]; then \
 			echo "==> Wiring Claude Code → router..."; \
@@ -122,7 +119,6 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + opt
 			echo ""; \
 			echo "Done. Your local setup:"; \
 			echo "  • Router runs on http://localhost:8080"; \
-			echo "  • Weave Router key saved in .weave-router-key (gitignored)"; \
 			echo "  • Claude Code is wired (.claude/settings.json + .claude/settings.local.json)"; \
 			echo ""; \
 			echo "Share with teammates (replace BASE_URL with a host they can reach,"; \
