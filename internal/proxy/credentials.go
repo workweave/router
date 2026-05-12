@@ -42,11 +42,6 @@ func BuildCredentialsMap(keys []*auth.ExternalAPIKey) map[string]*Credentials {
 	return m
 }
 
-// Usable reports whether c carries a non-empty key. Nil-safe.
-func (c *Credentials) Usable() bool {
-	return c != nil && len(c.APIKey) > 0
-}
-
 // ExtractClientCredentials extracts provider credentials from request headers.
 // Anthropic uses x-api-key; OpenAI and Google use Authorization: Bearer.
 //

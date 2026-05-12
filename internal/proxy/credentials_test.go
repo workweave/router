@@ -60,14 +60,6 @@ func TestBuildCredentialsMap_NilWhenAllEmpty(t *testing.T) {
 		"when every BYOK entry is empty the map must be nil so callers see 'no BYOK configured' rather than 'BYOK present but unusable'")
 }
 
-func TestCredentials_Usable(t *testing.T) {
-	assert.False(t, (*proxy.Credentials)(nil).Usable(),
-		"nil Credentials must report Usable=false to be nil-safe at call sites")
-	assert.False(t, (&proxy.Credentials{APIKey: nil}).Usable())
-	assert.False(t, (&proxy.Credentials{APIKey: []byte{}}).Usable())
-	assert.True(t, (&proxy.Credentials{APIKey: []byte("sk-x")}).Usable())
-}
-
 func TestExtractClientCredentials_Anthropic(t *testing.T) {
 	headers := http.Header{"X-Api-Key": []string{"sk-ant-client"}}
 	creds := proxy.ExtractClientCredentials("anthropic", headers)
