@@ -138,7 +138,25 @@ func stashClientIdentity(ctx context.Context, h http.Header, body []byte) contex
 		UserAgent: h.Get("User-Agent"),
 		ClientApp: h.Get("X-App"),
 	}
+	observability.Get().Info("anthropic stashClientIdentity",
+		"meta_raw_len", len(metaRaw),
+		"meta_raw_preview", truncate(metaRaw, 200),
+		"parsed_email_present", meta.Email != "",
+		"parsed_account_present", meta.AccountID != "",
+		"parsed_device_present", meta.DeviceID != "",
+		"parsed_account_len", len(meta.AccountID),
+		"final_email_present", id.Email != "",
+		"final_account_present", id.AccountID != "",
+		"header_email_present", h.Get("X-Weave-User-Email") != "",
+	)
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
 
 func writeAnthropicError(c *gin.Context, status int, errType, message string) {
