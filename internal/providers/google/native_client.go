@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/providers/httputil"
@@ -94,6 +95,35 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
+
+	if resp.StatusCode >= 400 {
+		var snip [1024]byte
+		n, _ := io.ReadFull(resp.Body, snip[:])
+		if n > 0 {
+			t.StampUpstreamFirstByte()
+		}
+		_, snipWriteErr := w.Write(snip[:n])
+		rest, copyErr := io.Copy(w, resp.Body)
+		if copyErr == nil {
+			t.StampUpstreamEOF()
+		}
+		logUpstreamStatus(
+			"Upstream Google returned error status",
+			resp.StatusCode,
+			"routed_model", decision.Model,
+			"streaming", stream,
+			"body_preview", string(snip[:n]),
+			"body_total_bytes", int64(n)+rest,
+		)
+		if snipWriteErr != nil {
+			return snipWriteErr
+		}
+		if copyErr != nil {
+			return copyErr
+		}
+		return &providers.UpstreamStatusError{Status: resp.StatusCode}
+	}
+
 	return httputil.StreamBody(resp.Body, resp.StatusCode, w, t)
 }
 
@@ -135,8 +165,41 @@ func (c *NativeClient) Passthrough(ctx context.Context, prep providers.PreparedR
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
+	if resp.StatusCode >= 400 {
+		var snip [1024]byte
+		n, _ := io.ReadFull(resp.Body, snip[:])
+		_, snipWriteErr := w.Write(snip[:n])
+		rest, copyErr := io.Copy(w, resp.Body)
+		logUpstreamStatus(
+			"Upstream Google returned error status (passthrough)",
+			resp.StatusCode,
+			"path", r.URL.Path,
+			"body_preview", string(snip[:n]),
+			"body_total_bytes", int64(n)+rest,
+		)
+		if snipWriteErr != nil {
+			return snipWriteErr
+		}
+		if copyErr != nil {
+			return copyErr
+		}
+		return &providers.UpstreamStatusError{Status: resp.StatusCode}
+	}
 	_, err = io.Copy(w, resp.Body)
 	return err
+}
+
+// logUpstreamStatus emits an Error log for upstream 4xx/5xx, Warn for 429s.
+// Mirrors the Anthropic adapter's helper so non-2xx upstream responses are
+// surfaced to ops with a body preview rather than blackholing into a generic
+// "upstream call failed" string at the client.
+func logUpstreamStatus(msg string, status int, attrs ...any) {
+	merged := append([]any{"status", status}, attrs...)
+	if status >= 500 || (status >= 400 && status != http.StatusTooManyRequests) {
+		observability.Get().Error(msg, merged...)
+		return
+	}
+	observability.Get().Warn(msg, merged...)
 }
 
 // applyAPIKey sets x-goog-api-key from BYOK credentials when present, falling
