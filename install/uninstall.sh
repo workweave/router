@@ -81,18 +81,39 @@ elif [ "$scope" = "user" ]; then
   local_settings_file=""
   statusline_file="$HOME/.weave/cc-statusline.sh"
 else
-  # project
-  if ! git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-    err "--scope project must be run inside a git repo, or use --dir <path>."
-    exit 1
+  # project. Ask which directory rather than silently assuming CWD's git root —
+  # matches install.sh's interactive project prompt so the user can't accidentally
+  # clean a different repo than the one they installed into.
+  project_dir=""
+  if [ -r /dev/tty ]; then
+    default_project_dir="$(pwd)"
+    printf "Project directory to uninstall from [default: %s]: " "$default_project_dir"
+    read -r project_dir_choice </dev/tty || project_dir_choice=""
+    project_dir="${project_dir_choice:-$default_project_dir}"
+    case "$project_dir" in
+      "~")    project_dir="$HOME" ;;
+      "~/"*)  project_dir="$HOME/${project_dir#~/}" ;;
+    esac
+    if [ ! -d "$project_dir" ]; then
+      err "directory does not exist: $project_dir"
+      exit 1
+    fi
+    project_dir="$(cd "$project_dir" && pwd)"
+    settings_base="$project_dir"
+  else
+    if ! git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+      err "--scope project must be run inside a git repo, or use --dir <path>."
+      exit 1
+    fi
+    settings_base="$git_root"
   fi
-  settings_file="$git_root/.claude/settings.json"
-  local_settings_file="$git_root/.claude/settings.local.json"
-  statusline_file="$git_root/.claude/cc-statusline.sh"
-  # Symlink containment: paths come from a git repo that may be hostile. The
-  # later `>` redirect on settings_file and `rm -f` on the scripts would
-  # otherwise follow links out of the repo.
-  refuse_if_symlink "$git_root/.claude"
+  settings_file="$settings_base/.claude/settings.json"
+  local_settings_file="$settings_base/.claude/settings.local.json"
+  statusline_file="$settings_base/.claude/cc-statusline.sh"
+  # Symlink containment: paths come from a git repo or user-supplied directory
+  # that may be hostile. The later `>` redirect on settings_file and `rm -f` on
+  # the scripts would otherwise follow links out of the repo.
+  refuse_if_symlink "$settings_base/.claude"
   refuse_if_symlink "$settings_file"
   refuse_if_symlink "$local_settings_file"
   refuse_if_symlink "$statusline_file"
