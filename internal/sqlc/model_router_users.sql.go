@@ -83,7 +83,66 @@ func (q *Queries) ListModelRouterUsersForInstallation(ctx context.Context, insta
 	return items, nil
 }
 
-const upsertModelRouterUser = `-- name: UpsertModelRouterUser :one
+const upsertModelRouterUserByAccountUUID = `-- name: UpsertModelRouterUserByAccountUUID :one
+INSERT INTO router.model_router_users (
+    installation_id,
+    email,
+    claude_account_uuid
+)
+VALUES (
+    $1::uuid,
+    NULL,
+    $2::uuid
+)
+ON CONFLICT (installation_id, claude_account_uuid)
+  WHERE email IS NULL AND claude_account_uuid IS NOT NULL AND deleted_at IS NULL
+DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP
+RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
+`
+
+type UpsertModelRouterUserByAccountUUIDParams struct {
+	InstallationID    uuid.UUID
+	ClaudeAccountUUID uuid.UUID
+}
+
+// Upserts an end-user identity keyed on (installation_id, claude_account_uuid)
+// for inbound requests that carry no email. Claude CLI v2.1.x ships only
+// {device_id, account_uuid, session_id} in metadata.user_id, so the
+// email-keyed upsert above would silently drop attribution for every such
+// request. The CONFLICT target matches the partial unique index
+// model_router_users_installation_account_unique
+// (WHERE email IS NULL AND claude_account_uuid IS NOT NULL).
+//
+//	INSERT INTO router.model_router_users (
+//	    installation_id,
+//	    email,
+//	    claude_account_uuid
+//	)
+//	VALUES (
+//	    $1::uuid,
+//	    NULL,
+//	    $2::uuid
+//	)
+//	ON CONFLICT (installation_id, claude_account_uuid)
+//	  WHERE email IS NULL AND claude_account_uuid IS NOT NULL AND deleted_at IS NULL
+//	DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP
+//	RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
+func (q *Queries) UpsertModelRouterUserByAccountUUID(ctx context.Context, arg UpsertModelRouterUserByAccountUUIDParams) (RouterModelRouterUser, error) {
+	row := q.db.QueryRow(ctx, upsertModelRouterUserByAccountUUID, arg.InstallationID, arg.ClaudeAccountUUID)
+	var i RouterModelRouterUser
+	err := row.Scan(
+		&i.ID,
+		&i.InstallationID,
+		&i.Email,
+		&i.ClaudeAccountUUID,
+		&i.FirstSeenAt,
+		&i.LastSeenAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const upsertModelRouterUserByEmail = `-- name: UpsertModelRouterUserByEmail :one
 INSERT INTO router.model_router_users (
     installation_id,
     email,
@@ -100,16 +159,17 @@ ON CONFLICT (installation_id, email) WHERE deleted_at IS NULL DO UPDATE SET
 RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
 `
 
-type UpsertModelRouterUserParams struct {
+type UpsertModelRouterUserByEmailParams struct {
 	InstallationID    uuid.UUID
 	Email             string
 	ClaudeAccountUUID pgtype.UUID
 }
 
-// Upserts an end-user identity for an installation, refreshing last_seen_at on every
-// hit. claude_account_uuid is overwritten only when the new value is non-NULL so a
-// request from a non-Claude-Code client can't blank out the field. Returns the row
-// so the caller can stash user_id on the request context.
+// Upserts an end-user identity keyed on (installation_id, email), refreshing
+// last_seen_at on every hit. claude_account_uuid is overwritten only when
+// the new value is non-NULL so a request from a non-Claude-Code client
+// can't blank out the field. Returns the row so the caller can stash
+// user_id on the request context.
 //
 //	INSERT INTO router.model_router_users (
 //	    installation_id,
@@ -125,8 +185,8 @@ type UpsertModelRouterUserParams struct {
 //	    last_seen_at        = CURRENT_TIMESTAMP,
 //	    claude_account_uuid = COALESCE(EXCLUDED.claude_account_uuid, router.model_router_users.claude_account_uuid)
 //	RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
-func (q *Queries) UpsertModelRouterUser(ctx context.Context, arg UpsertModelRouterUserParams) (RouterModelRouterUser, error) {
-	row := q.db.QueryRow(ctx, upsertModelRouterUser, arg.InstallationID, arg.Email, arg.ClaudeAccountUUID)
+func (q *Queries) UpsertModelRouterUserByEmail(ctx context.Context, arg UpsertModelRouterUserByEmailParams) (RouterModelRouterUser, error) {
+	row := q.db.QueryRow(ctx, upsertModelRouterUserByEmail, arg.InstallationID, arg.Email, arg.ClaudeAccountUUID)
 	var i RouterModelRouterUser
 	err := row.Scan(
 		&i.ID,

@@ -14,16 +14,27 @@ import (
 )
 
 type fakeUserRepo struct {
-	mu      sync.Mutex
-	upserts []auth.UpsertUserParams
-	user    *auth.User
-	err     error
+	mu             sync.Mutex
+	upserts        []auth.UpsertUserParams
+	accountUpserts []auth.UpsertUserByAccountUUIDParams
+	user           *auth.User
+	err            error
 }
 
-func (f *fakeUserRepo) Upsert(ctx context.Context, params auth.UpsertUserParams) (*auth.User, error) {
+func (f *fakeUserRepo) UpsertByEmail(ctx context.Context, params auth.UpsertUserParams) (*auth.User, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.upserts = append(f.upserts, params)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.user, nil
+}
+
+func (f *fakeUserRepo) UpsertByAccountUUID(ctx context.Context, params auth.UpsertUserByAccountUUIDParams) (*auth.User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.accountUpserts = append(f.accountUpserts, params)
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -65,14 +76,46 @@ func TestResolveAndStashUser_UpsertsAndStashesID(t *testing.T) {
 	assert.Equal(t, "user-42", auth.UserIDFrom(ctx))
 }
 
-func TestResolveAndStashUser_NoEmailIsNoOp(t *testing.T) {
+func TestResolveAndStashUser_NoIdentitySignalIsNoOp(t *testing.T) {
 	repo := &fakeUserRepo{}
 	svc := makeServiceWithUsers(t, repo)
 
 	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "", "")
 
 	assert.Empty(t, repo.upserts)
+	assert.Empty(t, repo.accountUpserts)
 	assert.Equal(t, "", auth.UserIDFrom(ctx))
+}
+
+func TestResolveAndStashUser_AccountUUIDOnlyUsesAccountUpsert(t *testing.T) {
+	// Claude CLI v2.1.x packs only {device_id, account_uuid, session_id}
+	// into metadata.user_id — no email. Per-seat attribution must still
+	// work via the account_uuid-keyed upsert path.
+	repo := &fakeUserRepo{user: &auth.User{ID: "user-9", InstallationID: "inst-1"}}
+	svc := makeServiceWithUsers(t, repo)
+
+	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "", "2c2aace8-82e9-4cb1-8d1f-2f822da43177")
+
+	assert.Empty(t, repo.upserts, "email-empty input must NOT call UpsertByEmail")
+	require.Len(t, repo.accountUpserts, 1)
+	assert.Equal(t, "inst-1", repo.accountUpserts[0].InstallationID)
+	assert.Equal(t, "2c2aace8-82e9-4cb1-8d1f-2f822da43177", repo.accountUpserts[0].ClaudeAccountUUID)
+	assert.Equal(t, "user-9", auth.UserIDFrom(ctx))
+}
+
+func TestResolveAndStashUser_EmailPathBeatsAccountUUIDPath(t *testing.T) {
+	// When both signals are present, email is the canonical key and the
+	// account_uuid rides along as enrichment on the email-keyed row.
+	// Using UpsertByAccountUUID here would create a duplicate seat.
+	repo := &fakeUserRepo{user: &auth.User{ID: "user-3"}}
+	svc := makeServiceWithUsers(t, repo)
+
+	svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "2c2aace8-82e9-4cb1-8d1f-2f822da43177")
+
+	require.Len(t, repo.upserts, 1)
+	assert.Empty(t, repo.accountUpserts, "email-present input must NOT call UpsertByAccountUUID")
+	require.NotNil(t, repo.upserts[0].ClaudeAccountUUID)
+	assert.Equal(t, "2c2aace8-82e9-4cb1-8d1f-2f822da43177", *repo.upserts[0].ClaudeAccountUUID)
 }
 
 func TestResolveAndStashUser_NoInstallationIsNoOp(t *testing.T) {

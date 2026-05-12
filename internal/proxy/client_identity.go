@@ -35,7 +35,8 @@ func ClientIdentityFrom(ctx context.Context) ClientIdentity {
 }
 
 // ResolveUserFromContext is the glue every inbound handler runs after
-// stashing ClientIdentity: pull the email out of ctx, hand it to
+// stashing ClientIdentity: pull whatever identity signal the request
+// carried (email and/or Claude account_uuid) out of ctx, hand it to
 // auth.Service.ResolveAndStashUser, return the (possibly enriched) ctx.
 //
 // Lives here rather than in each handler subpackage so the resolution
@@ -43,14 +44,18 @@ func ClientIdentityFrom(ctx context.Context) ClientIdentity {
 // copies between Anthropic / OpenAI / Gemini handlers would silently
 // break per-protocol attribution.
 //
-// No-op when authSvc, installation, or the email on the existing
-// ClientIdentity is missing; in those cases ctx is returned unchanged.
+// No-op when authSvc / installation are missing, or when the client
+// supplied neither an email nor a Claude account_uuid — there's nothing
+// to attribute a row to in that case. Claude CLI v2.1.x packs only
+// account_uuid (no email), so guarding on email alone here would defeat
+// the entire account_uuid attribution path; Service.ResolveAndStashUser
+// is responsible for picking the right upsert based on what's set.
 func ResolveUserFromContext(ctx context.Context, authSvc *auth.Service, installation *auth.Installation) context.Context {
 	if authSvc == nil || installation == nil {
 		return ctx
 	}
 	id := ClientIdentityFrom(ctx)
-	if id.Email == "" {
+	if id.Email == "" && id.AccountID == "" {
 		return ctx
 	}
 	return authSvc.ResolveAndStashUser(ctx, installation.ID, id.Email, id.AccountID)
