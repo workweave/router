@@ -246,18 +246,23 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 // Callers normalize email (lower-case, trim) before calling. claudeAccountUUID
 // is optional; pass "" when the client isn't Claude Code.
 func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email, claudeAccountUUID string) context.Context {
+	log := observability.Get()
 	if s.users == nil || installationID == "" {
+		log.Info("ResolveAndStashUser bailout", "reason", "nil_users_or_empty_inst", "users_nil", s.users == nil, "inst_empty", installationID == "")
 		return ctx
 	}
 	if email == "" && claudeAccountUUID == "" {
+		log.Info("ResolveAndStashUser bailout", "reason", "no_identity_signal", "installation_id", installationID)
 		return ctx
 	}
 
 	identityKey := userIdentityKey(email, claudeAccountUUID)
 	if cached, ok := s.userCache.Get(installationID, identityKey); ok {
+		log.Info("ResolveAndStashUser cache hit", "installation_id", installationID, "user_id", cached)
 		return context.WithValue(ctx, UserIDContextKey{}, cached)
 	}
 
+	log.Info("ResolveAndStashUser upsert", "installation_id", installationID, "email_present", email != "", "account_present", claudeAccountUUID != "")
 	var user *User
 	var err error
 	if email != "" {
@@ -285,6 +290,7 @@ func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email
 		return ctx
 	}
 	s.userCache.Set(installationID, identityKey, user.ID)
+	log.Info("ResolveAndStashUser upsert ok", "installation_id", installationID, "user_id", user.ID)
 	return context.WithValue(ctx, UserIDContextKey{}, user.ID)
 }
 
