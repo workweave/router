@@ -75,6 +75,46 @@ func TestService_ProxyMessages_PropagatesUpstreamStatusError(t *testing.T) {
 	assert.Equal(t, 400, got.Status)
 }
 
+// TestService_ProxyMessages_CrossFormatUpstreamErrorBodyReachesClient guards
+// against the regression where a cross-format upstream non-2xx (e.g. OpenRouter
+// 402 "out of credits") buffered the upstream body inside the
+// AnthropicSSETranslator but never flushed it, because Finalize was skipped on
+// any non-nil proxyErr. Claude Code would then see only the generic
+// "upstream call failed" envelope written by the handler. The translated body
+// must reach the client and the typed UpstreamStatusError must still surface
+// to the handler so telemetry records the upstream status.
+func TestService_ProxyMessages_CrossFormatUpstreamErrorBodyReachesClient(t *testing.T) {
+	const upstreamBody = `{"error":{"message":"OpenRouter: insufficient credits","code":402,"type":"invalid_request_error"}}`
+	provider := &fakeProvider{
+		proxyResponse: func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = io.WriteString(w, upstreamBody)
+		},
+		proxyErr: &providers.UpstreamStatusError{Status: http.StatusPaymentRequired},
+	}
+	svc := makeProxyService(
+		router.Decision{Provider: providers.ProviderOpenRouter, Model: "deepseek/deepseek-chat"},
+		map[string]providers.Client{providers.ProviderOpenRouter: provider},
+	)
+
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+
+	err := svc.ProxyMessages(context.Background(), body, rec, httpReq)
+
+	var got *providers.UpstreamStatusError
+	require.ErrorAs(t, err, &got, "UpstreamStatusError must still propagate for telemetry")
+	assert.Equal(t, http.StatusPaymentRequired, got.Status)
+
+	assert.Equal(t, http.StatusPaymentRequired, rec.Code, "upstream status must reach the client")
+	respBody := rec.Body.String()
+	require.NotEmpty(t, respBody, "translated upstream error body must reach the client")
+	assert.Contains(t, respBody, "insufficient credits", "upstream error message must survive translation")
+	assert.Contains(t, respBody, `"type":"error"`, "body must be in Anthropic error envelope shape")
+}
+
 func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 	const userPrompt = "Walk every Go file under router/internal/ and produce a one-paragraph summary of each."
 	// CC-shaped body: system preamble + earlier user prompt + long tool_result.

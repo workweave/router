@@ -466,9 +466,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 		translator := translate.NewAnthropicSSETranslator(sink, decision.Model, usage)
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
-		if proxyErr == nil {
-			proxyErr = translator.Finalize()
-		}
+		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderGoogle:
 		crossFormat = true
 		prep, emitErr := env.PrepareGemini(r.Header, opts)
@@ -485,12 +483,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage)
 		geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, decision.Model, nil)
 		proxyErr = p.Proxy(ctx, decision, prep, geminiTr, r)
-		if proxyErr == nil {
-			proxyErr = geminiTr.Finalize()
-		}
-		if proxyErr == nil {
-			proxyErr = anthropicTr.Finalize()
-		}
+		proxyErr = finalizeAfterProxy(proxyErr, geminiTr.Finalize)
+		proxyErr = finalizeAfterProxy(proxyErr, anthropicTr.Finalize)
 	default:
 		return fmt.Errorf("%w: %s (no translation path defined for inbound Anthropic Messages)", ErrProviderNotConfigured, decision.Provider)
 	}
@@ -750,6 +744,26 @@ func upstreamStatus(err error) int {
 	return 0
 }
 
+// finalizeAfterProxy runs a translator's Finalize step when the upstream call
+// either succeeded or returned a typed UpstreamStatusError. Cross-format
+// translators buffer the upstream body for non-streaming responses and only
+// flush it inside Finalize; skipping that on a 4xx/5xx drops the upstream
+// error envelope (e.g. an OpenRouter 402 "out of credits" message) before it
+// can reach the client. UpstreamStatusError takes precedence over a Finalize
+// error so telemetry preserves the upstream status code.
+func finalizeAfterProxy(proxyErr error, fn func() error) error {
+	var statusErr *providers.UpstreamStatusError
+	isStatus := errors.As(proxyErr, &statusErr)
+	if proxyErr != nil && !isStatus {
+		return proxyErr
+	}
+	finErr := fn()
+	if isStatus {
+		return proxyErr
+	}
+	return finErr
+}
+
 // ProxyOpenAIChatCompletion routes an OpenAI Chat Completion request,
 // translating cross-format when the decision picks a non-OpenAI provider.
 func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
@@ -914,9 +928,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		}
 		translator := translate.NewGeminiToOpenAISSETranslator(sink, decision.Model, usage)
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
-		if proxyErr == nil {
-			proxyErr = translator.Finalize()
-		}
+		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderAnthropic:
 		crossFormat = true
 		prep, emitErr := env.PrepareAnthropic(r.Header, opts)
@@ -931,9 +943,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		}
 		translator := translate.NewSSETranslator(sink, decision.Model, usage)
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
-		if proxyErr == nil {
-			proxyErr = translator.Finalize()
-		}
+		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	default:
 		return fmt.Errorf("%w: %s (no translation path defined)", ErrProviderNotConfigured, decision.Provider)
 	}
