@@ -132,6 +132,26 @@ if [ -z "$install_dir" ] && [ "$scope_explicit" = "false" ] && [ "$non_interacti
     2|project|p|P)    scope="project" ;;
     *) err "invalid choice: $scope_choice"; exit 2 ;;
   esac
+
+  # For project scope, ask which directory rather than silently assuming CWD.
+  # A user running this from a shell that happens to be in $HOME or some
+  # unrelated repo would otherwise scribble .claude/ into the wrong place.
+  if [ "$scope" = "project" ]; then
+    default_project_dir="$(pwd)"
+    printf "Project directory [default: %s]: " "$default_project_dir"
+    read -r project_dir_choice </dev/tty || project_dir_choice=""
+    project_dir="${project_dir_choice:-$default_project_dir}"
+    # Expand a leading ~ since `read` doesn't.
+    case "$project_dir" in
+      "~")    project_dir="$HOME" ;;
+      "~/"*)  project_dir="$HOME/${project_dir#~/}" ;;
+    esac
+    if [ ! -d "$project_dir" ]; then
+      err "directory does not exist: $project_dir"
+      exit 1
+    fi
+    project_dir="$(cd "$project_dir" && pwd)"
+  fi
 fi
 
 # ---------- pre-flight ----------
@@ -160,11 +180,19 @@ else
       settings_base="$HOME"
       ;;
     project)
-      if ! git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-        err "--scope project must be run inside a git repo, or pass --dir <path>. cd into your project first, or use --dir."
-        exit 1
+      # If the interactive prompt collected a project directory, use it.
+      # Otherwise fall back to the git root of CWD (the original behavior,
+      # preserved for --scope project passed on the command line).
+      if [ -n "${project_dir:-}" ]; then
+        settings_base="$project_dir"
+        git_root="$(cd "$project_dir" && git rev-parse --show-toplevel 2>/dev/null || true)"
+      else
+        if ! git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+          err "--scope project must be run inside a git repo, or pass --dir <path>. cd into your project first, or use --dir."
+          exit 1
+        fi
+        settings_base="$git_root"
       fi
-      settings_base="$git_root"
       ;;
   esac
 fi
@@ -548,7 +576,7 @@ fi
 
 # ---------- gitignore for project scope ----------
 
-if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
+if [ "$scope" = "project" ] && [ -z "$install_dir" ] && [ -n "${git_root:-}" ]; then
   gitignore="$git_root/.gitignore"
   # Same symlink containment as the .claude/ paths above: a hostile repo could
   # commit .gitignore as a symlink so the >> below writes outside the repo.
