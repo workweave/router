@@ -1,9 +1,0 @@
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "http://localhost:8080"
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "${CLAUDE_PROJECT_DIR}/.claude/cc-statusline.sh"
-  }
-}
