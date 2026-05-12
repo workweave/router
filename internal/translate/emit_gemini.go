@@ -716,6 +716,9 @@ var geminiUnsupportedSchemaKeys = map[string]struct{}{
 	"writeOnly":             {},
 	"examples":              {},
 	"deprecated":            {},
+	"exclusiveMinimum":      {},
+	"exclusiveMaximum":      {},
+	"multipleOf":            {},
 }
 
 // sanitizeSchemaForGemini returns a deep copy of v with JSON Schema fields
@@ -735,6 +738,9 @@ func sanitizeSchemaForGemini(v any) any {
 			if _, drop := geminiUnsupportedSchemaKeys[k]; drop {
 				continue
 			}
+			if k == "enum" && !enumAllStrings(child) {
+				continue
+			}
 			out[k] = sanitizeSchemaForGemini(child)
 		}
 		return out
@@ -747,6 +753,23 @@ func sanitizeSchemaForGemini(v any) any {
 	default:
 		return v
 	}
+}
+
+// enumAllStrings reports whether the enum value is a slice whose entries are
+// all strings. Google's function-calling API requires enum entries to be
+// TYPE_STRING; numeric or mixed enums are rejected with a 400. When this
+// returns false, the enum field is dropped from the sanitized schema.
+func enumAllStrings(v any) bool {
+	arr, ok := v.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range arr {
+		if _, ok := item.(string); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func pullAnthropicToolChoiceToGemini(body []byte, out map[string]any) {
