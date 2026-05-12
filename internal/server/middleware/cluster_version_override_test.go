@@ -13,8 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// runVersionOverride exercises WithClusterVersionOverride and reports
-// the version (if any) the handler observed on the request context.
+// runVersionOverride reports the version observed on the request context after WithClusterVersionOverride runs.
 func runVersionOverride(t *testing.T, installation *auth.Installation, header string) string {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

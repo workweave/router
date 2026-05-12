@@ -1,36 +1,21 @@
 // Package cache implements a semantic response cache for the router.
 //
-// The cache short-circuits identical and near-duplicate requests by
-// keying on the cluster scorer's prompt embedding (cosine similarity
-// against previously-stored entries). On a hit, the captured wire-
-// format response bytes are replayed to the client without invoking
-// the upstream provider.
+// Short-circuits near-duplicate requests by cosine similarity on the
+// cluster scorer's prompt embedding; on hit, captured wire-format bytes
+// are replayed without invoking the upstream provider.
 //
 // Scope (v1):
-//
-//   - Non-streaming requests only. The proxy bypasses the cache when
-//     the inbound body has stream=true; streaming buffer-on-miss is a
-//     follow-up. RouterArena's eval traffic is non-streaming, so the
-//     v1 covers the benchmark surface.
-//
-//   - Per-(installation, inbound-format) isolation. Two tenants asking
-//     the same question both pay first-call cost; a cached Anthropic
-//     response is never replayed for an OpenAI client. Inbound format
-//     is part of the bucket key because the captured bytes are
-//     post-translation (Anthropic SSE for Anthropic clients,
-//     OpenAI JSON for OpenAI clients).
-//
-//   - Cluster-bucketed brute-force lookup. Each (installationID,
-//     inboundFormat, clusterID) tuple owns its own LRU. On lookup, the
-//     cache scans the buckets for the routing decision's top-p clusters
-//     and returns the first entry whose cosine ≥ the per-cluster
-//     threshold. With 10 clusters and 1k entries per bucket, top-p=4
-//     × 1k × 768-d cosine ops fits in <5ms; HNSW is unnecessary at
-//     this scale.
+//   - Non-streaming only. Proxy bypasses cache when stream=true.
+//   - Per-(installation, inbound-format) isolation. Bucket key includes
+//     inbound format because captured bytes are post-translation, so a
+//     cached Anthropic response must never replay for an OpenAI client.
+//   - Cluster-bucketed brute-force lookup. Each (installation, format,
+//     clusterID) owns an LRU; lookup scans the routing decision's top-p
+//     clusters. At ~10 clusters × 1k entries × 768-d, fits in <5ms;
+//     HNSW is unnecessary.
 //
 // Out of scope: streaming, distributed (Redis), cross-installation
-// sharing, event-driven invalidation. TTL is the only eviction
-// mechanism.
+// sharing, event-driven invalidation. TTL is the only eviction.
 package cache
 
 import (
@@ -45,50 +30,29 @@ import (
 )
 
 // CachedResponse captures the upstream response in the inbound wire
-// format so a cache hit can replay it byte-for-byte. We intentionally
-// store the post-translation bytes (e.g. an Anthropic SSE response
-// produced by translate.AnthropicSSETranslator when the upstream is
-// OpenAI) rather than the upstream's native bytes — the goal is
-// indistinguishable replay from the client's perspective.
+// format. Stores post-translation bytes so replay is indistinguishable
+// from the client's perspective.
 type CachedResponse struct {
-	// StatusCode is the HTTP status the proxy wrote (or 200 if
-	// implicit).
 	StatusCode int
-	// Headers is a snapshot of the response headers at end-of-write.
-	// Caller-set router headers (x-router-*) and upstream headers
-	// (request-id, content-type, etc.) are both preserved; the cache
-	// consumer can scrub or override per-hit.
-	Headers http.Header
-	// Body is the full response body (post-translation if
-	// cross-format). Bounded by the cache's MaxBodyBytes; entries
-	// exceeding the cap are dropped (not stored) so callers should
-	// budget for a short tail of uncached large responses.
+	Headers    http.Header
+	// Body is bounded by MaxBodyBytes; oversized entries are dropped.
 	Body []byte
 }
 
 // Config carries the runtime knobs.
 type Config struct {
-	// PerClusterThreshold overrides DefaultThreshold per cluster.
-	// Empty/nil means "always use DefaultThreshold".
 	PerClusterThreshold map[int]float32
-	// DefaultThreshold is the cosine floor applied to every cluster
-	// without an override. Conservative default 0.95.
-	DefaultThreshold float32
-	// BucketSize caps per-(installation, inboundFormat, clusterID)
-	// LRU size. Bounded so a single chatty installation can't evict
-	// another's entries.
+	DefaultThreshold    float32
+	// BucketSize caps per-(installation, format, clusterID) LRU size so
+	// one chatty installation can't evict another's entries.
 	BucketSize int
-	// TTL is the LRU's per-entry time-to-live.
-	TTL time.Duration
-	// MaxBodyBytes drops responses larger than this without caching.
-	// Prevents an unbounded body from blowing memory on a single
-	// outlier (Anthropic max_tokens is 200k tokens ≈ 1MB).
+	TTL        time.Duration
+	// MaxBodyBytes drops responses larger than this without caching
+	// (Anthropic max_tokens is 200k ≈ 1MB).
 	MaxBodyBytes int
 }
 
-// DefaultConfig returns conservative defaults. Tuned for a single
-// staging deployment; production may want larger BucketSize and a
-// shorter TTL.
+// DefaultConfig returns conservative defaults tuned for staging.
 func DefaultConfig() Config {
 	return Config{
 		DefaultThreshold: 0.95,
@@ -98,17 +62,14 @@ func DefaultConfig() Config {
 	}
 }
 
-// Cache is the in-memory semantic cache. Safe for concurrent use; the
-// outer map of buckets is mutex-guarded, and each per-bucket
-// expirable.LRU is itself thread-safe.
+// Cache is the in-memory semantic cache. Concurrent-safe.
 type Cache struct {
 	cfg     Config
 	buckets map[bucketKey]*expirable.LRU[entryKey, *entry]
-	mu      sync.Mutex // guards `buckets` map (LRU itself is thread-safe)
+	mu      sync.Mutex // guards `buckets`; LRU itself is thread-safe
 }
 
-// New constructs a Cache. nil Config fields fall through to
-// DefaultConfig().
+// New constructs a Cache; zero Config fields fall through to DefaultConfig.
 func New(cfg Config) *Cache {
 	def := DefaultConfig()
 	if cfg.DefaultThreshold == 0 {
@@ -129,9 +90,8 @@ func New(cfg Config) *Cache {
 	}
 }
 
-// Format names the inbound wire format the cached response is encoded
-// in. Lookups must match against the same Format the entry was stored
-// under so an Anthropic client never receives an OpenAI-shaped reply.
+// Format names the inbound wire format. Lookups must match storage so
+// an Anthropic client never receives an OpenAI-shaped reply.
 type Format string
 
 const (
@@ -145,9 +105,8 @@ type bucketKey struct {
 	clusterID      int
 }
 
-// entryKey is a 16-byte digest of the embedding, derived from sha256
-// truncation. It identifies an entry inside its bucket without storing
-// the full 3KB embedding twice (the entry already carries it).
+// entryKey is a 16-byte sha256-truncated embedding digest, so we don't
+// store the 3KB embedding twice as the LRU key.
 type entryKey [16]byte
 
 type entry struct {
@@ -155,8 +114,8 @@ type entry struct {
 	response  CachedResponse
 }
 
-// thresholdFor returns the cosine threshold for a given cluster, with
-// fall-through to the default.
+// thresholdFor returns the cosine threshold for clusterID, falling
+// through to the default.
 func (c *Cache) thresholdFor(clusterID int) float32 {
 	if t, ok := c.cfg.PerClusterThreshold[clusterID]; ok {
 		return t
@@ -164,17 +123,9 @@ func (c *Cache) thresholdFor(clusterID int) float32 {
 	return c.cfg.DefaultThreshold
 }
 
-// Lookup walks the buckets for the given (installation, format,
-// clusterIDs) tuples and returns the first entry whose cosine
-// similarity against `embedding` clears the cluster's threshold.
-//
-// Embedding must be L2-normalized (matching the cluster scorer's
-// output); cosine reduces to a dot product. clusterIDs is the
-// scorer's top-p list. Order of clusterIDs is irrelevant — every
-// listed bucket is scanned.
-//
-// The (CachedResponse, false) case never occurs; the bool is sized
-// around the typical Go cache idiom of "value, hit".
+// Lookup walks buckets for (installation, format, clusterIDs) and
+// returns the first entry whose cosine clears the cluster's threshold.
+// embedding must be L2-normalized; clusterIDs order is irrelevant.
 func (c *Cache) Lookup(installationID string, format Format, embedding []float32, clusterIDs []int) (CachedResponse, bool) {
 	if c == nil || len(embedding) == 0 || len(clusterIDs) == 0 {
 		return CachedResponse{}, false
@@ -185,10 +136,8 @@ func (c *Cache) Lookup(installationID string, format Format, embedding []float32
 			continue
 		}
 		threshold := c.thresholdFor(cid)
-		// Iterate the LRU's keys; on each hit-candidate compute
-		// cosine. expirable.LRU.Keys() returns MRU-first which biases
-		// us toward returning the most-recently-stored similar entry —
-		// useful when the same prompt has been answered repeatedly.
+		// LRU.Keys() returns MRU-first, biasing toward the most-recently
+		// stored similar entry.
 		for _, k := range bucket.Keys() {
 			e, ok := bucket.Get(k)
 			if !ok {
@@ -203,14 +152,9 @@ func (c *Cache) Lookup(installationID string, format Format, embedding []float32
 	return CachedResponse{}, false
 }
 
-// Store persists a response under (installationID, format, clusterID).
-// clusterID should be one of the routing decision's top-p clusters
-// (the scorer sorts them ascending; picking the smallest keeps storage
-// deterministic). Lookup scans every top-p cluster, so any one is
-// sufficient.
-//
-// Bodies exceeding cfg.MaxBodyBytes are silently dropped (no error,
-// no panic) so a single outlier doesn't blow memory.
+// Store persists a response. clusterID should be one of the routing
+// decision's top-p clusters; Lookup scans every top-p cluster so any
+// one suffices. Oversized bodies are silently dropped.
 func (c *Cache) Store(installationID string, format Format, embedding []float32, clusterID int, resp CachedResponse) {
 	if c == nil || len(embedding) == 0 {
 		return
@@ -222,8 +166,8 @@ func (c *Cache) Store(installationID string, format Format, embedding []float32,
 	if bucket == nil {
 		return
 	}
-	// Deep-copy the embedding: the caller's slice is owned by
-	// router.Decision.Metadata and may be mutated/recycled.
+	// Deep-copy: caller's slice is owned by router.Decision.Metadata
+	// and may be mutated/recycled.
 	embedCopy := make([]float32, len(embedding))
 	copy(embedCopy, embedding)
 	bucket.Add(entryKeyFor(embedCopy), &entry{
@@ -232,9 +176,8 @@ func (c *Cache) Store(installationID string, format Format, embedding []float32,
 	})
 }
 
-// bucket returns the LRU for a given key. When create is false and the
-// bucket doesn't exist, returns nil (lookup path: we skip the empty
-// bucket). When create is true, the bucket is lazily allocated.
+// bucket returns the LRU for a key. create=false returns nil for
+// missing buckets (lookup path); create=true allocates lazily.
 func (c *Cache) bucket(installationID string, format Format, clusterID int, create bool) *expirable.LRU[entryKey, *entry] {
 	key := bucketKey{installationID: installationID, format: format, clusterID: clusterID}
 	c.mu.Lock()
@@ -250,10 +193,8 @@ func (c *Cache) bucket(installationID string, format Format, clusterID int, crea
 	return b
 }
 
-// entryKeyFor derives a deterministic key from an embedding by
-// hashing its raw bytes. Two identical embeddings produce the same
-// key, so re-storing the same prompt updates the existing entry
-// in-place rather than churning the LRU.
+// entryKeyFor hashes embedding bytes so identical embeddings produce
+// the same key and re-stores update in-place rather than churning the LRU.
 func entryKeyFor(embedding []float32) entryKey {
 	if len(embedding) == 0 {
 		return entryKey{}
@@ -268,10 +209,9 @@ func entryKeyFor(embedding []float32) entryKey {
 	return k
 }
 
-// cosine computes the cosine similarity between two L2-normalized
-// vectors. Both inputs must already be normalized (the cluster scorer
-// guarantees this for its embeddings); skipping the sqrt + divide
-// here mirrors scorer.go::topPNearest's reasoning.
+// cosine computes cosine similarity. Both inputs must be L2-normalized
+// (cluster scorer guarantees this); skip sqrt+divide to mirror
+// scorer.go::topPNearest.
 func cosine(a, b []float32) float32 {
 	if len(a) != len(b) {
 		return 0

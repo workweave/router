@@ -31,8 +31,8 @@ type EmitterConfig struct {
 	ExportTimeout time.Duration
 }
 
-// Emitter batches OTLP spans and exports them via HTTP POST. Safe for
-// concurrent use. A nil *Emitter means OTel is disabled; all methods no-op.
+// Emitter batches OTLP spans and exports them via HTTP POST. Safe for concurrent
+// use. A nil *Emitter means OTel is disabled; all methods no-op.
 type Emitter struct {
 	queue    chan *tracev1.Span
 	client   *http.Client
@@ -95,8 +95,8 @@ func NewEmitter(cfg EmitterConfig) (*Emitter, error) {
 	return e, nil
 }
 
-// Enqueue submits a span to the export queue. Non-blocking: drops on
-// queue-full or post-shutdown. Nil receiver is a no-op.
+// Enqueue submits a span to the export queue. Non-blocking: drops on queue-full
+// or post-shutdown. Nil receiver is a no-op.
 func (e *Emitter) Enqueue(s *tracev1.Span) {
 	if e == nil {
 		return
@@ -114,8 +114,8 @@ func (e *Emitter) Enqueue(s *tracev1.Span) {
 	}
 }
 
-// Shutdown closes the queue and waits for workers to drain. Blocks until
-// all workers finish or ctx expires. Idempotent; nil receiver is a no-op.
+// Shutdown closes the queue and waits for workers to drain. Blocks until all
+// workers finish or ctx expires. Idempotent; nil receiver is a no-op.
 func (e *Emitter) Shutdown(c context.Context) error {
 	if e == nil {
 		return nil

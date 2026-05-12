@@ -71,18 +71,14 @@ func TestService_ProxyMessages_PropagatesUpstreamStatusError(t *testing.T) {
 	err := svc.ProxyMessages(context.Background(), body, rec, httpReq)
 
 	var got *providers.UpstreamStatusError
-	require.ErrorAs(t, err, &got,
-		"ProxyMessages must surface the typed UpstreamStatusError so "+
-			"observability can log upstream_status alongside proxy_err")
+	require.ErrorAs(t, err, &got, "must surface the typed UpstreamStatusError")
 	assert.Equal(t, 400, got.Status)
 }
 
 func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 	const userPrompt = "Walk every Go file under router/internal/ and produce a one-paragraph summary of each."
-	// A realistic CC-shaped body: system preamble + an earlier user
-	// prompt + a long tool_result the cluster scorer would otherwise
-	// fingerprint on. The most recent user-authored text is the original
-	// prompt, several messages back.
+	// CC-shaped body: system preamble + earlier user prompt + long tool_result.
+	// Most recent user-authored text is the original prompt, several messages back.
 	body := []byte(`{
 		"model":"claude-opus-4-7",
 		"system":"You are Claude Code. CLAUDE.md says: do not use emojis...",
@@ -113,10 +109,8 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 
 		require.NotNil(t, fr.capturedReq)
 		got := fr.capturedReq.PromptText
-		assert.Contains(t, got, "You are Claude Code",
-			"flag=off must keep including the system prompt — that's the legacy concatenated-stream shape")
-		assert.Contains(t, got, userPrompt,
-			"flag=off must keep including each user message's text content")
+		assert.Contains(t, got, "You are Claude Code", "flag=off keeps system prompt")
+		assert.Contains(t, got, userPrompt, "flag=off keeps user message text")
 	})
 
 	t.Run("flag on uses last user message only", func(t *testing.T) {
@@ -139,9 +133,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 
 		require.NotNil(t, fr.capturedReq)
 		got := fr.capturedReq.PromptText
-		assert.Equal(t, userPrompt, got,
-			"flag=on must hand the cluster scorer the most recent user-typed text verbatim, "+
-				"with no system preamble or assistant content; that's the whole point of the flag")
+		assert.Equal(t, userPrompt, got, "flag=on uses last user message verbatim, no preamble")
 	})
 }
 
@@ -156,7 +148,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageContextOverride(t *testing.T)
 	cases := []struct {
 		name           string
 		startupFlag    bool
-		ctxOverride    *bool // nil = no override
+		ctxOverride    *bool
 		wantPromptText string
 	}{
 		{
@@ -238,7 +230,7 @@ func TestService_ProxyMessages_StickyBypassedByEvalOverrideHeaders(t *testing.T)
 				map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 				nil,
 				false,
-				time.Hour, // long TTL so sticky window stays open across both calls
+				time.Hour, // sticky window stays open across both calls
 				nil,
 				nil,
 				false,
@@ -257,8 +249,7 @@ func TestService_ProxyMessages_StickyBypassedByEvalOverrideHeaders(t *testing.T)
 				require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 			}
 
-			assert.Equal(t, tc.wantRouteCalls, fr.routeCalls,
-				"router.Route call count must reflect whether sticky cache short-circuited the second call")
+			assert.Equal(t, tc.wantRouteCalls, fr.routeCalls)
 		})
 	}
 }
@@ -285,18 +276,16 @@ func TestService_ProxyOpenAIChatCompletion_AnthropicCrossFormat(t *testing.T) {
 	err := svc.ProxyOpenAIChatCompletion(context.Background(), []byte(openAIReq), rec, httpReq)
 	require.NoError(t, err)
 
-	require.Len(t, provider.proxyBodies, 1, "provider.Proxy must be called exactly once")
+	require.Len(t, provider.proxyBodies, 1)
 	var translated map[string]any
 	require.NoError(t, json.Unmarshal(provider.proxyBodies[0], &translated))
-	assert.Equal(t, float64(100), translated["max_tokens"],
-		"OpenAI max_tokens must be preserved on the translated Anthropic body")
+	assert.Equal(t, float64(100), translated["max_tokens"], "max_tokens preserved on translated body")
 	msgs, _ := translated["messages"].([]any)
-	require.Len(t, msgs, 1, "translated Anthropic body must carry one user message")
+	require.Len(t, msgs, 1)
 
 	var openAIOut map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &openAIOut))
-	assert.Equal(t, "chat.completion", openAIOut["object"],
-		"response must be translated back to OpenAI chat.completion shape")
+	assert.Equal(t, "chat.completion", openAIOut["object"])
 	choices, _ := openAIOut["choices"].([]any)
 	require.Len(t, choices, 1)
 	choice, _ := choices[0].(map[string]any)
@@ -321,10 +310,9 @@ func TestService_ProxyOpenAIChatCompletion_AnthropicProxyError_PropagatesError(t
 
 	err := svc.ProxyOpenAIChatCompletion(context.Background(), []byte(body), rec, httpReq)
 
-	require.ErrorIs(t, err, upstreamErr,
-		"the upstream Proxy error must propagate so the handler can shape the correct OpenAI-format error")
+	require.ErrorIs(t, err, upstreamErr, "upstream Proxy error must propagate")
 	assert.NotContains(t, rec.Body.String(), "translation failed",
-		"a Proxy error must not be masked by a synthesized 'translation failed' body from Finalize")
+		"Proxy error must not be masked by Finalize's translation failure body")
 }
 
 func TestService_ProxyOpenAIChatCompletion_NativeOpenAI(t *testing.T) {
@@ -350,18 +338,16 @@ func TestService_ProxyOpenAIChatCompletion_NativeOpenAI(t *testing.T) {
 	require.Len(t, provider.proxyBodies, 1)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(provider.proxyBodies[0], &got))
-	assert.Equal(t, "gpt-4o", got["model"], "envelope must rewrite model to decision.Model")
+	assert.Equal(t, "gpt-4o", got["model"], "envelope rewrites model to decision.Model")
 	msgs, _ := got["messages"].([]any)
-	require.Len(t, msgs, 1, "user message must be preserved")
+	require.Len(t, msgs, 1)
 	assert.Contains(t, rec.Body.String(), `"chat.completion"`)
 }
 
-// OpenRouter speaks OpenAI Chat Completions natively. When an OpenAI-format
-// inbound (e.g. mini-swe-agent / litellm) lands on an OpenRouter decision,
-// the proxy must take the same no-translation path it does for native
-// OpenAI — not error out with "no translation path defined". This regression
-// surfaced when the eval harness ran v0.27 (which routes a chunk of traffic
-// to OpenRouter-hosted OSS models) through mini-swe-agent's OpenAI client.
+// OpenRouter speaks OpenAI Chat Completions natively: an OpenAI-format
+// inbound landing on an OpenRouter decision must take the no-translation path.
+// Regression: eval harness v0.27 (OpenRouter OSS models) via mini-swe-agent's
+// OpenAI client hit "no translation path defined".
 func TestService_ProxyOpenAIChatCompletion_NativeOpenRouter(t *testing.T) {
 	provider := &fakeProvider{
 		proxyResponse: func(w http.ResponseWriter) {
@@ -382,23 +368,16 @@ func TestService_ProxyOpenAIChatCompletion_NativeOpenRouter(t *testing.T) {
 	err := svc.ProxyOpenAIChatCompletion(context.Background(), []byte(body), rec, httpReq)
 	require.NoError(t, err)
 
-	require.Len(t, provider.proxyBodies, 1, "provider.Proxy must be called once for the OpenRouter decision")
+	require.Len(t, provider.proxyBodies, 1)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(provider.proxyBodies[0], &got))
-	assert.Equal(t, "qwen/qwen3-coder", got["model"],
-		"envelope must rewrite the inbound model to decision.Model so OpenRouter sees the routed pick")
-	assert.Contains(t, rec.Body.String(), `"chat.completion"`,
-		"OpenRouter response is already OpenAI-format and must pass through verbatim")
+	assert.Equal(t, "qwen/qwen3-coder", got["model"], "envelope rewrites model to decision.Model")
+	assert.Contains(t, rec.Body.String(), `"chat.completion"`)
 }
 
-// TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer asserts the
-// managed-deployment guard: when WithByokOnly(true) is set, a registered
-// provider must NOT appear in req.EnabledProviders unless the caller
-// supplied BYOK credentials or a client-supplied Bearer/x-api-key for that
-// provider. Without this guard, the cluster scorer happily picks
-// e.g. OpenRouter for an installation with no OpenRouter key and the
-// upstream call 402s on the platform's exhausted deployment key —
-// exactly the regression this flag fixes.
+// TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer: with
+// WithByokOnly(true), registered providers must not appear in EnabledProviders
+// without per-request credentials, or argmax routes to the platform key and 402s.
 func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
 	providerMap := map[string]providers.Client{
@@ -416,8 +395,7 @@ func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 
 		require.NotNil(t, fr.capturedReq)
 		assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic)
-		assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderOpenRouter,
-			"selfhost default: registered providers are eligible without per-request BYOK")
+		assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderOpenRouter)
 	})
 
 	t.Run("byok-on with no creds yields empty eligible set", func(t *testing.T) {
@@ -430,13 +408,11 @@ func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 		require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
 
 		require.NotNil(t, fr.capturedReq)
-		assert.Empty(t, fr.capturedReq.EnabledProviders,
-			"managed/BYOK-only: a registered provider must not be eligible without BYOK or client-supplied creds")
+		assert.Empty(t, fr.capturedReq.EnabledProviders, "BYOK-only: registered providers ineligible without creds")
 	})
 
 	t.Run("byok-on with client-supplied Bearer enables only that provider", func(t *testing.T) {
-		// Anthropic decision so the proxy completes; this subtest only asserts
-		// on req.EnabledProviders captured at Route() time.
+		// Anthropic decision lets proxy complete; assertion targets EnabledProviders.
 		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
 		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
 			WithByokOnly(true)
@@ -447,9 +423,8 @@ func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 		_ = svc.ProxyMessages(context.Background(), body, rec, httpReq)
 
 		require.NotNil(t, fr.capturedReq)
-		assert.NotContains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic,
-			"managed/BYOK-only: Anthropic must not be eligible without anthropic-specific creds")
+		assert.NotContains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic)
 		assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderOpenRouter,
-			"managed/BYOK-only: a client-supplied Bearer for OpenRouter must make it eligible")
+			"client-supplied Bearer enables the matching provider")
 	})
 }

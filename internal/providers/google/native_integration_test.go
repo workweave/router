@@ -21,16 +21,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestNative_TwoTurnToolUseRoundTripsThoughtSignature is the load-bearing
-// integration test for the native adapter. Run with:
-//
-//	GOOGLE_PROVIDER_API_KEY=... go test -tags=google_integration \
-//	  -run TestNative ./internal/providers/google/
-//
-// Asserts a complete tool-use loop succeeds against the real Gemini native
-// API: the model emits a functionCall with a thoughtSignature; we round-trip
-// that signature on the next turn alongside a functionResponse; the model
-// produces a final text answer without 400-ing on the missing signature.
+// TestNative_TwoTurnToolUseRoundTripsThoughtSignature asserts a complete
+// tool-use loop succeeds against the real Gemini native API: the model emits
+// a functionCall with a thoughtSignature; we round-trip that signature with a
+// functionResponse; turn 2 must not 400 on a missing signature. Run with
+// `GOOGLE_PROVIDER_API_KEY=... go test -tags=google_integration`.
 func TestNative_TwoTurnToolUseRoundTripsThoughtSignature(t *testing.T) {
 	key := os.Getenv("GOOGLE_PROVIDER_API_KEY")
 	if key == "" {
@@ -40,7 +35,6 @@ func TestNative_TwoTurnToolUseRoundTripsThoughtSignature(t *testing.T) {
 	const model = "gemini-2.5-flash"
 	c := google.NewNativeClient(key, "")
 
-	// Turn 1: ask the model to use a tool.
 	turn1 := map[string]any{
 		"contents": []any{
 			map[string]any{"role": "user", "parts": []any{map[string]any{"text": "What is the weather in San Francisco? Use the get_weather tool."}}},
@@ -92,11 +86,8 @@ func TestNative_TwoTurnToolUseRoundTripsThoughtSignature(t *testing.T) {
 
 	sig, _ := fcPart["thoughtSignature"].(string)
 	t.Logf("turn 1 thoughtSignature length: %d", len(sig))
-	// Gemini 3.x requires the signature; for Gemini 2.5 it may or may not be
-	// present. The test still verifies the round-trip succeeds either way.
+	// Gemini 3.x requires the signature; Gemini 2.5 may omit it. Round-trip succeeds either way.
 
-	// Turn 2: round-trip the assistant turn (with thoughtSignature) and
-	// supply a functionResponse.
 	assistantPart := map[string]any{
 		"functionCall": fcPart["functionCall"],
 	}
@@ -133,9 +124,6 @@ func TestNative_TwoTurnToolUseRoundTripsThoughtSignature(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &resp2))
 	t.Logf("turn 2 response: %s", rec2.Body.String())
 
-	// Sanity: turn 2 produced something — either a text answer or another
-	// functionCall (model's choice). The assertion that matters is the
-	// HTTP 200 above.
 	cands2 := resp2["candidates"].([]any)
 	require.NotEmpty(t, cands2)
 }
@@ -160,8 +148,7 @@ func TestNative_GenerateContentTextOnly(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 }
 
-// TestNative_StreamGenerateContent verifies the streaming hint flips the URL
-// to :streamGenerateContent?alt=sse and the response is text/event-stream.
+// TestNative_StreamGenerateContent verifies the streaming hint flips the URL to :streamGenerateContent?alt=sse.
 func TestNative_StreamGenerateContent(t *testing.T) {
 	key := os.Getenv("GOOGLE_PROVIDER_API_KEY")
 	if key == "" {

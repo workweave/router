@@ -12,13 +12,11 @@ import (
 )
 
 // SessionPinRepo adapts sessionpin.Store to the SQLC-generated queries.
-// Owned and constructed by cmd/router/main.go alongside the rest of the
-// postgres adapters.
 type SessionPinRepo struct {
 	tx sqlc.DBTX
 }
 
-// NewSessionPinRepo wires the adapter over a pgx pool (or transaction).
+// NewSessionPinRepo wires the adapter over a pgx pool or transaction.
 func NewSessionPinRepo(tx sqlc.DBTX) *SessionPinRepo {
 	return &SessionPinRepo{tx: tx}
 }
@@ -71,9 +69,7 @@ func toSessionPin(row sqlc.RouterSessionPin) sessionpin.Pin {
 		FirstPinnedAt:  timestampOrZero(row.FirstPinnedAt),
 		LastSeenAt:     timestampOrZero(row.LastSeenAt),
 	}
-	// session_key is BYTEA NOT NULL; the schema guarantees SessionKeyLen
-	// bytes via the upsert path. Bounded copy guards against a corrupt
-	// row panicking the request handler.
+	// Bounded copy guards against a corrupt row panicking the request handler.
 	copy(pin.SessionKey[:], row.SessionKey)
 	return pin
 }

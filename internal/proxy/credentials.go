@@ -36,16 +36,10 @@ func BuildCredentialsMap(keys []*auth.ExternalAPIKey) map[string]*Credentials {
 // ExtractClientCredentials extracts provider credentials from request headers.
 // Anthropic uses x-api-key; OpenAI and Google use Authorization: Bearer.
 //
-// The same headers are also consumed by router auth (WithAuth in
-// internal/server/middleware/auth.go), so a router-issued bearer (rk_...)
-// would otherwise leak to the upstream provider when BYOK is absent.
-// Reject any token carrying auth.APIKeyPrefix so router credentials never
-// cross the trust boundary into third-party provider infrastructure.
-//
-// Header values are TrimSpace'd before the prefix check to match the auth
-// middleware's normalization — without this, embedded whitespace (e.g.
-// "Bearer  rk_xxx") would authenticate as a router key but slip past the
-// HasAPIKeyPrefix guard and leak upstream.
+// Router-issued bearers (rk_...) authenticate the same headers via WithAuth,
+// so we reject any token carrying auth.APIKeyPrefix to prevent router
+// credentials from leaking upstream. TrimSpace matches the auth middleware's
+// normalization so embedded whitespace can't slip past the prefix guard.
 func ExtractClientCredentials(provider string, headers http.Header) *Credentials {
 	switch provider {
 	case providers.ProviderAnthropic:

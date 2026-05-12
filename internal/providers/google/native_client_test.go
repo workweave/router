@@ -82,8 +82,7 @@ func TestNativeClient_StreamingHintFlipsToStreamGenerateContent(t *testing.T) {
 
 func TestNativeClient_StreamHintHeaderStrippedFromUpstream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The synthetic hint header is an internal coordination signal; it must
-		// never be forwarded to Gemini.
+		// Synthetic hint header is an internal signal; must not reach Gemini.
 		assert.Empty(t, r.Header.Get(translate.GeminiStreamHintHeader))
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -120,8 +119,6 @@ func TestNativeClient_BYOKCredentialsOverrideDeploymentKey(t *testing.T) {
 
 func TestNativeClient_DefaultBaseURL(t *testing.T) {
 	c := google.NewNativeClient("k", "")
-	// We can't easily test the URL without making a real call, but we can
-	// verify the constant is what we expect.
 	assert.Equal(t, "https://generativelanguage.googleapis.com", google.NativeBaseURL)
 	_ = c
 }

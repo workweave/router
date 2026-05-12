@@ -19,14 +19,14 @@ func WithVersion(ctx context.Context, version string) context.Context {
 	return context.WithValue(ctx, versionContextKey{}, version)
 }
 
-// VersionFromContext reads the per-request version override, or "".
+// VersionFromContext returns the per-request version override or "".
 func VersionFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(versionContextKey{}).(string)
 	return v
 }
 
 // Multiversion holds one Scorer per artifact version and dispatches
-// per-request based on a context override. Defaults to the configured version.
+// per-request based on a context override.
 type Multiversion struct {
 	Default  string
 	Versions map[string]*Scorer
@@ -79,10 +79,8 @@ func (m *Multiversion) Route(ctx context.Context, req router.Request) (router.De
 	}
 	scorer, ok := m.Versions[chosen]
 	if !ok {
-		// Defensive: NewMultiversion enforces that Default is in Versions
-		// at construction time. If a future refactor breaks that invariant,
-		// surface the bug as ErrClusterUnavailable rather than silently
-		// degrading.
+		// Defensive: NewMultiversion enforces Default ∈ Versions. Surface
+		// the bug as ErrClusterUnavailable rather than silently degrading.
 		observability.Get().Error(
 			"Cluster scorer: chosen version missing; returning ErrClusterUnavailable",
 			"chosen_version", chosen,

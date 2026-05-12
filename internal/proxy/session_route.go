@@ -14,10 +14,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// installationIDFromContext reads the installation ID stashed by the
-// auth middleware and parses it. Returns uuid.Nil for unauthenticated
-// callers or when the value isn't a valid UUID; both cases mean "no
-// async pin upsert" downstream.
+// installationIDFromContext reads and parses the installation ID stashed by
+// auth middleware. Returns uuid.Nil for unauthenticated or invalid values;
+// both skip the async pin upsert downstream.
 func installationIDFromContext(ctx context.Context) uuid.UUID {
 	raw, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	if raw == "" {
@@ -30,10 +29,8 @@ func installationIDFromContext(ctx context.Context) uuid.UUID {
 	return id
 }
 
-// sessionRouteResult bundles the routing decision and the pin-state
-// fields handlers attach to OTel spans and log lines. PinTier is the
-// tier-string the dashboards group on; PinAgeSec is seconds since
-// first pinning (zero on a fresh decision or a hard-pin path).
+// sessionRouteResult bundles the routing decision and pin-state fields for
+// OTel spans and log lines.
 type sessionRouteResult struct {
 	Decision   router.Decision
 	SessionKey [sessionpin.SessionKeyLen]byte
@@ -46,18 +43,11 @@ type sessionRouteResult struct {
 
 // routeWithSession is the format-agnostic routing orchestrator: turn-type
 // detection, hard-pin short-circuit, tiered session-pin lookup, cluster
-// scorer fallback, and async pin upsert. ProxyMessages and
-// ProxyOpenAIChatCompletion (and any future ingress) call it and apply
-// the returned decision through the existing provider dispatch switch.
+// scorer fallback, and async pin upsert.
 //
-// installationID is uuid.Nil for unauthenticated / non-installation
-// callers; in that case the async upsert is skipped (pin rows require an
-// installation_id). subAgentHint is the optional x-weave-subagent-type
-// header value — empty for ingresses that don't read it.
-//
-// bypassLegacySticky disables the Tier-3 (apiKeyID-keyed LRU) lookup;
-// Tier 1/2 stay active because the session_key derivation is per-prompt,
-// not per-apiKey.
+// installationID == uuid.Nil skips the async upsert (pin rows require an
+// installation_id). bypassLegacySticky disables only the Tier-3 apiKeyID LRU;
+// Tier 1/2 stay active because their key derivation is per-prompt.
 func (s *Service) routeWithSession(
 	ctx context.Context,
 	env *translate.RequestEnvelope,

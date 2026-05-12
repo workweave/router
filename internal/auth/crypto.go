@@ -10,9 +10,8 @@ import (
 	"github.com/tink-crypto/tink-go/v2/tink"
 )
 
-// Encryptor handles AES-256-GCM encryption and decryption using Google Tink.
-// AAD binds each ciphertext to its (externalID, provider) so a stolen row
-// can't be decrypted for a different installation or provider.
+// Encryptor handles AES-256-GCM encryption/decryption via Google Tink.
+// AAD binds each ciphertext to (externalID, provider) so a stolen row can't be decrypted under a different identity.
 type Encryptor interface {
 	Encrypt(plaintext []byte, externalID, provider string) (ciphertext []byte, err error)
 	Decrypt(ciphertext []byte, externalID, provider string) (plaintext []byte, err error)
@@ -22,8 +21,8 @@ type tinkEncryptor struct {
 	aead tink.AEAD
 }
 
-// NewTinkEncryptor creates an Encryptor from a Tink keyset JSON string.
-// Generate a keyset with: tinkey create-keyset --key-template AES256_GCM --out-format json
+// NewTinkEncryptor creates an Encryptor from a Tink keyset JSON.
+// Generate with: tinkey create-keyset --key-template AES256_GCM --out-format json
 func NewTinkEncryptor(keysetJSON string) (Encryptor, error) {
 	reader := keyset.NewJSONReader(bytes.NewBufferString(keysetJSON))
 	handle, err := insecurecleartextkeyset.Read(reader)

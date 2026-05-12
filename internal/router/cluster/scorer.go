@@ -12,20 +12,14 @@ import (
 	"workweave/router/internal/router"
 )
 
-// ErrClusterUnavailable is returned by Scorer.Route when the cluster
-// scorer cannot produce a routing decision (embed timeout, embedder
-// error, dim mismatch, prompt too short, empty argmax). Callers map
-// this to HTTP 503: silent fallback to a default model is a worse
-// failure mode than surfacing the unavailability — it masks real
-// regressions in eval and lets quality silently degrade in prod.
+// ErrClusterUnavailable is returned when the cluster scorer cannot
+// produce a routing decision. Callers map to HTTP 503: silent fallback
+// masks real regressions in eval and lets quality silently degrade.
 var ErrClusterUnavailable = errors.New("cluster: routing unavailable")
 
-// ErrNoEligibleProvider is returned by Scorer.Route when the per-request
-// EnabledProviders set has no overlap with the scorer's boot-time
-// candidates. Callers map this to HTTP 4xx: the customer's request can't
-// be served because no provider keys are resolvable for any deployed
-// model, and silently routing to an unavailable provider would 401 at
-// the upstream call.
+// ErrNoEligibleProvider is returned when req.EnabledProviders has no
+// overlap with boot-time candidates. Callers map to HTTP 4xx; silently
+// routing to an unavailable provider would 401 upstream.
 var ErrNoEligibleProvider = errors.New("cluster: no eligible provider for request")
 
 // Config carries the scorer's runtime knobs.
@@ -47,9 +41,8 @@ func DefaultConfig() Config {
 }
 
 // Scorer is the cluster router for one frozen artifact version.
-// Failure modes (embed timeout, dim mismatch, empty argmax, prompt too
-// short) return ErrClusterUnavailable rather than silently falling back
-// to a default model.
+// Failure modes return ErrClusterUnavailable rather than silently
+// falling back to a default model.
 type Scorer struct {
 	version    string
 	cfg        Config
@@ -59,22 +52,17 @@ type Scorer struct {
 	registry   *ModelRegistry
 	candidates []DeployedEntry
 	models     []string
-	// metadata carries the parsed metadata.yaml for this version. May
-	// be nil when the bundle had no metadata.yaml. Currently used only
-	// by the semantic cache (CacheThresholds()).
+	// metadata is the parsed metadata.yaml; nil if absent. Used only by
+	// the semantic cache (CacheThresholds).
 	metadata *ArtifactMetadata
 }
 
-// Version returns the artifact version (e.g. "v0.2") for logging and
-// /health-style endpoints.
+// Version returns the artifact version (e.g. "v0.2").
 func (s *Scorer) Version() string { return s.version }
 
-// CacheThresholds returns the per-version semantic-cache thresholds
-// parsed from the bundle's metadata.yaml `cache_config` block. The
-// returned (perCluster, defaultThreshold) pair drives the cache's
-// per-cluster threshold lookup. defaultThreshold is 0 when the bundle
-// has no cache_config or its DefaultThreshold field is unset; callers
-// substitute their own runtime default in that case.
+// CacheThresholds returns per-version semantic-cache thresholds from the
+// bundle's metadata.yaml cache_config block. defaultThreshold is 0 when
+// unset; callers substitute their own runtime default.
 func (s *Scorer) CacheThresholds() (perCluster map[int]float32, defaultThreshold float32) {
 	if s.metadata == nil || s.metadata.CacheConfig == nil {
 		return nil, 0
@@ -89,8 +77,8 @@ func (s *Scorer) CacheThresholds() (perCluster map[int]float32, defaultThreshold
 	return perCluster, cfg.DefaultThreshold
 }
 
-// NewScorer wires a Scorer from a pre-loaded artifact Bundle. Entries whose
-// provider is not in availableProviders are filtered out of the candidate set.
+// NewScorer wires a Scorer from a pre-loaded Bundle. Entries whose
+// provider is not in availableProviders are filtered out.
 func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders map[string]struct{}) (*Scorer, error) {
 	if bundle == nil {
 		return nil, fmt.Errorf("cluster: bundle must not be nil")
@@ -109,8 +97,7 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 	}
 
 	if bundle.Centroids.K < cfg.TopP {
-		// TopP > K means top-p selection collapses to "all clusters",
-		// which trivially defeats the routing premise. Fail fast.
+		// TopP > K collapses top-p to "all clusters", defeating routing.
 		return nil, fmt.Errorf("cluster %s: K=%d < TopP=%d", bundle.Version, bundle.Centroids.K, cfg.TopP)
 	}
 
@@ -141,11 +128,8 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 		models[i] = c.Model
 	}
 
-	// Every centroid id must have a ranking row, and every candidate must
-	// have a score in every row. Iterating over [0, K) (not just rankings
-	// keys) catches the case where rankings.json is missing a cluster
-	// entirely — that cluster could win top-p selection at request time
-	// and silently contribute zero scores to argmax.
+	// Iterate [0, K) (not rankings keys) so a missing cluster fails fast:
+	// it could win top-p at request time and silently contribute zero.
 	for k := 0; k < bundle.Centroids.K; k++ {
 		row, ok := bundle.Rankings[k]
 		if !ok {
@@ -171,7 +155,6 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 	}, nil
 }
 
-// filterByProviders returns entries whose Provider is in the available set.
 func filterByProviders(entries []DeployedEntry, available map[string]struct{}) []DeployedEntry {
 	out := make([]DeployedEntry, 0, len(entries))
 	for _, e := range entries {
@@ -191,7 +174,7 @@ func sortedKeys(m map[string]struct{}) []string {
 	return out
 }
 
-// Route embeds the prompt, scores clusters, and returns the argmax decision.
+// Route embeds the prompt, scores clusters, returns the argmax decision.
 func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	start := time.Now()
 	log := observability.Get()
@@ -253,12 +236,9 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		return router.Decision{}, fmt.Errorf("embedding dim %d != expected %d: %w", len(vec), s.centroids.Dim, ErrClusterUnavailable)
 	}
 
-	// Per-request provider gating: when the caller has resolved which
-	// providers they have credentials for, restrict argmax to that
-	// subset. This is the runtime complement to NewScorer's boot-time
-	// filterByProviders — boot gating excludes providers the deployment
-	// has no env key for, request gating excludes providers this
-	// installation has no BYOK / client key for.
+	// Per-request gating complements boot-time filterByProviders: boot
+	// excludes providers without env keys; request excludes providers
+	// without BYOK / client keys for this installation.
 	eligibleModels := s.models
 	if req.EnabledProviders != nil {
 		eligibleModels = eligibleModels[:0:0]
@@ -299,10 +279,8 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	}
 	chosen := s.lookupCandidate(chosenModel)
 	if chosen == nil {
-		// Unreachable in practice: argmax only picks from s.models which
-		// is built directly from s.candidates. Guard so a future refactor
-		// that decouples them still surfaces the bug instead of silently
-		// degrading.
+		// Unreachable: argmax picks from s.models, built from s.candidates.
+		// Guard for future refactor that decouples them.
 		log.Error(
 			"Cluster scorer: argmax model not found in candidates; returning ErrClusterUnavailable",
 			"chosen_model", chosenModel,
@@ -310,10 +288,9 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		return router.Decision{}, fmt.Errorf("argmax model %q not found in candidates: %w", chosenModel, ErrClusterUnavailable)
 	}
 
-	// Hand off the embedding + top-p clusters so downstream consumers
-	// (semantic cache) can reuse them without re-embedding. Both slices
-	// are short-lived inside this Route call; copy into heap-allocated
-	// metadata slices that survive the return.
+	// Copy slices so downstream consumers (semantic cache) can reuse the
+	// embedding + top-p clusters without re-embedding; originals are
+	// short-lived within this call.
 	embedCopy := make([]float32, len(vec))
 	copy(embedCopy, vec)
 	clustersCopy := make([]int, len(topClusters))
@@ -355,8 +332,7 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	return decision, nil
 }
 
-// lookupCandidate returns nil when no candidate matches; callers
-// fail-open to the heuristic rather than returning a zero Decision.
+// lookupCandidate returns nil when no candidate matches.
 func (s *Scorer) lookupCandidate(model string) *DeployedEntry {
 	for i := range s.candidates {
 		if s.candidates[i].Model == model {
@@ -366,7 +342,7 @@ func (s *Scorer) lookupCandidate(model string) *DeployedEntry {
 	return nil
 }
 
-// topPNearest returns the indices of the p centroids closest to vec by
+// topPNearest returns indices of the p centroids closest to vec by
 // cosine similarity (dot product on L2-normed vectors).
 func topPNearest(vec []float32, c *Centroids, p int) []int {
 	if p > c.K {

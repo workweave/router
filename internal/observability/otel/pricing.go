@@ -83,9 +83,9 @@ var pricingTable = map[string]Pricing{
 }
 
 // Lookup returns pricing for the given model. If the exact name is not found,
-// it retries after stripping a trailing 8-digit suffix (e.g. "-20251001")
-// so dated model variants resolve to their canonical pricing.
-// Zero-value for completely unknown models.
+// it retries after stripping a trailing 8-digit suffix (e.g. "-20251001") so
+// dated model variants resolve to their canonical pricing. Returns zero-value
+// for unknown models.
 func Lookup(model string) Pricing {
 	if p, ok := pricingTable[model]; ok {
 		return p
@@ -98,8 +98,8 @@ func Lookup(model string) Pricing {
 	return Pricing{}
 }
 
-// stripDateSuffix removes a trailing "-XXXXXXXX" (hyphen + exactly 8 digits)
-// from model names. Returns the input unchanged if the pattern doesn't match.
+// stripDateSuffix removes a trailing "-XXXXXXXX" (hyphen + exactly 8 digits) from
+// model names. Returns the input unchanged if the pattern doesn't match.
 func stripDateSuffix(model string) string {
 	if len(model) < 10 {
 		return model

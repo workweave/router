@@ -1,10 +1,7 @@
 // Package google is the providers.Client adapter for Google Gemini's
-// OpenAI-compatible Chat Completions endpoint. The wire format on the request
-// path is identical to OpenAI's /v1/chat/completions, so the upstream call,
-// streaming, and most of the field-stripping logic mirror the openai adapter.
-// Kept as a separate package (not a parameter on the openai client) so the
-// composition root can register them under distinct provider names and the
-// auth header / base URL stay obvious at a read.
+// OpenAI-compatible Chat Completions endpoint. Kept separate from the openai
+// adapter so the composition root can register them under distinct provider
+// names with their own auth header and base URL.
 package google
 
 import (
@@ -23,9 +20,8 @@ import (
 	"workweave/router/internal/router"
 )
 
-// DefaultBaseURL is the public OpenAI-compatible endpoint for Gemini.
-// Override via GOOGLE_PROVIDER_BASE_URL when pointing at a regional endpoint
-// or a Vertex AI proxy that speaks the same wire format.
+// DefaultBaseURL is the public OpenAI-compatible endpoint for Gemini. Override
+// via GOOGLE_PROVIDER_BASE_URL for a regional endpoint or Vertex AI proxy.
 const DefaultBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
 type Client struct {
@@ -34,7 +30,6 @@ type Client struct {
 	http    *http.Client
 }
 
-// NewClient is pooled for sustained traffic to a single host.
 func NewClient(apiKey, baseURL string) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
@@ -52,8 +47,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		return fmt.Errorf("build upstream request: %w", err)
 	}
 	upstream.Header.Set("Content-Type", "application/json")
-	// Use per-request BYOK credentials when available; fall back to the
-	// deployment-level API key (plan-based auth).
+	// BYOK credentials take precedence over the deployment-level API key.
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
 	} else if c.apiKey != "" {
@@ -80,14 +74,10 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	return httputil.StreamBody(resp.Body, resp.StatusCode, w, t)
 }
 
-// Passthrough forwards an inbound request to the same path on Gemini's
-// OpenAI-compat surface without model rewriting. Used for /v1/models style
-// probes that some clients send to discover capability.
-//
-// DefaultBaseURL already carries Gemini's /v1beta/openai version prefix, so
-// the inbound /v1/... path must be stripped to its resource suffix
-// (/models, /chat/completions, ...) before concatenating; otherwise the
-// upstream URL would double-prefix to /v1beta/openai/v1/models and 404.
+// Passthrough forwards to the same path on Gemini's OpenAI-compat surface.
+// DefaultBaseURL already carries Gemini's /v1beta/openai prefix, so the
+// inbound /v1 must be stripped or the upstream URL would double-prefix to
+// /v1beta/openai/v1/models and 404.
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	suffix := strings.TrimPrefix(r.URL.Path, "/v1")
 	url := c.baseURL + suffix
@@ -102,8 +92,7 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		upstream.Header.Set("Content-Type", ct)
 	}
-	// Use per-request BYOK credentials when available; fall back to the
-	// deployment-level API key (plan-based auth).
+	// BYOK credentials take precedence over the deployment-level API key.
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
 	} else if c.apiKey != "" {

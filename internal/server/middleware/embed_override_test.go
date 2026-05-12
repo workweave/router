@@ -13,10 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// runEmbedOverride exercises WithEmbedLastUserMessageOverride against a
-// single request and returns (set, value) where set reports whether the
-// override was attached to the request context and value is the bool
-// the handler observed.
+// runEmbedOverride returns (set, value) where set reports whether the override was attached and value is the bool observed.
 func runEmbedOverride(t *testing.T, installation *auth.Installation, header string) (bool, bool) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

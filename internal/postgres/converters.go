@@ -52,10 +52,7 @@ func timestampPtr(t pgtype.Timestamp) *time.Time {
 	return &out
 }
 
-// stringPtrOrNil returns nil for an empty string and a pointer otherwise.
-// Used at the adapter boundary so SQLC's pointer-typed nullable columns
-// (emit_pointers_for_null_types) receive NULL when the caller has no
-// value to record, instead of an empty-string row.
+// stringPtrOrNil returns nil for empty strings so SQLC's nullable columns receive NULL instead of "".
 func stringPtrOrNil(s string) *string {
 	if s == "" {
 		return nil

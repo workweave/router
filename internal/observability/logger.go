@@ -13,11 +13,8 @@ import (
 const ginContextKey = "router_logger"
 
 // initOnce installs a slog handler honoring LOG_LEVEL on first Get(). Without
-// this, slog.Default() falls back to Go's stdlib handler at INFO — so Debug
-// lines emitted from anywhere in the codebase are silently dropped.
-//
-// Levels recognized (case-insensitive): debug, info, warn, error. Unknown or
-// unset values default to info, matching the previous behavior.
+// this, slog.Default() falls back to Go's stdlib handler at INFO, silently
+// dropping Debug lines emitted elsewhere in the codebase.
 var initOnce sync.Once
 
 func initLogger() {
@@ -61,8 +58,8 @@ func Middleware() gin.HandlerFunc {
 }
 
 // AccessLog logs one INFO line per request after handlers run. Without this,
-// a 401 from WithAuth produces zero output at LOG_LEVEL=info, making "no
-// logs" look like "the server isn't being hit" when it actually is.
+// a 401 from WithAuth produces zero output at LOG_LEVEL=info, making "no logs"
+// look like "the server isn't being hit" when it actually is.
 func AccessLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()

@@ -1,6 +1,4 @@
 // Package anthropic holds HTTP handlers for the Anthropic Messages surface.
-// The handler is intentionally thin: it adapts gin ↔ proxy.Service and shapes
-// errors back into Anthropic's wire format.
 package anthropic
 
 import (
@@ -51,9 +49,8 @@ func (t *tracingWriter) Write(b []byte) (int, error) {
 
 const maxBodyBytes = 10 * 1024 * 1024
 
-// MessagesHandler wires POST /v1/messages to proxy.Service.ProxyMessages.
-// authSvc is used to upsert the end-user identity (router.model_router_users)
-// once email is parsed from the body; pass nil to skip user resolution (tests).
+// MessagesHandler wires POST /v1/messages to proxy.Service.ProxyMessages. authSvc upserts the end-user
+// identity once email is parsed from the body; pass nil to skip user resolution (tests).
 func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)
@@ -116,9 +113,8 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 	}
 }
 
-// stashClientIdentity extracts user identification signals from HTTP headers
-// and the Anthropic metadata.user_id body field, then stashes them on the
-// context for downstream OTEL spans and the decision sidecar log.
+// stashClientIdentity extracts user identification signals from headers and Anthropic
+// metadata.user_id, stashing them on the context for OTEL spans and the decision sidecar log.
 func stashClientIdentity(ctx context.Context, h http.Header, body []byte) context.Context {
 	metaRaw := gjson.GetBytes(body, "metadata.user_id").String()
 	meta := proxy.ParseClaudeCodeMetadata(metaRaw)

@@ -19,9 +19,7 @@ import (
 )
 
 // captureTelemetry records every InsertTelemetryParams the proxy fires.
-// fireTelemetry runs in a goroutine, so the channel is the rendezvous
-// the tests block on. Cap=4 so a chatty test never blocks the proxy
-// path; tests only inspect the first row.
+// notify channel is the rendezvous for the async goroutine.
 type captureTelemetry struct {
 	mu     sync.Mutex
 	rows   []proxy.InsertTelemetryParams
@@ -80,12 +78,9 @@ func (c *captureTelemetry) firstRow(t *testing.T) proxy.InsertTelemetryParams {
 	return c.rows[0]
 }
 
-// TestProxyMessages_RecordsClusterObservation asserts that cluster-routed
+// TestProxyMessages_RecordsClusterObservation asserts cluster-routed
 // decisions surface every routing-brain field into the telemetry row.
-// W-1308 introduced these columns; W-1339 (ClickHouse pipe) and W-1335
-// (3-axis α-blend) depend on the writer populating them. If any field
-// stops landing, those downstream tickets get NULL columns and fail to
-// produce useful analytics.
+// W-1339 / W-1335 depend on the writer populating them.
 func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 	const installID = "11111111-1111-1111-1111-111111111111"
 	decision := router.Decision{
@@ -103,12 +98,12 @@ func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 	svc := proxy.NewService(
 		&fakeRouter{decision: decision},
 		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
-		nil,   // emitter
-		false, // embedLastUserMessage
-		0,     // stickyDecisionTTL
-		nil,   // semanticCache
-		nil,   // pinStore
-		false, // hardPinExplore
+		nil,
+		false,
+		0,
+		nil,
+		nil,
+		false,
 		providers.ProviderAnthropic, "claude-haiku-4-5",
 		telem,
 	)
@@ -122,27 +117,20 @@ func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 	row := telem.firstRow(t)
 	assert.Equal(t, installID, row.InstallationID)
 	assert.Equal(t, "claude-haiku-4-5", row.DecisionModel)
-	assert.Equal(t, []int32{3, 7}, row.ClusterIDs,
-		"cluster_ids must mirror the scorer's top-p set so analytics can group by cluster")
-	assert.Equal(t, []string{"claude-opus-4-7", "claude-haiku-4-5"}, row.CandidateModels,
-		"candidate_models must record the eligible argmax set for margin analysis")
-	require.NotNil(t, row.ChosenScore, "chosen_score must be persisted for non-zero scores")
+	assert.Equal(t, []int32{3, 7}, row.ClusterIDs)
+	assert.Equal(t, []string{"claude-opus-4-7", "claude-haiku-4-5"}, row.CandidateModels)
+	require.NotNil(t, row.ChosenScore)
 	assert.InDelta(t, 0.85, *row.ChosenScore, 1e-6)
-	assert.Equal(t, "v-test", row.ClusterRouterVersion,
-		"cluster_router_version is the join key for comparing artifact versions on the same traffic")
-	// AlphaBreakdown / CacheCreationTokens / CacheReadTokens are forward-
-	// compat slots populated by W-1335 / W-1309; this PR leaves them nil.
+	assert.Equal(t, "v-test", row.ClusterRouterVersion)
+	// AlphaBreakdown / Cache* are W-1335 / W-1309 forward-compat slots; nil here.
 	assert.Nil(t, row.AlphaBreakdown)
 	assert.Nil(t, row.CacheCreationTokens)
 	assert.Nil(t, row.CacheReadTokens)
 }
 
-// TestProxyMessages_ChosenScoreZeroIsPersisted guards the semantics of
-// the *float64 ChosenScore pointer: nil means "not a cluster decision"
-// and a non-nil &0 means "argmax produced a literal zero". Earlier
-// code collapsed these with a `!= 0` guard, silently dropping
-// legitimate zero scores. Cursor Bugbot caught the bug; this test
-// pins it so a future "simplification" can't reintroduce it.
+// TestProxyMessages_ChosenScoreZeroIsPersisted pins the *float64 semantics:
+// nil = not a cluster decision, &0 = legitimate zero. Regression guard
+// against a `!= 0` simplification that silently drops zero scores.
 func TestProxyMessages_ChosenScoreZeroIsPersisted(t *testing.T) {
 	const installID = "33333333-3333-3333-3333-333333333333"
 	decision := router.Decision{
@@ -152,7 +140,7 @@ func TestProxyMessages_ChosenScoreZeroIsPersisted(t *testing.T) {
 		Metadata: &router.RoutingMetadata{
 			ClusterIDs:           []int{0},
 			CandidateModels:      []string{"claude-haiku-4-5"},
-			ChosenScore:          0, // legitimate zero — must persist as &0, not nil
+			ChosenScore:          0, // must persist as &0, not nil
 			ClusterRouterVersion: "v-test",
 		},
 	}
@@ -172,16 +160,12 @@ func TestProxyMessages_ChosenScoreZeroIsPersisted(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 
 	row := telem.firstRow(t)
-	require.NotNil(t, row.ChosenScore,
-		"zero-valued ChosenScore on a cluster-routed decision must persist as &0, not be dropped to nil")
+	require.NotNil(t, row.ChosenScore, "zero ChosenScore must persist as &0, not be dropped")
 	assert.Equal(t, 0.0, *row.ChosenScore)
 }
 
-// TestProxyMessages_NoMetadataOmitsClusterFields covers the pinned-route /
-// heuristic path: when the router returns a Decision without Metadata,
-// the telemetry row must leave the routing-brain columns empty rather
-// than synthesizing fake values. The DB row exists (cost / latency still
-// matter), but cluster_ids et al. are NULL.
+// TestProxyMessages_NoMetadataOmitsClusterFields: pinned/heuristic decisions
+// leave routing-brain columns NULL rather than synthesizing fake values.
 func TestProxyMessages_NoMetadataOmitsClusterFields(t *testing.T) {
 	const installID = "22222222-2222-2222-2222-222222222222"
 	require.NotEqual(t, uuid.Nil.String(), installID)
@@ -190,7 +174,7 @@ func TestProxyMessages_NoMetadataOmitsClusterFields(t *testing.T) {
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-haiku-4-5",
 		Reason:   "pin",
-		// Metadata intentionally nil — same shape pinDecision produces.
+		// Metadata intentionally nil; matches pinDecision shape.
 	}
 	telem := newCaptureTelemetry()
 	svc := proxy.NewService(
@@ -214,7 +198,7 @@ func TestProxyMessages_NoMetadataOmitsClusterFields(t *testing.T) {
 
 	row := telem.firstRow(t)
 	assert.Equal(t, "claude-haiku-4-5", row.DecisionModel)
-	assert.Nil(t, row.ClusterIDs, "non-cluster decisions leave cluster_ids NULL")
+	assert.Nil(t, row.ClusterIDs)
 	assert.Nil(t, row.CandidateModels)
 	assert.Nil(t, row.ChosenScore)
 	assert.Empty(t, row.ClusterRouterVersion)

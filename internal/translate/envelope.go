@@ -14,14 +14,13 @@ import (
 
 // INVARIANTS:
 //   - e.body is immutable — set once at parse, never modified. Callers must
-//     not hold a reference to e.body and mutate it; the slice is shared
-//     across all same-format emit calls for the envelope's lifetime.
-//   - Same-format emit (OpenAI→OpenAI, Anthropic→Anthropic) uses byte-level
-//     overrides (gjson/sjson) on e.body — no cloning or json.Marshal.
-//   - Cross-format emit pulls fields from e.ensureSrc() into a new map[string]any.
-//     The Unmarshal is deferred until the first cross-format call.
-//   - Field accessors (Model, Stream, HasTools) and RoutingFeatures use gjson
-//     directly on e.body — zero allocations, no Unmarshal required.
+//     not mutate it; the slice is shared across all same-format emit calls.
+//   - Same-format emit uses byte-level gjson/sjson overrides on e.body — no
+//     cloning or json.Marshal.
+//   - Cross-format emit pulls fields from e.ensureSrc() into a new map; the
+//     Unmarshal is deferred until the first cross-format call.
+//   - Field accessors and RoutingFeatures use gjson directly on e.body —
+//     zero allocations, no Unmarshal required.
 
 // ErrNotJSONObject is returned when the request body is not a valid JSON object.
 var ErrNotJSONObject = errors.New("request body must be a JSON object")
@@ -34,7 +33,7 @@ const (
 	FormatGemini
 )
 
-// EmitOptions parameterizes how the envelope constructs an output body.
+// EmitOptions parameterizes output-body construction.
 type EmitOptions struct {
 	TargetModel        string
 	Capabilities       router.ModelSpec
@@ -42,16 +41,15 @@ type EmitOptions struct {
 }
 
 // RequestEnvelope wraps a parsed request body regardless of wire format.
-// Use Prepare* methods to emit target-format bytes, and accessor methods
-// (Stream, Model, HasTools) or RoutingFeatures for field reads.
+// Use Prepare* to emit target-format bytes; accessors and RoutingFeatures
+// read fields.
 type RequestEnvelope struct {
-	body   []byte         // immutable raw request bytes, set once at parse time
-	src    map[string]any // lazily populated; only needed for cross-format emit
+	body   []byte         // immutable raw request bytes
+	src    map[string]any // lazily populated for cross-format emit
 	format Format
 }
 
 // ParseOpenAI validates body as a JSON object and wraps it in a RequestEnvelope.
-// The full json.Unmarshal is deferred until a cross-format emit is requested.
 func ParseOpenAI(body []byte) (*RequestEnvelope, error) {
 	if err := validateJSONObject(body); err != nil {
 		return nil, err
@@ -60,7 +58,6 @@ func ParseOpenAI(body []byte) (*RequestEnvelope, error) {
 }
 
 // ParseAnthropic validates body as a JSON object and wraps it in a RequestEnvelope.
-// The full json.Unmarshal is deferred until a cross-format emit is requested.
 func ParseAnthropic(body []byte) (*RequestEnvelope, error) {
 	if err := validateJSONObject(body); err != nil {
 		return nil, err
@@ -68,10 +65,8 @@ func ParseAnthropic(body []byte) (*RequestEnvelope, error) {
 	return &RequestEnvelope{body: body, format: FormatAnthropic}, nil
 }
 
-// ParseGemini validates body as a JSON object and wraps it in a
-// RequestEnvelope sourced from Gemini's native generateContent shape
-// ({contents, systemInstruction, tools, generationConfig}). The full
-// json.Unmarshal is deferred until a cross-format emit is requested.
+// ParseGemini validates body as a JSON object and wraps it in a RequestEnvelope
+// sourced from Gemini's native generateContent shape.
 func ParseGemini(body []byte) (*RequestEnvelope, error) {
 	if err := validateJSONObject(body); err != nil {
 		return nil, err
@@ -79,8 +74,7 @@ func ParseGemini(body []byte) (*RequestEnvelope, error) {
 	return &RequestEnvelope{body: body, format: FormatGemini}, nil
 }
 
-// validateJSONObject checks that body is valid JSON and specifically an object
-// (rejects arrays, scalars, and null).
+// validateJSONObject rejects arrays, scalars, and null.
 func validateJSONObject(body []byte) error {
 	if !gjson.ValidBytes(body) {
 		return fmt.Errorf("%w: invalid JSON", ErrNotJSONObject)
@@ -91,10 +85,9 @@ func validateJSONObject(body []byte) error {
 	return nil
 }
 
-// ensureSrc lazily unmarshals e.body into e.src on first call. Only needed
-// by cross-format emit paths that must walk the parsed structure.
-// Returns an error when encoding/json rejects input that gjson accepted
-// (e.g. nesting beyond encoding/json's 500-level limit).
+// ensureSrc lazily unmarshals e.body into e.src on first call. Returns an
+// error when encoding/json rejects input that gjson accepted (e.g. nesting
+// beyond encoding/json's 500-level limit).
 func (e *RequestEnvelope) ensureSrc() (map[string]any, error) {
 	if e.src == nil {
 		if err := json.Unmarshal(e.body, &e.src); err != nil {
@@ -106,13 +99,11 @@ func (e *RequestEnvelope) ensureSrc() (map[string]any, error) {
 
 func (e *RequestEnvelope) SourceFormat() Format { return e.format }
 
-// Stream reports whether the request has "stream": true.
-// Accepts JSON booleans and string values ("true"/"false") but rejects
-// numeric coercion (e.g. 1 is not treated as true). For Gemini ingress
-// the streaming choice is encoded in the URL path
-// (:generateContent vs :streamGenerateContent), not the body, so the
-// Gemini handler injects a synthetic top-level "stream": true into the
-// body before parsing — the same field this method reads.
+// Stream reports whether the request has "stream": true. Accepts JSON booleans
+// and string values but rejects numeric coercion. For Gemini ingress the
+// streaming choice lives in the URL path (:generateContent vs
+// :streamGenerateContent); the Gemini handler injects a synthetic top-level
+// "stream": true into the body before parsing.
 func (e *RequestEnvelope) Stream() bool {
 	r := gjson.GetBytes(e.body, "stream")
 	if r.Type == gjson.Number {
@@ -121,24 +112,19 @@ func (e *RequestEnvelope) Stream() bool {
 	return r.Bool()
 }
 
-// Model returns the requested model name from the parsed body.
+// Model returns the requested model name.
 func (e *RequestEnvelope) Model() string {
 	return gjson.GetBytes(e.body, "model").String()
 }
 
-// MetadataUserID returns the raw metadata.user_id string from the request body.
-// Claude Code packs a JSON-encoded object here containing device_id,
-// account_uuid, and session_id. Returns "" when the field is absent.
+// MetadataUserID returns the raw metadata.user_id string. Claude Code packs a
+// JSON-encoded object here containing device_id, account_uuid, and session_id.
 func (e *RequestEnvelope) MetadataUserID() string {
 	return gjson.GetBytes(e.body, "metadata.user_id").String()
 }
 
-// SystemText returns the concatenated system-prompt text in a
-// format-neutral way. For Anthropic, reads the top-level `system`
-// field. For OpenAI, walks `messages[]` collecting every `system`-role
-// message's text content (OpenAI carries the system prompt as a
-// message rather than a separate field, and may have multiple). Used
-// by session-pin keying and turn-type detection (compaction markers).
+// SystemText returns the concatenated system-prompt text format-neutrally.
+// OpenAI may carry multiple system-role messages; all are concatenated.
 func (e *RequestEnvelope) SystemText() string {
 	switch e.format {
 	case FormatAnthropic:
@@ -152,13 +138,8 @@ func (e *RequestEnvelope) SystemText() string {
 	}
 }
 
-// LastUserMessageInfo summarizes the trailing user-side input on a
-// request. HasText is true when the last user-side input contains any
-// human-authored text; HasToolResult is true when it contains tool
-// results (tool_result blocks for Anthropic, role=="tool" messages for
-// OpenAI). Both flags can be true at once (mixed turn). Text holds the
-// extracted human text (empty when HasText is false). ToolResultCount
-// counts the contributing tool-result blocks/messages.
+// LastUserMessageInfo summarizes the trailing user-side input. Both flags can
+// be true at once (mixed turn).
 type LastUserMessageInfo struct {
 	HasText         bool
 	HasToolResult   bool
@@ -166,10 +147,8 @@ type LastUserMessageInfo struct {
 	Text            string
 }
 
-// LastUserMessage returns format-neutral information about the last
-// user-side input. Used by turn-type detection to classify tool-result
-// short-circuit turns and by future per-format helpers. Returns the
-// zero value when messages is absent or empty.
+// LastUserMessage returns format-neutral information about the last user-side
+// input. Used by turn-type detection.
 func (e *RequestEnvelope) LastUserMessage() LastUserMessageInfo {
 	switch e.format {
 	case FormatAnthropic:
@@ -183,10 +162,8 @@ func (e *RequestEnvelope) LastUserMessage() LastUserMessageInfo {
 	}
 }
 
-// FirstUserMessageText returns the text of the first user-authored
-// message. Format-aware: OpenAI/Anthropic walk messages[0]; Gemini
-// walks contents[0] when role=="user". Returns "" if there is no
-// first user message.
+// FirstUserMessageText returns the text of the first user-authored message.
+// Returns "" if there is no first user message.
 func (e *RequestEnvelope) FirstUserMessageText() string {
 	if e.format == FormatGemini {
 		return geminiFirstUserMessageText(e.body)
@@ -209,7 +186,7 @@ func (e *RequestEnvelope) FirstUserMessageText() string {
 	}
 }
 
-// HasTools reports whether the request contains a non-empty tools array.
+// HasTools reports whether the request has a non-empty tools array.
 func (e *RequestEnvelope) HasTools() bool {
 	r := gjson.GetBytes(e.body, "tools.#")
 	return r.Int() > 0
@@ -218,34 +195,31 @@ func (e *RequestEnvelope) HasTools() bool {
 // EmitOverrides describes byte-level mutations for same-format serialization.
 // Zero-valued fields are no-ops.
 type EmitOverrides struct {
-	Model string // always set: target model name
+	Model string
 
-	DeleteKeys []string // top-level keys to unconditionally remove
+	DeleteKeys []string
 
-	SetMaxCompletionTokens *int64 // if non-nil, set max_completion_tokens to this value
+	SetMaxCompletionTokens *int64
 
-	ClampMaxTokensKey       string // field to clamp (e.g. "max_tokens"); empty = skip
+	ClampMaxTokensKey       string
 	ClampMaxTokensValue     int64
-	ClampMaxCompTokensValue int64 // applied after SetMaxCompletionTokens
+	ClampMaxCompTokensValue int64
 
 	// DefaultMaxTokensKey / DefaultMaxTokensValue inject the named field only
-	// when it is absent in the source body. Anthropic Messages requires
-	// max_tokens; downstream routing/cost accounting also benefits from a
-	// deterministic value being present.
+	// when absent. Anthropic Messages requires max_tokens; downstream
+	// routing/cost accounting also benefits from a deterministic value.
 	DefaultMaxTokensKey   string
 	DefaultMaxTokensValue int64
 
-	InjectStreamUsage   bool // set stream_options.include_usage = true
-	StripThinkingBlocks bool // filter thinking/redacted_thinking from messages[*].content[*]
+	InjectStreamUsage   bool
+	StripThinkingBlocks bool
 }
 
-// emitSameFormat applies overrides to e.body via sjson, returning new bytes.
 func (e *RequestEnvelope) emitSameFormat(ov EmitOverrides) ([]byte, error) {
 	return applyOverrides(e.body, ov)
 }
 
-// applyOverrides applies mutations in order: structural (thinking blocks),
-// field overrides, then deletions.
+// applyOverrides applies mutations in order: structural, field overrides, deletions.
 func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 	var err error
 	out := body
@@ -304,8 +278,7 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 	return out, nil
 }
 
-// clampFieldBytes caps a numeric JSON field to maxVal. No-op if absent or
-// not a number.
+// clampFieldBytes caps a numeric JSON field to maxVal. No-op if absent or non-numeric.
 func clampFieldBytes(body []byte, key string, maxVal int64) []byte {
 	r := gjson.GetBytes(body, key)
 	if !r.Exists() || r.Type != gjson.Number {
@@ -322,17 +295,9 @@ func clampFieldBytes(body []byte, key string, maxVal int64) []byte {
 }
 
 // stripThinkingBlocksBytes removes thinking/redacted_thinking blocks from
-// messages[*].content[*].
-//
-// Uses two-phase reconstruction to guarantee O(B) total work. A per-block
-// sjson.DeleteBytes approach would be O(N*B) — each call rewrites the full
-// buffer — which is a DoS vector when N is large (~300K blocks in 10 MB).
-//
-// Phase 1: keep unaffected msg.Raw verbatim; for affected messages, rebuild
-// the content array from non-thinking block raws via sjson.SetRaw on the
-// per-message buffer.
-// Phase 2: join all message raws and replace "messages" with a single
-// sjson.SetRawBytes call.
+// messages[*].content[*]. Uses two-phase reconstruction to guarantee O(B)
+// total work — a per-block sjson.DeleteBytes approach would be O(N*B) and
+// a DoS vector when N is large (~300K blocks in 10 MB).
 func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.Exists() || !messages.IsArray() {
@@ -377,7 +342,6 @@ func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
 
 		filteredContent := "[" + strings.Join(kept, ",") + "]"
 
-		// sjson.SetRaw on the per-message buffer, not the full body.
 		newMsg, err := sjson.SetRaw(msg.Raw, "content", filteredContent)
 		if err != nil {
 			walkErr = fmt.Errorf("replace content in message: %w", err)
@@ -394,12 +358,10 @@ func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
 		return body, nil
 	}
 
-	// Single body-level replacement: join all message raws and write once.
 	newMessagesArray := "[" + strings.Join(msgRaws, ",") + "]"
 	return sjson.SetRawBytes(body, "messages", []byte(newMessagesArray))
 }
 
-// resolveOpenAIOverrides builds EmitOverrides for OpenAI → OpenAI emit.
 func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	ov := EmitOverrides{
 		Model: opts.TargetModel,
@@ -452,7 +414,6 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	return ov
 }
 
-// resolveAnthropicOverrides builds EmitOverrides for Anthropic → Anthropic emit.
 func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	ov := EmitOverrides{
 		Model: opts.TargetModel,
@@ -495,8 +456,8 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	return ov
 }
 
-// resolvePassthroughOverrides builds EmitOverrides for Anthropic passthrough
-// endpoints, stripping inference-time fields that non-routing endpoints reject.
+// resolvePassthroughOverrides strips inference-time fields that non-routing
+// Anthropic endpoints reject.
 func resolvePassthroughOverrides(body []byte) (EmitOverrides, bool) {
 	var deleteKeys []string
 	for _, key := range []string{"effort", "thinking", "context_management", "output_config"} {
@@ -513,7 +474,6 @@ func resolvePassthroughOverrides(body []byte) (EmitOverrides, bool) {
 	}, true
 }
 
-// shallowClone copies top-level keys of a map. Used by cross-format paths only.
 func shallowClone(src map[string]any) map[string]any {
 	out := make(map[string]any, len(src))
 	for k, v := range src {
@@ -548,8 +508,6 @@ const defaultMaxOutputTokenCap = 8192
 
 // defaultOutputTokens returns the default max output tokens for a model,
 // floored by the model's own cap and globally at defaultMaxOutputTokenCap.
-// Returns defaultMaxOutputTokenCap for models not in modelMaxOutputTokens.
-// Used to inject a value when the source request omits max_tokens entirely.
 func defaultOutputTokens(model string) int64 {
 	if cap, ok := modelMaxOutputTokens[model]; ok && cap < defaultMaxOutputTokenCap {
 		return int64(cap)
@@ -557,7 +515,7 @@ func defaultOutputTokens(model string) int64 {
 	return defaultMaxOutputTokenCap
 }
 
-// clampOutputTokens caps max_tokens/max_completion_tokens in a map. Cross-format only.
+// clampOutputTokens caps max_tokens/max_completion_tokens in a map.
 func clampOutputTokens(doc map[string]any, model string) {
 	cap := modelMaxOutputTokens[model]
 	if cap == 0 {

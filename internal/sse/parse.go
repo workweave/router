@@ -2,10 +2,7 @@ package sse
 
 import "bytes"
 
-// SplitNext finds the next complete SSE event in buf, returning the event
-// bytes (without the trailing delimiter) and the total number of bytes
-// consumed (event + delimiter). Returns n=0 when no complete event is
-// available. Supports both LF (\n\n) and CRLF (\r\n\r\n) boundaries.
+// SplitNext returns the next complete SSE event in buf (without delimiter) and the total bytes consumed; n=0 means no complete event yet. Accepts both LF (\n\n) and CRLF (\r\n\r\n) boundaries.
 func SplitNext(buf []byte) (event []byte, n int) {
 	lf := bytes.Index(buf, []byte("\n\n"))
 	crlf := bytes.Index(buf, []byte("\r\n\r\n"))

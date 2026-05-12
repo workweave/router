@@ -17,9 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// embeddingFixture returns a deterministic L2-normalized vector keyed
-// by `seed`. Different seeds yield different unit vectors so tests
-// can exercise distinct cache entries without sharing state.
+// embeddingFixture returns a deterministic L2-normalized vector keyed by seed.
 func embeddingFixture(seed float32) []float32 {
 	v := []float32{seed, 1, 0, 0, 0, 0, 0, 0}
 	var sum float32
@@ -37,9 +35,7 @@ func embeddingFixture(seed float32) []float32 {
 	return out
 }
 
-// anthropicBody returns a minimal valid Anthropic Messages body. The
-// stream flag is configurable so tests can exercise both cacheable
-// (stream=false) and bypass (stream=true) paths.
+// anthropicBody returns a minimal valid Anthropic Messages body.
 func anthropicBody(prompt string, stream bool) []byte {
 	streamLit := "false"
 	if stream {
@@ -53,9 +49,7 @@ func anthropicBody(prompt string, stream bool) []byte {
 	}`)
 }
 
-// decisionWithEmbedding builds a routing decision that carries the
-// metadata needed for cache eligibility — mirrors what the cluster
-// scorer produces in production.
+// decisionWithEmbedding builds a routing decision with metadata needed for cache eligibility.
 func decisionWithEmbedding(emb []float32, clusterIDs []int) router.Decision {
 	return router.Decision{
 		Provider: "anthropic",
@@ -68,8 +62,7 @@ func decisionWithEmbedding(emb []float32, clusterIDs []int) router.Decision {
 	}
 }
 
-// proxyContextWithExternalID wires the per-tenant identifier the cache
-// uses for isolation. Without it the proxy bypasses the cache.
+// proxyContextWithExternalID wires the per-tenant ID; without it the cache is bypassed.
 func proxyContextWithExternalID(t *testing.T, externalID string) context.Context {
 	t.Helper()
 	ctx := context.Background()
@@ -94,22 +87,17 @@ func TestService_Cache_HitShortCircuitsProvider(t *testing.T) {
 	ctx := proxyContextWithExternalID(t, "tenant-1")
 	body := anthropicBody("ping", false)
 
-	// First call: provider runs and the response is captured into the cache.
 	rec1 := httptest.NewRecorder()
 	httpReq1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec1, httpReq1))
 	require.Len(t, provider.proxyBodies, 1, "first call must hit the provider")
 
-	// Second call with identical body+context: cache must short-circuit so
-	// the provider sees no second request.
 	rec2 := httptest.NewRecorder()
 	httpReq2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec2, httpReq2))
 	assert.Len(t, provider.proxyBodies, 1, "cache hit must not invoke provider a second time")
 
-	// Replay must surface the original body bytes.
 	assert.Equal(t, `{"id":"first","content":"hi"}`, rec2.Body.String())
-	// And the hit marker must advertise the cache to the client.
 	assert.Equal(t, "hit", rec2.Header().Get("x-router-cache"))
 }
 
@@ -123,7 +111,7 @@ func TestService_Cache_StreamingBypasses(t *testing.T) {
 	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, 0, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
 	ctx := proxyContextWithExternalID(t, "tenant-1")
-	body := anthropicBody("streaming please", true) // stream=true
+	body := anthropicBody("streaming please", true)
 
 	rec1 := httptest.NewRecorder()
 	httpReq1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
@@ -157,7 +145,7 @@ func TestService_Cache_HeuristicDecisionBypasses(t *testing.T) {
 	httpReq2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec2, httpReq2))
 
-	assert.Len(t, provider.proxyBodies, 2, "decisions without RoutingMetadata must not be cached (no embedding to key on)")
+	assert.Len(t, provider.proxyBodies, 2, "decisions without RoutingMetadata must not be cached")
 }
 
 func TestService_Cache_MissingExternalIDBypasses(t *testing.T) {
@@ -171,8 +159,7 @@ func TestService_Cache_MissingExternalIDBypasses(t *testing.T) {
 
 	body := anthropicBody("ask", false)
 
-	// No externalID on context → cache is bypassed for safety (per-tenant
-	// scope is the cache's only isolation mechanism).
+	// No externalID → cache bypassed (per-tenant scope is the only isolation).
 	ctx := context.Background()
 	rec1 := httptest.NewRecorder()
 	httpReq1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
@@ -191,7 +178,7 @@ func TestService_Cache_DisabledByNilCache(t *testing.T) {
 		proxyResponse: func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"id":"z"}`)) },
 	}
 	fr := &fakeRouter{decision: decisionWithEmbedding(emb, []int{0})}
-	// nil cache — same effect as ROUTER_SEMANTIC_CACHE_ENABLED=false.
+	// nil cache equivalent to ROUTER_SEMANTIC_CACHE_ENABLED=false.
 	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
 	ctx := proxyContextWithExternalID(t, "tenant-1")

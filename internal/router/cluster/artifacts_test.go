@@ -11,9 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// buildCentroidsBlob writes a centroids.bin-formatted byte slice from
-// in-memory centroids. Used by both this file and scorer_test.go to
-// drive loadCentroids without depending on the committed placeholder.
+// buildCentroidsBlob produces centroids.bin bytes from in-memory data,
+// bypassing the committed placeholder.
 func buildCentroidsBlob(t *testing.T, k, dim int, data []float32) []byte {
 	t.Helper()
 	require.Len(t, data, k*dim, "data must be k*dim long")
@@ -30,9 +29,7 @@ func buildCentroidsBlob(t *testing.T, k, dim int, data []float32) []byte {
 
 func TestLoadCentroids_Roundtrip(t *testing.T) {
 	data := []float32{1, 2, 3, 4, 5, 6, 7, 8}
-	// Lie about EmbedDim by pretending k=2, dim=4 — the loader rejects
-	// any dim that doesn't match EmbedDim, so build it at the real dim
-	// instead and zero-pad the data.
+	// Loader rejects dim != EmbedDim; build at real dim and zero-pad.
 	dim := EmbedDim
 	k := 2
 	full := make([]float32, k*dim)
@@ -60,8 +57,7 @@ func TestLoadCentroids_TooShort(t *testing.T) {
 }
 
 func TestLoadCentroids_DimMismatch(t *testing.T) {
-	// Build a centroids blob that claims dim=128 — should be rejected
-	// because EmbedDim is 768.
+	// dim=128 must be rejected; EmbedDim is 768.
 	dim := 128
 	blob := buildCentroidsBlob(t, 1, dim, make([]float32, dim))
 	_, err := loadCentroids(blob)
@@ -77,7 +73,7 @@ func TestLoadCentroids_ZeroK(t *testing.T) {
 }
 
 func TestLoadCentroids_SizeMismatch(t *testing.T) {
-	// Header claims K=2 but only 1 centroid worth of data follows.
+	// Header K=2 but only 1 centroid of data follows.
 	var b bytes.Buffer
 	b.WriteString(centroidsMagic)
 	binary.Write(&b, binary.LittleEndian, centroidsVersion)
@@ -162,12 +158,9 @@ func TestLoadRegistry_MissingBenchColumn(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing bench_column")
 }
 
-// TestEmbeddedArtifacts_AllVersionsLoadable iterates every committed
-// version directory under artifacts/ and asserts each bundle parses.
-// If any committed version is malformed, the production binary refuses
-// to boot — main.go fail-opens to heuristic globally rather than
-// per-version. Catching that in CI prevents a "ship one bad bundle, lose
-// the cluster scorer entirely" footgun.
+// Catches in CI the "ship one bad bundle, lose the cluster scorer
+// entirely" footgun — production refuses to boot on any malformed
+// committed version.
 func TestEmbeddedArtifacts_AllVersionsLoadable(t *testing.T) {
 	versions, err := ListVersions()
 	require.NoError(t, err)
@@ -186,9 +179,7 @@ func TestEmbeddedArtifacts_AllVersionsLoadable(t *testing.T) {
 	}
 }
 
-// TestResolveVersion_Latest reads artifacts/latest and ensures the
-// resolved version names a real on-disk directory. Catches the case
-// where someone bumps latest to a typo'd version that doesn't exist.
+// Catches a typo'd latest pointer.
 func TestResolveVersion_Latest(t *testing.T) {
 	resolved, err := ResolveVersion(LatestVersion)
 	require.NoError(t, err)

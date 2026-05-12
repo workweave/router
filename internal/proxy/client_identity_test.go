@@ -13,9 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// captureUserRepo is the minimal auth.UserRepository needed to verify that
-// ResolveUserFromContext reaches Service.ResolveAndStashUser. Only the two
-// Upsert methods are exercised by the request path; Get/List are unused.
+// captureUserRepo is the minimal auth.UserRepository for these tests; only
+// the Upsert methods are exercised.
 type captureUserRepo struct {
 	emailUpserts   []auth.UpsertUserParams
 	accountUpserts []auth.UpsertUserByAccountUUIDParams
@@ -36,9 +35,7 @@ func (r *captureUserRepo) ListForInstallation(ctx context.Context, _ string) ([]
 	return nil, errors.New("not used")
 }
 
-// newTestAuthSvc wires a Service with only what ResolveAndStashUser touches
-// (users repo + the no-op user cache). The other interface params aren't
-// exercised by the resolver path so nil is safe.
+// newTestAuthSvc wires a Service with only what ResolveAndStashUser touches.
 func newTestAuthSvc(users auth.UserRepository) *auth.Service {
 	return auth.NewService(nil, nil, nil, users, nil, auth.NoOpUserCache{}, nil)
 }
@@ -50,8 +47,7 @@ func TestParseClaudeCodeMetadata_PullsEmail(t *testing.T) {
 	assert.Equal(t, "dev-1", got.DeviceID)
 	assert.Equal(t, "acct-1", got.AccountID)
 	assert.Equal(t, "sess-1", got.SessionID)
-	// Email is preserved verbatim; normalization is the caller's job
-	// so the parser stays a pure data transform.
+	// Email preserved verbatim; normalization is the caller's job.
 	assert.Equal(t, "User@Example.com", got.Email)
 }
 
@@ -71,63 +67,43 @@ func TestNormalizeEmail_RejectsEmptyAndWhitespace(t *testing.T) {
 }
 
 func TestNormalizeEmail_RejectsBadShape(t *testing.T) {
-	// No @ — would otherwise let a caller flood the user table with arbitrary
-	// strings under the guise of "email".
 	assert.Equal(t, "", proxy.NormalizeEmail("not-an-email"))
-	// Empty local-part.
 	assert.Equal(t, "", proxy.NormalizeEmail("@example.com"))
-	// Empty domain.
 	assert.Equal(t, "", proxy.NormalizeEmail("alice@"))
-	// Multiple @s.
 	assert.Equal(t, "", proxy.NormalizeEmail("a@b@c"))
 }
 
 func TestNormalizeEmail_RejectsOverLength(t *testing.T) {
-	// Right at the cap — accepted.
 	local := strings.Repeat("a", proxy.MaxEmailLen-len("@x.co"))
 	atCap := local + "@x.co"
 	require.Len(t, atCap, proxy.MaxEmailLen)
 	assert.Equal(t, atCap, proxy.NormalizeEmail(atCap))
 
-	// One byte over the cap — rejected. The cap bounds row growth from
-	// caller-controlled inputs; without it any authenticated key could flood
-	// router.model_router_users with unbounded distinct strings.
 	overCap := strings.Repeat("a", proxy.MaxEmailLen-len("@x.co")+1) + "@x.co"
 	require.Greater(t, len(overCap), proxy.MaxEmailLen)
 	assert.Equal(t, "", proxy.NormalizeEmail(overCap))
 }
 
 func TestNormalizeClientIdentifier_PassesThroughShortValues(t *testing.T) {
-	// Typical Claude Code device_id / session_id shapes (UUIDs and
-	// short tokens) flow through unchanged. The cap is a flood-
-	// protection floor, not a format check.
 	assert.Equal(t, "dev-abc123", proxy.NormalizeClientIdentifier("dev-abc123"))
 	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000",
 		proxy.NormalizeClientIdentifier("550e8400-e29b-41d4-a716-446655440000"))
-	// Empty input flows through as empty — no signal stays no signal.
 	assert.Equal(t, "", proxy.NormalizeClientIdentifier(""))
 }
 
 func TestNormalizeClientIdentifier_RejectsOverLength(t *testing.T) {
-	// Right at the cap — accepted.
 	atCap := strings.Repeat("a", proxy.MaxClientIdentifierLen)
 	require.Len(t, atCap, proxy.MaxClientIdentifierLen)
 	assert.Equal(t, atCap, proxy.NormalizeClientIdentifier(atCap))
 
-	// One byte over the cap — rejected (empty string). Without this an
-	// authenticated caller could pad device_id/session_id to arbitrary
-	// length and inflate router.model_router_request_telemetry storage
-	// per request.
 	overCap := strings.Repeat("a", proxy.MaxClientIdentifierLen+1)
 	require.Greater(t, len(overCap), proxy.MaxClientIdentifierLen)
 	assert.Equal(t, "", proxy.NormalizeClientIdentifier(overCap))
 }
 
 func TestResolveUserFromContext_AccountUUIDOnlyReachesUpsert(t *testing.T) {
-	// Regression: an earlier version of this guard returned early on
-	// id.Email == "", which made the new account_uuid-only upsert path
-	// (added for Claude CLI v2.1.x, which packs only account_uuid in
-	// metadata.user_id) completely unreachable from any inbound handler.
+	// Regression: an earlier guard returned early on id.Email == "", making
+	// the account_uuid-only upsert path (Claude CLI v2.1.x) unreachable.
 	repo := &captureUserRepo{}
 	svc := newTestAuthSvc(repo)
 	inst := &auth.Installation{ID: "inst-1"}
@@ -164,9 +140,6 @@ func TestResolveUserFromContext_BothMissingIsNoOp(t *testing.T) {
 	svc := newTestAuthSvc(repo)
 	inst := &auth.Installation{ID: "inst-1"}
 
-	// ClientIdentity stashed but both Email and AccountID empty: nothing
-	// to attribute, so neither upsert path should fire and the ctx must
-	// flow through with no UserID set.
 	ctx := context.WithValue(context.Background(), proxy.ClientIdentityContextKey{}, proxy.ClientIdentity{})
 	ctx = proxy.ResolveUserFromContext(ctx, svc, inst)
 

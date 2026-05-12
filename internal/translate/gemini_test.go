@@ -380,10 +380,8 @@ func must(t *testing.T, m map[string]any, k string) any {
 
 func TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects(t *testing.T) {
 	// Regression: Claude Code tool definitions include JSON Schema fields
-	// like $schema, additionalProperties, and propertyNames. Anthropic's
-	// API accepts these; Google's function-calling API rejects them with
-	// 400 "Cannot find field". Production saw this on every tools-bearing
-	// request that landed on a Gemini decision.
+	// ($schema, additionalProperties, propertyNames) that Google rejects with
+	// 400. Hit production on every tools-bearing Gemini request.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -422,29 +420,25 @@ func TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects(t *testing.T) {
 	assert.NotNil(t, params["properties"])
 	assert.Equal(t, []any{"url"}, params["required"])
 
-	// Casualties at the root level — these are exactly the keys Google
-	// rejects with "Cannot find field".
+	// Casualties: keys Google rejects with "Cannot find field".
 	assert.NotContains(t, params, "$schema", "$schema must be stripped at every level")
 	assert.NotContains(t, params, "additionalProperties", "additionalProperties must be stripped at every level")
 
-	// Nested object: same stripping must apply, otherwise a request with
-	// a Map<string,string> shaped tool argument would still 400.
+	// Nested objects: stripping must apply at every level.
 	props := params["properties"].(map[string]any)
 	paramsField := props["params"].(map[string]any)
 	assert.NotContains(t, paramsField, "additionalProperties",
 		"additionalProperties on a nested schema must also be stripped")
 	assert.NotContains(t, paramsField, "propertyNames",
 		"propertyNames must be stripped — Google doesn't recognize it")
-	// The nested leaf's own description / type passes through.
+	// Nested leaf description/type pass through.
 	url := props["url"].(map[string]any)
 	assert.Equal(t, "string", url["type"])
 	assert.Equal(t, "URL to fetch", url["description"])
 }
 
 func TestSanitizeSchemaForGemini_PreservesSupportedFields(t *testing.T) {
-	// Defense-in-depth: a single test that exhaustively confirms which
-	// keys survive. If a future PR adds a strip rule that's too aggressive
-	// and drops a valid field, this test fails before traffic does.
+	// Defense-in-depth: exhaustively confirms which keys survive sanitization.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{

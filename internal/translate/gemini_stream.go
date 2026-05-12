@@ -13,13 +13,11 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// GeminiToOpenAISSETranslator wraps an http.ResponseWriter and translates
-// Gemini :streamGenerateContent SSE chunks into OpenAI Chat Completion
-// chat.completion.chunk SSE on the fly. Non-streaming responses (non-2xx
-// errors or buffered JSON) are flushed by Finalize.
+// GeminiToOpenAISSETranslator translates Gemini :streamGenerateContent SSE
+// into OpenAI chat.completion.chunk SSE on the fly. Non-streaming responses
+// flush via Finalize.
 //
-// Used as the leaf translator for OpenAI-inbound → Google routing. For
-// Anthropic-inbound → Google, this is chained: the inner sink is an
+// For Anthropic-inbound → Google, this is chained: the inner sink is an
 // AnthropicSSETranslator that re-encodes the OpenAI chunks we emit.
 type GeminiToOpenAISSETranslator struct {
 	inner   http.ResponseWriter
@@ -41,9 +39,7 @@ type GeminiToOpenAISSETranslator struct {
 	usageSink otel.UsageSink
 }
 
-// NewGeminiToOpenAISSETranslator wraps w. Call Finalize after upstream returns
-// to flush non-streaming bodies and emit the trailing [DONE] for streams that
-// ended without a finishReason.
+// NewGeminiToOpenAISSETranslator wraps w. Call Finalize after upstream returns.
 func NewGeminiToOpenAISSETranslator(w http.ResponseWriter, model string, sink otel.UsageSink) *GeminiToOpenAISSETranslator {
 	flusher, _ := w.(http.Flusher)
 	return &GeminiToOpenAISSETranslator{
@@ -61,8 +57,6 @@ func (t *GeminiToOpenAISSETranslator) Header() http.Header {
 	return t.inner.Header()
 }
 
-// WriteHeader detects whether the upstream response is streaming SSE based
-// on Content-Type. Errors and non-streaming JSON defer to Finalize.
 func (t *GeminiToOpenAISSETranslator) WriteHeader(code int) {
 	t.statusCode = code
 	ct := t.inner.Header().Get("Content-Type")
@@ -95,10 +89,9 @@ func (t *GeminiToOpenAISSETranslator) Flush() {
 	}
 }
 
-// Finalize translates and flushes the buffered body for non-streaming
-// responses, or emits a trailing [DONE] for streams that ended without a
-// finishReason in the last chunk (defensive — Gemini sometimes sends usage
-// in its own chunk).
+// Finalize flushes the buffered body for non-streaming responses, or emits
+// a trailing [DONE] for streams that ended without a finishReason (defensive
+// — Gemini sometimes sends usage in its own chunk).
 func (t *GeminiToOpenAISSETranslator) Finalize() error {
 	if t.streaming {
 		if t.closed {
@@ -214,8 +207,8 @@ func (t *GeminiToOpenAISSETranslator) translateEvent(raw []byte) error {
 	}
 	if usage != nil {
 		// Gemini sometimes sends usage in a trailing chunk without a
-		// finishReason. Emit a usage-only chunk so downstream consumers
-		// (e.g. AnthropicSSETranslator) see it before [DONE].
+		// finishReason; emit a usage-only chunk so downstream consumers
+		// see it before [DONE].
 		if err := t.emitUsageOnlyChunk(usage); err != nil {
 			return err
 		}
@@ -258,10 +251,10 @@ func (t *GeminiToOpenAISSETranslator) emitTextDelta(text string) error {
 }
 
 // emitToolCallChunk emits a single OpenAI tool_calls delta carrying name and
-// the full arguments JSON in one chunk. Gemini does not split functionCall
-// args across chunks on this surface, so we don't accumulate a partial.
-// thoughtSignature is smuggled as function.thought_signature (off-spec but
-// preserved by passthrough clients) so the next request can round-trip it.
+// the full arguments JSON in one chunk; Gemini does not split functionCall
+// args across chunks. thoughtSignature is smuggled as
+// function.thought_signature (off-spec but preserved by passthrough clients)
+// so the next request can round-trip it.
 func (t *GeminiToOpenAISSETranslator) emitToolCallChunk(idx int, name, argsRaw, sig string) error {
 	id := generateToolCallID()
 	t.writeChunkHeader()
@@ -272,8 +265,7 @@ func (t *GeminiToOpenAISSETranslator) emitToolCallChunk(idx int, name, argsRaw, 
 	t.bw.WriteString(`,"type":"function","function":{"name":`)
 	sse.WriteJSONString(t.bw, name)
 	t.bw.WriteString(`,"arguments":`)
-	// arguments must be a string in OpenAI's wire format; encode the raw
-	// JSON args object as a JSON string.
+	// arguments must be a JSON-encoded string in OpenAI's wire format.
 	sse.WriteJSONString(t.bw, argsRaw)
 	if sig != "" {
 		t.bw.WriteString(`,"thought_signature":`)

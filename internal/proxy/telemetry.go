@@ -19,11 +19,9 @@ type TelemetryRepository interface {
 	GetTelemetryRowsAll(ctx context.Context, from, to time.Time, limit int32) ([]TelemetryRow, error)
 }
 
-// InsertTelemetryParams mirrors one router.upstream span row. The
-// routing-brain fields after UpstreamStatusCode are nullable — the
-// pinned-route and heuristic paths leave them as their zero values
-// and the adapter translates that to NULL columns. Schema is additive,
-// dashboard read queries are unaffected.
+// InsertTelemetryParams mirrors one router.upstream span row. Fields after
+// UpstreamStatusCode are nullable; pinned-route and heuristic paths leave
+// them zero and the adapter translates that to NULL columns.
 type InsertTelemetryParams struct {
 	InstallationID         string
 	RequestID              string
@@ -49,19 +47,17 @@ type InsertTelemetryParams struct {
 	CrossFormat            bool
 	UpstreamStatusCode     int32
 
-	// Routing observability fields. Populated for cluster-routed
-	// requests; left nil/empty for pinned routes and heuristic
-	// fallbacks. Adapter maps zero values to NULL columns.
-	ClusterIDs           []int32  // top-p clusters; nil for non-cluster decisions
-	CandidateModels      []string // eligible-model set argmax ran over; nil otherwise
-	ChosenScore          *float64 // argmax score; nil for non-cluster decisions
-	AlphaBreakdown       []byte   // pre-marshaled JSON for W-1335; nil until then
-	ClusterRouterVersion string   // artifact version; empty for non-cluster decisions
-	TTFTMs               *int64   // upstream first-byte ms; nil when unmeasured
-	CacheCreationTokens  *int32   // W-1309 forward-compat; nil until populated
-	CacheReadTokens      *int32   // W-1309 forward-compat; nil until populated
-	DeviceID             string   // from client identity; empty if absent
-	SessionID            string   // from client identity; empty if absent
+	// Routing observability fields. Populated for cluster-routed requests.
+	ClusterIDs           []int32
+	CandidateModels      []string
+	ChosenScore          *float64
+	AlphaBreakdown       []byte // pre-marshaled JSON for W-1335; nil until then
+	ClusterRouterVersion string
+	TTFTMs               *int64
+	CacheCreationTokens  *int32 // W-1309 forward-compat; nil until populated
+	CacheReadTokens      *int32 // W-1309 forward-compat; nil until populated
+	DeviceID             string
+	SessionID            string
 }
 
 // TelemetrySummary holds aggregated totals for the dashboard cards.
@@ -80,8 +76,7 @@ type TelemetryBucket struct {
 	ActualCostUSD    float64
 }
 
-// TelemetryRow is one individual upstream span returned by the drill-down
-// endpoint to show what happened inside a chart bucket.
+// TelemetryRow is one upstream span returned by the drill-down endpoint.
 type TelemetryRow struct {
 	Timestamp          time.Time
 	RequestID          string

@@ -1,5 +1,4 @@
-// Package server wires the HTTP engine: middleware, route registration, and
-// (later) streaming-flush helpers.
+// Package server wires the HTTP engine: middleware and route registration.
 package server
 
 import (
@@ -28,62 +27,47 @@ const (
 	adminTimeout          = 10 * time.Second
 )
 
-// DeploymentMode controls whether the self-hoster admin dashboard and its
-// backing /admin/v1/* API are mounted. In Weave-managed (SaaS) deployments
-// the dashboard is redundant attack surface — keys, BYOK provider secrets,
-// and config are owned by the Weave control plane, not the router's local
-// admin. Self-hosters running via docker-compose or on their own server
-// rely on the dashboard for login, stats, rk_ key rotation, and BYOK
-// management.
+// DeploymentMode gates whether the self-hoster admin dashboard and its
+// /admin/v1/* API are mounted. In Weave-managed (SaaS) deployments the
+// dashboard is redundant attack surface — keys, BYOK secrets, and config
+// are owned by the Weave control plane.
 type DeploymentMode string
 
 const (
-	// DeploymentModeSelfHosted mounts the dashboard and /admin/v1/* API.
-	// This is the default when ROUTER_DEPLOYMENT_MODE is unset.
+	// DeploymentModeSelfHosted mounts the dashboard and /admin/v1/* API. Default when ROUTER_DEPLOYMENT_MODE is unset.
 	DeploymentModeSelfHosted DeploymentMode = "selfhosted"
-	// DeploymentModeManaged skips the dashboard and admin API entirely.
-	// Set ROUTER_DEPLOYMENT_MODE=managed on Weave-managed Cloud Run
-	// services so misconfig can't expose a redundant control plane.
+	// DeploymentModeManaged skips the dashboard and admin API entirely so misconfig can't expose a redundant control plane.
 	DeploymentModeManaged DeploymentMode = "managed"
 )
 
 // Register wires routes onto the engine. devModeNoAuth skips bearer-auth on
-// /v1/* for local development. mode gates the self-hoster dashboard +
-// /admin/v1/* API; in managed mode those routes are not registered at all
-// (so requests 404 and the admin code paths are unreachable).
+// /v1/* for local development. In managed mode the dashboard + /admin/v1/*
+// routes are not registered at all.
 func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, devModeNoAuth bool, mode DeploymentMode) {
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
 
-	// /validate is a token-validity probe used by clients (not the
-	// dashboard), so it stays mounted in both modes.
+	// /validate is a token-validity probe used by clients (not the dashboard), so it stays mounted in both modes.
 	adminAuthed := engine.Group("", middleware.WithTimeout(validateTimeout), middleware.WithAuth(authSvc))
 	adminAuthed.GET("/validate", admin.ValidateHandler)
 
 	if mode == DeploymentModeSelfHosted {
-		// Redirect bare root to the UI.
 		engine.GET("/", func(c *gin.Context) { c.Redirect(http.StatusFound, "/ui/") })
 		engine.Static("/ui", "./assets/ui")
 
-		// Admin dashboard auth (login/logout/me). Public — these endpoints
-		// either accept a password and mint a cookie, or report whether the
-		// caller already has one. Putting them inside the WithAuth group would
-		// be a chicken-and-egg deadlock for users who don't yet have a cookie.
+		// Public — mounting inside WithAuth would be a chicken-and-egg
+		// deadlock for users who don't yet have a cookie.
 		authPublic := engine.Group("/admin/v1/auth", middleware.WithTimeout(adminTimeout))
 		authPublic.POST("/login", admin.LoginHandler(authSvc))
 		authPublic.POST("/logout", admin.LogoutHandler())
 		authPublic.GET("/me", admin.MeHandler(authSvc))
 
-		// Read-only metrics: dashboard cookie OR rk_ bearer (so an installation
-		// can fetch its own data via its router API key for monitoring scripts).
-		// Per-installation scoping is enforced inside the handlers.
+		// Read-only metrics: dashboard cookie OR rk_ bearer so an installation can fetch its own data for monitoring scripts. Per-installation scoping is enforced inside the handlers.
 		metrics := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAdminOrAuth(authSvc))
 		metrics.GET("/metrics/summary", admin.MetricsSummaryHandler(proxySvc))
 		metrics.GET("/metrics/timeseries", admin.MetricsTimeseriesHandler(proxySvc))
 		metrics.GET("/metrics/details", admin.MetricsDetailsHandler(proxySvc))
 
-		// Control-plane mutations: admin session cookie REQUIRED. rk_ tokens
-		// are rejected so a leaked data-plane key can't issue fresh router
-		// keys or rotate provider credentials for its installation.
+		// Mutations: admin cookie REQUIRED. rk_ tokens are rejected so a leaked data-plane key can't mint fresh router keys or rotate provider credentials.
 		mgmt := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAdminOnly(authSvc))
 		mgmt.GET("/keys", admin.ListAPIKeysHandler(authSvc))
 		mgmt.POST("/keys", admin.IssueAPIKeyHandler(authSvc))
@@ -116,10 +100,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	)
 	chatCompletionGroup := engine.Group("", chatCompletionAuth...)
 	chatCompletionGroup.POST("/v1/chat/completions", openaiapi.ChatCompletionHandler(proxySvc, authSvc))
-	// Native Gemini ingress shares the chat-completion timeout and
-	// middleware budget. The action suffix (:generateContent or
-	// :streamGenerateContent) lives inside the modelAction parameter
-	// because Gin treats `:` outside the leading position as a literal.
+	// Action suffix (:generateContent or :streamGenerateContent) lives inside modelAction because Gin treats `:` outside the leading position as a literal.
 	chatCompletionGroup.POST("/v1beta/models/:modelAction", geminiapi.GenerateContentHandler(proxySvc, authSvc))
 
 	passthroughAuth := []gin.HandlerFunc{middleware.WithTimeout(passthroughTimeout)}

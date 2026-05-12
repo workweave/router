@@ -13,8 +13,6 @@ import (
 )
 
 // PrepareAnthropic builds a fully-prepared Anthropic Messages request.
-// Same-format requests use byte-level overrides; cross-format requests
-// pull fields from the parsed map.
 func (e *RequestEnvelope) PrepareAnthropic(in http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
 	var body []byte
 	var err error
@@ -50,7 +48,6 @@ func deriveAnthropicHeaders(in http.Header, opts EmitOptions) http.Header {
 	return h
 }
 
-// filterBetaHeader drops anthropic-beta tokens incompatible with the target model.
 func filterBetaHeader(beta, targetModel string) string {
 	if beta == "" {
 		return ""
@@ -110,8 +107,6 @@ func (e *RequestEnvelope) buildAnthropicFromOpenAI(opts EmitOptions) (map[string
 	return out, nil
 }
 
-// pullOpenAIMessages translates OpenAI messages into Anthropic format,
-// separating system messages. Requires the full parsed map for deep traversal.
 func (e *RequestEnvelope) pullOpenAIMessages(out map[string]any) error {
 	src, err := e.ensureSrc()
 	if err != nil {
@@ -155,8 +150,6 @@ func pullStopSequences(body []byte, out map[string]any) {
 	}
 }
 
-// pullOpenAITools converts OpenAI tool definitions to Anthropic format.
-// Requires the full parsed map for nested function.parameters traversal.
 func (e *RequestEnvelope) pullOpenAITools(out map[string]any) error {
 	src, err := e.ensureSrc()
 	if err != nil {
@@ -215,14 +208,11 @@ func pullSharedParams(body []byte, out map[string]any) {
 	}
 }
 
-// buildAnthropicFromAnthropic applies byte-level overrides to the immutable
-// body. Unknown fields pass through unchanged.
 func (e *RequestEnvelope) buildAnthropicFromAnthropic(opts EmitOptions) ([]byte, error) {
 	ov := resolveAnthropicOverrides(e.body, opts)
 	return e.emitSameFormat(ov)
 }
 
-// translateMessages separates system messages and converts the remainder.
 func translateMessages(msgs []any) (system []any, anthropic []any) {
 	for _, raw := range msgs {
 		msg, ok := raw.(map[string]any)
@@ -292,8 +282,8 @@ func appendToolResult(anthropic *[]any, msg map[string]any) {
 	})
 }
 
-// toolResultContent extracts a string from OpenAI tool message content,
-// handling both the string and array-of-content-parts wire formats.
+// toolResultContent flattens OpenAI tool message content (string or array-of-parts)
+// to a single string, since OpenAI tool messages only accept strings.
 func toolResultContent(raw any) string {
 	switch c := raw.(type) {
 	case string:
@@ -318,13 +308,7 @@ func toolResultContent(raw any) string {
 }
 
 // openAIToolContentToAnthropic converts OpenAI tool message content into
-// Anthropic-compatible tool_result content. Strings pass through. Arrays
-// are mapped block-by-block: text -> Anthropic text block, image_url ->
-// Anthropic image block (via translateImageURL). Returns "" for nil input
-// or arrays with no usable parts.
-//
-// Counterpart to toolResultContent (Anthropic -> OpenAI direction), which
-// flattens to a joined string because OpenAI tool messages only accept strings.
+// Anthropic-compatible tool_result content (text + image blocks).
 func openAIToolContentToAnthropic(raw any) any {
 	switch c := raw.(type) {
 	case string:

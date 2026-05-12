@@ -9,9 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// routeSet collects the "METHOD path" pairs registered on the engine.
-// We compare against expected presence/absence so the assertion is robust
-// to additions of unrelated product routes.
+// routeSet collects "METHOD path" pairs so assertions are robust to additions of unrelated product routes.
 func routeSet(engine *gin.Engine) map[string]struct{} {
 	out := make(map[string]struct{}, len(engine.Routes()))
 	for _, r := range engine.Routes() {
@@ -23,8 +21,7 @@ func routeSet(engine *gin.Engine) map[string]struct{} {
 func TestRegister_DeploymentMode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Routes that must always be available — they're the product surface
-	// (proxying, health, token validation), not the dashboard.
+	// Product surface — always mounted regardless of deployment mode.
 	productRoutes := []string{
 		"GET /health",
 		"GET /validate",
@@ -37,8 +34,6 @@ func TestRegister_DeploymentMode(t *testing.T) {
 	}
 
 	// Self-hoster dashboard surface — gated by DeploymentModeSelfHosted.
-	// Includes the UI redirect, the /ui static handler (gin registers it
-	// as `/ui/*filepath`), public auth endpoints, and the mgmt API.
 	dashboardRoutes := []string{
 		"GET /",
 		"GET /ui/*filepath",
@@ -59,9 +54,7 @@ func TestRegister_DeploymentMode(t *testing.T) {
 
 	t.Run("selfhosted mounts dashboard and product routes", func(t *testing.T) {
 		engine := gin.New()
-		// Services may be nil here: Register only stores the references on
-		// closure-captured handlers; engine.Routes() inspection never
-		// invokes them.
+		// Nil services are fine: engine.Routes() inspection never invokes the closure-captured handlers.
 		server.Register(engine, nil, nil, false, server.DeploymentModeSelfHosted)
 		got := routeSet(engine)
 		for _, want := range productRoutes {

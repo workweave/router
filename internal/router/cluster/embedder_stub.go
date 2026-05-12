@@ -7,15 +7,12 @@ import (
 	"fmt"
 )
 
-// stubEmbedder is the no_onnx-tag implementation used by build / test
-// environments without libonnxruntime available. NewEmbedder returns an
-// error so the cluster.Scorer fails to construct and main.go fails open
-// to the heuristic — same fail-open path taken in production when the
-// embedded artifacts are missing or malformed.
+// stubEmbedder is the no_onnx-tag impl for environments without
+// libonnxruntime. NewEmbedder errors so cluster.Scorer fails to
+// construct — the documented dev-convenience escape hatch.
 type stubEmbedder struct{}
 
-// NewEmbedder always fails under -tags=no_onnx. This is the deliberate
-// dev-convenience escape hatch documented in router/CLAUDE.md.
+// NewEmbedder always fails under -tags=no_onnx.
 func NewEmbedder() (*stubEmbedder, error) {
 	return nil, fmt.Errorf("cluster: built with -tags=no_onnx; the ONNX-backed embedder is unavailable in this build")
 }

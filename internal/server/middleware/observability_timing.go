@@ -6,14 +6,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// WithTimingEntry creates an otel.Timing, stamps EntryNanos with the
-// current wall clock, and attaches the Timing to the request context.
-// Provider adapters and proxy.Service read it back via otel.TimingFrom
-// to stamp upstream milestones (TTFB, EOF) and compute derived latency
-// attributes on the OTel spans.
+// WithTimingEntry creates an otel.Timing, stamps EntryNanos, and attaches it to the request context for downstream readers (provider adapters, proxy.Service) via otel.TimingFrom.
 //
-// Must be registered before WithTimeout so the entry stamp reflects the
-// true gin-entry instant, not the post-deadline-setup instant.
+// Must be registered before WithTimeout so the entry stamp reflects the true gin-entry instant, not the post-deadline-setup instant.
 func WithTimingEntry() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, t := otel.WithTiming(c.Request.Context())

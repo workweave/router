@@ -1,7 +1,4 @@
-// Package openai is the providers.Client adapter for OpenAI's Chat Completions
-// API. Proxy rewrites the request body's `model` field to the routed model and
-// streams the response back without protocol translation, since both the
-// inbound and outbound surfaces are OpenAI Chat Completions.
+// Package openai is the providers.Client adapter for OpenAI's Chat Completions API.
 package openai
 
 import (
@@ -23,10 +20,9 @@ import (
 
 const DefaultBaseURL = "https://api.openai.com"
 
-// upstreamTraceEnabled mirrors ROUTER_DEBUG_UPSTREAM_TRACE=true. When on, the
-// OpenAI/Google adapter dumps response status, headers, and a body preview
-// per request — pair with ROUTER_DEBUG_SSE_TRACE to see exactly what's
-// crossing the OpenAI ↔ Anthropic translation boundary.
+// upstreamTraceEnabled mirrors ROUTER_DEBUG_UPSTREAM_TRACE=true. When on, dumps
+// response status, headers, and a body preview per request — pair with
+// ROUTER_DEBUG_SSE_TRACE to see what's crossing the OpenAI <-> Anthropic boundary.
 var upstreamTraceEnabled = os.Getenv("ROUTER_DEBUG_UPSTREAM_TRACE") == "true"
 
 type Client struct {
@@ -35,7 +31,6 @@ type Client struct {
 	http    *http.Client
 }
 
-// NewClient is pooled for sustained traffic to a single host (api.openai.com).
 func NewClient(apiKey, baseURL string) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
@@ -53,8 +48,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		return fmt.Errorf("build upstream request: %w", err)
 	}
 	upstream.Header.Set("Content-Type", "application/json")
-	// Use per-request BYOK credentials when available; fall back to the
-	// deployment-level API key (plan-based auth).
+	// BYOK credentials take precedence over the deployment-level API key.
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
 	} else if c.apiKey != "" {
@@ -138,9 +132,6 @@ func truncateBytes(b []byte, n int) string {
 	return string(b[:n]) + "…"
 }
 
-// Passthrough forwards an inbound request to the same path on OpenAI without
-// model rewriting or routing logic. Used for endpoints like /v1/models that
-// clients probe for model availability.
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	url := c.baseURL + r.URL.Path
 	if r.URL.RawQuery != "" {
@@ -154,8 +145,7 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		upstream.Header.Set("Content-Type", ct)
 	}
-	// Use per-request BYOK credentials when available; fall back to the
-	// deployment-level API key (plan-based auth).
+	// BYOK credentials take precedence over the deployment-level API key.
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
 	} else if c.apiKey != "" {

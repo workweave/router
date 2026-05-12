@@ -21,8 +21,7 @@ import (
 const maxBodyBytes = 10 * 1024 * 1024
 
 // ChatCompletionHandler wires POST /v1/chat/completions to proxy.Service.ProxyOpenAIChatCompletion.
-// authSvc is used to upsert the end-user identity once email is read from
-// X-Weave-User-Email; pass nil to skip user resolution (tests).
+// authSvc upserts the end-user identity from X-Weave-User-Email; pass nil to skip (tests).
 func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)
@@ -85,9 +84,8 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 	}
 }
 
-// stashClientIdentity extracts user identification signals from HTTP headers
-// and stashes them on the context. OpenAI-format requests don't carry the
-// Anthropic metadata.user_id body field, so only headers are inspected.
+// stashClientIdentity stashes user-identification headers on the context. OpenAI requests don't carry
+// an Anthropic metadata.user_id body field, so only headers contribute.
 func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
 	id := proxy.ClientIdentity{
 		SessionID: proxy.NormalizeClientIdentifier(h.Get("X-Claude-Code-Session-Id")),
