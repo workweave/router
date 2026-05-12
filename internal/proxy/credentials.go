@@ -18,17 +18,26 @@ type Credentials struct {
 // stashed by the auth middleware.
 type ExternalAPIKeysContextKey struct{}
 
-// BuildCredentialsMap builds a map of provider -> Credentials from external keys.
+// BuildCredentialsMap builds a map of provider -> Credentials from external
+// keys. Entries with empty plaintext are dropped: an empty-keyed row would
+// otherwise enroll the provider into the routing eligibility set and cause
+// the scorer to pick a model the upstream call would 401 on.
 func BuildCredentialsMap(keys []*auth.ExternalAPIKey) map[string]*Credentials {
 	if len(keys) == 0 {
 		return nil
 	}
 	m := make(map[string]*Credentials, len(keys))
 	for _, key := range keys {
+		if len(key.Plaintext) == 0 {
+			continue
+		}
 		m[key.Provider] = &Credentials{
 			APIKey: key.Plaintext,
 			Source: "byok",
 		}
+	}
+	if len(m) == 0 {
+		return nil
 	}
 	return m
 }

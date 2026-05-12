@@ -658,6 +658,12 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, headers http.H
 		}
 	}
 	for _, k := range externalKeysFromContext(ctx) {
+		// Empty plaintext (decryption produced no bytes, or a stale row was
+		// written without a value) must not enroll the provider — argmax
+		// would pick it and the upstream call would 401 with no auth header.
+		if len(k.Plaintext) == 0 {
+			continue
+		}
 		out[k.Provider] = struct{}{}
 	}
 	for _, p := range []string{providers.ProviderAnthropic, providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter, providers.ProviderFireworks} {

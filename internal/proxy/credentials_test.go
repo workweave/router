@@ -34,6 +34,32 @@ func TestBuildCredentialsMap_IndexesByProvider(t *testing.T) {
 	assert.Equal(t, []byte("sk-oai-byok"), m["openai"].APIKey)
 }
 
+func TestBuildCredentialsMap_DropsEmptyPlaintext(t *testing.T) {
+	// An empty Plaintext indicates a stale or malformed BYOK row (insertion
+	// bug, or decryption that produced no bytes). Such an entry must not
+	// enroll the provider into the routing eligibility set: argmax would
+	// pick it and the upstream call would 401 with no auth header.
+	keys := []*auth.ExternalAPIKey{
+		{Provider: "openrouter", Plaintext: []byte{}},
+		{Provider: "anthropic", Plaintext: []byte("sk-ant-byok")},
+	}
+	m := proxy.BuildCredentialsMap(keys)
+	require.NotNil(t, m)
+	assert.NotContains(t, m, "openrouter",
+		"BuildCredentialsMap must drop entries with empty Plaintext so the routing layer cannot enroll a provider that would 401 on dispatch")
+	assert.Contains(t, m, "anthropic")
+}
+
+func TestBuildCredentialsMap_NilWhenAllEmpty(t *testing.T) {
+	keys := []*auth.ExternalAPIKey{
+		{Provider: "openrouter", Plaintext: []byte{}},
+		{Provider: "fireworks", Plaintext: nil},
+	}
+	m := proxy.BuildCredentialsMap(keys)
+	assert.Nil(t, m,
+		"when every BYOK entry is empty the map must be nil so callers see 'no BYOK configured' rather than 'BYOK present but unusable'")
+}
+
 func TestExtractClientCredentials_Anthropic(t *testing.T) {
 	headers := http.Header{"X-Api-Key": []string{"sk-ant-client"}}
 	creds := proxy.ExtractClientCredentials("anthropic", headers)
