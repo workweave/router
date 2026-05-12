@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/sessionpin"
@@ -87,7 +86,7 @@ func (s *Service) routeWithSession(
 	pinEligible := s.pinStore != nil
 	var pinCacheKey string
 	if pinEligible {
-		res.SessionKey = DeriveSessionKey(env, apiKeyID, auth.UserIDFrom(ctx))
+		res.SessionKey = DeriveSessionKey(env, apiKeyID)
 		pinCacheKey = sessionPinCacheKey(res.SessionKey, sessionpin.DefaultRole)
 
 		if s.pinCache != nil {

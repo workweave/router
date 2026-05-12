@@ -36,8 +36,8 @@ func TestDeriveSessionKey_StableAcrossTurns(t *testing.T) {
 		]
 	}`)
 
-	k1 := proxy.DeriveSessionKey(turn1, "api-key-A", "")
-	k2 := proxy.DeriveSessionKey(turn2, "api-key-A", "")
+	k1 := proxy.DeriveSessionKey(turn1, "api-key-A")
+	k2 := proxy.DeriveSessionKey(turn2, "api-key-A")
 
 	assert.Equal(t, k1, k2, "key stable across turns: system + first user message don't change")
 	assert.Len(t, k1, sessionpin.SessionKeyLen)
@@ -49,8 +49,8 @@ func TestDeriveSessionKey_DiffersAcrossAPIKeys(t *testing.T) {
 		"messages": [{"role": "user", "content": "hello"}]
 	}`)
 
-	k1 := proxy.DeriveSessionKey(env, "api-key-A", "")
-	k2 := proxy.DeriveSessionKey(env, "api-key-B", "")
+	k1 := proxy.DeriveSessionKey(env, "api-key-A")
+	k2 := proxy.DeriveSessionKey(env, "api-key-B")
 
 	assert.NotEqual(t, k1, k2, "distinct callers must not collide on identical prompts")
 }
@@ -65,8 +65,8 @@ func TestDeriveSessionKey_DiffersAcrossSystemPrompts(t *testing.T) {
 		"messages": [{"role": "user", "content": "go"}]
 	}`)
 
-	kA := proxy.DeriveSessionKey(envA, "api-key", "")
-	kB := proxy.DeriveSessionKey(envB, "api-key", "")
+	kA := proxy.DeriveSessionKey(envA, "api-key")
+	kB := proxy.DeriveSessionKey(envB, "api-key")
 
 	assert.NotEqual(t, kA, kB)
 }
@@ -84,13 +84,16 @@ func TestDeriveSessionKey_PrefersMetadataUserID(t *testing.T) {
 		"messages": [{"role": "user", "content": "third turn"}]
 	}`)
 
-	k1 := proxy.DeriveSessionKey(env1, "api-key", "")
-	k2 := proxy.DeriveSessionKey(env2, "api-key", "")
+	k1 := proxy.DeriveSessionKey(env1, "api-key")
+	k2 := proxy.DeriveSessionKey(env2, "api-key")
 
 	assert.Equal(t, k1, k2, "metadata.user_id takes precedence over prompt-prefix fallback")
 }
 
 func TestDeriveSessionKey_DistinctMetadataUserIDsDoNotCollide(t *testing.T) {
+	// Claude Code packs {device_id, account_uuid, session_id} into
+	// metadata.user_id, so different sessions for the same human produce
+	// different keys — that's the whole point of a *session* pin.
 	envA := anthropicEnv(t, `{
 		"metadata": {"user_id": "device=abc;session=1"},
 		"messages": [{"role": "user", "content": "x"}]
@@ -100,8 +103,8 @@ func TestDeriveSessionKey_DistinctMetadataUserIDsDoNotCollide(t *testing.T) {
 		"messages": [{"role": "user", "content": "x"}]
 	}`)
 
-	kA := proxy.DeriveSessionKey(envA, "api-key", "")
-	kB := proxy.DeriveSessionKey(envB, "api-key", "")
+	kA := proxy.DeriveSessionKey(envA, "api-key")
+	kB := proxy.DeriveSessionKey(envB, "api-key")
 
 	assert.NotEqual(t, kA, kB)
 }
@@ -118,48 +121,15 @@ func TestDeriveSessionKey_MetadataTierDoesNotCollideWithPromptTier(t *testing.T)
 		"messages": [{"role": "user", "content": ""}]
 	}`)
 
-	kMeta := proxy.DeriveSessionKey(envWithMeta, "api-key", "")
-	kNoMeta := proxy.DeriveSessionKey(envNoMeta, "api-key", "")
+	kMeta := proxy.DeriveSessionKey(envWithMeta, "api-key")
+	kNoMeta := proxy.DeriveSessionKey(envNoMeta, "api-key")
 
 	assert.NotEqual(t, kMeta, kNoMeta)
 }
 
-func TestDeriveSessionKey_PrefersRouterUserIDOverMetadata(t *testing.T) {
-	// routerUserID wins over metadata.user_id: same human across devices shares a pin.
-	envDev1 := anthropicEnv(t, `{
-		"metadata": {"user_id": "device=DEV1;session=42"},
-		"messages": [{"role": "user", "content": "hi"}]
-	}`)
-	envDev2 := anthropicEnv(t, `{
-		"metadata": {"user_id": "device=DEV2;session=99"},
-		"messages": [{"role": "user", "content": "different prompt"}]
-	}`)
-
-	k1 := proxy.DeriveSessionKey(envDev1, "api-key", "user-uuid")
-	k2 := proxy.DeriveSessionKey(envDev2, "api-key", "user-uuid")
-
-	assert.Equal(t, k1, k2)
-}
-
-func TestDeriveSessionKey_RouterUserIDTierIsDomainSeparated(t *testing.T) {
-	// routerUserID and metadata.user_id tiers must be domain-separated.
-	envWithMeta := anthropicEnv(t, `{
-		"metadata": {"user_id": "shared-string"},
-		"messages": [{"role": "user", "content": "x"}]
-	}`)
-	envNoMeta := anthropicEnv(t, `{
-		"messages": [{"role": "user", "content": "x"}]
-	}`)
-
-	kMetaTier := proxy.DeriveSessionKey(envWithMeta, "api-key", "")
-	kUserIDTier := proxy.DeriveSessionKey(envNoMeta, "api-key", "shared-string")
-
-	assert.NotEqual(t, kMetaTier, kUserIDTier)
-}
-
 func TestDeriveSessionKey_NilEnvelopeStillKeyedByAPIKey(t *testing.T) {
 	// Defensive: parsing failure must not leak across callers via a shared pin.
-	kA := proxy.DeriveSessionKey(nil, "api-key-A", "")
-	kB := proxy.DeriveSessionKey(nil, "api-key-B", "")
+	kA := proxy.DeriveSessionKey(nil, "api-key-A")
+	kB := proxy.DeriveSessionKey(nil, "api-key-B")
 	assert.NotEqual(t, kA, kB)
 }
