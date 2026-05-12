@@ -8,25 +8,27 @@ import (
 )
 
 // DeriveSessionKey produces the 16-byte digest used to look up a session
-// pin. Three tiers tried in order:
+// pin. Two tiers tried in order:
 //
-//  1. routerUserID (stable across devices for the same human),
-//  2. metadata.user_id (per-device, no email needed),
-//  3. system prompt + first user message (matches Anthropic prompt-cache shape).
+//  1. metadata.user_id (Claude Code packs device_id + account_uuid +
+//     session_id here, so this is session-distinct),
+//  2. system prompt + first user message (matches Anthropic prompt-cache
+//     shape; session-distinct for clients that don't set metadata.user_id).
 //
 // apiKeyID is mixed into all tiers so callers under different keys can't
-// collide on a shared pin. Pure function; empty apiKeyID/routerUserID just
-// fall back to the next tier.
-func DeriveSessionKey(env *translate.RequestEnvelope, apiKeyID, routerUserID string) [sessionpin.SessionKeyLen]byte {
+// collide on a shared pin. Pure function; empty apiKeyID just falls back to
+// the next tier.
+//
+// Routing the same human across separate sessions to the same pin would be a
+// user pin, not a session pin — so the resolved router user ID is
+// deliberately not consulted here.
+func DeriveSessionKey(env *translate.RequestEnvelope, apiKeyID string) [sessionpin.SessionKeyLen]byte {
 	h := sha256.New()
 	h.Write([]byte(apiKeyID))
 	// Domain separator: prevents cross-tier collisions from caller-controlled strings.
 	h.Write([]byte{0x00})
 
 	switch {
-	case routerUserID != "":
-		h.Write([]byte("router_user_id:"))
-		h.Write([]byte(routerUserID))
 	case env != nil && env.MetadataUserID() != "":
 		h.Write([]byte("user_id:"))
 		h.Write([]byte(env.MetadataUserID()))
