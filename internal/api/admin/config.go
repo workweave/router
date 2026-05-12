@@ -10,11 +10,11 @@ import (
 )
 
 type configResponse struct {
-	ClusterVersion       string   `json:"cluster_version"`
-	EmbedLastUserMsg     bool     `json:"embed_last_user_message"`
-	StickyDecisionTTL    string   `json:"sticky_decision_ttl_ms"`
-	OtelEnabled          bool     `json:"otel_enabled"`
-	SemanticCacheEnabled bool     `json:"semantic_cache_enabled"`
+	ClusterVersion       string `json:"cluster_version"`
+	EmbedLastUserMsg     bool   `json:"embed_last_user_message"`
+	StickyDecisionTTL    string `json:"sticky_decision_ttl_ms"`
+	OtelEnabled          bool   `json:"otel_enabled"`
+	SemanticCacheEnabled bool   `json:"semantic_cache_enabled"`
 	// EnvProviderKeys lists provider names whose upstream API key is set
 	// via env var on the deployment (e.g. OPENAI_API_KEY). The dashboard
 	// renders these as read-only entries — they aren't stored in Postgres
