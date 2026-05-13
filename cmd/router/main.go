@@ -297,7 +297,7 @@ func main() {
 		logger.Info("Session pin store enabled (sliding 1h TTL, hourly sweep)")
 	}
 
-	hardPinExplore := config.GetOr("ROUTER_HARD_PIN_EXPLORE", "false") == "true"
+	hardPinExplore := config.GetOr("ROUTER_HARD_PIN_EXPLORE", "true") == "true"
 	// Pin to a model whose provider has actual deployment-level auth — a
 	// BYOK-only registered provider would 401 here since hard-pin compaction
 	// runs on every installation, including ones without their own BYOK.
