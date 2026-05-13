@@ -144,3 +144,27 @@ func TestAllowedAtOrBelow(t *testing.T) {
 	unknown := capability.AllowedAtOrBelow(capability.TierUnknown)
 	assert.Empty(t, unknown)
 }
+
+func TestTierFor_StripsDateSuffix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		model string
+		want  capability.Tier
+	}{
+		// Anthropic dated variants resolve to their base tier.
+		{"claude-haiku-4-5-20251001", capability.TierLow},
+		{"claude-sonnet-4-5-20250929", capability.TierMid},
+		{"claude-opus-4-7-20251015", capability.TierHigh},
+		// Non-dated stays as-is.
+		{"claude-haiku-4-5", capability.TierLow},
+		// Wrong-shaped suffixes (not 8 digits) don't strip; the lookup
+		// fails through to TierUnknown rather than masking typos.
+		{"claude-haiku-4-5-1234567", capability.TierUnknown},
+		{"claude-haiku-4-5-abcdefgh", capability.TierUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			assert.Equal(t, tc.want, capability.TierFor(tc.model))
+		})
+	}
+}

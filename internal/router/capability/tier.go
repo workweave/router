@@ -80,9 +80,39 @@ var tiers = map[string]Tier{
 	"deepseek/deepseek-v4-pro": TierHigh,
 }
 
-// TierFor returns the model's tier, or TierUnknown if absent.
+// TierFor returns the model's tier, or TierUnknown if absent. Anthropic
+// model identifiers carry a "-YYYYMMDD" date suffix (e.g.
+// "claude-haiku-4-5-20251001") that the table doesn't enumerate; we
+// strip an 8-digit suffix before retrying so dated variants resolve.
 func TierFor(model string) Tier {
-	return tiers[model]
+	if t, ok := tiers[model]; ok {
+		return t
+	}
+	if normalized := stripDateSuffix(model); normalized != model {
+		if t, ok := tiers[normalized]; ok {
+			return t
+		}
+	}
+	return TierUnknown
+}
+
+// stripDateSuffix removes a trailing "-XXXXXXXX" (hyphen + 8 digits).
+// Mirror of pricing.stripDateSuffix; kept local so capability doesn't
+// import pricing.
+func stripDateSuffix(model string) string {
+	if len(model) < 10 {
+		return model
+	}
+	tail := model[len(model)-9:]
+	if tail[0] != '-' {
+		return model
+	}
+	for _, c := range tail[1:] {
+		if c < '0' || c > '9' {
+			return model
+		}
+	}
+	return model[:len(model)-9]
 }
 
 // IsAtOrBelow reports whether the given model's tier is known and at or
