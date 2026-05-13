@@ -1,7 +1,9 @@
 -- Reads the active pin for a (session_key, role) pair. Single-row;
 -- returns sql.ErrNoRows when no pin is recorded yet. The caller checks
 -- pinned_until against now() to discard expired rows that the hourly
--- sweep hasn't collected yet.
+-- sweep hasn't collected yet. The last_* token columns and
+-- last_turn_ended_at carry the previous turn's upstream usage; the
+-- planner reads them to weigh switch EV against eviction cost.
 -- name: GetSessionPin :one
 SELECT *
 FROM router.session_pins
@@ -12,7 +14,11 @@ WHERE session_key = @session_key::bytea
 -- turn_count increments on conflict so we can observe how many turns a
 -- single (session_key, role) lives for. installation_id is set on first
 -- insert and not touched on update — re-binding a session to a different
--- installation would indicate a bug, not a legitimate state.
+-- installation would indicate a bug, not a legitimate state. The
+-- last_*_tokens / last_turn_ended_at columns are deliberately omitted
+-- from the ON CONFLICT update set: only UpdateSessionPinUsage writes
+-- them, so the at-start-of-turn refresh here cannot clobber the
+-- previous turn's usage with zeros before the planner reads it.
 -- name: UpsertSessionPin :exec
 INSERT INTO router.session_pins (
   session_key, role, installation_id, pinned_provider,
@@ -29,6 +35,23 @@ ON CONFLICT (session_key, role) DO UPDATE SET
   turn_count      = router.session_pins.turn_count + 1,
   pinned_until    = EXCLUDED.pinned_until,
   last_seen_at    = CURRENT_TIMESTAMP;
+
+-- Records the previous turn's upstream token usage on an existing pin
+-- row. Fired off the request path after the upstream response
+-- completes; the planner reads these columns at the start of the next
+-- turn to compute switch EV against eviction cost. The UPDATE matches
+-- by (session_key, role); if the pin has been evicted or never
+-- existed, zero rows are affected and the adapter wraps that as a
+-- successful no-op.
+-- name: UpdateSessionPinUsage :exec
+UPDATE router.session_pins
+SET last_input_tokens        = @last_input_tokens::int,
+    last_cached_read_tokens  = @last_cached_read_tokens::int,
+    last_cached_write_tokens = @last_cached_write_tokens::int,
+    last_output_tokens       = @last_output_tokens::int,
+    last_turn_ended_at       = @last_turn_ended_at::timestamptz
+WHERE session_key = @session_key::bytea
+  AND role        = @role::varchar;
 
 -- Garbage-collects pins that have been expired for >24h. The 24h grace
 -- means a transient Postgres outage doesn't immediately prune live pins;

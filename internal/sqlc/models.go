@@ -114,13 +114,18 @@ type RouterSessionPin struct {
 	// 16-byte digest derived from api_key_id + (metadata.user_id | system+first-user hashes)
 	SessionKey []byte
 	// Stage 1 always emits "default"; turn-type roles land with §3.3
-	Role           string
-	InstallationID uuid.UUID
-	PinnedProvider string
-	PinnedModel    string
-	DecisionReason string
-	TurnCount      int32
-	PinnedUntil    pgtype.Timestamp
-	FirstPinnedAt  pgtype.Timestamp
-	LastSeenAt     pgtype.Timestamp
+	Role                  string
+	InstallationID        uuid.UUID
+	PinnedProvider        string
+	PinnedModel           string
+	DecisionReason        string
+	TurnCount             int32
+	PinnedUntil           pgtype.Timestamp
+	FirstPinnedAt         pgtype.Timestamp
+	LastSeenAt            pgtype.Timestamp
+	LastInputTokens       int32
+	LastCachedReadTokens  int32
+	LastCachedWriteTokens int32
+	LastOutputTokens      int32
+	LastTurnEndedAt       pgtype.Timestamptz
 }

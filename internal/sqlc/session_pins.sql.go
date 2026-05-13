@@ -13,7 +13,7 @@ import (
 )
 
 const getSessionPin = `-- name: GetSessionPin :one
-SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at
+SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at
 FROM router.session_pins
 WHERE session_key = $1::bytea
   AND role        = $2::varchar
@@ -27,9 +27,11 @@ type GetSessionPinParams struct {
 // Reads the active pin for a (session_key, role) pair. Single-row;
 // returns sql.ErrNoRows when no pin is recorded yet. The caller checks
 // pinned_until against now() to discard expired rows that the hourly
-// sweep hasn't collected yet.
+// sweep hasn't collected yet. The last_* token columns and
+// last_turn_ended_at carry the previous turn's upstream usage; the
+// planner reads them to weigh switch EV against eviction cost.
 //
-//	SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at
+//	SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at
 //	FROM router.session_pins
 //	WHERE session_key = $1::bytea
 //	  AND role        = $2::varchar
@@ -47,6 +49,11 @@ func (q *Queries) GetSessionPin(ctx context.Context, arg GetSessionPinParams) (R
 		&i.PinnedUntil,
 		&i.FirstPinnedAt,
 		&i.LastSeenAt,
+		&i.LastInputTokens,
+		&i.LastCachedReadTokens,
+		&i.LastCachedWriteTokens,
+		&i.LastOutputTokens,
+		&i.LastTurnEndedAt,
 	)
 	return i, err
 }
@@ -65,6 +72,56 @@ WHERE pinned_until < now() - interval '24 hours'
 //	WHERE pinned_until < now() - interval '24 hours'
 func (q *Queries) SweepExpiredSessionPins(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, sweepExpiredSessionPins)
+	return err
+}
+
+const updateSessionPinUsage = `-- name: UpdateSessionPinUsage :exec
+UPDATE router.session_pins
+SET last_input_tokens        = $1::int,
+    last_cached_read_tokens  = $2::int,
+    last_cached_write_tokens = $3::int,
+    last_output_tokens       = $4::int,
+    last_turn_ended_at       = $5::timestamptz
+WHERE session_key = $6::bytea
+  AND role        = $7::varchar
+`
+
+type UpdateSessionPinUsageParams struct {
+	LastInputTokens       int32
+	LastCachedReadTokens  int32
+	LastCachedWriteTokens int32
+	LastOutputTokens      int32
+	LastTurnEndedAt       pgtype.Timestamptz
+	SessionKey            []byte
+	Role                  string
+}
+
+// Records the previous turn's upstream token usage on an existing pin
+// row. Fired off the request path after the upstream response
+// completes; the planner reads these columns at the start of the next
+// turn to compute switch EV against eviction cost. The UPDATE matches
+// by (session_key, role); if the pin has been evicted or never
+// existed, zero rows are affected and the adapter wraps that as a
+// successful no-op.
+//
+//	UPDATE router.session_pins
+//	SET last_input_tokens        = $1::int,
+//	    last_cached_read_tokens  = $2::int,
+//	    last_cached_write_tokens = $3::int,
+//	    last_output_tokens       = $4::int,
+//	    last_turn_ended_at       = $5::timestamptz
+//	WHERE session_key = $6::bytea
+//	  AND role        = $7::varchar
+func (q *Queries) UpdateSessionPinUsage(ctx context.Context, arg UpdateSessionPinUsageParams) error {
+	_, err := q.db.Exec(ctx, updateSessionPinUsage,
+		arg.LastInputTokens,
+		arg.LastCachedReadTokens,
+		arg.LastCachedWriteTokens,
+		arg.LastOutputTokens,
+		arg.LastTurnEndedAt,
+		arg.SessionKey,
+		arg.Role,
+	)
 	return err
 }
 
@@ -101,7 +158,11 @@ type UpsertSessionPinParams struct {
 // turn_count increments on conflict so we can observe how many turns a
 // single (session_key, role) lives for. installation_id is set on first
 // insert and not touched on update — re-binding a session to a different
-// installation would indicate a bug, not a legitimate state.
+// installation would indicate a bug, not a legitimate state. The
+// last_*_tokens / last_turn_ended_at columns are deliberately omitted
+// from the ON CONFLICT update set: only UpdateSessionPinUsage writes
+// them, so the at-start-of-turn refresh here cannot clobber the
+// previous turn's usage with zeros before the planner reads it.
 //
 //	INSERT INTO router.session_pins (
 //	  session_key, role, installation_id, pinned_provider,

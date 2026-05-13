@@ -61,6 +61,10 @@ func (f *fakePinStore) Upsert(ctx context.Context, p sessionpin.Pin) error {
 	return nil
 }
 
+func (f *fakePinStore) UpdateUsage(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string, usage sessionpin.Usage) error {
+	return nil
+}
+
 func (f *fakePinStore) SweepExpired(ctx context.Context) error { return nil }
 
 func waitForUpsert(t *testing.T, store *fakePinStore) {
