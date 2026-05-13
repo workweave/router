@@ -98,10 +98,10 @@ func TestParseAlphaSuffix(t *testing.T) {
 		{"v0.38-a00", "v0.38", 0, true},
 		{"v0.38-a05", "v0.38", 5, true},
 		{"v0.38-a10", "v0.38", 10, true},
-		{"v0.38", "", 0, false},        // no suffix → not an alpha bundle
-		{"v0.38-a11", "", 0, false},    // out of 0..10 range
-		{"v0.38-a5", "", 0, false},     // not two-digit
-		{"v0.38-aXY", "", 0, false},    // non-numeric
+		{"v0.38", "", 0, false},     // no suffix → not an alpha bundle
+		{"v0.38-a11", "", 0, false}, // out of 0..10 range
+		{"v0.38-a5", "", 0, false},  // not two-digit
+		{"v0.38-aXY", "", 0, false}, // non-numeric
 		{"plain", "", 0, false},
 	}
 	for _, tc := range cases {
