@@ -10,10 +10,6 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// TestRoutingMarkerFor_PlannerPaths covers the planner outcomes a reader
-// of the assistant pane is most likely to see, plus the no-planner
-// fallbacks. The upfront marker reports brand + model + reason only;
-// savings live on the closing marker (see TestClosingMarkerFor_*).
 func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 	decision := router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "openrouter"}
 
@@ -71,7 +67,6 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 			name: "no planner ran, fresh decision: first-turn fallback reason",
 			res: turnLoopResult{
 				Decision: decision,
-				// PlannerDecision zero-valued (Reason == "").
 			},
 			wantContains: []string{
 				"reason: first turn",
@@ -118,21 +113,17 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				assert.NotContains(t, got, nope)
 			}
 			assert.True(t, len(got) >= 2 && got[len(got)-2:] == "\n\n",
-				"marker must terminate with a blank line so the upstream response starts on its own paragraph")
+				"marker must terminate with a blank line")
 		})
 	}
 }
 
 func TestRoutingMarkerFor_EmptyDecisionEmitsNothing(t *testing.T) {
-	// Defensive: a routing path that produced no Decision.Model shouldn't
-	// inject an empty / malformed marker into the response.
 	got := routingMarkerFor(turnLoopResult{Decision: router.Decision{}})
 	assert.Empty(t, got)
 }
 
 func TestRoutingMarkerFor_OmitsProviderParensWhenProviderMissing(t *testing.T) {
-	// Some upstream paths populate Model but not Provider. Marker must
-	// still be well-formed (no trailing empty parens).
 	got := routingMarkerFor(turnLoopResult{
 		Decision: router.Decision{Model: "claude-haiku-4-5"},
 		PlannerDecision: planner.Decision{
@@ -144,30 +135,14 @@ func TestRoutingMarkerFor_OmitsProviderParensWhenProviderMissing(t *testing.T) {
 	assert.Contains(t, got, "reason: first turn")
 }
 
-// TestHumanReasonFromPlanner_UnknownCodePassesThrough verifies the
-// fail-loud behavior: a new planner reason code that hasn't been added
-// to the human-readable map surfaces in the marker as its raw label,
-// not as silently dropped text.
 func TestHumanReasonFromPlanner_UnknownCodePassesThrough(t *testing.T) {
 	got := humanReasonFromPlanner("brand_new_reason_v9")
 	assert.Equal(t, "brand_new_reason_v9", got)
 }
 
-// TestClosingMarkerFor_EmitsSavingsWhenRoutedIsCheaper exercises the
-// happy path: routed to a cheap model, request was for an expensive
-// one, savings > $0.0001 → marker fires with the correct dollar amount
-// and "vs <requested>" framing.
 func TestClosingMarkerFor_EmitsSavingsWhenRoutedIsCheaper(t *testing.T) {
-	// claude-opus-4-7: $15 input / $75 output / 0.10 cache mult
-	// deepseek/deepseek-v4-pro: $0.435 input / $0.870 output / 0.10 cache mult
-	// Usage: 10k non-cached input, 5k cache-read, 1k output.
-	//   routed input    = 10000*0.435 + 5000*0.435*0.10 = 4350 + 217.5 = 4567.5
-	//   routed output   = 1000*0.870 = 870
-	//   routed total    = 5437.5 / 1e6 = $0.0054375
-	//   requested input = 10000*15 + 5000*15*0.10 = 150000 + 7500 = 157500
-	//   requested out   = 1000*75 = 75000
-	//   requested total = 232500 / 1e6 = $0.2325
-	//   savings         = 0.2325 - 0.0054375 = $0.2270625
+	// opus 4.7 ($15/$75) vs deepseek-v4-pro ($0.435/$0.870), 0.10 cache mult,
+	// 10k non-cached + 5k cache-read in / 1k out → savings = $0.2271.
 	fn := closingMarkerFor(
 		router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "openrouter"},
 		"claude-opus-4-7",
@@ -176,10 +151,6 @@ func TestClosingMarkerFor_EmitsSavingsWhenRoutedIsCheaper(t *testing.T) {
 	assert.Equal(t, "✦ saved $0.2271 vs claude-opus-4-7 (15k in / 1k out)", got)
 }
 
-// TestClosingMarkerFor_FormatsTokenCounts pins the order-of-magnitude
-// short-form rendering so the marker stays legible across sub-1k,
-// thousands, and million-token turns. Demos rely on this readability:
-// "127k in" is what makes the savings number believable.
 func TestClosingMarkerFor_FormatsTokenCounts(t *testing.T) {
 	fn := closingMarkerFor(
 		router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "openrouter"},
@@ -215,7 +186,6 @@ func TestClosingMarkerFor_FormatsTokenCounts(t *testing.T) {
 }
 
 func TestClosingMarkerFor_NoEmissionWhenRoutedEqualsRequested(t *testing.T) {
-	// Identity case: nothing to compare against → no marker.
 	fn := closingMarkerFor(
 		router.Decision{Model: "claude-opus-4-7", Provider: "anthropic"},
 		"claude-opus-4-7",
@@ -225,9 +195,7 @@ func TestClosingMarkerFor_NoEmissionWhenRoutedEqualsRequested(t *testing.T) {
 }
 
 func TestClosingMarkerFor_NoEmissionWhenSavingsAreNonPositive(t *testing.T) {
-	// Routed to the EXPENSIVE side relative to what the client asked
-	// for — the marker mustn't advertise a loss. Inverse of the happy
-	// path above.
+	// Routed to the more expensive side — marker mustn't advertise a loss.
 	fn := closingMarkerFor(
 		router.Decision{Model: "claude-opus-4-7", Provider: "anthropic"},
 		"deepseek/deepseek-v4-pro",
@@ -237,7 +205,6 @@ func TestClosingMarkerFor_NoEmissionWhenSavingsAreNonPositive(t *testing.T) {
 }
 
 func TestClosingMarkerFor_NoEmissionWhenPricingMissing(t *testing.T) {
-	// Routed model unknown to the pricing table → can't compute → skip.
 	fn := closingMarkerFor(
 		router.Decision{Model: "imaginary-model-v0", Provider: "openrouter"},
 		"claude-opus-4-7",
@@ -247,8 +214,7 @@ func TestClosingMarkerFor_NoEmissionWhenPricingMissing(t *testing.T) {
 }
 
 func TestClosingMarkerFor_NoEmissionWhenSavingsBelowEpsilon(t *testing.T) {
-	// Tiny token counts → savings fall below $0.0001 floor → skip so
-	// the marker doesn't flicker for trivial turns.
+	// Savings below $0.0001 → skip so the marker doesn't flicker.
 	fn := closingMarkerFor(
 		router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "openrouter"},
 		"claude-opus-4-7",
