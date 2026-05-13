@@ -1,0 +1,141 @@
+internal/api/admin/excluded_models.go
+  s_4f9371a766c853::t_952a27bcb6d41e 1-141
+internal/router/cluster/assets-gte-modernbert/config.json
+  ai_agent 1-44
+db/migrations/20260513005529_installation-excluded-models.up.sql
+  s_4f9371a766c853::t_c6db8158e2e3c0 1-10
+internal/proxy/gemini.go
+  s_4f9371a766c853::t_99cb75b3e499ce 62
+internal/router/cluster/assets-gte-modernbert/tokenizer.json
+  ai_agent 1-251498
+cmd/router/main.go
+  s_4f9371a766c853::t_a9fb3a445985d7 289-293
+  s_4f9371a766c853::t_58152e1fb66fae 266-279
+frontend/src/app/(app)/settings/page.tsx
+  s_4f9371a766c853::t_711a22eba48918 78-91
+  s_4f9371a766c853::t_de97091212a8e7 15,19
+  s_4f9371a766c853::t_4a6427b477177e 624-750,752-761
+  s_4f9371a766c853::t_87051e8033260a 751
+internal/proxy/service_test.go
+  s_4f9371a766c853::t_133c5d59e467fc 471-521
+internal/router/cluster/artifacts/v0.30/rankings.json
+  ai_agent 1-267
+internal/router/cluster/assets-bge/tokenizer_config.json
+  ai_agent 1-15
+internal/router/cluster/assets-minilm/config.json
+  ai_agent 1-24
+internal/router/cluster/assets-nomic-v1.5/special_tokens_map.json
+  ai_agent 1-37
+internal/router/cluster/scorer.go
+  s_4f9371a766c853::t_6f73e855950a09 271-292
+  s_4f9371a766c853::t_c6e24c3afa68f3 63-73
+internal/router/cluster/artifacts/v0.29/metadata.yaml
+  ai_agent 1-73
+db/migrations/20260513005529_installation-excluded-models.down.sql
+  s_4f9371a766c853::t_9e2ad28dd67955 1-6
+internal/sqlc/models.go
+  s_4f9371a766c853::t_34adfff3192083 51-58
+internal/postgres/converters.go
+  s_4f9371a766c853::t_37da7a92c85802 13-16,18-25
+internal/router/cluster/artifacts/v0.28/rankings.json
+  ai_agent 1-267
+internal/router/cluster/assets-minilm/special_tokens_map.json
+  ai_agent 1
+internal/auth/installation.go
+  s_4f9371a766c853::t_048ae493f27b4b 36-38
+  s_4f9371a766c853::t_65854802b17cae 18-20
+internal/router/cluster/artifacts/v0.29/rankings.json
+  ai_agent 1-267
+db/queries/model_router_installations.sql
+  s_4f9371a766c853::t_3b1ec04c3d9c9b 36-44
+internal/router/cluster/artifacts/v0.30/model_registry.json
+  ai_agent 1-30
+internal/router/cluster/assets-nomic-v1.5/tokenizer_config.json
+  ai_agent 1-55
+internal/sqlc/model_router_api_keys.sql.go
+  s_4f9371a766c853::t_34adfff3192083 95,114,142
+internal/server/middleware/auth.go
+  s_4f9371a766c853::t_78d8ed5e58009e 85-87
+internal/router/cluster/assets-bge/tokenizer.json
+  ai_agent 1-30672
+internal/router/cluster/assets-gte-modernbert/special_tokens_map.json
+  ai_agent 1-37
+internal/router/cluster/artifacts/v0.29/model_registry.json
+  ai_agent 1-30
+internal/postgres/repository.go
+  s_4f9371a766c853::t_05cea289c0a4aa 99-113
+internal/server/server.go
+  s_4f9371a766c853::t_9f23b5d121a796 45-49
+  s_4f9371a766c853::t_bcfb5c6341a18f 83-86
+internal/auth/service_test.go
+  s_4f9371a766c853::t_9378c8a9a1a9da 132,302,430,527
+  s_4f9371a766c853::t_eab9773ba2a8ee 118
+  s_4f9371a766c853::t_baea8fd76c880d 96-98,112-117
+  s_4f9371a766c853::t_08ca33bcb30f64 549-582
+frontend/src/lib/api.ts
+  s_4f9371a766c853::t_f55f99d72223cc 115-125
+  s_4f9371a766c853::t_d1f3d9221727d0 183-190
+internal/router/cluster/artifacts/v0.28/metadata.yaml
+  ai_agent 1-73
+internal/auth/service.go
+  s_4f9371a766c853::t_a1acf0701386bd 163-197
+  s_4f9371a766c853::t_2b35d0558f7c3f 7,16-18
+internal/server/server_test.go
+  s_4f9371a766c853::t_eea50feb83d018 67
+  s_4f9371a766c853::t_e876e987f08c15 6,13-17
+  s_4f9371a766c853::t_f5e626453a5363 79
+  s_4f9371a766c853::t_1d581ebe18ae91 60-61
+internal/router/cluster/assets-bge/special_tokens_map.json
+  ai_agent 1-7
+internal/router/cluster/assets-gte-modernbert/tokenizer_config.json
+  ai_agent 1-945
+internal/router/cluster/assets-bge/config.json
+  ai_agent 1-31
+internal/router/cluster/assets-minilm/tokenizer.json
+  ai_agent 1
+internal/router/router.go
+  s_4f9371a766c853::t_45acf533524fd1 15-19
+internal/router/cluster/assets-minilm/tokenizer_config.json
+  ai_agent 1
+internal/router/cluster/assets-nomic-v1.5/tokenizer.json
+  ai_agent 1-30672
+internal/router/cluster/artifacts/v0.30/metadata.yaml
+  ai_agent 1-73
+internal/router/cluster/assets-nomic-v1.5/config.json
+  ai_agent 1-77
+internal/auth/user_test.go
+  s_4f9371a766c853::t_9378c8a9a1a9da 55,163
+internal/router/cluster/multiversion.go
+  s_4f9371a766c853::t_7f6d137862bbb0 64-74
+internal/proxy/service.go
+  s_4f9371a766c853::t_7b7b6cd71a30a0 77-110
+  s_4f9371a766c853::t_76ee3cb252ecb9 9
+  s_4f9371a766c853::t_2fb5b4f97417f6 57-60
+  s_4f9371a766c853::t_d9a4c0bb17a123 160-198
+  s_4f9371a766c853::t_2479ea9fe3d54c 414,880
+internal/sqlc/model_router_installations.sql.go
+  s_4f9371a766c853::t_34adfff3192083 25,46,58,64,78,94,100,109,131,167-190
+internal/router/cluster/scorer_test.go
+  s_4f9371a766c853::t_80ffb667c7a31f 561-586,589-610
+  s_4f9371a766c853::t_1fc52f75ef6e87 587-588
+internal/router/cluster/artifacts/v0.28/model_registry.json
+  ai_agent 1-30
+internal/server/middleware/auth_test.go
+  s_4f9371a766c853::t_52d357406deafc 77-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "636c540c3cfc40b210fcce90b5026a363104538f",
+  "prompts": {},
+  "sessions": {
+    "s_4f9371a766c853": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "054f8a31-0199-4699-b207-ca4951082849",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
