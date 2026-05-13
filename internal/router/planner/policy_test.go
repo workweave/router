@@ -36,6 +36,13 @@ var availableAll = map[string]struct{}{
 	modelGPT5:   {},
 }
 
+// tierUpgradeCfg mirrors defaultCfg with the tier guard on.
+var tierUpgradeCfg = planner.EVConfig{
+	ThresholdUSD:           0.001,
+	ExpectedRemainingTurns: 3,
+	TierUpgradeEnabled:     true,
+}
+
 // pinWithUsage returns a populated pin that has completed at least one
 // turn, so the planner's LastTurnEndedAt-zero guard does not fire.
 func pinWithUsage(model string) sessionpin.Pin {
@@ -239,6 +246,57 @@ func TestDecide(t *testing.T) {
 			expectEVMath:           true,
 			wantExpectedSavingsUSD: 0.0375,
 			wantEvictionCostUSD:    0.0625,
+		},
+		{
+			// Mirror of ev_negative; pinned here so the next case can show
+			// the tier knob is what flips the verdict.
+			name: "tier_upgrade_disabled: low -> high still stays",
+			in: planner.Inputs{
+				Pin:                  pinWithUsage(modelHaiku),
+				Fresh:                router.Decision{Model: modelOpus},
+				EstimatedInputTokens: 50_000,
+				AvailableModels:      availableAll,
+			},
+			cfg:                    defaultCfg, // TierUpgradeEnabled = false
+			want:                   planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
+			expectEVMath:           true,
+			wantExpectedSavingsUSD: -0.213,
+			wantEvictionCostUSD:    0.675,
+		},
+		{
+			// Same EV-loss as above; guard on flips it because opus is
+			// strictly higher tier than haiku. USD fields still populated.
+			name: "tier_upgrade: low -> high flips stay into switch",
+			in: planner.Inputs{
+				Pin:                  pinWithUsage(modelHaiku),
+				Fresh:                router.Decision{Model: modelOpus},
+				EstimatedInputTokens: 50_000,
+				AvailableModels:      availableAll,
+			},
+			cfg:                    tierUpgradeCfg,
+			want:                   planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonTierUpgrade},
+			expectEVMath:           true,
+			wantExpectedSavingsUSD: -0.213,
+			wantEvictionCostUSD:    0.675,
+		},
+		{
+			// Sonnet (Mid) -> haiku (Low) is a downgrade; guard must
+			// not fire, EV math governs.
+			name: "tier_upgrade: downgrade does not trigger guard",
+			in: planner.Inputs{
+				Pin:                  pinWithUsage(modelSonnet),
+				Fresh:                router.Decision{Model: modelHaiku},
+				EstimatedInputTokens: 1000,
+				AvailableModels:      availableAll,
+			},
+			cfg:          tierUpgradeCfg,
+			want:         planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
+			expectEVMath: true,
+			// savingsPerTurn = (3.00 - 0.80) * 0.1 * 1000 / 1e6 = $0.00022
+			// expectedSavings = 0.00022 * 3 = $0.00066
+			// evictionCost   = 0.80 * 1000 * 0.9 / 1e6 = $0.00072
+			wantExpectedSavingsUSD: 0.00066,
+			wantEvictionCostUSD:    0.00072,
 		},
 	}
 

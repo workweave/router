@@ -31,6 +31,7 @@ import (
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
+	"workweave/router/internal/router/capability"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
@@ -332,6 +333,7 @@ func main() {
 	plannerCfg := planner.EVConfig{
 		ThresholdUSD:           parseEnvFloat("ROUTER_SWITCH_EV_THRESHOLD_USD", proxy.DefaultPlannerThresholdUSD),
 		ExpectedRemainingTurns: parseEnvInt("ROUTER_SWITCH_EXPECTED_REMAINING_TURNS", proxy.DefaultPlannerExpectedRemainingTurns),
+		TierUpgradeEnabled:     config.GetOr("ROUTER_SWITCH_TIER_UPGRADE_ENABLED", boolDefault(proxy.DefaultPlannerTierUpgradeEnabled)) == "true",
 	}
 	handoverProviderName := config.GetOr("ROUTER_HANDOVER_PROVIDER", providers.ProviderAnthropic)
 	handoverModel := config.GetOr("ROUTER_HANDOVER_MODEL", proxy.DefaultHandoverModel)
@@ -361,7 +363,20 @@ func main() {
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels)
-	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "available_models_count", len(availableModels))
+	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
+
+	// Fail loud if a deployed model is missing from the tier table;
+	// TierUnknown would silently disable the guard for that pair.
+	if plannerCfg.TierUpgradeEnabled && len(availableModels) > 0 {
+		deployed := make([]string, 0, len(availableModels))
+		for m := range availableModels {
+			deployed = append(deployed, m)
+		}
+		if err := capability.Validate(deployed); err != nil {
+			logger.Error("Capability tier table incomplete; refusing to start with tier guard enabled", "err", err)
+			panic(err)
+		}
+	}
 
 	// ROUTER_EXCLUDED_MODELS pins a deployment-wide model exclusion list,
 	// overriding per-installation DB state. Empty / unset → DB takes over.
@@ -656,6 +671,14 @@ func parseEnvFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	return v
+}
+
+// boolDefault renders a bool default for config.GetOr on bool envs.
+func boolDefault(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // parseEnvDurationMs reads an env var as a millisecond integer and returns
