@@ -60,7 +60,7 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 	if isCompaction(systemText) {
 		return Compaction
 	}
-	if isSubAgentDispatch(env.MetadataUserID(), subAgentHint) {
+	if isSubAgentDispatch(env.MetadataUserID(), env.FirstUserMessageText(), subAgentHint) {
 		return SubAgentDispatch
 	}
 	if feats.LastKind == "tool_result" {
@@ -87,21 +87,46 @@ func isCompaction(systemText string) bool {
 }
 
 // isSubAgentDispatch reports whether the request originates from a
-// sub-agent dispatch. Claude Code packs sub-agent identity into
-// metadata.user_id as "subagent:<type>"; non-Anthropic clients pass it
-// via the x-weave-subagent-type header.
+// sub-agent dispatch. Three independent signals:
 //
-// A system-prompt string-match fallback used to live here ("subagent_type"
-// / "sub-agent") but was removed: Claude Code's main-loop system prompt
-// includes the Agent tool description, which contains the literal
-// "subagent_type" parameter name. That false-positive misclassified every
-// main-loop turn as a sub-agent and, with ROUTER_HARD_PIN_EXPLORE=true,
-// hard-pinned them all to the cheap model. Per this file's invariant,
-// false negatives (returning MainLoop) are safe — the cluster scorer
-// runs normally — so we keep detection to the two authoritative signals.
-func isSubAgentDispatch(metadataUserID, subAgentHint string) bool {
+//  1. x-weave-subagent-type header — set by non-Anthropic clients or
+//     middleware that knows it dispatched a sub-agent.
+//  2. metadata.user_id starting with "subagent:" — older Anthropic SDK
+//     convention.
+//  3. First user message wrapped in Claude Code's "<transcript>...</transcript>"
+//     envelope — what Claude Code's Agent tool actually emits today for
+//     dispatches like Explore. metadata.user_id is unset in this case
+//     (Claude Code reuses the parent session_id), so without this signal
+//     real Explore agents would never classify as SubAgentDispatch.
+//
+// "<transcript>" lives in the user-message body, not the system prompt.
+// That's deliberate: an earlier attempt matched "subagent_type" in the
+// system text and false-positived on every main-loop turn that exposed
+// the Agent tool description (since the tool description contains that
+// parameter name verbatim). The "<transcript>" envelope is specific to
+// dispatched sub-agent prompts and does not appear in main-loop traffic.
+//
+// Per this file's invariant, false negatives (returning MainLoop) are
+// safe — the cluster scorer runs normally; only false positives are
+// dangerous.
+func isSubAgentDispatch(metadataUserID, firstUserText, subAgentHint string) bool {
 	if subAgentHint != "" {
 		return true
 	}
-	return strings.HasPrefix(metadataUserID, "subagent:")
+	if strings.HasPrefix(metadataUserID, "subagent:") {
+		return true
+	}
+	// Claude Code's Agent tool wraps the dispatched prompt as:
+	//   <transcript>
+	//   User: <body>
+	//   </transcript>
+	// Look at a bounded prefix so a stray "<transcript>" string embedded
+	// deep in user content can't trigger SubAgentDispatch on a long
+	// main-loop turn.
+	const sniffLen = 64
+	prefix := firstUserText
+	if len(prefix) > sniffLen {
+		prefix = prefix[:sniffLen]
+	}
+	return strings.Contains(prefix, "<transcript>")
 }
