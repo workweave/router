@@ -1,0 +1,13 @@
+internal/api/anthropic/route.go
+  ai_agent 37-44,48
+internal/proxy/service.go
+  ai_agent 272-284,852,855,924,942,1086,1108
+internal/proxy/gemini.go
+  ai_agent 54,57,99,116,186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "9aa6a9e68732355a143dcf2959ffd22c96e7ce56",
+  "prompts": {}
+}

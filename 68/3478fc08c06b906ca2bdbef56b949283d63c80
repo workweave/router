@@ -1,0 +1,21 @@
+internal/api/admin/excluded_models.go
+  s_771c32aa83b174::t_60f1076dcad33f 76
+  s_771c32aa83b174::t_35622c4f30c08a 47-64
+  s_771c32aa83b174::t_1558658432f555 139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "683478fc08c06b906ca2bdbef56b949283d63c80",
+  "prompts": {},
+  "sessions": {
+    "s_771c32aa83b174": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2e7c36a-b781-4b42-8327-0788380bc09e",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
