@@ -362,6 +362,30 @@ type AnthropicSSETranslator struct {
 	modelFromUpstream string
 
 	usageSink otel.UsageSink
+
+	// usageCacheReadTokens is the prompt-cache hit count; kept on the
+	// translator so the closing-marker callback can compute savings.
+	usageCacheReadTokens int
+
+	// routingMarker, when non-empty, is emitted as a standalone text block
+	// at index 0 right after message_start. markerEmitted guards single emission.
+	routingMarker string
+	markerEmitted bool
+
+	// closingMarkerFn, when non-nil, is invoked from finishStream after the
+	// last upstream block closes; a non-empty return is emitted as a final
+	// text block before message_delta.
+	closingMarkerFn      func(Usage) string
+	closingMarkerEmitted bool
+}
+
+// Usage is the upstream-observed token breakdown passed to the closing-marker
+// callback. CacheCreationTokens is zero for OpenAI-style upstreams.
+type Usage struct {
+	InputTokens         int
+	OutputTokens        int
+	CacheReadTokens     int
+	CacheCreationTokens int
 }
 
 // NewAnthropicSSETranslator wraps w. Call Finalize after upstream returns.
@@ -374,6 +398,29 @@ func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink 
 		requestModel: requestModel,
 		toolBlocks:   make(map[int]int),
 		usageSink:    sink,
+	}
+}
+
+// WithRoutingMarker installs a text snippet emitted as a standalone content
+// block at index 0 immediately after message_start. Empty string disables it.
+func (t *AnthropicSSETranslator) WithRoutingMarker(marker string) *AnthropicSSETranslator {
+	t.routingMarker = marker
+	return t
+}
+
+// WithClosingMarker installs a callback invoked from finishStream after the
+// last upstream block closes; a non-empty return is emitted as a final text
+// block before message_delta.
+func (t *AnthropicSSETranslator) WithClosingMarker(fn func(Usage) string) *AnthropicSSETranslator {
+	t.closingMarkerFn = fn
+	return t
+}
+
+func (t *AnthropicSSETranslator) usage() Usage {
+	return Usage{
+		InputTokens:     t.usageInputTokens,
+		OutputTokens:    t.usageOutputTokens,
+		CacheReadTokens: t.usageCacheReadTokens,
 	}
 }
 
@@ -528,6 +575,9 @@ func (t *AnthropicSSETranslator) translateOpenAIEvent(raw []byte) error {
 			return err
 		}
 		t.started = true
+		if err := t.emitRoutingMarkerIfConfigured(); err != nil {
+			return err
+		}
 	}
 
 	delta := firstChoice.Get("delta")
@@ -554,6 +604,7 @@ func (t *AnthropicSSETranslator) extractAndForwardUsage(data []byte) {
 	cachedRead := usage.Get("prompt_tokens_details.cached_tokens").Int()
 	t.usageInputTokens = int(prompt)
 	t.usageOutputTokens = int(completion)
+	t.usageCacheReadTokens = int(cachedRead)
 	t.hasUsage = true
 	if t.usageSink != nil {
 		t.usageSink.RecordUsage(int(prompt), int(completion))
@@ -611,12 +662,62 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 	return emitErr
 }
 
+// emitRoutingMarkerIfConfigured emits the routing marker as a standalone text
+// block at the current index, once per response.
+func (t *AnthropicSSETranslator) emitRoutingMarkerIfConfigured() error {
+	if t.markerEmitted || t.routingMarker == "" {
+		return nil
+	}
+	idx := t.blockIdx
+	if err := t.emitContentBlockStartText(idx); err != nil {
+		return err
+	}
+	if err := t.emitContentBlockDeltaText(idx, t.routingMarker); err != nil {
+		return err
+	}
+	if err := t.emitContentBlockStop(idx); err != nil {
+		return err
+	}
+	t.blockIdx++
+	t.markerEmitted = true
+	return nil
+}
+
+// emitClosingMarkerIfConfigured invokes the callback (if any) and emits a
+// final text block when it returns non-empty. Empty returns are a no-op.
+func (t *AnthropicSSETranslator) emitClosingMarkerIfConfigured() error {
+	if t.closingMarkerEmitted || t.closingMarkerFn == nil {
+		return nil
+	}
+	text := t.closingMarkerFn(t.usage())
+	if text == "" {
+		t.closingMarkerEmitted = true
+		return nil
+	}
+	idx := t.blockIdx
+	if err := t.emitContentBlockStartText(idx); err != nil {
+		return err
+	}
+	if err := t.emitContentBlockDeltaText(idx, text); err != nil {
+		return err
+	}
+	if err := t.emitContentBlockStop(idx); err != nil {
+		return err
+	}
+	t.blockIdx++
+	t.closingMarkerEmitted = true
+	return nil
+}
+
 func (t *AnthropicSSETranslator) finishStream() error {
 	if !t.started {
 		if err := t.emitMessageStart(); err != nil {
 			return err
 		}
 		t.started = true
+		if err := t.emitRoutingMarkerIfConfigured(); err != nil {
+			return err
+		}
 	}
 	if t.textOpen {
 		if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
@@ -630,6 +731,10 @@ func (t *AnthropicSSETranslator) finishStream() error {
 		}
 	}
 	t.toolBlocks = map[int]int{}
+
+	if err := t.emitClosingMarkerIfConfigured(); err != nil {
+		return err
+	}
 
 	if err := t.emitMessageDelta(); err != nil {
 		return err
