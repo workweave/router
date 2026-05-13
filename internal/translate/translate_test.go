@@ -616,8 +616,8 @@ func TestAnthropicSSETranslator_RoutingMarkerEmittedBeforeUpstreamContent(t *tes
 
 func TestAnthropicSSETranslator_RoutingMarkerEmittedOnEmptyUpstream(t *testing.T) {
 	rec := httptest.NewRecorder()
-	marker := "✦ **Weave Router** → gpt-5-mini (openai) · reason: first turn\n\n"
-	markerProse := "✦ **Weave Router** → gpt-5-mini (openai) · reason: first turn"
+	marker := "✦ **Weave Router** → gpt-5-mini (openai) · reason: top scorer\n\n"
+	markerProse := "✦ **Weave Router** → gpt-5-mini (openai) · reason: top scorer"
 	translator := translate.NewAnthropicSSETranslator(rec, "claude-opus-4-7", nil).
 		WithRoutingMarker(marker)
 
