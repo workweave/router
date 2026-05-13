@@ -6,12 +6,16 @@
 //
 // The EV math compares:
 //
-//	expected savings = (Δ input $/M-tok) × tokens × remaining-turn horizon
+//	expected savings = (Δ input $/M-tok) × cache-read multiplier × tokens × remaining-turn horizon
 //	eviction cost    = fresh model input $/M-tok × tokens × (1 - cache-read multiplier)
 //
 // and switches only when (expected savings - eviction cost) exceeds a
-// configurable threshold. The full spec lives in the Prism-style cache-
-// aware routing plan; this file is the executable form.
+// configurable threshold. The cache-read multiplier on the savings term
+// reflects that once a pin is warm, ~(1 - multiplier) of input tokens
+// come from cache on both the pinned and (post-eviction) fresh model;
+// only the delta on the cache-read portion accrues per remaining turn.
+// The full spec lives in the Prism-style cache-aware routing plan; this
+// file is the executable form.
 package planner
 
 import (
@@ -114,7 +118,13 @@ func Decide(in Inputs, cfg EVConfig) Decision {
 	}
 
 	tokens := float64(in.EstimatedInputTokens)
-	savingsPerTurn := (pinPrice.InputUSDPer1M - freshPrice.InputUSDPer1M) * tokens / 1e6
+	// CacheReadMultiplier scales the per-turn delta because, in steady
+	// state on either model, ~(1 - multiplier) of input tokens are served
+	// from the prompt cache. Switching only avoids cost on the cache-read
+	// portion of subsequent turns; pricing the savings off full input
+	// price systematically overstates the switch benefit by 1/multiplier
+	// (~10×) and makes the planner too switch-eager near threshold.
+	savingsPerTurn := (pinPrice.InputUSDPer1M - freshPrice.InputUSDPer1M) * pricing.CacheReadMultiplier * tokens / 1e6
 	evictionCost := freshPrice.InputUSDPer1M * tokens * (1 - pricing.CacheReadMultiplier) / 1e6
 	expectedSavings := savingsPerTurn * float64(cfg.ExpectedRemainingTurns)
 

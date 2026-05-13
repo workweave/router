@@ -125,11 +125,13 @@ func TestDecide(t *testing.T) {
 			want: planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonPricingMissing},
 		},
 		{
-			// EV math for switch from opus -> haiku, 50k input, 3 turns:
-			//   savingsPerTurn = (15.00 - 0.80) * 50000 / 1e6 = 14.20 * 0.05 = $0.71
-			//   evictionCost   = 0.80 * 50000 * 0.9 / 1e6     = 0.80 * 0.045 = $0.036
-			//   expectedSavings = 0.71 * 3 = $2.13
-			//   delta = 2.13 - 0.036 = $2.094 >> $0.001 -> Switch.
+			// EV math for switch from opus -> haiku, 50k input, 3 turns.
+			// Savings are multiplied by CacheReadMultiplier (0.1) because in
+			// steady state most input tokens come from cache on both models:
+			//   savingsPerTurn = (15.00 - 0.80) * 0.1 * 50000 / 1e6 = $0.071
+			//   evictionCost   = 0.80 * 50000 * 0.9 / 1e6           = $0.036
+			//   expectedSavings = 0.071 * 3 = $0.213
+			//   delta = 0.213 - 0.036 = $0.177 >> $0.001 -> Switch.
 			name: "ev_positive: opus -> haiku on a large prompt",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
@@ -140,15 +142,15 @@ func TestDecide(t *testing.T) {
 			cfg:                    defaultCfg,
 			want:                   planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonEVPositive},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: 2.13,
+			wantExpectedSavingsUSD: 0.213,
 			wantEvictionCostUSD:    0.036,
 		},
 		{
 			// Symmetric flip: pinning haiku, fresh recommends opus.
-			//   savingsPerTurn = (0.80 - 15.00) * 0.05 = -$0.71
-			//   evictionCost   = 15.00 * 0.045         = $0.675
-			//   expectedSavings = -0.71 * 3 = -$2.13
-			//   delta = -2.13 - 0.675 = -$2.805 < $0.001 -> Stay.
+			//   savingsPerTurn = (0.80 - 15.00) * 0.1 * 50000 / 1e6 = -$0.071
+			//   evictionCost   = 15.00 * 50000 * 0.9 / 1e6          = $0.675
+			//   expectedSavings = -0.071 * 3 = -$0.213
+			//   delta = -0.213 - 0.675 = -$0.888 < $0.001 -> Stay.
 			name: "ev_negative: haiku -> opus is a huge net loss",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelHaiku),
@@ -159,49 +161,53 @@ func TestDecide(t *testing.T) {
 			cfg:                    defaultCfg,
 			want:                   planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: -2.13,
+			wantExpectedSavingsUSD: -0.213,
 			wantEvictionCostUSD:    0.675,
 		},
 		{
-			// Sonnet -> haiku, tuned to land just BELOW threshold.
-			//   per-token net = (2.20 * 3 - 0.72) / 1e6 = 5.88 / 1e6
-			//   at tokens = 170: net = 5.88 * 170 / 1e6 = $0.0009996
-			//   threshold = $0.001 -> net is 0.04% below; within ±5%.
-			//   expectedSavings = 2.20 * 170 / 1e6 * 3 = $0.001122
-			//   evictionCost    = 0.80 * 170 * 0.9 / 1e6 = $0.0001224
-			//   delta = 0.001122 - 0.0001224 = 0.0009996 -> Stay.
+			// Opus -> sonnet, tuned to land just BELOW threshold under the
+			// corrected (cache-read-aware) EV math.
+			//   per-token net = (3 * 0.1 * (15.00 - 3.00) - 0.9 * 3.00) / 1e6
+			//                 = (3.60 - 2.70) / 1e6 = 0.90 / 1e6
+			//   at tokens = 1111: net = 0.90 * 1111 / 1e6 = $0.0009999
+			//   threshold = $0.001 -> net is 0.01% below.
+			//   expectedSavings = (15.00 - 3.00) * 0.1 * 1111 / 1e6 * 3 = $0.0039996
+			//   evictionCost    = 3.00 * 1111 * 0.9 / 1e6              = $0.0029997
+			//   delta = 0.0039996 - 0.0029997 = $0.0009999 -> Stay.
+			// (sonnet -> haiku no longer straddles threshold: under the
+			// corrected math its per-token net is negative at every horizon.)
 			name: "ev_near_threshold: just below threshold stays stable",
 			in: planner.Inputs{
-				Pin:                  pinWithUsage(modelSonnet),
-				Fresh:                router.Decision{Model: modelHaiku},
-				EstimatedInputTokens: 170,
+				Pin:                  pinWithUsage(modelOpus),
+				Fresh:                router.Decision{Model: modelSonnet},
+				EstimatedInputTokens: 1111,
 				AvailableModels:      availableAll,
 			},
 			cfg:                    defaultCfg,
 			want:                   planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: 0.001122,
-			wantEvictionCostUSD:    0.0001224,
+			wantExpectedSavingsUSD: 0.0039996,
+			wantEvictionCostUSD:    0.0029997,
 		},
 		{
-			// Same sonnet -> haiku math, one extra token nudges across:
-			//   at tokens = 171: net = 5.88 * 171 / 1e6 = $0.00100548
-			//   threshold = $0.001 -> net is 0.5% above; within ±5%.
-			//   expectedSavings = 2.20 * 171 / 1e6 * 3 = $0.0011286
-			//   evictionCost    = 0.80 * 171 * 0.9 / 1e6 = $0.00012312
-			//   delta = 0.0011286 - 0.00012312 = 0.00100548 -> Switch.
+			// Same opus -> sonnet math, one extra token nudges across:
+			//   at tokens = 1112: net = 0.90 * 1112 / 1e6 = $0.0010008
+			//   threshold = $0.001 -> net is 0.08% above.
+			//   expectedSavings = (15.00 - 3.00) * 0.1 * 1112 / 1e6 * 3 = $0.0040032
+			//   evictionCost    = 3.00 * 1112 * 0.9 / 1e6              = $0.0030024
+			//   delta = 0.0040032 - 0.0030024 = $0.0010008 -> Switch.
 			name: "ev_near_threshold: just above threshold flips to switch",
 			in: planner.Inputs{
-				Pin:                  pinWithUsage(modelSonnet),
-				Fresh:                router.Decision{Model: modelHaiku},
-				EstimatedInputTokens: 171,
+				Pin:                  pinWithUsage(modelOpus),
+				Fresh:                router.Decision{Model: modelSonnet},
+				EstimatedInputTokens: 1112,
 				AvailableModels:      availableAll,
 			},
 			cfg:                    defaultCfg,
 			want:                   planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonEVPositive},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: 0.0011286,
-			wantEvictionCostUSD:    0.00012312,
+			wantExpectedSavingsUSD: 0.0040032,
+			wantEvictionCostUSD:    0.0030024,
 		},
 	}
 
