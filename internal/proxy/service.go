@@ -894,6 +894,24 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 		EndedAt:           time.Now(),
 	}
 	key := res.SessionKey
+
+	// Keep the in-proc LRU coherent with the DB writeback. Without this,
+	// loadPin's Tier-1 hit serves a stale pin with zero usage and the
+	// planner returns ReasonNoPriorUsage forever (the 30s LRU TTL keeps
+	// resetting under typical agentic turn cadence), which silently
+	// disables EV-based switching for all active sessions.
+	if s.pinCache != nil {
+		pinCacheKey := sessionPinCacheKey(key, sessionpin.DefaultRole)
+		if pin, ok := s.pinCache.Get(pinCacheKey); ok {
+			pin.LastInputTokens = usage.InputTokens
+			pin.LastCachedReadTokens = usage.CachedReadTokens
+			pin.LastCachedWriteTokens = usage.CachedWriteTokens
+			pin.LastOutputTokens = usage.OutputTokens
+			pin.LastTurnEndedAt = usage.EndedAt
+			s.pinCache.Add(pinCacheKey, pin)
+		}
+	}
+
 	select {
 	case s.usageWriteSem <- struct{}{}:
 		go func() {

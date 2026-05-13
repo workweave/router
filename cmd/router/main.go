@@ -639,17 +639,19 @@ func parseEnvInt(key string, fallback int) int {
 	return n
 }
 
-// parseEnvFloat reads an env var as a positive float64. Returns fallback
-// when the var is unset, empty, or unparseable. Logs a warning on bad
-// values. Zero/negative parsed values fall back so a misconfigured
-// threshold can't silently disable the planner's switch path.
+// parseEnvFloat reads an env var as a float64. Returns fallback when the
+// var is unset, empty, or unparseable. Logs a warning only on parse
+// failure. Zero and negative values are valid: ROUTER_SWITCH_EV_THRESHOLD_USD
+// uses a USD threshold in `expectedSavings - evictionCost > threshold`, so
+// operators set it to <= 0 to make the planner switch aggressively (the PR
+// test plan documents `-1` as the force-switch knob).
 func parseEnvFloat(key string, fallback float64) float64 {
 	raw := config.GetOr(key, "")
 	if raw == "" {
 		return fallback
 	}
 	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil || v <= 0 {
+	if err != nil {
 		observability.Get().Warn("Invalid env var; using default", "key", key, "value", raw, "default", fallback)
 		return fallback
 	}
