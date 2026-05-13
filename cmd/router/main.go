@@ -362,7 +362,8 @@ func main() {
 		WithPlannerEnabled(plannerEnabled).
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
-		WithAvailableModels(availableModels)
+		WithAvailableModels(availableModels).
+		WithDefaultBaselineModel(strings.TrimSpace(config.GetOr("ROUTER_DEFAULT_BASELINE_MODEL", "claude-sonnet-4-5")))
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
 	// Fail loud if a deployed model is missing from the tier table;

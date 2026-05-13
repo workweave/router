@@ -86,6 +86,12 @@ type Service struct {
 	// are registered. Read by the planner to decide whether a pin's model
 	// is still routable; if not, switch regardless of EV.
 	availableModels map[string]struct{}
+	// defaultBaselineModel is the cost-comparison baseline used when the
+	// inbound RequestedModel has no pricing entry (typical of generic
+	// "weave-router"-style custom names IDE clients send). Empty means no
+	// substitution — savings markers and pricing fields stay empty for
+	// unknown models, preserving prior behavior.
+	defaultBaselineModel string
 }
 
 // pinSessionTTL is the sliding TTL on pinned_until. Mirrors Anthropic's
@@ -361,6 +367,27 @@ func (s *Service) WithAvailableModels(models map[string]struct{}) *Service {
 	}
 	s.availableModels = copied
 	return s
+}
+
+// WithDefaultBaselineModel installs the cost-comparison fallback used
+// when the inbound RequestedModel has no pricing entry. Empty disables
+// substitution. See [Service.defaultBaselineModel] for rationale.
+func (s *Service) WithDefaultBaselineModel(model string) *Service {
+	s.defaultBaselineModel = model
+	return s
+}
+
+// baselineFor returns requested if it has a pricing entry; otherwise the
+// configured defaultBaselineModel (which may itself be ""). Used by every
+// cost/savings lookup so unknown client model names (e.g. "weave-router")
+// still attribute savings to a real baseline.
+func (s *Service) baselineFor(requested string) string {
+	if requested != "" {
+		if _, ok := pricing.For(requested); ok {
+			return requested
+		}
+	}
+	return s.defaultBaselineModel
 }
 
 // WithByokOnly enables BYOK-only credential resolution: providers without
@@ -700,7 +727,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 					Build(),
 			})
 			otel.Flush(ctx)
-			log.Info("ProxyMessages cache hit", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "external_id", externalID, "total_ms", time.Since(requestStart).Milliseconds())
+			log.Info("ProxyMessages cache hit", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "external_id", externalID, "total_ms", time.Since(requestStart).Milliseconds())
 			return nil
 		}
 	}
@@ -714,7 +741,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return provErr
 	}
 
-	reqPricing := otel.Lookup(feats.Model)
+	reqPricing := otel.Lookup(s.baselineFor(feats.Model))
 	actPricing := otel.Lookup(decision.Model)
 	decisionBuilder := otel.NewAttrBuilder(40).
 		String("request_id", requestID).
@@ -800,7 +827,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 		translator := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
 			WithRoutingMarker(routingMarkerFor(routeRes)).
-			WithClosingMarker(closingMarkerFor(decision, feats.Model))
+			WithClosingMarker(closingMarkerFor(decision, s.baselineFor(feats.Model)))
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
 		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderGoogle:
@@ -818,7 +845,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		// SSE chain: Gemini → OpenAI → Anthropic.
 		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
 			WithRoutingMarker(routingMarkerFor(routeRes)).
-			WithClosingMarker(closingMarkerFor(decision, feats.Model))
+			WithClosingMarker(closingMarkerFor(decision, s.baselineFor(feats.Model)))
 		geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, decision.Model, nil)
 		proxyErr = p.Proxy(ctx, decision, prep, geminiTr, r)
 		proxyErr = finalizeAfterProxy(proxyErr, geminiTr.Finalize)
@@ -919,7 +946,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		})
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
 
@@ -1352,7 +1379,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 					Build(),
 			})
 			otel.Flush(ctx)
-			log.Info("ProxyOpenAIChatCompletion cache hit", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "external_id", externalID, "total_ms", time.Since(requestStart).Milliseconds())
+			log.Info("ProxyOpenAIChatCompletion cache hit", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "external_id", externalID, "total_ms", time.Since(requestStart).Milliseconds())
 			return nil
 		}
 	}
@@ -1366,7 +1393,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	w.Header().Set("x-router-provider", decision.Provider)
 	w.Header().Set("x-router-model", decision.Model)
 
-	reqPricing := otel.Lookup(feats.Model)
+	reqPricing := otel.Lookup(s.baselineFor(feats.Model))
 	actPricing := otel.Lookup(decision.Model)
 	openaiDecisionBuilder := otel.NewAttrBuilder(40).
 		String("request_id", requestID).
@@ -1562,6 +1589,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
