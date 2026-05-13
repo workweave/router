@@ -74,7 +74,7 @@ func (fakeInstallationRepository) SoftDelete(ctx context.Context, externalID, id
 	return errors.New("not used")
 }
 
-func (fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, id string, models []string) error {
+func (fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, externalID, id string, models []string) error {
 	return errors.New("not used")
 }
 

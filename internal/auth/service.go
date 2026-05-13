@@ -161,14 +161,15 @@ func (s *Service) DeleteExternalAPIKey(ctx context.Context, installationID, id s
 }
 
 // SetInstallationExcludedModels replaces the per-installation model exclusion
-// list. allowed is the universe of valid model IDs the caller is willing to
-// accept (typically every deployed model); passing nil skips validation.
-// Returns ErrUnknownModel when an entry in models is not in allowed.
+// list, scoped to externalID to prevent cross-tenant updates. allowed is the
+// universe of valid model IDs the caller is willing to accept (typically
+// every deployed model); passing nil skips validation. Returns
+// ErrUnknownModel when an entry in models is not in allowed.
 //
 // The new list is visible to the request path within the APIKey cache TTL
 // (default 5 min); explicit invalidation is intentionally not wired so the
 // in-process cache stays write-through-by-TTL like external-key changes.
-func (s *Service) SetInstallationExcludedModels(ctx context.Context, installationID string, models []string, allowed map[string]struct{}) ([]string, error) {
+func (s *Service) SetInstallationExcludedModels(ctx context.Context, externalID, installationID string, models []string, allowed map[string]struct{}) ([]string, error) {
 	if models == nil {
 		models = []string{}
 	}
@@ -189,7 +190,7 @@ func (s *Service) SetInstallationExcludedModels(ctx context.Context, installatio
 		seen[m] = struct{}{}
 		out = append(out, m)
 	}
-	if err := s.installations.UpdateExcludedModels(ctx, installationID, out); err != nil {
+	if err := s.installations.UpdateExcludedModels(ctx, externalID, installationID, out); err != nil {
 		return nil, err
 	}
 	return out, nil

@@ -34,11 +34,13 @@ WHERE id = @id::uuid
   AND external_id = @external_id::varchar
   AND deleted_at IS NULL;
 
--- Replaces the per-installation model exclusion list. Empty array means
--- "no exclusion". Bumps updated_at so dashboards see the change.
+-- Replaces the per-installation model exclusion list, scoped to an external_id
+-- to prevent cross-tenant updates. Empty array means "no exclusion". Bumps
+-- updated_at so dashboards see the change.
 -- name: UpdateModelRouterInstallationExcludedModels :exec
 UPDATE router.model_router_installations
 SET excluded_models = @excluded_models::text[],
     updated_at = NOW()
 WHERE id = @id::uuid
+  AND external_id = @external_id::varchar
   AND deleted_at IS NULL;

@@ -94,7 +94,8 @@ func (f *fakeExternalAPIKeyRepo) MarkUsed(ctx context.Context, id string) error 
 }
 
 type fakeInstallationRepository struct {
-	excludedModelsByID map[string][]string
+	excludedModelsByID         map[string][]string
+	excludedModelsExternalByID map[string]string
 }
 
 func (fakeInstallationRepository) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
@@ -109,11 +110,15 @@ func (fakeInstallationRepository) ListForExternalID(ctx context.Context, externa
 func (fakeInstallationRepository) SoftDelete(ctx context.Context, externalID, id string) error {
 	return errors.New("not used")
 }
-func (f *fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, id string, models []string) error {
+func (f *fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, externalID, id string, models []string) error {
 	if f.excludedModelsByID == nil {
 		f.excludedModelsByID = map[string][]string{}
 	}
+	if f.excludedModelsExternalByID == nil {
+		f.excludedModelsExternalByID = map[string]string{}
+	}
 	f.excludedModelsByID[id] = append([]string{}, models...)
+	f.excludedModelsExternalByID[id] = externalID
 	return nil
 }
 
@@ -553,27 +558,29 @@ func TestService_SetInstallationExcludedModels(t *testing.T) {
 
 	allowed := map[string]struct{}{"gpt-4o": {}, "claude-opus-4-7": {}}
 
-	t.Run("persists deduped list", func(t *testing.T) {
-		out, err := svc.SetInstallationExcludedModels(context.Background(), "inst-1", []string{"gpt-4o", "gpt-4o", "claude-opus-4-7"}, allowed)
+	t.Run("persists deduped list scoped by external_id", func(t *testing.T) {
+		out, err := svc.SetInstallationExcludedModels(context.Background(), "ext-1", "inst-1", []string{"gpt-4o", "gpt-4o", "claude-opus-4-7"}, allowed)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"gpt-4o", "claude-opus-4-7"}, out, "duplicates collapsed; order preserved")
 		assert.Equal(t, []string{"gpt-4o", "claude-opus-4-7"}, installRepo.excludedModelsByID["inst-1"])
+		assert.Equal(t, "ext-1", installRepo.excludedModelsExternalByID["inst-1"],
+			"external_id must be propagated to the repo for cross-tenant scoping")
 	})
 
 	t.Run("rejects unknown model with ErrUnknownModel", func(t *testing.T) {
-		_, err := svc.SetInstallationExcludedModels(context.Background(), "inst-1", []string{"gemini-nope"}, allowed)
+		_, err := svc.SetInstallationExcludedModels(context.Background(), "ext-1", "inst-1", []string{"gemini-nope"}, allowed)
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, auth.ErrUnknownModel))
 	})
 
 	t.Run("nil allowed skips validation", func(t *testing.T) {
-		out, err := svc.SetInstallationExcludedModels(context.Background(), "inst-2", []string{"anything-goes"}, nil)
+		out, err := svc.SetInstallationExcludedModels(context.Background(), "ext-2", "inst-2", []string{"anything-goes"}, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"anything-goes"}, out)
 	})
 
 	t.Run("nil models persists empty slice", func(t *testing.T) {
-		out, err := svc.SetInstallationExcludedModels(context.Background(), "inst-3", nil, allowed)
+		out, err := svc.SetInstallationExcludedModels(context.Background(), "ext-3", "inst-3", nil, allowed)
 		require.NoError(t, err)
 		assert.Equal(t, []string{}, out)
 		assert.Equal(t, []string{}, installRepo.excludedModelsByID["inst-3"])

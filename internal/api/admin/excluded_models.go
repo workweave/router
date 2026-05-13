@@ -115,7 +115,7 @@ func UpdateExcludedModelsHandler(authSvc *auth.Service, models DeployedModelsSou
 			allowed[e.Model] = struct{}{}
 		}
 
-		stored, err := authSvc.SetInstallationExcludedModels(c.Request.Context(), installation.ID, req.Excluded, allowed)
+		stored, err := authSvc.SetInstallationExcludedModels(c.Request.Context(), installation.ExternalID, installation.ID, req.Excluded, allowed)
 		if err != nil {
 			if errors.Is(err, auth.ErrUnknownModel) {
 				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -128,7 +128,7 @@ func UpdateExcludedModelsHandler(authSvc *auth.Service, models DeployedModelsSou
 
 		sort.Strings(stored)
 		c.JSON(http.StatusOK, excludedModelsResponse{
-			Available: nil,
+			Available: []deployedModelDTO{},
 			Excluded:  stored,
 		})
 	}

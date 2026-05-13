@@ -170,23 +170,27 @@ UPDATE router.model_router_installations
 SET excluded_models = $1::text[],
     updated_at = NOW()
 WHERE id = $2::uuid
+  AND external_id = $3::varchar
   AND deleted_at IS NULL
 `
 
 type UpdateModelRouterInstallationExcludedModelsParams struct {
 	ExcludedModels []string
 	ID             uuid.UUID
+	ExternalID     string
 }
 
-// Replaces the per-installation model exclusion list. Empty array means
-// "no exclusion". Bumps updated_at so dashboards see the change.
+// Replaces the per-installation model exclusion list, scoped to an external_id
+// to prevent cross-tenant updates. Empty array means "no exclusion". Bumps
+// updated_at so dashboards see the change.
 //
 //	UPDATE router.model_router_installations
 //	SET excluded_models = $1::text[],
 //	    updated_at = NOW()
 //	WHERE id = $2::uuid
+//	  AND external_id = $3::varchar
 //	  AND deleted_at IS NULL
 func (q *Queries) UpdateModelRouterInstallationExcludedModels(ctx context.Context, arg UpdateModelRouterInstallationExcludedModelsParams) error {
-	_, err := q.db.Exec(ctx, updateModelRouterInstallationExcludedModels, arg.ExcludedModels, arg.ID)
+	_, err := q.db.Exec(ctx, updateModelRouterInstallationExcludedModels, arg.ExcludedModels, arg.ID, arg.ExternalID)
 	return err
 }

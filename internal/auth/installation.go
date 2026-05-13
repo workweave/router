@@ -33,7 +33,8 @@ type InstallationRepository interface {
 	ListForExternalID(ctx context.Context, externalID string) ([]*Installation, error)
 	// SoftDelete is scoped to externalID to prevent cross-tenant deletes.
 	SoftDelete(ctx context.Context, externalID, id string) error
-	// UpdateExcludedModels replaces the per-installation exclusion list.
-	// An empty (or nil) slice clears the list.
-	UpdateExcludedModels(ctx context.Context, id string, models []string) error
+	// UpdateExcludedModels replaces the per-installation exclusion list,
+	// scoped to externalID to prevent cross-tenant updates. An empty (or
+	// nil) slice clears the list.
+	UpdateExcludedModels(ctx context.Context, externalID, id string, models []string) error
 }
