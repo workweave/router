@@ -556,6 +556,45 @@ func TestService_HardPin_OpenAI_SubAgentHeaderHintRoutesToHardPin(t *testing.T) 
 	assert.Equal(t, "gpt-4o-mini", rec.Header().Get("x-router-model"))
 }
 
+// TestService_HardPin_BypassesTierCeiling regression-guards the PR #100
+// finding: ROUTER_HARD_PIN_MODEL is an explicit operator opt-in that
+// MUST win over the requested-model tier ceiling. Before the fix, the
+// orchestrator clamped the hard-pin decision and silently rewrote the
+// operator's chosen model to the cheapest in-ceiling alternative when
+// the operator pinned an over-ceiling (or unknown-tier) model.
+func TestService_HardPin_BypassesTierCeiling(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
+
+	// Hard-pin set to opus (High); inbound model haiku → ceiling Low.
+	// Pre-fix, clampToCeiling would rewrite opus → the resolver's pick.
+	svc := proxy.NewService(
+		fr,
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		providers.ProviderAnthropic,
+		"claude-opus-4-7",
+		nil,
+	).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+		// If this fires for a hard-pin decision, the bypass is broken.
+		return providers.ProviderAnthropic, "claude-haiku-4-5", true
+	})
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	// Haiku-requesting body with the compaction system marker → hard-pin
+	// triggers; tier ceiling is Low but hard-pin must bypass it.
+	body := `{"model":"claude-haiku-4-5","system":"Your task is to create a detailed summary of the conversation so far.","messages":[{"role":"user","content":"go"}]}`
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
+
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"), "operator hard-pin must win over the tier ceiling")
+}
+
 // haikuClampBody requests a Low-tier model (haiku); the scorer is
 // stubbed to return an Opus (High) pick, which violates the ceiling and
 // must be clamped down to a Low-tier alternative.
@@ -574,7 +613,7 @@ func TestService_TierClamp_HaikuRequestedClampsHighScore(t *testing.T) {
 	// Scorer returns High-tier model: must be rewritten.
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_ map[string]struct{}, ceiling capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, ceiling capability.Tier) (string, string, bool) {
 		require.Equal(t, capability.TierLow, ceiling, "haiku requested → Low ceiling")
 		return providers.ProviderAnthropic, "claude-haiku-4-5", true
 	})
@@ -596,7 +635,7 @@ func TestService_TierClamp_OpusRequestedNoClamp(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
 	resolverCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
 		resolverCalls++
 		return "", "", false
 	})
@@ -628,7 +667,7 @@ func TestService_TierClamp_PinAboveCeilingIsClamped(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
 		return providers.ProviderAnthropic, "claude-haiku-4-5", true
 	})
 
@@ -638,6 +677,68 @@ func TestService_TierClamp_PinAboveCeilingIsClamped(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
 
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
+}
+
+// TestService_TierClamp_UnknownRequestedModelDisablesClamp regression-
+// guards the PR #100 finding: RequestedTier must be derived from
+// capability.TierFor(feats.Model) directly, not via
+// baselineFor(feats.Model). Substituting unknown model names through
+// baselineFor (which falls back to the default mid-tier baseline)
+// would force custom/proxy model names like "weave-router" into a
+// TierMid ceiling and silently clamp high-tier scorer picks. The
+// documented behavior is "unknown requested model ⇒ TierUnknown ⇒
+// clamping disabled".
+func TestService_TierClamp_UnknownRequestedModelDisablesClamp(t *testing.T) {
+	store := newFakePinStore()
+	// Scorer returns a High-tier pick that a TierMid clamp would
+	// rewrite; we want to prove the clamp is disabled entirely.
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
+
+	resolverCalls := 0
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+		resolverCalls++
+		return providers.ProviderAnthropic, "claude-sonnet-4-5", true
+	})
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	// Custom/proxy model name with no capability entry → TierUnknown.
+	body := `{"model":"weave-router","system":"sys","messages":[{"role":"user","content":"hi"}]}`
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
+
+	assert.Equal(t, 0, resolverCalls, "unknown requested model must yield TierUnknown ceiling, disabling the clamp")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"), "scorer pick must pass through unclamped for unknown requested models")
+}
+
+// TestService_TierClamp_ExcludedModelsThreadedToResolver regression-
+// guards the PR #100 security finding: tier clamping must respect the
+// request's ExcludedModels denylist so the clamp path cannot route to
+// a model the installation/request has explicitly blocked. Without
+// threading req.ExcludedModels through, the resolver would happily
+// pick a denylisted model whenever the scorer's choice violated the
+// ceiling — silently bypassing model access policy.
+func TestService_TierClamp_ExcludedModelsThreadedToResolver(t *testing.T) {
+	store := newFakePinStore()
+	// Scorer returns an over-ceiling pick; clamp will fire.
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
+
+	var capturedExcluded map[string]struct{}
+	svc := newPinSvc(fr, store).
+		WithExcludedModelsOverride([]string{"claude-haiku-4-5"}).
+		WithTierClampResolver(func(_, excluded map[string]struct{}, _ capability.Tier) (string, string, bool) {
+			capturedExcluded = excluded
+			return providers.ProviderAnthropic, "claude-sonnet-4-5", true
+		})
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
+
+	require.NotNil(t, capturedExcluded, "resolver must receive the request's ExcludedModels")
+	_, denied := capturedExcluded["claude-haiku-4-5"]
+	assert.True(t, denied, "ExcludedModels must propagate to the tier-clamp resolver")
 }
 
 // TestService_TierClamp_StaleFlagClearedOnUnclampedFinal regression-
@@ -668,7 +769,7 @@ func TestService_TierClamp_StaleFlagClearedOnUnclampedFinal(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
 	clampCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
 		clampCalls++
 		// Resolver should never need to fire because all decisions are
 		// at or below the High ceiling.

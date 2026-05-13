@@ -345,15 +345,15 @@ func main() {
 	// whose provider is in the request's enabled set. Nil when the bundle
 	// can't load — the proxy then leaves all decisions un-clamped (preserves
 	// pre-tier-ceiling behavior).
-	var tierClampResolver func(map[string]struct{}, capability.Tier) (string, string, bool)
+	var tierClampResolver func(map[string]struct{}, map[string]struct{}, capability.Tier) (string, string, bool)
 	{
 		reqVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
 		if version, vErr := cluster.ResolveVersion(reqVersion); vErr == nil {
 			if bundle, bErr := cluster.LoadBundle(version); bErr == nil {
 				meta, registry := bundle.Metadata, bundle.Registry
-				tierClampResolver = func(enabled map[string]struct{}, ceiling capability.Tier) (string, string, bool) {
+				tierClampResolver = func(enabled, excluded map[string]struct{}, ceiling capability.Tier) (string, string, bool) {
 					allowed := capability.AllowedAtOrBelow(ceiling)
-					return cluster.CheapestModelInSet(meta, registry, enabled, allowed)
+					return cluster.CheapestModelInSet(meta, registry, enabled, excluded, allowed)
 				}
 				logger.Info("Tier-clamp resolver wired", "version", version)
 			} else {

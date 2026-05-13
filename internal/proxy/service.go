@@ -67,11 +67,12 @@ type Service struct {
 	// than silently falling back.
 	hardPinResolver func(enabled map[string]struct{}) (provider, model string, ok bool)
 	// tierClampResolver enforces the requested-model tier ceiling: returns
-	// the cheapest deployed model whose tier ≤ ceiling and whose provider
-	// is in the request's enabled set. Nil disables the clamp. See
+	// the cheapest deployed model whose tier ≤ ceiling, whose provider is
+	// in the request's enabled set, and which is NOT in the request's
+	// excluded-models denylist. Nil disables the clamp. See
 	// WithTierClampResolver and turnloop.go's clampToCeiling for the call
 	// sites.
-	tierClampResolver func(enabled map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)
+	tierClampResolver func(enabled, excluded map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)
 	// telemetry is an optional repository for persisting per-request telemetry.
 	telemetry TelemetryRepository
 	// byokOnly disables deployment-level credential fallback. When true, a
@@ -454,7 +455,7 @@ func (s *Service) WithDefaultBaselineModel(model string) *Service {
 // routable for this request — the orchestrator preserves the original
 // (unclamped) decision rather than failing the turn. Nil resolver
 // disables clamping (preserves pre-tier-ceiling behavior).
-func (s *Service) WithTierClampResolver(resolver func(enabled map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)) *Service {
+func (s *Service) WithTierClampResolver(resolver func(enabled, excluded map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)) *Service {
 	s.tierClampResolver = resolver
 	return s
 }

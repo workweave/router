@@ -45,9 +45,14 @@ type turnLoopResult struct {
 	HardPinned bool
 	PinTier    string
 	PinAgeSec  int64
-	// RequestedTier is the tier of baselineFor(requested_model). Drives
+	// RequestedTier is the tier of the inbound requested model, looked up
+	// directly via capability.TierFor (no baseline substitution). Drives
 	// the tier-ceiling clamp; logged as `requested_tier`. TierUnknown
-	// disables clamping (preserves prior behavior for custom model names).
+	// disables clamping, which is the right behavior for custom/proxy
+	// model names (e.g. "weave-router") — substituting through
+	// baselineFor would force them into the default model's tier
+	// (TierMid) and clamp high-tier scorer picks despite the documented
+	// "unknown ⇒ no ceiling" rule.
 	RequestedTier capability.Tier
 	// TierClamped is true when the original decision violated the
 	// requested-model ceiling and was rewritten to an in-ceiling pick.
@@ -108,7 +113,7 @@ func (s *Service) runTurnLoop(
 	res := turnLoopResult{
 		TurnType:      turntype.DetectFromEnvelope(env, feats, subAgentHint),
 		PinTier:       "miss",
-		RequestedTier: capability.TierFor(s.baselineFor(feats.Model)),
+		RequestedTier: capability.TierFor(feats.Model),
 	}
 	res.PinRole = roleForTier(res.RequestedTier)
 
@@ -140,12 +145,17 @@ func (s *Service) runTurnLoop(
 			}
 			provider, model = p, m
 		}
+		// Operator hard-pins bypass the tier ceiling by design — the
+		// ROUTER_HARD_PIN_MODEL env var is an explicit operator opt-in
+		// that wins over the requested-model ceiling. Clamping here
+		// would silently rewrite an unknown-tier hard-pin to the
+		// cheapest in-ceiling alternative, defeating the operator's
+		// stated intent.
 		hardDecision := router.Decision{
 			Provider: provider,
 			Model:    model,
 			Reason:   string(res.TurnType) + "_hard_pin",
 		}
-		hardDecision = s.clampToCeiling(hardDecision, res.RequestedTier, req.EnabledProviders, &res)
 		res.Decision = hardDecision
 		res.StickyHit = true
 		res.HardPinned = true
@@ -160,7 +170,7 @@ func (s *Service) runTurnLoop(
 		if err != nil {
 			return res, err
 		}
-		decision = s.clampToCeiling(decision, res.RequestedTier, req.EnabledProviders, &res)
+		decision = s.clampToCeiling(decision, res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
 		res.Decision = decision
 		res.Fresh = decision
 		return res, nil
@@ -179,7 +189,7 @@ func (s *Service) runTurnLoop(
 	// trailing tool_result embedding flips decisions to noisy candidates;
 	// reuse the pin verbatim when present and refresh the TTL.
 	if res.TurnType == turntype.ToolResult && pinFound {
-		decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, &res)
+		decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
 		res.Decision = decision
 		res.StickyHit = true
 		res.PinTier = "postgres_tool_result_sc"
@@ -191,7 +201,7 @@ func (s *Service) runTurnLoop(
 	// behavior for callers that opt out via env flag. Skip the scorer
 	// entirely; the pin's model is authoritative.
 	if !s.plannerEnabled && pinFound {
-		decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, &res)
+		decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
 		res.Decision = decision
 		res.StickyHit = true
 		res.PinTier = "postgres"
@@ -206,7 +216,7 @@ func (s *Service) runTurnLoop(
 	if err != nil {
 		return res, err
 	}
-	fresh = s.clampToCeiling(fresh, res.RequestedTier, req.EnabledProviders, &res)
+	fresh = s.clampToCeiling(fresh, res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
 	res.Fresh = fresh
 
 	// Planner-disabled with no pin: take the fresh decision and write
@@ -231,7 +241,7 @@ func (s *Service) runTurnLoop(
 	res.PlannerDecision = decision
 
 	if decision.Outcome == planner.OutcomeStay && pinFound {
-		stay := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, &res)
+		stay := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
 		res.Decision = stay
 		res.StickyHit = true
 		res.PinTier = "postgres_stay_" + decision.Reason
@@ -321,12 +331,16 @@ func roleForTier(t capability.Tier) string {
 // decision's model has a known tier strictly higher than the ceiling,
 // the resolver picks the cheapest in-ceiling alternative for the
 // request's enabled providers and replaces the decision. Decisions
-// already at or below the ceiling pass through. TierUnknown ceilings
-// (custom model names with no capability entry) disable clamping.
-// Resolver lookup failure (no in-ceiling model available) preserves
-// the original decision rather than failing the turn — a soft fallback
-// chosen over hard erroring on background tasks.
-func (s *Service) clampToCeiling(decision router.Decision, ceiling capability.Tier, enabled map[string]struct{}, res *turnLoopResult) router.Decision {
+// already at or below the ceiling pass through. The resolver also
+// honors req.ExcludedModels so the clamp path cannot route to models
+// the installation/request has explicitly denylisted — otherwise tier
+// clamping would silently bypass the model access policy enforced on
+// normal scorer routing. TierUnknown ceilings (custom model names with
+// no capability entry) disable clamping. Resolver lookup failure (no
+// in-ceiling model available) preserves the original decision rather
+// than failing the turn — a soft fallback chosen over hard erroring on
+// background tasks.
+func (s *Service) clampToCeiling(decision router.Decision, ceiling capability.Tier, enabled, excluded map[string]struct{}, res *turnLoopResult) router.Decision {
 	// Reset state every call: the orchestrator clamps multiple decision
 	// sources per turn (fresh scorer output, then planner-stay pin), and
 	// without this reset a clamp on `fresh` would leak `TierClamped=true`
@@ -340,7 +354,7 @@ func (s *Service) clampToCeiling(decision router.Decision, ceiling capability.Ti
 	if capability.IsAtOrBelow(decision.Model, ceiling) {
 		return decision
 	}
-	p, m, ok := s.tierClampResolver(enabled, ceiling)
+	p, m, ok := s.tierClampResolver(enabled, excluded, ceiling)
 	if !ok {
 		return decision
 	}
