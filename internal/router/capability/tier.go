@@ -80,9 +80,64 @@ var tiers = map[string]Tier{
 	"deepseek/deepseek-v4-pro": TierHigh,
 }
 
-// TierFor returns the model's tier, or TierUnknown if absent.
+// TierFor returns the model's tier, or TierUnknown if absent. Anthropic
+// model identifiers carry a "-YYYYMMDD" date suffix (e.g.
+// "claude-haiku-4-5-20251001") that the table doesn't enumerate; we
+// strip an 8-digit suffix before retrying so dated variants resolve.
 func TierFor(model string) Tier {
-	return tiers[model]
+	if t, ok := tiers[model]; ok {
+		return t
+	}
+	if normalized := stripDateSuffix(model); normalized != model {
+		if t, ok := tiers[normalized]; ok {
+			return t
+		}
+	}
+	return TierUnknown
+}
+
+// stripDateSuffix removes a trailing "-XXXXXXXX" (hyphen + 8 digits).
+// Mirror of pricing.stripDateSuffix; kept local so capability doesn't
+// import pricing.
+func stripDateSuffix(model string) string {
+	if len(model) < 10 {
+		return model
+	}
+	tail := model[len(model)-9:]
+	if tail[0] != '-' {
+		return model
+	}
+	for _, c := range tail[1:] {
+		if c < '0' || c > '9' {
+			return model
+		}
+	}
+	return model[:len(model)-9]
+}
+
+// IsAtOrBelow reports whether the given model's tier is known and at or
+// below the ceiling. Unknown-tier models return false so the tier-ceiling
+// guard fails closed — Validate already catches missing entries at boot,
+// so any TierUnknown at request time means the table is out of sync.
+func IsAtOrBelow(model string, ceiling Tier) bool {
+	t := TierFor(model)
+	if t == TierUnknown {
+		return false
+	}
+	return t <= ceiling
+}
+
+// AllowedAtOrBelow returns the set of known models whose tier is at or
+// below the ceiling. Used by the cluster bundle when picking a clamp
+// target that respects the requested-model ceiling.
+func AllowedAtOrBelow(ceiling Tier) map[string]struct{} {
+	out := make(map[string]struct{}, len(tiers))
+	for m, t := range tiers {
+		if t != TierUnknown && t <= ceiling {
+			out[m] = struct{}{}
+		}
+	}
+	return out
 }
 
 // Validate returns an error naming any deployed model missing from the

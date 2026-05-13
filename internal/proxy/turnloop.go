@@ -9,6 +9,7 @@ import (
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/capability"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
@@ -44,6 +45,26 @@ type turnLoopResult struct {
 	HardPinned bool
 	PinTier    string
 	PinAgeSec  int64
+	// RequestedTier is the tier of the inbound requested model, looked up
+	// directly via capability.TierFor (no baseline substitution). Drives
+	// the tier-ceiling clamp; logged as `requested_tier`. TierUnknown
+	// disables clamping, which is the right behavior for custom/proxy
+	// model names (e.g. "weave-router") — substituting through
+	// baselineFor would force them into the default model's tier
+	// (TierMid) and clamp high-tier scorer picks despite the documented
+	// "unknown ⇒ no ceiling" rule.
+	RequestedTier capability.Tier
+	// TierClamped is true when the original decision violated the
+	// requested-model ceiling and was rewritten to an in-ceiling pick.
+	TierClamped bool
+	// PreClampModel records the violating model so logs can attribute
+	// which model the scorer / hard-pin / pin actually wanted to use.
+	PreClampModel string
+	// PinRole is the session-pin role used for this turn. Threaded through
+	// loadPin/refreshPin/writeNewPin and the post-response UpdateUsage call
+	// so a low-tier background turn and a high-tier main turn in the same
+	// session never share a pin row.
+	PinRole string
 	// Fresh is the scorer's recommendation for this turn when the scorer
 	// ran. Zero-valued on hard-pin / tool-result-with-pin paths where we
 	// never consulted the scorer.
@@ -90,9 +111,11 @@ func (s *Service) runTurnLoop(
 ) (turnLoopResult, error) {
 	log := observability.Get()
 	res := turnLoopResult{
-		TurnType: turntype.DetectFromEnvelope(env, feats, subAgentHint),
-		PinTier:  "miss",
+		TurnType:      turntype.DetectFromEnvelope(env, feats, subAgentHint),
+		PinTier:       "miss",
+		RequestedTier: capability.TierFor(feats.Model),
 	}
+	res.PinRole = roleForTier(res.RequestedTier)
 
 	// Hard pins for turn types whose optimal model is known a priori
 	// (compaction, Explore sub-agent dispatch, SDK quota probes). Bypass
@@ -122,11 +145,18 @@ func (s *Service) runTurnLoop(
 			}
 			provider, model = p, m
 		}
-		res.Decision = router.Decision{
+		// Operator hard-pins bypass the tier ceiling by design — the
+		// ROUTER_HARD_PIN_MODEL env var is an explicit operator opt-in
+		// that wins over the requested-model ceiling. Clamping here
+		// would silently rewrite an unknown-tier hard-pin to the
+		// cheapest in-ceiling alternative, defeating the operator's
+		// stated intent.
+		hardDecision := router.Decision{
 			Provider: provider,
 			Model:    model,
 			Reason:   string(res.TurnType) + "_hard_pin",
 		}
+		res.Decision = hardDecision
 		res.StickyHit = true
 		res.HardPinned = true
 		res.PinTier = string(res.TurnType) + "_hard_pin"
@@ -140,15 +170,16 @@ func (s *Service) runTurnLoop(
 		if err != nil {
 			return res, err
 		}
+		decision = s.clampToCeiling(decision, res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
 		res.Decision = decision
 		res.Fresh = decision
 		return res, nil
 	}
 
 	res.SessionKey = DeriveSessionKey(env, apiKeyID)
-	pinCacheKey := sessionPinCacheKey(res.SessionKey, sessionpin.DefaultRole)
+	pinCacheKey := sessionPinCacheKey(res.SessionKey, res.PinRole)
 
-	pin, pinFound := s.loadPin(ctx, pinCacheKey, res.SessionKey)
+	pin, pinFound := s.loadPin(ctx, pinCacheKey, res.SessionKey, res.PinRole)
 	if pinFound {
 		res.PinModel = pin.Model
 		res.PinAgeSec = pinAge(pin)
@@ -158,10 +189,11 @@ func (s *Service) runTurnLoop(
 	// trailing tool_result embedding flips decisions to noisy candidates;
 	// reuse the pin verbatim when present and refresh the TTL.
 	if res.TurnType == turntype.ToolResult && pinFound {
-		res.Decision = pinDecision(pin)
+		decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+		res.Decision = decision
 		res.StickyHit = true
 		res.PinTier = "postgres_tool_result_sc"
-		s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.Decision)
+		s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, decision)
 		return res, nil
 	}
 
@@ -169,10 +201,11 @@ func (s *Service) runTurnLoop(
 	// behavior for callers that opt out via env flag. Skip the scorer
 	// entirely; the pin's model is authoritative.
 	if !s.plannerEnabled && pinFound {
-		res.Decision = pinDecision(pin)
+		decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+		res.Decision = decision
 		res.StickyHit = true
 		res.PinTier = "postgres"
-		s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.Decision)
+		s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, decision)
 		return res, nil
 	}
 
@@ -183,13 +216,14 @@ func (s *Service) runTurnLoop(
 	if err != nil {
 		return res, err
 	}
+	fresh = s.clampToCeiling(fresh, res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
 	res.Fresh = fresh
 
 	// Planner-disabled with no pin: take the fresh decision and write
 	// a new pin row so subsequent turns see it.
 	if !s.plannerEnabled {
 		res.Decision = fresh
-		s.writeNewPin(installationID, res.SessionKey, pinCacheKey, fresh)
+		s.writeNewPin(installationID, res.SessionKey, pinCacheKey, res.PinRole, fresh)
 		return res, nil
 	}
 
@@ -207,10 +241,11 @@ func (s *Service) runTurnLoop(
 	res.PlannerDecision = decision
 
 	if decision.Outcome == planner.OutcomeStay && pinFound {
-		res.Decision = pinDecision(pin)
+		stay := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+		res.Decision = stay
 		res.StickyHit = true
 		res.PinTier = "postgres_stay_" + decision.Reason
-		s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.Decision)
+		s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, stay)
 		return res, nil
 	}
 
@@ -268,15 +303,75 @@ func (s *Service) runTurnLoop(
 	if pinFound {
 		res.PinTier = "switch_" + decision.Reason
 	}
-	s.writeNewPin(installationID, res.SessionKey, pinCacheKey, fresh)
+	s.writeNewPin(installationID, res.SessionKey, pinCacheKey, res.PinRole, fresh)
 	return res, nil
+}
+
+// roleForTier maps a requested-model tier to its session-pin role. Each
+// tier gets its own row so a low-tier background turn and a high-tier
+// main turn in the same session never share a pin (preventing the
+// haiku-inherits-opus-pin leak that originally motivated the tier
+// ceiling). TierUnknown falls back to DefaultRole so callers with custom
+// model names (no entry in the capability table) keep their pre-ceiling
+// behavior.
+func roleForTier(t capability.Tier) string {
+	switch t {
+	case capability.TierLow:
+		return sessionpin.DefaultRole + "_low"
+	case capability.TierMid:
+		return sessionpin.DefaultRole + "_mid"
+	case capability.TierHigh:
+		return sessionpin.DefaultRole + "_high"
+	default:
+		return sessionpin.DefaultRole
+	}
+}
+
+// clampToCeiling enforces the requested-model tier ceiling. When the
+// decision's model has a known tier strictly higher than the ceiling,
+// the resolver picks the cheapest in-ceiling alternative for the
+// request's enabled providers and replaces the decision. Decisions
+// already at or below the ceiling pass through. The resolver also
+// honors req.ExcludedModels so the clamp path cannot route to models
+// the installation/request has explicitly denylisted — otherwise tier
+// clamping would silently bypass the model access policy enforced on
+// normal scorer routing. TierUnknown ceilings (custom model names with
+// no capability entry) disable clamping. Resolver lookup failure (no
+// in-ceiling model available) preserves the original decision rather
+// than failing the turn — a soft fallback chosen over hard erroring on
+// background tasks.
+func (s *Service) clampToCeiling(decision router.Decision, ceiling capability.Tier, enabled, excluded map[string]struct{}, res *turnLoopResult) router.Decision {
+	// Reset state every call: the orchestrator clamps multiple decision
+	// sources per turn (fresh scorer output, then planner-stay pin), and
+	// without this reset a clamp on `fresh` would leak `TierClamped=true`
+	// + `PreClampModel` into a subsequent unclamped pin decision, falsely
+	// labeling the final decision as clamped in the structured log.
+	res.TierClamped = false
+	res.PreClampModel = ""
+	if s.tierClampResolver == nil || ceiling == capability.TierUnknown {
+		return decision
+	}
+	if capability.IsAtOrBelow(decision.Model, ceiling) {
+		return decision
+	}
+	p, m, ok := s.tierClampResolver(enabled, excluded, ceiling)
+	if !ok {
+		return decision
+	}
+	res.TierClamped = true
+	res.PreClampModel = decision.Model
+	return router.Decision{
+		Provider: p,
+		Model:    m,
+		Reason:   decision.Reason + "+tier_clamp",
+	}
 }
 
 // loadPin returns the active pin for this session, consulting the in-proc
 // LRU first then Postgres. Expired rows are treated as misses on both
 // tiers. A store error is logged and surfaces as "not found" so the
 // caller falls through to the planner with a zero pin.
-func (s *Service) loadPin(ctx context.Context, pinCacheKey string, sessionKey [sessionpin.SessionKeyLen]byte) (sessionpin.Pin, bool) {
+func (s *Service) loadPin(ctx context.Context, pinCacheKey string, sessionKey [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool) {
 	log := observability.Get()
 	if s.pinCache != nil {
 		if pin, ok := s.pinCache.Get(pinCacheKey); ok {
@@ -294,7 +389,7 @@ func (s *Service) loadPin(ctx context.Context, pinCacheKey string, sessionKey [s
 			s.pinCache.Remove(pinCacheKey)
 		}
 	}
-	pin, found, err := s.pinStore.Get(ctx, sessionKey, sessionpin.DefaultRole)
+	pin, found, err := s.pinStore.Get(ctx, sessionKey, role)
 	if err != nil {
 		log.Error("session pin store unavailable; falling through to cluster scorer", "err", err)
 		return sessionpin.Pin{}, false
@@ -315,13 +410,13 @@ func (s *Service) loadPin(ctx context.Context, pinCacheKey string, sessionKey [s
 // cache entry. Carries the existing pin's cached last-turn usage forward
 // so the planner has evidence on subsequent turns even before the next
 // UpdateUsage writeback lands. Async, bounded; drops on saturation.
-func (s *Service) refreshPin(installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, existing sessionpin.Pin, pinCacheKey string, chosen router.Decision) {
+func (s *Service) refreshPin(installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, existing sessionpin.Pin, pinCacheKey string, role string, chosen router.Decision) {
 	if installationID == uuid.Nil {
 		return
 	}
 	p := sessionpin.Pin{
 		SessionKey:            sessionKey,
-		Role:                  sessionpin.DefaultRole,
+		Role:                  role,
 		InstallationID:        installationID,
 		Provider:              chosen.Provider,
 		Model:                 chosen.Model,
@@ -340,13 +435,13 @@ func (s *Service) refreshPin(installationID uuid.UUID, sessionKey [sessionpin.Se
 // writeNewPin records a freshly-routed decision as the active pin. Used
 // on first-turn routing and on switch turns; the new row has no prior
 // usage stats yet (UpdateUsage fills them in after the response lands).
-func (s *Service) writeNewPin(installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, pinCacheKey string, chosen router.Decision) {
+func (s *Service) writeNewPin(installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, pinCacheKey string, role string, chosen router.Decision) {
 	if installationID == uuid.Nil {
 		return
 	}
 	p := sessionpin.Pin{
 		SessionKey:     sessionKey,
-		Role:           sessionpin.DefaultRole,
+		Role:           role,
 		InstallationID: installationID,
 		Provider:       chosen.Provider,
 		Model:          chosen.Model,

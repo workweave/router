@@ -154,7 +154,7 @@ func TestLoadPin_EvictsExpiredLRUEntry(t *testing.T) {
 	}
 	svc.pinCache.Add(cacheKey, expired)
 
-	pin, found := svc.loadPin(context.Background(), cacheKey, sessionKey)
+	pin, found := svc.loadPin(context.Background(), cacheKey, sessionKey, sessionpin.DefaultRole)
 	assert.False(t, found, "expired LRU entry must not be served")
 	assert.Equal(t, sessionpin.Pin{}, pin, "miss must return the zero pin")
 	_, stillCached := svc.pinCache.Get(cacheKey)
@@ -194,7 +194,7 @@ func TestLoadPin_ServesFreshLRUEntry(t *testing.T) {
 	}
 	svc.pinCache.Add(cacheKey, fresh)
 
-	pin, found := svc.loadPin(context.Background(), cacheKey, sessionKey)
+	pin, found := svc.loadPin(context.Background(), cacheKey, sessionKey, sessionpin.DefaultRole)
 	require.True(t, found, "non-expired LRU entry should be returned without hitting Postgres")
 	assert.Equal(t, fresh.Model, pin.Model)
 	assert.Equal(t, fresh.Provider, pin.Provider)

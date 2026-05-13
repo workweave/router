@@ -244,3 +244,62 @@ func TestCheapestModel(t *testing.T) {
 		assert.Equal(t, "model-a", m)
 	})
 }
+
+func TestCheapestModelInSet(t *testing.T) {
+	meta := &ArtifactMetadata{
+		CostPer1KInputUSD: map[string]float64{
+			"model-a": 3.00,
+			"model-b": 0.50,
+			"model-c": 0.10,
+		},
+	}
+	registry := &ModelRegistry{
+		DeployedModels: []DeployedEntry{
+			{Model: "model-a", Provider: "anthropic", BenchColumn: "col-a"},
+			{Model: "model-b", Provider: "google", BenchColumn: "col-b"},
+			{Model: "model-c", Provider: "google", BenchColumn: "col-c"},
+		},
+	}
+	available := map[string]struct{}{"anthropic": {}, "google": {}}
+
+	t.Run("respects allowSet — cheapest within allow", func(t *testing.T) {
+		allow := map[string]struct{}{"model-a": {}, "model-b": {}}
+		p, m, ok := CheapestModelInSet(meta, registry, available, nil, allow)
+		require.True(t, ok)
+		assert.Equal(t, "google", p)
+		assert.Equal(t, "model-b", m, "model-c is cheaper but excluded by allowSet")
+	})
+
+	t.Run("ok=false when allowSet has no available model", func(t *testing.T) {
+		allow := map[string]struct{}{"nope": {}}
+		_, _, ok := CheapestModelInSet(meta, registry, available, nil, allow)
+		assert.False(t, ok)
+	})
+
+	t.Run("nil allowSet behaves like CheapestModel", func(t *testing.T) {
+		p, m, ok := CheapestModelInSet(meta, registry, available, nil, nil)
+		require.True(t, ok)
+		assert.Equal(t, "google", p)
+		assert.Equal(t, "model-c", m)
+	})
+
+	t.Run("denySet excludes models even when allowed by allowSet", func(t *testing.T) {
+		// allowSet permits model-b and model-c (both google, both in
+		// the registry); denySet excludes the cheapest of the two —
+		// model-c — forcing the resolver to fall back to model-b.
+		// Guards the PR #100 issue where tier clamping bypassed the
+		// request's ExcludedModels denylist.
+		allow := map[string]struct{}{"model-b": {}, "model-c": {}}
+		deny := map[string]struct{}{"model-c": {}}
+		p, m, ok := CheapestModelInSet(meta, registry, available, deny, allow)
+		require.True(t, ok)
+		assert.Equal(t, "google", p)
+		assert.Equal(t, "model-b", m, "model-c is cheaper but denylisted")
+	})
+
+	t.Run("denySet emptying pool yields ok=false", func(t *testing.T) {
+		deny := map[string]struct{}{"model-a": {}, "model-b": {}, "model-c": {}}
+		_, _, ok := CheapestModelInSet(meta, registry, available, deny, nil)
+		assert.False(t, ok)
+	})
+}

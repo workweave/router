@@ -6,9 +6,52 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/capability"
 	"workweave/router/internal/router/planner"
 	"workweave/router/internal/translate"
 )
+
+func TestRoutingMarkerFor_TierClampNote(t *testing.T) {
+	t.Parallel()
+
+	t.Run("haiku-ceiling clamp suggests sonnet upsell", func(t *testing.T) {
+		res := turnLoopResult{
+			Decision:      router.Decision{Model: "claude-haiku-4-5", Provider: "anthropic"},
+			TierClamped:   true,
+			PreClampModel: "deepseek/deepseek-v4-pro",
+			RequestedTier: capability.TierLow,
+		}
+		got := routingMarkerFor(res)
+		assert.Contains(t, got, "second-choice pick")
+		assert.Contains(t, got, "deepseek/deepseek-v4-pro")
+		assert.Contains(t, got, "low tier")
+		assert.Contains(t, got, "claude-sonnet-4-5")
+	})
+
+	t.Run("sonnet-ceiling clamp suggests opus upsell", func(t *testing.T) {
+		res := turnLoopResult{
+			Decision:      router.Decision{Model: "claude-sonnet-4-5", Provider: "anthropic"},
+			TierClamped:   true,
+			PreClampModel: "claude-opus-4-7",
+			RequestedTier: capability.TierMid,
+		}
+		got := routingMarkerFor(res)
+		assert.Contains(t, got, "claude-opus-4-7")
+		assert.Contains(t, got, "mid tier")
+		assert.Contains(t, got, "claude-opus-4-7 to unlock")
+	})
+
+	t.Run("no clamp emits no note", func(t *testing.T) {
+		res := turnLoopResult{
+			Decision:      router.Decision{Model: "claude-opus-4-7", Provider: "anthropic"},
+			TierClamped:   false,
+			RequestedTier: capability.TierHigh,
+		}
+		got := routingMarkerFor(res)
+		assert.NotContains(t, got, "second-choice")
+		assert.NotContains(t, got, "would have used")
+	})
+}
 
 func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 	decision := router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "openrouter"}
