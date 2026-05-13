@@ -471,3 +471,85 @@ func TestSanitizeSchemaForGemini_PreservesSupportedFields(t *testing.T) {
 	assert.Equal(t, true, props["line"].(map[string]any)["nullable"], "nullable must survive")
 	assert.Equal(t, []any{"path", "mode"}, params["required"], "required must survive")
 }
+
+func TestPrepareGemini_RepairsArrayMissingItems(t *testing.T) {
+	// Regression: production Claude Code traffic includes MCP tools whose schemas
+	// declare `{"type":"array"}` with no `items` field (valid JSON Schema, invalid
+	// Gemini function-call schema). Gemini rejected the whole request with
+	// "GenerateContentRequest.tools[0].function_declarations[N].parameters.
+	// properties[X].items: missing field". Inject a permissive default instead.
+	body := []byte(`{
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [{
+			"name":"odd-tool",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"tools":{"type":"array","description":"a list of tools"},
+					"nested":{
+						"type":"object",
+						"properties":{
+							"items":{"type":"array"}
+						}
+					}
+				}
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+	props := params["properties"].(map[string]any)
+
+	toolsField := props["tools"].(map[string]any)
+	assert.Equal(t, "array", toolsField["type"])
+	require.Contains(t, toolsField, "items", "top-level array missing items must get a default injected")
+	assert.Equal(t, map[string]any{"type": "string"}, toolsField["items"])
+
+	nestedItems := props["nested"].(map[string]any)["properties"].(map[string]any)["items"].(map[string]any)
+	assert.Equal(t, "array", nestedItems["type"])
+	require.Contains(t, nestedItems, "items", "nested array missing items must get a default injected too")
+	assert.Equal(t, map[string]any{"type": "string"}, nestedItems["items"])
+}
+
+func TestPrepareGemini_DropsEmptyStringEnumEntries(t *testing.T) {
+	// Regression: MCP tool schemas occasionally include `""` as an enum value
+	// (e.g. an "operator" field that allows "no filter"). Gemini rejects with
+	// "function_declarations[N].parameters.properties[X].enum[0]: cannot be
+	// empty". Drop empty strings; drop the enum entirely when nothing remains.
+	body := []byte(`{
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [{
+			"name":"odd-tool",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"operator":{"type":"string","enum":["","eq","neq","gt"]},
+					"all_empty":{"type":"string","enum":["",""]},
+					"normal":{"type":"string","enum":["a","b"]}
+				}
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+	props := params["properties"].(map[string]any)
+
+	operator := props["operator"].(map[string]any)
+	assert.Equal(t, []any{"eq", "neq", "gt"}, operator["enum"], "empty string must be filtered out")
+
+	allEmpty := props["all_empty"].(map[string]any)
+	assert.NotContains(t, allEmpty, "enum", "enum with only empty strings must be dropped entirely")
+
+	normal := props["normal"].(map[string]any)
+	assert.Equal(t, []any{"a", "b"}, normal["enum"], "well-formed enums must pass through unchanged")
+}
