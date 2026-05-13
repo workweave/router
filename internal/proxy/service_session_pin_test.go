@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/sessionpin"
 
 	"github.com/google/uuid"
@@ -106,6 +108,19 @@ func newPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 func authedCtx(installationID string) context.Context {
 	ctx := context.WithValue(context.Background(), proxy.APIKeyIDContextKey{}, "key-1")
 	return context.WithValue(ctx, proxy.InstallationIDContextKey{}, installationID)
+}
+
+// authedCtxWithExternalKey mirrors authedCtx and additionally stashes one
+// BYOK ExternalAPIKey on the context, the way the auth middleware does at
+// runtime.
+func authedCtxWithExternalKey(installationID, provider string, plaintext []byte) context.Context {
+	ctx := authedCtx(installationID)
+	keys := []*auth.ExternalAPIKey{{
+		InstallationID: installationID,
+		Provider:       provider,
+		Plaintext:      plaintext,
+	}}
+	return context.WithValue(ctx, proxy.ExternalAPIKeysContextKey{}, keys)
 }
 
 const pinTestBody = `{
@@ -242,6 +257,78 @@ const exploreBody = `{
 	"metadata":{"user_id":"subagent:Explore"},
 	"messages":[{"role":"user","content":"list go files"}]
 }`
+
+// In byokOnly mode the per-request hard-pin resolver overrides the
+// boot-time hardPin{Provider,Model} so compaction lands on a model the
+// request can authenticate to. Resolver receives the request's
+// enabled-providers set; here we BYOK only Anthropic and assert the
+// hard-pin lands on Anthropic regardless of the boot-time default.
+func TestService_HardPin_Compaction_ByokOnly_UsesRequestResolver(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
+
+	resolver := func(enabled map[string]struct{}) (string, string, bool) {
+		if _, ok := enabled[providers.ProviderAnthropic]; ok {
+			return providers.ProviderAnthropic, "claude-haiku-anthropic-byok", true
+		}
+		if _, ok := enabled[providers.ProviderOpenRouter]; ok {
+			return providers.ProviderOpenRouter, "deepseek/cheap", true
+		}
+		return "", "", false
+	}
+
+	providerMap := map[string]providers.Client{
+		providers.ProviderAnthropic:  &fakeProvider{},
+		providers.ProviderOpenRouter: &fakeProvider{},
+	}
+	// Boot-time hard-pin points at OpenRouter (mimics the buggy managed-mode
+	// boot path); the per-request resolver must override it to Anthropic
+	// because the installation only BYOKs Anthropic.
+	svc := proxy.NewService(
+		fr, providerMap, nil, false, nil, store, false,
+		providers.ProviderOpenRouter, "deepseek/cheap",
+		nil,
+	).WithByokOnly(true).WithHardPinResolver(resolver)
+
+	ctx := authedCtxWithExternalKey(uuid.New().String(), providers.ProviderAnthropic, []byte("sk-ant-test"))
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(compactionBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls, "compaction must bypass the cluster scorer")
+	assert.Equal(t, "claude-haiku-anthropic-byok", rec.Header().Get("x-router-model"),
+		"per-request resolver must land hard-pin on the installation's BYOK provider, not the boot-time default")
+}
+
+// With no BYOK and no client creds in byokOnly mode the resolver returns
+// ok=false; the hard-pin branch must surface ErrClusterUnavailable rather
+// than dispatching to the boot-time default that the request can't auth to.
+func TestService_HardPin_Compaction_ByokOnly_NoEligibleProviderErrors(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
+
+	resolver := func(enabled map[string]struct{}) (string, string, bool) {
+		if _, ok := enabled[providers.ProviderAnthropic]; ok {
+			return providers.ProviderAnthropic, "claude-haiku", true
+		}
+		return "", "", false
+	}
+
+	providerMap := map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}}
+	svc := proxy.NewService(
+		fr, providerMap, nil, false, nil, store, false,
+		providers.ProviderOpenRouter, "deepseek/cheap",
+		nil,
+	).WithByokOnly(true).WithHardPinResolver(resolver)
+
+	ctx := authedCtx(uuid.New().String()) // no external keys
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	err := svc.ProxyMessages(ctx, []byte(compactionBody), rec, httpReq)
+	require.Error(t, err, "hard-pin with no eligible provider must surface an error, not silently dispatch")
+	assert.ErrorIs(t, err, cluster.ErrClusterUnavailable,
+		"error must be ErrClusterUnavailable so handlers map it to HTTP 503")
+}
 
 func TestService_HardPin_CompactionAlwaysRoutesToHaiku(t *testing.T) {
 	store := newFakePinStore()

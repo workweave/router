@@ -2,11 +2,14 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
 	"workweave/router/internal/router/sessionpin"
@@ -101,9 +104,27 @@ func (s *Service) runTurnLoop(
 	if res.TurnType == turntype.Compaction ||
 		res.TurnType == turntype.Probe ||
 		(res.TurnType == turntype.SubAgentDispatch && s.hardPinExplore) {
+		provider, model := s.hardPinProvider, s.hardPinModel
+		// In byokOnly mode the boot-time hard-pin is unsafe: it was
+		// computed over every registered provider, but the request may
+		// only have BYOK credentials for a subset. Resolve per-request
+		// against the request's enabled-providers set so compaction
+		// stays on a provider the request can authenticate to.
+		if s.hardPinResolver != nil {
+			p, m, ok := s.hardPinResolver(req.EnabledProviders)
+			if !ok {
+				log.Warn(
+					"Hard-pin: no eligible provider for request; returning ErrClusterUnavailable",
+					"turn_type", string(res.TurnType),
+					"enabled_providers", sortedEnabledKeys(req.EnabledProviders),
+				)
+				return res, fmt.Errorf("hard-pin: no eligible provider for %s: %w", res.TurnType, cluster.ErrClusterUnavailable)
+			}
+			provider, model = p, m
+		}
 		res.Decision = router.Decision{
-			Provider: s.hardPinProvider,
-			Model:    s.hardPinModel,
+			Provider: provider,
+			Model:    model,
 			Reason:   string(res.TurnType) + "_hard_pin",
 		}
 		res.StickyHit = true
@@ -369,4 +390,18 @@ func estimateSummaryTokens(s string) int {
 		return 0
 	}
 	return len(s) / 4
+}
+
+// sortedEnabledKeys returns a deterministic slice of the keys in m for
+// log-line attribution. nil/empty map yields an empty slice.
+func sortedEnabledKeys(m map[string]struct{}) []string {
+	if len(m) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

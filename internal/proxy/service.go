@@ -55,6 +55,16 @@ type Service struct {
 	// model; overridable via ROUTER_HARD_PIN_PROVIDER / ROUTER_HARD_PIN_MODEL.
 	hardPinProvider string
 	hardPinModel    string
+	// hardPinResolver, when set, overrides the boot-time hardPin{Provider,Model}
+	// per-request. Used in byokOnly (managed) deployments where the cheapest
+	// model among ALL registered providers is the wrong choice — the
+	// installation may only BYOK a subset, and a hard-pin to a provider they
+	// can't authenticate to would 401 at dispatch. The resolver is given the
+	// request's enabled-providers set (BYOK + client-creds intersection) and
+	// returns (provider, model, ok). ok=false signals no eligible provider for
+	// this request — the orchestrator surfaces ErrClusterUnavailable rather
+	// than silently falling back.
+	hardPinResolver func(enabled map[string]struct{}) (provider, model string, ok bool)
 	// telemetry is an optional repository for persisting per-request telemetry.
 	telemetry TelemetryRepository
 	// byokOnly disables deployment-level credential fallback. When true, a
@@ -375,6 +385,18 @@ func (s *Service) WithAvailableModels(models map[string]struct{}) *Service {
 		copied[m] = struct{}{}
 	}
 	s.availableModels = copied
+	return s
+}
+
+// WithHardPinResolver installs a per-request hard-pin resolver. The
+// resolver is consulted on compaction/probe/Explore turns when set; nil
+// preserves the boot-time hardPin{Provider,Model} for every request
+// (the selfhosted default). The resolver receives the request's enabled
+// providers set; ok=false signals the request has no eligible provider
+// and the turnloop should surface ErrClusterUnavailable rather than
+// dispatching to a provider the request can't authenticate to.
+func (s *Service) WithHardPinResolver(resolver func(enabled map[string]struct{}) (provider, model string, ok bool)) *Service {
+	s.hardPinResolver = resolver
 	return s
 }
 
@@ -699,7 +721,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		PromptText:           promptText,
-		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
+		EnabledProviders:     s.enabledProvidersForRequest(ctx, providers.ProviderAnthropic, r.Header),
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
 	})
 	if routeErr != nil {
@@ -1179,7 +1201,16 @@ func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers htt
 // resolvable for this request (boot-time env key, BYOK, or client-supplied
 // header). The cluster scorer intersects this set with its boot-time
 // candidates so argmax never picks a model the upstream call would 401 on.
-func (s *Service) enabledProvidersForRequest(ctx context.Context, headers http.Header) map[string]struct{} {
+//
+// surfaceProvider is the inbound wire-format's natural provider (anthropic
+// for /v1/messages, openai for /v1/chat/completions, google for the Gemini
+// surface). A client-supplied bearer/x-api-key header is treated as creds
+// for that surface only — never as a licence to enable other OpenAI-compat
+// upstreams that happen to read the same Authorization header. This matches
+// the guard already in resolveAndInjectCredentials: a router-key-authed
+// request must rely on BYOK; a header on such a request is for the inbound
+// surface only and must not enable cross-provider routing.
+func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvider string, headers http.Header) map[string]struct{} {
 	out := make(map[string]struct{}, len(s.providers))
 	// In BYOK-only mode the deployment-level env key must not make a provider
 	// eligible — otherwise argmax could pick it and 401 with the platform key.
@@ -1206,12 +1237,16 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, headers http.H
 		}
 		out[k.Provider] = struct{}{}
 	}
-	for _, p := range []string{providers.ProviderAnthropic, providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter, providers.ProviderFireworks} {
-		if _, already := out[p]; already {
-			continue
-		}
-		if ExtractClientCredentials(p, headers) != nil {
-			out[p] = struct{}{}
+	// Client-supplied headers are only consulted when the request is NOT
+	// authed via a router key. A router-key-authed request that happens to
+	// carry an inbound bearer (e.g. Claude Code's Anthropic OAuth token
+	// passing through) must not enable OpenAI-compat upstreams just because
+	// they share the Authorization: Bearer header format.
+	if installationIDFromContext(ctx) == (uuid.UUID{}) && surfaceProvider != "" {
+		if _, already := out[surfaceProvider]; !already {
+			if ExtractClientCredentials(surfaceProvider, headers) != nil {
+				out[surfaceProvider] = struct{}{}
+			}
 		}
 	}
 	return out
@@ -1352,7 +1387,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		PromptText:           promptText,
-		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
+		EnabledProviders:     s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header),
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
