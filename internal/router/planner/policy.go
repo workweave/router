@@ -12,8 +12,13 @@
 // where pinMult / freshMult are each model's per-provider cache-read
 // multiplier (Anthropic 0.10, OpenAI 0.50, Gemini 0.25, ...) read via
 // pricing.Pricing.EffectiveCacheReadMultiplier. The planner switches
-// only when (expected savings - eviction cost) exceeds a configurable
-// threshold. The cache-read multiplier on the savings term reflects
+// when (expected savings - eviction cost) exceeds a configurable
+// threshold OR when the optional tier-upgrade guard fires — that is,
+// when the fresh scorer recommendation is in a strictly higher
+// capability tier than the pin (see internal/router/capability). The
+// tier guard exists because a small first turn ("hi") can pin a Low
+// model, and the pure EV math will then keep all subsequent harder
+// prompts on the cheap pin since switching evicts the warm cache. The cache-read multiplier on the savings term reflects
 // that once a pin is warm, ~(1 - mult) of input tokens come from cache
 // on both the pinned and (post-eviction) fresh model, so only the
 // cache-read portion of the per-turn delta accrues over the horizon.
@@ -25,6 +30,7 @@ package planner
 
 import (
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/capability"
 	"workweave/router/internal/router/pricing"
 	"workweave/router/internal/router/sessionpin"
 )
@@ -64,6 +70,16 @@ type EVConfig struct {
 	// Default 3 reflects observed session length distributions; tuned
 	// per deployment via env.
 	ExpectedRemainingTurns int
+	// TierUpgradeEnabled overturns an EV "stay" verdict when the fresh
+	// scorer recommendation is in a strictly higher capability tier
+	// than the pin. Tiers live in internal/router/capability and are a
+	// short hand-maintained ladder (low / mid / high). The guard is
+	// asymmetric on purpose: only upgrades fire, never sideways or
+	// downward moves — those are already governed correctly by the EV
+	// math (cheap fresh model → expectedSavings > evictionCost → switch).
+	// Defaults to false so existing callers (tests, BYOK paths) get
+	// unchanged behavior; production wires it on via env.
+	TierUpgradeEnabled bool
 }
 
 // Inputs is the full per-turn input to Decide. Kept as a struct (not
@@ -85,6 +101,7 @@ const (
 	ReasonPricingMissing  = "pricing_missing"
 	ReasonEVPositive      = "ev_positive"
 	ReasonEVNegative      = "ev_negative"
+	ReasonTierUpgrade     = "tier_upgrade"
 )
 
 // Decide returns the planner verdict for this turn. See package doc for
@@ -142,12 +159,35 @@ func Decide(in Inputs, cfg EVConfig) Decision {
 		EvictionCostUSD:    evictionCost,
 		ThresholdUSD:       cfg.ThresholdUSD,
 	}
-	if expectedSavings-evictionCost > cfg.ThresholdUSD {
+	switch {
+	case expectedSavings-evictionCost > cfg.ThresholdUSD:
 		d.Outcome = OutcomeSwitch
 		d.Reason = ReasonEVPositive
-	} else {
+	case cfg.TierUpgradeEnabled && tierUpgrade(in.Pin.Model, in.Fresh.Model):
+		// EV said stay, but the scorer wants a strictly stronger model.
+		// Pay the eviction cost — the per-turn capability gain on a hard
+		// prompt is worth more than the cache we'd preserve. Only fires
+		// when both models are in the tier table; unknown-tier models
+		// fall through to the EV verdict so a missing entry never
+		// silently forces a switch.
+		d.Outcome = OutcomeSwitch
+		d.Reason = ReasonTierUpgrade
+	default:
 		d.Outcome = OutcomeStay
 		d.Reason = ReasonEVNegative
 	}
 	return d
+}
+
+// tierUpgrade reports whether fresh is in a strictly higher capability
+// tier than pin. Both models must be in the tier table; an unknown
+// tier on either side disables the guard for that decision, so a model
+// missing from the table can never silently force a switch.
+func tierUpgrade(pin, fresh string) bool {
+	pinTier := capability.TierFor(pin)
+	freshTier := capability.TierFor(fresh)
+	if pinTier == capability.TierUnknown || freshTier == capability.TierUnknown {
+		return false
+	}
+	return freshTier > pinTier
 }

@@ -154,6 +154,13 @@ const DefaultPlannerThresholdUSD = 0.001
 // per-turn savings. Matches observed agentic-loop tail length.
 const DefaultPlannerExpectedRemainingTurns = 3
 
+// DefaultPlannerTierUpgradeEnabled turns on the capability-tier guard
+// by default. The guard overturns an EV "stay" when the fresh scorer
+// recommendation is in a strictly higher tier than the pin so a small
+// first turn cannot pin a Low-tier model for the rest of the session.
+// See internal/router/capability for the tier table.
+const DefaultPlannerTierUpgradeEnabled = true
+
 // session-pin feature flag is off. The planner runs by default with the
 // conservative EVConfig above; callers tune it via WithPlanner /
 // WithPlannerEnabled / WithSummarizer / WithAvailableModels.
@@ -183,6 +190,7 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		planner: planner.EVConfig{
 			ThresholdUSD:           DefaultPlannerThresholdUSD,
 			ExpectedRemainingTurns: DefaultPlannerExpectedRemainingTurns,
+			TierUpgradeEnabled:     DefaultPlannerTierUpgradeEnabled,
 		},
 		plannerEnabled: true,
 	}
@@ -200,6 +208,7 @@ func (s *Service) WithPlanner(cfg planner.EVConfig) *Service {
 	if cfg.ExpectedRemainingTurns > 0 {
 		s.planner.ExpectedRemainingTurns = cfg.ExpectedRemainingTurns
 	}
+	s.planner.TierUpgradeEnabled = cfg.TierUpgradeEnabled
 	return s
 }
 
