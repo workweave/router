@@ -219,6 +219,8 @@ func humanReasonFromPlanner(code string) string {
 		return "pin model no longer available"
 	case planner.ReasonPricingMissing:
 		return "missing pricing for a candidate"
+	case planner.ReasonTierUpgrade:
+		return "model tier upgrade"
 	default:
 		return code
 	}
