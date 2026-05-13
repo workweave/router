@@ -1,0 +1,30 @@
+{
+  "meta": {
+    "comment": "v0.25 candidate. Strict superset of v0.24's 14-model deployed set: appends 6 new OpenRouter-hosted OSS models (qwen3.5-flash, qwen3-coder, deepseek-v4 flash+pro, kimi-k2.5, mistral-small-2603) for total of 20. qwen3.6-max-preview and z-ai/glm-4.7 were dropped from this candidate after the v0.25 labeling run's first-pass token means showed them burning ~944 / ~758 avg_out tokens with no plan to deploy. Same direct-label scheme — every entry uses routerarena_<model> as its bench_column. Centroids and rankings are NOT yet built — this template lands first so labeling/training can target it; train_cluster_router.py reads model_registry.json from this directory to write centroids.bin + rankings.json + metadata.yaml.",
+    "last_refreshed": "2026-05-06",
+    "training_recipe": "v0.21 recipe (k=10 zscore shrinkage_k0=10 routerarena_only); alpha to be selected via the v0.25/v0.26/v0.27 sweep."
+  },
+  "deployed_models": [
+    {"model": "claude-haiku-4-5",                 "provider": "anthropic",  "bench_column": "routerarena_claude-haiku-4-5",                 "direct_label": "routerarena"},
+    {"model": "claude-sonnet-4-5",                "provider": "anthropic",  "bench_column": "routerarena_claude-sonnet-4-5",                "direct_label": "routerarena"},
+    {"model": "claude-opus-4-7",                  "provider": "anthropic",  "bench_column": "routerarena_claude-opus-4-7",                  "direct_label": "routerarena"},
+    {"model": "gemini-3.1-flash-lite-preview",    "provider": "google",     "bench_column": "routerarena_gemini-3.1-flash-lite-preview",    "direct_label": "routerarena"},
+    {"model": "gemini-3.1-pro-preview",           "provider": "google",     "bench_column": "routerarena_gemini-3.1-pro-preview",           "direct_label": "routerarena"},
+    {"model": "gemini-3-flash-preview",           "provider": "google",     "bench_column": "routerarena_gemini-3-flash-preview",           "direct_label": "routerarena"},
+    {"model": "gpt-4.1",                          "provider": "openai",     "bench_column": "routerarena_gpt-4.1",                          "direct_label": "routerarena"},
+    {"model": "gpt-5.4-mini",                     "provider": "openai",     "bench_column": "routerarena_gpt-5.4-mini",                     "direct_label": "routerarena"},
+    {"model": "gpt-5.5",                          "provider": "openai",     "bench_column": "routerarena_gpt-5.5",                          "direct_label": "routerarena"},
+    {"model": "gemini-2.5-flash",                 "provider": "google",     "bench_column": "routerarena_gemini-2.5-flash",                 "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-235b-a22b-2507",        "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-235b-a22b-2507",        "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-30b-a3b-instruct-2507", "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-30b-a3b-instruct-2507", "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-coder-next",            "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-coder-next",            "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-next-80b-a3b-instruct", "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-next-80b-a3b-instruct", "direct_label": "routerarena"},
+
+    {"model": "qwen/qwen3.5-flash-02-23",         "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3.5-flash-02-23",         "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-coder",                 "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-coder",                 "direct_label": "routerarena"},
+    {"model": "deepseek/deepseek-v4-flash",       "provider": "openrouter", "bench_column": "routerarena_deepseek/deepseek-v4-flash",       "direct_label": "routerarena"},
+    {"model": "deepseek/deepseek-v4-pro",         "provider": "openrouter", "bench_column": "routerarena_deepseek/deepseek-v4-pro",         "direct_label": "routerarena"},
+    {"model": "moonshotai/kimi-k2.5",             "provider": "openrouter", "bench_column": "routerarena_moonshotai/kimi-k2.5",             "direct_label": "routerarena"},
+    {"model": "mistralai/mistral-small-2603",     "provider": "openrouter", "bench_column": "routerarena_mistralai/mistral-small-2603",     "direct_label": "routerarena"}
+  ]
+}
