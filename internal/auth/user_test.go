@@ -52,7 +52,7 @@ func (f *fakeUserRepo) ListForInstallation(ctx context.Context, installationID s
 func makeServiceWithUsers(t *testing.T, users auth.UserRepository) *auth.Service {
 	t.Helper()
 	return auth.NewService(
-		fakeInstallationRepository{},
+		&fakeInstallationRepository{},
 		&fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}},
 		nil,
 		users,
@@ -160,7 +160,7 @@ func TestResolveAndStashUser_CacheHitSkipsRepo(t *testing.T) {
 	repo := &fakeUserRepo{user: &auth.User{ID: "user-1"}}
 	cache := auth.NewLRUUserCache(8, 5*time.Minute)
 	svc := auth.NewService(
-		fakeInstallationRepository{},
+		&fakeInstallationRepository{},
 		&fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}},
 		nil,
 		repo,

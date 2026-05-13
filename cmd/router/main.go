@@ -263,6 +263,20 @@ func main() {
 
 	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).WithByokOnly(byokOnly)
 
+	// ROUTER_EXCLUDED_MODELS pins a deployment-wide model exclusion list,
+	// overriding per-installation DB state. Empty / unset → DB takes over.
+	if excludedRaw := strings.TrimSpace(config.GetOr("ROUTER_EXCLUDED_MODELS", "")); excludedRaw != "" {
+		parts := strings.Split(excludedRaw, ",")
+		cleaned := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				cleaned = append(cleaned, trimmed)
+			}
+		}
+		proxySvc = proxySvc.WithExcludedModelsOverride(cleaned)
+		logger.Info("Model exclusion override active", "excluded_models", cleaned)
+	}
+
 	engine := gin.New()
 	engine.UnescapePathValues = true
 	engine.UseRawPath = true
@@ -272,7 +286,11 @@ func main() {
 		gin.Recovery(),
 	)
 
-	server.Register(engine, authSvc, proxySvc, deploymentMode)
+	// Cast the router to *cluster.Multiversion so the admin model-selection
+	// handler can surface the universe of deployed models. The fallback nil
+	// keeps non-cluster routers (heuristic dev override, etc.) bootable.
+	deployedModels, _ := rtr.(*cluster.Multiversion)
+	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),

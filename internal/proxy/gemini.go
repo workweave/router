@@ -59,6 +59,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		HasTools:             feats.HasTools,
 		PromptText:           feats.PromptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
+		ExcludedModels:       s.excludedModelsForRequest(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {

@@ -558,3 +558,53 @@ func TestScorer_EmptyEnabledProvidersReturnsErrNoEligibleProvider(t *testing.T) 
 	// sentinels to different status codes (400 vs 503).
 	assert.False(t, errors.Is(err, ErrClusterUnavailable))
 }
+
+// Per-installation model exclusion drops the named model from argmax even
+// when its provider is otherwise eligible.
+func TestScorer_ExcludedModelsRemovesFromArgmax(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s := newTwoProviderScorer(t, emb)
+
+	got, err := s.Route(context.Background(), router.Request{
+		PromptText:     strings.Repeat("x", 100),
+		ExcludedModels: map[string]struct{}{"gpt-5": {}},
+	})
+	require.NoError(t, err)
+	// Without exclusion gpt-5 wins; excluding it forces argmax onto claude.
+	assert.Equal(t, "claude-opus-4-7", got.Model)
+	assert.Equal(t, "anthropic", got.Provider)
+}
+
+// Excluding every deployed model must surface ErrNoEligibleProvider (no
+// silent fallback to a default).
+func TestScorer_ExcludedModelsEmptyingPoolReturnsErrNoEligibleProvider(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s := newTwoProviderScorer(t, emb)
+
+	_, err := s.Route(context.Background(), router.Request{
+		PromptText: strings.Repeat("x", 100),
+		ExcludedModels: map[string]struct{}{
+			"gpt-5":           {},
+			"claude-opus-4-7": {},
+		},
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNoEligibleProvider))
+	assert.False(t, errors.Is(err, ErrClusterUnavailable))
+}
+
+// DeployedModels returns the full provider-filtered candidate list, not the
+// per-request eligible subset.
+func TestScorer_DeployedModelsReturnsBootCandidates(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s := newTwoProviderScorer(t, emb)
+
+	got := s.DeployedModels()
+	models := make([]string, 0, len(got))
+	for _, e := range got {
+		models = append(models, e.Model)
+	}
+	// Two-provider scorer fixture has gpt-5 + claude-opus-4-7.
+	assert.Contains(t, models, "gpt-5")
+	assert.Contains(t, models, "claude-opus-4-7")
+}

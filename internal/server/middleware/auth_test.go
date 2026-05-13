@@ -74,6 +74,10 @@ func (fakeInstallationRepository) SoftDelete(ctx context.Context, externalID, id
 	return errors.New("not used")
 }
 
+func (fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, id string, models []string) error {
+	return errors.New("not used")
+}
+
 func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const routerToken = "rk_router"

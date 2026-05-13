@@ -93,7 +93,9 @@ func (f *fakeExternalAPIKeyRepo) MarkUsed(ctx context.Context, id string) error 
 	return nil
 }
 
-type fakeInstallationRepository struct{}
+type fakeInstallationRepository struct {
+	excludedModelsByID map[string][]string
+}
 
 func (fakeInstallationRepository) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
 	return nil, errors.New("not used")
@@ -106,6 +108,13 @@ func (fakeInstallationRepository) ListForExternalID(ctx context.Context, externa
 }
 func (fakeInstallationRepository) SoftDelete(ctx context.Context, externalID, id string) error {
 	return errors.New("not used")
+}
+func (f *fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, id string, models []string) error {
+	if f.excludedModelsByID == nil {
+		f.excludedModelsByID = map[string][]string{}
+	}
+	f.excludedModelsByID[id] = append([]string{}, models...)
+	return nil
 }
 
 func frozenClock() auth.Clock {
@@ -120,7 +129,7 @@ func makeService(t *testing.T, rows ...fakeKeyRow) (*auth.Service, *fakeAPIKeyRe
 		apiKeys.byHash[row.apiKey.KeyHash] = row
 	}
 	svc := auth.NewService(
-		fakeInstallationRepository{},
+		&fakeInstallationRepository{},
 		apiKeys,
 		nil,
 		nil,
@@ -290,7 +299,7 @@ func makeServiceWithCacheAndCounter(t *testing.T, cache auth.APIKeyCache, rows .
 	}
 	counter := &repoCallCounter{fakeAPIKeyRepository: bare}
 	svc := auth.NewService(
-		fakeInstallationRepository{},
+		&fakeInstallationRepository{},
 		counter,
 		nil,
 		nil,
@@ -418,7 +427,7 @@ func makeServiceWithExternalKeys(t *testing.T, externalRepo auth.ExternalAPIKeyR
 		apiKeys.byHash[row.apiKey.KeyHash] = row
 	}
 	return auth.NewService(
-		fakeInstallationRepository{},
+		&fakeInstallationRepository{},
 		apiKeys,
 		externalRepo,
 		nil,
@@ -515,7 +524,7 @@ func TestService_VerifyAPIKey_ExternalKeysAreCached(t *testing.T) {
 	}}
 	counter := &repoCallCounter{fakeAPIKeyRepository: bare}
 	svc := auth.NewService(
-		fakeInstallationRepository{},
+		&fakeInstallationRepository{},
 		counter,
 		fakeExternal,
 		nil,
@@ -537,3 +546,37 @@ func TestService_VerifyAPIKey_ExternalKeysAreCached(t *testing.T) {
 	assert.Equal(t, 1, counter.getCallCount(),
 		"the repo must only be called once; the second call must be served from cache")
 }
+
+func TestService_SetInstallationExcludedModels(t *testing.T) {
+	installRepo := &fakeInstallationRepository{}
+	svc := auth.NewService(installRepo, &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}, nil, nil, auth.NoOpAPIKeyCache{}, nil, frozenClock())
+
+	allowed := map[string]struct{}{"gpt-4o": {}, "claude-opus-4-7": {}}
+
+	t.Run("persists deduped list", func(t *testing.T) {
+		out, err := svc.SetInstallationExcludedModels(context.Background(), "inst-1", []string{"gpt-4o", "gpt-4o", "claude-opus-4-7"}, allowed)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"gpt-4o", "claude-opus-4-7"}, out, "duplicates collapsed; order preserved")
+		assert.Equal(t, []string{"gpt-4o", "claude-opus-4-7"}, installRepo.excludedModelsByID["inst-1"])
+	})
+
+	t.Run("rejects unknown model with ErrUnknownModel", func(t *testing.T) {
+		_, err := svc.SetInstallationExcludedModels(context.Background(), "inst-1", []string{"gemini-nope"}, allowed)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, auth.ErrUnknownModel))
+	})
+
+	t.Run("nil allowed skips validation", func(t *testing.T) {
+		out, err := svc.SetInstallationExcludedModels(context.Background(), "inst-2", []string{"anything-goes"}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"anything-goes"}, out)
+	})
+
+	t.Run("nil models persists empty slice", func(t *testing.T) {
+		out, err := svc.SetInstallationExcludedModels(context.Background(), "inst-3", nil, allowed)
+		require.NoError(t, err)
+		assert.Equal(t, []string{}, out)
+		assert.Equal(t, []string{}, installRepo.excludedModelsByID["inst-3"])
+	})
+}
+

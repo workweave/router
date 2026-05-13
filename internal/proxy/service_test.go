@@ -468,3 +468,54 @@ func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 			"client-supplied Bearer enables the matching provider")
 	})
 }
+
+// Model exclusion flows from installation context or env override into
+// the router.Request that the scorer consumes. Env override wins.
+func TestService_ExcludedModelsThroughRequest(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+	providerMap := map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}}
+
+	t.Run("no override and no installation list → nil", func(t *testing.T) {
+		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+
+		rec := httptest.NewRecorder()
+		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+
+		require.NotNil(t, fr.capturedReq)
+		assert.Nil(t, fr.capturedReq.ExcludedModels)
+	})
+
+	t.Run("installation list populates request", func(t *testing.T) {
+		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+
+		ctx := context.WithValue(context.Background(), proxy.InstallationExcludedModelsContextKey{}, []string{"claude-opus-4-7", "gpt-5"})
+		rec := httptest.NewRecorder()
+		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+
+		require.NotNil(t, fr.capturedReq)
+		assert.Contains(t, fr.capturedReq.ExcludedModels, "claude-opus-4-7")
+		assert.Contains(t, fr.capturedReq.ExcludedModels, "gpt-5")
+	})
+
+	t.Run("env override replaces installation list", func(t *testing.T) {
+		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+			WithExcludedModelsOverride([]string{"gpt-4o"})
+
+		// Installation list says one thing; override says another. Override wins.
+		ctx := context.WithValue(context.Background(), proxy.InstallationExcludedModelsContextKey{}, []string{"claude-opus-4-7"})
+		rec := httptest.NewRecorder()
+		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+
+		require.NotNil(t, fr.capturedReq)
+		assert.Contains(t, fr.capturedReq.ExcludedModels, "gpt-4o")
+		assert.NotContains(t, fr.capturedReq.ExcludedModels, "claude-opus-4-7")
+		assert.True(t, svc.HasExcludedModelsOverride())
+		assert.Equal(t, []string{"gpt-4o"}, svc.ExcludedModelsOverride())
+	})
+}

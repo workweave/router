@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -11,6 +12,10 @@ import (
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
 )
+
+// ErrUnknownModel is returned by SetInstallationExcludedModels when a
+// requested model ID is not in the allowed set the caller passed in.
+var ErrUnknownModel = errors.New("auth: unknown model id")
 
 type Clock func() time.Time
 
@@ -153,6 +158,41 @@ func (s *Service) UpsertExternalAPIKey(ctx context.Context, installationID, prov
 // DeleteExternalAPIKey soft-deletes a specific provider API key.
 func (s *Service) DeleteExternalAPIKey(ctx context.Context, installationID, id string) error {
 	return s.externalKeys.SoftDelete(ctx, installationID, id)
+}
+
+// SetInstallationExcludedModels replaces the per-installation model exclusion
+// list. allowed is the universe of valid model IDs the caller is willing to
+// accept (typically every deployed model); passing nil skips validation.
+// Returns ErrUnknownModel when an entry in models is not in allowed.
+//
+// The new list is visible to the request path within the APIKey cache TTL
+// (default 5 min); explicit invalidation is intentionally not wired so the
+// in-process cache stays write-through-by-TTL like external-key changes.
+func (s *Service) SetInstallationExcludedModels(ctx context.Context, installationID string, models []string, allowed map[string]struct{}) ([]string, error) {
+	if models == nil {
+		models = []string{}
+	}
+	if allowed != nil {
+		for _, m := range models {
+			if _, ok := allowed[m]; !ok {
+				return nil, fmt.Errorf("%w: %q", ErrUnknownModel, m)
+			}
+		}
+	}
+	// De-dupe while preserving order so the persisted list is stable.
+	seen := make(map[string]struct{}, len(models))
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		if _, dup := seen[m]; dup {
+			continue
+		}
+		seen[m] = struct{}{}
+		out = append(out, m)
+	}
+	if err := s.installations.UpdateExcludedModels(ctx, installationID, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // VerifyAPIKey authenticates a raw bearer token.

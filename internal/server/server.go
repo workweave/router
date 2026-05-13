@@ -42,7 +42,11 @@ const (
 
 // Register wires routes onto the engine. In managed mode the dashboard +
 // /admin/v1/* routes are not registered at all.
-func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, mode DeploymentMode) {
+//
+// deployedModels is the source for the admin model-selection checklist. May
+// be nil in tests; required in selfhosted production so the dashboard can
+// render the universe of routable models.
+func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode) {
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
 
 	// /validate is a token-validity probe used by clients (not the dashboard), so it stays mounted in both modes.
@@ -76,6 +80,10 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		mgmt.POST("/provider-keys", admin.UpsertExternalKeyHandler(authSvc))
 		mgmt.DELETE("/provider-keys/:id", admin.DeleteExternalKeyHandler(authSvc))
 		mgmt.GET("/config", admin.ConfigHandler)
+		if deployedModels != nil {
+			mgmt.GET("/excluded-models", admin.GetExcludedModelsHandler(authSvc, deployedModels, proxySvc))
+			mgmt.PUT("/excluded-models", admin.UpdateExcludedModelsHandler(authSvc, deployedModels, proxySvc))
+		}
 	}
 
 	messagesGroup := engine.Group("",

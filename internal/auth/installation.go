@@ -15,6 +15,9 @@ type Installation struct {
 	UpdatedAt  time.Time
 	DeletedAt  *time.Time
 	CreatedBy  *string
+	// ExcludedModels is the per-installation model exclusion list applied
+	// at request time by the cluster scorer. Empty slice means no exclusion.
+	ExcludedModels []string
 }
 
 type CreateInstallationParams struct {
@@ -30,4 +33,7 @@ type InstallationRepository interface {
 	ListForExternalID(ctx context.Context, externalID string) ([]*Installation, error)
 	// SoftDelete is scoped to externalID to prevent cross-tenant deletes.
 	SoftDelete(ctx context.Context, externalID, id string) error
+	// UpdateExcludedModels replaces the per-installation exclusion list.
+	// An empty (or nil) slice clears the list.
+	UpdateExcludedModels(ctx context.Context, id string, models []string) error
 }

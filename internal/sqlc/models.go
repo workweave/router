@@ -48,13 +48,14 @@ type RouterModelRouterExternalAPIKey struct {
 
 // Customer router installations; owns API keys
 type RouterModelRouterInstallation struct {
-	ID         uuid.UUID
-	ExternalID string
-	Name       string
-	CreatedAt  pgtype.Timestamp
-	UpdatedAt  pgtype.Timestamp
-	DeletedAt  pgtype.Timestamp
-	CreatedBy  *string
+	ID             uuid.UUID
+	ExternalID     string
+	Name           string
+	CreatedAt      pgtype.Timestamp
+	UpdatedAt      pgtype.Timestamp
+	DeletedAt      pgtype.Timestamp
+	CreatedBy      *string
+	ExcludedModels []string
 }
 
 type RouterModelRouterRequestTelemetry struct {

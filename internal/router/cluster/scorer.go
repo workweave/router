@@ -60,6 +60,17 @@ type Scorer struct {
 // Version returns the artifact version (e.g. "v0.2").
 func (s *Scorer) Version() string { return s.version }
 
+// DeployedModels returns the static, provider-filtered candidate list this
+// Scorer was built with. The slice is a copy; mutating it does not affect
+// routing. Used by the admin API to render the model-selection checklist
+// (we surface the universe of choices, not just the currently-eligible
+// subset for a given installation).
+func (s *Scorer) DeployedModels() []DeployedEntry {
+	out := make([]DeployedEntry, len(s.candidates))
+	copy(out, s.candidates)
+	return out
+}
+
 // CacheThresholds returns per-version semantic-cache thresholds from the
 // bundle's metadata.yaml cache_config block. defaultThreshold is 0 when
 // unset; callers substitute their own runtime default.
@@ -255,6 +266,28 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			)
 			return router.Decision{}, fmt.Errorf("enabled providers %v have no overlap with deployed candidates: %w", sortedKeys(req.EnabledProviders), ErrNoEligibleProvider)
 		}
+	}
+
+	// Per-installation (or env-var-driven) model exclusion. Applied after
+	// EnabledProviders so the two filters compose: provider-eligible AND
+	// not-excluded. Empties → ErrNoEligibleProvider (no silent fallback;
+	// the operator deliberately narrowed the pool).
+	if len(req.ExcludedModels) > 0 {
+		filtered := eligibleModels[:0:0]
+		for _, m := range eligibleModels {
+			if _, drop := req.ExcludedModels[m]; !drop {
+				filtered = append(filtered, m)
+			}
+		}
+		if len(filtered) == 0 {
+			log.Warn(
+				"Cluster scorer: exclusion list empties eligible pool; returning ErrNoEligibleProvider",
+				"excluded_models", sortedKeys(req.ExcludedModels),
+				"requested_model", req.RequestedModel,
+			)
+			return router.Decision{}, fmt.Errorf("excluded models %v leave no eligible candidates: %w", sortedKeys(req.ExcludedModels), ErrNoEligibleProvider)
+		}
+		eligibleModels = filtered
 	}
 
 	scoreStart := time.Now()

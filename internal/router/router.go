@@ -12,6 +12,11 @@ type Request struct {
 	// EnabledProviders restricts argmax so we never return a decision the
 	// upstream call would 401 on. Nil means no per-request gating.
 	EnabledProviders map[string]struct{}
+	// ExcludedModels drops the named models from argmax. Per-installation
+	// or env-var-driven; sibling to EnabledProviders but at model granularity.
+	// Nil or empty means no exclusion. If filtering empties the eligible
+	// set, the scorer returns ErrNoEligibleProvider rather than falling back.
+	ExcludedModels map[string]struct{}
 }
 
 type Decision struct {
