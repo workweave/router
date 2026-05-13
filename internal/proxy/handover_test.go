@@ -21,9 +21,9 @@ import (
 // the summarizer test: it can return a canned non-streaming body, sleep
 // past a deadline, or surface a non-2xx status.
 type fakeHandoverProvider struct {
-	respBody   string
-	respStatus int
-	sleep      time.Duration
+	respBody    string
+	respStatus  int
+	sleep       time.Duration
 	upstreamErr error
 }
 

@@ -69,13 +69,13 @@ type Inputs struct {
 // Reason constants for Decision.Reason. Kept as exported strings so the
 // orchestrator and tests reference the same labels without retyping.
 const (
-	ReasonNoPin             = "no_pin"
-	ReasonSameModel         = "same_model"
-	ReasonPinModelMissing   = "pin_model_missing"
-	ReasonNoPriorUsage      = "no_prior_usage"
-	ReasonPricingMissing    = "pricing_missing"
-	ReasonEVPositive        = "ev_positive"
-	ReasonEVNegative        = "ev_negative"
+	ReasonNoPin           = "no_pin"
+	ReasonSameModel       = "same_model"
+	ReasonPinModelMissing = "pin_model_missing"
+	ReasonNoPriorUsage    = "no_prior_usage"
+	ReasonPricingMissing  = "pricing_missing"
+	ReasonEVPositive      = "ev_positive"
+	ReasonEVNegative      = "ev_negative"
 )
 
 // Decide returns the planner verdict for this turn. See package doc for
