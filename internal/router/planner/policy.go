@@ -6,16 +6,21 @@
 //
 // The EV math compares:
 //
-//	expected savings = (Δ input $/M-tok) × cache-read multiplier × tokens × remaining-turn horizon
-//	eviction cost    = fresh model input $/M-tok × tokens × (1 - cache-read multiplier)
+//	expected savings = (pin $/M-tok × pinMult − fresh $/M-tok × freshMult) × tokens × remaining-turn horizon
+//	eviction cost    = fresh $/M-tok × tokens × (1 − freshMult)
 //
-// and switches only when (expected savings - eviction cost) exceeds a
-// configurable threshold. The cache-read multiplier on the savings term
-// reflects that once a pin is warm, ~(1 - multiplier) of input tokens
-// come from cache on both the pinned and (post-eviction) fresh model;
-// only the delta on the cache-read portion accrues per remaining turn.
-// The full spec lives in the Prism-style cache-aware routing plan; this
-// file is the executable form.
+// where pinMult / freshMult are each model's per-provider cache-read
+// multiplier (Anthropic 0.10, OpenAI 0.50, Gemini 0.25, ...) read via
+// pricing.Pricing.EffectiveCacheReadMultiplier. The planner switches
+// only when (expected savings - eviction cost) exceeds a configurable
+// threshold. The cache-read multiplier on the savings term reflects
+// that once a pin is warm, ~(1 - mult) of input tokens come from cache
+// on both the pinned and (post-eviction) fresh model, so only the
+// cache-read portion of the per-turn delta accrues over the horizon.
+// Per-model multipliers (vs a single global) keep cross-provider
+// switches (e.g. opus → gpt-5) economically correct. The full spec
+// lives in the Prism-style cache-aware routing plan; this file is the
+// executable form.
 package planner
 
 import (
@@ -118,14 +123,18 @@ func Decide(in Inputs, cfg EVConfig) Decision {
 	}
 
 	tokens := float64(in.EstimatedInputTokens)
-	// CacheReadMultiplier scales the per-turn delta because, in steady
-	// state on either model, ~(1 - multiplier) of input tokens are served
-	// from the prompt cache. Switching only avoids cost on the cache-read
-	// portion of subsequent turns; pricing the savings off full input
-	// price systematically overstates the switch benefit by 1/multiplier
-	// (~10×) and makes the planner too switch-eager near threshold.
-	savingsPerTurn := (pinPrice.InputUSDPer1M - freshPrice.InputUSDPer1M) * pricing.CacheReadMultiplier * tokens / 1e6
-	evictionCost := freshPrice.InputUSDPer1M * tokens * (1 - pricing.CacheReadMultiplier) / 1e6
+	// Per-model cache-read multipliers scale the per-turn delta because,
+	// in steady state on either model, ~(1 - multiplier) of input tokens
+	// are served from the prompt cache. Switching only avoids cost on the
+	// cache-read portion of subsequent turns; pricing the savings off full
+	// input price systematically overstates the switch benefit. Reading
+	// the multiplier per-model (vs a single global) is what makes
+	// cross-provider switches (e.g. opus → gpt-5, where Anthropic's 0.10
+	// and OpenAI's 0.50 differ by 5×) economically correct.
+	pinMult := pinPrice.EffectiveCacheReadMultiplier()
+	freshMult := freshPrice.EffectiveCacheReadMultiplier()
+	savingsPerTurn := (pinPrice.InputUSDPer1M*pinMult - freshPrice.InputUSDPer1M*freshMult) * tokens / 1e6
+	evictionCost := freshPrice.InputUSDPer1M * tokens * (1 - freshMult) / 1e6
 	expectedSavings := savingsPerTurn * float64(cfg.ExpectedRemainingTurns)
 
 	d := Decision{

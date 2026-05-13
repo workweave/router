@@ -51,16 +51,51 @@ func TestFor_EmptyString(t *testing.T) {
 	assert.Equal(t, pricing.Pricing{}, p)
 }
 
-func TestCacheMultipliers_Positive(t *testing.T) {
-	// Sanity-check the Anthropic-published multipliers that the planner will
-	// consume. If any of these flip non-positive, the EV math breaks.
-	assert.Greater(t, pricing.CacheReadMultiplier, 0.0)
-	assert.Less(t, pricing.CacheReadMultiplier, 1.0,
-		"cache reads should be cheaper than base input")
-	assert.Greater(t, pricing.CacheWriteMultiplier5Min, 1.0,
-		"5-min cache writes should cost more than base input")
-	assert.Greater(t, pricing.CacheWriteMultiplier1Hour, pricing.CacheWriteMultiplier5Min,
-		"1-hour cache writes should cost more than 5-min cache writes")
+func TestCacheReadMultiplier_PerProvider(t *testing.T) {
+	// Per-provider published cache-read multipliers reach the planner via the
+	// Pricing table. Cross-provider switches use these to compute the right
+	// EV math; a regression here would silently miscompute non-Anthropic
+	// switches by the multiplier ratio (e.g. ~5× for Anthropic vs OpenAI).
+	cases := []struct {
+		model    string
+		expected float64
+		provider string
+	}{
+		{"claude-opus-4-7", 0.10, "Anthropic"},
+		{"gpt-5", 0.50, "OpenAI"},
+		{"gpt-4.1", 0.50, "OpenAI legacy"},
+		{"gemini-3.1-pro-preview", 0.25, "Google"},
+		{"deepseek/deepseek-v4-pro", 0.10, "DeepSeek"},
+	}
+	for _, tc := range cases {
+		p, ok := pricing.For(tc.model)
+		require.True(t, ok, tc.model)
+		assert.InDelta(t, tc.expected, p.CacheReadMultiplier, 1e-9,
+			"%s cache-read multiplier should be %.2f", tc.provider, tc.expected)
+		assert.InDelta(t, tc.expected, p.EffectiveCacheReadMultiplier(), 1e-9,
+			"EffectiveCacheReadMultiplier should return the explicit value when set")
+	}
+}
+
+func TestEffectiveCacheReadMultiplier_FallsBackToDefault(t *testing.T) {
+	// Models without published cache pricing leave CacheReadMultiplier zero
+	// and must fall back to the package default so eviction cost in the EV
+	// math never zeroes out (which would make every switch look free).
+	p, ok := pricing.For("moonshotai/kimi-k2.5")
+	require.True(t, ok)
+	assert.Zero(t, p.CacheReadMultiplier,
+		"OSS model with no published cache pricing should leave multiplier zero")
+	assert.InDelta(t, pricing.DefaultCacheReadMultiplier,
+		p.EffectiveCacheReadMultiplier(), 1e-9,
+		"EffectiveCacheReadMultiplier should return DefaultCacheReadMultiplier")
+}
+
+func TestDefaultCacheReadMultiplier_InValidRange(t *testing.T) {
+	// Must be positive (else eviction cost zeroes out and switches look free)
+	// and strictly less than 1.0 (else cache reads aren't cheaper than base).
+	assert.Greater(t, pricing.DefaultCacheReadMultiplier, 0.0)
+	assert.Less(t, pricing.DefaultCacheReadMultiplier, 1.0,
+		"default cache-read multiplier must be < 1.0 to model a real cache discount")
 }
 
 func TestAll_ReturnsCopy(t *testing.T) {

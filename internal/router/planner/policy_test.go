@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	modelOpus    = "claude-opus-4-7"   // $15.00 input / $75.00 output per 1M
-	modelSonnet  = "claude-sonnet-4-5" // $3.00 input / $15.00 output
-	modelHaiku   = "claude-haiku-4-5"  // $0.80 input / $4.00 output
+	modelOpus    = "claude-opus-4-7"   // $15.00 input / $75.00 output per 1M, cache mult 0.10
+	modelSonnet  = "claude-sonnet-4-5" // $3.00 input / $15.00 output, cache mult 0.10
+	modelHaiku   = "claude-haiku-4-5"  // $0.80 input / $4.00 output, cache mult 0.10
+	modelGPT5    = "gpt-5"             // $2.50 input / $10.00 output, cache mult 0.50 (cross-provider)
 	modelUnknown = "fictional-foo-1.0" // intentionally absent from the pricing table
 )
 
@@ -25,12 +26,14 @@ var defaultCfg = planner.EVConfig{
 	ExpectedRemainingTurns: 3,
 }
 
-// availableAll covers the three Anthropic models the EV cases reference.
-// Used everywhere except the pin_model_missing case.
+// availableAll covers every model the EV cases reference (Anthropic + the
+// cross-provider GPT-5 entry). Used everywhere except the pin_model_missing
+// case.
 var availableAll = map[string]struct{}{
 	modelOpus:   {},
 	modelSonnet: {},
 	modelHaiku:  {},
+	modelGPT5:   {},
 }
 
 // pinWithUsage returns a populated pin that has completed at least one
@@ -208,6 +211,34 @@ func TestDecide(t *testing.T) {
 			expectEVMath:           true,
 			wantExpectedSavingsUSD: 0.0040032,
 			wantEvictionCostUSD:    0.0030024,
+		},
+		{
+			// Cross-provider regression: opus (Anthropic, mult 0.10) ->
+			// gpt-5 (OpenAI, mult 0.50) on a 50k prompt.
+			//   savingsPerTurn  = (15.00 * 0.10 - 2.50 * 0.50) * 50000 / 1e6
+			//                   = (1.50 - 1.25) * 0.05 = $0.0125
+			//   expectedSavings = 0.0125 * 3 = $0.0375
+			//   evictionCost    = 2.50 * 50000 * (1 - 0.50) / 1e6 = $0.0625
+			//   delta = 0.0375 - 0.0625 = -$0.025 -> Stay.
+			//
+			// Sanity vs the old (broken) global-0.10 math: that path would
+			// have computed savingsPerTurn = (15 - 2.5) * 0.10 * 0.05 =
+			// $0.0625 and evictionCost = 2.50 * 0.05 * 0.90 = $0.1125, delta
+			// $0.075 — i.e. would have wrongly chosen to switch. Per-model
+			// multipliers correctly say "stay on opus" because gpt-5's
+			// 50% cache-read pricing eats most of the per-turn savings.
+			name: "ev_cross_provider: opus -> gpt-5 stays under per-model math",
+			in: planner.Inputs{
+				Pin:                  pinWithUsage(modelOpus),
+				Fresh:                router.Decision{Model: modelGPT5},
+				EstimatedInputTokens: 50_000,
+				AvailableModels:      availableAll,
+			},
+			cfg:                    defaultCfg,
+			want:                   planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
+			expectEVMath:           true,
+			wantExpectedSavingsUSD: 0.0375,
+			wantEvictionCostUSD:    0.0625,
 		},
 	}
 
