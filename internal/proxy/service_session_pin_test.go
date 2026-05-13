@@ -28,10 +28,15 @@ type fakePinStore struct {
 	getCalls int
 	upserts  []sessionpin.Pin
 	upsertCh chan struct{}
+	usages   []sessionpin.Usage
+	usageCh  chan struct{}
 }
 
 func newFakePinStore() *fakePinStore {
-	return &fakePinStore{upsertCh: make(chan struct{}, 16)}
+	return &fakePinStore{
+		upsertCh: make(chan struct{}, 16),
+		usageCh:  make(chan struct{}, 16),
+	}
 }
 
 func (f *fakePinStore) Get(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool, error) {
@@ -62,6 +67,13 @@ func (f *fakePinStore) Upsert(ctx context.Context, p sessionpin.Pin) error {
 }
 
 func (f *fakePinStore) UpdateUsage(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string, usage sessionpin.Usage) error {
+	f.mu.Lock()
+	f.usages = append(f.usages, usage)
+	f.mu.Unlock()
+	select {
+	case f.usageCh <- struct{}{}:
+	default:
+	}
 	return nil
 }
 
@@ -82,7 +94,6 @@ func newPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 		nil,
 		false,
-		0, // stickyDecisionTTL=0 disables legacy LRU
 		nil,
 		store,
 		false,
@@ -103,7 +114,12 @@ const pinTestBody = `{
 	"messages":[{"role":"user","content":"original prompt"}]
 }`
 
-func TestService_SessionPin_PostgresHitShortCircuitsRoute(t *testing.T) {
+// With a Postgres-tier pin and divergent scorer recommendation, the
+// planner stays on the pin (ReasonNoPriorUsage covers the case where no
+// turn has completed yet so we have no cache-warm evidence to evict).
+// The scorer runs once per turn now (Prism-style re-eval), but the
+// pinned model still wins.
+func TestService_SessionPin_PostgresHitKeepsPinnedModel(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -121,11 +137,17 @@ func TestService_SessionPin_PostgresHitShortCircuitsRoute(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls, "tier-2 hit must short-circuit s.router.Route")
+	// The scorer runs even on a pin hit (Prism-style re-eval); the
+	// planner then keeps the pinned model because we have no prior-turn
+	// usage to justify paying eviction cost.
+	assert.Equal(t, 1, fr.routeCalls, "scorer runs every MainLoop turn under the planner")
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
 	waitForUpsert(t, store)
 }
 
+// In-proc LRU short-circuits the Postgres GET on a hit. The scorer
+// still runs every MainLoop turn under the planner, but Tier-2 must
+// only be consulted on Tier-1 miss.
 func TestService_SessionPin_InProcCacheAvoidsPostgresOnSecondTurn(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5", Reason: "fresh"}}
@@ -141,11 +163,12 @@ func TestService_SessionPin_InProcCacheAvoidsPostgresOnSecondTurn(t *testing.T) 
 	require.Equal(t, 1, fr.routeCalls)
 	require.Equal(t, 1, store.getCalls, "tier-1 miss must consult tier-2 once")
 
-	// Turn 2: in-proc LRU hit; tier-2 must not be consulted.
+	// Turn 2: in-proc LRU hit; scorer runs (planner re-eval) but
+	// tier-2 must not be consulted.
 	rec2 := httptest.NewRecorder()
 	httpReq2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec2, httpReq2))
-	assert.Equal(t, 1, fr.routeCalls, "second turn must not re-route")
+	assert.Equal(t, 2, fr.routeCalls, "planner re-evaluates every MainLoop turn")
 	assert.Equal(t, 1, store.getCalls, "second turn must be served by tier-1; tier-2 must not be consulted")
 }
 
@@ -183,10 +206,10 @@ func TestService_SessionPin_ExpiredPinIsIgnored(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
 }
 
+// Eval-override headers must NOT bypass session-key pinning; the
+// planner still runs and stays on the pin (no prior usage → cannot
+// justify eviction cost).
 func TestService_SessionPin_EvalOverrideHeaderKeepsSessionKeyPinning(t *testing.T) {
-	// Tier-1/2 pinning must stay active under eval traffic to keep multi-turn
-	// tool-use on a single provider (Gemini rejects function calls without
-	// thoughtSignature emitted by other providers).
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{Provider: "anthropic", Model: "claude-haiku-4-5", PinnedUntil: time.Now().Add(time.Hour), Reason: "pinned"}
@@ -199,7 +222,9 @@ func TestService_SessionPin_EvalOverrideHeaderKeepsSessionKeyPinning(t *testing.
 	httpReq.Header.Set("x-weave-cluster-version", "v0.2")
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls, "eval-override must not bypass session-key pinning")
+	// Scorer still runs (planner re-eval is unconditional) but the pin
+	// wins under ReasonNoPriorUsage.
+	assert.Equal(t, 1, fr.routeCalls, "scorer runs every MainLoop turn under the planner")
 	assert.Equal(t, 1, store.getCalls)
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
 }
@@ -247,7 +272,6 @@ func TestService_HardPin_ExploreRoutesToHaikuWhenFlagOn(t *testing.T) {
 		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 		nil,
 		false,
-		0,
 		nil,
 		store,
 		true,
@@ -302,14 +326,16 @@ func newOpenAIPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 			providers.ProviderAnthropic: &fakeProvider{},
 			providers.ProviderOpenAI:    &fakeProvider{},
 		},
-		nil, false, 0, nil,
+		nil, false, nil,
 		store,
 		false, providers.ProviderAnthropic, "claude-haiku-4-5",
 		nil,
 	)
 }
 
-func TestService_SessionPin_OpenAI_PostgresHitShortCircuitsRoute(t *testing.T) {
+// OpenAI ingress: Tier-2 pin hit keeps the pinned model under the
+// planner (no prior-turn usage → stay).
+func TestService_SessionPin_OpenAI_PostgresHitKeepsPinnedModel(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -327,7 +353,7 @@ func TestService_SessionPin_OpenAI_PostgresHitShortCircuitsRoute(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(openAIPinTestBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls, "OpenAI tier-2 hit must short-circuit the cluster scorer")
+	assert.Equal(t, 1, fr.routeCalls, "scorer runs every MainLoop turn under the planner")
 	assert.Equal(t, "gpt-5", rec.Header().Get("x-router-model"))
 	waitForUpsert(t, store)
 }
@@ -391,7 +417,7 @@ func newOpenAIHardPinSvc(fr *fakeRouter, store *fakePinStore, hardPinExplore boo
 			providers.ProviderAnthropic: &fakeProvider{},
 			providers.ProviderOpenAI:    &fakeProvider{},
 		},
-		nil, false, 0, nil,
+		nil, false, nil,
 		store,
 		hardPinExplore,
 		providers.ProviderOpenAI,

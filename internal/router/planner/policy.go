@@ -92,9 +92,12 @@ func Decide(in Inputs, cfg EVConfig) Decision {
 	}
 
 	// Pin's model is no longer routable (provider key removed, model
-	// retired): we have to switch regardless of EV.
-	if _, ok := in.AvailableModels[in.Pin.Model]; !ok {
-		return Decision{Outcome: OutcomeSwitch, Reason: ReasonPinModelMissing}
+	// retired): we have to switch regardless of EV. nil AvailableModels
+	// means "no filter configured" — preserve the pin in that case.
+	if in.AvailableModels != nil {
+		if _, ok := in.AvailableModels[in.Pin.Model]; !ok {
+			return Decision{Outcome: OutcomeSwitch, Reason: ReasonPinModelMissing}
+		}
 	}
 
 	// We have a pin but it has never completed a turn, so we have no

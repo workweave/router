@@ -100,7 +100,6 @@ func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 		nil,
 		false,
-		0,
 		nil,
 		nil,
 		false,
@@ -148,7 +147,7 @@ func TestProxyMessages_ChosenScoreZeroIsPersisted(t *testing.T) {
 	svc := proxy.NewService(
 		&fakeRouter{decision: decision},
 		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
-		nil, false, 0, nil, nil, false,
+		nil, false, nil, nil, false,
 		providers.ProviderAnthropic, "claude-haiku-4-5",
 		telem,
 	)
@@ -182,7 +181,6 @@ func TestProxyMessages_NoMetadataOmitsClusterFields(t *testing.T) {
 		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 		nil,
 		false,
-		0,
 		nil,
 		nil,
 		false,

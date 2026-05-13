@@ -82,7 +82,7 @@ func TestService_Cache_HitShortCircuitsProvider(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: decisionWithEmbedding(emb, []int{0, 1, 2, 3})}
 	c := cache.New(cache.DefaultConfig())
-	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, 0, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
 	ctx := proxyContextWithExternalID(t, "tenant-1")
 	body := anthropicBody("ping", false)
@@ -108,7 +108,7 @@ func TestService_Cache_StreamingBypasses(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: decisionWithEmbedding(emb, []int{0})}
 	c := cache.New(cache.DefaultConfig())
-	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, 0, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
 	ctx := proxyContextWithExternalID(t, "tenant-1")
 	body := anthropicBody("streaming please", true)
@@ -132,7 +132,7 @@ func TestService_Cache_HeuristicDecisionBypasses(t *testing.T) {
 	// Decision with no Metadata — what the heuristic router produces.
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5", Reason: "heuristic"}}
 	c := cache.New(cache.DefaultConfig())
-	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, 0, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
 	ctx := proxyContextWithExternalID(t, "tenant-1")
 	body := anthropicBody("ask", false)
@@ -155,7 +155,7 @@ func TestService_Cache_MissingExternalIDBypasses(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: decisionWithEmbedding(emb, []int{0})}
 	c := cache.New(cache.DefaultConfig())
-	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, 0, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
 	body := anthropicBody("ask", false)
 
@@ -179,7 +179,7 @@ func TestService_Cache_DisabledByNilCache(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: decisionWithEmbedding(emb, []int{0})}
 	// nil cache equivalent to ROUTER_SEMANTIC_CACHE_ENABLED=false.
-	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
 	ctx := proxyContextWithExternalID(t, "tenant-1")
 	body := anthropicBody("ask", false)

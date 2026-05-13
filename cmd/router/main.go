@@ -269,16 +269,6 @@ func main() {
 	} else {
 		logger.Info("Cluster scorer embedding concatenated stream (ROUTER_EMBED_ONLY_USER_MESSAGE=false)")
 	}
-	var stickyTTL time.Duration
-	if v := config.GetOr("ROUTER_STICKY_DECISION_TTL_MS", "0"); v != "0" && v != "" {
-		ms, parseErr := time.ParseDuration(v + "ms")
-		if parseErr != nil || ms < 0 {
-			logger.Warn("Invalid ROUTER_STICKY_DECISION_TTL_MS; sticky decisions disabled", "value", v)
-		} else {
-			stickyTTL = ms
-			logger.Info("Sticky routing decisions enabled", "ttl_ms", ms.Milliseconds())
-		}
-	}
 	emitter, err := buildOtelEmitter()
 	if err != nil {
 		logger.Error("Failed to create OTel emitter", "err", err)
@@ -331,7 +321,11 @@ func main() {
 		deploymentEligible[providers.ProviderAnthropic] = struct{}{}
 	}
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedOnlyUser, stickyTTL, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
+	// TODO(subagent-7): wire ROUTER_PLANNER_ENABLED, ROUTER_SWITCH_EV_THRESHOLD_USD,
+	// ROUTER_SWITCH_EXPECTED_REMAINING_TURNS, ROUTER_HANDOVER_* env vars and the
+	// summarizer adapter. The service ships safe defaults (planner on, $0.001
+	// threshold, 3-turn horizon, no summarizer).
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithByokOnly(byokOnly).
 		WithDeploymentKeyedProviders(deploymentEligible)
 
