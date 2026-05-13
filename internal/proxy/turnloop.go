@@ -327,6 +327,13 @@ func roleForTier(t capability.Tier) string {
 // the original decision rather than failing the turn — a soft fallback
 // chosen over hard erroring on background tasks.
 func (s *Service) clampToCeiling(decision router.Decision, ceiling capability.Tier, enabled map[string]struct{}, res *turnLoopResult) router.Decision {
+	// Reset state every call: the orchestrator clamps multiple decision
+	// sources per turn (fresh scorer output, then planner-stay pin), and
+	// without this reset a clamp on `fresh` would leak `TierClamped=true`
+	// + `PreClampModel` into a subsequent unclamped pin decision, falsely
+	// labeling the final decision as clamped in the structured log.
+	res.TierClamped = false
+	res.PreClampModel = ""
 	if s.tierClampResolver == nil || ceiling == capability.TierUnknown {
 		return decision
 	}

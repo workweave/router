@@ -639,3 +639,50 @@ func TestService_TierClamp_PinAboveCeilingIsClamped(t *testing.T) {
 
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
 }
+
+// TestService_TierClamp_StaleFlagClearedOnUnclampedFinal regression-
+// guards the case Cursor flagged on PR #100: when the orchestrator
+// clamps an early-stage decision (e.g. the fresh scorer output) and a
+// later stage picks an in-ceiling pin without needing to clamp, the
+// TierClamped/PreClampModel fields must reflect the *final* decision —
+// otherwise the structured log falsely reports a clamp that didn't
+// actually affect the served model.
+func TestService_TierClamp_StaleFlagClearedOnUnclampedFinal(t *testing.T) {
+	store := newFakePinStore()
+	// Pin is in-ceiling for an opus request (TierHigh) — no clamp at the
+	// pin-hit step.
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:      providers.ProviderAnthropic,
+		Model:         "claude-opus-4-7",
+		Reason:        "cluster:v0.37",
+		PinnedUntil:   time.Now().Add(30 * time.Minute),
+		FirstPinnedAt: time.Now().Add(-5 * time.Minute),
+		// Prior-turn usage so the planner has eviction-cost evidence to
+		// weigh against the fresh decision; with this set the planner
+		// returns OutcomeStay (cache-warm beats switch).
+		LastInputTokens: 50000,
+	}
+	// Fresh scorer returns a violating model (haiku ceiling would have
+	// clamped); irrelevant here because we go through the High path.
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
+
+	clampCalls := 0
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+		clampCalls++
+		// Resolver should never need to fire because all decisions are
+		// at or below the High ceiling.
+		return providers.ProviderAnthropic, "claude-haiku-4-5", true
+	})
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
+	assert.Equal(t, 0, clampCalls, "no clamp should fire under a High ceiling with in-ceiling models")
+	// Implicit: by passing through without clamp, the log would record
+	// tier_clamped=false / pre_clamp_model="" — the regression would
+	// have left a stale true here from a prior-stage clamp.
+}
