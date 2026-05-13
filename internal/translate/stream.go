@@ -362,6 +362,45 @@ type AnthropicSSETranslator struct {
 	modelFromUpstream string
 
 	usageSink otel.UsageSink
+
+	// usageCacheReadTokens is the OpenAI-side prompt-cache hit count we
+	// extracted from the upstream's usage event. Stored on the translator
+	// (in addition to forwarded to usageSink) so the closing-marker
+	// callback can compute actual-cost savings without depending on the
+	// sink's internal shape.
+	usageCacheReadTokens int
+
+	// routingMarker, if non-empty, is emitted as a standalone text content
+	// block at index 0 immediately after message_start and before any
+	// upstream content. Lets Claude Code render "routed to X" the instant
+	// streaming begins instead of waiting for the upstream's first token.
+	// markerEmitted guards single emission per response.
+	routingMarker string
+	markerEmitted bool
+
+	// closingMarkerFn, if non-nil, is invoked from finishStream after all
+	// upstream content blocks have closed but before message_delta /
+	// message_stop. Its return value (if non-empty) is emitted as a final
+	// standalone text content block so the client renders a turn-final
+	// summary (typically the actual-cost-savings line) using observed
+	// usage numbers instead of a priori estimates.
+	closingMarkerFn      func(Usage) string
+	closingMarkerEmitted bool
+}
+
+// Usage is the upstream-observed token breakdown the closing-marker
+// callback uses to compute its text. Field semantics match Anthropic's
+// usage shape after cross-format translation: InputTokens is the
+// non-cached prompt portion, CacheReadTokens is the portion served from
+// the prompt cache (priced at the model's cache-read multiplier), and
+// CacheCreationTokens is the portion written into the cache on this
+// turn. OpenAI-style upstreams don't bill for cache writes separately,
+// so CacheCreationTokens may be zero even when caching is active.
+type Usage struct {
+	InputTokens         int
+	OutputTokens        int
+	CacheReadTokens     int
+	CacheCreationTokens int
 }
 
 // NewAnthropicSSETranslator wraps w. Call Finalize after upstream returns.
@@ -374,6 +413,45 @@ func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink 
 		requestModel: requestModel,
 		toolBlocks:   make(map[int]int),
 		usageSink:    sink,
+	}
+}
+
+// WithRoutingMarker installs a text snippet that the translator emits as a
+// standalone Anthropic content block at index 0 right after message_start,
+// before any upstream content arrives. Designed for the live demo / debug
+// case: lets the client (Claude Code) render the routed model name as soon
+// as streaming begins, without waiting for the upstream model's first token.
+// Empty string disables emission. Returns the receiver for fluent wiring.
+func (t *AnthropicSSETranslator) WithRoutingMarker(marker string) *AnthropicSSETranslator {
+	t.routingMarker = marker
+	return t
+}
+
+// WithClosingMarker installs a callback that the translator invokes from
+// finishStream after the last upstream content block closes and before
+// message_delta. The callback receives observed usage (input / output /
+// cache-read / cache-creation token counts) so it can compute a final
+// actual-cost summary using real numbers instead of a priori estimates.
+// A non-empty return value is emitted as a standalone text content block
+// at the next available index; an empty return value (or a nil callback)
+// is a no-op. Returns the receiver for fluent wiring.
+func (t *AnthropicSSETranslator) WithClosingMarker(fn func(Usage) string) *AnthropicSSETranslator {
+	t.closingMarkerFn = fn
+	return t
+}
+
+// usage returns the upstream-observed token breakdown as a Usage value.
+// Internal helper for the closing-marker callback so it doesn't have to
+// know the translator's field shape.
+func (t *AnthropicSSETranslator) usage() Usage {
+	return Usage{
+		InputTokens:     t.usageInputTokens,
+		OutputTokens:    t.usageOutputTokens,
+		CacheReadTokens: t.usageCacheReadTokens,
+		// CacheCreationTokens stays zero for OpenAI-style upstreams;
+		// Anthropic-format streams that do carry cache_creation will
+		// populate it here when the Anthropic passthrough path grows
+		// its own closing-marker support (separate follow-up).
 	}
 }
 
@@ -528,6 +606,9 @@ func (t *AnthropicSSETranslator) translateOpenAIEvent(raw []byte) error {
 			return err
 		}
 		t.started = true
+		if err := t.emitRoutingMarkerIfConfigured(); err != nil {
+			return err
+		}
 	}
 
 	delta := firstChoice.Get("delta")
@@ -554,6 +635,7 @@ func (t *AnthropicSSETranslator) extractAndForwardUsage(data []byte) {
 	cachedRead := usage.Get("prompt_tokens_details.cached_tokens").Int()
 	t.usageInputTokens = int(prompt)
 	t.usageOutputTokens = int(completion)
+	t.usageCacheReadTokens = int(cachedRead)
 	t.hasUsage = true
 	if t.usageSink != nil {
 		t.usageSink.RecordUsage(int(prompt), int(completion))
@@ -611,12 +693,71 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 	return emitErr
 }
 
+// emitRoutingMarkerIfConfigured writes a standalone text content block
+// (start + delta + stop) at the current block index if WithRoutingMarker
+// installed a non-empty marker and we haven't emitted it yet. Safe to
+// invoke from any post-message_start codepath; guarded against double
+// emission so finishStream can also call it for empty-upstream paths.
+func (t *AnthropicSSETranslator) emitRoutingMarkerIfConfigured() error {
+	if t.markerEmitted || t.routingMarker == "" {
+		return nil
+	}
+	idx := t.blockIdx
+	if err := t.emitContentBlockStartText(idx); err != nil {
+		return err
+	}
+	if err := t.emitContentBlockDeltaText(idx, t.routingMarker); err != nil {
+		return err
+	}
+	if err := t.emitContentBlockStop(idx); err != nil {
+		return err
+	}
+	t.blockIdx++
+	t.markerEmitted = true
+	return nil
+}
+
+// emitClosingMarkerIfConfigured asks the configured callback (if any) for
+// a final text block to render after the upstream's content but before
+// message_delta. Empty return values are treated as "no marker"; the
+// callback can therefore decline to emit (missing pricing, same routed
+// and requested model, zero or negative savings) without forcing the
+// caller to special-case. Single-emission-guarded so the empty-upstream
+// path in finishStream doesn't double-emit when the request also went
+// through translateOpenAIEvent.
+func (t *AnthropicSSETranslator) emitClosingMarkerIfConfigured() error {
+	if t.closingMarkerEmitted || t.closingMarkerFn == nil {
+		return nil
+	}
+	text := t.closingMarkerFn(t.usage())
+	if text == "" {
+		t.closingMarkerEmitted = true
+		return nil
+	}
+	idx := t.blockIdx
+	if err := t.emitContentBlockStartText(idx); err != nil {
+		return err
+	}
+	if err := t.emitContentBlockDeltaText(idx, text); err != nil {
+		return err
+	}
+	if err := t.emitContentBlockStop(idx); err != nil {
+		return err
+	}
+	t.blockIdx++
+	t.closingMarkerEmitted = true
+	return nil
+}
+
 func (t *AnthropicSSETranslator) finishStream() error {
 	if !t.started {
 		if err := t.emitMessageStart(); err != nil {
 			return err
 		}
 		t.started = true
+		if err := t.emitRoutingMarkerIfConfigured(); err != nil {
+			return err
+		}
 	}
 	if t.textOpen {
 		if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
@@ -630,6 +771,15 @@ func (t *AnthropicSSETranslator) finishStream() error {
 		}
 	}
 	t.toolBlocks = map[int]int{}
+
+	// Closing marker (e.g. actual-cost savings summary) fires after every
+	// upstream content block has closed but before message_delta /
+	// message_stop, so it lands as the final visible content in the
+	// rendered assistant message. Usage numbers passed to the callback
+	// are the upstream-observed totals captured by extractAndForwardUsage.
+	if err := t.emitClosingMarkerIfConfigured(); err != nil {
+		return err
+	}
 
 	if err := t.emitMessageDelta(); err != nil {
 		return err

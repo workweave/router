@@ -544,6 +544,187 @@ func TestAnthropicSSETranslator_EmptyStreamEmitsSyntheticMessage(t *testing.T) {
 	assert.Contains(t, body, "event: message_stop")
 }
 
+func TestAnthropicSSETranslator_RoutingMarkerEmittedBeforeUpstreamContent(t *testing.T) {
+	// The marker must land as a standalone text block immediately after
+	// message_start and before the upstream's first content delta. That
+	// ordering is what lets Claude Code render "routed to X" the instant
+	// streaming begins instead of waiting for the upstream model's first
+	// token.
+	rec := httptest.NewRecorder()
+	marker := "✦ **Weave Router** → deepseek/deepseek-v4-pro (openrouter) · reason: switched to save on cache reads\n\n"
+	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil).
+		WithRoutingMarker(marker)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	body := rec.Body.String()
+	// strings.Index returns >=0 when found (0 is a valid match at the start
+	// of the buffer), -1 when missing. The marker's trailing newlines get
+	// JSON-escaped inside the SSE data field, so match against the visible
+	// prose portion instead of the raw trailing newlines.
+	markerProse := "✦ **Weave Router** → deepseek/deepseek-v4-pro (openrouter) · reason: switched to save on cache reads"
+	startIdx := strings.Index(body, "event: message_start")
+	markerIdx := strings.Index(body, markerProse)
+	helloIdx := strings.Index(body, `"text":"Hello"`)
+	require.GreaterOrEqual(t, startIdx, 0, "message_start must be emitted")
+	require.GreaterOrEqual(t, markerIdx, 0, "marker text must appear in the stream")
+	require.GreaterOrEqual(t, helloIdx, 0, "upstream content must appear in the stream")
+	assert.Less(t, startIdx, markerIdx, "marker must follow message_start")
+	assert.Less(t, markerIdx, helloIdx, "marker must precede the upstream's first text delta")
+
+	// Marker occupies a standalone text content block at index 0 (its own
+	// start + delta + stop) so the upstream's first text block lands at
+	// index 1 and Claude Code's content-block assembly doesn't conflate
+	// them.
+	idx0Start := strings.Index(body, `"index":0,"content_block":{"type":"text"`)
+	idx1Start := strings.Index(body, `"index":1,"content_block":{"type":"text"`)
+	require.GreaterOrEqual(t, idx0Start, 0, "marker should open content_block at index 0")
+	require.GreaterOrEqual(t, idx1Start, 0, "upstream content should open content_block at index 1")
+	assert.Less(t, idx0Start, idx1Start)
+}
+
+func TestAnthropicSSETranslator_RoutingMarkerEmittedOnEmptyUpstream(t *testing.T) {
+	// Even when the upstream emits no choices (error, immediate [DONE]),
+	// the marker still lands so the client sees the routed-model attribution.
+	// finishStream's emitMessageStart fallback covers this codepath.
+	rec := httptest.NewRecorder()
+	marker := "✦ **Weave Router** → gpt-5-mini (openai) · reason: first turn\n\n"
+	markerProse := "✦ **Weave Router** → gpt-5-mini (openai) · reason: first turn"
+	translator := translate.NewAnthropicSSETranslator(rec, "claude-opus-4-7", nil).
+		WithRoutingMarker(marker)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	_, err := translator.Write([]byte("data: [DONE]\n\n"))
+	require.NoError(t, err)
+	require.NoError(t, translator.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "event: message_start")
+	assert.Contains(t, body, markerProse,
+		"marker prose must fire even when upstream emits no content")
+	assert.Contains(t, body, "event: message_stop")
+}
+
+func TestAnthropicSSETranslator_NoMarkerWhenNotConfigured(t *testing.T) {
+	// Sanity: when WithRoutingMarker isn't called, the stream is identical
+	// to the legacy behavior — no synthetic content block is injected.
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-3\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	body := rec.Body.String()
+	assert.NotContains(t, body, "Weave Router",
+		"no marker should appear when WithRoutingMarker was not invoked")
+	assert.Contains(t, body, `"text":"hi"`)
+	// Upstream's first text block must occupy index 0 (the marker-reserved
+	// index) when no marker is configured.
+	assert.Contains(t, body, `"index":0,"content_block":{"type":"text"`)
+}
+
+func TestAnthropicSSETranslator_ClosingMarkerEmittedAfterContent(t *testing.T) {
+	// The closing marker fires from finishStream AFTER every upstream
+	// content block has closed and BEFORE message_delta / message_stop.
+	// The callback receives observed usage so it can format a real-cost
+	// summary using post-stream numbers, not a priori estimates.
+	rec := httptest.NewRecorder()
+	closingProse := "✦ saved $0.0234 vs claude-opus-4-7"
+	closingFn := func(u translate.Usage) string {
+		// Defensive: the callback should see the usage values the
+		// upstream reported, not the zero value.
+		require.Equal(t, 100, u.InputTokens)
+		require.Equal(t, 20, u.OutputTokens)
+		require.Equal(t, 50, u.CacheReadTokens)
+		return closingProse
+	}
+	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil).
+		WithClosingMarker(closingFn)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer body\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-c1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":50}}}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	body := rec.Body.String()
+	answerIdx := strings.Index(body, `"text":"answer body"`)
+	closingIdx := strings.Index(body, closingProse)
+	deltaIdx := strings.Index(body, "event: message_delta")
+	require.GreaterOrEqual(t, answerIdx, 0, "upstream content must appear")
+	require.GreaterOrEqual(t, closingIdx, 0, "closing marker text must appear in the stream")
+	require.GreaterOrEqual(t, deltaIdx, 0, "message_delta must follow the content")
+	assert.Less(t, answerIdx, closingIdx, "closing marker must follow the upstream content")
+	assert.Less(t, closingIdx, deltaIdx, "closing marker must precede message_delta")
+}
+
+func TestAnthropicSSETranslator_ClosingMarkerSkippedWhenCallbackReturnsEmpty(t *testing.T) {
+	// Callbacks that can't compute (no pricing, equal models, negative
+	// savings) return "" — translator must skip injection rather than
+	// emit an empty content block, and message_delta / message_stop must
+	// still close the stream cleanly.
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil).
+		WithClosingMarker(func(translate.Usage) string { return "" })
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-c2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-c2\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "event: message_delta",
+		"stream must still close cleanly when closing marker returns empty")
+	assert.Contains(t, body, "event: message_stop")
+	// Upstream content holds index 0; no closing-marker block means
+	// nothing was opened at index 1 (the next available slot).
+	assert.NotContains(t, body, `"index":1`,
+		"empty closing-marker text must not open a content block")
+}
+
 func TestPrepareAnthropic_ToolResultStringContent(t *testing.T) {
 	openAIReq := `{
 		"model": "gpt-4o",

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"workweave/router/internal/auth"
@@ -17,6 +19,7 @@ import (
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
+	"workweave/router/internal/router/pricing"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
@@ -106,6 +109,167 @@ type InstallationExcludedModelsContextKey struct{}
 
 // installationExcludedModelsFromContext returns the per-installation exclusion
 // list stashed on ctx by the auth middleware, or nil when none is present.
+// routingMarkerFor returns the upfront text snippet — brand, routed
+// model + provider, and routing reason — emitted as a standalone
+// Anthropic content block at the start of every cross-format streamed
+// response. The actual-cost savings line is emitted separately by
+// closingMarkerFor after the response completes, so it can use
+// observed usage numbers instead of an a priori EV estimate. Returns
+// "" (no emission) when the decision carries no model name.
+func routingMarkerFor(res turnLoopResult) string {
+	decision := res.Decision
+	if decision.Model == "" {
+		return ""
+	}
+	// "Weave Router" wrapped in markdown bold so the brand stands out in
+	// the agent pane. Claude Code renders Markdown but not raw ANSI inside
+	// assistant content, so we can't paint the brand color (#FF6C47) the
+	// statusline uses — bold is the closest portable affordance.
+	parts := []string{"✦ **Weave Router** → " + decision.Model}
+	if decision.Provider != "" {
+		parts[0] += " (" + decision.Provider + ")"
+	}
+	if reason := routingReasonShort(res); reason != "" {
+		parts = append(parts, "reason: "+reason)
+	}
+	return strings.Join(parts, " · ") + "\n\n"
+}
+
+// closingMarkerFor returns the callback the SSE translator invokes
+// after the response stream completes. The returned function receives
+// the upstream-observed usage and emits a single-line "saved $X vs Y"
+// summary using actual input + output token counts × per-model pricing
+// (input + cache-read multiplier + output). Returns "" (no closing
+// marker) when:
+//
+//   - the routed model is the same as what the client requested (no
+//     comparison to draw),
+//   - pricing data is missing for either side (can't compute),
+//   - or the computed savings are non-positive (we'd be advertising a
+//     loss; demo affordance — also keeps the marker from cluttering
+//     legitimately equal-cost turns).
+//
+// Tracks the requested model the client originally asked for (from
+// feats.Model) and the routed decision so it can format
+// "saved $X vs <requested>".
+func closingMarkerFor(decision router.Decision, requestedModel string) func(translate.Usage) string {
+	return func(u translate.Usage) string {
+		if decision.Model == "" || requestedModel == "" {
+			return ""
+		}
+		if decision.Model == requestedModel {
+			return ""
+		}
+		routed, ok1 := pricing.For(decision.Model)
+		requested, ok2 := pricing.For(requestedModel)
+		if !ok1 || !ok2 {
+			return ""
+		}
+		savings := closingMarkerSavingsUSD(u, routed, requested)
+		// Skip sub-tenth-of-a-cent diffs so floating-point noise on
+		// zero-traffic turns doesn't flicker a "saved $0.0001" line.
+		if savings < 0.0001 {
+			return ""
+		}
+		return fmt.Sprintf("✦ saved $%.4f vs %s (%s in / %s out)",
+			savings, requestedModel,
+			formatTokenCount(u.InputTokens), formatTokenCount(u.OutputTokens))
+	}
+}
+
+// formatTokenCount renders a token count for the closing marker in the
+// most legible short form: raw for sub-1k counts, "%dk" for thousands,
+// "%.1fM" once a turn breaks a million tokens. The marker is
+// audience-facing, not a billing source of truth — readability over
+// precision is the right tradeoff. The DB telemetry table still
+// carries exact integer counts for accounting.
+func formatTokenCount(n int) string {
+	switch {
+	case n < 1000:
+		return strconv.Itoa(n)
+	case n < 1_000_000:
+		return strconv.Itoa(n/1000) + "k"
+	default:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	}
+}
+
+// closingMarkerSavingsUSD computes (alternative cost on requested model)
+// minus (actual cost on routed model) using the post-stream usage
+// breakdown. Both sides are priced under the same usage shape — input
+// tokens at full price minus the cached portion at the model's
+// cache-read multiplier — so the delta isolates the price difference
+// between the two models for the same workload. Output tokens are
+// always priced at the model's full output rate.
+func closingMarkerSavingsUSD(u translate.Usage, routed, requested pricing.Pricing) float64 {
+	nonCached := u.InputTokens - u.CacheReadTokens
+	if nonCached < 0 {
+		nonCached = 0
+	}
+	routedCost := costForUsage(nonCached, u.CacheReadTokens, u.OutputTokens, routed)
+	requestedCost := costForUsage(nonCached, u.CacheReadTokens, u.OutputTokens, requested)
+	return requestedCost - routedCost
+}
+
+// costForUsage returns the dollar cost of (nonCached, cacheRead, output)
+// tokens billed against the given Pricing entry. Cache-creation tokens
+// are folded into nonCached at full price — OpenAI-style upstreams
+// don't bill writes separately, and the demo marker is an
+// approximation, not the source of truth (the telemetry table is).
+func costForUsage(nonCachedInput, cacheReadInput, output int, p pricing.Pricing) float64 {
+	cacheMult := p.EffectiveCacheReadMultiplier()
+	inputCost := float64(nonCachedInput)*p.InputUSDPer1M +
+		float64(cacheReadInput)*p.InputUSDPer1M*cacheMult
+	outputCost := float64(output) * p.OutputUSDPer1M
+	return (inputCost + outputCost) / 1e6
+}
+
+// routingReasonShort returns a short, demo-readable phrase for why this
+// turn landed on the chosen model. Translates the planner's snake_case
+// reason codes (machine-friendly, kept verbatim in logs / spans) into
+// the verb-led human-readable form that goes in the in-pane marker.
+// Falls back to a coarse description of the orchestrator path when the
+// planner didn't run so the marker is never reasonless.
+func routingReasonShort(res turnLoopResult) string {
+	if res.PlannerDecision.Reason != "" {
+		return humanReasonFromPlanner(res.PlannerDecision.Reason)
+	}
+	if res.HardPinned {
+		return "hard pin (compaction / sub-agent)"
+	}
+	if res.StickyHit {
+		return "tool-result follow-up"
+	}
+	return "first turn"
+}
+
+// humanReasonFromPlanner maps planner.Reason* codes to the short
+// human-readable phrases rendered in the marker. Unknown codes pass
+// through verbatim — new planner reasons will surface in the marker
+// as their raw label until this map is updated, which is the right
+// fail-loud behavior (the marker complains visibly instead of silently
+// dropping the reason).
+func humanReasonFromPlanner(code string) string {
+	switch code {
+	case planner.ReasonEVPositive:
+		return "switched to save on cache reads"
+	case planner.ReasonEVNegative:
+		return "stayed: cache reuse beats the switch"
+	case planner.ReasonSameModel:
+		return "scorer matches the pin"
+	case planner.ReasonNoPin:
+		return "first turn"
+	case planner.ReasonNoPriorUsage:
+		return "no cache stats yet"
+	case planner.ReasonPinModelMissing:
+		return "pin model no longer available"
+	case planner.ReasonPricingMissing:
+		return "missing pricing for a candidate"
+	default:
+		return code
+	}
+}
+
 func installationExcludedModelsFromContext(ctx context.Context) []string {
 	v := ctx.Value(InstallationExcludedModelsContextKey{})
 	if v == nil {
@@ -671,7 +835,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			extractor = otel.NewUsageExtractor(nil, decision.Provider)
 			usage = extractor
 		}
-		translator := translate.NewAnthropicSSETranslator(sink, decision.Model, usage)
+		translator := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
+			WithRoutingMarker(routingMarkerFor(routeRes)).
+			WithClosingMarker(closingMarkerFor(decision, feats.Model))
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
 		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderGoogle:
@@ -687,7 +853,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			usage = extractor
 		}
 		// SSE chain: Gemini → OpenAI → Anthropic.
-		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage)
+		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
+			WithRoutingMarker(routingMarkerFor(routeRes)).
+			WithClosingMarker(closingMarkerFor(decision, feats.Model))
 		geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, decision.Model, nil)
 		proxyErr = p.Proxy(ctx, decision, prep, geminiTr, r)
 		proxyErr = finalizeAfterProxy(proxyErr, geminiTr.Finalize)
