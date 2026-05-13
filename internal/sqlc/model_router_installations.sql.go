@@ -22,7 +22,7 @@ VALUES (
     $2::varchar,
     $3
 )
-RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by
+RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models
 `
 
 type CreateModelRouterInstallationParams struct {
@@ -43,7 +43,7 @@ type CreateModelRouterInstallationParams struct {
 //	    $2::varchar,
 //	    $3
 //	)
-//	RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by
+//	RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models
 func (q *Queries) CreateModelRouterInstallation(ctx context.Context, arg CreateModelRouterInstallationParams) (RouterModelRouterInstallation, error) {
 	row := q.db.QueryRow(ctx, createModelRouterInstallation, arg.ExternalID, arg.Name, arg.CreatedBy)
 	var i RouterModelRouterInstallation
@@ -55,12 +55,13 @@ func (q *Queries) CreateModelRouterInstallation(ctx context.Context, arg CreateM
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.CreatedBy,
+		&i.ExcludedModels,
 	)
 	return i, err
 }
 
 const getModelRouterInstallation = `-- name: GetModelRouterInstallation :one
-SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by
+SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models
 FROM router.model_router_installations
 WHERE id = $1::uuid
   AND external_id = $2::varchar
@@ -74,7 +75,7 @@ type GetModelRouterInstallationParams struct {
 
 // Gets an installation by id, scoped to an external_id to prevent cross-tenant access.
 //
-//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by
+//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models
 //	FROM router.model_router_installations
 //	WHERE id = $1::uuid
 //	  AND external_id = $2::varchar
@@ -90,12 +91,13 @@ func (q *Queries) GetModelRouterInstallation(ctx context.Context, arg GetModelRo
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.CreatedBy,
+		&i.ExcludedModels,
 	)
 	return i, err
 }
 
 const listModelRouterInstallationsForExternalID = `-- name: ListModelRouterInstallationsForExternalID :many
-SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by
+SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models
 FROM router.model_router_installations
 WHERE external_id = $1::varchar
   AND deleted_at IS NULL
@@ -104,7 +106,7 @@ ORDER BY created_at DESC
 
 // ListModelRouterInstallationsForExternalID
 //
-//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by
+//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models
 //	FROM router.model_router_installations
 //	WHERE external_id = $1::varchar
 //	  AND deleted_at IS NULL
@@ -126,6 +128,7 @@ func (q *Queries) ListModelRouterInstallationsForExternalID(ctx context.Context,
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.CreatedBy,
+			&i.ExcludedModels,
 		); err != nil {
 			return nil, err
 		}
@@ -159,5 +162,35 @@ type SoftDeleteModelRouterInstallationParams struct {
 //	  AND deleted_at IS NULL
 func (q *Queries) SoftDeleteModelRouterInstallation(ctx context.Context, arg SoftDeleteModelRouterInstallationParams) error {
 	_, err := q.db.Exec(ctx, softDeleteModelRouterInstallation, arg.ID, arg.ExternalID)
+	return err
+}
+
+const updateModelRouterInstallationExcludedModels = `-- name: UpdateModelRouterInstallationExcludedModels :exec
+UPDATE router.model_router_installations
+SET excluded_models = $1::text[],
+    updated_at = NOW()
+WHERE id = $2::uuid
+  AND external_id = $3::varchar
+  AND deleted_at IS NULL
+`
+
+type UpdateModelRouterInstallationExcludedModelsParams struct {
+	ExcludedModels []string
+	ID             uuid.UUID
+	ExternalID     string
+}
+
+// Replaces the per-installation model exclusion list, scoped to an external_id
+// to prevent cross-tenant updates. Empty array means "no exclusion". Bumps
+// updated_at so dashboards see the change.
+//
+//	UPDATE router.model_router_installations
+//	SET excluded_models = $1::text[],
+//	    updated_at = NOW()
+//	WHERE id = $2::uuid
+//	  AND external_id = $3::varchar
+//	  AND deleted_at IS NULL
+func (q *Queries) UpdateModelRouterInstallationExcludedModels(ctx context.Context, arg UpdateModelRouterInstallationExcludedModelsParams) error {
+	_, err := q.db.Exec(ctx, updateModelRouterInstallationExcludedModels, arg.ExcludedModels, arg.ID, arg.ExternalID)
 	return err
 }

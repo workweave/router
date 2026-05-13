@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"workweave/router/internal/auth"
@@ -53,6 +54,10 @@ type Service struct {
 	// present. Set on Weave-managed deployments so customer requests never
 	// silently consume the platform's API key budget.
 	byokOnly bool
+	// excludedModelsOverride, when non-nil, replaces the per-installation
+	// exclusion list on every request. Set from ROUTER_EXCLUDED_MODELS at
+	// boot so headless self-hosters can pin the list in their manifest.
+	excludedModelsOverride map[string]struct{}
 	// deploymentKeyedProviders is the subset of registered providers whose
 	// upstream API key is actually configured at the deployment level (env
 	// var). It's the "default eligible" set used by enabledProvidersForRequest
@@ -74,6 +79,40 @@ type ExternalIDContextKey struct{}
 
 // CredentialsContextKey is the request-context key for resolved per-request credentials.
 type CredentialsContextKey struct{}
+
+// InstallationExcludedModelsContextKey is the request-context key for the
+// authed installation's model exclusion list. Carried as []string so the
+// proxy can build the request-time filter without re-reading the DB.
+type InstallationExcludedModelsContextKey struct{}
+
+// installationExcludedModelsFromContext returns the per-installation exclusion
+// list stashed on ctx by the auth middleware, or nil when none is present.
+func installationExcludedModelsFromContext(ctx context.Context) []string {
+	v := ctx.Value(InstallationExcludedModelsContextKey{})
+	if v == nil {
+		return nil
+	}
+	out, _ := v.([]string)
+	return out
+}
+
+// excludedModelsForRequest returns the model exclusion set to apply for this
+// request. The env-driven override wins; otherwise the installation list (if
+// any) is converted to a set. Returns nil when neither is configured.
+func (s *Service) excludedModelsForRequest(ctx context.Context) map[string]struct{} {
+	if s.excludedModelsOverride != nil {
+		return s.excludedModelsOverride
+	}
+	excluded := installationExcludedModelsFromContext(ctx)
+	if len(excluded) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(excluded))
+	for _, m := range excluded {
+		out[m] = struct{}{}
+	}
+	return out
+}
 
 // CredentialsFromContext returns the resolved credentials stashed on ctx,
 // or nil when none are present (plan-based auth path).
@@ -122,6 +161,45 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 func (s *Service) WithByokOnly(byokOnly bool) *Service {
 	s.byokOnly = byokOnly
 	return s
+}
+
+// WithExcludedModelsOverride pins the per-request model exclusion list to a
+// deployment-wide set, ignoring per-installation DB state. Pass nil or an
+// empty slice to clear the override (per-installation DB state then takes
+// over). Used for headless self-hosted deployments that pin config in env.
+func (s *Service) WithExcludedModelsOverride(models []string) *Service {
+	if len(models) == 0 {
+		s.excludedModelsOverride = nil
+		return s
+	}
+	set := make(map[string]struct{}, len(models))
+	for _, m := range models {
+		set[m] = struct{}{}
+	}
+	s.excludedModelsOverride = set
+	return s
+}
+
+// HasExcludedModelsOverride reports whether ROUTER_EXCLUDED_MODELS (or an
+// equivalent override) is in effect. Admin handlers use this to render the
+// UI read-only and to reject mutating PUTs.
+func (s *Service) HasExcludedModelsOverride() bool {
+	return s.excludedModelsOverride != nil
+}
+
+// ExcludedModelsOverride returns a sorted copy of the override list, or nil
+// when no override is active. Surfaced via the admin GET endpoint so the UI
+// can show the operator which models the env var pins off.
+func (s *Service) ExcludedModelsOverride() []string {
+	if s.excludedModelsOverride == nil {
+		return nil
+	}
+	out := make([]string, 0, len(s.excludedModelsOverride))
+	for m := range s.excludedModelsOverride {
+		out = append(out, m)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // usageRequired reports whether per-request token usage must be captured.
@@ -384,6 +462,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		HasTools:             feats.HasTools,
 		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
+		ExcludedModels:       s.excludedModelsForRequest(ctx),
 	})
 	if routeErr != nil {
 		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "estimated_input_tokens", feats.Tokens)
@@ -868,6 +947,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		HasTools:             feats.HasTools,
 		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
+		ExcludedModels:       s.excludedModelsForRequest(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {

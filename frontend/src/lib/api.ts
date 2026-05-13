@@ -113,6 +113,17 @@ export interface MeResponse {
   subject?: string;
 }
 
+export interface DeployedModel {
+  model: string;
+  provider: string;
+}
+
+export interface ExcludedModelsResponse {
+  available: DeployedModel[];
+  excluded: string[];
+  env_override_active: boolean;
+}
+
 // --- API calls ---
 
 export const api = {
@@ -169,5 +180,13 @@ export const api = {
   },
   config: {
     get: () => request<RouterConfig>("/config"),
+  },
+  excludedModels: {
+    get: () => request<ExcludedModelsResponse>("/excluded-models"),
+    update: (excluded: string[]) =>
+      request<ExcludedModelsResponse>("/excluded-models", {
+        method: "PUT",
+        body: JSON.stringify({ excluded }),
+      }),
   },
 };

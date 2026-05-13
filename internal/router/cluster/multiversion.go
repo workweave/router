@@ -61,6 +61,17 @@ func (m *Multiversion) Built() []string {
 	return out
 }
 
+// DefaultDeployedModels returns the deployed candidates from the default
+// version's Scorer. The admin model-selection UI uses this as the universe
+// of valid model IDs; per-version differences are intentionally hidden.
+func (m *Multiversion) DefaultDeployedModels() []DeployedEntry {
+	s, ok := m.Versions[m.Default]
+	if !ok {
+		return nil
+	}
+	return s.DeployedModels()
+}
+
 // Route dispatches to the per-request version override if built, otherwise Default.
 func (m *Multiversion) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	requested := VersionFromContext(ctx)

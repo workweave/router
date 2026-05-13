@@ -96,6 +96,22 @@ func (r *installationRepo) SoftDelete(ctx context.Context, externalID, id string
 	})
 }
 
+func (r *installationRepo) UpdateExcludedModels(ctx context.Context, externalID, id string, models []string) error {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return err
+	}
+	if models == nil {
+		models = []string{}
+	}
+	q := sqlc.New(r.tx)
+	return q.UpdateModelRouterInstallationExcludedModels(ctx, sqlc.UpdateModelRouterInstallationExcludedModelsParams{
+		ID:             parsed,
+		ExternalID:     externalID,
+		ExcludedModels: models,
+	})
+}
+
 type apiKeyRepo struct {
 	tx sqlc.DBTX
 }
