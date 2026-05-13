@@ -68,16 +68,16 @@ var tiers = map[string]Tier{
 	"qwen/qwen3-next-80b-a3b-instruct": TierMid,
 
 	// --- High ---
-	"claude-opus-4-7":           TierHigh,
-	"gemini-3-pro-preview":      TierHigh,
-	"gemini-3.1-pro-preview":    TierHigh,
-	"gpt-5":                     TierHigh,
-	"gpt-5.4":                   TierHigh,
-	"gpt-5.5":                   TierHigh,
-	"gpt-5.4-pro":               TierHigh,
-	"gpt-5.5-pro":               TierHigh,
-	"moonshotai/kimi-k2.5":      TierHigh,
-	"deepseek/deepseek-v4-pro":  TierHigh,
+	"claude-opus-4-7":          TierHigh,
+	"gemini-3-pro-preview":     TierHigh,
+	"gemini-3.1-pro-preview":   TierHigh,
+	"gpt-5":                    TierHigh,
+	"gpt-5.4":                  TierHigh,
+	"gpt-5.5":                  TierHigh,
+	"gpt-5.4-pro":              TierHigh,
+	"gpt-5.5-pro":              TierHigh,
+	"moonshotai/kimi-k2.5":     TierHigh,
+	"deepseek/deepseek-v4-pro": TierHigh,
 }
 
 // TierFor returns the model's tier, or TierUnknown if absent.
