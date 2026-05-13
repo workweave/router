@@ -363,7 +363,7 @@ func main() {
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels).
-		WithDefaultBaselineModel(strings.TrimSpace(config.GetOr("ROUTER_DEFAULT_BASELINE_MODEL", "claude-sonnet-4-5")))
+		WithDefaultBaselineModel(resolveDefaultBaselineModel())
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
 	// Fail loud if a deployed model is missing from the tier table;
@@ -798,6 +798,19 @@ const (
 	defaultHardPinProvider = providers.ProviderAnthropic
 	defaultHardPinModel    = "claude-haiku-4-5"
 )
+
+// resolveDefaultBaselineModel returns the cost-comparison baseline used when
+// the inbound RequestedModel has no pricing entry. Unset → default
+// claude-sonnet-4-5; set to empty → no substitution. config.GetOr collapses
+// the empty-set and unset cases, so we use os.LookupEnv directly to preserve
+// the "" → disable contract documented in .env.example.
+func resolveDefaultBaselineModel() string {
+	v, ok := os.LookupEnv("ROUTER_DEFAULT_BASELINE_MODEL")
+	if !ok {
+		return "claude-sonnet-4-5"
+	}
+	return strings.TrimSpace(v)
+}
 
 // resolveHardPinModel returns the (provider, model) to use for compaction and
 // Explore hard-pins. Operator override wins; otherwise the cheapest model in
