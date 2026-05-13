@@ -256,7 +256,7 @@ func (t *GeminiToOpenAISSETranslator) emitTextDelta(text string) error {
 // function.thought_signature (off-spec but preserved by passthrough clients)
 // so the next request can round-trip it.
 func (t *GeminiToOpenAISSETranslator) emitToolCallChunk(idx int, name, argsRaw, sig string) error {
-	id := generateToolCallID()
+	id := embedSignatureInID(generateToolCallID(), sig)
 	t.writeChunkHeader()
 	t.bw.WriteString(`"choices":[{"index":0,"delta":{"tool_calls":[{"index":`)
 	sse.WriteJSONInt(t.bw, int64(idx))

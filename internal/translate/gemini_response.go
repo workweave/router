@@ -199,13 +199,14 @@ func geminiFunctionCallToToolCall(fc map[string]any, signature string) map[strin
 		"arguments": argStr,
 	}
 	tc := map[string]any{
-		"id":       generateToolCallID(),
+		"id":       embedSignatureInID(generateToolCallID(), signature),
 		"type":     "function",
 		"function": fn,
 	}
 	if signature != "" {
-		// Off-spec; clients pass it through and our translators read it back
-		// on the next turn.
+		// Off-spec; clients that preserve unknown fields pass it through.
+		// The signature is also smuggled into tc.id above for typed SDKs
+		// (Claude Code, Anthropic TS SDK) that drop unknown fields.
 		fn["thought_signature"] = signature
 		tc["thought_signature"] = signature
 	}
@@ -226,16 +227,17 @@ func buildAnthropicBlocksFromGemini(candidate map[string]any) []any {
 			continue
 		}
 		if fc, ok := part["functionCall"].(map[string]any); ok {
+			sig, _ := part["thoughtSignature"].(string)
 			block := map[string]any{
 				"type":  "tool_use",
-				"id":    generateToolUseID(),
+				"id":    embedSignatureInID(generateToolUseID(), sig),
 				"name":  fc["name"],
 				"input": fc["args"],
 			}
 			if block["input"] == nil {
 				block["input"] = map[string]any{}
 			}
-			if sig, _ := part["thoughtSignature"].(string); sig != "" {
+			if sig != "" {
 				block["thought_signature"] = sig
 			}
 			blocks = append(blocks, block)
