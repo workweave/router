@@ -1,0 +1,57 @@
+internal/router/cluster/artifacts.go
+  s_0ac1abdedf47d0::t_d712e904669324 326-337,343-346
+internal/router/capability/tier_test.go
+  s_0ac1abdedf47d0::t_c961014b9deae0 91-146
+internal/proxy/service.go
+  s_0ac1abdedf47d0::t_9f8b18486b20a8 1659
+  s_0ac1abdedf47d0::t_013522055e80dd 20
+  s_0ac1abdedf47d0::t_967266b629f895 999
+  s_0ac1abdedf47d0::t_6dafc4e0e61ff5 1108-1111,1119,1134
+  s_0ac1abdedf47d0::t_59a4f890f8d9d3 69-74
+  s_0ac1abdedf47d0::t_f01c15ce767dcd 418-429
+internal/proxy/turnloop.go
+  s_0ac1abdedf47d0::t_272d88ec9660d5 296,300-346
+  s_0ac1abdedf47d0::t_47b178adb68547 392,398
+  s_0ac1abdedf47d0::t_7dc5e6b7a7487e 48-57
+  s_0ac1abdedf47d0::t_e6f8ad4ac456bf 353
+  s_0ac1abdedf47d0::t_c1c520a6de7403 58-62
+  s_0ac1abdedf47d0::t_983c6377ad1ba7 113
+  s_0ac1abdedf47d0::t_998424abaa3fee 182-183,186,194-195,198,209,216
+  s_0ac1abdedf47d0::t_51744fa33a1be8 12
+  s_0ac1abdedf47d0::t_6fe5cffe8fd1ca 109-111
+  s_0ac1abdedf47d0::t_1c5de2c087229a 371
+  s_0ac1abdedf47d0::t_9efbd42b7d712f 417,423
+  s_0ac1abdedf47d0::t_a842c87e3f99aa 143,148-149,163,170,172
+  s_0ac1abdedf47d0::t_23281656381ee9 234-235,238
+internal/router/cluster/artifacts_test.go
+  s_0ac1abdedf47d0::t_8b02f43e010e83 247-285
+internal/router/capability/tier.go
+  s_0ac1abdedf47d0::t_42a8f383a836bc 88-112
+cmd/router/main.go
+  s_0ac1abdedf47d0::t_2d4425bff327b9 342-366
+  s_0ac1abdedf47d0::t_3574ad1f4786d3 414
+internal/proxy/turnloop_internal_test.go
+  s_0ac1abdedf47d0::t_3940989ebc655b 157,197
+internal/proxy/service_session_pin_test.go
+  s_0ac1abdedf47d0::t_72c1cbca76c83d 579,587
+  s_0ac1abdedf47d0::t_deaff1e3462764 595-596,609
+  s_0ac1abdedf47d0::t_4b9a56817ca5c5 623-624,629,632,640
+  s_0ac1abdedf47d0::t_08e31ecc8672ca 558-578,580-586,588-594,597-608,610-622,625-628,630-631,633-639,641
+  s_0ac1abdedf47d0::t_411337b10b28f6 17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "8308bfc129713600cde3961084ea95d533dfe411",
+  "prompts": {},
+  "sessions": {
+    "s_0ac1abdedf47d0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4555dc00-dcca-4e93-9af7-b0a0af00d4d9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
