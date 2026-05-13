@@ -1,0 +1,25 @@
+internal/observability/otel/pricing.go
+  s_345838d581d61d::t_40d4282287d8ec 6,8-13,17,25-26
+internal/observability/otel/pricing_statusline_test.go
+  s_345838d581d61d::t_682e9dfa8a6550 15-17,34-35,46,50
+internal/router/pricing/pricing_test.go
+  s_345838d581d61d::t_0991c5406a224b 1-75
+internal/router/pricing/pricing.go
+  s_345838d581d61d::t_086bc0f3319b14 1-34,38-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "f50aaafd906d3620e563b65a4d90badaf40128d5",
+  "prompts": {},
+  "sessions": {
+    "s_345838d581d61d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9eb338c3-38c3-4920-ba43-34e939958542",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

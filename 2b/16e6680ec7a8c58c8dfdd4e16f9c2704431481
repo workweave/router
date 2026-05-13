@@ -1,0 +1,29 @@
+internal/router/pricing/pricing.go
+  s_87d67628e1063e::t_7499082f954165 12-21,24-40
+  s_87d67628e1063e::t_d71144acf22b0f 54-57,59-62,64-68,71-74,77-80,83-87,89-93,96-100,103,109-110,113-114
+internal/router/planner/policy.go
+  s_87d67628e1063e::t_70afa5c1b10dd4 126-137
+  s_87d67628e1063e::t_d7882d3de0c3ee 9-10,12-23
+internal/router/pricing/pricing_test.go
+  s_87d67628e1063e::t_2933290730ad0b 54-98
+internal/router/planner/policy_test.go
+  s_87d67628e1063e::t_78284619a53d27 215-242
+  s_87d67628e1063e::t_2649aa2039853f 15-18
+  s_87d67628e1063e::t_d8e435120b0e06 29-31,36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "2b16e6680ec7a8c58c8dfdd4e16f9c2704431481",
+  "prompts": {},
+  "sessions": {
+    "s_87d67628e1063e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b76cc82-198d-44c7-b4db-7689a1007adc",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
