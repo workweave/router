@@ -24,12 +24,12 @@ func runEmbedOverride(t *testing.T, installation *auth.Installation, header stri
 		}
 		c.Next()
 	})
-	engine.Use(middleware.WithEmbedLastUserMessageOverride())
+	engine.Use(middleware.WithEmbedOnlyUserMessageOverride())
 
 	var observedSet bool
 	var observedValue bool
 	engine.GET("/probe", func(c *gin.Context) {
-		v, ok := c.Request.Context().Value(proxy.EmbedLastUserMessageContextKey{}).(bool)
+		v, ok := c.Request.Context().Value(proxy.EmbedOnlyUserMessageContextKey{}).(bool)
 		observedSet = ok
 		observedValue = v
 		c.Status(http.StatusOK)
@@ -37,7 +37,7 @@ func runEmbedOverride(t *testing.T, installation *auth.Installation, header stri
 
 	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
 	if header != "" {
-		req.Header.Set(middleware.EmbedLastUserMessageOverrideHeader, header)
+		req.Header.Set(middleware.EmbedOnlyUserMessageOverrideHeader, header)
 	}
 	rr := httptest.NewRecorder()
 	engine.ServeHTTP(rr, req)

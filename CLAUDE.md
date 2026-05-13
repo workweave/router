@@ -617,11 +617,11 @@ runs as a Modal app (`modal_app.py`); see [`eval/README.md`](eval/README.md).
   `cluster.VersionFromContext` and dispatches to the matching `Scorer`.
   Customer traffic (no header) always serves the deployment's default
   version (`ROUTER_CLUSTER_VERSION` → `artifacts/latest`).
-- `internal/server/middleware.WithEmbedLastUserMessageOverride` honors
-  the `x-weave-embed-last-user-message: true` header, flipping the
-  proxy to embed the last-user-typed message instead of the concatenated
-  stream. Used for orthogonal feature-extraction A/Bs against the
-  artifact-version axis.
+- `internal/server/middleware.WithEmbedOnlyUserMessageOverride` honors
+  the `x-weave-embed-only-user-message: true|false` header, flipping
+  the proxy between embedding user-role text only (default) and the
+  concatenated turn stream. Used for orthogonal feature-extraction
+  A/Bs against the artifact-version axis.
 - The eval harness names cluster routers as `vX.Y-cluster` — any
   committed artifact directory under
   `internal/router/cluster/artifacts/` is reachable by name, no Python

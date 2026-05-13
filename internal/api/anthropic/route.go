@@ -34,12 +34,18 @@ func RouteHandler(svc *proxy.Service) gin.HandlerFunc {
 			return
 		}
 
-		feats := env.RoutingFeatures(false)
-		decision, routeErr := svc.Route(c.Request.Context(), router.Request{
+		ctx := c.Request.Context()
+		embedFlag := svc.ResolveEmbedOnlyUserMessage(ctx)
+		feats := env.RoutingFeatures(embedFlag)
+		promptText := feats.PromptText
+		if embedFlag && feats.OnlyUserMessageText != "" {
+			promptText = feats.OnlyUserMessageText
+		}
+		decision, routeErr := svc.Route(ctx, router.Request{
 			RequestedModel:       feats.Model,
 			EstimatedInputTokens: feats.Tokens,
 			HasTools:             feats.HasTools,
-			PromptText:           feats.PromptText,
+			PromptText:           promptText,
 		})
 		if routeErr != nil {
 			log.Error("Routing failed", "err", routeErr)

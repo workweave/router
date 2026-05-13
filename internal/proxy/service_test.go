@@ -115,17 +115,21 @@ func TestService_ProxyMessages_CrossFormatUpstreamErrorBodyReachesClient(t *test
 	assert.Contains(t, respBody, `"type":"error"`, "body must be in Anthropic error envelope shape")
 }
 
-func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
-	const userPrompt = "Walk every Go file under router/internal/ and produce a one-paragraph summary of each."
-	// CC-shaped body: system preamble + earlier user prompt + long tool_result.
-	// Most recent user-authored text is the original prompt, several messages back.
+func TestService_ProxyMessages_EmbedOnlyUserMessageFlag(t *testing.T) {
+	const firstUserPrompt = "Walk every Go file under router/internal/ and produce a one-paragraph summary of each."
+	const secondUserPrompt = "Now narrow it to handlers under internal/api/."
+	// CC-shaped body: system preamble + two user prompts separated by an
+	// assistant turn + trailing tool_result. embedOnlyUserMessage must keep
+	// both user prompts and drop the system text, the assistant tool_use, and
+	// the tool_result blocks.
 	body := []byte(`{
 		"model":"claude-opus-4-7",
 		"system":"You are Claude Code. CLAUDE.md says: do not use emojis...",
 		"messages":[
-			{"role":"user","content":"` + userPrompt + `"},
+			{"role":"user","content":"` + firstUserPrompt + `"},
 			{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"path":"go.mod"}}]},
-			{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"module workweave/router\n\ngo 1.23\n\nrequire (\n\tgithub.com/gin-gonic/gin v1.10.0\n)"}]}
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"module workweave/router\n\ngo 1.23\n\nrequire (\n\tgithub.com/gin-gonic/gin v1.10.0\n)"}]},
+			{"role":"user","content":"` + secondUserPrompt + `"}
 		]
 	}`)
 
@@ -150,10 +154,10 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 		require.NotNil(t, fr.capturedReq)
 		got := fr.capturedReq.PromptText
 		assert.Contains(t, got, "You are Claude Code", "flag=off keeps system prompt")
-		assert.Contains(t, got, userPrompt, "flag=off keeps user message text")
+		assert.Contains(t, got, firstUserPrompt, "flag=off keeps first user message text")
 	})
 
-	t.Run("flag on uses last user message only", func(t *testing.T) {
+	t.Run("flag on concatenates user-role text and drops everything else", func(t *testing.T) {
 		fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"}}
 		svc := proxy.NewService(fr,
 			map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
@@ -173,11 +177,12 @@ func TestService_ProxyMessages_EmbedLastUserMessageFlag(t *testing.T) {
 
 		require.NotNil(t, fr.capturedReq)
 		got := fr.capturedReq.PromptText
-		assert.Equal(t, userPrompt, got, "flag=on uses last user message verbatim, no preamble")
+		assert.Equal(t, firstUserPrompt+"\n"+secondUserPrompt, got,
+			"flag=on emits user-role text only (no system, no assistant tool_use, no tool_result)")
 	})
 }
 
-func TestService_ProxyMessages_EmbedLastUserMessageContextOverride(t *testing.T) {
+func TestService_ProxyMessages_EmbedOnlyUserMessageContextOverride(t *testing.T) {
 	const userPrompt = "Find the race condition in main.go"
 	body := []byte(`{
 		"model":"claude-opus-4-7",
@@ -233,7 +238,7 @@ func TestService_ProxyMessages_EmbedLastUserMessageContextOverride(t *testing.T)
 
 			ctx := context.Background()
 			if tc.ctxOverride != nil {
-				ctx = context.WithValue(ctx, proxy.EmbedLastUserMessageContextKey{}, *tc.ctxOverride)
+				ctx = context.WithValue(ctx, proxy.EmbedOnlyUserMessageContextKey{}, *tc.ctxOverride)
 			}
 
 			rec := httptest.NewRecorder()
@@ -260,7 +265,7 @@ func TestService_ProxyMessages_StickyBypassedByEvalOverrideHeaders(t *testing.T)
 	cases := []runConfig{
 		{name: "no override → second call hits sticky cache", header: "", wantRouteCalls: 1},
 		{name: "x-weave-cluster-version bypasses sticky", header: "x-weave-cluster-version", wantRouteCalls: 2},
-		{name: "x-weave-embed-last-user-message bypasses sticky", header: "x-weave-embed-last-user-message", wantRouteCalls: 2},
+		{name: "x-weave-embed-only-user-message bypasses sticky", header: "x-weave-embed-only-user-message", wantRouteCalls: 2},
 	}
 
 	for _, tc := range cases {

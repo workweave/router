@@ -45,7 +45,17 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		log.Error("Failed to parse Gemini request", "err", parseErr)
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
-	feats := env.RoutingFeatures(false)
+	embedFlag := s.embedOnlyUserMessage
+	if v, ok := embedOnlyUserMessageOverride(ctx); ok {
+		embedFlag = v
+	}
+	feats := env.RoutingFeatures(embedFlag)
+	promptText := feats.PromptText
+	embedInput := "concatenated_stream"
+	if embedFlag && feats.OnlyUserMessageText != "" {
+		promptText = feats.OnlyUserMessageText
+		embedInput = "only_user_message"
+	}
 
 	bypassEval := hasEvalOverrideHeader(r)
 	bypassLegacySticky := bypassEval
@@ -57,7 +67,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
-		PromptText:           feats.PromptText,
+		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
@@ -86,7 +96,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(22).
+		Attrs: otel.NewAttrBuilder(23).
 			String("request_id", requestID).
 			String("external_id", externalID).
 			String("client.device_id", clientID.DeviceID).
@@ -103,6 +113,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 			String("routing.session_pin_tier", pinTier).
 			Int64("routing.session_pin_age_s", pinAgeSec).
 			String("routing.turn_type", string(tt)).
+			String("routing.embed_input", embedInput).
 			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
 			Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
@@ -172,6 +183,6 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	})
 	otel.Flush(ctx)
 
-	log.Info("ProxyGeminiGenerateContent complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyGeminiGenerateContent complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }

@@ -85,7 +85,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithTimingEntry(),
 		middleware.WithTimeout(messagesTimeout),
 		middleware.WithAuth(authSvc),
-		middleware.WithEmbedLastUserMessageOverride(),
+		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
 	)
 	messagesGroup.POST("/v1/messages", anthropicapi.MessagesHandler(proxySvc, authSvc))
@@ -94,7 +94,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithTimingEntry(),
 		middleware.WithTimeout(chatCompletionTimeout),
 		middleware.WithAuth(authSvc),
-		middleware.WithEmbedLastUserMessageOverride(),
+		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
 	)
 	chatCompletionGroup.POST("/v1/chat/completions", openaiapi.ChatCompletionHandler(proxySvc, authSvc))
@@ -112,7 +112,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	routeGroup := engine.Group("",
 		middleware.WithTimeout(routeTimeout),
 		middleware.WithAuth(authSvc),
-		middleware.WithEmbedLastUserMessageOverride(),
+		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
 	)
 	routeGroup.POST("/v1/route", anthropicapi.RouteHandler(proxySvc))

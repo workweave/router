@@ -26,7 +26,7 @@ type Service struct {
 	router               router.Router
 	providers            map[string]providers.Client
 	emitter              *otel.Emitter
-	embedLastUserMessage bool
+	embedOnlyUserMessage bool
 	stickyDecisions      *expirable.LRU[string, router.Decision]
 	// semanticCache short-circuits non-streaming requests on a cosine-similarity hit.
 	semanticCache *cache.Cache
@@ -88,7 +88,7 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 
 // NewService constructs the proxy service. pinStore may be nil when the
 // session-pin feature flag is off.
-func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
+func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedOnlyUserMessage bool, stickyDecisionTTL time.Duration, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
 	var sticky *expirable.LRU[string, router.Decision]
 	if stickyDecisionTTL > 0 {
 		sticky = expirable.NewLRU[string, router.Decision](10000, nil, stickyDecisionTTL)
@@ -103,7 +103,7 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		router:               r,
 		providers:            providerMap,
 		emitter:              emitter,
-		embedLastUserMessage: embedLastUserMessage,
+		embedOnlyUserMessage: embedOnlyUserMessage,
 		stickyDecisions:      sticky,
 		semanticCache:        semanticCache,
 		pinStore:             pinStore,
@@ -260,13 +260,26 @@ func (s *Service) writeCachedResponse(w http.ResponseWriter, resp cache.CachedRe
 	}
 }
 
-// EmbedLastUserMessageContextKey is the context key for the per-request embed flag override.
-type EmbedLastUserMessageContextKey struct{}
+// EmbedOnlyUserMessageContextKey is the context key for the per-request embed flag override.
+type EmbedOnlyUserMessageContextKey struct{}
 
-// embedLastUserMessageOverride reads the per-request embed flag from ctx.
-func embedLastUserMessageOverride(ctx context.Context) (bool, bool) {
-	v, ok := ctx.Value(EmbedLastUserMessageContextKey{}).(bool)
+// embedOnlyUserMessageOverride reads the per-request embed flag from ctx.
+func embedOnlyUserMessageOverride(ctx context.Context) (bool, bool) {
+	v, ok := ctx.Value(EmbedOnlyUserMessageContextKey{}).(bool)
 	return v, ok
+}
+
+// ResolveEmbedOnlyUserMessage reports the effective embed-only-user flag for
+// ctx, applying the per-request override (if set) on top of the service
+// default. Exposed so handlers outside this package (e.g. /v1/route) can use
+// the same resolution as ProxyMessages and stay in sync with customer-visible
+// routing behavior.
+func (s *Service) ResolveEmbedOnlyUserMessage(ctx context.Context) bool {
+	flag := s.embedOnlyUserMessage
+	if v, ok := embedOnlyUserMessageOverride(ctx); ok {
+		flag = v
+	}
+	return flag
 }
 
 func (s *Service) provider(name string) (providers.Client, error) {
@@ -338,16 +351,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
 
-	embedFlag := s.embedLastUserMessage
-	if v, ok := embedLastUserMessageOverride(ctx); ok {
+	embedFlag := s.embedOnlyUserMessage
+	if v, ok := embedOnlyUserMessageOverride(ctx); ok {
 		embedFlag = v
 	}
 	feats := env.RoutingFeatures(embedFlag)
 	promptText := feats.PromptText
 	embedInput := "concatenated_stream"
-	if embedFlag && feats.LastUserMessageText != "" {
-		promptText = feats.LastUserMessageText
-		embedInput = "last_user_message"
+	if embedFlag && feats.OnlyUserMessageText != "" {
+		promptText = feats.OnlyUserMessageText
+		embedInput = "only_user_message"
 	}
 
 	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
@@ -663,7 +676,7 @@ func hasEvalOverrideHeader(r *http.Request) bool {
 		return false
 	}
 	return r.Header.Get("x-weave-cluster-version") != "" ||
-		r.Header.Get("x-weave-embed-last-user-message") != ""
+		r.Header.Get("x-weave-embed-only-user-message") != ""
 }
 
 // externalKeysFromContext reads external API keys stashed by auth middleware.
@@ -830,7 +843,17 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		log.Error("Failed to parse OpenAI request", "err", parseErr)
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
-	feats := env.RoutingFeatures(false)
+	embedFlag := s.embedOnlyUserMessage
+	if v, ok := embedOnlyUserMessageOverride(ctx); ok {
+		embedFlag = v
+	}
+	feats := env.RoutingFeatures(embedFlag)
+	promptText := feats.PromptText
+	embedInput := "concatenated_stream"
+	if embedFlag && feats.OnlyUserMessageText != "" {
+		promptText = feats.OnlyUserMessageText
+		embedInput = "only_user_message"
+	}
 
 	bypassEval := hasEvalOverrideHeader(r)
 	bypassLegacySticky := bypassEval
@@ -843,7 +866,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
-		PromptText:           feats.PromptText,
+		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
@@ -898,7 +921,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(24).
+		Attrs: otel.NewAttrBuilder(25).
 			String("request_id", requestID).
 			String("external_id", externalID).
 			String("router_user_id", auth.UserIDFrom(ctx)).
@@ -916,6 +939,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			String("routing.session_pin_tier", pinTier).
 			Int64("routing.session_pin_age_s", pinAgeSec).
 			String("routing.turn_type", string(tt)).
+			String("routing.embed_input", embedInput).
 			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 			IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
 			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
@@ -1059,6 +1083,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			DecisionReason:         decision.Reason,
 			EstimatedInputTokens:   int32(feats.Tokens),
 			StickyHit:              stickyHit,
+			EmbedInput:             embedInput,
 			InputTokens:            int32(in),
 			OutputTokens:           int32(out),
 			RequestedInputCostUSD:  float64(in) / 1_000_000 * reqPricing.InputUSDPer1M,
@@ -1080,6 +1105,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }

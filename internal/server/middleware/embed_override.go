@@ -10,13 +10,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// EmbedLastUserMessageOverrideHeader flips the cluster scorer's PromptText source per-request.
-const EmbedLastUserMessageOverrideHeader = "x-weave-embed-last-user-message"
+// EmbedOnlyUserMessageOverrideHeader flips the cluster scorer's PromptText source per-request.
+const EmbedOnlyUserMessageOverrideHeader = "x-weave-embed-only-user-message"
 
-// WithEmbedLastUserMessageOverride attaches a bool override to the request context when the header is "true" or "false".
-func WithEmbedLastUserMessageOverride() gin.HandlerFunc {
+// WithEmbedOnlyUserMessageOverride attaches a bool override to the request context when the header is "true" or "false".
+func WithEmbedOnlyUserMessageOverride() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		raw := strings.TrimSpace(c.GetHeader(EmbedLastUserMessageOverrideHeader))
+		raw := strings.TrimSpace(c.GetHeader(EmbedOnlyUserMessageOverrideHeader))
 		if raw == "" {
 			c.Next()
 			return
@@ -37,10 +37,10 @@ func WithEmbedLastUserMessageOverride() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		ctx := context.WithValue(c.Request.Context(), proxy.EmbedLastUserMessageContextKey{}, override)
+		ctx := context.WithValue(c.Request.Context(), proxy.EmbedOnlyUserMessageContextKey{}, override)
 		c.Request = c.Request.WithContext(ctx)
 		observability.FromGin(c).Info(
-			"Embed-last-user-message override applied",
+			"Embed-only-user-message override applied",
 			"installation_id", installation.ID,
 			"value", override,
 		)

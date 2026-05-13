@@ -19,41 +19,45 @@ type RoutingFeatures struct {
 	LastKind string
 	// LastPreview: first previewMaxChars of the last message's text, newlines collapsed.
 	LastPreview string
-	// LastUserMessageText: most recent user-authored prompt text (skipping tool_result blocks).
-	LastUserMessageText string
+	// OnlyUserMessageText: concatenated text from every role=="user" message in
+	// order, with system prompt, assistant turns, and tool_result blocks
+	// excluded. Populated when the caller passes extractOnlyUser=true.
+	OnlyUserMessageText string
 }
 
-// RoutingFeatures extracts routing inputs from the envelope.
-func (e *RequestEnvelope) RoutingFeatures(extractLastUser bool) RoutingFeatures {
+// RoutingFeatures extracts routing inputs from the envelope. When
+// extractOnlyUser is true, OnlyUserMessageText is populated so the caller can
+// route on user-typed text only.
+func (e *RequestEnvelope) RoutingFeatures(extractOnlyUser bool) RoutingFeatures {
 	switch e.format {
 	case FormatAnthropic:
-		return e.anthropicRoutingFeatures(extractLastUser)
+		return e.anthropicRoutingFeatures(extractOnlyUser)
 	case FormatOpenAI:
-		return e.openAIRoutingFeatures()
+		return e.openAIRoutingFeatures(extractOnlyUser)
 	case FormatGemini:
-		return e.geminiRoutingFeatures()
+		return e.geminiRoutingFeatures(extractOnlyUser)
 	default:
 		return RoutingFeatures{}
 	}
 }
 
-func (e *RequestEnvelope) anthropicRoutingFeatures(extractLastUser bool) RoutingFeatures {
+func (e *RequestEnvelope) anthropicRoutingFeatures(extractOnlyUser bool) RoutingFeatures {
 	var b strings.Builder
 	appendText(&b, systemTextGJSON(gjson.GetBytes(e.body, "system")))
 
 	msgs := gjson.GetBytes(e.body, "messages")
 	var (
-		msgCount     int
-		lastMsg      gjson.Result
-		lastUserText string
+		msgCount  int
+		lastMsg   gjson.Result
+		onlyUserB strings.Builder
 	)
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		msgCount++
 		appendText(&b, contentTextGJSON(msg.Get("content")))
 		lastMsg = msg
-		if extractLastUser && msg.Get("role").String() == "user" {
+		if extractOnlyUser && msg.Get("role").String() == "user" {
 			if text := userPromptTextGJSON(msg.Get("content")); text != "" {
-				lastUserText = text
+				appendText(&onlyUserB, text)
 			}
 		}
 		return true
@@ -73,25 +77,31 @@ func (e *RequestEnvelope) anthropicRoutingFeatures(extractLastUser bool) Routing
 		feats.LastPreview = previewGJSON(lastMsg.Get("content"))
 	}
 
-	if lastUserText != "" {
-		feats.LastUserMessageText = lastUserText
+	if onlyUserB.Len() > 0 {
+		feats.OnlyUserMessageText = onlyUserB.String()
 	}
 
 	return feats
 }
 
-func (e *RequestEnvelope) openAIRoutingFeatures() RoutingFeatures {
+func (e *RequestEnvelope) openAIRoutingFeatures(extractOnlyUser bool) RoutingFeatures {
 	msgs := gjson.GetBytes(e.body, "messages")
 
 	var b strings.Builder
 	var (
-		msgCount int
-		lastMsg  gjson.Result
+		msgCount  int
+		lastMsg   gjson.Result
+		onlyUserB strings.Builder
 	)
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		msgCount++
 		appendText(&b, openAIContentTextGJSON(msg.Get("content")))
 		lastMsg = msg
+		if extractOnlyUser && msg.Get("role").String() == "user" {
+			if text := openAIContentTextGJSON(msg.Get("content")); text != "" {
+				appendText(&onlyUserB, text)
+			}
+		}
 		return true
 	})
 	text := b.String()
@@ -107,6 +117,10 @@ func (e *RequestEnvelope) openAIRoutingFeatures() RoutingFeatures {
 	if msgCount > 0 {
 		feats.LastKind = classifyLastMessageOpenAI(lastMsg.Get("role").String())
 		feats.LastPreview = previewText(openAIContentTextGJSON(lastMsg.Get("content")))
+	}
+
+	if onlyUserB.Len() > 0 {
+		feats.OnlyUserMessageText = onlyUserB.String()
 	}
 
 	return feats

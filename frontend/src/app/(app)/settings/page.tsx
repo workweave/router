@@ -591,9 +591,9 @@ function buildRows(cfg: RouterConfig): ConfigRow[] {
       description: "Active routing artifact bundle served by default",
     },
     {
-      label: "Embed last user message",
-      value: cfg.embed_last_user_message ? "Enabled" : "Disabled",
-      description: "Whether the router embeds only the last user turn for cluster routing",
+      label: "Embed only user message",
+      value: cfg.embed_only_user_message ? "Enabled" : "Disabled",
+      description: "Whether the router embeds user-role text only (no system, assistant, or tool_result content) for cluster routing",
     },
     {
       label: "Sticky decision TTL",

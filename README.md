@@ -246,7 +246,7 @@ Set `DATABASE_URL` directly, or compose it from the individual vars:
 | --------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------- |
 | `ROUTER_CLUSTER_VERSION`          | *(reads `artifacts/latest`)* | Pin a specific cluster artifact version (e.g. `v0.27`).                                |
 | `ROUTER_CLUSTER_EMBED_TIMEOUT_MS` | `200`                        | Per-request ONNX embed timeout. Increase for slower hosts.                             |
-| `ROUTER_EMBED_LAST_USER_MESSAGE`  | `false`                      | Feed the last user message to the embedder instead of the concatenated turn context.   |
+| `ROUTER_EMBED_ONLY_USER_MESSAGE`  | `true`                       | Feed only user-role text (no system, assistant, or tool_result) to the embedder. Set `false` to fall back to the concatenated turn context. |
 | `ROUTER_STICKY_DECISION_TTL_MS`   | `0` (disabled)               | Reuse a routing decision per API key for this many ms.                                 |
 | `ROUTER_SESSION_PIN_ENABLED`      | `true`                       | Pin a session to its first-routed model so multi-turn conversations stay coherent.     |
 | `ROUTER_HARD_PIN_MODEL`           | *(none)*                     | Force every request to a specific model, bypassing the cluster scorer. Debugging only. |

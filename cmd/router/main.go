@@ -263,9 +263,11 @@ func main() {
 		}
 		authSvc.WithAdminPassword(adminPassword)
 	}
-	embedLastUser := config.GetOr("ROUTER_EMBED_LAST_USER_MESSAGE", "false") == "true"
-	if embedLastUser {
-		logger.Info("Cluster scorer embedding the last user message (ROUTER_EMBED_LAST_USER_MESSAGE=true)")
+	embedOnlyUser := config.GetOr("ROUTER_EMBED_ONLY_USER_MESSAGE", "true") == "true"
+	if embedOnlyUser {
+		logger.Info("Cluster scorer embedding user-role text only (ROUTER_EMBED_ONLY_USER_MESSAGE=true)")
+	} else {
+		logger.Info("Cluster scorer embedding concatenated stream (ROUTER_EMBED_ONLY_USER_MESSAGE=false)")
 	}
 	var stickyTTL time.Duration
 	if v := config.GetOr("ROUTER_STICKY_DECISION_TTL_MS", "0"); v != "0" && v != "" {
@@ -329,7 +331,7 @@ func main() {
 		deploymentEligible[providers.ProviderAnthropic] = struct{}{}
 	}
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedOnlyUser, stickyTTL, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithByokOnly(byokOnly).
 		WithDeploymentKeyedProviders(deploymentEligible)
 
