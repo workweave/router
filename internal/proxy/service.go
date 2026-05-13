@@ -133,28 +133,37 @@ func routingMarkerFor(res turnLoopResult) string {
 	return strings.Join(parts, " · ") + "\n\n"
 }
 
-// closingMarkerFor returns a callback that formats a "saved $X vs <requested>"
-// line from observed usage. Returns "" when routed == requested, pricing is
+// closingMarkerFor returns a callback that formats a "saved $X vs <baseline>"
+// line from observed usage. Returns "" when routed == baseline, pricing is
 // missing, or savings are non-positive / below the flicker floor.
-func closingMarkerFor(decision router.Decision, requestedModel string) func(translate.Usage) string {
+//
+// When requestedModel and baselineModel differ, the inbound model name had
+// no pricing entry and the baseline was substituted in; the marker labels
+// the comparison "(configured baseline)" so users see the savings are an
+// attribution rather than against a literal model they requested.
+func closingMarkerFor(decision router.Decision, requestedModel, baselineModel string) func(translate.Usage) string {
 	return func(u translate.Usage) string {
-		if decision.Model == "" || requestedModel == "" {
+		if decision.Model == "" || baselineModel == "" {
 			return ""
 		}
-		if decision.Model == requestedModel {
+		if decision.Model == baselineModel {
 			return ""
 		}
 		routed, ok1 := pricing.For(decision.Model)
-		requested, ok2 := pricing.For(requestedModel)
+		baseline, ok2 := pricing.For(baselineModel)
 		if !ok1 || !ok2 {
 			return ""
 		}
-		savings := closingMarkerSavingsUSD(u, routed, requested)
+		savings := closingMarkerSavingsUSD(u, routed, baseline)
 		if savings < 0.0001 {
 			return ""
 		}
+		label := baselineModel
+		if requestedModel != baselineModel {
+			label = baselineModel + " (configured baseline)"
+		}
 		return fmt.Sprintf("✦ saved $%.4f vs %s (%s in / %s out)",
-			savings, requestedModel,
+			savings, label,
 			formatTokenCount(u.InputTokens), formatTokenCount(u.OutputTokens))
 	}
 }
@@ -827,7 +836,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 		translator := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
 			WithRoutingMarker(routingMarkerFor(routeRes)).
-			WithClosingMarker(closingMarkerFor(decision, s.baselineFor(feats.Model)))
+			WithClosingMarker(closingMarkerFor(decision, feats.Model, s.baselineFor(feats.Model)))
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
 		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderGoogle:
@@ -845,7 +854,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		// SSE chain: Gemini → OpenAI → Anthropic.
 		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
 			WithRoutingMarker(routingMarkerFor(routeRes)).
-			WithClosingMarker(closingMarkerFor(decision, s.baselineFor(feats.Model)))
+			WithClosingMarker(closingMarkerFor(decision, feats.Model, s.baselineFor(feats.Model)))
 		geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, decision.Model, nil)
 		proxyErr = p.Proxy(ctx, decision, prep, geminiTr, r)
 		proxyErr = finalizeAfterProxy(proxyErr, geminiTr.Finalize)
