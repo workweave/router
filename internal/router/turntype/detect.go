@@ -60,7 +60,7 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 	if isCompaction(systemText) {
 		return Compaction
 	}
-	if isSubAgentDispatch(env.MetadataUserID(), systemText, subAgentHint) {
+	if isSubAgentDispatch(env.MetadataUserID(), subAgentHint) {
 		return SubAgentDispatch
 	}
 	if feats.LastKind == "tool_result" {
@@ -89,15 +89,19 @@ func isCompaction(systemText string) bool {
 // isSubAgentDispatch reports whether the request originates from a
 // sub-agent dispatch. Claude Code packs sub-agent identity into
 // metadata.user_id as "subagent:<type>"; non-Anthropic clients pass it
-// via the x-weave-subagent-type header. System-prompt marker phrases
-// are a third fallback.
-func isSubAgentDispatch(metadataUserID, systemText, subAgentHint string) bool {
+// via the x-weave-subagent-type header.
+//
+// A system-prompt string-match fallback used to live here ("subagent_type"
+// / "sub-agent") but was removed: Claude Code's main-loop system prompt
+// includes the Agent tool description, which contains the literal
+// "subagent_type" parameter name. That false-positive misclassified every
+// main-loop turn as a sub-agent and, with ROUTER_HARD_PIN_EXPLORE=true,
+// hard-pinned them all to the cheap model. Per this file's invariant,
+// false negatives (returning MainLoop) are safe — the cluster scorer
+// runs normally — so we keep detection to the two authoritative signals.
+func isSubAgentDispatch(metadataUserID, subAgentHint string) bool {
 	if subAgentHint != "" {
 		return true
 	}
-	if strings.HasPrefix(metadataUserID, "subagent:") {
-		return true
-	}
-	lower := strings.ToLower(systemText)
-	return strings.Contains(lower, "subagent_type") || strings.Contains(lower, "sub-agent")
+	return strings.HasPrefix(metadataUserID, "subagent:")
 }
