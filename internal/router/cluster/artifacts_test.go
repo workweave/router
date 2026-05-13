@@ -244,3 +244,42 @@ func TestCheapestModel(t *testing.T) {
 		assert.Equal(t, "model-a", m)
 	})
 }
+
+func TestCheapestModelInSet(t *testing.T) {
+	meta := &ArtifactMetadata{
+		CostPer1KInputUSD: map[string]float64{
+			"model-a": 3.00,
+			"model-b": 0.50,
+			"model-c": 0.10,
+		},
+	}
+	registry := &ModelRegistry{
+		DeployedModels: []DeployedEntry{
+			{Model: "model-a", Provider: "anthropic", BenchColumn: "col-a"},
+			{Model: "model-b", Provider: "google", BenchColumn: "col-b"},
+			{Model: "model-c", Provider: "google", BenchColumn: "col-c"},
+		},
+	}
+	available := map[string]struct{}{"anthropic": {}, "google": {}}
+
+	t.Run("respects allowSet — cheapest within allow", func(t *testing.T) {
+		allow := map[string]struct{}{"model-a": {}, "model-b": {}}
+		p, m, ok := CheapestModelInSet(meta, registry, available, allow)
+		require.True(t, ok)
+		assert.Equal(t, "google", p)
+		assert.Equal(t, "model-b", m, "model-c is cheaper but excluded by allowSet")
+	})
+
+	t.Run("ok=false when allowSet has no available model", func(t *testing.T) {
+		allow := map[string]struct{}{"nope": {}}
+		_, _, ok := CheapestModelInSet(meta, registry, available, allow)
+		assert.False(t, ok)
+	})
+
+	t.Run("nil allowSet behaves like CheapestModel", func(t *testing.T) {
+		p, m, ok := CheapestModelInSet(meta, registry, available, nil)
+		require.True(t, ok)
+		assert.Equal(t, "google", p)
+		assert.Equal(t, "model-c", m)
+	})
+}

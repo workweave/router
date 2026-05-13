@@ -17,6 +17,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
+	"workweave/router/internal/router/capability"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
 	"workweave/router/internal/router/pricing"
@@ -65,6 +66,12 @@ type Service struct {
 	// this request — the orchestrator surfaces ErrClusterUnavailable rather
 	// than silently falling back.
 	hardPinResolver func(enabled map[string]struct{}) (provider, model string, ok bool)
+	// tierClampResolver enforces the requested-model tier ceiling: returns
+	// the cheapest deployed model whose tier ≤ ceiling and whose provider
+	// is in the request's enabled set. Nil disables the clamp. See
+	// WithTierClampResolver and turnloop.go's clampToCeiling for the call
+	// sites.
+	tierClampResolver func(enabled map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)
 	// telemetry is an optional repository for persisting per-request telemetry.
 	telemetry TelemetryRepository
 	// byokOnly disables deployment-level credential fallback. When true, a
@@ -405,6 +412,18 @@ func (s *Service) WithHardPinResolver(resolver func(enabled map[string]struct{})
 // substitution. See [Service.defaultBaselineModel] for rationale.
 func (s *Service) WithDefaultBaselineModel(model string) *Service {
 	s.defaultBaselineModel = model
+	return s
+}
+
+// WithTierClampResolver installs the resolver used by the tier-ceiling
+// guard. Given a request's enabled-providers set and a tier ceiling, it
+// returns the cheapest registry-deployed model whose tier is ≤ ceiling
+// and whose provider is enabled. ok=false means no in-ceiling model is
+// routable for this request — the orchestrator preserves the original
+// (unclamped) decision rather than failing the turn. Nil resolver
+// disables clamping (preserves pre-tier-ceiling behavior).
+func (s *Service) WithTierClampResolver(resolver func(enabled map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)) *Service {
+	s.tierClampResolver = resolver
 	return s
 }
 
@@ -977,7 +996,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		})
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", capability.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
 
@@ -1086,6 +1105,10 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 		EndedAt:           time.Now(),
 	}
 	key := res.SessionKey
+	role := res.PinRole
+	if role == "" {
+		role = sessionpin.DefaultRole
+	}
 
 	// Keep the in-proc LRU coherent with the DB writeback. Without this,
 	// loadPin's Tier-1 hit serves a stale pin with zero usage and the
@@ -1093,7 +1116,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 	// resetting under typical agentic turn cadence), which silently
 	// disables EV-based switching for all active sessions.
 	if s.pinCache != nil {
-		pinCacheKey := sessionPinCacheKey(key, sessionpin.DefaultRole)
+		pinCacheKey := sessionPinCacheKey(key, role)
 		if pin, ok := s.pinCache.Get(pinCacheKey); ok {
 			pin.LastInputTokens = usage.InputTokens
 			pin.LastCachedReadTokens = usage.CachedReadTokens
@@ -1108,7 +1131,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 	case s.usageWriteSem <- struct{}{}:
 		go func() {
 			defer func() { <-s.usageWriteSem }()
-			if err := s.pinStore.UpdateUsage(context.Background(), key, sessionpin.DefaultRole, usage); err != nil {
+			if err := s.pinStore.UpdateUsage(context.Background(), key, role, usage); err != nil {
 				observability.Get().Debug("session pin usage writeback failed", "err", err)
 			}
 		}()
@@ -1633,6 +1656,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", capability.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }

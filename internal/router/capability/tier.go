@@ -85,6 +85,31 @@ func TierFor(model string) Tier {
 	return tiers[model]
 }
 
+// IsAtOrBelow reports whether the given model's tier is known and at or
+// below the ceiling. Unknown-tier models return false so the tier-ceiling
+// guard fails closed — Validate already catches missing entries at boot,
+// so any TierUnknown at request time means the table is out of sync.
+func IsAtOrBelow(model string, ceiling Tier) bool {
+	t := TierFor(model)
+	if t == TierUnknown {
+		return false
+	}
+	return t <= ceiling
+}
+
+// AllowedAtOrBelow returns the set of known models whose tier is at or
+// below the ceiling. Used by the cluster bundle when picking a clamp
+// target that respects the requested-model ceiling.
+func AllowedAtOrBelow(ceiling Tier) map[string]struct{} {
+	out := make(map[string]struct{}, len(tiers))
+	for m, t := range tiers {
+		if t != TierUnknown && t <= ceiling {
+			out[m] = struct{}{}
+		}
+	}
+	return out
+}
+
 // Validate returns an error naming any deployed model missing from the
 // tier table. Called once at boot against the scorer's deployed set.
 func Validate(deployed []string) error {

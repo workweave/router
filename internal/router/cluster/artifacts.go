@@ -323,10 +323,27 @@ func loadRankings(raw []byte) (Rankings, error) {
 // registry entries whose provider is in available. Entries missing a
 // cost are skipped. Returns ok=false if nothing matches.
 func CheapestModel(meta *ArtifactMetadata, registry *ModelRegistry, available map[string]struct{}) (provider, model string, ok bool) {
+	return cheapestModelFiltered(meta, registry, available, nil)
+}
+
+// CheapestModelInSet is CheapestModel restricted to a caller-supplied
+// model allowlist. Used by the tier-ceiling clamp: callers pass the set
+// of models at or below the requested tier so the cheapest pick stays
+// inside the ceiling. A nil/empty allowSet behaves like CheapestModel.
+func CheapestModelInSet(meta *ArtifactMetadata, registry *ModelRegistry, available, allowSet map[string]struct{}) (provider, model string, ok bool) {
+	return cheapestModelFiltered(meta, registry, available, allowSet)
+}
+
+func cheapestModelFiltered(meta *ArtifactMetadata, registry *ModelRegistry, available, allowSet map[string]struct{}) (provider, model string, ok bool) {
 	var bestCost float64 = -1
 	for _, e := range registry.DeployedModels {
 		if _, inSet := available[e.Provider]; !inSet {
 			continue
+		}
+		if allowSet != nil {
+			if _, allowed := allowSet[e.Model]; !allowed {
+				continue
+			}
 		}
 		cost, hasCost := meta.CostPer1KInputUSD[e.Model]
 		if !hasCost {

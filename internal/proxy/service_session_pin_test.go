@@ -14,6 +14,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/capability"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/sessionpin"
 
@@ -553,4 +554,88 @@ func TestService_HardPin_OpenAI_SubAgentHeaderHintRoutesToHardPin(t *testing.T) 
 
 	assert.Equal(t, 0, fr.routeCalls, "x-weave-subagent-type must trigger Explore hard-pin")
 	assert.Equal(t, "gpt-4o-mini", rec.Header().Get("x-router-model"))
+}
+
+// haikuClampBody requests a Low-tier model (haiku); the scorer is
+// stubbed to return an Opus (High) pick, which violates the ceiling and
+// must be clamped down to a Low-tier alternative.
+const haikuClampBody = `{
+	"model":"claude-haiku-4-5",
+	"system":"sys",
+	"messages":[{"role":"user","content":"summarize this"}]
+}`
+
+// TestService_TierClamp_HaikuRequestedClampsHighScore covers the
+// haiku-tier leak that motivated this change: a background haiku call
+// whose scorer recommended an Opus/DeepSeek-pro/Gemini-pro pick must be
+// clamped to a Low-tier alternative.
+func TestService_TierClamp_HaikuRequestedClampsHighScore(t *testing.T) {
+	store := newFakePinStore()
+	// Scorer returns High-tier model: must be rewritten.
+	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
+
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_ map[string]struct{}, ceiling capability.Tier) (string, string, bool) {
+		require.Equal(t, capability.TierLow, ceiling, "haiku requested → Low ceiling")
+		return providers.ProviderAnthropic, "claude-haiku-4-5", true
+	})
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
+
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "decision must be clamped to in-ceiling model")
+}
+
+// TestService_TierClamp_OpusRequestedNoClamp confirms High-tier
+// requests (opus) leave any decision unchanged — there's no ceiling
+// to enforce above High.
+func TestService_TierClamp_OpusRequestedNoClamp(t *testing.T) {
+	store := newFakePinStore()
+	// Scorer returns a High model; opus ceiling allows it.
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
+
+	resolverCalls := 0
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+		resolverCalls++
+		return "", "", false
+	})
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"), "opus ceiling allows High picks unchanged")
+	assert.Equal(t, 0, resolverCalls, "resolver must not be called when decision is at or below ceiling")
+}
+
+// TestService_TierClamp_PinAboveCeilingIsClamped covers the original
+// leak directly: a session pin from a previous opus turn points at
+// deepseek-v4-pro (High); the next turn requests haiku (Low ceiling) —
+// the pin's stored model must be clamped on read, not blindly served.
+// (Pin keying by tier role prevents this in practice; this test guards
+// the defense-in-depth clamp on the pin-hit path in case roles collide.)
+func TestService_TierClamp_PinAboveCeilingIsClamped(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:      providers.ProviderAnthropic,
+		Model:         "claude-opus-4-7",
+		Reason:        "cluster:v0.37",
+		PinnedUntil:   time.Now().Add(30 * time.Minute),
+		FirstPinnedAt: time.Now().Add(-5 * time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
+
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+		return providers.ProviderAnthropic, "claude-haiku-4-5", true
+	})
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
+
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
 }

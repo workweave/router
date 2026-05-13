@@ -88,3 +88,59 @@ func TestValidate(t *testing.T) {
 		assert.NoError(t, capability.Validate(nil))
 	})
 }
+
+func TestIsAtOrBelow(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		model   string
+		ceiling capability.Tier
+		want    bool
+	}{
+		{"claude-haiku-4-5", capability.TierLow, true},
+		{"claude-haiku-4-5", capability.TierMid, true},
+		{"claude-haiku-4-5", capability.TierHigh, true},
+		{"claude-sonnet-4-5", capability.TierLow, false},
+		{"claude-sonnet-4-5", capability.TierMid, true},
+		{"claude-opus-4-7", capability.TierLow, false},
+		{"claude-opus-4-7", capability.TierMid, false},
+		{"claude-opus-4-7", capability.TierHigh, true},
+		{"deepseek/deepseek-v4-pro", capability.TierLow, false},
+		{"qwen/qwen3.5-flash-02-23", capability.TierLow, true},
+		// Unknown tier must fail-closed: a model absent from the table
+		// can't be proven safe under a ceiling, so reject it.
+		{"made-up-model", capability.TierHigh, false},
+		{"", capability.TierHigh, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model+"_vs_"+tc.ceiling.String(), func(t *testing.T) {
+			assert.Equal(t, tc.want, capability.IsAtOrBelow(tc.model, tc.ceiling))
+		})
+	}
+}
+
+func TestAllowedAtOrBelow(t *testing.T) {
+	t.Parallel()
+	low := capability.AllowedAtOrBelow(capability.TierLow)
+	for m := range low {
+		require.Equal(t, capability.TierLow, capability.TierFor(m), "AllowedAtOrBelow(Low) returned %q which is not TierLow", m)
+	}
+	assert.Contains(t, low, "claude-haiku-4-5")
+	assert.Contains(t, low, "qwen/qwen3.5-flash-02-23")
+	assert.NotContains(t, low, "claude-opus-4-7")
+	assert.NotContains(t, low, "claude-sonnet-4-5")
+
+	mid := capability.AllowedAtOrBelow(capability.TierMid)
+	assert.Contains(t, mid, "claude-haiku-4-5", "Mid ceiling must include Low models")
+	assert.Contains(t, mid, "claude-sonnet-4-5")
+	assert.NotContains(t, mid, "claude-opus-4-7")
+
+	high := capability.AllowedAtOrBelow(capability.TierHigh)
+	assert.Contains(t, high, "claude-haiku-4-5")
+	assert.Contains(t, high, "claude-sonnet-4-5")
+	assert.Contains(t, high, "claude-opus-4-7")
+
+	// TierUnknown ceiling: empty set (no model qualifies; the proxy
+	// disables clamping in this case via the IsAtOrBelow short-circuit).
+	unknown := capability.AllowedAtOrBelow(capability.TierUnknown)
+	assert.Empty(t, unknown)
+}
