@@ -579,4 +579,3 @@ func TestService_SetInstallationExcludedModels(t *testing.T) {
 		assert.Equal(t, []string{}, installRepo.excludedModelsByID["inst-3"])
 	})
 }
-
