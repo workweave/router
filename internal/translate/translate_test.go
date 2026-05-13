@@ -501,6 +501,34 @@ func TestAnthropicSSETranslator_StreamingToolUse(t *testing.T) {
 	assert.Contains(t, body, "event: message_stop")
 }
 
+// Load-bearing: Gemini 3.x requires the opaque thought_signature round-tripped
+// on the next turn's functionCall part. The Gemini→OpenAI translator smuggles
+// it as function.thought_signature on the tool_call chunk; AnthropicSSE must
+// surface it on the tool_use content_block_start so passthrough clients echo
+// it back on the next request.
+func TestAnthropicSSETranslator_StreamingToolUsePreservesThoughtSignature(t *testing.T) {
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "gemini-x", nil)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-3\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"index\":0,\"id\":\"call_x\",\"type\":\"function\",\"function\":{\"name\":\"bash\",\"arguments\":\"{}\",\"thought_signature\":\"OPAQUE_SIG\"}}]},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-3\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, event := range events {
+		_, err := translator.Write([]byte(event))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"type":"tool_use"`)
+	assert.Contains(t, body, `"thought_signature":"OPAQUE_SIG"`)
+}
+
 func TestAnthropicSSETranslator_NonStreamingResponse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil)
