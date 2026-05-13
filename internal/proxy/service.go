@@ -269,6 +269,19 @@ func embedOnlyUserMessageOverride(ctx context.Context) (bool, bool) {
 	return v, ok
 }
 
+// ResolveEmbedOnlyUserMessage reports the effective embed-only-user flag for
+// ctx, applying the per-request override (if set) on top of the service
+// default. Exposed so handlers outside this package (e.g. /v1/route) can use
+// the same resolution as ProxyMessages and stay in sync with customer-visible
+// routing behavior.
+func (s *Service) ResolveEmbedOnlyUserMessage(ctx context.Context) bool {
+	flag := s.embedOnlyUserMessage
+	if v, ok := embedOnlyUserMessageOverride(ctx); ok {
+		flag = v
+	}
+	return flag
+}
+
 func (s *Service) provider(name string) (providers.Client, error) {
 	p, ok := s.providers[name]
 	if !ok {
@@ -836,8 +849,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 	feats := env.RoutingFeatures(embedFlag)
 	promptText := feats.PromptText
+	embedInput := "concatenated_stream"
 	if embedFlag && feats.OnlyUserMessageText != "" {
 		promptText = feats.OnlyUserMessageText
+		embedInput = "only_user_message"
 	}
 
 	bypassEval := hasEvalOverrideHeader(r)
@@ -906,7 +921,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(24).
+		Attrs: otel.NewAttrBuilder(25).
 			String("request_id", requestID).
 			String("external_id", externalID).
 			String("router_user_id", auth.UserIDFrom(ctx)).
@@ -924,6 +939,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			String("routing.session_pin_tier", pinTier).
 			Int64("routing.session_pin_age_s", pinAgeSec).
 			String("routing.turn_type", string(tt)).
+			String("routing.embed_input", embedInput).
 			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 			IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
 			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
@@ -1067,6 +1083,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			DecisionReason:         decision.Reason,
 			EstimatedInputTokens:   int32(feats.Tokens),
 			StickyHit:              stickyHit,
+			EmbedInput:             embedInput,
 			InputTokens:            int32(in),
 			OutputTokens:           int32(out),
 			RequestedInputCostUSD:  float64(in) / 1_000_000 * reqPricing.InputUSDPer1M,
@@ -1088,6 +1105,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "estimated_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
