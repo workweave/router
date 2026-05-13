@@ -64,12 +64,12 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 			},
 		},
 		{
-			name: "no planner ran, fresh decision: first-turn fallback reason",
+			name: "no planner ran, fresh decision: top-scorer fallback reason",
 			res: turnLoopResult{
 				Decision: decision,
 			},
 			wantContains: []string{
-				"reason: first turn",
+				"reason: top scorer",
 			},
 			wantNotContain: []string{
 				"est. save",
@@ -132,7 +132,7 @@ func TestRoutingMarkerFor_OmitsProviderParensWhenProviderMissing(t *testing.T) {
 	})
 	assert.Contains(t, got, "✦ **Weave Router** → claude-haiku-4-5 ·")
 	assert.NotContains(t, got, "()")
-	assert.Contains(t, got, "reason: first turn")
+	assert.Contains(t, got, "reason: top scorer")
 }
 
 func TestHumanReasonFromPlanner_UnknownCodePassesThrough(t *testing.T) {

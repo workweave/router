@@ -223,7 +223,7 @@ func routingReasonShort(res turnLoopResult) string {
 	if res.StickyHit {
 		return "tool-result follow-up"
 	}
-	return "first turn"
+	return "top scorer"
 }
 
 // humanReasonFromPlanner maps planner.Reason* codes to marker prose. Unknown
@@ -237,7 +237,7 @@ func humanReasonFromPlanner(code string) string {
 	case planner.ReasonSameModel:
 		return "scorer matches the pin"
 	case planner.ReasonNoPin:
-		return "first turn"
+		return "top scorer"
 	case planner.ReasonNoPriorUsage:
 		return "no cache stats yet"
 	case planner.ReasonPinModelMissing:
