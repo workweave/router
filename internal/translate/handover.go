@@ -96,10 +96,7 @@ func (e *RequestEnvelope) rewriteAnthropicForHandover(summary string) int {
 
 	// elided counts original conversation messages no longer present;
 	// the synthesized summary is not part of the original conversation.
-	elided := len(all) - preserved
-	if elided < 0 {
-		elided = 0
-	}
+	elided := max(len(all)-preserved, 0)
 
 	newMessages := "[" + strings.Join(rebuilt, ",") + "]"
 	out, err := sjson.SetRawBytes(e.body, "messages", []byte(newMessages))
@@ -207,10 +204,7 @@ func (e *RequestEnvelope) rewriteOpenAIForHandover(summary string) int {
 
 	// elided counts original conversation messages no longer present;
 	// preserved systems and the (optional) latestUser are not counted.
-	elided := len(others) - preserved
-	if elided < 0 {
-		elided = 0
-	}
+	elided := max(len(others)-preserved, 0)
 
 	newMessages := "[" + strings.Join(rebuilt, ",") + "]"
 	out, err := sjson.SetRawBytes(e.body, "messages", []byte(newMessages))
@@ -310,10 +304,7 @@ func (e *RequestEnvelope) rewriteGeminiForHandover(summary string) int {
 		preserved = 1
 	}
 
-	elided := len(all) - preserved
-	if elided < 0 {
-		elided = 0
-	}
+	elided := max(len(all)-preserved, 0)
 
 	newContents := "[" + strings.Join(rebuilt, ",") + "]"
 	out, err := sjson.SetRawBytes(e.body, "contents", []byte(newContents))
