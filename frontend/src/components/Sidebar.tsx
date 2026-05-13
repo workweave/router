@@ -2,9 +2,8 @@
 
 import { Logo } from "./Logo";
 import { Button } from "@/components/molecules/Button";
-import { Popover } from "@/components/molecules/Popover";
 import { Tooltip } from "@/components/molecules/Tooltip";
-import { Appearance, Intent } from "@/components/types";
+import { Appearance } from "@/components/types";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { BarChart2, LogOut, Settings } from "lucide-react";
@@ -72,45 +71,37 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="relative z-10 flex w-full items-center p-2">
-        <Popover>
-          <Tooltip content="Menu" side="right" interactiveChild>
-            <Popover.Trigger>
-              <Button
-                appearance={Appearance.Hollow}
-                className="size-8 shrink-0 justify-center rounded-md border border-border-darker bg-muted p-0 text-muted-foreground hover:bg-border-darker hover:text-foreground"
-                title="Menu"
-              >
-                <Settings className="size-4" />
-              </Button>
-            </Popover.Trigger>
-          </Tooltip>
+      <div className="relative z-10 flex w-full items-center justify-between gap-2 p-2">
+        <Tooltip content="Settings" side="right" interactiveChild>
+          <Button
+            href="/settings"
+            appearance={Appearance.Hollow}
+            className={sidebarFooterButton}
+            title="Settings"
+          >
+            <Settings className="size-4" />
+          </Button>
+        </Tooltip>
 
-          <Popover.Content side="top" align="start" sideOffset={8} className="w-64 p-1">
-            <div className="flex flex-col">
-              <Button
-                href="/settings"
-                appearance={Appearance.Hollow}
-                className="h-7 w-full justify-start gap-2 px-2 text-xs"
-              >
-                <Settings className="size-4 shrink-0 text-muted-foreground" />
-                <span>Settings</span>
-              </Button>
-
-              <Button
-                appearance={Appearance.Hollow}
-                className="h-7 w-full justify-start gap-2 px-2 text-xs"
-                onClick={() => {
-                  void handleSignOut();
-                }}
-              >
-                <LogOut className="size-4 shrink-0 text-muted-foreground" />
-                <span>Sign out</span>
-              </Button>
-            </div>
-          </Popover.Content>
-        </Popover>
+        <Tooltip content="Sign out" side="left" interactiveChild>
+          <Button
+            appearance={Appearance.Hollow}
+            className={sidebarFooterButton}
+            title="Sign out"
+            onClick={() => {
+              void handleSignOut();
+            }}
+          >
+            <LogOut className="size-4" />
+          </Button>
+        </Tooltip>
       </div>
     </div>
   );
 }
+
+// Identical visual treatment for both footer buttons so the only difference
+// the user sees is the icon. Kept as a constant to guarantee the two stay in
+// lockstep when the design changes.
+const sidebarFooterButton =
+  "size-8 shrink-0 justify-center rounded-md border border-border-darker bg-muted p-0 text-muted-foreground hover:bg-border-darker hover:text-foreground";
