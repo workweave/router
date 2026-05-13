@@ -433,21 +433,51 @@ func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 		assert.Empty(t, fr.capturedReq.EnabledProviders, "BYOK-only: registered providers ineligible without creds")
 	})
 
-	t.Run("byok-on with client-supplied Bearer enables only that provider", func(t *testing.T) {
-		// Anthropic decision lets proxy complete; assertion targets EnabledProviders.
+	t.Run("byok-on Anthropic surface with x-api-key enables Anthropic only", func(t *testing.T) {
+		// On the Anthropic surface, a client x-api-key is the legitimate
+		// passthrough credential and enables Anthropic. It must NOT enable
+		// OpenRouter or any other OpenAI-compat upstream — those use a
+		// different inbound surface and reading the same header would be a
+		// cross-provider credential leak.
 		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
 		svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
 			WithByokOnly(true)
 
 		rec := httptest.NewRecorder()
 		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-		httpReq.Header.Set("Authorization", "Bearer sk-or-v1-customer-key")
+		httpReq.Header.Set("x-api-key", "sk-ant-customer-key")
 		_ = svc.ProxyMessages(context.Background(), body, rec, httpReq)
 
 		require.NotNil(t, fr.capturedReq)
-		assert.NotContains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic)
-		assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderOpenRouter,
-			"client-supplied Bearer enables the matching provider")
+		assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic,
+			"client-supplied x-api-key on the Anthropic surface enables Anthropic")
+		assert.NotContains(t, fr.capturedReq.EnabledProviders, providers.ProviderOpenRouter,
+			"client header on the Anthropic surface must not leak credentials into OpenAI-compat upstreams")
+	})
+
+	t.Run("byok-on Anthropic surface with inbound Bearer (e.g. Claude Code OAuth) enables nothing", func(t *testing.T) {
+		// Regression for the 2026-05-13 prod incident: Claude Code passes an
+		// Anthropic OAuth bearer (Authorization: Bearer sk-ant-oat-…) on every
+		// request. The old code treated that header as creds for every
+		// OpenAI-compat provider (OpenRouter/Fireworks/OpenAI/Google),
+		// enabling argmax to pick OpenRouter and 401'ing at dispatch when no
+		// OpenRouter key was attached. On the Anthropic surface a bearer is
+		// never legitimate client creds (Anthropic uses x-api-key), so the
+		// enabled set must remain empty.
+		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+		svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+			WithByokOnly(true)
+
+		rec := httptest.NewRecorder()
+		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		httpReq.Header.Set("Authorization", "Bearer sk-ant-oat-claude-code-token")
+		_ = svc.ProxyMessages(context.Background(), body, rec, httpReq)
+
+		require.NotNil(t, fr.capturedReq)
+		assert.NotContains(t, fr.capturedReq.EnabledProviders, providers.ProviderOpenRouter,
+			"inbound Bearer on the Anthropic surface must never enable OpenRouter")
+		assert.NotContains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic,
+			"a Bearer is not Anthropic auth — surface uses x-api-key")
 	})
 }
 

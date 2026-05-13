@@ -303,15 +303,41 @@ func main() {
 	// runs on every installation, including ones without their own BYOK.
 	// Anthropic-passthrough is excluded for the same reason: an inbound
 	// request that doesn't carry Anthropic client headers would 401.
-	hardPinAvailable := envKeyedProviders
-	if byokOnly {
-		hardPinAvailable = availableProviders
-	}
-	hardPinProvider, hardPinModel := resolveHardPinModel(hardPinAvailable, logger)
+	// In selfhosted mode the boot-time hard-pin is computed over providers
+	// with deployment-level env keys — those are the only ones a hard-pin
+	// can rely on across every installation. In managed/byokOnly mode there
+	// is no provider with deployment auth, so any boot-time hard-pin would
+	// 401 for installations that didn't BYOK that exact provider; we resolve
+	// hard-pin per-request from the cluster bundle below instead.
+	hardPinProvider, hardPinModel := resolveHardPinModel(envKeyedProviders, logger)
 	if hardPinExplore {
 		logger.Info("Explore sub-agent hard-pin enabled", "provider", hardPinProvider, "model", hardPinModel)
 	}
-	logger.Info("Hard-pin model resolved", "provider", hardPinProvider, "model", hardPinModel)
+	logger.Info("Hard-pin model resolved", "provider", hardPinProvider, "model", hardPinModel, "byok_only", byokOnly)
+
+	// Per-request hard-pin resolver for byokOnly deployments. Loads the
+	// default cluster bundle once and closes over its metadata/registry; the
+	// resolver is then called from the proxy with the request's enabled-
+	// providers set so compaction lands on the cheapest model the request
+	// can actually authenticate to. Selfhosted mode leaves the resolver nil
+	// — its boot-time hardPin{Provider,Model} is already correct.
+	var hardPinResolver func(map[string]struct{}) (string, string, bool)
+	if byokOnly {
+		reqVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
+		if version, vErr := cluster.ResolveVersion(reqVersion); vErr == nil {
+			if bundle, bErr := cluster.LoadBundle(version); bErr == nil {
+				meta, registry := bundle.Metadata, bundle.Registry
+				hardPinResolver = func(enabled map[string]struct{}) (string, string, bool) {
+					return cluster.CheapestModel(meta, registry, enabled)
+				}
+				logger.Info("Hard-pin resolver wired for byokOnly mode (per-request cheapest model from cluster bundle)", "version", version)
+			} else {
+				logger.Warn("Hard-pin resolver disabled: cluster bundle failed to load; byokOnly hard-pin will fall back to boot-time defaults", "err", bErr, "version", version)
+			}
+		} else {
+			logger.Warn("Hard-pin resolver disabled: could not resolve cluster version; byokOnly hard-pin will fall back to boot-time defaults", "err", vErr)
+		}
+	}
 
 	// Default-eligible set for proxy.Service: env-keyed providers + the
 	// Anthropic passthrough path. BYOK and client-supplied credentials add
@@ -359,6 +385,7 @@ func main() {
 	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithByokOnly(byokOnly).
 		WithDeploymentKeyedProviders(deploymentEligible).
+		WithHardPinResolver(hardPinResolver).
 		WithPlannerEnabled(plannerEnabled).
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
