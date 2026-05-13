@@ -365,11 +365,8 @@ func main() {
 		WithAvailableModels(availableModels)
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
-	// Tier-guard depends on a complete capability.TierFor table: any
-	// deployed model missing from it would silently bypass the upgrade
-	// check (TierUnknown disables the guard for that pair). Fail loud
-	// at boot when enabled so a newly-added model can't ship without a
-	// tier assignment.
+	// Fail loud if a deployed model is missing from the tier table;
+	// TierUnknown would silently disable the guard for that pair.
 	if plannerCfg.TierUpgradeEnabled && len(availableModels) > 0 {
 		deployed := make([]string, 0, len(availableModels))
 		for m := range availableModels {
@@ -676,8 +673,7 @@ func parseEnvFloat(key string, fallback float64) float64 {
 	return v
 }
 
-// boolDefault returns the "true"/"false" string a bool default maps to,
-// for use with config.GetOr on boolean env vars.
+// boolDefault renders a bool default for config.GetOr on bool envs.
 func boolDefault(b bool) string {
 	if b {
 		return "true"

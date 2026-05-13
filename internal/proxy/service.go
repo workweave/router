@@ -154,11 +154,9 @@ const DefaultPlannerThresholdUSD = 0.001
 // per-turn savings. Matches observed agentic-loop tail length.
 const DefaultPlannerExpectedRemainingTurns = 3
 
-// DefaultPlannerTierUpgradeEnabled turns on the capability-tier guard
-// by default. The guard overturns an EV "stay" when the fresh scorer
-// recommendation is in a strictly higher tier than the pin so a small
-// first turn cannot pin a Low-tier model for the rest of the session.
-// See internal/router/capability for the tier table.
+// DefaultPlannerTierUpgradeEnabled turns on the tier guard so a trivial
+// first turn can't pin a Low-tier model for the rest of the session.
+// See internal/router/capability.
 const DefaultPlannerTierUpgradeEnabled = true
 
 // session-pin feature flag is off. The planner runs by default with the

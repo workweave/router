@@ -36,9 +36,7 @@ var availableAll = map[string]struct{}{
 	modelGPT5:   {},
 }
 
-// tierUpgradeCfg mirrors defaultCfg with the tier guard turned on. Used
-// by the tier-upgrade tests so the EV-only cases stay independent of the
-// new knob.
+// tierUpgradeCfg mirrors defaultCfg with the tier guard on.
 var tierUpgradeCfg = planner.EVConfig{
 	ThresholdUSD:           0.001,
 	ExpectedRemainingTurns: 3,
@@ -250,10 +248,8 @@ func TestDecide(t *testing.T) {
 			wantEvictionCostUSD:    0.0625,
 		},
 		{
-			// Tier guard off: haiku -> opus would normally stay (huge net
-			// loss on EV). Same case as "ev_negative" above — kept here as
-			// a regression that the tier knob is the only thing that
-			// flips the outcome.
+			// Mirror of ev_negative; pinned here so the next case can show
+			// the tier knob is what flips the verdict.
 			name: "tier_upgrade_disabled: low -> high still stays",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelHaiku),
@@ -268,10 +264,8 @@ func TestDecide(t *testing.T) {
 			wantEvictionCostUSD:    0.675,
 		},
 		{
-			// Tier guard on: same haiku -> opus EV-loss case as above
-			// now flips because opus is strictly higher tier than haiku.
-			// EV math still runs and the USD fields are populated; only
-			// the verdict differs.
+			// Same EV-loss as above; guard on flips it because opus is
+			// strictly higher tier than haiku. USD fields still populated.
 			name: "tier_upgrade: low -> high flips stay into switch",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelHaiku),
@@ -286,15 +280,10 @@ func TestDecide(t *testing.T) {
 			wantEvictionCostUSD:    0.675,
 		},
 		{
-			// Tier guard on but pin and fresh are in the same tier
-			// (sonnet is Mid; haiku is Low — different tiers but this
-			// is a DOWNgrade, not an upgrade). Tier guard must not fire
-			// on downgrades; EV math governs (here EV is also negative
-			// → stay).
+			// Sonnet (Mid) -> haiku (Low) is a downgrade; guard must
+			// not fire, EV math governs.
 			name: "tier_upgrade: downgrade does not trigger guard",
 			in: planner.Inputs{
-				// per-token net = (3 * 0.1 * (3.00 - 0.80) - 0.9 * 0.80) / 1e6
-				//               = (0.66 - 0.72) / 1e6 = -0.06 / 1e6  → tiny net loss per turn.
 				Pin:                  pinWithUsage(modelSonnet),
 				Fresh:                router.Decision{Model: modelHaiku},
 				EstimatedInputTokens: 1000,

@@ -1,19 +1,8 @@
-// Package capability assigns a coarse "tier" to each deployed model so
-// the planner can overturn a cost-driven "stay" verdict when the scorer
-// recommends a strictly stronger model than the session pin.
-//
-// The tier ladder is intentionally short (Low / Mid / High) and
-// hand-maintained. We deliberately do NOT derive tiers from
-// pricing.OutputUSDPer1M: output price tracks vendor pricing strategy
-// more than capability (OSS models on OpenRouter are systematically
-// cheap for their strength), and pricing churn would silently move
-// models between tiers without any human review of whether the move
-// is correct. A small explicit table is easier to reason about and
-// keeps tier moves a deliberate decision.
-//
-// Adding a new deployed model means adding it here too. The boot-time
-// Validate call against the cluster scorer's deployed set ensures a
-// new model can never silently bypass the tier guard.
+// Package capability assigns a coarse Low/Mid/High tier to each
+// deployed model so the planner can overturn a cost-driven "stay" when
+// the scorer recommends a strictly stronger model. Hand-maintained on
+// purpose — deriving tiers from price would silently move models on
+// every pricing change.
 package capability
 
 import (
@@ -22,29 +11,21 @@ import (
 	"strings"
 )
 
-// Tier is the coarse capability bucket for a model. Higher is stronger.
-// Comparisons use the standard integer ordering: a > b means a is in a
-// strictly stronger bucket than b.
+// Tier is the coarse capability bucket. Higher is stronger; integer
+// ordering is load-bearing (planner compares freshTier > pinTier).
 type Tier int
 
 const (
-	// TierUnknown is the zero value, returned when a model is not in the
-	// tier table. Callers should treat it as "do not apply the tier
-	// guard" (fail-soft per request); Validate is what makes a missing
-	// entry fail loud at boot.
+	// TierUnknown is the zero value for models absent from the table.
+	// Per-request it disables the tier guard; Validate fails loud at
+	// boot so a missing entry can't silently bypass it.
 	TierUnknown Tier = iota
-	// TierLow is small / fast / cheap models suitable for greetings,
-	// short Q&A, and trivial code edits.
 	TierLow
-	// TierMid is capable generalists — coding, summarization, mid-depth
-	// reasoning, most agentic workloads.
 	TierMid
-	// TierHigh is frontier models — hard design questions, long-horizon
-	// reasoning, complex agentic loops.
 	TierHigh
 )
 
-// String returns a snake_case label suitable for logs and OTel attrs.
+// String returns a snake_case label for logs and OTel attrs.
 func (t Tier) String() string {
 	switch t {
 	case TierLow:
@@ -58,8 +39,8 @@ func (t Tier) String() string {
 	}
 }
 
-// tiers is the source of truth. Keys must match the deployed model
-// names in internal/router/cluster/artifacts/<version>/model_registry.json
+// tiers keys must match deployed model names in
+// internal/router/cluster/artifacts/<version>/model_registry.json
 // verbatim; Validate enforces this at boot.
 var tiers = map[string]Tier{
 	// --- Low ---
@@ -99,18 +80,13 @@ var tiers = map[string]Tier{
 	"deepseek/deepseek-v4-pro":  TierHigh,
 }
 
-// TierFor returns the capability tier for a model, or TierUnknown when
-// the model is not in the table. TierUnknown disables the planner's
-// tier guard for that decision (it never compares greater than any
-// known tier).
+// TierFor returns the model's tier, or TierUnknown if absent.
 func TierFor(model string) Tier {
 	return tiers[model]
 }
 
-// Validate returns a non-nil error listing any model in deployed that
-// is absent from the tier table. Intended to be called once at boot
-// against the cluster scorer's deployed-models set so a newly-added
-// model cannot silently bypass the tier guard.
+// Validate returns an error naming any deployed model missing from the
+// tier table. Called once at boot against the scorer's deployed set.
 func Validate(deployed []string) error {
 	var missing []string
 	for _, m := range deployed {
