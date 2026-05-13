@@ -268,7 +268,7 @@ func TestService_ProxyMessages_NoPinStoreRunsScorerEveryTurn(t *testing.T) {
 	)
 
 	ctx := context.WithValue(context.Background(), proxy.APIKeyIDContextKey{}, "key-1")
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		rec := httptest.NewRecorder()
 		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 		require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
