@@ -1,0 +1,74 @@
+version: "v0.37"
+parent: "v0.32"
+status: "candidate"
+promoted_date: "2026-05-13"
+embedder:
+  model: "jina-v2-base-code-int8"
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 16
+  top_p: 4
+  alpha: 0.55
+  shrinkage_k0: 10.0
+  score_normalization: "per_prompt_minmax_across_bench_columns"
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 8416
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  output_cost_ratio: 5.0
+  include_routerarena_labels: "/Users/steventohme/Desktop/workweave4/router-internal/eval/results/_unsorted/routerarena_plus_shortprompts.jsonl"
+  routerarena_only: true
+  exclude_prompts: null
+  n_excluded_prompts: 0
+deployed_providers:
+  - anthropic
+  - google
+  - openai
+  - openrouter
+deployed_models:
+  - claude-haiku-4-5
+  - claude-opus-4-7
+  - claude-sonnet-4-5
+  - deepseek/deepseek-v4-flash
+  - deepseek/deepseek-v4-pro
+  - gemini-2.5-flash
+  - gemini-3-flash-preview
+  - gemini-3.1-flash-lite-preview
+  - gemini-3.1-pro-preview
+  - gpt-4.1
+  - gpt-5.4-mini
+  - gpt-5.5
+  - mistralai/mistral-small-2603
+  - moonshotai/kimi-k2.5
+  - qwen/qwen3-235b-a22b-2507
+  - qwen/qwen3-30b-a3b-instruct-2507
+  - qwen/qwen3-coder
+  - qwen/qwen3-coder-next
+  - qwen/qwen3-next-80b-a3b-instruct
+  - qwen/qwen3.5-flash-02-23
+cost_per_1k_effective_usd:
+  claude-haiku-4-5: 0.0208
+  claude-opus-4-7: 0.39
+  claude-sonnet-4-5: 0.078
+  deepseek/deepseek-v4-flash: 0.0015399999999999997
+  deepseek/deepseek-v4-pro: 0.004784999999999999
+  gemini-2.5-flash: 0.006299999999999999
+  gemini-3-flash-preview: 0.0105
+  gemini-3.1-flash-lite-preview: 0.0021
+  gemini-3.1-pro-preview: 0.042
+  gpt-4.1: 0.042
+  gpt-5.4-mini: 0.0084
+  gpt-5.5: 0.20500000000000002
+  mistralai/mistral-small-2603: 0.0031499999999999996
+  moonshotai/kimi-k2.5: 0.01044
+  qwen/qwen3-235b-a22b-2507: 0.0023859999999999997
+  qwen/qwen3-30b-a3b-instruct-2507: 0.00173
+  qwen/qwen3-coder: 0.009219999999999999
+  qwen/qwen3-coder-next: 0.0015699999999999998
+  qwen/qwen3-next-80b-a3b-instruct: 0.00559
+  qwen/qwen3.5-flash-02-23: 0.001365
+changelog: "v0.37: K=16, alpha=0.55, output_cost_ratio=5.0 (NEW knob). Same data + alpha as v0.35 but cost-norm uses effective per-query cost = input + 5x*output. Goal: penalize models with high output cost (kimi-k2.5 $2/M out, gemini-pro $8/M out) that v0.35/v0.36 inadvertently favored."
