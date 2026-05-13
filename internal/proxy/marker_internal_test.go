@@ -146,14 +146,29 @@ func TestClosingMarkerFor_EmitsSavingsWhenRoutedIsCheaper(t *testing.T) {
 	fn := closingMarkerFor(
 		router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "openrouter"},
 		"claude-opus-4-7",
+		"claude-opus-4-7",
 	)
 	got := fn(translate.Usage{InputTokens: 15000, OutputTokens: 1000, CacheReadTokens: 5000})
 	assert.Equal(t, "✦ saved $0.2271 vs claude-opus-4-7 (15k in / 1k out)", got)
 }
 
+func TestClosingMarkerFor_LabelsConfiguredBaselineWhenSubstituted(t *testing.T) {
+	// requested_model has no pricing entry, baseline kicked in. Marker must
+	// flag the comparison as the configured baseline so users see it's an
+	// attribution, not a literal "vs the model you asked for".
+	fn := closingMarkerFor(
+		router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "openrouter"},
+		"weave-router",
+		"claude-opus-4-7",
+	)
+	got := fn(translate.Usage{InputTokens: 15000, OutputTokens: 1000, CacheReadTokens: 5000})
+	assert.Equal(t, "✦ saved $0.2271 vs claude-opus-4-7 (configured baseline) (15k in / 1k out)", got)
+}
+
 func TestClosingMarkerFor_FormatsTokenCounts(t *testing.T) {
 	fn := closingMarkerFor(
 		router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "openrouter"},
+		"claude-opus-4-7",
 		"claude-opus-4-7",
 	)
 	cases := []struct {
@@ -189,6 +204,7 @@ func TestClosingMarkerFor_NoEmissionWhenRoutedEqualsRequested(t *testing.T) {
 	fn := closingMarkerFor(
 		router.Decision{Model: "claude-opus-4-7", Provider: "anthropic"},
 		"claude-opus-4-7",
+		"claude-opus-4-7",
 	)
 	got := fn(translate.Usage{InputTokens: 10000, OutputTokens: 500})
 	assert.Empty(t, got)
@@ -199,6 +215,7 @@ func TestClosingMarkerFor_NoEmissionWhenSavingsAreNonPositive(t *testing.T) {
 	fn := closingMarkerFor(
 		router.Decision{Model: "claude-opus-4-7", Provider: "anthropic"},
 		"deepseek/deepseek-v4-pro",
+		"deepseek/deepseek-v4-pro",
 	)
 	got := fn(translate.Usage{InputTokens: 15000, OutputTokens: 1000, CacheReadTokens: 5000})
 	assert.Empty(t, got)
@@ -207,6 +224,7 @@ func TestClosingMarkerFor_NoEmissionWhenSavingsAreNonPositive(t *testing.T) {
 func TestClosingMarkerFor_NoEmissionWhenPricingMissing(t *testing.T) {
 	fn := closingMarkerFor(
 		router.Decision{Model: "imaginary-model-v0", Provider: "openrouter"},
+		"claude-opus-4-7",
 		"claude-opus-4-7",
 	)
 	got := fn(translate.Usage{InputTokens: 10000, OutputTokens: 1000})
@@ -217,6 +235,7 @@ func TestClosingMarkerFor_NoEmissionWhenSavingsBelowEpsilon(t *testing.T) {
 	// Savings below $0.0001 → skip so the marker doesn't flicker.
 	fn := closingMarkerFor(
 		router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "openrouter"},
+		"claude-opus-4-7",
 		"claude-opus-4-7",
 	)
 	got := fn(translate.Usage{InputTokens: 1, OutputTokens: 1})
