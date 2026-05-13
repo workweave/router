@@ -707,10 +707,24 @@ func sanitizeSchemaForGemini(v any) any {
 			if _, drop := geminiUnsupportedSchemaKeys[k]; drop {
 				continue
 			}
-			if k == "enum" && !enumAllStrings(child) {
+			if k == "enum" {
+				cleaned := filterStringEnum(child)
+				if len(cleaned) == 0 {
+					continue
+				}
+				out[k] = cleaned
 				continue
 			}
 			out[k] = sanitizeSchemaForGemini(child)
+		}
+		// Anthropic permits `{"type":"array"}` with no `items`; Gemini's strict
+		// function-calling validator rejects it ("missing field"). Inject a
+		// permissive default so the tool definition survives translation. Real
+		// items schemas from the source were preserved by the loop above.
+		if t, ok := out["type"].(string); ok && t == "array" {
+			if existing, has := out["items"]; !has || existing == nil {
+				out["items"] = map[string]any{"type": "string"}
+			}
 		}
 		return out
 	case []any:
@@ -724,19 +738,24 @@ func sanitizeSchemaForGemini(v any) any {
 	}
 }
 
-// enumAllStrings reports whether enum entries are all strings. Google requires
-// TYPE_STRING enums; numeric/mixed are rejected with a 400, so we drop them.
-func enumAllStrings(v any) bool {
+// filterStringEnum returns enum entries that are non-empty strings. Google's
+// function-calling surface requires TYPE_STRING enums and rejects empty-string
+// entries ("enum[i]: cannot be empty"); both filter out here. Returns an empty
+// slice when nothing survives so the caller can drop the field entirely.
+func filterStringEnum(v any) []any {
 	arr, ok := v.([]any)
 	if !ok {
-		return false
+		return nil
 	}
+	out := make([]any, 0, len(arr))
 	for _, item := range arr {
-		if _, ok := item.(string); !ok {
-			return false
+		s, ok := item.(string)
+		if !ok || s == "" {
+			continue
 		}
+		out = append(out, s)
 	}
-	return true
+	return out
 }
 
 func pullAnthropicToolChoiceToGemini(body []byte, out map[string]any) {
