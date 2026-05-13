@@ -329,7 +329,7 @@ function ProviderKeysPanel() {
   const [keys, setKeys] = useState<ExternalKey[]>([]);
   const [envKeyed, setEnvKeyed] = useState<Provider[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [provider, setProvider] = useState<Provider | null>(null);
+  const [pickedProvider, setPickedProvider] = useState<Provider | null>(null);
   const [keyValue, setKeyValue] = useState("");
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -362,16 +362,12 @@ function ProviderKeysPanel() {
       });
   }, []);
 
-  const dbKeyed = new Set(keys.map(k => k.provider));
-  const taken = new Set<string>([...dbKeyed, ...envKeyed]);
+  const taken = new Set<string>([...keys.map(k => k.provider), ...envKeyed]);
   const available: Provider[] = PROVIDERS.filter(p => !taken.has(p));
-
-  // Snap the picker to the first available provider when the current
-  // selection becomes unavailable (e.g. after a successful save).
-  useEffect(() => {
-    if (provider != null && !taken.has(provider)) return;
-    setProvider(available[0] ?? null);
-  }, [available.join(","), provider, taken]);
+  const provider: Provider | null =
+    pickedProvider != null && available.includes(pickedProvider)
+      ? pickedProvider
+      : (available[0] ?? null);
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -414,7 +410,7 @@ function ProviderKeysPanel() {
           <Card.Content>
             <form onSubmit={handleSave} className="space-y-3" autoComplete="off">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-[200px_1fr]">
-                <ProviderPicker value={provider} onChange={setProvider} options={available} />
+                <ProviderPicker value={provider} onChange={setPickedProvider} options={available} />
                 <Input
                   label="API key"
                   type="password"
