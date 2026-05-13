@@ -147,7 +147,39 @@ func routingMarkerFor(res turnLoopResult) string {
 	if reason := routingReasonShort(res); reason != "" {
 		parts = append(parts, "reason: "+reason)
 	}
+	if note := clampNote(res); note != "" {
+		parts = append(parts, note)
+	}
 	return strings.Join(parts, " · ") + "\n\n"
+}
+
+// clampNote surfaces the tier-ceiling clamp to the caller when it fired:
+// names the runner-up model the scorer actually preferred and points at
+// the action that would unlock it (request a higher-tier model). Empty
+// string when no clamp occurred.
+func clampNote(res turnLoopResult) string {
+	if !res.TierClamped || res.PreClampModel == "" {
+		return ""
+	}
+	upsell := upsellModelFor(res.RequestedTier)
+	if upsell == "" {
+		return fmt.Sprintf("second-choice pick (would have used %s — capped to your requested %s tier)", res.PreClampModel, res.RequestedTier.String())
+	}
+	return fmt.Sprintf("second-choice pick (would have used %s — capped to your requested %s tier; request %s to unlock higher-tier picks)", res.PreClampModel, res.RequestedTier.String(), upsell)
+}
+
+// upsellModelFor returns the conventional next-tier-up model name to
+// suggest in the clamp note. High tier has no upsell. Unknown returns
+// empty so the marker falls back to the no-upsell wording.
+func upsellModelFor(t capability.Tier) string {
+	switch t {
+	case capability.TierLow:
+		return "claude-sonnet-4-5"
+	case capability.TierMid:
+		return "claude-opus-4-7"
+	default:
+		return ""
+	}
 }
 
 // closingMarkerFor returns a callback that formats a "saved $X vs <baseline>"
