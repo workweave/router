@@ -222,6 +222,40 @@ func TestTurnLoop_SummarizerErrorFallsBackToTrim(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "switch must still happen on summarizer error")
 }
 
+// TestTurnLoop_HandoverSkippedWhenRequestHasClientCreds guards the
+// BYOK/tenant-boundary invariant: when a request supplies its own
+// provider credentials, the deployment-level summarizer must NOT be
+// invoked (it would route prior conversation context through the
+// platform account, violating the tenant boundary). The orchestrator
+// falls back to TrimLastN and the switch proceeds.
+func TestTurnLoop_HandoverSkippedWhenRequestHasClientCreds(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-opus-4-7",
+		Reason:          "cluster:v0.2",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 5000,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
+	sz := &fakeSummarizer{summary: "Should not be invoked."}
+	svc := newPinSvc(fr, store).WithSummarizer(sz)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	// Client-supplied Anthropic key on the request: BYOK-flavored, so the
+	// deployment summarizer must be skipped to preserve the tenant
+	// boundary.
+	httpReq.Header.Set("x-api-key", "sk-ant-customer-byok-key")
+	require.NoError(t, svc.ProxyMessages(ctx, largeBody(t), rec, httpReq))
+
+	assert.Equal(t, int32(0), sz.calls.Load(), "summarizer must NOT be invoked when the request carries BYOK creds")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "switch must still happen via TrimLastN fallback")
+}
+
 // TestTurnLoop_PlannerDisabledPreservesFirstDecisionWins exercises the
 // ROUTER_PLANNER_ENABLED kill switch: an existing pin wins outright and
 // the scorer is not consulted, mirroring the legacy stickiness.

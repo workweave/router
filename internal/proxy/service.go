@@ -188,12 +188,15 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 	}
 }
 
-// WithPlanner overrides the EV-policy configuration. Zero/negative
-// values fall back to the defaults so partial overrides remain safe.
+// WithPlanner overrides the EV-policy configuration. ThresholdUSD is
+// assigned verbatim — zero and negative values are legitimate operator-
+// chosen settings (the planner switches when expectedSavings -
+// evictionCost > threshold; the test plan documents -1 as the force-
+// switch knob). ExpectedRemainingTurns falls back to the default on
+// non-positive values because amortizing savings over <= 0 turns has no
+// meaningful interpretation.
 func (s *Service) WithPlanner(cfg planner.EVConfig) *Service {
-	if cfg.ThresholdUSD > 0 {
-		s.planner.ThresholdUSD = cfg.ThresholdUSD
-	}
+	s.planner.ThresholdUSD = cfg.ThresholdUSD
 	if cfg.ExpectedRemainingTurns > 0 {
 		s.planner.ExpectedRemainingTurns = cfg.ExpectedRemainingTurns
 	}
@@ -528,7 +531,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
 	routeStart := time.Now()
-	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", router.Request{
+	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, router.Request{
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
@@ -976,6 +979,35 @@ func externalKeysFromContext(ctx context.Context) []*auth.ExternalAPIKey {
 	return keys
 }
 
+// requestUsesNonDeploymentCreds reports whether the inbound request's
+// provider credentials are NOT the platform's deployment-level env keys.
+// The handover summarizer is wired at boot with deployment-level
+// credentials; calling it on a request whose upstream call would use
+// BYOK or client-supplied creds would route prior conversation context
+// (preserved by the summarizer's handover instruction) through the
+// platform account, violating tenant data boundaries. The orchestrator
+// uses this to skip the summarizer and fall through to TrimLastN.
+func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers http.Header) bool {
+	if s.byokOnly {
+		return true
+	}
+	if len(externalKeysFromContext(ctx)) > 0 {
+		return true
+	}
+	for _, p := range []string{
+		providers.ProviderAnthropic,
+		providers.ProviderOpenAI,
+		providers.ProviderGoogle,
+		providers.ProviderOpenRouter,
+		providers.ProviderFireworks,
+	} {
+		if ExtractClientCredentials(p, headers) != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // enabledProvidersForRequest returns providers whose credentials are
 // resolvable for this request (boot-time env key, BYOK, or client-supplied
 // header). The cluster scorer intersects this set with its boot-time
@@ -1148,7 +1180,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
 	routeStart := time.Now()
-	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, router.Request{
+	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,

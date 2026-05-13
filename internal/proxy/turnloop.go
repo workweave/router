@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"workweave/router/internal/observability"
@@ -81,6 +82,7 @@ func (s *Service) runTurnLoop(
 	apiKeyID string,
 	installationID uuid.UUID,
 	subAgentHint string,
+	reqHeaders http.Header,
 	req router.Request,
 ) (turnLoopResult, error) {
 	log := observability.Get()
@@ -192,23 +194,37 @@ func (s *Service) runTurnLoop(
 	// existing warm cache, attempt bounded-cost handover: synchronously
 	// summarize prior context with the cheap-model summarizer; on error
 	// fall back to TrimLastN so the switch turn still succeeds.
+	//
+	// Privacy guard: the summarizer is wired at boot with deployment-level
+	// provider credentials. Calling it on a request whose upstream call
+	// would otherwise use BYOK or client-supplied credentials would route
+	// prior conversation context (carried verbatim into the summarizer
+	// prompt) through the platform account, violating tenant data
+	// boundaries. Detect that case and skip straight to TrimLastN.
 	if pinFound && s.summarizer != nil {
-		start := time.Now()
-		summary, sumErr := s.summarizer.Summarize(ctx, env)
-		res.Handover.Invoked = true
-		res.Handover.LatencyMS = time.Since(start).Milliseconds()
-		switch {
-		case sumErr != nil:
+		if s.requestUsesNonDeploymentCreds(ctx, reqHeaders) {
 			elided := handover.TrimLastN(env, 3)
+			res.Handover.Invoked = true
 			res.Handover.FallbackToTrim = true
-			log.Warn("Handover summarizer failed; trimmed envelope instead", "err", sumErr, "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
-		case summary == "":
-			elided := handover.TrimLastN(env, 3)
-			res.Handover.FallbackToTrim = true
-			log.Warn("Handover summarizer returned empty summary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
-		default:
-			handover.RewriteEnvelope(env, summary)
-			res.Handover.SummaryTokens = estimateSummaryTokens(summary)
+			log.Info("Handover summarizer skipped to preserve BYOK tenant boundary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
+		} else {
+			start := time.Now()
+			summary, sumErr := s.summarizer.Summarize(ctx, env)
+			res.Handover.Invoked = true
+			res.Handover.LatencyMS = time.Since(start).Milliseconds()
+			switch {
+			case sumErr != nil:
+				elided := handover.TrimLastN(env, 3)
+				res.Handover.FallbackToTrim = true
+				log.Warn("Handover summarizer failed; trimmed envelope instead", "err", sumErr, "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
+			case summary == "":
+				elided := handover.TrimLastN(env, 3)
+				res.Handover.FallbackToTrim = true
+				log.Warn("Handover summarizer returned empty summary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
+			default:
+				handover.RewriteEnvelope(env, summary)
+				res.Handover.SummaryTokens = estimateSummaryTokens(summary)
+			}
 		}
 	}
 
