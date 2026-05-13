@@ -3,7 +3,9 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router"
@@ -25,11 +27,36 @@ func VersionFromContext(ctx context.Context) string {
 	return v
 }
 
+// alphaSuffixPattern captures the trailing -a<NN> form used to mark
+// alpha-blend variants of the same training stem (e.g. v0.38-a05 → stem
+// "v0.38", alpha 5). Two-digit zero-padded so lexicographic listing matches
+// numeric order.
+var alphaSuffixPattern = regexp.MustCompile(`^(.*)-a(\d{2})$`)
+
+// parseAlphaSuffix returns (stem, alphaValue, true) when name has a valid
+// -a<NN> suffix with NN in 0..10. Anything else returns ok=false.
+func parseAlphaSuffix(name string) (stem string, alpha int, ok bool) {
+	matches := alphaSuffixPattern.FindStringSubmatch(name)
+	if matches == nil {
+		return "", 0, false
+	}
+	alpha, err := strconv.Atoi(matches[2])
+	if err != nil || alpha < 0 || alpha > 10 {
+		return "", 0, false
+	}
+	return matches[1], alpha, true
+}
+
 // Multiversion holds one Scorer per artifact version and dispatches
-// per-request based on a context override.
+// per-request based on a context override or an installation's routing alpha.
 type Multiversion struct {
 	Default  string
 	Versions map[string]*Scorer
+	// alphaToVersion maps an integer alpha (0..10) to the bundle name that
+	// corresponds to it within the default version's stem. Empty when the
+	// default version is a legacy bundle without an -a<NN> suffix, in which
+	// case routing-alpha overrides degrade gracefully to the default scorer.
+	alphaToVersion map[int]string
 }
 
 // NewMultiversion requires defaultVersion to be a key in versions.
@@ -45,9 +72,20 @@ func NewMultiversion(defaultVersion string, versions map[string]*Scorer) (*Multi
 		sort.Strings(built)
 		return nil, fmt.Errorf("cluster multiversion: default %q not in built versions %v", defaultVersion, built)
 	}
+	alphaToVersion := map[int]string{}
+	if stem, _, ok := parseAlphaSuffix(defaultVersion); ok {
+		for name := range versions {
+			candidateStem, alpha, ok := parseAlphaSuffix(name)
+			if !ok || candidateStem != stem {
+				continue
+			}
+			alphaToVersion[alpha] = name
+		}
+	}
 	return &Multiversion{
-		Default:  defaultVersion,
-		Versions: versions,
+		Default:        defaultVersion,
+		Versions:       versions,
+		alphaToVersion: alphaToVersion,
 	}, nil
 }
 
@@ -72,11 +110,15 @@ func (m *Multiversion) DefaultDeployedModels() []DeployedEntry {
 	return s.DeployedModels()
 }
 
-// Route dispatches to the per-request version override if built, otherwise Default.
+// Route dispatches based on (in priority order): the per-request version
+// header override; the per-installation routing alpha (when alpha bundles for
+// the default's stem are built); otherwise the default version. Missing
+// overrides degrade silently to the default so a misconfigured installation
+// never errors a request — the cluster scorer's "fail loud" sentinels are
+// reserved for unavailability, not for routing-preference fallbacks.
 func (m *Multiversion) Route(ctx context.Context, req router.Request) (router.Decision, error) {
-	requested := VersionFromContext(ctx)
 	chosen := m.Default
-	if requested != "" {
+	if requested := VersionFromContext(ctx); requested != "" {
 		if _, ok := m.Versions[requested]; ok {
 			chosen = requested
 		} else {
@@ -85,6 +127,19 @@ func (m *Multiversion) Route(ctx context.Context, req router.Request) (router.De
 				"requested_version", requested,
 				"default_version", m.Default,
 				"built_versions", m.Built(),
+			)
+		}
+	} else if req.AlphaSet {
+		if alphaVersion, ok := m.alphaToVersion[req.Alpha]; ok {
+			chosen = alphaVersion
+		} else {
+			// Bundle for this alpha isn't built (legacy default, or alpha
+			// outside the built sweep). Log Debug rather than Warn so the
+			// expected legacy case doesn't flood production logs.
+			observability.Get().Debug(
+				"Cluster scorer: routing alpha bundle not built; serving default",
+				"alpha", req.Alpha,
+				"default_version", m.Default,
 			)
 		}
 	}

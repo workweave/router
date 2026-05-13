@@ -96,6 +96,8 @@ func (f *fakeExternalAPIKeyRepo) MarkUsed(ctx context.Context, id string) error 
 type fakeInstallationRepository struct {
 	excludedModelsByID         map[string][]string
 	excludedModelsExternalByID map[string]string
+	routingAlphaByID           map[string]int
+	routingAlphaExternalByID   map[string]string
 }
 
 func (fakeInstallationRepository) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
@@ -119,6 +121,17 @@ func (f *fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, e
 	}
 	f.excludedModelsByID[id] = append([]string{}, models...)
 	f.excludedModelsExternalByID[id] = externalID
+	return nil
+}
+func (f *fakeInstallationRepository) UpdateRoutingAlpha(ctx context.Context, externalID, id string, alpha int) error {
+	if f.routingAlphaByID == nil {
+		f.routingAlphaByID = map[string]int{}
+	}
+	if f.routingAlphaExternalByID == nil {
+		f.routingAlphaExternalByID = map[string]string{}
+	}
+	f.routingAlphaByID[id] = alpha
+	f.routingAlphaExternalByID[id] = externalID
 	return nil
 }
 
@@ -584,5 +597,36 @@ func TestService_SetInstallationExcludedModels(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{}, out)
 		assert.Equal(t, []string{}, installRepo.excludedModelsByID["inst-3"])
+	})
+}
+
+func TestService_SetInstallationRoutingAlpha(t *testing.T) {
+	installRepo := &fakeInstallationRepository{}
+	svc := auth.NewService(installRepo, &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}, nil, nil, auth.NoOpAPIKeyCache{}, nil, frozenClock())
+
+	t.Run("persists in range alpha scoped by external_id", func(t *testing.T) {
+		require.NoError(t, svc.SetInstallationRoutingAlpha(context.Background(), "ext-1", "inst-1", 7))
+		assert.Equal(t, 7, installRepo.routingAlphaByID["inst-1"])
+		assert.Equal(t, "ext-1", installRepo.routingAlphaExternalByID["inst-1"],
+			"external_id must be propagated for cross-tenant scoping")
+	})
+
+	t.Run("accepts boundary values", func(t *testing.T) {
+		require.NoError(t, svc.SetInstallationRoutingAlpha(context.Background(), "ext-1", "inst-1", auth.MinRoutingAlpha))
+		assert.Equal(t, auth.MinRoutingAlpha, installRepo.routingAlphaByID["inst-1"])
+		require.NoError(t, svc.SetInstallationRoutingAlpha(context.Background(), "ext-1", "inst-1", auth.MaxRoutingAlpha))
+		assert.Equal(t, auth.MaxRoutingAlpha, installRepo.routingAlphaByID["inst-1"])
+	})
+
+	t.Run("rejects below minimum with ErrAlphaOutOfRange", func(t *testing.T) {
+		err := svc.SetInstallationRoutingAlpha(context.Background(), "ext-1", "inst-1", -1)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, auth.ErrAlphaOutOfRange))
+	})
+
+	t.Run("rejects above maximum with ErrAlphaOutOfRange", func(t *testing.T) {
+		err := svc.SetInstallationRoutingAlpha(context.Background(), "ext-1", "inst-1", auth.MaxRoutingAlpha+1)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, auth.ErrAlphaOutOfRange))
 	})
 }

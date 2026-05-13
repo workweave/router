@@ -87,6 +87,8 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 			mgmt.GET("/excluded-models", admin.GetExcludedModelsHandler(authSvc, deployedModels, proxySvc))
 			mgmt.PUT("/excluded-models", admin.UpdateExcludedModelsHandler(authSvc, deployedModels, proxySvc))
 		}
+		mgmt.GET("/routing-alpha", admin.GetRoutingAlphaHandler(authSvc))
+		mgmt.PUT("/routing-alpha", admin.UpdateRoutingAlphaHandler(authSvc))
 	}
 
 	messagesGroup := engine.Group("",

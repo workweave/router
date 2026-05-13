@@ -113,6 +113,12 @@ type CredentialsContextKey struct{}
 // proxy can build the request-time filter without re-reading the DB.
 type InstallationExcludedModelsContextKey struct{}
 
+// InstallationRoutingAlphaContextKey is the request-context key for the
+// authed installation's routing alpha (int 0..10). Stashed by WithAuth so
+// the cluster Multiversion router can map it to the matching pre-baked
+// bundle without re-reading the DB on every request.
+type InstallationRoutingAlphaContextKey struct{}
+
 // installationExcludedModelsFromContext returns the per-installation exclusion
 // list stashed on ctx by the auth middleware, or nil when none is present.
 
@@ -248,6 +254,23 @@ func installationExcludedModelsFromContext(ctx context.Context) []string {
 	}
 	out, _ := v.([]string)
 	return out
+}
+
+// installationRoutingAlphaFromContext returns the per-installation routing
+// alpha stashed on ctx by WithAuth. ok is false when no value is present
+// (unauthenticated test paths, or callers that bypass WithAuth) so the
+// caller can leave router.Request.AlphaSet at false and let the scorer use
+// its default bundle.
+func installationRoutingAlphaFromContext(ctx context.Context) (int, bool) {
+	v := ctx.Value(InstallationRoutingAlphaContextKey{})
+	if v == nil {
+		return 0, false
+	}
+	alpha, ok := v.(int)
+	if !ok {
+		return 0, false
+	}
+	return alpha, true
 }
 
 // excludedModelsForRequest returns the model exclusion set to apply for this
@@ -690,6 +713,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 	bypassEval := hasEvalOverrideHeader(r)
+	installationAlpha, installationAlphaSet := installationRoutingAlphaFromContext(ctx)
 
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
@@ -701,6 +725,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
+		Alpha:                installationAlpha,
+		AlphaSet:             installationAlphaSet,
 	})
 	if routeErr != nil {
 		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "estimated_input_tokens", feats.Tokens)
@@ -1342,6 +1368,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	bypassEval := hasEvalOverrideHeader(r)
+	installationAlpha, installationAlphaSet := installationRoutingAlphaFromContext(ctx)
 
 	// OpenAI signals sub-agent identity via x-weave-subagent-type (no metadata.user_id).
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
@@ -1354,6 +1381,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
+		Alpha:                installationAlpha,
+		AlphaSet:             installationAlphaSet,
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {

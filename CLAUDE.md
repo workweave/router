@@ -509,10 +509,15 @@ the rules-for-AI subset.
 
 **What to NOT do:**
 
-- **Don't add per-request cost lookup or a runtime α knob.** α is
-  baked at training time; changing it requires retraining. Per-request
-  override (`x-weave-routing-alpha`) is P1, not P0 — wait for a
-  customer to ask before shipping it.
+- **Don't add per-request cost lookup.** Pricing is baked into rankings
+  at training time and not consulted on the hot path.
+- **α is per-installation, not per-request.** Each installation row
+  carries a `routing_alpha` smallint (0..10, where 5 = α=0.5). The
+  cluster Multiversion router maps that value to a pre-baked
+  `v<stem>-a<NN>` artifact bundle, so α tuning is a bundle-selection
+  problem, not a runtime blend. Per-request override
+  (`x-weave-routing-alpha`) remains P1; ship it only when a customer
+  asks. Retraining the α sweep is one command (`scripts/train_alpha_sweep.sh`).
 - **Don't loosen the `MaxPromptChars = 1024` cap** without re-running
   the latency test. BERT inference is O(n²) attention; the cap is
   load-bearing.

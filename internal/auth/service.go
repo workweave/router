@@ -17,6 +17,18 @@ import (
 // requested model ID is not in the allowed set the caller passed in.
 var ErrUnknownModel = errors.New("auth: unknown model id")
 
+// MinRoutingAlpha and MaxRoutingAlpha bound the per-installation alpha knob.
+// Stored as an integer 0..10 representing α=0.0..1.0 in 0.1 steps so the
+// cluster Multiversion router can do exact-equality bundle lookups.
+const (
+	MinRoutingAlpha = 0
+	MaxRoutingAlpha = 10
+)
+
+// ErrAlphaOutOfRange is returned by SetInstallationRoutingAlpha when alpha is
+// outside [MinRoutingAlpha, MaxRoutingAlpha].
+var ErrAlphaOutOfRange = errors.New("auth: routing alpha out of range")
+
 type Clock func() time.Time
 
 // Service authenticates incoming bearer tokens. Identity only; routing/dispatch lives in proxy.Service.
@@ -194,6 +206,22 @@ func (s *Service) SetInstallationExcludedModels(ctx context.Context, externalID,
 		return nil, err
 	}
 	return out, nil
+}
+
+// SetInstallationRoutingAlpha replaces the per-installation routing alpha
+// (0..10), scoped to externalID. Returns ErrAlphaOutOfRange when the input
+// falls outside the bounds — the DB CHECK constraint would catch this too,
+// but a clean error at the service boundary keeps the HTTP layer's 400 path
+// uncoupled from SQLSTATE inspection.
+//
+// New alpha is visible to the request path within the APIKey cache TTL
+// (default 5 min); explicit invalidation is intentionally not wired so the
+// in-process cache stays write-through-by-TTL like excluded models.
+func (s *Service) SetInstallationRoutingAlpha(ctx context.Context, externalID, installationID string, alpha int) error {
+	if alpha < MinRoutingAlpha || alpha > MaxRoutingAlpha {
+		return fmt.Errorf("%w: %d (want %d..%d)", ErrAlphaOutOfRange, alpha, MinRoutingAlpha, MaxRoutingAlpha)
+	}
+	return s.installations.UpdateRoutingAlpha(ctx, externalID, installationID, alpha)
 }
 
 // VerifyAPIKey authenticates a raw bearer token.

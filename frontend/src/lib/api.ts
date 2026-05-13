@@ -124,6 +124,12 @@ export interface ExcludedModelsResponse {
   env_override_active: boolean;
 }
 
+export interface RoutingAlphaResponse {
+  alpha: number;
+  min: number;
+  max: number;
+}
+
 // --- API calls ---
 
 export const api = {
@@ -187,6 +193,14 @@ export const api = {
       request<ExcludedModelsResponse>("/excluded-models", {
         method: "PUT",
         body: JSON.stringify({ excluded }),
+      }),
+  },
+  routingAlpha: {
+    get: () => request<RoutingAlphaResponse>("/routing-alpha"),
+    update: (alpha: number) =>
+      request<RoutingAlphaResponse>("/routing-alpha", {
+        method: "PUT",
+        body: JSON.stringify({ alpha }),
       }),
   },
 };

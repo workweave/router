@@ -85,6 +85,7 @@ func withAPIKey(svc *auth.Service) gin.HandlerFunc {
 			if len(installation.ExcludedModels) > 0 {
 				ctx = context.WithValue(ctx, proxy.InstallationExcludedModelsContextKey{}, installation.ExcludedModels)
 			}
+			ctx = context.WithValue(ctx, proxy.InstallationRoutingAlphaContextKey{}, installation.RoutingAlpha)
 		}
 		if externalKeys != nil {
 			ctx = context.WithValue(ctx, proxy.ExternalAPIKeysContextKey{}, externalKeys)
