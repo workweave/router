@@ -465,14 +465,17 @@ the rules-for-AI subset.
   e.g. `v0.2`) names the version the runtime serves by default; the
   `ROUTER_CLUSTER_VERSION` env var overrides it. Promotion is a
   one-line edit to `latest` plus a redeploy.
-- The Go runtime builds **one Scorer per committed bundle** at boot
-  (`cluster.NewMultiversion` in `cmd/router/main.go`); customer traffic
-  hits the default version; any caller can pin per-request to a sibling
-  version with `x-weave-cluster-version: v0.X` via
+- The Go runtime builds **only the served default version** by default
+  (`cmd/router/main.go`'s `buildClusterScorer`). Setting
+  `ROUTER_CLUSTER_BUILD_ALL_VERSIONS=true` switches to building **one
+  Scorer per committed bundle** so callers can pin per-request to a
+  sibling version with `x-weave-cluster-version: v0.X` via
   `middleware.WithClusterVersionOverride`. This is the
-  "compare-against-each-other" mechanism — a single staging deployment
-  carries every committed bundle and the eval harness flips between
-  them per-request.
+  "compare-against-each-other" mechanism — staging/eval deployments set
+  the flag so a single deploy carries every committed bundle and the
+  eval harness flips between them per-request. Prod leaves the flag
+  off: only the default bundle is loaded into memory and the header
+  override is a no-op.
 - **Centroids/rankings are write-once.** `train_cluster_router.py`
   always writes to `artifacts/v<X.Y>/` and never overwrites a previous
   version (auto-bumps from `latest` when `--version` is omitted). Pass

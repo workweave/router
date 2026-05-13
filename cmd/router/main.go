@@ -486,9 +486,21 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 		return nil, fmt.Errorf("resolve cluster version %q: %w", requestedVersion, err)
 	}
 
-	versions, err := cluster.ListVersions()
-	if err != nil {
-		return nil, fmt.Errorf("list cluster versions: %w", err)
+	// Default to building only the served version. Staging/eval deployments
+	// opt in to building every committed bundle by setting
+	// ROUTER_CLUSTER_BUILD_ALL_VERSIONS=true; that powers the eval harness's
+	// per-request x-weave-cluster-version header A/B. Prod doesn't need the
+	// other bundles in memory and exposing them via header override is a
+	// foot-gun.
+	buildAll := strings.EqualFold(config.GetOr("ROUTER_CLUSTER_BUILD_ALL_VERSIONS", "false"), "true")
+	var versions []string
+	if buildAll {
+		versions, err = cluster.ListVersions()
+		if err != nil {
+			return nil, fmt.Errorf("list cluster versions: %w", err)
+		}
+	} else {
+		versions = []string{defaultVersion}
 	}
 
 	embedder, err := cluster.NewEmbedder()
@@ -554,6 +566,7 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 		"default_version", defaultVersion,
 		"built_versions", multi.Built(),
 		"requested_version", requestedVersion,
+		"build_all_versions", buildAll,
 	)
 
 	// Warmup: burn the lazy ONNX graph-optimization cost at boot.
