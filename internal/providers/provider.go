@@ -20,6 +20,24 @@ const (
 	ProviderFireworks  = "fireworks"
 )
 
+// APIKeyEnvVars maps a canonical provider name to the env var that supplies
+// the deployment-level upstream API key. Single source of truth: the boot
+// wiring in cmd/router/main.go and the /admin/v1/config handler both read
+// it so the dashboard's env-keyed view can't drift from the actual wiring.
+var APIKeyEnvVars = map[string]string{
+	ProviderAnthropic:  "ANTHROPIC_API_KEY",
+	ProviderOpenAI:     "OPENAI_API_KEY",
+	ProviderGoogle:     "GOOGLE_API_KEY",
+	ProviderOpenRouter: "OPENROUTER_API_KEY",
+	ProviderFireworks:  "FIREWORKS_API_KEY",
+}
+
+// APIKeyEnvVar returns the env-var name for the given provider, or empty
+// when the provider is unknown.
+func APIKeyEnvVar(provider string) string {
+	return APIKeyEnvVars[provider]
+}
+
 // HopByHopHeaders are stripped from upstream responses per RFC 7230.
 var HopByHopHeaders = map[string]struct{}{
 	"Connection":          {},

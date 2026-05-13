@@ -3,6 +3,9 @@ package server
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"workweave/router/internal/api/admin"
@@ -54,8 +57,8 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	adminAuthed.GET("/validate", admin.ValidateHandler)
 
 	if mode == DeploymentModeSelfHosted {
-		engine.GET("/", func(c *gin.Context) { c.Redirect(http.StatusFound, "/ui/") })
-		engine.Static("/ui", "./assets/ui")
+		engine.GET("/", func(c *gin.Context) { c.Redirect(http.StatusFound, "/ui") })
+		registerUIStatic(engine, "./assets/ui")
 
 		// Public — mounting inside WithAuth would be a chicken-and-egg
 		// deadlock for users who don't yet have a cookie.
@@ -121,4 +124,70 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithClusterVersionOverride(),
 	)
 	routeGroup.POST("/v1/route", anthropicapi.RouteHandler(proxySvc))
+}
+
+// registerUIStatic mounts the exported Next.js dashboard at /ui with
+// clean-URL semantics (no trailing slash, no .html extension visible).
+//
+// Next is configured with trailingSlash:false, so its static export writes
+// files as `settings.html` rather than `settings/index.html`. We can't use
+// gin.Static / http.FileServer directly: FileServer would either 404 on
+// `/ui/settings` or redirect `/ui/settings` → `/ui/settings/` (when
+// `settings/index.html` exists), neither of which is what we want here.
+//
+// Resolution order for a request to `/ui/<path>`:
+//  1. If <path> ends with `/`, redirect to the slashless form (308).
+//  2. If <path> is empty or `index`, serve `index.html`.
+//  3. If `<path>` exists as a regular file under assets/ui, serve it.
+//  4. If `<path>.html` exists, serve that.
+//  5. Otherwise 404.
+//
+// All resolved paths are clamped under `root` via filepath.Clean to block
+// `..` traversal regardless of what gin's wildcard captures.
+func registerUIStatic(engine *gin.Engine, root string) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		absRoot = root
+	}
+	handler := func(c *gin.Context) {
+		raw := c.Param("filepath")
+		raw = strings.TrimPrefix(raw, "/")
+
+		// Strip trailing slash so bookmarked /ui/settings/ collapses to
+		// /ui/settings. The matched param does not include the /ui prefix.
+		if strings.HasSuffix(raw, "/") && raw != "" {
+			target := "/ui/" + strings.TrimSuffix(raw, "/")
+			c.Redirect(http.StatusPermanentRedirect, target)
+			return
+		}
+
+		if raw == "" || raw == "index" {
+			http.ServeFile(c.Writer, c.Request, filepath.Join(absRoot, "index.html"))
+			return
+		}
+
+		cleaned := filepath.Clean("/" + raw)
+		fullPath := filepath.Join(absRoot, cleaned)
+		// Reject any path that escaped the root after cleaning.
+		if !strings.HasPrefix(fullPath, absRoot+string(filepath.Separator)) && fullPath != absRoot {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+
+		if info, statErr := os.Stat(fullPath); statErr == nil && !info.IsDir() {
+			http.ServeFile(c.Writer, c.Request, fullPath)
+			return
+		}
+		// Clean-URL fallback: /ui/settings → assets/ui/settings.html.
+		htmlPath := fullPath + ".html"
+		if info, statErr := os.Stat(htmlPath); statErr == nil && !info.IsDir() {
+			http.ServeFile(c.Writer, c.Request, htmlPath)
+			return
+		}
+		c.AbortWithStatus(http.StatusNotFound)
+	}
+	engine.GET("/ui", handler)
+	engine.HEAD("/ui", handler)
+	engine.GET("/ui/*filepath", handler)
+	engine.HEAD("/ui/*filepath", handler)
 }

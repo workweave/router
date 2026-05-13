@@ -22,8 +22,13 @@ import (
 )
 
 const (
-	defaultOrgID = "local-dev"
-	defaultName  = "local-dev-seed"
+	// Seed into the admin installation so the seeded rk_... key (and any
+	// BYOK provider keys added through the dashboard) all live on the same
+	// installation. Using a separate "local-dev" installation made the
+	// seeded key invisible to the dashboard and made dashboard-added BYOK
+	// keys invisible to requests authenticated with the seeded token.
+	defaultOrgID = auth.AdminInstallationExternalID
+	defaultName  = auth.AdminInstallationName
 	createdBy    = "make seed"
 	baseURL      = "http://localhost:8080"
 )

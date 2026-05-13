@@ -333,14 +333,22 @@ const PROVIDER_LABEL: Record<Provider, string> = {
   openrouter: "OpenRouter",
 };
 
+const PROVIDER_ENV_VAR: Record<Provider, string> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  google: "GOOGLE_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+};
+
 function providerLabel(p: Provider): string {
   return PROVIDER_LABEL[p];
 }
 
 function ProviderKeysPanel() {
   const [keys, setKeys] = useState<ExternalKey[]>([]);
+  const [envKeyed, setEnvKeyed] = useState<Provider[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [provider, setProvider] = useState<Provider>("anthropic");
+  const [pickedProvider, setPickedProvider] = useState<Provider | null>(null);
   const [keyValue, setKeyValue] = useState("");
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -357,9 +365,32 @@ function ProviderKeysPanel() {
 
   useEffect(load, []);
 
+  useEffect(() => {
+    api.config
+      .get()
+      .then(cfg => {
+        const set = (cfg.env_provider_keys ?? []).filter((p): p is Provider =>
+          (PROVIDERS as readonly string[]).includes(p),
+        );
+        setEnvKeyed(set);
+      })
+      .catch(() => {
+        // Non-fatal: the panel still works, env-keyed providers just won't
+        // be flagged as read-only.
+        setEnvKeyed([]);
+      });
+  }, []);
+
+  const taken = new Set<string>([...keys.map(k => k.provider), ...envKeyed]);
+  const available: Provider[] = PROVIDERS.filter(p => !taken.has(p));
+  const provider: Provider | null =
+    pickedProvider != null && available.includes(pickedProvider)
+      ? pickedProvider
+      : (available[0] ?? null);
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (keyValue.trim() === "") return;
+    if (provider == null || keyValue.trim() === "") return;
     setSaving(true);
     try {
       await api.providerKeys.upsert(provider, keyValue.trim(), name.trim() || undefined);
@@ -385,65 +416,97 @@ function ProviderKeysPanel() {
     }
   }
 
+  const hasAnyKey = keys.length > 0 || envKeyed.length > 0;
   return (
     <>
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
-      <Card>
-        <Card.Header>
-          <Card.Title variant="h4">Add or replace a key</Card.Title>
-        </Card.Header>
-        <Card.Content>
-          <form onSubmit={handleSave} className="space-y-3" autoComplete="off">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[200px_1fr]">
-              <ProviderPicker value={provider} onChange={setProvider} />
+      {available.length > 0 && provider != null ? (
+        <Card>
+          <Card.Header>
+            <Card.Title variant="h4">Add a key</Card.Title>
+          </Card.Header>
+          <Card.Content>
+            <form onSubmit={handleSave} className="space-y-3" autoComplete="off">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[200px_1fr]">
+                <ProviderPicker value={provider} onChange={setPickedProvider} options={available} />
+                <Input
+                  label="API key"
+                  type="password"
+                  name="provider-api-key"
+                  autoComplete="new-password"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-form-type="other"
+                  placeholder="sk-..."
+                  value={keyValue}
+                  onChange={e => setKeyValue(e.target.value)}
+                  required
+                />
+              </div>
               <Input
-                label="API key"
-                type="password"
-                name="provider-api-key"
-                autoComplete="new-password"
+                label="Name (optional)"
+                name="provider-key-label"
+                autoComplete="off"
                 data-1p-ignore
                 data-lpignore="true"
                 data-form-type="other"
-                placeholder="sk-..."
-                value={keyValue}
-                onChange={e => setKeyValue(e.target.value)}
-                required
+                placeholder="My Anthropic key"
+                value={name}
+                onChange={e => setName(e.target.value)}
               />
-            </div>
-            <Input
-              label="Name (optional)"
-              name="provider-key-label"
-              autoComplete="off"
-              data-1p-ignore
-              data-lpignore="true"
-              data-form-type="other"
-              placeholder="My Anthropic key"
-              value={name}
-              onChange={e => setName(e.target.value)}
-            />
-            <div>
-              <Button
-                type="submit"
-                appearance={Appearance.Filled}
-                intent={Intent.Primary}
-                className="!border-brand !bg-brand !text-white hover:!bg-brand/90"
-                disabled={saving || keyValue.trim() === ""}
-              >
-                {saving ? "Saving…" : "Save key"}
-              </Button>
-            </div>
-          </form>
-        </Card.Content>
-      </Card>
+              <div>
+                <Button
+                  type="submit"
+                  appearance={Appearance.Filled}
+                  intent={Intent.Primary}
+                  className="!border-brand !bg-brand !text-white hover:!bg-brand/90"
+                  disabled={saving || keyValue.trim() === ""}
+                >
+                  {saving ? "Saving…" : "Save key"}
+                </Button>
+              </div>
+            </form>
+          </Card.Content>
+        </Card>
+      ) : null}
 
-      {keys.length > 0 ? (
+      {hasAnyKey ? (
         <Card className="p-0">
           <Card.Header className="border-b border-border px-5 py-3">
             <Card.Title variant="h4">Active provider keys</Card.Title>
           </Card.Header>
           <Card.Content>
             <ul className="divide-y divide-border">
+              {envKeyed.map(p => (
+                <li
+                  key={`env-${p}`}
+                  className="flex items-center justify-between px-5 py-3"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-foreground">
+                        {PROVIDER_LABEL[p]}
+                      </span>
+                      <span className="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                        env
+                      </span>
+                    </div>
+                    <p className="mt-0.5 font-mono text-2xs text-muted-foreground">
+                      Set via {PROVIDER_ENV_VAR[p]}
+                    </p>
+                  </div>
+                  <Button
+                    appearance={Appearance.Hollow}
+                    intent={Intent.Danger}
+                    size="icon"
+                    disabled
+                    title="Unset the env var and restart the router to remove"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </li>
+              ))}
               {keys.map(k => (
                 <li key={k.id} className="flex items-center justify-between px-5 py-3">
                   <div>
@@ -483,9 +546,11 @@ function ProviderKeysPanel() {
 function ProviderPicker({
   value,
   onChange,
+  options,
 }: {
   value: Provider;
   onChange: (p: Provider) => void;
+  options: readonly Provider[];
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -508,7 +573,7 @@ function ProviderPicker({
         <Popover.Content className="w-56 p-1" align="start">
           <Command>
             <Command.List>
-              {PROVIDERS.map(p => (
+              {options.map(p => (
                 <Command.Item
                   key={p}
                   onSelect={() => {

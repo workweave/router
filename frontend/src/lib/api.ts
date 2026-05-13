@@ -105,6 +105,7 @@ export interface RouterConfig {
   otel_enabled: boolean;
   dev_mode: boolean;
   semantic_cache_enabled: boolean;
+  env_provider_keys: string[];
 }
 
 export interface MeResponse {

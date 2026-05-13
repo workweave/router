@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"math"
+	"math/big"
 	"time"
 
 	"workweave/router/internal/proxy"
@@ -355,10 +357,24 @@ func telemetryRowFromRow(
 }
 
 // toNumeric converts a float64 cost value to pgtype.Numeric.
+//
+// pgtype.Numeric.Scan only accepts string/[]byte/nil — passing a float64
+// returns an error which silently leaves the value Valid:false, so every
+// cost ended up persisting as NULL (→ DEFAULT 0). Build the Numeric by
+// hand from the float's mantissa/exponent at fixed scale instead.
 func toNumeric(f float64) pgtype.Numeric {
-	var n pgtype.Numeric
-	_ = n.Scan(f)
-	return n
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return pgtype.Numeric{Valid: false}
+	}
+	// Cost columns are NUMERIC(16,6). Match that scale: multiply by 1e6,
+	// round to int, store with Exp = -6.
+	const scale = 6
+	scaled := math.Round(f * 1e6)
+	return pgtype.Numeric{
+		Int:   new(big.Int).SetInt64(int64(scaled)),
+		Exp:   -scale,
+		Valid: true,
+	}
 }
 
 // numericToFloat converts a pgtype.Numeric to float64, returning 0 on failure.
