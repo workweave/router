@@ -75,14 +75,14 @@ func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 			want: turntype.SubAgentDispatch,
 		},
 		{
-			name: "sub-agent via system prompt sub-agent marker",
-			body: `{"model":"claude-haiku-4-5","system":"You are a sub-agent for the Explore task.","messages":[{"role":"user","content":"list files"}]}`,
-			want: turntype.SubAgentDispatch,
-		},
-		{
-			name: "sub-agent via system prompt subagent_type marker",
-			body: `{"model":"claude-haiku-4-5","system":"subagent_type: Explore","messages":[{"role":"user","content":"grep"}]}`,
-			want: turntype.SubAgentDispatch,
+			// Regression guard: Claude Code's main-loop system prompt embeds
+			// the Agent tool description, which contains "subagent_type" as
+			// a parameter name. That used to trigger SubAgentDispatch and
+			// hard-pin every turn to the cheap model. Detection now requires
+			// the metadata.user_id or x-weave-subagent-type signal.
+			name: "main_loop with Agent tool description mentioning subagent_type stays main_loop",
+			body: `{"model":"claude-opus-4-7","system":"Use the Agent tool with a subagent_type parameter to dispatch sub-agents.","messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.MainLoop,
 		},
 		{
 			name: "sub-agent via x-weave-subagent-type header hint",
@@ -197,12 +197,13 @@ func TestDetectFromEnvelope_OpenAI(t *testing.T) {
 			want: turntype.SubAgentDispatch,
 		},
 		{
-			name: "sub-agent via system message marker",
+			// Regression guard — see TestDetectFromEnvelope_Anthropic.
+			name: "system message mentioning subagent_type stays main_loop",
 			body: `{"model":"gpt-4o","messages":[
-				{"role":"system","content":"You are a sub-agent for the Explore task."},
+				{"role":"system","content":"Use the Agent tool with a subagent_type parameter."},
 				{"role":"user","content":"list files"}
 			]}`,
-			want: turntype.SubAgentDispatch,
+			want: turntype.MainLoop,
 		},
 		{
 			name: "last message assistant is main_loop",
@@ -271,12 +272,13 @@ func TestDetectFromEnvelope_Gemini(t *testing.T) {
 			want: turntype.SubAgentDispatch,
 		},
 		{
-			name: "sub-agent via systemInstruction marker",
+			// Regression guard — see TestDetectFromEnvelope_Anthropic.
+			name: "systemInstruction mentioning subagent_type stays main_loop",
 			body: `{
-				"systemInstruction":{"parts":[{"text":"You are a sub-agent for the Explore task."}]},
+				"systemInstruction":{"parts":[{"text":"Use the Agent tool with a subagent_type parameter."}]},
 				"contents":[{"role":"user","parts":[{"text":"list files"}]}]
 			}`,
-			want: turntype.SubAgentDispatch,
+			want: turntype.MainLoop,
 		},
 		{
 			name: "trailing model message is main_loop",
