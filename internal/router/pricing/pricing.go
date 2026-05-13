@@ -3,6 +3,8 @@
 // Source of truth for prices the OTel layer also emits as attributes.
 package pricing
 
+import "maps"
+
 // Pricing holds the per-1M-token USD costs for a single model.
 type Pricing struct {
 	InputUSDPer1M  float64
@@ -32,9 +34,7 @@ const (
 // All returns a copy of the full pricing table keyed by model name.
 func All() map[string]Pricing {
 	out := make(map[string]Pricing, len(table))
-	for k, v := range table {
-		out[k] = v
-	}
+	maps.Copy(out, table)
 	return out
 }
 
