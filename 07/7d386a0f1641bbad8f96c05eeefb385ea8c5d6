@@ -1,0 +1,26 @@
+.env.example
+  s_fa4de19d7bcca5::t_91894696fb6ba3 69-74
+CLAUDE.md
+  s_fa4de19d7bcca5::t_d439ca0bf1d12c 468-472,474-478
+AGENTS.md
+  s_fa4de19d7bcca5::t_90e060ce31a75c 468-472,474-478
+cmd/router/main.go
+  s_fa4de19d7bcca5::t_1e46fcb6ca30f1 489-503
+  s_fa4de19d7bcca5::t_f3e25e84a66623 569
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "077d386a0f1641bbad8f96c05eeefb385ea8c5d6",
+  "prompts": {},
+  "sessions": {
+    "s_fa4de19d7bcca5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3b6a692-884a-424a-9e3d-c5133e5941bf",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
