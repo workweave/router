@@ -44,6 +44,24 @@ type updateExcludedModelsRequest struct {
 	Excluded []string `json:"excluded"`
 }
 
+// deployedModelsDTO converts the cluster scorer's deployed-models list to the
+// sorted DTO form returned by both the GET and PUT handlers. Centralized so
+// the two responses cannot drift apart.
+func deployedModelsDTO(models DeployedModelsSource) []deployedModelDTO {
+	entries := models.DefaultDeployedModels()
+	out := make([]deployedModelDTO, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, deployedModelDTO{Model: e.Model, Provider: e.Provider})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Provider != out[j].Provider {
+			return out[i].Provider < out[j].Provider
+		}
+		return out[i].Model < out[j].Model
+	})
+	return out
+}
+
 // GetExcludedModelsHandler returns the universe of deployed models plus the
 // caller installation's current exclusion list. If a deployment-wide env
 // override is active, the override is returned as `excluded` and
@@ -55,17 +73,7 @@ func GetExcludedModelsHandler(authSvc *auth.Service, models DeployedModelsSource
 			return
 		}
 
-		entries := models.DefaultDeployedModels()
-		out := make([]deployedModelDTO, 0, len(entries))
-		for _, e := range entries {
-			out = append(out, deployedModelDTO{Model: e.Model, Provider: e.Provider})
-		}
-		sort.SliceStable(out, func(i, j int) bool {
-			if out[i].Provider != out[j].Provider {
-				return out[i].Provider < out[j].Provider
-			}
-			return out[i].Model < out[j].Model
-		})
+		out := deployedModelsDTO(models)
 
 		envActive := override != nil && override.HasExcludedModelsOverride()
 		var excluded []string
@@ -128,7 +136,7 @@ func UpdateExcludedModelsHandler(authSvc *auth.Service, models DeployedModelsSou
 
 		sort.Strings(stored)
 		c.JSON(http.StatusOK, excludedModelsResponse{
-			Available: []deployedModelDTO{},
+			Available: deployedModelsDTO(models),
 			Excluded:  stored,
 		})
 	}

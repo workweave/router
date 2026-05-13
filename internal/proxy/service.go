@@ -234,7 +234,6 @@ func (s *Service) WithDeploymentKeyedProviders(set map[string]struct{}) *Service
 	return s
 }
 
-
 // MetricsSummary returns aggregated cost/token totals for the given installation and time window.
 func (s *Service) MetricsSummary(ctx context.Context, installationID string, from, to time.Time) (TelemetrySummary, error) {
 	if s.telemetry == nil {
