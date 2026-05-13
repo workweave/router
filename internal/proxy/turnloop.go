@@ -248,14 +248,25 @@ func (s *Service) runTurnLoop(
 }
 
 // loadPin returns the active pin for this session, consulting the in-proc
-// LRU first then Postgres. Expired rows are treated as misses. A store
-// error is logged and surfaces as "not found" so the caller falls
-// through to the planner with a zero pin.
+// LRU first then Postgres. Expired rows are treated as misses on both
+// tiers. A store error is logged and surfaces as "not found" so the
+// caller falls through to the planner with a zero pin.
 func (s *Service) loadPin(ctx context.Context, pinCacheKey string, sessionKey [sessionpin.SessionKeyLen]byte) (sessionpin.Pin, bool) {
 	log := observability.Get()
 	if s.pinCache != nil {
 		if pin, ok := s.pinCache.Get(pinCacheKey); ok {
-			return pin, true
+			// Mirror the Postgres-tier expiry check below: an LRU entry
+			// whose PinnedUntil has lapsed must not be served. The 30s
+			// LRU TTL is short relative to the 1h pin TTL, so this is
+			// mostly defense-in-depth — but recordTurnUsage re-adds
+			// entries on every turn (resetting the LRU clock), so under
+			// the worst-case ordering (refreshPin's enqueue dropped on
+			// semaphore saturation while recordTurnUsage keeps landing)
+			// an expired entry could otherwise outlive its PinnedUntil.
+			if pin.PinnedUntil.After(time.Now()) {
+				return pin, true
+			}
+			s.pinCache.Remove(pinCacheKey)
 		}
 	}
 	pin, found, err := s.pinStore.Get(ctx, sessionKey, sessionpin.DefaultRole)

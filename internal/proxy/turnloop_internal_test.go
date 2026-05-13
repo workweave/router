@@ -110,3 +110,92 @@ func TestRecordTurnUsage_UpdatesInProcCache(t *testing.T) {
 	assert.Equal(t, 80, got.LastOutputTokens, "LRU LastOutputTokens must reflect recorded usage")
 	assert.False(t, got.LastTurnEndedAt.IsZero(), "LRU LastTurnEndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
+
+// TestLoadPin_EvictsExpiredLRUEntry guards the LRU tier's expiry check.
+// recordTurnUsage refreshes LRU entries on every turn, so the 30s eviction
+// clock keeps resetting under typical agentic cadence. Without checking
+// PinnedUntil on the LRU hit path, an entry whose pin has lapsed could
+// keep being served well past its intended expiry — particularly when
+// refreshPin's bounded enqueue drops on semaphore saturation while
+// recordTurnUsage keeps landing.
+func TestLoadPin_EvictsExpiredLRUEntry(t *testing.T) {
+	store := newStubPinStore()
+	svc := NewService(
+		nil,
+		nil,
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	require.NotNil(t, svc.pinCache)
+
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	for i := range sessionKey {
+		sessionKey[i] = byte(i + 1)
+	}
+	cacheKey := sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
+
+	// Pre-warm the LRU with a pin whose PinnedUntil is already in the past.
+	// The stub pin store returns no rows on Get, so any non-expired LRU
+	// entry would be the only source of a "found" result. Confirming a
+	// miss here proves the expiry check fires before the LRU is served.
+	expired := sessionpin.Pin{
+		SessionKey:  sessionKey,
+		Role:        sessionpin.DefaultRole,
+		Provider:    "anthropic",
+		Model:       "claude-opus-4-7",
+		Reason:      "fresh",
+		TurnCount:   1,
+		PinnedUntil: time.Now().Add(-time.Minute),
+	}
+	svc.pinCache.Add(cacheKey, expired)
+
+	pin, found := svc.loadPin(context.Background(), cacheKey, sessionKey)
+	assert.False(t, found, "expired LRU entry must not be served")
+	assert.Equal(t, sessionpin.Pin{}, pin, "miss must return the zero pin")
+	_, stillCached := svc.pinCache.Get(cacheKey)
+	assert.False(t, stillCached, "expired LRU entry must be evicted on lookup so subsequent turns hit Postgres")
+}
+
+// TestLoadPin_ServesFreshLRUEntry is the companion happy-path test: a
+// non-expired LRU entry hits Tier 1 without touching Postgres.
+func TestLoadPin_ServesFreshLRUEntry(t *testing.T) {
+	store := newStubPinStore()
+	svc := NewService(
+		nil,
+		nil,
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	for i := range sessionKey {
+		sessionKey[i] = byte(i + 1)
+	}
+	cacheKey := sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
+
+	fresh := sessionpin.Pin{
+		SessionKey:  sessionKey,
+		Role:        sessionpin.DefaultRole,
+		Provider:    "anthropic",
+		Model:       "claude-opus-4-7",
+		Reason:      "fresh",
+		TurnCount:   1,
+		PinnedUntil: time.Now().Add(time.Hour),
+	}
+	svc.pinCache.Add(cacheKey, fresh)
+
+	pin, found := svc.loadPin(context.Background(), cacheKey, sessionKey)
+	require.True(t, found, "non-expired LRU entry should be returned without hitting Postgres")
+	assert.Equal(t, fresh.Model, pin.Model)
+	assert.Equal(t, fresh.Provider, pin.Provider)
+}
