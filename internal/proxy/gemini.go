@@ -45,7 +45,15 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		log.Error("Failed to parse Gemini request", "err", parseErr)
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
-	feats := env.RoutingFeatures(false)
+	embedFlag := s.embedOnlyUserMessage
+	if v, ok := embedOnlyUserMessageOverride(ctx); ok {
+		embedFlag = v
+	}
+	feats := env.RoutingFeatures(embedFlag)
+	promptText := feats.PromptText
+	if embedFlag && feats.OnlyUserMessageText != "" {
+		promptText = feats.OnlyUserMessageText
+	}
 
 	bypassEval := hasEvalOverrideHeader(r)
 	bypassLegacySticky := bypassEval
@@ -57,7 +65,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
-		PromptText:           feats.PromptText,
+		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()

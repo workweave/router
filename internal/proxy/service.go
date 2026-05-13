@@ -26,7 +26,7 @@ type Service struct {
 	router               router.Router
 	providers            map[string]providers.Client
 	emitter              *otel.Emitter
-	embedLastUserMessage bool
+	embedOnlyUserMessage bool
 	stickyDecisions      *expirable.LRU[string, router.Decision]
 	// semanticCache short-circuits non-streaming requests on a cosine-similarity hit.
 	semanticCache *cache.Cache
@@ -88,7 +88,7 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 
 // NewService constructs the proxy service. pinStore may be nil when the
 // session-pin feature flag is off.
-func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedLastUserMessage bool, stickyDecisionTTL time.Duration, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
+func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedOnlyUserMessage bool, stickyDecisionTTL time.Duration, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
 	var sticky *expirable.LRU[string, router.Decision]
 	if stickyDecisionTTL > 0 {
 		sticky = expirable.NewLRU[string, router.Decision](10000, nil, stickyDecisionTTL)
@@ -103,7 +103,7 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		router:               r,
 		providers:            providerMap,
 		emitter:              emitter,
-		embedLastUserMessage: embedLastUserMessage,
+		embedOnlyUserMessage: embedOnlyUserMessage,
 		stickyDecisions:      sticky,
 		semanticCache:        semanticCache,
 		pinStore:             pinStore,
@@ -260,12 +260,12 @@ func (s *Service) writeCachedResponse(w http.ResponseWriter, resp cache.CachedRe
 	}
 }
 
-// EmbedLastUserMessageContextKey is the context key for the per-request embed flag override.
-type EmbedLastUserMessageContextKey struct{}
+// EmbedOnlyUserMessageContextKey is the context key for the per-request embed flag override.
+type EmbedOnlyUserMessageContextKey struct{}
 
-// embedLastUserMessageOverride reads the per-request embed flag from ctx.
-func embedLastUserMessageOverride(ctx context.Context) (bool, bool) {
-	v, ok := ctx.Value(EmbedLastUserMessageContextKey{}).(bool)
+// embedOnlyUserMessageOverride reads the per-request embed flag from ctx.
+func embedOnlyUserMessageOverride(ctx context.Context) (bool, bool) {
+	v, ok := ctx.Value(EmbedOnlyUserMessageContextKey{}).(bool)
 	return v, ok
 }
 
@@ -338,16 +338,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
 
-	embedFlag := s.embedLastUserMessage
-	if v, ok := embedLastUserMessageOverride(ctx); ok {
+	embedFlag := s.embedOnlyUserMessage
+	if v, ok := embedOnlyUserMessageOverride(ctx); ok {
 		embedFlag = v
 	}
 	feats := env.RoutingFeatures(embedFlag)
 	promptText := feats.PromptText
 	embedInput := "concatenated_stream"
-	if embedFlag && feats.LastUserMessageText != "" {
-		promptText = feats.LastUserMessageText
-		embedInput = "last_user_message"
+	if embedFlag && feats.OnlyUserMessageText != "" {
+		promptText = feats.OnlyUserMessageText
+		embedInput = "only_user_message"
 	}
 
 	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
@@ -663,7 +663,7 @@ func hasEvalOverrideHeader(r *http.Request) bool {
 		return false
 	}
 	return r.Header.Get("x-weave-cluster-version") != "" ||
-		r.Header.Get("x-weave-embed-last-user-message") != ""
+		r.Header.Get("x-weave-embed-only-user-message") != ""
 }
 
 // externalKeysFromContext reads external API keys stashed by auth middleware.
@@ -830,7 +830,15 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		log.Error("Failed to parse OpenAI request", "err", parseErr)
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
-	feats := env.RoutingFeatures(false)
+	embedFlag := s.embedOnlyUserMessage
+	if v, ok := embedOnlyUserMessageOverride(ctx); ok {
+		embedFlag = v
+	}
+	feats := env.RoutingFeatures(embedFlag)
+	promptText := feats.PromptText
+	if embedFlag && feats.OnlyUserMessageText != "" {
+		promptText = feats.OnlyUserMessageText
+	}
 
 	bypassEval := hasEvalOverrideHeader(r)
 	bypassLegacySticky := bypassEval
@@ -843,7 +851,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
-		PromptText:           feats.PromptText,
+		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, r.Header),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
