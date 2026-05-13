@@ -1,0 +1,31 @@
+scripts/demo-statusline-watcher.sh
+  s_e22baeb228ff26::t_40a4f77c88577b 1-63
+internal/proxy/service.go
+  s_1e54d6ab023e5a::t_d349c68fe488ef 222-223
+.claude/settings.json
+  s_e22baeb228ff26::t_40a4f77c88577b 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "53ef9d2618e7d2b87706077fe3756dba8e03e91c",
+  "prompts": {},
+  "sessions": {
+    "s_1e54d6ab023e5a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "20363211-e78b-49bb-ad4b-1a51e2092897",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_e22baeb228ff26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f46e30ee-645b-4530-83ec-9ebb1d07fc5f",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
