@@ -222,6 +222,34 @@ func TestTurnLoop_SummarizerErrorFallsBackToTrim(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "switch must still happen on summarizer error")
 }
 
+// TestTurnLoop_HandoverFallsBackToTrimWhenSummarizerNotWired guards the
+// documented graceful-degrade path: when no summarizer is wired (e.g. a
+// self-hoster without an Anthropic key for handover), the switch turn
+// must still bound the input to the new model by trimming history, not
+// forward the full conversation unchanged.
+func TestTurnLoop_HandoverFallsBackToTrimWhenSummarizerNotWired(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-opus-4-7",
+		Reason:          "cluster:v0.2",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 5000,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
+	// No WithSummarizer call — Service.summarizer stays nil.
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, largeBody(t), rec, httpReq))
+
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "switch must proceed even without a summarizer")
+}
+
 // TestTurnLoop_HandoverSkippedWhenRequestHasClientCreds guards the
 // BYOK/tenant-boundary invariant: when a request supplies its own
 // provider credentials, the deployment-level summarizer must NOT be

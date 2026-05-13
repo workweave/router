@@ -193,21 +193,32 @@ func (s *Service) runTurnLoop(
 	// outcome=stay with no pin to actually stay on. When switching off an
 	// existing warm cache, attempt bounded-cost handover: synchronously
 	// summarize prior context with the cheap-model summarizer; on error
-	// fall back to TrimLastN so the switch turn still succeeds.
+	// fall back to TrimLastN so the switch turn still succeeds. When the
+	// summarizer is not wired (self-hoster with no Anthropic key) or the
+	// request carries BYOK/client credentials, skip summarization and
+	// trim instead — either way the switch turn must NOT forward the
+	// full prior conversation to the new model (defeats the cost-bounding
+	// goal of handover).
 	//
 	// Privacy guard: the summarizer is wired at boot with deployment-level
 	// provider credentials. Calling it on a request whose upstream call
 	// would otherwise use BYOK or client-supplied credentials would route
 	// prior conversation context (carried verbatim into the summarizer
 	// prompt) through the platform account, violating tenant data
-	// boundaries. Detect that case and skip straight to TrimLastN.
-	if pinFound && s.summarizer != nil {
-		if s.requestUsesNonDeploymentCreds(ctx, reqHeaders) {
+	// boundaries.
+	if pinFound {
+		switch {
+		case s.summarizer == nil:
+			elided := handover.TrimLastN(env, 3)
+			res.Handover.Invoked = true
+			res.Handover.FallbackToTrim = true
+			log.Info("Handover summarizer not wired; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
+		case s.requestUsesNonDeploymentCreds(ctx, reqHeaders):
 			elided := handover.TrimLastN(env, 3)
 			res.Handover.Invoked = true
 			res.Handover.FallbackToTrim = true
 			log.Info("Handover summarizer skipped to preserve BYOK tenant boundary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
-		} else {
+		default:
 			start := time.Now()
 			summary, sumErr := s.summarizer.Summarize(ctx, env)
 			res.Handover.Invoked = true
