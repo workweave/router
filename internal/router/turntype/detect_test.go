@@ -101,6 +101,31 @@ func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 			want: turntype.MainLoop,
 		},
 		{
+			name: "max_tokens=1 quota probe is probe",
+			body: `{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`,
+			want: turntype.Probe,
+		},
+		{
+			name: "max_tokens=4 still probe (SDK variation buffer)",
+			body: `{"model":"claude-haiku-4-5","max_tokens":4,"messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.Probe,
+		},
+		{
+			name: "max_tokens=5 is not a probe",
+			body: `{"model":"claude-haiku-4-5","max_tokens":5,"messages":[{"role":"user","content":"hello"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			name: "no max_tokens is not a probe",
+			body: `{"model":"claude-haiku-4-5","messages":[{"role":"user","content":"hello there"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			name: "probe takes priority over compaction system prompt",
+			body: `{"model":"claude-sonnet-4-5","max_tokens":1,"system":"Your task is to create a detailed summary","messages":[{"role":"user","content":"quota"}]}`,
+			want: turntype.Probe,
+		},
+		{
 			name: "compaction takes priority over tool_result",
 			body: `{"model":"claude-sonnet-4-5","system":"compact the conversation","messages":[
 				{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"output"}]}
@@ -187,6 +212,16 @@ func TestDetectFromEnvelope_OpenAI(t *testing.T) {
 			]}`,
 			want: turntype.MainLoop,
 		},
+		{
+			name: "max_completion_tokens=1 is probe (modern OpenAI SDK)",
+			body: `{"model":"gpt-4o","max_completion_tokens":1,"messages":[{"role":"user","content":"quota"}]}`,
+			want: turntype.Probe,
+		},
+		{
+			name: "max_tokens=1 is probe (legacy OpenAI SDK)",
+			body: `{"model":"gpt-4o","max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`,
+			want: turntype.Probe,
+		},
 	}
 
 	for _, tc := range tests {
@@ -250,6 +285,11 @@ func TestDetectFromEnvelope_Gemini(t *testing.T) {
 				{"role":"model","parts":[{"text":"hello"}]}
 			]}`,
 			want: turntype.MainLoop,
+		},
+		{
+			name: "generationConfig.maxOutputTokens=1 is probe",
+			body: `{"generationConfig":{"maxOutputTokens":1},"contents":[{"role":"user","parts":[{"text":"quota"}]}]}`,
+			want: turntype.Probe,
 		},
 	}
 
