@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"workweave/router/internal/config"
+	"workweave/router/internal/providers"
 	"workweave/router/internal/server/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -22,14 +23,14 @@ type configResponse struct {
 	EnvProviderKeys []string `json:"env_provider_keys"`
 }
 
-// envProviderKey maps a provider name to the env var that configures its
-// upstream API key. Keep in sync with cmd/router/main.go's provider wiring.
-var envProviderKey = map[string]string{
-	"anthropic":  "ANTHROPIC_API_KEY",
-	"openai":     "OPENAI_API_KEY",
-	"openrouter": "OPENROUTER_API_KEY",
-	"fireworks":  "FIREWORKS_API_KEY",
-	"google":     "GOOGLE_API_KEY",
+// configProviderOrder pins the response ordering of env_provider_keys so the
+// dashboard renders deterministically.
+var configProviderOrder = []string{
+	providers.ProviderAnthropic,
+	providers.ProviderOpenAI,
+	providers.ProviderOpenRouter,
+	providers.ProviderFireworks,
+	providers.ProviderGoogle,
 }
 
 // ConfigHandler returns the current non-secret router configuration. Accepts
@@ -39,10 +40,9 @@ func ConfigHandler(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_key"})
 		return
 	}
-	envKeyed := make([]string, 0, len(envProviderKey))
-	// Iterate over a stable order so the response is deterministic.
-	for _, p := range []string{"anthropic", "openai", "openrouter", "fireworks", "google"} {
-		if config.GetOr(envProviderKey[p], "") != "" {
+	envKeyed := make([]string, 0, len(configProviderOrder))
+	for _, p := range configProviderOrder {
+		if config.GetOr(providers.APIKeyEnvVar(p), "") != "" {
 			envKeyed = append(envKeyed, p)
 		}
 	}

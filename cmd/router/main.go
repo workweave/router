@@ -115,12 +115,17 @@ func main() {
 
 	providerMap := make(map[string]providers.Client)
 	// envKeyedProviders tracks providers whose deployment-level API key is
-	// actually configured (env var present). In selfhosted mode we now
-	// register every provider unconditionally so that BYOK keys added via
-	// the dashboard can route there — but only env-keyed providers are
-	// eligible "by default"; everything else needs a per-installation BYOK
-	// (or client-supplied) credential at request time.
+	// actually configured (env var present). This set feeds resolveHardPinModel
+	// so compaction only lands on providers with real deployment auth — a
+	// BYOK-only or passthrough-only provider would 401 on a request that
+	// doesn't carry the matching credential.
 	envKeyedProviders := make(map[string]struct{})
+	// anthropicPassthroughEligible is true when Anthropic is registered with
+	// no deployment env key but is reachable via client-supplied auth
+	// (OAuth / x-api-key headers) — Claude Code's logged-in plan flow. It
+	// must NOT taint envKeyedProviders since hard-pin can't rely on
+	// every inbound request carrying Anthropic credentials.
+	anthropicPassthroughEligible := false
 
 	// In managed mode every provider is registered unconditionally with no
 	// deployment-level API key. The proxy service is also flipped into
@@ -144,10 +149,12 @@ func main() {
 		envKeyedProviders[providers.ProviderAnthropic] = struct{}{}
 		logger.Info("Anthropic provider enabled (router key)", "base_url", anthropic.DefaultBaseURL)
 	default:
-		// Anthropic in selfhosted with no env key still serves the
-		// passthrough path on client OAuth/x-api-key — treat it as "keyed"
-		// for default-eligibility so routing to it doesn't require BYOK.
-		envKeyedProviders[providers.ProviderAnthropic] = struct{}{}
+		// Anthropic in selfhosted with no env key serves the passthrough
+		// path on client OAuth/x-api-key. It's eligible for routing but
+		// must stay out of envKeyedProviders so resolveHardPinModel doesn't
+		// pin compaction to a model that needs a credential the inbound
+		// request might not carry.
+		anthropicPassthroughEligible = true
 		logger.Info("Anthropic provider enabled (client auth passthrough)", "base_url", anthropic.DefaultBaseURL)
 	}
 
@@ -299,6 +306,8 @@ func main() {
 	// Pin to a model whose provider has actual deployment-level auth — a
 	// BYOK-only registered provider would 401 here since hard-pin compaction
 	// runs on every installation, including ones without their own BYOK.
+	// Anthropic-passthrough is excluded for the same reason: an inbound
+	// request that doesn't carry Anthropic client headers would 401.
 	hardPinAvailable := envKeyedProviders
 	if byokOnly {
 		hardPinAvailable = availableProviders
@@ -309,9 +318,20 @@ func main() {
 	}
 	logger.Info("Hard-pin model resolved", "provider", hardPinProvider, "model", hardPinModel)
 
+	// Default-eligible set for proxy.Service: env-keyed providers + the
+	// Anthropic passthrough path. BYOK and client-supplied credentials add
+	// to this set per-request inside enabledProvidersForRequest.
+	deploymentEligible := make(map[string]struct{}, len(envKeyedProviders)+1)
+	for p := range envKeyedProviders {
+		deploymentEligible[p] = struct{}{}
+	}
+	if anthropicPassthroughEligible {
+		deploymentEligible[providers.ProviderAnthropic] = struct{}{}
+	}
+
 	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedLastUser, stickyTTL, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithByokOnly(byokOnly).
-		WithDeploymentKeyedProviders(envKeyedProviders)
+		WithDeploymentKeyedProviders(deploymentEligible)
 
 	engine := gin.New()
 	engine.UnescapePathValues = true
@@ -453,7 +473,7 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 				"cluster_version", v,
 				"missing_provider", prov,
 				"affected_models", models,
-				"hint", "set "+envVarForProvider(prov)+" to keep these in the routing pool",
+				"hint", "set "+envVarHint(prov)+" to keep these in the routing pool",
 			)
 		}
 
@@ -714,20 +734,12 @@ func resolveHardPinModel(available map[string]struct{}, logger *slog.Logger) (pr
 	return p, m
 }
 
-// envVarForProvider returns the env var name for a provider's API key.
-func envVarForProvider(provider string) string {
-	switch provider {
-	case providers.ProviderAnthropic:
-		return "ANTHROPIC_API_KEY"
-	case providers.ProviderOpenAI:
-		return "OPENAI_API_KEY"
-	case providers.ProviderOpenRouter:
-		return "OPENROUTER_API_KEY"
-	case providers.ProviderFireworks:
-		return "FIREWORKS_API_KEY"
-	case providers.ProviderGoogle:
-		return "GOOGLE_API_KEY"
-	default:
-		return "<unknown provider " + provider + ">"
+// envVarHint returns the env var name for a provider's API key, formatted
+// for log warnings. Wraps providers.APIKeyEnvVar so the "unknown provider"
+// fallback is readable in operator-facing logs.
+func envVarHint(provider string) string {
+	if v := providers.APIKeyEnvVar(provider); v != "" {
+		return v
 	}
+	return "<unknown provider " + provider + ">"
 }
