@@ -22,8 +22,12 @@ context, then this file for rules.
 - **DRY** — don't repeat yourself
 - **Designed for a small, expert-level team** — favor explicit composition, readable wiring; reject DI containers, reflection, and
   framework magic
-- **Concise comments** — comments should clarify non-obvious intent, not
-  rehash what the code does
+- **Concise comments, sparingly added** — default to writing no comments.
+  Only add one when the *why* is non-obvious: a hidden constraint, a subtle
+  invariant, a workaround, behavior that would surprise a reader. Never
+  rehash what the code does, never reference the current task/PR/caller,
+  and never write multi-paragraph commentary. If removing the comment
+  wouldn't confuse a future reader, don't write it.
 - **Non-tautological tests** — every test must assert behavior that would
   break if the production code were deleted
 
