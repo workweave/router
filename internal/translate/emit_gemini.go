@@ -283,12 +283,18 @@ func openAIAssistantToGeminiParts(msg map[string]any) ([]any, error) {
 		part := map[string]any{
 			"functionCall": map[string]any{"name": name, "args": args},
 		}
-		// thought_signature may live on the tool_call or the function object;
-		// round-trip whichever shape we receive.
+		// thought_signature may live on the tool_call, the function object,
+		// or smuggled into tc.id; round-trip whichever shape we receive.
+		// OpenAI Chat Completions clients pass tool_call.id verbatim, so the
+		// id channel survives typed-SDK field stripping.
 		if sig, _ := tc["thought_signature"].(string); sig != "" {
 			part["thoughtSignature"] = sig
 		} else if sig, _ := fn["thought_signature"].(string); sig != "" {
 			part["thoughtSignature"] = sig
+		} else if id, _ := tc["id"].(string); id != "" {
+			if _, sig := extractSignatureFromID(id); sig != "" {
+				part["thoughtSignature"] = sig
+			}
 		}
 		parts = append(parts, part)
 	}
@@ -616,7 +622,16 @@ func anthropicAssistantToGeminiParts(content any) ([]any, error) {
 				part := map[string]any{
 					"functionCall": map[string]any{"name": name, "args": input},
 				}
-				if sig, _ := block["thought_signature"].(string); sig != "" {
+				// Prefer an explicit thought_signature field, but fall back to
+				// one smuggled into block.id — Claude Code and other typed
+				// Anthropic SDKs drop the off-spec field on the way back.
+				sig, _ := block["thought_signature"].(string)
+				if sig == "" {
+					if id, _ := block["id"].(string); id != "" {
+						_, sig = extractSignatureFromID(id)
+					}
+				}
+				if sig != "" {
 					part["thoughtSignature"] = sig
 				}
 				parts = append(parts, part)

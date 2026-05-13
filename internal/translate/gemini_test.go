@@ -298,6 +298,114 @@ func TestGeminiToAnthropicResponse_ToolUsePreservesThoughtSignature(t *testing.T
 	assert.Equal(t, "tool_use", tu["type"])
 	assert.Equal(t, "GS", tu["thought_signature"])
 	assert.Equal(t, "bash", tu["name"])
+	// The id must also carry the signature so typed-SDK clients (Claude Code)
+	// that drop unknown content-block fields still round-trip it.
+	assert.Contains(t, tu["id"].(string), "__thought__")
+}
+
+// TestPrepareGemini_FromAnthropic_ToolUseSignatureSurvivesUnknownFieldStripping
+// is the load-bearing regression test for Gemini 3.x multi-turn tool use
+// when the client (Claude Code) drops the off-spec thought_signature field
+// from a tool_use content block on deserialization. The signature must still
+// be smuggled back to Gemini via the id channel.
+func TestPrepareGemini_FromAnthropic_ToolUseSignatureSurvivesUnknownFieldStripping(t *testing.T) {
+	// Turn 1: Gemini → Anthropic response embeds the signature into the
+	// synthesized tool_use.id.
+	geminiResp := []byte(`{
+		"candidates":[{"content":{"role":"model","parts":[
+			{"functionCall":{"name":"bash","args":{"command":"ls"}},
+			 "thoughtSignature":"OPAQUE_GEMINI_SIG"}
+		]},"finishReason":"STOP"}]
+	}`)
+	anthropicOut, err := translate.GeminiToAnthropicResponse(geminiResp, "gemini-3.1-pro-preview")
+	require.NoError(t, err)
+	resp := mustUnmarshal(t, anthropicOut)
+	tu := resp["content"].([]any)[0].(map[string]any)
+	smuggledID := tu["id"].(string)
+	require.Contains(t, smuggledID, "__thought__")
+
+	// Simulate Claude Code stripping the off-spec field on deserialization.
+	delete(tu, "thought_signature")
+
+	// Turn 3: client sends history back. Router translates Anthropic → Gemini.
+	req := map[string]any{
+		"model": "claude-opus-4-7",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "list files"},
+			map[string]any{"role": "assistant", "content": []any{tu}},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": smuggledID, "content": "f1\nf2"},
+			}},
+		},
+	}
+	reqBody, err := json.Marshal(req)
+	require.NoError(t, err)
+	env, err := translate.ParseAnthropic(reqBody)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	contents := out["contents"].([]any)
+	require.Len(t, contents, 3)
+	model := contents[1].(map[string]any)
+	parts := model["parts"].([]any)
+	p := parts[0].(map[string]any)
+	// The signature is what Gemini 3.x rejects requests for when missing.
+	assert.Equal(t, "OPAQUE_GEMINI_SIG", p["thoughtSignature"])
+	fc := p["functionCall"].(map[string]any)
+	assert.Equal(t, "bash", fc["name"])
+	// And the functionResponse must still resolve the name from the smuggled id.
+	tr := contents[2].(map[string]any)
+	frPart := tr["parts"].([]any)[0].(map[string]any)
+	fr := frPart["functionResponse"].(map[string]any)
+	assert.Equal(t, "bash", fr["name"])
+}
+
+// Same as above but via OpenAI Chat Completions wire format; tool_call.id is
+// the round-trip channel and is preserved by every Chat Completions client.
+func TestPrepareGemini_FromOpenAI_ToolCallSignatureSurvivesUnknownFieldStripping(t *testing.T) {
+	geminiResp := []byte(`{
+		"candidates":[{"content":{"role":"model","parts":[
+			{"functionCall":{"name":"bash","args":{"command":"ls"}},
+			 "thoughtSignature":"OPAQUE_SIG_2"}
+		]},"finishReason":"STOP"}]
+	}`)
+	openaiOut, err := translate.GeminiToOpenAIResponse(geminiResp, "gemini-3.1-pro-preview")
+	require.NoError(t, err)
+	resp := mustUnmarshal(t, openaiOut)
+	choice := resp["choices"].([]any)[0].(map[string]any)
+	tc := choice["message"].(map[string]any)["tool_calls"].([]any)[0].(map[string]any)
+	smuggledID := tc["id"].(string)
+	require.Contains(t, smuggledID, "__thought__")
+
+	// Strip the explicit signature fields on both the tool_call and the
+	// nested function — simulating a client that only preserves spec fields.
+	delete(tc, "thought_signature")
+	fn := tc["function"].(map[string]any)
+	delete(fn, "thought_signature")
+
+	req := map[string]any{
+		"model": "gpt-x",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "list files"},
+			map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{tc}},
+			map[string]any{"role": "tool", "tool_call_id": smuggledID, "content": "f1\nf2"},
+		},
+	}
+	reqBody, err := json.Marshal(req)
+	require.NoError(t, err)
+	env, err := translate.ParseOpenAI(reqBody)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+	require.NoError(t, err)
+	out := mustUnmarshal(t, prep.Body)
+	contents := out["contents"].([]any)
+	require.GreaterOrEqual(t, len(contents), 2)
+	model := contents[1].(map[string]any)
+	parts := model["parts"].([]any)
+	p := parts[0].(map[string]any)
+	assert.Equal(t, "OPAQUE_SIG_2", p["thoughtSignature"])
 }
 
 // ----- Streaming -----
