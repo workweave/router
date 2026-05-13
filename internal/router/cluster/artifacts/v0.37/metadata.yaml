@@ -50,7 +50,7 @@ deployed_models:
   - qwen/qwen3-coder-next
   - qwen/qwen3-next-80b-a3b-instruct
   - qwen/qwen3.5-flash-02-23
-cost_per_1k_effective_usd:
+cost_per_1k_input_usd:
   claude-haiku-4-5: 0.0208
   claude-opus-4-7: 0.39
   claude-sonnet-4-5: 0.078

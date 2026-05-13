@@ -1,7 +1,7 @@
 {
   "meta": {
     "alpha": 0.55,
-    "cost_per_1k_effective_usd": {
+    "cost_per_1k_input_usd": {
       "claude-haiku-4-5": 0.0208,
       "claude-opus-4-7": 0.39,
       "claude-sonnet-4-5": 0.078,
