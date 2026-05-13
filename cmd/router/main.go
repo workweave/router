@@ -32,6 +32,8 @@ import (
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/cluster"
+	"workweave/router/internal/router/handover"
+	"workweave/router/internal/router/planner"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/server"
 
@@ -269,16 +271,6 @@ func main() {
 	} else {
 		logger.Info("Cluster scorer embedding concatenated stream (ROUTER_EMBED_ONLY_USER_MESSAGE=false)")
 	}
-	var stickyTTL time.Duration
-	if v := config.GetOr("ROUTER_STICKY_DECISION_TTL_MS", "0"); v != "0" && v != "" {
-		ms, parseErr := time.ParseDuration(v + "ms")
-		if parseErr != nil || ms < 0 {
-			logger.Warn("Invalid ROUTER_STICKY_DECISION_TTL_MS; sticky decisions disabled", "value", v)
-		} else {
-			stickyTTL = ms
-			logger.Info("Sticky routing decisions enabled", "ttl_ms", ms.Milliseconds())
-		}
-	}
 	emitter, err := buildOtelEmitter()
 	if err != nil {
 		logger.Error("Failed to create OTel emitter", "err", err)
@@ -331,9 +323,45 @@ func main() {
 		deploymentEligible[providers.ProviderAnthropic] = struct{}{}
 	}
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedOnlyUser, stickyTTL, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
+	// Planner + handover config (Prism-style cache-aware routing). Defaults
+	// keep the kill switch on, $0.001 EV threshold, and a 3-turn horizon —
+	// each can be overridden per deployment. The summarizer is only wired
+	// when its provider client is registered; otherwise the orchestrator
+	// falls back to handover.TrimLastN on switch turns.
+	plannerEnabled := config.GetOr("ROUTER_PLANNER_ENABLED", "true") == "true"
+	plannerCfg := planner.EVConfig{
+		ThresholdUSD:           parseEnvFloat("ROUTER_SWITCH_EV_THRESHOLD_USD", proxy.DefaultPlannerThresholdUSD),
+		ExpectedRemainingTurns: parseEnvInt("ROUTER_SWITCH_EXPECTED_REMAINING_TURNS", proxy.DefaultPlannerExpectedRemainingTurns),
+	}
+	handoverProviderName := config.GetOr("ROUTER_HANDOVER_PROVIDER", providers.ProviderAnthropic)
+	handoverModel := config.GetOr("ROUTER_HANDOVER_MODEL", proxy.DefaultHandoverModel)
+	handoverTimeout := parseEnvDurationMs("ROUTER_HANDOVER_TIMEOUT_MS", proxy.DefaultHandoverTimeout)
+	// summarizer stays as the interface type so an unregistered provider
+	// leaves it as a true nil interface — passing a typed-nil *ProviderSummarizer
+	// through WithSummarizer would defeat the orchestrator's `!= nil` check.
+	var summarizer handover.Summarizer
+	if client, ok := providerMap[handoverProviderName]; ok {
+		summarizer = proxy.NewProviderSummarizer(client, handoverModel, handoverTimeout)
+		logger.Info("Handover summarizer wired", "provider", handoverProviderName, "model", handoverModel, "timeout_ms", handoverTimeout.Milliseconds())
+	} else {
+		logger.Info("Handover summarizer disabled (provider not registered); switch turns will fall back to TrimLastN", "requested_provider", handoverProviderName)
+	}
+
+	// Available-models set lets the planner force a switch when a pinned
+	// model's provider has been removed. Sourced from the default cluster
+	// bundle's deployed_models filtered by registered providers — same
+	// logic as resolveHardPinModel, so a missing/unloadable bundle leaves
+	// it nil (planner then treats every pin as still routable).
+	availableModels := resolveAvailableModels(availableProviders, logger)
+
+	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithByokOnly(byokOnly).
-		WithDeploymentKeyedProviders(deploymentEligible)
+		WithDeploymentKeyedProviders(deploymentEligible).
+		WithPlannerEnabled(plannerEnabled).
+		WithPlanner(plannerCfg).
+		WithSummarizer(summarizer).
+		WithAvailableModels(availableModels)
+	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "available_models_count", len(availableModels))
 
 	// ROUTER_EXCLUDED_MODELS pins a deployment-wide model exclusion list,
 	// overriding per-installation DB state. Empty / unset → DB takes over.
@@ -611,6 +639,25 @@ func parseEnvInt(key string, fallback int) int {
 	return n
 }
 
+// parseEnvFloat reads an env var as a float64. Returns fallback when the
+// var is unset, empty, or unparseable. Logs a warning only on parse
+// failure. Zero and negative values are valid: ROUTER_SWITCH_EV_THRESHOLD_USD
+// uses a USD threshold in `expectedSavings - evictionCost > threshold`, so
+// operators set it to <= 0 to make the planner switch aggressively (the PR
+// test plan documents `-1` as the force-switch knob).
+func parseEnvFloat(key string, fallback float64) float64 {
+	raw := config.GetOr(key, "")
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		observability.Get().Warn("Invalid env var; using default", "key", key, "value", raw, "default", fallback)
+		return fallback
+	}
+	return v
+}
+
 // parseEnvDurationMs reads an env var as a millisecond integer and returns
 // it as a time.Duration. Returns fallback when unset, empty, or unparseable.
 func parseEnvDurationMs(key string, fallback time.Duration) time.Duration {
@@ -752,6 +799,36 @@ func resolveHardPinModel(available map[string]struct{}, logger *slog.Logger) (pr
 		return defaultHardPinProvider, defaultHardPinModel
 	}
 	return p, m
+}
+
+// resolveAvailableModels returns the boot-time set of routable model names,
+// derived from the default cluster bundle's deployed_models intersected with
+// the registered provider set. Returns nil on any load failure — the planner
+// then treats every pin as still routable (best-effort behavior; matches
+// resolveHardPinModel's fallback posture).
+func resolveAvailableModels(availableProviders map[string]struct{}, logger *slog.Logger) map[string]struct{} {
+	reqVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
+	defaultVersion, err := cluster.ResolveVersion(reqVersion)
+	if err != nil {
+		logger.Warn("Available-models set: could not resolve cluster version; planner will treat every pin as routable", "err", err)
+		return nil
+	}
+	bundle, err := cluster.LoadBundle(defaultVersion)
+	if err != nil {
+		logger.Warn("Available-models set: could not load bundle; planner will treat every pin as routable", "err", err)
+		return nil
+	}
+	out := make(map[string]struct{}, len(bundle.Registry.DeployedModels))
+	for _, e := range bundle.Registry.DeployedModels {
+		if _, ok := availableProviders[e.Provider]; !ok {
+			continue
+		}
+		out[e.Model] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // envVarHint returns the env var name for a provider's API key, formatted

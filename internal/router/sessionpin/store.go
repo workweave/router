@@ -24,23 +24,50 @@ const DefaultRole = "default"
 
 // Pin is one row in the session-pin table. Mirrors a routing decision
 // so a hit can rehydrate router.Decision without re-running the scorer.
+//
+// The Last*Tokens / LastTurnEndedAt fields record the previous turn's
+// upstream token usage; the Prism-style planner reads them to compute
+// the expected-value math for switching providers vs. retaining the
+// existing prompt cache. They are written by Store.UpdateUsage after a
+// turn completes and are deliberately left untouched by Upsert so the
+// at-start-of-turn refresh cannot clobber them with zeros.
+// LastTurnEndedAt's zero value means "no turn has completed yet".
 type Pin struct {
-	SessionKey     [SessionKeyLen]byte
-	Role           string
-	InstallationID uuid.UUID
-	Provider       string
-	Model          string
-	Reason         string
-	TurnCount      int
-	PinnedUntil    time.Time
-	FirstPinnedAt  time.Time
-	LastSeenAt     time.Time
+	SessionKey            [SessionKeyLen]byte
+	Role                  string
+	InstallationID        uuid.UUID
+	Provider              string
+	Model                 string
+	Reason                string
+	TurnCount             int
+	PinnedUntil           time.Time
+	FirstPinnedAt         time.Time
+	LastSeenAt            time.Time
+	LastInputTokens       int
+	LastCachedReadTokens  int
+	LastCachedWriteTokens int
+	LastOutputTokens      int
+	LastTurnEndedAt       time.Time
+}
+
+// Usage captures the previous turn's upstream token accounting. It is
+// the input to Store.UpdateUsage; the planner reads it back through
+// Store.Get on the next turn to weigh switch EV against eviction cost.
+type Usage struct {
+	InputTokens       int
+	CachedReadTokens  int
+	CachedWriteTokens int
+	OutputTokens      int
+	EndedAt           time.Time
 }
 
 // Store is the I/O surface for session pins. Get returns (zero, false,
-// nil) when no row exists (no error).
+// nil) when no row exists (no error). UpdateUsage is a no-op (returns
+// nil) when the pin has been evicted or never existed; callers fire it
+// off the request path so a missing row must not surface as an error.
 type Store interface {
 	Get(ctx context.Context, sessionKey [SessionKeyLen]byte, role string) (Pin, bool, error)
 	Upsert(ctx context.Context, p Pin) error
+	UpdateUsage(ctx context.Context, sessionKey [SessionKeyLen]byte, role string, usage Usage) error
 	SweepExpired(ctx context.Context) error
 }

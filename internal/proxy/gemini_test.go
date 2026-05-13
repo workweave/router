@@ -33,7 +33,7 @@ func TestProxyGeminiGenerateContent_RoutesToGoogleProvider(t *testing.T) {
 	svc := proxy.NewService(
 		fr,
 		map[string]providers.Client{providers.ProviderGoogle: googleProv},
-		nil, false, 0, nil,
+		nil, false, nil,
 		store,
 		false, providers.ProviderGoogle, "gemini-2.5-flash",
 		nil,
@@ -64,7 +64,7 @@ func TestProxyGeminiGenerateContent_CrossFormatReturnsSentinel(t *testing.T) {
 			providers.ProviderAnthropic: &fakeProvider{},
 			providers.ProviderGoogle:    &fakeProvider{},
 		},
-		nil, false, 0, nil,
+		nil, false, nil,
 		store,
 		false, providers.ProviderGoogle, "gemini-2.5-flash",
 		nil,

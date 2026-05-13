@@ -15,6 +15,8 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
+	"workweave/router/internal/router/handover"
+	"workweave/router/internal/router/planner"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
@@ -28,11 +30,11 @@ type Service struct {
 	providers            map[string]providers.Client
 	emitter              *otel.Emitter
 	embedOnlyUserMessage bool
-	stickyDecisions      *expirable.LRU[string, router.Decision]
 	// semanticCache short-circuits non-streaming requests on a cosine-similarity hit.
 	semanticCache *cache.Cache
 	// pinStore persists session-sticky routing decisions across instance restarts.
-	// Nil when the feature flag is off; tiered lookup degrades to the legacy LRU.
+	// Nil when the feature flag is off; the orchestrator then runs the scorer
+	// every turn and persists nothing.
 	pinStore sessionpin.Store
 	// pinCache absorbs the hot path; 30s TTL is short enough that pinned_until
 	// in the pin store remains source of truth for validity.
@@ -40,6 +42,9 @@ type Service struct {
 	// pinWriteSem bounds concurrent async pin-upsert goroutines. Writes drop
 	// (non-blocking) when full so a slow Postgres can't accumulate goroutines.
 	pinWriteSem chan struct{}
+	// usageWriteSem bounds concurrent async last-turn-usage writeback
+	// goroutines, with the same drop-on-full semantics as pinWriteSem.
+	usageWriteSem chan struct{}
 	// hardPinExplore gates the Explore sub-agent hard-pin.
 	hardPinExplore bool
 	// hardPinProvider/hardPinModel route compaction (and, when hardPinExplore is
@@ -64,6 +69,20 @@ type Service struct {
 	// in non-BYOK-only mode. When nil, all registered providers are treated
 	// as deployment-keyed (legacy behavior preserved for tests).
 	deploymentKeyedProviders map[string]struct{}
+	// planner parameterizes the Prism-style EV policy that decides
+	// stay-vs-switch per turn. Constructed once at boot from env.
+	planner planner.EVConfig
+	// plannerEnabled is the kill switch (ROUTER_PLANNER_ENABLED). When
+	// false, the orchestrator falls back to first-decision-wins behavior.
+	plannerEnabled bool
+	// summarizer produces a bounded-cost handover summary on switch
+	// turns. May be nil — the orchestrator then falls straight to
+	// handover.TrimLastN on switch.
+	summarizer handover.Summarizer
+	// availableModels is the boot-time set of model names whose providers
+	// are registered. Read by the planner to decide whether a pin's model
+	// is still routable; if not, switch regardless of EV.
+	availableModels map[string]struct{}
 }
 
 // pinSessionTTL is the sliding TTL on pinned_until. Mirrors Anthropic's
@@ -125,34 +144,96 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 	return creds
 }
 
-// NewService constructs the proxy service. pinStore may be nil when the
-// session-pin feature flag is off.
-func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedOnlyUserMessage bool, stickyDecisionTTL time.Duration, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
-	var sticky *expirable.LRU[string, router.Decision]
-	if stickyDecisionTTL > 0 {
-		sticky = expirable.NewLRU[string, router.Decision](10000, nil, stickyDecisionTTL)
-	}
+// DefaultPlannerThresholdUSD is the minimum positive EV (over the
+// remaining-turn horizon) required to switch off a pinned model. Small
+// enough that genuine arbitrage triggers a switch; large enough that
+// near-tie noise doesn't flap decisions.
+const DefaultPlannerThresholdUSD = 0.001
+
+// DefaultPlannerExpectedRemainingTurns is the horizon used to amortize
+// per-turn savings. Matches observed agentic-loop tail length.
+const DefaultPlannerExpectedRemainingTurns = 3
+
+// session-pin feature flag is off. The planner runs by default with the
+// conservative EVConfig above; callers tune it via WithPlanner /
+// WithPlannerEnabled / WithSummarizer / WithAvailableModels.
+func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedOnlyUserMessage bool, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
 	var pinCache *expirable.LRU[string, sessionpin.Pin]
 	var pinWriteSem chan struct{}
+	var usageWriteSem chan struct{}
 	if pinStore != nil {
 		pinCache = expirable.NewLRU[string, sessionpin.Pin](10000, nil, 30*time.Second)
 		pinWriteSem = make(chan struct{}, 64)
+		usageWriteSem = make(chan struct{}, 64)
 	}
 	return &Service{
 		router:               r,
 		providers:            providerMap,
 		emitter:              emitter,
 		embedOnlyUserMessage: embedOnlyUserMessage,
-		stickyDecisions:      sticky,
 		semanticCache:        semanticCache,
 		pinStore:             pinStore,
 		pinCache:             pinCache,
 		pinWriteSem:          pinWriteSem,
+		usageWriteSem:        usageWriteSem,
 		hardPinExplore:       hardPinExplore,
 		hardPinProvider:      hardPinProvider,
 		hardPinModel:         hardPinModel,
 		telemetry:            telemetry,
+		planner: planner.EVConfig{
+			ThresholdUSD:           DefaultPlannerThresholdUSD,
+			ExpectedRemainingTurns: DefaultPlannerExpectedRemainingTurns,
+		},
+		plannerEnabled: true,
 	}
+}
+
+// WithPlanner overrides the EV-policy configuration. ThresholdUSD is
+// assigned verbatim — zero and negative values are legitimate operator-
+// chosen settings (the planner switches when expectedSavings -
+// evictionCost > threshold; the test plan documents -1 as the force-
+// switch knob). ExpectedRemainingTurns falls back to the default on
+// non-positive values because amortizing savings over <= 0 turns has no
+// meaningful interpretation.
+func (s *Service) WithPlanner(cfg planner.EVConfig) *Service {
+	s.planner.ThresholdUSD = cfg.ThresholdUSD
+	if cfg.ExpectedRemainingTurns > 0 {
+		s.planner.ExpectedRemainingTurns = cfg.ExpectedRemainingTurns
+	}
+	return s
+}
+
+// WithPlannerEnabled is the kill switch (ROUTER_PLANNER_ENABLED). When
+// false, the orchestrator preserves the "first decision wins" behavior
+// (Tier-1/2 pin lookup, scorer fallback, no EV math).
+func (s *Service) WithPlannerEnabled(enabled bool) *Service {
+	s.plannerEnabled = enabled
+	return s
+}
+
+// WithSummarizer installs the cheap-model summarizer used to bound
+// handover cost on switch turns. nil disables the synchronous summary
+// step; the orchestrator then trims-last-N on every switch.
+func (s *Service) WithSummarizer(sz handover.Summarizer) *Service {
+	s.summarizer = sz
+	return s
+}
+
+// WithAvailableModels installs the boot-time set of model names whose
+// providers are registered. The planner consults this set so a pin
+// whose model is no longer routable forces a switch regardless of EV.
+// Passing nil clears the set (every model is considered available).
+func (s *Service) WithAvailableModels(models map[string]struct{}) *Service {
+	if models == nil {
+		s.availableModels = nil
+		return s
+	}
+	copied := make(map[string]struct{}, len(models))
+	for m := range models {
+		copied[m] = struct{}{}
+	}
+	s.availableModels = copied
+	return s
 }
 
 // WithByokOnly enables BYOK-only credential resolution: providers without
@@ -446,17 +527,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 	bypassEval := hasEvalOverrideHeader(r)
-	// Tier-1/2 pinning stays on for eval traffic (unique session_key per prompt).
-	// Tier-3 (legacy apiKeyID LRU) bypassed: eval shares one apiKeyID across
-	// 500 instances and the first decision would otherwise stick to all of them.
-	// Mid-conversation provider switches break Gemini (rejects function calls
-	// without thoughtSignature), so per-session pinning is required.
-	bypassLegacySticky := bypassEval
 
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
 	routeStart := time.Now()
-	routeRes, routeErr := s.routeWithSession(ctx, env, feats, apiKeyID, installationID, "", bypassLegacySticky, router.Request{
+	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, router.Request{
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
@@ -474,6 +549,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	pinTier := routeRes.PinTier
 	pinAgeSec := routeRes.PinAgeSec
 	routeMs := time.Since(routeStart).Milliseconds()
+	s.logPlannerOutcome(routeRes)
 
 	// Semantic-cache eligibility: configured, non-streaming, decision has
 	// metadata, externalID present, not eval traffic (eval bypasses to keep
@@ -513,37 +589,38 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	reqPricing := otel.Lookup(feats.Model)
 	actPricing := otel.Lookup(decision.Model)
+	decisionBuilder := otel.NewAttrBuilder(40).
+		String("request_id", requestID).
+		String("external_id", externalID).
+		String("router_user_id", auth.UserIDFrom(ctx)).
+		String("client.device_id", clientID.DeviceID).
+		String("client.account_id", clientID.AccountID).
+		String("client.session_id", clientID.SessionID).
+		String("client.user_agent", clientID.UserAgent).
+		String("client.app", clientID.ClientApp).
+		String("requested.model", feats.Model).
+		String("decision.model", decision.Model).
+		String("decision.provider", decision.Provider).
+		String("decision.reason", decision.Reason).
+		Bool("routing.sticky_hit", stickyHit).
+		Bool("routing.session_pin_hit", pinTier == "in_proc" || pinTier == "postgres").
+		String("routing.session_pin_tier", pinTier).
+		Int64("routing.session_pin_age_s", pinAgeSec).
+		String("routing.turn_type", string(tt)).
+		String("routing.embed_input", embedInput).
+		Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
+		IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
+		Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
+		Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
+		Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
+		Float64("pricing.actual_output_per_1m", actPricing.OutputUSDPer1M).
+		Int64("latency.route_ms", routeMs)
+	applyPlannerAttrs(decisionBuilder, routeRes)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(26).
-			String("request_id", requestID).
-			String("external_id", externalID).
-			String("router_user_id", auth.UserIDFrom(ctx)).
-			String("client.device_id", clientID.DeviceID).
-			String("client.account_id", clientID.AccountID).
-			String("client.session_id", clientID.SessionID).
-			String("client.user_agent", clientID.UserAgent).
-			String("client.app", clientID.ClientApp).
-			String("requested.model", feats.Model).
-			String("decision.model", decision.Model).
-			String("decision.provider", decision.Provider).
-			String("decision.reason", decision.Reason).
-			Bool("routing.sticky_hit", stickyHit).
-			Bool("routing.session_pin_hit", pinTier == "in_proc" || pinTier == "postgres").
-			String("routing.session_pin_tier", pinTier).
-			Int64("routing.session_pin_age_s", pinAgeSec).
-			String("routing.turn_type", string(tt)).
-			String("routing.embed_input", embedInput).
-			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
-			IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
-			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
-			Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
-			Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
-			Float64("pricing.actual_output_per_1m", actPricing.OutputUSDPer1M).
-			Int64("latency.route_ms", routeMs).
-			Build(),
+		Attrs: decisionBuilder.Build(),
 	})
 	otel.Flush(ctx)
 
@@ -636,7 +713,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	in, out := extractor.Tokens()
 	cacheCreation, cacheRead := extractor.CacheTokens()
-	upstreamBuilder := otel.NewAttrBuilder(27).
+	upstreamBuilder := otel.NewAttrBuilder(40).
 		String("request_id", requestID).
 		String("external_id", externalID).
 		String("router_user_id", auth.UserIDFrom(ctx)).
@@ -657,6 +734,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
 		Bool("routing.cross_format", crossFormat)
+	applyPlannerAttrs(upstreamBuilder, routeRes)
 	addTimingAttrs(ctx, upstreamBuilder)
 
 	// Span attrs and telemetry row share the same source; bundle keeps them symmetric.
@@ -670,6 +748,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Attrs: upstreamBuilder.Build(),
 	})
 	otel.Flush(ctx)
+
+	// Persist last-turn usage to the pin row so the next turn's planner
+	// has cache-hit evidence. Off the request path; drops on saturation.
+	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
 
 	if installationID != uuid.Nil {
 		s.fireTelemetry(InsertTelemetryParams{
@@ -715,6 +797,135 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 // schema's role dimension for non-default roles.
 func sessionPinCacheKey(key [sessionpin.SessionKeyLen]byte, role string) string {
 	return hex.EncodeToString(key[:]) + ":" + role
+}
+
+// applyPlannerAttrs stamps planner and handover attributes onto a span
+// attribute builder. Safe to call when the planner didn't run; uses
+// "skipped" for the outcome and zero values for the EV fields so the
+// schema stays uniform across hard-pin / tool-result / planner-disabled
+// paths.
+func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilder {
+	outcome := plannerOutcomeAttr(res)
+	b.String("planner.outcome", outcome).
+		String("planner.reason", res.PlannerDecision.Reason).
+		Float64("planner.expected_savings_usd", res.PlannerDecision.ExpectedSavingsUSD).
+		Float64("planner.eviction_cost_usd", res.PlannerDecision.EvictionCostUSD).
+		Float64("planner.threshold_usd", res.PlannerDecision.ThresholdUSD).
+		String("planner.pin_model", res.PinModel).
+		String("planner.fresh_model", res.Fresh.Model).
+		String("planner.chosen_model", res.Decision.Model).
+		Bool("handover.invoked", res.Handover.Invoked).
+		Int64("handover.latency_ms", res.Handover.LatencyMS).
+		Int64("handover.summary_tokens", int64(res.Handover.SummaryTokens)).
+		Bool("handover.fallback_to_trim", res.Handover.FallbackToTrim)
+	return b
+}
+
+// plannerOutcomeAttr maps the planner's typed outcome to the string used
+// in OTel attrs. "skipped" covers every path where Decide was not
+// invoked (hard-pin, tool-result short-circuit, planner-disabled,
+// pin-store-disabled).
+func plannerOutcomeAttr(res turnLoopResult) string {
+	if res.PlannerDecision.Reason == "" {
+		return "skipped"
+	}
+	switch res.PlannerDecision.Outcome {
+	case planner.OutcomeStay:
+		return "stay"
+	case planner.OutcomeSwitch:
+		return "switch"
+	default:
+		return "skipped"
+	}
+}
+
+// logPlannerOutcome emits a single structured log line summarizing the
+// planner's verdict. Switch turns are Info (rare, decision-affecting);
+// stay turns are Debug so the steady-state hot path stays quiet.
+func (s *Service) logPlannerOutcome(res turnLoopResult) {
+	if res.PlannerDecision.Reason == "" {
+		return
+	}
+	log := observability.Get()
+	if res.PlannerDecision.Outcome == planner.OutcomeSwitch {
+		log.Info("router switched models",
+			"from", res.PinModel,
+			"to", res.Decision.Model,
+			"reason", res.PlannerDecision.Reason,
+			"expected_savings_usd", res.PlannerDecision.ExpectedSavingsUSD,
+			"eviction_cost_usd", res.PlannerDecision.EvictionCostUSD,
+			"threshold_usd", res.PlannerDecision.ThresholdUSD,
+			"handover_invoked", res.Handover.Invoked,
+			"handover_fallback_to_trim", res.Handover.FallbackToTrim,
+			"handover_latency_ms", res.Handover.LatencyMS,
+		)
+		return
+	}
+	log.Debug("router stayed on pinned model",
+		"model", res.Decision.Model,
+		"reason", res.PlannerDecision.Reason,
+		"expected_savings_usd", res.PlannerDecision.ExpectedSavingsUSD,
+		"eviction_cost_usd", res.PlannerDecision.EvictionCostUSD,
+		"threshold_usd", res.PlannerDecision.ThresholdUSD,
+	)
+}
+
+// recordTurnUsage writes the upstream's observed input/output/cache
+// tokens back to the session pin row. The planner reads these on the
+// next turn to weigh switch EV against eviction cost.
+//
+// Bounded async; drops on saturation. Guarded against hard-pin turns
+// (no pin row to update) and missing session keys (e.g. pin store
+// disabled). Uses context.Background() — per CLAUDE.md, deferred DB
+// writes must outlive the request ctx.
+func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, cacheRead int) {
+	if s.pinStore == nil || res.HardPinned {
+		return
+	}
+	var zeroKey [sessionpin.SessionKeyLen]byte
+	if res.SessionKey == zeroKey {
+		return
+	}
+	if in == 0 && out == 0 && cacheCreation == 0 && cacheRead == 0 {
+		return
+	}
+	usage := sessionpin.Usage{
+		InputTokens:       in,
+		CachedReadTokens:  cacheRead,
+		CachedWriteTokens: cacheCreation,
+		OutputTokens:      out,
+		EndedAt:           time.Now(),
+	}
+	key := res.SessionKey
+
+	// Keep the in-proc LRU coherent with the DB writeback. Without this,
+	// loadPin's Tier-1 hit serves a stale pin with zero usage and the
+	// planner returns ReasonNoPriorUsage forever (the 30s LRU TTL keeps
+	// resetting under typical agentic turn cadence), which silently
+	// disables EV-based switching for all active sessions.
+	if s.pinCache != nil {
+		pinCacheKey := sessionPinCacheKey(key, sessionpin.DefaultRole)
+		if pin, ok := s.pinCache.Get(pinCacheKey); ok {
+			pin.LastInputTokens = usage.InputTokens
+			pin.LastCachedReadTokens = usage.CachedReadTokens
+			pin.LastCachedWriteTokens = usage.CachedWriteTokens
+			pin.LastOutputTokens = usage.OutputTokens
+			pin.LastTurnEndedAt = usage.EndedAt
+			s.pinCache.Add(pinCacheKey, pin)
+		}
+	}
+
+	select {
+	case s.usageWriteSem <- struct{}{}:
+		go func() {
+			defer func() { <-s.usageWriteSem }()
+			if err := s.pinStore.UpdateUsage(context.Background(), key, sessionpin.DefaultRole, usage); err != nil {
+				observability.Get().Debug("session pin usage writeback failed", "err", err)
+			}
+		}()
+	default:
+		observability.Get().Debug("session pin usage writeback dropped: semaphore full")
+	}
 }
 
 // pinDecision rehydrates a router.Decision from a stored pin. Metadata is
@@ -766,6 +977,35 @@ func externalKeysFromContext(ctx context.Context) []*auth.ExternalAPIKey {
 	}
 	keys, _ := v.([]*auth.ExternalAPIKey)
 	return keys
+}
+
+// requestUsesNonDeploymentCreds reports whether the inbound request's
+// provider credentials are NOT the platform's deployment-level env keys.
+// The handover summarizer is wired at boot with deployment-level
+// credentials; calling it on a request whose upstream call would use
+// BYOK or client-supplied creds would route prior conversation context
+// (preserved by the summarizer's handover instruction) through the
+// platform account, violating tenant data boundaries. The orchestrator
+// uses this to skip the summarizer and fall through to TrimLastN.
+func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers http.Header) bool {
+	if s.byokOnly {
+		return true
+	}
+	if len(externalKeysFromContext(ctx)) > 0 {
+		return true
+	}
+	for _, p := range []string{
+		providers.ProviderAnthropic,
+		providers.ProviderOpenAI,
+		providers.ProviderGoogle,
+		providers.ProviderOpenRouter,
+		providers.ProviderFireworks,
+	} {
+		if ExtractClientCredentials(p, headers) != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // enabledProvidersForRequest returns providers whose credentials are
@@ -935,13 +1175,12 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	bypassEval := hasEvalOverrideHeader(r)
-	bypassLegacySticky := bypassEval
 
 	// OpenAI signals sub-agent identity via x-weave-subagent-type (no metadata.user_id).
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
 	routeStart := time.Now()
-	routeRes, err := s.routeWithSession(ctx, env, feats, apiKeyID, installationID, subAgentHint, bypassLegacySticky, router.Request{
+	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
@@ -959,6 +1198,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	stickyHit := routeRes.StickyHit
 	pinTier := routeRes.PinTier
 	pinAgeSec := routeRes.PinAgeSec
+	s.logPlannerOutcome(routeRes)
 
 	// Same eligibility rules as ProxyMessages. FormatOpenAI keeps replays
 	// scoped: an Anthropic-stored response is never served here.
@@ -997,37 +1237,38 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	reqPricing := otel.Lookup(feats.Model)
 	actPricing := otel.Lookup(decision.Model)
+	openaiDecisionBuilder := otel.NewAttrBuilder(40).
+		String("request_id", requestID).
+		String("external_id", externalID).
+		String("router_user_id", auth.UserIDFrom(ctx)).
+		String("client.device_id", clientID.DeviceID).
+		String("client.account_id", clientID.AccountID).
+		String("client.session_id", clientID.SessionID).
+		String("client.user_agent", clientID.UserAgent).
+		String("client.app", clientID.ClientApp).
+		String("requested.model", feats.Model).
+		String("decision.model", decision.Model).
+		String("decision.provider", decision.Provider).
+		String("decision.reason", decision.Reason).
+		Bool("routing.sticky_hit", stickyHit).
+		Bool("routing.session_pin_hit", pinTier == "in_proc" || pinTier == "postgres").
+		String("routing.session_pin_tier", pinTier).
+		Int64("routing.session_pin_age_s", pinAgeSec).
+		String("routing.turn_type", string(tt)).
+		String("routing.embed_input", embedInput).
+		Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
+		IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
+		Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
+		Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
+		Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
+		Float64("pricing.actual_output_per_1m", actPricing.OutputUSDPer1M).
+		Int64("latency.route_ms", routeMs)
+	applyPlannerAttrs(openaiDecisionBuilder, routeRes)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.decision",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(25).
-			String("request_id", requestID).
-			String("external_id", externalID).
-			String("router_user_id", auth.UserIDFrom(ctx)).
-			String("client.device_id", clientID.DeviceID).
-			String("client.account_id", clientID.AccountID).
-			String("client.session_id", clientID.SessionID).
-			String("client.user_agent", clientID.UserAgent).
-			String("client.app", clientID.ClientApp).
-			String("requested.model", feats.Model).
-			String("decision.model", decision.Model).
-			String("decision.provider", decision.Provider).
-			String("decision.reason", decision.Reason).
-			Bool("routing.sticky_hit", stickyHit).
-			Bool("routing.session_pin_hit", pinTier == "in_proc" || pinTier == "postgres").
-			String("routing.session_pin_tier", pinTier).
-			Int64("routing.session_pin_age_s", pinAgeSec).
-			String("routing.turn_type", string(tt)).
-			String("routing.embed_input", embedInput).
-			Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
-			IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
-			Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
-			Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
-			Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
-			Float64("pricing.actual_output_per_1m", actPricing.OutputUSDPer1M).
-			Int64("latency.route_ms", routeMs).
-			Build(),
+		Attrs: openaiDecisionBuilder.Build(),
 	})
 	otel.Flush(ctx)
 
@@ -1114,7 +1355,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	in, out := extractor.Tokens()
 	cacheCreation, cacheRead := extractor.CacheTokens()
-	openaiUpstreamBuilder := otel.NewAttrBuilder(27).
+	openaiUpstreamBuilder := otel.NewAttrBuilder(40).
 		String("request_id", requestID).
 		String("external_id", externalID).
 		String("router_user_id", auth.UserIDFrom(ctx)).
@@ -1135,6 +1376,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
 		Bool("routing.cross_format", crossFormat)
+	applyPlannerAttrs(openaiUpstreamBuilder, routeRes)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
 
 	// Shared bundle keeps the OpenAI path in lockstep with ProxyMessages.
@@ -1148,6 +1390,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Attrs: openaiUpstreamBuilder.Build(),
 	})
 	otel.Flush(ctx)
+
+	// Persist last-turn usage to the pin row so the next turn's planner
+	// has cache-hit evidence. Off the request path; drops on saturation.
+	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
 
 	installationIDOAI, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	if installationIDOAI != "" {

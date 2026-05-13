@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
@@ -53,7 +52,7 @@ func (f *fakeProvider) Passthrough(ctx context.Context, prep providers.PreparedR
 }
 
 func makeProxyService(decision router.Decision, p map[string]providers.Client) *proxy.Service {
-	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+	return proxy.NewService(&fakeRouter{decision: decision}, p, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 }
 
 func TestService_ProxyMessages_PropagatesUpstreamStatusError(t *testing.T) {
@@ -139,7 +138,6 @@ func TestService_ProxyMessages_EmbedOnlyUserMessageFlag(t *testing.T) {
 			map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 			nil,
 			false,
-			0,
 			nil,
 			nil,
 			false,
@@ -163,7 +161,6 @@ func TestService_ProxyMessages_EmbedOnlyUserMessageFlag(t *testing.T) {
 			map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 			nil,
 			true,
-			0,
 			nil,
 			nil,
 			false,
@@ -228,7 +225,6 @@ func TestService_ProxyMessages_EmbedOnlyUserMessageContextOverride(t *testing.T)
 				map[string]providers.Client{"anthropic": &fakeProvider{}},
 				nil,
 				tc.startupFlag,
-				0,
 				nil,
 				nil,
 				false,
@@ -254,49 +250,30 @@ func TestService_ProxyMessages_EmbedOnlyUserMessageContextOverride(t *testing.T)
 
 func boolPtr(b bool) *bool { return &b }
 
-func TestService_ProxyMessages_StickyBypassedByEvalOverrideHeaders(t *testing.T) {
+// TestService_ProxyMessages_NoPinStoreRunsScorerEveryTurn verifies the
+// pin-store-disabled path: without a pin store, every turn re-runs the
+// cluster scorer (no Tier-3 legacy LRU short-circuits routing anymore).
+func TestService_ProxyMessages_NoPinStoreRunsScorerEveryTurn(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"}}
+	svc := proxy.NewService(fr,
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil,
+		false,
+		nil,
+		nil, // pinStore disabled
+		false,
+		providers.ProviderAnthropic, "claude-haiku-4-5",
+		nil,
+	)
 
-	type runConfig struct {
-		name           string
-		header         string
-		wantRouteCalls int
+	ctx := context.WithValue(context.Background(), proxy.APIKeyIDContextKey{}, "key-1")
+	for range 2 {
+		rec := httptest.NewRecorder()
+		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 	}
-	cases := []runConfig{
-		{name: "no override → second call hits sticky cache", header: "", wantRouteCalls: 1},
-		{name: "x-weave-cluster-version bypasses sticky", header: "x-weave-cluster-version", wantRouteCalls: 2},
-		{name: "x-weave-embed-only-user-message bypasses sticky", header: "x-weave-embed-only-user-message", wantRouteCalls: 2},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"}}
-			svc := proxy.NewService(fr,
-				map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
-				nil,
-				false,
-				time.Hour, // sticky window stays open across both calls
-				nil,
-				nil,
-				false,
-				providers.ProviderAnthropic, "claude-haiku-4-5",
-				nil,
-			)
-
-			ctx := context.WithValue(context.Background(), proxy.APIKeyIDContextKey{}, "key-1")
-
-			for i := 0; i < 2; i++ {
-				rec := httptest.NewRecorder()
-				httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-				if tc.header != "" {
-					httpReq.Header.Set(tc.header, "true")
-				}
-				require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
-			}
-
-			assert.Equal(t, tc.wantRouteCalls, fr.routeCalls)
-		})
-	}
+	assert.Equal(t, 2, fr.routeCalls, "without a pin store, both turns must consult the scorer")
 }
 
 func TestService_ProxyOpenAIChatCompletion_AnthropicCrossFormat(t *testing.T) {
@@ -432,7 +409,7 @@ func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 
 	t.Run("byok-off keeps every registered provider eligible (selfhost baseline)", func(t *testing.T) {
 		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
-		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+		svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
 		rec := httptest.NewRecorder()
 		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
@@ -445,7 +422,7 @@ func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 
 	t.Run("byok-on with no creds yields empty eligible set", func(t *testing.T) {
 		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
-		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
 			WithByokOnly(true)
 
 		rec := httptest.NewRecorder()
@@ -459,7 +436,7 @@ func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 	t.Run("byok-on with client-supplied Bearer enables only that provider", func(t *testing.T) {
 		// Anthropic decision lets proxy complete; assertion targets EnabledProviders.
 		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
-		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
 			WithByokOnly(true)
 
 		rec := httptest.NewRecorder()
@@ -482,7 +459,7 @@ func TestService_ExcludedModelsThroughRequest(t *testing.T) {
 
 	t.Run("no override and no installation list → nil", func(t *testing.T) {
 		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
-		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+		svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
 		rec := httptest.NewRecorder()
 		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
@@ -494,7 +471,7 @@ func TestService_ExcludedModelsThroughRequest(t *testing.T) {
 
 	t.Run("installation list populates request", func(t *testing.T) {
 		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
-		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+		svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
 		ctx := context.WithValue(context.Background(), proxy.InstallationExcludedModelsContextKey{}, []string{"claude-opus-4-7", "gpt-5"})
 		rec := httptest.NewRecorder()
@@ -508,7 +485,7 @@ func TestService_ExcludedModelsThroughRequest(t *testing.T) {
 
 	t.Run("env override replaces installation list", func(t *testing.T) {
 		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
-		svc := proxy.NewService(fr, providerMap, nil, false, 0, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
 			WithExcludedModelsOverride([]string{"gpt-4o"})
 
 		// Installation list says one thing; override says another. Override wins.
