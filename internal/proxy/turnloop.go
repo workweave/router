@@ -92,10 +92,14 @@ func (s *Service) runTurnLoop(
 	}
 
 	// Hard pins for turn types whose optimal model is known a priori
-	// (compaction, Explore sub-agent dispatch). Bypass pin lookup, pin
-	// write, planner and scorer entirely so the pin row keeps tracking
-	// the main-loop model.
+	// (compaction, Explore sub-agent dispatch, SDK quota probes). Bypass
+	// pin lookup, pin write, planner and scorer entirely so the pin row
+	// keeps tracking the main-loop model. Probes specifically MUST NOT
+	// create a session pin — the Anthropic SDK fires one on init before
+	// the first real user turn, and if it anchored the pin every
+	// subsequent turn would inherit the probe's cheap-model decision.
 	if res.TurnType == turntype.Compaction ||
+		res.TurnType == turntype.Probe ||
 		(res.TurnType == turntype.SubAgentDispatch && s.hardPinExplore) {
 		res.Decision = router.Decision{
 			Provider: s.hardPinProvider,

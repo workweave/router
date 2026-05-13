@@ -42,6 +42,7 @@ func (e *RequestEnvelope) geminiRoutingFeatures(extractOnlyUser bool) RoutingFea
 		HasTools:     e.HasTools(),
 		PromptText:   text,
 		MessageCount: msgCount,
+		MaxTokens:    intGJSON(gjson.GetBytes(e.body, "generationConfig.maxOutputTokens")),
 	}
 
 	if msgCount > 0 {

@@ -25,7 +25,6 @@ var ErrNoEligibleProvider = errors.New("cluster: no eligible provider for reques
 // Config carries the scorer's runtime knobs.
 type Config struct {
 	TopP           int
-	MinPromptChars int
 	MaxPromptChars int
 	EmbedTimeout   time.Duration
 }
@@ -34,7 +33,6 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		TopP:           4,
-		MinPromptChars: 20,
 		MaxPromptChars: 1024,
 		EmbedTimeout:   1500 * time.Millisecond,
 	}
@@ -189,16 +187,6 @@ func sortedKeys(m map[string]struct{}) []string {
 func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	start := time.Now()
 	log := observability.Get()
-
-	if len(req.PromptText) < s.cfg.MinPromptChars {
-		log.Warn(
-			"Cluster scorer: prompt too short; returning ErrClusterUnavailable",
-			"prompt_chars", len(req.PromptText),
-			"min_prompt_chars", s.cfg.MinPromptChars,
-			"requested_model", req.RequestedModel,
-		)
-		return router.Decision{}, fmt.Errorf("prompt has %d chars, minimum is %d: %w", len(req.PromptText), s.cfg.MinPromptChars, ErrClusterUnavailable)
-	}
 
 	text := tailTruncate(req.PromptText, s.cfg.MaxPromptChars)
 	truncated := len(req.PromptText) > s.cfg.MaxPromptChars

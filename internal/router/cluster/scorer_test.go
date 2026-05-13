@@ -177,18 +177,6 @@ func TestScorer_PicksOtherClusterWhenAligned(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", got.Model)
 }
 
-// Fail loud rather than silently degrade — silent fallback masked real
-// regressions in eval.
-func TestScorer_ReturnsErrOnShortPrompt(t *testing.T) {
-	emb := &fakeEmbedder{vec: makeOpusVec()}
-	s := newScorerForTest(t, emb, cfgForTest())
-
-	_, err := s.Route(context.Background(), router.Request{PromptText: "hi"})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrClusterUnavailable))
-	assert.Equal(t, 0, emb.calls, "embedder should not be called for short prompts")
-}
-
 func TestScorer_ReturnsErrOnEmbedderError(t *testing.T) {
 	emb := &fakeEmbedder{err: errors.New("ort exploded")}
 	s := newScorerForTest(t, emb, cfgForTest())

@@ -15,6 +15,11 @@ type RoutingFeatures struct {
 	HasTools     bool
 	PromptText   string
 	MessageCount int
+	// MaxTokens is the caller's requested output cap (max_tokens for
+	// Anthropic/OpenAI, generationConfig.maxOutputTokens for Gemini). 0
+	// means unset/unknown. Probe detection in router/turntype keys off
+	// this — Anthropic SDK quota probes set max_tokens=1.
+	MaxTokens int
 	// LastKind: "user_prompt", "tool_result", or "assistant". Empty when messages is empty.
 	LastKind string
 	// LastPreview: first previewMaxChars of the last message's text, newlines collapsed.
@@ -70,6 +75,7 @@ func (e *RequestEnvelope) anthropicRoutingFeatures(extractOnlyUser bool) Routing
 		HasTools:     e.HasTools(),
 		PromptText:   text,
 		MessageCount: msgCount,
+		MaxTokens:    intGJSON(gjson.GetBytes(e.body, "max_tokens")),
 	}
 
 	if msgCount > 0 {
@@ -112,6 +118,7 @@ func (e *RequestEnvelope) openAIRoutingFeatures(extractOnlyUser bool) RoutingFea
 		HasTools:     e.HasTools(),
 		PromptText:   text,
 		MessageCount: msgCount,
+		MaxTokens:    openAIMaxTokens(e.body),
 	}
 
 	if msgCount > 0 {
@@ -124,6 +131,31 @@ func (e *RequestEnvelope) openAIRoutingFeatures(extractOnlyUser bool) RoutingFea
 	}
 
 	return feats
+}
+
+// intGJSON returns the integer value of a JSON number, or 0 when the
+// result is absent / non-numeric / fractional. Probe detection only cares
+// about whole-number caps (max_tokens=1); float values aren't valid here
+// and should be treated as unset rather than rounded silently.
+func intGJSON(v gjson.Result) int {
+	if !v.Exists() || v.Type != gjson.Number {
+		return 0
+	}
+	n := v.Int()
+	if n < 0 {
+		return 0
+	}
+	return int(n)
+}
+
+// openAIMaxTokens reads the output token cap from an OpenAI-format body.
+// Recent OpenAI SDKs send `max_completion_tokens`; older ones send
+// `max_tokens`. Either signals the caller's intent for a probe.
+func openAIMaxTokens(body []byte) int {
+	if n := intGJSON(gjson.GetBytes(body, "max_completion_tokens")); n > 0 {
+		return n
+	}
+	return intGJSON(gjson.GetBytes(body, "max_tokens"))
 }
 
 // classifyLastMessageOpenAI maps an OpenAI message role onto the shared

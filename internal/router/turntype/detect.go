@@ -25,7 +25,19 @@ const (
 	// Compaction: Claude Code context-compaction turn. Always routed to
 	// Haiku (short-out-of-long-in cost profile).
 	Compaction TurnType = "compaction"
+	// Probe: a quota / liveness check the caller issued before any real
+	// conversation (Anthropic SDK + Claude Code do this on init with
+	// max_tokens=1). Always hard-pinned to the cheap model AND skips
+	// session-pin creation so a probe never anchors subsequent routing.
+	Probe TurnType = "probe"
 )
+
+// probeMaxTokensThreshold is the inclusive upper bound on max_tokens for
+// classifying a request as a probe. The Anthropic SDK quota check uses
+// max_tokens=1; allow up to 4 to absorb minor variations across SDK
+// versions without false-positiving real "give me a short answer" calls
+// (which start around 64+).
+const probeMaxTokensThreshold = 4
 
 // DetectFromEnvelope classifies an inbound request. subAgentHint is the
 // optional x-weave-subagent-type header value; empty is ignored.
@@ -36,6 +48,13 @@ const (
 func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingFeatures, subAgentHint string) TurnType {
 	if env == nil {
 		return MainLoop
+	}
+	// Probe is checked first: it's the most specific signal (a numeric
+	// cap on the caller's request, not a heuristic over text) and the
+	// consequence is biggest — a probe that anchors a session pin
+	// poisons every subsequent turn in that session.
+	if isProbe(feats) {
+		return Probe
 	}
 	systemText := env.SystemText()
 	if isCompaction(systemText) {
@@ -48,6 +67,15 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 		return ToolResult
 	}
 	return MainLoop
+}
+
+// isProbe reports whether a request is a liveness/quota check that should
+// be hard-pinned and excluded from session-pin creation. The Anthropic
+// SDK's `client.messages.create(..., max_tokens=1)` quota probe is the
+// canonical case; OpenAI's `max_completion_tokens` and Gemini's
+// `generationConfig.maxOutputTokens` produce the same RoutingFeatures.
+func isProbe(feats translate.RoutingFeatures) bool {
+	return feats.MaxTokens > 0 && feats.MaxTokens <= probeMaxTokensThreshold
 }
 
 // isCompaction reports whether the system prompt contains Claude Code's
