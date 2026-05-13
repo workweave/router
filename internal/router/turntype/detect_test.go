@@ -91,6 +91,23 @@ func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 			want: turntype.SubAgentDispatch,
 		},
 		{
+			// Claude Code's Agent tool wraps the dispatched prompt in a
+			// <transcript> envelope. metadata.user_id is unset (Claude
+			// Code reuses the parent session_id), so the transcript
+			// marker is the only signal we get.
+			name: "sub-agent via <transcript> envelope in user message",
+			body: `{"model":"claude-opus-4-7","messages":[{"role":"user","content":"<transcript>\nUser: Find all router cost references\n</transcript>"}]}`,
+			want: turntype.SubAgentDispatch,
+		},
+		{
+			// Regression guard: a long main-loop user prompt that
+			// happens to contain "<transcript>" deep in its body must
+			// not trip the heuristic. Detection sniffs a 64-byte prefix.
+			name: "long main_loop with embedded <transcript> deep in body stays main_loop",
+			body: `{"model":"claude-opus-4-7","messages":[{"role":"user","content":"please review this code and tell me what you think about its overall structure and design including a <transcript> tag we discussed earlier"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
 			name: "empty body is main_loop",
 			body: `{}`,
 			want: turntype.MainLoop,
