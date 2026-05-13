@@ -645,10 +645,14 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 			}
 			id := tc.Get("id").Str
 			name := tc.Get("function.name").Str
+			sig := tc.Get("function.thought_signature").Str
+			if sig == "" {
+				sig = tc.Get("thought_signature").Str
+			}
 			blockIdx = t.blockIdx
 			t.toolBlocks[idx] = blockIdx
 			t.blockIdx++
-			if emitErr = t.emitContentBlockStartTool(blockIdx, id, name); emitErr != nil {
+			if emitErr = t.emitContentBlockStartTool(blockIdx, id, name, sig); emitErr != nil {
 				return false
 			}
 		}
@@ -776,7 +780,12 @@ func (t *AnthropicSSETranslator) emitContentBlockStartText(index int) error {
 	return t.flushEvent()
 }
 
-func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name string) error {
+// emitContentBlockStartTool emits an Anthropic content_block_start for a
+// tool_use block. sig, when non-empty, is the opaque thought_signature that
+// Gemini 3.x requires round-tripped on the next turn's functionCall part —
+// smuggled here as a non-standard field on the tool_use block so clients
+// that pass through unknown fields preserve it.
+func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name, sig string) error {
 	if sseTraceEnabled {
 		observability.Get().Debug("AnthropicSSE emit", "event", "content_block_start", "type", "tool_use", "name", name)
 	}
@@ -786,6 +795,10 @@ func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name s
 	sse.WriteJSONString(t.bw, id)
 	t.bw.WriteString(",\"name\":")
 	sse.WriteJSONString(t.bw, name)
+	if sig != "" {
+		t.bw.WriteString(",\"thought_signature\":")
+		sse.WriteJSONString(t.bw, sig)
+	}
 	t.bw.WriteString(",\"input\":{}}}\n\n")
 	return t.flushEvent()
 }
