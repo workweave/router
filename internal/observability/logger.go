@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lmittmann/tint"
+	"github.com/mattn/go-isatty"
 )
 
 const ginContextKey = "router_logger"
@@ -27,8 +29,32 @@ func initLogger() {
 	case "error":
 		level = slog.LevelError
 	}
-	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
+	var handler slog.Handler
+	if useColor() {
+		handler = tint.NewHandler(os.Stderr, &tint.Options{
+			Level:      level,
+			TimeFormat: time.Kitchen,
+		})
+	} else {
+		handler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
+	}
 	slog.SetDefault(slog.New(handler))
+}
+
+// useColor returns true when tint's ANSI-colored handler should be used.
+// Respects LOG_COLOR={1,true,yes,on} / {0,false,no,off}; otherwise auto-detects
+// based on whether stderr is a TTY and NO_COLOR is unset (https://no-color.org).
+func useColor() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("LOG_COLOR"))) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	}
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		return false
+	}
+	return isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())
 }
 
 func Get() *slog.Logger {
