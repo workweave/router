@@ -1,0 +1,40 @@
+internal/postgres/invalidation.go
+  s_23c46efc3c7661::t_afd3afd834a094 1-138
+internal/auth/service_test.go
+  s_23c46efc3c7661::t_01ba9f16ffaa50 149-154
+  s_23c46efc3c7661::t_14d1545b2b627a 184-214
+  s_23c46efc3c7661::t_387bd67c191077 163-166
+  s_23c46efc3c7661::t_d4b637e88b1adf 625-660,662-694
+  s_23c46efc3c7661::t_d41d8cdc71bfa5 661
+internal/auth/apikey_cache.go
+  s_23c46efc3c7661::t_e6b553535af7a1 54
+  s_23c46efc3c7661::t_d27cded0a52880 4,19-21,25,31-33,37-42,44-47,51-52,55-56,72-119
+internal/auth/service.go
+  s_23c46efc3c7661::t_64eb4a183a4395 203-205,207
+  s_23c46efc3c7661::t_a524aaec500ab3 153-156,158
+  s_23c46efc3c7661::t_ec40a20ee5bb87 76,88-104,106
+  s_23c46efc3c7661::t_1d7480eee07334 105
+  s_23c46efc3c7661::t_ba2ff75c90bbfc 22-35,44
+  s_23c46efc3c7661::t_f092fc6a3562a0 216-219
+  s_23c46efc3c7661::t_4d24cda159b8ee 157,197,206,244
+internal/auth/apikey_cache_test.go
+  s_23c46efc3c7661::t_593da3fc4f4a19 34-100
+cmd/router/main.go
+  s_23c46efc3c7661::t_79d8d0eff3fa84 255-269
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "539805276eed62fb456bf7d95f0770e8c6aa84e2",
+  "prompts": {},
+  "sessions": {
+    "s_23c46efc3c7661": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6992b495-c614-474e-938a-ee8010b9aee2",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
