@@ -475,7 +475,7 @@ func (t *AnthropicSSETranslator) Finalize() error {
 				int(usage.Get("completion_tokens").Int()),
 			)
 			t.usageSink.RecordCacheUsage(
-				0,
+				int(usage.Get("prompt_tokens_details.cache_creation_tokens").Int()),
 				int(usage.Get("prompt_tokens_details.cached_tokens").Int()),
 			)
 		}
@@ -577,7 +577,7 @@ func (t *AnthropicSSETranslator) extractAndForwardUsage(data []byte) {
 	t.hasUsage = true
 	if t.usageSink != nil {
 		t.usageSink.RecordUsage(int(prompt), int(completion))
-		t.usageSink.RecordCacheUsage(0, int(cachedRead))
+		t.usageSink.RecordCacheUsage(int(cacheCreation), int(cachedRead))
 	}
 }
 
