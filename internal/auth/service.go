@@ -266,11 +266,11 @@ func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email
 
 	identityKey := userIdentityKey(email, claudeAccountUUID)
 	if cached, ok := s.userCache.Get(installationID, identityKey); ok {
-		log.Info("ResolveAndStashUser cache hit", "installation_id", installationID, "user_id", cached)
+		log.Debug("ResolveAndStashUser cache hit", "installation_id", installationID, "user_id", cached)
 		return context.WithValue(ctx, UserIDContextKey{}, cached)
 	}
 
-	log.Info("ResolveAndStashUser upsert", "installation_id", installationID, "email_present", email != "", "account_present", claudeAccountUUID != "")
+	log.Debug("ResolveAndStashUser upsert", "installation_id", installationID, "email_present", email != "", "account_present", claudeAccountUUID != "")
 	var user *User
 	var err error
 	if email != "" {
@@ -298,7 +298,7 @@ func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email
 		return ctx
 	}
 	s.userCache.Set(installationID, identityKey, user.ID)
-	log.Info("ResolveAndStashUser upsert ok", "installation_id", installationID, "user_id", user.ID)
+	log.Debug("ResolveAndStashUser upsert ok", "installation_id", installationID, "user_id", user.ID)
 	return context.WithValue(ctx, UserIDContextKey{}, user.ID)
 }
 

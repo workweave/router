@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"runtime/debug"
 
 	"workweave/router/internal/auth"
@@ -20,8 +19,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
-
-var writerTraceEnabled = os.Getenv("ROUTER_DEBUG_WRITER_TRACE") == "true"
 
 type tracingWriter struct {
 	gin.ResponseWriter
@@ -66,10 +63,6 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 			return
 		}
 
-		// Structured metadata only — never log the raw request body. Prompts
-		// and tool payloads can carry customer secrets, and Debug-level logs
-		// still land in log storage and downstream consumers in any
-		// non-local deployment.
 		msgs := gjson.GetBytes(body, "messages")
 		log.Debug("inbound anthropic request",
 			"body_bytes", len(body),
@@ -78,16 +71,14 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 			"model", gjson.GetBytes(body, "model").String(),
 			"max_tokens", gjson.GetBytes(body, "max_tokens").Int(),
 			"session_id", c.Request.Header.Get("X-Claude-Code-Session-Id"),
+			"body", string(body),
 		)
 
 		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header, body)
 		ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		c.Request = c.Request.WithContext(ctx)
 
-		var w http.ResponseWriter = c.Writer
-		if writerTraceEnabled {
-			w = &tracingWriter{ResponseWriter: c.Writer}
-		}
+		w := &tracingWriter{ResponseWriter: c.Writer}
 		if err := svc.ProxyMessages(c.Request.Context(), body, w, c.Request); err != nil {
 			var statusErr *providers.UpstreamStatusError
 			if errors.As(err, &statusErr) {
@@ -148,7 +139,7 @@ func stashClientIdentity(ctx context.Context, h http.Header, body []byte) contex
 		UserAgent: h.Get("User-Agent"),
 		ClientApp: h.Get("X-App"),
 	}
-	observability.Get().Info("anthropic stashClientIdentity",
+	observability.Get().Debug("anthropic stashClientIdentity",
 		"meta_raw_len", len(metaRaw),
 		"meta_raw_preview", truncate(metaRaw, 200),
 		"parsed_email_present", meta.Email != "",
