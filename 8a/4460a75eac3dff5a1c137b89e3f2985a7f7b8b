@@ -1,0 +1,26 @@
+internal/auth/apikey_cache.go
+  s_773d52c7d7b5a5::t_480719c787d488 48-54,59-60
+  s_773d52c7d7b5a5::t_85b2e54b20dcd9 82-86,88-90,93,99-119,133
+  s_773d52c7d7b5a5::t_2cbeaa54ace76b 31-33
+internal/postgres/invalidation.go
+  s_773d52c7d7b5a5::t_e8db84a257d308 63
+  s_773d52c7d7b5a5::t_e1ed47baa510aa 77-84,87,89,95,97-99
+internal/auth/apikey_cache_test.go
+  s_773d52c7d7b5a5::t_c4cc1a0959ba4d 101-158
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "8a4460a75eac3dff5a1c137b89e3f2985a7f7b8b",
+  "prompts": {},
+  "sessions": {
+    "s_773d52c7d7b5a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a4416eb-4746-4caf-825c-c557fbd13098",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
