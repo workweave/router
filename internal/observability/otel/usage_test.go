@@ -199,6 +199,26 @@ func TestUsageExtractor_OpenAICacheTokens_Streaming(t *testing.T) {
 	assert.Equal(t, 7, cacheRead)
 }
 
+func TestUsageExtractor_GoogleNativeCacheTokens_NonStreaming(t *testing.T) {
+	rec := httptest.NewRecorder()
+	ext := otel.NewUsageExtractor(rec, "google")
+
+	// Native Gemini :generateContent body — no "usage" field, only "usageMetadata"
+	// with cachedContentTokenCount. Without the native-shape branch the
+	// extractor returned all zeros and Gemini caching was invisible end-to-end.
+	body := `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1200,"candidatesTokenCount":4,"totalTokenCount":1204,"cachedContentTokenCount":1024}}`
+	_, err := ext.Write([]byte(body))
+	require.NoError(t, err)
+
+	in, out := ext.Tokens()
+	assert.Equal(t, 1200, in)
+	assert.Equal(t, 4, out)
+
+	cacheCreation, cacheRead := ext.CacheTokens()
+	assert.Equal(t, 0, cacheCreation)
+	assert.Equal(t, 1024, cacheRead)
+}
+
 func TestUsageExtractor_RecordCacheUsage_NilReceiver(t *testing.T) {
 	var ext *otel.UsageExtractor
 	creation, read := ext.CacheTokens()

@@ -125,6 +125,9 @@ func (t *GeminiToOpenAISSETranslator) Finalize() error {
 				int(usage.Get("promptTokenCount").Int()),
 				int(usage.Get("candidatesTokenCount").Int()),
 			)
+			if cached := int(usage.Get("cachedContentTokenCount").Int()); cached > 0 {
+				t.usageSink.RecordCacheUsage(0, cached)
+			}
 		}
 	}
 
@@ -236,6 +239,7 @@ func geminiUsageFromBytes(data []byte) map[string]int {
 	prompt := int(r.Get("promptTokenCount").Int())
 	completion := int(r.Get("candidatesTokenCount").Int())
 	total := int(r.Get("totalTokenCount").Int())
+	cached := int(r.Get("cachedContentTokenCount").Int())
 	if total == 0 {
 		total = prompt + completion
 	}
@@ -243,6 +247,7 @@ func geminiUsageFromBytes(data []byte) map[string]int {
 		"prompt_tokens":     prompt,
 		"completion_tokens": completion,
 		"total_tokens":      total,
+		"cached_tokens":     cached,
 	}
 }
 
@@ -294,16 +299,8 @@ func (t *GeminiToOpenAISSETranslator) emitFinalChunk(finishReason string, usage 
 	sse.WriteJSONString(t.bw, finishReason)
 	t.bw.WriteString(`}]`)
 	if usage != nil {
-		t.bw.WriteString(`,"usage":{"prompt_tokens":`)
-		sse.WriteJSONInt(t.bw, int64(usage["prompt_tokens"]))
-		t.bw.WriteString(`,"completion_tokens":`)
-		sse.WriteJSONInt(t.bw, int64(usage["completion_tokens"]))
-		t.bw.WriteString(`,"total_tokens":`)
-		sse.WriteJSONInt(t.bw, int64(usage["total_tokens"]))
-		t.bw.WriteByte('}')
-		if t.usageSink != nil {
-			t.usageSink.RecordUsage(usage["prompt_tokens"], usage["completion_tokens"])
-		}
+		t.writeUsageJSON(usage)
+		t.recordUsageOnSink(usage)
 	}
 	t.bw.WriteString("}\n\n")
 	return t.flushEvent()
@@ -311,17 +308,40 @@ func (t *GeminiToOpenAISSETranslator) emitFinalChunk(finishReason string, usage 
 
 func (t *GeminiToOpenAISSETranslator) emitUsageOnlyChunk(usage map[string]int) error {
 	t.writeChunkHeader()
-	t.bw.WriteString(`"choices":[],"usage":{"prompt_tokens":`)
+	t.bw.WriteString(`"choices":[]`)
+	t.writeUsageJSON(usage)
+	t.bw.WriteString("}\n\n")
+	t.recordUsageOnSink(usage)
+	return t.flushEvent()
+}
+
+// writeUsageJSON serializes an OpenAI-shape usage object onto t.bw, including
+// prompt_tokens_details.cached_tokens when Gemini reported a cached prefix.
+// The nested shape matches what AnthropicSSETranslator.extractAndForwardUsage
+// reads via gjson, so cache numbers propagate through the chain.
+func (t *GeminiToOpenAISSETranslator) writeUsageJSON(usage map[string]int) {
+	t.bw.WriteString(`,"usage":{"prompt_tokens":`)
 	sse.WriteJSONInt(t.bw, int64(usage["prompt_tokens"]))
 	t.bw.WriteString(`,"completion_tokens":`)
 	sse.WriteJSONInt(t.bw, int64(usage["completion_tokens"]))
 	t.bw.WriteString(`,"total_tokens":`)
 	sse.WriteJSONInt(t.bw, int64(usage["total_tokens"]))
-	t.bw.WriteString("}}\n\n")
-	if t.usageSink != nil {
-		t.usageSink.RecordUsage(usage["prompt_tokens"], usage["completion_tokens"])
+	if cached := usage["cached_tokens"]; cached > 0 {
+		t.bw.WriteString(`,"prompt_tokens_details":{"cached_tokens":`)
+		sse.WriteJSONInt(t.bw, int64(cached))
+		t.bw.WriteByte('}')
 	}
-	return t.flushEvent()
+	t.bw.WriteByte('}')
+}
+
+func (t *GeminiToOpenAISSETranslator) recordUsageOnSink(usage map[string]int) {
+	if t.usageSink == nil {
+		return
+	}
+	t.usageSink.RecordUsage(usage["prompt_tokens"], usage["completion_tokens"])
+	if cached := usage["cached_tokens"]; cached > 0 {
+		t.usageSink.RecordCacheUsage(0, cached)
+	}
 }
 
 func (t *GeminiToOpenAISSETranslator) emitDone() error {
