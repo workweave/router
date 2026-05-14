@@ -195,4 +195,3 @@ func buildBody(t *testing.T, messages []map[string]any) []byte {
 	require.NoError(t, err)
 	return body
 }
-
