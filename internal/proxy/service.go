@@ -680,6 +680,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	buf := otel.NewBuffer(s.emitter)
 	ctx = buf.WithContext(ctx)
 
+	// Strip the routing marker that prior cross-format responses injected as
+	// standalone assistant text blocks. Without this, the marker round-trips
+	// through clients that preserve content verbatim and ends up in upstream
+	// context on every subsequent turn.
+	body, stripErr := translate.StripRoutingMarkerFromMessages(body)
+	if stripErr != nil {
+		log.Error("Failed to strip routing marker from inbound messages", "err", stripErr)
+		return fmt.Errorf("strip routing marker: %w", stripErr)
+	}
+
 	env, parseErr := translate.ParseAnthropic(body)
 	if parseErr != nil {
 		log.Error("Failed to parse Anthropic request", "err", parseErr)
