@@ -611,7 +611,15 @@ func anthropicAssistantToGeminiParts(content any) ([]any, error) {
 			switch t, _ := block["type"].(string); t {
 			case "text":
 				if text, _ := block["text"].(string); text != "" {
-					parts = append(parts, map[string]any{"text": text})
+					part := map[string]any{"text": text}
+					// Gemini 3.x attaches thoughtSignature to the leading
+					// text/thinking part, not the subsequent functionCalls;
+					// dropping it here causes the next turn to 400 on
+					// missing signature for the functionCall parts.
+					if sig, _ := block["thought_signature"].(string); sig != "" {
+						part["thoughtSignature"] = sig
+					}
+					parts = append(parts, part)
 				}
 			case "tool_use":
 				name, _ := block["name"].(string)

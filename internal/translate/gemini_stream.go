@@ -35,6 +35,11 @@ type GeminiToOpenAISSETranslator struct {
 	closed   bool
 	toolIdx  int
 	finished bool
+	// pendingSig is a thoughtSignature observed on a leading text part with
+	// no functionCall sibling to carry it. Gemini 3.x requires the next turn
+	// to round-trip the signature; we smuggle it onto the first tool_call
+	// chunk so the downstream Anthropic translator lands it on tool_use.
+	pendingSig string
 
 	usageSink otel.UsageSink
 }
@@ -175,6 +180,10 @@ func (t *GeminiToOpenAISSETranslator) translateEvent(raw []byte) error {
 					argsRaw = "{}"
 				}
 				sig := part.Get("thoughtSignature").String()
+				if sig == "" && t.pendingSig != "" {
+					sig = t.pendingSig
+				}
+				t.pendingSig = ""
 				if err := t.emitToolCallChunk(t.toolIdx, name, argsRaw, sig); err != nil {
 					emitErr = err
 					return false
@@ -183,6 +192,9 @@ func (t *GeminiToOpenAISSETranslator) translateEvent(raw []byte) error {
 				return true
 			}
 			if text := part.Get("text"); text.Exists() && text.String() != "" {
+				if sig := part.Get("thoughtSignature").String(); sig != "" && t.pendingSig == "" {
+					t.pendingSig = sig
+				}
 				if err := t.emitTextDelta(text.String()); err != nil {
 					emitErr = err
 					return false
