@@ -129,5 +129,4 @@ jobs:
           gh pr merge "$BRANCH" \
             --repo workweave/WorkWeave \
             --auto \
-            --squash \
-            --delete-branch
+            --squash
