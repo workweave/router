@@ -722,7 +722,8 @@ func (s *Service) shouldBypassToAnthropic(ctx context.Context, r *http.Request) 
 	if _, ok := s.providers[providers.ProviderAnthropic]; !ok {
 		return false
 	}
-	creds := ResolveCredentials(providers.ProviderAnthropic, byokCredentialsFromContext(ctx), r.Header)
+	byok := BuildCredentialsMap(externalKeysFromContext(ctx))
+	creds := ResolveCredentials(providers.ProviderAnthropic, byok, r.Header)
 	if creds == nil || len(creds.APIKey) == 0 {
 		return false
 	}
@@ -790,13 +791,6 @@ func (s *Service) bypassToAnthropic(
 		"proxy_err", proxyErr,
 	)
 	return proxyErr
-}
-
-// byokCredentialsFromContext extracts the request-scoped BYOK map the
-// auth middleware stashes on ctx. Returns nil when no map is present.
-func byokCredentialsFromContext(ctx context.Context) map[string]*Credentials {
-	m, _ := ctx.Value(ExternalAPIKeysContextKey{}).(map[string]*Credentials)
-	return m
 }
 
 // PassthroughToProvider forwards a non-routing request to the default
@@ -878,7 +872,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Anthropic with the model the caller asked for. The observer
 	// records the headers off the response so subsequent requests can
 	// flip into routing once either window approaches the cap.
-	if s.shouldBypassToAnthropic(ctx, r) {
+	//
+	// Installation-level model exclusions are enforced before we
+	// short-circuit: if the caller's requested model is on the tenant's
+	// deny list, fall through to runTurnLoop so the tier clamp can
+	// substitute an allowed model. Skipping that check would let the
+	// bypass path return responses from models the tenant has policy-
+	// blocked.
+	if _, blocked := s.excludedModelsForRequest(ctx)[feats.Model]; !blocked && s.shouldBypassToAnthropic(ctx, r) {
 		return s.bypassToAnthropic(ctx, env, feats, requestStart, requestID, externalID, r, w)
 	}
 
