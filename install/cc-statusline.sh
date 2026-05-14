@@ -146,10 +146,18 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
   # JSONL in reverse so we can grab the latest assistant turn.
   if command -v tac >/dev/null 2>&1; then reverse=(tac); else reverse=(tail -r); fi
 
+  # CC stamps message.model = "<synthetic>" on assistant turns it generated
+  # locally (errored requests, cancellations, tool-only stubs) instead of a
+  # real model id. Show that as "failure" rather than leaking the internal
+  # sentinel into the statusline.
   routed="$("${reverse[@]}" "$transcript_path" 2>/dev/null \
     | jq -r 'select(.type=="assistant") | .message.model // empty' \
     | head -n 1 || true)"
-  routed="$(normalize_model "$routed")"
+  if [[ "$routed" == "<synthetic>" ]]; then
+    routed="failure"
+  else
+    routed="$(normalize_model "$routed")"
+  fi
 
   # Build {request_id: requested_model} map from the sidecar log. Empty
   # object when the log is missing — savings calc then sees no entries
@@ -241,7 +249,11 @@ if [[ "$tot_in" -gt 0 || "$tot_out" -gt 0 || "$tot_cached" -gt 0 ]]; then
   tokens_clause=" · $(fmt_tok "$tot_in") in / $(fmt_tok "$tot_out") out / $(fmt_tok "$tot_cached") cached"
 fi
 
-if [[ -n "$routed" ]]; then
+if [[ "$routed" == "failure" ]]; then
+  # Latest turn was a CC-synthesized error stub — don't claim a routing
+  # swap or compute savings against a non-model.
+  printf '%s — %s%s' "$brand" "$routed" "$tokens_clause"
+elif [[ -n "$routed" ]]; then
   # Show the savings clause only when the session is genuinely net-saving.
   # session_savings is "0.0000" when no rerouted turns were found (sidecar
   # missing, fresh session, only side-calls so far); it can also go
