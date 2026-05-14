@@ -68,38 +68,27 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + int
 			echo "error: KEY and BASE_URL must both be provided together."; \
 			exit 1; \
 		fi; \
-		COMPOSE_LOG="$$(mktemp -t full-setup-compose.XXXXXX.log)"; \
-		echo "==> Building and starting docker compose stack (postgres, migrate, server)..."; \
-		echo "    (build log: $$COMPOSE_LOG)"; \
-		if ! docker compose up --build -d >"$$COMPOSE_LOG" 2>&1; then \
-			echo "error: docker compose failed. Output:"; \
-			cat "$$COMPOSE_LOG"; \
-			exit 1; \
-		fi; \
-		echo "==> Waiting for the router to become healthy..."; \
-		for i in $$(seq 1 60); do \
-			if curl -fsS --max-time 2 http://localhost:8080/health >/dev/null 2>&1; then \
-				echo "    healthy after $${i}s"; \
-				break; \
-			fi; \
-			if [ "$$i" = "60" ]; then \
-				echo "error: router did not become healthy within 60s. Tail with 'make logs'."; \
-				exit 1; \
-			fi; \
-			sleep 1; \
-		done; \
-		echo "==> Seeding a Weave Router key for your installation..."; \
-		SEED_OUTPUT=$$(docker compose run --rm seed 2>&1); \
-		WEAVE_KEY=$$(echo "$$SEED_OUTPUT" | grep -oE "^  rk_[a-zA-Z0-9_-]+$$" | head -1 | xargs); \
+		./install/spin "Building docker compose stack (postgres, migrate, server)" \
+			docker compose up --build -d || exit 1; \
+		./install/spin "Waiting for router /health" bash -c '\
+			for i in $$(seq 1 60); do \
+				curl -fsS --max-time 2 http://localhost:8080/health >/dev/null 2>&1 && exit 0; \
+				sleep 1; \
+			done; \
+			echo "router did not become healthy within 60s. Tail with: make logs" >&2; \
+			exit 1' || exit 1; \
+		SEED_CAPTURE="$$(mktemp -t full-setup-seed.XXXXXX.log)"; \
+		WEAVE_SPIN_CAPTURE="$$SEED_CAPTURE" ./install/spin "Seeding Weave Router API key" \
+			docker compose run --rm seed || { rm -f "$$SEED_CAPTURE"; exit 1; }; \
+		WEAVE_KEY=$$(grep -oE "^  rk_[a-zA-Z0-9_-]+$$" "$$SEED_CAPTURE" | head -1 | xargs); \
+		rm -f "$$SEED_CAPTURE"; \
 		if [ -z "$$WEAVE_KEY" ]; then \
 			echo "error: failed to extract router key from seed output."; \
-			echo "$$SEED_OUTPUT"; \
 			exit 1; \
 		fi; \
 		echo "    key: $$WEAVE_KEY"; \
 		echo ""; \
-		echo "==> Wiring Claude Code → router (you'll be prompted for scope: user or project)..."; \
-		WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --base-url http://localhost:8080 --quiet; \
+		WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --base-url http://localhost:8080; \
 		echo ""; \
 		echo "Done. Router on http://localhost:8080. Share with teammates: make full-setup KEY=$$WEAVE_KEY BASE_URL=<reachable-url>"; \
 	fi

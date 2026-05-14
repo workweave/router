@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+#
+# Spinner wrapper: `./install/spin "label" cmd args...` runs cmd in the
+# background, animates a frame cycle while it runs, then replaces the line
+# with ✓ or ✗ depending on exit status. On failure, the captured stdout +
+# stderr are re-emitted dim-indented for debugging.
+#
+# Used by install.sh (sources this file) and Makefile (invokes directly) so
+# the docker-compose / health-wait / seed steps share the same look as the
+# install ✓ checklist.
+#
+# Honors NO_COLOR and degrades to plain ASCII output when stdout is not a
+# TTY (CI logs, `curl ... | sh` redirects) so log captures stay clean.
+
+set -euo pipefail
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_BRAND=$'\033[38;2;255;108;71m'
+  C_DIM=$'\033[2m'
+  C_RED=$'\033[31m'
+  C_GREEN=$'\033[32m'
+  C_RESET=$'\033[0m'
+  tty_out="true"
+else
+  C_BRAND=""; C_DIM=""; C_RED=""; C_GREEN=""; C_RESET=""
+  tty_out="false"
+fi
+
+# `dots` frame set from sindresorhus/cli-spinners.
+SPIN_FRAMES='⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏'
+SPIN_INTERVAL=0.08
+
+label="${1:-}"
+shift || true
+if [ -z "$label" ] || [ $# -eq 0 ]; then
+  printf 'usage: spin "label" cmd args...\n' >&2
+  exit 2
+fi
+
+# Non-TTY: just run the command and emit a single check line.
+if [ "$tty_out" != "true" ]; then
+  if "$@"; then
+    printf '%s✓%s %s\n' "$C_GREEN" "$C_RESET" "$label"
+    exit 0
+  else
+    rc=$?
+    printf '%s✗%s %s\n' "$C_RED" "$C_RESET" "$label" >&2
+    exit "$rc"
+  fi
+fi
+
+spin_log="$(mktemp -t weave-spin.XXXXXX)"
+spin_pid=""
+
+cleanup() {
+  if [ -n "$spin_pid" ] && kill -0 "$spin_pid" 2>/dev/null; then
+    kill "$spin_pid" 2>/dev/null || true
+    wait "$spin_pid" 2>/dev/null || true
+  fi
+  printf '\033[?25h' # show cursor
+  rm -f "$spin_log" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM HUP
+
+( "$@" >"$spin_log" 2>&1 ) &
+spin_pid=$!
+
+printf '\033[?25l' # hide cursor
+# shellcheck disable=SC2206
+frames=($SPIN_FRAMES)
+n=${#frames[@]}
+i=0
+while kill -0 "$spin_pid" 2>/dev/null; do
+  printf '\r%s%s%s %s' "$C_BRAND" "${frames[i]}" "$C_RESET" "$label"
+  i=$(( (i + 1) % n ))
+  sleep "$SPIN_INTERVAL"
+done
+
+wait "$spin_pid"
+rc=$?
+spin_pid=""
+printf '\033[?25h\r\033[2K' # show cursor, clear line
+
+if [ "$rc" -eq 0 ]; then
+  printf '%s✓%s %s\n' "$C_GREEN" "$C_RESET" "$label"
+  # Optional output capture: callers (e.g. Makefile seed step) that need to
+  # parse the wrapped command's stdout can set WEAVE_SPIN_CAPTURE=<path> and
+  # read the file after spin exits 0.
+  if [ -n "${WEAVE_SPIN_CAPTURE:-}" ]; then
+    cp "$spin_log" "$WEAVE_SPIN_CAPTURE"
+  fi
+else
+  printf '%s✗%s %s\n' "$C_RED" "$C_RESET" "$label" >&2
+  if [ -s "$spin_log" ]; then
+    printf '%s' "$C_DIM" >&2
+    sed 's/^/    /' "$spin_log" >&2
+    printf '%s\n' "$C_RESET" >&2
+  fi
+fi
+exit "$rc"
