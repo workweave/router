@@ -785,8 +785,13 @@ func (t *AnthropicSSETranslator) emitMessageDelta() error {
 	sse.WriteJSONString(t.bw, stopReason)
 	t.bw.WriteString(",\"stop_sequence\":null},\"usage\":{")
 	if t.hasUsage {
+		// Anthropic's input_tokens is fresh-only; OpenAI's prompt_tokens (the
+		// source) is the total including cached tokens. Subtract cache so the
+		// statusline formula (input + 1.25*cwrt + multiplier*crd) doesn't
+		// double-count cache tokens.
+		freshInput := max(0, t.usageInputTokens-t.usageCacheCreationTokens-t.usageCacheReadTokens)
 		t.bw.WriteString("\"input_tokens\":")
-		sse.WriteJSONInt(t.bw, int64(t.usageInputTokens))
+		sse.WriteJSONInt(t.bw, int64(freshInput))
 		t.bw.WriteString(",\"output_tokens\":")
 		sse.WriteJSONInt(t.bw, int64(t.usageOutputTokens))
 		if t.usageCacheCreationTokens > 0 {

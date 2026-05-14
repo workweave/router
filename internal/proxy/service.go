@@ -914,9 +914,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
-		Float64("cost.requested_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing)).
+		Float64("cost.requested_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
 		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
-		Float64("cost.actual_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing)).
+		Float64("cost.actual_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
 		Float64("cost.actual_output_usd", float64(out)/1_000_000*actPricing.OutputUSDPer1M).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
@@ -957,9 +957,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			EmbedInput:             embedInput,
 			InputTokens:            int32(in),
 			OutputTokens:           int32(out),
-			RequestedInputCostUSD:  effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing),
+			RequestedInputCostUSD:  effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
 			RequestedOutputCostUSD: float64(out) / 1_000_000 * reqPricing.OutputUSDPer1M,
-			ActualInputCostUSD:     effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing),
+			ActualInputCostUSD:     effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
 			ActualOutputCostUSD:    float64(out) / 1_000_000 * actPricing.OutputUSDPer1M,
 			RouteLatencyMs:         routeMs,
 			UpstreamLatencyMs:      proxyMs,
@@ -1070,8 +1070,16 @@ func (s *Service) logPlannerOutcome(res turnLoopResult) {
 // Fresh input tokens are priced at base rate; cache-creation tokens at 1.25×;
 // cache-read tokens at the model's effective cache-read multiplier (default 0.5×).
 // Matches the formula in install/cc-statusline.sh.
-func effectiveInputCost(inputTokens, cacheCreation, cacheRead int, pricePer1M float64, pinfo pricing.Pricing) float64 {
-	fresh := inputTokens - cacheCreation - cacheRead
+//
+// upstreamProvider distinguishes wire-format semantics: Anthropic's
+// input_tokens is fresh-only (cache counters are non-overlapping); OpenAI's
+// prompt_tokens is the total including cached_tokens. Without this signal we'd
+// over-subtract on the Anthropic path and clamp fresh to 0.
+func effectiveInputCost(inputTokens, cacheCreation, cacheRead int, pricePer1M float64, pinfo pricing.Pricing, upstreamProvider string) float64 {
+	fresh := inputTokens
+	if upstreamProvider != providers.ProviderAnthropic {
+		fresh = inputTokens - cacheCreation - cacheRead
+	}
 	if fresh < 0 {
 		fresh = 0
 	}
@@ -1587,9 +1595,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
-		Float64("cost.requested_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing)).
+		Float64("cost.requested_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
 		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
-		Float64("cost.actual_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing)).
+		Float64("cost.actual_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
 		Float64("cost.actual_output_usd", float64(out)/1_000_000*actPricing.OutputUSDPer1M).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
@@ -1631,9 +1639,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			EmbedInput:             embedInput,
 			InputTokens:            int32(in),
 			OutputTokens:           int32(out),
-			RequestedInputCostUSD:  effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing),
+			RequestedInputCostUSD:  effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
 			RequestedOutputCostUSD: float64(out) / 1_000_000 * reqPricing.OutputUSDPer1M,
-			ActualInputCostUSD:     effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing),
+			ActualInputCostUSD:     effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
 			ActualOutputCostUSD:    float64(out) / 1_000_000 * actPricing.OutputUSDPer1M,
 			RouteLatencyMs:         routeMs,
 			UpstreamLatencyMs:      proxyMs,
