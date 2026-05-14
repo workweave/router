@@ -1,0 +1,34 @@
+install/cc-statusline.sh
+  s_56ee74e40f065b::t_02891148564f63 238-244,246-253
+  s_56ee74e40f065b::t_1249a11bc6823f 182,206,208-210
+  s_48f79dd8b725da::t_23afc4a689f721 135-136
+.claude/settings.json
+  ai_agent 1-10
+install/install.sh
+  s_48f79dd8b725da::t_ec0837971cc04d 409-410
+  s_56ee74e40f065b::t_496d4991908f7f 456,480,482-484,512-518,520-527
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "b393359b32d8e42a562f62842db137633df1d560",
+  "prompts": {},
+  "sessions": {
+    "s_48f79dd8b725da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c0f3c3b8-383e-49d6-b8c8-995b70af358e",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null
+    },
+    "s_56ee74e40f065b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfefa320-cb6e-46b0-94dd-eb20e8f805d9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
