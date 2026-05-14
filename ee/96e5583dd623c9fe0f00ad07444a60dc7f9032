@@ -1,0 +1,26 @@
+internal/api/admin/excluded_models.go
+  s_9918426a29c6b9::t_bc89d37a2df3c0 64-66
+  s_9918426a29c6b9::t_971b7fd008f2ec 47-48
+internal/api/admin/keys.go
+  s_9918426a29c6b9::t_b96d175c2f977b 121-123
+  s_9918426a29c6b9::t_6fbcca21f7070e 102
+  s_9918426a29c6b9::t_24040c55057069 61-63
+internal/api/gemini/generate_content.go
+  s_9918426a29c6b9::t_ceadfe76d9da67 32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "ee96e5583dd623c9fe0f00ad07444a60dc7f9032",
+  "prompts": {},
+  "sessions": {
+    "s_9918426a29c6b9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "488e8a35-f3d2-42cb-b713-44a7d3f9686e",
+        "model": "deepseek/deepseek-v4-pro-20260423"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
