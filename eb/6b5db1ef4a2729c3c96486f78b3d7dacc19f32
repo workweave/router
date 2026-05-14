@@ -1,0 +1,26 @@
+install/cc-statusline.sh
+  s_4af8c5cb73cb47::t_aa155ff77065f0 15
+  s_4af8c5cb73cb47::t_cd9caa07707826 168-177,184-207,209-211
+  s_4af8c5cb73cb47::t_d1cf1ec11f5f43 180-181
+  s_4af8c5cb73cb47::t_6e59e9f9367320 230-243,250,257-258,260,263
+  s_4af8c5cb73cb47::t_a6fd1a9e071720 131-133
+internal/proxy/service.go
+  s_4af8c5cb73cb47::t_7bb186bd3119d3 860
+  s_4af8c5cb73cb47::t_e378e1fb5c2658 843
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "eb6b5db1ef4a2729c3c96486f78b3d7dacc19f32",
+  "prompts": {},
+  "sessions": {
+    "s_4af8c5cb73cb47": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a3f2faf9-0352-446b-8ffd-d62b56064ad2",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
