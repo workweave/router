@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"workweave/router/internal/router"
@@ -385,6 +386,113 @@ func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
 			return false
 		}
 		msgRaws = append(msgRaws, newMsg)
+		return true
+	})
+
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	if !anyChanged {
+		return body, nil
+	}
+
+	newMessagesArray := "[" + strings.Join(msgRaws, ",") + "]"
+	return sjson.SetRawBytes(body, "messages", []byte(newMessagesArray))
+}
+
+// encodeJSONStringNoHTMLEscape returns the JSON encoding of s without
+// HTML-escaping `<`, `>`, or `&`. Preserves whatever escaping the client
+// originally chose so that re-emitted message text matches the input byte
+// pattern as closely as possible (relevant for upstream prompt-cache keys).
+func encodeJSONStringNoHTMLEscape(s string) ([]byte, error) {
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(s); err != nil {
+		return nil, err
+	}
+	out := buf.String()
+	// json.Encoder appends a trailing newline; strip it for sjson.
+	return []byte(strings.TrimSuffix(out, "\n")), nil
+}
+
+// routingMarkerPattern matches the upfront "✦ **Weave Router** → ..." snippet
+// that AnthropicSSETranslator emits as a standalone text block on cross-format
+// responses. Single-line, terminated by the literal "\n\n" appended in
+// routingMarkerFor; the body between prefix and terminator is opaque (varies
+// with model, provider, planner reason, and clamp note).
+var routingMarkerPattern = regexp.MustCompile(`✦ \*\*Weave Router\*\* → [^\n]*\n\n`)
+
+// StripRoutingMarkerFromMessages removes the routing-marker snippet from every
+// text block in messages[*].content[*]. The marker is injected on outbound
+// cross-format responses (see internal/translate/stream.go) and round-trips
+// through clients that preserve assistant content verbatim; stripping on
+// ingress keeps it out of upstream context and stabilizes the assistant
+// prefix for prompt-cache reuse. Mirrors stripThinkingBlocksBytes' two-phase
+// O(B) reconstruction.
+func StripRoutingMarkerFromMessages(body []byte) ([]byte, error) {
+	messages := gjson.GetBytes(body, "messages")
+	if !messages.Exists() || !messages.IsArray() {
+		return body, nil
+	}
+
+	anyChanged := false
+	var msgRaws []string
+	var walkErr error
+
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.Exists() || !content.IsArray() {
+			msgRaws = append(msgRaws, msg.Raw)
+			return true
+		}
+
+		var newBlocks []string
+		msgChanged := false
+		content.ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() != "text" {
+				newBlocks = append(newBlocks, block.Raw)
+				return true
+			}
+			text := block.Get("text").String()
+			if !routingMarkerPattern.MatchString(text) {
+				newBlocks = append(newBlocks, block.Raw)
+				return true
+			}
+			stripped := routingMarkerPattern.ReplaceAllString(text, "")
+			msgChanged = true
+			if strings.TrimSpace(stripped) == "" {
+				return true
+			}
+			encoded, err := encodeJSONStringNoHTMLEscape(stripped)
+			if err != nil {
+				walkErr = fmt.Errorf("marshal stripped text: %w", err)
+				return false
+			}
+			newBlock, err := sjson.SetRawBytes([]byte(block.Raw), "text", encoded)
+			if err != nil {
+				walkErr = fmt.Errorf("replace text in block: %w", err)
+				return false
+			}
+			newBlocks = append(newBlocks, string(newBlock))
+			return true
+		})
+		if walkErr != nil {
+			return false
+		}
+		if !msgChanged {
+			msgRaws = append(msgRaws, msg.Raw)
+			return true
+		}
+
+		anyChanged = true
+		newContent := "[" + strings.Join(newBlocks, ",") + "]"
+		newMsg, err := sjson.SetRawBytes([]byte(msg.Raw), "content", []byte(newContent))
+		if err != nil {
+			walkErr = fmt.Errorf("replace content in message: %w", err)
+			return false
+		}
+		msgRaws = append(msgRaws, string(newMsg))
 		return true
 	})
 

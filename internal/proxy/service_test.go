@@ -114,6 +114,45 @@ func TestService_ProxyMessages_CrossFormatUpstreamErrorBodyReachesClient(t *test
 	assert.Contains(t, respBody, `"type":"error"`, "body must be in Anthropic error envelope shape")
 }
 
+// TestService_ProxyMessages_StripsRoutingMarkerFromInboundHistory guards the
+// hygiene fix at internal/proxy/service.go: the routing-marker text injected
+// on prior cross-format responses (✦ **Weave Router** → ...) must not survive
+// into the upstream body. Without the strip, the marker round-trips through
+// clients that preserve assistant content verbatim and pollutes context on
+// every subsequent turn.
+func TestService_ProxyMessages_StripsRoutingMarkerFromInboundHistory(t *testing.T) {
+	const markerSentinel = "Weave Router"
+	body := []byte(`{
+		"model":"claude-opus-4-7",
+		"messages":[
+			{"role":"user","content":"first prompt"},
+			{"role":"assistant","content":[
+				{"type":"text","text":"✦ **Weave Router** → deepseek/deepseek-v4-pro (openrouter) · reason: top scorer\n\n"},
+				{"type":"text","text":"real assistant reply"}
+			]},
+			{"role":"user","content":[
+				{"type":"text","text":"</summary>\n<result>✦ **Weave Router** → claude-haiku-4-5 (anthropic) · reason: tool-result follow-up\n\n</result>"}
+			]}
+		]
+	}`)
+
+	provider := &fakeProvider{}
+	svc := makeProxyService(
+		router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"},
+		map[string]providers.Client{providers.ProviderAnthropic: provider},
+	)
+
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+
+	require.Len(t, provider.proxyBodies, 1)
+	upstream := string(provider.proxyBodies[0])
+	assert.NotContains(t, upstream, markerSentinel, "routing marker must not reach upstream")
+	assert.Contains(t, upstream, "real assistant reply", "non-marker assistant content must survive")
+	assert.Contains(t, upstream, "</result>", "wrapper text around an embedded marker must survive")
+}
+
 func TestService_ProxyMessages_EmbedOnlyUserMessageFlag(t *testing.T) {
 	const firstUserPrompt = "Walk every Go file under router/internal/ and produce a one-paragraph summary of each."
 	const secondUserPrompt = "Now narrow it to handlers under internal/api/."
