@@ -64,6 +64,8 @@ export interface MetricsDetailRow {
   sticky_hit: boolean;
   input_tokens: number;
   output_tokens: number;
+  cache_creation_tokens: number | null;
+  cache_read_tokens: number | null;
   requested_cost_usd: number;
   actual_cost_usd: number;
   total_latency_ms: number;
