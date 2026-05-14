@@ -121,10 +121,51 @@ func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 	require.NotNil(t, row.ChosenScore)
 	assert.InDelta(t, 0.85, *row.ChosenScore, 1e-6)
 	assert.Equal(t, "v-test", row.ClusterRouterVersion)
-	// AlphaBreakdown / Cache* are W-1335 / W-1309 forward-compat slots; nil here.
+	// AlphaBreakdown is a W-1335 forward-compat slot; nil here.
+	// Cache* are nil because the fake provider returns no body, so the
+	// usage extractor reports 0 and cacheTokenPtr returns nil.
 	assert.Nil(t, row.AlphaBreakdown)
 	assert.Nil(t, row.CacheCreationTokens)
 	assert.Nil(t, row.CacheReadTokens)
+}
+
+// TestProxyMessages_PersistsCacheTokens covers the inverse of the above:
+// when the upstream actually reports cache_creation_input_tokens and
+// cache_read_input_tokens, those values must land on the telemetry row.
+// Regression guard against the W-1309 fields being declared but never wired.
+func TestProxyMessages_PersistsCacheTokens(t *testing.T) {
+	const installID = "44444444-4444-4444-4444-444444444444"
+	decision := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "pin",
+	}
+	telem := newCaptureTelemetry()
+	provider := &fakeProvider{
+		proxyResponse: func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude-haiku-4-5","stop_reason":"end_turn","usage":{"input_tokens":120,"output_tokens":7,"cache_creation_input_tokens":512,"cache_read_input_tokens":2048}}`))
+		},
+	}
+	svc := proxy.NewService(
+		&fakeRouter{decision: decision},
+		map[string]providers.Client{providers.ProviderAnthropic: provider},
+		nil, false, nil, nil, false,
+		providers.ProviderAnthropic, "claude-haiku-4-5",
+		telem,
+	)
+
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
+	rec := httptest.NewRecorder()
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`)
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+
+	row := telem.firstRow(t)
+	require.NotNil(t, row.CacheCreationTokens, "cache_creation_input_tokens must persist as *int32, not be dropped")
+	assert.Equal(t, int32(512), *row.CacheCreationTokens)
+	require.NotNil(t, row.CacheReadTokens, "cache_read_input_tokens must persist as *int32, not be dropped")
+	assert.Equal(t, int32(2048), *row.CacheReadTokens)
 }
 
 // TestProxyMessages_ChosenScoreZeroIsPersisted pins the *float64 semantics:

@@ -973,6 +973,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			ChosenScore:            obs.ChosenScore,
 			ClusterRouterVersion:   obs.ClusterRouterVersion,
 			TTFTMs:                 obs.TTFTMs,
+			CacheCreationTokens:    cacheTokenPtr(cacheCreation),
+			CacheReadTokens:        cacheTokenPtr(cacheRead),
 			DeviceID:               clientID.DeviceID,
 			SessionID:              clientID.SessionID,
 		})
@@ -1329,6 +1331,16 @@ func addTimingAttrs(ctx context.Context, b *otel.AttrBuilder) {
 		Int64("latency.router_overhead_ms", overhead)
 }
 
+// cacheTokenPtr returns nil for zero so the DB column stays NULL when the
+// upstream did not report cache usage, distinguishing "no cache" from "0 hits".
+func cacheTokenPtr(n int) *int32 {
+	if n <= 0 {
+		return nil
+	}
+	v := int32(n)
+	return &v
+}
+
 // fireTelemetry persists a telemetry row asynchronously. Telemetry loss is acceptable.
 func (s *Service) fireTelemetry(p InsertTelemetryParams) {
 	if s.telemetry == nil {
@@ -1655,6 +1667,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			ChosenScore:            openaiObs.ChosenScore,
 			ClusterRouterVersion:   openaiObs.ClusterRouterVersion,
 			TTFTMs:                 openaiObs.TTFTMs,
+			CacheCreationTokens:    cacheTokenPtr(cacheCreation),
+			CacheReadTokens:        cacheTokenPtr(cacheRead),
 			DeviceID:               clientID.DeviceID,
 			SessionID:              clientID.SessionID,
 		})
