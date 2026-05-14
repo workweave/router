@@ -76,8 +76,14 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + int
 			echo "error: KEY and BASE_URL must both be provided together."; \
 			exit 1; \
 		fi; \
+		COMPOSE_LOG="$$(mktemp -t full-setup-compose.XXXXXX.log)"; \
 		echo "==> Building and starting docker compose stack (postgres, migrate, server)..."; \
-		docker compose up --build -d; \
+		echo "    (build log: $$COMPOSE_LOG)"; \
+		if ! docker compose up --build -d >"$$COMPOSE_LOG" 2>&1; then \
+			echo "error: docker compose failed. Output:"; \
+			cat "$$COMPOSE_LOG"; \
+			exit 1; \
+		fi; \
 		echo "==> Waiting for the router to become healthy..."; \
 		for i in $$(seq 1 60); do \
 			if curl -fsS --max-time 2 http://localhost:8080/health >/dev/null 2>&1; then \
@@ -101,21 +107,9 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + int
 		echo "    key: $$WEAVE_KEY"; \
 		echo ""; \
 		echo "==> Wiring Claude Code → router (you'll be prompted for scope: user or project)..."; \
-		WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --base-url http://localhost:8080; \
+		WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --base-url http://localhost:8080 --quiet; \
 		echo ""; \
-		echo "Done. Router runs on http://localhost:8080."; \
-		echo ""; \
-		echo "Share with teammates (replace BASE_URL with a host they can reach,"; \
-		echo "e.g. an ngrok tunnel or a deployed router — localhost only works on this machine):"; \
-		echo "  make full-setup KEY=$$WEAVE_KEY BASE_URL=http://localhost:8080"; \
-		echo ""; \
-		echo "Cursor users: wire manually (see README \"Wiring Claude Code or Cursor\")."; \
-		echo "  Base URL: http://localhost:8080/v1"; \
-		echo "  API key:  $$WEAVE_KEY"; \
-		echo ""; \
-		echo "Useful follow-ups:"; \
-		echo "  make logs    # tail server logs"; \
-		echo "  make down    # stop the stack"; \
+		echo "Done. Router on http://localhost:8080. Share with teammates: make full-setup KEY=$$WEAVE_KEY BASE_URL=<reachable-url>"; \
 	fi
 
 db: ## Start the compose Postgres only (port 5433)
