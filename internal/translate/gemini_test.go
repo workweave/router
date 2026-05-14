@@ -545,6 +545,61 @@ func TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects(t *testing.T) {
 	assert.Equal(t, "URL to fetch", url["description"])
 }
 
+func TestPrepareGemini_StripsVendorExtensionAndDollarPrefixedKeys(t *testing.T) {
+	// Regression: MCP tool schemas derived from Google APIs (and friends)
+	// embed vendor extensions like `x-google-enum-descriptions` at every
+	// nesting level. Gemini's proto validator rejects any unknown field
+	// with 400 "Cannot find field". Strip anything with an "x-" or "$"
+	// prefix instead of maintaining a moving allowlist.
+	body := []byte(`{
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [{
+			"name":"sheets_get",
+			"input_schema":{
+				"$schema":"http://json-schema.org/draft-07/schema#",
+				"$id":"urn:weave:test",
+				"type":"object",
+				"x-google-resource":"sheet",
+				"properties":{
+					"range":{
+						"type":"string",
+						"x-google-enum-descriptions":["A","B"],
+						"enum":["A1","B2"]
+					},
+					"nested":{
+						"type":"object",
+						"x-google-foo":"bar",
+						"properties":{
+							"leaf":{"type":"string","x-vendor-thing":"y"}
+						}
+					}
+				}
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	params := mustUnmarshal(t, prep.Body)["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+
+	assert.NotContains(t, params, "x-google-resource", "top-level x- extension must be stripped")
+	assert.NotContains(t, params, "$schema", "top-level $-prefixed key must be stripped")
+	assert.NotContains(t, params, "$id", "top-level $-prefixed key must be stripped")
+
+	props := params["properties"].(map[string]any)
+	rangeField := props["range"].(map[string]any)
+	assert.NotContains(t, rangeField, "x-google-enum-descriptions", "nested x- extension must be stripped")
+	assert.Equal(t, []any{"A1", "B2"}, rangeField["enum"], "real enum must survive")
+
+	nested := props["nested"].(map[string]any)
+	assert.NotContains(t, nested, "x-google-foo", "nested x- extension must be stripped at every level")
+	leaf := nested["properties"].(map[string]any)["leaf"].(map[string]any)
+	assert.NotContains(t, leaf, "x-vendor-thing", "leaf x- extension must be stripped")
+	assert.Equal(t, "string", leaf["type"], "real type must survive")
+}
+
 func TestSanitizeSchemaForGemini_PreservesSupportedFields(t *testing.T) {
 	// Defense-in-depth: exhaustively confirms which keys survive sanitization.
 	body := []byte(`{

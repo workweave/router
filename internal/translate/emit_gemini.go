@@ -722,6 +722,14 @@ func sanitizeSchemaForGemini(v any) any {
 			if _, drop := geminiUnsupportedSchemaKeys[k]; drop {
 				continue
 			}
+			// Drop vendor extensions ("x-*", e.g. x-google-enum-descriptions from
+			// Google-API-derived MCP tool schemas) and JSON Schema metadata
+			// ("$*", e.g. $schema/$id/$ref). Gemini's proto-based validator
+			// rejects any unknown field name with 400, so we strip by prefix
+			// rather than maintaining a moving allowlist.
+			if strings.HasPrefix(k, "x-") || strings.HasPrefix(k, "$") {
+				continue
+			}
 			if k == "enum" {
 				cleaned := filterStringEnum(child)
 				if len(cleaned) == 0 {
