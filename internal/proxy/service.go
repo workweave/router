@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -671,6 +672,23 @@ func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName s
 	return proxyErr
 }
 
+// logUpstreamBody emits the fully-prepared upstream request body at Debug
+// level. Intended for per-turn byte-diff investigations of upstream
+// prompt-cache stability; gated by LOG_LEVEL=debug.
+func logUpstreamBody(log *slog.Logger, sessionKey [sessionpin.SessionKeyLen]byte, decision router.Decision, feats translate.RoutingFeatures, body []byte) {
+	if !log.Enabled(context.Background(), slog.LevelDebug) {
+		return
+	}
+	log.Debug("upstream prepared body",
+		"session_key", hex.EncodeToString(sessionKey[:]),
+		"decision_model", decision.Model,
+		"decision_provider", decision.Provider,
+		"message_count", feats.MessageCount,
+		"body_len", len(body),
+		"body", string(body),
+	)
+}
+
 // ProxyMessages routes a raw Anthropic-Messages request body and streams the
 // upstream response back. The routing decision is reflected in x-router-* headers.
 func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
@@ -839,6 +857,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			log.Error("Failed to emit Anthropic body", "err", emitErr)
 			return fmt.Errorf("emit body: %w", emitErr)
 		}
+		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
 		proxyWriter := sink
 		if s.usageRequired() {
 			extractor = otel.NewUsageExtractor(sink, decision.Provider)
@@ -852,6 +871,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			log.Error("Failed to translate Anthropic request to OpenAI format", "err", emitErr, "decision_provider", decision.Provider)
 			return fmt.Errorf("translate anthropic request: %w", emitErr)
 		}
+		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
 		var usage otel.UsageSink
 		if s.usageRequired() {
 			extractor = otel.NewUsageExtractor(nil, decision.Provider)
@@ -869,6 +889,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			log.Error("Failed to translate Anthropic request to Gemini format", "err", emitErr)
 			return fmt.Errorf("translate anthropic request to gemini: %w", emitErr)
 		}
+		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
 		var usage otel.UsageSink
 		if s.usageRequired() {
 			extractor = otel.NewUsageExtractor(nil, decision.Provider)
