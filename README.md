@@ -100,12 +100,9 @@ make down   # stop the stack (keeps the postgres volume)
 
 ### Wiring Claude Code or Cursor
 
-`make full-setup` leaves you with a router on `localhost:8080` and an
-`rk_...` key. To point Claude Code or Cursor at it:
-
-```bash
-make full-setup PLATFORM=cc        # auto-wires ~/.claude/settings.json
-```
+`make full-setup` boots the router on `localhost:8080`, seeds an
+`rk_...` key, and runs the Claude Code installer interactively (it
+prompts whether to wire user scope or a project directory).
 
 Or manually:
 
@@ -127,7 +124,7 @@ To wire an already-running router (e.g. a shared/staging deployment)
 instead of booting locally:
 
 ```bash
-make full-setup PLATFORM=cc KEY=rk_... BASE_URL=https://router.example.com
+make full-setup KEY=rk_... BASE_URL=https://router.example.com
 ```
 
 > **Two different keys, do not confuse them.**

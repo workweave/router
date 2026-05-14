@@ -55,42 +55,35 @@ seed: ## Create a local dev installation + API key and print usage instructions
 
 setup: migrate-up seed ## Bootstrap (host DB): init DB, run migrations, seed an API key
 
-full-setup: generate-statusline ## Bootstrap router: docker compose + seed + optional Claude Code wiring (see below)
+full-setup: generate-statusline ## Bootstrap router: docker compose + seed + interactively wire Claude Code
 	## Usage:
-	##   make full-setup                                  # boot compose, seed, print instructions
-	##   make full-setup PLATFORM=cc                      # boot + seed + auto-wire Claude Code
-	##   make full-setup PLATFORM=cc KEY=rk_... BASE_URL=http://...  # wire existing router to Claude Code
-	##   make full-setup PLATFORM=cc KEY=rk_... BASE_URL=http://... DIR=/tmp/test  # isolated throwaway install
-	##   make full-setup PLATFORM=cc KEY=rk_... BASE_URL=http://... SCOPE=project NON_INTERACTIVE=1  # CI-friendly
-	##   make full-setup KEY=rk_... BASE_URL=http://...  # print instructions for existing router
+	##   make full-setup                                  # boot compose, seed, wire Claude Code (interactive scope prompt)
+	##   make full-setup KEY=rk_... BASE_URL=http://...   # wire an already-running router to Claude Code
+	##   make full-setup KEY=rk_... BASE_URL=http://... DIR=/tmp/test         # isolated throwaway install
+	##   make full-setup KEY=rk_... BASE_URL=http://... SCOPE=user            # skip the interactive scope prompt
+	##   make full-setup KEY=rk_... BASE_URL=http://... SCOPE=user NON_INTERACTIVE=1  # CI-friendly
+	##
+	## Cursor wiring is manual — see README "Wiring Claude Code or Cursor".
 	@if [ -n "$(KEY)" ] && [ -n "$(BASE_URL)" ]; then \
-		if [ "$(PLATFORM)" = "cc" ]; then \
-			INSTALL_CMD='WEAVE_ROUTER_KEY="$(KEY)" ./install/install.sh --base-url "$(BASE_URL)"'; \
-			[ -n "$(SCOPE)" ] && INSTALL_CMD="$$INSTALL_CMD --scope $(SCOPE)"; \
-			[ -n "$(DIR)" ] && INSTALL_CMD="$$INSTALL_CMD --dir $(DIR)"; \
-			[ "$(NON_INTERACTIVE)" = "1" ] && INSTALL_CMD="$$INSTALL_CMD --non-interactive"; \
-			echo "==> Wiring Claude Code → $(BASE_URL)..."; \
-			eval "$$INSTALL_CMD"; \
-		else \
-			echo "Weave Router key:"; \
-			echo "  $(KEY)"; \
-			echo ""; \
-			echo "=== Claude Code ==="; \
-			echo "  export WEAVE_ROUTER_KEY=$(KEY)"; \
-			echo "  ./install/install.sh --base-url $(BASE_URL)"; \
-			echo ""; \
-			echo "=== Cursor ==="; \
-			echo "  1. Open Cursor Settings > Models > Override OpenAI Base URL"; \
-			echo "     Set to: $(BASE_URL)/v1"; \
-			echo "  2. Add API key: $(KEY)"; \
-		fi; \
+		INSTALL_CMD='WEAVE_ROUTER_KEY="$(KEY)" ./install/install.sh --base-url "$(BASE_URL)"'; \
+		[ -n "$(SCOPE)" ] && INSTALL_CMD="$$INSTALL_CMD --scope $(SCOPE)"; \
+		[ -n "$(DIR)" ] && INSTALL_CMD="$$INSTALL_CMD --dir $(DIR)"; \
+		[ "$(NON_INTERACTIVE)" = "1" ] && INSTALL_CMD="$$INSTALL_CMD --non-interactive"; \
+		echo "==> Wiring Claude Code → $(BASE_URL)..."; \
+		eval "$$INSTALL_CMD"; \
 	else \
 		if [ -n "$(KEY)" ] || [ -n "$(BASE_URL)" ]; then \
 			echo "error: KEY and BASE_URL must both be provided together."; \
 			exit 1; \
 		fi; \
+		COMPOSE_LOG="$$(mktemp -t full-setup-compose.XXXXXX.log)"; \
 		echo "==> Building and starting docker compose stack (postgres, migrate, server)..."; \
-		docker compose up --build -d; \
+		echo "    (build log: $$COMPOSE_LOG)"; \
+		if ! docker compose up --build -d >"$$COMPOSE_LOG" 2>&1; then \
+			echo "error: docker compose failed. Output:"; \
+			cat "$$COMPOSE_LOG"; \
+			exit 1; \
+		fi; \
 		echo "==> Waiting for the router to become healthy..."; \
 		for i in $$(seq 1 60); do \
 			if curl -fsS --max-time 2 http://localhost:8080/health >/dev/null 2>&1; then \
@@ -113,40 +106,10 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + opt
 		fi; \
 		echo "    key: $$WEAVE_KEY"; \
 		echo ""; \
-		if [ "$(PLATFORM)" = "cc" ]; then \
-			echo "==> Wiring Claude Code → router..."; \
-			WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --base-url http://localhost:8080 --scope project --non-interactive; \
-			echo ""; \
-			echo "Done. Your local setup:"; \
-			echo "  • Router runs on http://localhost:8080"; \
-			echo "  • Claude Code is wired (.claude/settings.json + .claude/settings.local.json)"; \
-			echo ""; \
-			echo "Share with teammates (replace BASE_URL with a host they can reach,"; \
-			echo "e.g. an ngrok tunnel or a deployed router — localhost only works on this machine):"; \
-			echo "  make full-setup PLATFORM=cc KEY=$$WEAVE_KEY BASE_URL=http://localhost:8080"; \
-			echo ""; \
-			echo "Useful follow-ups:"; \
-			echo "  make logs    # tail server logs"; \
-			echo "  make down    # stop the stack"; \
-		else \
-			echo "Your local Weave Router is ready. Set up Claude Code or Cursor:"; \
-			echo ""; \
-			echo "=== Claude Code ==="; \
-			echo "  make full-setup PLATFORM=cc KEY=$$WEAVE_KEY BASE_URL=http://localhost:8080"; \
-			echo ""; \
-			echo "=== Cursor ==="; \
-			echo "  1. Open Cursor Settings > Models > Override OpenAI Base URL"; \
-			echo "     Set to: http://localhost:8080/v1"; \
-			echo "  2. Add API key: $$WEAVE_KEY"; \
-			echo ""; \
-			echo "Share with teammates (replace BASE_URL with a host they can reach,"; \
-			echo "e.g. an ngrok tunnel or a deployed router — localhost only works on this machine):"; \
-			echo "  make full-setup PLATFORM=cc KEY=$$WEAVE_KEY BASE_URL=http://localhost:8080"; \
-			echo ""; \
-			echo "Useful follow-ups:"; \
-			echo "  make logs    # tail server logs"; \
-			echo "  make down    # stop the stack"; \
-		fi; \
+		echo "==> Wiring Claude Code → router (you'll be prompted for scope: user or project)..."; \
+		WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --base-url http://localhost:8080 --quiet; \
+		echo ""; \
+		echo "Done. Router on http://localhost:8080. Share with teammates: make full-setup KEY=$$WEAVE_KEY BASE_URL=<reachable-url>"; \
 	fi
 
 db: ## Start the compose Postgres only (port 5433)

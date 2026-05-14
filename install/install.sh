@@ -21,6 +21,7 @@
 #   ./install.sh --local                          # local router on localhost:8080
 #   ./install.sh --base-url http://localhost:8080 # self-hosted, custom port
 #   ./install.sh --non-interactive                # require WEAVE_ROUTER_KEY env var
+#   ./install.sh --quiet                          # suppress banner, ping check, and trailing tips
 #
 #   curl -fsSL https://weave.ai/cc/install.sh | sh
 #   curl -fsSL https://weave.ai/cc/install.sh | sh -s -- --scope project
@@ -38,6 +39,7 @@ scope_explicit="false"
 install_dir=""
 base_url=""
 non_interactive="false"
+quiet="false"
 router_key_header="X-Weave-Router-Key"
 
 # ---------- helpers ----------
@@ -96,6 +98,9 @@ while [ $# -gt 0 ]; do
       ;;
     --non-interactive)
       non_interactive="true"; shift
+      ;;
+    --quiet)
+      quiet="true"; shift
       ;;
     --dir)
       install_dir="${2:-}"; shift 2
@@ -156,7 +161,7 @@ fi
 
 # ---------- pre-flight ----------
 
-info "Weave Router installer (scope=$scope, base_url=$base_url)"
+[ "$quiet" = "true" ] || info "Weave Router installer (scope=$scope, base_url=$base_url)"
 
 require_cmd jq    "macOS: 'brew install jq' · Debian/Ubuntu: 'sudo apt install jq'"
 require_cmd curl  "macOS/Linux: usually preinstalled — check your package manager"
@@ -597,11 +602,13 @@ fi
 
 # ---------- post-install verification ----------
 
-info "Pinging router at $base_url ..."
-if curl -fsS --max-time 5 "$base_url/health" >/dev/null 2>&1; then
-  ok "Router is reachable."
-else
-  warn "Could not reach $base_url/health within 5s. Settings are written; verify the router is running."
+if [ "$quiet" != "true" ]; then
+  info "Pinging router at $base_url ..."
+  if curl -fsS --max-time 5 "$base_url/health" >/dev/null 2>&1; then
+    ok "Router is reachable."
+  else
+    warn "Could not reach $base_url/health within 5s. Settings are written; verify the router is running."
+  fi
 fi
 
 if [ -n "$api_key" ]; then
@@ -620,7 +627,9 @@ fi
 
 printf "\n"
 ok "Weave Router installed for Claude Code."
-if [ "$scope" = "project" ]; then
+if [ "$quiet" = "true" ]; then
+  : # caller (e.g. make full-setup) prints its own next-steps block
+elif [ "$scope" = "project" ]; then
   if [ -n "$install_dir" ]; then
     echo "  Installed into $install_dir/.claude/ (project scope)."
     echo "  Run 'cd $install_dir && claude' to use the router."
