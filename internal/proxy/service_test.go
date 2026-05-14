@@ -10,10 +10,15 @@ import (
 	"strings"
 	"testing"
 
+	"time"
+
+	"workweave/router/internal/auth"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -569,4 +574,165 @@ func TestService_ExcludedModelsThroughRequest(t *testing.T) {
 		assert.True(t, svc.HasExcludedModelsOverride())
 		assert.Equal(t, []string{"gpt-4o"}, svc.ExcludedModelsOverride())
 	})
+}
+
+// TestService_ProxyMessages_UsageBypass_SkipsScorer guards the core
+// contract of the rate-limit gate: while observed Anthropic utilization
+// stays below threshold, ProxyMessages must NOT call the cluster
+// scorer, and must dispatch to the Anthropic provider with the
+// caller-requested model (not whatever the scorer would have picked).
+func TestService_ProxyMessages_UsageBypass_SkipsScorer(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+	p := &fakeProvider{}
+	obs := usage.NewObserver(0.95, 10*time.Minute, true)
+	// Pin a sub-threshold reading under the credential we'll send in the
+	// request header so the bypass branch engages on the first call.
+	obs.RecordObservation(usage.CredentialKey([]byte("sk-ant-customer")), usage.Observation{FiveHourUtil: 0.2, WeeklyUtil: 0.3})
+
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithUsageBypass(obs)
+
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	httpReq.Header.Set("x-api-key", "sk-ant-customer")
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+
+	require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+	assert.Equal(t, 0, fr.routeCalls, "scorer must not run while utilization is below threshold")
+	require.Len(t, p.proxyBodies, 1, "request must be dispatched to Anthropic exactly once")
+	assert.Contains(t, string(p.proxyBodies[0]), `"claude-opus-4-7"`, "bypass path must preserve the caller-requested model")
+	assert.Equal(t, "usage_bypass", rec.Header().Get("x-router-decision"))
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
+}
+
+// TestService_ProxyMessages_UsageBypass_EngagesAtThreshold is the
+// counterpart: once either window crosses threshold for this
+// credential, the scorer must run. The fake scorer here routes to
+// haiku, distinct from the opus the caller asked for.
+func TestService_ProxyMessages_UsageBypass_EngagesAtThreshold(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+	p := &fakeProvider{}
+	obs := usage.NewObserver(0.95, 10*time.Minute, true)
+	obs.RecordObservation(usage.CredentialKey([]byte("sk-ant-hot")), usage.Observation{FiveHourUtil: 0.99, WeeklyUtil: 0.1})
+
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithUsageBypass(obs)
+
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	httpReq.Header.Set("x-api-key", "sk-ant-hot")
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+
+	require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+	assert.Equal(t, 1, fr.routeCalls, "scorer must run once utilization crosses threshold")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "scorer's pick (haiku) replaces the requested opus")
+}
+
+// TestService_ProxyMessages_UsageBypass_ResolvesBYOKFromContext guards
+// against the regression where byokCredentialsFromContext type-asserted
+// the wrong shape: the auth middleware stores []*auth.ExternalAPIKey
+// under ExternalAPIKeysContextKey{}, so the bypass gate must reach BYOK
+// credentials via externalKeysFromContext + BuildCredentialsMap, not a
+// direct map type-assertion. Regression: a router-authed BYOK request
+// would silently fall back to attacker-controlled x-api-key headers.
+func TestService_ProxyMessages_UsageBypass_ResolvesBYOKFromContext(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+	p := &fakeProvider{}
+	obs := usage.NewObserver(0.95, 10*time.Minute, true)
+	// Pin a near-limit reading under the BYOK credential (NOT under the
+	// header value). If the gate keys off the BYOK map correctly, the
+	// scorer must run. If it falls back to the header (the bug), the
+	// gate sees no observation for that key and incorrectly bypasses.
+	byokKey := []byte("sk-ant-byok-secret")
+	obs.RecordObservation(usage.CredentialKey(byokKey), usage.Observation{FiveHourUtil: 0.99, WeeklyUtil: 0.1})
+
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithUsageBypass(obs)
+
+	ctx := context.WithValue(context.Background(), proxy.ExternalAPIKeysContextKey{}, []*auth.ExternalAPIKey{
+		{Provider: providers.ProviderAnthropic, Plaintext: byokKey},
+	})
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	httpReq.Header.Set("x-api-key", "sk-ant-attacker-supplied-headroom-key")
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+	assert.Equal(t, 1, fr.routeCalls, "BYOK credential's at-limit observation must engage routing — header-based fallback would falsely bypass")
+}
+
+// TestService_ProxyMessages_UsageBypass_RespectsModelExclusion guards
+// the second security review: bypass must not let callers reach
+// Anthropic models that installation policy has on its deny list.
+// When the requested model is excluded, fall through to runTurnLoop so
+// the tier clamp / scorer can substitute an allowed model.
+func TestService_ProxyMessages_UsageBypass_RespectsModelExclusion(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+	p := &fakeProvider{}
+	obs := usage.NewObserver(0.95, 10*time.Minute, true)
+	obs.RecordObservation(usage.CredentialKey([]byte("sk-ant-customer")), usage.Observation{FiveHourUtil: 0.2, WeeklyUtil: 0.2})
+
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithUsageBypass(obs).
+		WithExcludedModelsOverride([]string{"claude-opus-4-7"})
+
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	httpReq.Header.Set("x-api-key", "sk-ant-customer")
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+
+	require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+	assert.Equal(t, 1, fr.routeCalls, "excluded model must force the scorer to run even when utilization is below threshold")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "scorer must substitute an allowed model in place of the excluded opus")
+}
+
+// TestService_ProxyMessages_UsageBypass_DisabledFlagDoesNotBypass guards
+// the regression where a non-nil but disabled Observer would still
+// engage the bypass path: Observer.ShouldBypassRouting returns true when
+// disabled (to preserve legacy callers that always pass-through), so
+// without an Enabled() gate every request with a resolvable Anthropic
+// credential would skip the scorer entirely.
+func TestService_ProxyMessages_UsageBypass_DisabledFlagDoesNotBypass(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+	p := &fakeProvider{}
+	obs := usage.NewObserver(0.95, 10*time.Minute, false)
+
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithUsageBypass(obs)
+
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	httpReq.Header.Set("x-api-key", "sk-ant-customer")
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+
+	require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+	assert.Equal(t, 1, fr.routeCalls, "scorer must run when the bypass feature flag is off, regardless of Observer presence")
+}
+
+// TestService_ProxyMessages_UsageBypass_IgnoresHeaderOnRouterAuth guards
+// the trust-boundary mismatch: on router-key-authenticated requests
+// (installation ID present on ctx) with no BYOK, the bypass gate must
+// not key off the inbound x-api-key header. resolveAndInjectCredentials
+// gates client-header extraction behind the same installation check, so
+// the upstream call would use the deployment key instead. Letting the
+// gate observe a header-supplied key would (a) let a caller force the
+// bypass path with an attacker-chosen cold-start key, and (b) mismatch
+// the key that actually flows upstream.
+func TestService_ProxyMessages_UsageBypass_IgnoresHeaderOnRouterAuth(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+	p := &fakeProvider{}
+	obs := usage.NewObserver(0.95, 10*time.Minute, true)
+	obs.RecordObservation(usage.CredentialKey([]byte("sk-ant-attacker-supplied")), usage.Observation{FiveHourUtil: 0.2, WeeklyUtil: 0.2})
+
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithUsageBypass(obs)
+
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, uuid.NewString())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	httpReq.Header.Set("x-api-key", "sk-ant-attacker-supplied")
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+	assert.Equal(t, 1, fr.routeCalls, "router-authed request without BYOK must not use inbound headers to gate bypass — scorer must run")
 }
