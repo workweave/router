@@ -19,6 +19,20 @@ var ErrUnknownModel = errors.New("auth: unknown model id")
 
 type Clock func() time.Time
 
+// InstallationChangeNotifier publishes per-installation invalidation events so
+// peer replicas can drop their cached entries. Fire-and-forget: implementations
+// should not block the caller; transport errors are logged, not returned.
+type InstallationChangeNotifier interface {
+	NotifyInstallationChanged(installationID string)
+}
+
+// NoOpInstallationChangeNotifier is the Null Object used when no cross-replica
+// fanout is configured (e.g. local dev, single-replica deployments).
+type NoOpInstallationChangeNotifier struct{}
+
+// NotifyInstallationChanged is a no-op.
+func (NoOpInstallationChangeNotifier) NotifyInstallationChanged(string) {}
+
 // Service authenticates incoming bearer tokens. Identity only; routing/dispatch lives in proxy.Service.
 type Service struct {
 	installations InstallationRepository
@@ -27,6 +41,7 @@ type Service struct {
 	users         UserRepository
 	cache         APIKeyCache
 	userCache     UserCache
+	notifier      InstallationChangeNotifier
 	now           Clock
 	encryptor     Encryptor
 
@@ -58,6 +73,7 @@ func NewService(
 		users:         users,
 		cache:         cache,
 		userCache:     userCache,
+		notifier:      NoOpInstallationChangeNotifier{},
 		now:           now,
 		encryptor:     NoOpEncryptor{},
 	}
@@ -67,6 +83,27 @@ func NewService(
 func (s *Service) WithEncryptor(e Encryptor) *Service {
 	s.encryptor = e
 	return s
+}
+
+// WithInstallationChangeNotifier wires a cross-replica fanout so cached entries
+// on peer replicas are dropped when settings change. Pass nil to disable.
+func (s *Service) WithInstallationChangeNotifier(n InstallationChangeNotifier) *Service {
+	if n == nil {
+		s.notifier = NoOpInstallationChangeNotifier{}
+		return s
+	}
+	s.notifier = n
+	return s
+}
+
+// invalidateInstallation evicts the local cache and fans out to peer replicas.
+// Always called after a successful DB commit so listeners observe the new state.
+func (s *Service) invalidateInstallation(installationID string) {
+	if installationID == "" {
+		return
+	}
+	s.cache.InvalidateInstallation(installationID)
+	s.notifier.NotifyInstallationChanged(installationID)
 }
 
 // IssueAPIKey creates a new router API key and returns the raw token (only visible here; not stored in plaintext).
@@ -113,7 +150,12 @@ func (s *Service) RotateAPIKey(ctx context.Context, installationID string, creat
 			return nil, "", err
 		}
 	}
-	return s.IssueAPIKey(ctx, installationID, name, createdBy)
+	key, raw, err := s.IssueAPIKey(ctx, installationID, name, createdBy)
+	if err != nil {
+		return nil, "", err
+	}
+	s.invalidateInstallation(installationID)
+	return key, raw, nil
 }
 
 // DeleteAPIKey soft-deletes an API key. The LRU entry TTL-expires; in-flight requests within the TTL window still succeed, acceptable for this rare path.
@@ -152,12 +194,17 @@ func (s *Service) UpsertExternalAPIKey(ctx context.Context, installationID, prov
 	if err != nil {
 		return nil, err
 	}
+	s.invalidateInstallation(installationID)
 	return key, nil
 }
 
 // DeleteExternalAPIKey soft-deletes a specific provider API key.
 func (s *Service) DeleteExternalAPIKey(ctx context.Context, installationID, id string) error {
-	return s.externalKeys.SoftDelete(ctx, installationID, id)
+	if err := s.externalKeys.SoftDelete(ctx, installationID, id); err != nil {
+		return err
+	}
+	s.invalidateInstallation(installationID)
+	return nil
 }
 
 // SetInstallationExcludedModels replaces the per-installation model exclusion
@@ -166,9 +213,10 @@ func (s *Service) DeleteExternalAPIKey(ctx context.Context, installationID, id s
 // every deployed model); passing nil skips validation. Returns
 // ErrUnknownModel when an entry in models is not in allowed.
 //
-// The new list is visible to the request path within the APIKey cache TTL
-// (default 5 min); explicit invalidation is intentionally not wired so the
-// in-process cache stays write-through-by-TTL like external-key changes.
+// The new list is visible on the next authenticated request: the API-key
+// cache is explicitly invalidated for this installation on commit, with the
+// TTL acting as the safety net across replicas that miss the invalidation
+// signal.
 func (s *Service) SetInstallationExcludedModels(ctx context.Context, externalID, installationID string, models []string, allowed map[string]struct{}) ([]string, error) {
 	if models == nil {
 		models = []string{}
@@ -193,6 +241,7 @@ func (s *Service) SetInstallationExcludedModels(ctx context.Context, externalID,
 	if err := s.installations.UpdateExcludedModels(ctx, externalID, installationID, out); err != nil {
 		return nil, err
 	}
+	s.invalidateInstallation(installationID)
 	return out, nil
 }
 
