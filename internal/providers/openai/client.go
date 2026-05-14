@@ -21,8 +21,7 @@ import (
 const DefaultBaseURL = "https://api.openai.com"
 
 // upstreamTraceEnabled mirrors ROUTER_DEBUG_UPSTREAM_TRACE=true. When on, dumps
-// response status, headers, and a body preview per request — pair with
-// ROUTER_DEBUG_SSE_TRACE to see what's crossing the OpenAI <-> Anthropic boundary.
+// response status, headers, and a body preview per request.
 var upstreamTraceEnabled = os.Getenv("ROUTER_DEBUG_UPSTREAM_TRACE") == "true"
 
 type Client struct {

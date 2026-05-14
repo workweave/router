@@ -3,6 +3,7 @@ package translate_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -72,4 +73,34 @@ func TestAnthropicSSETranslator_ForwardsOpenAICachedTokens(t *testing.T) {
 	assert.Equal(t, 12, sink.output)
 	assert.Equal(t, 0, sink.cacheCreation)
 	assert.Equal(t, 64, sink.cacheRead)
+}
+
+// Cross-format upstreams (OpenAI, Gemini) only learn the real input_tokens
+// at the end of the stream, but Claude Code's subagent counter reads off
+// message_start.usage.input_tokens. Without WithEstimatedInputTokens the
+// counter shows zero tokens for every subagent turn.
+func TestAnthropicSSETranslator_MessageStartCarriesEstimatedInputTokens(t *testing.T) {
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil).
+		WithEstimatedInputTokens(1234)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},\"finish_reason\":null}]}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+
+	body := rec.Body.String()
+	startIdx := strings.Index(body, "event: message_start")
+	deltaIdx := strings.Index(body, "event: content_block_delta")
+	require.GreaterOrEqual(t, startIdx, 0, "message_start must be emitted")
+	require.GreaterOrEqual(t, deltaIdx, startIdx, "message_start must precede the first delta")
+	startSegment := body[startIdx:deltaIdx]
+	assert.Contains(t, startSegment, `"usage":{"input_tokens":1234,"output_tokens":0}`)
 }

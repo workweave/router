@@ -858,7 +858,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			usage = extractor
 		}
 		translator := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
-			WithRoutingMarker(routingMarkerFor(routeRes))
+			WithRoutingMarker(routingMarkerFor(routeRes)).
+			WithEstimatedInputTokens(feats.Tokens)
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
 		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderGoogle:
@@ -875,7 +876,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 		// SSE chain: Gemini → OpenAI → Anthropic.
 		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
-			WithRoutingMarker(routingMarkerFor(routeRes))
+			WithRoutingMarker(routingMarkerFor(routeRes)).
+			WithEstimatedInputTokens(feats.Tokens)
 		geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, decision.Model, nil)
 		proxyErr = p.Proxy(ctx, decision, prep, geminiTr, r)
 		proxyErr = finalizeAfterProxy(proxyErr, geminiTr.Finalize)
