@@ -112,6 +112,19 @@ func (r *installationRepo) UpdateExcludedModels(ctx context.Context, externalID,
 	})
 }
 
+func (r *installationRepo) UpdateRoutingAlpha(ctx context.Context, externalID, id string, alpha int) error {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return err
+	}
+	q := sqlc.New(r.tx)
+	return q.UpdateModelRouterInstallationRoutingAlpha(ctx, sqlc.UpdateModelRouterInstallationRoutingAlphaParams{
+		ID:           parsed,
+		ExternalID:   externalID,
+		RoutingAlpha: int16(alpha),
+	})
+}
+
 type apiKeyRepo struct {
 	tx sqlc.DBTX
 }

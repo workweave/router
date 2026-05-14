@@ -18,6 +18,11 @@ type Installation struct {
 	// ExcludedModels is the per-installation model exclusion list applied
 	// at request time by the cluster scorer. Empty slice means no exclusion.
 	ExcludedModels []string
+	// RoutingAlpha is the quality-vs-cost knob in 0.1 steps, stored as the
+	// integer 0..10 (so 5 = α=0.5). 0 biases purely toward cost, 10 purely
+	// toward quality. The cluster Multiversion router maps this to a
+	// pre-baked artifact bundle at request time.
+	RoutingAlpha int
 }
 
 type CreateInstallationParams struct {
@@ -37,4 +42,9 @@ type InstallationRepository interface {
 	// scoped to externalID to prevent cross-tenant updates. An empty (or
 	// nil) slice clears the list.
 	UpdateExcludedModels(ctx context.Context, externalID, id string, models []string) error
+	// UpdateRoutingAlpha replaces the per-installation routing alpha (0..10),
+	// scoped to externalID to prevent cross-tenant updates. Caller validates
+	// the range; the repo persists whatever it receives so SQLSTATE 23514
+	// would surface a malformed write loudly rather than silently clipping.
+	UpdateRoutingAlpha(ctx context.Context, externalID, id string, alpha int) error
 }

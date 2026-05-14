@@ -23,6 +23,7 @@ func toAuthInstallation(row sqlc.RouterModelRouterInstallation) *auth.Installati
 		DeletedAt:      timestampPtr(row.DeletedAt),
 		CreatedBy:      row.CreatedBy,
 		ExcludedModels: excluded,
+		RoutingAlpha:   int(row.RoutingAlpha),
 	}
 }
 

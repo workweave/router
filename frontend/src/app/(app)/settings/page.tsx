@@ -16,7 +16,7 @@ import {
   type ExternalKey,
   type RouterConfig,
 } from "@/lib/api";
-import { ChevronDown, Copy, Filter, KeyRound, Plug, RotateCw, Settings as SettingsIcon, Trash2 } from "lucide-react";
+import { ChevronDown, Copy, Filter, KeyRound, Plug, RotateCw, Scale, Settings as SettingsIcon, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export default function SettingsPage() {
@@ -69,6 +69,24 @@ export default function SettingsPage() {
             Bring your own keys for Anthropic, OpenAI, Google, OpenRouter.
           </Text>
           <ProviderKeysPanel />
+        </Page.Section>
+
+        <Page.Section
+          className="py-3"
+          header={
+            <Page.SectionHeader>
+              <Scale className="size-4" />
+              <Text variant="h4" as="h3">
+                Quality vs cost
+              </Text>
+            </Page.SectionHeader>
+          }
+        >
+          <Text className="text-xs text-muted-foreground">
+            Bias routing toward cheaper models or higher-scoring models in
+            0.1 steps. Changes take effect on the next request.
+          </Text>
+          <RoutingAlphaPanel />
         </Page.Section>
 
         <Page.Section
@@ -818,6 +836,108 @@ function ModelSelectionPanel() {
             {saving ? "Saving…" : "Save"}
           </Button>
         </Card.Footer>
+      </Card>
+    </>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Routing alpha panel
+// ──────────────────────────────────────────────────────────────────────────
+
+function formatAlpha(value: number, max: number): string {
+  // Range is 0..max (default 10) representing α=0.0..1.0. Render the float
+  // form so users see the canonical alpha; we never persist or display the
+  // raw integer to keep the UI consistent with the paper notation.
+  return (value / max).toFixed(1);
+}
+
+function RoutingAlphaPanel() {
+  const [bounds, setBounds] = useState<{ min: number; max: number } | null>(null);
+  const [value, setValue] = useState<number | null>(null);
+  const [savedValue, setSavedValue] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.routingAlpha
+      .get()
+      .then(res => {
+        setBounds({ min: res.min, max: res.max });
+        setValue(res.alpha);
+        setSavedValue(res.alpha);
+      })
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Failed to load routing alpha"),
+      );
+  }, []);
+
+  async function commit(next: number) {
+    if (savedValue === next) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await api.routingAlpha.update(next);
+      setValue(res.alpha);
+      setSavedValue(res.alpha);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save routing alpha");
+      // Roll back the optimistic slider position on failure so the UI
+      // doesn't lie about persisted state.
+      setValue(savedValue);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (bounds == null || value == null) {
+    return (
+      <Card className="p-0">
+        <Card.Content>
+          <div className="px-5 py-8 text-center text-2xs text-muted-foreground">
+            {error != null ? "Failed to load" : "Loading…"}
+          </div>
+        </Card.Content>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      {error && <ErrorBanner>{error}</ErrorBanner>}
+      <Card>
+        <Card.Content>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-baseline justify-between">
+              <Text className="text-2xs uppercase tracking-wide text-muted-foreground">
+                Alpha
+              </Text>
+              <span className="font-mono text-sm text-foreground">
+                α = {formatAlpha(value, bounds.max)}
+                {saving && <span className="ml-2 text-2xs text-muted-foreground">saving…</span>}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={bounds.min}
+              max={bounds.max}
+              step={1}
+              value={value}
+              onChange={e => setValue(Number(e.target.value))}
+              onMouseUp={e => commit(Number((e.target as HTMLInputElement).value))}
+              onTouchEnd={e => commit(Number((e.target as HTMLInputElement).value))}
+              onKeyUp={e => commit(Number((e.target as HTMLInputElement).value))}
+              disabled={saving}
+              className="w-full accent-brand"
+              aria-label="Routing alpha"
+            />
+            <div className="flex justify-between text-2xs text-muted-foreground">
+              <span>Lowest cost</span>
+              <span>Default (0.5)</span>
+              <span>Highest quality</span>
+            </div>
+          </div>
+        </Card.Content>
       </Card>
     </>
   );

@@ -17,6 +17,14 @@ type Request struct {
 	// Nil or empty means no exclusion. If filtering empties the eligible
 	// set, the scorer returns ErrNoEligibleProvider rather than falling back.
 	ExcludedModels map[string]struct{}
+	// Alpha is the quality-vs-cost knob in integer steps (0..10, where 5 =
+	// α=0.5). The cluster Multiversion router maps this to a pre-baked
+	// artifact bundle. Zero is a valid value (pure cost), so callers signal
+	// "use the default" by leaving AlphaSet false rather than zeroing Alpha.
+	Alpha int
+	// AlphaSet differentiates "explicit α=0" from "no preference". Set true
+	// only when the caller has a per-installation value to apply.
+	AlphaSet bool
 }
 
 type Decision struct {

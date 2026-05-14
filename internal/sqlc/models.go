@@ -56,6 +56,7 @@ type RouterModelRouterInstallation struct {
 	DeletedAt      pgtype.Timestamp
 	CreatedBy      *string
 	ExcludedModels []string
+	RoutingAlpha   int16
 }
 
 type RouterModelRouterRequestTelemetry struct {
