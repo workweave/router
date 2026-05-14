@@ -1,0 +1,21 @@
+AGENTS.md
+  s_14b26e5cbeae5d::t_b24a9930c81578 25-30
+CLAUDE.md
+  s_14b26e5cbeae5d::t_76358004119457 25-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "d32ae7c57fc5c7f82eef8dabf9cc87fcc6b7b1d7",
+  "prompts": {},
+  "sessions": {
+    "s_14b26e5cbeae5d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3434220-c4eb-400d-994b-e548d668c1b8",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
