@@ -1,0 +1,52 @@
+internal/proxy/usage/observer.go
+  s_773d52c7d7b5a5::t_cc0e43239bece4 115-118,126-131,133-136
+  s_773d52c7d7b5a5::t_1303a5c82427c1 47
+  s_773d52c7d7b5a5::t_fab4c3b6054c9d 132
+  s_773d52c7d7b5a5::t_8190e35393ad3f 20
+  s_773d52c7d7b5a5::t_6cf40e7d0e7241 1-19,21-46,48-114,119-125,137-207
+internal/providers/anthropic/client_test.go
+  s_773d52c7d7b5a5::t_5021013a4aad45 254-323
+internal/proxy/service.go
+  s_773d52c7d7b5a5::t_0ca9a3b3ddb7a6 741
+  s_773d52c7d7b5a5::t_526b71eab96a19 23
+  s_773d52c7d7b5a5::t_6b551cb7018bdf 114-120
+  s_773d52c7d7b5a5::t_69ea097895f7b2 711-740,742-801
+  s_773d52c7d7b5a5::t_c06ac6d708bb3a 875-884
+  s_773d52c7d7b5a5::t_6a8dea18aaa9ec 414-421
+internal/providers/anthropic/client.go
+  s_773d52c7d7b5a5::t_d371c0bf46962e 22-30,35-41,55-83
+  s_773d52c7d7b5a5::t_8687ca3c12cb9a 129
+  s_773d52c7d7b5a5::t_7f11e2e29936a4 218-232
+  s_773d52c7d7b5a5::t_2dd5b8cd2ba75a 190
+cmd/router/main.go
+  s_773d52c7d7b5a5::t_1ae305295d142f 149-150
+  s_773d52c7d7b5a5::t_c56232a0d78644 32
+  s_773d52c7d7b5a5::t_94f2b0667581a3 148,151-159
+  s_773d52c7d7b5a5::t_009bcc35766a19 746-760
+  s_773d52c7d7b5a5::t_9871180240090b 431-432
+internal/proxy/usage/observer_test.go
+  s_773d52c7d7b5a5::t_9adc910e0d5025 106
+  s_773d52c7d7b5a5::t_a8597dc3514aaf 17,33,39,45,52,58,63,69,110
+  s_773d52c7d7b5a5::t_b9c692f4473064 1-16,18-32,34-38,40-44,46-51,53-57,59-62,64-68,70-105,107-109,111-118
+internal/proxy/service_test.go
+  s_773d52c7d7b5a5::t_76007f133fe708 13-14,17
+  s_773d52c7d7b5a5::t_82c5b6cabc2ae6 537-588
+.env.example
+  s_773d52c7d7b5a5::t_ce4e5a90d2d30d 120-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "ad91fad2745ea90ae2ccbb8cdf5a1ca65602b430",
+  "prompts": {},
+  "sessions": {
+    "s_773d52c7d7b5a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a4416eb-4746-4caf-825c-c557fbd13098",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
