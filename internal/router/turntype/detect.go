@@ -40,6 +40,15 @@ const (
 	// pin written here would anchor the real-conv turn that lands ~25ms
 	// later (same session key) before its own scorer even runs.
 	TitleGen TurnType = "title_gen"
+	// Classifier: a short-form classification call — no tools, small
+	// max_tokens, short message list. Anthropic's Claude Code security
+	// monitor (allow/block-with-reason on the agent's latest action) is
+	// the canonical case, but the pattern is general: any caller asking
+	// the model to emit a tiny verdict from a fixed-shape context. Same
+	// routing treatment as Probe and TitleGen — hard-pinned to the cheap
+	// model and skips session-pin creation so the real-conv pin doesn't
+	// inherit a classifier's decision.
+	Classifier TurnType = "classifier"
 )
 
 // probeMaxTokensThreshold is the inclusive upper bound on max_tokens for
@@ -48,6 +57,17 @@ const (
 // versions without false-positiving real "give me a short answer" calls
 // (which start around 64+).
 const probeMaxTokensThreshold = 4
+
+// classifier{Max,Msg}Threshold bound the Classifier turn type to short-form
+// classification calls. Claude Code's security monitor uses max_tokens=64
+// and message_count=2 (system + a single transcript-bundled user turn);
+// the bounds give headroom for similar yes/no/verdict classifiers without
+// catching real "short reply" main-loop turns (which start at ~512 output
+// tokens and carry the full 128-tool Claude Code registry).
+const (
+	classifierMaxTokensThreshold = 256
+	classifierMaxMessageCount    = 3
+)
 
 // DetectFromEnvelope classifies an inbound request. subAgentHint is the
 // optional x-weave-subagent-type header value; empty is ignored.
@@ -76,6 +96,9 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 	if isSubAgentDispatch(env.MetadataUserID(), env.FirstUserMessageText(), subAgentHint) {
 		return SubAgentDispatch
 	}
+	if isClassifier(feats) {
+		return Classifier
+	}
 	if feats.LastKind == "tool_result" {
 		return ToolResult
 	}
@@ -89,6 +112,37 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 // `generationConfig.maxOutputTokens` produce the same RoutingFeatures.
 func isProbe(feats translate.RoutingFeatures) bool {
 	return feats.MaxTokens > 0 && feats.MaxTokens <= probeMaxTokensThreshold
+}
+
+// isClassifier reports whether a request is a short-form classifier call
+// (Anthropic's security monitor, or any similar caller asking for a tiny
+// verdict from a fixed-shape context). Three structural signals, all
+// required:
+//
+//  1. No tools — a real Claude Code main-loop turn always carries the
+//     full 128-tool registry, even when the user asks for a short reply.
+//  2. max_tokens within classifierMaxTokensThreshold — classifier outputs
+//     are tiny (security monitor uses 64; title-gen and friends similar).
+//  3. message_count within classifierMaxMessageCount — classifiers are
+//     stateless and bundle their context into a single user turn; real
+//     conversations grow the message list past 3 quickly.
+//
+// Probe (max_tokens<=4) is checked first and wins; TitleGen and Compaction
+// have more specific fingerprints and also win when they match. This is a
+// general fallback for the broader classifier shape. False negatives
+// (returning MainLoop) are safe; false positives would route a real
+// conversation to the cheap hard-pin, hence the tight conjunction.
+func isClassifier(feats translate.RoutingFeatures) bool {
+	if feats.HasTools {
+		return false
+	}
+	if feats.MaxTokens <= 0 || feats.MaxTokens > classifierMaxTokensThreshold {
+		return false
+	}
+	if feats.MessageCount <= 0 || feats.MessageCount > classifierMaxMessageCount {
+		return false
+	}
+	return true
 }
 
 // isTitleGen reports whether a request is Claude Code's sidebar-title

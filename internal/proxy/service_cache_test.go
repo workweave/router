@@ -35,7 +35,10 @@ func embeddingFixture(seed float32) []float32 {
 	return out
 }
 
-// anthropicBody returns a minimal valid Anthropic Messages body.
+// anthropicBody returns a minimal valid Anthropic Messages body. Includes a
+// stub tool so the request stays classified as MainLoop — without it the
+// turntype detector would fingerprint it as Classifier (small max_tokens,
+// no tools, short message list) and hard-pin past the semantic cache.
 func anthropicBody(prompt string, stream bool) []byte {
 	streamLit := "false"
 	if stream {
@@ -45,6 +48,7 @@ func anthropicBody(prompt string, stream bool) []byte {
 		"model":"claude-opus-4-7",
 		"max_tokens":256,
 		"stream":` + streamLit + `,
+		"tools":[{"name":"noop","description":"placeholder","input_schema":{"type":"object"}}],
 		"messages":[{"role":"user","content":"` + prompt + `"}]
 	}`)
 }

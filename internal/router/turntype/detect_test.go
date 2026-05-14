@@ -128,8 +128,22 @@ func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 			want: turntype.Probe,
 		},
 		{
-			name: "max_tokens=5 is not a probe",
+			// max_tokens=5 is above the Probe threshold (which is the
+			// canonical SDK quota-check shape at max_tokens=1). With no
+			// tools and a short message list it falls into the broader
+			// Classifier shape — see the security-monitor case below for
+			// the canonical example.
+			name: "max_tokens=5 with no tools is classifier (above probe threshold)",
 			body: `{"model":"claude-haiku-4-5","max_tokens":5,"messages":[{"role":"user","content":"hello"}]}`,
+			want: turntype.Classifier,
+		},
+		{
+			// Belt for the test above: max_tokens=5 with the full tool
+			// registry stays MainLoop. Probe vs Classifier boundaries
+			// must never catch a real conversation that requested a
+			// terse reply.
+			name: "max_tokens=5 with tools stays main_loop",
+			body: `{"model":"claude-haiku-4-5","max_tokens":5,"tools":[{"name":"Bash","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"hello"}]}`,
 			want: turntype.MainLoop,
 		},
 		{
@@ -195,6 +209,74 @@ func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 			body: `{"model":"claude-haiku-4-5","metadata":{"user_id":"subagent:Explore"},"messages":[
 				{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"output"}]}
 			]}`,
+			want: turntype.SubAgentDispatch,
+		},
+		{
+			// Anthropic Claude Code security monitor — the canonical
+			// classifier shape: small max_tokens, no tools, short message
+			// list. Must hard-pin to the cheap model so the main-loop
+			// session pin isn't poisoned with a classifier verdict.
+			name: "anthropic security monitor classifier",
+			body: `{"model":"claude-opus-4-7","max_tokens":64,"messages":[{"role":"user","content":"is this safe?"}],"system":"You are a security monitor for autonomous AI coding agents."}`,
+			want: turntype.Classifier,
+		},
+		{
+			name: "classifier with two messages still classifier",
+			body: `{"model":"claude-opus-4-7","max_tokens":64,"messages":[
+				{"role":"user","content":"transcript"},
+				{"role":"assistant","content":"verdict?"}
+			]}`,
+			want: turntype.Classifier,
+		},
+		{
+			// Regression guard: a real Claude Code main-loop turn always
+			// ships the full tool registry, even when the user requests a
+			// terse reply. tools=[non-empty] must keep it MainLoop.
+			name: "short reply with tools stays main_loop",
+			body: `{"model":"claude-opus-4-7","max_tokens":64,"tools":[{"name":"Bash","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"yes or no?"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			// Regression guard: max_tokens above the classifier threshold
+			// must keep the turn on the cluster scorer. 4096 is a typical
+			// real-conversation cap.
+			name: "max_tokens 4096 with no tools is not classifier",
+			body: `{"model":"claude-opus-4-7","max_tokens":4096,"messages":[{"role":"user","content":"explain this"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			// Regression guard: a long classifier session (message_count
+			// exceeding classifierMaxMessageCount) is no longer the
+			// classifier shape — likely a stateful conversation. Drop
+			// to MainLoop so the cluster scorer handles it.
+			name: "small max_tokens but message_count 4 is main_loop",
+			body: `{"model":"claude-opus-4-7","max_tokens":64,"messages":[
+				{"role":"user","content":"a"},
+				{"role":"assistant","content":"b"},
+				{"role":"user","content":"c"},
+				{"role":"assistant","content":"d"}
+			]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			name: "probe takes priority over classifier",
+			body: `{"model":"claude-opus-4-7","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}`,
+			want: turntype.Probe,
+		},
+		{
+			// Regression guard: classifier must not pre-empt the more
+			// specific compaction match (its system-prompt fingerprint
+			// is unambiguous even when max_tokens is small).
+			name: "compaction takes priority over classifier",
+			body: `{"model":"claude-opus-4-7","max_tokens":64,"system":"Your task is to create a detailed summary","messages":[{"role":"user","content":"go"}]}`,
+			want: turntype.Compaction,
+		},
+		{
+			// Regression guard: a short sub-agent dispatch must remain
+			// SubAgentDispatch (its hard-pin is gated on the Explore
+			// feature flag; classifier's is unconditional).
+			name: "subagent dispatch takes priority over classifier",
+			body: `{"model":"claude-opus-4-7","max_tokens":64,"metadata":{"user_id":"subagent:Explore"},"messages":[{"role":"user","content":"grep"}]}`,
 			want: turntype.SubAgentDispatch,
 		},
 	}
