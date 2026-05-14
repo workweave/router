@@ -43,6 +43,12 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 			return nil, fmt.Errorf("set openrouter provider hint: %w", err)
 		}
 	}
+	if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
+		body, err = sjson.SetBytes(body, "reasoning", reasoning)
+		if err != nil {
+			return nil, fmt.Errorf("set openrouter reasoning hint: %w", err)
+		}
+	}
 	return body, nil
 }
 
@@ -88,6 +94,9 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 
 	if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
 		out["provider"] = hint
+	}
+	if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
+		out["reasoning"] = reasoning
 	}
 
 	return json.Marshal(out)
