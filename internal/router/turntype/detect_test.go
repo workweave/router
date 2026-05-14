@@ -138,30 +138,44 @@ func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 			want: turntype.MainLoop,
 		},
 		{
-			// Claude Code sidebar title-gen call: tools=[], JSON-schema
-			// response format, system prompt opens with the verbatim
-			// "Generate a concise, sentence-case title" phrase.
+			// Claude Code sidebar title-gen call: tools=[] +
+			// output_config.format.type=json_schema declaring a string
+			// "title" property. Both structural signals required.
 			name: "claude code title-gen is title_gen",
-			body: `{"model":"claude-opus-4-7","max_tokens":64000,"tools":[],"system":[{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."},{"type":"text","text":"Generate a concise, sentence-case title (3-7 words) that captures the main topic or goal of this coding session."}],"messages":[{"role":"user","content":"what good cuh"}]}`,
+			body: `{"model":"claude-opus-4-7","max_tokens":64000,"tools":[],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}}},"messages":[{"role":"user","content":"what good cuh"}]}`,
 			want: turntype.TitleGen,
 		},
 		{
 			// Regression guard: a real conversation that happens to
-			// mention "generate a concise, sentence-case title" in the
-			// system prompt must NOT be hard-pinned. Real Claude Code
-			// conversations always carry the tool registry.
-			name: "system prompt mentioning title phrase but with tools stays main_loop",
-			body: `{"model":"claude-opus-4-7","tools":[{"name":"Bash","input_schema":{"type":"object"}}],"system":"Generate a concise, sentence-case title for the session if asked.","messages":[{"role":"user","content":"hi"}]}`,
+			// request a title-shaped structured output but ALSO carries
+			// the tool registry must NOT be hard-pinned.
+			name: "title schema with tools stays main_loop",
+			body: `{"model":"claude-opus-4-7","tools":[{"name":"Bash","input_schema":{"type":"object"}}],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}}}}},"messages":[{"role":"user","content":"hi"}]}`,
 			want: turntype.MainLoop,
 		},
 		{
-			name: "title-gen takes priority over compaction phrase",
-			body: `{"model":"claude-opus-4-7","tools":[],"system":"Generate a concise, sentence-case title. Your task is to create a detailed summary later.","messages":[{"role":"user","content":"hi"}]}`,
+			// Regression guard: a structured-output call with a different
+			// schema (no string "title" property) must NOT be hard-pinned.
+			// Only the title-gen-shaped schema qualifies.
+			name: "structured output without title field stays main_loop",
+			body: `{"model":"claude-opus-4-7","tools":[],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"summary":{"type":"string"}}}}},"messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			// Regression guard: a request without any output_config does
+			// not classify as title-gen, even when tools=[].
+			name: "no structured output declaration stays main_loop",
+			body: `{"model":"claude-opus-4-7","tools":[],"messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			name: "title-gen takes priority over compaction phrase in system",
+			body: `{"model":"claude-opus-4-7","tools":[],"system":"Your task is to create a detailed summary","output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}}}}},"messages":[{"role":"user","content":"hi"}]}`,
 			want: turntype.TitleGen,
 		},
 		{
-			name: "probe takes priority over title-gen system prompt",
-			body: `{"model":"claude-opus-4-7","max_tokens":1,"tools":[],"system":"Generate a concise, sentence-case title.","messages":[{"role":"user","content":"hi"}]}`,
+			name: "probe takes priority over title-gen schema",
+			body: `{"model":"claude-opus-4-7","max_tokens":1,"tools":[],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}}}}},"messages":[{"role":"user","content":"hi"}]}`,
 			want: turntype.Probe,
 		},
 		{

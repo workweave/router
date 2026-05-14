@@ -66,6 +66,10 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 			return
 		}
 
+		// Structured metadata only — never log the raw request body. Prompts
+		// and tool payloads can carry customer secrets, and Debug-level logs
+		// still land in log storage and downstream consumers in any
+		// non-local deployment.
 		msgs := gjson.GetBytes(body, "messages")
 		log.Debug("inbound anthropic request",
 			"body_bytes", len(body),
@@ -74,7 +78,6 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 			"model", gjson.GetBytes(body, "model").String(),
 			"max_tokens", gjson.GetBytes(body, "max_tokens").Int(),
 			"session_id", c.Request.Header.Get("X-Claude-Code-Session-Id"),
-			"body", truncate(string(body), 4000),
 		)
 
 		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header, body)

@@ -66,10 +66,10 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 	if isProbe(feats) {
 		return Probe
 	}
-	systemText := env.SystemText()
-	if isTitleGen(systemText, feats.HasTools) {
+	if isTitleGen(env, feats.HasTools) {
 		return TitleGen
 	}
+	systemText := env.SystemText()
 	if isCompaction(systemText) {
 		return Compaction
 	}
@@ -92,26 +92,27 @@ func isProbe(feats translate.RoutingFeatures) bool {
 }
 
 // isTitleGen reports whether a request is Claude Code's sidebar-title
-// generation call. Two combined signals keep false positives tight:
+// generation call. Detection uses two structural signals (per the
+// project's classifier-must-not-string-match-content rule), both
+// required:
 //
-//  1. System prompt contains the verbatim Claude Code title-prompt
-//     phrase "Generate a concise, sentence-case title". This string is
-//     specific to that one prompt; it does not appear in the main-loop
-//     system prompt, sub-agent dispatches, or compaction prompts.
-//  2. No tools declared. Title-gen calls are always tools=[]; any
-//     real conversation that mentions title generation in its system
-//     prompt (e.g. a user asking the model to "generate a concise
-//     title") will still carry the full Claude Code tool registry, so
-//     this guard prevents hard-pinning a real conversation.
+//  1. The request declares a JSON-schema response format whose top-level
+//     schema has a string "title" property — i.e. it is asking the model
+//     to emit `{"title": "..."}` and nothing else. This is the structural
+//     fingerprint of Claude Code's title generator; a general-purpose
+//     structured-output call with a different schema does not match.
+//  2. tools is empty. A real conversation that wants a title-shaped
+//     structured output still carries the full Claude Code tool
+//     registry, so this guard prevents hard-pinning conversations.
 //
 // Per this file's invariant, false negatives (returning MainLoop) are
 // safe — the cluster scorer runs normally; only false positives are
 // dangerous.
-func isTitleGen(systemText string, hasTools bool) bool {
+func isTitleGen(env *translate.RequestEnvelope, hasTools bool) bool {
 	if hasTools {
 		return false
 	}
-	return strings.Contains(strings.ToLower(systemText), "generate a concise, sentence-case title")
+	return env.RequestsTitleSchema()
 }
 
 // isCompaction reports whether the system prompt contains Claude Code's
