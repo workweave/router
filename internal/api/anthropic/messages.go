@@ -46,8 +46,6 @@ func (t *tracingWriter) Write(b []byte) (int, error) {
 
 const maxBodyBytes = 10 * 1024 * 1024
 
-// MessagesHandler wires POST /v1/messages to proxy.Service.ProxyMessages. authSvc upserts the end-user
-// identity once email is parsed from the body; pass nil to skip user resolution (tests).
 func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)
@@ -118,8 +116,6 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 	}
 }
 
-// stashClientIdentity extracts user identification signals from headers and Anthropic
-// metadata.user_id, stashing them on the context for OTEL spans and the decision sidecar log.
 func stashClientIdentity(ctx context.Context, h http.Header, body []byte) context.Context {
 	metaRaw := gjson.GetBytes(body, "metadata.user_id").String()
 	meta := proxy.ParseClaudeCodeMetadata(metaRaw)
