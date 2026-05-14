@@ -1,0 +1,63 @@
+internal/sqlc/model_router_installations.sql.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 25,46,59,65,79,96,102,111,134,200-227
+internal/sqlc/models.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 59
+internal/auth/service.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 20-31,211-224
+db/migrations/0004_installation_routing_alpha.down.sql
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 1-6
+frontend/src/app/(app)/settings/page.tsx
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 19,74-91,845-940
+db/queries/model_router_installations.sql
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 47-57
+internal/server/server.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 90-91
+internal/sqlc/model_router_api_keys.sql.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 95,114,143
+AGENTS.md
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 512-520
+internal/router/router.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 20-27
+internal/api/admin/routing_alpha.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 1-75
+internal/router/cluster/multiversion.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 6,8,30-49,51,55-59,75-84,86-88,113-118,121,132-142
+internal/server/middleware/auth.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 88
+internal/postgres/converters.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 26
+frontend/src/lib/api.ts
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 127-132,198-203
+db/migrations/0004_installation_routing_alpha.up.sql
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 1-12
+internal/auth/service_test.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 99-100,126-136,602-630
+CLAUDE.md
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 512-520
+internal/auth/installation.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 21-25,45-49
+internal/postgres/repository.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 115-127
+internal/proxy/service.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 134-139,309-325,790,802-803,1462,1475-1476
+internal/router/cluster/multiversion_test.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 90-100,105-214
+internal/server/middleware/auth_test.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 81-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "a28b4393c316b774428fe2e2e5bffb081bc727ee",
+  "prompts": {},
+  "sessions": {
+    "s_438bcc2bdde0c8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "640f58d3-2980-4250-9395-32758a060bd1",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

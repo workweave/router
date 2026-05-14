@@ -1,0 +1,23 @@
+internal/router/capability/tier.go
+  s_0ac1abdedf47d0::t_42a8f383a836bc 118-142,90,94-95,97-98,105,109,113-114
+  s_0ac1abdedf47d0::t_3da5e6fbdb43f5 83-86,88-89,91-93,96,99-104,106-108,110-112,115
+internal/router/capability/tier_test.go
+  s_0ac1abdedf47d0::t_c961014b9deae0 91-146
+  s_0ac1abdedf47d0::t_5ba6b2201932e7 147-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "e62a62916d1ca5fb20c09e2065a9dd1df0a73964",
+  "prompts": {},
+  "sessions": {
+    "s_0ac1abdedf47d0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4555dc00-dcca-4e93-9af7-b0a0af00d4d9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
