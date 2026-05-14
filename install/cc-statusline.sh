@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 #
 # Claude Code statusline for the Weave router. CC pipes a JSON blob on stdin
-# whose `transcript_path` points at the JSONL log of the current session. The
+# whose `transcript_path` points at the JSONL log of the current session and
+# whose `model.display_name` is the user's CC-side model selection. The
 # router rewrites each request's `model` field before forwarding, so
-# Anthropic/OpenAI/Google return `message.model = <routed>` in the SSE stream
-# and CC stores that in the transcript verbatim. We also read each turn's
-# `message.usage` to compare what the routed call actually cost against what
-# the user-selected model would have cost on the same tokens.
+# Anthropic/OpenAI/Google return `message.model = <routed>` in the SSE
+# stream and CC stores that in the transcript verbatim. Per-turn savings
+# come from comparing each turn's routed cost against what the user's
+# selection would have cost on the same tokens. Works identically for
+# local docker and the managed cloud router — no sidecar, no DB, no auth.
 #
 # Wire up by adding to ~/.claude/settings.json:
 #   { "statusLine": { "type": "command", "command": "/abs/path/to/cc-statusline.sh" } }
@@ -132,14 +134,18 @@ tot_in=0
 tot_out=0
 tot_cached=0
 
-# Sidecar log written by the router with one JSON line per request:
-# {ts, request_id, requested_model, decision_model, decision_reason,
-#  decision_provider}. The script joins this against the transcript by
-# request_id so we know each turn's *original* requested model — info
-# the transcript itself doesn't carry. Without this we can't tell CC's
-# haiku-tagged background side-calls from genuine opus-routed-down
-# turns; both end up as message.model = claude-haiku-4-5 in the JSONL.
-decisions_log="${ROUTER_DECISIONS_LOG_PATH:-$HOME/.weave-router/decisions.jsonl}"
+# Per-turn savings compare each turn's routed cost (priced from
+# message.model in the transcript) against what the CC-side model selection
+# (selected_display) would have cost on the same tokens. The selection
+# isn't strictly the per-turn "requested" model — CC tags some background
+# side-calls (compaction probes, title-gen) with a different model id —
+# but for those the planner short-circuits to a hard pin and the savings
+# math zeroes out anyway. Turns where routed == selection or where either
+# model isn't in the pricing table emit 0 savings; the tokens clause
+# always renders.
+
+# Normalize the CC-side selection once for use in the jq math below.
+requested_norm="$(normalize_model "$selected_display")"
 
 if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
   # macOS ships `tail -r`, GNU coreutils ships `tac`. Either works to walk the
@@ -159,34 +165,22 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
     routed="$(normalize_model "$routed")"
   fi
 
-  # Build {request_id: requested_model} map from the sidecar log. Empty
-  # object when the log is missing — savings calc then sees no entries
-  # and emits no credit, which is the honest fallback. Bound the read at
-  # the most recent ~5k lines so the per-render cost stays flat as the
-  # log grows; CC re-renders on every state change and the log is
-  # append-only with no rotation. Older entries can't match request_ids
-  # in the current session anyway.
-  decisions_map='{}'
-  if [[ -f "$decisions_log" ]]; then
-    decisions_map="$(tail -n 5000 "$decisions_log" 2>/dev/null \
-      | jq -s 'map({(.request_id): .requested_model}) | add // {}' 2>/dev/null \
-      || echo '{}')"
-  fi
-
-  # Compute a session running total: savings across every assistant turn the
-  # router rerouted, plus cumulative token counts across every assistant turn
-  # (whether rerouted or not — total work the session has done).
-  # cache_creation is priced at 1.25× input, cache_read at 0.1× — both ratios
-  # are stable across the Claude family and a no-op when the provider doesn't
-  # return those fields. Cache reads ARE included in the savings comparison:
-  # both the routed and would-have-been-selected costs apply the same 0.1×
-  # weight to cache_read_input_tokens, so the delta reflects the model-price
+  # Compute a session running total: savings across every assistant turn
+  # whose marker reports a requested ≠ routed swap, plus cumulative token
+  # counts across every assistant turn (rerouted or not — total work the
+  # session has done). cache_creation is priced at 1.25× input, cache_read
+  # at 0.1× — both ratios are stable across the Claude family and a no-op
+  # when the provider doesn't return those fields. Cache reads ARE included
+  # in the savings comparison: both costs apply the same 0.1× weight to
+  # cache_read_input_tokens, so the delta reflects the model-price
   # difference on the cached portion as well.
+  #
+  # The marker regex tolerates the optional "(<provider>)" segment and a
+  # `[1m]` / `-YYYYMMDD` suffix on either model name so transcripts written
+  # against context-tiered or dated model ids still parse cleanly.
   read -r session_savings tot_in tot_out tot_cached < <(
-    jq -r --argjson p "$prices" --argjson decisions "$decisions_map" '
+    jq -r --argjson p "$prices" --arg requested "$requested_norm" '
       select(.type=="assistant") |
-      (.requestId // null) as $req_id |
-      (if $req_id == null then null else ($decisions[$req_id] // null) end) as $requested_raw |
       .message as $m |
       ($m.model // "" | sub("\\[[^]]*\\]$"; "") | sub("-[0-9]{8}$"; "")) as $rm |
       {
@@ -195,21 +189,17 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
         cwrt:  ($m.usage.cache_creation_input_tokens // 0),
         crd:   ($m.usage.cache_read_input_tokens // 0)
       } as $t |
-      (if $requested_raw == null then 0
+      (if $requested == "" or $requested == $rm then 0
        else
-         ($requested_raw | sub("\\[[^]]*\\]$"; "") | sub("-[0-9]{8}$"; "")) as $requested |
-         if $requested == $rm then 0
+         ($p.input[$rm] // null)        as $rin  | ($p.output[$rm] // null)        as $rout |
+         ($p.input[$requested] // null) as $sin  | ($p.output[$requested] // null) as $sout |
+         if ($rin == null or $rout == null or $sin == null or $sout == null) then 0
          else
-           ($p.input[$rm] // null)        as $rin  | ($p.output[$rm] // null)        as $rout |
-           ($p.input[$requested] // null) as $sin  | ($p.output[$requested] // null) as $sout |
-           if ($rin == null or $rout == null or $sin == null or $sout == null) then 0
-           else
-             (($t.in + 1.25 * $t.cwrt + 0.1 * $t.crd) / 1000) as $input_units |
-             ($t.out / 1000)                                  as $output_units |
-             ($input_units * $rin + $output_units * $rout)    as $routed_cost |
-             ($input_units * $sin + $output_units * $sout)    as $requested_cost |
-             ($requested_cost - $routed_cost)
-           end
+           (($t.in + 1.25 * $t.cwrt + 0.1 * $t.crd) / 1000) as $input_units |
+           ($t.out / 1000)                                  as $output_units |
+           ($input_units * $rin + $output_units * $rout)    as $routed_cost |
+           ($input_units * $sin + $output_units * $sout)    as $requested_cost |
+           ($requested_cost - $routed_cost)
          end
        end) as $savings |
       "\($savings) \($t.in) \($t.out) \($t.cwrt + $t.crd)"
@@ -255,11 +245,11 @@ if [[ "$routed" == "failure" ]]; then
   printf '%s — %s%s' "$brand" "$routed" "$tokens_clause"
 elif [[ -n "$routed" ]]; then
   # Show the savings clause only when the session is genuinely net-saving.
-  # session_savings is "0.0000" when no rerouted turns were found (sidecar
-  # missing, fresh session, only side-calls so far); it can also go
-  # negative when sticky routing forces a haiku-tagged side-call up to a
-  # cached sonnet/opus decision. In both cases the word "saved" would
-  # mislead, so drop the savings clause but keep the token totals.
+  # session_savings is "0.0000" on fresh sessions or sessions where every
+  # turn routed back to the selected model; it can also go negative when
+  # sticky routing forces a haiku-tagged side-call up to a cached
+  # sonnet/opus decision. In both cases the word "saved" would mislead,
+  # so drop the savings clause but keep the token totals.
   has_savings="false"
   if [[ -n "$session_savings" ]] \
      && awk -v v="$session_savings" 'BEGIN{exit !(v+0 > 0.005)}'; then
