@@ -130,6 +130,7 @@ func (s *Service) runTurnLoop(
 	if res.TurnType == turntype.Compaction ||
 		res.TurnType == turntype.Probe ||
 		res.TurnType == turntype.TitleGen ||
+		res.TurnType == turntype.Classifier ||
 		(res.TurnType == turntype.SubAgentDispatch && s.hardPinExplore) {
 		provider, model := s.hardPinProvider, s.hardPinModel
 		// In byokOnly mode the boot-time hard-pin is unsafe: it was
