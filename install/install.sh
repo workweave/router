@@ -44,10 +44,141 @@ router_key_header="X-Weave-Router-Key"
 
 # ---------- helpers ----------
 
-err()  { printf "\033[31merror:\033[0m %s\n" "$*" >&2; }
-warn() { printf "\033[33mwarning:\033[0m %s\n" "$*" >&2; }
-info() { printf "\033[36m==>\033[0m %s\n" "$*"; }
-ok()   { printf "\033[32m✓\033[0m %s\n" "$*"; }
+# Detect whether stdout is a real terminal that grokks ANSI escapes. Pipes,
+# CI logs, and `curl ... | sh` redirects all fail this check, so we degrade
+# to plain ASCII output instead of leaking raw escape bytes.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  tty_out="true"
+else
+  tty_out="false"
+fi
+
+# Brand color (#FF6C47) plus a few supporting shades. Truecolor escapes work
+# on every modern terminal (iTerm2, Apple Terminal, vscode, ghostty, alacritty,
+# wezterm, kitty); on TTY-less output we blank them out.
+if [ "$tty_out" = "true" ]; then
+  C_BRAND=$'\033[38;2;255;108;71m'
+  C_DIM=$'\033[2m'
+  C_BOLD=$'\033[1m'
+  C_RED=$'\033[31m'
+  C_YELLOW=$'\033[33m'
+  C_GREEN=$'\033[32m'
+  C_CYAN=$'\033[36m'
+  C_RESET=$'\033[0m'
+else
+  C_BRAND=""; C_DIM=""; C_BOLD=""; C_RED=""; C_YELLOW=""; C_GREEN=""; C_CYAN=""; C_RESET=""
+fi
+
+err()  { printf "%serror:%s %s\n" "$C_RED" "$C_RESET" "$*" >&2; }
+warn() { printf "%swarning:%s %s\n" "$C_YELLOW" "$C_RESET" "$*" >&2; }
+info() { printf "%s==>%s %s\n" "$C_CYAN" "$C_RESET" "$*"; }
+ok()   { printf "%s✓%s %s\n" "$C_GREEN" "$C_RESET" "$*"; }
+skip() { printf "%s⊙%s %s%s%s\n" "$C_DIM" "$C_RESET" "$C_DIM" "$*" "$C_RESET"; }
+
+# ---------- banner ----------
+#
+# Print the WEAVE wordmark in brand orange. Skipped under --quiet or when
+# stdout isn't a TTY so log captures don't get junk box-drawing chars.
+print_banner() {
+  [ "$quiet" = "true" ] && return 0
+  [ "$tty_out" = "true" ] || return 0
+  printf '\n'
+  printf '%s  ╦ ╦╔═╗╔═╗╦  ╦╔═╗%s\n' "$C_BRAND" "$C_RESET"
+  printf '%s  ║║║║╣ ╠═╣╚╗╔╝║╣ %s\n' "$C_BRAND" "$C_RESET"
+  printf '%s  ╚╩╝╚═╝╩ ╩ ╚╝ ╚═╝%s\n' "$C_BRAND" "$C_RESET"
+  printf '  %sWeave Router · Claude Code installer%s\n\n' "$C_DIM" "$C_RESET"
+}
+
+# ---------- spinner ----------
+#
+# Pure-bash spinner. `spin "label" cmd args...` runs cmd in the background,
+# cycles dots frames in place while it runs, then replaces the line with
+# ✓ or ✗ depending on exit status. Skipped (synchronous fallback) when
+# stdout is not a TTY — pipes and CI logs would otherwise eat the carriage
+# returns and leave a blob of frames. The command's own stdout/stderr is
+# captured to $spin_log so we can echo it on failure for debugging.
+#
+# Frame set is `dots` from sindresorhus/cli-spinners.
+SPIN_FRAMES='⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏'
+SPIN_INTERVAL=0.08
+spin_pid=""
+spin_log=""
+
+_spin_cleanup() {
+  # Kill any active spinner child and restore the cursor. Called from the
+  # global EXIT/INT/TERM/HUP trap so Ctrl-C never leaves a dangling spinner
+  # process or a hidden cursor behind.
+  if [ -n "$spin_pid" ] && kill -0 "$spin_pid" 2>/dev/null; then
+    kill "$spin_pid" 2>/dev/null || true
+    wait "$spin_pid" 2>/dev/null || true
+  fi
+  spin_pid=""
+  if [ "$tty_out" = "true" ]; then
+    printf '\033[?25h' # show cursor
+  fi
+  [ -n "$spin_log" ] && rm -f "$spin_log" 2>/dev/null || true
+  # Also restore stty echo in case we died mid-keypaste prompt. macOS
+  # `[ -r /dev/tty ]` returns true even when the underlying device errors
+  # on open (ENXIO "Device not configured") under `curl | sh` and CI, so
+  # we gate on stdin being an actual tty before touching it.
+  if [ -t 0 ]; then
+    stty echo 2>/dev/null || true
+  fi
+}
+trap _spin_cleanup EXIT INT TERM HUP
+
+spin() {
+  local label="$1"; shift
+  if [ "$tty_out" != "true" ] || [ "$quiet" = "true" ]; then
+    # No spinner — just run the command and emit a single check line after.
+    if "$@" >/dev/null 2>&1; then
+      ok "$label"
+      return 0
+    else
+      local rc=$?
+      printf "%s✗%s %s\n" "$C_RED" "$C_RESET" "$label" >&2
+      return $rc
+    fi
+  fi
+
+  spin_log="$(mktemp -t weave-install.XXXXXX)"
+  ( "$@" >"$spin_log" 2>&1 ) &
+  spin_pid=$!
+
+  printf '\033[?25l' # hide cursor
+  local i=0
+  # shellcheck disable=SC2206
+  local frames=($SPIN_FRAMES)
+  local n=${#frames[@]}
+  while kill -0 "$spin_pid" 2>/dev/null; do
+    printf '\r%s%s%s %s' "$C_BRAND" "${frames[i]}" "$C_RESET" "$label"
+    i=$(( (i + 1) % n ))
+    sleep "$SPIN_INTERVAL"
+  done
+
+  wait "$spin_pid"
+  local rc=$?
+  spin_pid=""
+  printf '\033[?25h' # show cursor
+  printf '\r\033[2K' # clear line
+
+  if [ $rc -eq 0 ]; then
+    printf '%s✓%s %s\n' "$C_GREEN" "$C_RESET" "$label"
+    rm -f "$spin_log"
+    spin_log=""
+    return 0
+  else
+    printf '%s✗%s %s\n' "$C_RED" "$C_RESET" "$label" >&2
+    if [ -s "$spin_log" ]; then
+      printf '%s' "$C_DIM" >&2
+      sed 's/^/    /' "$spin_log" >&2
+      printf '%s' "$C_RESET" >&2
+    fi
+    rm -f "$spin_log"
+    spin_log=""
+    return $rc
+  fi
+}
 
 usage() {
   # Print the leading comment block (lines 2..just-before `set -euo`), stripping
@@ -121,16 +252,21 @@ fi
 # trim trailing slash for cleanliness
 base_url="${base_url%/}"
 
+# Banner runs before the interactive scope prompt so the very first thing
+# users see when `make full-setup` hands off to install.sh is the wordmark,
+# not a bare "Install scope:" line.
+print_banner
+
 # ---------- interactive scope prompt ----------
 
 # If the user didn't pass --scope and we have a controlling terminal, ask which
 # scope to install into. Non-interactive runs (CI, `curl | sh --non-interactive`)
 # silently use the "user" default.
 if [ -z "$install_dir" ] && [ "$scope_explicit" = "false" ] && [ "$non_interactive" = "false" ] && [ -r /dev/tty ]; then
-  printf "Install scope:\n"
-  printf "  1) user     — write to ~/.claude/ (applies everywhere you run claude)\n"
-  printf "  2) project  — write to <repo>/.claude/ (applies only inside this repo)\n"
-  printf "Choose [1/2] (default 1): "
+  printf "%sInstall scope:%s\n" "$C_BOLD" "$C_RESET"
+  printf "  %s1)%s user     %s— write to ~/.claude/ (applies everywhere you run claude)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "  %s2)%s project  %s— write to <repo>/.claude/ (applies only inside this repo)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "Choose %s[1/2]%s (default %s1%s): " "$C_BOLD" "$C_RESET" "$C_BOLD" "$C_RESET"
   read -r scope_choice </dev/tty || scope_choice=""
   case "${scope_choice:-1}" in
     1|""|user|u|U)    scope="user" ;;
@@ -161,7 +297,7 @@ fi
 
 # ---------- pre-flight ----------
 
-[ "$quiet" = "true" ] || info "Weave Router installer (scope=$scope, base_url=$base_url)"
+[ "$quiet" = "true" ] || info "scope=${C_BOLD}${scope}${C_RESET}  base_url=${C_BOLD}${base_url}${C_RESET}"
 
 require_cmd jq    "macOS: 'brew install jq' · Debian/Ubuntu: 'sudo apt install jq'"
 require_cmd curl  "macOS/Linux: usually preinstalled — check your package manager"
@@ -257,14 +393,13 @@ if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
       err "no controlling terminal — set WEAVE_ROUTER_KEY and re-run with --non-interactive."
       exit 1
     fi
-    # Restore terminal echo on any exit path (Ctrl-C, error, signal). Without
-    # this trap, an interrupted prompt leaves the user's terminal stuck silent.
-    trap 'stty echo </dev/tty 2>/dev/null || true' EXIT INT TERM HUP
-    printf "Paste your Weave Router API key (rk_...): "
+    # _spin_cleanup (installed globally above) already restores stty echo on
+    # any exit path, so we don't need a separate trap here — that would
+    # overwrite the spinner cleanup and leak the cursor / child PID on Ctrl-C.
+    printf "%sPaste your Weave Router API key (rk_...):%s " "$C_DIM" "$C_RESET"
     stty -echo </dev/tty 2>/dev/null || true
     read -r api_key </dev/tty
     stty echo </dev/tty 2>/dev/null || true
-    trap - EXIT INT TERM HUP
     printf "\n"
     [ -n "$api_key" ] || { err "no key provided"; exit 1; }
   fi
@@ -564,7 +699,9 @@ ok "Statusline installed at $statusline_file"
 # so teammates can share settings.json. --dir and user scope inline the key
 # directly into settings.json since there's no team to coordinate with.
 tmp_patch="$(mktemp)"
-trap 'rm -f "$tmp_patch"' EXIT
+# Compose with the spinner cleanup trap installed above — replacing it would
+# leave the cursor hidden if Ctrl-C lands during settings.json patching.
+trap '_spin_cleanup; rm -f "$tmp_patch"' EXIT INT TERM HUP
 
 if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
   jq -n --arg url "$base_url" --arg sl "$statusline_path_for_settings" '{
@@ -640,10 +777,7 @@ fi
 # ---------- post-install verification ----------
 
 if [ "$quiet" != "true" ]; then
-  info "Pinging router at $base_url ..."
-  if curl -fsS --max-time 5 "$base_url/health" >/dev/null 2>&1; then
-    ok "Router is reachable."
-  else
+  if ! spin "Pinging $base_url/health" curl -fsS --max-time 5 "$base_url/health"; then
     warn "Could not reach $base_url/health within 5s. Settings are written; verify the router is running."
   fi
 fi
@@ -651,11 +785,13 @@ fi
 if [ -n "$api_key" ]; then
   # Pass the router key via stdin (`@-`) instead of a -H argument so the key
   # never appears in the process arg list (visible via `ps` / /proc to other
-  # local users on shared machines).
-  if printf '%s: %s\n' "$router_key_header" "$api_key" \
-      | curl -fsS --max-time 5 --header @- "$base_url/validate" >/dev/null 2>&1; then
-    ok "API key validated."
-  else
+  # local users on shared machines). We feed stdin via a small wrapper so the
+  # spinner's exec form sees a single command argv.
+  validate_key() {
+    printf '%s: %s\n' "$router_key_header" "$api_key" \
+      | curl -fsS --max-time 5 --header @- "$base_url/validate"
+  }
+  if ! spin "Validating API key" validate_key; then
     warn "Router rejected the API key (check it matches the dashboard at $base_url/ui/)."
   fi
 fi
@@ -663,26 +799,5 @@ fi
 # ---------- done ----------
 
 printf "\n"
-ok "Weave Router installed for Claude Code."
-if [ "$quiet" = "true" ]; then
-  : # caller (e.g. make full-setup) prints its own next-steps block
-elif [ "$scope" = "project" ]; then
-  if [ -n "$install_dir" ]; then
-    echo "  Installed into $install_dir/.claude/ (project scope)."
-    echo "  Run 'cd $install_dir && claude' to use the router."
-    echo "  Uninstall with: $script_dir/uninstall.sh --scope project --dir $install_dir"
-  else
-    echo "  Commit .claude/settings.json + the .gitignore changes."
-    echo "  Local helpers/settings are gitignored — each teammate runs"
-    echo "  './router/install/install.sh --scope project' once after cloning."
-    echo "  Each teammate also sets WEAVE_ROUTER_KEY=rk_... or pastes it when prompted."
-    echo "  Uninstall with: $script_dir/uninstall.sh --scope project"
-  fi
-elif [ -n "$install_dir" ]; then
-  echo "  Run 'claude' from $install_dir — the status line will show the routed model + savings."
-  echo "  'cd $install_dir && claude' to use the router; run 'claude' elsewhere to skip it."
-  echo "  Uninstall with: $script_dir/uninstall.sh --dir $install_dir"
-else
-  echo "  Run 'claude' anywhere — the status line will show the routed model + savings."
-  echo "  Uninstall with: $script_dir/uninstall.sh --scope user"
-fi
+printf "%s✓%s %s%sWeave Router installed for Claude Code.%s\n" \
+  "$C_GREEN" "$C_RESET" "$C_BOLD" "$C_BRAND" "$C_RESET"
