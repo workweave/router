@@ -28,9 +28,9 @@ type APIKeyCache interface {
 // NoOpAPIKeyCache is the Null Object: every Get misses, every Set is dropped.
 type NoOpAPIKeyCache struct{}
 
-func (NoOpAPIKeyCache) Get(string) (CachedKey, bool)   { return CachedKey{}, false }
-func (NoOpAPIKeyCache) Set(string, CachedKey)          {}
-func (NoOpAPIKeyCache) InvalidateInstallation(string)  {}
+func (NoOpAPIKeyCache) Get(string) (CachedKey, bool)  { return CachedKey{}, false }
+func (NoOpAPIKeyCache) Set(string, CachedKey)         {}
+func (NoOpAPIKeyCache) InvalidateInstallation(string) {}
 
 // LRUAPIKeyCache uses two LRUs so positive/negative entries have independent sizes and TTLs.
 // Negative gets a shorter TTL so a freshly-created key isn't 401'd longer than necessary.
@@ -45,11 +45,19 @@ type LRUAPIKeyCache struct {
 	positive       *expirable.LRU[string, CachedKey]
 	negative       *expirable.LRU[string, CachedKey]
 	byInstallation map[string]map[string]struct{}
+	// invalidationGen counts InvalidateInstallation calls per installation
+	// so Set can detect an invalidation that slipped between its index
+	// update and the LRU insert and clean up the orphaned entry. We can't
+	// simply hold mu across positive.Add because the LRU's eviction
+	// callback (onPositiveEvict) also acquires mu, which would deadlock
+	// when Add triggers a capacity eviction.
+	invalidationGen map[string]uint64
 }
 
 func NewLRUAPIKeyCache(positiveSize, negativeSize int, positiveTTL, negativeTTL time.Duration) *LRUAPIKeyCache {
 	c := &LRUAPIKeyCache{
-		byInstallation: make(map[string]map[string]struct{}),
+		byInstallation:  make(map[string]map[string]struct{}),
+		invalidationGen: make(map[string]uint64),
 	}
 	c.positive = expirable.NewLRU(positiveSize, c.onPositiveEvict, positiveTTL)
 	c.negative = expirable.NewLRU[string, CachedKey](negativeSize, nil, negativeTTL)
@@ -71,17 +79,44 @@ func (c *LRUAPIKeyCache) Set(keyHash string, entry CachedKey) {
 		c.negative.Add(keyHash, entry)
 		return
 	}
+	instID := ""
+	if entry.Installation != nil {
+		instID = entry.Installation.ID
+	}
+	var preGen uint64
 	c.mu.Lock()
-	if entry.Installation != nil && entry.Installation.ID != "" {
-		hashes, ok := c.byInstallation[entry.Installation.ID]
+	if instID != "" {
+		preGen = c.invalidationGen[instID]
+		hashes, ok := c.byInstallation[instID]
 		if !ok {
 			hashes = make(map[string]struct{}, 1)
-			c.byInstallation[entry.Installation.ID] = hashes
+			c.byInstallation[instID] = hashes
 		}
 		hashes[keyHash] = struct{}{}
 	}
 	c.mu.Unlock()
 	c.positive.Add(keyHash, entry)
+	if instID == "" {
+		return
+	}
+	// Closes the race with InvalidateInstallation. If a concurrent
+	// invalidation drained byInstallation[instID] between the index
+	// update above and positive.Add, the generation counter has bumped;
+	// the entry we just inserted is now orphaned (not tracked in
+	// byInstallation), so evict it and roll back our index entry.
+	c.mu.Lock()
+	if c.invalidationGen[instID] != preGen {
+		if hashes, ok := c.byInstallation[instID]; ok {
+			delete(hashes, keyHash)
+			if len(hashes) == 0 {
+				delete(c.byInstallation, instID)
+			}
+		}
+		c.mu.Unlock()
+		c.positive.Remove(keyHash)
+		return
+	}
+	c.mu.Unlock()
 }
 
 // InvalidateInstallation drops every positive entry tied to installationID so the next request
@@ -95,6 +130,7 @@ func (c *LRUAPIKeyCache) InvalidateInstallation(installationID string) {
 	c.mu.Lock()
 	hashes := c.byInstallation[installationID]
 	delete(c.byInstallation, installationID)
+	c.invalidationGen[installationID]++
 	c.mu.Unlock()
 	for hash := range hashes {
 		c.positive.Remove(hash)

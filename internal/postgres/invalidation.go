@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"workweave/router/internal/auth"
@@ -61,9 +60,7 @@ func (n *PgxInvalidationNotifier) NotifyInstallationChanged(installationID strin
 type InvalidationListener struct {
 	pool  *pgxpool.Pool
 	cache auth.APIKeyCache
-
-	stopOnce sync.Once
-	done     chan struct{}
+	done  chan struct{}
 }
 
 // NewInvalidationListener wires a listener that drops entries from cache when
@@ -77,16 +74,29 @@ func NewInvalidationListener(pool *pgxpool.Pool, cache auth.APIKeyCache) *Invali
 }
 
 // Run blocks until ctx is canceled. Reconnects with bounded backoff on errors.
+//
+// stableThreshold defines how long a listenLoop must run before the next
+// failure is treated as "fresh" and the backoff resets to its initial
+// value. Without this, a burst of failures escalates backoff to the cap
+// and keeps it there forever — so a single transient error after hours
+// of stable operation pays the full 30s wait.
+const stableThreshold = time.Minute
+
 func (l *InvalidationListener) Run(ctx context.Context) {
 	log := observability.Get()
-	backoff := time.Second
+	const initialBackoff = time.Second
 	const maxBackoff = 30 * time.Second
+	backoff := initialBackoff
 	for {
 		if ctx.Err() != nil {
 			close(l.done)
 			return
 		}
+		sessionStart := time.Now()
 		if err := l.listenLoop(ctx); err != nil && ctx.Err() == nil {
+			if time.Since(sessionStart) >= stableThreshold {
+				backoff = initialBackoff
+			}
 			log.Warn("Invalidation listener disconnected; reconnecting", "err", err, "backoff", backoff)
 			select {
 			case <-ctx.Done():
