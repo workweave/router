@@ -30,6 +30,16 @@ const (
 	// max_tokens=1). Always hard-pinned to the cheap model AND skips
 	// session-pin creation so a probe never anchors subsequent routing.
 	Probe TurnType = "probe"
+	// TitleGen: Claude Code's sidebar-title generation call. Fires once
+	// per user turn alongside the real conversation request, carries no
+	// tools and a JSON-schema response format, and always asks for the
+	// same fixed-shape output ({"title": "..."}). Hard-pinned to the
+	// cheap model AND skips session-pin creation: routing the real
+	// conversation through the cluster scorer is the whole point of the
+	// router, but the title-gen call has no signal worth scoring and a
+	// pin written here would anchor the real-conv turn that lands ~25ms
+	// later (same session key) before its own scorer even runs.
+	TitleGen TurnType = "title_gen"
 )
 
 // probeMaxTokensThreshold is the inclusive upper bound on max_tokens for
@@ -56,6 +66,9 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 	if isProbe(feats) {
 		return Probe
 	}
+	if isTitleGen(env, feats.HasTools) {
+		return TitleGen
+	}
 	systemText := env.SystemText()
 	if isCompaction(systemText) {
 		return Compaction
@@ -76,6 +89,30 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 // `generationConfig.maxOutputTokens` produce the same RoutingFeatures.
 func isProbe(feats translate.RoutingFeatures) bool {
 	return feats.MaxTokens > 0 && feats.MaxTokens <= probeMaxTokensThreshold
+}
+
+// isTitleGen reports whether a request is Claude Code's sidebar-title
+// generation call. Detection uses two structural signals (per the
+// project's classifier-must-not-string-match-content rule), both
+// required:
+//
+//  1. The request declares a JSON-schema response format whose top-level
+//     schema has a string "title" property — i.e. it is asking the model
+//     to emit `{"title": "..."}` and nothing else. This is the structural
+//     fingerprint of Claude Code's title generator; a general-purpose
+//     structured-output call with a different schema does not match.
+//  2. tools is empty. A real conversation that wants a title-shaped
+//     structured output still carries the full Claude Code tool
+//     registry, so this guard prevents hard-pinning conversations.
+//
+// Per this file's invariant, false negatives (returning MainLoop) are
+// safe — the cluster scorer runs normally; only false positives are
+// dangerous.
+func isTitleGen(env *translate.RequestEnvelope, hasTools bool) bool {
+	if hasTools {
+		return false
+	}
+	return env.RequestsTitleSchema()
 }
 
 // isCompaction reports whether the system prompt contains Claude Code's

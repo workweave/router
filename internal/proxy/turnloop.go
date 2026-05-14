@@ -118,14 +118,18 @@ func (s *Service) runTurnLoop(
 	res.PinRole = roleForTier(res.RequestedTier)
 
 	// Hard pins for turn types whose optimal model is known a priori
-	// (compaction, Explore sub-agent dispatch, SDK quota probes). Bypass
-	// pin lookup, pin write, planner and scorer entirely so the pin row
-	// keeps tracking the main-loop model. Probes specifically MUST NOT
-	// create a session pin — the Anthropic SDK fires one on init before
-	// the first real user turn, and if it anchored the pin every
-	// subsequent turn would inherit the probe's cheap-model decision.
+	// (compaction, Explore sub-agent dispatch, SDK quota probes, Claude
+	// Code title generation). Bypass pin lookup, pin write, planner and
+	// scorer entirely so the pin row keeps tracking the main-loop model.
+	// Probes and title-gen specifically MUST NOT create a session pin —
+	// the Anthropic SDK fires probes on init before the first real user
+	// turn, and Claude Code fires a title-gen call ~25ms before the
+	// real-conv call on every user turn. In both cases an anchored pin
+	// would inherit the cheap-model decision into the immediately-
+	// following real conversation that should have routed on its own.
 	if res.TurnType == turntype.Compaction ||
 		res.TurnType == turntype.Probe ||
+		res.TurnType == turntype.TitleGen ||
 		(res.TurnType == turntype.SubAgentDispatch && s.hardPinExplore) {
 		provider, model := s.hardPinProvider, s.hardPinModel
 		// In byokOnly mode the boot-time hard-pin is unsafe: it was
@@ -373,6 +377,7 @@ func (s *Service) clampToCeiling(decision router.Decision, ceiling capability.Ti
 // caller falls through to the planner with a zero pin.
 func (s *Service) loadPin(ctx context.Context, pinCacheKey string, sessionKey [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool) {
 	log := observability.Get()
+	log.Debug("loadPin called", "role", role, "session_key_hex", fmt.Sprintf("%x", sessionKey))
 	if s.pinCache != nil {
 		if pin, ok := s.pinCache.Get(pinCacheKey); ok {
 			// Mirror the Postgres-tier expiry check below: an LRU entry
@@ -436,7 +441,9 @@ func (s *Service) refreshPin(installationID uuid.UUID, sessionKey [sessionpin.Se
 // on first-turn routing and on switch turns; the new row has no prior
 // usage stats yet (UpdateUsage fills them in after the response lands).
 func (s *Service) writeNewPin(installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, pinCacheKey string, role string, chosen router.Decision) {
+	observability.Get().Debug("writeNewPin called", "installation_id", installationID.String(), "role", role, "model", chosen.Model, "session_key_hex", fmt.Sprintf("%x", sessionKey))
 	if installationID == uuid.Nil {
+		observability.Get().Debug("writeNewPin: skipping because installationID is uuid.Nil")
 		return
 	}
 	p := sessionpin.Pin{
@@ -467,7 +474,9 @@ func (s *Service) enqueuePinUpsert(p sessionpin.Pin, pinCacheKey string) {
 			// the write and break provider continuity next turn.
 			if err := s.pinStore.Upsert(context.Background(), pin); err != nil {
 				observability.Get().Error("session pin upsert failed", "err", err)
+				return
 			}
+			observability.Get().Debug("session pin upsert ok", "installation_id", pin.InstallationID.String(), "role", pin.Role, "model", pin.Model)
 		}(p)
 	default:
 		log.Debug("session pin upsert dropped: semaphore full")

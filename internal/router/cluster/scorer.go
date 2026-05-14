@@ -345,9 +345,10 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		"score_us", scoreUs,
 		"total_ms", time.Since(start).Milliseconds(),
 		"prompt_chars", len(text),
+		"embedded_tokens", len(text)/4,
 		"prompt_truncated", truncated,
 		"requested_model", req.RequestedModel,
-		"estimated_input_tokens", req.EstimatedInputTokens,
+		"total_input_tokens", req.EstimatedInputTokens,
 		"has_tools", req.HasTools,
 	)
 	return decision, nil

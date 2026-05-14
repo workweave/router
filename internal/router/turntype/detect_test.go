@@ -138,6 +138,47 @@ func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 			want: turntype.MainLoop,
 		},
 		{
+			// Claude Code sidebar title-gen call: tools=[] +
+			// output_config.format.type=json_schema declaring a string
+			// "title" property. Both structural signals required.
+			name: "claude code title-gen is title_gen",
+			body: `{"model":"claude-opus-4-7","max_tokens":64000,"tools":[],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}}},"messages":[{"role":"user","content":"what good cuh"}]}`,
+			want: turntype.TitleGen,
+		},
+		{
+			// Regression guard: a real conversation that happens to
+			// request a title-shaped structured output but ALSO carries
+			// the tool registry must NOT be hard-pinned.
+			name: "title schema with tools stays main_loop",
+			body: `{"model":"claude-opus-4-7","tools":[{"name":"Bash","input_schema":{"type":"object"}}],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}}}}},"messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			// Regression guard: a structured-output call with a different
+			// schema (no string "title" property) must NOT be hard-pinned.
+			// Only the title-gen-shaped schema qualifies.
+			name: "structured output without title field stays main_loop",
+			body: `{"model":"claude-opus-4-7","tools":[],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"summary":{"type":"string"}}}}},"messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			// Regression guard: a request without any output_config does
+			// not classify as title-gen, even when tools=[].
+			name: "no structured output declaration stays main_loop",
+			body: `{"model":"claude-opus-4-7","tools":[],"messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			name: "title-gen takes priority over compaction phrase in system",
+			body: `{"model":"claude-opus-4-7","tools":[],"system":"Your task is to create a detailed summary","output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}}}}},"messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.TitleGen,
+		},
+		{
+			name: "probe takes priority over title-gen schema",
+			body: `{"model":"claude-opus-4-7","max_tokens":1,"tools":[],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}}}}},"messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.Probe,
+		},
+		{
 			name: "probe takes priority over compaction system prompt",
 			body: `{"model":"claude-sonnet-4-5","max_tokens":1,"system":"Your task is to create a detailed summary","messages":[{"role":"user","content":"quota"}]}`,
 			want: turntype.Probe,

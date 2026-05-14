@@ -192,6 +192,43 @@ func (e *RequestEnvelope) HasTools() bool {
 	return r.Int() > 0
 }
 
+// RequestsTitleSchema reports whether the request asks the model to
+// emit a JSON-schema-shaped response with a top-level string "title"
+// property. Structural signal used by turn-type classification to
+// identify Claude Code's sidebar-title generation call without content
+// matching on the system prompt.
+//
+// Anthropic: output_config.format.{type:"json_schema", schema:{...}}
+// OpenAI:    response_format.{type:"json_schema",
+//
+//	json_schema:{schema:{...}}}
+//
+// Gemini:    no structured-title equivalent today — returns false.
+//
+// Detection requires both (a) the JSON-schema format declaration and
+// (b) a schema declaring `properties.title.type == "string"`. The
+// combined shape is specific to a fixed-output title generator; a
+// general-purpose structured-output call with a different schema does
+// not match.
+func (e *RequestEnvelope) RequestsTitleSchema() bool {
+	switch e.format {
+	case FormatAnthropic:
+		fmtNode := gjson.GetBytes(e.body, "output_config.format")
+		if fmtNode.Get("type").String() != "json_schema" {
+			return false
+		}
+		return fmtNode.Get("schema.properties.title.type").String() == "string"
+	case FormatOpenAI:
+		rf := gjson.GetBytes(e.body, "response_format")
+		if rf.Get("type").String() != "json_schema" {
+			return false
+		}
+		return rf.Get("json_schema.schema.properties.title.type").String() == "string"
+	default:
+		return false
+	}
+}
+
 // EmitOverrides describes byte-level mutations for same-format serialization.
 // Zero-valued fields are no-ops.
 type EmitOverrides struct {
