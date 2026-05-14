@@ -254,10 +254,29 @@ func openAIUsageToAnthropicResponse(usage any) map[string]any {
 	}
 	prompt, _ := u["prompt_tokens"].(float64)
 	completion, _ := u["completion_tokens"].(float64)
-	return map[string]any{
-		"input_tokens":  int(prompt),
+	var cacheRead, cacheCreation float64
+	if details, _ := u["prompt_tokens_details"].(map[string]any); details != nil {
+		cacheRead, _ = details["cached_tokens"].(float64)
+		cacheCreation, _ = details["cache_creation_tokens"].(float64)
+	}
+	// Anthropic's input_tokens is fresh-only; OpenAI's prompt_tokens is the
+	// total including cached tokens. Subtract cache so the field matches
+	// Anthropic semantics (mirrors AnthropicSSETranslator.emitMessageDelta).
+	freshInput := prompt - cacheCreation - cacheRead
+	if freshInput < 0 {
+		freshInput = 0
+	}
+	out := map[string]any{
+		"input_tokens":  int(freshInput),
 		"output_tokens": int(completion),
 	}
+	if cacheRead > 0 {
+		out["cache_read_input_tokens"] = int(cacheRead)
+	}
+	if cacheCreation > 0 {
+		out["cache_creation_input_tokens"] = int(cacheCreation)
+	}
+	return out
 }
 
 // OpenAIToAnthropicError re-wraps an OpenAI error as Anthropic format. Returns

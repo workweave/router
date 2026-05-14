@@ -354,12 +354,14 @@ type AnthropicSSETranslator struct {
 	textOpen   bool
 	toolBlocks map[int]int
 
-	finishReason      string
-	usageInputTokens  int
-	usageOutputTokens int
-	hasUsage          bool
-	messageID         string
-	modelFromUpstream string
+	finishReason             string
+	usageInputTokens         int
+	usageOutputTokens        int
+	usageCacheCreationTokens int
+	usageCacheReadTokens     int
+	hasUsage                 bool
+	messageID                string
+	modelFromUpstream        string
 
 	usageSink otel.UsageSink
 
@@ -473,7 +475,7 @@ func (t *AnthropicSSETranslator) Finalize() error {
 				int(usage.Get("completion_tokens").Int()),
 			)
 			t.usageSink.RecordCacheUsage(
-				0,
+				int(usage.Get("prompt_tokens_details.cache_creation_tokens").Int()),
 				int(usage.Get("prompt_tokens_details.cached_tokens").Int()),
 			)
 		}
@@ -569,10 +571,13 @@ func (t *AnthropicSSETranslator) extractAndForwardUsage(data []byte) {
 	cachedRead := usage.Get("prompt_tokens_details.cached_tokens").Int()
 	t.usageInputTokens = int(prompt)
 	t.usageOutputTokens = int(completion)
+	cacheCreation := usage.Get("prompt_tokens_details.cache_creation_tokens").Int()
+	t.usageCacheCreationTokens = int(cacheCreation)
+	t.usageCacheReadTokens = int(cachedRead)
 	t.hasUsage = true
 	if t.usageSink != nil {
 		t.usageSink.RecordUsage(int(prompt), int(completion))
-		t.usageSink.RecordCacheUsage(0, int(cachedRead))
+		t.usageSink.RecordCacheUsage(int(cacheCreation), int(cachedRead))
 	}
 }
 
@@ -780,10 +785,23 @@ func (t *AnthropicSSETranslator) emitMessageDelta() error {
 	sse.WriteJSONString(t.bw, stopReason)
 	t.bw.WriteString(",\"stop_sequence\":null},\"usage\":{")
 	if t.hasUsage {
+		// Anthropic's input_tokens is fresh-only; OpenAI's prompt_tokens (the
+		// source) is the total including cached tokens. Subtract cache so the
+		// statusline formula (input + 1.25*cwrt + multiplier*crd) doesn't
+		// double-count cache tokens.
+		freshInput := max(0, t.usageInputTokens-t.usageCacheCreationTokens-t.usageCacheReadTokens)
 		t.bw.WriteString("\"input_tokens\":")
-		sse.WriteJSONInt(t.bw, int64(t.usageInputTokens))
+		sse.WriteJSONInt(t.bw, int64(freshInput))
 		t.bw.WriteString(",\"output_tokens\":")
 		sse.WriteJSONInt(t.bw, int64(t.usageOutputTokens))
+		if t.usageCacheCreationTokens > 0 {
+			t.bw.WriteString(",\"cache_creation_input_tokens\":")
+			sse.WriteJSONInt(t.bw, int64(t.usageCacheCreationTokens))
+		}
+		if t.usageCacheReadTokens > 0 {
+			t.bw.WriteString(",\"cache_read_input_tokens\":")
+			sse.WriteJSONInt(t.bw, int64(t.usageCacheReadTokens))
+		}
 	} else {
 		t.bw.WriteString("\"output_tokens\":0")
 	}
