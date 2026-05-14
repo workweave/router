@@ -406,7 +406,8 @@ routed=""
 session_savings=""
 tot_in=0
 tot_out=0
-tot_cached=0
+tot_cache_read=0
+tot_cache_write=0
 
 # Per-turn savings compare each turn's routed cost (priced from
 # message.model in the transcript) against what the CC-side model selection
