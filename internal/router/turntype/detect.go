@@ -30,6 +30,16 @@ const (
 	// max_tokens=1). Always hard-pinned to the cheap model AND skips
 	// session-pin creation so a probe never anchors subsequent routing.
 	Probe TurnType = "probe"
+	// TitleGen: Claude Code's sidebar-title generation call. Fires once
+	// per user turn alongside the real conversation request, carries no
+	// tools and a JSON-schema response format, and always asks for the
+	// same fixed-shape output ({"title": "..."}). Hard-pinned to the
+	// cheap model AND skips session-pin creation: routing the real
+	// conversation through the cluster scorer is the whole point of the
+	// router, but the title-gen call has no signal worth scoring and a
+	// pin written here would anchor the real-conv turn that lands ~25ms
+	// later (same session key) before its own scorer even runs.
+	TitleGen TurnType = "title_gen"
 )
 
 // probeMaxTokensThreshold is the inclusive upper bound on max_tokens for
@@ -57,6 +67,9 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 		return Probe
 	}
 	systemText := env.SystemText()
+	if isTitleGen(systemText, feats.HasTools) {
+		return TitleGen
+	}
 	if isCompaction(systemText) {
 		return Compaction
 	}
@@ -76,6 +89,29 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 // `generationConfig.maxOutputTokens` produce the same RoutingFeatures.
 func isProbe(feats translate.RoutingFeatures) bool {
 	return feats.MaxTokens > 0 && feats.MaxTokens <= probeMaxTokensThreshold
+}
+
+// isTitleGen reports whether a request is Claude Code's sidebar-title
+// generation call. Two combined signals keep false positives tight:
+//
+//  1. System prompt contains the verbatim Claude Code title-prompt
+//     phrase "Generate a concise, sentence-case title". This string is
+//     specific to that one prompt; it does not appear in the main-loop
+//     system prompt, sub-agent dispatches, or compaction prompts.
+//  2. No tools declared. Title-gen calls are always tools=[]; any
+//     real conversation that mentions title generation in its system
+//     prompt (e.g. a user asking the model to "generate a concise
+//     title") will still carry the full Claude Code tool registry, so
+//     this guard prevents hard-pinning a real conversation.
+//
+// Per this file's invariant, false negatives (returning MainLoop) are
+// safe — the cluster scorer runs normally; only false positives are
+// dangerous.
+func isTitleGen(systemText string, hasTools bool) bool {
+	if hasTools {
+		return false
+	}
+	return strings.Contains(strings.ToLower(systemText), "generate a concise, sentence-case title")
 }
 
 // isCompaction reports whether the system prompt contains Claude Code's

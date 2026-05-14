@@ -138,6 +138,33 @@ func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 			want: turntype.MainLoop,
 		},
 		{
+			// Claude Code sidebar title-gen call: tools=[], JSON-schema
+			// response format, system prompt opens with the verbatim
+			// "Generate a concise, sentence-case title" phrase.
+			name: "claude code title-gen is title_gen",
+			body: `{"model":"claude-opus-4-7","max_tokens":64000,"tools":[],"system":[{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."},{"type":"text","text":"Generate a concise, sentence-case title (3-7 words) that captures the main topic or goal of this coding session."}],"messages":[{"role":"user","content":"what good cuh"}]}`,
+			want: turntype.TitleGen,
+		},
+		{
+			// Regression guard: a real conversation that happens to
+			// mention "generate a concise, sentence-case title" in the
+			// system prompt must NOT be hard-pinned. Real Claude Code
+			// conversations always carry the tool registry.
+			name: "system prompt mentioning title phrase but with tools stays main_loop",
+			body: `{"model":"claude-opus-4-7","tools":[{"name":"Bash","input_schema":{"type":"object"}}],"system":"Generate a concise, sentence-case title for the session if asked.","messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			name: "title-gen takes priority over compaction phrase",
+			body: `{"model":"claude-opus-4-7","tools":[],"system":"Generate a concise, sentence-case title. Your task is to create a detailed summary later.","messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.TitleGen,
+		},
+		{
+			name: "probe takes priority over title-gen system prompt",
+			body: `{"model":"claude-opus-4-7","max_tokens":1,"tools":[],"system":"Generate a concise, sentence-case title.","messages":[{"role":"user","content":"hi"}]}`,
+			want: turntype.Probe,
+		},
+		{
 			name: "probe takes priority over compaction system prompt",
 			body: `{"model":"claude-sonnet-4-5","max_tokens":1,"system":"Your task is to create a detailed summary","messages":[{"role":"user","content":"quota"}]}`,
 			want: turntype.Probe,

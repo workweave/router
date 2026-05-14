@@ -66,6 +66,17 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 			return
 		}
 
+		msgs := gjson.GetBytes(body, "messages")
+		log.Debug("inbound anthropic request",
+			"body_bytes", len(body),
+			"message_count", int(msgs.Get("#").Int()),
+			"system_chars", len(gjson.GetBytes(body, "system").String()),
+			"model", gjson.GetBytes(body, "model").String(),
+			"max_tokens", gjson.GetBytes(body, "max_tokens").Int(),
+			"session_id", c.Request.Header.Get("X-Claude-Code-Session-Id"),
+			"body", truncate(string(body), 4000),
+		)
+
 		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header, body)
 		ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		c.Request = c.Request.WithContext(ctx)

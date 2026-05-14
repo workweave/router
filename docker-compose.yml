@@ -83,7 +83,6 @@ services:
     environment:
       DATABASE_URL: postgres://router:router@postgres:5432/router?sslmode=disable
       PORT: "8080"
-      LOG_LEVEL: info
       # .env.development sets ROUTER_ONNX_ASSETS_DIR to a repo-relative path
       # that's correct for `make dev` outside Docker but wrong inside the
       # container, where the Dockerfile populates /opt/router/assets/. The
