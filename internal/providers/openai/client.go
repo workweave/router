@@ -6,8 +6,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
 	"workweave/router/internal/observability"
@@ -19,11 +19,6 @@ import (
 )
 
 const DefaultBaseURL = "https://api.openai.com"
-
-// upstreamTraceEnabled mirrors ROUTER_DEBUG_UPSTREAM_TRACE=true. When on, dumps
-// response status, headers, and a body preview per request — pair with
-// ROUTER_DEBUG_SSE_TRACE to see what's crossing the OpenAI <-> Anthropic boundary.
-var upstreamTraceEnabled = os.Getenv("ROUTER_DEBUG_UPSTREAM_TRACE") == "true"
 
 type Client struct {
 	apiKey  string
@@ -70,21 +65,23 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
 
-	if upstreamTraceEnabled {
-		observability.Get().Debug("OpenAI upstream response",
-			"status", resp.StatusCode,
-			"content_type", resp.Header.Get("Content-Type"),
-			"transfer_encoding", resp.Header.Get("Transfer-Encoding"),
-			"content_encoding", resp.Header.Get("Content-Encoding"),
-			"request_id", resp.Header.Get("X-Request-Id"),
-		)
-	}
+	log := observability.Get()
+	log.Debug("OpenAI upstream response",
+		"status", resp.StatusCode,
+		"content_type", resp.Header.Get("Content-Type"),
+		"transfer_encoding", resp.Header.Get("Transfer-Encoding"),
+		"content_encoding", resp.Header.Get("Content-Encoding"),
+		"request_id", resp.Header.Get("X-Request-Id"),
+	)
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 	status := resp.StatusCode
 
-	if !upstreamTraceEnabled {
+	// Per-chunk diagnostics (first-byte preview, EOF, write/read errors) require
+	// a manual streaming loop instead of httputil.StreamBody. Skip it when debug
+	// is off so info-level deployments keep the fast path.
+	if !log.Enabled(ctx, slog.LevelDebug) {
 		return httputil.StreamBody(resp.Body, status, w, t)
 	}
 
@@ -96,14 +93,14 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		if n > 0 {
 			t.StampUpstreamFirstByte()
 			if bytesRead == 0 {
-				observability.Get().Debug("OpenAI upstream first chunk",
+				log.Debug("OpenAI upstream first chunk",
 					"bytes", n,
 					"preview", truncateBytes(buf[:n], 320),
 				)
 			}
 			bytesRead += n
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				observability.Get().Debug("OpenAI upstream write failed", "err", writeErr, "bytes_read", bytesRead)
+				log.Debug("OpenAI upstream write failed", "err", writeErr, "bytes_read", bytesRead)
 				return writeErr
 			}
 			if flusher != nil {
@@ -112,14 +109,14 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		}
 		if readErr == io.EOF {
 			t.StampUpstreamEOF()
-			observability.Get().Debug("OpenAI upstream stream complete", "bytes_total", bytesRead)
+			log.Debug("OpenAI upstream stream complete", "bytes_total", bytesRead)
 			if status < 200 || status >= 300 {
 				return &providers.UpstreamStatusError{Status: status}
 			}
 			return nil
 		}
 		if readErr != nil {
-			observability.Get().Debug("OpenAI upstream read failed", "err", readErr, "bytes_read", bytesRead)
+			log.Debug("OpenAI upstream read failed", "err", readErr, "bytes_read", bytesRead)
 			return readErr
 		}
 	}
