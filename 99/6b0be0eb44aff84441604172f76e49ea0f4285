@@ -1,11 +1,17 @@
+internal/translate/emit_gemini.go
+  s_9a3ce3fd3de458::t_ec58f7b5326101 13
+  s_9a3ce3fd3de458::t_1a58adf51a1b90 26-48
 internal/router/turntype/detect_test.go
   s_9a3ce3fd3de458::t_37c64e9f017c19 7,10,13,17,87-92,121-197,202,267-269
   s_9a3ce3fd3de458::t_dc68c93d578934 203-266
 internal/proxy/gemini.go
   s_9a3ce3fd3de458::t_549201d39f485e 1-182
-internal/translate/emit_gemini.go
-  s_9a3ce3fd3de458::t_ec58f7b5326101 13
-  s_9a3ce3fd3de458::t_1a58adf51a1b90 26-48
+internal/translate/gemini_envelope_test.go
+  s_9a3ce3fd3de458::t_10d9cd891da768 1-176
+internal/api/gemini/generate_content_test.go
+  s_9a3ce3fd3de458::t_0583c17d5f907d 1-68
+internal/proxy/gemini_test.go
+  s_9a3ce3fd3de458::t_7840cb753baad0 1-83
 internal/translate/envelope.go
   s_9a3ce3fd3de458::t_c0e8df5edf9be8 34
   s_9a3ce3fd3de458::t_c60fe26827b6a1 71-81
@@ -14,27 +20,21 @@ internal/translate/envelope.go
   s_9a3ce3fd3de458::t_520e14bf517b92 148-149
   s_9a3ce3fd3de458::t_062d9d65d9989f 179-180
   s_9a3ce3fd3de458::t_ad756fdf678907 186-188,191-193
-internal/translate/features_gemini.go
-  s_9a3ce3fd3de458::t_f2097a21ae52df 1-194
-internal/proxy/gemini_test.go
-  s_9a3ce3fd3de458::t_7840cb753baad0 1-83
+internal/api/gemini/generate_content.go
+  s_9a3ce3fd3de458::t_1f6243e07fb72a 1-180
 internal/server/server.go
   s_9a3ce3fd3de458::t_b9ebca2f7da82d 10
   s_9a3ce3fd3de458::t_997f7702895986 58-62
+internal/translate/features_gemini.go
+  s_9a3ce3fd3de458::t_f2097a21ae52df 1-194
 internal/translate/features.go
   s_9a3ce3fd3de458::t_c7091b845a8aea 34-35
   s_9a3ce3fd3de458::t_b075dd183d7465 88-91,95,100,107-257
   s_9a3ce3fd3de458::t_efbbd53da58b90 322
-internal/api/gemini/generate_content_test.go
-  s_9a3ce3fd3de458::t_0583c17d5f907d 1-68
-internal/translate/gemini_envelope_test.go
-  s_9a3ce3fd3de458::t_10d9cd891da768 1-176
-internal/api/gemini/generate_content.go
-  s_9a3ce3fd3de458::t_1f6243e07fb72a 1-180
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.4.1",
+  "git_ai_version": "1.4.8",
   "base_commit_sha": "996b0be0eb44aff84441604172f76e49ea0f4285",
   "prompts": {},
   "sessions": {

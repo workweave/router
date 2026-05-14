@@ -3,7 +3,7 @@ internal/proxy/gemini.go
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.4.1",
+  "git_ai_version": "1.4.8",
   "base_commit_sha": "ceb1d7ff85e639e1a61bd21031ff2fecc542191d",
   "prompts": {},
   "sessions": {

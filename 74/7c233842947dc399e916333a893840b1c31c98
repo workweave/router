@@ -7,7 +7,7 @@ internal/proxy/service.go
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.4.1",
+  "git_ai_version": "1.4.8",
   "base_commit_sha": "747c233842947dc399e916333a893840b1c31c98",
   "prompts": {},
   "sessions": {
