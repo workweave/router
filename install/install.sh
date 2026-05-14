@@ -433,7 +433,11 @@ set -euo pipefail
 
 input="$(cat)"
 transcript_path="$(printf '%s' "$input" | jq -r '.transcript_path // empty')"
-selected_display="$(printf '%s' "$input" | jq -r '.model.display_name // .model.id // "?"')"
+# Prefer model.id over display_name: pricing keys + the routed model id in
+# the transcript are canonical ids (e.g. claude-opus-4-7), while display_name
+# is a human label ("Opus 4.7 (1M context)") that won't hit the pricing table,
+# zeroing out savings. id passes through normalize_model cleanly.
+selected_display="$(printf '%s' "$input" | jq -r '.model.id // .model.display_name // "?"')"
 
 # Normalize a model id to a pricing-table key. CC + the decisions log carry
 # two flavors of annotation we don't want in the lookup:
