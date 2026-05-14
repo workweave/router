@@ -200,7 +200,9 @@ func (e *RequestEnvelope) HasTools() bool {
 //
 // Anthropic: output_config.format.{type:"json_schema", schema:{...}}
 // OpenAI:    response_format.{type:"json_schema",
-//                             json_schema:{schema:{...}}}
+//
+//	json_schema:{schema:{...}}}
+//
 // Gemini:    no structured-title equivalent today — returns false.
 //
 // Detection requires both (a) the JSON-schema format declaration and
