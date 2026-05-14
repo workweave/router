@@ -12,7 +12,7 @@
 #   { "statusLine": { "type": "command", "command": "/abs/path/to/cc-statusline.sh" } }
 #
 # Renders:
-#   WEAVE ROUTER — claude-sonnet-4-5 ← claude-opus-4-7 · saved $0.04 turn / $1.23 session
+#   WEAVE ROUTER — claude-sonnet-4-5 ← claude-opus-4-7 · saved $1.23 · 12.4k in / 3.1k out / 45.2k cached
 #
 # Pricing source of truth: router/eval/pricing.py. Keep these maps in lockstep
 # when prices change. Cache multipliers (1.25× / 0.1×) follow Anthropic's
@@ -127,8 +127,10 @@ prices='{
 # END_GENERATED_PRICES
 
 routed=""
-turn_savings=""
 session_savings=""
+tot_in=0
+tot_out=0
+tot_cached=0
 
 # Sidecar log written by the router with one JSON line per request:
 # {ts, request_id, requested_model, decision_model, decision_reason,
@@ -163,45 +165,50 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
       || echo '{}')"
   fi
 
-  # Compute savings across every assistant turn that the router actually
-  # rerouted. cache_creation is priced at 1.25× input, cache_read at 0.1× —
-  # both ratios are stable across the Claude family and a no-op when the
-  # provider doesn't return those fields.
-  read -r turn_savings session_savings < <(
+  # Compute a session running total: savings across every assistant turn the
+  # router rerouted, plus cumulative token counts across every assistant turn
+  # (whether rerouted or not — total work the session has done).
+  # cache_creation is priced at 1.25× input, cache_read at 0.1× — both ratios
+  # are stable across the Claude family and a no-op when the provider doesn't
+  # return those fields. Cache reads ARE included in the savings comparison:
+  # both the routed and would-have-been-selected costs apply the same 0.1×
+  # weight to cache_read_input_tokens, so the delta reflects the model-price
+  # difference on the cached portion as well.
+  read -r session_savings tot_in tot_out tot_cached < <(
     jq -r --argjson p "$prices" --argjson decisions "$decisions_map" '
       select(.type=="assistant") |
-      .requestId as $req_id |
-      ($decisions[$req_id] // null) as $requested_raw |
+      (.requestId // null) as $req_id |
+      (if $req_id == null then null else ($decisions[$req_id] // null) end) as $requested_raw |
       .message as $m |
       ($m.model // "" | sub("\\[[^]]*\\]$"; "") | sub("-[0-9]{8}$"; "")) as $rm |
-      # Emit one number per assistant turn so awk’s "last" tracks the
-      # actually-most-recent turn, not the last *rerouted* turn.
-      # Non-rerouted / unmeasurable turns emit 0.
-      if $requested_raw == null then 0
-      else
-        ($requested_raw | sub("\\[[^]]*\\]$"; "") | sub("-[0-9]{8}$"; "")) as $requested |
-        if $requested == $rm then 0
-        else
-          {
-            in:    ($m.usage.input_tokens // 0),
-            out:   ($m.usage.output_tokens // 0),
-            cwrt:  ($m.usage.cache_creation_input_tokens // 0),
-            crd:   ($m.usage.cache_read_input_tokens // 0)
-          } as $t |
-          ($p.input[$rm] // null)        as $rin  | ($p.output[$rm] // null)        as $rout |
-          ($p.input[$requested] // null) as $sin  | ($p.output[$requested] // null) as $sout |
-          if ($rin == null or $rout == null or $sin == null or $sout == null) then 0
-          else
-            (($t.in + 1.25 * $t.cwrt + 0.1 * $t.crd) / 1000) as $input_units |
-            ($t.out / 1000)                                  as $output_units |
-            ($input_units * $rin + $output_units * $rout)    as $routed_cost |
-            ($input_units * $sin + $output_units * $sout)    as $requested_cost |
-            ($requested_cost - $routed_cost)
-          end
-        end
-      end
+      {
+        in:    ($m.usage.input_tokens // 0),
+        out:   ($m.usage.output_tokens // 0),
+        cwrt:  ($m.usage.cache_creation_input_tokens // 0),
+        crd:   ($m.usage.cache_read_input_tokens // 0)
+      } as $t |
+      (if $requested_raw == null then 0
+       else
+         ($requested_raw | sub("\\[[^]]*\\]$"; "") | sub("-[0-9]{8}$"; "")) as $requested |
+         if $requested == $rm then 0
+         else
+           ($p.input[$rm] // null)        as $rin  | ($p.output[$rm] // null)        as $rout |
+           ($p.input[$requested] // null) as $sin  | ($p.output[$requested] // null) as $sout |
+           if ($rin == null or $rout == null or $sin == null or $sout == null) then 0
+           else
+             (($t.in + 1.25 * $t.cwrt + 0.1 * $t.crd) / 1000) as $input_units |
+             ($t.out / 1000)                                  as $output_units |
+             ($input_units * $rin + $output_units * $rout)    as $routed_cost |
+             ($input_units * $sin + $output_units * $sout)    as $requested_cost |
+             ($requested_cost - $routed_cost)
+           end
+         end
+       end) as $savings |
+      "\($savings) \($t.in) \($t.out) \($t.cwrt + $t.crd)"
     ' "$transcript_path" 2>/dev/null \
-    | awk 'BEGIN{tot=0; last=0} {tot+=$1; last=$1} END{printf "%.4f %.4f\n", last, tot}'
+    | awk 'BEGIN{s=0; i=0; o=0; c=0}
+           {s+=$1; i+=$2; o+=$3; c+=$4}
+           END{printf "%.4f %d %d %d\n", s, i, o, c}'
   ) || true
 fi
 
@@ -220,24 +227,38 @@ fmt_money() {
   }'
 }
 
+fmt_tok() {
+  awk -v v="$1" 'BEGIN{
+    v = v+0
+    if (v >= 1000000) { printf "%.1fM", v/1000000; exit }
+    if (v >= 1000)    { printf "%.1fk", v/1000;    exit }
+    printf "%d", v
+  }'
+}
+
+tokens_clause=""
+if [[ "$tot_in" -gt 0 || "$tot_out" -gt 0 || "$tot_cached" -gt 0 ]]; then
+  tokens_clause=" · $(fmt_tok "$tot_in") in / $(fmt_tok "$tot_out") out / $(fmt_tok "$tot_cached") cached"
+fi
+
 if [[ -n "$routed" ]]; then
   # Show the savings clause only when the session is genuinely net-saving.
   # session_savings is "0.0000" when no rerouted turns were found (sidecar
   # missing, fresh session, only side-calls so far); it can also go
   # negative when sticky routing forces a haiku-tagged side-call up to a
   # cached sonnet/opus decision. In both cases the word "saved" would
-  # mislead, so drop the clause and just show the routed model.
+  # mislead, so drop the savings clause but keep the token totals.
   has_savings="false"
   if [[ -n "$session_savings" ]] \
      && awk -v v="$session_savings" 'BEGIN{exit !(v+0 > 0.005)}'; then
     has_savings="true"
   fi
   if [[ "$has_savings" == "true" ]]; then
-    printf '%s — %s ← %s · saved %s turn / %s session' \
-      "$brand" "$routed" "$selected_display" "$(fmt_money "$turn_savings")" "$(fmt_money "$session_savings")"
+    printf '%s — %s ← %s · saved %s%s' \
+      "$brand" "$routed" "$selected_display" "$(fmt_money "$session_savings")" "$tokens_clause"
   else
-    printf '%s — %s' "$brand" "$routed"
+    printf '%s — %s%s' "$brand" "$routed" "$tokens_clause"
   fi
 else
-  printf '%s — %s' "$brand" "$selected_display"
+  printf '%s — %s%s' "$brand" "$selected_display" "$tokens_clause"
 fi

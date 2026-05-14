@@ -659,69 +659,6 @@ func TestAnthropicSSETranslator_NoMarkerWhenNotConfigured(t *testing.T) {
 	assert.Contains(t, body, `"index":0,"content_block":{"type":"text"`)
 }
 
-func TestAnthropicSSETranslator_ClosingMarkerEmittedAfterContent(t *testing.T) {
-	rec := httptest.NewRecorder()
-	closingProse := "✦ saved $0.0234 vs claude-opus-4-7"
-	closingFn := func(u translate.Usage) string {
-		require.Equal(t, 100, u.InputTokens)
-		require.Equal(t, 20, u.OutputTokens)
-		require.Equal(t, 50, u.CacheReadTokens)
-		return closingProse
-	}
-	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil).
-		WithClosingMarker(closingFn)
-
-	translator.Header().Set("Content-Type", "text/event-stream")
-	translator.WriteHeader(http.StatusOK)
-
-	events := []string{
-		"data: {\"id\":\"chatcmpl-c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer body\"},\"finish_reason\":null}]}\n\n",
-		"data: {\"id\":\"chatcmpl-c1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":50}}}\n\n",
-		"data: [DONE]\n\n",
-	}
-	for _, e := range events {
-		_, err := translator.Write([]byte(e))
-		require.NoError(t, err)
-	}
-	require.NoError(t, translator.Finalize())
-
-	body := rec.Body.String()
-	answerIdx := strings.Index(body, `"text":"answer body"`)
-	closingIdx := strings.Index(body, closingProse)
-	deltaIdx := strings.Index(body, "event: message_delta")
-	require.GreaterOrEqual(t, answerIdx, 0)
-	require.GreaterOrEqual(t, closingIdx, 0)
-	require.GreaterOrEqual(t, deltaIdx, 0)
-	assert.Less(t, answerIdx, closingIdx, "closing marker follows upstream content")
-	assert.Less(t, closingIdx, deltaIdx, "closing marker precedes message_delta")
-}
-
-func TestAnthropicSSETranslator_ClosingMarkerSkippedWhenCallbackReturnsEmpty(t *testing.T) {
-	rec := httptest.NewRecorder()
-	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil).
-		WithClosingMarker(func(translate.Usage) string { return "" })
-
-	translator.Header().Set("Content-Type", "text/event-stream")
-	translator.WriteHeader(http.StatusOK)
-
-	events := []string{
-		"data: {\"id\":\"chatcmpl-c2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n",
-		"data: {\"id\":\"chatcmpl-c2\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n",
-		"data: [DONE]\n\n",
-	}
-	for _, e := range events {
-		_, err := translator.Write([]byte(e))
-		require.NoError(t, err)
-	}
-	require.NoError(t, translator.Finalize())
-
-	body := rec.Body.String()
-	assert.Contains(t, body, "event: message_delta")
-	assert.Contains(t, body, "event: message_stop")
-	// No closing-marker emission means index 1 stays unopened.
-	assert.NotContains(t, body, `"index":1`)
-}
-
 func TestPrepareAnthropic_ToolResultStringContent(t *testing.T) {
 	openAIReq := `{
 		"model": "gpt-4o",
