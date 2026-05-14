@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/sse"
 
@@ -421,6 +422,11 @@ func (t *AnthropicSSETranslator) WriteHeader(code int) {
 		t.inner.Header().Set("Content-Type", "text/event-stream")
 		t.inner.WriteHeader(code)
 	}
+	observability.Get().Debug("AnthropicSSE WriteHeader",
+		"upstream_status", code,
+		"upstream_content_type", ct,
+		"streaming", t.streaming,
+	)
 }
 
 func (t *AnthropicSSETranslator) Write(data []byte) (int, error) {
@@ -444,6 +450,13 @@ func (t *AnthropicSSETranslator) Flush() {
 // Finalize writes the buffered body for non-streaming responses; for streaming,
 // emits trailing message_delta/message_stop if not already closed.
 func (t *AnthropicSSETranslator) Finalize() error {
+	observability.Get().Debug("AnthropicSSE Finalize entry",
+		"streaming", t.streaming,
+		"closed", t.closed,
+		"started", t.started,
+		"status_code", t.statusCode,
+		"buffered_bytes", t.buf.Len(),
+	)
 	if t.streaming {
 		if t.closed {
 			return nil
@@ -693,6 +706,7 @@ func (t *AnthropicSSETranslator) emitMessageStart() error {
 	if id == "" {
 		id = "msg_translated"
 	}
+	observability.Get().Debug("AnthropicSSE emit", "event", "message_start")
 	// estimatedInputTokens is the proxy's pre-inference estimate, used so clients
 	// that key off message_start.usage.input_tokens (e.g. Claude Code's subagent
 	// token counter) see a non-zero value for cross-format paths where the real
@@ -709,6 +723,7 @@ func (t *AnthropicSSETranslator) emitMessageStart() error {
 }
 
 func (t *AnthropicSSETranslator) emitContentBlockStartText(index int) error {
+	observability.Get().Debug("AnthropicSSE emit", "event", "content_block_start", "type", "text")
 	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
@@ -721,6 +736,7 @@ func (t *AnthropicSSETranslator) emitContentBlockStartText(index int) error {
 // smuggled here as a non-standard field on the tool_use block so clients
 // that pass through unknown fields preserve it.
 func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name, sig string) error {
+	observability.Get().Debug("AnthropicSSE emit", "event", "content_block_start", "type", "tool_use", "name", name)
 	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"content_block\":{\"type\":\"tool_use\",\"id\":")
@@ -736,6 +752,7 @@ func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name, 
 }
 
 func (t *AnthropicSSETranslator) emitContentBlockDeltaText(index int, text string) error {
+	observability.Get().Debug("AnthropicSSE emit", "event", "content_block_delta", "type", "text_delta")
 	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"delta\":{\"type\":\"text_delta\",\"text\":")
@@ -745,6 +762,7 @@ func (t *AnthropicSSETranslator) emitContentBlockDeltaText(index int, text strin
 }
 
 func (t *AnthropicSSETranslator) emitContentBlockDeltaJSON(index int, partial string) error {
+	observability.Get().Debug("AnthropicSSE emit", "event", "content_block_delta", "type", "input_json_delta")
 	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":")
@@ -754,6 +772,7 @@ func (t *AnthropicSSETranslator) emitContentBlockDeltaJSON(index int, partial st
 }
 
 func (t *AnthropicSSETranslator) emitContentBlockStop(index int) error {
+	observability.Get().Debug("AnthropicSSE emit", "event", "content_block_stop")
 	t.bw.WriteString("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString("}\n\n")
@@ -762,6 +781,7 @@ func (t *AnthropicSSETranslator) emitContentBlockStop(index int) error {
 
 func (t *AnthropicSSETranslator) emitMessageDelta() error {
 	stopReason := openAIFinishToAnthropic(t.finishReason)
+	observability.Get().Debug("AnthropicSSE emit", "event", "message_delta", "stop_reason", stopReason)
 	t.bw.WriteString("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":")
 	sse.WriteJSONString(t.bw, stopReason)
 	t.bw.WriteString(",\"stop_sequence\":null},\"usage\":{")
@@ -791,6 +811,7 @@ func (t *AnthropicSSETranslator) emitMessageDelta() error {
 }
 
 func (t *AnthropicSSETranslator) emitMessageStop() error {
+	observability.Get().Debug("AnthropicSSE emit", "event", "message_stop")
 	t.bw.WriteString("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 	return t.flushEvent()
 }
