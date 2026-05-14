@@ -104,19 +104,19 @@ func MetricsTimeseriesHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 type metricsDetailRow struct {
 	Timestamp           string  `json:"timestamp"`
 	RequestID           string  `json:"request_id"`
-	RequestedModel     string  `json:"requested_model"`
-	DecisionModel      string  `json:"decision_model"`
-	DecisionProvider   string  `json:"decision_provider"`
-	DecisionReason     string  `json:"decision_reason"`
-	StickyHit          bool    `json:"sticky_hit"`
-	InputTokens        int32   `json:"input_tokens"`
-	OutputTokens       int32   `json:"output_tokens"`
-	CacheCreationTokens *int32 `json:"cache_creation_tokens"`
-	CacheReadTokens     *int32 `json:"cache_read_tokens"`
-	RequestedCostUSD   float64 `json:"requested_cost_usd"`
-	ActualCostUSD      float64 `json:"actual_cost_usd"`
-	TotalLatencyMs     int64   `json:"total_latency_ms"`
-	UpstreamStatusCode int32   `json:"upstream_status_code"`
+	RequestedModel      string  `json:"requested_model"`
+	DecisionModel       string  `json:"decision_model"`
+	DecisionProvider    string  `json:"decision_provider"`
+	DecisionReason      string  `json:"decision_reason"`
+	StickyHit           bool    `json:"sticky_hit"`
+	InputTokens         int32   `json:"input_tokens"`
+	OutputTokens        int32   `json:"output_tokens"`
+	CacheCreationTokens *int32  `json:"cache_creation_tokens"`
+	CacheReadTokens     *int32  `json:"cache_read_tokens"`
+	RequestedCostUSD    float64 `json:"requested_cost_usd"`
+	ActualCostUSD       float64 `json:"actual_cost_usd"`
+	TotalLatencyMs      int64   `json:"total_latency_ms"`
+	UpstreamStatusCode  int32   `json:"upstream_status_code"`
 }
 
 type metricsDetailsResponse struct {
