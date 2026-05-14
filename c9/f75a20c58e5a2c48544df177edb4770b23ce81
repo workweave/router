@@ -1,17 +1,17 @@
-internal/router/cluster/testdata/fixture.json
-  s_0d755795d2ad31::t_5b9df71543f22a 15-782,785-1552,1555-2322,2325-3092,3095-3862,3865-4632
-internal/router/cluster/artifacts/v0.25/model_registry.json
-  s_0d755795d2ad31::t_ae80627eb8ffb9 1-30
+internal/router/cluster/artifacts/v0.25/rankings.json
+  s_0d755795d2ad31::t_41b2702da0f510 1-267
 internal/router/cluster/artifacts/v0.25/metadata.yaml
   s_0d755795d2ad31::t_41b2702da0f510 1-73
 internal/router/cluster/artifacts/latest
   s_0d755795d2ad31::t_514848c612aa47 1
-internal/router/cluster/artifacts/v0.25/rankings.json
-  s_0d755795d2ad31::t_41b2702da0f510 1-267
+internal/router/cluster/artifacts/v0.25/model_registry.json
+  s_0d755795d2ad31::t_ae80627eb8ffb9 1-30
+internal/router/cluster/testdata/fixture.json
+  s_0d755795d2ad31::t_5b9df71543f22a 15-782,785-1552,1555-2322,2325-3092,3095-3862,3865-4632
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.4.1",
+  "git_ai_version": "1.4.8",
   "base_commit_sha": "c9f75a20c58e5a2c48544df177edb4770b23ce81",
   "prompts": {},
   "sessions": {
