@@ -115,6 +115,7 @@ func injectStreamUsageOption(doc map[string]any) {
 func flattenAnthropicSystem(system any) map[string]any {
 	switch s := system.(type) {
 	case string:
+		s = stripAnthropicBillingHeader(s)
 		if s == "" {
 			return nil
 		}
@@ -128,7 +129,9 @@ func flattenAnthropicSystem(system any) map[string]any {
 			}
 			if t, _ := block["type"].(string); t == "text" {
 				if text, _ := block["text"].(string); text != "" {
-					parts = append(parts, text)
+					if stripped := stripAnthropicBillingHeader(text); stripped != "" {
+						parts = append(parts, stripped)
+					}
 				}
 			}
 		}

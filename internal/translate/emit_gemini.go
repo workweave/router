@@ -443,8 +443,8 @@ func pullAnthropicSystemToGemini(src map[string]any, out map[string]any) {
 	var parts []string
 	switch s := system.(type) {
 	case string:
-		if s != "" {
-			parts = append(parts, s)
+		if stripped := stripAnthropicBillingHeader(s); stripped != "" {
+			parts = append(parts, stripped)
 		}
 	case []any:
 		for _, b := range s {
@@ -454,7 +454,9 @@ func pullAnthropicSystemToGemini(src map[string]any, out map[string]any) {
 			}
 			if t, _ := block["type"].(string); t == "text" {
 				if text, _ := block["text"].(string); text != "" {
-					parts = append(parts, text)
+					if stripped := stripAnthropicBillingHeader(text); stripped != "" {
+						parts = append(parts, stripped)
+					}
 				}
 			}
 		}
