@@ -56,14 +56,6 @@ seed: ## Create a local dev installation + API key and print usage instructions
 setup: migrate-up seed ## Bootstrap (host DB): init DB, run migrations, seed an API key
 
 full-setup: generate-statusline ## Bootstrap router: docker compose + seed + interactively wire Claude Code
-	## Usage:
-	##   make full-setup                                  # boot compose, seed, wire Claude Code (interactive scope prompt)
-	##   make full-setup KEY=rk_... BASE_URL=http://...   # wire an already-running router to Claude Code
-	##   make full-setup KEY=rk_... BASE_URL=http://... DIR=/tmp/test         # isolated throwaway install
-	##   make full-setup KEY=rk_... BASE_URL=http://... SCOPE=user            # skip the interactive scope prompt
-	##   make full-setup KEY=rk_... BASE_URL=http://... SCOPE=user NON_INTERACTIVE=1  # CI-friendly
-	##
-	## Cursor wiring is manual — see README "Wiring Claude Code or Cursor".
 	@if [ -n "$(KEY)" ] && [ -n "$(BASE_URL)" ]; then \
 		INSTALL_CMD='WEAVE_ROUTER_KEY="$(KEY)" ./install/install.sh --base-url "$(BASE_URL)"'; \
 		[ -n "$(SCOPE)" ] && INSTALL_CMD="$$INSTALL_CMD --scope $(SCOPE)"; \
