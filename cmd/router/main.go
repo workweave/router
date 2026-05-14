@@ -252,7 +252,21 @@ func main() {
 
 	cache := auth.NewLRUAPIKeyCache(10000, 50000, 5*time.Minute, 60*time.Second)
 	userCache := auth.NewLRUUserCache(50000, 10*time.Minute)
-	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, repo.Users, cache, userCache, time.Now).WithEncryptor(encryptor)
+	notifier := postgres.NewPgxInvalidationNotifier(pool)
+	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, repo.Users, cache, userCache, time.Now).
+		WithEncryptor(encryptor).
+		WithInstallationChangeNotifier(notifier)
+
+	// Listener fans out NOTIFY-published invalidations to this replica's cache so
+	// settings changes are visible on the next request across the fleet. The 5-min
+	// cache TTL is the safety net if this goroutine fails to reconnect.
+	listener := postgres.NewInvalidationListener(pool, cache)
+	listenerCtx, listenerCancel := context.WithCancel(context.Background())
+	defer func() {
+		listenerCancel()
+		listener.Wait()
+	}()
+	go listener.Run(listenerCtx)
 
 	// Admin dashboard password. In managed mode the dashboard is not mounted
 	// at all so the password is irrelevant. In selfhosted mode, fall back to

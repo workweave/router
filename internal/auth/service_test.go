@@ -146,10 +146,12 @@ func makeService(t *testing.T, rows ...fakeKeyRow) (*auth.Service, *fakeAPIKeyRe
 }
 
 type recordingAPIKeyCache struct {
-	mu    sync.Mutex
-	store map[string]auth.CachedKey
-	hits  int
-	sets  []recordedSet
+	mu            sync.Mutex
+	store         map[string]auth.CachedKey
+	byInst        map[string]map[string]struct{}
+	hits          int
+	sets          []recordedSet
+	invalidations []string
 }
 
 type recordedSet struct {
@@ -158,7 +160,10 @@ type recordedSet struct {
 }
 
 func newRecordingAPIKeyCache() *recordingAPIKeyCache {
-	return &recordingAPIKeyCache{store: map[string]auth.CachedKey{}}
+	return &recordingAPIKeyCache{
+		store:  map[string]auth.CachedKey{},
+		byInst: map[string]map[string]struct{}{},
+	}
 }
 
 func (c *recordingAPIKeyCache) Get(keyHash string) (auth.CachedKey, bool) {
@@ -176,6 +181,37 @@ func (c *recordingAPIKeyCache) Set(keyHash string, entry auth.CachedKey) {
 	defer c.mu.Unlock()
 	c.store[keyHash] = entry
 	c.sets = append(c.sets, recordedSet{keyHash: keyHash, entry: entry})
+	if !entry.Negative && entry.Installation != nil && entry.Installation.ID != "" {
+		hashes, ok := c.byInst[entry.Installation.ID]
+		if !ok {
+			hashes = map[string]struct{}{}
+			c.byInst[entry.Installation.ID] = hashes
+		}
+		hashes[keyHash] = struct{}{}
+	}
+}
+
+func (c *recordingAPIKeyCache) InvalidateInstallation(installationID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.invalidations = append(c.invalidations, installationID)
+	hashes := c.byInst[installationID]
+	delete(c.byInst, installationID)
+	for hash := range hashes {
+		entry, ok := c.store[hash]
+		if !ok || entry.Negative {
+			continue
+		}
+		delete(c.store, hash)
+	}
+}
+
+func (c *recordingAPIKeyCache) invalidationSnapshot() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, len(c.invalidations))
+	copy(out, c.invalidations)
+	return out
 }
 
 func (c *recordingAPIKeyCache) hitCount() int {
@@ -584,5 +620,75 @@ func TestService_SetInstallationExcludedModels(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{}, out)
 		assert.Equal(t, []string{}, installRepo.excludedModelsByID["inst-3"])
+	})
+}
+
+type recordingNotifier struct {
+	mu  sync.Mutex
+	ids []string
+}
+
+func (n *recordingNotifier) NotifyInstallationChanged(installationID string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.ids = append(n.ids, installationID)
+}
+
+func (n *recordingNotifier) snapshot() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	out := make([]string, len(n.ids))
+	copy(out, n.ids)
+	return out
+}
+
+func TestService_WriteHooksInvalidateAndNotify(t *testing.T) {
+	// Each per-installation write must drop the cached entries for that
+	// installation AND publish a NOTIFY so peer replicas do the same. The
+	// 5-min TTL is the safety net, not the steady-state behavior — without
+	// these hooks the dashboard's "save" button is a lie for up to 5 minutes.
+	const installID = "inst-A"
+
+	makeSvc := func() (*auth.Service, *recordingAPIKeyCache, *recordingNotifier) {
+		cache := newRecordingAPIKeyCache()
+		// Pre-populate so InvalidateInstallation has something to drop.
+		cache.Set("hash-A", auth.CachedKey{
+			APIKey:       &auth.APIKey{ID: "k1"},
+			Installation: &auth.Installation{ID: installID},
+		})
+		nf := &recordingNotifier{}
+		installRepo := &fakeInstallationRepository{}
+		extRepo := &fakeExternalAPIKeyRepo{}
+		apiKeyRepo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}
+		svc := auth.NewService(installRepo, apiKeyRepo, extRepo, nil, cache, nil, frozenClock()).
+			WithInstallationChangeNotifier(nf)
+		return svc, cache, nf
+	}
+
+	t.Run("SetInstallationExcludedModels", func(t *testing.T) {
+		svc, cache, nf := makeSvc()
+		_, err := svc.SetInstallationExcludedModels(context.Background(), "ext-1", installID, []string{"gpt-4o"}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, []string{installID}, cache.invalidationSnapshot(),
+			"excluded-model writes must call cache.InvalidateInstallation so the next request sees the new list")
+		assert.Equal(t, []string{installID}, nf.snapshot(),
+			"excluded-model writes must publish NOTIFY so peer replicas drop their cache too")
+	})
+
+	t.Run("UpsertExternalAPIKey", func(t *testing.T) {
+		svc, cache, nf := makeSvc()
+		_, err := svc.UpsertExternalAPIKey(context.Background(), installID, "anthropic", "sk-abc", nil, nil)
+		require.NoError(t, err)
+		assert.Equal(t, []string{installID}, cache.invalidationSnapshot(),
+			"BYOK upsert must drop the cached ExternalKeys so the new credential is picked up on the next request, not in 5 minutes")
+		assert.Equal(t, []string{installID}, nf.snapshot())
+	})
+
+	t.Run("DeleteExternalAPIKey", func(t *testing.T) {
+		svc, cache, nf := makeSvc()
+		err := svc.DeleteExternalAPIKey(context.Background(), installID, "ekid-1")
+		require.NoError(t, err)
+		assert.Equal(t, []string{installID}, cache.invalidationSnapshot())
+		assert.Equal(t, []string{installID}, nf.snapshot())
 	})
 }
