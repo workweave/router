@@ -19,10 +19,26 @@ import (
 
 const DefaultBaseURL = "https://api.anthropic.com"
 
+// UsageRecorder consumes the rate-limit headers Anthropic returns on
+// every Messages response. It is declared as a consumer-side interface
+// (rather than importing internal/proxy/usage) so the providers layer
+// keeps its inner-ring purity: the concrete observer lives outside this
+// package and is injected from the composition root.
+type UsageRecorder interface {
+	Record(key string, h http.Header)
+}
+
 type Client struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
+	// usage is optional; nil means rate-limit headers are forwarded to
+	// the client but not recorded for the bypass gate.
+	usage UsageRecorder
+	// credKeyer turns the upstream-bound credential into the opaque key
+	// the recorder uses. Injected so the providers package doesn't
+	// import internal/proxy/usage.
+	credKeyer func(apiKey []byte) string
 }
 
 func NewClient(apiKey, baseURL string) *Client {
@@ -34,6 +50,37 @@ func NewClient(apiKey, baseURL string) *Client {
 		baseURL: baseURL,
 		http:    &http.Client{Transport: httputil.NewTransport(10*time.Second, 10*time.Second)},
 	}
+}
+
+// WithUsageRecorder attaches a recorder + credential-key function so
+// every successful upstream response feeds the bypass observer.
+// Returns the receiver for fluent wiring from main.go.
+func (c *Client) WithUsageRecorder(rec UsageRecorder, credKeyer func([]byte) string) *Client {
+	c.usage = rec
+	c.credKeyer = credKeyer
+	return c
+}
+
+// resolveCredentialKey mirrors setAuth's precedence so the key recorded
+// against an observation matches the credential actually sent upstream.
+// Returns "" when no credential is resolvable or no recorder is wired.
+func (c *Client) resolveCredentialKey(ctx context.Context, inbound *http.Request) string {
+	if c.usage == nil || c.credKeyer == nil {
+		return ""
+	}
+	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
+		return c.credKeyer(creds.APIKey)
+	}
+	if c.apiKey != "" {
+		return c.credKeyer([]byte(c.apiKey))
+	}
+	if v := inbound.Header.Get("x-api-key"); v != "" {
+		return c.credKeyer([]byte(v))
+	}
+	if v := inbound.Header.Get("authorization"); v != "" {
+		return c.credKeyer([]byte(v))
+	}
+	return ""
 }
 
 // setAuth applies authentication to the upstream request. Precedence:
@@ -79,6 +126,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	}
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
+	c.recordUsage(ctx, r, resp)
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
@@ -139,6 +187,7 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 		return fmt.Errorf("upstream passthrough call: %w", err)
 	}
 	defer resp.Body.Close()
+	c.recordUsage(ctx, r, resp)
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
@@ -164,6 +213,21 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	}
 	_, err = io.Copy(w, resp.Body)
 	return err
+}
+
+// recordUsage observes the unified rate-limit headers off resp and
+// forwards them to the recorder. No-op when no recorder is wired or
+// no credential can be resolved (in which case the bypass gate's
+// cold-start path applies to the next request).
+func (c *Client) recordUsage(ctx context.Context, inbound *http.Request, resp *http.Response) {
+	if c.usage == nil {
+		return
+	}
+	key := c.resolveCredentialKey(ctx, inbound)
+	if key == "" {
+		return
+	}
+	c.usage.Record(key, resp.Header)
 }
 
 func logUpstreamStatus(msg string, status int, attrs ...any) {

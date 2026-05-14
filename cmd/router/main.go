@@ -29,6 +29,7 @@ import (
 	openaiProvider "workweave/router/internal/providers/openai"
 	openaiCompatProvider "workweave/router/internal/providers/openaicompat"
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/capability"
@@ -144,7 +145,18 @@ func main() {
 	if !byokOnly {
 		anthropicKey = config.GetOr("ANTHROPIC_API_KEY", "")
 	}
-	providerMap[providers.ProviderAnthropic] = anthropic.NewClient(anthropicKey, anthropic.DefaultBaseURL)
+	usageBypassEnabled := config.GetOr("ROUTER_USAGE_BYPASS_ENABLED", "false") == "true"
+	usageBypassThreshold := parseEnvFloat("ROUTER_USAGE_BYPASS_THRESHOLD", 0.95)
+	usageBypassTTL := parseEnvDuration("ROUTER_USAGE_OBSERVATION_TTL", 10*time.Minute)
+	usageObserver := usage.NewObserver(usageBypassThreshold, usageBypassTTL, usageBypassEnabled)
+	anthropicClient := anthropic.NewClient(anthropicKey, anthropic.DefaultBaseURL).
+		WithUsageRecorder(usageObserver, usage.CredentialKey)
+	providerMap[providers.ProviderAnthropic] = anthropicClient
+	logger.Info("Anthropic usage-bypass gate configured",
+		"enabled", usageBypassEnabled,
+		"threshold", usageBypassThreshold,
+		"observation_ttl", usageBypassTTL.String(),
+	)
 	switch {
 	case byokOnly:
 		logger.Info("Anthropic provider enabled (BYOK only)", "base_url", anthropic.DefaultBaseURL)
@@ -416,7 +428,8 @@ func main() {
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels).
-		WithDefaultBaselineModel(resolveDefaultBaselineModel())
+		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
+		WithUsageBypass(usageObserver)
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
 	// Fail loud if a deployed model is missing from the tier table;
@@ -728,6 +741,21 @@ func parseEnvFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	return v
+}
+
+// parseEnvDuration reads a time.Duration env var (e.g. "10m", "1h30s"),
+// falling back to the provided default on missing/malformed values.
+func parseEnvDuration(key string, fallback time.Duration) time.Duration {
+	raw := config.GetOr(key, "")
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		observability.Get().Warn("Invalid duration env var; using default", "key", key, "value", raw, "default", fallback.String())
+		return fallback
+	}
+	return d
 }
 
 // boolDefault renders a bool default for config.GetOr on bool envs.

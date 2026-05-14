@@ -20,6 +20,7 @@ import (
 	"workweave/router/internal/router/capability"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
+	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router/pricing"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
@@ -110,6 +111,13 @@ type Service struct {
 	// substitution — savings markers and pricing fields stay empty for
 	// unknown models, preserving prior behavior.
 	defaultBaselineModel string
+	// usageBypass, when non-nil, gates whether cluster routing runs at
+	// all for a given inbound Anthropic Messages request. While the
+	// observed unified rate-limit utilization (5h + weekly) stays
+	// below its threshold the orchestrator skips the scorer and proxies
+	// the request straight to Anthropic with the model the caller asked
+	// for. Nil disables the feature entirely (legacy behavior).
+	usageBypass *usage.Observer
 }
 
 // pinSessionTTL is the sliding TTL on pinned_until. Mirrors Anthropic's
@@ -403,6 +411,14 @@ func (s *Service) WithPlannerEnabled(enabled bool) *Service {
 	return s
 }
 
+// WithUsageBypass installs the unified-rate-limit observer used to skip
+// cluster routing while the caller has Anthropic headroom. nil disables
+// the gate (the orchestrator always runs the scorer).
+func (s *Service) WithUsageBypass(o *usage.Observer) *Service {
+	s.usageBypass = o
+	return s
+}
+
 // WithSummarizer installs the cheap-model summarizer used to bound
 // handover cost on switch turns. nil disables the synchronous summary
 // step; the orchestrator then trims-last-N on every switch.
@@ -692,6 +708,97 @@ func (s *Service) Route(ctx context.Context, req router.Request) (router.Decisio
 	return s.router.Route(ctx, req)
 }
 
+// shouldBypassToAnthropic reports whether ProxyMessages should skip
+// cluster routing for this request and proxy it straight to Anthropic.
+// Returns false when:
+//   - the observer is not configured (legacy always-route behavior),
+//   - the Anthropic provider isn't registered (nothing to bypass to),
+//   - no Anthropic credential is resolvable from this request,
+//   - the observer's gate says utilization is at-or-above threshold.
+func (s *Service) shouldBypassToAnthropic(ctx context.Context, r *http.Request) bool {
+	if s.usageBypass == nil {
+		return false
+	}
+	if _, ok := s.providers[providers.ProviderAnthropic]; !ok {
+		return false
+	}
+	creds := ResolveCredentials(providers.ProviderAnthropic, byokCredentialsFromContext(ctx), r.Header)
+	if creds == nil || len(creds.APIKey) == 0 {
+		return false
+	}
+	return s.usageBypass.ShouldBypassRouting(usage.CredentialKey(creds.APIKey))
+}
+
+// bypassToAnthropic proxies an inbound Anthropic-Messages request
+// straight to the Anthropic provider with the caller-requested model.
+// It deliberately skips the cluster scorer, planner, session pin, and
+// semantic cache: there's no model substitution happening, so none of
+// those subsystems can improve the outcome. The Anthropic provider's
+// recorder still observes the response headers, keeping the bypass
+// gate primed for the next request.
+func (s *Service) bypassToAnthropic(
+	ctx context.Context,
+	env *translate.RequestEnvelope,
+	feats translate.RoutingFeatures,
+	requestStart time.Time,
+	requestID, externalID string,
+	r *http.Request,
+	w http.ResponseWriter,
+) error {
+	log := observability.Get()
+	decision := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    feats.Model,
+		Reason:   "usage_bypass",
+	}
+	w.Header().Set("x-router-decision", decision.Reason)
+	w.Header().Set("x-router-provider", decision.Provider)
+	w.Header().Set("x-router-model", decision.Model)
+
+	p, provErr := s.provider(providers.ProviderAnthropic)
+	if provErr != nil {
+		return provErr
+	}
+
+	// Resolve credentials onto ctx so the Anthropic adapter's setAuth
+	// picks up BYOK / client-supplied keys exactly as it would on a
+	// routed request.
+	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
+
+	opts := translate.EmitOptions{
+		TargetModel:        decision.Model,
+		Capabilities:       router.Lookup(decision.Model),
+		IncludeStreamUsage: s.usageRequired(),
+	}
+	prep, emitErr := env.PrepareAnthropic(r.Header, opts)
+	if emitErr != nil {
+		log.Error("Failed to emit Anthropic body in usage-bypass path", "err", emitErr)
+		return fmt.Errorf("emit body: %w", emitErr)
+	}
+
+	proxyStart := time.Now()
+	proxyErr := p.Proxy(ctx, decision, prep, w, r)
+	log.Info("ProxyMessages usage-bypass complete",
+		"request_id", requestID,
+		"external_id", externalID,
+		"requested_model", feats.Model,
+		"decision_model", decision.Model,
+		"decision_provider", decision.Provider,
+		"decision_reason", decision.Reason,
+		"proxy_ms", time.Since(proxyStart).Milliseconds(),
+		"total_ms", time.Since(requestStart).Milliseconds(),
+		"proxy_err", proxyErr,
+	)
+	return proxyErr
+}
+
+// byokCredentialsFromContext extracts the request-scoped BYOK map the
+// auth middleware stashes on ctx. Returns nil when no map is present.
+func byokCredentialsFromContext(ctx context.Context) map[string]*Credentials {
+	m, _ := ctx.Value(ExternalAPIKeysContextKey{}).(map[string]*Credentials)
+	return m
+}
+
 // PassthroughToProvider forwards a non-routing request to the default
 // (Anthropic) provider for metadata endpoints (count_tokens, models).
 func (s *Service) PassthroughToProvider(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
@@ -764,6 +871,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 	bypassEval := hasEvalOverrideHeader(r)
+
+	// Anthropic-usage gate: while the caller's unified rate-limit
+	// utilization stays below the configured threshold (default 95%),
+	// the cluster scorer is bypassed and the request goes straight to
+	// Anthropic with the model the caller asked for. The observer
+	// records the headers off the response so subsequent requests can
+	// flip into routing once either window approaches the cap.
+	if s.shouldBypassToAnthropic(ctx, r) {
+		return s.bypassToAnthropic(ctx, env, feats, requestStart, requestID, externalID, r, w)
+	}
 
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.

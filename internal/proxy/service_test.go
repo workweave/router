@@ -10,8 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"time"
+
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router"
 
 	"github.com/stretchr/testify/assert"
@@ -530,4 +533,56 @@ func TestService_ExcludedModelsThroughRequest(t *testing.T) {
 		assert.True(t, svc.HasExcludedModelsOverride())
 		assert.Equal(t, []string{"gpt-4o"}, svc.ExcludedModelsOverride())
 	})
+}
+
+// TestService_ProxyMessages_UsageBypass_SkipsScorer guards the core
+// contract of the rate-limit gate: while observed Anthropic utilization
+// stays below threshold, ProxyMessages must NOT call the cluster
+// scorer, and must dispatch to the Anthropic provider with the
+// caller-requested model (not whatever the scorer would have picked).
+func TestService_ProxyMessages_UsageBypass_SkipsScorer(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+	p := &fakeProvider{}
+	obs := usage.NewObserver(0.95, 10*time.Minute, true)
+	// Pin a sub-threshold reading under the credential we'll send in the
+	// request header so the bypass branch engages on the first call.
+	obs.RecordObservation(usage.CredentialKey([]byte("sk-ant-customer")), usage.Observation{FiveHourUtil: 0.2, WeeklyUtil: 0.3})
+
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithUsageBypass(obs)
+
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	httpReq.Header.Set("x-api-key", "sk-ant-customer")
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+
+	require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+	assert.Equal(t, 0, fr.routeCalls, "scorer must not run while utilization is below threshold")
+	require.Len(t, p.proxyBodies, 1, "request must be dispatched to Anthropic exactly once")
+	assert.Contains(t, string(p.proxyBodies[0]), `"claude-opus-4-7"`, "bypass path must preserve the caller-requested model")
+	assert.Equal(t, "usage_bypass", rec.Header().Get("x-router-decision"))
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
+}
+
+// TestService_ProxyMessages_UsageBypass_EngagesAtThreshold is the
+// counterpart: once either window crosses threshold for this
+// credential, the scorer must run. The fake scorer here routes to
+// haiku, distinct from the opus the caller asked for.
+func TestService_ProxyMessages_UsageBypass_EngagesAtThreshold(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
+	p := &fakeProvider{}
+	obs := usage.NewObserver(0.95, 10*time.Minute, true)
+	obs.RecordObservation(usage.CredentialKey([]byte("sk-ant-hot")), usage.Observation{FiveHourUtil: 0.99, WeeklyUtil: 0.1})
+
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithUsageBypass(obs)
+
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	httpReq.Header.Set("x-api-key", "sk-ant-hot")
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
+
+	require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, httpReq))
+	assert.Equal(t, 1, fr.routeCalls, "scorer must run once utilization crosses threshold")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "scorer's pick (haiku) replaces the requested opus")
 }

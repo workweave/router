@@ -251,3 +251,73 @@ func TestProxy_StampsTimingOnError(t *testing.T) {
 	assert.NotZero(t, tm.UpstreamFirstByteNanos.Load(), "must stamp UpstreamFirstByteNanos on error body read")
 	assert.NotZero(t, tm.UpstreamEOFNanos.Load(), "must stamp UpstreamEOFNanos after error body is drained")
 }
+
+// fakeRecorder records the most recent (key, headers) pair so the usage
+// integration test can assert it observed the response without dragging
+// in the real proxy/usage Observer.
+type fakeRecorder struct {
+	calls []fakeRecorderCall
+}
+
+type fakeRecorderCall struct {
+	Key     string
+	FiveHr  string
+	Weekly  string
+	HasFive bool
+	HasWeek bool
+}
+
+func (f *fakeRecorder) Record(key string, h http.Header) {
+	f.calls = append(f.calls, fakeRecorderCall{
+		Key:     key,
+		FiveHr:  h.Get("anthropic-ratelimit-unified-5h-utilization"),
+		Weekly:  h.Get("anthropic-ratelimit-unified-weekly-utilization"),
+		HasFive: h.Get("anthropic-ratelimit-unified-5h-utilization") != "",
+		HasWeek: h.Get("anthropic-ratelimit-unified-weekly-utilization") != "",
+	})
+}
+
+func TestProxy_ForwardsRateLimitHeadersToUsageRecorder(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("anthropic-ratelimit-unified-5h-utilization", "0.42")
+		w.Header().Set("anthropic-ratelimit-unified-weekly-utilization", "0.87")
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_2"}`))
+	}))
+	defer upstream.Close()
+
+	keyer := func(b []byte) string { return "key:" + string(b) }
+	rec := &fakeRecorder{}
+	c := anthropic.NewClient("router-key", upstream.URL).WithUsageRecorder(rec, keyer)
+
+	resp := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"claude-opus-4-7"}`), Headers: make(http.Header)}
+	require.NoError(t, c.Proxy(context.Background(), router.Decision{Model: "claude-opus-4-7"}, prep, resp, clientReq))
+
+	require.Len(t, rec.calls, 1, "recorder must fire exactly once per upstream response")
+	call := rec.calls[0]
+	assert.Equal(t, "key:router-key", call.Key, "recorder must key under the credential actually sent upstream")
+	assert.Equal(t, "0.42", call.FiveHr)
+	assert.Equal(t, "0.87", call.Weekly)
+}
+
+func TestProxy_UsageRecorderSkippedWithoutCredential(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("anthropic-ratelimit-unified-5h-utilization", "0.10")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	rec := &fakeRecorder{}
+	// No router key, no inbound credential headers — there's nothing to
+	// key the recording under, so the recorder must not be called.
+	c := anthropic.NewClient("", upstream.URL).WithUsageRecorder(rec, func(b []byte) string { return string(b) })
+	resp := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"x"}`), Headers: make(http.Header)}
+	_ = c.Proxy(context.Background(), router.Decision{Model: "x"}, prep, resp, clientReq)
+
+	assert.Empty(t, rec.calls, "recorder must not fire when no credential can be resolved")
+}
