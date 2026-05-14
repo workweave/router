@@ -98,6 +98,8 @@ const COLUMNS: ColumnDef[] = [
   { key: "provider", label: "Provider" },
   { key: "in_tok", label: "Input tokens", align: "right" },
   { key: "out_tok", label: "Output tokens", align: "right" },
+  { key: "cache_write", label: "Cache write", align: "right" },
+  { key: "cache_read", label: "Cache read", align: "right" },
   { key: "req_cost", label: "Requested $", align: "right" },
   { key: "act_cost", label: "Actual $", align: "right" },
   { key: "latency", label: "Latency", align: "right" },
@@ -211,6 +213,12 @@ export function DrillDownModal({
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
                         {formatNumber(r.output_tokens)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-muted-foreground">
+                        {r.cache_creation_tokens == null ? "—" : formatNumber(r.cache_creation_tokens)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-muted-foreground">
+                        {r.cache_read_tokens == null ? "—" : formatNumber(r.cache_read_tokens)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
                         {formatUSD(r.requested_cost_usd)}

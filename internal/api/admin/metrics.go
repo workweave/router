@@ -102,8 +102,8 @@ func MetricsTimeseriesHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 }
 
 type metricsDetailRow struct {
-	Timestamp          string  `json:"timestamp"`
-	RequestID          string  `json:"request_id"`
+	Timestamp           string  `json:"timestamp"`
+	RequestID           string  `json:"request_id"`
 	RequestedModel     string  `json:"requested_model"`
 	DecisionModel      string  `json:"decision_model"`
 	DecisionProvider   string  `json:"decision_provider"`
@@ -111,6 +111,8 @@ type metricsDetailRow struct {
 	StickyHit          bool    `json:"sticky_hit"`
 	InputTokens        int32   `json:"input_tokens"`
 	OutputTokens       int32   `json:"output_tokens"`
+	CacheCreationTokens *int32 `json:"cache_creation_tokens"`
+	CacheReadTokens     *int32 `json:"cache_read_tokens"`
 	RequestedCostUSD   float64 `json:"requested_cost_usd"`
 	ActualCostUSD      float64 `json:"actual_cost_usd"`
 	TotalLatencyMs     int64   `json:"total_latency_ms"`
@@ -158,19 +160,21 @@ func MetricsDetailsHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 		out := make([]metricsDetailRow, 0, len(rows))
 		for _, r := range rows {
 			out = append(out, metricsDetailRow{
-				Timestamp:          r.Timestamp.UTC().Format(time.RFC3339Nano),
-				RequestID:          r.RequestID,
-				RequestedModel:     r.RequestedModel,
-				DecisionModel:      r.DecisionModel,
-				DecisionProvider:   r.DecisionProvider,
-				DecisionReason:     r.DecisionReason,
-				StickyHit:          r.StickyHit,
-				InputTokens:        r.InputTokens,
-				OutputTokens:       r.OutputTokens,
-				RequestedCostUSD:   r.RequestedCostUSD,
-				ActualCostUSD:      r.ActualCostUSD,
-				TotalLatencyMs:     r.TotalLatencyMs,
-				UpstreamStatusCode: r.UpstreamStatusCode,
+				Timestamp:           r.Timestamp.UTC().Format(time.RFC3339Nano),
+				RequestID:           r.RequestID,
+				RequestedModel:      r.RequestedModel,
+				DecisionModel:       r.DecisionModel,
+				DecisionProvider:    r.DecisionProvider,
+				DecisionReason:      r.DecisionReason,
+				StickyHit:           r.StickyHit,
+				InputTokens:         r.InputTokens,
+				OutputTokens:        r.OutputTokens,
+				CacheCreationTokens: r.CacheCreationTokens,
+				CacheReadTokens:     r.CacheReadTokens,
+				RequestedCostUSD:    r.RequestedCostUSD,
+				ActualCostUSD:       r.ActualCostUSD,
+				TotalLatencyMs:      r.TotalLatencyMs,
+				UpstreamStatusCode:  r.UpstreamStatusCode,
 			})
 		}
 		c.JSON(http.StatusOK, metricsDetailsResponse{Rows: out})

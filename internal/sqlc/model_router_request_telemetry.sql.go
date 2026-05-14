@@ -23,6 +23,8 @@ SELECT
     sticky_hit,
     input_tokens,
     output_tokens,
+    cache_creation_tokens,
+    cache_read_tokens,
     (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
     (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
     total_latency_ms,
@@ -44,19 +46,21 @@ type GetTelemetryRowsParams struct {
 }
 
 type GetTelemetryRowsRow struct {
-	Timestamp          pgtype.Timestamptz
-	RequestID          string
-	RequestedModel     *string
-	DecisionModel      *string
-	DecisionProvider   *string
-	DecisionReason     *string
-	StickyHit          *bool
-	InputTokens        *int32
-	OutputTokens       *int32
-	RequestedCostUsd   pgtype.Numeric
-	ActualCostUsd      pgtype.Numeric
-	TotalLatencyMs     *int64
-	UpstreamStatusCode *int32
+	Timestamp           pgtype.Timestamptz
+	RequestID           string
+	RequestedModel      *string
+	DecisionModel       *string
+	DecisionProvider    *string
+	DecisionReason      *string
+	StickyHit           *bool
+	InputTokens         *int32
+	OutputTokens        *int32
+	CacheCreationTokens *int32
+	CacheReadTokens     *int32
+	RequestedCostUsd    pgtype.Numeric
+	ActualCostUsd       pgtype.Numeric
+	TotalLatencyMs      *int64
+	UpstreamStatusCode  *int32
 }
 
 // Returns individual telemetry rows scoped to a single installation.
@@ -71,6 +75,8 @@ type GetTelemetryRowsRow struct {
 //	    sticky_hit,
 //	    input_tokens,
 //	    output_tokens,
+//	    cache_creation_tokens,
+//	    cache_read_tokens,
 //	    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
 //	    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
 //	    total_latency_ms,
@@ -106,6 +112,8 @@ func (q *Queries) GetTelemetryRows(ctx context.Context, arg GetTelemetryRowsPara
 			&i.StickyHit,
 			&i.InputTokens,
 			&i.OutputTokens,
+			&i.CacheCreationTokens,
+			&i.CacheReadTokens,
 			&i.RequestedCostUsd,
 			&i.ActualCostUsd,
 			&i.TotalLatencyMs,
@@ -132,6 +140,8 @@ SELECT
     sticky_hit,
     input_tokens,
     output_tokens,
+    cache_creation_tokens,
+    cache_read_tokens,
     (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
     (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
     total_latency_ms,
@@ -151,19 +161,21 @@ type GetTelemetryRowsAllParams struct {
 }
 
 type GetTelemetryRowsAllRow struct {
-	Timestamp          pgtype.Timestamptz
-	RequestID          string
-	RequestedModel     *string
-	DecisionModel      *string
-	DecisionProvider   *string
-	DecisionReason     *string
-	StickyHit          *bool
-	InputTokens        *int32
-	OutputTokens       *int32
-	RequestedCostUsd   pgtype.Numeric
-	ActualCostUsd      pgtype.Numeric
-	TotalLatencyMs     *int64
-	UpstreamStatusCode *int32
+	Timestamp           pgtype.Timestamptz
+	RequestID           string
+	RequestedModel      *string
+	DecisionModel       *string
+	DecisionProvider    *string
+	DecisionReason      *string
+	StickyHit           *bool
+	InputTokens         *int32
+	OutputTokens        *int32
+	CacheCreationTokens *int32
+	CacheReadTokens     *int32
+	RequestedCostUsd    pgtype.Numeric
+	ActualCostUsd       pgtype.Numeric
+	TotalLatencyMs      *int64
+	UpstreamStatusCode  *int32
 }
 
 // Returns individual telemetry rows for a time window. Used by the
@@ -180,6 +192,8 @@ type GetTelemetryRowsAllRow struct {
 //	    sticky_hit,
 //	    input_tokens,
 //	    output_tokens,
+//	    cache_creation_tokens,
+//	    cache_read_tokens,
 //	    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
 //	    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
 //	    total_latency_ms,
@@ -209,6 +223,8 @@ func (q *Queries) GetTelemetryRowsAll(ctx context.Context, arg GetTelemetryRowsA
 			&i.StickyHit,
 			&i.InputTokens,
 			&i.OutputTokens,
+			&i.CacheCreationTokens,
+			&i.CacheReadTokens,
 			&i.RequestedCostUsd,
 			&i.ActualCostUsd,
 			&i.TotalLatencyMs,

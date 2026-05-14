@@ -78,17 +78,19 @@ type TelemetryBucket struct {
 
 // TelemetryRow is one upstream span returned by the drill-down endpoint.
 type TelemetryRow struct {
-	Timestamp          time.Time
-	RequestID          string
-	RequestedModel     string
-	DecisionModel      string
-	DecisionProvider   string
-	DecisionReason     string
-	StickyHit          bool
-	InputTokens        int32
-	OutputTokens       int32
-	RequestedCostUSD   float64
-	ActualCostUSD      float64
-	TotalLatencyMs     int64
-	UpstreamStatusCode int32
+	Timestamp           time.Time
+	RequestID           string
+	RequestedModel      string
+	DecisionModel       string
+	DecisionProvider    string
+	DecisionReason      string
+	StickyHit           bool
+	InputTokens         int32
+	OutputTokens        int32
+	CacheCreationTokens *int32 // nil when the upstream reported no cache usage
+	CacheReadTokens     *int32 // nil when the upstream reported no cache usage
+	RequestedCostUSD    float64
+	ActualCostUSD       float64
+	TotalLatencyMs      int64
+	UpstreamStatusCode  int32
 }
