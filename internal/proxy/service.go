@@ -711,19 +711,35 @@ func (s *Service) Route(ctx context.Context, req router.Request) (router.Decisio
 // shouldBypassToAnthropic reports whether ProxyMessages should skip
 // cluster routing for this request and proxy it straight to Anthropic.
 // Returns false when:
-//   - the observer is not configured (legacy always-route behavior),
+//   - the observer is not configured or the feature flag is off
+//     (Observer.ShouldBypassRouting returns true when disabled to
+//     preserve legacy callers; we must gate on Enabled() here or every
+//     authed request would skip the scorer),
 //   - the Anthropic provider isn't registered (nothing to bypass to),
 //   - no Anthropic credential is resolvable from this request,
 //   - the observer's gate says utilization is at-or-above threshold.
+//
+// Credential resolution mirrors resolveAndInjectCredentials exactly so
+// the key we observe matches the key the upstream call will send.
+// On router-key auth (installation ID present) we deliberately do not
+// fall back to inbound client headers — otherwise a caller could supply
+// an arbitrary x-api-key value to key the gate against attacker-chosen
+// (typically cold-start) state, while the upstream call uses the
+// deployment key.
 func (s *Service) shouldBypassToAnthropic(ctx context.Context, r *http.Request) bool {
-	if s.usageBypass == nil {
+	if s.usageBypass == nil || !s.usageBypass.Enabled() {
 		return false
 	}
 	if _, ok := s.providers[providers.ProviderAnthropic]; !ok {
 		return false
 	}
-	byok := BuildCredentialsMap(externalKeysFromContext(ctx))
-	creds := ResolveCredentials(providers.ProviderAnthropic, byok, r.Header)
+	var creds *Credentials
+	if byok := BuildCredentialsMap(externalKeysFromContext(ctx)); byok != nil {
+		creds = byok[providers.ProviderAnthropic]
+	}
+	if creds == nil && installationIDFromContext(ctx) == (uuid.UUID{}) {
+		creds = ExtractClientCredentials(providers.ProviderAnthropic, r.Header)
+	}
 	if creds == nil || len(creds.APIKey) == 0 {
 		return false
 	}
