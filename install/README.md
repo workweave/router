@@ -107,7 +107,7 @@ The `install.sh --scope project` step only needs to run once per checkout
 | -------------------------- | ----------------------------- | ---------------------------------------------------------------------- |
 | `--scope user\|project`    | interactive prompt (default `user`) | User-level install (everywhere) vs project-level (this repo only). If omitted on a TTY, the installer asks; defaults to `user` non-interactively. |
 | `--local`                  | off                           | Shortcut for the bundled docker-compose router (`localhost:8080`).      |
-| `--base-url <url>`         | `https://router.weave.ai`     | Override the router endpoint. Use for self-hosted / custom port.        |
+| `--base-url <url>`         | `https://router.workweave.ai` | Override the router endpoint. Use for self-hosted / custom port.        |
 | `--non-interactive`        | off                           | Fail if `$WEAVE_ROUTER_KEY` isn't set instead of prompting. CI-friendly. |
 
 Override the default base URL globally by setting `$WEAVE_ROUTER_URL` before
