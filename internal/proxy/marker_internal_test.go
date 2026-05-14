@@ -60,6 +60,7 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 		res            turnLoopResult
 		wantContains   []string
 		wantNotContain []string
+		wantEmpty      bool
 	}{
 		{
 			name: "ev_positive: planner switched",
@@ -131,23 +132,25 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 			},
 		},
 		{
-			name: "tool-result short-circuit: pinned model reused, no planner",
+			// Tool-result follow-ups are suppressed entirely — every
+			// post-tool turn would otherwise re-emit "Weave Router → …"
+			// mid-stream without conveying new routing info.
+			name: "tool-result short-circuit: marker suppressed",
 			res: turnLoopResult{
 				Decision:  decision,
 				StickyHit: true,
 			},
-			wantContains: []string{
-				"reason: tool-result follow-up",
-			},
-			wantNotContain: []string{
-				"est. save",
-			},
+			wantEmpty: true,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := routingMarkerFor(tc.res)
+			if tc.wantEmpty {
+				assert.Empty(t, got)
+				return
+			}
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
 			}

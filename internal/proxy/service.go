@@ -140,6 +140,14 @@ func routingMarkerFor(res turnLoopResult) string {
 	if decision.Model == "" {
 		return ""
 	}
+	// Suppress the marker on tool-result follow-ups: every turn after a
+	// tool call would otherwise emit a duplicate "Weave Router → …" line
+	// mid-stream, which clutters the transcript without conveying new
+	// routing information. The planner / hard-pin / clamp branches still
+	// emit so genuine routing events stay visible.
+	if res.PlannerDecision.Reason == "" && !res.HardPinned && !res.TierClamped && res.StickyHit {
+		return ""
+	}
 	parts := []string{"✦ **Weave Router** → " + decision.Model}
 	if decision.Provider != "" {
 		parts[0] += " (" + decision.Provider + ")"
