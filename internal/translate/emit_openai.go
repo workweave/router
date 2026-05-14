@@ -10,6 +10,7 @@ import (
 	"workweave/router/internal/router"
 
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // PrepareOpenAI builds a fully-prepared OpenAI Chat Completions request.
@@ -32,7 +33,17 @@ func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (provi
 
 func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error) {
 	ov := resolveOpenAIOverrides(e.body, opts)
-	return e.emitSameFormat(ov)
+	body, err := e.emitSameFormat(ov)
+	if err != nil {
+		return nil, err
+	}
+	if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
+		body, err = sjson.SetBytes(body, "provider", hint)
+		if err != nil {
+			return nil, fmt.Errorf("set openrouter provider hint: %w", err)
+		}
+	}
+	return body, nil
 }
 
 func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, error) {
@@ -73,6 +84,10 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	clampOutputTokens(out, opts.TargetModel)
 	if opts.IncludeStreamUsage {
 		injectStreamUsageOption(out)
+	}
+
+	if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
+		out["provider"] = hint
 	}
 
 	return json.Marshal(out)
