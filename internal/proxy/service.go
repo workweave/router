@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -181,74 +180,6 @@ func upsellModelFor(t capability.Tier) string {
 	default:
 		return ""
 	}
-}
-
-// closingMarkerFor returns a callback that formats a "saved $X vs <baseline>"
-// line from observed usage. Returns "" when routed == baseline, pricing is
-// missing, or savings are non-positive / below the flicker floor.
-//
-// When requestedModel and baselineModel differ, the inbound model name had
-// no pricing entry and the baseline was substituted in; the marker labels
-// the comparison "(configured baseline)" so users see the savings are an
-// attribution rather than against a literal model they requested.
-func closingMarkerFor(decision router.Decision, requestedModel, baselineModel string) func(translate.Usage) string {
-	return func(u translate.Usage) string {
-		if decision.Model == "" || baselineModel == "" {
-			return ""
-		}
-		if decision.Model == baselineModel {
-			return ""
-		}
-		routed, ok1 := pricing.For(decision.Model)
-		baseline, ok2 := pricing.For(baselineModel)
-		if !ok1 || !ok2 {
-			return ""
-		}
-		savings := closingMarkerSavingsUSD(u, routed, baseline)
-		if savings < 0.0001 {
-			return ""
-		}
-		label := baselineModel
-		if requestedModel != baselineModel {
-			label = baselineModel + " (configured baseline)"
-		}
-		return fmt.Sprintf("✦ saved $%.4f vs %s (%s in / %s out)",
-			savings, label,
-			formatTokenCount(u.InputTokens), formatTokenCount(u.OutputTokens))
-	}
-}
-
-// formatTokenCount renders a token count as raw / "Nk" / "N.NM".
-func formatTokenCount(n int) string {
-	switch {
-	case n < 1000:
-		return strconv.Itoa(n)
-	case n < 1_000_000:
-		return strconv.Itoa(n/1000) + "k"
-	default:
-		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
-	}
-}
-
-// closingMarkerSavingsUSD = requested-model cost − routed-model cost for the
-// same usage shape.
-func closingMarkerSavingsUSD(u translate.Usage, routed, requested pricing.Pricing) float64 {
-	nonCached := u.InputTokens - u.CacheReadTokens
-	if nonCached < 0 {
-		nonCached = 0
-	}
-	routedCost := costForUsage(nonCached, u.CacheReadTokens, u.OutputTokens, routed)
-	requestedCost := costForUsage(nonCached, u.CacheReadTokens, u.OutputTokens, requested)
-	return requestedCost - routedCost
-}
-
-// costForUsage prices (nonCached, cacheRead, output) tokens against p.
-func costForUsage(nonCachedInput, cacheReadInput, output int, p pricing.Pricing) float64 {
-	cacheMult := p.EffectiveCacheReadMultiplier()
-	inputCost := float64(nonCachedInput)*p.InputUSDPer1M +
-		float64(cacheReadInput)*p.InputUSDPer1M*cacheMult
-	outputCost := float64(output) * p.OutputUSDPer1M
-	return (inputCost + outputCost) / 1e6
 }
 
 // routingReasonShort returns a human-readable reason for the marker, falling
@@ -909,8 +840,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			usage = extractor
 		}
 		translator := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
-			WithRoutingMarker(routingMarkerFor(routeRes)).
-			WithClosingMarker(closingMarkerFor(decision, feats.Model, s.baselineFor(feats.Model)))
+			WithRoutingMarker(routingMarkerFor(routeRes))
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
 		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderGoogle:
@@ -927,8 +857,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 		// SSE chain: Gemini → OpenAI → Anthropic.
 		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
-			WithRoutingMarker(routingMarkerFor(routeRes)).
-			WithClosingMarker(closingMarkerFor(decision, feats.Model, s.baselineFor(feats.Model)))
+			WithRoutingMarker(routingMarkerFor(routeRes))
 		geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, decision.Model, nil)
 		proxyErr = p.Proxy(ctx, decision, prep, geminiTr, r)
 		proxyErr = finalizeAfterProxy(proxyErr, geminiTr.Finalize)
