@@ -1,0 +1,29 @@
+internal/postgres/session_pin_repo.go
+  s_345838d581d61d::t_6bd7183649e68a 7,56-79,87-100,106-114
+internal/router/sessionpin/store.go
+  s_345838d581d61d::t_944e1cd2454286 27-34,36-61,65-67,71
+internal/sqlc/session_pins.sql.go
+  s_345838d581d61d::t_98fb019796935d 16,30-32,34,52-56,78-127,161-165
+db/queries/session_pins.sql
+  s_345838d581d61d::t_639d784c94aef9 4-6,17-21,39-54
+internal/sqlc/models.go
+  s_345838d581d61d::t_98fb019796935d 117-130
+internal/proxy/service_session_pin_test.go
+  s_345838d581d61d::t_30b59ac9f54425 64-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "f52c6c348d8eb5efbedeb82952a2bbb8e327a4f1",
+  "prompts": {},
+  "sessions": {
+    "s_345838d581d61d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9eb338c3-38c3-4920-ba43-34e939958542",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

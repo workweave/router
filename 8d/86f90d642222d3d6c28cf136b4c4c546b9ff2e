@@ -1,0 +1,23 @@
+cmd/router/baseline_test.go
+  s_fa4de19d7bcca5::t_083ba5a417e65c 1-3,5-11,23-39
+  s_fa4de19d7bcca5::t_554ee1d0896b69 4,12-22
+cmd/router/main.go
+  s_fa4de19d7bcca5::t_61930435b6f13e 366
+  s_fa4de19d7bcca5::t_65e8665e688165 802-814
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "8d86f90d642222d3d6c28cf136b4c4c546b9ff2e",
+  "prompts": {},
+  "sessions": {
+    "s_fa4de19d7bcca5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3b6a692-884a-424a-9e3d-c5133e5941bf",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

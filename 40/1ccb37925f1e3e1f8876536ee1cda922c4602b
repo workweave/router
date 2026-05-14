@@ -1,0 +1,40 @@
+.gitignore
+  ai_agent 73-75
+internal/providers/openaicompat/client_test.go
+  s_0ea24cc7526e39::t_ece4706c7db291 113-114
+  ai_agent 14,54-112
+install/install.sh
+  ai_agent 21-22,97-99
+internal/proxy/service.go
+  s_0ea24cc7526e39::t_514268a0d5673b 680-681
+.claude/settings.json
+  ai_agent 1-9
+internal/providers/openaicompat/client.go
+  s_0ea24cc7526e39::t_23aff25c4bf58d 68-71
+  s_0ea24cc7526e39::t_74fead194c6fea 140-142
+Makefile
+  ai_agent 121,124,126
+internal/proxy/credentials_test.go
+  ai_agent 107-147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "401ccb37925f1e3e1f8876536ee1cda922c4602b",
+  "prompts": {},
+  "humans": {
+    "h_16c9377d4ebc00": {
+      "author": "steventohme <steven@workweave.ai>"
+    }
+  },
+  "sessions": {
+    "s_0ea24cc7526e39": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cb4ebf38-c225-461f-9100-c68deb2104c5",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

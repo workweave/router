@@ -1,0 +1,21 @@
+internal/router/pricing/pricing.go
+  s_345838d581d61d::t_086bc0f3319b14 1-5,8-36,38-133,7
+  s_345838d581d61d::t_7934b53b3872ef 6
+  s_345838d581d61d::t_9a800f92694c98 37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "d97ca7d9aac638b6528de639ae5929ebca319ef7",
+  "prompts": {},
+  "sessions": {
+    "s_345838d581d61d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9eb338c3-38c3-4920-ba43-34e939958542",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

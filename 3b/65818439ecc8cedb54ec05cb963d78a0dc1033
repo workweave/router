@@ -1,0 +1,35 @@
+internal/providers/google/native_integration_test.go
+  s_1c8c9d22b24d60::t_80d3cd4c76cd4a 28,30,32,132,134,153,155
+.env.example
+  s_1c8c9d22b24d60::t_80d3cd4c76cd4a 37-38,40-41
+AGENTS.md
+  s_1c8c9d22b24d60::t_80d3cd4c76cd4a 548-549
+CLAUDE.md
+  s_1c8c9d22b24d60::t_80d3cd4c76cd4a 548-549
+docker-compose.yml
+  s_1c8c9d22b24d60::t_80d3cd4c76cd4a 71-72
+cmd/router/main.go
+  s_1c8c9d22b24d60::t_80d3cd4c76cd4a 148,151-152,182,185-186,675,681
+internal/providers/google/client.go
+  s_1c8c9d22b24d60::t_80d3cd4c76cd4a 24
+internal/router/cluster/scorer.go
+  s_1c8c9d22b24d60::t_80d3cd4c76cd4a 108-109
+README.md
+  s_1c8c9d22b24d60::t_80d3cd4c76cd4a 219-222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "3b65818439ecc8cedb54ec05cb963d78a0dc1033",
+  "prompts": {},
+  "sessions": {
+    "s_1c8c9d22b24d60": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "486fc29c-9155-4606-b57a-7793f2fb68a6",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

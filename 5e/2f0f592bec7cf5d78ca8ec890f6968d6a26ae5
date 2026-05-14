@@ -1,0 +1,21 @@
+.claude/settings.json
+  s_e22baeb228ff26::t_40a4f77c88577b 1-5
+scripts/demo-statusline-watcher.sh
+  s_e22baeb228ff26::t_40a4f77c88577b 1-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "5e2f0f592bec7cf5d78ca8ec890f6968d6a26ae5",
+  "prompts": {},
+  "sessions": {
+    "s_e22baeb228ff26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f46e30ee-645b-4530-83ec-9ebb1d07fc5f",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

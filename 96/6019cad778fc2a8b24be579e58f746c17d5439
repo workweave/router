@@ -1,0 +1,21 @@
+frontend/src/app/(app)/settings/page.tsx
+  s_fa4a442294e030::t_a1ac6341fdf5d6 365,367-370
+  s_fa4a442294e030::t_c1f79174fcb03f 413
+  s_fa4a442294e030::t_c5336e69d72a7a 332
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "966019cad778fc2a8b24be579e58f746c17d5439",
+  "prompts": {},
+  "sessions": {
+    "s_fa4a442294e030": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f58c034-3915-4752-9df1-c191b196a6c3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
