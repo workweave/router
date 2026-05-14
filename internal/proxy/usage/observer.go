@@ -87,6 +87,7 @@ func CredentialKey(apiKey []byte) string {
 type Observer struct {
 	mu        sync.RWMutex
 	entries   map[string]Observation
+	lastSweep time.Time
 	threshold float64
 	ttl       time.Duration
 	now       func() time.Time
@@ -115,13 +116,27 @@ func NewObserver(threshold float64, ttl time.Duration, enabled bool) *Observer {
 // RecordObservation stores obs under key, stamping ObservedAt to the
 // current clock. Skips entries without any usable signal so a single
 // bad response can't evict a known-good prior reading.
+//
+// Amortized eviction: once per ttl interval the write path sweeps stale
+// entries so the map can't grow unbounded under credential churn (BYOK
+// key rotation, ephemeral keys). The sweep runs under the write lock
+// we're already holding.
 func (o *Observer) RecordObservation(key string, obs Observation) {
 	if o == nil || key == "" || !obs.HasSignal() {
 		return
 	}
-	obs.ObservedAt = o.now()
+	now := o.now()
+	obs.ObservedAt = now
 	o.mu.Lock()
 	o.entries[key] = obs
+	if now.Sub(o.lastSweep) > o.ttl {
+		for k, e := range o.entries {
+			if now.Sub(e.ObservedAt) > o.ttl {
+				delete(o.entries, k)
+			}
+		}
+		o.lastSweep = now
+	}
 	o.mu.Unlock()
 }
 
