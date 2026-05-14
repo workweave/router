@@ -262,6 +262,9 @@ func openAIUsageToAnthropicResponse(usage any) map[string]any {
 		if cr, _ := details["cached_tokens"].(float64); cr > 0 {
 			out["cache_read_input_tokens"] = int(cr)
 		}
+		if cc, _ := details["cache_creation_tokens"].(float64); cc > 0 {
+			out["cache_creation_input_tokens"] = int(cc)
+		}
 	}
 	return out
 }
