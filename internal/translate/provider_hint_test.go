@@ -89,6 +89,62 @@ func TestPrepareOpenAI_NoHintForUnrecognizedModel(t *testing.T) {
 		"first-party OpenAI/Fireworks targets must not get a provider hint")
 }
 
+// reasoningField extracts the `reasoning` field from an emitted OpenAI body.
+func reasoningField(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(body, &doc))
+	r, _ := doc["reasoning"].(map[string]any)
+	return r
+}
+
+func TestPrepareOpenAI_AnthropicSource_DisablesReasoningForDeepSeek(t *testing.T) {
+	src := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)
+	env, err := translate.ParseAnthropic(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel: "deepseek/deepseek-v4-pro",
+	})
+	require.NoError(t, err)
+
+	r := reasoningField(t, out.Body)
+	require.NotNil(t, r, "deepseek/* must get a reasoning override")
+	assert.Equal(t, false, r["enabled"])
+}
+
+func TestPrepareOpenAI_OpenAISource_DisablesReasoningForDeepSeek(t *testing.T) {
+	src := []byte(`{"model":"x","messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)
+	env, err := translate.ParseOpenAI(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel: "deepseek/deepseek-v4-pro",
+	})
+	require.NoError(t, err)
+
+	r := reasoningField(t, out.Body)
+	require.NotNil(t, r)
+	assert.Equal(t, false, r["enabled"])
+}
+
+func TestPrepareOpenAI_NoReasoningOverrideForNonDeepSeek(t *testing.T) {
+	cases := []string{"moonshotai/kimi-k2.5", "qwen/qwen3-max", "google/gemini-2.5-pro", "gpt-5"}
+	for _, model := range cases {
+		t.Run(model, func(t *testing.T) {
+			src := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)
+			env, err := translate.ParseAnthropic(src)
+			require.NoError(t, err)
+
+			out, err := env.PrepareOpenAI(nil, translate.EmitOptions{TargetModel: model})
+			require.NoError(t, err)
+
+			assert.Nil(t, reasoningField(t, out.Body),
+				"non-deepseek targets must not get a reasoning override")
+		})
+	}
+}
+
 func TestPrepareOpenAI_QwenAndGoogleGetSortHint(t *testing.T) {
 	cases := []string{"qwen/qwen3-max", "google/gemini-2.5-pro"}
 	for _, model := range cases {

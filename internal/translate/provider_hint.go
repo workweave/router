@@ -31,3 +31,20 @@ func openRouterProviderHint(model string) map[string]any {
 	}
 	return nil
 }
+
+// openRouterReasoningHint returns the OpenRouter `reasoning` request-body
+// field for models whose default reasoning behavior burns the entire
+// max_tokens budget on hidden thinking, leaving zero visible content for
+// the caller. Returns nil for models that don't need the override.
+//
+// Native DeepSeek serving deepseek/* defaults to reasoning-on, and at
+// agentic max_tokens budgets (1-2K) reliably emits 2000 reasoning tokens
+// and 0 visible tokens — the user waits a minute and gets nothing. Only
+// `reasoning.enabled=false` actually disables it; `effort=minimal` and
+// `max_tokens=0` are ignored by the upstream.
+func openRouterReasoningHint(model string) map[string]any {
+	if strings.HasPrefix(model, "deepseek/") {
+		return map[string]any{"enabled": false}
+	}
+	return nil
+}
