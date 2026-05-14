@@ -254,10 +254,16 @@ func openAIUsageToAnthropicResponse(usage any) map[string]any {
 	}
 	prompt, _ := u["prompt_tokens"].(float64)
 	completion, _ := u["completion_tokens"].(float64)
-	return map[string]any{
+	out := map[string]any{
 		"input_tokens":  int(prompt),
 		"output_tokens": int(completion),
 	}
+	if details, _ := u["prompt_tokens_details"].(map[string]any); details != nil {
+		if cr, _ := details["cached_tokens"].(float64); cr > 0 {
+			out["cache_read_input_tokens"] = int(cr)
+		}
+	}
+	return out
 }
 
 // OpenAIToAnthropicError re-wraps an OpenAI error as Anthropic format. Returns

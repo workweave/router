@@ -354,12 +354,14 @@ type AnthropicSSETranslator struct {
 	textOpen   bool
 	toolBlocks map[int]int
 
-	finishReason      string
-	usageInputTokens  int
-	usageOutputTokens int
-	hasUsage          bool
-	messageID         string
-	modelFromUpstream string
+	finishReason             string
+	usageInputTokens         int
+	usageOutputTokens        int
+	usageCacheCreationTokens int
+	usageCacheReadTokens     int
+	hasUsage                 bool
+	messageID                string
+	modelFromUpstream        string
 
 	usageSink otel.UsageSink
 
@@ -569,6 +571,9 @@ func (t *AnthropicSSETranslator) extractAndForwardUsage(data []byte) {
 	cachedRead := usage.Get("prompt_tokens_details.cached_tokens").Int()
 	t.usageInputTokens = int(prompt)
 	t.usageOutputTokens = int(completion)
+	cacheCreation := usage.Get("prompt_tokens_details.cache_creation_tokens").Int()
+	t.usageCacheCreationTokens = int(cacheCreation)
+	t.usageCacheReadTokens = int(cachedRead)
 	t.hasUsage = true
 	if t.usageSink != nil {
 		t.usageSink.RecordUsage(int(prompt), int(completion))
@@ -784,6 +789,14 @@ func (t *AnthropicSSETranslator) emitMessageDelta() error {
 		sse.WriteJSONInt(t.bw, int64(t.usageInputTokens))
 		t.bw.WriteString(",\"output_tokens\":")
 		sse.WriteJSONInt(t.bw, int64(t.usageOutputTokens))
+		if t.usageCacheCreationTokens > 0 {
+			t.bw.WriteString(",\"cache_creation_input_tokens\":")
+			sse.WriteJSONInt(t.bw, int64(t.usageCacheCreationTokens))
+		}
+		if t.usageCacheReadTokens > 0 {
+			t.bw.WriteString(",\"cache_read_input_tokens\":")
+			sse.WriteJSONInt(t.bw, int64(t.usageCacheReadTokens))
+		}
 	} else {
 		t.bw.WriteString("\"output_tokens\":0")
 	}

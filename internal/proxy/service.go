@@ -904,9 +904,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
-		Float64("cost.requested_input_usd", float64(in)/1_000_000*reqPricing.InputUSDPer1M).
+		Float64("cost.requested_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing)).
 		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
-		Float64("cost.actual_input_usd", float64(in)/1_000_000*actPricing.InputUSDPer1M).
+		Float64("cost.actual_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing)).
 		Float64("cost.actual_output_usd", float64(out)/1_000_000*actPricing.OutputUSDPer1M).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
@@ -947,9 +947,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			EmbedInput:             embedInput,
 			InputTokens:            int32(in),
 			OutputTokens:           int32(out),
-			RequestedInputCostUSD:  float64(in) / 1_000_000 * reqPricing.InputUSDPer1M,
+			RequestedInputCostUSD:  effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing),
 			RequestedOutputCostUSD: float64(out) / 1_000_000 * reqPricing.OutputUSDPer1M,
-			ActualInputCostUSD:     float64(in) / 1_000_000 * actPricing.InputUSDPer1M,
+			ActualInputCostUSD:     effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing),
 			ActualOutputCostUSD:    float64(out) / 1_000_000 * actPricing.OutputUSDPer1M,
 			RouteLatencyMs:         routeMs,
 			UpstreamLatencyMs:      proxyMs,
@@ -1056,6 +1056,20 @@ func (s *Service) logPlannerOutcome(res turnLoopResult) {
 // (no pin row to update) and missing session keys (e.g. pin store
 // disabled). Uses context.Background() — per CLAUDE.md, deferred DB
 // writes must outlive the request ctx.
+// effectiveInputCost returns the true USD input cost after applying cache pricing.
+// Fresh input tokens are priced at base rate; cache-creation tokens at 1.25×;
+// cache-read tokens at the model's effective cache-read multiplier (default 0.5×).
+// Matches the formula in install/cc-statusline.sh.
+func effectiveInputCost(inputTokens, cacheCreation, cacheRead int, pricePer1M float64, pinfo pricing.Pricing) float64 {
+	fresh := inputTokens - cacheCreation - cacheRead
+	if fresh < 0 {
+		fresh = 0
+	}
+	return (float64(fresh) +
+		float64(cacheCreation)*1.25 +
+		float64(cacheRead)*pinfo.EffectiveCacheReadMultiplier()) / 1_000_000 * pricePer1M
+}
+
 func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, cacheRead int) {
 	if s.pinStore == nil || res.HardPinned {
 		return
@@ -1563,9 +1577,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
-		Float64("cost.requested_input_usd", float64(in)/1_000_000*reqPricing.InputUSDPer1M).
+		Float64("cost.requested_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing)).
 		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
-		Float64("cost.actual_input_usd", float64(in)/1_000_000*actPricing.InputUSDPer1M).
+		Float64("cost.actual_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing)).
 		Float64("cost.actual_output_usd", float64(out)/1_000_000*actPricing.OutputUSDPer1M).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
@@ -1607,9 +1621,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			EmbedInput:             embedInput,
 			InputTokens:            int32(in),
 			OutputTokens:           int32(out),
-			RequestedInputCostUSD:  float64(in) / 1_000_000 * reqPricing.InputUSDPer1M,
+			RequestedInputCostUSD:  effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing),
 			RequestedOutputCostUSD: float64(out) / 1_000_000 * reqPricing.OutputUSDPer1M,
-			ActualInputCostUSD:     float64(in) / 1_000_000 * actPricing.InputUSDPer1M,
+			ActualInputCostUSD:     effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing),
 			ActualOutputCostUSD:    float64(out) / 1_000_000 * actPricing.OutputUSDPer1M,
 			RouteLatencyMs:         routeMs,
 			UpstreamLatencyMs:      proxyMs,
