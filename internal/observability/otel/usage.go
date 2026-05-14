@@ -235,9 +235,19 @@ func (u *UsageExtractor) tryExtractFromJSON() {
 
 // extractUsageGJSON probes for token usage fields using gjson, avoiding
 // json.Unmarshal and map[string]any allocations entirely. OpenAI has no
-// cache-creation concept (cacheRead maps to prompt_tokens_details.cached_tokens);
-// Google emits neither cache field.
+// cache-creation concept (cacheRead maps to prompt_tokens_details.cached_tokens).
+// Google's native :generateContent surface uses usageMetadata with
+// cachedContentTokenCount; the OpenAI-compat surface uses the OpenAI shape.
 func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreation, cacheRead int, found bool) {
+	if provider == providerGoogle {
+		if meta := gjson.GetBytes(data, "usageMetadata"); meta.Exists() {
+			input = int(meta.Get("promptTokenCount").Int())
+			output = int(meta.Get("candidatesTokenCount").Int())
+			cacheRead = int(meta.Get("cachedContentTokenCount").Int())
+			return input, output, 0, cacheRead, true
+		}
+	}
+
 	usage := gjson.GetBytes(data, "usage")
 	if !usage.Exists() && provider == providerAnthropic {
 		usage = gjson.GetBytes(data, "message.usage")

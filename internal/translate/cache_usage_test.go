@@ -104,3 +104,57 @@ func TestAnthropicSSETranslator_MessageStartCarriesEstimatedInputTokens(t *testi
 	startSegment := body[startIdx:deltaIdx]
 	assert.Contains(t, startSegment, `"usage":{"input_tokens":1234,"output_tokens":0}`)
 }
+
+// Catches the Gemini cachedContentTokenCount field being dropped on its way
+// to the usage sink. Gemini implicit caching is the only signal we have that
+// caching is working at all on the Gemini path, so this number must reach
+// recordTurnUsage → session_pins / telemetry.
+func TestGeminiSSETranslator_ForwardsCachedContentTokenCount(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sink := &fakeUsageSink{}
+	translator := translate.NewGeminiToOpenAISSETranslator(rec, "gemini-3.1-flash-lite-preview", sink)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	chunks := []string{
+		`data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}` + "\n\n",
+		`data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2048,"candidatesTokenCount":4,"totalTokenCount":2052,"cachedContentTokenCount":1900}}` + "\n\n",
+	}
+	for _, c := range chunks {
+		_, err := translator.Write([]byte(c))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	assert.Equal(t, 2048, sink.input)
+	assert.Equal(t, 4, sink.output)
+	assert.Equal(t, 0, sink.cacheCreation, "Gemini reports only cache reads, not creation")
+	assert.Equal(t, 1900, sink.cacheRead)
+
+	// The serialized OpenAI chunk must carry prompt_tokens_details.cached_tokens
+	// so the downstream AnthropicSSETranslator picks it up via gjson at the
+	// path it already reads (stream.go:604).
+	body := rec.Body.String()
+	assert.Contains(t, body, `"prompt_tokens_details":{"cached_tokens":1900}`)
+}
+
+// Same field, non-streaming path (Gemini :generateContent returned as a single
+// JSON body rather than SSE). Same propagation requirement.
+func TestGeminiSSETranslator_NonStreamingForwardsCachedContentTokenCount(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sink := &fakeUsageSink{}
+	translator := translate.NewGeminiToOpenAISSETranslator(rec, "gemini-3.1-flash-lite-preview", sink)
+
+	translator.Header().Set("Content-Type", "application/json")
+	translator.WriteHeader(http.StatusOK)
+
+	body := `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1500,"candidatesTokenCount":3,"totalTokenCount":1503,"cachedContentTokenCount":1200}}`
+	_, err := translator.Write([]byte(body))
+	require.NoError(t, err)
+	require.NoError(t, translator.Finalize())
+
+	assert.Equal(t, 1500, sink.input)
+	assert.Equal(t, 3, sink.output)
+	assert.Equal(t, 1200, sink.cacheRead)
+}
