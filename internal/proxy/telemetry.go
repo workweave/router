@@ -54,8 +54,8 @@ type InsertTelemetryParams struct {
 	AlphaBreakdown       []byte // pre-marshaled JSON for W-1335; nil until then
 	ClusterRouterVersion string
 	TTFTMs               *int64
-	CacheCreationTokens  *int32 // W-1309 forward-compat; nil until populated
-	CacheReadTokens      *int32 // W-1309 forward-compat; nil until populated
+	CacheCreationTokens  *int32 // nil when the upstream reported no cache usage
+	CacheReadTokens      *int32 // nil when the upstream reported no cache usage
 	DeviceID             string
 	SessionID            string
 }
