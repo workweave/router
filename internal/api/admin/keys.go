@@ -10,8 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// --- Router API keys ---
-
 type apiKeyResponse struct {
 	ID         string     `json:"id"`
 	Name       *string    `json:"name"`
@@ -41,7 +39,6 @@ func toAPIKeyResponse(k *auth.APIKey) apiKeyResponse {
 	}
 }
 
-// ListAPIKeysHandler returns all active router API keys for the authed installation.
 func ListAPIKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -61,9 +58,9 @@ func ListAPIKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// IssueAPIKeyHandler creates the installation's first router API key. Returns 409 if an active key
-// exists — admins should rotate instead (the partial unique index on (installation_id) WHERE
-// deleted_at IS NULL would reject the insert regardless). Returns the raw token once.
+// IssueAPIKeyHandler creates the installation's first router API key.
+// Returns 409 if an active key exists — the partial unique index on
+// (installation_id) WHERE deleted_at IS NULL would reject the insert regardless.
 func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -102,8 +99,7 @@ func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// RotateAPIKeyHandler soft-deletes the current active key and issues a replacement, carrying forward
-// the previous name. Same response shape as IssueAPIKeyHandler.
+// RotateAPIKeyHandler soft-deletes the current active key and issues a replacement.
 func RotateAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -122,8 +118,9 @@ func RotateAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// DeleteAPIKeyHandler soft-deletes a router API key by ID. Returns 404 if the key belongs to another
-// installation, so a tenant who learns a foreign key UUID cannot revoke it.
+// DeleteAPIKeyHandler soft-deletes a router API key. Returns 404 for keys
+// owned by another installation so a tenant who learns a foreign key UUID
+// cannot revoke it.
 func DeleteAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -159,8 +156,6 @@ func DeleteAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// --- Provider (external) API keys ---
-
 type externalKeyResponse struct {
 	ID         string     `json:"id"`
 	Provider   string     `json:"provider"`
@@ -189,7 +184,6 @@ func toExternalKeyResponse(k *auth.ExternalAPIKey) externalKeyResponse {
 	}
 }
 
-// ListExternalKeysHandler returns all active provider API keys for the authed installation.
 func ListExternalKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -209,7 +203,6 @@ func ListExternalKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// UpsertExternalKeyHandler creates or replaces a provider API key.
 func UpsertExternalKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -230,7 +223,6 @@ func UpsertExternalKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// DeleteExternalKeyHandler soft-deletes a provider API key.
 func DeleteExternalKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)

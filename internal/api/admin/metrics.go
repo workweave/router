@@ -29,8 +29,6 @@ type metricsTimeseriesResponse struct {
 	Buckets []timeseriesBucket `json:"buckets"`
 }
 
-// MetricsSummaryHandler returns aggregated cost/token totals. Admin-cookie sessions span every
-// installation; rk_-keyed callers see only their own.
 func MetricsSummaryHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		from, to := parseTimeWindow(c)
@@ -64,8 +62,6 @@ func MetricsSummaryHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 	}
 }
 
-// MetricsTimeseriesHandler returns bucketed cost data for the cost savings chart. Admin sessions
-// aggregate across every installation; rk_-keyed callers see only their own.
 func MetricsTimeseriesHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		granularity := c.DefaultQuery("granularity", "hour")
@@ -125,8 +121,6 @@ type metricsDetailsResponse struct {
 	Rows []metricsDetailRow `json:"rows"`
 }
 
-// MetricsDetailsHandler returns individual telemetry rows for a time window, used by the dashboard
-// drill-down modal. Admin sessions span every installation; rk_-keyed callers see only their own.
 func MetricsDetailsHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		from, to := parseTimeWindow(c)
@@ -183,7 +177,6 @@ func MetricsDetailsHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 	}
 }
 
-// parseTimeWindow reads optional ?from= and ?to= RFC3339 query params, defaulting to the last 7 days.
 func parseTimeWindow(c *gin.Context) (from, to time.Time) {
 	to = time.Now().UTC()
 	from = to.AddDate(0, 0, -7)

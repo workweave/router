@@ -44,9 +44,8 @@ type updateExcludedModelsRequest struct {
 	Excluded []string `json:"excluded"`
 }
 
-// deployedModelsDTO converts the cluster scorer's deployed-models list to the
-// sorted DTO form returned by both the GET and PUT handlers. Centralized so
-// the two responses cannot drift apart.
+// deployedModelsDTO converts the deployed-models list to sorted DTO form,
+// centralized so the GET and PUT responses cannot drift apart.
 func deployedModelsDTO(models DeployedModelsSource) []deployedModelDTO {
 	entries := models.DefaultDeployedModels()
 	out := make([]deployedModelDTO, 0, len(entries))
@@ -62,10 +61,9 @@ func deployedModelsDTO(models DeployedModelsSource) []deployedModelDTO {
 	return out
 }
 
-// GetExcludedModelsHandler returns the universe of deployed models plus the
-// caller installation's current exclusion list. If a deployment-wide env
-// override is active, the override is returned as `excluded` and
-// `env_override_active` is true; the UI must render the checklist read-only.
+// GetExcludedModelsHandler returns deployed models and the installation's exclusion list.
+// When a deployment-wide env override is active, `env_override_active` is true and the
+// UI must render the checklist read-only.
 func GetExcludedModelsHandler(authSvc *auth.Service, models DeployedModelsSource, override ExclusionOverrideSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -142,7 +140,6 @@ func UpdateExcludedModelsHandler(authSvc *auth.Service, models DeployedModelsSou
 	}
 }
 
-// Compile-time interface checks.
 var (
 	_ DeployedModelsSource    = (*cluster.Multiversion)(nil)
 	_ ExclusionOverrideSource = (*proxy.Service)(nil)

@@ -81,7 +81,6 @@ func LoginHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// LogoutHandler clears the admin session cookie. Always returns 200.
 func LogoutHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		clearAdminSessionCookie(c)
@@ -89,7 +88,6 @@ func LogoutHandler() gin.HandlerFunc {
 	}
 }
 
-// MeHandler reports whether the request carries a valid admin session cookie.
 func MeHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !authSvc.AdminLoginEnabled() {

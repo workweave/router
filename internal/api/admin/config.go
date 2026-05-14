@@ -23,8 +23,6 @@ type configResponse struct {
 	EnvProviderKeys []string `json:"env_provider_keys"`
 }
 
-// configProviderOrder pins the response ordering of env_provider_keys so the
-// dashboard renders deterministically.
 var configProviderOrder = []string{
 	providers.ProviderAnthropic,
 	providers.ProviderOpenAI,
@@ -33,8 +31,6 @@ var configProviderOrder = []string{
 	providers.ProviderGoogle,
 }
 
-// ConfigHandler returns the current non-secret router configuration. Accepts
-// either an admin session cookie or a valid rk_ bearer.
 func ConfigHandler(c *gin.Context) {
 	if middleware.AdminPrincipalFrom(c) == nil && middleware.InstallationFrom(c) == nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_key"})

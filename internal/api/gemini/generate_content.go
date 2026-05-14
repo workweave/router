@@ -1,4 +1,3 @@
-// Package gemini holds HTTP handlers for the native Gemini generateContent surface.
 package gemini
 
 import (
@@ -30,8 +29,7 @@ const (
 
 // GenerateContentHandler wires POST /v1beta/models/:modelAction to proxy.Service.ProxyGeminiGenerateContent.
 // The colon-suffixed action lives inside a single Gin path parameter because Gin treats `:` outside the
-// leading position as a literal. Parses the model name and stream flag, injects them as synthetic body
-// fields ("model", "stream") so the envelope's format-neutral accessors work, then forwards.
+// leading position as a literal.
 func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)
@@ -114,7 +112,6 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 	}
 }
 
-// splitModelAction splits "{model}:{action}" into the model name and a stream flag.
 func splitModelAction(modelAction string) (model string, stream bool, ok bool) {
 	switch {
 	case strings.HasSuffix(modelAction, streamGenerateContentSuffix):
@@ -131,9 +128,6 @@ func splitModelAction(modelAction string) (model string, stream bool, ok bool) {
 	return model, stream, true
 }
 
-// injectModelAndStream rewrites body to add synthetic top-level "model" and "stream" fields. Both are
-// stripped before the body reaches the upstream Google adapter (see emit_gemini.go FormatGemini
-// same-format passthrough branch).
 func injectModelAndStream(body []byte, model string, stream bool) ([]byte, error) {
 	out, err := sjson.SetBytes(body, "model", model)
 	if err != nil {
@@ -146,8 +140,6 @@ func injectModelAndStream(body []byte, model string, stream bool) ([]byte, error
 	return out, nil
 }
 
-// stashClientIdentity stashes user-identification signals from HTTP headers onto the context.
-// Native Gemini requests don't carry an Anthropic-style metadata.user_id, so only headers contribute.
 func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
 	id := proxy.ClientIdentity{
 		SessionID: proxy.NormalizeClientIdentifier(h.Get("X-Claude-Code-Session-Id")),
@@ -158,7 +150,6 @@ func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
 }
 
-// writeGeminiError emits a Google API-shaped error JSON matching generativelanguage.googleapis.com.
 func writeGeminiError(c *gin.Context, status int, errStatus, message string) {
 	c.AbortWithStatusJSON(status, gin.H{
 		"error": gin.H{
