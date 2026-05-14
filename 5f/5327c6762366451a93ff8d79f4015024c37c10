@@ -1,0 +1,27 @@
+Makefile
+  s_60615be0bc358c::t_a0dd04a2326b3f 79,81-86
+  s_60615be0bc358c::t_80c78cc832fb2e 110,112
+install/install.sh
+  s_60615be0bc358c::t_ecb296de8be499 24
+  s_60615be0bc358c::t_f5d8ec09e203b9 42
+  s_60615be0bc358c::t_7b95c7bb684f73 630-632
+  s_60615be0bc358c::t_4173d20c01bf6b 164
+  s_60615be0bc358c::t_3729791c4492b3 605-611
+  s_60615be0bc358c::t_e3827672d18fad 102-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "5f5327c6762366451a93ff8d79f4015024c37c10",
+  "prompts": {},
+  "sessions": {
+    "s_60615be0bc358c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf16e54b-8d14-42de-a419-dbca7d5c8083",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
