@@ -56,7 +56,7 @@ func ResolveUserFromContext(ctx context.Context, authSvc *auth.Service, installa
 		)
 		return ctx
 	}
-	log.Info("ResolveUserFromContext dispatch",
+	log.Debug("ResolveUserFromContext dispatch",
 		"installation_id", installation.ID,
 		"email_present", id.Email != "",
 		"account_present", id.AccountID != "",
