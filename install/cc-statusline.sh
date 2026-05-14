@@ -132,7 +132,8 @@ routed=""
 session_savings=""
 tot_in=0
 tot_out=0
-tot_cached=0
+tot_cache_read=0
+tot_cache_write=0
 
 # Per-turn savings compare each turn's routed cost (priced from
 # message.model in the transcript) against what the CC-side model selection
@@ -178,7 +179,7 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
   # The marker regex tolerates the optional "(<provider>)" segment and a
   # `[1m]` / `-YYYYMMDD` suffix on either model name so transcripts written
   # against context-tiered or dated model ids still parse cleanly.
-  read -r session_savings tot_in tot_out tot_cached < <(
+  read -r session_savings tot_in tot_out tot_cache_read tot_cache_write < <(
     jq -r --argjson p "$prices" --arg requested "$requested_norm" '
       select(.type=="assistant") |
       .message as $m |
@@ -202,11 +203,11 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
            ($requested_cost - $routed_cost)
          end
        end) as $savings |
-      "\($savings) \($t.in) \($t.out) \($t.cwrt + $t.crd)"
+      "\($savings) \($t.in) \($t.out) \($t.crd) \($t.cwrt)"
     ' "$transcript_path" 2>/dev/null \
-    | awk 'BEGIN{s=0; i=0; o=0; c=0}
-           {s+=$1; i+=$2; o+=$3; c+=$4}
-           END{printf "%.4f %d %d %d\n", s, i, o, c}'
+    | awk 'BEGIN{s=0; i=0; o=0; r=0; w=0}
+           {s+=$1; i+=$2; o+=$3; r+=$4; w+=$5}
+           END{printf "%.4f %d %d %d %d\n", s, i, o, r, w}'
   ) || true
 fi
 
@@ -234,9 +235,22 @@ fmt_tok() {
   }'
 }
 
+# cache_read tokens are the cached portion of every prompt that the
+# provider serves at 0.1× input price; cache_write tokens are the bytes
+# that get newly cached on this turn at 1.25× input price. They behave
+# completely differently both in cost and in what they tell the user
+# about session-level efficiency, so we surface them separately rather
+# than summing into a single "cached" number that conflates the two.
+# Each clause is shown only when nonzero, so quiet sessions stay quiet.
 tokens_clause=""
-if [[ "$tot_in" -gt 0 || "$tot_out" -gt 0 || "$tot_cached" -gt 0 ]]; then
-  tokens_clause=" · $(fmt_tok "$tot_in") in / $(fmt_tok "$tot_out") out / $(fmt_tok "$tot_cached") cached"
+if [[ "$tot_in" -gt 0 || "$tot_out" -gt 0 || "$tot_cache_read" -gt 0 || "$tot_cache_write" -gt 0 ]]; then
+  tokens_clause=" · $(fmt_tok "$tot_in") in / $(fmt_tok "$tot_out") out"
+  if [[ "$tot_cache_read" -gt 0 ]]; then
+    tokens_clause+=" / $(fmt_tok "$tot_cache_read") cache read"
+  fi
+  if [[ "$tot_cache_write" -gt 0 ]]; then
+    tokens_clause+=" / $(fmt_tok "$tot_cache_write") cache write"
+  fi
 fi
 
 if [[ "$routed" == "failure" ]]; then
