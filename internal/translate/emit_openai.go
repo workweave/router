@@ -55,6 +55,14 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 			return nil, fmt.Errorf("set system reminder: %w", err)
 		}
 	}
+	if openRouterForcesToolTemperatureZero(opts.TargetModel) &&
+		gjson.GetBytes(body, "tools").Exists() &&
+		!gjson.GetBytes(body, "temperature").Exists() {
+		body, err = sjson.SetBytes(body, "temperature", 0)
+		if err != nil {
+			return nil, fmt.Errorf("set tool temperature override: %w", err)
+		}
+	}
 	return body, nil
 }
 
@@ -75,9 +83,18 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	}
 	pullAnthropicToolChoice(e.body, out)
 
+	clientSetTemp := false
 	for _, key := range []string{"temperature", "top_p"} {
 		if r := gjson.GetBytes(e.body, key); r.Exists() {
 			out[key] = r.Value()
+			if key == "temperature" {
+				clientSetTemp = true
+			}
+		}
+	}
+	if !clientSetTemp && openRouterForcesToolTemperatureZero(opts.TargetModel) {
+		if _, hasTools := out["tools"]; hasTools {
+			out["temperature"] = 0
 		}
 	}
 	if r := gjson.GetBytes(e.body, "max_tokens"); r.Exists() {
