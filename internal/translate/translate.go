@@ -213,6 +213,7 @@ func buildAnthropicContent(message map[string]any) []any {
 		if json.Unmarshal([]byte(argsStr), &input) != nil {
 			input = map[string]any{}
 		}
+		normalizeEditEscapes(name, input)
 		blocks = append(blocks, map[string]any{
 			"type":  "tool_use",
 			"id":    id,

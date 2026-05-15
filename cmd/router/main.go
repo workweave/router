@@ -37,6 +37,7 @@ import (
 	"workweave/router/internal/router/planner"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/server"
+	"workweave/router/internal/translate"
 
 	_ "time/tzdata"
 
@@ -285,6 +286,10 @@ func main() {
 		logger.Info("Cluster scorer embedding user-role text only (ROUTER_EMBED_ONLY_USER_MESSAGE=true)")
 	} else {
 		logger.Info("Cluster scorer embedding concatenated stream (ROUTER_EMBED_ONLY_USER_MESSAGE=false)")
+	}
+	if config.GetOr("ROUTER_DEEPSEEK_ESCAPE_NORMALIZE", "false") == "true" {
+		translate.EnableEditEscapeNormalize = true
+		logger.Info("Edit-tool escape-sequence repair enabled (ROUTER_DEEPSEEK_ESCAPE_NORMALIZE=true)")
 	}
 	emitter, err := buildOtelEmitter()
 	if err != nil {
