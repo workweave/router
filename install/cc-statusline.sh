@@ -27,14 +27,12 @@ set -euo pipefail
 # Once every WEAVE_STATUSLINE_UPDATE_INTERVAL_DAYS (default 7), check
 # raw.githubusercontent.com for a newer copy of this script and swap it in
 # atomically. Runs in a forked subshell so the current Claude turn never
-# blocks; the next turn picks up the new version.
-#
-# Scope: only refreshes when the script lives under $HOME/.weave/ — i.e. a
-# user-scope install. Project-scope copies (<repo>/.claude/cc-statusline.sh)
-# are frequently committed to git, and silently rewriting them would create
-# dirty working trees for every teammate. Project installs re-pin to a
-# specific upstream version each time `npx weave-router --scope project`
-# runs, which is the intended update path for shared installs.
+# blocks; the next turn picks up the new version. Applies to both user-scope
+# (~/.weave/cc-statusline.sh) and project-scope (<repo>/.claude/cc-statusline.sh)
+# installs — project teammates rate-limit independently because the stamp
+# lives in their per-user cache dir, and on no-content-change days we skip
+# the mv entirely so the repo working tree stays clean. When upstream does
+# change, the first teammate's commit propagates the new version to the rest.
 #
 # Opt out entirely with `export WEAVE_STATUSLINE_UPDATE=0`. Override the
 # source with `WEAVE_STATUSLINE_URL=...`, e.g. for self-hosters who fork.
@@ -45,15 +43,18 @@ weave_self_refresh() {
   local self="${BASH_SOURCE[0]:-$0}"
   [ -f "$self" ] && [ -w "$self" ] || return 0
 
-  # User-scope only — see comment above.
-  case "$self" in
-    "$HOME/.weave/"*) ;;
-    *) return 0 ;;
-  esac
-
   local interval_days="${WEAVE_STATUSLINE_UPDATE_INTERVAL_DAYS:-7}"
   local interval_seconds=$(( interval_days * 86400 ))
-  local stamp="$HOME/.weave/.cc-statusline-checked-at"
+
+  # Stamp lives in the per-user cache dir, keyed by absolute script path so
+  # multiple repos (and the user-scope copy) rate-limit independently and no
+  # stray file ever lands inside a repo working tree.
+  local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/weave-router"
+  mkdir -p "$cache_dir" 2>/dev/null || return 0
+  local script_slug
+  script_slug="$(printf '%s' "$self" | tr -c 'A-Za-z0-9._-' '_')"
+  local stamp="$cache_dir/checked-at${script_slug}"
+
   local now stamp_mtime
   now="$(date +%s 2>/dev/null)" || return 0
   if [ -f "$stamp" ]; then
@@ -80,8 +81,14 @@ weave_self_refresh() {
        && [ -s "$tmp" ] \
        && head -n 1 "$tmp" | grep -q '^#!.*bash' \
        && [ "$(wc -c < "$tmp")" -ge 1024 ]; then
-      chmod +x "$tmp" 2>/dev/null || true
-      mv "$tmp" "$self" 2>/dev/null || rm -f "$tmp"
+      # No-op when the download matches what's already on disk — keeps git
+      # status clean for project-scope teammates during a routine refresh.
+      if cmp -s "$tmp" "$self"; then
+        rm -f "$tmp"
+      else
+        chmod +x "$tmp" 2>/dev/null || true
+        mv "$tmp" "$self" 2>/dev/null || rm -f "$tmp"
+      fi
     else
       rm -f "$tmp"
     fi
