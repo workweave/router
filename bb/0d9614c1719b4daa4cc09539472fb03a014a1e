@@ -1,0 +1,87 @@
+AGENTS.md
+  ai_agent 3,5,91,93,97,99,101-113,115,117,179,181,183,185-186,191-194,197
+internal/providers/CLAUDE.md
+  ai_agent 1-46
+db/AGENTS.md
+  ai_agent 1-30
+internal/postgres/CLAUDE.md
+  ai_agent 1-36
+internal/router/pricing/AGENTS.md
+  ai_agent 1-23
+internal/router/capability/AGENTS.md
+  ai_agent 1-19
+internal/proxy/usage/CLAUDE.md
+  ai_agent 1-22
+internal/router/pricing/CLAUDE.md
+  ai_agent 1-23
+CLAUDE.md
+  ai_agent 5,91,93,97,99,101-113,115,117,179,181,183,185-186,191-194,197
+docs/CLAUDE.md
+  ai_agent 1-26
+internal/router/sessionpin/AGENTS.md
+  ai_agent 1-24
+docs/AGENTS.md
+  ai_agent 1-26
+internal/proxy/usage/AGENTS.md
+  ai_agent 1-22
+internal/router/cache/AGENTS.md
+  ai_agent 1-19
+internal/api/CLAUDE.md
+  ai_agent 1-33
+internal/router/handover/AGENTS.md
+  ai_agent 1-19
+internal/postgres/AGENTS.md
+  ai_agent 1-36
+internal/proxy/AGENTS.md
+  ai_agent 1-52
+internal/translate/AGENTS.md
+  ai_agent 1-33
+internal/proxy/CLAUDE.md
+  ai_agent 1-52
+internal/router/handover/CLAUDE.md
+  ai_agent 1-19
+internal/router/cluster/AGENTS.md
+  ai_agent 1-65
+cmd/AGENTS.md
+  ai_agent 1-35
+internal/router/cluster/CLAUDE.md
+  ai_agent 1-65
+internal/router/turntype/CLAUDE.md
+  ai_agent 1-22
+db/CLAUDE.md
+  ai_agent 1-30
+internal/router/planner/AGENTS.md
+  ai_agent 1-28
+internal/auth/CLAUDE.md
+  ai_agent 1-24
+internal/router/capability/CLAUDE.md
+  ai_agent 1-19
+internal/router/CLAUDE.md
+  ai_agent 1-34
+internal/translate/CLAUDE.md
+  ai_agent 1-33
+cmd/CLAUDE.md
+  ai_agent 1-35
+internal/router/cache/CLAUDE.md
+  ai_agent 1-19
+internal/auth/AGENTS.md
+  ai_agent 1-24
+internal/api/AGENTS.md
+  ai_agent 1-33
+internal/router/planner/CLAUDE.md
+  ai_agent 1-28
+internal/router/sessionpin/CLAUDE.md
+  ai_agent 1-24
+internal/router/AGENTS.md
+  ai_agent 1-34
+internal/providers/AGENTS.md
+  ai_agent 1-46
+internal/router/turntype/AGENTS.md
+  ai_agent 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "bb0d9614c1719b4daa4cc09539472fb03a014a1e",
+  "prompts": {}
+}
