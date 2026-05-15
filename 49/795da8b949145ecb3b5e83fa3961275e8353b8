@@ -1,0 +1,25 @@
+install/install.sh
+  s_c04564f5fcbec6::t_bb3285268b7112 590,632
+internal/router/capability/tier.go
+  s_c04564f5fcbec6::t_198d0d077a7bf4 66
+install/cc-statusline.sh
+  s_c04564f5fcbec6::t_bb3285268b7112 133,175
+internal/router/pricing/pricing.go
+  s_c04564f5fcbec6::t_8991580e2f75f3 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "49795da8b949145ecb3b5e83fa3961275e8353b8",
+  "prompts": {},
+  "sessions": {
+    "s_c04564f5fcbec6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4d3f6ccd-955a-4f39-9073-642b568c7de4",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
