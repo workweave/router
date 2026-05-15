@@ -27,13 +27,18 @@ jobs:
       run:
         working-directory: install/npm
     steps:
+      # Third-party actions pinned to commit SHAs because this job has
+      # `id-token: write` and publishes to npm — a retargeted floating tag
+      # would let upstream-action compromise publish a malicious package.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "20"
+          # Node 24 ships with npm ≥ 11.5, which is the minimum that supports
+          # OIDC trusted publishing. Node 20 (npm 10) would 401 at publish.
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       - name: Verify tag matches package.json version
