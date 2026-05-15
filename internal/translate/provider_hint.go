@@ -42,3 +42,11 @@ func openRouterReasoningHint(model string) map[string]any {
 func openRouterForcesToolTemperatureZero(model string) bool {
 	return strings.HasPrefix(model, "deepseek/")
 }
+
+// openRouterStrictTools reports whether tool definitions should be emitted with
+// `strict: true` and a strict-mode-compatible parameter schema. Reserved for
+// models that drift tool-arg JSON from the declared schema (extra fields, wrong
+// types) badly enough that constrained decoding is worth the schema constraints.
+func openRouterStrictTools(model string) bool {
+	return strings.HasPrefix(model, "deepseek/")
+}
