@@ -135,6 +135,38 @@ func TestEscapeNormalize_FlagOn_SkipsFilePath(t *testing.T) {
 	assert.Equal(t, "foo\nbar", input["old_string"], "old_string still rewritten alongside")
 }
 
+func TestEscapeNormalize_FlagOn_RewritesMultiEditNestedEdits(t *testing.T) {
+	// MultiEdit's real shape nests per-edit fields inside an `edits` array.
+	// A flat-only walk would silently skip the strings that actually need
+	// repairing.
+	withEscapeNormalize(t, true)
+	args := `{
+		"file_path":"a.go",
+		"edits":[
+			{"old_string":"foo\\nbar","new_string":"baz"},
+			{"old_string":"alpha","new_string":"beta\\tgamma"}
+		]
+	}`
+	resp := editToolUseResponse(t, "MultiEdit", args)
+
+	out, err := translate.OpenAIToAnthropicResponse(resp, "deepseek/deepseek-v4-pro")
+	require.NoError(t, err)
+
+	input := firstToolUseInput(t, out)
+	assert.Equal(t, "a.go", input["file_path"])
+	edits, ok := input["edits"].([]any)
+	require.True(t, ok, "edits must round-trip as array")
+	require.Len(t, edits, 2)
+
+	first, _ := edits[0].(map[string]any)
+	assert.Equal(t, "foo\nbar", first["old_string"], "first edit's old_string must be unescaped")
+	assert.Equal(t, "baz", first["new_string"])
+
+	second, _ := edits[1].(map[string]any)
+	assert.Equal(t, "alpha", second["old_string"])
+	assert.Equal(t, "beta\tgamma", second["new_string"], "second edit's new_string must be unescaped")
+}
+
 func TestEscapeNormalize_FlagOn_CaseInsensitiveToolName(t *testing.T) {
 	withEscapeNormalize(t, true)
 	for _, name := range []string{"edit", "EDIT", "Write", "MultiEdit"} {

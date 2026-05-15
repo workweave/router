@@ -40,6 +40,9 @@ var editEscapableFields = map[string]struct{}{
 // backslash-letter sequence here is the broken case: the model emitted
 // double-escaped JSON ("\\n" on the wire) and our decoder produced literal
 // backslash-n.
+//
+// MultiEdit nests per-edit `old_string`/`new_string` inside an `edits` array,
+// so each entry there is also walked.
 func normalizeEditEscapes(toolName string, input any) {
 	if !EnableEditEscapeNormalize {
 		return
@@ -51,6 +54,21 @@ func normalizeEditEscapes(toolName string, input any) {
 	if !ok {
 		return
 	}
+	rewriteAllowlistedFields(m)
+	if edits, ok := m["edits"].([]any); ok {
+		for _, e := range edits {
+			entry, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			rewriteAllowlistedFields(entry)
+		}
+	}
+}
+
+// rewriteAllowlistedFields applies escape repair to every allowlisted string
+// field in the given map. Caller gates by tool name.
+func rewriteAllowlistedFields(m map[string]any) {
 	for key, raw := range m {
 		if _, allowed := editEscapableFields[key]; !allowed {
 			continue
