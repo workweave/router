@@ -32,6 +32,11 @@ jobs:
       # would let upstream-action compromise publish a malicious package.
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Full history so the "verify tag is reachable from main" step can
+          # walk the commit graph. The default shallow clone (depth 1) only
+          # has the tagged commit and can't prove ancestry to origin/main.
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
