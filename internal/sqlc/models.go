@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// Rotatable bearer keys (rk_ prefix) per installation
+// Rotatable bearer keys (rk_ prefix). An installation may hold multiple active keys; identity is carried by router.model_router_users.
 type RouterModelRouterAPIKey struct {
 	ID             uuid.UUID
 	InstallationID uuid.UUID
