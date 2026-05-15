@@ -20,7 +20,10 @@
 #   npx weave-router --base-url http://localhost:8080 # self-hosted, custom port
 #   npx weave-router --non-interactive                # require WEAVE_ROUTER_KEY env var
 #   npx weave-router --quiet                          # suppress banner, ping check, and trailing tips
-#   npx weave-router --uninstall                      # remove the installation
+#
+# To remove an existing install, run uninstall.sh (the npx wrapper exposes
+# this as `npx weave-router --uninstall`; install.sh itself doesn't accept
+# that flag because the uninstall logic lives in a sibling script).
 
 set -euo pipefail
 
