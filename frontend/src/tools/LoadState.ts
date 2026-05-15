@@ -8,15 +8,15 @@ const ERROR = Symbol("ERROR");
 const LOADED = Symbol("LOADED");
 const RELOADING = Symbol("RELOADING");
 
-export interface LoadStateNotStartedLoading {
+interface LoadStateNotStartedLoading {
   type: typeof NOT_STARTED_LOADING;
 }
 
-export interface LoadStateLoading {
+interface LoadStateLoading {
   type: typeof LOADING;
 }
 
-export interface LoadStateError<T> {
+interface LoadStateError<T> {
   error: Error;
   /**
    * If defined, this is the value the load state had before it errored.
@@ -25,12 +25,12 @@ export interface LoadStateError<T> {
   type: typeof ERROR;
 }
 
-export interface LoadStateLoaded<T> {
+interface LoadStateLoaded<T> {
   type: typeof LOADED;
   value: T;
 }
 
-export interface LoadStateReloading<T> {
+interface LoadStateReloading<T> {
   type: typeof RELOADING;
   value: T;
 }

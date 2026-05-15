@@ -85,17 +85,15 @@ export const DATE_RANGES: readonly DateRange[] = [
 
 const DEFAULT_RANGE_ID = "last-month";
 
-export interface DashboardFilters {
-  range: DateRange;
-  granularity: Granularity;
-  /** ISO timestamp of the range start. */
-  fromISO: string;
-  /** ISO timestamp of the range end (now). */
-  toISO: string;
-}
-
 export interface UseDashboardFiltersResult {
-  filters: DashboardFilters;
+  filters: {
+    range: DateRange;
+    granularity: Granularity;
+    /** ISO timestamp of the range start. */
+    fromISO: string;
+    /** ISO timestamp of the range end (now). */
+    toISO: string;
+  };
   setRangeId: (id: string) => void;
   setGranularity: (g: Granularity) => void;
 }

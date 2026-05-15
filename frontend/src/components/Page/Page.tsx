@@ -37,11 +37,10 @@ export function Page({ children, className, header, subheader }: PageProps) {
   );
 }
 
-export interface PageSectionProps extends React.HTMLAttributes<HTMLDivElement> {
-  header?: React.ReactNode;
-}
-
-Page.Section = React.forwardRef<HTMLDivElement, PageSectionProps>(
+Page.Section = React.forwardRef<
+  HTMLDivElement,
+  React.HTMLAttributes<HTMLDivElement> & { header?: React.ReactNode }
+>(
   ({ children, className, header, ...props }, ref) => (
     <section
       className={cn("flex w-full max-w-content-width flex-col gap-4 p-6", className)}

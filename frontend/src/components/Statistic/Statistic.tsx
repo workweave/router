@@ -2,13 +2,9 @@ import { Text } from "@/components/atoms/Text";
 import { cn } from "@/tools/cn";
 import { LoadState } from "@/tools/LoadState";
 
-export interface StatisticValue {
-  total?: string;
-}
-
 export interface StatisticProps {
   className?: string;
-  statistic: LoadState<StatisticValue>;
+  statistic: LoadState<{ total?: string }>;
 }
 
 export function Statistic({ className, statistic }: StatisticProps) {

@@ -6,11 +6,7 @@ import { cn } from "@/lib/cn";
 import { X } from "lucide-react";
 import React, { forwardRef } from "react";
 
-export interface FilterPillProps extends React.PropsWithChildren {
-  onRemove?: () => void;
-}
-
-type FilterPillType = React.FC<FilterPillProps> & {
+type FilterPillType = React.FC<React.PropsWithChildren<{ onRemove?: () => void }>> & {
   Button: React.ForwardRefExoticComponent<
     Omit<ButtonProps, "appearance" | "size"> & React.RefAttributes<HTMLButtonElement>
   >;
@@ -37,7 +33,7 @@ const FilterPillButton = forwardRef<
 FilterPillButton.displayName = "FilterPill.Button";
 
 export const FilterPill: FilterPillType = Object.assign(
-  function FilterPill({ children, onRemove }: FilterPillProps) {
+  function FilterPill({ children, onRemove }: React.PropsWithChildren<{ onRemove?: () => void }>) {
     return (
       <div className="flex shrink-0 grow-0 items-center gap-1.5 rounded-lg bg-muted px-2 py-1 text-sm">
         {children}
