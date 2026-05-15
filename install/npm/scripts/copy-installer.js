@@ -9,6 +9,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 const installDir = path.resolve(root, "..");
+const repoRoot = path.resolve(installDir, "..");
 
 const files = ["install.sh", "uninstall.sh", "cc-statusline.sh"];
 for (const f of files) {
@@ -18,3 +19,8 @@ for (const f of files) {
   chmodSync(dst, 0o755);
   console.log(`copied ${f}`);
 }
+
+// LICENSE lives at the repo root and applies to the whole project. npm
+// surfaces it on the package page when bundled alongside package.json.
+copyFileSync(path.join(repoRoot, "LICENSE"), path.join(root, "LICENSE"));
+console.log("copied LICENSE");
