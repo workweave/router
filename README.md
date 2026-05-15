@@ -39,8 +39,9 @@ loved by Robinhood, PostHog & Reducto.*
 
 Point Claude Code, Cursor, or your own app at `localhost:8080`. The router:
 
-- 🎯 **Routes per request.** An AvengersPro-derived cluster scorer picks the
-  right model from your enabled providers, every turn.
+- 🎯 **Routes per request.** A cluster scorer derived from
+  [Avengers-Pro](https://arxiv.org/abs/2508.12631) [^1] picks the right
+  model from your enabled providers, every turn.
 - 🔌 **Speaks everyone's API.** Anthropic Messages, OpenAI Chat Completions,
   Gemini native. Streaming, tools, vision, the works.
 - 🧠 **Knows OSS too.** DeepSeek, Kimi, GLM, Qwen, Llama, Mistral via
@@ -155,3 +156,7 @@ Licensed under [ELv2](https://www.elastic.co/licensing/elastic-license) ·
 [Code of conduct](CODE_OF_CONDUCT.md)
 
 </div>
+
+[^1]: Zhang, Y. et al. *Beyond GPT-5: Making LLMs Cheaper and Better via
+    Performance–Efficiency Optimized Routing* (Avengers-Pro).
+    arXiv:2508.12631, 2025. <https://arxiv.org/abs/2508.12631>
