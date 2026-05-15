@@ -1,5 +1,6 @@
 # Weave Router
 
+[![Weave Badge](https://img.shields.io/endpoint?url=https%3A%2F%2Fapp.workweave.ai%2Fapi%2Frepository%2Fbadge%2Forg_QWsHDcRQWQEs6RpkdEZrlFK8%2F805349704&cacheSeconds=3600)](https://app.workweave.ai/reports/repository/org_QWsHDcRQWQEs6RpkdEZrlFK8/805349704)
 [![Go Version](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](go.mod)
 [![Tests](https://github.com/workweave/router/actions/workflows/test.yml/badge.svg)](https://github.com/workweave/router/actions/workflows/test.yml)
 [![License: ELv2](https://img.shields.io/badge/License-ELv2-00BFB3.svg)](https://www.elastic.co/licensing/elastic-license)
@@ -11,7 +12,7 @@ AvengersPro-derived cluster scorer, and dispatches to Anthropic, OpenAI,
 Google Gemini, or any OpenAI-compatible endpoint (OpenRouter, vLLM,
 Together, Fireworks, etc.).
 
-#### Developed by: www.workweave.ai (the #1 engineering intelligence platform, loved by Robinhood, Posthog & Reducto)
+#### Developed by: [Weave](https://www.workweave.ai) (the #1 engineering intelligence platform, loved by Robinhood, Posthog & Reducto)
 
 ## Quick start
 
