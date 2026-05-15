@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 #
-# Weave Router installer for Claude Code.
-#
 # Configures Claude Code to permanently route through the Weave Router by
 # writing the router base URL, router auth header, and a status line into
 # Claude Code's settings.json. After running, `claude` Just Works — no shell
