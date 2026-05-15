@@ -19,7 +19,7 @@ training:
     d1: 1.0
     d2: 0.0
     d3: 0.0
-  include_routerarena_labels: "/Users/steventohme/Desktop/workweave4/router-internal/eval/results/_unsorted/routerarena_labels_full.jsonl"
+  include_routerarena_labels: "routerarena_labels_full.jsonl"
   routerarena_only: true
   exclude_prompts: null
   n_excluded_prompts: 0
