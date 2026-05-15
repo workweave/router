@@ -49,6 +49,12 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 			return nil, fmt.Errorf("set openrouter reasoning hint: %w", err)
 		}
 	}
+	if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" && gjson.GetBytes(body, "tools").Exists() {
+		body, err = applySystemReminderToBody(body, reminder)
+		if err != nil {
+			return nil, fmt.Errorf("set system reminder: %w", err)
+		}
+	}
 	return body, nil
 }
 
@@ -97,6 +103,12 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	}
 	if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
 		out["reasoning"] = reasoning
+	}
+	if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" {
+		if _, hasTools := out["tools"]; hasTools {
+			msgs, _ := out["messages"].([]any)
+			out["messages"] = injectSystemReminder(msgs, reminder)
+		}
 	}
 
 	return json.Marshal(out)
