@@ -429,6 +429,75 @@ cat > "$statusline_file" << 'STATUSLINE_EOF'
 
 set -euo pipefail
 
+# ---------- background self-refresh ----------
+#
+# Once every WEAVE_STATUSLINE_UPDATE_INTERVAL_DAYS (default 7), check
+# raw.githubusercontent.com for a newer copy of this script and swap it in
+# atomically. Runs in a forked subshell so the current Claude turn never
+# blocks; the next turn picks up the new version.
+#
+# Scope: only refreshes when the script lives under $HOME/.weave/ — i.e. a
+# user-scope install. Project-scope copies (<repo>/.claude/cc-statusline.sh)
+# are frequently committed to git, and silently rewriting them would create
+# dirty working trees for every teammate. Project installs re-pin to a
+# specific upstream version each time `npx weave-router --scope project`
+# runs, which is the intended update path for shared installs.
+#
+# Opt out entirely with `export WEAVE_STATUSLINE_UPDATE=0`. Override the
+# source with `WEAVE_STATUSLINE_URL=...`, e.g. for self-hosters who fork.
+weave_self_refresh() {
+  [ "${WEAVE_STATUSLINE_UPDATE:-1}" = "0" ] && return 0
+  command -v curl >/dev/null 2>&1 || return 0
+
+  local self="${BASH_SOURCE[0]:-$0}"
+  [ -f "$self" ] && [ -w "$self" ] || return 0
+
+  # User-scope only — see comment above.
+  case "$self" in
+    "$HOME/.weave/"*) ;;
+    *) return 0 ;;
+  esac
+
+  local interval_days="${WEAVE_STATUSLINE_UPDATE_INTERVAL_DAYS:-7}"
+  local interval_seconds=$(( interval_days * 86400 ))
+  local stamp="$HOME/.weave/.cc-statusline-checked-at"
+  local now stamp_mtime
+  now="$(date +%s 2>/dev/null)" || return 0
+  if [ -f "$stamp" ]; then
+    stamp_mtime="$(stat -f %m "$stamp" 2>/dev/null || stat -c %Y "$stamp" 2>/dev/null)" || stamp_mtime=0
+  else
+    stamp_mtime=0
+  fi
+  if [ -n "${stamp_mtime:-}" ] && [ "$stamp_mtime" -gt 0 ] \
+     && [ $(( now - stamp_mtime )) -lt "$interval_seconds" ]; then
+    return 0
+  fi
+
+  # Touch the stamp BEFORE forking so concurrent statusline invocations
+  # (Claude calls us on every turn) don't all kick off downloads.
+  : > "$stamp" 2>/dev/null || return 0
+
+  local url="${WEAVE_STATUSLINE_URL:-https://raw.githubusercontent.com/workweave/router/main/install/cc-statusline.sh}"
+  local tmp="${self}.tmp.$$"
+  (
+    # Detach stdin (CC pipes JSON to us) so curl can't accidentally consume
+    # it, and silence all output so nothing leaks into the statusline.
+    exec </dev/null
+    if curl -fsSL --max-time 15 "$url" -o "$tmp" 2>/dev/null \
+       && [ -s "$tmp" ] \
+       && head -n 1 "$tmp" | grep -q '^#!.*bash' \
+       && [ "$(wc -c < "$tmp")" -ge 1024 ]; then
+      chmod +x "$tmp" 2>/dev/null || true
+      mv "$tmp" "$self" 2>/dev/null || rm -f "$tmp"
+    else
+      rm -f "$tmp"
+    fi
+  ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  return 0
+}
+weave_self_refresh 2>/dev/null || true
+
 input="$(cat)"
 transcript_path="$(printf '%s' "$input" | jq -r '.transcript_path // empty')"
 # Prefer model.id over display_name: pricing keys + the routed model id in
