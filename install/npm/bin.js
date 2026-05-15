@@ -12,11 +12,12 @@ const uninstallIdx = args.indexOf("--uninstall");
 const isUninstall = uninstallIdx !== -1;
 if (isUninstall) args.splice(uninstallIdx, 1);
 
-const script = path.join(__dirname, isUninstall ? "uninstall.sh" : "install.sh");
+const scriptName = isUninstall ? "uninstall.sh" : "install.sh";
+const script = path.join(__dirname, scriptName);
 
 if (!existsSync(script)) {
   console.error(
-    "weave-router: install.sh missing from package — please report at https://github.com/workweave/router/issues",
+    `weave-router: ${scriptName} missing from package — please report at https://github.com/workweave/router/issues`,
   );
   process.exit(1);
 }
