@@ -58,7 +58,12 @@ weave_self_refresh() {
   local now stamp_mtime
   now="$(date +%s 2>/dev/null)" || return 0
   if [ -f "$stamp" ]; then
-    stamp_mtime="$(stat -f %m "$stamp" 2>/dev/null || stat -c %Y "$stamp" 2>/dev/null)" || stamp_mtime=0
+    # Try GNU `stat -c %Y` first; on macOS (BSD stat) -c isn't recognized
+    # and exits non-zero, so we fall through to `stat -f %m`. The reverse
+    # order is broken: GNU `stat -f` is `--file-system`, which silently
+    # succeeds with multi-line filesystem info instead of failing, leaving
+    # $stamp_mtime as garbage and disabling the rate-limit check entirely.
+    stamp_mtime="$(stat -c %Y "$stamp" 2>/dev/null || stat -f %m "$stamp" 2>/dev/null)" || stamp_mtime=0
   else
     stamp_mtime=0
   fi
