@@ -20,10 +20,7 @@
 #   npx weave-router --base-url http://localhost:8080 # self-hosted, custom port
 #   npx weave-router --non-interactive                # require WEAVE_ROUTER_KEY env var
 #   npx weave-router --quiet                          # suppress banner, ping check, and trailing tips
-#
-# To remove an existing install, run uninstall.sh (the npx wrapper exposes
-# this as `npx weave-router --uninstall`; install.sh itself doesn't accept
-# that flag because the uninstall logic lives in a sibling script).
+#   npx weave-router --uninstall                      # remove a previous install (delegates to uninstall.sh)
 
 set -euo pipefail
 
@@ -209,6 +206,49 @@ refuse_if_symlink() {
     exit 1
   fi
 }
+
+# ---------- uninstall delegation ----------
+#
+# `--uninstall` flips this script into a thin shim for uninstall.sh: the
+# canonical uninstall logic lives in a sibling file, and we want both
+# direct invocations (`./install.sh --uninstall`) and curl-piped ones
+# (`curl ... | sh -s -- --uninstall`) to behave the same as
+# `npx weave-router --uninstall` (which bin.js routes to uninstall.sh on
+# its own).
+#
+# Scan every arg, not just $1, so flag order doesn't matter; build a clean
+# list with --uninstall stripped and exec uninstall.sh with the remainder.
+#
+# Resolution order for the uninstall script:
+#   1. Sibling file next to install.sh on disk (npm tarball / git checkout).
+#   2. WEAVE_UNINSTALL_URL override (self-hosters who fork).
+#   3. Default: raw.githubusercontent.com canonical copy (curl|sh path).
+for arg in "$@"; do
+  if [ "$arg" = "--uninstall" ]; then
+    cleaned_args=()
+    for a in "$@"; do
+      [ "$a" = "--uninstall" ] || cleaned_args+=("$a")
+    done
+
+    script_path="${BASH_SOURCE[0]:-$0}"
+    if [ -f "$script_path" ]; then
+      sibling_dir="$(cd "$(dirname "$script_path")" 2>/dev/null && pwd)"
+      if [ -n "$sibling_dir" ] && [ -f "$sibling_dir/uninstall.sh" ]; then
+        exec bash "$sibling_dir/uninstall.sh" "${cleaned_args[@]+"${cleaned_args[@]}"}"
+      fi
+    fi
+
+    require_cmd curl "https://curl.se"
+    url="${WEAVE_UNINSTALL_URL:-https://raw.githubusercontent.com/workweave/router/main/install/uninstall.sh}"
+    tmp="$(mktemp -t weave-uninstall.XXXXXX)" || { err "failed to create temp file"; exit 1; }
+    if ! curl -fsSL --max-time 30 "$url" -o "$tmp" 2>/dev/null; then
+      rm -f "$tmp"
+      err "failed to fetch uninstall.sh from $url"
+      exit 1
+    fi
+    exec bash "$tmp" "${cleaned_args[@]+"${cleaned_args[@]}"}"
+  fi
+done
 
 # ---------- arg parsing ----------
 
