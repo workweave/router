@@ -8,6 +8,7 @@ var (
 	ErrInvalidPrefix = errors.New("invalid bearer key prefix")
 	ErrInvalidToken  = errors.New("invalid bearer key")
 
-	// ErrActiveKeyExists is returned when the installation already has an active key.
-	ErrActiveKeyExists = errors.New("installation already has an active api key")
+	// ErrAPIKeyNotFound is returned when a rotate/delete targets a key that is
+	// either missing or owned by a different installation.
+	ErrAPIKeyNotFound = errors.New("api key not found")
 )

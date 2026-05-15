@@ -117,15 +117,11 @@ function RouterKeysPanel() {
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [rotating, setRotating] = useState(false);
+  const [rotating, setRotating] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // hasKey is only meaningful once the list has loaded. Without the loaded
-  // gate, the "Issue a new key" form would flash on every page load even
-  // when an active key exists, implying multi-key support that the
-  // installation_id-scoped partial unique index now forbids.
   const hasKey = keys.length > 0;
 
   function load() {
@@ -145,7 +141,6 @@ function RouterKeysPanel() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (hasKey) return; // Belt-and-suspenders against a stale-render submit.
     setCreating(true);
     try {
       const res = await api.keys.issue(name.trim() || undefined);
@@ -159,21 +154,20 @@ function RouterKeysPanel() {
     }
   }
 
-  async function handleRotate() {
-    if (!hasKey) return;
+  async function handleRotate(id: string) {
     const confirmed = window.confirm(
       "Rotate this API key?\n\nThe current token will stop working immediately. A new token will be shown once.",
     );
     if (!confirmed) return;
-    setRotating(true);
+    setRotating(id);
     try {
-      const res = await api.keys.rotate();
+      const res = await api.keys.rotate(id);
       setNewToken(res.token);
       load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to rotate key");
     } finally {
-      setRotating(false);
+      setRotating(null);
     }
   }
 
@@ -228,7 +222,7 @@ function RouterKeysPanel() {
         </div>
       )}
 
-      {loaded && !hasKey && (
+      {loaded && (
         <Card>
           <Card.Header>
             <Card.Title variant="h4">Issue a new key</Card.Title>
@@ -265,7 +259,7 @@ function RouterKeysPanel() {
       {hasKey ? (
         <Card className="p-0">
           <Card.Header className="border-b border-border px-5 py-3">
-            <Card.Title variant="h4">Active router key</Card.Title>
+            <Card.Title variant="h4">Active router keys</Card.Title>
           </Card.Header>
           <Card.Content>
             <ul className="divide-y divide-border">
@@ -287,18 +281,18 @@ function RouterKeysPanel() {
                     <Button
                       appearance={Appearance.Outlined}
                       size="sm"
-                      onClick={handleRotate}
-                      disabled={rotating || deleting != null}
+                      onClick={() => handleRotate(k.id)}
+                      disabled={rotating != null || deleting != null}
                     >
                       <RotateCw className="size-3.5" />
-                      {rotating ? "Rotating…" : "Rotate"}
+                      {rotating === k.id ? "Rotating…" : "Rotate"}
                     </Button>
                     <Button
                       appearance={Appearance.Hollow}
                       intent={Intent.Danger}
                       size="icon"
                       onClick={() => handleDelete(k.id)}
-                      disabled={deleting === k.id || rotating}
+                      disabled={deleting === k.id || rotating != null}
                       title="Revoke key"
                     >
                       <Trash2 className="size-3.5" />

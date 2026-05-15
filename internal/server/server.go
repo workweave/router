@@ -77,7 +77,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		mgmt := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAdminOnly(authSvc))
 		mgmt.GET("/keys", admin.ListAPIKeysHandler(authSvc))
 		mgmt.POST("/keys", admin.IssueAPIKeyHandler(authSvc))
-		mgmt.POST("/keys/rotate", admin.RotateAPIKeyHandler(authSvc))
+		mgmt.POST("/keys/:id/rotate", admin.RotateAPIKeyHandler(authSvc))
 		mgmt.DELETE("/keys/:id", admin.DeleteAPIKeyHandler(authSvc))
 		mgmt.GET("/provider-keys", admin.ListExternalKeysHandler(authSvc))
 		mgmt.POST("/provider-keys", admin.UpsertExternalKeyHandler(authSvc))

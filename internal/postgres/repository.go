@@ -3,20 +3,12 @@ package postgres
 
 import (
 	"context"
-	"errors"
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/sqlc"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
 )
-
-// activeKeyUniqueIndex enforces one active key per installation (migration 0007).
-const activeKeyUniqueIndex = "model_router_api_keys_installation_active_unique"
-
-// uniqueViolation is Postgres SQLSTATE 23505.
-const uniqueViolation = "23505"
 
 // Repository aggregates all repositories backed by the same DBTX.
 type Repository struct {
@@ -132,10 +124,6 @@ func (r *apiKeyRepo) Create(ctx context.Context, params auth.CreateAPIKeyParams)
 		CreatedBy:      params.CreatedBy,
 	})
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == activeKeyUniqueIndex {
-			return nil, auth.ErrActiveKeyExists
-		}
 		return nil, err
 	}
 	return toAuthAPIKey(row), nil

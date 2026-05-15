@@ -126,24 +126,32 @@ func (s *Service) ListAPIKeys(ctx context.Context, installationID string) ([]*AP
 	return s.apiKeys.ListForInstallation(ctx, installationID)
 }
 
-// RotateAPIKey soft-deletes all active keys and issues a new one, carrying forward the name.
-// Not wrapped in a tx: a brief "no active key" window is acceptable because rotation's purpose
-// is to invalidate the old token anyway.
-func (s *Service) RotateAPIKey(ctx context.Context, installationID string, createdBy *string) (*APIKey, string, error) {
+// RotateAPIKey soft-deletes the named key and issues a replacement under the
+// same installation, carrying forward the previous key's name. Returns
+// ErrAPIKeyNotFound when keyID does not match an active key owned by the
+// installation, so a tenant who learns a foreign key UUID cannot rotate it.
+//
+// Not wrapped in a tx: a brief "no active key" window is acceptable because
+// rotation's purpose is to invalidate the old token anyway.
+func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string, createdBy *string) (*APIKey, string, error) {
 	existing, err := s.apiKeys.ListForInstallation(ctx, installationID)
 	if err != nil {
 		return nil, "", err
 	}
-	var name *string
+	var target *APIKey
 	for _, k := range existing {
-		if k.Name != nil && name == nil {
-			name = k.Name
-		}
-		if err := s.apiKeys.SoftDelete(ctx, k.ID); err != nil {
-			return nil, "", err
+		if k.ID == keyID {
+			target = k
+			break
 		}
 	}
-	key, raw, err := s.IssueAPIKey(ctx, installationID, name, createdBy)
+	if target == nil {
+		return nil, "", ErrAPIKeyNotFound
+	}
+	if err := s.apiKeys.SoftDelete(ctx, target.ID); err != nil {
+		return nil, "", err
+	}
+	key, raw, err := s.IssueAPIKey(ctx, installationID, target.Name, createdBy)
 	if err != nil {
 		return nil, "", err
 	}
