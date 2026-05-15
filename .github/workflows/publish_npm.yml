@@ -41,6 +41,20 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
+      # Reject tags pointing at unreviewed commits. Without this, anyone with
+      # tag-push rights could publish from a side branch and bypass main's
+      # PR-review + branch-protection rules. We require the tagged commit to
+      # be reachable from origin/main.
+      - name: Verify tag is reachable from main
+        working-directory: ${{ github.workspace }}
+        run: |
+          git fetch origin main --no-tags
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag ${GITHUB_REF#refs/tags/} (commit $GITHUB_SHA) is not reachable from origin/main. Only main-reachable tags may publish."
+            exit 1
+          fi
+          echo "Tag commit is on main, OK to publish."
+
       - name: Verify tag matches package.json version
         run: |
           tag="${GITHUB_REF#refs/tags/router-v}"
