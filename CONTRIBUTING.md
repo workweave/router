@@ -84,6 +84,35 @@ make check        # generate + build + test (CI-equivalent)
 The CI required-checks gate is `make check`, plus `git diff --quiet`
 after `make generate` (to catch uncommitted regenerated code).
 
+### Hot-reload dev loop
+
+For iterating on router code with `CompileDaemon`:
+
+```bash
+make db                                # start Postgres only (port 5433)
+echo "DATABASE_URL=postgresql://router:router@localhost:5433/router?sslmode=disable" >> .env.local
+make setup                             # init schema + migrate + seed an rk_ key
+make dev                               # run the server with hot reload
+```
+
+Prerequisites: Go 1.25+, [golang-migrate](https://github.com/golang-migrate/migrate),
+[CompileDaemon](https://github.com/githubnemo/CompileDaemon).
+
+The cluster scorer uses an ONNX embedder; on Apple Silicon you also need:
+
+```bash
+# Populate ./assets/ first — see docs/CONFIGURATION.md → Cluster-routing artifacts.
+echo "ROUTER_ONNX_ASSETS_DIR=$(pwd)/assets" >> .env.local
+echo "CGO_LDFLAGS=-L/path/to/libtokenizers" >> .env.local
+echo "ROUTER_ONNX_LIBRARY_DIR=/opt/homebrew/lib" >> .env.local
+```
+
+(`brew install onnxruntime`; `libtokenizers` from
+[daulet/tokenizers releases](https://github.com/daulet/tokenizers/releases).)
+Without these the cluster scorer fails at boot and the router refuses to
+start. The Docker path bundles all of this — Apple Silicon CGO setup only
+matters for the `make dev` flow.
+
 ### Tests
 
 - Use in-memory fakes for repos / routers / provider clients. See
