@@ -10,10 +10,10 @@ edits.
 
 ```bash
 # User scope — applies everywhere on this machine
-npx weave-router
+npx @workweave/router
 
 # Project scope — only when running `claude` inside this repo
-npx weave-router --scope project
+npx @workweave/router --scope project
 ```
 
 Prefer `curl`? The same installer is also served as a shell script:

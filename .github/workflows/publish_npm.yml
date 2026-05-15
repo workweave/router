@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# Publish the @workweave/router npm package on tag push.
+#
+# Trigger: push a tag matching `router-v*` (e.g. `router-v0.1.0`). The job
+# asserts the tag's version matches install/npm/package.json before publishing
+# — mismatched tag fails fast instead of shipping a wrong version.
+#
+# Publish auth: npm OIDC trusted publishing (no secret in the repo). Configure
+# the @workweave/router package on npmjs.com → Settings → Trusted Publishers
+# → GitHub Actions with org=workweave, repo=router, workflow=publish_npm.yml.
+name: Publish npm
+
+on:
+  push:
+    tags:
+      - "router-v*"
+
+jobs:
+  publish:
+    name: Publish @workweave/router
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for npm OIDC + provenance
+    defaults:
+      run:
+        working-directory: install/npm
+    steps:
+      # Third-party actions pinned to commit SHAs because this job has
+      # `id-token: write` and publishes to npm — a retargeted floating tag
+      # would let upstream-action compromise publish a malicious package.
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Full history so the "verify tag is reachable from main" step can
+          # walk the commit graph. The default shallow clone (depth 1) only
+          # has the tagged commit and can't prove ancestry to origin/main.
+          fetch-depth: 0
+
+      - name: Set up Node
+        # setup-node v6 is the first release with npm OIDC support
+        # (actions/setup-node#1477). v4/v5 unconditionally write
+        # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into .npmrc,
+        # which short-circuits the OIDC code path and 401s at publish.
+        uses: actions/setup-node@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Node 24 ships with npm ≥ 11.5, which is the minimum that supports
+          # OIDC trusted publishing. Node 20 (npm 10) would 401 at publish.
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      # Reject tags pointing at unreviewed commits. Without this, anyone with
+      # tag-push rights could publish from a side branch and bypass main's
+      # PR-review + branch-protection rules. We require the tagged commit to
+      # be reachable from origin/main.
+      - name: Verify tag is reachable from main
+        working-directory: ${{ github.workspace }}
+        run: |
+          git fetch origin main --no-tags
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag ${GITHUB_REF#refs/tags/} (commit $GITHUB_SHA) is not reachable from origin/main. Only main-reachable tags may publish."
+            exit 1
+          fi
+          echo "Tag commit is on main, OK to publish."
+
+      - name: Verify tag matches package.json version
+        run: |
+          tag="${GITHUB_REF#refs/tags/router-v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg_version" ]; then
+            echo "::error::Tag version ($tag) does not match package.json version ($pkg_version)"
+            exit 1
+          fi
+          echo "Publishing @workweave/router@$pkg_version"
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public

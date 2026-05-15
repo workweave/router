@@ -6,10 +6,10 @@
 # Leaves the rest of settings.json untouched.
 #
 # Usage:
-#   npx weave-router --uninstall                            # user scope
-#   npx weave-router --uninstall --scope project            # run inside the repo
-#   npx weave-router --uninstall --dir /tmp/test            # --dir alone (user scope, .weave/)
-#   npx weave-router --uninstall --scope project --dir /tmp # --dir + project scope (.claude/)
+#   npx @workweave/router --uninstall                            # user scope
+#   npx @workweave/router --uninstall --scope project            # run inside the repo
+#   npx @workweave/router --uninstall --dir /tmp/test            # --dir alone (user scope, .weave/)
+#   npx @workweave/router --uninstall --scope project --dir /tmp # --dir + project scope (.claude/)
 
 set -euo pipefail
 
