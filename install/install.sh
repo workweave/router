@@ -27,7 +27,7 @@ set -euo pipefail
 # ---------- defaults ----------
 
 # The hosted Weave Router URL. Override with --base-url for self-hosted.
-DEFAULT_BASE_URL="${WEAVE_ROUTER_URL:-https://router.weave.ai}"
+DEFAULT_BASE_URL="${WEAVE_ROUTER_URL:-https://router.workweave.ai}"
 
 
 scope="user"
