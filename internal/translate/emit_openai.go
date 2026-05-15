@@ -394,7 +394,7 @@ func applyStrictModeToParams(node any) {
 	if !ok {
 		return
 	}
-	if t, _ := m["type"].(string); t == "object" {
+	if isObjectType(m["type"]) {
 		m["additionalProperties"] = false
 		if props, ok := m["properties"].(map[string]any); ok && len(props) > 0 {
 			existing := map[string]struct{}{}
@@ -433,6 +433,25 @@ func applyStrictModeToParams(node any) {
 			}
 		}
 	}
+}
+
+// isObjectType reports whether a JSON Schema `type` value is "object", either
+// as a bare string or as part of a nullable union like ["object", "null"].
+// Optional nested objects pass through `makeNullable` before recursion, which
+// rewrites scalar `type: "object"` to a string-array, so the strict-mode pass
+// must accept both shapes or it skips invariants on those subtrees.
+func isObjectType(typ any) bool {
+	switch t := typ.(type) {
+	case string:
+		return t == "object"
+	case []any:
+		for _, v := range t {
+			if s, _ := v.(string); s == "object" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // applyStrictToolsToBody mutates the `tools` array of a serialized OpenAI body

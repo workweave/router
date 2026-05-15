@@ -140,6 +140,52 @@ func TestStrictTools_AnthropicSource_PropagatesIntoNestedObject(t *testing.T) {
 	assert.ElementsMatch(t, []any{"flag"}, required, "strict mode propagates to nested objects")
 }
 
+func TestStrictTools_AnthropicSource_OptionalNestedObjectStillTightened(t *testing.T) {
+	// Regression: makeNullable rewrites an optional nested object's `type` from
+	// the scalar "object" to ["object","null"]. A naive recursive walk that
+	// matches only scalar "object" would skip the nested object's invariants,
+	// emitting a schema that fails strict-mode validation upstream.
+	src := []byte(`{
+		"model":"claude-opus-4-7",
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[{
+			"name":"NestedOptional",
+			"description":"nested optional",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"opts":{
+						"type":"object",
+						"properties":{
+							"flag":{"type":"boolean"}
+						}
+					}
+				}
+			}
+		}],
+		"max_tokens":256
+	}`)
+	env, err := translate.ParseAnthropic(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{TargetModel: "deepseek/deepseek-v4-pro"})
+	require.NoError(t, err)
+
+	fn := firstToolFunction(t, out.Body)
+	params, _ := fn["parameters"].(map[string]any)
+	props, _ := params["properties"].(map[string]any)
+	opts, _ := props["opts"].(map[string]any)
+	require.NotNil(t, opts)
+
+	assert.ElementsMatch(t, []any{"object", "null"}, opts["type"],
+		"optional nested object must be marked nullable")
+	assert.Equal(t, false, opts["additionalProperties"],
+		"nullable nested objects still need additionalProperties:false for strict mode")
+	required, _ := opts["required"].([]any)
+	assert.ElementsMatch(t, []any{"flag"}, required,
+		"nullable nested objects still need their properties moved to required")
+}
+
 func TestStrictTools_OpenAISource_SetsStrictAndTightensSchemaForDeepSeek(t *testing.T) {
 	src := []byte(`{
 		"model":"x",
