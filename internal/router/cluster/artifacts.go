@@ -122,8 +122,8 @@ type ArtifactMetadata struct {
 
 // ArtifactCacheConfig carries per-version semantic-cache knobs.
 type ArtifactCacheConfig struct {
-	DefaultThreshold    float32           `yaml:"default_threshold,omitempty"`
-	PerClusterThreshold map[int]float32   `yaml:"per_cluster_threshold,omitempty"`
+	DefaultThreshold    float32         `yaml:"default_threshold,omitempty"`
+	PerClusterThreshold map[int]float32 `yaml:"per_cluster_threshold,omitempty"`
 }
 
 type ArtifactEmbedder struct {

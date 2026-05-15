@@ -50,8 +50,8 @@ type turnLoopResult struct {
 	RequestedTier capability.Tier
 	// TierClamped is true when the original decision violated the
 	// requested-model ceiling and was rewritten.
-	TierClamped    bool
-	PreClampModel  string
+	TierClamped   bool
+	PreClampModel string
 	// PinRole is the session-pin role used for this turn, preventing a
 	// low-tier background turn and a high-tier main turn from sharing a pin.
 	PinRole string

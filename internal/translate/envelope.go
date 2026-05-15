@@ -203,16 +203,16 @@ func (e *RequestEnvelope) RequestsTitleSchema() bool {
 // EmitOverrides describes byte-level mutations for same-format serialization.
 // Zero-valued fields are no-ops.
 type EmitOverrides struct {
-	Model         string
-	DeleteKeys    []string
-	SetMaxCompletionTokens *int64
+	Model                   string
+	DeleteKeys              []string
+	SetMaxCompletionTokens  *int64
 	ClampMaxTokensKey       string
 	ClampMaxTokensValue     int64
 	ClampMaxCompTokensValue int64
-	DefaultMaxTokensKey   string
-	DefaultMaxTokensValue int64
-	InjectStreamUsage   bool
-	StripThinkingBlocks bool
+	DefaultMaxTokensKey     string
+	DefaultMaxTokensValue   int64
+	InjectStreamUsage       bool
+	StripThinkingBlocks     bool
 }
 
 func (e *RequestEnvelope) emitSameFormat(ov EmitOverrides) ([]byte, error) {

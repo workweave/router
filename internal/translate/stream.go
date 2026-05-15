@@ -339,7 +339,7 @@ type AnthropicSSETranslator struct {
 	// closed guards against double-emission after [DONE] triggers finishStream.
 	closed   bool
 	blockIdx int
-		// textOpen avoids empty text blocks for tool-only responses.
+	// textOpen avoids empty text blocks for tool-only responses.
 	textOpen   bool
 	toolBlocks map[int]int
 
