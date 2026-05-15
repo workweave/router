@@ -1,0 +1,24 @@
+install/npm/scripts/copy-installer.js
+  s_1ada5d20f5c39b::t_2868ccdfaee171 12,22-26
+install/npm/.gitignore
+  s_1ada5d20f5c39b::t_203679379b66de 2-3,7
+install/npm/package.json
+  s_1ada5d20f5c39b::t_a885bd95f9737c 27-28
+  s_1ada5d20f5c39b::t_d1df3fb1922615 3,13-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "f2a04a990ae96bdfbeb4fa0e7bd53fd0b8ee2472",
+  "prompts": {},
+  "sessions": {
+    "s_1ada5d20f5c39b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2428335b-ad97-4311-937d-8c153b11f614",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
