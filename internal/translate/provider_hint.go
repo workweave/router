@@ -33,3 +33,12 @@ func openRouterReasoningHint(model string) map[string]any {
 	}
 	return nil
 }
+
+// openRouterForcesToolTemperatureZero reports whether tool-calling turns for
+// this model should default to temperature 0. Reserved for models whose
+// sampling jitter measurably degrades tool-arg fidelity (whitespace, unicode)
+// — DeepSeek's reasoning-disabled tool turns are the documented case.
+// Callers still skip the override when the client set temperature explicitly.
+func openRouterForcesToolTemperatureZero(model string) bool {
+	return strings.HasPrefix(model, "deepseek/")
+}
