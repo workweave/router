@@ -13,7 +13,7 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// PrepareOpenAI builds a fully-prepared OpenAI Chat Completions request.
+// PrepareOpenAI builds an OpenAI Chat Completions request body.
 func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
 	var body []byte
 	var err error

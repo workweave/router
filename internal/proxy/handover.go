@@ -22,33 +22,27 @@ import (
 )
 
 // DefaultHandoverModel is the Anthropic model used to summarize prior
-// conversation context before a mid-session model switch. Haiku-class
-// is intentional: summarization is one of the cheapest workloads
-// available and the 3s timeout is comfortable on a 1k-token output.
+// conversation before a mid-session model switch. Haiku-class is intentional:
+// summarization is one of the cheapest workloads available.
 const DefaultHandoverModel = "claude-haiku-4-5"
 
 // DefaultHandoverTimeout bounds the summarizer call so a slow upstream
-// cannot block the request path. On timeout, the orchestrator falls
-// back to TrimLastN.
+// cannot block the request path.
 const DefaultHandoverTimeout = 3 * time.Second
 
-// DefaultHandoverMaxTokens caps the synthesized summary length so it
-// can never blow up input cost on the switched-to model.
+// DefaultHandoverMaxTokens caps the synthesized summary length.
 const DefaultHandoverMaxTokens = 800
 
 // handoverInstruction is appended as a final user message to elicit the
-// summary. Kept explicit about what must be preserved so a routing
-// switch does not lose decisions, file paths, or the user's latest
-// intent.
+// summary. Kept explicit about what must be preserved so a routing switch
+// does not lose decisions, file paths, or the user's latest intent.
 const handoverInstruction = "Summarize the conversation so far in <= 800 tokens. " +
 	"Preserve all decisions, file paths, code snippets, and the user's latest intent. " +
 	"Output only the summary text — no preamble, no closing remark."
 
-// ProviderSummarizer is the default handover.Summarizer adapter. It
-// builds a small Anthropic Messages request from the inbound envelope's
-// prior conversation and invokes a providers.Client (typically the
-// Anthropic Haiku client) with a bounded timeout, returning the assistant
-// text as the summary.
+// ProviderSummarizer adapts a providers.Client to the handover.Summarizer
+// interface by building a small Anthropic Messages request from the inbound
+// envelope's prior conversation.
 type ProviderSummarizer struct {
 	client    providers.Client
 	model     string
@@ -56,9 +50,8 @@ type ProviderSummarizer struct {
 	maxTokens int
 }
 
-// NewProviderSummarizer constructs a summarizer adapter. Empty/zero
-// args fall back to DefaultHandoverModel / DefaultHandoverTimeout /
-// DefaultHandoverMaxTokens respectively.
+// NewProviderSummarizer constructs a summarizer adapter. Empty/zero args
+// fall back to defaults.
 func NewProviderSummarizer(client providers.Client, model string, timeout time.Duration) *ProviderSummarizer {
 	if model == "" {
 		model = DefaultHandoverModel
@@ -84,18 +77,12 @@ func (s *ProviderSummarizer) WithMaxTokens(n int) *ProviderSummarizer {
 }
 
 // ErrEmptySummary is returned when the upstream call succeeded but no
-// assistant text was extractable from the response (truncated, refused,
-// or unrecognized response shape).
+// assistant text was extractable.
 var ErrEmptySummary = errors.New("handover: upstream returned no summary text")
 
-// Summarize implements handover.Summarizer. It builds an Anthropic
-// Messages call from env's prior conversation, dispatches it through
-// the configured providers.Client under a hard timeout, and returns
-// the assistant text.
-//
-// Failure cases (timeout, network error, upstream non-2xx, empty
-// response) return ("", err) so the caller can fall back to
-// handover.TrimLastN.
+// Summarize implements handover.Summarizer. Builds an Anthropic Messages call,
+// dispatches through the configured client under a hard timeout. On failure
+// returns ("", err) so the caller can fall back to handover.TrimLastN.
 func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.RequestEnvelope) (string, error) {
 	log := observability.Get()
 	if env == nil {
@@ -116,7 +103,6 @@ func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.Reque
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	req.Header.Set("content-type", "application/json")
-	// Force non-streaming response by NOT setting accept: text/event-stream.
 
 	prep := providers.PreparedRequest{
 		Body:    body,
@@ -158,12 +144,8 @@ func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.Reque
 }
 
 // buildHandoverRequestBody constructs a non-streaming Anthropic Messages
-// request body from the inbound envelope's prior conversation plus a
-// final user instruction asking for a summary. Format-aware: for
-// Anthropic ingress we reuse messages/system as-is; for OpenAI/Gemini
-// ingress we go through translate's existing cross-format builder by
-// preparing an Anthropic body and then injecting our instruction +
-// override model/max_tokens/stream.
+// request from the inbound envelope's prior conversation, injecting a
+// summary instruction and overriding model/max_tokens/stream.
 func buildHandoverRequestBody(env *translate.RequestEnvelope, model string, maxTokens int) ([]byte, error) {
 	prep, err := env.PrepareAnthropic(nil, translate.EmitOptions{TargetModel: model})
 	if err != nil {
@@ -189,8 +171,6 @@ func buildHandoverRequestBody(env *translate.RequestEnvelope, model string, maxT
 		return nil, fmt.Errorf("append instruction: %w", err)
 	}
 
-	// Drop fields that would only complicate the summary call. Tools and
-	// thinking are not relevant for a summarize-and-return workload.
 	for _, key := range []string{"tools", "tool_choice", "thinking", "context_management", "effort", "output_config", "metadata"} {
 		body, _ = sjson.DeleteBytes(body, key)
 	}
@@ -198,8 +178,7 @@ func buildHandoverRequestBody(env *translate.RequestEnvelope, model string, maxT
 	return body, nil
 }
 
-// appendUserInstruction appends a role=user text message to the
-// messages array. Returns the new body.
+// appendUserInstruction appends a role=user text message to the messages array.
 func appendUserInstruction(body []byte, text string) ([]byte, error) {
 	msg := map[string]any{
 		"role": "user",
@@ -214,12 +193,8 @@ func appendUserInstruction(body []byte, text string) ([]byte, error) {
 	return sjson.SetRawBytes(body, "messages.-1", raw)
 }
 
-// extractAnthropicAssistantText pulls the concatenated text from an
-// Anthropic Messages non-streaming response. The shape is:
-//
-//	{ "content": [ {"type":"text", "text": "..."}, ... ], ... }
-//
-// All text blocks are joined with newlines.
+// extractAnthropicAssistantText pulls concatenated text from an Anthropic
+// Messages non-streaming response. All text blocks are joined with newlines.
 func extractAnthropicAssistantText(body []byte) string {
 	if !gjson.ValidBytes(body) {
 		return ""
@@ -246,5 +221,4 @@ func extractAnthropicAssistantText(body []byte) string {
 	return out.String()
 }
 
-// Compile-time check: ProviderSummarizer satisfies handover.Summarizer.
 var _ handover.Summarizer = (*ProviderSummarizer)(nil)

@@ -13,21 +13,18 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 )
 
-// ErrUnknownModel is returned by SetInstallationExcludedModels when a
-// requested model ID is not in the allowed set the caller passed in.
+// ErrUnknownModel is returned when a requested model ID is not in the caller-supplied allowed set.
 var ErrUnknownModel = errors.New("auth: unknown model id")
 
 type Clock func() time.Time
 
-// InstallationChangeNotifier publishes per-installation invalidation events so
-// peer replicas can drop their cached entries. Fire-and-forget: implementations
-// should not block the caller; transport errors are logged, not returned.
+// InstallationChangeNotifier fans out installation-change events to peer replicas.
+// Fire-and-forget: implementations must not block the caller.
 type InstallationChangeNotifier interface {
 	NotifyInstallationChanged(installationID string)
 }
 
-// NoOpInstallationChangeNotifier is the Null Object used when no cross-replica
-// fanout is configured (e.g. local dev, single-replica deployments).
+// NoOpInstallationChangeNotifier is the Null Object when no cross-replica fanout is configured.
 type NoOpInstallationChangeNotifier struct{}
 
 // NotifyInstallationChanged is a no-op.
@@ -45,11 +42,11 @@ type Service struct {
 	now           Clock
 	encryptor     Encryptor
 
-	// Admin dashboard auth: shared password (ROUTER_ADMIN_PASSWORD) plus derived HMAC key for session cookies. Empty when admin login is disabled.
+	// adminPassword and adminSessionKey are empty when admin login is disabled.
 	adminPassword   string
 	adminSessionKey []byte
 
-	// adminLoginFailures throttles per-IP brute-force attempts; lazy-init in WithAdminPassword guarded by adminLoginMu.
+	// adminLoginFailures throttles per-IP brute-force login attempts.
 	adminLoginFailures *expirable.LRU[string, int]
 	adminLoginMu       sync.Mutex
 }
@@ -79,14 +76,12 @@ func NewService(
 	}
 }
 
-// WithEncryptor sets the encryptor used when creating external API keys.
 func (s *Service) WithEncryptor(e Encryptor) *Service {
 	s.encryptor = e
 	return s
 }
 
-// WithInstallationChangeNotifier wires a cross-replica fanout so cached entries
-// on peer replicas are dropped when settings change. Pass nil to disable.
+// WithInstallationChangeNotifier wires a cross-replica fanout. Pass nil to disable.
 func (s *Service) WithInstallationChangeNotifier(n InstallationChangeNotifier) *Service {
 	if n == nil {
 		s.notifier = NoOpInstallationChangeNotifier{}
@@ -106,7 +101,7 @@ func (s *Service) invalidateInstallation(installationID string) {
 	s.notifier.NotifyInstallationChanged(installationID)
 }
 
-// IssueAPIKey creates a new router API key and returns the raw token (only visible here; not stored in plaintext).
+// IssueAPIKey creates a new router API key and returns the raw token.
 func (s *Service) IssueAPIKey(ctx context.Context, installationID string, name *string, createdBy *string) (*APIKey, string, error) {
 	rawToken := GenerateID(APIKeyPrefix)
 	keyHash, keyPrefix, keySuffix := APITokenFingerprint(rawToken)
@@ -131,11 +126,9 @@ func (s *Service) ListAPIKeys(ctx context.Context, installationID string) ([]*AP
 	return s.apiKeys.ListForInstallation(ctx, installationID)
 }
 
-// RotateAPIKey soft-deletes the active key and issues a new one, carrying forward its name.
-//
-// Not wrapped in a tx: the brief "no active key" window is acceptable because (a) the partial unique
-// index on (installation_id) WHERE deleted_at IS NULL prevents collision, and (b) rotation's purpose
-// is to invalidate the old token, so a concurrent auth failure against it is expected.
+// RotateAPIKey soft-deletes all active keys and issues a new one, carrying forward the name.
+// Not wrapped in a tx: a brief "no active key" window is acceptable because rotation's purpose
+// is to invalidate the old token anyway.
 func (s *Service) RotateAPIKey(ctx context.Context, installationID string, createdBy *string) (*APIKey, string, error) {
 	existing, err := s.apiKeys.ListForInstallation(ctx, installationID)
 	if err != nil {
@@ -158,7 +151,7 @@ func (s *Service) RotateAPIKey(ctx context.Context, installationID string, creat
 	return key, raw, nil
 }
 
-// DeleteAPIKey soft-deletes an API key. The LRU entry TTL-expires; in-flight requests within the TTL window still succeed, acceptable for this rare path.
+// DeleteAPIKey soft-deletes an API key.
 func (s *Service) DeleteAPIKey(ctx context.Context, id string) error {
 	return s.apiKeys.SoftDelete(ctx, id)
 }
@@ -168,9 +161,9 @@ func (s *Service) ListExternalAPIKeys(ctx context.Context, installationID string
 	return s.externalKeys.GetForInstallation(ctx, installationID)
 }
 
-// UpsertExternalAPIKey replaces any existing key for the provider and inserts a new one. Raw key is encrypted before storage.
+// UpsertExternalAPIKey replaces any existing key for the provider and inserts a new one.
 func (s *Service) UpsertExternalAPIKey(ctx context.Context, installationID, provider, rawKey string, name *string, createdBy *string) (*ExternalAPIKey, error) {
-	// Generate external ID first so it binds into the ciphertext as AAD; decrypt re-derives AAD from (external_id, provider) on every read.
+	// Generate external ID first so it binds into the ciphertext as AAD.
 	externalID := GenerateID("ekid")
 	ciphertext, err := s.encryptor.Encrypt([]byte(rawKey), externalID, provider)
 	if err != nil {
@@ -207,16 +200,8 @@ func (s *Service) DeleteExternalAPIKey(ctx context.Context, installationID, id s
 	return nil
 }
 
-// SetInstallationExcludedModels replaces the per-installation model exclusion
-// list, scoped to externalID to prevent cross-tenant updates. allowed is the
-// universe of valid model IDs the caller is willing to accept (typically
-// every deployed model); passing nil skips validation. Returns
-// ErrUnknownModel when an entry in models is not in allowed.
-//
-// The new list is visible on the next authenticated request: the API-key
-// cache is explicitly invalidated for this installation on commit, with the
-// TTL acting as the safety net across replicas that miss the invalidation
-// signal.
+// SetInstallationExcludedModels replaces the per-installation model exclusion list.
+// allowed is the set of valid model IDs; passing nil skips validation.
 func (s *Service) SetInstallationExcludedModels(ctx context.Context, externalID, installationID string, models []string, allowed map[string]struct{}) ([]string, error) {
 	if models == nil {
 		models = []string{}
@@ -245,12 +230,9 @@ func (s *Service) SetInstallationExcludedModels(ctx context.Context, externalID,
 	return out, nil
 }
 
-// VerifyAPIKey authenticates a raw bearer token.
-//
-// Returns ErrInvalidPrefix/ErrInvalidToken for unauthenticated cases; repo transport errors propagate
-// as-is so they aren't masked as 401s. Reads through s.cache: ErrNoRows populates a negative entry
-// (defends against credential-stuffing); transport errors are not cached so the next request can retry.
-// Returned ExternalAPIKey slice has Plaintext populated; nil when none exist or s.externalKeys is nil.
+// VerifyAPIKey authenticates a raw bearer token against the API key cache then Postgres.
+// Returns ErrInvalidPrefix/ErrInvalidToken for unauthenticated cases.
+// Returned ExternalAPIKey slice has Plaintext populated; nil when none exist.
 func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installation, *APIKey, []*ExternalAPIKey, error) {
 	if !HasAPIKeyPrefix(rawToken) {
 		return nil, nil, nil, ErrInvalidPrefix
@@ -292,16 +274,10 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 	return installation, apiKey, externalKeys, nil
 }
 
-// ResolveAndStashUser upserts a router user and stashes the resolved ID on ctx via UserIDContextKey.
-//
-// Email takes precedence: (installationID, email) keys the row and account_uuid enriches it.
-// When email is empty but claudeAccountUUID is present (Claude CLI v2.1.x packs only
-// account_uuid+device_id+session_id into metadata.user_id), the row is keyed on
-// (installationID, claude_account_uuid) with NULL email so per-seat attribution still works.
-//
-// Best-effort: returns the original ctx unchanged on no signal or upsert failure — must never fail an authenticated request.
-// Reads through s.userCache; last_seen_at lags by up to the cache TTL.
-// Callers must normalize email (lowercase, trim). claudeAccountUUID is optional.
+// ResolveAndStashUser upserts a router user and stashes the ID on ctx.
+// Email takes precedence as the lookup key. When only claudeAccountUUID is present,
+// the row is keyed on account_uuid with NULL email.
+// Best-effort: returns ctx unchanged on failure — must never fail an authenticated request.
 func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email, claudeAccountUUID string) context.Context {
 	log := observability.Get()
 	if s.users == nil || installationID == "" {
@@ -351,8 +327,6 @@ func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email
 	return context.WithValue(ctx, UserIDContextKey{}, user.ID)
 }
 
-// userIdentityKey produces a stable cache key. Email-bearing and account-only rows live in disjoint
-// key spaces so a later request that finally carries email doesn't false-hit the account-only entry.
 func userIdentityKey(email, claudeAccountUUID string) string {
 	if email != "" {
 		return "email:" + email

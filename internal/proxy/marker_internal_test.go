@@ -132,9 +132,6 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 			},
 		},
 		{
-			// Tool-result follow-ups are suppressed entirely — every
-			// post-tool turn would otherwise re-emit "Weave Router → …"
-			// mid-stream without conveying new routing info.
 			name: "tool-result short-circuit: marker suppressed",
 			res: turnLoopResult{
 				Decision:  decision,

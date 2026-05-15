@@ -1,8 +1,7 @@
-// Package capability assigns a coarse Low/Mid/High tier to each
-// deployed model so the planner can overturn a cost-driven "stay" when
-// the scorer recommends a strictly stronger model. Hand-maintained on
-// purpose — deriving tiers from price would silently move models on
-// every pricing change.
+// Package capability assigns Low/Mid/High tiers to deployed models so the
+// planner can overturn cost-driven stays when the scorer recommends a
+// strictly stronger model. Hand-maintained — deriving from price would
+// silently move models on every pricing change.
 package capability
 
 import (
@@ -16,10 +15,7 @@ import (
 type Tier int
 
 const (
-	// TierUnknown is the zero value for models absent from the table.
-	// Per-request it disables the tier guard; Validate fails loud at
-	// boot so a missing entry can't silently bypass it.
-	TierUnknown Tier = iota
+	TierUnknown Tier = iota // Zero value; absent from table. Validate catches at boot.
 	TierLow
 	TierMid
 	TierHigh
@@ -39,9 +35,7 @@ func (t Tier) String() string {
 	}
 }
 
-// tiers keys must match deployed model names in
-// internal/router/cluster/artifacts/<version>/model_registry.json
-// verbatim; Validate enforces this at boot.
+// tiers must match model_registry.json verbatim; Validate enforces at boot.
 var tiers = map[string]Tier{
 	// --- Low ---
 	"claude-haiku-4-5":                 TierLow,
@@ -80,10 +74,8 @@ var tiers = map[string]Tier{
 	"deepseek/deepseek-v4-pro": TierHigh,
 }
 
-// TierFor returns the model's tier, or TierUnknown if absent. Anthropic
-// model identifiers carry a "-YYYYMMDD" date suffix (e.g.
-// "claude-haiku-4-5-20251001") that the table doesn't enumerate; we
-// strip an 8-digit suffix before retrying so dated variants resolve.
+// TierFor returns the model's tier, or TierUnknown if absent. Strips an
+// 8-digit date suffix before retrying so dated variants resolve.
 func TierFor(model string) Tier {
 	if t, ok := tiers[model]; ok {
 		return t
@@ -97,8 +89,6 @@ func TierFor(model string) Tier {
 }
 
 // stripDateSuffix removes a trailing "-XXXXXXXX" (hyphen + 8 digits).
-// Mirror of pricing.stripDateSuffix; kept local so capability doesn't
-// import pricing.
 func stripDateSuffix(model string) string {
 	if len(model) < 10 {
 		return model
@@ -115,10 +105,9 @@ func stripDateSuffix(model string) string {
 	return model[:len(model)-9]
 }
 
-// IsAtOrBelow reports whether the given model's tier is known and at or
-// below the ceiling. Unknown-tier models return false so the tier-ceiling
-// guard fails closed — Validate already catches missing entries at boot,
-// so any TierUnknown at request time means the table is out of sync.
+// IsAtOrBelow reports whether the model's tier is known and at or below
+// the ceiling. Unknown-tier models return false — Validate catches missing
+// entries at boot.
 func IsAtOrBelow(model string, ceiling Tier) bool {
 	t := TierFor(model)
 	if t == TierUnknown {

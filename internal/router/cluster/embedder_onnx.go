@@ -14,25 +14,19 @@ import (
 	"github.com/knights-analytics/hugot/pipelines"
 )
 
-// model.onnx and tokenizer.json are paired (tokenizer must match the
-// model it was trained against); versioned together on HF Hub.
+// model.onnx and tokenizer.json are versioned together on HF Hub.
 // Override with ROUTER_ONNX_ASSETS_DIR for local dev.
 const defaultAssetsDir = "/opt/router/assets"
 
-// minModelSizeBytes is a sanity floor catching an unpopulated HF
-// download or placeholder. Real INT8-quantized jina-v2-base-code is
-// ~160 MB; failing loudly at boot beats silently miscalibrating.
-const minModelSizeBytes = 1 << 20 // 1 MiB
+// minModelSizeBytes catches unpopulated HF downloads or placeholders.
+// Real INT8-quantized jina-v2-base-code is ~160 MB.
+const minModelSizeBytes = 1 << 20
 
 // onnxEmbedder is the production Embedder. Owns one hugot session and
-// pipeline; both goroutine-safe so one instance is shared across all
-// requests. hugot handles tokenization, ONNX inference, mean pooling,
-// and L2 normalization.
+// pipeline; both goroutine-safe so one instance serves all requests.
 type onnxEmbedder struct {
-	session  *hugot.Session
-	pipeline *pipelines.FeatureExtractionPipeline
-
-	// closeOnce guards against double-close from tests/shutdown hooks.
+	session   *hugot.Session
+	pipeline  *pipelines.FeatureExtractionPipeline
 	closeOnce sync.Once
 }
 
@@ -45,8 +39,7 @@ func resolveAssetsDir() string {
 }
 
 // NewEmbedder reads model.onnx and tokenizer.json from disk and
-// constructs the shared session + pipeline. Callers must Close on
-// shutdown to release the ORT session.
+// constructs the shared session + pipeline.
 func NewEmbedder() (*onnxEmbedder, error) {
 	assetsDir := resolveAssetsDir()
 	modelPath := filepath.Join(assetsDir, "model.onnx")
@@ -63,10 +56,8 @@ func NewEmbedder() (*onnxEmbedder, error) {
 		return nil, fmt.Errorf("cluster: stat tokenizer.json at %s: %w", tokenizerPath, err)
 	}
 
-	// hugot defaults to /usr/lib (Linux) / /usr/local/lib (macOS).
-	// macOS brew installs to /opt/homebrew/lib — not the default — so
-	// ROUTER_ONNX_LIBRARY_DIR is the dev escape hatch (hugot v0.7.0
-	// takes a *directory*, not a file).
+	// hugot defaults to /usr/lib (Linux) / /usr/local/lib (macOS);
+	// ROUTER_ONNX_LIBRARY_DIR overrides (macOS brew → /opt/homebrew/lib).
 	var sessOpts []options.WithOption
 	if dir := os.Getenv("ROUTER_ONNX_LIBRARY_DIR"); dir != "" {
 		sessOpts = append(sessOpts, options.WithOnnxLibraryPath(dir))
@@ -80,11 +71,7 @@ func NewEmbedder() (*onnxEmbedder, error) {
 		ModelPath:    assetsDir,
 		Name:         "weave-router-jina-v2",
 		OnnxFilename: "model.onnx",
-		Options: []hugot.FeatureExtractionOption{
-			// jina-embeddings-v2-base-code is trained with mean pooling +
-			// L2 normalization; hard-pin to match.
-			pipelines.WithNormalization(),
-		},
+		Options:      []hugot.FeatureExtractionOption{pipelines.WithNormalization()},
 	}
 	pipeline, err := hugot.NewPipeline(session, pipelineCfg)
 	if err != nil {
@@ -98,7 +85,7 @@ func NewEmbedder() (*onnxEmbedder, error) {
 	}, nil
 }
 
-// Embed runs the pipeline on a single text. ctx is ignored — hugot
+// Embed runs the pipeline on a single text. ctx is ignored because hugot
 // v0.7.0's RunPipeline doesn't accept one; scorer.Route races this call
 // against context.WithTimeout in a goroutine instead.
 func (e *onnxEmbedder) Embed(_ context.Context, text string) ([]float32, error) {

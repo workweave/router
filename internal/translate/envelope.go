@@ -14,14 +14,9 @@ import (
 )
 
 // INVARIANTS:
-//   - e.body is immutable — set once at parse, never modified. Callers must
-//     not mutate it; the slice is shared across all same-format emit calls.
-//   - Same-format emit uses byte-level gjson/sjson overrides on e.body — no
-//     cloning or json.Marshal.
-//   - Cross-format emit pulls fields from e.ensureSrc() into a new map; the
-//     Unmarshal is deferred until the first cross-format call.
-//   - Field accessors and RoutingFeatures use gjson directly on e.body —
-//     zero allocations, no Unmarshal required.
+//   - e.body is immutable after parse. Same-format emit uses gjson/sjson overrides
+//     on e.body with no cloning. Cross-format emit unmarshals into e.src once.
+//   - Field accessors use gjson directly on e.body.
 
 // ErrNotJSONObject is returned when the request body is not a valid JSON object.
 var ErrNotJSONObject = errors.New("request body must be a JSON object")
@@ -42,10 +37,9 @@ type EmitOptions struct {
 }
 
 // RequestEnvelope wraps a parsed request body regardless of wire format.
-// Use Prepare* to emit target-format bytes; accessors and RoutingFeatures
-// read fields.
+// Use Prepare* to emit target-format bytes; accessors read fields.
 type RequestEnvelope struct {
-	body   []byte         // immutable raw request bytes
+	body   []byte
 	src    map[string]any // lazily populated for cross-format emit
 	format Format
 }
@@ -86,9 +80,7 @@ func validateJSONObject(body []byte) error {
 	return nil
 }
 
-// ensureSrc lazily unmarshals e.body into e.src on first call. Returns an
-// error when encoding/json rejects input that gjson accepted (e.g. nesting
-// beyond encoding/json's 500-level limit).
+// ensureSrc lazily unmarshals e.body into e.src on first call.
 func (e *RequestEnvelope) ensureSrc() (map[string]any, error) {
 	if e.src == nil {
 		if err := json.Unmarshal(e.body, &e.src); err != nil {
@@ -100,11 +92,8 @@ func (e *RequestEnvelope) ensureSrc() (map[string]any, error) {
 
 func (e *RequestEnvelope) SourceFormat() Format { return e.format }
 
-// Stream reports whether the request has "stream": true. Accepts JSON booleans
-// and string values but rejects numeric coercion. For Gemini ingress the
-// streaming choice lives in the URL path (:generateContent vs
-// :streamGenerateContent); the Gemini handler injects a synthetic top-level
-// "stream": true into the body before parsing.
+// Stream reports whether the request has "stream": true. Rejects numeric coercion.
+// For Gemini ingress, the handler injects a synthetic "stream": true.
 func (e *RequestEnvelope) Stream() bool {
 	r := gjson.GetBytes(e.body, "stream")
 	if r.Type == gjson.Number {
@@ -118,14 +107,12 @@ func (e *RequestEnvelope) Model() string {
 	return gjson.GetBytes(e.body, "model").String()
 }
 
-// MetadataUserID returns the raw metadata.user_id string. Claude Code packs a
-// JSON-encoded object here containing device_id, account_uuid, and session_id.
+// MetadataUserID returns the raw metadata.user_id string.
 func (e *RequestEnvelope) MetadataUserID() string {
 	return gjson.GetBytes(e.body, "metadata.user_id").String()
 }
 
 // SystemText returns the concatenated system-prompt text format-neutrally.
-// OpenAI may carry multiple system-role messages; all are concatenated.
 func (e *RequestEnvelope) SystemText() string {
 	switch e.format {
 	case FormatAnthropic:
@@ -139,8 +126,7 @@ func (e *RequestEnvelope) SystemText() string {
 	}
 }
 
-// LastUserMessageInfo summarizes the trailing user-side input. Both flags can
-// be true at once (mixed turn).
+// LastUserMessageInfo summarizes the trailing user-side input.
 type LastUserMessageInfo struct {
 	HasText         bool
 	HasToolResult   bool
@@ -148,8 +134,7 @@ type LastUserMessageInfo struct {
 	Text            string
 }
 
-// LastUserMessage returns format-neutral information about the last user-side
-// input. Used by turn-type detection.
+// LastUserMessage returns format-neutral information about the last user input.
 func (e *RequestEnvelope) LastUserMessage() LastUserMessageInfo {
 	switch e.format {
 	case FormatAnthropic:
@@ -193,24 +178,9 @@ func (e *RequestEnvelope) HasTools() bool {
 	return r.Int() > 0
 }
 
-// RequestsTitleSchema reports whether the request asks the model to
-// emit a JSON-schema-shaped response with a top-level string "title"
-// property. Structural signal used by turn-type classification to
-// identify Claude Code's sidebar-title generation call without content
-// matching on the system prompt.
-//
-// Anthropic: output_config.format.{type:"json_schema", schema:{...}}
-// OpenAI:    response_format.{type:"json_schema",
-//
-//	json_schema:{schema:{...}}}
-//
-// Gemini:    no structured-title equivalent today — returns false.
-//
-// Detection requires both (a) the JSON-schema format declaration and
-// (b) a schema declaring `properties.title.type == "string"`. The
-// combined shape is specific to a fixed-output title generator; a
-// general-purpose structured-output call with a different schema does
-// not match.
+// RequestsTitleSchema reports whether the request asks for a JSON-schema response
+// with a top-level string "title" property. Used to identify Claude Code's
+// sidebar-title generation call without content-matching the system prompt.
 func (e *RequestEnvelope) RequestsTitleSchema() bool {
 	switch e.format {
 	case FormatAnthropic:
@@ -233,24 +203,16 @@ func (e *RequestEnvelope) RequestsTitleSchema() bool {
 // EmitOverrides describes byte-level mutations for same-format serialization.
 // Zero-valued fields are no-ops.
 type EmitOverrides struct {
-	Model string
-
-	DeleteKeys []string
-
-	SetMaxCompletionTokens *int64
-
+	Model                   string
+	DeleteKeys              []string
+	SetMaxCompletionTokens  *int64
 	ClampMaxTokensKey       string
 	ClampMaxTokensValue     int64
 	ClampMaxCompTokensValue int64
-
-	// DefaultMaxTokensKey / DefaultMaxTokensValue inject the named field only
-	// when absent. Anthropic Messages requires max_tokens; downstream
-	// routing/cost accounting also benefits from a deterministic value.
-	DefaultMaxTokensKey   string
-	DefaultMaxTokensValue int64
-
-	InjectStreamUsage   bool
-	StripThinkingBlocks bool
+	DefaultMaxTokensKey     string
+	DefaultMaxTokensValue   int64
+	InjectStreamUsage       bool
+	StripThinkingBlocks     bool
 }
 
 func (e *RequestEnvelope) emitSameFormat(ov EmitOverrides) ([]byte, error) {
@@ -333,9 +295,7 @@ func clampFieldBytes(body []byte, key string, maxVal int64) []byte {
 }
 
 // stripThinkingBlocksBytes removes thinking/redacted_thinking blocks from
-// messages[*].content[*]. Uses two-phase reconstruction to guarantee O(B)
-// total work — a per-block sjson.DeleteBytes approach would be O(N*B) and
-// a DoS vector when N is large (~300K blocks in 10 MB).
+// messages[*].content[*]. Uses two-phase reconstruction for O(B) work.
 func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.Exists() || !messages.IsArray() {
@@ -400,10 +360,8 @@ func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
 	return sjson.SetRawBytes(body, "messages", []byte(newMessagesArray))
 }
 
-// encodeJSONStringNoHTMLEscape returns the JSON encoding of s without
-// HTML-escaping `<`, `>`, or `&`. Preserves whatever escaping the client
-// originally chose so that re-emitted message text matches the input byte
-// pattern as closely as possible (relevant for upstream prompt-cache keys).
+// encodeJSONStringNoHTMLEscape marshals s without HTML-escaping <, >, or &.
+// Preserves the client's original escaping for upstream prompt-cache keys.
 func encodeJSONStringNoHTMLEscape(s string) ([]byte, error) {
 	var buf strings.Builder
 	enc := json.NewEncoder(&buf)
@@ -416,20 +374,13 @@ func encodeJSONStringNoHTMLEscape(s string) ([]byte, error) {
 	return []byte(strings.TrimSuffix(out, "\n")), nil
 }
 
-// routingMarkerPattern matches the upfront "✦ **Weave Router** → ..." snippet
-// that AnthropicSSETranslator emits as a standalone text block on cross-format
-// responses. Single-line, terminated by the literal "\n\n" appended in
-// routingMarkerFor; the body between prefix and terminator is opaque (varies
-// with model, provider, planner reason, and clamp note).
+// routingMarkerPattern matches the "✦ **Weave Router** → ..." snippet
+// injected in cross-format responses.
 var routingMarkerPattern = regexp.MustCompile(`✦ \*\*Weave Router\*\* → [^\n]*\n\n`)
 
 // StripRoutingMarkerFromMessages removes the routing-marker snippet from every
-// text block in messages[*].content[*]. The marker is injected on outbound
-// cross-format responses (see internal/translate/stream.go) and round-trips
-// through clients that preserve assistant content verbatim; stripping on
-// ingress keeps it out of upstream context and stabilizes the assistant
-// prefix for prompt-cache reuse. Mirrors stripThinkingBlocksBytes' two-phase
-// O(B) reconstruction.
+// text block in messages[*].content[*]. Stripping on ingress keeps it out of
+// upstream context and stabilizes assistant prefixes for prompt-cache reuse.
 func StripRoutingMarkerFromMessages(body []byte) ([]byte, error) {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.Exists() || !messages.IsArray() {

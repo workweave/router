@@ -1,9 +1,6 @@
 // Package sessionpin defines the inner-ring contract for session-sticky
-// routing pins. Pure types + interface; adapters live in
-// internal/postgres so the proxy service can be tested without a DB.
-//
-// Stage 1 ships the schema as role-keyed but always emits role="default";
-// role-conditioned pinning waits on the turn-type detector.
+// routing pins. Pure types + interface; the Postgres adapter lives in
+// internal/postgres.
 package sessionpin
 
 import (
@@ -13,9 +10,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// SessionKeyLen is the sha256-truncated session key length. 16 bytes
-// makes collisions astronomically rare at per-(api-key, session)
-// granularity and mirrors routing_observations.prompt_prefix_hash.
+// SessionKeyLen is the sha256-truncated session key length. 16 bytes makes
+// collisions astronomically rare at per-(api-key, session) granularity.
 const SessionKeyLen = 16
 
 // DefaultRole is the only role emitted in Stage 1; column exists so the
@@ -25,13 +21,10 @@ const DefaultRole = "default"
 // Pin is one row in the session-pin table. Mirrors a routing decision
 // so a hit can rehydrate router.Decision without re-running the scorer.
 //
-// The Last*Tokens / LastTurnEndedAt fields record the previous turn's
-// upstream token usage; the Prism-style planner reads them to compute
-// the expected-value math for switching providers vs. retaining the
-// existing prompt cache. They are written by Store.UpdateUsage after a
-// turn completes and are deliberately left untouched by Upsert so the
-// at-start-of-turn refresh cannot clobber them with zeros.
-// LastTurnEndedAt's zero value means "no turn has completed yet".
+// Last*Tokens / LastTurnEndedAt record the previous turn's upstream usage
+// and are written by Store.UpdateUsage after a turn completes. They are
+// deliberately left untouched by Upsert so an at-start-of-turn refresh
+// cannot clobber them with zeros.
 type Pin struct {
 	SessionKey            [SessionKeyLen]byte
 	Role                  string
@@ -50,9 +43,7 @@ type Pin struct {
 	LastTurnEndedAt       time.Time
 }
 
-// Usage captures the previous turn's upstream token accounting. It is
-// the input to Store.UpdateUsage; the planner reads it back through
-// Store.Get on the next turn to weigh switch EV against eviction cost.
+// Usage captures the previous turn's upstream token accounting.
 type Usage struct {
 	InputTokens       int
 	CachedReadTokens  int
@@ -61,10 +52,9 @@ type Usage struct {
 	EndedAt           time.Time
 }
 
-// Store is the I/O surface for session pins. Get returns (zero, false,
-// nil) when no row exists (no error). UpdateUsage is a no-op (returns
-// nil) when the pin has been evicted or never existed; callers fire it
-// off the request path so a missing row must not surface as an error.
+// Store is the I/O surface for session pins. Get returns (zero, false, nil)
+// when no row exists. UpdateUsage is a no-op when the pin has been evicted
+// or never existed.
 type Store interface {
 	Get(ctx context.Context, sessionKey [SessionKeyLen]byte, role string) (Pin, bool, error)
 	Upsert(ctx context.Context, p Pin) error

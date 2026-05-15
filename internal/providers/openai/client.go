@@ -43,7 +43,6 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		return fmt.Errorf("build upstream request: %w", err)
 	}
 	upstream.Header.Set("Content-Type", "application/json")
-	// BYOK credentials take precedence over the deployment-level API key.
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
 	} else if c.apiKey != "" {
@@ -78,9 +77,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	w.WriteHeader(resp.StatusCode)
 	status := resp.StatusCode
 
-	// Per-chunk diagnostics (first-byte preview, EOF, write/read errors) require
-	// a manual streaming loop instead of httputil.StreamBody. Skip it when debug
-	// is off so info-level deployments keep the fast path.
+	// Manual stream loop for per-chunk diagnostics; non-debug takes the fast path.
 	if !log.Enabled(ctx, slog.LevelDebug) {
 		return httputil.StreamBody(resp.Body, status, w, t)
 	}
@@ -142,7 +139,6 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		upstream.Header.Set("Content-Type", ct)
 	}
-	// BYOK credentials take precedence over the deployment-level API key.
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
 	} else if c.apiKey != "" {

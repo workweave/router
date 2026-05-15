@@ -8,20 +8,19 @@ import (
 )
 
 // observationContext bundles per-request routing values shared by the OTel
-// span and the telemetry row. Zero values for non-cluster decisions; the
-// telemetry adapter maps them to NULL columns.
+// span and telemetry row.
 type observationContext struct {
 	// ClusterIDs is the top-p cluster set, widened to int32 for SQLC's INT[].
 	ClusterIDs []int32
 	// CandidateModels mirrors the scorer's eligible argmax set.
 	CandidateModels []string
-	// ChosenScore is the argmax score. Pointer so a literal 0.0 stays distinct
-	// from "not a cluster decision".
+	// ChosenScore is the argmax score. Pointer so 0.0 stays distinct from
+	// "not a cluster decision".
 	ChosenScore *float64
 	// ClusterRouterVersion is the artifact version that produced this decision.
 	ClusterRouterVersion string
-	// TTFTMs is the upstream-request → first-byte delta in ms. Pointer because
-	// zero is a legitimate sub-millisecond measurement, not "unmeasured".
+	// TTFTMs is the upstream-request-to-first-byte delta in ms. Pointer because
+	// zero is a legitimate sub-millisecond measurement.
 	TTFTMs *int64
 }
 
@@ -40,8 +39,8 @@ func buildObservationContext(ctx context.Context, decision router.Decision) obse
 		if len(md.CandidateModels) > 0 {
 			obs.CandidateModels = append([]string(nil), md.CandidateModels...)
 		}
-		// Unconditional inside md != nil: a `!= 0` guard would silently drop
-		// legitimate zero scores.
+		// ChosenScore is unconditional inside md != nil: a != 0 guard
+		// would silently drop legitimate zero scores.
 		score := float64(md.ChosenScore)
 		obs.ChosenScore = &score
 		obs.ClusterRouterVersion = md.ClusterRouterVersion
@@ -54,8 +53,7 @@ func buildObservationContext(ctx context.Context, decision router.Decision) obse
 	return obs
 }
 
-// applySpanAttrs records routing fields on an OTel AttrBuilder using the same
-// gating as the telemetry row, keeping the span and DB row symmetric.
+// applySpanAttrs records routing fields on an OTel AttrBuilder.
 func (o observationContext) applySpanAttrs(b *otel.AttrBuilder) {
 	if len(o.ClusterIDs) > 0 {
 		// Widen int32 → int for AttrBuilder.IntSlice.

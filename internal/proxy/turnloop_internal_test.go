@@ -13,9 +13,7 @@ import (
 	"workweave/router/internal/router/sessionpin"
 )
 
-// stubPinStore is the minimum sessionpin.Store needed to exercise the
-// recordTurnUsage LRU-coherence path without pulling in the external
-// fake from service_session_pin_test.go (different test package).
+// stubPinStore is a minimal sessionpin.Store for testing recordTurnUsage.
 type stubPinStore struct {
 	mu          sync.Mutex
 	lastUsage   sessionpin.Usage
@@ -45,19 +43,13 @@ func (s *stubPinStore) UpdateUsage(_ context.Context, _ [sessionpin.SessionKeyLe
 
 func (s *stubPinStore) SweepExpired(context.Context) error { return nil }
 
-// TestRecordTurnUsage_UpdatesInProcCache guards the LRU-coherence
-// invariant: when recordTurnUsage persists usage, the in-proc pin cache
-// entry for the same session must reflect the new Last* fields. Without
-// this, loadPin's Tier-1 hit serves a stale zero-usage pin and the
-// planner returns ReasonNoPriorUsage forever (the 30s LRU TTL keeps
-// resetting under typical agentic turn cadence), silently disabling
-// EV-based switching for all active sessions.
+// TestRecordTurnUsage_UpdatesInProcCache guards the LRU-coherence invariant:
+// when recordTurnUsage persists usage, the in-proc pin cache entry must
+// reflect the new Last* fields. Without this, loadPin's Tier-1 hit serves a
+// stale zero-usage pin and the planner returns ReasonNoPriorUsage forever.
 func TestRecordTurnUsage_UpdatesInProcCache(t *testing.T) {
 	store := newStubPinStore()
-	// NewService wires a real expirable LRU when pinSessionTTL/etc. are
-	// in play; constructing through the public ctor keeps that wiring
-	// honest. We don't need a router/provider for this test — only the
-	// usage path.
+	// NewService wires a real expirable LRU when pinStore is set.
 	svc := NewService(
 		nil,
 		nil,
@@ -77,8 +69,7 @@ func TestRecordTurnUsage_UpdatesInProcCache(t *testing.T) {
 	}
 	cacheKey := sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
 
-	// Pre-warm the cache the same way writeNewPin/refreshPin would: a
-	// freshly-routed pin with zero usage stats.
+	// Pre-warm the cache as writeNewPin/refreshPin would.
 	initial := sessionpin.Pin{
 		SessionKey:  sessionKey,
 		Role:        sessionpin.DefaultRole,
@@ -112,12 +103,9 @@ func TestRecordTurnUsage_UpdatesInProcCache(t *testing.T) {
 }
 
 // TestLoadPin_EvictsExpiredLRUEntry guards the LRU tier's expiry check.
-// recordTurnUsage refreshes LRU entries on every turn, so the 30s eviction
-// clock keeps resetting under typical agentic cadence. Without checking
-// PinnedUntil on the LRU hit path, an entry whose pin has lapsed could
-// keep being served well past its intended expiry — particularly when
-// refreshPin's bounded enqueue drops on semaphore saturation while
-// recordTurnUsage keeps landing.
+// recordTurnUsage refreshes LRU entries on every turn, so expired entries
+// could keep being served if expiry isn't checked — particularly when
+// refreshPin's bounded enqueue drops but recordTurnUsage keeps landing.
 func TestLoadPin_EvictsExpiredLRUEntry(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(
@@ -139,10 +127,9 @@ func TestLoadPin_EvictsExpiredLRUEntry(t *testing.T) {
 	}
 	cacheKey := sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
 
-	// Pre-warm the LRU with a pin whose PinnedUntil is already in the past.
-	// The stub pin store returns no rows on Get, so any non-expired LRU
-	// entry would be the only source of a "found" result. Confirming a
-	// miss here proves the expiry check fires before the LRU is served.
+	// Pre-warm the LRU with an expired pin. The stub store returns no rows
+	// on Get, so any non-expired LRU entry would be the only source of a
+	// "found" result.
 	expired := sessionpin.Pin{
 		SessionKey:  sessionKey,
 		Role:        sessionpin.DefaultRole,
@@ -161,8 +148,8 @@ func TestLoadPin_EvictsExpiredLRUEntry(t *testing.T) {
 	assert.False(t, stillCached, "expired LRU entry must be evicted on lookup so subsequent turns hit Postgres")
 }
 
-// TestLoadPin_ServesFreshLRUEntry is the companion happy-path test: a
-// non-expired LRU entry hits Tier 1 without touching Postgres.
+// TestLoadPin_ServesFreshLRUEntry is the companion test: a non-expired LRU
+// entry hits Tier 1 without touching Postgres.
 func TestLoadPin_ServesFreshLRUEntry(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(

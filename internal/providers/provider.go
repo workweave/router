@@ -1,4 +1,4 @@
-// Package providers defines the upstream LLM client interface and shared types.
+// Package providers defines the upstream LLM client interface, sentinel errors, and shared wire helpers.
 package providers
 
 import (
@@ -11,7 +11,6 @@ import (
 	"workweave/router/internal/router"
 )
 
-// Canonical provider keys used in client registries and router.Decision.Provider.
 const (
 	ProviderAnthropic  = "anthropic"
 	ProviderOpenAI     = "openai"
@@ -20,10 +19,7 @@ const (
 	ProviderFireworks  = "fireworks"
 )
 
-// APIKeyEnvVars maps a canonical provider name to the env var that supplies
-// the deployment-level upstream API key. Single source of truth: the boot
-// wiring in cmd/router/main.go and the /admin/v1/config handler both read
-// it so the dashboard's env-keyed view can't drift from the actual wiring.
+// APIKeyEnvVars maps provider name to the env var providing its deployment-level upstream API key.
 var APIKeyEnvVars = map[string]string{
 	ProviderAnthropic:  "ANTHROPIC_API_KEY",
 	ProviderOpenAI:     "OPENAI_API_KEY",
@@ -38,7 +34,7 @@ func APIKeyEnvVar(provider string) string {
 	return APIKeyEnvVars[provider]
 }
 
-// HopByHopHeaders are stripped from upstream responses per RFC 7230.
+// HopByHopHeaders are stripped from upstream responses per RFC 7230 §6.1.
 var HopByHopHeaders = map[string]struct{}{
 	"Connection":          {},
 	"Keep-Alive":          {},
@@ -50,9 +46,7 @@ var HopByHopHeaders = map[string]struct{}{
 	"Upgrade":             {},
 }
 
-// CopyUpstreamHeaders copies non-hop-by-hop headers from resp into w. Per
-// RFC 7230 §6.1, headers named in the upstream Connection header are also
-// treated as hop-by-hop and stripped.
+// CopyUpstreamHeaders copies non-hop-by-hop headers from resp into w.
 func CopyUpstreamHeaders(w http.ResponseWriter, resp *http.Response) {
 	dynamicHop := make(map[string]struct{})
 	for _, v := range resp.Header.Values("Connection") {
@@ -81,11 +75,8 @@ func CopyUpstreamHeaders(w http.ResponseWriter, resp *http.Response) {
 var ErrNotImplemented = errors.New("provider: not implemented")
 
 // UpstreamStatusError is returned by Client.Proxy and Client.Passthrough after
-// the upstream non-2xx response envelope has already been written through to
-// the client. The body is committed before this error is returned, so handlers
-// detecting c.Writer.Written() must NOT also write their own JSON envelope.
-// Exists so callers can surface upstream rejections that would otherwise hide
-// behind a successful proxy of an error response.
+// the upstream non-2xx response body has already been written to the client.
+// Handlers detecting c.Writer.Written() must NOT write their own JSON envelope.
 type UpstreamStatusError struct {
 	Status int
 }
@@ -94,22 +85,16 @@ func (e *UpstreamStatusError) Error() string {
 	return fmt.Sprintf("upstream returned status %d", e.Status)
 }
 
-// PreparedRequest is the output of translate.RequestEnvelope.Prepare*. Body is
-// the fully-encoded target-format request body; Headers carries format-specific
-// header overrides (e.g. filtered anthropic-beta) the adapter applies alongside
-// its own auth headers.
+// PreparedRequest holds the encoded target-format request body and format-specific header overrides.
 type PreparedRequest struct {
 	Body    []byte
 	Headers http.Header
 }
 
 type Client interface {
-	// Proxy forwards prep.Body verbatim to the upstream and streams the response
-	// into w. Implementations must not decode/re-encode the body.
+	// Proxy forwards prep.Body verbatim to the upstream and streams the response into w.
 	Proxy(ctx context.Context, decision router.Decision, prep PreparedRequest, w http.ResponseWriter, r *http.Request) error
 
-	// Passthrough forwards an inbound request to the same path on the upstream
-	// with no model rewriting and no routing decision applied. Used for
-	// ancillary endpoints (model availability, token counting).
+	// Passthrough forwards an inbound request to the same path on the upstream with no model rewriting.
 	Passthrough(ctx context.Context, prep PreparedRequest, w http.ResponseWriter, r *http.Request) error
 }

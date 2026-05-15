@@ -7,8 +7,8 @@ import (
 )
 
 // Gemini wire format reference:
-//   - systemInstruction: { parts: [ {text: ...}, ... ] }
-//   - contents: [ { role: "user"|"model", parts: [ {text|functionCall|functionResponse|inlineData|thoughtSignature: ...} ] }, ... ]
+//   - systemInstruction: { parts: [ {text: ...} ] }
+//   - contents: [ { role: "user"|"model", parts: [...] } ]
 //   - tools / generationConfig: top-level
 // Streaming choice is encoded in the URL path, not the body.
 
@@ -57,8 +57,7 @@ func (e *RequestEnvelope) geminiRoutingFeatures(extractOnlyUser bool) RoutingFea
 	return feats
 }
 
-// classifyLastMessageGemini maps a Gemini contents[] entry onto the shared
-// three-value LastKind enum.
+// classifyLastMessageGemini maps a Gemini contents[] entry to the shared LastKind enum.
 func classifyLastMessageGemini(msg gjson.Result) string {
 	if msg.Get("role").String() == "model" {
 		return "assistant"
@@ -109,8 +108,7 @@ func geminiSystemText(body []byte) string {
 	return b.String()
 }
 
-// geminiPartsText concatenates every text-bearing part. Tool-call/response and
-// thoughtSignature parts contribute no text.
+// geminiPartsText concatenates every text-bearing part.
 func geminiPartsText(parts gjson.Result) string {
 	if !parts.IsArray() {
 		return ""
@@ -175,7 +173,7 @@ func geminiLastUserMessage(body []byte) LastUserMessageInfo {
 	return info
 }
 
-// geminiFirstUserMessageText returns the text of the first role=="user" contents[] entry.
+// geminiFirstUserMessageText returns the text of the first role=="user" contents entry.
 func geminiFirstUserMessageText(body []byte) string {
 	contents := gjson.GetBytes(body, "contents")
 	if !contents.IsArray() {

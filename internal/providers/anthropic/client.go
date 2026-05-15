@@ -36,10 +36,7 @@ func NewClient(apiKey, baseURL string) *Client {
 	}
 }
 
-// setAuth applies authentication to the upstream request. Precedence:
-// (1) per-request BYOK credentials in ctx; (2) deployment-level API key;
-// (3) passthrough of the client's own Anthropic auth headers (OAuth bearer or
-// x-api-key). Router-only credentials are deliberately not forwarded.
+// setAuth resolves credentials in precedence order: BYOK, deployment key, then client-sent auth headers.
 func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("x-api-key", string(creds.APIKey))

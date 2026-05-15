@@ -10,8 +10,8 @@ import (
 	"github.com/tink-crypto/tink-go/v2/tink"
 )
 
-// Encryptor handles AES-256-GCM encryption/decryption via Google Tink.
-// AAD binds each ciphertext to (externalID, provider) so a stolen row can't be decrypted under a different identity.
+// Encryptor encrypts/decrypts external API keys via AES-256-GCM.
+// AAD binds each ciphertext to (externalID, provider).
 type Encryptor interface {
 	Encrypt(plaintext []byte, externalID, provider string) (ciphertext []byte, err error)
 	Decrypt(ciphertext []byte, externalID, provider string) (plaintext []byte, err error)
@@ -22,7 +22,6 @@ type tinkEncryptor struct {
 }
 
 // NewTinkEncryptor creates an Encryptor from a Tink keyset JSON.
-// Generate with: tinkey create-keyset --key-template AES256_GCM --out-format json
 func NewTinkEncryptor(keysetJSON string) (Encryptor, error) {
 	reader := keyset.NewJSONReader(bytes.NewBufferString(keysetJSON))
 	handle, err := insecurecleartextkeyset.Read(reader)
@@ -45,13 +44,12 @@ func (e *tinkEncryptor) Decrypt(ciphertext []byte, externalID, provider string) 
 }
 
 // aadFor MUST stay byte-identical with the Weave-side helper at
-// backend/internal/app/weaverouter/crypto.go. Drift bricks BYOK decrypt with
-// tag mismatch; crypto_test.go on both sides pins the format.
+// backend/internal/app/weaverouter/crypto.go.
 func aadFor(externalID, provider string) []byte {
 	return []byte(externalID + "\x00" + provider)
 }
 
-// NoOpEncryptor is a passthrough for local development without encryption.
+// NoOpEncryptor is a pass-through for development without encryption.
 type NoOpEncryptor struct{}
 
 func (NoOpEncryptor) Encrypt(plaintext []byte, _, _ string) ([]byte, error) {

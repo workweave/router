@@ -34,87 +34,64 @@ type Service struct {
 	providers            map[string]providers.Client
 	emitter              *otel.Emitter
 	embedOnlyUserMessage bool
-	// semanticCache short-circuits non-streaming requests on a cosine-similarity hit.
-	semanticCache *cache.Cache
-	// pinStore persists session-sticky routing decisions across instance restarts.
-	// Nil when the feature flag is off; the orchestrator then runs the scorer
-	// every turn and persists nothing.
+	semanticCache        *cache.Cache
+	// pinStore persists session-sticky routing decisions. Nil when the feature
+	// flag is off; the orchestrator then runs the scorer every turn.
 	pinStore sessionpin.Store
 	// pinCache absorbs the hot path; 30s TTL is short enough that pinned_until
 	// in the pin store remains source of truth for validity.
 	pinCache *expirable.LRU[string, sessionpin.Pin]
-	// pinWriteSem bounds concurrent async pin-upsert goroutines. Writes drop
-	// (non-blocking) when full so a slow Postgres can't accumulate goroutines.
+	// pinWriteSem bounds concurrent async pin-upsert goroutines with drop-on-full semantics.
 	pinWriteSem chan struct{}
-	// usageWriteSem bounds concurrent async last-turn-usage writeback
-	// goroutines, with the same drop-on-full semantics as pinWriteSem.
+	// usageWriteSem bounds concurrent async last-turn-usage writeback goroutines,
+	// with the same drop-on-full semantics as pinWriteSem.
 	usageWriteSem chan struct{}
 	// hardPinExplore gates the Explore sub-agent hard-pin.
 	hardPinExplore bool
 	// hardPinProvider/hardPinModel route compaction (and, when hardPinExplore is
-	// on, Explore sub-agent turns). Derived at boot from the cheapest available
+	// on, Explore sub-agent turns). Derived at boot from the cheapest registered
 	// model; overridable via ROUTER_HARD_PIN_PROVIDER / ROUTER_HARD_PIN_MODEL.
 	hardPinProvider string
 	hardPinModel    string
-	// hardPinResolver, when set, overrides the boot-time hardPin{Provider,Model}
-	// per-request. Used in byokOnly (managed) deployments where the cheapest
-	// model among ALL registered providers is the wrong choice — the
-	// installation may only BYOK a subset, and a hard-pin to a provider they
-	// can't authenticate to would 401 at dispatch. The resolver is given the
-	// request's enabled-providers set (BYOK + client-creds intersection) and
-	// returns (provider, model, ok). ok=false signals no eligible provider for
-	// this request — the orchestrator surfaces ErrClusterUnavailable rather
-	// than silently falling back.
+	// hardPinResolver, when set, overrides boot-time hardPin{Provider,Model}
+	// per-request. Used in byokOnly deployments where the registered cheapest
+	// model is unsafe — the installation may only BYOK a subset of providers.
+	// Returns (provider, model, ok); ok=false signals no eligible provider.
 	hardPinResolver func(enabled map[string]struct{}) (provider, model string, ok bool)
-	// tierClampResolver enforces the requested-model tier ceiling: returns
-	// the cheapest deployed model whose tier ≤ ceiling, whose provider is
-	// in the request's enabled set, and which is NOT in the request's
-	// excluded-models denylist. Nil disables the clamp. See
-	// WithTierClampResolver and turnloop.go's clampToCeiling for the call
-	// sites.
+	// tierClampResolver enforces the requested-model tier ceiling. Nil disables
+	// the clamp.
 	tierClampResolver func(enabled, excluded map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)
 	// telemetry is an optional repository for persisting per-request telemetry.
 	telemetry TelemetryRepository
-	// byokOnly disables deployment-level credential fallback. When true, a
-	// provider is only eligible if BYOK or client-supplied credentials are
-	// present. Set on Weave-managed deployments so customer requests never
-	// silently consume the platform's API key budget.
+	// byokOnly disables deployment-level credential fallback so customer
+	// requests never silently consume the platform's API key budget.
 	byokOnly bool
 	// excludedModelsOverride, when non-nil, replaces the per-installation
-	// exclusion list on every request. Set from ROUTER_EXCLUDED_MODELS at
-	// boot so headless self-hosters can pin the list in their manifest.
+	// exclusion list on every request. Set from ROUTER_EXCLUDED_MODELS at boot.
 	excludedModelsOverride map[string]struct{}
 	// deploymentKeyedProviders is the subset of registered providers whose
-	// upstream API key is actually configured at the deployment level (env
-	// var). It's the "default eligible" set used by enabledProvidersForRequest
-	// in non-BYOK-only mode. When nil, all registered providers are treated
-	// as deployment-keyed (legacy behavior preserved for tests).
+	// upstream API key is configured at the deployment level. When nil, all
+	// registered providers are treated as deployment-keyed (legacy behavior).
 	deploymentKeyedProviders map[string]struct{}
-	// planner parameterizes the Prism-style EV policy that decides
-	// stay-vs-switch per turn. Constructed once at boot from env.
+	// planner parameterizes the Prism-style EV policy for stay-vs-switch.
 	planner planner.EVConfig
-	// plannerEnabled is the kill switch (ROUTER_PLANNER_ENABLED). When
-	// false, the orchestrator falls back to first-decision-wins behavior.
+	// plannerEnabled is the kill switch. When false, the orchestrator falls
+	// back to first-decision-wins behavior.
 	plannerEnabled bool
-	// summarizer produces a bounded-cost handover summary on switch
-	// turns. May be nil — the orchestrator then falls straight to
-	// handover.TrimLastN on switch.
+	// summarizer produces a bounded-cost handover summary on switch turns.
+	// nil falls straight to handover.TrimLastN.
 	summarizer handover.Summarizer
-	// availableModels is the boot-time set of model names whose providers
-	// are registered. Read by the planner to decide whether a pin's model
-	// is still routable; if not, switch regardless of EV.
+	// availableModels is the boot-time set of model names whose providers are
+	// registered. Read by the planner to decide whether a pin's model is still
+	// routable.
 	availableModels map[string]struct{}
-	// defaultBaselineModel is the cost-comparison baseline used when the
-	// inbound RequestedModel has no pricing entry (typical of generic
-	// "weave-router"-style custom names IDE clients send). Empty means no
-	// substitution — savings markers and pricing fields stay empty for
-	// unknown models, preserving prior behavior.
+	// defaultBaselineModel is the cost-comparison baseline used when the inbound
+	// RequestedModel has no pricing entry. Empty means no substitution.
 	defaultBaselineModel string
 }
 
-// pinSessionTTL is the sliding TTL on pinned_until. Mirrors Anthropic's
-// prompt-cache TTL on Sonnet/Haiku/Opus 4.5+ so the pin lifecycle tracks
-// the cache it's keeping warm.
+// pinSessionTTL mirrors Anthropic's prompt-cache TTL on Sonnet/Haiku/Opus 4.5+
+// so the pin lifecycle tracks the cache it's keeping warm.
 const pinSessionTTL = time.Hour
 
 // APIKeyIDContextKey is the request-context key for the authenticated api_key_id.
@@ -126,26 +103,22 @@ type ExternalIDContextKey struct{}
 // CredentialsContextKey is the request-context key for resolved per-request credentials.
 type CredentialsContextKey struct{}
 
-// InstallationExcludedModelsContextKey is the request-context key for the
-// authed installation's model exclusion list. Carried as []string so the
-// proxy can build the request-time filter without re-reading the DB.
+// InstallationExcludedModelsContextKey is the context key for the authed
+// installation's model exclusion list. Carried as []string.
 type InstallationExcludedModelsContextKey struct{}
 
 // installationExcludedModelsFromContext returns the per-installation exclusion
 // list stashed on ctx by the auth middleware, or nil when none is present.
 
-// routingMarkerFor builds the upfront "brand → model · reason" snippet emitted
+// routingMarkerFor builds the "brand -> model . reason" snippet emitted
 // at the start of every cross-format streamed response.
 func routingMarkerFor(res turnLoopResult) string {
 	decision := res.Decision
 	if decision.Model == "" {
 		return ""
 	}
-	// Suppress the marker on tool-result follow-ups: every turn after a
-	// tool call would otherwise emit a duplicate "Weave Router → …" line
-	// mid-stream, which clutters the transcript without conveying new
-	// routing information. The planner / hard-pin / clamp branches still
-	// emit so genuine routing events stay visible.
+	// Suppress the marker on tool-result follow-ups: every post-tool turn would
+	// otherwise re-emit a duplicate mid-stream.
 	if res.PlannerDecision.Reason == "" && !res.HardPinned && !res.TierClamped && res.StickyHit {
 		return ""
 	}
@@ -162,10 +135,7 @@ func routingMarkerFor(res turnLoopResult) string {
 	return strings.Join(parts, " · ") + "\n\n"
 }
 
-// clampNote surfaces the tier-ceiling clamp to the caller when it fired:
-// names the runner-up model the scorer actually preferred and points at
-// the action that would unlock it (request a higher-tier model). Empty
-// string when no clamp occurred.
+// clampNote surfaces the tier-ceiling clamp; empty when no clamp occurred.
 func clampNote(res turnLoopResult) string {
 	if !res.TierClamped || res.PreClampModel == "" {
 		return ""
@@ -177,9 +147,8 @@ func clampNote(res turnLoopResult) string {
 	return fmt.Sprintf("second-choice pick (would have used %s — capped to your requested %s tier; request %s to unlock higher-tier picks)", res.PreClampModel, res.RequestedTier.String(), upsell)
 }
 
-// upsellModelFor returns the conventional next-tier-up model name to
-// suggest in the clamp note. High tier has no upsell. Unknown returns
-// empty so the marker falls back to the no-upsell wording.
+// upsellModelFor returns the conventional next-tier-up model name for the
+// clamp note. High tier has no upsell.
 func upsellModelFor(t capability.Tier) string {
 	switch t {
 	case capability.TierLow:
@@ -191,8 +160,7 @@ func upsellModelFor(t capability.Tier) string {
 	}
 }
 
-// routingReasonShort returns a human-readable reason for the marker, falling
-// back to the orchestrator path when the planner didn't run.
+// routingReasonShort returns a human-readable reason for the marker.
 func routingReasonShort(res turnLoopResult) string {
 	if res.PlannerDecision.Reason != "" {
 		return humanReasonFromPlanner(res.PlannerDecision.Reason)
@@ -206,8 +174,7 @@ func routingReasonShort(res turnLoopResult) string {
 	return "top scorer"
 }
 
-// humanReasonFromPlanner maps planner.Reason* codes to marker prose. Unknown
-// codes pass through verbatim so new reasons surface visibly.
+// humanReasonFromPlanner maps planner reason codes to marker prose.
 func humanReasonFromPlanner(code string) string {
 	switch code {
 	case planner.ReasonEVPositive:
@@ -240,9 +207,8 @@ func installationExcludedModelsFromContext(ctx context.Context) []string {
 	return out
 }
 
-// excludedModelsForRequest returns the model exclusion set to apply for this
-// request. The env-driven override wins; otherwise the installation list (if
-// any) is converted to a set. Returns nil when neither is configured.
+// excludedModelsForRequest returns the request's model exclusion set.
+// Env override wins; otherwise the installation list is converted to a set.
 func (s *Service) excludedModelsForRequest(ctx context.Context) map[string]struct{} {
 	if s.excludedModelsOverride != nil {
 		return s.excludedModelsOverride
@@ -258,8 +224,7 @@ func (s *Service) excludedModelsForRequest(ctx context.Context) map[string]struc
 	return out
 }
 
-// CredentialsFromContext returns the resolved credentials stashed on ctx,
-// or nil when none are present (plan-based auth path).
+// CredentialsFromContext returns the resolved credentials stashed on ctx.
 func CredentialsFromContext(ctx context.Context) *Credentials {
 	v := ctx.Value(CredentialsContextKey{})
 	if v == nil {
@@ -269,24 +234,19 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 	return creds
 }
 
-// DefaultPlannerThresholdUSD is the minimum positive EV (over the
-// remaining-turn horizon) required to switch off a pinned model. Small
-// enough that genuine arbitrage triggers a switch; large enough that
-// near-tie noise doesn't flap decisions.
+// DefaultPlannerThresholdUSD is the minimum positive EV over remaining-turn
+// horizon to switch off a pinned model. Small enough for arbitrage; large
+// enough to avoid near-tie noise.
 const DefaultPlannerThresholdUSD = 0.001
 
-// DefaultPlannerExpectedRemainingTurns is the horizon used to amortize
-// per-turn savings. Matches observed agentic-loop tail length.
+// DefaultPlannerExpectedRemainingTurns is the horizon for amortizing per-turn
+// savings. Matches observed agentic-loop tail length.
 const DefaultPlannerExpectedRemainingTurns = 3
 
-// DefaultPlannerTierUpgradeEnabled turns on the tier guard so a trivial
-// first turn can't pin a Low-tier model for the rest of the session.
-// See internal/router/capability.
+// DefaultPlannerTierUpgradeEnabled turns on the tier guard so a trivial first
+// turn can't pin a Low-tier model for the session.
 const DefaultPlannerTierUpgradeEnabled = true
 
-// session-pin feature flag is off. The planner runs by default with the
-// conservative EVConfig above; callers tune it via WithPlanner /
-// WithPlannerEnabled / WithSummarizer / WithAvailableModels.
 func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedOnlyUserMessage bool, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
 	var pinCache *expirable.LRU[string, sessionpin.Pin]
 	var pinWriteSem chan struct{}
@@ -319,13 +279,9 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 	}
 }
 
-// WithPlanner overrides the EV-policy configuration. ThresholdUSD is
-// assigned verbatim — zero and negative values are legitimate operator-
-// chosen settings (the planner switches when expectedSavings -
-// evictionCost > threshold; the test plan documents -1 as the force-
-// switch knob). ExpectedRemainingTurns falls back to the default on
-// non-positive values because amortizing savings over <= 0 turns has no
-// meaningful interpretation.
+// WithPlanner overrides the EV-policy configuration. ThresholdUSD is assigned
+// verbatim (zero and negative are legitimate). ExpectedRemainingTurns falls
+// back to the default on non-positive values.
 func (s *Service) WithPlanner(cfg planner.EVConfig) *Service {
 	s.planner.ThresholdUSD = cfg.ThresholdUSD
 	if cfg.ExpectedRemainingTurns > 0 {
@@ -335,26 +291,23 @@ func (s *Service) WithPlanner(cfg planner.EVConfig) *Service {
 	return s
 }
 
-// WithPlannerEnabled is the kill switch (ROUTER_PLANNER_ENABLED). When
-// false, the orchestrator preserves the "first decision wins" behavior
-// (Tier-1/2 pin lookup, scorer fallback, no EV math).
+// WithPlannerEnabled is the kill switch. When false, the orchestrator
+// preserves first-decision-wins behavior.
 func (s *Service) WithPlannerEnabled(enabled bool) *Service {
 	s.plannerEnabled = enabled
 	return s
 }
 
-// WithSummarizer installs the cheap-model summarizer used to bound
-// handover cost on switch turns. nil disables the synchronous summary
-// step; the orchestrator then trims-last-N on every switch.
+// WithSummarizer installs the cheap-model summarizer for handover on switch
+// turns. nil disables the summary step; TrimLastN is used instead.
 func (s *Service) WithSummarizer(sz handover.Summarizer) *Service {
 	s.summarizer = sz
 	return s
 }
 
-// WithAvailableModels installs the boot-time set of model names whose
-// providers are registered. The planner consults this set so a pin
-// whose model is no longer routable forces a switch regardless of EV.
-// Passing nil clears the set (every model is considered available).
+// WithAvailableModels installs the boot-time set of routable model names.
+// The planner consults this set so a pin whose model is no longer
+// available forces a switch. nil treats every model as available.
 func (s *Service) WithAvailableModels(models map[string]struct{}) *Service {
 	if models == nil {
 		s.availableModels = nil
@@ -368,42 +321,29 @@ func (s *Service) WithAvailableModels(models map[string]struct{}) *Service {
 	return s
 }
 
-// WithHardPinResolver installs a per-request hard-pin resolver. The
-// resolver is consulted on compaction/probe/Explore turns when set; nil
-// preserves the boot-time hardPin{Provider,Model} for every request
-// (the selfhosted default). The resolver receives the request's enabled
-// providers set; ok=false signals the request has no eligible provider
-// and the turnloop should surface ErrClusterUnavailable rather than
-// dispatching to a provider the request can't authenticate to.
+// WithHardPinResolver installs a per-request hard-pin resolver. nil
+// preserves the boot-time hardPin{Provider,Model} for every request.
+// ok=false signals no eligible provider, surfacing ErrClusterUnavailable.
 func (s *Service) WithHardPinResolver(resolver func(enabled map[string]struct{}) (provider, model string, ok bool)) *Service {
 	s.hardPinResolver = resolver
 	return s
 }
 
-// WithDefaultBaselineModel installs the cost-comparison fallback used
-// when the inbound RequestedModel has no pricing entry. Empty disables
-// substitution. See [Service.defaultBaselineModel] for rationale.
+// WithDefaultBaselineModel installs the cost-comparison fallback for when
+// the inbound RequestedModel has no pricing entry. Empty disables.
 func (s *Service) WithDefaultBaselineModel(model string) *Service {
 	s.defaultBaselineModel = model
 	return s
 }
 
-// WithTierClampResolver installs the resolver used by the tier-ceiling
-// guard. Given a request's enabled-providers set and a tier ceiling, it
-// returns the cheapest registry-deployed model whose tier is ≤ ceiling
-// and whose provider is enabled. ok=false means no in-ceiling model is
-// routable for this request — the orchestrator preserves the original
-// (unclamped) decision rather than failing the turn. Nil resolver
-// disables clamping (preserves pre-tier-ceiling behavior).
+// WithTierClampResolver installs the tier-ceiling clamp resolver. Nil disables.
 func (s *Service) WithTierClampResolver(resolver func(enabled, excluded map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)) *Service {
 	s.tierClampResolver = resolver
 	return s
 }
 
-// baselineFor returns requested if it has a pricing entry; otherwise the
-// configured defaultBaselineModel (which may itself be ""). Used by every
-// cost/savings lookup so unknown client model names (e.g. "weave-router")
-// still attribute savings to a real baseline.
+// baselineFor returns requested if it has a pricing entry, otherwise the
+// configured defaultBaselineModel (which may be "").
 func (s *Service) baselineFor(requested string) string {
 	if requested != "" {
 		if _, ok := pricing.For(requested); ok {
@@ -414,17 +354,14 @@ func (s *Service) baselineFor(requested string) string {
 }
 
 // WithByokOnly enables BYOK-only credential resolution: providers without
-// caller-supplied credentials are ineligible, even if a deployment-level env
-// key is registered.
+// caller-supplied credentials are ineligible.
 func (s *Service) WithByokOnly(byokOnly bool) *Service {
 	s.byokOnly = byokOnly
 	return s
 }
 
 // WithExcludedModelsOverride pins the per-request model exclusion list to a
-// deployment-wide set, ignoring per-installation DB state. Pass nil or an
-// empty slice to clear the override (per-installation DB state then takes
-// over). Used for headless self-hosted deployments that pin config in env.
+// deployment-wide set. Pass nil or empty slice to clear the override.
 func (s *Service) WithExcludedModelsOverride(models []string) *Service {
 	if len(models) == 0 {
 		s.excludedModelsOverride = nil
@@ -438,16 +375,12 @@ func (s *Service) WithExcludedModelsOverride(models []string) *Service {
 	return s
 }
 
-// HasExcludedModelsOverride reports whether ROUTER_EXCLUDED_MODELS (or an
-// equivalent override) is in effect. Admin handlers use this to render the
-// UI read-only and to reject mutating PUTs.
+// HasExcludedModelsOverride reports whether an excluded-models override is active.
 func (s *Service) HasExcludedModelsOverride() bool {
 	return s.excludedModelsOverride != nil
 }
 
-// ExcludedModelsOverride returns a sorted copy of the override list, or nil
-// when no override is active. Surfaced via the admin GET endpoint so the UI
-// can show the operator which models the env var pins off.
+// ExcludedModelsOverride returns a sorted copy of the override list.
 func (s *Service) ExcludedModelsOverride() []string {
 	if s.excludedModelsOverride == nil {
 		return nil
@@ -461,24 +394,14 @@ func (s *Service) ExcludedModelsOverride() []string {
 }
 
 // usageRequired reports whether per-request token usage must be captured.
-// Both OTel export and DB telemetry persistence need it; without either, we
-// can skip the SSE include_usage flag + extractor wiring.
-//
-// This used to be gated on s.emitter alone, which meant local deployments
-// without OTEL_EXPORTER_OTLP_ENDPOINT silently persisted every telemetry
-// row with input/output_tokens = 0 (and therefore $0 cost). Telemetry
-// persistence is the source of truth for the dashboard's cost panel — it
-// can't depend on OTel being configured.
+// Both OTel export and DB telemetry persistence need it.
 func (s *Service) usageRequired() bool {
 	return s.emitter != nil || s.telemetry != nil
 }
 
-// WithDeploymentKeyedProviders restricts the "default eligible" set for
-// non-BYOK-only requests to providers whose deployment env key is actually
-// set. Without this, every registered provider is eligible by default —
-// which is wrong when we register a provider with an empty key purely so
-// BYOK keys can route to it. Passing nil restores the legacy "all
-// registered providers eligible" behavior.
+// WithDeploymentKeyedProviders restricts the default eligible set to
+// providers whose deployment env key is set. nil restores legacy behavior
+// (all registered providers eligible).
 func (s *Service) WithDeploymentKeyedProviders(set map[string]struct{}) *Service {
 	if set == nil {
 		s.deploymentKeyedProviders = nil
@@ -756,8 +679,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	s.logPlannerOutcome(routeRes)
 
 	// Semantic-cache eligibility: configured, non-streaming, decision has
-	// metadata, externalID present, not eval traffic (eval bypasses to keep
-	// per-prompt accuracy attribution clean).
+	// metadata, externalID present, not eval traffic.
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
@@ -834,10 +756,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		IncludeStreamUsage: s.usageRequired(),
 	}
 
-	// BYOK takes precedence; inbound headers supply fallback credentials.
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
-	// Mirror post-translation wire bytes into a buffer for post-Proxy storage.
 	var captureW *captureWriter
 	var sink http.ResponseWriter = w
 	if cacheEligible {
@@ -948,7 +868,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	applyPlannerAttrs(upstreamBuilder, routeRes)
 	addTimingAttrs(ctx, upstreamBuilder)
 
-	// Span attrs and telemetry row share the same source; bundle keeps them symmetric.
 	obs := buildObservationContext(ctx, decision)
 	obs.applySpanAttrs(upstreamBuilder)
 
@@ -960,8 +879,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	})
 	otel.Flush(ctx)
 
-	// Persist last-turn usage to the pin row so the next turn's planner
-	// has cache-hit evidence. Off the request path; drops on saturation.
 	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
 
 	if installationID != uuid.Nil {
@@ -1006,17 +923,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 }
 
 // sessionPinCacheKey produces the in-proc LRU key for a (session_key, role)
-// pair. Hex-encoded for the string-keyed LRU; role suffix preserves the
-// schema's role dimension for non-default roles.
+// pair. Hex-encoded for the string-keyed LRU.
 func sessionPinCacheKey(key [sessionpin.SessionKeyLen]byte, role string) string {
 	return hex.EncodeToString(key[:]) + ":" + role
 }
 
 // applyPlannerAttrs stamps planner and handover attributes onto a span
-// attribute builder. Safe to call when the planner didn't run; uses
-// "skipped" for the outcome and zero values for the EV fields so the
-// schema stays uniform across hard-pin / tool-result / planner-disabled
-// paths.
+// attribute builder. Safe when the planner didn't run (uses "skipped" outcome).
 func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilder {
 	outcome := plannerOutcomeAttr(res)
 	b.String("planner.outcome", outcome).
@@ -1034,10 +947,7 @@ func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilde
 	return b
 }
 
-// plannerOutcomeAttr maps the planner's typed outcome to the string used
-// in OTel attrs. "skipped" covers every path where Decide was not
-// invoked (hard-pin, tool-result short-circuit, planner-disabled,
-// pin-store-disabled).
+// plannerOutcomeAttr maps the planner's typed outcome to an OTel string.
 func plannerOutcomeAttr(res turnLoopResult) string {
 	if res.PlannerDecision.Reason == "" {
 		return "skipped"
@@ -1052,9 +962,8 @@ func plannerOutcomeAttr(res turnLoopResult) string {
 	}
 }
 
-// logPlannerOutcome emits a single structured log line summarizing the
-// planner's verdict. Switch turns are Info (rare, decision-affecting);
-// stay turns are Debug so the steady-state hot path stays quiet.
+// logPlannerOutcome emits a structured log line for the planner's verdict.
+// Switch turns are Info; stay turns are Debug.
 func (s *Service) logPlannerOutcome(res turnLoopResult) {
 	if res.PlannerDecision.Reason == "" {
 		return
@@ -1083,23 +992,14 @@ func (s *Service) logPlannerOutcome(res turnLoopResult) {
 	)
 }
 
-// recordTurnUsage writes the upstream's observed input/output/cache
-// tokens back to the session pin row. The planner reads these on the
-// next turn to weigh switch EV against eviction cost.
-//
-// Bounded async; drops on saturation. Guarded against hard-pin turns
-// (no pin row to update) and missing session keys (e.g. pin store
-// disabled). Uses context.Background() — per CLAUDE.md, deferred DB
-// writes must outlive the request ctx.
-// effectiveInputCost returns the true USD input cost after applying cache pricing.
-// Fresh input tokens are priced at base rate; cache-creation tokens at 1.25×;
-// cache-read tokens at the model's effective cache-read multiplier (default 0.5×).
-// Matches the formula in install/cc-statusline.sh.
-//
-// upstreamProvider distinguishes wire-format semantics: Anthropic's
-// input_tokens is fresh-only (cache counters are non-overlapping); OpenAI's
-// prompt_tokens is the total including cached_tokens. Without this signal we'd
-// over-subtract on the Anthropic path and clamp fresh to 0.
+// recordTurnUsage writes upstream token usage back to the session pin row
+// for the planner's next-turn EV math. Bounded async; drops on saturation.
+// Uses context.Background() so the DB write outlives the request ctx.
+
+// effectiveInputCost returns the true USD input cost after applying cache
+// pricing. Fresh tokens at base rate; cache-creation at 1.25x; cache-read at
+// the model's effective multiplier. upstreamProvider distinguishes Anthropic
+// (input_tokens is fresh-only) from OpenAI (prompt_tokens includes cached).
 func effectiveInputCost(inputTokens, cacheCreation, cacheRead int, pricePer1M float64, pinfo pricing.Pricing, upstreamProvider string) float64 {
 	fresh := inputTokens
 	if upstreamProvider != providers.ProviderAnthropic {
@@ -1167,9 +1067,8 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 	}
 }
 
-// pinDecision rehydrates a router.Decision from a stored pin. Metadata is
-// nil intentionally — the embedding isn't persisted, so semantic-cache won't
-// fire on a pinned turn (acceptable: the pin already short-circuits routing).
+// pinDecision rehydrates a router.Decision from a stored pin. Metadata is nil
+// (embedding isn't persisted, acceptable since the pin short-circuits routing).
 func pinDecision(p sessionpin.Pin) router.Decision {
 	return router.Decision{
 		Provider: p.Provider,
@@ -1178,8 +1077,7 @@ func pinDecision(p sessionpin.Pin) router.Decision {
 	}
 }
 
-// clusterIDsFromDecision returns the cluster ids on a decision, or nil for
-// decisions without metadata.
+// clusterIDsFromDecision returns cluster ids from a decision's metadata.
 func clusterIDsFromDecision(d router.Decision) []int {
 	if d.Metadata == nil {
 		return nil
@@ -1187,7 +1085,7 @@ func clusterIDsFromDecision(d router.Decision) []int {
 	return d.Metadata.ClusterIDs
 }
 
-// pinAge returns seconds since first_pinned_at, or zero for fresh pins.
+// pinAge returns seconds since first_pinned_at.
 func pinAge(p sessionpin.Pin) int64 {
 	if p.FirstPinnedAt.IsZero() {
 		return 0
@@ -1218,14 +1116,12 @@ func externalKeysFromContext(ctx context.Context) []*auth.ExternalAPIKey {
 	return keys
 }
 
-// requestUsesNonDeploymentCreds reports whether the inbound request's
-// provider credentials are NOT the platform's deployment-level env keys.
-// The handover summarizer is wired at boot with deployment-level
-// credentials; calling it on a request whose upstream call would use
-// BYOK or client-supplied creds would route prior conversation context
-// (preserved by the summarizer's handover instruction) through the
-// platform account, violating tenant data boundaries. The orchestrator
-// uses this to skip the summarizer and fall through to TrimLastN.
+// requestUsesNonDeploymentCreds reports whether the request would use BYOK
+// or client-supplied creds for upstream calls. The summarizer is wired with
+// deployment-level creds; calling it on a BYOK request would route prior
+// conversation context through the platform account, violating tenant data
+// boundaries. The orchestrator uses this to skip the summarizer and fall
+// through to TrimLastN.
 func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers http.Header) bool {
 	if s.byokOnly {
 		return true
@@ -1247,27 +1143,16 @@ func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers htt
 	return false
 }
 
-// enabledProvidersForRequest returns providers whose credentials are
-// resolvable for this request (boot-time env key, BYOK, or client-supplied
-// header). The cluster scorer intersects this set with its boot-time
-// candidates so argmax never picks a model the upstream call would 401 on.
-//
-// surfaceProvider is the inbound wire-format's natural provider (anthropic
-// for /v1/messages, openai for /v1/chat/completions, google for the Gemini
-// surface). A client-supplied bearer/x-api-key header is treated as creds
-// for that surface only — never as a licence to enable other OpenAI-compat
-// upstreams that happen to read the same Authorization header. This matches
-// the guard already in resolveAndInjectCredentials: a router-key-authed
-// request must rely on BYOK; a header on such a request is for the inbound
-// surface only and must not enable cross-provider routing.
+// enabledProvidersForRequest returns providers with resolvable credentials
+// for this request (deployment key, BYOK, or client-supplied header).
+// surfaceProvider is the inbound wire-format's natural provider. A
+// client-supplied bearer header is treated as creds for that surface only —
+// never as a licence to enable other OpenAI-compat upstreams that share the
+// same Authorization header format. A router-key-authed request must rely on
+// BYOK; a header on such a request is for the inbound surface only.
 func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvider string, headers http.Header) map[string]struct{} {
 	out := make(map[string]struct{}, len(s.providers))
-	// In BYOK-only mode the deployment-level env key must not make a provider
-	// eligible — otherwise argmax could pick it and 401 with the platform key.
 	if !s.byokOnly {
-		// Prefer the explicit env-keyed set when configured (selfhosted mode
-		// with BYOK-routable providers registered but unkeyed). Fall back to
-		// "every registered provider" for legacy callers that don't set it.
 		if s.deploymentKeyedProviders != nil {
 			for p := range s.deploymentKeyedProviders {
 				out[p] = struct{}{}
@@ -1279,19 +1164,17 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 		}
 	}
 	for _, k := range externalKeysFromContext(ctx) {
-		// Empty plaintext (decryption produced no bytes, or a stale row was
-		// written without a value) must not enroll the provider — argmax
-		// would pick it and the upstream call would 401 with no auth header.
+		// Empty plaintext must not enroll the provider — argmax would pick
+		// it and the upstream call would 401 with no auth header.
 		if len(k.Plaintext) == 0 {
 			continue
 		}
 		out[k.Provider] = struct{}{}
 	}
-	// Client-supplied headers are only consulted when the request is NOT
-	// authed via a router key. A router-key-authed request that happens to
-	// carry an inbound bearer (e.g. Claude Code's Anthropic OAuth token
-	// passing through) must not enable OpenAI-compat upstreams just because
-	// they share the Authorization: Bearer header format.
+	// Client-supplied headers are only consulted when NOT authed via a
+	// router key. A router-key-authed request carrying an inbound bearer
+	// must not enable OpenAI-compat upstreams that share the Authorization
+	// header format.
 	if installationIDFromContext(ctx) == (uuid.UUID{}) && surfaceProvider != "" {
 		if _, already := out[surfaceProvider]; !already {
 			if ExtractClientCredentials(surfaceProvider, headers) != nil {
@@ -1303,14 +1186,10 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 }
 
 // resolveAndInjectCredentials resolves credentials for provider and stashes
-// them on ctx. Returns ctx unchanged when none are available.
-//
-// When the request was authenticated via a router key (installation ID present
-// on ctx), client-header extraction is skipped. This prevents the client's
-// inbound Anthropic key (Authorization: Bearer sk-ant-...) from being
-// mistakenly forwarded as credentials to a different upstream provider
-// (OpenRouter, Fireworks, etc.). In that case the deployment-level env key
-// on the provider client is the correct fallback.
+// them on ctx. When authed via a router key, client-header extraction is
+// skipped — prevents the client's inbound Anthropic key from being
+// forwarded to a different upstream provider. Deployment-level env key on
+// the provider client is the correct fallback in that case.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	byok := BuildCredentialsMap(externalKeysFromContext(ctx))
 	var creds *Credentials
@@ -1318,8 +1197,6 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 		creds = byok[provider]
 	}
 	if creds == nil && installationIDFromContext(ctx) == (uuid.UUID{}) {
-		// No router-key auth — allow client-supplied bearer as provider creds
-		// (plan-based / dev-mode passthrough scenario).
 		creds = ExtractClientCredentials(provider, headers)
 	}
 	if creds != nil {
@@ -1329,7 +1206,6 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 }
 
 // addTimingAttrs appends derived latency attributes from the request Timing.
-// No-op when no Timing is attached.
 func addTimingAttrs(ctx context.Context, b *otel.AttrBuilder) {
 	t := otel.TimingFrom(ctx)
 	if t == nil {
@@ -1353,7 +1229,7 @@ func addTimingAttrs(ctx context.Context, b *otel.AttrBuilder) {
 }
 
 // cacheTokenPtr returns nil for zero so the DB column stays NULL when the
-// upstream did not report cache usage, distinguishing "no cache" from "0 hits".
+// upstream didn't report cache usage (distinguishing "no cache" from "0 hits").
 func cacheTokenPtr(n int) *int32 {
 	if n <= 0 {
 		return nil
@@ -1385,12 +1261,10 @@ func upstreamStatus(err error) int {
 	return 0
 }
 
-// finalizeAfterProxy runs a translator's Finalize step when the upstream call
-// either succeeded or returned a typed UpstreamStatusError. Cross-format
-// translators buffer the upstream body for non-streaming responses and only
-// flush it inside Finalize; skipping that on a 4xx/5xx drops the upstream
-// error envelope (e.g. an OpenRouter 402 "out of credits" message) before it
-// can reach the client. UpstreamStatusError takes precedence over a Finalize
+// finalizeAfterProxy runs a translator's Finalize step. Cross-format
+// translators buffer upstream body for non-streaming responses and flush only
+// inside Finalize; skipping on 4xx/5xx drops the upstream error envelope before
+// the client can see it. UpstreamStatusError takes precedence over Finalize
 // error so telemetry preserves the upstream status code.
 func finalizeAfterProxy(proxyErr error, fn func() error) error {
 	var statusErr *providers.UpstreamStatusError
@@ -1462,8 +1336,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	pinAgeSec := routeRes.PinAgeSec
 	s.logPlannerOutcome(routeRes)
 
-	// Same eligibility rules as ProxyMessages. FormatOpenAI keeps replays
-	// scoped: an Anthropic-stored response is never served here.
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
@@ -1542,7 +1414,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
-	// Mirror post-translation wire bytes into a buffer for post-Proxy storage.
 	var captureW *captureWriter
 	var sink http.ResponseWriter = w
 	if cacheEligible {
@@ -1641,7 +1512,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	applyPlannerAttrs(openaiUpstreamBuilder, routeRes)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
 
-	// Shared bundle keeps the OpenAI path in lockstep with ProxyMessages.
 	openaiObs := buildObservationContext(ctx, decision)
 	openaiObs.applySpanAttrs(openaiUpstreamBuilder)
 
@@ -1653,8 +1523,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	})
 	otel.Flush(ctx)
 
-	// Persist last-turn usage to the pin row so the next turn's planner
-	// has cache-hit evidence. Off the request path; drops on saturation.
 	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
 
 	installationIDOAI, _ := ctx.Value(InstallationIDContextKey{}).(string)

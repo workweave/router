@@ -14,8 +14,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// SSETranslator translates Anthropic streaming SSE to OpenAI
-// chat.completion.chunk on the fly. Non-streaming responses buffer for Finalize.
+// SSETranslator translates Anthropic streaming SSE to OpenAI chat.completion.chunk
+// on the fly. Non-streaming responses buffer for Finalize.
 type SSETranslator struct {
 	inner   http.ResponseWriter
 	flusher http.Flusher
@@ -28,8 +28,7 @@ type SSETranslator struct {
 	msgID   string
 	model   string
 	created int64
-	// toolIdx advances on content_block_stop for tool_use blocks so the start
-	// chunk and all input_json_deltas share the same index.
+	// toolIdx advances on content_block_stop for tool_use blocks.
 	toolIdx       int
 	currentIsTool bool
 
@@ -53,14 +52,13 @@ func (t *SSETranslator) Header() http.Header {
 	return t.inner.Header()
 }
 
-// WriteHeader routes streaming success responses through SSE; errors and
-// non-streaming defer to Finalize.
+// WriteHeader routes streaming success responses through SSE.
 func (t *SSETranslator) WriteHeader(code int) {
 	t.statusCode = code
 	ct := t.inner.Header().Get("Content-Type")
 	t.streaming = strings.Contains(ct, "text/event-stream") && code < 400
 
-	// Stale once we re-encode the body to a different size.
+	// Content-Length and Content-Encoding are stale once we re-encode.
 	t.inner.Header().Del("Content-Length")
 	t.inner.Header().Del("Content-Encoding")
 
@@ -79,8 +77,7 @@ func (t *SSETranslator) Write(data []byte) (int, error) {
 	return n, t.processSSEBuffer()
 }
 
-// Flush only forwards once committed to streaming; flushing during buffered
-// non-streaming would prematurely commit gin's default 200 status.
+// Flush only forwards once streaming is committed.
 func (t *SSETranslator) Flush() {
 	if !t.streaming {
 		return
@@ -90,8 +87,7 @@ func (t *SSETranslator) Flush() {
 	}
 }
 
-// Finalize writes the buffered body for non-streaming responses. Streaming
-// is a no-op — [DONE] was already emitted on message_stop.
+// Finalize writes the buffered body for non-streaming responses.
 func (t *SSETranslator) Finalize() error {
 	if t.streaming {
 		return nil
@@ -340,12 +336,10 @@ type AnthropicSSETranslator struct {
 	requestModel string
 
 	started bool
-	// closed guards against double-emission: [DONE] triggers finishStream
-	// mid-stream, and Finalize runs again after Proxy returns.
+	// closed guards against double-emission after [DONE] triggers finishStream.
 	closed   bool
 	blockIdx int
-	// textOpen is lazily set on first content delta to avoid empty blocks for
-	// tool-only responses.
+	// textOpen avoids empty text blocks for tool-only responses.
 	textOpen   bool
 	toolBlocks map[int]int
 
@@ -360,15 +354,12 @@ type AnthropicSSETranslator struct {
 
 	usageSink otel.UsageSink
 
-	// estimatedInputTokens is the proxy's pre-inference input-token estimate.
-	// It populates message_start.usage.input_tokens so clients that key off
-	// that event (Claude Code's subagent token counter, etc.) see a non-zero
-	// value even on cross-format paths where the real upstream usage doesn't
-	// arrive until message_delta.
+	// estimatedInputTokens is the pre-inference estimate, used to populate
+	// message_start.usage.input_tokens for cross-format paths where upstream
+	// usage doesn't arrive until message_delta.
 	estimatedInputTokens int
 
-	// routingMarker, when non-empty, is emitted as a standalone text block
-	// at index 0 right after message_start. markerEmitted guards single emission.
+	// routingMarker is emitted as a standalone text block at index 0.
 	routingMarker string
 	markerEmitted bool
 }
@@ -387,16 +378,14 @@ func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink 
 }
 
 // WithRoutingMarker installs a text snippet emitted as a standalone content
-// block at index 0 immediately after message_start. Empty string disables it.
+// block at index 0 after message_start. Empty string disables it.
 func (t *AnthropicSSETranslator) WithRoutingMarker(marker string) *AnthropicSSETranslator {
 	t.routingMarker = marker
 	return t
 }
 
-// WithEstimatedInputTokens seeds message_start.usage.input_tokens with the
-// proxy's pre-inference estimate. Cross-format paths (OpenAI, Gemini) don't
-// learn the real input_tokens until message_delta, but some clients only read
-// input_tokens off message_start — without this hint they see zero.
+// WithEstimatedInputTokens seeds message_start.usage.input_tokens for cross-format
+// paths where upstream usage arrives after message_start.
 func (t *AnthropicSSETranslator) WithEstimatedInputTokens(n int) *AnthropicSSETranslator {
 	if n > 0 {
 		t.estimatedInputTokens = n
@@ -408,8 +397,7 @@ func (t *AnthropicSSETranslator) Header() http.Header {
 	return t.inner.Header()
 }
 
-// WriteHeader routes streaming success responses through SSE; errors and
-// non-streaming defer to Finalize.
+// WriteHeader routes streaming success responses through SSE.
 func (t *AnthropicSSETranslator) WriteHeader(code int) {
 	t.statusCode = code
 	ct := t.inner.Header().Get("Content-Type")
@@ -447,8 +435,8 @@ func (t *AnthropicSSETranslator) Flush() {
 	}
 }
 
-// Finalize writes the buffered body for non-streaming responses; for streaming,
-// emits trailing message_delta/message_stop if not already closed.
+// Finalize writes the buffered body for non-streaming responses, or emits
+// trailing message_delta/message_stop for streaming.
 func (t *AnthropicSSETranslator) Finalize() error {
 	observability.Get().Debug("AnthropicSSE Finalize entry",
 		"streaming", t.streaming,
@@ -707,11 +695,6 @@ func (t *AnthropicSSETranslator) emitMessageStart() error {
 		id = "msg_translated"
 	}
 	observability.Get().Debug("AnthropicSSE emit", "event", "message_start")
-	// estimatedInputTokens is the proxy's pre-inference estimate, used so clients
-	// that key off message_start.usage.input_tokens (e.g. Claude Code's subagent
-	// token counter) see a non-zero value for cross-format paths where the real
-	// upstream usage doesn't arrive until the final chunk. message_delta
-	// overwrites it with the actual upstream-reported value.
 	t.bw.WriteString("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":")
 	sse.WriteJSONString(t.bw, id)
 	t.bw.WriteString(",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":")
@@ -730,11 +713,9 @@ func (t *AnthropicSSETranslator) emitContentBlockStartText(index int) error {
 	return t.flushEvent()
 }
 
-// emitContentBlockStartTool emits an Anthropic content_block_start for a
-// tool_use block. sig, when non-empty, is the opaque thought_signature that
-// Gemini 3.x requires round-tripped on the next turn's functionCall part —
-// smuggled here as a non-standard field on the tool_use block so clients
-// that pass through unknown fields preserve it.
+// emitContentBlockStartTool emits a tool_use content_block_start. sig, when
+// non-empty, is an opaque thought_signature for Gemini 3.x round-trips,
+// smuggled as a non-standard field so passthrough clients preserve it.
 func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name, sig string) error {
 	observability.Get().Debug("AnthropicSSE emit", "event", "content_block_start", "type", "tool_use", "name", name)
 	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
@@ -786,10 +767,8 @@ func (t *AnthropicSSETranslator) emitMessageDelta() error {
 	sse.WriteJSONString(t.bw, stopReason)
 	t.bw.WriteString(",\"stop_sequence\":null},\"usage\":{")
 	if t.hasUsage {
-		// Anthropic's input_tokens is fresh-only; OpenAI's prompt_tokens (the
-		// source) is the total including cached tokens. Subtract cache so the
-		// statusline formula (input + 1.25*cwrt + multiplier*crd) doesn't
-		// double-count cache tokens.
+		// Anthropic's input_tokens is fresh-only; subtract cache so the
+		// statusline formula doesn't double-count.
 		freshInput := max(0, t.usageInputTokens-t.usageCacheCreationTokens-t.usageCacheReadTokens)
 		t.bw.WriteString("\"input_tokens\":")
 		sse.WriteJSONInt(t.bw, int64(freshInput))

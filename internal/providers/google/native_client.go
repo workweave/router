@@ -18,22 +18,18 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// NativeBaseURL is Google's native Generative Language base URL. Endpoints sit
-// under /v1beta/models/{model}:generateContent — distinct from the OpenAI-compat
-// surface under /v1beta/openai.
+// NativeBaseURL is Google's native Generative Language base URL.
 const NativeBaseURL = "https://generativelanguage.googleapis.com"
 
 // NativeClient is the providers.Client adapter for Gemini's native REST surface.
-// The native API returns and accepts the opaque thought_signature field that
-// multi-turn tool use against Gemini 3.x preview models requires; the
-// OpenAI-compat surface does not. Auth is via x-goog-api-key.
+// The native API preserves thought_signature for multi-turn tool use with Gemini 3.x preview models.
 type NativeClient struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
 }
 
-// NewNativeClient returns a NativeClient; baseURL defaults to NativeBaseURL when empty.
+// NewNativeClient returns a NativeClient using NativeBaseURL when baseURL is empty.
 func NewNativeClient(apiKey, baseURL string) *NativeClient {
 	if baseURL == "" {
 		baseURL = NativeBaseURL
@@ -45,9 +41,7 @@ func NewNativeClient(apiKey, baseURL string) *NativeClient {
 	}
 }
 
-// Proxy posts the prepared body to :generateContent, or
-// :streamGenerateContent?alt=sse when prep.Headers[GeminiStreamHintHeader] is
-// "true". The synthetic hint header is stripped before forwarding upstream.
+// Proxy posts to :generateContent or :streamGenerateContent?alt=sse depending on the Gemini stream hint header.
 func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	stream := prep.Headers.Get(translate.GeminiStreamHintHeader) == "true"
 	prep.Headers.Del(translate.GeminiStreamHintHeader)
@@ -116,8 +110,7 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 	return httputil.StreamBody(resp.Body, resp.StatusCode, w, t)
 }
 
-// Passthrough forwards to the native surface, rewriting the inbound /v1/
-// prefix to /v1beta/ since the native API exposes /v1beta/models for discovery.
+// Passthrough rewrites inbound /v1/ paths to /v1beta/ for the native API surface.
 func (c *NativeClient) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	suffix := r.URL.Path
 	if rest, ok := strings.CutPrefix(suffix, "/v1/"); ok {
@@ -177,9 +170,7 @@ func (c *NativeClient) Passthrough(ctx context.Context, prep providers.PreparedR
 	return err
 }
 
-// logUpstreamStatus emits Error for 4xx/5xx and Warn for 429s, surfacing a
-// body preview so non-2xx upstream responses don't blackhole into a generic
-// "upstream call failed" string at the client.
+// logUpstreamStatus logs non-2xx upstream responses with a body preview.
 func logUpstreamStatus(msg string, status int, attrs ...any) {
 	merged := append([]any{"status", status}, attrs...)
 	if status >= 500 || (status >= 400 && status != http.StatusTooManyRequests) {

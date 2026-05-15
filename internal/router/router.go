@@ -7,15 +7,11 @@ type Request struct {
 	RequestedModel       string
 	EstimatedInputTokens int
 	HasTools             bool
-	// PromptText is the concatenated user/system text, used by content-aware routers.
-	PromptText string
-	// EnabledProviders restricts argmax so we never return a decision the
-	// upstream call would 401 on. Nil means no per-request gating.
+	PromptText           string
+	// Per-request provider gating — nil means unrestricted.
 	EnabledProviders map[string]struct{}
-	// ExcludedModels drops the named models from argmax. Per-installation
-	// or env-var-driven; sibling to EnabledProviders but at model granularity.
-	// Nil or empty means no exclusion. If filtering empties the eligible
-	// set, the scorer returns ErrNoEligibleProvider rather than falling back.
+	// Per-request model exclusion — nil or empty means no exclusion.
+	// If filtering empties eligible set, scorer returns ErrNoEligibleProvider.
 	ExcludedModels map[string]struct{}
 }
 
@@ -23,23 +19,16 @@ type Decision struct {
 	Provider string
 	Model    string
 	Reason   string
-	// Metadata is populated by content-aware routers; nil for others.
-	// Downstream consumers must nil-check before dereferencing.
+	// Nil for non-content-aware routers; nil-check before dereferencing.
 	Metadata *RoutingMetadata
 }
 
-// RoutingMetadata lets downstream components reuse the embedding + cluster
-// context without recomputing. Always nil-check before reading.
+// RoutingMetadata lets downstream components reuse the embedding and
+// cluster context without recomputing.
 type RoutingMetadata struct {
-	Embedding []float32
-	// ClusterIDs are sorted ascending for log determinism; ClusterIDs[0]
-	// is NOT necessarily the closest centroid.
-	ClusterIDs []int
-	// CandidateModels is the eligible-model set argmax ran over; captured
-	// so observations record what was on the table, not just what was picked.
-	CandidateModels []string
-	// ChosenScore is the sum of rankings across top-p clusters; used for
-	// margin-of-victory analytics.
+	Embedding            []float32
+	ClusterIDs           []int // Sorted ascending; [0] is NOT necessarily closest.
+	CandidateModels      []string
 	ChosenScore          float32
 	ClusterRouterVersion string
 }

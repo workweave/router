@@ -1,21 +1,7 @@
-// Package cache implements a semantic response cache for the router.
-//
-// Short-circuits near-duplicate requests by cosine similarity on the
-// cluster scorer's prompt embedding; on hit, captured wire-format bytes
-// are replayed without invoking the upstream provider.
-//
-// Scope (v1):
-//   - Non-streaming only. Proxy bypasses cache when stream=true.
-//   - Per-(installation, inbound-format) isolation. Bucket key includes
-//     inbound format because captured bytes are post-translation, so a
-//     cached Anthropic response must never replay for an OpenAI client.
-//   - Cluster-bucketed brute-force lookup. Each (installation, format,
-//     clusterID) owns an LRU; lookup scans the routing decision's top-p
-//     clusters. At ~10 clusters × 1k entries × 768-d, fits in <5ms;
-//     HNSW is unnecessary.
-//
-// Out of scope: streaming, distributed (Redis), cross-installation
-// sharing, event-driven invalidation. TTL is the only eviction.
+// Package cache implements a semantic response cache. Short-circuits
+// near-duplicate non-streaming requests by cosine similarity on prompt
+// embedding; per-(installation, inbound-format) isolation. TTL is the only
+// eviction.
 package cache
 
 import (
@@ -29,26 +15,20 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 )
 
-// CachedResponse captures the upstream response in the inbound wire
-// format. Stores post-translation bytes so replay is indistinguishable
-// from the client's perspective.
+// CachedResponse captures the upstream response in the inbound wire format.
 type CachedResponse struct {
 	StatusCode int
 	Headers    http.Header
-	// Body is bounded by MaxBodyBytes; oversized entries are dropped.
-	Body []byte
+	Body       []byte // Bounded by MaxBodyBytes; oversized entries are dropped.
 }
 
 // Config carries the runtime knobs.
 type Config struct {
 	PerClusterThreshold map[int]float32
 	DefaultThreshold    float32
-	// BucketSize caps per-(installation, format, clusterID) LRU size so
-	// one chatty installation can't evict another's entries.
-	BucketSize int
-	TTL        time.Duration
-	// MaxBodyBytes drops responses larger than this without caching
-	// (Anthropic max_tokens is 200k ≈ 1MB).
+	// BucketSize caps per-(installation, format, clusterID) LRU size.
+	BucketSize   int
+	TTL          time.Duration
 	MaxBodyBytes int
 }
 
@@ -58,7 +38,7 @@ func DefaultConfig() Config {
 		DefaultThreshold: 0.95,
 		BucketSize:       1024,
 		TTL:              1 * time.Hour,
-		MaxBodyBytes:     1 << 20, // 1 MiB
+		MaxBodyBytes:     1 << 20,
 	}
 }
 
@@ -66,7 +46,7 @@ func DefaultConfig() Config {
 type Cache struct {
 	cfg     Config
 	buckets map[bucketKey]*expirable.LRU[entryKey, *entry]
-	mu      sync.Mutex // guards `buckets`; LRU itself is thread-safe
+	mu      sync.Mutex
 }
 
 // New constructs a Cache; zero Config fields fall through to DefaultConfig.
@@ -124,7 +104,7 @@ func (c *Cache) thresholdFor(clusterID int) float32 {
 }
 
 // Lookup walks buckets for (installation, format, clusterIDs) and
-// returns the first entry whose cosine clears the cluster's threshold.
+// returns the first entry whose cosine clears the threshold.
 // embedding must be L2-normalized; clusterIDs order is irrelevant.
 func (c *Cache) Lookup(installationID string, format Format, embedding []float32, clusterIDs []int) (CachedResponse, bool) {
 	if c == nil || len(embedding) == 0 || len(clusterIDs) == 0 {
@@ -136,8 +116,7 @@ func (c *Cache) Lookup(installationID string, format Format, embedding []float32
 			continue
 		}
 		threshold := c.thresholdFor(cid)
-		// LRU.Keys() returns MRU-first, biasing toward the most-recently
-		// stored similar entry.
+		// Keys() returns MRU-first, biasing toward most recently stored entry.
 		for _, k := range bucket.Keys() {
 			e, ok := bucket.Get(k)
 			if !ok {
@@ -153,8 +132,7 @@ func (c *Cache) Lookup(installationID string, format Format, embedding []float32
 }
 
 // Store persists a response. clusterID should be one of the routing
-// decision's top-p clusters; Lookup scans every top-p cluster so any
-// one suffices. Oversized bodies are silently dropped.
+// decision's top-p clusters. Oversized bodies are silently dropped.
 func (c *Cache) Store(installationID string, format Format, embedding []float32, clusterID int, resp CachedResponse) {
 	if c == nil || len(embedding) == 0 {
 		return
@@ -166,8 +144,7 @@ func (c *Cache) Store(installationID string, format Format, embedding []float32,
 	if bucket == nil {
 		return
 	}
-	// Deep-copy: caller's slice is owned by router.Decision.Metadata
-	// and may be mutated/recycled.
+	// Deep-copy: caller's slice may be mutated/recycled.
 	embedCopy := make([]float32, len(embedding))
 	copy(embedCopy, embedding)
 	bucket.Add(entryKeyFor(embedCopy), &entry{
@@ -176,8 +153,8 @@ func (c *Cache) Store(installationID string, format Format, embedding []float32,
 	})
 }
 
-// bucket returns the LRU for a key. create=false returns nil for
-// missing buckets (lookup path); create=true allocates lazily.
+// bucket returns the LRU for a key. create=false returns nil for missing
+// buckets (lookup path); create=true allocates lazily.
 func (c *Cache) bucket(installationID string, format Format, clusterID int, create bool) *expirable.LRU[entryKey, *entry] {
 	key := bucketKey{installationID: installationID, format: format, clusterID: clusterID}
 	c.mu.Lock()
@@ -193,8 +170,8 @@ func (c *Cache) bucket(installationID string, format Format, clusterID int, crea
 	return b
 }
 
-// entryKeyFor hashes embedding bytes so identical embeddings produce
-// the same key and re-stores update in-place rather than churning the LRU.
+// entryKeyFor hashes embedding bytes so re-stores update in-place rather
+// than churning the LRU.
 func entryKeyFor(embedding []float32) entryKey {
 	if len(embedding) == 0 {
 		return entryKey{}
@@ -209,9 +186,8 @@ func entryKeyFor(embedding []float32) entryKey {
 	return k
 }
 
-// cosine computes cosine similarity. Both inputs must be L2-normalized
-// (cluster scorer guarantees this); skip sqrt+divide to mirror
-// scorer.go::topPNearest.
+// cosine computes cosine similarity. Both inputs must be L2-normalized;
+// skip sqrt+divide to mirror scorer.go::topPNearest.
 func cosine(a, b []float32) float32 {
 	if len(a) != len(b) {
 		return 0
