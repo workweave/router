@@ -15,16 +15,14 @@
 #   - dir:              <dir>/.claude/settings.json + <dir>/.claude/cc-statusline.sh
 #
 # Usage:
-#   ./install.sh                                  # hosted router, user scope
-#   ./install.sh --scope project                  # commit-with-team install
-#   ./install.sh --dir /tmp/my-sandbox            # isolated throwaway install
-#   ./install.sh --local                          # local router on localhost:8080
-#   ./install.sh --base-url http://localhost:8080 # self-hosted, custom port
-#   ./install.sh --non-interactive                # require WEAVE_ROUTER_KEY env var
-#   ./install.sh --quiet                          # suppress banner, ping check, and trailing tips
-#
-#   curl -fsSL https://weave.ai/cc/install.sh | sh
-#   curl -fsSL https://weave.ai/cc/install.sh | sh -s -- --scope project
+#   npx weave-router                                  # hosted router, user scope
+#   npx weave-router --scope project                  # commit-with-team install
+#   npx weave-router --dir /tmp/my-sandbox            # isolated throwaway install
+#   npx weave-router --local                          # local router on localhost:8080
+#   npx weave-router --base-url http://localhost:8080 # self-hosted, custom port
+#   npx weave-router --non-interactive                # require WEAVE_ROUTER_KEY env var
+#   npx weave-router --quiet                          # suppress banner, ping check, and trailing tips
+#   npx weave-router --uninstall                      # remove the installation
 
 set -euo pipefail
 
@@ -183,7 +181,9 @@ spin() {
 usage() {
   # Print the leading comment block (lines 2..just-before `set -euo`), stripping
   # the leading `# `. awk avoids GNU `head -n -<N>`, which BSD head on macOS
-  # rejects with "illegal line count -- -N".
+  # rejects with "illegal line count -- -N". Banner sits above so `--help`
+  # gets the same wordmark as a fresh install run.
+  print_banner
   awk 'NR<2 { next } /^set -euo/ { exit } { sub(/^# ?/, ""); print }' "$0"
   exit "${1:-0}"
 }
