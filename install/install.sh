@@ -240,13 +240,20 @@ for arg in "$@"; do
 
     require_cmd curl "https://curl.se"
     url="${WEAVE_UNINSTALL_URL:-https://raw.githubusercontent.com/workweave/router/main/install/uninstall.sh}"
-    tmp="$(mktemp -t weave-uninstall.XXXXXX)" || { err "failed to create temp file"; exit 1; }
-    if ! curl -fsSL --max-time 30 "$url" -o "$tmp" 2>/dev/null; then
-      rm -f "$tmp"
+    # Pull the body into memory and exec via `bash -c` so we never touch
+    # disk: `exec` replaces this process, so any temp file we wrote would
+    # outlive the EXIT trap and leak indefinitely. Loading into a variable
+    # also gives us a chance to fail closed on 404 HTML pages before
+    # handing the content to bash.
+    if ! uninstall_body="$(curl -fsSL --max-time 30 "$url" 2>/dev/null)"; then
       err "failed to fetch uninstall.sh from $url"
       exit 1
     fi
-    exec bash "$tmp" "${cleaned_args[@]+"${cleaned_args[@]}"}"
+    if [ -z "$uninstall_body" ] || [ "${uninstall_body:0:2}" != "#!" ]; then
+      err "fetched content from $url doesn't look like a bash script"
+      exit 1
+    fi
+    exec bash -c "$uninstall_body" weave-uninstall "${cleaned_args[@]+"${cleaned_args[@]}"}"
   fi
 done
 
