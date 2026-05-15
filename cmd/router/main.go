@@ -130,6 +130,10 @@ func main() {
 	// must NOT taint envKeyedProviders since hard-pin can't rely on
 	// every inbound request carrying Anthropic credentials.
 	anthropicPassthroughEligible := false
+	// openaiPassthroughEligible mirrors anthropicPassthroughEligible for the
+	// OpenAI provider — Codex's logged-in plan flow. Same invariant: must NOT
+	// taint envKeyedProviders.
+	openaiPassthroughEligible := false
 
 	// In managed mode every provider is registered unconditionally with no
 	// deployment-level API key. The proxy service is also flipped into
@@ -176,7 +180,10 @@ func main() {
 			envKeyedProviders[providers.ProviderOpenAI] = struct{}{}
 			logger.Info("OpenAI provider enabled", "base_url", openaiBaseURL)
 		default:
-			logger.Info("OpenAI provider registered (BYOK only — set OPENAI_API_KEY for deployment-level use)", "base_url", openaiBaseURL)
+			// OpenAI in selfhosted with no env key serves the passthrough
+			// path on client Authorization headers (Codex plan flow).
+			openaiPassthroughEligible = true
+			logger.Info("OpenAI provider enabled (client auth passthrough)", "base_url", openaiBaseURL)
 		}
 	}
 
@@ -392,6 +399,9 @@ func main() {
 	}
 	if anthropicPassthroughEligible {
 		deploymentEligible[providers.ProviderAnthropic] = struct{}{}
+	}
+	if openaiPassthroughEligible {
+		deploymentEligible[providers.ProviderOpenAI] = struct{}{}
 	}
 
 	// Planner + handover config (Prism-style cache-aware routing). Defaults

@@ -37,17 +37,31 @@ func NewClient(apiKey, baseURL string) *Client {
 	}
 }
 
+// setAuth applies authentication to the upstream request. Precedence:
+// (1) per-request BYOK credentials in ctx; (2) deployment-level API key;
+// (3) passthrough of the client's own OpenAI auth header (Codex plan flow).
+// Router-only credentials are deliberately not forwarded.
+func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) {
+	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
+		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
+		return
+	}
+	if c.apiKey != "" {
+		upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
+		return
+	}
+	if v := inbound.Header.Get("authorization"); v != "" {
+		upstream.Header.Set("Authorization", v)
+	}
+}
+
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewReader(prep.Body))
 	if err != nil {
 		return fmt.Errorf("build upstream request: %w", err)
 	}
 	upstream.Header.Set("Content-Type", "application/json")
-	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
-		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
-	} else if c.apiKey != "" {
-		upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
+	c.setAuth(ctx, upstream, r)
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
@@ -139,11 +153,7 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		upstream.Header.Set("Content-Type", ct)
 	}
-	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
-		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
-	} else if c.apiKey != "" {
-		upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
+	c.setAuth(ctx, upstream, r)
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}

@@ -1,24 +1,33 @@
 #!/usr/bin/env bash
 #
-# Configures Claude Code to permanently route through the Weave Router by
-# writing the router base URL, router auth header, and a status line into
-# Claude Code's settings.json. After running, `claude` Just Works — no shell
-# exports, no manual settings edits.
+# Weave Router installer for Claude Code and Codex.
 #
-# Two scopes:
+# Configures Claude Code (default) or the OpenAI Codex CLI (`--codex`) to
+# permanently route through the Weave Router. For Claude Code this writes
+# the router base URL, router auth header, and a status line into Claude
+# Code's settings.json. For Codex it writes a `model_providers.weave`
+# entry plus `model_provider = "weave"` into ~/.codex/config.toml (managed
+# block delimited by markers so re-install / uninstall is clean).
+#
+# Two scopes (apply to both targets):
 #   - user (default):  ~/.claude/settings.json  + ~/.weave/cc-statusline.sh
+#                      ~/.codex/config.toml                       (with --codex)
 #   - project:         <repo>/.claude/settings.json + <repo>/.claude/cc-statusline.sh
+#                      <repo>/.codex/config.toml                  (with --codex)
 #
 # Or pass --dir to install into any directory:
 #   - dir:              <dir>/.claude/settings.json + <dir>/.claude/cc-statusline.sh
+#                       <dir>/.codex/config.toml                  (with --codex)
 #
 # Usage:
-#   npx @workweave/router                                  # hosted router, user scope
+#   npx @workweave/router                                  # interactive picker (Claude Code or Codex)
+#   npx @workweave/router --claude                         # skip the picker, target Claude Code
+#   npx @workweave/router --codex                          # skip the picker, target the OpenAI Codex CLI
 #   npx @workweave/router --scope project                  # commit-with-team install
 #   npx @workweave/router --dir /tmp/my-sandbox            # isolated throwaway install
 #   npx @workweave/router --local                          # local router on localhost:8080
 #   npx @workweave/router --base-url http://localhost:8080 # self-hosted, custom port
-#   npx @workweave/router --non-interactive                # require WEAVE_ROUTER_KEY env var
+#   npx @workweave/router --non-interactive                # require WEAVE_ROUTER_KEY env var (defaults target to claude)
 #   npx @workweave/router --quiet                          # suppress banner, ping check, and trailing tips
 #   npx @workweave/router --uninstall                      # remove a previous install (delegates to uninstall.sh)
 
@@ -37,6 +46,14 @@ base_url=""
 non_interactive="false"
 quiet="false"
 router_key_header="X-Weave-Router-Key"
+# Target tool whose config we patch. "claude" (default) writes Claude Code
+# settings.json; "codex" writes ~/.codex/config.toml. Each target carries its
+# own credential-passthrough story in the router: Claude Code's logged-in
+# Anthropic key flows through unchanged, and Codex's `OPENAI_API_KEY` flows
+# through via the same header path. target_explicit tracks whether --claude
+# or --codex was passed so an interactive run can prompt for the choice.
+target="claude"
+target_explicit="false"
 
 # ---------- helpers ----------
 
@@ -78,11 +95,16 @@ skip() { printf "%s⊙%s %s%s%s\n" "$C_DIM" "$C_RESET" "$C_DIM" "$*" "$C_RESET";
 print_banner() {
   [ "$quiet" = "true" ] && return 0
   [ "$tty_out" = "true" ] || return 0
+  local target_label
+  case "$target" in
+    codex) target_label="Codex installer" ;;
+    *)     target_label="Claude Code installer" ;;
+  esac
   printf '\n'
   printf '%s  ╦ ╦╔═╗╔═╗╦  ╦╔═╗%s\n' "$C_BRAND" "$C_RESET"
   printf '%s  ║║║║╣ ╠═╣╚╗╔╝║╣ %s\n' "$C_BRAND" "$C_RESET"
   printf '%s  ╚╩╝╚═╝╩ ╩ ╚╝ ╚═╝%s\n' "$C_BRAND" "$C_RESET"
-  printf '  %sWeave Router · Claude Code installer%s\n\n' "$C_DIM" "$C_RESET"
+  printf '  %sWeave Router · %s%s\n\n' "$C_DIM" "$target_label" "$C_RESET"
 }
 
 # ---------- spinner ----------
@@ -207,6 +229,71 @@ refuse_if_symlink() {
   fi
 }
 
+# Markers that delimit the block this installer manages inside Codex's
+# config.toml. Kept on disk verbatim so a re-install (or uninstall.sh
+# --codex) can find and replace the block instead of duplicating it.
+WEAVE_CODEX_BEGIN_MARKER="# >>> weave-router managed (do not edit between markers) >>>"
+WEAVE_CODEX_END_MARKER="# <<< weave-router managed <<<"
+
+# write_codex_config writes a managed [model_providers.weave] block to the
+# Codex CLI's config.toml. Sets `model_provider = "weave"` at the top level so
+# Codex picks the routed provider by default. Both lines live inside the
+# managed-block markers so uninstall removes them cleanly. We strip any
+# top-level `model_provider = ...` declaration OUTSIDE the markers before
+# appending so the file doesn't end up with a duplicate key (TOML rejects
+# that). Inline `model_provider` keys inside `[profiles.*]` sections stay
+# untouched.
+#
+# Usage: write_codex_config <config_file_path> <base_url> <api_key>
+write_codex_config() {
+  local config_file="$1"
+  local block_url="$2"
+  local block_key="$3"
+
+  local block
+  block="$(cat <<TOML
+${WEAVE_CODEX_BEGIN_MARKER}
+# Managed by the Weave Router installer. Re-running the installer rewrites
+# this block; \`./uninstall.sh --codex\` removes it. To opt out without
+# uninstalling, change the model_provider value below.
+model_provider = "weave"
+
+[model_providers.weave]
+name = "Weave Router"
+base_url = "${block_url}/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "chat"
+http_headers = { "X-Weave-Router-Key" = "${block_key}" }
+${WEAVE_CODEX_END_MARKER}
+TOML
+)"
+
+  if [ -f "$config_file" ]; then
+    local tmp; tmp="$(mktemp -t weave-codex.XXXXXX)"
+    # Strip the managed block (between markers) plus any top-level
+    # `model_provider =` outside it. We define "top-level" as everything
+    # before the first `[section]` header. The awk handles both passes in
+    # one sweep so we never emit a duplicate.
+    awk -v begin="$WEAVE_CODEX_BEGIN_MARKER" -v end="$WEAVE_CODEX_END_MARKER" '
+      $0 == begin { skip = 1; next }
+      $0 == end   { skip = 0; next }
+      skip        { next }
+      /^[[:space:]]*\[/ { in_section = 1 }
+      !in_section && /^[[:space:]]*model_provider[[:space:]]*=/ { next }
+      { print }
+    ' "$config_file" >"$tmp"
+    mv "$tmp" "$config_file"
+    # Leading newline keeps the appended block readable when the file ended
+    # without one (mktemp output may or may not have trailing newline).
+    printf "\n%s\n" "$block" >>"$config_file"
+  else
+    printf "%s\n" "$block" >"$config_file"
+  fi
+  # 0600: the file holds a router key. Even at user scope, mode 644 would
+  # leak the key to any local user on a shared box.
+  chmod 600 "$config_file"
+}
+
 # ---------- uninstall delegation ----------
 #
 # `--uninstall` flips this script into a thin shim for uninstall.sh: the
@@ -285,6 +372,14 @@ while [ $# -gt 0 ]; do
       install_dir="${2:-}"; shift 2
       [ -n "$install_dir" ] || { err "--dir requires a path"; exit 2; }
       ;;
+    --codex)
+      target="codex"; target_explicit="true"; shift
+      ;;
+    --claude)
+      # No-op selector for symmetry with --codex. Useful in pipelines that
+      # want to skip the interactive picker without depending on the default.
+      target="claude"; target_explicit="true"; shift
+      ;;
     -h|--help)
       usage 0
       ;;
@@ -300,9 +395,31 @@ fi
 # trim trailing slash for cleanliness
 base_url="${base_url%/}"
 
+# ---------- interactive target prompt ----------
+
+# If neither --claude nor --codex was passed and we have a controlling
+# terminal, ask which tool to install for. Non-interactive runs (CI,
+# `curl | sh --non-interactive`) silently use the "claude" default — same
+# behavior the script had before --codex existed, so existing pipelines
+# don't change semantics. We prompt BEFORE print_banner so the banner's
+# target label (Claude Code installer / Codex installer) reflects the choice.
+if [ "$target_explicit" = "false" ] && [ "$non_interactive" = "false" ] && [ -r /dev/tty ]; then
+  printf "%sInstall target:%s\n" "$C_BOLD" "$C_RESET"
+  printf "  %s1)%s Claude Code  %s— patches ~/.claude/settings.json (or <repo>/.claude/)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "  %s2)%s Codex        %s— patches ~/.codex/config.toml (or <repo>/.codex/)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "Choose %s[1/2]%s (default %s1%s): " "$C_BOLD" "$C_RESET" "$C_BOLD" "$C_RESET"
+  read -r target_choice </dev/tty || target_choice=""
+  case "${target_choice:-1}" in
+    1|""|claude|c|C)  target="claude" ;;
+    2|codex|x|X)      target="codex" ;;
+    *) err "invalid choice: $target_choice"; exit 2 ;;
+  esac
+fi
+
 # Banner runs before the interactive scope prompt so the very first thing
 # users see when `make full-setup` hands off to install.sh is the wordmark,
-# not a bare "Install scope:" line.
+# not a bare "Install scope:" line. Target prompt above already finalized
+# $target, so the banner's per-target label reflects the user's choice.
 print_banner
 
 # ---------- interactive scope prompt ----------
@@ -345,15 +462,29 @@ fi
 
 # ---------- pre-flight ----------
 
-[ "$quiet" = "true" ] || info "scope=${C_BOLD}${scope}${C_RESET}  base_url=${C_BOLD}${base_url}${C_RESET}"
+[ "$quiet" = "true" ] || info "scope=${C_BOLD}${scope}${C_RESET}  target=${C_BOLD}${target}${C_RESET}  base_url=${C_BOLD}${base_url}${C_RESET}"
 
-require_cmd jq    "macOS: 'brew install jq' · Debian/Ubuntu: 'sudo apt install jq'"
+# Codex install only writes a TOML file (managed via awk) so jq isn't needed.
+# Claude Code's settings.json patching uses jq to deep-merge env keys.
+if [ "$target" = "claude" ]; then
+  require_cmd jq    "macOS: 'brew install jq' · Debian/Ubuntu: 'sudo apt install jq'"
+fi
 require_cmd curl  "macOS/Linux: usually preinstalled — check your package manager"
 
-if ! command -v claude >/dev/null 2>&1; then
-  warn "'claude' not found on PATH. Install Claude Code from https://claude.com/code, then re-run this script."
-  warn "Continuing — settings.json will be written and will take effect once Claude Code is installed."
-fi
+case "$target" in
+  claude)
+    if ! command -v claude >/dev/null 2>&1; then
+      warn "'claude' not found on PATH. Install Claude Code from https://claude.com/code, then re-run this script."
+      warn "Continuing — settings.json will be written and will take effect once Claude Code is installed."
+    fi
+    ;;
+  codex)
+    if ! command -v codex >/dev/null 2>&1; then
+      warn "'codex' not found on PATH. Install via 'npm install -g @openai/codex' (or brew install codex), then re-run this script."
+      warn "Continuing — config.toml will be written and will take effect once Codex is installed."
+    fi
+    ;;
+esac
 
 script_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)"
 
@@ -386,42 +517,59 @@ else
   esac
 fi
 
-case "$scope" in
-  user)
-    settings_dir="$settings_base/.claude"
-    settings_file="$settings_dir/settings.json"
-    local_settings_file=""
-    statusline_dir="${settings_base}/.weave"
-    statusline_file="$statusline_dir/cc-statusline.sh"
-    statusline_path_for_settings="$statusline_file"
-    ;;
-  project)
-    settings_dir="$settings_base/.claude"
-    settings_file="$settings_dir/settings.json"
-    local_settings_file="$settings_dir/settings.local.json"
-    statusline_dir="$settings_base/.claude"
-    statusline_file="$statusline_dir/cc-statusline.sh"
-    # Portable relative path for real repos (teammates can clone anywhere).
-    # Absolute path when --dir overrides (no meaningful $CLAUDE_PROJECT_DIR).
-    if [ -z "$install_dir" ]; then
-      statusline_path_for_settings="\${CLAUDE_PROJECT_DIR}/.claude/cc-statusline.sh"
-    else
+if [ "$target" = "claude" ]; then
+  case "$scope" in
+    user)
+      settings_dir="$settings_base/.claude"
+      settings_file="$settings_dir/settings.json"
+      local_settings_file=""
+      statusline_dir="${settings_base}/.weave"
+      statusline_file="$statusline_dir/cc-statusline.sh"
       statusline_path_for_settings="$statusline_file"
-    fi
-    ;;
-esac
+      ;;
+    project)
+      settings_dir="$settings_base/.claude"
+      settings_file="$settings_dir/settings.json"
+      local_settings_file="$settings_dir/settings.local.json"
+      statusline_dir="$settings_base/.claude"
+      statusline_file="$statusline_dir/cc-statusline.sh"
+      # Portable relative path for real repos (teammates can clone anywhere).
+      # Absolute path when --dir overrides (no meaningful $CLAUDE_PROJECT_DIR).
+      if [ -z "$install_dir" ]; then
+        statusline_path_for_settings="\${CLAUDE_PROJECT_DIR}/.claude/cc-statusline.sh"
+      else
+        statusline_path_for_settings="$statusline_file"
+      fi
+      ;;
+  esac
 
-# Symlink containment: refuse if any target path is a symlink. User-scope paths
-# under $HOME are trusted; project-scope and --dir paths come from a git repo or
-# user-supplied directory that may be hostile, so we check those.
-if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
-  refuse_if_symlink "$settings_dir"
-  refuse_if_symlink "$settings_file"
-  refuse_if_symlink "$local_settings_file"
-  refuse_if_symlink "$statusline_file"
+  # Symlink containment: refuse if any target path is a symlink. User-scope
+  # paths under $HOME are trusted; project-scope and --dir paths come from a
+  # git repo or user-supplied directory that may be hostile, so we check those.
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$settings_dir"
+    refuse_if_symlink "$settings_file"
+    refuse_if_symlink "$local_settings_file"
+    refuse_if_symlink "$statusline_file"
+  fi
+
+  mkdir -p "$settings_dir" "$statusline_dir"
+else
+  # Codex CLI reads config from ~/.codex/config.toml by default. For project
+  # scope we write to <repo>/.codex/config.toml; the user invokes Codex with
+  # `CODEX_HOME=<repo>/.codex codex` (or runs from the repo if Codex auto-
+  # discovers). The router key is embedded in the file so it stays per-
+  # teammate — .codex/config.toml goes in .gitignore in project scope.
+  codex_dir="$settings_base/.codex"
+  codex_config_file="$codex_dir/config.toml"
+
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$codex_dir"
+    refuse_if_symlink "$codex_config_file"
+  fi
+
+  mkdir -p "$codex_dir"
 fi
-
-mkdir -p "$settings_dir" "$statusline_dir"
 
 # ---------- token handling ----------
 
@@ -451,6 +599,60 @@ if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
     printf "\n"
     [ -n "$api_key" ] || { err "no key provided"; exit 1; }
   fi
+
+# ---------- codex install path (dispatch + exit before the Claude-only writes) ----------
+
+if [ "$target" = "codex" ]; then
+  write_codex_config "$codex_config_file" "$base_url" "$api_key"
+  ok "Codex config written to $codex_config_file"
+
+  # Project scope: ensure the per-teammate config (which holds the router key)
+  # is gitignored. The base URL is the same for every teammate, so a
+  # committed shared file would still leak the per-key portion. Easier to
+  # ignore the whole config and have each teammate run the installer.
+  if [ "$scope" = "project" ] && [ -z "$install_dir" ] && [ -n "${git_root:-}" ]; then
+    gitignore="$git_root/.gitignore"
+    refuse_if_symlink "$gitignore"
+    for entry in \
+      ".codex/config.toml"
+    do
+      if [ ! -f "$gitignore" ] || ! grep -qxF "$entry" "$gitignore"; then
+        printf '%s\n' "$entry" >>"$gitignore"
+      fi
+    done
+    ok "Updated $gitignore (ignored .codex/config.toml)"
+  fi
+
+  # Post-install verification: same probes the Claude path runs so a working
+  # install gives the same green checks regardless of target.
+  if [ "$quiet" != "true" ]; then
+    if ! spin "Pinging $base_url/health" curl -fsS --max-time 5 "$base_url/health"; then
+      warn "Could not reach $base_url/health within 5s. Settings are written; verify the router is running."
+    fi
+  fi
+
+  if [ -n "$api_key" ]; then
+    # Pass the router key via stdin (`@-`) instead of -H so it never lands in
+    # the process arg list. Mirrors the Claude-path validate logic.
+    validate_codex_key() {
+      printf '%s: %s\n' "$router_key_header" "$api_key" \
+        | curl -fsS --max-time 5 --header @- "$base_url/validate"
+    }
+    if ! spin "Validating API key" validate_codex_key; then
+      warn "Router rejected the API key (check it matches the dashboard at $base_url/ui/)."
+    fi
+  fi
+
+  printf "\n"
+  printf "%s✓%s %s%sWeave Router installed for Codex.%s\n" \
+    "$C_GREEN" "$C_RESET" "$C_BOLD" "$C_BRAND" "$C_RESET"
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    # Codex auto-discovers ~/.codex; for non-user installs the caller has to
+    # point CODEX_HOME at the directory we wrote so Codex finds our config.
+    info "Run Codex with CODEX_HOME=$codex_dir codex so it picks up this config."
+  fi
+  exit 0
+fi
 
 # ---------- write the statusline script ----------
 
