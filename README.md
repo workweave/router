@@ -11,6 +11,8 @@ AvengersPro-derived cluster scorer, and dispatches to Anthropic, OpenAI,
 Google Gemini, or any OpenAI-compatible endpoint (OpenRouter, vLLM,
 Together, Fireworks, etc.).
 
+#### Developed by: www.workweave.ai (the #1 engineering intelligence platform, loved by Robinhood, Posthog & Reducto)
+
 ## Quick start
 
 **1. Add at least one upstream provider key to `.env.local` first.**
