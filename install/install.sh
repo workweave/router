@@ -428,9 +428,22 @@ print_banner
 # scope to install into. Non-interactive runs (CI, `curl | sh --non-interactive`)
 # silently use the "user" default.
 if [ -z "$install_dir" ] && [ "$scope_explicit" = "false" ] && [ "$non_interactive" = "false" ] && [ -r /dev/tty ]; then
+  # Per-target paths so the prompt text matches what actually gets written.
+  case "$target" in
+    codex)
+      scope_user_path="~/.codex/"
+      scope_project_path="<repo>/.codex/"
+      scope_cli_label="codex"
+      ;;
+    *)
+      scope_user_path="~/.claude/"
+      scope_project_path="<repo>/.claude/"
+      scope_cli_label="claude"
+      ;;
+  esac
   printf "%sInstall scope:%s\n" "$C_BOLD" "$C_RESET"
-  printf "  %s1)%s user     %s— write to ~/.claude/ (applies everywhere you run claude)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
-  printf "  %s2)%s project  %s— write to <repo>/.claude/ (applies only inside this repo)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "  %s1)%s user     %s— write to %s (applies everywhere you run %s)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$scope_user_path" "$scope_cli_label" "$C_RESET"
+  printf "  %s2)%s project  %s— write to %s (applies only inside this repo)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$scope_project_path" "$C_RESET"
   printf "Choose %s[1/2]%s (default %s1%s): " "$C_BOLD" "$C_RESET" "$C_BOLD" "$C_RESET"
   read -r scope_choice </dev/tty || scope_choice=""
   case "${scope_choice:-1}" in

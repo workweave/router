@@ -8,8 +8,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
@@ -40,7 +42,12 @@ func NewClient(apiKey, baseURL string) *Client {
 // setAuth applies authentication to the upstream request. Precedence:
 // (1) per-request BYOK credentials in ctx; (2) deployment-level API key;
 // (3) passthrough of the client's own OpenAI auth header (Codex plan flow).
-// Router-only credentials are deliberately not forwarded.
+//
+// The passthrough tier strips `Authorization: Bearer rk_...` because the
+// router auth middleware accepts the same header for router-key auth — we
+// must not relay a router credential to OpenAI just because no BYOK or
+// deployment key is configured. Mirrors the !HasAPIKeyPrefix guard in
+// proxy.ExtractClientCredentials.
 func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
@@ -50,9 +57,19 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *h
 		upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
 		return
 	}
-	if v := inbound.Header.Get("authorization"); v != "" {
-		upstream.Header.Set("Authorization", v)
+	v := inbound.Header.Get("authorization")
+	if v == "" {
+		return
 	}
+	// Only forward if the Bearer token isn't a router-issued key. Any other
+	// shape (incl. raw or malformed) we still forward — upstream will 401 on
+	// invalid creds, which is the correct failure mode for "no auth resolvable".
+	if raw, found := strings.CutPrefix(v, "Bearer "); found {
+		if auth.HasAPIKeyPrefix(strings.TrimSpace(raw)) {
+			return
+		}
+	}
+	upstream.Header.Set("Authorization", v)
 }
 
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {

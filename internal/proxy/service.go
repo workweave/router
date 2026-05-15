@@ -73,6 +73,15 @@ type Service struct {
 	// upstream API key is configured at the deployment level. When nil, all
 	// registered providers are treated as deployment-keyed (legacy behavior).
 	deploymentKeyedProviders map[string]struct{}
+	// passthroughEligibleProviders is the subset of registered providers
+	// reachable via client-supplied auth headers (no deployment key, no
+	// BYOK). Entries here are added to the eligible set only when the
+	// inbound request came in via the matching surface — otherwise the
+	// OpenAI client would forward an Anthropic-surface request's `x-api-key`
+	// to api.openai.com (and vice versa), which is a cross-provider
+	// credential leak even when upstream 401s. Surface-scoping ensures
+	// passthrough creds only enable the upstream they were issued for.
+	passthroughEligibleProviders map[string]struct{}
 	// planner parameterizes the Prism-style EV policy for stay-vs-switch.
 	planner planner.EVConfig
 	// plannerEnabled is the kill switch. When false, the orchestrator falls
@@ -412,6 +421,25 @@ func (s *Service) WithDeploymentKeyedProviders(set map[string]struct{}) *Service
 		copied[p] = struct{}{}
 	}
 	s.deploymentKeyedProviders = copied
+	return s
+}
+
+// WithPassthroughEligibleProviders names providers that are reachable via
+// client-supplied auth headers (no deployment key, no BYOK). Entries are
+// surface-scoped in enabledProvidersForRequest: an Anthropic-surface
+// request can enable Anthropic via passthrough but NOT OpenAI, and vice
+// versa. Without this guard, cross-surface routing would forward the
+// wrong credential type to a third-party API.
+func (s *Service) WithPassthroughEligibleProviders(set map[string]struct{}) *Service {
+	if set == nil {
+		s.passthroughEligibleProviders = nil
+		return s
+	}
+	copied := make(map[string]struct{}, len(set))
+	for p := range set {
+		copied[p] = struct{}{}
+	}
+	s.passthroughEligibleProviders = copied
 	return s
 }
 
@@ -1170,6 +1198,17 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 			continue
 		}
 		out[k.Provider] = struct{}{}
+	}
+	// Passthrough-eligible providers are surface-scoped: a provider
+	// registered without a deployment key joins the eligible set only when
+	// the inbound surface matches. Otherwise an Anthropic-surface request's
+	// `x-api-key` would flow to api.openai.com (and vice versa) when no
+	// BYOK / env keys are configured — a cross-provider credential leak
+	// even when upstream 401s.
+	if surfaceProvider != "" {
+		if _, ok := s.passthroughEligibleProviders[surfaceProvider]; ok {
+			out[surfaceProvider] = struct{}{}
+		}
 	}
 	// Client-supplied headers are only consulted when NOT authed via a
 	// router key. A router-key-authed request carrying an inbound bearer
