@@ -89,6 +89,10 @@ func (m *Multiversion) Route(ctx context.Context, req router.Request) (router.De
 	scorer, ok := m.Versions[chosen]
 	if !ok {
 		// NewMultiversion enforces Default ∈ Versions — should be unreachable.
+		observability.Get().Error(
+			"Cluster scorer: chosen version missing; returning ErrClusterUnavailable",
+			"chosen_version", chosen,
+		)
 		return router.Decision{}, fmt.Errorf("cluster multiversion: chosen version %q not built: %w", chosen, ErrClusterUnavailable)
 	}
 	return scorer.Route(ctx, req)
