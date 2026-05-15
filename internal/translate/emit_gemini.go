@@ -750,6 +750,12 @@ func sanitizeSchemaForGemini(v any) any {
 			}
 			out[k] = sanitizeSchemaForGemini(child)
 		}
+		// JSON Schema allows "type" to be an array (e.g. ["array", "null"]),
+		// but Gemini's proto Schema expects a single Type enum value and a
+		// separate "nullable" boolean. Collapse array types: pick the first
+		// non-"null" entry as the type and set nullable=true when "null"
+		// appears alongside.
+		out = collapseTypeArray(out)
 		// Anthropic permits `{"type":"array"}` with no `items`; Gemini's strict
 		// function-calling validator rejects it ("missing field"). Inject a
 		// permissive default so the tool definition survives translation. Real
@@ -769,6 +775,39 @@ func sanitizeSchemaForGemini(v any) any {
 	default:
 		return v
 	}
+}
+
+// collapseTypeArray collapses JSON Schema array-typed "type" (e.g. ["array", "null"])
+// into Gemini's single-Type-plus-nullable convention. Returns the map unchanged
+// when "type" is already a string or absent.
+func collapseTypeArray(out map[string]any) map[string]any {
+	types, ok := out["type"].([]any)
+	if !ok {
+		return out
+	}
+	var primary string
+	hasNull := false
+	for _, t := range types {
+		s, ok := t.(string)
+		if !ok {
+			continue
+		}
+		if s == "null" {
+			hasNull = true
+		} else if primary == "" {
+			primary = s
+		}
+	}
+	if primary == "" {
+		// Only "null" or empty — invalid, remove the type field.
+		delete(out, "type")
+		return out
+	}
+	out["type"] = primary
+	if hasNull {
+		out["nullable"] = true
+	}
+	return out
 }
 
 // filterStringEnum returns enum entries that are non-empty strings. Google's

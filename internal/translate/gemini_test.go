@@ -635,6 +635,50 @@ func TestSanitizeSchemaForGemini_PreservesSupportedFields(t *testing.T) {
 	assert.Equal(t, []any{"path", "mode"}, params["required"], "required must survive")
 }
 
+func TestPrepareGemini_CollapsesArrayTypeField(t *testing.T) {
+	// Regression: MCP tool schemas (e.g. Pylon) use JSON Schema array-typed
+	// "type" like ["array","null"]. Gemini's proto Schema expects type to be a
+	// single enum value with a separate "nullable" boolean. Without collapsing,
+	// Gemini rejects with "Proto field is not repeating, cannot start list."
+	body := []byte(`{
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [{
+			"name":"create_issue",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"tags":{
+						"type":["array","null"],
+						"description":"optional tags",
+						"items":{"type":"string"}
+					},
+					"title":{"type":"string"},
+					"score":{"type":["number","null"]}
+				}
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+	props := params["properties"].(map[string]any)
+
+	tags := props["tags"].(map[string]any)
+	assert.Equal(t, "array", tags["type"], "array-type type must collapse to primary non-null type")
+	assert.Equal(t, true, tags["nullable"], "nullable must be set when null appears in type array")
+	assert.NotNil(t, tags["items"], "items must survive collapseTypeArray")
+
+	assert.Equal(t, "string", props["title"].(map[string]any)["type"], "single-string type must be unchanged")
+
+	score := props["score"].(map[string]any)
+	assert.Equal(t, "number", score["type"], "number type must survive")
+	assert.Equal(t, true, score["nullable"], "nullable must be set for [number, null]")
+}
+
 func TestPrepareGemini_RepairsArrayMissingItems(t *testing.T) {
 	// Regression: production Claude Code traffic includes MCP tools whose schemas
 	// declare `{"type":"array"}` with no `items` field (valid JSON Schema, invalid
