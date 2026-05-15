@@ -39,6 +39,7 @@ func All() map[string]Pricing {
 var table = map[string]Pricing{
 	// Anthropic (cache reads at 10% of base)
 	"claude-opus-4-7":   {InputUSDPer1M: 15.00, OutputUSDPer1M: 75.00, CacheReadMultiplier: 0.10},
+	"claude-opus-4-6":   {InputUSDPer1M: 15.00, OutputUSDPer1M: 75.00, CacheReadMultiplier: 0.10},
 	"claude-sonnet-4-5": {InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10},
 	"claude-haiku-4-5":  {InputUSDPer1M: 0.80, OutputUSDPer1M: 4.00, CacheReadMultiplier: 0.10},
 
