@@ -12,9 +12,6 @@ export interface ChartTickProps<TIndependentValue extends ChartDataValueType> {
   y?: number | string;
 }
 
-/**
- * Renders a custom tick for the x-axis of a chart.
- */
 export function ChartTick<TIndependentValue extends ChartDataValueType>({
   height,
   index,

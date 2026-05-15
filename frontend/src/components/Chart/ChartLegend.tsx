@@ -6,10 +6,8 @@ import * as Recharts from "recharts";
 import { useChartContext } from "./ChartContext";
 import { ChartDataKeyType } from "./types";
 
-/** Maximum character length for legend labels before truncation */
 const LEGEND_TEXT_MAX_LENGTH = 40;
 
-/** Truncate text to a max length with ellipsis */
 function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength - 3) + "...";
@@ -44,9 +42,6 @@ interface ChartLegendSeriesProps {
   series: Pick<RechartsLegendPayloadItem, "color" | "type" | "value">;
 }
 
-/**
- * Renders the content for a single series in the chart tooltip.
- */
 function ChartLegendSeries<TDependentKey extends ChartDataKeyType>({
   series,
 }: ChartLegendSeriesProps) {

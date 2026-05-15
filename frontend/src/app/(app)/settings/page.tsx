@@ -110,9 +110,6 @@ export default function SettingsPage() {
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Router keys panel
-// ──────────────────────────────────────────────────────────────────────────
 
 function RouterKeysPanel() {
   const [keys, setKeys] = useState<APIKey[]>([]);
@@ -319,9 +316,6 @@ function RouterKeysPanel() {
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Provider keys panel
-// ──────────────────────────────────────────────────────────────────────────
 
 const PROVIDERS = ["anthropic", "openai", "google", "openrouter"] as const;
 type Provider = (typeof PROVIDERS)[number];
@@ -592,9 +586,6 @@ function ProviderPicker({
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Config panel
-// ──────────────────────────────────────────────────────────────────────────
 
 interface ConfigRow {
   label: string;
@@ -685,9 +676,6 @@ function ConfigPanel() {
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Model selection panel
-// ──────────────────────────────────────────────────────────────────────────
 
 function ModelSelectionPanel() {
   const [available, setAvailable] = useState<DeployedModel[] | null>(null);
@@ -823,9 +811,6 @@ function ModelSelectionPanel() {
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────────────────────────────────
 
 function ErrorBanner({ children }: { children: React.ReactNode }) {
   return (

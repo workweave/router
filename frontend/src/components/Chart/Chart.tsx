@@ -278,9 +278,6 @@ export interface ChartProps<
   ) => ChartData<TIndependentKey, TDependentKey, TIndependentValue, TDependentValue>;
 }
 
-/**
- * Renders a chart.
- */
 export function Chart<
   TIndependentKey extends ChartDataKeyType,
   TDependentKey extends ChartDataKeyType,
@@ -804,7 +801,6 @@ export function Chart<
 
             {referenceLines != null &&
               LoadState.unwrap(referenceLines)?.map(line => {
-                // Extract scalar value for Recharts (handles both single values and tuples)
                 const getValue = (val: ChartDataValueType): number | string =>
                   Array.isArray(val) ? val[0] : val;
 

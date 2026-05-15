@@ -187,7 +187,6 @@ function map(...args: unknown[]): LoadState<unknown> {
     //  5. Loaded
 
     if (LoadState.isError(acc) && acc.previousValue !== undefined) {
-      // push the current value to the error accumulator, if possible
       const value =
         LoadState.isError(state) && state.previousValue !== undefined ? state.previousValue
         : LoadState.isReady(state) ? state.value

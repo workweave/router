@@ -61,9 +61,6 @@ export interface ChartTooltipProps<
   fadeInactiveSeries?: boolean;
 }
 
-/**
- * Renders the content for the chart tooltip.
- */
 export function ChartTooltip<
   TIndependentKey extends ChartDataKeyType,
   TDependentKey extends ChartDataKeyType,
@@ -136,7 +133,6 @@ export function ChartTooltip<
   if (payload == null || payload.length === 0) return null;
   const independentValue = label as TIndependentValue | null | undefined;
 
-  // Use series-aware formatter if provided, otherwise fall back to basic formatter
   const title =
     independentValue != null && formatIndependentValueForSeries != null ?
       formatIndependentValueForSeries(independentValue, activeSeries ?? null)
@@ -240,9 +236,6 @@ interface ChartTooltipSeriesProps<
   >;
 }
 
-/**
- * Renders the content for a single series in the chart tooltip.
- */
 function ChartTooltipSeries<
   TIndependentKey extends ChartDataKeyType,
   TDependentKey extends ChartDataKeyType,
