@@ -34,8 +34,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-// --- types ---
-
 export interface MetricsSummary {
   request_count: number;
   total_tokens: number;
@@ -125,8 +123,6 @@ export interface ExcludedModelsResponse {
   excluded: string[];
   env_override_active: boolean;
 }
-
-// --- API calls ---
 
 export const api = {
   auth: {

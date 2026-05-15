@@ -16,9 +16,6 @@ const TEXT_ANCHOR: Readonly<
   right: "start",
 };
 
-/**
- * Renders a label for a reference line.
- */
 export function ChartReferenceLineLabel({
   label,
   side = "center",

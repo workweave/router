@@ -15,9 +15,6 @@ interface UseToggleSeriesVisibilityResult<TDependentKey extends ChartDataKeyType
   toggleSeriesVisibility: (key: TDependentKey, exclusive?: boolean) => void;
 }
 
-/**
- * Returns a callback to toggle the visibility of a series.
- */
 export function useToggleSeriesVisibility<TDependentKey extends ChartDataKeyType>({
   dependentKeys,
   hiddenSeriesExternal,
