@@ -1,0 +1,22 @@
+internal/translate/emit_openai.go
+  s_51339b096c0381::t_a72c713fd7be27 380
+  s_51339b096c0381::t_422dbf043f6686 421-439
+internal/translate/strict_tools_test.go
+  s_51339b096c0381::t_13cf8a6b7547db 143-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "354d614c4571eeb2ca70154171822c5b72751ead",
+  "prompts": {},
+  "sessions": {
+    "s_51339b096c0381": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e2066829-9106-4207-87a6-d9536970b180",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
