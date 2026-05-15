@@ -25,7 +25,7 @@
     },
     "embedder_model": "jina-v2-base-code-int8",
     "exclude_prompts": null,
-    "include_routerarena_labels": "/Users/steventohme/Desktop/workweave4/router-internal/eval/results/_unsorted/routerarena_plus_shortprompts.jsonl",
+    "include_routerarena_labels": "routerarena_plus_shortprompts.jsonl",
     "k": 16,
     "n_excluded_prompts": 0,
     "n_prompts": 8416,

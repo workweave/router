@@ -1,6 +1,9 @@
 # Local docker stack for the router. Brings up Postgres, applies migrations, and
-# starts the server end-to-end. Suitable for `docker compose up` smoke tests; not
-# tuned for production (single-instance Postgres, no resource limits).
+# starts the server end-to-end. Suitable for `docker compose up` smoke tests.
+#
+# DEV ONLY — not tuned for production (single-instance Postgres, no resource
+# limits, default credentials below). Do not deploy this compose file to any
+# environment exposed beyond localhost.
 #
 # Usage:
 #   docker compose up --build
@@ -15,6 +18,7 @@
 services:
   postgres:
     image: postgres:15-alpine
+    # DEV ONLY credentials — replace before exposing this stack anywhere.
     environment:
       POSTGRES_USER: router
       POSTGRES_PASSWORD: router
