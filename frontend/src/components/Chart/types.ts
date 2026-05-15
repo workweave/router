@@ -46,16 +46,6 @@ export enum ChartDependentAxis {
 }
 
 /**
- * Defines a line on an XY chart.
- */
-export interface ChartLineDefinition {
-  /** The y-intercept of the line. */
-  intercept: number;
-  /** The slope of the line. */
-  slope: number;
-}
-
-/**
  * Different ways a chart series can be displayed.
  */
 export enum ChartSeriesType {
@@ -186,14 +176,6 @@ export type ChartConfig<
 > = Readonly<Partial<Record<TDependentKey, ChartSeriesConfig<TIndependentValue, TDependentValue>>>>;
 
 /**
- * The dependent values for a single data point in a chart.
- */
-export type ChartDataPointDependentValues<
-  TDependentKey extends ChartDataKeyType,
-  TDependentValue extends ChartDataValueType,
-> = Partial<Readonly<Record<TDependentKey, TDependentValue | null>>>;
-
-/**
  * A chart data point is a single data point in a chart, which always contains the independent value
  * and may contain data for any of the dependent series in the chart.
  */
@@ -204,7 +186,7 @@ export type ChartDataPoint<
   TDependentValue extends ChartDataValueType,
   TTooltipData = unknown,
 > = Readonly<Record<TIndependentKey, TIndependentValue>> &
-  ChartDataPointDependentValues<TDependentKey, TDependentValue> & {
+  Partial<Readonly<Record<TDependentKey, TDependentValue | null>>> & {
     [TOOLTIP_DATA_KEY]?: TTooltipData;
   };
 
@@ -240,27 +222,9 @@ interface ChartReferenceLineCommon {
   side?: "center" | "left" | "right";
 }
 
-/**
- * A reference line to draw on a chart at a given independent value.
- */
-export interface ChartIndependentReferenceLine<TIndependentValue extends ChartDataValueType>
-  extends ChartReferenceLineCommon {
-  type: "independent";
-  /** The value to draw the reference line at. */
-  value: TIndependentValue;
-}
-
-/**
- * A reference line to draw on a chart at a given dependent value.
- */
-export interface ChartDependentReferenceLine<TDependentValue extends ChartDataValueType>
-  extends ChartReferenceLineCommon {
-  type: "dependent";
-  /** The value to draw the reference line at. */
-  value: TDependentValue;
-}
-
 export type ChartReferenceLine<
   TIndependentValue extends ChartDataValueType,
   TDependentValue extends ChartDataValueType,
-> = ChartDependentReferenceLine<TDependentValue> | ChartIndependentReferenceLine<TIndependentValue>;
+> =
+  | (ChartReferenceLineCommon & { type: "dependent"; value: TDependentValue })
+  | (ChartReferenceLineCommon & { type: "independent"; value: TIndependentValue });

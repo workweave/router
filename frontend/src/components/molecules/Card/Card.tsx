@@ -76,11 +76,11 @@ const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
 );
 CardHeader.displayName = "CardHeader";
 
-export interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {
-  variant?: TextProps["variant"];
-}
-
-function CardTitle({ className, variant, ...props }: CardTitleProps) {
+function CardTitle({
+  className,
+  variant,
+  ...props
+}: React.HTMLAttributes<HTMLHeadingElement> & { variant?: TextProps["variant"] }) {
   return (
     <Text
       variant={variant ?? "h3"}

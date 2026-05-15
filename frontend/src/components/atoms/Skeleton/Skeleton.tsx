@@ -36,15 +36,6 @@ export function Skeleton({
   );
 }
 
-export interface SkeletonTextProps extends SkeletonProps {
-  /**
-   * Corresponds with Tailwind text sizes or `Text` component sizes.
-   *
-   * @default "base"
-   */
-  size?: "2xl" | "4xl" | "base" | "h1" | "h2" | "h3" | "h4" | "lg" | "p" | "sm" | "xl" | "xs";
-}
-
 /**
  * Renders a skeleton exactly matching the size and spacing of text.
  */
@@ -55,7 +46,9 @@ Skeleton.Text = function SkeletonText({
   darker = false,
   size = "base",
   ...props
-}: SkeletonTextProps) {
+}: SkeletonProps & {
+  size?: "2xl" | "4xl" | "base" | "h1" | "h2" | "h3" | "h4" | "lg" | "p" | "sm" | "xl" | "xs";
+}) {
   return (
     <Element
       className={cn(

@@ -7,8 +7,6 @@ type PopoverType = typeof PopoverPrimitive.Root & {
   Trigger: typeof PopoverTrigger;
 };
 
-export type PopoverProps = React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Root>;
-
 export const Popover: PopoverType = PopoverPrimitive.Root as PopoverType;
 
 const PopoverTrigger = React.forwardRef<
@@ -24,11 +22,9 @@ const PopoverTrigger = React.forwardRef<
 ));
 PopoverTrigger.displayName = PopoverPrimitive.Trigger.displayName;
 
-export type PopoverContentProps = React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>;
-
 const PopoverContent = React.forwardRef<
   React.ElementRef<typeof PopoverPrimitive.Content>,
-  PopoverContentProps
+  React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
 >(({ align = "center", className, sideOffset = 6, ...props }, ref) => (
   <PopoverPrimitive.Portal>
     <PopoverPrimitive.Content
