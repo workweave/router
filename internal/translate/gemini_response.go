@@ -112,33 +112,6 @@ func GeminiToOpenAIError(body []byte) []byte {
 	return out
 }
 
-// GeminiToAnthropicError re-wraps a Gemini error envelope as an Anthropic error.
-func GeminiToAnthropicError(body []byte) []byte {
-	var g struct {
-		Error struct {
-			Message string `json:"message"`
-			Status  string `json:"status"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &g); err != nil {
-		return body
-	}
-	if g.Error.Message == "" && g.Error.Status == "" {
-		return body
-	}
-	out, err := json.Marshal(map[string]any{
-		"type": "error",
-		"error": map[string]any{
-			"type":    strings.ToLower(g.Error.Status),
-			"message": g.Error.Message,
-		},
-	})
-	if err != nil {
-		return body
-	}
-	return out
-}
-
 // extractGeminiParts walks candidate.content.parts and produces the OpenAI view.
 // thoughtSignature is smuggled on function.thought_signature; leadingSig is
 // set from the first text part when no functionCalls are present.

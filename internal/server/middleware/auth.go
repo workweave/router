@@ -150,16 +150,6 @@ func handleAuthError(c *gin.Context, err error) {
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_key"})
 }
 
-// ExternalAPIKeysFrom retrieves the external API keys stashed by WithAuth. Returns nil if the request bypassed WithAuth or has no BYOK keys.
-func ExternalAPIKeysFrom(c *gin.Context) []*auth.ExternalAPIKey {
-	v := c.Request.Context().Value(proxy.ExternalAPIKeysContextKey{})
-	if v == nil {
-		return nil
-	}
-	keys, _ := v.([]*auth.ExternalAPIKey)
-	return keys
-}
-
 // InstallationFrom retrieves the authed installation set by WithAuth. Returns nil for admin-cookie sessions and unauthed requests.
 func InstallationFrom(c *gin.Context) *auth.Installation {
 	v, ok := c.Get(ctxKeyInstallation)
