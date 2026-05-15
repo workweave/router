@@ -149,14 +149,6 @@ Models → *Override OpenAI Base URL* → `http://localhost:8080/v1`, paste
 
 ---
 
-<div align="center">
-
-Licensed under [ELv2](https://www.elastic.co/licensing/elastic-license) ·
-[Report a security issue](SECURITY.md) ·
-[Code of conduct](CODE_OF_CONDUCT.md)
-
-</div>
-
 [^1]: Zhang, Y. et al. *Beyond GPT-5: Making LLMs Cheaper and Better via
     Performance–Efficiency Optimized Routing* (Avengers-Pro).
     arXiv:2508.12631, 2025. <https://arxiv.org/abs/2508.12631>
