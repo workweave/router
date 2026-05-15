@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"workweave/router/internal/providers"
@@ -63,6 +64,12 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 			return nil, fmt.Errorf("set tool temperature override: %w", err)
 		}
 	}
+	if openRouterStrictTools(opts.TargetModel) && gjson.GetBytes(body, "tools").Exists() {
+		body, err = applyStrictToolsToBody(body)
+		if err != nil {
+			return nil, fmt.Errorf("apply strict tools: %w", err)
+		}
+	}
 	return body, nil
 }
 
@@ -78,7 +85,7 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 		return nil, err
 	}
 	pullAnthropicStopSequences(e.body, out)
-	if err := e.pullAnthropicTools(out); err != nil {
+	if err := e.pullAnthropicTools(out, openRouterStrictTools(opts.TargetModel)); err != nil {
 		return nil, err
 	}
 	pullAnthropicToolChoice(e.body, out)
@@ -342,7 +349,7 @@ func (e *RequestEnvelope) pullAnthropicSystemAndMessages(out map[string]any) err
 
 const openAIMaxTools = 128
 
-func (e *RequestEnvelope) pullAnthropicTools(out map[string]any) error {
+func (e *RequestEnvelope) pullAnthropicTools(out map[string]any, strict bool) error {
 	src, err := e.ensureSrc()
 	if err != nil {
 		return err
@@ -364,6 +371,10 @@ func (e *RequestEnvelope) pullAnthropicTools(out map[string]any) error {
 			"description": tool["description"],
 			"parameters":  params,
 		}
+		if strict {
+			applyStrictModeToParams(params)
+			fn["strict"] = true
+		}
 		result = append(result, map[string]any{"type": "function", "function": fn})
 	}
 	if len(result) > openAIMaxTools {
@@ -371,6 +382,135 @@ func (e *RequestEnvelope) pullAnthropicTools(out map[string]any) error {
 	}
 	out["tools"] = result
 	return nil
+}
+
+// applyStrictModeToParams mutates a JSON Schema so it satisfies OpenAI's
+// strict-mode tool-call requirements: every `type: "object"` schema gets
+// `additionalProperties: false` and every property is listed in `required`.
+// Properties not in the source `required` set are marked nullable via a type
+// union so the model can still pass null to preserve "optional" semantics.
+func applyStrictModeToParams(node any) {
+	m, ok := node.(map[string]any)
+	if !ok {
+		return
+	}
+	if isObjectType(m["type"]) {
+		m["additionalProperties"] = false
+		if props, ok := m["properties"].(map[string]any); ok && len(props) > 0 {
+			existing := map[string]struct{}{}
+			if reqArr, ok := m["required"].([]any); ok {
+				for _, r := range reqArr {
+					if s, ok := r.(string); ok {
+						existing[s] = struct{}{}
+					}
+				}
+			}
+			names := make([]string, 0, len(props))
+			for name := range props {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			required := make([]any, 0, len(names))
+			for _, name := range names {
+				required = append(required, name)
+				if _, wasRequired := existing[name]; !wasRequired {
+					makeNullable(props[name])
+				}
+			}
+			m["required"] = required
+		}
+	}
+	if props, ok := m["properties"].(map[string]any); ok {
+		for _, v := range props {
+			applyStrictModeToParams(v)
+		}
+	}
+	applyStrictModeToParams(m["items"])
+	for _, key := range []string{"$defs", "definitions"} {
+		if defs, ok := m[key].(map[string]any); ok {
+			for _, v := range defs {
+				applyStrictModeToParams(v)
+			}
+		}
+	}
+	for _, key := range []string{"anyOf", "oneOf", "allOf"} {
+		if arr, ok := m[key].([]any); ok {
+			for _, v := range arr {
+				applyStrictModeToParams(v)
+			}
+		}
+	}
+}
+
+// isObjectType reports whether a JSON Schema `type` value is "object", either
+// as a bare string or as part of a nullable union like ["object", "null"].
+// Optional nested objects pass through `makeNullable` before recursion, which
+// rewrites scalar `type: "object"` to a string-array, so the strict-mode pass
+// must accept both shapes or it skips invariants on those subtrees.
+func isObjectType(typ any) bool {
+	switch t := typ.(type) {
+	case string:
+		return t == "object"
+	case []any:
+		for _, v := range t {
+			if s, _ := v.(string); s == "object" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// applyStrictToolsToBody mutates the `tools` array of a serialized OpenAI body
+// to add `function.strict = true` and tighten each parameter schema. Best-effort:
+// returns the input unchanged when `tools` cannot be parsed rather than failing
+// the request.
+func applyStrictToolsToBody(body []byte) ([]byte, error) {
+	toolsResult := gjson.GetBytes(body, "tools")
+	if !toolsResult.IsArray() {
+		return body, nil
+	}
+	var tools []any
+	if err := json.Unmarshal([]byte(toolsResult.Raw), &tools); err != nil {
+		return body, nil
+	}
+	for _, t := range tools {
+		tool, _ := t.(map[string]any)
+		if tool == nil {
+			continue
+		}
+		fn, _ := tool["function"].(map[string]any)
+		if fn == nil {
+			continue
+		}
+		applyStrictModeToParams(fn["parameters"])
+		fn["strict"] = true
+	}
+	return sjson.SetBytes(body, "tools", tools)
+}
+
+// makeNullable adds "null" to a schema's `type` so strict mode can still send
+// a null value for what was previously an optional property. No-op when the
+// schema lacks a `type` keyword or already permits null.
+func makeNullable(node any) {
+	m, ok := node.(map[string]any)
+	if !ok {
+		return
+	}
+	switch t := m["type"].(type) {
+	case string:
+		if t == "null" {
+			return
+		}
+		m["type"] = []any{t, "null"}
+	case []any:
+		for _, v := range t {
+			if s, _ := v.(string); s == "null" {
+				return
+			}
+		}
+		m["type"] = append(t, "null")
+	}
 }
 
 func sanitizeOpenAIToolSchema(node any) {
