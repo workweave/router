@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Thin wrapper that runs install.sh with the user's arguments.
-// Bundled install.sh ships with the npm package so `npx weave-router` works
-// offline (modulo the router API ping the installer does).
+// Bundled install.sh ships with the npm package so `npx @workweave/router`
+// works offline (modulo the router API ping the installer does).
 
 const { spawnSync } = require("node:child_process");
 const { existsSync } = require("node:fs");

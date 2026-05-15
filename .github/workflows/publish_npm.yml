@@ -1,27 +1,28 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 #
-# Publish the weave-router npm package on tag push.
+# Publish the @workweave/router npm package on tag push.
 #
-# Trigger: push a tag matching `weave-router-v*` (e.g. `weave-router-v0.1.1`).
-# The job asserts the tag's version matches install/npm/package.json before
-# publishing — mismatched tag fails fast instead of shipping a wrong version.
+# Trigger: push a tag matching `router-v*` (e.g. `router-v0.1.0`). The job
+# asserts the tag's version matches install/npm/package.json before publishing
+# — mismatched tag fails fast instead of shipping a wrong version.
 #
-# Requires repo secret `NPM_TOKEN` (npm automation token with publish rights
-# on the `weave-router` package).
+# Publish auth: npm OIDC trusted publishing (no secret in the repo). Configure
+# the @workweave/router package on npmjs.com → Settings → Trusted Publishers
+# → GitHub Actions with org=workweave, repo=router, workflow=publish_npm.yml.
 name: Publish npm
 
 on:
   push:
     tags:
-      - "weave-router-v*"
+      - "router-v*"
 
 jobs:
   publish:
-    name: Publish weave-router
+    name: Publish @workweave/router
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # required for npm --provenance
+      id-token: write # required for npm OIDC + provenance
     defaults:
       run:
         working-directory: install/npm
@@ -37,15 +38,13 @@ jobs:
 
       - name: Verify tag matches package.json version
         run: |
-          tag="${GITHUB_REF#refs/tags/weave-router-v}"
+          tag="${GITHUB_REF#refs/tags/router-v}"
           pkg_version="$(node -p "require('./package.json').version")"
           if [ "$tag" != "$pkg_version" ]; then
             echo "::error::Tag version ($tag) does not match package.json version ($pkg_version)"
             exit 1
           fi
-          echo "Publishing weave-router@$pkg_version"
+          echo "Publishing @workweave/router@$pkg_version"
 
       - name: Publish to npm
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -13,14 +13,14 @@
 #   - dir:              <dir>/.claude/settings.json + <dir>/.claude/cc-statusline.sh
 #
 # Usage:
-#   npx weave-router                                  # hosted router, user scope
-#   npx weave-router --scope project                  # commit-with-team install
-#   npx weave-router --dir /tmp/my-sandbox            # isolated throwaway install
-#   npx weave-router --local                          # local router on localhost:8080
-#   npx weave-router --base-url http://localhost:8080 # self-hosted, custom port
-#   npx weave-router --non-interactive                # require WEAVE_ROUTER_KEY env var
-#   npx weave-router --quiet                          # suppress banner, ping check, and trailing tips
-#   npx weave-router --uninstall                      # remove a previous install (delegates to uninstall.sh)
+#   npx @workweave/router                                  # hosted router, user scope
+#   npx @workweave/router --scope project                  # commit-with-team install
+#   npx @workweave/router --dir /tmp/my-sandbox            # isolated throwaway install
+#   npx @workweave/router --local                          # local router on localhost:8080
+#   npx @workweave/router --base-url http://localhost:8080 # self-hosted, custom port
+#   npx @workweave/router --non-interactive                # require WEAVE_ROUTER_KEY env var
+#   npx @workweave/router --quiet                          # suppress banner, ping check, and trailing tips
+#   npx @workweave/router --uninstall                      # remove a previous install (delegates to uninstall.sh)
 
 set -euo pipefail
 
@@ -213,7 +213,7 @@ refuse_if_symlink() {
 # canonical uninstall logic lives in a sibling file, and we want both
 # direct invocations (`./install.sh --uninstall`) and curl-piped ones
 # (`curl ... | sh -s -- --uninstall`) to behave the same as
-# `npx weave-router --uninstall` (which bin.js routes to uninstall.sh on
+# `npx @workweave/router --uninstall` (which bin.js routes to uninstall.sh on
 # its own).
 #
 # Scan every arg, not just $1, so flag order doesn't matter; build a clean
