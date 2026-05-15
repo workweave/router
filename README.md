@@ -39,17 +39,17 @@ loved by Robinhood, PostHog & Reducto.*
 
 Point Claude Code, Cursor, or your own app at `localhost:8080`. The router:
 
-- 🎯 **Routes per request** — an AvengersPro-derived cluster scorer picks the
+- 🎯 **Routes per request.** An AvengersPro-derived cluster scorer picks the
   right model from your enabled providers, every turn.
-- 🔌 **Speaks everyone's API** — Anthropic Messages, OpenAI Chat Completions,
+- 🔌 **Speaks everyone's API.** Anthropic Messages, OpenAI Chat Completions,
   Gemini native. Streaming, tools, vision, the works.
-- 🧠 **Knows OSS too** — DeepSeek, Kimi, GLM, Qwen, Llama, Mistral via
+- 🧠 **Knows OSS too.** DeepSeek, Kimi, GLM, Qwen, Llama, Mistral via
   OpenRouter (or any OpenAI-compatible endpoint).
-- 🔒 **BYOK by default** — provider keys stay on your box, encrypted at rest.
-- 📊 **Observable** — OTLP traces out of the box. Drop in Honeycomb, Datadog,
+- 🔒 **BYOK by default.** Provider keys stay on your box, encrypted at rest.
+- 📊 **Observable.** OTLP traces out of the box. Drop in Honeycomb, Datadog,
   Grafana, whatever.
 
-No silent fallbacks. No vibes. Routing failures return 503 — loud by design.
+No silent fallbacks. No vibes. Routing failures return 503; loud by design.
 
 ## 60-second quickstart
 
@@ -84,16 +84,13 @@ curl -sS http://localhost:8080/v1/route -H "Authorization: Bearer rk_..." -d '..
 
 ## Wire it into your tools
 
-**Claude Code**
+**Claude Code.** `make full-setup` already runs the Claude Code installer
+interactively at the end. Just say yes when it asks, and pick user scope
+or a project directory. Done.
 
-```bash
-export ANTHROPIC_BASE_URL=http://localhost:8080
-export ANTHROPIC_CUSTOM_HEADERS="X-Weave-Router-Key: rk_..."
-claude
-```
-
-**Cursor** — Settings → Models → *Override OpenAI Base URL* →
-`http://localhost:8080/v1`, paste `rk_...` as the API key.
+**Cursor** *(early beta, performance may not be the best).* Settings →
+Models → *Override OpenAI Base URL* → `http://localhost:8080/v1`, paste
+`rk_...` as the API key.
 
 > Two keys, don't mix them up:
 > - `sk-or-...` / `sk-ant-...` / `sk-...` = your **upstream** provider key. Lives in `.env.local`.
@@ -103,20 +100,20 @@ claude
 
 | Endpoint                       | Format                                   |
 | ------------------------------ | ---------------------------------------- |
-| `POST /v1/messages`            | Anthropic Messages — routed              |
-| `POST /v1/chat/completions`    | OpenAI Chat Completions — routed         |
-| `POST /v1beta/models/:action`  | Gemini `generateContent` — routed        |
+| `POST /v1/messages`            | Anthropic Messages, routed               |
+| `POST /v1/chat/completions`    | OpenAI Chat Completions, routed          |
+| `POST /v1beta/models/:action`  | Gemini `generateContent`, routed         |
 | `POST /v1/route`               | Returns the decision, no upstream call   |
 | `GET /v1/models` &nbsp;·&nbsp; `POST /v1/messages/count_tokens` | Anthropic passthrough |
 | `GET /health` &nbsp;·&nbsp; `GET /validate` | liveness + key check         |
 
 ## Deeper docs
 
-- 📐 [**Configuration reference**](docs/CONFIGURATION.md) — every env var,
+- 📐 [**Configuration reference**](docs/CONFIGURATION.md): every env var,
   BYOK encryption, OTel knobs, cluster routing.
-- 🛠️ [**Contributing**](CONTRIBUTING.md) — layering rules, hot-reload dev,
+- 🛠️ [**Contributing**](CONTRIBUTING.md): layering rules, hot-reload dev,
   migrations, tests, the whole engineering loop.
-- 🏗️ [**Architecture**](AGENTS.md) — package layout, import contracts,
+- 🏗️ [**Architecture**](AGENTS.md): package layout, import contracts,
   recipes for adding endpoints / providers / strategies.
 
 ## Roadmap
