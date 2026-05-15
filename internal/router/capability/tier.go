@@ -63,6 +63,7 @@ var tiers = map[string]Tier{
 
 	// --- High ---
 	"claude-opus-4-7":          TierHigh,
+	"claude-opus-4-6":          TierHigh,
 	"gemini-3-pro-preview":     TierHigh,
 	"gemini-3.1-pro-preview":   TierHigh,
 	"gpt-5":                    TierHigh,

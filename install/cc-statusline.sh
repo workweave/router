@@ -130,6 +130,7 @@ normalize_model() {
 prices='{
   "input": {
     "claude-haiku-4-5":                 0.0008,
+    "claude-opus-4-6":                  0.015,
     "claude-opus-4-7":                  0.015,
     "claude-sonnet-4-5":                0.003,
     "deepseek/deepseek-v4-flash":       0.00014,
@@ -171,6 +172,7 @@ prices='{
   },
   "output": {
     "claude-haiku-4-5":                 0.004,
+    "claude-opus-4-6":                  0.075,
     "claude-opus-4-7":                  0.075,
     "claude-sonnet-4-5":                0.015,
     "deepseek/deepseek-v4-flash":       0.00028,
