@@ -426,6 +426,13 @@ func applyStrictModeToParams(node any) {
 		}
 	}
 	applyStrictModeToParams(m["items"])
+	for _, key := range []string{"$defs", "definitions"} {
+		if defs, ok := m[key].(map[string]any); ok {
+			for _, v := range defs {
+				applyStrictModeToParams(v)
+			}
+		}
+	}
 	for _, key := range []string{"anyOf", "oneOf", "allOf"} {
 		if arr, ok := m[key].([]any); ok {
 			for _, v := range arr {

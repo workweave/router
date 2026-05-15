@@ -186,6 +186,65 @@ func TestStrictTools_AnthropicSource_OptionalNestedObjectStillTightened(t *testi
 		"nullable nested objects still need their properties moved to required")
 }
 
+func TestStrictTools_AnthropicSource_RecursesIntoDefsAndDefinitions(t *testing.T) {
+	// Schemas using $ref / $defs reuse type definitions across properties.
+	// OpenAI strict mode requires object schemas inside $defs also have
+	// additionalProperties:false and all properties in required, otherwise
+	// validation 400s once the resolved schema is materialized upstream.
+	src := []byte(`{
+		"model":"claude-opus-4-7",
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[{
+			"name":"WithDefs",
+			"description":"uses defs",
+			"input_schema":{
+				"type":"object",
+				"properties":{"point":{"$ref":"#/$defs/Point"}},
+				"required":["point"],
+				"$defs":{
+					"Point":{
+						"type":"object",
+						"properties":{
+							"x":{"type":"number"},
+							"y":{"type":"number"}
+						},
+						"required":["x"]
+					}
+				},
+				"definitions":{
+					"Legacy":{
+						"type":"object",
+						"properties":{"name":{"type":"string"}}
+					}
+				}
+			}
+		}],
+		"max_tokens":256
+	}`)
+	env, err := translate.ParseAnthropic(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{TargetModel: "deepseek/deepseek-v4-pro"})
+	require.NoError(t, err)
+
+	fn := firstToolFunction(t, out.Body)
+	params, _ := fn["parameters"].(map[string]any)
+
+	defs, _ := params["$defs"].(map[string]any)
+	require.NotNil(t, defs, "$defs must survive emit")
+	point, _ := defs["Point"].(map[string]any)
+	require.NotNil(t, point)
+	assert.Equal(t, false, point["additionalProperties"], "$defs entries must get additionalProperties:false")
+	pointRequired, _ := point["required"].([]any)
+	assert.ElementsMatch(t, []any{"x", "y"}, pointRequired, "$defs entries must move all properties to required")
+
+	definitions, _ := params["definitions"].(map[string]any)
+	require.NotNil(t, definitions, "legacy definitions must survive emit")
+	legacy, _ := definitions["Legacy"].(map[string]any)
+	require.NotNil(t, legacy)
+	assert.Equal(t, false, legacy["additionalProperties"], "legacy definitions also get tightened")
+}
+
 func TestStrictTools_OpenAISource_SetsStrictAndTightensSchemaForDeepSeek(t *testing.T) {
 	src := []byte(`{
 		"model":"x",
