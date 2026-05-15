@@ -58,23 +58,13 @@ func ListAPIKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// IssueAPIKeyHandler creates the installation's first router API key.
-// Returns 409 if an active key exists — the partial unique index on
-// (installation_id) WHERE deleted_at IS NULL would reject the insert regardless.
+// IssueAPIKeyHandler creates a new router API key for the installation. An
+// installation may hold multiple active keys at a time; callers issue, rotate,
+// and revoke them individually.
 func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
 		if !ok {
-			return
-		}
-		// Pre-check in front of the DB constraint so callers get a clean 409 instead of a generic 500.
-		existing, err := authSvc.ListAPIKeys(c.Request.Context(), installation.ID)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to look up existing api key"})
-			return
-		}
-		if len(existing) > 0 {
-			c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "installation already has an active api key; rotate it instead"})
 			return
 		}
 		var req issueAPIKeyRequest
@@ -85,10 +75,6 @@ func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 		}
 		key, rawToken, err := authSvc.IssueAPIKey(c.Request.Context(), installation.ID, name, nil)
 		if err != nil {
-			if errors.Is(err, auth.ErrActiveKeyExists) {
-				c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "installation already has an active api key; rotate it instead"})
-				return
-			}
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to issue api key"})
 			return
 		}
@@ -99,15 +85,26 @@ func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
-// RotateAPIKeyHandler soft-deletes the current active key and issues a replacement.
+// RotateAPIKeyHandler soft-deletes the specified key and issues a replacement
+// against the same installation, carrying forward the previous key's name.
+// 404 when the id is not owned by the caller's installation.
 func RotateAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
 		if !ok {
 			return
 		}
-		key, rawToken, err := authSvc.RotateAPIKey(c.Request.Context(), installation.ID, nil)
+		id := c.Param("id")
+		if id == "" {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing id"})
+			return
+		}
+		key, rawToken, err := authSvc.RotateAPIKey(c.Request.Context(), installation.ID, id, nil)
 		if err != nil {
+			if errors.Is(err, auth.ErrAPIKeyNotFound) {
+				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "api key not found"})
+				return
+			}
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to rotate api key"})
 			return
 		}

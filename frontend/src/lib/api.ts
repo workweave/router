@@ -160,11 +160,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ name: name ?? "" }),
       }),
-    // Soft-deletes the current active key and issues a replacement in one
-    // round-trip. The previous token stops working immediately. Carries
-    // forward the previous key's name server-side.
-    rotate: () =>
-      request<IssueAPIKeyResponse>("/keys/rotate", { method: "POST" }),
+    // Soft-deletes the named key and issues a replacement in one round-trip.
+    // The previous token stops working immediately. Carries forward the
+    // previous key's name server-side.
+    rotate: (id: string) =>
+      request<IssueAPIKeyResponse>(`/keys/${id}/rotate`, { method: "POST" }),
     delete: (id: string) => request<void>(`/keys/${id}`, { method: "DELETE" }),
   },
   providerKeys: {
