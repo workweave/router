@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 #
-# Weave Router installer for Claude Code.
-#
 # Configures Claude Code to permanently route through the Weave Router by
 # writing the router base URL, router auth header, and a status line into
 # Claude Code's settings.json. After running, `claude` Just Works — no shell
@@ -15,16 +13,14 @@
 #   - dir:              <dir>/.claude/settings.json + <dir>/.claude/cc-statusline.sh
 #
 # Usage:
-#   ./install.sh                                  # hosted router, user scope
-#   ./install.sh --scope project                  # commit-with-team install
-#   ./install.sh --dir /tmp/my-sandbox            # isolated throwaway install
-#   ./install.sh --local                          # local router on localhost:8080
-#   ./install.sh --base-url http://localhost:8080 # self-hosted, custom port
-#   ./install.sh --non-interactive                # require WEAVE_ROUTER_KEY env var
-#   ./install.sh --quiet                          # suppress banner, ping check, and trailing tips
-#
-#   curl -fsSL https://weave.ai/cc/install.sh | sh
-#   curl -fsSL https://weave.ai/cc/install.sh | sh -s -- --scope project
+#   npx weave-router                                  # hosted router, user scope
+#   npx weave-router --scope project                  # commit-with-team install
+#   npx weave-router --dir /tmp/my-sandbox            # isolated throwaway install
+#   npx weave-router --local                          # local router on localhost:8080
+#   npx weave-router --base-url http://localhost:8080 # self-hosted, custom port
+#   npx weave-router --non-interactive                # require WEAVE_ROUTER_KEY env var
+#   npx weave-router --quiet                          # suppress banner, ping check, and trailing tips
+#   npx weave-router --uninstall                      # remove a previous install (delegates to uninstall.sh)
 
 set -euo pipefail
 
@@ -183,7 +179,9 @@ spin() {
 usage() {
   # Print the leading comment block (lines 2..just-before `set -euo`), stripping
   # the leading `# `. awk avoids GNU `head -n -<N>`, which BSD head on macOS
-  # rejects with "illegal line count -- -N".
+  # rejects with "illegal line count -- -N". Banner sits above so `--help`
+  # gets the same wordmark as a fresh install run.
+  print_banner
   awk 'NR<2 { next } /^set -euo/ { exit } { sub(/^# ?/, ""); print }' "$0"
   exit "${1:-0}"
 }
@@ -208,6 +206,56 @@ refuse_if_symlink() {
     exit 1
   fi
 }
+
+# ---------- uninstall delegation ----------
+#
+# `--uninstall` flips this script into a thin shim for uninstall.sh: the
+# canonical uninstall logic lives in a sibling file, and we want both
+# direct invocations (`./install.sh --uninstall`) and curl-piped ones
+# (`curl ... | sh -s -- --uninstall`) to behave the same as
+# `npx weave-router --uninstall` (which bin.js routes to uninstall.sh on
+# its own).
+#
+# Scan every arg, not just $1, so flag order doesn't matter; build a clean
+# list with --uninstall stripped and exec uninstall.sh with the remainder.
+#
+# Resolution order for the uninstall script:
+#   1. Sibling file next to install.sh on disk (npm tarball / git checkout).
+#   2. WEAVE_UNINSTALL_URL override (self-hosters who fork).
+#   3. Default: raw.githubusercontent.com canonical copy (curl|sh path).
+for arg in "$@"; do
+  if [ "$arg" = "--uninstall" ]; then
+    cleaned_args=()
+    for a in "$@"; do
+      [ "$a" = "--uninstall" ] || cleaned_args+=("$a")
+    done
+
+    script_path="${BASH_SOURCE[0]:-$0}"
+    if [ -f "$script_path" ]; then
+      sibling_dir="$(cd "$(dirname "$script_path")" 2>/dev/null && pwd)"
+      if [ -n "$sibling_dir" ] && [ -f "$sibling_dir/uninstall.sh" ]; then
+        exec bash "$sibling_dir/uninstall.sh" "${cleaned_args[@]+"${cleaned_args[@]}"}"
+      fi
+    fi
+
+    require_cmd curl "https://curl.se"
+    url="${WEAVE_UNINSTALL_URL:-https://raw.githubusercontent.com/workweave/router/main/install/uninstall.sh}"
+    # Pull the body into memory and exec via `bash -c` so we never touch
+    # disk: `exec` replaces this process, so any temp file we wrote would
+    # outlive the EXIT trap and leak indefinitely. Loading into a variable
+    # also gives us a chance to fail closed on 404 HTML pages before
+    # handing the content to bash.
+    if ! uninstall_body="$(curl -fsSL --max-time 30 "$url" 2>/dev/null)"; then
+      err "failed to fetch uninstall.sh from $url"
+      exit 1
+    fi
+    if [ -z "$uninstall_body" ] || [ "${uninstall_body:0:2}" != "#!" ]; then
+      err "fetched content from $url doesn't look like a bash script"
+      exit 1
+    fi
+    exec bash -c "$uninstall_body" weave-uninstall "${cleaned_args[@]+"${cleaned_args[@]}"}"
+  fi
+done
 
 # ---------- arg parsing ----------
 
@@ -430,6 +478,87 @@ cat > "$statusline_file" << 'STATUSLINE_EOF'
 # published cache pricing and are stable across the Claude family.
 
 set -euo pipefail
+
+# ---------- background self-refresh ----------
+#
+# Once every WEAVE_STATUSLINE_UPDATE_INTERVAL_DAYS (default 7), check
+# raw.githubusercontent.com for a newer copy of this script and swap it in
+# atomically. Runs in a forked subshell so the current Claude turn never
+# blocks; the next turn picks up the new version. Applies to both user-scope
+# (~/.weave/cc-statusline.sh) and project-scope (<repo>/.claude/cc-statusline.sh)
+# installs — project teammates rate-limit independently because the stamp
+# lives in their per-user cache dir, and on no-content-change days we skip
+# the mv entirely so the repo working tree stays clean. When upstream does
+# change, the first teammate's commit propagates the new version to the rest.
+#
+# Opt out entirely with `export WEAVE_STATUSLINE_UPDATE=0`. Override the
+# source with `WEAVE_STATUSLINE_URL=...`, e.g. for self-hosters who fork.
+weave_self_refresh() {
+  [ "${WEAVE_STATUSLINE_UPDATE:-1}" = "0" ] && return 0
+  command -v curl >/dev/null 2>&1 || return 0
+
+  local self="${BASH_SOURCE[0]:-$0}"
+  [ -f "$self" ] && [ -w "$self" ] || return 0
+
+  local interval_days="${WEAVE_STATUSLINE_UPDATE_INTERVAL_DAYS:-7}"
+  local interval_seconds=$(( interval_days * 86400 ))
+
+  # Stamp lives in the per-user cache dir, keyed by absolute script path so
+  # multiple repos (and the user-scope copy) rate-limit independently and no
+  # stray file ever lands inside a repo working tree.
+  local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/weave-router"
+  mkdir -p "$cache_dir" 2>/dev/null || return 0
+  local script_slug
+  script_slug="$(printf '%s' "$self" | tr -c 'A-Za-z0-9._-' '_')"
+  local stamp="$cache_dir/checked-at${script_slug}"
+
+  local now stamp_mtime
+  now="$(date +%s 2>/dev/null)" || return 0
+  if [ -f "$stamp" ]; then
+    # Try GNU `stat -c %Y` first; on macOS (BSD stat) -c isn't recognized
+    # and exits non-zero, so we fall through to `stat -f %m`. The reverse
+    # order is broken: GNU `stat -f` is `--file-system`, which silently
+    # succeeds with multi-line filesystem info instead of failing, leaving
+    # $stamp_mtime as garbage and disabling the rate-limit check entirely.
+    stamp_mtime="$(stat -c %Y "$stamp" 2>/dev/null || stat -f %m "$stamp" 2>/dev/null)" || stamp_mtime=0
+  else
+    stamp_mtime=0
+  fi
+  if [ -n "${stamp_mtime:-}" ] && [ "$stamp_mtime" -gt 0 ] \
+     && [ $(( now - stamp_mtime )) -lt "$interval_seconds" ]; then
+    return 0
+  fi
+
+  # Touch the stamp BEFORE forking so concurrent statusline invocations
+  # (Claude calls us on every turn) don't all kick off downloads.
+  : > "$stamp" 2>/dev/null || return 0
+
+  local url="${WEAVE_STATUSLINE_URL:-https://raw.githubusercontent.com/workweave/router/main/install/cc-statusline.sh}"
+  local tmp="${self}.tmp.$$"
+  (
+    # Detach stdin (CC pipes JSON to us) so curl can't accidentally consume
+    # it, and silence all output so nothing leaks into the statusline.
+    exec </dev/null
+    if curl -fsSL --max-time 15 "$url" -o "$tmp" 2>/dev/null \
+       && [ -s "$tmp" ] \
+       && head -n 1 "$tmp" | grep -q '^#!.*bash' \
+       && [ "$(wc -c < "$tmp")" -ge 1024 ]; then
+      # No-op when the download matches what's already on disk — keeps git
+      # status clean for project-scope teammates during a routine refresh.
+      if cmp -s "$tmp" "$self"; then
+        rm -f "$tmp"
+      else
+        chmod +x "$tmp" 2>/dev/null || true
+        mv "$tmp" "$self" 2>/dev/null || rm -f "$tmp"
+      fi
+    else
+      rm -f "$tmp"
+    fi
+  ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  return 0
+}
+weave_self_refresh 2>/dev/null || true
 
 input="$(cat)"
 transcript_path="$(printf '%s' "$input" | jq -r '.transcript_path // empty')"

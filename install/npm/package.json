@@ -1,0 +1,36 @@
+{
+  "name": "weave-router",
+  "version": "0.1.0",
+  "description": "One-command installer that points Claude Code at the Weave Router.",
+  "bin": {
+    "weave-router": "bin.js"
+  },
+  "files": [
+    "bin.js",
+    "install.sh",
+    "uninstall.sh",
+    "cc-statusline.sh",
+    "README.md"
+  ],
+  "scripts": {
+    "prepack": "node ./scripts/copy-installer.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/workweave/router.git",
+    "directory": "install/npm"
+  },
+  "homepage": "https://weave.ai",
+  "license": "Apache-2.0",
+  "keywords": [
+    "weave",
+    "router",
+    "claude",
+    "claude-code",
+    "anthropic",
+    "llm-router"
+  ]
+}

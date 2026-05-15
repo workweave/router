@@ -22,6 +22,87 @@
 
 set -euo pipefail
 
+# ---------- background self-refresh ----------
+#
+# Once every WEAVE_STATUSLINE_UPDATE_INTERVAL_DAYS (default 7), check
+# raw.githubusercontent.com for a newer copy of this script and swap it in
+# atomically. Runs in a forked subshell so the current Claude turn never
+# blocks; the next turn picks up the new version. Applies to both user-scope
+# (~/.weave/cc-statusline.sh) and project-scope (<repo>/.claude/cc-statusline.sh)
+# installs — project teammates rate-limit independently because the stamp
+# lives in their per-user cache dir, and on no-content-change days we skip
+# the mv entirely so the repo working tree stays clean. When upstream does
+# change, the first teammate's commit propagates the new version to the rest.
+#
+# Opt out entirely with `export WEAVE_STATUSLINE_UPDATE=0`. Override the
+# source with `WEAVE_STATUSLINE_URL=...`, e.g. for self-hosters who fork.
+weave_self_refresh() {
+  [ "${WEAVE_STATUSLINE_UPDATE:-1}" = "0" ] && return 0
+  command -v curl >/dev/null 2>&1 || return 0
+
+  local self="${BASH_SOURCE[0]:-$0}"
+  [ -f "$self" ] && [ -w "$self" ] || return 0
+
+  local interval_days="${WEAVE_STATUSLINE_UPDATE_INTERVAL_DAYS:-7}"
+  local interval_seconds=$(( interval_days * 86400 ))
+
+  # Stamp lives in the per-user cache dir, keyed by absolute script path so
+  # multiple repos (and the user-scope copy) rate-limit independently and no
+  # stray file ever lands inside a repo working tree.
+  local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/weave-router"
+  mkdir -p "$cache_dir" 2>/dev/null || return 0
+  local script_slug
+  script_slug="$(printf '%s' "$self" | tr -c 'A-Za-z0-9._-' '_')"
+  local stamp="$cache_dir/checked-at${script_slug}"
+
+  local now stamp_mtime
+  now="$(date +%s 2>/dev/null)" || return 0
+  if [ -f "$stamp" ]; then
+    # Try GNU `stat -c %Y` first; on macOS (BSD stat) -c isn't recognized
+    # and exits non-zero, so we fall through to `stat -f %m`. The reverse
+    # order is broken: GNU `stat -f` is `--file-system`, which silently
+    # succeeds with multi-line filesystem info instead of failing, leaving
+    # $stamp_mtime as garbage and disabling the rate-limit check entirely.
+    stamp_mtime="$(stat -c %Y "$stamp" 2>/dev/null || stat -f %m "$stamp" 2>/dev/null)" || stamp_mtime=0
+  else
+    stamp_mtime=0
+  fi
+  if [ -n "${stamp_mtime:-}" ] && [ "$stamp_mtime" -gt 0 ] \
+     && [ $(( now - stamp_mtime )) -lt "$interval_seconds" ]; then
+    return 0
+  fi
+
+  # Touch the stamp BEFORE forking so concurrent statusline invocations
+  # (Claude calls us on every turn) don't all kick off downloads.
+  : > "$stamp" 2>/dev/null || return 0
+
+  local url="${WEAVE_STATUSLINE_URL:-https://raw.githubusercontent.com/workweave/router/main/install/cc-statusline.sh}"
+  local tmp="${self}.tmp.$$"
+  (
+    # Detach stdin (CC pipes JSON to us) so curl can't accidentally consume
+    # it, and silence all output so nothing leaks into the statusline.
+    exec </dev/null
+    if curl -fsSL --max-time 15 "$url" -o "$tmp" 2>/dev/null \
+       && [ -s "$tmp" ] \
+       && head -n 1 "$tmp" | grep -q '^#!.*bash' \
+       && [ "$(wc -c < "$tmp")" -ge 1024 ]; then
+      # No-op when the download matches what's already on disk — keeps git
+      # status clean for project-scope teammates during a routine refresh.
+      if cmp -s "$tmp" "$self"; then
+        rm -f "$tmp"
+      else
+        chmod +x "$tmp" 2>/dev/null || true
+        mv "$tmp" "$self" 2>/dev/null || rm -f "$tmp"
+      fi
+    else
+      rm -f "$tmp"
+    fi
+  ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  return 0
+}
+weave_self_refresh 2>/dev/null || true
+
 input="$(cat)"
 transcript_path="$(printf '%s' "$input" | jq -r '.transcript_path // empty')"
 # Prefer model.id over display_name: pricing keys + the routed model id in

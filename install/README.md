@@ -10,9 +10,16 @@ edits.
 
 ```bash
 # User scope — applies everywhere on this machine
-curl -fsSL https://weave.ai/cc/install.sh | sh
+npx weave-router
 
 # Project scope — only when running `claude` inside this repo
+npx weave-router --scope project
+```
+
+Prefer `curl`? The same installer is also served as a shell script:
+
+```bash
+curl -fsSL https://weave.ai/cc/install.sh | sh
 curl -fsSL https://weave.ai/cc/install.sh | sh -s -- --scope project
 ```
 
