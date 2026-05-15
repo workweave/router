@@ -8,16 +8,13 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 )
 
-// UserCache memoizes resolved router user IDs keyed on (installation_id, identityKey) to skip the
-// UPSERT on the hot path. identityKey is "email:<addr>" or "account:<uuid>" — the two key spaces are
-// disjoint so an account-only request never false-hits an email-bearing row.
-// Cache hits skip the DB; last_seen_at lags by up to the cache TTL.
+// UserCache memoizes resolved user IDs to skip the DB upsert on the hot path.
 type UserCache interface {
 	Get(installationID, identityKey string) (string, bool)
 	Set(installationID, identityKey, userID string)
 }
 
-// NoOpUserCache is the Null Object: every Get misses, every Set is dropped.
+// NoOpUserCache is the Null Object: every Get misses.
 type NoOpUserCache struct{}
 
 func (NoOpUserCache) Get(string, string) (string, bool) { return "", false }

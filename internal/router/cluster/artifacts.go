@@ -16,40 +16,34 @@ import (
 
 // centroids.bin file format (little-endian):
 //
-//	magic     [4]byte  = "CRT1"
-//	version   uint32   = 1
-//	k         uint32   number of centroids
-//	dim       uint32   embedding dimension (must equal EmbedDim)
-//	data      [k][dim]float32  L2-normalized centroids, row-major
-//
-// Magic + version header catches malformed/truncated files at load time
-// rather than producing silently-wrong routing.
+//	magic   [4]byte  = "CRT1"
+//	version uint32   = 1
+//	k       uint32   number of centroids
+//	dim     uint32   embedding dimension (must equal EmbedDim)
+//	data    [k][dim]float32  L2-normalized centroids, row-major
 const (
 	centroidsMagic   = "CRT1"
 	centroidsVersion = uint32(1)
 )
 
 // LatestPointer names the file inside artifacts/ pinning the default
-// served version. Promoting a trained version is a one-line edit.
+// served version.
 const LatestPointer = "latest"
 
 // LatestVersion is the sentinel ROUTER_CLUSTER_VERSION accepts to mean
-// "read artifacts/latest". Treat identically to empty string.
+// "read artifacts/latest".
 const LatestVersion = "latest"
 
-// embeddedArtifacts is the entire artifacts/ tree compiled into the
-// binary; each subdir is one frozen, comparable bundle.
+// embeddedArtifacts is the entire artifacts/ tree compiled into the binary.
 //
 //go:embed all:artifacts
 var embeddedArtifacts embed.FS
 
-// Centroids are L2-normalized at training time so the runtime can use
-// dot product as a cosine-distance signal.
+// Centroids are L2-normalized at training time so runtime can use dot product.
 type Centroids struct {
 	K   int
 	Dim int
-	// Data is row-major: centroid k at Data[k*Dim : (k+1)*Dim]. Single
-	// contiguous allocation keeps the distance loop cache-friendly.
+	// Data is row-major: centroid k at Data[k*Dim : (k+1)*Dim].
 	Data []float32
 }
 
@@ -59,9 +53,8 @@ func (c *Centroids) Row(k int) []float32 {
 }
 
 // Rankings is the per-(cluster, model) α-blended score table.
-// Values are min-max-normalized per cluster and α-blended at training
-// time (paper §3): xⱼⁱ = α · p̃ⱼⁱ + (1 − α) · (1 − q̃ⱼⁱ).
-// Runtime scorer just sums + argmaxes.
+// Values are min-max-normalized per cluster and α-blended at training time
+// (paper §3). Runtime scorer sums + argmaxes.
 type Rankings map[int]map[string]float32
 
 // rankingsFile is the on-disk JSON form; cluster ids parsed back to int.
@@ -81,8 +74,7 @@ type rankingsFile struct {
 }
 
 // DeployedEntry is one routable target. Direct columns are 1:1
-// (Model == BenchColumn); proxy entries reuse another column's scores
-// until enough D3 traffic accumulates to rank directly.
+// (Model == BenchColumn); proxy entries reuse another column's scores.
 type DeployedEntry struct {
 	Model       string `json:"model"`
 	Provider    string `json:"provider"`
@@ -97,8 +89,6 @@ type ModelRegistry struct {
 }
 
 // Models returns the deduplicated model-name set in DeployedModels order.
-// Order is meaningful: it pins tie-breaking when providers share a
-// bench column score.
 func (r *ModelRegistry) Models() []string {
 	seen := make(map[string]struct{}, len(r.DeployedModels))
 	out := make([]string, 0, len(r.DeployedModels))
@@ -112,8 +102,8 @@ func (r *ModelRegistry) Models() []string {
 	return out
 }
 
-// ArtifactMetadata is the parsed metadata.yaml. Informational at
-// runtime; routing decisions depend only on centroids + rankings + registry.
+// ArtifactMetadata is the parsed metadata.yaml. Informational at runtime;
+// routing decisions depend only on centroids + rankings + registry.
 type ArtifactMetadata struct {
 	Version           string             `yaml:"version"`
 	Parent            string             `yaml:"parent,omitempty"`
@@ -126,18 +116,14 @@ type ArtifactMetadata struct {
 	DeployedModels    []string           `yaml:"deployed_models,omitempty"`
 	CostPer1KInputUSD map[string]float64 `yaml:"cost_per_1k_input_usd,omitempty"`
 	Changelog         string             `yaml:"changelog,omitempty"`
-	// CacheConfig is optional. Each version may tune thresholds
-	// independently — looser geometry can ship lower thresholds.
+	// CacheConfig carries per-version semantic-cache knobs.
 	CacheConfig *ArtifactCacheConfig `yaml:"cache_config,omitempty"`
 }
 
 // ArtifactCacheConfig carries per-version semantic-cache knobs.
 type ArtifactCacheConfig struct {
-	// DefaultThreshold is the cosine floor applied to clusters without
-	// override; 0 means fall back to the runtime's compiled-in default.
-	DefaultThreshold float32 `yaml:"default_threshold,omitempty"`
-	// PerClusterThreshold is sparse; only list outliers. Values in [0, 1].
-	PerClusterThreshold map[int]float32 `yaml:"per_cluster_threshold,omitempty"`
+	DefaultThreshold    float32           `yaml:"default_threshold,omitempty"`
+	PerClusterThreshold map[int]float32   `yaml:"per_cluster_threshold,omitempty"`
 }
 
 type ArtifactEmbedder struct {
@@ -166,8 +152,6 @@ type Bundle struct {
 }
 
 // ListVersions returns sorted version directories under artifacts/.
-// Order is lexicographic — keep names monotonic and zero-padded past
-// 9 minor versions. The "latest" pointer file is not returned.
 func ListVersions() ([]string, error) {
 	entries, err := fs.ReadDir(embeddedArtifacts, "artifacts")
 	if err != nil {
@@ -320,19 +304,13 @@ func loadRankings(raw []byte) (Rankings, error) {
 }
 
 // CheapestModel returns the lowest cost-per-1k-input entry among
-// registry entries whose provider is in available. Entries missing a
-// cost are skipped. Returns ok=false if nothing matches.
+// registry entries whose provider is in available. Returns ok=false if
+// nothing matches.
 func CheapestModel(meta *ArtifactMetadata, registry *ModelRegistry, available map[string]struct{}) (provider, model string, ok bool) {
 	return cheapestModelFiltered(meta, registry, available, nil, nil)
 }
 
-// CheapestModelInSet is CheapestModel restricted to a caller-supplied
-// model allowlist and denylist. Used by the tier-ceiling clamp:
-// callers pass the set of models at or below the requested tier as
-// allowSet so the cheapest pick stays inside the ceiling, plus the
-// request's ExcludedModels as denySet so the clamp path cannot bypass
-// the installation/request model exclusion policy. nil/empty allowSet
-// behaves like CheapestModel; nil/empty denySet disables exclusion.
+// CheapestModelInSet is CheapestModel restricted to an allowlist and denylist.
 func CheapestModelInSet(meta *ArtifactMetadata, registry *ModelRegistry, available, denySet, allowSet map[string]struct{}) (provider, model string, ok bool) {
 	return cheapestModelFiltered(meta, registry, available, denySet, allowSet)
 }
@@ -365,8 +343,8 @@ func cheapestModelFiltered(meta *ArtifactMetadata, registry *ModelRegistry, avai
 	return
 }
 
-// loadRegistry validates every entry has a non-empty (model, provider,
-// bench_column) triple — loud at boot beats silent "routes to nothing".
+// loadRegistry validates every entry has non-empty (model, provider,
+// bench_column).
 func loadRegistry(raw []byte) (*ModelRegistry, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("model_registry.json is empty")

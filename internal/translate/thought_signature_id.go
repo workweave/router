@@ -5,19 +5,16 @@ import (
 	"strings"
 )
 
-// thoughtSignatureIDDelimiter separates a synthesized tool-use id from a
-// base64-encoded Gemini thoughtSignature smuggled inside it. The id field is
-// structurally preserved by every Anthropic and OpenAI client (it's a typed
-// string used to correlate tool_use ↔ tool_result), so this is a stateless
-// round-trip channel that works even when a client's typed SDK drops unknown
-// fields like the off-spec thought_signature field on a tool_use block.
+// thoughtSignatureIDDelimiter separates the tool-use id from a base64-encoded
+// Gemini thoughtSignature smuggled inside it. The id field survives all
+// Anthropic/OpenAI client SDKs (typed string, tool_use/tool_result correlation),
+// making it a stateless round-trip channel for opaque signatures that typed SDKs
+// would otherwise drop as unknown fields.
 //
-// Prior art: BerriAI/litellm PR #16895 uses the same approach on OpenAI
-// tool_call.id.
+// Prior art: BerriAI/litellm PR #16895.
 const thoughtSignatureIDDelimiter = "__thought__"
 
-// embedSignatureInID returns id with sig encoded and appended via the
-// delimiter. Returns id unchanged when sig is empty.
+// embedSignatureInID returns id with sig base64-encoded and appended.
 func embedSignatureInID(id, sig string) string {
 	if sig == "" {
 		return id
@@ -25,10 +22,7 @@ func embedSignatureInID(id, sig string) string {
 	return id + thoughtSignatureIDDelimiter + base64.RawURLEncoding.EncodeToString([]byte(sig))
 }
 
-// extractSignatureFromID is the inverse of embedSignatureInID. If id contains
-// the delimiter and the suffix decodes as base64, it returns the leading
-// portion and the decoded signature. Otherwise it returns id unchanged and an
-// empty signature.
+// extractSignatureFromID is the inverse of embedSignatureInID.
 func extractSignatureFromID(id string) (cleanID, signature string) {
 	i := strings.Index(id, thoughtSignatureIDDelimiter)
 	if i < 0 {

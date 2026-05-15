@@ -19,9 +19,7 @@ type TelemetryRepository interface {
 	GetTelemetryRowsAll(ctx context.Context, from, to time.Time, limit int32) ([]TelemetryRow, error)
 }
 
-// InsertTelemetryParams mirrors one router.upstream span row. Fields after
-// UpstreamStatusCode are nullable; pinned-route and heuristic paths leave
-// them zero and the adapter translates that to NULL columns.
+// InsertTelemetryParams mirrors one router.upstream span row.
 type InsertTelemetryParams struct {
 	InstallationID         string
 	RequestID              string
@@ -47,15 +45,14 @@ type InsertTelemetryParams struct {
 	CrossFormat            bool
 	UpstreamStatusCode     int32
 
-	// Routing observability fields. Populated for cluster-routed requests.
 	ClusterIDs           []int32
 	CandidateModels      []string
 	ChosenScore          *float64
 	AlphaBreakdown       []byte // pre-marshaled JSON for W-1335; nil until then
 	ClusterRouterVersion string
 	TTFTMs               *int64
-	CacheCreationTokens  *int32 // nil when the upstream reported no cache usage
-	CacheReadTokens      *int32 // nil when the upstream reported no cache usage
+	CacheCreationTokens  *int32
+	CacheReadTokens      *int32
 	DeviceID             string
 	SessionID            string
 }
@@ -87,8 +84,8 @@ type TelemetryRow struct {
 	StickyHit           bool
 	InputTokens         int32
 	OutputTokens        int32
-	CacheCreationTokens *int32 // nil when the upstream reported no cache usage
-	CacheReadTokens     *int32 // nil when the upstream reported no cache usage
+	CacheCreationTokens *int32
+	CacheReadTokens     *int32
 	RequestedCostUSD    float64
 	ActualCostUSD       float64
 	TotalLatencyMs      int64

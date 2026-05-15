@@ -9,9 +9,7 @@ import (
 	"time"
 )
 
-// GeminiToOpenAIResponse converts a non-streaming Gemini :generateContent
-// response to an OpenAI Chat Completion response. Gemini's native body does
-// not echo the requested model, so requestModel is used.
+// GeminiToOpenAIResponse converts a non-streaming Gemini response to OpenAI format.
 func GeminiToOpenAIResponse(body []byte, requestModel string) ([]byte, error) {
 	var resp map[string]any
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -36,7 +34,7 @@ func GeminiToOpenAIResponse(body []byte, requestModel string) ([]byte, error) {
 	if len(toolCalls) > 0 {
 		message["tool_calls"] = toolCalls
 	} else if leadingSig != "" {
-		// Off-spec extra field; litellm/openai-go pass through unknown fields.
+		// Off-spec; litellm/openai-go pass through unknown fields.
 		message["thought_signature"] = leadingSig
 	}
 
@@ -55,8 +53,8 @@ func GeminiToOpenAIResponse(body []byte, requestModel string) ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// GeminiToAnthropicResponse converts a non-streaming Gemini response to an
-// Anthropic Messages response.
+// GeminiToAnthropicResponse converts a non-streaming Gemini response to
+// Anthropic Messages format.
 func GeminiToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
 	var resp map[string]any
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -86,7 +84,6 @@ func GeminiToAnthropicResponse(body []byte, requestModel string) ([]byte, error)
 }
 
 // GeminiToOpenAIError re-wraps a Gemini error envelope as an OpenAI error.
-// Returns the input unchanged when the body doesn't parse as a Gemini error.
 func GeminiToOpenAIError(body []byte) []byte {
 	var g struct {
 		Error struct {
@@ -142,9 +139,9 @@ func GeminiToAnthropicError(body []byte) []byte {
 	return out
 }
 
-// extractGeminiParts walks candidate.content.parts and produces the OpenAI
-// view. thoughtSignature is smuggled as function.thought_signature; leadingSig
-// is set from the first text part when no functionCalls are present.
+// extractGeminiParts walks candidate.content.parts and produces the OpenAI view.
+// thoughtSignature is smuggled on function.thought_signature; leadingSig is
+// set from the first text part when no functionCalls are present.
 func extractGeminiParts(candidate map[string]any) (textContent string, toolCalls []any, leadingSig string) {
 	if candidate == nil {
 		return "", nil, ""
@@ -204,9 +201,7 @@ func geminiFunctionCallToToolCall(fc map[string]any, signature string) map[strin
 		"function": fn,
 	}
 	if signature != "" {
-		// Off-spec; clients that preserve unknown fields pass it through.
-		// The signature is also smuggled into tc.id above for typed SDKs
-		// (Claude Code, Anthropic TS SDK) that drop unknown fields.
+		// Also smuggled in tc.id for typed SDKs that drop unknown fields.
 		fn["thought_signature"] = signature
 		tc["thought_signature"] = signature
 	}
@@ -268,7 +263,6 @@ func blocksContainToolUse(blocks []any) bool {
 }
 
 // mapGeminiFinishReason converts Gemini finishReason to OpenAI finish_reason.
-// Unknown values fall through to "stop".
 func mapGeminiFinishReason(reason string, hasToolCalls bool) string {
 	switch reason {
 	case "STOP":

@@ -7,7 +7,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 )
 
-// CachedKey is the value stored in APIKeyCache. Negative=true marks a known-bad token; APIKey/Installation are nil then.
+// CachedKey is the value stored in APIKeyCache. Negative marks a known-bad token.
 type CachedKey struct {
 	APIKey       *APIKey
 	Installation *Installation
@@ -15,42 +15,33 @@ type CachedKey struct {
 	Negative     bool
 }
 
-// APIKeyCache is an in-process read-through cache for the auth lookup. Must be safe for concurrent use.
-// Positive entries can be invalidated by installation ID via InvalidateInstallation so settings changes
-// (excluded models, BYOK keys) are visible on the next request; the TTL is a safety net for replicas
-// that miss the invalidation signal.
+// APIKeyCache is an in-process read-through cache for the auth lookup.
+// Positive entries can be invalidated by installation ID.
 type APIKeyCache interface {
 	Get(keyHash string) (CachedKey, bool)
 	Set(keyHash string, entry CachedKey)
 	InvalidateInstallation(installationID string)
 }
 
-// NoOpAPIKeyCache is the Null Object: every Get misses, every Set is dropped.
+// NoOpAPIKeyCache is the Null Object: every Get misses.
 type NoOpAPIKeyCache struct{}
 
 func (NoOpAPIKeyCache) Get(string) (CachedKey, bool)  { return CachedKey{}, false }
 func (NoOpAPIKeyCache) Set(string, CachedKey)         {}
 func (NoOpAPIKeyCache) InvalidateInstallation(string) {}
 
-// LRUAPIKeyCache uses two LRUs so positive/negative entries have independent sizes and TTLs.
-// Negative gets a shorter TTL so a freshly-created key isn't 401'd longer than necessary.
-//
-// byInstallation is a secondary index over the positive LRU; it lets writers evict every
-// cached key for an installation in O(keys-per-installation) when settings change. Eviction
-// callbacks (LRU capacity churn or TTL expiry) keep the index in sync so it never accumulates
-// dangling hashes. Negative entries are not indexed: they're keyed by hash and have no
-// installation_id binding.
+// LRUAPIKeyCache uses two LRUs for positive/negative entries with independent sizes and TTLs.
+// Negative TTL is shorter so a freshly-created key isn't 401'd longer than necessary.
+// byInstallation is a secondary index for O(keys-per-installation) eviction on settings changes.
+// eviction callbacks keep the index in sync. Negative entries are not indexed.
 type LRUAPIKeyCache struct {
 	mu             sync.Mutex
 	positive       *expirable.LRU[string, CachedKey]
 	negative       *expirable.LRU[string, CachedKey]
 	byInstallation map[string]map[string]struct{}
-	// invalidationGen counts InvalidateInstallation calls per installation
-	// so Set can detect an invalidation that slipped between its index
-	// update and the LRU insert and clean up the orphaned entry. We can't
-	// simply hold mu across positive.Add because the LRU's eviction
-	// callback (onPositiveEvict) also acquires mu, which would deadlock
-	// when Add triggers a capacity eviction.
+	// invalidationGen detects invalidation races between index update and LRU insert.
+	// We cannot hold mu across positive.Add because the LRU eviction callback acquires mu,
+	// which would deadlock when Add triggers a capacity eviction.
 	invalidationGen map[string]uint64
 }
 
@@ -119,10 +110,8 @@ func (c *LRUAPIKeyCache) Set(keyHash string, entry CachedKey) {
 	c.mu.Unlock()
 }
 
-// InvalidateInstallation drops every positive entry tied to installationID so the next request
-// for any of its API keys re-reads the row (with refreshed ExcludedModels / ExternalKeys) from
-// Postgres. Negative entries are untouched: they're per-token and unaffected by installation
-// settings.
+// InvalidateInstallation drops every positive entry for installationID so the next auth
+// re-reads from Postgres. Negative entries (per-token) are untouched.
 func (c *LRUAPIKeyCache) InvalidateInstallation(installationID string) {
 	if installationID == "" {
 		return
@@ -137,9 +126,8 @@ func (c *LRUAPIKeyCache) InvalidateInstallation(installationID string) {
 	}
 }
 
-// onPositiveEvict keeps byInstallation consistent with the LRU. Fires for both capacity-driven
-// evictions and TTL expiries, including the synchronous Remove calls made by InvalidateInstallation
-// (which is why we must not hold c.mu when calling Remove).
+// onPositiveEvict keeps byInstallation in sync with the LRU on eviction or TTL expiry.
+// Must not hold c.mu when calling Remove (would deadlock with Add's capacity eviction).
 func (c *LRUAPIKeyCache) onPositiveEvict(keyHash string, entry CachedKey) {
 	if entry.Installation == nil || entry.Installation.ID == "" {
 		return

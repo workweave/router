@@ -13,13 +13,11 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// PrepareGemini builds a fully-prepared request body for Gemini's native REST
-// surface. Required for multi-turn tool use against Gemini 3.x preview models,
-// which need the opaque thought_signature round-tripped — Gemini's
-// OpenAI-compat surface does not return that field.
+// PrepareGemini builds a Gemini native REST request body. The native surface is
+// required for multi-turn tool use against Gemini 3.x preview models because
+// OpenAI-compat does not return the opaque thought_signature field.
 func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
-	// Strip the synthetic top-level "model" and "stream" fields injected by the
-	// Gemini handler; neither belongs in the upstream generateContent body.
+	// Strip synthetic top-level "model" and "stream" — belonging to routing, not Gemini.
 	if e.format == FormatGemini {
 		body := e.body
 		var err error
@@ -198,8 +196,7 @@ func openAITextContent(content any) string {
 }
 
 // openAIUserToGeminiParts converts OpenAI user content into Gemini Parts.
-// data: URLs become inlineData; http(s) URLs are unsupported on the native
-// surface and dropped.
+// http(s) image URLs are unsupported on the native surface and dropped.
 func openAIUserToGeminiParts(content any) []any {
 	switch c := content.(type) {
 	case string:
@@ -232,8 +229,7 @@ func openAIUserToGeminiParts(content any) []any {
 	return nil
 }
 
-// dataURLToInlinePart parses "data:<mime>;base64,<payload>" into a Gemini
-// inlineData part.
+// dataURLToInlinePart parses data: URLs into Gemini inlineData parts.
 func dataURLToInlinePart(url string) map[string]any {
 	if !strings.HasPrefix(url, "data:") {
 		return nil
@@ -246,8 +242,7 @@ func dataURLToInlinePart(url string) map[string]any {
 	if mime == "" {
 		mime = "image/jpeg"
 	}
-	// Validate base64 so upstream rejects don't surface as opaque 400s;
-	// Gemini wants the raw base64 string, not bytes.
+	// Validate base64 so upstream rejects surface as client-visible errors.
 	if _, err := base64.StdEncoding.DecodeString(payload); err != nil {
 		return nil
 	}
@@ -257,9 +252,7 @@ func dataURLToInlinePart(url string) map[string]any {
 }
 
 // openAIAssistantToGeminiParts converts an OpenAI assistant message to Gemini
-// model-role Parts. thought_signature smuggled on tool_calls is preserved as
-// thoughtSignature — the load-bearing round-trip for Gemini 3.x multi-turn
-// tool use.
+// model-role Parts. thought_signature is preserved for Gemini 3.x multi-turn tool use.
 func openAIAssistantToGeminiParts(msg map[string]any) ([]any, error) {
 	var parts []any
 	if s := openAITextContent(msg["content"]); s != "" {
@@ -285,8 +278,6 @@ func openAIAssistantToGeminiParts(msg map[string]any) ([]any, error) {
 		}
 		// thought_signature may live on the tool_call, the function object,
 		// or smuggled into tc.id; round-trip whichever shape we receive.
-		// OpenAI Chat Completions clients pass tool_call.id verbatim, so the
-		// id channel survives typed-SDK field stripping.
 		if sig, _ := tc["thought_signature"].(string); sig != "" {
 			part["thoughtSignature"] = sig
 		} else if sig, _ := fn["thought_signature"].(string); sig != "" {
@@ -419,9 +410,8 @@ func stopToArray(r gjson.Result) []any {
 	return nil
 }
 
-// mapReasoningEffortToThinkingConfig mirrors Google's published table for the
-// OpenAI-compat surface. "none" passes through with thinkingBudget=0; Gemini
-// 3.x rejects it but we surface the upstream error rather than mask it.
+// mapReasoningEffortToThinkingConfig maps OpenAI reasoning_effort values to
+// Gemini thinkingConfig. "none" sets thinkingBudget=0.
 func mapReasoningEffortToThinkingConfig(effort string) (map[string]any, bool) {
 	switch effort {
 	case "none":
@@ -469,9 +459,8 @@ func pullAnthropicSystemToGemini(src map[string]any, out map[string]any) {
 	}
 }
 
-// pullAnthropicContentsToGemini converts Anthropic messages into Gemini
-// contents. Tracks tool_use_id → function name so a later tool_result block
-// can recover the name Gemini requires.
+// pullAnthropicContentsToGemini converts Anthropic messages into Gemini contents.
+// Tracks tool_use_id to function name for tool_result recovery.
 func pullAnthropicContentsToGemini(src map[string]any, out map[string]any) error {
 	msgs, _ := src["messages"].([]any)
 	if len(msgs) == 0 {
@@ -614,10 +603,6 @@ func anthropicAssistantToGeminiParts(content any) ([]any, error) {
 			case "text":
 				if text, _ := block["text"].(string); text != "" {
 					part := map[string]any{"text": text}
-					// Gemini 3.x attaches thoughtSignature to the leading
-					// text/thinking part, not the subsequent functionCalls;
-					// dropping it here causes the next turn to 400 on
-					// missing signature for the functionCall parts.
 					if sig, _ := block["thought_signature"].(string); sig != "" {
 						part["thoughtSignature"] = sig
 					}
@@ -632,9 +617,8 @@ func anthropicAssistantToGeminiParts(content any) ([]any, error) {
 				part := map[string]any{
 					"functionCall": map[string]any{"name": name, "args": input},
 				}
-				// Prefer an explicit thought_signature field, but fall back to
-				// one smuggled into block.id — Claude Code and other typed
-				// Anthropic SDKs drop the off-spec field on the way back.
+				// typed Anthropic SDKs drop off-spec fields on tool_use, so fall
+				// back to a signature smuggled inside block.id.
 				sig, _ := block["thought_signature"].(string)
 				if sig == "" {
 					if id, _ := block["id"].(string); id != "" {
@@ -683,11 +667,8 @@ func pullAnthropicToolsToGemini(src map[string]any, out map[string]any) error {
 	return nil
 }
 
-// geminiUnsupportedSchemaKeys lists JSON Schema keywords that Google's
-// function-calling API rejects with 400 "Cannot find field". Claude Code tool
-// definitions routinely include these, so they must be stripped before
-// sending upstream. Keep the list conservative — fields like description /
-// nullable / enum / format are valid and must pass through.
+// geminiUnsupportedSchemaKeys lists JSON Schema keywords Google's function-calling
+// API rejects with 400. Claude Code tool definitions routinely include these.
 var geminiUnsupportedSchemaKeys = map[string]struct{}{
 	"$schema":               {},
 	"$id":                   {},
@@ -720,10 +701,8 @@ var geminiUnsupportedSchemaKeys = map[string]struct{}{
 	"multipleOf":            {},
 }
 
-// sanitizeSchemaForGemini returns a deep copy of v with JSON Schema fields
-// Google's function-calling surface rejects removed. Always returns a copy so
-// the caller can mutate without touching the original input_schema (other
-// emitters DO accept full JSON Schema).
+// sanitizeSchemaForGemini returns a deep copy of v with fields Google's
+// function-calling surface rejects removed.
 func sanitizeSchemaForGemini(v any) any {
 	switch node := v.(type) {
 	case map[string]any:
@@ -732,11 +711,8 @@ func sanitizeSchemaForGemini(v any) any {
 			if _, drop := geminiUnsupportedSchemaKeys[k]; drop {
 				continue
 			}
-			// Drop vendor extensions ("x-*", e.g. x-google-enum-descriptions from
-			// Google-API-derived MCP tool schemas) and JSON Schema metadata
-			// ("$*", e.g. $schema/$id/$ref). Gemini's proto-based validator
-			// rejects any unknown field name with 400, so we strip by prefix
-			// rather than maintaining a moving allowlist.
+			// Drop vendor extensions and JSON Schema metadata; Gemini's
+			// proto-based validator rejects unknown field names.
 			if strings.HasPrefix(k, "x-") || strings.HasPrefix(k, "$") {
 				continue
 			}
@@ -750,16 +726,9 @@ func sanitizeSchemaForGemini(v any) any {
 			}
 			out[k] = sanitizeSchemaForGemini(child)
 		}
-		// JSON Schema allows "type" to be an array (e.g. ["array", "null"]),
-		// but Gemini's proto Schema expects a single Type enum value and a
-		// separate "nullable" boolean. Collapse array types: pick the first
-		// non-"null" entry as the type and set nullable=true when "null"
-		// appears alongside.
+		// JSON Schema allows "type": ["array", "null"]; Gemini wants single Type + nullable bool.
 		out = collapseTypeArray(out)
-		// Anthropic permits `{"type":"array"}` with no `items`; Gemini's strict
-		// function-calling validator rejects it ("missing field"). Inject a
-		// permissive default so the tool definition survives translation. Real
-		// items schemas from the source were preserved by the loop above.
+		// Gemini rejects {"type":"array"} with no "items" — inject a default.
 		if t, ok := out["type"].(string); ok && t == "array" {
 			if existing, has := out["items"]; !has || existing == nil {
 				out["items"] = map[string]any{"type": "string"}
@@ -777,9 +746,8 @@ func sanitizeSchemaForGemini(v any) any {
 	}
 }
 
-// collapseTypeArray collapses JSON Schema array-typed "type" (e.g. ["array", "null"])
-// into Gemini's single-Type-plus-nullable convention. Returns the map unchanged
-// when "type" is already a string or absent.
+// collapseTypeArray collapses JSON Schema ["array", "null"] into Gemini's
+// single Type + nullable convention. Drops "type" entirely if only "null".
 func collapseTypeArray(out map[string]any) map[string]any {
 	types, ok := out["type"].([]any)
 	if !ok {
@@ -799,7 +767,6 @@ func collapseTypeArray(out map[string]any) map[string]any {
 		}
 	}
 	if primary == "" {
-		// Only "null" or empty — invalid, remove the type field.
 		delete(out, "type")
 		return out
 	}
@@ -810,10 +777,8 @@ func collapseTypeArray(out map[string]any) map[string]any {
 	return out
 }
 
-// filterStringEnum returns enum entries that are non-empty strings. Google's
-// function-calling surface requires TYPE_STRING enums and rejects empty-string
-// entries ("enum[i]: cannot be empty"); both filter out here. Returns an empty
-// slice when nothing survives so the caller can drop the field entirely.
+// filterStringEnum returns non-empty string entries from an enum array.
+// Google's function-calling surface rejects empty-string entries.
 func filterStringEnum(v any) []any {
 	arr, ok := v.([]any)
 	if !ok {

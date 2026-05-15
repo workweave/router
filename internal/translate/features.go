@@ -15,24 +15,19 @@ type RoutingFeatures struct {
 	HasTools     bool
 	PromptText   string
 	MessageCount int
-	// MaxTokens is the caller's requested output cap (max_tokens for
-	// Anthropic/OpenAI, generationConfig.maxOutputTokens for Gemini). 0
-	// means unset/unknown. Probe detection in router/turntype keys off
-	// this — Anthropic SDK quota probes set max_tokens=1.
+	// MaxTokens is the caller's requested output cap. 0 means unset.
+	// Probe detection keys off this — Anthropic SDK quota probes set max_tokens=1.
 	MaxTokens int
-	// LastKind: "user_prompt", "tool_result", or "assistant". Empty when messages is empty.
+	// LastKind: "user_prompt", "tool_result", or "assistant".
 	LastKind string
-	// LastPreview: first previewMaxChars of the last message's text, newlines collapsed.
+	// LastPreview: first previewMaxChars of the last message's text.
 	LastPreview string
-	// OnlyUserMessageText: concatenated text from every role=="user" message in
-	// order, with system prompt, assistant turns, and tool_result blocks
-	// excluded. Populated when the caller passes extractOnlyUser=true.
+	// OnlyUserMessageText: user-message text with system/assistant/tool_result excluded.
 	OnlyUserMessageText string
 }
 
 // RoutingFeatures extracts routing inputs from the envelope. When
-// extractOnlyUser is true, OnlyUserMessageText is populated so the caller can
-// route on user-typed text only.
+// extractOnlyUser is true, OnlyUserMessageText is populated.
 func (e *RequestEnvelope) RoutingFeatures(extractOnlyUser bool) RoutingFeatures {
 	switch e.format {
 	case FormatAnthropic:
@@ -133,10 +128,8 @@ func (e *RequestEnvelope) openAIRoutingFeatures(extractOnlyUser bool) RoutingFea
 	return feats
 }
 
-// intGJSON returns the integer value of a JSON number, or 0 when the
-// result is absent / non-numeric / fractional. Probe detection only cares
-// about whole-number caps (max_tokens=1); float values aren't valid here
-// and should be treated as unset rather than rounded silently.
+// intGJSON returns the integer value of a JSON number, or 0 when absent/non-numeric.
+// Fractional values (invalid for token caps) are treated as unset.
 func intGJSON(v gjson.Result) int {
 	if !v.Exists() || v.Type != gjson.Number {
 		return 0
@@ -148,9 +141,8 @@ func intGJSON(v gjson.Result) int {
 	return int(n)
 }
 
-// openAIMaxTokens reads the output token cap from an OpenAI-format body.
-// Recent OpenAI SDKs send `max_completion_tokens`; older ones send
-// `max_tokens`. Either signals the caller's intent for a probe.
+// openAIMaxTokens reads the output token cap from an OpenAI body.
+// Reads max_completion_tokens first, falling back to max_tokens.
 func openAIMaxTokens(body []byte) int {
 	if n := intGJSON(gjson.GetBytes(body, "max_completion_tokens")); n > 0 {
 		return n
@@ -158,8 +150,7 @@ func openAIMaxTokens(body []byte) int {
 	return intGJSON(gjson.GetBytes(body, "max_tokens"))
 }
 
-// classifyLastMessageOpenAI maps an OpenAI message role onto the shared
-// three-value LastKind enum.
+// classifyLastMessageOpenAI maps an OpenAI message role to the shared LastKind enum.
 func classifyLastMessageOpenAI(role string) string {
 	switch role {
 	case "assistant":
@@ -171,8 +162,7 @@ func classifyLastMessageOpenAI(role string) string {
 	}
 }
 
-// previewText returns the first previewMaxChars of text with newlines
-// collapsed to spaces.
+// previewText returns the first previewMaxChars with newlines collapsed to spaces.
 func previewText(text string) string {
 	if text == "" {
 		return ""
@@ -186,7 +176,6 @@ func previewText(text string) string {
 }
 
 // anthropicLastUserMessage walks messages backwards for the last user entry.
-// The bare-string content shape counts as text.
 func anthropicLastUserMessage(body []byte) LastUserMessageInfo {
 	msgs := gjson.GetBytes(body, "messages")
 	if !msgs.IsArray() {
@@ -236,10 +225,8 @@ func anthropicLastUserMessage(body []byte) LastUserMessageInfo {
 	return info
 }
 
-// openAILastUserMessage scans the trailing run of role=="tool" messages and
-// the most recent role=="user" message. OpenAI splits tool returns into
-// separate messages, so a tool-result-only turn is trailing role=="tool"
-// messages with no role=="user" after them.
+// openAILastUserMessage scans the trailing run of role=="tool" messages and the
+// most recent role=="user" message.
 func openAILastUserMessage(body []byte) LastUserMessageInfo {
 	msgs := gjson.GetBytes(body, "messages")
 	if !msgs.IsArray() {
@@ -388,10 +375,8 @@ func userPromptTextGJSON(content gjson.Result) string {
 }
 
 // claudeCodeInjectedBlockPrefixes are wrapper tags Claude Code injects into
-// user-message content arrays (system reminders, slash-command echoes, local
-// command output). They carry no routing signal and dwarf the user's typed
-// text, so we skip them when building the embed input. The full untouched
-// request body is still proxied to the upstream model.
+// user-message content arrays. They carry no routing signal and dwarf the
+// user's typed text, so we skip them when building the embed input.
 var claudeCodeInjectedBlockPrefixes = []string{
 	"<system-reminder>",
 	"<command-name>",

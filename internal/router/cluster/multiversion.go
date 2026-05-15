@@ -61,9 +61,7 @@ func (m *Multiversion) Built() []string {
 	return out
 }
 
-// DefaultDeployedModels returns the deployed candidates from the default
-// version's Scorer. The admin model-selection UI uses this as the universe
-// of valid model IDs; per-version differences are intentionally hidden.
+// DefaultDeployedModels returns the deployed candidates from the default version's Scorer.
 func (m *Multiversion) DefaultDeployedModels() []DeployedEntry {
 	s, ok := m.Versions[m.Default]
 	if !ok {
@@ -90,13 +88,10 @@ func (m *Multiversion) Route(ctx context.Context, req router.Request) (router.De
 	}
 	scorer, ok := m.Versions[chosen]
 	if !ok {
-		// Defensive: NewMultiversion enforces Default ∈ Versions. Surface
-		// the bug as ErrClusterUnavailable rather than silently degrading.
-		observability.Get().Error(
-			"Cluster scorer: chosen version missing; returning ErrClusterUnavailable",
-			"chosen_version", chosen,
-		)
+		// NewMultiversion enforces Default ∈ Versions — should be unreachable.
 		return router.Decision{}, fmt.Errorf("cluster multiversion: chosen version %q not built: %w", chosen, ErrClusterUnavailable)
 	}
 	return scorer.Route(ctx, req)
 }
+
+var _ router.Router = (*Multiversion)(nil)

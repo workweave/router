@@ -13,18 +13,9 @@ import (
 // apart from real assistant output.
 const HandoverSummaryTag = "[handover summary] "
 
-// RewriteForHandover mutates the envelope body in place: it keeps the
-// system block(s) (Anthropic top-level field, OpenAI role="system"
-// messages, Gemini systemInstruction) and replaces all other messages
-// with [assistantSummary, latestUserMessage]. The summary is prefixed
-// with HandoverSummaryTag.
-//
-// Returns the number of non-system messages that were elided so the
-// caller can log it. No-ops (and returns 0) when the envelope has no
-// messages or the body cannot be parsed.
-//
-// Used by handover.RewriteEnvelope to bound the input-token cost of a
-// mid-session model switch. Pure: no I/O.
+// RewriteForHandover replaces all non-system messages with [assistantSummary, latestUserMessage].
+// Returns the count of elided messages. No-ops when the envelope has no messages.
+// Used to bound input-token cost on mid-session model switches.
 func (e *RequestEnvelope) RewriteForHandover(summary string) int {
 	if e == nil {
 		return 0
@@ -41,10 +32,8 @@ func (e *RequestEnvelope) RewriteForHandover(summary string) int {
 	}
 }
 
-// TrimLastNMessages keeps the most recent n non-system messages
-// (defaulting to 3 when n <= 0) plus the system block(s), discarding
-// older messages. Used as the graceful-degradation path when
-// summarization fails. Returns the number of messages elided.
+// TrimLastNMessages keeps the most recent n non-system messages plus system
+// blocks. Falls back to n=3 when n <= 0. Returns the number elided.
 func (e *RequestEnvelope) TrimLastNMessages(n int) int {
 	if e == nil {
 		return 0
@@ -64,8 +53,7 @@ func (e *RequestEnvelope) TrimLastNMessages(n int) int {
 	}
 }
 
-// rewriteAnthropicForHandover rewrites the "messages" array. Anthropic
-// keeps system on a separate top-level field, so it is untouched.
+// rewriteAnthropicForHandover rewrites the "messages" array for Anthropic format.
 func (e *RequestEnvelope) rewriteAnthropicForHandover(summary string) int {
 	msgs := gjson.GetBytes(e.body, "messages")
 	if !msgs.IsArray() {
@@ -76,8 +64,7 @@ func (e *RequestEnvelope) rewriteAnthropicForHandover(summary string) int {
 		return 0
 	}
 
-	// Find the last user message (walking from the end). Anthropic's
-	// "user" role carries either a string content or a content[] array.
+	// Find the last user message (walking from the end).
 	var latestUser gjson.Result
 	for i := len(all) - 1; i >= 0; i-- {
 		if all[i].Get("role").String() == "user" {
@@ -108,10 +95,8 @@ func (e *RequestEnvelope) rewriteAnthropicForHandover(summary string) int {
 	return elided
 }
 
-// anthropicAssistantSummaryBlock builds the synthesized assistant entry.
-// Content is a single text block so the wire shape matches what
-// downstream emitters expect (PrepareAnthropic / PrepareOpenAI both
-// walk content[]).
+// anthropicAssistantSummaryBlock builds a synthesized assistant entry with a
+// single text block containing the tagged summary.
 func anthropicAssistantSummaryBlock(summary string) string {
 	tagged := HandoverSummaryTag + summary
 	msg := map[string]any{
@@ -122,9 +107,8 @@ func anthropicAssistantSummaryBlock(summary string) string {
 	}
 	raw, err := json.Marshal(msg)
 	if err != nil {
-		// json.Marshal can fail only on unsupported values; both keys
-		// here are strings, so falling through to a minimal hand-crafted
-		// shape is defensive.
+		// json.Marshal can only fail on unsupported values; both keys
+		// are strings, so this is defensive.
 		escaped, _ := json.Marshal(tagged)
 		return `{"role":"assistant","content":[{"type":"text","text":` + string(escaped) + `}]}`
 	}
@@ -155,10 +139,8 @@ func (e *RequestEnvelope) trimAnthropicLastN(n int) int {
 	return len(all) - len(keep)
 }
 
-// rewriteOpenAIForHandover preserves the leading run of role=="system"
-// messages, replaces every other message with [assistantSummary,
-// latestUser]. OpenAI carries system inside messages, so we have to
-// split the array into system vs non-system.
+// rewriteOpenAIForHandover preserves role=="system" messages and replaces
+// every other message with [assistantSummary, latestUser].
 func (e *RequestEnvelope) rewriteOpenAIForHandover(summary string) int {
 	msgs := gjson.GetBytes(e.body, "messages")
 	if !msgs.IsArray() {
@@ -216,9 +198,8 @@ func (e *RequestEnvelope) rewriteOpenAIForHandover(summary string) int {
 	return elided
 }
 
-// openAIAssistantSummaryMessage builds an OpenAI-shaped assistant message
-// with the tagged summary as a single string content (OpenAI's most
-// widely-supported content shape on assistant messages).
+// openAIAssistantSummaryMessage builds an OpenAI assistant message with the
+// tagged summary as a single string content.
 func openAIAssistantSummaryMessage(summary string) string {
 	tagged := HandoverSummaryTag + summary
 	msg := map[string]any{
@@ -269,8 +250,7 @@ func (e *RequestEnvelope) trimOpenAILastN(n int) int {
 }
 
 // rewriteGeminiForHandover mirrors the Anthropic path against Gemini's
-// `contents` array. systemInstruction is a separate top-level field;
-// untouched.
+// `contents` array. systemInstruction is untouched.
 func (e *RequestEnvelope) rewriteGeminiForHandover(summary string) int {
 	contents := gjson.GetBytes(e.body, "contents")
 	if !contents.IsArray() {

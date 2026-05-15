@@ -12,7 +12,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// PrepareAnthropic builds a fully-prepared Anthropic Messages request.
+// PrepareAnthropic builds an Anthropic Messages request body.
 func (e *RequestEnvelope) PrepareAnthropic(in http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
 	var body []byte
 	var err error
@@ -282,8 +282,7 @@ func appendToolResult(anthropic *[]any, msg map[string]any) {
 	})
 }
 
-// toolResultContent flattens OpenAI tool message content (string or array-of-parts)
-// to a single string, since OpenAI tool messages only accept strings.
+// toolResultContent flattens OpenAI tool message content to a single string.
 func toolResultContent(raw any) string {
 	switch c := raw.(type) {
 	case string:
@@ -307,8 +306,8 @@ func toolResultContent(raw any) string {
 	}
 }
 
-// openAIToolContentToAnthropic converts OpenAI tool message content into
-// Anthropic-compatible tool_result content (text + image blocks).
+// openAIToolContentToAnthropic converts OpenAI tool message content to
+// Anthropic-compatible tool_result content.
 func openAIToolContentToAnthropic(raw any) any {
 	switch c := raw.(type) {
 	case string:

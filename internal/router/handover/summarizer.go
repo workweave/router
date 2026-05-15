@@ -1,14 +1,12 @@
 // Package handover defines the contract for bounded-cost context handover
-// when the planner switches models mid-session. The adapter that calls a
-// real provider lives in internal/proxy; this package only declares the
-// interface and the envelope-rewrite helpers so inner-ring code can
-// describe the operation without taking an I/O dependency.
+// when the planner switches models mid-session. The provider-backed
+// implementation lives in internal/proxy; this package only declares the
+// interface and envelope-rewrite helpers so inner-ring code can describe
+// the operation without an I/O dependency.
 //
-// Why this exists: switching models mid-session forces the new model to
-// take a one-time prompt-cache miss on the whole prior context. By
-// summarizing the conversation and replacing the message history with
-// [synthesizedSummary, latestUser], the switch turn's input cost is
-// bounded regardless of how long the session has been running.
+// Why: switching mid-session forces a prompt-cache miss on the full prior
+// context. Summarizing and replacing history with [summary, latestUser]
+// bounds switch-turn input cost regardless of session length.
 package handover
 
 import (
@@ -17,29 +15,20 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// Summarizer produces a short prose summary of the prior conversation
-// suitable to seed a new model's context after a router switch. Adapters
-// implement this against a real LLM (default: claude-haiku-4-5).
+// Summarizer produces a prose summary of the prior conversation for
+// seeding a new model's context after a router switch.
 //
-// The summarizer SHOULD respect the context's deadline. On timeout or
-// any error, callers fall back to TrimLastN — implementations return an
-// error rather than blocking past the deadline.
+// Implementations SHOULD respect the context deadline. On timeout or
+// error, callers fall back to TrimLastN.
 type Summarizer interface {
 	Summarize(ctx context.Context, env *translate.RequestEnvelope) (summary string, err error)
 }
 
-// RewriteEnvelope mutates env in-place: keeps the system block(s) and
-// replaces all messages with [assistantSummary, latestUser]. The summary
-// is wrapped with translate.HandoverSummaryTag so a reader can tell
-// synthesized context from real assistant output.
+// RewriteEnvelope mutates env in-place: keeps system blocks, replaces
+// messages with [assistantSummary, latestUser]. Returns the number of
+// original messages elided.
 //
-// Returns the number of original messages that were elided so the
-// caller can log it. The synthesized summary entry is not counted as
-// elided.
-//
-// Pure: no I/O. Returns 0 and does nothing when env is nil, when the
-// envelope's message array is missing, or when the message array is
-// empty.
+// Pure: no I/O. Returns 0 when env is nil or the message array is missing/empty.
 func RewriteEnvelope(env *translate.RequestEnvelope, summary string) int {
 	if env == nil {
 		return 0
@@ -47,10 +36,9 @@ func RewriteEnvelope(env *translate.RequestEnvelope, summary string) int {
 	return env.RewriteForHandover(summary)
 }
 
-// TrimLastN is the graceful-degradation path used when summarization
-// fails or times out. Keeps the most recent n non-system messages plus
-// the system block(s); n <= 0 is treated as 3. Returns the number of
-// messages elided.
+// TrimLastN is the graceful-degradation path when summarization fails or
+// times out. Keeps the most recent n non-system messages plus system
+// blocks; n <= 0 is treated as 3. Returns the number of messages elided.
 //
 // Pure: no I/O. Returns 0 when env is nil.
 func TrimLastN(env *translate.RequestEnvelope, n int) int {

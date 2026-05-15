@@ -1,8 +1,4 @@
-// Package openaicompat is a generic providers.Client adapter for upstreams
-// that expose the OpenAI Chat Completions wire shape (OpenRouter, vLLM,
-// Together, Fireworks, DeepInfra, customer-hosted endpoints). Kept separate
-// from the first-party OpenAI adapter so the composition root can register
-// these pools under their own provider names and API keys.
+// Package openaicompat is a generic providers.Client adapter for upstreams that speak OpenAI Chat Completions.
 package openaicompat
 
 import (
@@ -44,8 +40,7 @@ func NewClient(apiKey, baseURL string) *Client {
 	}
 }
 
-// setAuth applies authentication: BYOK credentials in ctx take precedence
-// over the deployment-level API key.
+// setAuth sets the Authorization header, preferring BYOK credentials over the deployment-level key.
 func (c *Client) setAuth(ctx context.Context, upstream *http.Request) {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
@@ -65,9 +60,6 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
-	// setAuth is applied after prep.Headers so the resolved credential
-	// always wins — prep.Headers must never clobber the Authorization
-	// header set here (currently empty, but belt-and-suspenders).
 	c.setAuth(ctx, upstream)
 	if v := r.Header.Get("Accept"); v != "" {
 		upstream.Header.Set("Accept", v)
@@ -116,10 +108,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	return httputil.StreamBody(resp.Body, resp.StatusCode, w, t)
 }
 
-// Passthrough forwards to the same resource suffix on the upstream. The
-// configured baseURL already includes the provider's version prefix (e.g.
-// /api/v1), so the inbound /v1 must be stripped before joining or the upstream
-// URL would double-prefix.
+// Passthrough strips the inbound /v1 prefix to avoid double-prefixing with the configured baseURL.
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	suffix := strings.TrimPrefix(r.URL.Path, "/v1")
 	url := c.baseURL + suffix
@@ -137,8 +126,6 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
-	// setAuth is applied after prep.Headers so the resolved credential
-	// always wins.
 	c.setAuth(ctx, upstream)
 	if v := r.Header.Get("Accept"); v != "" {
 		upstream.Header.Set("Accept", v)
@@ -177,9 +164,7 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	return err
 }
 
-// logUpstreamStatus emits Error for 4xx/5xx and Warn for 429s, surfacing a
-// body preview so non-2xx upstream responses don't blackhole into a generic
-// "upstream call failed" string at the client.
+// logUpstreamStatus logs non-2xx upstream responses with a body preview.
 func logUpstreamStatus(msg string, status int, attrs ...any) {
 	merged := append([]any{"status", status}, attrs...)
 	if status >= 500 || (status >= 400 && status != http.StatusTooManyRequests) {

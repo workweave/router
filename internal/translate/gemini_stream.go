@@ -13,12 +13,9 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// GeminiToOpenAISSETranslator translates Gemini :streamGenerateContent SSE
-// into OpenAI chat.completion.chunk SSE on the fly. Non-streaming responses
-// flush via Finalize.
-//
-// For Anthropic-inbound → Google, this is chained: the inner sink is an
-// AnthropicSSETranslator that re-encodes the OpenAI chunks we emit.
+// GeminiToOpenAISSETranslator translates Gemini :streamGenerateContent SSE into
+// OpenAI chat.completion.chunk on the fly. For Anthropic-inbound, it chains with
+// an inner AnthropicSSETranslator.
 type GeminiToOpenAISSETranslator struct {
 	inner   http.ResponseWriter
 	flusher http.Flusher
@@ -35,10 +32,8 @@ type GeminiToOpenAISSETranslator struct {
 	closed   bool
 	toolIdx  int
 	finished bool
-	// pendingSig is a thoughtSignature observed on a leading text part with
-	// no functionCall sibling to carry it. Gemini 3.x requires the next turn
-	// to round-trip the signature; we smuggle it onto the first tool_call
-	// chunk so the downstream Anthropic translator lands it on tool_use.
+	// pendingSig is a thoughtSignature from a text part with no functionCall
+	// sibling, held for the next tool_call chunk.
 	pendingSig string
 
 	usageSink otel.UsageSink
@@ -94,9 +89,7 @@ func (t *GeminiToOpenAISSETranslator) Flush() {
 	}
 }
 
-// Finalize flushes the buffered body for non-streaming responses, or emits
-// a trailing [DONE] for streams that ended without a finishReason (defensive
-// — Gemini sometimes sends usage in its own chunk).
+// Finalize flushes non-streaming responses or emits trailing [DONE] for streams.
 func (t *GeminiToOpenAISSETranslator) Finalize() error {
 	if t.streaming {
 		if t.closed {
@@ -267,11 +260,9 @@ func (t *GeminiToOpenAISSETranslator) emitTextDelta(text string) error {
 	return t.flushEvent()
 }
 
-// emitToolCallChunk emits a single OpenAI tool_calls delta carrying name and
-// the full arguments JSON in one chunk; Gemini does not split functionCall
-// args across chunks. thoughtSignature is smuggled as
-// function.thought_signature (off-spec but preserved by passthrough clients)
-// so the next request can round-trip it.
+// emitToolCallChunk emits an OpenAI tool_calls delta with a full arguments JSON
+// in one chunk. thoughtSignature is smuggled as function.thought_signature so the
+// next request can round-trip it.
 func (t *GeminiToOpenAISSETranslator) emitToolCallChunk(idx int, name, argsRaw, sig string) error {
 	id := embedSignatureInID(generateToolCallID(), sig)
 	t.writeChunkHeader()
@@ -316,9 +307,8 @@ func (t *GeminiToOpenAISSETranslator) emitUsageOnlyChunk(usage map[string]int) e
 }
 
 // writeUsageJSON serializes an OpenAI-shape usage object onto t.bw, including
-// prompt_tokens_details.cached_tokens when Gemini reported a cached prefix.
-// The nested shape matches what AnthropicSSETranslator.extractAndForwardUsage
-// reads via gjson, so cache numbers propagate through the chain.
+// cached_tokens when present. The nested shape matches what AnthropicSSETranslator
+// reads, so cache numbers propagate through the chain.
 func (t *GeminiToOpenAISSETranslator) writeUsageJSON(usage map[string]int) {
 	t.bw.WriteString(`,"usage":{"prompt_tokens":`)
 	sse.WriteJSONInt(t.bw, int64(usage["prompt_tokens"]))

@@ -7,25 +7,14 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// DeriveSessionKey produces the 16-byte digest used to look up a session
-// pin. Two tiers tried in order:
-//
-//  1. metadata.user_id (Claude Code packs device_id + account_uuid +
-//     session_id here, so this is session-distinct),
-//  2. system prompt + first user message (matches Anthropic prompt-cache
-//     shape; session-distinct for clients that don't set metadata.user_id).
-//
-// apiKeyID is mixed into all tiers so callers under different keys can't
-// collide on a shared pin. Pure function; empty apiKeyID just falls back to
-// the next tier.
-//
-// Routing the same human across separate sessions to the same pin would be a
-// user pin, not a session pin — so the resolved router user ID is
-// deliberately not consulted here.
+// DeriveSessionKey produces a 16-byte session digest. Tries metadata.user_id
+// (session-distinct from Claude Code's device+account+session bundle), then
+// system prompt + first user message (prompt-cache shape fallback). apiKeyID
+// is mixed into every tier to prevent cross-key collisions.
 func DeriveSessionKey(env *translate.RequestEnvelope, apiKeyID string) [sessionpin.SessionKeyLen]byte {
 	h := sha256.New()
 	h.Write([]byte(apiKeyID))
-	// Domain separator: prevents cross-tier collisions from caller-controlled strings.
+	// Domain separator prevents cross-tier collisions from caller-controlled strings.
 	h.Write([]byte{0x00})
 
 	switch {
@@ -33,7 +22,6 @@ func DeriveSessionKey(env *translate.RequestEnvelope, apiKeyID string) [sessionp
 		h.Write([]byte("user_id:"))
 		h.Write([]byte(env.MetadataUserID()))
 	case env != nil:
-		// Stable across turns: matches Anthropic's prompt-cache key shape.
 		h.Write([]byte("prompt_prefix:"))
 		h.Write([]byte(env.SystemText()))
 		h.Write([]byte{0x00})

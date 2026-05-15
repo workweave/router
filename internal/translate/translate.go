@@ -1,7 +1,6 @@
-// Package translate converts request and response bodies between the OpenAI
-// Chat Completions and Anthropic Messages wire formats. Request-side
-// translation lives in RequestEnvelope (envelope.go, emit_*.go); this file
-// retains response-side helpers.
+// Package translate converts request and response bodies between OpenAI and
+// Anthropic wire formats. Request translation uses RequestEnvelope; this file
+// handles non-streaming response helpers.
 package translate
 
 import (
@@ -11,9 +10,7 @@ import (
 	"time"
 )
 
-// AnthropicToOpenAIResponse converts a non-streaming Anthropic Messages response
-// to an OpenAI Chat Completion response. requestModel is the fallback when the
-// upstream body omits a model field.
+// AnthropicToOpenAIResponse converts a non-streaming Anthropic response to OpenAI format.
 func AnthropicToOpenAIResponse(body []byte, requestModel string) ([]byte, error) {
 	var resp map[string]any
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -110,8 +107,7 @@ func mapStopReason(reason any) string {
 	}
 }
 
-// AnthropicToOpenAIError re-wraps an Anthropic error as OpenAI format. Returns
-// the input unchanged when it isn't a valid Anthropic error envelope.
+// AnthropicToOpenAIError re-wraps an Anthropic error as OpenAI format.
 func AnthropicToOpenAIError(body []byte) []byte {
 	var anthropic struct {
 		Error struct {
@@ -153,9 +149,8 @@ func translateUsage(usage any) map[string]any {
 	}
 }
 
-// OpenAIToAnthropicResponse converts a non-streaming OpenAI Chat Completion
-// response to an Anthropic Messages response. requestModel is the fallback when
-// the upstream body omits a model field.
+// OpenAIToAnthropicResponse converts a non-streaming OpenAI response to
+// Anthropic Messages format.
 func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
 	var resp map[string]any
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -231,8 +226,7 @@ func buildAnthropicContent(message map[string]any) []any {
 	return blocks
 }
 
-// openAIFinishToAnthropicResponse is the non-streaming variant; it takes an
-// `any` directly out of the JSON map.
+// openAIFinishToAnthropicResponse is the non-streaming variant.
 func openAIFinishToAnthropicResponse(reason any) string {
 	s, _ := reason.(string)
 	switch s {
@@ -259,9 +253,7 @@ func openAIUsageToAnthropicResponse(usage any) map[string]any {
 		cacheRead, _ = details["cached_tokens"].(float64)
 		cacheCreation, _ = details["cache_creation_tokens"].(float64)
 	}
-	// Anthropic's input_tokens is fresh-only; OpenAI's prompt_tokens is the
-	// total including cached tokens. Subtract cache so the field matches
-	// Anthropic semantics (mirrors AnthropicSSETranslator.emitMessageDelta).
+	// Anthropic's input_tokens is fresh-only; subtract cached tokens.
 	freshInput := prompt - cacheCreation - cacheRead
 	if freshInput < 0 {
 		freshInput = 0
@@ -279,8 +271,7 @@ func openAIUsageToAnthropicResponse(usage any) map[string]any {
 	return out
 }
 
-// OpenAIToAnthropicError re-wraps an OpenAI error as Anthropic format. Returns
-// the input unchanged when it isn't a valid OpenAI error envelope.
+// OpenAIToAnthropicError re-wraps an OpenAI error as Anthropic format.
 func OpenAIToAnthropicError(body []byte) []byte {
 	var openai struct {
 		Error struct {
