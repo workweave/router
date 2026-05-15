@@ -3,3 +3,9 @@
 install.sh
 uninstall.sh
 cc-statusline.sh
+
+# Local `npm pack` / `npm install <tarball>` artifacts. The package has no
+# runtime deps, so no lockfile to track.
+*.tgz
+package-lock.json
+node_modules/
