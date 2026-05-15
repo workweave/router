@@ -39,7 +39,11 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        # setup-node v6 is the first release with npm OIDC support
+        # (actions/setup-node#1477). v4/v5 unconditionally write
+        # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into .npmrc,
+        # which short-circuits the OIDC code path and 401s at publish.
+        uses: actions/setup-node@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # Node 24 ships with npm ≥ 11.5, which is the minimum that supports
           # OIDC trusted publishing. Node 20 (npm 10) would 401 at publish.
