@@ -282,10 +282,39 @@ TOML
       !in_section && /^[[:space:]]*model_provider[[:space:]]*=/ { next }
       { print }
     ' "$config_file" >"$tmp"
-    mv "$tmp" "$config_file"
-    # Leading newline keeps the appended block readable when the file ended
-    # without one (mktemp output may or may not have trailing newline).
-    printf "\n%s\n" "$block" >>"$config_file"
+
+    # Insert the managed block at TOML top-level scope, NOT end-of-file. In
+    # TOML, every bare key after a `[section]` header belongs to that
+    # section, so appending `model_provider = "weave"` after a user's
+    # existing `[profiles.foo]` would silently scope it as
+    # `profiles.foo.model_provider` — Codex would never see the top-level
+    # default and routing would silently fail to activate. We splice the
+    # block in just before the first user section header so:
+    #   <user's top-level keys>           ← still top-level
+    #   <our managed block>               ← model_provider stays top-level
+    #     [model_providers.weave]         ← scoped section, OK anywhere
+    #   <user's sections>                 ← re-scope, unaffected
+    local first_section
+    first_section="$(awk '/^[[:space:]]*\[/ { print NR; exit }' "$tmp")"
+    if [ -n "$first_section" ]; then
+      # BSD `head -n 0` (macOS default) errors with "illegal line count"
+      # and trips `set -euo pipefail`, leaving an empty config. Skip the
+      # head call entirely when the file starts with a section header.
+      {
+        if [ "$first_section" -gt 1 ]; then
+          head -n "$((first_section - 1))" "$tmp"
+        fi
+        printf "%s\n" "$block"
+        tail -n "+${first_section}" "$tmp"
+      } >"$config_file"
+    else
+      # No section headers in the existing file — every prior user key was
+      # already at top-level. Our block ends with its own [section], so
+      # appending is safe (no bare keys follow).
+      cp "$tmp" "$config_file"
+      printf "\n%s\n" "$block" >>"$config_file"
+    fi
+    rm -f "$tmp"
   else
     printf "%s\n" "$block" >"$config_file"
   fi
