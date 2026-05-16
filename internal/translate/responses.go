@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -15,6 +16,18 @@ import (
 
 	"github.com/tidwall/gjson"
 )
+
+// responsesBadgeEnabled controls whether the routed-model "badge" reasoning
+// item is emitted at the start of every Responses stream. Default on; set
+// WEAVE_ROUTER_RESPONSES_BADGE=0 / false to suppress.
+func responsesBadgeEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("WEAVE_ROUTER_RESPONSES_BADGE")))
+	switch v {
+	case "0", "false", "no", "off":
+		return false
+	}
+	return true
+}
 
 // ResponsesToChatCompletions converts an OpenAI Responses API request body into
 // an equivalent Chat Completions request body so the existing chat-completions
@@ -254,10 +267,17 @@ type ResponsesWriter struct {
 
 	// Streaming state.
 	headersEmitted bool
+	badgeEnabled   bool
+	badge          *responsesBadge
 	textItem       *responsesTextItem
 	toolItems      map[int]*responsesToolItem
 	finishReason   string
 	usage          *responsesUsage
+}
+
+type responsesBadge struct {
+	itemID string
+	text   string
 }
 
 type responsesTextItem struct {
@@ -296,13 +316,14 @@ func newResponsesID(prefix string) string {
 func NewResponsesWriter(w http.ResponseWriter, model string) *ResponsesWriter {
 	flusher, _ := w.(http.Flusher)
 	return &ResponsesWriter{
-		inner:      w,
-		flusher:    flusher,
-		bw:         bufio.NewWriterSize(w, 8192),
-		model:      model,
-		responseID: newResponsesID("resp"),
-		createdAt:  time.Now().Unix(),
-		toolItems:  map[int]*responsesToolItem{},
+		inner:        w,
+		flusher:      flusher,
+		bw:           bufio.NewWriterSize(w, 8192),
+		model:        model,
+		responseID:   newResponsesID("resp"),
+		createdAt:    time.Now().Unix(),
+		toolItems:    map[int]*responsesToolItem{},
+		badgeEnabled: responsesBadgeEnabled(),
 	}
 }
 
@@ -340,6 +361,9 @@ func (t *ResponsesWriter) Write(data []byte) (int, error) {
 		if err := t.emitCreated(); err != nil {
 			return n, err
 		}
+		if err := t.emitReasoningBadge(); err != nil {
+			return n, err
+		}
 		t.headersEmitted = true
 	}
 	return n, t.processSSEBuffer()
@@ -362,6 +386,9 @@ func (t *ResponsesWriter) Finalize() error {
 		// emit a completed envelope so the client sees a clean termination.
 		if !t.headersEmitted {
 			if err := t.emitCreated(); err != nil {
+				return err
+			}
+			if err := t.emitReasoningBadge(); err != nil {
 				return err
 			}
 			t.headersEmitted = true
@@ -465,9 +492,12 @@ func (t *ResponsesWriter) translateChunk(raw []byte) error {
 func (t *ResponsesWriter) appendText(s string) error {
 	if t.textItem == nil {
 		t.textItem = &responsesTextItem{
-			itemID:      newResponsesID("msg"),
-			outputIndex: t.nextOutputIndex(),
+			itemID: newResponsesID("msg"),
 		}
+		// Assign outputIndex after t.textItem is reachable so nextOutputIndex
+		// counts it. The struct-literal form is order-of-evaluation-dependent
+		// in Go (RHS resolves before assignment), which produced an off-by-one.
+		t.textItem.outputIndex = t.nextOutputIndex()
 		if err := t.emitMessageItemAdded(t.textItem); err != nil {
 			return err
 		}
@@ -484,10 +514,10 @@ func (t *ResponsesWriter) appendToolCall(idx int, tc gjson.Result) error {
 	item, ok := t.toolItems[idx]
 	if !ok {
 		item = &responsesToolItem{
-			itemID:      newResponsesID("fc"),
-			outputIndex: t.nextOutputIndex(),
+			itemID: newResponsesID("fc"),
 		}
 		t.toolItems[idx] = item
+		item.outputIndex = t.nextOutputIndex()
 		if id := tc.Get("id").Str; id != "" {
 			item.callID = strings.Clone(id)
 		} else {
@@ -516,11 +546,78 @@ func (t *ResponsesWriter) appendToolCall(idx int, tc gjson.Result) error {
 
 func (t *ResponsesWriter) nextOutputIndex() int {
 	count := 0
+	if t.badge != nil {
+		count++
+	}
 	if t.textItem != nil {
 		count++
 	}
 	count += len(t.toolItems)
 	return count - 1
+}
+
+// emitReasoningBadge writes a single reasoning output item containing the
+// router's decision summary so Codex desktop (which has no other surface for
+// per-turn custom-provider routing info) shows the picked model. Codex
+// desktop reads reasoning items with a summary_text part — schema borrowed
+// from openai/codex codex-rs/core/tests/common/responses.rs.
+func (t *ResponsesWriter) emitReasoningBadge() error {
+	if !t.badgeEnabled || t.model == "" {
+		return nil
+	}
+	text := "Routed via Weave Router → " + t.model
+	if provider := t.inner.Header().Get("x-router-provider"); provider != "" {
+		text = "Weave Router · " + provider + " · " + t.model
+	}
+
+	badge := &responsesBadge{
+		itemID: newResponsesID("rs"),
+		text:   text,
+	}
+	t.badge = badge
+
+	if err := t.writeEvent("response.output_item.added", map[string]any{
+		"output_index": 0,
+		"item": map[string]any{
+			"id":      badge.itemID,
+			"type":    "reasoning",
+			"summary": []any{},
+		},
+	}); err != nil {
+		return err
+	}
+	if err := t.writeEvent("response.reasoning_summary_part.added", map[string]any{
+		"item_id":       badge.itemID,
+		"output_index":  0,
+		"summary_index": 0,
+		"part":          map[string]any{"type": "summary_text", "text": ""},
+	}); err != nil {
+		return err
+	}
+	if err := t.writeEvent("response.reasoning_summary_text.delta", map[string]any{
+		"item_id":       badge.itemID,
+		"output_index":  0,
+		"summary_index": 0,
+		"delta":         text,
+	}); err != nil {
+		return err
+	}
+	if err := t.writeEvent("response.reasoning_summary_text.done", map[string]any{
+		"item_id":       badge.itemID,
+		"output_index":  0,
+		"summary_index": 0,
+		"text":          text,
+	}); err != nil {
+		return err
+	}
+	return t.writeEvent("response.output_item.done", map[string]any{
+		"output_index": 0,
+		"item": map[string]any{
+			"id":      badge.itemID,
+			"type":    "reasoning",
+			"summary": []any{map[string]any{"type": "summary_text", "text": text}},
+		},
+	})
 }
 
 func (t *ResponsesWriter) closeOpenItems() {
@@ -730,7 +827,14 @@ func (t *ResponsesWriter) emitCompleted() error {
 }
 
 func (t *ResponsesWriter) assembleOutput() []any {
-	out := make([]any, 0, 1+len(t.toolItems))
+	out := make([]any, 0, 2+len(t.toolItems))
+	if t.badge != nil {
+		out = append(out, map[string]any{
+			"id":      t.badge.itemID,
+			"type":    "reasoning",
+			"summary": []any{map[string]any{"type": "summary_text", "text": t.badge.text}},
+		})
+	}
 	if t.textItem != nil {
 		out = append(out, map[string]any{
 			"id":     t.textItem.itemID,
