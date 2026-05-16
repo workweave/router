@@ -820,13 +820,13 @@ func sanitizeSchemaFiltered(v any, filterKeys bool) any {
 				}
 			}
 			// Values of "default" and "example" are arbitrary JSON data, not JSON
-		// Schema — pass them through without recursive filtering so object
-		// keys like {"host":"localhost","port":8080} are not stripped.
-		if (k == "default" || k == "example") && filterKeys {
-			out[k] = child
-			continue
-		}
-		out[k] = sanitizeSchemaFiltered(child, true)
+			// Schema — pass them through without recursive filtering so object
+			// keys like {"host":"localhost","port":8080} are not stripped.
+			if (k == "default" || k == "example") && filterKeys {
+				out[k] = child
+				continue
+			}
+			out[k] = sanitizeSchemaFiltered(child, true)
 		}
 		// JSON Schema allows "type": ["array", "null"]; Gemini wants single Type + nullable bool.
 		out = collapseTypeArray(out)
