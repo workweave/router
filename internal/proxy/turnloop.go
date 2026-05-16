@@ -166,6 +166,29 @@ func (s *Service) runTurnLoop(
 		res.PinAgeSec = pinAge(pin)
 	}
 
+	// User-forced pins are immutable stickies — skip scorer and planner entirely.
+	// The pin was written by /force-model and stays active until /unforce-model
+	// clears it, at which point the pin is expired and this branch is not taken.
+	//
+	// Two invariants maintained here:
+	//   1. Excluded-model policy is still enforced: if the forced model has been
+	//      added to the installation exclusion list since the pin was written, fall
+	//      through to normal routing so the exclusion takes effect immediately.
+	//   2. The forced reason is preserved after clampToCeiling: clampToCeiling
+	//      appends "+tier_clamp" to the reason, which would break the exact-match
+	//      on the next turn. Reset it to ReasonUserForceModel before refreshing.
+	if pinFound && pin.Reason == translate.ReasonUserForceModel {
+		if _, excluded := req.ExcludedModels[pin.Model]; !excluded {
+			decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+			decision.Reason = translate.ReasonUserForceModel
+			res.Decision = decision
+			res.StickyHit = true
+			res.PinTier = "user_forced"
+			s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, decision)
+			return res, nil
+		}
+	}
+
 	// Tool-result turns are mid-turn continuations. Re-routing them on
 	// trailing tool_result embedding flips decisions to noisy candidates;
 	// reuse the pin verbatim when present and refresh the TTL.
