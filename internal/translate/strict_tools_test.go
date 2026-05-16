@@ -230,17 +230,15 @@ func TestStrictTools_AnthropicSource_OptionalNestedArrayKeepsScalarType(t *testi
 		"keep scalar `type: array` — DeepSeek's parser rejects 'array' as a member of a type array")
 }
 
-func TestStrictTools_AnthropicSource_EmptyObjectGetsPermissiveBoolean(t *testing.T) {
-	// DeepSeek rejects empty object schemas in two distinct ways:
-	//   - `{type:object, additionalProperties:false}` → "An object with no properties is not allowed"
-	//   - `{type:object, additionalProperties:{schema}}` → "invalid type: map, expected a boolean"
-	// Strict-mode constrained decoding can't usefully constrain an object
-	// with no declared shape, so we normalize empty object subschemas to
-	// `additionalProperties: true` (permissive boolean) — the natural
-	// reading of `{type:object}` anyway, and the only shape DeepSeek
-	// accepts. Top-level params here have properties so strict-mode
-	// invariants still apply at the root; `metadata` is the empty-object
-	// regression case.
+func TestStrictTools_AnthropicSource_EmptyObjectGetsPlaceholderProperty(t *testing.T) {
+	// DeepSeek's tool-schema validator rejects every "no-properties"
+	// shape with the same error: "An object with no properties is not
+	// allowed." Setting additionalProperties to true/false/a-schema all
+	// fail — the literal absence of declared properties is what triggers
+	// the rejection. The only way past the validator is to inject a
+	// placeholder property the model can pass null for. Top-level params
+	// here are non-empty so strict-mode invariants apply at the root;
+	// the nested `metadata` field is the empty-object regression case.
 	src := []byte(`{
 		"model":"claude-opus-4-7",
 		"messages":[{"role":"user","content":"hi"}],
@@ -272,22 +270,32 @@ func TestStrictTools_AnthropicSource_EmptyObjectGetsPermissiveBoolean(t *testing
 	props, _ := params["properties"].(map[string]any)
 	metadata, _ := props["metadata"].(map[string]any)
 	require.NotNil(t, metadata)
+
 	assert.Equal(t, "object", metadata["type"])
-	assert.Equal(t, true, metadata["additionalProperties"],
-		"empty nested object must carry additionalProperties:true — DeepSeek requires boolean here and rejects both false and a sub-schema")
-	_, hasRequired := metadata["required"]
-	assert.False(t, hasRequired,
-		"empty nested object must NOT carry required:[] — that's the same closed-empty shape DeepSeek rejects")
+	assert.Equal(t, false, metadata["additionalProperties"],
+		"empty nested object: with the placeholder property in place we can now close the object normally")
+
+	metaProps, _ := metadata["properties"].(map[string]any)
+	reserved, _ := metaProps["_reserved"].(map[string]any)
+	require.NotNil(t, reserved, "empty nested object must carry a _reserved placeholder property")
+	assert.ElementsMatch(t, []any{"string", "null"}, reserved["type"],
+		"placeholder must be nullable so the model can pass null for an originally-unconstrained field")
+
+	required, _ := metadata["required"].([]any)
+	assert.ElementsMatch(t, []any{"_reserved"}, required,
+		"strict-mode lists every property in required; the placeholder is the only one")
 }
 
-func TestStrictTools_AnthropicSource_MapAdditionalPropertiesNormalizedToBoolean(t *testing.T) {
-	// DeepSeek's parser requires `additionalProperties` to be a boolean
-	// wherever it appears. Source JSON Schema lets it be a map (a
-	// sub-schema meaning "extra keys must match this shape"), which 400s
-	// upstream with "invalid type: map, expected a boolean". The strict-
-	// mode pass normalizes map → true (permissive). Root has properties
-	// (so strict-mode overwrites root.additionalProperties = false); the
-	// nested `headers` field is the source-map regression case.
+func TestStrictTools_AnthropicSource_MapAdditionalPropertiesReplacedByPlaceholder(t *testing.T) {
+	// Two DeepSeek constraints intersect here:
+	//   - additionalProperties must be a boolean (not a sub-schema map);
+	//   - an object must carry at least one declared property.
+	// A source schema like `{type:object, additionalProperties:{type:string}}`
+	// (no declared properties, but extras must match a sub-schema) hits both.
+	// The empty-object branch handles it: we inject a `_reserved` placeholder
+	// and set `additionalProperties: false`, satisfying both constraints.
+	// The source's "extras must be strings" semantics is lost — the
+	// alternative is a 400 on the whole request.
 	src := []byte(`{
 		"model":"claude-opus-4-7",
 		"messages":[{"role":"user","content":"hi"}],
@@ -318,12 +326,18 @@ func TestStrictTools_AnthropicSource_MapAdditionalPropertiesNormalizedToBoolean(
 	props, _ := params["properties"].(map[string]any)
 	headers, _ := props["headers"].(map[string]any)
 	require.NotNil(t, headers)
+
 	addProp := headers["additionalProperties"]
 	_, isBool := addProp.(bool)
 	assert.True(t, isBool,
 		"additionalProperties must be a boolean — DeepSeek rejects maps with 'invalid type: map, expected a boolean'")
-	assert.Equal(t, true, addProp,
-		"a source-map additionalProperties normalizes to true (permissive); false would be a 'closed empty object' rejection")
+	assert.Equal(t, false, addProp,
+		"empty-object branch closes the object once the _reserved placeholder is in place")
+
+	hdrProps, _ := headers["properties"].(map[string]any)
+	_, hasReserved := hdrProps["_reserved"].(map[string]any)
+	assert.True(t, hasReserved,
+		"placeholder property must be injected so DeepSeek's no-properties check passes")
 }
 
 func TestStrictTools_AnthropicSource_RecursesIntoDefsAndDefinitions(t *testing.T) {

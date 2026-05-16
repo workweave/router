@@ -420,18 +420,32 @@ func applyStrictModeToParams(node any) {
 			m["required"] = required
 		} else {
 			// Empty object subschemas ({type: object} with no properties).
-			// DeepSeek's tool-schema parser:
-			//   - rejects `additionalProperties: false`   — "An object with no properties is not allowed"
-			//   - rejects `additionalProperties: {schema}` — "invalid type: map, expected a boolean"
-			// Source schemas can legitimately specify either (the map form
-			// means "extra keys must match this sub-schema"). Strict-mode
-			// constrained decoding can't usefully constrain an object with
-			// no declared shape, so we normalize to `additionalProperties:
-			// true` — permissive, boolean, and the natural reading of an
-			// empty `type: object` schema anyway. This code only runs for
-			// DeepSeek targets (gated on openRouterStrictTools), so it
-			// doesn't loosen OpenAI strict-mode invariants elsewhere.
-			m["additionalProperties"] = true
+			// DeepSeek's tool-schema validator rejects every shape of
+			// "no-property object" we can otherwise produce:
+			//   - `additionalProperties: false`   → "An object with no properties is not allowed"
+			//   - `additionalProperties: true`    → same error (the literal absence of properties is what's rejected)
+			//   - `additionalProperties: {schema}` → "invalid type: map, expected a boolean"
+			//   - `properties: {}` (empty map)    → same "no properties" error
+			//
+			// The only way past the validator is to actually have a
+			// property. We inject a single nullable string placeholder; the
+			// model is expected to pass `{"_reserved": null}` for what was
+			// originally an "any object" field. Trade-off: a source schema
+			// that genuinely wanted to accept arbitrary content (rare —
+			// only some MCP-server tools) loses that affordance against
+			// DeepSeek. The alternative is a 400 on the whole request.
+			//
+			// Only runs for DeepSeek targets (gated on
+			// openRouterStrictTools), so OpenAI / OpenRouter / Anthropic
+			// targets keep their unmodified empty-object semantics.
+			m["properties"] = map[string]any{
+				"_reserved": map[string]any{
+					"type":        []any{"string", "null"},
+					"description": "Reserved placeholder. The source schema accepted any object here; DeepSeek's validator rejects schemas with no declared properties, so pass null.",
+				},
+			}
+			m["required"] = []any{"_reserved"}
+			m["additionalProperties"] = false
 		}
 	}
 	// Belt-and-suspenders normalization for non-object schemas that carry
