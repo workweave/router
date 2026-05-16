@@ -47,14 +47,17 @@ func (s *Service) handleForceModelCommand(
 	w http.ResponseWriter,
 	env *translate.RequestEnvelope,
 	cmd translate.ForceModelResult,
-	apiKeyID string,
 	installationID uuid.UUID,
+	sessionKey [sessionpin.SessionKeyLen]byte,
 ) error {
 	log := observability.Get()
-	sessionKey := DeriveSessionKey(env, apiKeyID)
 	role := roleForTier(capability.TierFor(env.Model()))
 	pinCacheKey := sessionPinCacheKey(sessionKey, role)
 
+	// Acknowledgment text is formatted as a routing marker (✦ **Weave Router** → …\n\n)
+	// so the existing StripRoutingMarkerFromMessages ingress stripper removes it from
+	// subsequent inbound requests. Without this, the text persists in conversation
+	// history and leaks router internals to the upstream on every following turn.
 	var msg string
 	if cmd.Clear {
 		if s.pinStore != nil {
@@ -77,7 +80,7 @@ func (s *Service) handleForceModelCommand(
 				s.enqueuePinUpsert(expired, pinCacheKey)
 			}
 		}
-		msg = "Routing unpinned — will resume automatic model selection."
+		msg = "✦ **Weave Router** → force-model cleared · resuming automatic model selection\n\n"
 		log.Info("/unforce-model: session pin cleared",
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
 			"role", role,
@@ -97,7 +100,7 @@ func (s *Service) handleForceModelCommand(
 			}
 			s.enqueuePinUpsert(forced, pinCacheKey)
 		}
-		msg = fmt.Sprintf("Routing pinned to %s (%s). Use /unforce-model to resume automatic selection.", cmd.Model, provider)
+		msg = fmt.Sprintf("✦ **Weave Router** → force-model applied: %s (%s) · use /unforce-model to clear\n\n", cmd.Model, provider)
 		log.Info("/force-model: session pin set",
 			"model", cmd.Model,
 			"provider", provider,

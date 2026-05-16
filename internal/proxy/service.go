@@ -657,9 +657,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	// Handle /force-model <model> and /unforce-model commands before routing.
 	// The command is stripped from env.body so the upstream never sees it.
+	// Session key is derived before extraction: ExtractForceModelCommand mutates
+	// env.body, and DeriveSessionKey falls back to prompt text when
+	// metadata.user_id is absent. Deriving after the strip would produce a key
+	// that mismatches subsequent turns where the unstripped message is present.
 	if s.pinStore != nil {
+		cmdSessionKey := DeriveSessionKey(env, apiKeyID)
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
-			return s.handleForceModelCommand(w, env, cmd, apiKeyID, installationID)
+			return s.handleForceModelCommand(w, env, cmd, installationID, cmdSessionKey)
 		}
 	}
 
