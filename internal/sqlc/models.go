@@ -109,6 +109,33 @@ type RouterModelRouterUser struct {
 	DeletedAt         pgtype.Timestamp
 }
 
+type RouterOrganizationBillingOverride struct {
+	OrganizationID string
+	Reason         string
+	ExpiresAt      pgtype.Timestamptz
+	CreatedBy      *string
+	CreatedAt      pgtype.Timestamptz
+}
+
+type RouterOrganizationCreditBalance struct {
+	OrganizationID   string
+	BalanceUsdMicros int64
+	UpdatedAt        pgtype.Timestamptz
+}
+
+type RouterOrganizationCreditLedger struct {
+	ID                    uuid.UUID
+	OrganizationID        string
+	DeltaUsdMicros        int64
+	NotionalCostMicros    int64
+	BalanceAfterMicros    int64
+	EntryType             string
+	StripePaymentIntentID *string
+	RouterRequestID       *string
+	RouterModel           *string
+	CreatedAt             pgtype.Timestamptz
+}
+
 // Session-sticky routing pins; sliding 1h TTL matching Anthropic prompt cache
 type RouterSessionPin struct {
 	// 16-byte digest derived from api_key_id + (metadata.user_id | system+first-user hashes)

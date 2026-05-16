@@ -1,9 +1,13 @@
 // Package pricing exposes per-model input/output USD pricing for inner-ring
-// consumers (planner's EV math, OTel attributes). Pure data + lookup
-// helpers; no I/O.
+// consumers (planner's EV math, OTel attributes, billing). Pure data +
+// lookup helpers; no I/O.
 package pricing
 
-import "maps"
+import (
+	"maps"
+
+	"workweave/router/internal/providers"
+)
 
 // Pricing holds the per-1M-token USD costs for a single model.
 type Pricing struct {
@@ -108,6 +112,33 @@ func For(model string) (Pricing, bool) {
 		}
 	}
 	return Pricing{}, false
+}
+
+// EffectiveInputCost returns the true USD input cost after applying cache
+// pricing. Fresh tokens at base rate; cache-creation at 1.25x; cache-read at
+// the model's effective multiplier. upstreamProvider distinguishes Anthropic
+// (input_tokens is fresh-only) from OpenAI / Gemini (prompt_tokens includes
+// cached tokens — must subtract).
+//
+// Single source of truth for the proxy's OTel emitter, telemetry write
+// path, and the billing debit hook.
+func EffectiveInputCost(inputTokens, cacheCreation, cacheRead int, pricePer1M float64, p Pricing, upstreamProvider string) float64 {
+	fresh := inputTokens
+	if upstreamProvider != providers.ProviderAnthropic {
+		fresh = inputTokens - cacheCreation - cacheRead
+	}
+	if fresh < 0 {
+		fresh = 0
+	}
+	return (float64(fresh) +
+		float64(cacheCreation)*1.25 +
+		float64(cacheRead)*p.EffectiveCacheReadMultiplier()) / 1_000_000 * pricePer1M
+}
+
+// EffectiveOutputCost returns USD output cost for a call. Output tokens have
+// no caching multipliers — straight tokens × per-1M price.
+func EffectiveOutputCost(outputTokens int, pricePer1M float64) float64 {
+	return float64(outputTokens) / 1_000_000 * pricePer1M
 }
 
 // stripDateSuffix removes a trailing "-XXXXXXXX" (hyphen + exactly 8 digits).

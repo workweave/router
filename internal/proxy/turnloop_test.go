@@ -13,6 +13,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
@@ -31,12 +32,12 @@ type fakeSummarizer struct {
 	calls     atomic.Int32
 }
 
-func (f *fakeSummarizer) Summarize(ctx context.Context, env *translate.RequestEnvelope) (string, error) {
+func (f *fakeSummarizer) Summarize(ctx context.Context, env *translate.RequestEnvelope) (string, handover.Usage, error) {
 	f.calls.Add(1)
 	if f.errOnCall != nil {
-		return "", f.errOnCall
+		return "", handover.Usage{}, f.errOnCall
 	}
-	return f.summary, nil
+	return f.summary, handover.Usage{}, nil
 }
 
 // usageProvider is a fakeProvider that writes an Anthropic non-streaming

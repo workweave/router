@@ -98,6 +98,52 @@ func TestDefaultCacheReadMultiplier_InValidRange(t *testing.T) {
 		"default cache-read multiplier must be < 1.0 to model a real cache discount")
 }
 
+func TestEffectiveInputCost_Anthropic_FreshOnlyInputTokens(t *testing.T) {
+	// Anthropic reports input_tokens as the fresh-only count; cache_creation
+	// and cache_read are siblings. So total billable = input_tokens (fresh)
+	// + cache_creation * 1.25 + cache_read * multiplier.
+	p := pricing.Pricing{InputUSDPer1M: 3.00, CacheReadMultiplier: 0.10}
+	got := pricing.EffectiveInputCost(
+		/*input*/ 1_000_000 /*cacheCreation*/, 200_000 /*cacheRead*/, 100_000,
+		p.InputUSDPer1M, p, "anthropic")
+	// 1_000_000 + 200_000*1.25 + 100_000*0.10 = 1_260_000 tokens at $3/M = $3.78
+	assert.InDelta(t, 3.78, got, 1e-9)
+}
+
+func TestEffectiveInputCost_OpenAI_SubtractsCachedFromPromptTokens(t *testing.T) {
+	// OpenAI's prompt_tokens includes the cached portion, so the function
+	// subtracts cache_creation+cache_read to recover fresh count. A
+	// regression here would double-charge for cached tokens.
+	p := pricing.Pricing{InputUSDPer1M: 5.00, CacheReadMultiplier: 0.50}
+	got := pricing.EffectiveInputCost(
+		/*input*/ 500_000 /*cacheCreation*/, 100_000 /*cacheRead*/, 200_000,
+		p.InputUSDPer1M, p, "openai")
+	// fresh = 500_000 - 100_000 - 200_000 = 200_000
+	// total = 200_000 + 100_000*1.25 + 200_000*0.5 = 425_000 at $5/M = $2.125
+	assert.InDelta(t, 2.125, got, 1e-9)
+}
+
+func TestEffectiveInputCost_FreshNegativeClampsToZero(t *testing.T) {
+	// If upstream returns cached>=prompt (rare counting bug), fresh is
+	// clamped to 0 rather than going negative — protects against
+	// pathologically negative ledger entries.
+	p := pricing.Pricing{InputUSDPer1M: 2.00, CacheReadMultiplier: 0.50}
+	got := pricing.EffectiveInputCost(100, 50, 80, p.InputUSDPer1M, p, "openai")
+	// fresh would be 100 - 50 - 80 = -30 → clamped to 0
+	// total = 0 + 50*1.25 + 80*0.5 = 102.5 at $2/M
+	assert.InDelta(t, 102.5/1_000_000*2.0, got, 1e-12)
+}
+
+func TestEffectiveOutputCost_NoCachingMultipliers(t *testing.T) {
+	got := pricing.EffectiveOutputCost(250_000, 15.0)
+	// 250_000 tokens at $15/M = $3.75
+	assert.InDelta(t, 3.75, got, 1e-9)
+}
+
+func TestEffectiveOutputCost_ZeroTokens(t *testing.T) {
+	assert.Equal(t, 0.0, pricing.EffectiveOutputCost(0, 15.0))
+}
+
 func TestAll_ReturnsCopy(t *testing.T) {
 	// Mutating the returned map must not affect subsequent lookups.
 	m := pricing.All()
