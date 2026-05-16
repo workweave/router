@@ -655,6 +655,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	clientID := ClientIdentityFrom(ctx)
 	bypassEval := hasEvalOverrideHeader(r)
 
+	// Handle /force-model <model> and /unforce-model commands before routing.
+	// The command is stripped from env.body so the upstream never sees it.
+	if s.pinStore != nil {
+		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
+			return s.handleForceModelCommand(w, env, cmd, apiKeyID, installationID)
+		}
+	}
+
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
 	routeStart := time.Now()
