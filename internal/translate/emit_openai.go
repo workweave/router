@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 
 	"workweave/router/internal/providers"
@@ -64,12 +63,6 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 			return nil, fmt.Errorf("set tool temperature override: %w", err)
 		}
 	}
-	if openRouterStrictTools(opts.TargetModel) && gjson.GetBytes(body, "tools").Exists() {
-		body, err = applyStrictToolsToBody(body)
-		if err != nil {
-			return nil, fmt.Errorf("apply strict tools: %w", err)
-		}
-	}
 	return body, nil
 }
 
@@ -85,7 +78,7 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 		return nil, err
 	}
 	pullAnthropicStopSequences(e.body, out)
-	if err := e.pullAnthropicTools(out, openRouterStrictTools(opts.TargetModel)); err != nil {
+	if err := e.pullAnthropicTools(out); err != nil {
 		return nil, err
 	}
 	pullAnthropicToolChoice(e.body, out)
@@ -349,7 +342,7 @@ func (e *RequestEnvelope) pullAnthropicSystemAndMessages(out map[string]any) err
 
 const openAIMaxTools = 128
 
-func (e *RequestEnvelope) pullAnthropicTools(out map[string]any, strict bool) error {
+func (e *RequestEnvelope) pullAnthropicTools(out map[string]any) error {
 	src, err := e.ensureSrc()
 	if err != nil {
 		return err
@@ -371,10 +364,6 @@ func (e *RequestEnvelope) pullAnthropicTools(out map[string]any, strict bool) er
 			"description": tool["description"],
 			"parameters":  params,
 		}
-		if strict {
-			applyStrictModeToParams(params)
-			fn["strict"] = true
-		}
 		result = append(result, map[string]any{"type": "function", "function": fn})
 	}
 	if len(result) > openAIMaxTools {
@@ -382,155 +371,6 @@ func (e *RequestEnvelope) pullAnthropicTools(out map[string]any, strict bool) er
 	}
 	out["tools"] = result
 	return nil
-}
-
-// applyStrictModeToParams mutates a JSON Schema so it satisfies OpenAI's
-// strict-mode tool-call requirements: every `type: "object"` schema gets
-// `additionalProperties: false` and every property is listed in `required`.
-// Properties not in the source `required` set are marked nullable via a type
-// union so the model can still pass null to preserve "optional" semantics.
-func applyStrictModeToParams(node any) {
-	m, ok := node.(map[string]any)
-	if !ok {
-		return
-	}
-	if isObjectType(m["type"]) {
-		m["additionalProperties"] = false
-		if props, ok := m["properties"].(map[string]any); ok && len(props) > 0 {
-			existing := map[string]struct{}{}
-			if reqArr, ok := m["required"].([]any); ok {
-				for _, r := range reqArr {
-					if s, ok := r.(string); ok {
-						existing[s] = struct{}{}
-					}
-				}
-			}
-			names := make([]string, 0, len(props))
-			for name := range props {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			required := make([]any, 0, len(names))
-			for _, name := range names {
-				required = append(required, name)
-				if _, wasRequired := existing[name]; !wasRequired {
-					makeNullable(props[name])
-				}
-			}
-			m["required"] = required
-		}
-	}
-	if props, ok := m["properties"].(map[string]any); ok {
-		for _, v := range props {
-			applyStrictModeToParams(v)
-		}
-	}
-	applyStrictModeToParams(m["items"])
-	for _, key := range []string{"$defs", "definitions"} {
-		if defs, ok := m[key].(map[string]any); ok {
-			for _, v := range defs {
-				applyStrictModeToParams(v)
-			}
-		}
-	}
-	for _, key := range []string{"anyOf", "oneOf", "allOf"} {
-		if arr, ok := m[key].([]any); ok {
-			for _, v := range arr {
-				applyStrictModeToParams(v)
-			}
-		}
-	}
-}
-
-// isObjectType reports whether a JSON Schema `type` value is "object", either
-// as a bare string or as part of a union like ["object", "null"]. The router's
-// own strict-mode pass no longer produces `["object", "null"]` (see
-// makeNullable — DeepSeek rejects it), but a hand-written source schema can
-// still arrive in that shape, so we keep the union check for defensive
-// coverage on the recursion's "is this still an object subtree?" question.
-func isObjectType(typ any) bool {
-	switch t := typ.(type) {
-	case string:
-		return t == "object"
-	case []any:
-		for _, v := range t {
-			if s, _ := v.(string); s == "object" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// applyStrictToolsToBody mutates the `tools` array of a serialized OpenAI body
-// to add `function.strict = true` and tighten each parameter schema. Best-effort:
-// returns the input unchanged when `tools` cannot be parsed rather than failing
-// the request.
-func applyStrictToolsToBody(body []byte) ([]byte, error) {
-	toolsResult := gjson.GetBytes(body, "tools")
-	if !toolsResult.IsArray() {
-		return body, nil
-	}
-	var tools []any
-	if err := json.Unmarshal([]byte(toolsResult.Raw), &tools); err != nil {
-		return body, nil
-	}
-	for _, t := range tools {
-		tool, _ := t.(map[string]any)
-		if tool == nil {
-			continue
-		}
-		fn, _ := tool["function"].(map[string]any)
-		if fn == nil {
-			continue
-		}
-		applyStrictModeToParams(fn["parameters"])
-		fn["strict"] = true
-	}
-	return sjson.SetBytes(body, "tools", tools)
-}
-
-// makeNullable adds "null" to a schema's `type` so strict mode can still send
-// a null value for what was previously an optional property. No-op when the
-// schema lacks a `type` keyword or already permits null.
-//
-// "object" and "array" are deliberately skipped: DeepSeek's tool-schema
-// parser only accepts string|number|integer|boolean|null as members of a
-// `type` array, so emitting `["object", "null"]` 400s upstream even though
-// the union is standard JSON Schema. Strict mode forces every property
-// into `required` anyway, so the model has to construct the value to
-// invoke the tool either way — dropping the nullable affordance for these
-// types removes a path the model can't usefully take.
-func makeNullable(node any) {
-	m, ok := node.(map[string]any)
-	if !ok {
-		return
-	}
-	switch t := m["type"].(type) {
-	case string:
-		if t == "null" || t == "object" || t == "array" {
-			return
-		}
-		m["type"] = []any{t, "null"}
-	case []any:
-		for _, v := range t {
-			if s, _ := v.(string); s == "null" {
-				return
-			}
-		}
-		// If a hand-written source schema already declared a type union
-		// containing "object" or "array", DeepSeek would reject it on its
-		// own merits — adding "null" doesn't worsen that, but adding it to
-		// a union that's already DeepSeek-incompatible has no upside. Leave
-		// it alone so the error message points at the source field, not at
-		// the strict-mode pass.
-		for _, v := range t {
-			if s, _ := v.(string); s == "object" || s == "array" {
-				return
-			}
-		}
-		m["type"] = append(t, "null")
-	}
 }
 
 func sanitizeOpenAIToolSchema(node any) {
