@@ -93,6 +93,64 @@ func TestResponsesToChatCompletions_ToolsFlatToNested(t *testing.T) {
 	assert.True(t, tools[0].Get("function.parameters").IsObject())
 }
 
+func TestResponsesToChatCompletions_StripsRoutingBadgeFromAssistantHistory(t *testing.T) {
+	// Codex re-sends every prior assistant turn in the input array. The badge
+	// we prepend on egress must not survive ingress, or the upstream sees
+	// per-turn router-injected bytes that break prompt-cache reuse.
+	body := []byte(`{
+		"model": "gpt-5",
+		"input": [
+			{"type": "message", "role": "user", "content": "hi"},
+			{"type": "message", "role": "assistant", "content": [
+				{"type": "output_text", "text": "**WEAVE ROUTER** — claude-opus-4-7 ← gpt-5.5\n\nHello there!"}
+			]},
+			{"type": "message", "role": "user", "content": "again"}
+		]
+	}`)
+
+	out, _, _, err := translate.ResponsesToChatCompletions(body)
+	require.NoError(t, err)
+
+	messages := gjson.GetBytes(out, "messages").Array()
+	require.Len(t, messages, 3)
+	assert.Equal(t, "assistant", messages[1].Get("role").Str)
+	assert.Equal(t, "Hello there!", messages[1].Get("content").Str)
+}
+
+func TestResponsesToChatCompletions_StripsBadgeFromStringContent(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-5",
+		"input": [
+			{"type": "message", "role": "assistant", "content": "**WEAVE ROUTER** — claude-opus-4-7\n\nbody"}
+		]
+	}`)
+
+	out, _, _, err := translate.ResponsesToChatCompletions(body)
+	require.NoError(t, err)
+
+	messages := gjson.GetBytes(out, "messages").Array()
+	require.Len(t, messages, 1)
+	assert.Equal(t, "body", messages[0].Get("content").Str)
+}
+
+func TestResponsesToChatCompletions_LeavesUserContentAlone(t *testing.T) {
+	// User content that happens to start with the marker bytes (e.g. someone
+	// pasting our log line in) must not be silently mutated.
+	body := []byte(`{
+		"model": "gpt-5",
+		"input": [
+			{"type": "message", "role": "user", "content": "**WEAVE ROUTER** — something\n\nplease explain"}
+		]
+	}`)
+
+	out, _, _, err := translate.ResponsesToChatCompletions(body)
+	require.NoError(t, err)
+
+	messages := gjson.GetBytes(out, "messages").Array()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Get("content").Str, "**WEAVE ROUTER**")
+}
+
 func TestResponsesToChatCompletions_ReasoningAndMaxOutput(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-5",

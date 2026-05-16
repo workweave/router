@@ -64,8 +64,13 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *h
 	// Only forward if the Bearer token isn't a router-issued key. Any other
 	// shape (incl. raw or malformed) we still forward — upstream will 401 on
 	// invalid creds, which is the correct failure mode for "no auth resolvable".
-	if raw, found := strings.CutPrefix(v, "Bearer "); found {
-		if auth.HasAPIKeyPrefix(strings.TrimSpace(raw)) {
+	// Match the bearer prefix case-insensitively to mirror the router auth
+	// middleware's extractBearer; otherwise `authorization: bearer rk_...`
+	// (lowercased by some clients) bypasses this guard and the router key
+	// crosses the trust boundary to OpenAI.
+	const bearerPrefix = "Bearer "
+	if len(v) > len(bearerPrefix) && strings.EqualFold(v[:len(bearerPrefix)], bearerPrefix) {
+		if auth.HasAPIKeyPrefix(strings.TrimSpace(v[len(bearerPrefix):])) {
 			return
 		}
 	}

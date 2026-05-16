@@ -1205,9 +1205,19 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 	// `x-api-key` would flow to api.openai.com (and vice versa) when no
 	// BYOK / env keys are configured — a cross-provider credential leak
 	// even when upstream 401s.
+	//
+	// Skip when the request is router-key-authed (installationID set) and
+	// surfaceProvider isn't already enrolled via BYOK. Passthrough depends on
+	// the client's inbound auth header, but for router-key auth that header
+	// IS the router key — setAuth strips it, so the upstream call would
+	// dispatch unauthenticated and 401 instead of failing fast with a 503.
 	if surfaceProvider != "" {
 		if _, ok := s.passthroughEligibleProviders[surfaceProvider]; ok {
-			out[surfaceProvider] = struct{}{}
+			_, alreadyByok := out[surfaceProvider]
+			routerKeyAuthed := installationIDFromContext(ctx) != (uuid.UUID{})
+			if !routerKeyAuthed || alreadyByok {
+				out[surfaceProvider] = struct{}{}
+			}
 		}
 	}
 	// Client-supplied headers are only consulted when NOT authed via a

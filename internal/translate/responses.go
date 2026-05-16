@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -201,21 +202,42 @@ func responsesInputItemToMessages(item gjson.Result) ([]map[string]any, error) {
 	return nil, nil
 }
 
+// responsesBadgePattern matches the routing badge ResponsesWriter prepends to
+// the first assistant text delta. Stripped on ingress so prior assistant turns
+// don't accumulate per-turn variable badge text (which would defeat
+// prompt-cache reuse and waste tokens), and so the upstream provider never
+// sees router-injected content as part of the model's history.
+var responsesBadgePattern = regexp.MustCompile(`(?m)\A\*\*WEAVE ROUTER\*\* — [^\n]*\n\n`)
+
 // responsesContentToChatContent flattens a content array. For assistant
 // messages we may also extract tool-call shells if a client embeds them.
 func responsesContentToChatContent(content gjson.Result, role string) (string, []map[string]any) {
 	if content.Type == gjson.String {
-		return content.Str, nil
+		s := content.Str
+		if role == "assistant" {
+			s = responsesBadgePattern.ReplaceAllString(s, "")
+		}
+		return s, nil
 	}
 	if !content.IsArray() {
 		return "", nil
 	}
 	var text strings.Builder
 	var toolCalls []map[string]any
+	firstAssistantTextStripped := false
 	for _, part := range content.Array() {
 		switch part.Get("type").Str {
 		case "input_text", "output_text", "text":
-			text.WriteString(part.Get("text").Str)
+			s := part.Get("text").Str
+			// Strip the badge only from the assistant's first output_text part
+			// (where ResponsesWriter prepends it). Doing this once per message
+			// keeps user/system text untouched even if it happens to start
+			// with the marker bytes for some reason.
+			if role == "assistant" && !firstAssistantTextStripped {
+				s = responsesBadgePattern.ReplaceAllString(s, "")
+				firstAssistantTextStripped = true
+			}
+			text.WriteString(s)
 		case "refusal":
 			text.WriteString(part.Get("refusal").Str)
 		case "tool_use":

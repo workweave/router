@@ -52,6 +52,12 @@ while [ $# -gt 0 ]; do
     --codex)
       target="codex"; shift
       ;;
+    --claude)
+      # No-op selector for symmetry with --codex and install.sh's --claude.
+      # Lets `./install.sh --uninstall --claude` (which forwards remaining
+      # args here) succeed instead of hitting the unknown-flag catch-all.
+      target="claude"; shift
+      ;;
     -h|--help)
       # awk avoids GNU `head -n -<N>` (rejected by BSD head on macOS).
       awk 'NR<2 { next } /^set -euo/ { exit } { sub(/^# ?/, ""); print }' "$0"
