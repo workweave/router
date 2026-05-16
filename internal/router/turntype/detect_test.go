@@ -60,9 +60,12 @@ func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 			want: turntype.Compaction,
 		},
 		{
-			name: "compaction via compact+conversation keywords",
+			// Loose "compact"+"conversation" keyword pair was dropped: it
+			// false-positived on Codex / generic system prompts. Only the
+			// canonical Claude Code summary phrase counts now.
+			name: "loose compact+conversation phrase no longer triggers compaction",
 			body: `{"model":"claude-sonnet-4-5","system":"Please compact the conversation history into a concise summary.","messages":[{"role":"user","content":"ok"}]}`,
-			want: turntype.Compaction,
+			want: turntype.MainLoop,
 		},
 		{
 			name: "compaction with array system prompt",
@@ -199,7 +202,7 @@ func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 		},
 		{
 			name: "compaction takes priority over tool_result",
-			body: `{"model":"claude-sonnet-4-5","system":"compact the conversation","messages":[
+			body: `{"model":"claude-sonnet-4-5","system":"Your task is to create a detailed summary of the conversation so far.","messages":[
 				{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"output"}]}
 			]}`,
 			want: turntype.Compaction,
@@ -323,12 +326,16 @@ func TestDetectFromEnvelope_OpenAI(t *testing.T) {
 			want: turntype.MainLoop,
 		},
 		{
-			name: "compaction via system message",
+			// Compaction detection is gated on Anthropic wire format —
+			// Claude Code is the only client that emits this turn type and
+			// it always talks /v1/messages. Codex / OpenAI system prompts
+			// with similar phrasing must stay main_loop.
+			name: "claude-code-style summary phrase in OpenAI body stays main_loop",
 			body: `{"model":"gpt-4o","messages":[
 				{"role":"system","content":"Your task is to create a detailed summary of the conversation so far."},
 				{"role":"user","content":"go"}
 			]}`,
-			want: turntype.Compaction,
+			want: turntype.MainLoop,
 		},
 		{
 			name: "sub-agent via header hint",
@@ -398,12 +405,14 @@ func TestDetectFromEnvelope_Gemini(t *testing.T) {
 			want: turntype.ToolResult,
 		},
 		{
-			name: "compaction via systemInstruction",
+			// Compaction detection is gated on Anthropic wire format; see
+			// the OpenAI parallel above.
+			name: "claude-code-style summary phrase in Gemini body stays main_loop",
 			body: `{
 				"systemInstruction":{"parts":[{"text":"Your task is to create a detailed summary of the conversation so far."}]},
 				"contents":[{"role":"user","parts":[{"text":"go"}]}]
 			}`,
-			want: turntype.Compaction,
+			want: turntype.MainLoop,
 		},
 		{
 			name: "sub-agent via header hint",

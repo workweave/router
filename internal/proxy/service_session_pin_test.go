@@ -514,7 +514,15 @@ func newOpenAIHardPinSvc(fr *fakeRouter, store *fakePinStore, hardPinExplore boo
 	)
 }
 
-func TestService_HardPin_OpenAI_CompactionRoutesToHardPin(t *testing.T) {
+// TestService_OpenAI_CompactionPhraseDoesNotHardPin regression-guards the
+// Codex false-positive: Claude Code's compaction system phrase is a
+// Claude-Code-only marker, but pre-fix the detector matched it on any wire
+// format. Codex sends an `instructions` field via /v1/responses that gets
+// flattened into an OpenAI-style system message, so any incidental mention
+// of "compact" / "conversation" used to hard-pin every Codex turn to the
+// cheap model — and the resulting session pin made subsequent turns stick.
+// Compaction detection is now gated on Anthropic format only.
+func TestService_OpenAI_CompactionPhraseDoesNotHardPin(t *testing.T) {
 	const compactionOpenAIBody = `{
 		"model":"gpt-4o",
 		"messages":[
@@ -531,14 +539,8 @@ func TestService_HardPin_OpenAI_CompactionRoutesToHardPin(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(compactionOpenAIBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls, "OpenAI compaction must bypass the scorer")
-	assert.Equal(t, "gpt-4o-mini", rec.Header().Get("x-router-model"))
-
-	select {
-	case <-store.upsertCh:
-		t.Fatal("compaction turn must not write a session pin")
-	case <-time.After(100 * time.Millisecond):
-	}
+	assert.Equal(t, 1, fr.routeCalls, "OpenAI body must run the scorer, not hard-pin")
+	assert.Equal(t, "gpt-4o", rec.Header().Get("x-router-model"))
 }
 
 func TestService_HardPin_OpenAI_SubAgentHeaderHintRoutesToHardPin(t *testing.T) {
