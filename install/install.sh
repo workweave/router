@@ -444,7 +444,7 @@ if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
     # _spin_cleanup (installed globally above) already restores stty echo on
     # any exit path, so we don't need a separate trap here — that would
     # overwrite the spinner cleanup and leak the cursor / child PID on Ctrl-C.
-    printf "%sGet your Weave Router API key at %s%s%s\n" "$C_BRAND" "$base_url" "$C_RESET"
+    printf "%sGet your Weave Router API key at %s%s\n" "$C_BRAND" "$base_url" "$C_RESET"
     printf "%sPaste your key here (rk_...):%s " "$C_DIM" "$C_RESET"
     stty -echo </dev/tty 2>/dev/null || true
     read -r api_key </dev/tty
