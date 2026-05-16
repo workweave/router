@@ -37,7 +37,7 @@ loved by Robinhood, PostHog & Reducto.*
 
 ## What it does
 
-Point Claude Code, Cursor, or your own app at `localhost:8080`. The router:
+Point Claude Code, Codex, Cursor, or your own app at `localhost:8080`. The router:
 
 - 🎯 **Routes per request.** A cluster scorer derived from
   [Avengers-Pro](https://arxiv.org/abs/2508.12631) [^1] picks the right
@@ -54,24 +54,28 @@ No silent fallbacks. No vibes. Routing failures return 503; loud by design.
 
 ## 30-second quickstart
 
-The fastest way: point Claude Code at the **hosted** Weave Router with one
-command. No clone, no Docker, no Postgres.
+The fastest way: point Claude Code or Codex at the **hosted** Weave Router
+with one command. No clone, no Docker, no Postgres.
 
 ```bash
 npx @workweave/router
 ```
 
-That's it. The installer walks you through scope (user vs. project), grabs
-a router key, and wires Claude Code. Other flavors:
+That's it. The installer asks which tool (Claude Code or Codex), walks you
+through scope (user vs. project), grabs a router key, and wires the right
+config file. Other flavors:
 
 ```bash
-npx @workweave/router --scope project       # per-repo, commits settings.json
+npx @workweave/router --claude              # skip the picker, Claude Code
+npx @workweave/router --codex               # skip the picker, OpenAI Codex CLI
+npx @workweave/router --scope project       # per-repo, commits settings.json (or .codex/)
 npx @workweave/router --local               # self-hosted localhost:8080
 npx @workweave/router --base-url https://router.acme.internal
 npx @workweave/router@0.1.0                 # pin a version
 ```
 
-Requires Node ≥ 18 and `jq`. Full flag reference: [install/npm/README.md](install/npm/README.md).
+Requires Node ≥ 18 (Claude Code path also needs `jq`). Full flag reference:
+[install/npm/README.md](install/npm/README.md).
 
 ### Or: self-host the whole stack
 
@@ -112,6 +116,14 @@ curl -sS http://localhost:8080/v1/route -H "Authorization: Bearer rk_..." -d '..
 self-hosted router (it's also invoked automatically at the end of
 `make full-setup`). For the hosted router, use `npx @workweave/router`
 above.
+
+**Codex** (OpenAI CLI). `npx @workweave/router --codex` patches
+`~/.codex/config.toml` (or `<repo>/.codex/config.toml` with `--scope project`)
+with a managed `[model_providers.weave]` block and sets `model_provider = "weave"`.
+Codex's existing `OPENAI_API_KEY` flows through to api.openai.com for the
+plan-based passthrough; the router key rides in an `X-Weave-Router-Key` HTTP
+header. Re-install and `--uninstall --codex` rewrite/remove only the managed
+block, leaving the rest of your Codex config untouched.
 
 **Cursor** *(early beta, performance may not be the best).* Settings →
 Models → *Override OpenAI Base URL* → `http://localhost:8080/v1`, paste
