@@ -1605,3 +1605,24 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", capability.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
+
+// ProxyOpenAIResponses routes an OpenAI Responses API request. The Responses
+// wire format is translated to Chat Completions on entry, dispatched through
+// the existing chat-completions path, then the chat-completions response is
+// re-emitted as Responses-shaped SSE / JSON. This keeps the turn loop, cache,
+// pricing, and translation matrix unchanged.
+func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
+	chatBody, _, model, err := translate.ResponsesToChatCompletions(body)
+	if err != nil {
+		return fmt.Errorf("translate responses request: %w", err)
+	}
+	wrapper := translate.NewResponsesWriter(w, model)
+	proxyErr := s.ProxyOpenAIChatCompletion(ctx, chatBody, wrapper, r)
+	if proxyErr != nil {
+		// On error, let the handler write the error envelope unless we've
+		// already committed to streaming — in which case the chat-completions
+		// path will have surfaced a status error and we just propagate.
+		return proxyErr
+	}
+	return wrapper.Finalize()
+}
