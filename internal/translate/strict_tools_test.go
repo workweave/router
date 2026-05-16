@@ -230,6 +230,56 @@ func TestStrictTools_AnthropicSource_OptionalNestedArrayKeepsScalarType(t *testi
 		"keep scalar `type: array` — DeepSeek's parser rejects 'array' as a member of a type array")
 }
 
+func TestStrictTools_AnthropicSource_EmptyObjectSchemaStaysPermissive(t *testing.T) {
+	// DeepSeek rejects {type: object, additionalProperties: false} when
+	// there are no properties: "An object with no properties is not
+	// allowed." Strict-mode constrained decoding can't constrain an
+	// object with no declared shape anyway, so the strict-mode pass must
+	// leave additionalProperties unset (defaults to true) on those
+	// subschemas. Top-level params here are non-empty so the tool stays
+	// strict-eligible; the nested `metadata` field is what would have
+	// produced the offending closed-empty object.
+	src := []byte(`{
+		"model":"claude-opus-4-7",
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[{
+			"name":"WithEmptyObject",
+			"description":"has a nested object with no declared shape",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"name":{"type":"string"},
+					"metadata":{"type":"object"}
+				},
+				"required":["name"]
+			}
+		}],
+		"max_tokens":256
+	}`)
+	env, err := translate.ParseAnthropic(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{TargetModel: "deepseek/deepseek-v4-pro"})
+	require.NoError(t, err)
+
+	fn := firstToolFunction(t, out.Body)
+	params, _ := fn["parameters"].(map[string]any)
+	// Root has properties so strict-mode invariants still apply at the top.
+	assert.Equal(t, false, params["additionalProperties"],
+		"non-empty root params still get additionalProperties:false for strict mode")
+
+	props, _ := params["properties"].(map[string]any)
+	metadata, _ := props["metadata"].(map[string]any)
+	require.NotNil(t, metadata)
+	assert.Equal(t, "object", metadata["type"])
+	_, hasAdditional := metadata["additionalProperties"]
+	assert.False(t, hasAdditional,
+		"empty nested object must NOT carry additionalProperties:false — DeepSeek rejects closed-empty objects")
+	_, hasRequired := metadata["required"]
+	assert.False(t, hasRequired,
+		"empty nested object must NOT carry required:[] — that's the same closed-empty shape DeepSeek rejects")
+}
+
 func TestStrictTools_AnthropicSource_RecursesIntoDefsAndDefinitions(t *testing.T) {
 	// Schemas using $ref / $defs reuse type definitions across properties.
 	// OpenAI strict mode requires object schemas inside $defs also have

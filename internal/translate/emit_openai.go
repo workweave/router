@@ -395,8 +395,8 @@ func applyStrictModeToParams(node any) {
 		return
 	}
 	if isObjectType(m["type"]) {
-		m["additionalProperties"] = false
 		if props, ok := m["properties"].(map[string]any); ok && len(props) > 0 {
+			m["additionalProperties"] = false
 			existing := map[string]struct{}{}
 			if reqArr, ok := m["required"].([]any); ok {
 				for _, r := range reqArr {
@@ -419,6 +419,16 @@ func applyStrictModeToParams(node any) {
 			}
 			m["required"] = required
 		}
+		// Empty object subschemas ({type: object} with no properties) are
+		// deliberately left without additionalProperties:false. DeepSeek
+		// rejects `{type: object, additionalProperties: false}` with "An
+		// object with no properties is not allowed" — the schema describes
+		// a closed object that accepts nothing, which DeepSeek's tool-call
+		// validator treats as illegal. Strict-mode constrained decoding
+		// can't usefully constrain an object with no declared shape, so the
+		// permissive default (accept any keys) is the only sane shape we
+		// can emit. This code only runs for DeepSeek targets, so we aren't
+		// affecting OpenAI strict-mode invariants anywhere else.
 	}
 	if props, ok := m["properties"].(map[string]any); ok {
 		for _, v := range props {
