@@ -12,11 +12,11 @@ import (
 
 func TestParseForceModelCommand_ForceModel(t *testing.T) {
 	tests := []struct {
-		name          string
-		input         string
-		wantModel     string
-		wantFound     bool
-		wantStripped  string
+		name         string
+		input        string
+		wantModel    string
+		wantFound    bool
+		wantStripped string
 	}{
 		{
 			name:         "command only",
