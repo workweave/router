@@ -262,7 +262,7 @@ model_provider = "weave"
 name = "Weave Router"
 base_url = "${block_url}/v1"
 env_key = "OPENAI_API_KEY"
-wire_api = "chat"
+wire_api = "responses"
 http_headers = { "X-Weave-Router-Key" = "${block_key}" }
 ${WEAVE_CODEX_END_MARKER}
 TOML
