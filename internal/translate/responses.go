@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -16,18 +15,6 @@ import (
 
 	"github.com/tidwall/gjson"
 )
-
-// responsesBadgeEnabled controls whether the routed-model "badge" reasoning
-// item is emitted at the start of every Responses stream. Default on; set
-// WEAVE_ROUTER_RESPONSES_BADGE=0 / false to suppress.
-func responsesBadgeEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("WEAVE_ROUTER_RESPONSES_BADGE")))
-	switch v {
-	case "0", "false", "no", "off":
-		return false
-	}
-	return true
-}
 
 // ResponsesToChatCompletions converts an OpenAI Responses API request body into
 // an equivalent Chat Completions request body so the existing chat-completions
@@ -255,9 +242,10 @@ type ResponsesWriter struct {
 	flusher http.Flusher
 	bw      *bufio.Writer
 
-	model      string
-	responseID string
-	createdAt  int64
+	model          string // routed model, set from x-router-model when known
+	requestedModel string // originally requested model (from the client's request)
+	responseID     string
+	createdAt      int64
 
 	statusCode int
 	streaming  bool
@@ -268,8 +256,6 @@ type ResponsesWriter struct {
 	// Streaming state.
 	headersEmitted   bool
 	completedEmitted bool
-	badgeEnabled     bool
-	badgeText        string // set on first text delta if badge inlining is enabled
 	badgePrepended   bool
 	textItem         *responsesTextItem
 	toolItems        map[int]*responsesToolItem
@@ -313,14 +299,14 @@ func newResponsesID(prefix string) string {
 func NewResponsesWriter(w http.ResponseWriter, model string) *ResponsesWriter {
 	flusher, _ := w.(http.Flusher)
 	return &ResponsesWriter{
-		inner:        w,
-		flusher:      flusher,
-		bw:           bufio.NewWriterSize(w, 8192),
-		model:        model,
-		responseID:   newResponsesID("resp"),
-		createdAt:    time.Now().Unix(),
-		toolItems:    map[int]*responsesToolItem{},
-		badgeEnabled: responsesBadgeEnabled(),
+		inner:          w,
+		flusher:        flusher,
+		bw:             bufio.NewWriterSize(w, 8192),
+		model:          model,
+		requestedModel: model,
+		responseID:     newResponsesID("resp"),
+		createdAt:      time.Now().Unix(),
+		toolItems:      map[int]*responsesToolItem{},
 	}
 }
 
@@ -507,13 +493,12 @@ func (t *ResponsesWriter) appendText(s string) error {
 
 	// Prepend the routing badge to the very first text delta. Codex desktop
 	// drops reasoning-summary items from custom providers, so the text stream
-	// is the only surface that's guaranteed to render. Captured into the
-	// item's running text so the final output_item.done carries it too.
+	// is the only surface that's guaranteed to render. Format mirrors the
+	// Claude Code statusline (router/install/cc-statusline.sh): brand chip,
+	// routed model, optional "← requested" if the router swapped models.
 	if !t.badgePrepended {
 		t.badgePrepended = true
-		if badge := t.computeBadgeText(); badge != "" {
-			t.badgeText = badge
-			line := "_" + badge + "_\n\n"
+		if line := t.computeBadgeText(); line != "" {
 			t.textItem.text.WriteString(line)
 			if err := t.emitTextDelta(t.textItem, line); err != nil {
 				return err
@@ -568,17 +553,23 @@ func (t *ResponsesWriter) nextOutputIndex() int {
 	return count - 1
 }
 
-// computeBadgeText builds the routing badge once both the model and provider
-// are known. Empty result means no badge to render.
+// computeBadgeText builds the routing badge that's prepended to the
+// assistant's first text delta. Format mirrors the Claude Code statusline:
+//
+//	**WEAVE ROUTER** — <routed>
+//	**WEAVE ROUTER** — <routed> ← <requested>   (when the router swapped)
+//
+// Returns the badge line including trailing blank line, or empty when there
+// is no routed model to surface yet.
 func (t *ResponsesWriter) computeBadgeText() string {
-	if !t.badgeEnabled || t.model == "" {
+	if t.model == "" {
 		return ""
 	}
-	provider := t.inner.Header().Get("x-router-provider")
-	if provider == "" {
-		return "via Weave Router · " + t.model
+	badge := "**WEAVE ROUTER** — " + t.model
+	if t.requestedModel != "" && t.requestedModel != t.model {
+		badge += " ← " + t.requestedModel
 	}
-	return "via Weave Router · " + provider + " · " + t.model
+	return badge + "\n\n"
 }
 
 func (t *ResponsesWriter) closeOpenItems() {

@@ -109,11 +109,11 @@ func TestResponsesToChatCompletions_ReasoningAndMaxOutput(t *testing.T) {
 }
 
 func TestResponsesWriter_StreamingText(t *testing.T) {
-	// Suppress the routing badge so this test stays focused on the chunk
-	// translation contract; badge behavior has its own test.
-	t.Setenv("WEAVE_ROUTER_RESPONSES_BADGE", "0")
 	rec := httptest.NewRecorder()
-	w := translate.NewResponsesWriter(rec, "gpt-5")
+	// Empty initial model + no x-router-model header means the badge can't
+	// resolve a routed pick and stays silent — lets this test focus on the
+	// chunk translation contract.
+	w := translate.NewResponsesWriter(rec, "")
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.WriteHeader(200)
@@ -143,12 +143,19 @@ func TestResponsesWriter_StreamingText(t *testing.T) {
 	assert.Contains(t, types, "response.output_item.done")
 	assert.Contains(t, types, "response.completed")
 
-	// Concatenated deltas equal the full text.
+	// Concatenated text deltas, skipping the routing badge prefix that the
+	// writer prepends on the first delta whenever a routed model is known.
+	// Chunks here carry model="gpt-5" so the badge resolves and fires.
 	var combined strings.Builder
 	for _, e := range events {
-		if e["type"] == "response.output_text.delta" {
-			combined.WriteString(e["delta"].(string))
+		if e["type"] != "response.output_text.delta" {
+			continue
 		}
+		d := e["delta"].(string)
+		if strings.HasPrefix(d, "**WEAVE ROUTER**") {
+			continue
+		}
+		combined.WriteString(d)
 	}
 	assert.Equal(t, "Hello world", combined.String())
 
@@ -160,27 +167,26 @@ func TestResponsesWriter_StreamingText(t *testing.T) {
 	assert.EqualValues(t, 2, usage["output_tokens"])
 }
 
-func TestResponsesWriter_PrependsBadgeToFirstTextDelta(t *testing.T) {
+func TestResponsesWriter_PrependsBadgeOnSwap(t *testing.T) {
 	rec := httptest.NewRecorder()
-	w := translate.NewResponsesWriter(rec, "gpt-5")
+	w := translate.NewResponsesWriter(rec, "gpt-5.5")
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("x-router-model", "claude-opus-4-7")
-	w.Header().Set("x-router-provider", "anthropic")
 	w.WriteHeader(200)
 
-	_, err := w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}` + "\n\n"))
-	require.NoError(t, err)
-	_, err = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}` + "\n\n"))
-	require.NoError(t, err)
-	_, err = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}` + "\n\n"))
-	require.NoError(t, err)
-	_, err = w.Write([]byte("data: [DONE]\n\n"))
-	require.NoError(t, err)
+	for _, c := range []string{
+		`data: {"choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}` + "\n\n",
+		`data: {"choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}` + "\n\n",
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}` + "\n\n",
+		"data: [DONE]\n\n",
+	} {
+		_, err := w.Write([]byte(c))
+		require.NoError(t, err)
+	}
 	require.NoError(t, w.Finalize())
 
 	events := parseSSEEvents(t, rec.Body.Bytes())
 
-	// First text delta carries the badge; subsequent deltas are unchanged.
 	var deltas []string
 	for _, e := range events {
 		if e["type"] == "response.output_text.delta" {
@@ -188,13 +194,15 @@ func TestResponsesWriter_PrependsBadgeToFirstTextDelta(t *testing.T) {
 		}
 	}
 	require.Len(t, deltas, 3)
-	assert.Contains(t, deltas[0], "Weave Router")
+	// Format: **WEAVE ROUTER** — claude-opus-4-7 ← gpt-5.5\n\n
+	assert.Contains(t, deltas[0], "**WEAVE ROUTER**")
 	assert.Contains(t, deltas[0], "claude-opus-4-7")
-	assert.Contains(t, deltas[0], "anthropic")
+	assert.Contains(t, deltas[0], "← gpt-5.5")
+	assert.True(t, strings.HasSuffix(deltas[0], "\n\n"))
 	assert.Equal(t, "Hello", deltas[1])
 	assert.Equal(t, " world", deltas[2])
 
-	// response.completed must appear exactly once.
+	// response.completed appears exactly once.
 	completedCount := 0
 	for _, e := range events {
 		if e["type"] == "response.completed" {
@@ -204,10 +212,9 @@ func TestResponsesWriter_PrependsBadgeToFirstTextDelta(t *testing.T) {
 	assert.Equal(t, 1, completedCount)
 }
 
-func TestResponsesWriter_BadgeSuppressedByEnv(t *testing.T) {
-	t.Setenv("WEAVE_ROUTER_RESPONSES_BADGE", "0")
+func TestResponsesWriter_BadgeWithoutSwapShowsModelOnly(t *testing.T) {
 	rec := httptest.NewRecorder()
-	w := translate.NewResponsesWriter(rec, "gpt-5")
+	w := translate.NewResponsesWriter(rec, "claude-opus-4-7")
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("x-router-model", "claude-opus-4-7")
 	w.WriteHeader(200)
@@ -218,11 +225,17 @@ func TestResponsesWriter_BadgeSuppressedByEnv(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Finalize())
 
-	for _, e := range parseSSEEvents(t, rec.Body.Bytes()) {
+	events := parseSSEEvents(t, rec.Body.Bytes())
+	var firstDelta string
+	for _, e := range events {
 		if e["type"] == "response.output_text.delta" {
-			assert.NotContains(t, e["delta"].(string), "Weave Router")
+			firstDelta = e["delta"].(string)
+			break
 		}
 	}
+	assert.Contains(t, firstDelta, "**WEAVE ROUTER**")
+	assert.Contains(t, firstDelta, "claude-opus-4-7")
+	assert.NotContains(t, firstDelta, "←")
 }
 
 func TestResponsesWriter_UsesRoutedModelFromHeader(t *testing.T) {
