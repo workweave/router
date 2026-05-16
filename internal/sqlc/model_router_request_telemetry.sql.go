@@ -25,8 +25,8 @@ SELECT
     output_tokens,
     cache_creation_tokens,
     cache_read_tokens,
-    (requested_input_cost_usd + requested_output_cost_usd)::bigint AS requested_cost_usd,
-    (actual_input_cost_usd + actual_output_cost_usd)::bigint       AS actual_cost_usd,
+    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
     total_latency_ms,
     upstream_status_code
 FROM router.model_router_request_telemetry
@@ -77,8 +77,8 @@ type GetTelemetryRowsRow struct {
 //	    output_tokens,
 //	    cache_creation_tokens,
 //	    cache_read_tokens,
-//	    (requested_input_cost_usd + requested_output_cost_usd)::bigint AS requested_cost_usd,
-//	    (actual_input_cost_usd + actual_output_cost_usd)::bigint       AS actual_cost_usd,
+//	    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+//	    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
 //	    total_latency_ms,
 //	    upstream_status_code
 //	FROM router.model_router_request_telemetry
@@ -142,8 +142,8 @@ SELECT
     output_tokens,
     cache_creation_tokens,
     cache_read_tokens,
-    (requested_input_cost_usd + requested_output_cost_usd)::bigint AS requested_cost_usd,
-    (actual_input_cost_usd + actual_output_cost_usd)::bigint       AS actual_cost_usd,
+    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
     total_latency_ms,
     upstream_status_code
 FROM router.model_router_request_telemetry
@@ -194,8 +194,8 @@ type GetTelemetryRowsAllRow struct {
 //	    output_tokens,
 //	    cache_creation_tokens,
 //	    cache_read_tokens,
-//	    (requested_input_cost_usd + requested_output_cost_usd)::bigint AS requested_cost_usd,
-//	    (actual_input_cost_usd + actual_output_cost_usd)::bigint       AS actual_cost_usd,
+//	    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+//	    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
 //	    total_latency_ms,
 //	    upstream_status_code
 //	FROM router.model_router_request_telemetry
