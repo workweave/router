@@ -29,6 +29,12 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 		if err != nil {
 			return providers.PreparedRequest{}, fmt.Errorf("strip stream field: %w", err)
 		}
+		// Same-format Gemini requests still need tool schema sanitization:
+		// the inbound tools may carry JSON Schema keywords Gemini rejects.
+		body, err = sanitizeGeminiTools(body)
+		if err != nil {
+			return providers.PreparedRequest{}, fmt.Errorf("sanitize gemini tools: %w", err)
+		}
 		headers := make(http.Header)
 		if e.Stream() {
 			headers.Set(GeminiStreamHintHeader, "true")
@@ -84,6 +90,71 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 // to pick between :generateContent and :streamGenerateContent and strips it
 // before forwarding.
 const GeminiStreamHintHeader = "X-Router-Gemini-Stream"
+
+// sanitizeGeminiTools walks the tools array of an already-Gemini-format request
+// body and runs sanitizeSchemaForGemini on every function declaration's
+// parameters. The same-format path (FormatGemini) bypasses the per-field
+// translation helpers, so tool schemas must be sanitized in-place.
+func sanitizeGeminiTools(body []byte) ([]byte, error) {
+	// Quick check: if there are no tools, return unchanged.
+	if !gjson.GetBytes(body, "tools").Exists() {
+		return body, nil
+	}
+	var err error
+	body, err = sjson.SetBytes(body, "tools", sanitizeGeminiToolsRaw(gjson.GetBytes(body, "tools").Value()))
+	if err != nil {
+		return nil, fmt.Errorf("set sanitized tools: %w", err)
+	}
+	return body, nil
+}
+
+// sanitizeGeminiToolsRaw is the gjson-compatible walker for the tools array.
+func sanitizeGeminiToolsRaw(v any) any {
+	tools, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	out := make([]any, len(tools))
+	for i, t := range tools {
+		tool, _ := t.(map[string]any)
+		if tool == nil {
+			out[i] = t
+			continue
+		}
+		fds, _ := tool["functionDeclarations"].([]any)
+		if len(fds) == 0 {
+			out[i] = t
+			continue
+		}
+		sanitized := make([]any, len(fds))
+		for j, fd := range fds {
+			fdMap, _ := fd.(map[string]any)
+			if fdMap == nil {
+				sanitized[j] = fd
+				continue
+			}
+			if params, ok := fdMap["parameters"]; ok && params != nil {
+				fdMap = copyMap(fdMap)
+				fdMap["parameters"] = sanitizeSchemaForGemini(params)
+			}
+			sanitized[j] = fdMap
+		}
+		toolCopy := copyMap(tool)
+		toolCopy["functionDeclarations"] = sanitized
+		out[i] = toolCopy
+	}
+	return out
+}
+
+// copyMap returns a shallow copy of m so that modifying the copy does not
+// mutate the original, which gjson may be sharing with the caller.
+func copyMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
 
 // ----- OpenAI → Gemini -----
 
@@ -667,56 +738,60 @@ func pullAnthropicToolsToGemini(src map[string]any, out map[string]any) error {
 	return nil
 }
 
-// geminiUnsupportedSchemaKeys lists JSON Schema keywords Google's function-calling
-// API rejects with 400. Claude Code tool definitions routinely include these.
-var geminiUnsupportedSchemaKeys = map[string]struct{}{
-	"$schema":               {},
-	"$id":                   {},
-	"$ref":                  {},
-	"$defs":                 {},
-	"definitions":           {},
-	"additionalProperties":  {},
-	"propertyNames":         {},
-	"unevaluatedProperties": {},
-	"patternProperties":     {},
-	"dependencies":          {},
-	"dependentRequired":     {},
-	"dependentSchemas":      {},
-	"if":                    {},
-	"then":                  {},
-	"else":                  {},
-	"not":                   {},
-	"allOf":                 {},
-	"oneOf":                 {},
-	"const":                 {},
-	"contentEncoding":       {},
-	"contentMediaType":      {},
-	"contentSchema":         {},
-	"readOnly":              {},
-	"writeOnly":             {},
-	"examples":              {},
-	"deprecated":            {},
-	"exclusiveMinimum":      {},
-	"exclusiveMaximum":      {},
-	"multipleOf":            {},
+// geminiSchemaAllowedKeys is the set of JSON Schema keywords that Gemini's
+// function-calling API accepts, derived from the Schema struct in the Google
+// genai Go SDK (googleapis/go-genai types.go). Any key not in this set is
+// silently dropped — this is an allow-list, not a deny-list, so new JSON
+// Schema keywords that tool authors add are rejected before they can 400.
+var geminiSchemaAllowedKeys = map[string]struct{}{
+	"type":             {},
+	"nullable":         {},
+	"description":      {},
+	"format":           {},
+	"enum":             {},
+	"items":            {},
+	"properties":       {},
+	"required":         {},
+	"title":            {},
+	"default":          {},
+	"example":          {},
+	"pattern":          {},
+	"anyOf":            {},
+	"maxItems":         {},
+	"maxLength":        {},
+	"maxProperties":    {},
+	"maximum":          {},
+	"minItems":         {},
+	"minLength":        {},
+	"minProperties":    {},
+	"minimum":          {},
+	"propertyOrdering": {},
 }
 
-// sanitizeSchemaForGemini returns a deep copy of v with fields Google's
-// function-calling surface rejects removed.
+// sanitizeSchemaForGemini returns a deep copy of v containing only the JSON
+// Schema fields that Gemini's function-calling API accepts. Uses an allow-list
+// derived from the googleapis/go-genai Schema struct. Always returns a copy so
+// the caller can mutate without touching the original input_schema (other
+// emitters DO accept full JSON Schema).
 func sanitizeSchemaForGemini(v any) any {
+	return sanitizeSchemaFiltered(v, true)
+}
+
+// sanitizeSchemaFiltered is the recursive workhorse. When filterKeys is false,
+// all map keys pass through unfiltered (used for user-defined property names
+// inside "properties", which must not be checked against the schema-keyword
+// allow-list).
+func sanitizeSchemaFiltered(v any, filterKeys bool) any {
 	switch node := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(node))
 		for k, child := range node {
-			if _, drop := geminiUnsupportedSchemaKeys[k]; drop {
-				continue
+			if filterKeys {
+				if _, ok := geminiSchemaAllowedKeys[k]; !ok {
+					continue
+				}
 			}
-			// Drop vendor extensions and JSON Schema metadata; Gemini's
-			// proto-based validator rejects unknown field names.
-			if strings.HasPrefix(k, "x-") || strings.HasPrefix(k, "$") {
-				continue
-			}
-			if k == "enum" {
+			if k == "enum" && filterKeys {
 				cleaned := filterStringEnum(child)
 				if len(cleaned) == 0 {
 					continue
@@ -724,11 +799,44 @@ func sanitizeSchemaForGemini(v any) any {
 				out[k] = cleaned
 				continue
 			}
-			out[k] = sanitizeSchemaForGemini(child)
+			// User-defined property names inside "properties" must not be
+			// checked against the schema-keyword allow-list, but their values
+			// (the per-property schemas) MUST be filtered. Only apply this
+			// special case when filterKeys is true — when it is false we are
+			// already inside a properties map and "properties" here is just
+			// another user-defined property name whose value is a schema.
+			if k == "properties" && filterKeys {
+				out[k] = sanitizeSchemaFiltered(child, false)
+				continue
+			}
+			// When we are inside a properties map (filterKeys=false), each value
+			// is a JSON Schema. A boolean true/false is valid JSON Schema ("any
+			// type" / "reject all") but Gemini's proto Schema rejects both.
+			// Convert to empty Schema objects so they survive translation.
+			if !filterKeys {
+				if _, isBool := child.(bool); isBool {
+					out[k] = map[string]any{}
+					continue
+				}
+			}
+			// Values of "default" and "example" are arbitrary JSON data, not JSON
+			// Schema — pass them through without recursive filtering so object
+			// keys like {"host":"localhost","port":8080} are not stripped.
+			if (k == "default" || k == "example") && filterKeys {
+				out[k] = child
+				continue
+			}
+			out[k] = sanitizeSchemaFiltered(child, true)
 		}
 		// JSON Schema allows "type": ["array", "null"]; Gemini wants single Type + nullable bool.
 		out = collapseTypeArray(out)
-		// Gemini rejects {"type":"array"} with no "items" — inject a default.
+		// JSON Schema allows `items` to be a boolean (true = any, false = none).
+		// Gemini's proto Schema.items is optional Schema and rejects booleans.
+		out = collapseItemsBool(out)
+		// Anthropic permits `{"type":"array"}` with no `items`; Gemini's strict
+		// function-calling validator rejects it ("missing field"). Inject a
+		// permissive default so the tool definition survives translation. Real
+		// items schemas from the source were preserved by the loop above.
 		if t, ok := out["type"].(string); ok && t == "array" {
 			if existing, has := out["items"]; !has || existing == nil {
 				out["items"] = map[string]any{"type": "string"}
@@ -738,7 +846,7 @@ func sanitizeSchemaForGemini(v any) any {
 	case []any:
 		out := make([]any, len(node))
 		for i, child := range node {
-			out[i] = sanitizeSchemaForGemini(child)
+			out[i] = sanitizeSchemaFiltered(child, true)
 		}
 		return out
 	default:
@@ -777,8 +885,29 @@ func collapseTypeArray(out map[string]any) map[string]any {
 	return out
 }
 
-// filterStringEnum returns non-empty string entries from an enum array.
-// Google's function-calling surface rejects empty-string entries.
+// collapseItemsBool converts JSON Schema boolean "items" (true = any schema,
+// false = no items) into Gemini's Schema-or-null convention. `true` becomes
+// an empty Schema (equivalent to "any type"). `false` is removed.
+func collapseItemsBool(out map[string]any) map[string]any {
+	v, ok := out["items"]
+	if !ok {
+		return out
+	}
+	switch v := v.(type) {
+	case bool:
+		if v {
+			out["items"] = map[string]any{}
+		} else {
+			delete(out, "items")
+		}
+	}
+	return out
+}
+
+// filterStringEnum returns enum entries that are non-empty strings. Google's
+// function-calling surface requires TYPE_STRING enums and rejects empty-string
+// entries ("enum[i]: cannot be empty"); both filter out here. Returns an empty
+// slice when nothing survives so the caller can drop the field entirely.
 func filterStringEnum(v any) []any {
 	arr, ok := v.([]any)
 	if !ok {

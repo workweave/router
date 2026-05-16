@@ -635,6 +635,56 @@ func TestSanitizeSchemaForGemini_PreservesSupportedFields(t *testing.T) {
 	assert.Equal(t, []any{"path", "mode"}, params["required"], "required must survive")
 }
 
+func TestPrepareGemini_CollapsesItemsBool(t *testing.T) {
+	// Regression: MCP tool schemas (e.g. SigNoz) use `"items": true` (JSON Schema:
+	// any items allowed). Gemini's proto Schema.items is optional Schema and
+	// rejects boolean values with "Invalid value at ... (Schema), true".
+	body := []byte(`{
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [{
+			"name":"create_dashboard",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"args":{
+						"type":"array",
+						"items":true
+					},
+					"disabled":{
+						"type":"array",
+						"items":false
+					},
+					"links":{
+						"type":"array",
+						"items":{"type":"string"}
+					}
+				}
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+	props := params["properties"].(map[string]any)
+
+	args := props["args"].(map[string]any)
+	assert.Equal(t, "array", args["type"])
+	items, ok := args["items"].(map[string]any)
+	require.True(t, ok, "items:true must become empty Schema, not remain bool")
+	assert.NotNil(t, items)
+
+	// items:false is removed, then repaired as missing-items-on-array → default.
+	disabled := props["disabled"].(map[string]any)
+	assert.Equal(t, map[string]any{"type": "string"}, disabled["items"], "items:false removed then repaired with default")
+
+	links := props["links"].(map[string]any)
+	assert.Equal(t, map[string]any{"type": "string"}, links["items"], "real items Schema must survive")
+}
+
 func TestPrepareGemini_CollapsesArrayTypeField(t *testing.T) {
 	// Regression: MCP tool schemas (e.g. Pylon) use JSON Schema array-typed
 	// "type" like ["array","null"]. Gemini's proto Schema expects type to be a
@@ -759,4 +809,112 @@ func TestPrepareGemini_DropsEmptyStringEnumEntries(t *testing.T) {
 
 	normal := props["normal"].(map[string]any)
 	assert.Equal(t, []any{"a", "b"}, normal["enum"], "well-formed enums must pass through unchanged")
+}
+
+func TestPrepareGemini_UserDefinedPropertyNamedProperties(t *testing.T) {
+	// A user-defined property named "properties" must not be mistaken for the
+	// JSON Schema "properties" keyword. Its value schema must still be filtered.
+	body := []byte(`{
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [{
+			"name":"track_event",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"eventName":{"type":"string"},
+					"properties":{
+						"type":"object",
+						"additionalProperties":true,
+						"description":"Additional properties"
+					}
+				}
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+	props := params["properties"].(map[string]any)
+
+	userProp, ok := props["properties"].(map[string]any)
+	require.True(t, ok, "user-defined 'properties' property must survive")
+	assert.Equal(t, "object", userProp["type"])
+	assert.Equal(t, "Additional properties", userProp["description"])
+	assert.NotContains(t, userProp, "additionalProperties",
+		"additionalProperties must be stripped even inside a property named 'properties'")
+}
+
+func TestPrepareGemini_GeminiFormatSanitizesTools(t *testing.T) {
+	// The same-format (FormatGemini) path must also sanitize tool schemas.
+	body := []byte(`{
+		"model": "gemini-3.1-pro-preview",
+		"stream": false,
+		"contents": [{"role":"user","parts":[{"text":"hi"}]}],
+		"tools": [{
+			"functionDeclarations": [{
+				"name":"test",
+				"parameters":{
+					"type":"object",
+					"additionalProperties":false,
+					"properties":{"x":{"type":"string"}}
+				}
+			}]
+		}]
+	}`)
+	env, err := translate.ParseGemini(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	assert.NotContains(t, out, "model")
+	assert.NotContains(t, out, "stream")
+	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+	assert.NotContains(t, params, "additionalProperties", "additionalProperties must be stripped in Gemini-format path")
+	assert.NotNil(t, params["properties"])
+}
+
+func TestPrepareGemini_ConvertsBoolPropertySchemas(t *testing.T) {
+	// JSON Schema allows boolean schemas as property values (true = any type).
+	// Gemini's proto Schema rejects them. They must be converted to empty Schema.
+	body := []byte(`{
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [{
+			"name":"create_dashboard",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"queryData":true,
+					"softMax":true,
+					"realProp":{"type":"string"}
+				}
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+	props := params["properties"].(map[string]any)
+
+	// Boolean true → empty Schema {}
+	qd, ok := props["queryData"].(map[string]any)
+	require.True(t, ok, "queryData=true should become empty schema object, got %T", props["queryData"])
+	assert.NotNil(t, qd)
+
+	sm, ok := props["softMax"].(map[string]any)
+	require.True(t, ok, "softMax=true should become empty schema object, got %T", props["softMax"])
+	assert.NotNil(t, sm)
+
+	// Real property must survive
+	rp, ok := props["realProp"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "string", rp["type"])
 }
