@@ -313,6 +313,14 @@ func (t *ResponsesWriter) WriteHeader(code int) {
 	ct := t.inner.Header().Get("Content-Type")
 	t.streaming = strings.Contains(ct, "text/event-stream") && code < 400
 
+	// The proxy stamps the routing decision on the response headers before the
+	// downstream writer is given any bytes. Prefer the routed model name so
+	// Codex's TUI (and any other client that reads `response.model`) displays
+	// what the router actually picked instead of the requested alias.
+	if routed := t.inner.Header().Get("x-router-model"); routed != "" {
+		t.model = routed
+	}
+
 	t.inner.Header().Del("Content-Length")
 	t.inner.Header().Del("Content-Encoding")
 

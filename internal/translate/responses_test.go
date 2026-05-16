@@ -157,6 +157,43 @@ func TestResponsesWriter_StreamingText(t *testing.T) {
 	assert.EqualValues(t, 2, usage["output_tokens"])
 }
 
+func TestResponsesWriter_UsesRoutedModelFromHeader(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesWriter(rec, "gpt-5")
+
+	// Simulate the proxy stamping its routing decision on the writer headers
+	// before any body bytes flow through.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("x-router-model", "claude-opus-4-7")
+	w.Header().Set("x-router-provider", "anthropic")
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}` + "\n\n"))
+	require.NoError(t, err)
+	_, err = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}` + "\n\n"))
+	require.NoError(t, err)
+	_, err = w.Write([]byte("data: [DONE]\n\n"))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	events := parseSSEEvents(t, rec.Body.Bytes())
+
+	// response.created and response.completed both carry the routed model.
+	var created, completed map[string]any
+	for _, e := range events {
+		switch e["type"] {
+		case "response.created":
+			created = e["response"].(map[string]any)
+		case "response.completed":
+			completed = e["response"].(map[string]any)
+		}
+	}
+	require.NotNil(t, created)
+	require.NotNil(t, completed)
+	assert.Equal(t, "claude-opus-4-7", created["model"])
+	assert.Equal(t, "claude-opus-4-7", completed["model"])
+}
+
 func TestResponsesWriter_StreamingToolCall(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesWriter(rec, "gpt-5")
