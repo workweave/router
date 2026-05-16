@@ -74,10 +74,10 @@ type RouterModelRouterRequestTelemetry struct {
 	EmbedInput             *string
 	InputTokens            *int32
 	OutputTokens           *int32
-	RequestedInputCostUsd  pgtype.Numeric
-	RequestedOutputCostUsd pgtype.Numeric
-	ActualInputCostUsd     pgtype.Numeric
-	ActualOutputCostUsd    pgtype.Numeric
+	RequestedInputCostUsd  *int64
+	RequestedOutputCostUsd *int64
+	ActualInputCostUsd     *int64
+	ActualOutputCostUsd    *int64
 	RouteLatencyMs         *int64
 	UpstreamLatencyMs      *int64
 	TotalLatencyMs         *int64
