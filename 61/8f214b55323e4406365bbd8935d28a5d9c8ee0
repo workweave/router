@@ -1,16 +1,16 @@
-internal/proxy/gemini.go
-  s_9a3ce3fd3de458::t_549201d39f485e 1-182
+README.md
+  s_48a44f81b8d7ee::t_fa75d9df7b91a2 54-77,83,87-89,98,110-113
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.4.8",
-  "base_commit_sha": "ceb1d7ff85e639e1a61bd21031ff2fecc542191d",
+  "base_commit_sha": "618f214b55323e4406365bbd8935d28a5d9c8ee0",
   "prompts": {},
   "sessions": {
-    "s_9a3ce3fd3de458": {
+    "s_48a44f81b8d7ee": {
       "agent_id": {
         "tool": "claude",
-        "id": "e89af5ef-a55c-466d-bc83-a409d64b4193",
+        "id": "3c839c5e-21bc-4289-8556-b634e2bf3841",
         "model": "claude-opus-4-7"
       },
       "human_author": "steventohme <steven@workweave.ai>"

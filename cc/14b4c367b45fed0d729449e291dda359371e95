@@ -1,0 +1,38 @@
+db/queries/model_router_request_telemetry.sql
+  s_3e7d106a5547c4::t_c4500c419e2a29 210-211,235-236
+  s_3e7d106a5547c4::t_69b1f622529422 56-59
+  s_3e7d106a5547c4::t_a481e26de24992 85-86,90,140-141,145
+  s_3e7d106a5547c4::t_cc5bc0a1e18d84 100-101,113-114,126-127,156-157,170-171,184-185
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_3e7d106a5547c4::t_aa126ace284548 28-29,60-61,80-81,145-146,175-176,197-198,247-248,252,269-271,279-280,284,307-308,312,327-329,339-340,344,365-366,384-385,392-393,424-425,441-442,449-450,480-481,499-500,507-508,539-540,556-557,564-565,595-596,614-615,622-623,654-655,671-672,679-680,757-760,795-798,871-874
+internal/postgres/telemetry.go
+  s_3e7d106a5547c4::t_6ace261fcfb45a 343-344
+  s_3e7d106a5547c4::t_1d2e04e6211b28 379-380
+  s_3e7d106a5547c4::t_626729553b47f2 171-172,249-250
+  s_3e7d106a5547c4::t_7d10442fe790ad 15-33
+  s_3e7d106a5547c4::t_b41d87016a9f8f 134-135,152-153,214-215,231-232
+  s_3e7d106a5547c4::t_351022a45e7021 68-71
+  s_3e7d106a5547c4::t_d9d64458038584 107-109,191-193
+db/migrations/0005_telemetry-costs-to-micros.up.sql
+  s_3e7d106a5547c4::t_9004826c914e31 1-22
+db/migrations/0005_telemetry-costs-to-micros.down.sql
+  s_3e7d106a5547c4::t_39440dbdc1db37 1-17
+internal/sqlc/models.go
+  s_3e7d106a5547c4::t_aa126ace284548 77-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "cc14b4c367b45fed0d729449e291dda359371e95",
+  "prompts": {},
+  "sessions": {
+    "s_3e7d106a5547c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2df0133c-d92f-4c1e-8861-ad0207425729",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

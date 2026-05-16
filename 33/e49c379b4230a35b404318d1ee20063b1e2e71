@@ -1,0 +1,38 @@
+install/install.sh
+  s_474b8ceff46b9a::t_72778c1f3c2a1b 398-418,421-422
+  s_474b8ceff46b9a::t_f0c9abc5977216 375-382
+  s_474b8ceff46b9a::t_587542de3d7e87 465,467-471,474-487
+  s_474b8ceff46b9a::t_d308e1ae46c32c 49-56
+  s_474b8ceff46b9a::t_8188062b3204b2 98-102,107
+  s_474b8ceff46b9a::t_27646ad977e112 3,5-12,14,16,20,23-25,30
+  s_474b8ceff46b9a::t_0ff66aa57b44b9 520-527,529-544,546-569,571-572
+  s_474b8ceff46b9a::t_e2f845bf692494 232-296
+  s_474b8ceff46b9a::t_8515a1a044cf7f 603-656
+internal/providers/openai/client.go
+  s_474b8ceff46b9a::t_e99f2fb0f68692 40-57,64
+  s_474b8ceff46b9a::t_df6e81843f3be0 156
+cmd/seed/main.go
+  s_474b8ceff46b9a::t_38c8a296730d2e 157-163
+cmd/router/main.go
+  s_474b8ceff46b9a::t_38c8a296730d2e 133-136,183-186,403-404
+install/uninstall.sh
+  s_474b8ceff46b9a::t_9eadfcddd09eec 3,5-9,12-13,23
+  s_474b8ceff46b9a::t_70d155ea3ce21e 66-67,71-161
+  s_474b8ceff46b9a::t_a09dc32fb278b5 52-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "33e49c379b4230a35b404318d1ee20063b1e2e71",
+  "prompts": {},
+  "sessions": {
+    "s_474b8ceff46b9a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "55aba179-0748-477b-832c-24da8d88df13",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

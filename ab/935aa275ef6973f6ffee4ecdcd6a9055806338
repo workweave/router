@@ -1,16 +1,16 @@
-internal/proxy/gemini.go
-  s_9a3ce3fd3de458::t_549201d39f485e 1-182
+install/npm/.gitignore
+  s_1ada5d20f5c39b::t_6c484e83e44f7f 6-11
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.4.8",
-  "base_commit_sha": "ceb1d7ff85e639e1a61bd21031ff2fecc542191d",
+  "base_commit_sha": "ab935aa275ef6973f6ffee4ecdcd6a9055806338",
   "prompts": {},
   "sessions": {
-    "s_9a3ce3fd3de458": {
+    "s_1ada5d20f5c39b": {
       "agent_id": {
         "tool": "claude",
-        "id": "e89af5ef-a55c-466d-bc83-a409d64b4193",
+        "id": "2428335b-ad97-4311-937d-8c153b11f614",
         "model": "claude-opus-4-7"
       },
       "human_author": "steventohme <steven@workweave.ai>"

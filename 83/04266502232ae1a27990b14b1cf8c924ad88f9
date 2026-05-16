@@ -1,0 +1,34 @@
+frontend/src/lib/api.ts
+  s_2274d9627f3cc1::t_2555dfb07b32ac 67-68
+frontend/src/components/charts/DrillDownModal.tsx
+  s_2274d9627f3cc1::t_e3f095249dcf22 217-222
+  s_2274d9627f3cc1::t_de94e044ae9e97 101-102
+internal/proxy/telemetry.go
+  s_2274d9627f3cc1::t_0a356528947e17 81-95
+internal/postgres/telemetry.go
+  s_2274d9627f3cc1::t_8e385f6ec2ab0a 322-323
+  s_2274d9627f3cc1::t_01aea6e2ff26b9 299-300
+  s_2274d9627f3cc1::t_c1d9529b06df26 265-266
+  s_2274d9627f3cc1::t_20ac8e00ee457a 349-363
+internal/api/admin/metrics.go
+  s_2274d9627f3cc1::t_1a03831188424d 163-177
+  s_2274d9627f3cc1::t_68d2bdb3b60045 105-106,114-115
+db/queries/model_router_request_telemetry.sql
+  s_2274d9627f3cc1::t_4b1dffbfee704a 208-209,233-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "8304266502232ae1a27990b14b1cf8c924ad88f9",
+  "prompts": {},
+  "sessions": {
+    "s_2274d9627f3cc1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "38dc655b-e066-47f6-bbfa-0e097310f0ee",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

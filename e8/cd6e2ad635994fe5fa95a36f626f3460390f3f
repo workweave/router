@@ -1,16 +1,16 @@
-internal/proxy/gemini.go
-  s_9a3ce3fd3de458::t_549201d39f485e 1-182
+install/cc-statusline.sh
+  s_6fd9a62cce298d::t_64808266dadaf3 27-31
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.4.8",
-  "base_commit_sha": "ceb1d7ff85e639e1a61bd21031ff2fecc542191d",
+  "base_commit_sha": "e8cd6e2ad635994fe5fa95a36f626f3460390f3f",
   "prompts": {},
   "sessions": {
-    "s_9a3ce3fd3de458": {
+    "s_6fd9a62cce298d": {
       "agent_id": {
         "tool": "claude",
-        "id": "e89af5ef-a55c-466d-bc83-a409d64b4193",
+        "id": "2865202b-b20b-4fd2-83ad-f3a96c24fb2d",
         "model": "claude-opus-4-7"
       },
       "human_author": "steventohme <steven@workweave.ai>"

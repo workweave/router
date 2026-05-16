@@ -1,0 +1,20 @@
+internal/translate/emit_openai.go
+  s_474b8ceff46b9a::t_4630f0e358e196 81
+  s_474b8ceff46b9a::t_0ed3ac69ae10da 345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "c259ac5c34d379047db23d7ee0bc22d44507edda",
+  "prompts": {},
+  "sessions": {
+    "s_474b8ceff46b9a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "55aba179-0748-477b-832c-24da8d88df13",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null
+    }
+  }
+}
