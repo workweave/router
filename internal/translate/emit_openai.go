@@ -384,15 +384,63 @@ func (e *RequestEnvelope) pullAnthropicTools(out map[string]any, strict bool) er
 	return nil
 }
 
+// deepSeekUnsupportedKeywords is the set of JSON Schema validation keywords
+// DeepSeek's tool-call validator either rejects with a 400 or silently
+// ignores in ways that make strict-mode constrained decoding lie about the
+// constraints. Stripping them at translation time is conservative — we lose
+// the validation hint but the schema goes through; the model still gets the
+// shape (type/properties/required/description), which is what actually
+// drives function-call generation. Re-add a specific keyword here if we
+// confirm DeepSeek accepts it AND constrained decoding honors it.
+var deepSeekUnsupportedKeywords = []string{
+	"pattern", // regex; DeepSeek's regex flavor diverges from OpenAI's
+	"minLength", "maxLength",
+	"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+	"minItems", "maxItems", "uniqueItems",
+	"minProperties", "maxProperties",
+	"patternProperties", "propertyNames",
+	"unevaluatedProperties", "unevaluatedItems",
+	"contains", "minContains", "maxContains",
+	"dependencies", "dependentRequired", "dependentSchemas",
+}
+
+// deepSeekSupportedFormats is the allowlist of `format` values DeepSeek's
+// validator accepts. Everything else 400s with "unknown variant `<value>`"
+// — `uri`, `date-time`, `date`, `time`, `email-strict`, the bunch of IDN /
+// JSON-Pointer formats. Common Claude Code tool params (file paths, URLs)
+// use values outside this list, so dropping unrecognized ones is the only
+// way to keep tool-using requests routable to DeepSeek.
+var deepSeekSupportedFormats = map[string]struct{}{
+	"email":    {},
+	"hostname": {},
+	"ipv4":     {},
+	"ipv6":     {},
+	"uuid":     {},
+}
+
 // applyStrictModeToParams mutates a JSON Schema so it satisfies OpenAI's
 // strict-mode tool-call requirements: every `type: "object"` schema gets
 // `additionalProperties: false` and every property is listed in `required`.
 // Properties not in the source `required` set are marked nullable via a type
 // union so the model can still pass null to preserve "optional" semantics.
+//
+// Also strips JSON Schema validation keywords DeepSeek's parser rejects or
+// ignores (see deepSeekUnsupportedKeywords + deepSeekSupportedFormats) so a
+// schema with `format: "uri"` or `pattern: "..."` doesn't 400 the request.
+// Only runs for DeepSeek targets, so OpenAI / OpenRouter generic / Gemini /
+// Anthropic paths keep their unmodified schemas.
 func applyStrictModeToParams(node any) {
 	m, ok := node.(map[string]any)
 	if !ok {
 		return
+	}
+	for _, k := range deepSeekUnsupportedKeywords {
+		delete(m, k)
+	}
+	if f, ok := m["format"].(string); ok {
+		if _, allowed := deepSeekSupportedFormats[f]; !allowed {
+			delete(m, "format")
+		}
 	}
 	if isObjectType(m["type"]) {
 		if props, ok := m["properties"].(map[string]any); ok && len(props) > 0 {

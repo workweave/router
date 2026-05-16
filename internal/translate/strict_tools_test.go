@@ -286,6 +286,65 @@ func TestStrictTools_AnthropicSource_EmptyObjectGetsPlaceholderProperty(t *testi
 		"strict-mode lists every property in required; the placeholder is the only one")
 }
 
+func TestStrictTools_AnthropicSource_StripsDeepSeekUnsupportedKeywords(t *testing.T) {
+	// DeepSeek's tool-schema validator rejects JSON Schema validation
+	// keywords with explicit 400s, e.g.:
+	//   format: "uri" → "unknown variant `uri`, expected one of `email`,
+	//                   `hostname`, `ipv4`, `ipv6`, `uuid`"
+	// Common Claude Code tool params (file paths, URLs, regex patterns)
+	// trip these. The strict-mode pass strips unsupported `format`
+	// values and validation keywords (pattern, min/max, etc.) so the
+	// schema goes through. The model still sees type + description +
+	// required, which is what drives function-call generation; we lose
+	// the validation hint but DeepSeek didn't honor it anyway.
+	src := []byte(`{
+		"model":"claude-opus-4-7",
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[{
+			"name":"ReadFile",
+			"description":"open a file",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"path":{"type":"string","format":"uri","pattern":"^/.*"},
+					"limit":{"type":"integer","minimum":1,"maximum":1000},
+					"id":{"type":"string","format":"uuid"}
+				},
+				"required":["path"]
+			}
+		}],
+		"max_tokens":256
+	}`)
+	env, err := translate.ParseAnthropic(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{TargetModel: "deepseek/deepseek-v4-pro"})
+	require.NoError(t, err)
+
+	fn := firstToolFunction(t, out.Body)
+	params, _ := fn["parameters"].(map[string]any)
+	props, _ := params["properties"].(map[string]any)
+
+	path, _ := props["path"].(map[string]any)
+	require.NotNil(t, path)
+	_, hasFormat := path["format"]
+	assert.False(t, hasFormat, "format:'uri' must be stripped — DeepSeek rejects it")
+	_, hasPattern := path["pattern"]
+	assert.False(t, hasPattern, "pattern must be stripped — DeepSeek's regex parser diverges")
+
+	limit, _ := props["limit"].(map[string]any)
+	require.NotNil(t, limit)
+	_, hasMin := limit["minimum"]
+	assert.False(t, hasMin, "minimum must be stripped")
+	_, hasMax := limit["maximum"]
+	assert.False(t, hasMax, "maximum must be stripped")
+
+	id, _ := props["id"].(map[string]any)
+	require.NotNil(t, id)
+	assert.Equal(t, "uuid", id["format"],
+		"format:'uuid' is in DeepSeek's allowlist, must be preserved")
+}
+
 func TestStrictTools_AnthropicSource_MapAdditionalPropertiesReplacedByPlaceholder(t *testing.T) {
 	// Two DeepSeek constraints intersect here:
 	//   - additionalProperties must be a boolean (not a sub-schema map);
