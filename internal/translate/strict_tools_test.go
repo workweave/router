@@ -230,15 +230,17 @@ func TestStrictTools_AnthropicSource_OptionalNestedArrayKeepsScalarType(t *testi
 		"keep scalar `type: array` — DeepSeek's parser rejects 'array' as a member of a type array")
 }
 
-func TestStrictTools_AnthropicSource_EmptyObjectSchemaStaysPermissive(t *testing.T) {
-	// DeepSeek rejects {type: object, additionalProperties: false} when
-	// there are no properties: "An object with no properties is not
-	// allowed." Strict-mode constrained decoding can't constrain an
-	// object with no declared shape anyway, so the strict-mode pass must
-	// leave additionalProperties unset (defaults to true) on those
-	// subschemas. Top-level params here are non-empty so the tool stays
-	// strict-eligible; the nested `metadata` field is what would have
-	// produced the offending closed-empty object.
+func TestStrictTools_AnthropicSource_EmptyObjectGetsPermissiveBoolean(t *testing.T) {
+	// DeepSeek rejects empty object schemas in two distinct ways:
+	//   - `{type:object, additionalProperties:false}` → "An object with no properties is not allowed"
+	//   - `{type:object, additionalProperties:{schema}}` → "invalid type: map, expected a boolean"
+	// Strict-mode constrained decoding can't usefully constrain an object
+	// with no declared shape, so we normalize empty object subschemas to
+	// `additionalProperties: true` (permissive boolean) — the natural
+	// reading of `{type:object}` anyway, and the only shape DeepSeek
+	// accepts. Top-level params here have properties so strict-mode
+	// invariants still apply at the root; `metadata` is the empty-object
+	// regression case.
 	src := []byte(`{
 		"model":"claude-opus-4-7",
 		"messages":[{"role":"user","content":"hi"}],
@@ -264,7 +266,6 @@ func TestStrictTools_AnthropicSource_EmptyObjectSchemaStaysPermissive(t *testing
 
 	fn := firstToolFunction(t, out.Body)
 	params, _ := fn["parameters"].(map[string]any)
-	// Root has properties so strict-mode invariants still apply at the top.
 	assert.Equal(t, false, params["additionalProperties"],
 		"non-empty root params still get additionalProperties:false for strict mode")
 
@@ -272,12 +273,57 @@ func TestStrictTools_AnthropicSource_EmptyObjectSchemaStaysPermissive(t *testing
 	metadata, _ := props["metadata"].(map[string]any)
 	require.NotNil(t, metadata)
 	assert.Equal(t, "object", metadata["type"])
-	_, hasAdditional := metadata["additionalProperties"]
-	assert.False(t, hasAdditional,
-		"empty nested object must NOT carry additionalProperties:false — DeepSeek rejects closed-empty objects")
+	assert.Equal(t, true, metadata["additionalProperties"],
+		"empty nested object must carry additionalProperties:true — DeepSeek requires boolean here and rejects both false and a sub-schema")
 	_, hasRequired := metadata["required"]
 	assert.False(t, hasRequired,
 		"empty nested object must NOT carry required:[] — that's the same closed-empty shape DeepSeek rejects")
+}
+
+func TestStrictTools_AnthropicSource_MapAdditionalPropertiesNormalizedToBoolean(t *testing.T) {
+	// DeepSeek's parser requires `additionalProperties` to be a boolean
+	// wherever it appears. Source JSON Schema lets it be a map (a
+	// sub-schema meaning "extra keys must match this shape"), which 400s
+	// upstream with "invalid type: map, expected a boolean". The strict-
+	// mode pass normalizes map → true (permissive). Root has properties
+	// (so strict-mode overwrites root.additionalProperties = false); the
+	// nested `headers` field is the source-map regression case.
+	src := []byte(`{
+		"model":"claude-opus-4-7",
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[{
+			"name":"WithMapAdditional",
+			"description":"has a nested object whose extra keys are typed",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"headers":{
+						"type":"object",
+						"additionalProperties":{"type":"string"}
+					}
+				},
+				"required":["headers"]
+			}
+		}],
+		"max_tokens":256
+	}`)
+	env, err := translate.ParseAnthropic(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{TargetModel: "deepseek/deepseek-v4-pro"})
+	require.NoError(t, err)
+
+	fn := firstToolFunction(t, out.Body)
+	params, _ := fn["parameters"].(map[string]any)
+	props, _ := params["properties"].(map[string]any)
+	headers, _ := props["headers"].(map[string]any)
+	require.NotNil(t, headers)
+	addProp := headers["additionalProperties"]
+	_, isBool := addProp.(bool)
+	assert.True(t, isBool,
+		"additionalProperties must be a boolean — DeepSeek rejects maps with 'invalid type: map, expected a boolean'")
+	assert.Equal(t, true, addProp,
+		"a source-map additionalProperties normalizes to true (permissive); false would be a 'closed empty object' rejection")
 }
 
 func TestStrictTools_AnthropicSource_RecursesIntoDefsAndDefinitions(t *testing.T) {

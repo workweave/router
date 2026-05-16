@@ -418,17 +418,29 @@ func applyStrictModeToParams(node any) {
 				}
 			}
 			m["required"] = required
+		} else {
+			// Empty object subschemas ({type: object} with no properties).
+			// DeepSeek's tool-schema parser:
+			//   - rejects `additionalProperties: false`   — "An object with no properties is not allowed"
+			//   - rejects `additionalProperties: {schema}` — "invalid type: map, expected a boolean"
+			// Source schemas can legitimately specify either (the map form
+			// means "extra keys must match this sub-schema"). Strict-mode
+			// constrained decoding can't usefully constrain an object with
+			// no declared shape, so we normalize to `additionalProperties:
+			// true` — permissive, boolean, and the natural reading of an
+			// empty `type: object` schema anyway. This code only runs for
+			// DeepSeek targets (gated on openRouterStrictTools), so it
+			// doesn't loosen OpenAI strict-mode invariants elsewhere.
+			m["additionalProperties"] = true
 		}
-		// Empty object subschemas ({type: object} with no properties) are
-		// deliberately left without additionalProperties:false. DeepSeek
-		// rejects `{type: object, additionalProperties: false}` with "An
-		// object with no properties is not allowed" — the schema describes
-		// a closed object that accepts nothing, which DeepSeek's tool-call
-		// validator treats as illegal. Strict-mode constrained decoding
-		// can't usefully constrain an object with no declared shape, so the
-		// permissive default (accept any keys) is the only sane shape we
-		// can emit. This code only runs for DeepSeek targets, so we aren't
-		// affecting OpenAI strict-mode invariants anywhere else.
+	}
+	// Belt-and-suspenders normalization for non-object schemas that carry
+	// a stray `additionalProperties: <schema>` (uncommon but valid JSON
+	// Schema noise). The strict-mode object-type branch above doesn't reach
+	// them, and DeepSeek's parser requires `additionalProperties` to be a
+	// boolean everywhere it appears.
+	if _, isMap := m["additionalProperties"].(map[string]any); isMap {
+		m["additionalProperties"] = true
 	}
 	if props, ok := m["properties"].(map[string]any); ok {
 		for _, v := range props {
