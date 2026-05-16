@@ -1,0 +1,23 @@
+db/migrations/0005_telemetry-costs-to-micros.up.sql
+  s_3e7d106a5547c4::t_b66893320d32ba 13-20
+db/queries/model_router_request_telemetry.sql
+  s_3e7d106a5547c4::t_7b76383daf9ead 210-211,235-236
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_3e7d106a5547c4::t_d628295cc07cbe 28-29,80-81,145-146,197-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "c6074bcd5e5a41c33791c081e3802f270f2b6655",
+  "prompts": {},
+  "sessions": {
+    "s_3e7d106a5547c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2df0133c-d92f-4c1e-8861-ad0207425729",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
