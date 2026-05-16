@@ -25,8 +25,8 @@ SELECT
     output_tokens,
     cache_creation_tokens,
     cache_read_tokens,
-    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
-    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
+    (requested_input_cost_usd + requested_output_cost_usd)::bigint AS requested_cost_usd,
+    (actual_input_cost_usd + actual_output_cost_usd)::bigint       AS actual_cost_usd,
     total_latency_ms,
     upstream_status_code
 FROM router.model_router_request_telemetry
@@ -57,8 +57,8 @@ type GetTelemetryRowsRow struct {
 	OutputTokens        *int32
 	CacheCreationTokens *int32
 	CacheReadTokens     *int32
-	RequestedCostUsd    pgtype.Numeric
-	ActualCostUsd       pgtype.Numeric
+	RequestedCostUsd    int64
+	ActualCostUsd       int64
 	TotalLatencyMs      *int64
 	UpstreamStatusCode  *int32
 }
@@ -77,8 +77,8 @@ type GetTelemetryRowsRow struct {
 //	    output_tokens,
 //	    cache_creation_tokens,
 //	    cache_read_tokens,
-//	    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
-//	    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
+//	    (requested_input_cost_usd + requested_output_cost_usd)::bigint AS requested_cost_usd,
+//	    (actual_input_cost_usd + actual_output_cost_usd)::bigint       AS actual_cost_usd,
 //	    total_latency_ms,
 //	    upstream_status_code
 //	FROM router.model_router_request_telemetry
@@ -142,8 +142,8 @@ SELECT
     output_tokens,
     cache_creation_tokens,
     cache_read_tokens,
-    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
-    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
+    (requested_input_cost_usd + requested_output_cost_usd)::bigint AS requested_cost_usd,
+    (actual_input_cost_usd + actual_output_cost_usd)::bigint       AS actual_cost_usd,
     total_latency_ms,
     upstream_status_code
 FROM router.model_router_request_telemetry
@@ -172,8 +172,8 @@ type GetTelemetryRowsAllRow struct {
 	OutputTokens        *int32
 	CacheCreationTokens *int32
 	CacheReadTokens     *int32
-	RequestedCostUsd    pgtype.Numeric
-	ActualCostUsd       pgtype.Numeric
+	RequestedCostUsd    int64
+	ActualCostUsd       int64
 	TotalLatencyMs      *int64
 	UpstreamStatusCode  *int32
 }
@@ -194,8 +194,8 @@ type GetTelemetryRowsAllRow struct {
 //	    output_tokens,
 //	    cache_creation_tokens,
 //	    cache_read_tokens,
-//	    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
-//	    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
+//	    (requested_input_cost_usd + requested_output_cost_usd)::bigint AS requested_cost_usd,
+//	    (actual_input_cost_usd + actual_output_cost_usd)::bigint       AS actual_cost_usd,
 //	    total_latency_ms,
 //	    upstream_status_code
 //	FROM router.model_router_request_telemetry
@@ -244,12 +244,12 @@ const getTelemetrySummary = `-- name: GetTelemetrySummary :one
 SELECT
     COUNT(*)::bigint                                            AS request_count,
     COALESCE(SUM(input_tokens + output_tokens), 0)::bigint     AS total_tokens,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS total_requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS total_actual_cost_usd,
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS total_requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS total_actual_cost_usd,
     COALESCE(SUM(
         (requested_input_cost_usd + requested_output_cost_usd) -
         (actual_input_cost_usd + actual_output_cost_usd)
-    ), 0)::numeric                                             AS total_savings_usd
+    ), 0)::bigint                                             AS total_savings_usd
 FROM router.model_router_request_telemetry
 WHERE installation_id = $1::uuid
   AND span_type = 'router.upstream'
@@ -266,9 +266,9 @@ type GetTelemetrySummaryParams struct {
 type GetTelemetrySummaryRow struct {
 	RequestCount          int64
 	TotalTokens           int64
-	TotalRequestedCostUsd pgtype.Numeric
-	TotalActualCostUsd    pgtype.Numeric
-	TotalSavingsUsd       pgtype.Numeric
+	TotalRequestedCostUsd int64
+	TotalActualCostUsd    int64
+	TotalSavingsUsd       int64
 }
 
 // Returns aggregated cost and token totals for the dashboard cards.
@@ -276,12 +276,12 @@ type GetTelemetrySummaryRow struct {
 //	SELECT
 //	    COUNT(*)::bigint                                            AS request_count,
 //	    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint     AS total_tokens,
-//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS total_requested_cost_usd,
-//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS total_actual_cost_usd,
+//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS total_requested_cost_usd,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS total_actual_cost_usd,
 //	    COALESCE(SUM(
 //	        (requested_input_cost_usd + requested_output_cost_usd) -
 //	        (actual_input_cost_usd + actual_output_cost_usd)
-//	    ), 0)::numeric                                             AS total_savings_usd
+//	    ), 0)::bigint                                             AS total_savings_usd
 //	FROM router.model_router_request_telemetry
 //	WHERE installation_id = $1::uuid
 //	  AND span_type = 'router.upstream'
@@ -304,12 +304,12 @@ const getTelemetrySummaryAll = `-- name: GetTelemetrySummaryAll :one
 SELECT
     COUNT(*)::bigint                                            AS request_count,
     COALESCE(SUM(input_tokens + output_tokens), 0)::bigint     AS total_tokens,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS total_requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS total_actual_cost_usd,
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS total_requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS total_actual_cost_usd,
     COALESCE(SUM(
         (requested_input_cost_usd + requested_output_cost_usd) -
         (actual_input_cost_usd + actual_output_cost_usd)
-    ), 0)::numeric                                             AS total_savings_usd
+    ), 0)::bigint                                             AS total_savings_usd
 FROM router.model_router_request_telemetry
 WHERE span_type = 'router.upstream'
   AND timestamp >= $1::timestamptz
@@ -324,9 +324,9 @@ type GetTelemetrySummaryAllParams struct {
 type GetTelemetrySummaryAllRow struct {
 	RequestCount          int64
 	TotalTokens           int64
-	TotalRequestedCostUsd pgtype.Numeric
-	TotalActualCostUsd    pgtype.Numeric
-	TotalSavingsUsd       pgtype.Numeric
+	TotalRequestedCostUsd int64
+	TotalActualCostUsd    int64
+	TotalSavingsUsd       int64
 }
 
 // Returns aggregated cost and token totals across every installation.
@@ -336,12 +336,12 @@ type GetTelemetrySummaryAllRow struct {
 //	SELECT
 //	    COUNT(*)::bigint                                            AS request_count,
 //	    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint     AS total_tokens,
-//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS total_requested_cost_usd,
-//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS total_actual_cost_usd,
+//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS total_requested_cost_usd,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS total_actual_cost_usd,
 //	    COALESCE(SUM(
 //	        (requested_input_cost_usd + requested_output_cost_usd) -
 //	        (actual_input_cost_usd + actual_output_cost_usd)
-//	    ), 0)::numeric                                             AS total_savings_usd
+//	    ), 0)::bigint                                             AS total_savings_usd
 //	FROM router.model_router_request_telemetry
 //	WHERE span_type = 'router.upstream'
 //	  AND timestamp >= $1::timestamptz
@@ -362,8 +362,8 @@ func (q *Queries) GetTelemetrySummaryAll(ctx context.Context, arg GetTelemetrySu
 const getTelemetryTimeseriesDaily = `-- name: GetTelemetryTimeseriesDaily :many
 SELECT
     date_trunc('day', timestamp)::timestamptz                                        AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE installation_id = $1::uuid
   AND span_type = 'router.upstream'
@@ -381,16 +381,16 @@ type GetTelemetryTimeseriesDailyParams struct {
 
 type GetTelemetryTimeseriesDailyRow struct {
 	Bucket           pgtype.Timestamptz
-	RequestedCostUsd pgtype.Numeric
-	ActualCostUsd    pgtype.Numeric
+	RequestedCostUsd int64
+	ActualCostUsd    int64
 }
 
 // Returns per-day cost buckets for the cost savings chart.
 //
 //	SELECT
 //	    date_trunc('day', timestamp)::timestamptz                                        AS bucket,
-//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 //	FROM router.model_router_request_telemetry
 //	WHERE installation_id = $1::uuid
 //	  AND span_type = 'router.upstream'
@@ -421,8 +421,8 @@ func (q *Queries) GetTelemetryTimeseriesDaily(ctx context.Context, arg GetTeleme
 const getTelemetryTimeseriesDailyAll = `-- name: GetTelemetryTimeseriesDailyAll :many
 SELECT
     date_trunc('day', timestamp)::timestamptz                                        AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE span_type = 'router.upstream'
   AND timestamp >= $1::timestamptz
@@ -438,16 +438,16 @@ type GetTelemetryTimeseriesDailyAllParams struct {
 
 type GetTelemetryTimeseriesDailyAllRow struct {
 	Bucket           pgtype.Timestamptz
-	RequestedCostUsd pgtype.Numeric
-	ActualCostUsd    pgtype.Numeric
+	RequestedCostUsd int64
+	ActualCostUsd    int64
 }
 
 // Per-day cost buckets across every installation. Admin-only.
 //
 //	SELECT
 //	    date_trunc('day', timestamp)::timestamptz                                        AS bucket,
-//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 //	FROM router.model_router_request_telemetry
 //	WHERE span_type = 'router.upstream'
 //	  AND timestamp >= $1::timestamptz
@@ -477,8 +477,8 @@ func (q *Queries) GetTelemetryTimeseriesDailyAll(ctx context.Context, arg GetTel
 const getTelemetryTimeseriesHourly = `-- name: GetTelemetryTimeseriesHourly :many
 SELECT
     date_trunc('hour', timestamp)::timestamptz                                       AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE installation_id = $1::uuid
   AND span_type = 'router.upstream'
@@ -496,16 +496,16 @@ type GetTelemetryTimeseriesHourlyParams struct {
 
 type GetTelemetryTimeseriesHourlyRow struct {
 	Bucket           pgtype.Timestamptz
-	RequestedCostUsd pgtype.Numeric
-	ActualCostUsd    pgtype.Numeric
+	RequestedCostUsd int64
+	ActualCostUsd    int64
 }
 
 // Returns per-hour cost buckets for the cost savings chart.
 //
 //	SELECT
 //	    date_trunc('hour', timestamp)::timestamptz                                       AS bucket,
-//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 //	FROM router.model_router_request_telemetry
 //	WHERE installation_id = $1::uuid
 //	  AND span_type = 'router.upstream'
@@ -536,8 +536,8 @@ func (q *Queries) GetTelemetryTimeseriesHourly(ctx context.Context, arg GetTelem
 const getTelemetryTimeseriesHourlyAll = `-- name: GetTelemetryTimeseriesHourlyAll :many
 SELECT
     date_trunc('hour', timestamp)::timestamptz                                       AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE span_type = 'router.upstream'
   AND timestamp >= $1::timestamptz
@@ -553,16 +553,16 @@ type GetTelemetryTimeseriesHourlyAllParams struct {
 
 type GetTelemetryTimeseriesHourlyAllRow struct {
 	Bucket           pgtype.Timestamptz
-	RequestedCostUsd pgtype.Numeric
-	ActualCostUsd    pgtype.Numeric
+	RequestedCostUsd int64
+	ActualCostUsd    int64
 }
 
 // Per-hour cost buckets across every installation. Admin-only.
 //
 //	SELECT
 //	    date_trunc('hour', timestamp)::timestamptz                                       AS bucket,
-//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 //	FROM router.model_router_request_telemetry
 //	WHERE span_type = 'router.upstream'
 //	  AND timestamp >= $1::timestamptz
@@ -592,8 +592,8 @@ func (q *Queries) GetTelemetryTimeseriesHourlyAll(ctx context.Context, arg GetTe
 const getTelemetryTimeseriesWeekly = `-- name: GetTelemetryTimeseriesWeekly :many
 SELECT
     date_trunc('week', timestamp)::timestamptz                                       AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE installation_id = $1::uuid
   AND span_type = 'router.upstream'
@@ -611,16 +611,16 @@ type GetTelemetryTimeseriesWeeklyParams struct {
 
 type GetTelemetryTimeseriesWeeklyRow struct {
 	Bucket           pgtype.Timestamptz
-	RequestedCostUsd pgtype.Numeric
-	ActualCostUsd    pgtype.Numeric
+	RequestedCostUsd int64
+	ActualCostUsd    int64
 }
 
 // Returns per-ISO-week cost buckets for the cost savings chart.
 //
 //	SELECT
 //	    date_trunc('week', timestamp)::timestamptz                                       AS bucket,
-//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 //	FROM router.model_router_request_telemetry
 //	WHERE installation_id = $1::uuid
 //	  AND span_type = 'router.upstream'
@@ -651,8 +651,8 @@ func (q *Queries) GetTelemetryTimeseriesWeekly(ctx context.Context, arg GetTelem
 const getTelemetryTimeseriesWeeklyAll = `-- name: GetTelemetryTimeseriesWeeklyAll :many
 SELECT
     date_trunc('week', timestamp)::timestamptz                                       AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE span_type = 'router.upstream'
   AND timestamp >= $1::timestamptz
@@ -668,16 +668,16 @@ type GetTelemetryTimeseriesWeeklyAllParams struct {
 
 type GetTelemetryTimeseriesWeeklyAllRow struct {
 	Bucket           pgtype.Timestamptz
-	RequestedCostUsd pgtype.Numeric
-	ActualCostUsd    pgtype.Numeric
+	RequestedCostUsd int64
+	ActualCostUsd    int64
 }
 
 // Per-ISO-week cost buckets across every installation. Admin-only.
 //
 //	SELECT
 //	    date_trunc('week', timestamp)::timestamptz                                       AS bucket,
-//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+//	    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 //	FROM router.model_router_request_telemetry
 //	WHERE span_type = 'router.upstream'
 //	  AND timestamp >= $1::timestamptz
@@ -754,10 +754,10 @@ INSERT INTO router.model_router_request_telemetry (
     $12::varchar,
     $13::int,
     $14::int,
-    $15::numeric,
-    $16::numeric,
-    $17::numeric,
-    $18::numeric,
+    $15::bigint,
+    $16::bigint,
+    $17::bigint,
+    $18::bigint,
     $19::bigint,
     $20::bigint,
     $21::bigint,
@@ -792,10 +792,10 @@ type InsertRequestTelemetryParams struct {
 	EmbedInput             string
 	InputTokens            int32
 	OutputTokens           int32
-	RequestedInputCostUsd  pgtype.Numeric
-	RequestedOutputCostUsd pgtype.Numeric
-	ActualInputCostUsd     pgtype.Numeric
-	ActualOutputCostUsd    pgtype.Numeric
+	RequestedInputCostUsd  int64
+	RequestedOutputCostUsd int64
+	ActualInputCostUsd     int64
+	ActualOutputCostUsd    int64
 	RouteLatencyMs         int64
 	UpstreamLatencyMs      int64
 	TotalLatencyMs         int64
@@ -868,10 +868,10 @@ type InsertRequestTelemetryParams struct {
 //	    $12::varchar,
 //	    $13::int,
 //	    $14::int,
-//	    $15::numeric,
-//	    $16::numeric,
-//	    $17::numeric,
-//	    $18::numeric,
+//	    $15::bigint,
+//	    $16::bigint,
+//	    $17::bigint,
+//	    $18::bigint,
 //	    $19::bigint,
 //	    $20::bigint,
 //	    $21::bigint,
