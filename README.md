@@ -47,7 +47,7 @@ Point Claude Code, Cursor, or your own app at `localhost:8080`. The router:
 - 🧠 **Knows OSS too.** DeepSeek, Kimi, GLM, Qwen, Llama, Mistral via
   OpenRouter (or any OpenAI-compatible endpoint).
 - 🔒 **BYOK by default.** Provider keys stay on your box, encrypted at rest.
-- 📊 **Observable.** OTLP traces out of the box. Drop in Honeycomb, Datadog,
+- 📊 **Observable.** OTLP traces out of the box. See your dashboard in the Weave dashboard (http://localhost:8080/ui/dashboard) or drop in Honeycomb, Datadog,
   Grafana, whatever.
 
 No silent fallbacks. No vibes. Routing failures return 503; loud by design.
