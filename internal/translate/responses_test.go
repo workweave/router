@@ -109,6 +109,9 @@ func TestResponsesToChatCompletions_ReasoningAndMaxOutput(t *testing.T) {
 }
 
 func TestResponsesWriter_StreamingText(t *testing.T) {
+	// Suppress the routing badge so this test stays focused on the chunk
+	// translation contract; badge behavior has its own test.
+	t.Setenv("WEAVE_ROUTER_RESPONSES_BADGE", "0")
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesWriter(rec, "gpt-5")
 
@@ -157,7 +160,7 @@ func TestResponsesWriter_StreamingText(t *testing.T) {
 	assert.EqualValues(t, 2, usage["output_tokens"])
 }
 
-func TestResponsesWriter_EmitsReasoningBadge(t *testing.T) {
+func TestResponsesWriter_PrependsBadgeToFirstTextDelta(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesWriter(rec, "gpt-5")
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -165,7 +168,9 @@ func TestResponsesWriter_EmitsReasoningBadge(t *testing.T) {
 	w.Header().Set("x-router-provider", "anthropic")
 	w.WriteHeader(200)
 
-	_, err := w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}` + "\n\n"))
+	_, err := w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}` + "\n\n"))
+	require.NoError(t, err)
+	_, err = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}` + "\n\n"))
 	require.NoError(t, err)
 	_, err = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}` + "\n\n"))
 	require.NoError(t, err)
@@ -174,49 +179,29 @@ func TestResponsesWriter_EmitsReasoningBadge(t *testing.T) {
 	require.NoError(t, w.Finalize())
 
 	events := parseSSEEvents(t, rec.Body.Bytes())
-	types := eventTypes(events)
 
-	// Badge events come right after response.created, before the message item.
-	createdIdx := indexOf(types, "response.created")
-	badgeAddedIdx := indexOf(types, "response.output_item.added") // first one = badge
-	require.Greater(t, badgeAddedIdx, createdIdx)
-	badgeItem := events[badgeAddedIdx]["item"].(map[string]any)
-	assert.Equal(t, "reasoning", badgeItem["type"])
-
-	// Badge text contains "Weave Router" and the routed model.
-	var badgeText string
+	// First text delta carries the badge; subsequent deltas are unchanged.
+	var deltas []string
 	for _, e := range events {
-		if e["type"] == "response.reasoning_summary_text.delta" {
-			badgeText += e["delta"].(string)
+		if e["type"] == "response.output_text.delta" {
+			deltas = append(deltas, e["delta"].(string))
 		}
 	}
-	assert.Contains(t, badgeText, "Weave Router")
-	assert.Contains(t, badgeText, "claude-opus-4-7")
-	assert.Contains(t, badgeText, "anthropic")
+	require.Len(t, deltas, 3)
+	assert.Contains(t, deltas[0], "Weave Router")
+	assert.Contains(t, deltas[0], "claude-opus-4-7")
+	assert.Contains(t, deltas[0], "anthropic")
+	assert.Equal(t, "Hello", deltas[1])
+	assert.Equal(t, " world", deltas[2])
 
-	// Message item should land at output_index 1 (badge took 0).
-	for _, e := range events {
-		if e["type"] != "response.output_item.added" {
-			continue
-		}
-		item := e["item"].(map[string]any)
-		if item["type"] == "message" {
-			assert.EqualValues(t, 1, e["output_index"])
-		}
-	}
-
-	// Final completed envelope includes both reasoning and message items.
-	var completed map[string]any
+	// response.completed must appear exactly once.
+	completedCount := 0
 	for _, e := range events {
 		if e["type"] == "response.completed" {
-			completed = e["response"].(map[string]any)
+			completedCount++
 		}
 	}
-	require.NotNil(t, completed)
-	output := completed["output"].([]any)
-	require.GreaterOrEqual(t, len(output), 2)
-	assert.Equal(t, "reasoning", output[0].(map[string]any)["type"])
-	assert.Equal(t, "message", output[1].(map[string]any)["type"])
+	assert.Equal(t, 1, completedCount)
 }
 
 func TestResponsesWriter_BadgeSuppressedByEnv(t *testing.T) {
@@ -234,17 +219,10 @@ func TestResponsesWriter_BadgeSuppressedByEnv(t *testing.T) {
 	require.NoError(t, w.Finalize())
 
 	for _, e := range parseSSEEvents(t, rec.Body.Bytes()) {
-		assert.NotEqual(t, "response.reasoning_summary_text.delta", e["type"])
-	}
-}
-
-func indexOf(list []string, want string) int {
-	for i, v := range list {
-		if v == want {
-			return i
+		if e["type"] == "response.output_text.delta" {
+			assert.NotContains(t, e["delta"].(string), "Weave Router")
 		}
 	}
-	return -1
 }
 
 func TestResponsesWriter_UsesRoutedModelFromHeader(t *testing.T) {

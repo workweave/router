@@ -266,18 +266,15 @@ type ResponsesWriter struct {
 	seq int64
 
 	// Streaming state.
-	headersEmitted bool
-	badgeEnabled   bool
-	badge          *responsesBadge
-	textItem       *responsesTextItem
-	toolItems      map[int]*responsesToolItem
-	finishReason   string
-	usage          *responsesUsage
-}
-
-type responsesBadge struct {
-	itemID string
-	text   string
+	headersEmitted   bool
+	completedEmitted bool
+	badgeEnabled     bool
+	badgeText        string // set on first text delta if badge inlining is enabled
+	badgePrepended   bool
+	textItem         *responsesTextItem
+	toolItems        map[int]*responsesToolItem
+	finishReason     string
+	usage            *responsesUsage
 }
 
 type responsesTextItem struct {
@@ -361,9 +358,6 @@ func (t *ResponsesWriter) Write(data []byte) (int, error) {
 		if err := t.emitCreated(); err != nil {
 			return n, err
 		}
-		if err := t.emitReasoningBadge(); err != nil {
-			return n, err
-		}
 		t.headersEmitted = true
 	}
 	return n, t.processSSEBuffer()
@@ -388,14 +382,14 @@ func (t *ResponsesWriter) Finalize() error {
 			if err := t.emitCreated(); err != nil {
 				return err
 			}
-			if err := t.emitReasoningBadge(); err != nil {
-				return err
-			}
 			t.headersEmitted = true
 		}
 		t.closeOpenItems()
-		if err := t.emitCompleted(); err != nil {
-			return err
+		if !t.completedEmitted {
+			if err := t.emitCompleted(); err != nil {
+				return err
+			}
+			t.completedEmitted = true
 		}
 		return t.bw.Flush()
 	}
@@ -443,6 +437,10 @@ func (t *ResponsesWriter) translateChunk(raw []byte) error {
 	}
 	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
 		t.closeOpenItems()
+		if t.completedEmitted {
+			return nil
+		}
+		t.completedEmitted = true
 		return t.emitCompleted()
 	}
 	if !gjson.ValidBytes(data) {
@@ -506,6 +504,23 @@ func (t *ResponsesWriter) appendText(s string) error {
 		}
 		t.textItem.openedPart = true
 	}
+
+	// Prepend the routing badge to the very first text delta. Codex desktop
+	// drops reasoning-summary items from custom providers, so the text stream
+	// is the only surface that's guaranteed to render. Captured into the
+	// item's running text so the final output_item.done carries it too.
+	if !t.badgePrepended {
+		t.badgePrepended = true
+		if badge := t.computeBadgeText(); badge != "" {
+			t.badgeText = badge
+			line := "_" + badge + "_\n\n"
+			t.textItem.text.WriteString(line)
+			if err := t.emitTextDelta(t.textItem, line); err != nil {
+				return err
+			}
+		}
+	}
+
 	t.textItem.text.WriteString(s)
 	return t.emitTextDelta(t.textItem, s)
 }
@@ -546,9 +561,6 @@ func (t *ResponsesWriter) appendToolCall(idx int, tc gjson.Result) error {
 
 func (t *ResponsesWriter) nextOutputIndex() int {
 	count := 0
-	if t.badge != nil {
-		count++
-	}
 	if t.textItem != nil {
 		count++
 	}
@@ -556,68 +568,17 @@ func (t *ResponsesWriter) nextOutputIndex() int {
 	return count - 1
 }
 
-// emitReasoningBadge writes a single reasoning output item containing the
-// router's decision summary so Codex desktop (which has no other surface for
-// per-turn custom-provider routing info) shows the picked model. Codex
-// desktop reads reasoning items with a summary_text part — schema borrowed
-// from openai/codex codex-rs/core/tests/common/responses.rs.
-func (t *ResponsesWriter) emitReasoningBadge() error {
+// computeBadgeText builds the routing badge once both the model and provider
+// are known. Empty result means no badge to render.
+func (t *ResponsesWriter) computeBadgeText() string {
 	if !t.badgeEnabled || t.model == "" {
-		return nil
+		return ""
 	}
-	text := "Routed via Weave Router → " + t.model
-	if provider := t.inner.Header().Get("x-router-provider"); provider != "" {
-		text = "Weave Router · " + provider + " · " + t.model
+	provider := t.inner.Header().Get("x-router-provider")
+	if provider == "" {
+		return "via Weave Router · " + t.model
 	}
-
-	badge := &responsesBadge{
-		itemID: newResponsesID("rs"),
-		text:   text,
-	}
-	t.badge = badge
-
-	if err := t.writeEvent("response.output_item.added", map[string]any{
-		"output_index": 0,
-		"item": map[string]any{
-			"id":      badge.itemID,
-			"type":    "reasoning",
-			"summary": []any{},
-		},
-	}); err != nil {
-		return err
-	}
-	if err := t.writeEvent("response.reasoning_summary_part.added", map[string]any{
-		"item_id":       badge.itemID,
-		"output_index":  0,
-		"summary_index": 0,
-		"part":          map[string]any{"type": "summary_text", "text": ""},
-	}); err != nil {
-		return err
-	}
-	if err := t.writeEvent("response.reasoning_summary_text.delta", map[string]any{
-		"item_id":       badge.itemID,
-		"output_index":  0,
-		"summary_index": 0,
-		"delta":         text,
-	}); err != nil {
-		return err
-	}
-	if err := t.writeEvent("response.reasoning_summary_text.done", map[string]any{
-		"item_id":       badge.itemID,
-		"output_index":  0,
-		"summary_index": 0,
-		"text":          text,
-	}); err != nil {
-		return err
-	}
-	return t.writeEvent("response.output_item.done", map[string]any{
-		"output_index": 0,
-		"item": map[string]any{
-			"id":      badge.itemID,
-			"type":    "reasoning",
-			"summary": []any{map[string]any{"type": "summary_text", "text": text}},
-		},
-	})
+	return "via Weave Router · " + provider + " · " + t.model
 }
 
 func (t *ResponsesWriter) closeOpenItems() {
@@ -828,13 +789,6 @@ func (t *ResponsesWriter) emitCompleted() error {
 
 func (t *ResponsesWriter) assembleOutput() []any {
 	out := make([]any, 0, 2+len(t.toolItems))
-	if t.badge != nil {
-		out = append(out, map[string]any{
-			"id":      t.badge.itemID,
-			"type":    "reasoning",
-			"summary": []any{map[string]any{"type": "summary_text", "text": t.badge.text}},
-		})
-	}
 	if t.textItem != nil {
 		out = append(out, map[string]any{
 			"id":     t.textItem.itemID,
