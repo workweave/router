@@ -141,10 +141,12 @@ func TestStrictTools_AnthropicSource_PropagatesIntoNestedObject(t *testing.T) {
 }
 
 func TestStrictTools_AnthropicSource_OptionalNestedObjectStillTightened(t *testing.T) {
-	// Regression: makeNullable rewrites an optional nested object's `type` from
-	// the scalar "object" to ["object","null"]. A naive recursive walk that
-	// matches only scalar "object" would skip the nested object's invariants,
-	// emitting a schema that fails strict-mode validation upstream.
+	// Regression: an optional nested object schema must still get strict-mode
+	// invariants (additionalProperties:false, all properties moved to
+	// required) and must appear in its parent's `required` list. The `type`
+	// itself stays the scalar "object" — emitting `["object", "null"]`
+	// would 400 against DeepSeek's tool-schema parser, which only accepts
+	// string|number|integer|boolean|null as members of a type array.
 	src := []byte(`{
 		"model":"claude-opus-4-7",
 		"messages":[{"role":"user","content":"hi"}],
@@ -173,17 +175,59 @@ func TestStrictTools_AnthropicSource_OptionalNestedObjectStillTightened(t *testi
 
 	fn := firstToolFunction(t, out.Body)
 	params, _ := fn["parameters"].(map[string]any)
+	parentRequired, _ := params["required"].([]any)
+	assert.Contains(t, parentRequired, "opts",
+		"strict mode forces every property into required; the optional becomes effectively required")
+
 	props, _ := params["properties"].(map[string]any)
 	opts, _ := props["opts"].(map[string]any)
 	require.NotNil(t, opts)
 
-	assert.ElementsMatch(t, []any{"object", "null"}, opts["type"],
-		"optional nested object must be marked nullable")
+	assert.Equal(t, "object", opts["type"],
+		"keep scalar `type: object` — DeepSeek's parser rejects 'object' as a member of a type array")
 	assert.Equal(t, false, opts["additionalProperties"],
-		"nullable nested objects still need additionalProperties:false for strict mode")
+		"nested object still needs additionalProperties:false for strict mode")
 	required, _ := opts["required"].([]any)
 	assert.ElementsMatch(t, []any{"flag"}, required,
-		"nullable nested objects still need their properties moved to required")
+		"nested object still needs its properties moved to required")
+}
+
+func TestStrictTools_AnthropicSource_OptionalNestedArrayKeepsScalarType(t *testing.T) {
+	// Mirror of OptionalNestedObject for `type: array`. DeepSeek's parser
+	// rejects "array" inside a type union the same way it rejects "object",
+	// so the strict-mode pass must keep arrays scalar.
+	src := []byte(`{
+		"model":"claude-opus-4-7",
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[{
+			"name":"NestedArray",
+			"description":"nested optional array",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"items":{
+						"type":"array",
+						"items":{"type":"string"}
+					}
+				}
+			}
+		}],
+		"max_tokens":256
+	}`)
+	env, err := translate.ParseAnthropic(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{TargetModel: "deepseek/deepseek-v4-pro"})
+	require.NoError(t, err)
+
+	fn := firstToolFunction(t, out.Body)
+	params, _ := fn["parameters"].(map[string]any)
+	props, _ := params["properties"].(map[string]any)
+	items, _ := props["items"].(map[string]any)
+	require.NotNil(t, items)
+
+	assert.Equal(t, "array", items["type"],
+		"keep scalar `type: array` — DeepSeek's parser rejects 'array' as a member of a type array")
 }
 
 func TestStrictTools_AnthropicSource_RecursesIntoDefsAndDefinitions(t *testing.T) {

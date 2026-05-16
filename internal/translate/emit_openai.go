@@ -443,10 +443,11 @@ func applyStrictModeToParams(node any) {
 }
 
 // isObjectType reports whether a JSON Schema `type` value is "object", either
-// as a bare string or as part of a nullable union like ["object", "null"].
-// Optional nested objects pass through `makeNullable` before recursion, which
-// rewrites scalar `type: "object"` to a string-array, so the strict-mode pass
-// must accept both shapes or it skips invariants on those subtrees.
+// as a bare string or as part of a union like ["object", "null"]. The router's
+// own strict-mode pass no longer produces `["object", "null"]` (see
+// makeNullable — DeepSeek rejects it), but a hand-written source schema can
+// still arrive in that shape, so we keep the union check for defensive
+// coverage on the recursion's "is this still an object subtree?" question.
 func isObjectType(typ any) bool {
 	switch t := typ.(type) {
 	case string:
@@ -492,6 +493,14 @@ func applyStrictToolsToBody(body []byte) ([]byte, error) {
 // makeNullable adds "null" to a schema's `type` so strict mode can still send
 // a null value for what was previously an optional property. No-op when the
 // schema lacks a `type` keyword or already permits null.
+//
+// "object" and "array" are deliberately skipped: DeepSeek's tool-schema
+// parser only accepts string|number|integer|boolean|null as members of a
+// `type` array, so emitting `["object", "null"]` 400s upstream even though
+// the union is standard JSON Schema. Strict mode forces every property
+// into `required` anyway, so the model has to construct the value to
+// invoke the tool either way — dropping the nullable affordance for these
+// types removes a path the model can't usefully take.
 func makeNullable(node any) {
 	m, ok := node.(map[string]any)
 	if !ok {
@@ -499,13 +508,24 @@ func makeNullable(node any) {
 	}
 	switch t := m["type"].(type) {
 	case string:
-		if t == "null" {
+		if t == "null" || t == "object" || t == "array" {
 			return
 		}
 		m["type"] = []any{t, "null"}
 	case []any:
 		for _, v := range t {
 			if s, _ := v.(string); s == "null" {
+				return
+			}
+		}
+		// If a hand-written source schema already declared a type union
+		// containing "object" or "array", DeepSeek would reject it on its
+		// own merits — adding "null" doesn't worsen that, but adding it to
+		// a union that's already DeepSeek-incompatible has no upside. Leave
+		// it alone so the error message points at the source field, not at
+		// the strict-mode pass.
+		for _, v := range t {
+			if s, _ := v.(string); s == "object" || s == "array" {
 				return
 			}
 		}
