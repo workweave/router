@@ -18,134 +18,114 @@
 
 
 
-**One endpoint. Every model. Always the right one.**
+**一个入口。所有模型。始终选对。**
 
-A drop-in proxy for Anthropic, OpenAI, and Gemini that picks the best model
-for *every* request: using a tiny on-box embedder, not a vibes-based prompt.
+面向 Anthropic、OpenAI 和 Gemini 的即插即用代理，为*每一次*请求选择最合适的模型：使用的是一个极小的本地嵌入器，而不是靠提示词“凭感觉”判断。
 
 [![Weave Badge](https://img.shields.io/endpoint?url=https%3A%2F%2Fapp.workweave.ai%2Fapi%2Frepository%2Fbadge%2Forg_QWsHDcRQWQEs6RpkdEZrlFK8%2F1222789989%2Fhttps%253A%252F%252Fgithub.com&cacheSeconds=3600)](https://app.workweave.ai/reports/repository/org_QWsHDcRQWQEs6RpkdEZrlFK8/https%3A%2F%2Fgithub.com/1222789989)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](go.mod)
 [![Tests](https://github.com/workweave/router/actions/workflows/test.yml/badge.svg)](https://github.com/workweave/router/actions/workflows/test.yml)
 [![License: ELv2](https://img.shields.io/badge/License-ELv2-00BFB3.svg)](https://www.elastic.co/licensing/elastic-license)
 
-[简体中文](README.zh-CN.md) · English
-
-*Built by [Weave](https://www.workweave.ai): The #1 engineering intelligence platform,
-loved by Robinhood, PostHog, Reducto, and hundreds of others.*
+*由 [Weave](https://www.workweave.ai) 打造：领先的工程智能平台，深受 Robinhood、PostHog、Reducto 及数百家其他团队信赖。*
 
 </div>
 
 ---
 
-## What it does
+## 它能做什么
 
-Point Claude Code, Cursor, or your own app at `localhost:8080`. The router:
+把 Claude Code、Cursor 或你自己的应用指向 `localhost:8080`。路由器会：
 
-- 🎯 **Routes per request.** A cluster scorer derived from
-  [Avengers-Pro](https://arxiv.org/abs/2508.12631) [^1] picks the right
-  model from your enabled providers, every turn.
-- 🔌 **Speaks everyone's API.** Anthropic Messages, OpenAI Chat Completions,
-  Gemini native. Streaming, tools, vision, the works.
-- 🧠 **Knows OSS too.** DeepSeek, Kimi, GLM, Qwen, Llama, Mistral via
-  OpenRouter (or any OpenAI-compatible endpoint).
-- 🔒 **BYOK by default.** Provider keys stay on your box, encrypted at rest.
-- 📊 **Observable.** OTLP traces out of the box. See your dashboard in the Weave dashboard (http://localhost:8080/ui/dashboard) or drop in Honeycomb, Datadog,
-  Grafana, whatever.
+- 🎯 **按请求路由。** 基于 [Avengers-Pro](https://arxiv.org/abs/2508.12631) [^1] 的集群评分器，会为每一轮请求从你启用的提供商中选出最合适的模型。
+- 🔌 **兼容所有人的 API。** Anthropic Messages、OpenAI Chat Completions、Gemini 原生接口，流式输出、工具、视觉能力都支持。
+- 🧠 **也懂开源模型。** 通过 OpenRouter（或任何 OpenAI 兼容端点）接入 DeepSeek、Kimi、GLM、Qwen、Llama、Mistral。
+- 🔒 **默认 BYOK。** 提供商密钥保存在你自己的机器上，并在静态存储时加密。
+- 📊 **可观测。** 默认支持 OTLP traces。你可以在 Weave 仪表盘中查看（http://localhost:8080/ui/dashboard），也可以接入 Honeycomb、Datadog、Grafana 等工具。
 
-## 30-second quickstart
+## 30 秒快速开始
 
-The fastest way: point Claude Code at the **hosted** Weave Router with one
-command. No clone, no Docker, no Postgres.
+最快的方式：用一个命令把 Claude Code 指向 **托管版** Weave Router。无需克隆、无需 Docker、无需 Postgres。
 
 ```bash
 npx @workweave/router
 ```
 
-That's it. The installer walks you through scope (user vs. project), grabs
-a router key, and wires Claude Code. Other flavors:
+就这么简单。安装器会引导你选择作用域（用户级或项目级）、获取 router key，并完成 Claude Code 配置。其他用法：
 
 ```bash
-npx @workweave/router --scope project       # per-repo, commits settings.json
-npx @workweave/router --local               # self-hosted localhost:8080
+npx @workweave/router --scope project       # 按仓库写入 settings.json
+npx @workweave/router --local               # 自托管 localhost:8080
 npx @workweave/router --base-url https://router.acme.internal
-npx @workweave/router@0.1.0                 # pin a version
+npx @workweave/router@0.1.0                 # 固定版本
 ```
 
-Requires Node ≥ 18 and `jq`. Full flag reference: [install/npm/README.md](install/npm/README.md).
+需要 Node ≥ 18 和 `jq`。完整参数说明见：[install/npm/README.md](install/npm/README.md)。
 
-### Or: self-host the whole stack
+### 或者：自行托管整套服务
 
-If you want the router (and dashboard) running on your own box:
+如果你想在自己的机器上运行路由器（和仪表盘）：
 
 ```bash
-# 1. Drop a provider key in. OpenRouter is the recommended baseline.
+# 1. 先放入一个提供商密钥。推荐先用 OpenRouter 作为基线。
 echo "OPENROUTER_API_KEY=sk-or-v1-..." >> .env.local
 
-# 2. Boot Postgres + router on :8080 and seed an rk_ key.
+# 2. 启动 Postgres + 路由器，监听 :8080，并生成一个 rk_ key。
 make full-setup
 ```
 
-The router is up at <http://localhost:8080>, the dashboard at
-<http://localhost:8080/ui/> (password: `admin`), and your `rk_...` key
-prints in the logs.
+路由器运行在 <http://localhost:8080>，仪表盘运行在 <http://localhost:8080/ui/>（密码：`admin`），你的 `rk_...` key 会打印到日志里。
 
 ```bash
-# Call it like Anthropic
+# 以 Anthropic 方式调用
 curl -sS http://localhost:8080/v1/messages \
   -H "Authorization: Bearer rk_..." \
   -d '{"model":"claude-sonnet-4-5","max_tokens":256,
        "messages":[{"role":"user","content":"hi"}]}'
 
-# ...or like OpenAI
+# 或者以 OpenAI 方式调用
 curl -sS http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer rk_..." \
   -d '{"model":"gpt-4o-mini",
        "messages":[{"role":"user","content":"hi"}]}'
 
-# Peek at the routing decision without proxying
+# 只查看路由决策，不转发到上游
 curl -sS http://localhost:8080/v1/route -H "Authorization: Bearer rk_..." -d '...'
 ```
 
-## Wire it into your tools
+## 接入你的工具
 
-**Claude Code.** Run `make install-cc` to wire Claude Code at the local
-self-hosted router (it's also invoked automatically at the end of
-`make full-setup`). For the hosted router, use `npx @workweave/router`
-above.
+**Claude Code。** 运行 `make install-cc`，把 Claude Code 接到本地自托管路由器上（`make full-setup` 结束时也会自动执行）。如果使用托管版，请用上面的 `npx @workweave/router`。
 
-**Cursor** *(early beta, performance may not be the best).* Settings →
-Models → *Override OpenAI Base URL* → `http://localhost:8080/v1`, paste
-`rk_...` as the API key.
+**Cursor**（早期 beta，性能可能不是最佳）。进入 Settings → Models → *Override OpenAI Base URL* → `http://localhost:8080/v1`，然后把 `rk_...` 作为 API key 粘贴进去。
 
-> Two keys, don't mix them up:
-> - `sk-or-...` / `sk-ant-...` / `sk-...` = your **upstream** provider key. Lives in `.env.local`.
-> - `rk_...` = your **router** key. Clients send this as a Bearer token.
+> 两种 key，别混了：
+> - `sk-or-...` / `sk-ant-...` / `sk-...` = 你的**上游**提供商 key，存放在 `.env.local`。
+> - `rk_...` = 你的**路由器** key，客户端通过 Bearer token 发送。
 
-## Endpoints
+## 端点
 
-| Endpoint                       | Format                                   |
-| ------------------------------ | ---------------------------------------- |
-| `POST /v1/messages`            | Anthropic Messages, routed               |
-| `POST /v1/chat/completions`    | OpenAI Chat Completions, routed          |
-| `POST /v1beta/models/:action`  | Gemini `generateContent`, routed         |
-| `POST /v1/route`               | Returns the decision, no upstream call   |
-| `GET /v1/models` &nbsp;·&nbsp; `POST /v1/messages/count_tokens` | Anthropic passthrough |
-| `GET /health` &nbsp;·&nbsp; `GET /validate` | liveness + key check         |
+| 端点 | 格式 |
+| ---- | ---- |
+| `POST /v1/messages` | Anthropic Messages，已路由 |
+| `POST /v1/chat/completions` | OpenAI Chat Completions，已路由 |
+| `POST /v1beta/models/:action` | Gemini `generateContent`，已路由 |
+| `POST /v1/route` | 返回路由决策，不发起上游调用 |
+| `GET /v1/models` &nbsp;·&nbsp; `POST /v1/messages/count_tokens` | Anthropic 透传 |
+| `GET /health` &nbsp;·&nbsp; `GET /validate` | 存活检查 + key 校验 |
 
-## Deeper docs
+## 更深入的文档
 
-- 📐 [**Configuration reference**](docs/CONFIGURATION.md): every env var,
-  BYOK encryption, OTel knobs, cluster routing.
-- 🛠️ [**Contributing**](CONTRIBUTING.md): layering rules, hot-reload dev,
-  migrations, tests, the whole engineering loop.
-- 🏗️ [**Architecture**](AGENTS.md): package layout, import contracts,
-  recipes for adding endpoints / providers / strategies.
+- 📐 [**配置参考**](docs/CONFIGURATION.md)：所有环境变量、BYOK 加密、OTel 配置、集群路由。
+- 🛠️ [**贡献指南**](CONTRIBUTING.md)：分层规则、热重载开发、迁移、测试等完整工程流程。
+- 🏗️ [**架构说明**](AGENTS.md)：包结构、导入约束、添加端点 / 提供商 / 策略的做法。
+- 🌐 [**English README**](README.md)：英文原版说明。
 
-## Roadmap
+## 路线图
 
-- Token-aware rate limiting (Redis sliding window per installation)
-- Sub-installations for tenant hierarchies
-- Speculative dispatch + hedging for tail latency
+- 面向 token 的限流（按 installation 使用 Redis 滑动窗口）
+- 支持租户层级的子 installation
+- 推测性分发 + 级联兜底，降低尾延迟
 
 ---
 
