@@ -57,7 +57,7 @@ setup: migrate-up seed ## Bootstrap (host DB): init DB, run migrations, seed an 
 
 full-setup: generate-statusline ## Bootstrap router: docker compose + seed + interactively wire Claude Code
 	@if [ -n "$(KEY)" ] && [ -n "$(BASE_URL)" ]; then \
-		INSTALL_CMD='WEAVE_ROUTER_KEY="$(KEY)" ./install/install.sh --base-url "$(BASE_URL)"'; \
+		INSTALL_CMD='WEAVE_ROUTER_KEY="$(KEY)" ./install/install.sh --claude --base-url "$(BASE_URL)"'; \
 		[ -n "$(SCOPE)" ] && INSTALL_CMD="$$INSTALL_CMD --scope $(SCOPE)"; \
 		[ -n "$(DIR)" ] && INSTALL_CMD="$$INSTALL_CMD --dir $(DIR)"; \
 		[ "$(NON_INTERACTIVE)" = "1" ] && INSTALL_CMD="$$INSTALL_CMD --non-interactive"; \
@@ -88,7 +88,7 @@ full-setup: generate-statusline ## Bootstrap router: docker compose + seed + int
 		fi; \
 		echo "    key: $$WEAVE_KEY"; \
 		echo ""; \
-		WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --base-url http://localhost:8080; \
+		WEAVE_ROUTER_KEY="$$WEAVE_KEY" ./install/install.sh --claude --base-url http://localhost:8080; \
 		echo ""; \
 		echo "Done. Router on http://localhost:8080. Share with teammates: make full-setup KEY=$$WEAVE_KEY BASE_URL=<reachable-url>"; \
 	fi
@@ -149,7 +149,7 @@ logs: ## Tail the server logs
 	docker compose logs -f server
 
 install-cc: generate-statusline ## Wire only Claude Code at the local docker-compose router (assumes it's already running)
-	./install/install.sh --local
+	./install/install.sh --claude --local
 
 uninstall-cc: ## Remove the local Claude Code → router config
 	./install/uninstall.sh

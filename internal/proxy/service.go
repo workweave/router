@@ -73,6 +73,15 @@ type Service struct {
 	// upstream API key is configured at the deployment level. When nil, all
 	// registered providers are treated as deployment-keyed (legacy behavior).
 	deploymentKeyedProviders map[string]struct{}
+	// passthroughEligibleProviders is the subset of registered providers
+	// reachable via client-supplied auth headers (no deployment key, no
+	// BYOK). Entries here are added to the eligible set only when the
+	// inbound request came in via the matching surface — otherwise the
+	// OpenAI client would forward an Anthropic-surface request's `x-api-key`
+	// to api.openai.com (and vice versa), which is a cross-provider
+	// credential leak even when upstream 401s. Surface-scoping ensures
+	// passthrough creds only enable the upstream they were issued for.
+	passthroughEligibleProviders map[string]struct{}
 	// planner parameterizes the Prism-style EV policy for stay-vs-switch.
 	planner planner.EVConfig
 	// plannerEnabled is the kill switch. When false, the orchestrator falls
@@ -412,6 +421,25 @@ func (s *Service) WithDeploymentKeyedProviders(set map[string]struct{}) *Service
 		copied[p] = struct{}{}
 	}
 	s.deploymentKeyedProviders = copied
+	return s
+}
+
+// WithPassthroughEligibleProviders names providers that are reachable via
+// client-supplied auth headers (no deployment key, no BYOK). Entries are
+// surface-scoped in enabledProvidersForRequest: an Anthropic-surface
+// request can enable Anthropic via passthrough but NOT OpenAI, and vice
+// versa. Without this guard, cross-surface routing would forward the
+// wrong credential type to a third-party API.
+func (s *Service) WithPassthroughEligibleProviders(set map[string]struct{}) *Service {
+	if set == nil {
+		s.passthroughEligibleProviders = nil
+		return s
+	}
+	copied := make(map[string]struct{}, len(set))
+	for p := range set {
+		copied[p] = struct{}{}
+	}
+	s.passthroughEligibleProviders = copied
 	return s
 }
 
@@ -1171,6 +1199,27 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 		}
 		out[k.Provider] = struct{}{}
 	}
+	// Passthrough-eligible providers are surface-scoped: a provider
+	// registered without a deployment key joins the eligible set only when
+	// the inbound surface matches. Otherwise an Anthropic-surface request's
+	// `x-api-key` would flow to api.openai.com (and vice versa) when no
+	// BYOK / env keys are configured — a cross-provider credential leak
+	// even when upstream 401s.
+	//
+	// Skip when the request is router-key-authed (installationID set) and
+	// surfaceProvider isn't already enrolled via BYOK. Passthrough depends on
+	// the client's inbound auth header, but for router-key auth that header
+	// IS the router key — setAuth strips it, so the upstream call would
+	// dispatch unauthenticated and 401 instead of failing fast with a 503.
+	if surfaceProvider != "" {
+		if _, ok := s.passthroughEligibleProviders[surfaceProvider]; ok {
+			_, alreadyByok := out[surfaceProvider]
+			routerKeyAuthed := installationIDFromContext(ctx) != (uuid.UUID{})
+			if !routerKeyAuthed || alreadyByok {
+				out[surfaceProvider] = struct{}{}
+			}
+		}
+	}
 	// Client-supplied headers are only consulted when NOT authed via a
 	// router key. A router-key-authed request carrying an inbound bearer
 	// must not enable OpenAI-compat upstreams that share the Authorization
@@ -1565,4 +1614,25 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", capability.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
+}
+
+// ProxyOpenAIResponses routes an OpenAI Responses API request. The Responses
+// wire format is translated to Chat Completions on entry, dispatched through
+// the existing chat-completions path, then the chat-completions response is
+// re-emitted as Responses-shaped SSE / JSON. This keeps the turn loop, cache,
+// pricing, and translation matrix unchanged.
+func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
+	chatBody, _, model, err := translate.ResponsesToChatCompletions(body)
+	if err != nil {
+		return fmt.Errorf("translate responses request: %w", err)
+	}
+	wrapper := translate.NewResponsesWriter(w, model)
+	proxyErr := s.ProxyOpenAIChatCompletion(ctx, chatBody, wrapper, r)
+	if proxyErr != nil {
+		// On error, let the handler write the error envelope unless we've
+		// already committed to streaming — in which case the chat-completions
+		// path will have surfaced a status error and we just propagate.
+		return proxyErr
+	}
+	return wrapper.Finalize()
 }

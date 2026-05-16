@@ -154,6 +154,13 @@ func main() {
 	fmt.Printf("    export ANTHROPIC_CUSTOM_HEADERS='X-Weave-Router-Key: %s'\n", rawToken)
 	fmt.Printf("    claude\n\n")
 
+	fmt.Printf("=== Codex ===\n")
+	fmt.Printf("  Keep Codex's OpenAI auth unchanged; send the router key\n")
+	fmt.Printf("  in a router-only custom header.\n")
+	fmt.Printf("    export OPENAI_BASE_URL=%s/v1\n", baseURL)
+	fmt.Printf("    export OPENAI_EXTRA_HEADERS='X-Weave-Router-Key: %s'\n", rawToken)
+	fmt.Printf("    codex\n\n")
+
 	fmt.Printf("=== Cursor ===\n")
 	fmt.Printf("  1. Open Cursor Settings > Models > Override OpenAI Base URL\n")
 	fmt.Printf("     Set to: %s/v1\n", baseURL)
