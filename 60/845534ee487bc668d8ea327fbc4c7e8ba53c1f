@@ -1,0 +1,26 @@
+internal/proxy/service.go
+  s_fd26d4f195c783::t_1d251a29efad0e 875,877
+  s_fd26d4f195c783::t_8c2cd7ae15b3c5 1618,1620
+cmd/router/main.go
+  s_fd26d4f195c783::t_bd0f15d36cf812 787-790,797
+internal/server/middleware/balance_check_test.go
+  s_fd26d4f195c783::t_7aeb93b7f0effe 129-134,137-162
+internal/server/middleware/balance_check.go
+  s_fd26d4f195c783::t_ba40f79f9ca9e7 33-37,65-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "60845534ee487bc668d8ea327fbc4c7e8ba53c1f",
+  "prompts": {},
+  "sessions": {
+    "s_fd26d4f195c783": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "049207f3-1569-4a9a-ad09-bb77bd41bc49",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
