@@ -928,7 +928,7 @@ if [ -n "$api_key" ]; then
       | curl -fsS --max-time 5 --header @- "$base_url/validate"
   }
   if ! spin "Validating API key" validate_key; then
-    warn "Router rejected the API key (check it matches the dashboard at $base_url/ui/)."
+    warn "Router rejected the API key (check it matches the dashboard at $base_url)."
   fi
 fi
 
