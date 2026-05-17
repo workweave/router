@@ -64,7 +64,7 @@ func TestRegister_DeploymentMode(t *testing.T) {
 	t.Run("selfhosted mounts dashboard and product routes", func(t *testing.T) {
 		engine := gin.New()
 		// Nil services are fine: engine.Routes() inspection never invokes the closure-captured handlers.
-		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeSelfHosted)
+		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeSelfHosted, nil, 0)
 		got := routeSet(engine)
 		for _, want := range productRoutes {
 			assert.Contains(t, got, want, "product route missing in selfhosted mode")
@@ -76,7 +76,7 @@ func TestRegister_DeploymentMode(t *testing.T) {
 
 	t.Run("managed skips dashboard but keeps product routes", func(t *testing.T) {
 		engine := gin.New()
-		server.Register(engine, nil, nil, nil, server.DeploymentModeManaged)
+		server.Register(engine, nil, nil, nil, server.DeploymentModeManaged, nil, 0)
 		got := routeSet(engine)
 		for _, want := range productRoutes {
 			assert.Contains(t, got, want, "product route missing in managed mode")

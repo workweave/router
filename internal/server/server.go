@@ -13,6 +13,7 @@ import (
 	geminiapi "workweave/router/internal/api/gemini"
 	openaiapi "workweave/router/internal/api/openai"
 	"workweave/router/internal/auth"
+	"workweave/router/internal/billing"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/server/middleware"
 
@@ -49,7 +50,12 @@ const (
 // deployedModels is the source for the admin model-selection checklist. May
 // be nil in tests; required in selfhosted production so the dashboard can
 // render the universe of routable models.
-func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode) {
+//
+// billingSvc is non-nil only in managed mode when the credit-billing tables
+// are present; when set, every inference route is gated on prepaid balance
+// via middleware.WithBalanceCheck. nil leaves inference routes open (BYOK
+// or platform key still controls upstream auth).
+func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service, billingMinBalanceMicros int64) {
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
 
 	// /validate is a token-validity probe used by clients (not the dashboard), so it stays mounted in both modes.
@@ -89,26 +95,43 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		}
 	}
 
-	messagesGroup := engine.Group("",
+	messagesMiddleware := []gin.HandlerFunc{
 		middleware.WithTimingEntry(),
 		middleware.WithTimeout(messagesTimeout),
 		middleware.WithAuth(authSvc),
+	}
+	if billingSvc != nil {
+		messagesMiddleware = append(messagesMiddleware, middleware.WithBalanceCheck(billingSvc, billingMinBalanceMicros))
+	}
+	messagesMiddleware = append(messagesMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
 	)
+	messagesGroup := engine.Group("", messagesMiddleware...)
 	messagesGroup.POST("/v1/messages", anthropicapi.MessagesHandler(proxySvc, authSvc))
 
-	chatCompletionGroup := engine.Group("",
+	chatCompletionMiddleware := []gin.HandlerFunc{
 		middleware.WithTimingEntry(),
 		middleware.WithTimeout(chatCompletionTimeout),
 		middleware.WithAuth(authSvc),
+	}
+	if billingSvc != nil {
+		chatCompletionMiddleware = append(chatCompletionMiddleware, middleware.WithBalanceCheck(billingSvc, billingMinBalanceMicros))
+	}
+	chatCompletionMiddleware = append(chatCompletionMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
 	)
+	chatCompletionGroup := engine.Group("", chatCompletionMiddleware...)
 	chatCompletionGroup.POST("/v1/chat/completions", openaiapi.ChatCompletionHandler(proxySvc, authSvc))
 	// Action suffix (:generateContent or :streamGenerateContent) lives inside modelAction because Gin treats `:` outside the leading position as a literal.
 	chatCompletionGroup.POST("/v1beta/models/:modelAction", geminiapi.GenerateContentHandler(proxySvc, authSvc))
 
+	// Passthrough endpoints (count_tokens, model list) do not consume
+	// upstream tokens beyond a metadata lookup, so we leave them open
+	// even when billing is enabled. count_tokens in particular is the
+	// SDK's first call before /v1/messages — gating it on balance would
+	// make clients fail to negotiate before any inference happens.
 	passthroughGroup := engine.Group("",
 		middleware.WithTimeout(passthroughTimeout),
 		middleware.WithAuth(authSvc),
@@ -117,12 +140,18 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	passthroughGroup.GET("/v1/models", anthropicapi.PassthroughHandler(proxySvc))
 	passthroughGroup.GET("/v1/models/:model", anthropicapi.PassthroughHandler(proxySvc))
 
-	routeGroup := engine.Group("",
+	routeMiddleware := []gin.HandlerFunc{
 		middleware.WithTimeout(routeTimeout),
 		middleware.WithAuth(authSvc),
+	}
+	if billingSvc != nil {
+		routeMiddleware = append(routeMiddleware, middleware.WithBalanceCheck(billingSvc, billingMinBalanceMicros))
+	}
+	routeMiddleware = append(routeMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
 	)
+	routeGroup := engine.Group("", routeMiddleware...)
 	routeGroup.POST("/v1/route", anthropicapi.RouteHandler(proxySvc))
 }
 

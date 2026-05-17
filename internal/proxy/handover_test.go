@@ -91,7 +91,7 @@ func TestProviderSummarizer_SuccessReturnsAssistantText(t *testing.T) {
 	}
 	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
 
-	got, err := s.Summarize(context.Background(), env)
+	got, _, err := s.Summarize(context.Background(), env)
 	require.NoError(t, err)
 	assert.Equal(t, "Refactor in progress: step 1 done, step 2 pending.", got)
 }
@@ -109,7 +109,7 @@ func TestProviderSummarizer_TimeoutReturnsError(t *testing.T) {
 	}
 	s := NewProviderSummarizer(fake, "", 25*time.Millisecond)
 
-	got, err := s.Summarize(context.Background(), env)
+	got, _, err := s.Summarize(context.Background(), env)
 	require.Error(t, err)
 	assert.Empty(t, got)
 	// Either the ctx.Err() bubble or the fake's own ctx-aware return both
@@ -129,7 +129,7 @@ func TestProviderSummarizer_Non2xxReturnsError(t *testing.T) {
 	}
 	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
 
-	got, err := s.Summarize(context.Background(), env)
+	got, _, err := s.Summarize(context.Background(), env)
 	require.Error(t, err)
 	assert.Empty(t, got)
 	assert.True(t, strings.Contains(err.Error(), "500"), "error must mention upstream status 500; got %v", err)
@@ -149,7 +149,7 @@ func TestProviderSummarizer_EmptyContentReturnsErrEmptySummary(t *testing.T) {
 	}
 	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
 
-	got, err := s.Summarize(context.Background(), env)
+	got, _, err := s.Summarize(context.Background(), env)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrEmptySummary)
 	assert.Empty(t, got)
@@ -161,6 +161,6 @@ func TestProviderSummarizer_NilEnvelopeReturnsError(t *testing.T) {
 	fake := &fakeHandoverProvider{}
 	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
 
-	_, err := s.Summarize(context.Background(), nil)
+	_, _, err := s.Summarize(context.Background(), nil)
 	require.Error(t, err)
 }

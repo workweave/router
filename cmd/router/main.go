@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/billing"
 	"workweave/router/internal/config"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
@@ -131,12 +132,37 @@ func main() {
 	// every inbound request carrying Anthropic credentials.
 	anthropicPassthroughEligible := false
 
-	// In managed mode every provider is registered unconditionally with no
-	// deployment-level API key. The proxy service is also flipped into
-	// BYOK-only mode below, so a request without BYOK or client-supplied
-	// credentials for the chosen provider 400s at the scorer rather than
-	// silently spending the platform's API budget on customer traffic.
-	byokOnly := deploymentMode == server.DeploymentModeManaged
+	// Credit billing service: wired only in managed mode and only when the
+	// router-schema billing tables exist. The boot-time health check
+	// provides a safe rollback path — drop the tables and restart the
+	// router to disable billing without code changes. Self-hosted
+	// deployments never wire billing.
+	var billingSvc *billing.Service
+	var billingMinBalanceMicros int64
+	if deploymentMode == server.DeploymentModeManaged {
+		billingRepo := postgres.NewBillingRepo(pool)
+		bootCtx, bootCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		tablesExist, billingCheckErr := billingRepo.BillingTablesExist(bootCtx)
+		bootCancel()
+		switch {
+		case billingCheckErr != nil:
+			logger.Warn("Boot billing health check failed; staying in BYOK-only mode", "err", billingCheckErr)
+		case !tablesExist:
+			logger.Warn("Billing tables missing from router schema; staying in BYOK-only mode. Apply db migration 0006_credit_billing to enable billing.")
+		default:
+			billingSvc = billing.NewService(billingRepo)
+			billingMinBalanceMicros = parseEnvInt64("ROUTER_BILLING_MIN_BALANCE_MICROS", 1_000_000)
+			logger.Info("Router billing enabled", "min_balance_usd_micros", billingMinBalanceMicros)
+		}
+	}
+
+	// In managed mode without billing we keep BYOK-only behavior (zero
+	// active customers today, but we don't want to silently spend
+	// platform-key budget if billing fails to wire). With billing on, we
+	// flip to platform-key mode: the balance check gates spending and the
+	// debit hook books each call. Self-hosted stays at byokOnly=false so
+	// platform env keys work the way operators expect.
+	byokOnly := deploymentMode == server.DeploymentModeManaged && billingSvc == nil
 
 	// Anthropic is always registered. With ANTHROPIC_API_KEY (selfhosted only)
 	// the router uses its own key; otherwise the client's auth headers
@@ -435,7 +461,8 @@ func main() {
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels).
-		WithDefaultBaselineModel(resolveDefaultBaselineModel())
+		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
+		WithBillingService(billingSvc)
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
 	// Fail loud if a deployed model is missing from the tier table;
@@ -478,7 +505,7 @@ func main() {
 	// handler can surface the universe of deployed models. The fallback nil
 	// keeps non-cluster routers (heuristic dev override, etc.) bootable.
 	deployedModels, _ := rtr.(*cluster.Multiversion)
-	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode)
+	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc, billingMinBalanceMicros)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),
@@ -755,6 +782,23 @@ func boolDefault(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// parseEnvInt64 reads an env var as a non-negative int64. Returns fallback
+// when unset, empty, or unparseable. Accepts 0 — a legitimate operational
+// value for thresholds (e.g. ROUTER_BILLING_MIN_BALANCE_MICROS=0 means
+// "only 402 when the balance is actually at or below zero").
+func parseEnvInt64(key string, fallback int64) int64 {
+	raw := config.GetOr(key, "")
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n < 0 {
+		observability.Get().Warn("Invalid env var; using default", "key", key, "value", raw, "default", fallback)
+		return fallback
+	}
+	return n
 }
 
 // parseEnvDurationMs reads an env var as a millisecond integer and returns

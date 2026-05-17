@@ -72,6 +72,10 @@ type handoverOutcome struct {
 	LatencyMS      int64
 	SummaryTokens  int
 	FallbackToTrim bool
+	// SummaryUsage captures upstream token usage for the summarizer call
+	// so proxy.fireBilling can debit it as a separate ledger row with the
+	// "_summary" request_id suffix. Zero on fallback/error paths.
+	SummaryUsage handover.Usage
 }
 
 // runTurnLoop is the format-agnostic routing orchestrator: detect turn type,
@@ -246,7 +250,7 @@ func (s *Service) runTurnLoop(
 			log.Info("Handover summarizer skipped to preserve BYOK tenant boundary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
 		default:
 			start := time.Now()
-			summary, sumErr := s.summarizer.Summarize(ctx, env)
+			summary, summaryUsage, sumErr := s.summarizer.Summarize(ctx, env)
 			res.Handover.Invoked = true
 			res.Handover.LatencyMS = time.Since(start).Milliseconds()
 			switch {
@@ -261,6 +265,7 @@ func (s *Service) runTurnLoop(
 			default:
 				handover.RewriteEnvelope(env, summary)
 				res.Handover.SummaryTokens = estimateSummaryTokens(summary)
+				res.Handover.SummaryUsage = summaryUsage
 			}
 		}
 	}
