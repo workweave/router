@@ -126,15 +126,40 @@ func TestWithBalanceCheck_OverrideShortCircuitsAndFlagsContext(t *testing.T) {
 	assert.True(t, hasOverride, "override flag must reach the request context")
 }
 
-func TestWithBalanceCheck_FailOpenOnRepoError(t *testing.T) {
-	// A transient DB error reading the balance must NOT blackhole inference.
-	// We log Error and let the request through; the debit hook will likely
-	// also fail and surface in metrics. Better than 500ing every customer
-	// on a transient ClickHouse-style hiccup.
+func TestWithBalanceCheck_FailClosedOnRepoError(t *testing.T) {
+	// A transient DB error reading the balance must fail closed. In a
+	// prepaid credit system, letting the request through with an unknown
+	// balance creates an unbilled-usage window where platform spend is
+	// incurred but no debit is possible. 503 prompts the client to retry
+	// rather than silently spend against an unknown balance.
 	repo := &stubBillingRepo{balanceErr: errors.New("conn refused")}
 	w, reached := runMiddleware(t, repo, 1_000_000, "org_x")
-	assert.True(t, reached, "transient DB error must not block inference")
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, reached, "infra error must not allow request through")
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+	var body struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "billing_unavailable", body.Error)
+	assert.NotEmpty(t, body.Message)
+}
+
+func TestWithBalanceCheck_AllowsZeroThreshold(t *testing.T) {
+	// minBalanceMicros=0 means "only 402 when the balance is actually
+	// at or below zero". A small positive balance must pass through.
+	repo := &stubBillingRepo{balance: 1}
+	_, reached := runMiddleware(t, repo, 0, "org_x")
+	assert.True(t, reached, "positive balance must pass when threshold is zero")
+}
+
+func TestWithBalanceCheck_BlocksAtZeroWhenThresholdIsZero(t *testing.T) {
+	// At threshold=0, balance=0 still trips the ≤ check and returns 402.
+	repo := &stubBillingRepo{balance: 0}
+	w, reached := runMiddleware(t, repo, 0, "org_x")
+	assert.False(t, reached)
+	assert.Equal(t, http.StatusPaymentRequired, w.Code)
 }
 
 func TestWithBalanceCheck_SkipsWhenInstallationMissing(t *testing.T) {

@@ -784,15 +784,17 @@ func boolDefault(b bool) string {
 	return "false"
 }
 
-// parseEnvInt64 reads an env var as a positive int64. Returns fallback when
-// unset, empty, or unparseable.
+// parseEnvInt64 reads an env var as a non-negative int64. Returns fallback
+// when unset, empty, or unparseable. Accepts 0 — a legitimate operational
+// value for thresholds (e.g. ROUTER_BILLING_MIN_BALANCE_MICROS=0 means
+// "only 402 when the balance is actually at or below zero").
 func parseEnvInt64(key string, fallback int64) int64 {
 	raw := config.GetOr(key, "")
 	if raw == "" {
 		return fallback
 	}
 	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || n <= 0 {
+	if err != nil || n < 0 {
 		observability.Get().Warn("Invalid env var; using default", "key", key, "value", raw, "default", fallback)
 		return fallback
 	}

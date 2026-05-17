@@ -30,9 +30,11 @@ const TopUpURL = "https://app.workweave.ai/settings/billing/router-credits"
 //   - Otherwise → pass through.
 //
 // The balance read is a single indexed SELECT (~2-5ms in-region). Any
-// repo error is logged and fail-open: the customer's request continues
-// rather than 500ing. The plan accepts the rare debit-failure window;
-// repeated infra failures will surface in metrics.
+// repo error fails closed with HTTP 503: in a prepaid credit system,
+// allowing requests through when the gate cannot read the balance
+// creates an unbilled-usage window where platform spend is incurred
+// against an unknown balance. A short retry window for clients is the
+// correct tradeoff vs. silently letting tenants spend without billing.
 func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)
@@ -60,11 +62,15 @@ func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerF
 				})
 				return
 			}
-			// Infra error reading billing tables. Fail open so we don't
-			// blackhole inference on a transient DB hiccup; the debit
-			// hook will likely also fail and surface in metrics.
-			log.Error("Balance check failed; allowing request to proceed", "err", err, "organization_id", orgID)
-			c.Next()
+			// Infra error reading billing tables. Fail closed: a prepaid
+			// gate that lets requests through on read errors creates an
+			// unbilled-usage window. Return 503 so clients retry rather
+			// than silently spending against an unknown balance.
+			log.Error("Balance check failed; refusing request", "err", err, "organization_id", orgID)
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "billing_unavailable",
+				"message": "Billing system is temporarily unavailable. Please retry in a few moments.",
+			})
 			return
 		}
 
