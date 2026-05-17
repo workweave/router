@@ -34,6 +34,13 @@ func HasOverrideFromContext(ctx context.Context) bool {
 // constraint on router.organization_credit_ledger.entry_type.
 const EntryTypeInference = "inference"
 
+// MinBalanceMicros is the balance threshold (in USD micros) below which
+// the router returns HTTP 402. Hardcoded rather than env-tunable: the
+// floor is a product decision shared with the dashboard's low-balance
+// copy, and a typo in a Cloud Run env var should not be able to silently
+// flip the gating threshold.
+const MinBalanceMicros int64 = 1_000_000
+
 // Service orchestrates balance reads and debits. No I/O of its own — all
 // persistence flows through the Repo interface.
 type Service struct {
