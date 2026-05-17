@@ -11,10 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ctxKeyHasBillingOverride is the gin context key used to plumb the
-// override flag from this middleware to the proxy's debit hook.
-const ctxKeyHasBillingOverride = "router_has_billing_override"
-
 // TopUpURL is the customer-facing page where org admins buy credits.
 // Returned in the 402 body so the client can surface a CTA.
 const TopUpURL = "https://app.workweave.ai/settings/billing/router-credits"
@@ -75,7 +71,6 @@ func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerF
 		}
 
 		if result.HasOverride {
-			c.Set(ctxKeyHasBillingOverride, true)
 			ctx := context.WithValue(c.Request.Context(), billing.HasOverrideContextKey, true)
 			c.Request = c.Request.WithContext(ctx)
 			c.Next()
