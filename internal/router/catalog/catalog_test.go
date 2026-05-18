@@ -31,6 +31,8 @@ func TestCatalog_BindingsReferenceCanonicalProviders(t *testing.T) {
 		providers.ProviderGoogle:     {},
 		providers.ProviderOpenRouter: {},
 		providers.ProviderFireworks:  {},
+		providers.ProviderDeepInfra:  {},
+		providers.ProviderBedrock:    {},
 	}
 	for _, m := range Models {
 		for i, b := range m.Providers {
