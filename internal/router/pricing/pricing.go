@@ -87,14 +87,13 @@ var table = map[string]Pricing{
 
 	// OpenRouter OSS pool
 	"qwen/qwen3-235b-a22b-2507":        {InputUSDPer1M: 0.071, OutputUSDPer1M: 0.463},
-	"qwen/qwen3-30b-a3b-instruct-2507": {InputUSDPer1M: 0.080, OutputUSDPer1M: 0.330},
 	"qwen/qwen3-coder-next":            {InputUSDPer1M: 0.070, OutputUSDPer1M: 0.300},
 	"qwen/qwen3-next-80b-a3b-instruct": {InputUSDPer1M: 0.090, OutputUSDPer1M: 1.100},
 
 	// OpenRouter OSS pool: v0.25 expansion
 	"qwen/qwen3-coder":           {InputUSDPer1M: 0.220, OutputUSDPer1M: 1.800},
 	"deepseek/deepseek-v4-flash": {InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10},
-	"deepseek/deepseek-v4-pro":   {InputUSDPer1M: 0.435, OutputUSDPer1M: 0.870, CacheReadMultiplier: 0.10},
+	"deepseek/deepseek-v4-pro":   {InputUSDPer1M: 1.740, OutputUSDPer1M: 3.480, CacheReadMultiplier: 0.0862}, // Fireworks serverless
 	"moonshotai/kimi-k2.5":       {InputUSDPer1M: 0.440, OutputUSDPer1M: 2.000},
 }
 

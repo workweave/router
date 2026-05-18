@@ -131,7 +131,6 @@ var registry = map[string]ModelSpec{
 	"gemini-2.0-flash-lite": googleBase,
 
 	"qwen/qwen3-235b-a22b-2507":        openAICompatBase,
-	"qwen/qwen3-30b-a3b-instruct-2507": openAICompatBase,
 	"qwen/qwen3-coder-next":            openAICompatBase,
 	"qwen/qwen3-next-80b-a3b-instruct": openAICompatBase,
 }

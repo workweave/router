@@ -16,7 +16,6 @@
       "gpt-5.5": 0.20500000000000002,
       "moonshotai/kimi-k2.5": 0.01044,
       "qwen/qwen3-235b-a22b-2507": 0.0023859999999999997,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.00173,
       "qwen/qwen3-coder": 0.009219999999999999,
       "qwen/qwen3-coder-next": 0.0015699999999999998,
       "qwen/qwen3-next-80b-a3b-instruct": 0.00559
@@ -57,7 +56,6 @@
       "gpt-5.5": 0.48954894788590797,
       "moonshotai/kimi-k2.5": 0.8710678148573947,
       "qwen/qwen3-235b-a22b-2507": 0.6245288184134836,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.4501322032589482,
       "qwen/qwen3-coder": 0.48241551053064624,
       "qwen/qwen3-coder-next": 0.4753661616334615,
       "qwen/qwen3-next-80b-a3b-instruct": 0.5310647390414883
@@ -77,7 +75,6 @@
       "gpt-5.5": 0.7642112779343085,
       "moonshotai/kimi-k2.5": 0.889315837351212,
       "qwen/qwen3-235b-a22b-2507": 0.6970003773071541,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.4798109401443426,
       "qwen/qwen3-coder": 0.6390781869552583,
       "qwen/qwen3-coder-next": 0.5824468974814361,
       "qwen/qwen3-next-80b-a3b-instruct": 0.6299162307023257
@@ -97,7 +94,6 @@
       "gpt-5.5": 0.7642112779343085,
       "moonshotai/kimi-k2.5": 0.9175342278935199,
       "qwen/qwen3-235b-a22b-2507": 0.6637727000777001,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.6166181232788157,
       "qwen/qwen3-coder": 0.6481340436123385,
       "qwen/qwen3-coder-next": 0.6602214006047934,
       "qwen/qwen3-next-80b-a3b-instruct": 0.6556352548620946
@@ -117,7 +113,6 @@
       "gpt-5.5": 0.5330178205084126,
       "moonshotai/kimi-k2.5": 0.7892301998910392,
       "qwen/qwen3-235b-a22b-2507": 0.7516523702666238,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.6335364412763316,
       "qwen/qwen3-coder": 0.7048639252886739,
       "qwen/qwen3-coder-next": 0.756146678068635,
       "qwen/qwen3-next-80b-a3b-instruct": 0.8110047313060406
@@ -137,7 +132,6 @@
       "gpt-5.5": 0.6963772807714734,
       "moonshotai/kimi-k2.5": 0.8685781496089567,
       "qwen/qwen3-235b-a22b-2507": 0.6665835752828,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.5842187977833659,
       "qwen/qwen3-coder": 0.626107574556571,
       "qwen/qwen3-coder-next": 0.5631948836520047,
       "qwen/qwen3-next-80b-a3b-instruct": 0.6126478972188485
@@ -157,7 +151,6 @@
       "gpt-5.5": 0.7431506322227074,
       "moonshotai/kimi-k2.5": 0.901748340915413,
       "qwen/qwen3-235b-a22b-2507": 0.8207369142386196,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.7874826492128564,
       "qwen/qwen3-coder": 0.7788787643069888,
       "qwen/qwen3-coder-next": 0.8290246233045633,
       "qwen/qwen3-next-80b-a3b-instruct": 0.7695194978686162
@@ -177,7 +170,6 @@
       "gpt-5.5": 0.7093877458984548,
       "moonshotai/kimi-k2.5": 0.9173730978667927,
       "qwen/qwen3-235b-a22b-2507": 0.815439325756123,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.7817265079513122,
       "qwen/qwen3-coder": 0.8644186516929504,
       "qwen/qwen3-coder-next": 0.7675992141367954,
       "qwen/qwen3-next-80b-a3b-instruct": 0.7209711670790183
@@ -197,7 +189,6 @@
       "gpt-5.5": 0.7152190861756434,
       "moonshotai/kimi-k2.5": 0.909906141296184,
       "qwen/qwen3-235b-a22b-2507": 0.8281572837420225,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.7021447813871953,
       "qwen/qwen3-coder": 0.7745154039640525,
       "qwen/qwen3-coder-next": 0.7869315045224654,
       "qwen/qwen3-next-80b-a3b-instruct": 0.7403357950418816
@@ -217,7 +208,6 @@
       "gpt-5.5": 0.7642112779343085,
       "moonshotai/kimi-k2.5": 0.8406361398293016,
       "qwen/qwen3-235b-a22b-2507": 0.7336055056529036,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.44957736693812955,
       "qwen/qwen3-coder": 0.7162827847747599,
       "qwen/qwen3-coder-next": 0.5684789545475912,
       "qwen/qwen3-next-80b-a3b-instruct": 0.5472099526238796
@@ -237,7 +227,6 @@
       "gpt-5.5": 0.7341702970510193,
       "moonshotai/kimi-k2.5": 0.9213650392073327,
       "qwen/qwen3-235b-a22b-2507": 0.7043228949514447,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.5288766848954702,
       "qwen/qwen3-coder": 0.637375223769965,
       "qwen/qwen3-coder-next": 0.6035317181856381,
       "qwen/qwen3-next-80b-a3b-instruct": 0.6201869672849345
@@ -257,7 +246,6 @@
       "gpt-5.5": 0.7642112779343085,
       "moonshotai/kimi-k2.5": 0.929807488920565,
       "qwen/qwen3-235b-a22b-2507": 0.4962124249564315,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.5137618418731535,
       "qwen/qwen3-coder": 0.5053646562424675,
       "qwen/qwen3-coder-next": 0.5250302861738423,
       "qwen/qwen3-next-80b-a3b-instruct": 0.5533392147954117
@@ -277,7 +265,6 @@
       "gpt-5.5": 0.7642112779343085,
       "moonshotai/kimi-k2.5": 0.9033391669716189,
       "qwen/qwen3-235b-a22b-2507": 0.7486131725140674,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.44957736693812955,
       "qwen/qwen3-coder": 0.7177558303725016,
       "qwen/qwen3-coder-next": 0.5736850149945096,
       "qwen/qwen3-next-80b-a3b-instruct": 0.6897552997258409
@@ -297,7 +284,6 @@
       "gpt-5.5": 0.7302018768017958,
       "moonshotai/kimi-k2.5": 0.9624167407688109,
       "qwen/qwen3-235b-a22b-2507": 0.7588095911044961,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.5138070765819512,
       "qwen/qwen3-coder": 0.7379720340920599,
       "qwen/qwen3-coder-next": 0.6277487193813827,
       "qwen/qwen3-next-80b-a3b-instruct": 0.6412327645717263
@@ -317,7 +303,6 @@
       "gpt-5.5": 0.5439937906813384,
       "moonshotai/kimi-k2.5": 0.9388408818026135,
       "qwen/qwen3-235b-a22b-2507": 0.6937322704239084,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.6166809774473885,
       "qwen/qwen3-coder": 0.6280181141194909,
       "qwen/qwen3-coder-next": 0.6309247295577541,
       "qwen/qwen3-next-80b-a3b-instruct": 0.6593273222173457
@@ -337,7 +322,6 @@
       "gpt-5.5": 0.7642112779343085,
       "moonshotai/kimi-k2.5": 0.9053890576103669,
       "qwen/qwen3-235b-a22b-2507": 0.7227478095844051,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.591077486647451,
       "qwen/qwen3-coder": 0.7429337438491865,
       "qwen/qwen3-coder-next": 0.5948808831944363,
       "qwen/qwen3-next-80b-a3b-instruct": 0.7306139957992992
@@ -357,7 +341,6 @@
       "gpt-5.5": 0.7216712507940385,
       "moonshotai/kimi-k2.5": 0.9459962744117775,
       "qwen/qwen3-235b-a22b-2507": 0.9154214336281287,
-      "qwen/qwen3-30b-a3b-instruct-2507": 0.9030446809621345,
       "qwen/qwen3-coder": 0.7790535485327494,
       "qwen/qwen3-coder-next": 0.8967474577668377,
       "qwen/qwen3-next-80b-a3b-instruct": 0.7319337901203817

@@ -43,7 +43,6 @@ var tiers = map[string]Tier{
 	"gemini-2.5-flash":                 TierLow,
 	"gpt-4.1-nano":                     TierLow,
 	"gpt-4.1-mini":                     TierLow,
-	"qwen/qwen3-30b-a3b-instruct-2507": TierLow,
 	"deepseek/deepseek-v4-flash":       TierLow,
 
 	// --- Mid ---

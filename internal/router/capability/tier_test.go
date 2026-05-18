@@ -62,7 +62,6 @@ func TestValidate(t *testing.T) {
 			"gpt-5.5",
 			"gemini-2.5-flash",
 			"qwen/qwen3-235b-a22b-2507",
-			"qwen/qwen3-30b-a3b-instruct-2507",
 			"qwen/qwen3-coder-next",
 			"qwen/qwen3-next-80b-a3b-instruct",
 			"qwen/qwen3-coder",

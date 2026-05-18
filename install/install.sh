@@ -592,7 +592,7 @@ prices='{
     "claude-opus-4-7":                  0.015,
     "claude-sonnet-4-5":                0.003,
     "deepseek/deepseek-v4-flash":       0.00014,
-    "deepseek/deepseek-v4-pro":         0.000435,
+    "deepseek/deepseek-v4-pro":         0.00174,
     "gemini-2.0-flash":                 0.0001,
     "gemini-2.0-flash-lite":            0.000075,
     "gemini-2.5-flash":                 0.0003,
@@ -621,7 +621,6 @@ prices='{
     "gpt-5.5-pro":                      0.03,
     "moonshotai/kimi-k2.5":             0.00044,
     "qwen/qwen3-235b-a22b-2507":        0.000071,
-    "qwen/qwen3-30b-a3b-instruct-2507": 0.00008,
     "qwen/qwen3-coder":                 0.00022,
     "qwen/qwen3-coder-next":            0.00007,
     "qwen/qwen3-next-80b-a3b-instruct": 0.00009
@@ -632,7 +631,7 @@ prices='{
     "claude-opus-4-7":                  0.075,
     "claude-sonnet-4-5":                0.015,
     "deepseek/deepseek-v4-flash":       0.00028,
-    "deepseek/deepseek-v4-pro":         0.00087,
+    "deepseek/deepseek-v4-pro":         0.00348,
     "gemini-2.0-flash":                 0.0004,
     "gemini-2.0-flash-lite":            0.0003,
     "gemini-2.5-flash":                 0.0012,
@@ -661,7 +660,6 @@ prices='{
     "gpt-5.5-pro":                      0.12,
     "moonshotai/kimi-k2.5":             0.002,
     "qwen/qwen3-235b-a22b-2507":        0.000463,
-    "qwen/qwen3-30b-a3b-instruct-2507": 0.00033,
     "qwen/qwen3-coder":                 0.0018,
     "qwen/qwen3-coder-next":            0.0003,
     "qwen/qwen3-next-80b-a3b-instruct": 0.0011

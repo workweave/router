@@ -26,6 +26,7 @@ training:
   n_excluded_prompts: 0
 deployed_providers:
   - anthropic
+  - fireworks
   - google
   - openai
   - openrouter
@@ -44,7 +45,6 @@ deployed_models:
   - gpt-5.5
   - moonshotai/kimi-k2.5
   - qwen/qwen3-235b-a22b-2507
-  - qwen/qwen3-30b-a3b-instruct-2507
   - qwen/qwen3-coder
   - qwen/qwen3-coder-next
   - qwen/qwen3-next-80b-a3b-instruct
@@ -63,8 +63,7 @@ cost_per_1k_input_usd:
   gpt-5.5: 0.20500000000000002
   moonshotai/kimi-k2.5: 0.01044
   qwen/qwen3-235b-a22b-2507: 0.0023859999999999997
-  qwen/qwen3-30b-a3b-instruct-2507: 0.00173
   qwen/qwen3-coder: 0.009219999999999999
   qwen/qwen3-coder-next: 0.0015699999999999998
   qwen/qwen3-next-80b-a3b-instruct: 0.00559
-changelog: "v0.38: v0.37 minus mistralai/mistral-small-2603 and qwen/qwen3.5-flash-02-23 (both underperformed in eval). centroids.bin reused verbatim from v0.37; rankings/registry stripped of the two model columns. No retraining — PR 7 (v0.39) will retrain on the SOC 2 direct-provider price set."
+changelog: "v0.38: v0.37 minus mistralai/mistral-small-2603, qwen/qwen3.5-flash-02-23, and qwen/qwen3-30b-a3b-instruct-2507 (the first two underperformed in eval; the third is dedicated-only on Fireworks, not available on any SOC 2-compliant serverless provider). deepseek/deepseek-v4-pro re-pointed from openrouter → fireworks for SOC 2 isolation. centroids.bin reused verbatim from v0.37; rankings/registry stripped of the three dropped models. No retraining — PR 7 (v0.39) will retrain on the SOC 2 direct-provider price set."

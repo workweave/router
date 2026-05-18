@@ -65,7 +65,7 @@ func TestCacheReadMultiplier_PerProvider(t *testing.T) {
 		{"gpt-5", 0.50, "OpenAI"},
 		{"gpt-4.1", 0.50, "OpenAI legacy"},
 		{"gemini-3.1-pro-preview", 0.25, "Google"},
-		{"deepseek/deepseek-v4-pro", 0.10, "DeepSeek"},
+		{"deepseek/deepseek-v4-pro", 0.0862, "Fireworks (DeepSeek V4 Pro)"},
 	}
 	for _, tc := range cases {
 		p, ok := pricing.For(tc.model)
