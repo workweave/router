@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ---------- fixtures ----------
-
 var openAISimpleConversation = []byte(`{
 	"model": "gpt-4",
 	"stream": true,
@@ -192,8 +190,6 @@ var anthropicEmptyToolArgs = []byte(`{
 	"max_tokens": 512
 }`)
 
-// ---------- helpers ----------
-
 func unmarshalBody(t *testing.T, body []byte) map[string]any {
 	t.Helper()
 	var out map[string]any
@@ -226,9 +222,6 @@ func msgAt(t *testing.T, msgs []any, i int) map[string]any {
 	require.True(t, ok, "messages[%d] is not an object", i)
 	return m
 }
-
-// ---------- OpenAI → Anthropic ----------
-
 func TestCrossFormat_OpenAIToAnthropic_SimpleText(t *testing.T) {
 	env, err := translate.ParseOpenAI(openAISimpleConversation)
 	require.NoError(t, err)
@@ -423,9 +416,6 @@ func TestCrossFormat_OpenAIToAnthropic_NullToolResult(t *testing.T) {
 	assert.Equal(t, "tool_result", block["type"])
 	assert.Equal(t, "", block["content"], "null tool content must become empty string")
 }
-
-// ---------- OpenAI → Gemini ----------
-
 func TestCrossFormat_OpenAIToGemini_SimpleText(t *testing.T) {
 	env, err := translate.ParseOpenAI(openAISimpleConversation)
 	require.NoError(t, err)
@@ -488,7 +478,6 @@ func TestCrossFormat_OpenAIToGemini_ToolConversation(t *testing.T) {
 	assert.NotNil(t, readDecl["parameters"])
 
 	contents := getArray(t, doc, "contents")
-	// user + model(functionCall) + user(functionResponse) + model(text) + user
 	require.Len(t, contents, 5)
 
 	modelFuncCall := msgAt(t, contents, 1)
@@ -578,9 +567,6 @@ func TestCrossFormat_OpenAIToGemini_EmptyToolArgs(t *testing.T) {
 	require.True(t, ok, "args must be an object even when empty")
 	assert.Empty(t, args)
 }
-
-// ---------- Anthropic → OpenAI ----------
-
 func TestCrossFormat_AnthropicToOpenAI_SimpleText(t *testing.T) {
 	env, err := translate.ParseAnthropic(anthropicSimpleConversation)
 	require.NoError(t, err)
@@ -642,7 +628,6 @@ func TestCrossFormat_AnthropicToOpenAI_ToolConversation(t *testing.T) {
 	assert.NotContains(t, fn, "input_schema", "OpenAI tools must use 'parameters', not 'input_schema'")
 
 	msgs := getArray(t, doc, "messages")
-	// system + user + assistant(tool_call) + tool + assistant(text) + user
 	require.Len(t, msgs, 6)
 
 	assistantMsg := msgAt(t, msgs, 2)
@@ -741,9 +726,6 @@ func TestCrossFormat_AnthropicToOpenAI_EmptyToolInputBecomesEmptyArgsString(t *t
 	require.True(t, ok, "arguments must be a JSON string")
 	assert.Equal(t, "{}", argsStr)
 }
-
-// ---------- Anthropic → Gemini ----------
-
 func TestCrossFormat_AnthropicToGemini_SimpleText(t *testing.T) {
 	env, err := translate.ParseAnthropic(anthropicSimpleConversation)
 	require.NoError(t, err)
@@ -883,9 +865,6 @@ func TestCrossFormat_AnthropicToGemini_EmptyToolInput(t *testing.T) {
 	require.True(t, ok, "args must be a JSON object")
 	assert.Empty(t, args)
 }
-
-// ---------- Gemini → Anthropic / OpenAI: unsupported ----------
-
 func TestCrossFormat_GeminiToAnthropic_IsUnsupported(t *testing.T) {
 	body := []byte(`{
 		"model": "gemini-2.5-pro",
@@ -909,9 +888,6 @@ func TestCrossFormat_GeminiToOpenAI_IsUnsupported(t *testing.T) {
 	_, err = env.PrepareOpenAI(http.Header{}, translate.EmitOptions{TargetModel: "gpt-4", TargetProvider: "openai"})
 	assert.Error(t, err, "Gemini→OpenAI request translation is not implemented and must return an error")
 }
-
-// ---------- Scalar field passthrough ----------
-
 func TestCrossFormat_OpenAIToAnthropic_ScalarFieldsCarriedThrough(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4",
@@ -1014,9 +990,6 @@ func TestCrossFormat_AnthropicToGemini_ScalarFieldsCarriedThrough(t *testing.T) 
 	assert.Equal(t, []any{"END"}, stops)
 	assert.Equal(t, "true", prep.Headers.Get(translate.GeminiStreamHintHeader))
 }
-
-// ---------- Tool definition schema direction ----------
-
 func TestCrossFormat_OpenAIToAnthropic_ToolParametersBecomesInputSchema(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4",
@@ -1078,9 +1051,6 @@ func TestCrossFormat_AnthropicToOpenAI_InputSchemaBecomesParameters(t *testing.T
 	assert.Equal(t, "object", params["type"])
 	assert.NotContains(t, tool, "input_schema")
 }
-
-// ---------- Consecutive tool results ----------
-
 func TestCrossFormat_OpenAIToAnthropic_ConsecutiveToolResultsMerge(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4",
@@ -1173,7 +1143,6 @@ func TestCrossFormat_AnthropicToOpenAI_ToolWithoutDescription(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Output must be valid JSON — missing description should not produce malformed output.
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
 
@@ -1182,7 +1151,6 @@ func TestCrossFormat_AnthropicToOpenAI_ToolWithoutDescription(t *testing.T) {
 	fn, _ := tools[0].(map[string]any)["function"].(map[string]any)
 	require.NotNil(t, fn)
 	assert.Equal(t, "Bash", fn["name"])
-	// description should be absent or null, not malformed (e.g. "description":,)
 	if desc, hasDesc := fn["description"]; hasDesc {
 		assert.Nil(t, desc, "if present, description should be null for tools without one")
 	}
@@ -1201,11 +1169,9 @@ func TestCrossFormat_OpenAIToAnthropic_StopNull(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Output must be valid JSON — null stop value should not produce malformed output.
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
 
-	// stop_sequences should not appear when source stop is null
 	_, hasStop := doc["stop_sequences"]
 	assert.False(t, hasStop, "null stop value should not produce a stop_sequences field")
 }
@@ -1229,9 +1195,7 @@ func TestCrossFormat_OpenAIToAnthropic_ToolChoiceNoneSuppressesTools(t *testing.
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(prep.Body, &doc))
 
-	// tool_choice "none" must suppress tools entirely — Anthropic has no
-	// "none" equivalent, so omitting tools is the only way to prevent
-	// the provider from making tool calls.
+	// Anthropic has no "none" equivalent — omitting tools is the only way to suppress.
 	_, hasTools := doc["tools"]
 	assert.False(t, hasTools, "tool_choice=none must suppress tools in Anthropic output")
 	_, hasToolChoice := doc["tool_choice"]

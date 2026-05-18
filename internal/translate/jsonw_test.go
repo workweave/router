@@ -112,7 +112,5 @@ func TestJSONWriter_StringEscaping(t *testing.T) {
 	w.EndObj()
 
 	got := string(w.Bytes())
-	// Verify the output parses back to the original strings — escaping is correct
-	// only if the round-trip matches.
 	require.JSONEq(t, `{"q":"say \"hello\"","bs":"back\\slash","nl":"line1\nline2"}`, got)
 }

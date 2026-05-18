@@ -1,4 +1,3 @@
-// Package translate — jsonWriter is a GoF Builder for structural JSON assembly.
 package translate
 
 import (

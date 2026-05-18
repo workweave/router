@@ -12,8 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ── fixtures ──────────────────────────────────────────────────────────────────
-
 var anthropicTextResponse = []byte(`{
 	"id": "msg_01XYZ",
 	"type": "message",
@@ -158,8 +156,6 @@ var geminiThoughtSigResponse = []byte(`{
 	"usageMetadata": {"promptTokenCount": 30, "candidatesTokenCount": 15, "totalTokenCount": 45}
 }`)
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 func unmarshal(t *testing.T, b []byte) map[string]any {
 	t.Helper()
 	var doc map[string]any
@@ -207,8 +203,6 @@ func content(t *testing.T, doc map[string]any) []any {
 	return c
 }
 
-// ── AnthropicToOpenAIResponse ─────────────────────────────────────────────────
-
 func TestAnthropicToOpenAIResponse_SimpleText(t *testing.T) {
 	out, err := translate.AnthropicToOpenAIResponse(anthropicTextResponse, "claude-sonnet-4-20250514")
 	require.NoError(t, err)
@@ -250,7 +244,6 @@ func TestAnthropicToOpenAIResponse_ToolUse(t *testing.T) {
 
 	fn, _ := tc["function"].(map[string]any)
 	assert.Equal(t, "Read", fn["name"])
-	// Arguments must be a JSON string, not an object.
 	args, _ := fn["arguments"].(string)
 	assert.True(t, json.Valid([]byte(args)), "arguments must be valid JSON string")
 	assert.Contains(t, args, "main.go")
@@ -328,9 +321,6 @@ func TestAnthropicToOpenAIResponse_MissingUsageReturnsZero(t *testing.T) {
 	assert.Equal(t, float64(0), u["completion_tokens"])
 	assert.Equal(t, float64(0), u["total_tokens"])
 }
-
-// ── OpenAIToAnthropicResponse ─────────────────────────────────────────────────
-
 func TestOpenAIToAnthropicResponse_SimpleText(t *testing.T) {
 	out, err := translate.OpenAIToAnthropicResponse(openAITextResponse, "gpt-4")
 	require.NoError(t, err)
@@ -363,7 +353,6 @@ func TestOpenAIToAnthropicResponse_ToolUse(t *testing.T) {
 	assert.Equal(t, "call_r1", blk["id"])
 	assert.Equal(t, "Read", blk["name"])
 
-	// Anthropic input is an object, not a string.
 	input, _ := blk["input"].(map[string]any)
 	require.NotNil(t, input, "Anthropic input must be an object, not a string")
 	assert.Equal(t, "main.go", input["path"])
@@ -449,9 +438,6 @@ func TestOpenAIToAnthropicResponse_FallbackModelFromRequest(t *testing.T) {
 	doc := unmarshal(t, out)
 	assert.Equal(t, "fallback-model", doc["model"])
 }
-
-// ── GeminiToOpenAIResponse ───────────────────────────────────────────────────
-
 func TestGeminiToOpenAIResponse_SimpleText(t *testing.T) {
 	out, err := translate.GeminiToOpenAIResponse(geminiTextResponse, "gemini-2.5-flash")
 	require.NoError(t, err)
@@ -493,7 +479,6 @@ func TestGeminiToOpenAIResponse_ToolUse(t *testing.T) {
 
 	fn, _ := tc["function"].(map[string]any)
 	assert.Equal(t, "Read", fn["name"])
-	// Gemini args is an object; OpenAI arguments must be a JSON string.
 	args, _ := fn["arguments"].(string)
 	assert.True(t, json.Valid([]byte(args)), "arguments must be valid JSON string")
 	assert.Contains(t, args, "main.go")
@@ -525,7 +510,6 @@ func TestGeminiToOpenAIResponse_MixedTextAndToolCalls(t *testing.T) {
 	require.NoError(t, err)
 	doc := unmarshal(t, out)
 
-	// When tool calls present, text from text parts is included in content
 	msg := message(t, doc)
 	assert.Equal(t, "Let me read that.", msg["content"])
 
@@ -534,8 +518,6 @@ func TestGeminiToOpenAIResponse_MixedTextAndToolCalls(t *testing.T) {
 }
 
 func TestGeminiToOpenAIResponse_FinishReasonMappingWithToolCalls(t *testing.T) {
-	// Validates STOP+hasToolCalls→tool_calls and MAX_TOKENS/SAFETY paths.
-	// (text-only STOP and empty reason are covered in gemini_test.go.)
 	cases := []struct {
 		reason       string
 		hasToolCalls bool
@@ -587,23 +569,18 @@ func TestGeminiToOpenAIResponse_ThoughtSignaturePreserved(t *testing.T) {
 	require.Len(t, tcs, 1)
 	tc, _ := tcs[0].(map[string]any)
 
-	// Signature must be smuggled in the tool_call object.
+	// thoughtSignature round-trips across three locations to bridge Gemini→OpenAI format.
 	sig, _ := tc["thought_signature"].(string)
 	assert.Equal(t, "OPAQUE_SIG_ABC", sig)
 
-	// Signature must also be in function object.
 	fn, _ := tc["function"].(map[string]any)
 	fnSig, _ := fn["thought_signature"].(string)
 	assert.Equal(t, "OPAQUE_SIG_ABC", fnSig)
 
-	// ID must contain the base64-encoded signature.
 	id, _ := tc["id"].(string)
 	encoded := base64.RawURLEncoding.EncodeToString([]byte("OPAQUE_SIG_ABC"))
 	assert.Contains(t, id, encoded, "signature must be embedded in tool call ID for round-trip")
 }
-
-// ── GeminiToAnthropicResponse ─────────────────────────────────────────────────
-
 func TestGeminiToAnthropicResponse_SimpleText(t *testing.T) {
 	out, err := translate.GeminiToAnthropicResponse(geminiTextResponse, "gemini-2.5-flash")
 	require.NoError(t, err)
@@ -636,7 +613,6 @@ func TestGeminiToAnthropicResponse_ToolUse(t *testing.T) {
 	assert.Equal(t, "tool_use", blk["type"])
 	assert.Equal(t, "Read", blk["name"])
 
-	// Gemini args is an object; Anthropic input must also be an object.
 	input, _ := blk["input"].(map[string]any)
 	require.NotNil(t, input, "Anthropic input must be an object")
 	assert.Equal(t, "main.go", input["path"])
@@ -729,14 +705,10 @@ func TestGeminiToAnthropicResponse_ThoughtSignaturePreserved(t *testing.T) {
 	sig, _ := blk["thought_signature"].(string)
 	assert.Equal(t, "OPAQUE_SIG_ABC", sig)
 
-	// ID must contain embedded base64 signature.
 	id, _ := blk["id"].(string)
 	encoded := base64.RawURLEncoding.EncodeToString([]byte("OPAQUE_SIG_ABC"))
 	assert.Contains(t, id, encoded, "signature must be embedded in tool_use ID for round-trip")
 }
-
-// ── Error wrappers ────────────────────────────────────────────────────────────
-
 func TestAnthropicToOpenAIError_WrapsError(t *testing.T) {
 	body := []byte(`{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens must be positive"}}`)
 	out := translate.AnthropicToOpenAIError(body)
@@ -821,9 +793,6 @@ func TestGeminiToOpenAIError_MissingCodeIsZero(t *testing.T) {
 	// gjson.Int() returns 0 for absent fields, matching the struct-based behavior.
 	assert.Equal(t, float64(0), errObj["code"])
 }
-
-// ── Invalid JSON error contract ──────────────────────────────────────────────
-
 func TestAnthropicToOpenAIResponse_InvalidJSON_ReturnsError(t *testing.T) {
 	_, err := translate.AnthropicToOpenAIResponse([]byte(`not json`), "m")
 	assert.Error(t, err)

@@ -300,24 +300,14 @@ func openAIUserPartsGJSON(content gjson.Result) []string {
 		if s == "" {
 			return nil
 		}
-		pw := newJSONWriter()
-		pw.Obj()
-		pw.Key("text")
-		pw.Str(s)
-		pw.EndObj()
-		return []string{string(pw.Bytes())}
+		return []string{geminiTextPart(s)}
 	case gjson.JSON:
 		var parts []string
 		content.ForEach(func(_, p gjson.Result) bool {
 			switch p.Get("type").String() {
 			case "text":
 				if s := p.Get("text").String(); s != "" {
-					pw := newJSONWriter()
-					pw.Obj()
-					pw.Key("text")
-					pw.Str(s)
-					pw.EndObj()
-					parts = append(parts, string(pw.Bytes()))
+					parts = append(parts, geminiTextPart(s))
 				}
 			case "image_url":
 				urlStr := p.Get("image_url.url").String()
@@ -355,13 +345,8 @@ func openAIAssistantPartsGJSON(msg gjson.Result) ([]string, error) {
 	var parts []string
 
 	content := msg.Get("content")
-	if text := openAIContentTextFromGJSON(content); text != "" {
-		pw := newJSONWriter()
-		pw.Obj()
-		pw.Key("text")
-		pw.Str(text)
-		pw.EndObj()
-		parts = append(parts, string(pw.Bytes()))
+	if text := openAIContentTextGJSON(content); text != "" {
+		parts = append(parts, geminiTextPart(text))
 	}
 
 	var parseErr error
@@ -398,29 +383,13 @@ func openAIAssistantPartsGJSON(msg gjson.Result) ([]string, error) {
 	return parts, parseErr
 }
 
-// openAIContentTextFromGJSON extracts text from an OpenAI content value (string or array).
-func openAIContentTextFromGJSON(content gjson.Result) string {
-	switch content.Type {
-	case gjson.String:
-		return content.String()
-	case gjson.JSON:
-		var sb strings.Builder
-		first := true
-		content.ForEach(func(_, p gjson.Result) bool {
-			if p.Get("type").String() == "text" {
-				if s := p.Get("text").String(); s != "" {
-					if !first {
-						sb.WriteByte('\n')
-					}
-					sb.WriteString(s)
-					first = false
-				}
-			}
-			return true
-		})
-		return sb.String()
-	}
-	return ""
+func geminiTextPart(text string) string {
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("text")
+	jw.Str(text)
+	jw.EndObj()
+	return string(jw.Bytes())
 }
 
 // writeGeminiToolsFromOpenAI writes the tools array into jw from an OpenAI body.
@@ -708,24 +677,14 @@ func anthropicUserPartsGJSON(content gjson.Result, toolNames map[string]string) 
 		if s == "" {
 			return nil
 		}
-		pw := newJSONWriter()
-		pw.Obj()
-		pw.Key("text")
-		pw.Str(s)
-		pw.EndObj()
-		return []string{string(pw.Bytes())}
+		return []string{geminiTextPart(s)}
 	case gjson.JSON:
 		var parts []string
 		content.ForEach(func(_, block gjson.Result) bool {
 			switch block.Get("type").String() {
 			case "text":
 				if text := block.Get("text").String(); text != "" {
-					pw := newJSONWriter()
-					pw.Obj()
-					pw.Key("text")
-					pw.Str(text)
-					pw.EndObj()
-					parts = append(parts, string(pw.Bytes()))
+					parts = append(parts, geminiTextPart(text))
 				}
 			case "image":
 				if block.Get("source.type").String() != "base64" {
@@ -784,12 +743,7 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 		if s == "" {
 			return nil
 		}
-		pw := newJSONWriter()
-		pw.Obj()
-		pw.Key("text")
-		pw.Str(s)
-		pw.EndObj()
-		return []string{string(pw.Bytes())}
+		return []string{geminiTextPart(s)}
 	case gjson.JSON:
 		var parts []string
 		content.ForEach(func(_, block gjson.Result) bool {
@@ -811,7 +765,6 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 				parts = append(parts, string(pw.Bytes()))
 			case "tool_use":
 				name := block.Get("name").String()
-				// input is already a JSON object in Anthropic format.
 				inputRaw := block.Get("input").Raw
 				if inputRaw == "" || inputRaw == "null" {
 					inputRaw = "{}"
