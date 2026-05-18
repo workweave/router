@@ -813,7 +813,7 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 				name := block.Get("name").String()
 				// input is already a JSON object in Anthropic format.
 				inputRaw := block.Get("input").Raw
-				if inputRaw == "" {
+				if inputRaw == "" || inputRaw == "null" {
 					inputRaw = "{}"
 				}
 				pw := newJSONWriter()

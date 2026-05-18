@@ -13,18 +13,17 @@ type jsonWriter struct {
 	buf      *bytes.Buffer
 	bw       *bufio.Writer
 	depth    int
-	first    [64]bool
+	first    []bool
 	afterKey bool
 }
 
 func newJSONWriter() *jsonWriter {
 	buf := &bytes.Buffer{}
-	w := &jsonWriter{
-		buf: buf,
-		bw:  bufio.NewWriterSize(buf, 8192),
+	return &jsonWriter{
+		buf:   buf,
+		bw:    bufio.NewWriterSize(buf, 8192),
+		first: []bool{true},
 	}
-	w.first[0] = true
-	return w
 }
 
 func (w *jsonWriter) sep() {
@@ -43,7 +42,7 @@ func (w *jsonWriter) Obj() {
 	w.sep()
 	w.bw.WriteByte('{')
 	w.depth++
-	w.first[w.depth] = true
+	w.pushFirst()
 }
 
 func (w *jsonWriter) EndObj() {
@@ -51,11 +50,19 @@ func (w *jsonWriter) EndObj() {
 	w.bw.WriteByte('}')
 }
 
+func (w *jsonWriter) pushFirst() {
+	if w.depth >= len(w.first) {
+		w.first = append(w.first, true)
+	} else {
+		w.first[w.depth] = true
+	}
+}
+
 func (w *jsonWriter) Arr() {
 	w.sep()
 	w.bw.WriteByte('[')
 	w.depth++
-	w.first[w.depth] = true
+	w.pushFirst()
 }
 
 func (w *jsonWriter) EndArr() {

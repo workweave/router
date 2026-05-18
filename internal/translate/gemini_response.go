@@ -63,7 +63,7 @@ func writeOpenAIMessageFromGemini(jw *jsonWriter, candidate gjson.Result) (hasTo
 		if fc := part.Get("functionCall"); fc.Exists() {
 			name := fc.Get("name").String()
 			args := fc.Get("args").Raw
-			if args == "" {
+			if args == "" || args == "null" {
 				args = "{}"
 			}
 			sig := part.Get("thoughtSignature").String()
@@ -195,7 +195,7 @@ func buildAnthropicContent(candidate gjson.Result) (hasToolUse bool, content []b
 		if fc := part.Get("functionCall"); fc.Exists() {
 			sig := part.Get("thoughtSignature").String()
 			args := fc.Get("args").Raw
-			if args == "" {
+			if args == "" || args == "null" {
 				args = "{}"
 			}
 			jw.Obj()

@@ -834,6 +834,58 @@ func TestOpenAIToAnthropicResponse_InvalidJSON_ReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestGeminiToOpenAIResponse_NullArgsNormalizedToEmptyObject(t *testing.T) {
+	body := []byte(`{
+		"candidates": [{
+			"content": {"parts": [
+				{"functionCall": {"name": "Bash", "args": null}}
+			]},
+			"finishReason": "STOP"
+		}],
+		"usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5}
+	}`)
+	out, err := translate.GeminiToOpenAIResponse(body, "gemini-2.5-flash")
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(out, &doc))
+
+	choices, _ := doc["choices"].([]any)
+	require.Len(t, choices, 1)
+	msg := choices[0].(map[string]any)["message"].(map[string]any)
+	tcs, _ := msg["tool_calls"].([]any)
+	require.Len(t, tcs, 1)
+	fn := tcs[0].(map[string]any)["function"].(map[string]any)
+	assert.Equal(t, "{}", fn["arguments"], "null args must be normalized to empty object string, not \"null\"")
+}
+
+func TestGeminiToAnthropicResponse_NullArgsNormalizedToEmptyObject(t *testing.T) {
+	body := []byte(`{
+		"candidates": [{
+			"content": {"parts": [
+				{"functionCall": {"name": "Bash", "args": null}}
+			]},
+			"finishReason": "STOP"
+		}],
+		"usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5}
+	}`)
+	out, err := translate.GeminiToAnthropicResponse(body, "gemini-2.5-flash")
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(out, &doc))
+
+	blocks, _ := doc["content"].([]any)
+	require.Len(t, blocks, 1)
+	block := blocks[0].(map[string]any)
+	assert.Equal(t, "tool_use", block["type"])
+	input := block["input"]
+	require.NotNil(t, input, "input must not be nil/null")
+	inputMap, ok := input.(map[string]any)
+	require.True(t, ok, "input must be an object, got %T", input)
+	assert.Empty(t, inputMap, "null args must be normalized to empty object")
+}
+
 func TestGeminiToOpenAIResponse_InvalidJSON_ReturnsError(t *testing.T) {
 	_, err := translate.GeminiToOpenAIResponse([]byte(`not json`), "m")
 	assert.Error(t, err)

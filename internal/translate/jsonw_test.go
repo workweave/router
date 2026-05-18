@@ -85,6 +85,21 @@ func TestJSONWriter_EmptyContainers(t *testing.T) {
 	require.JSONEq(t, `{"arr":[],"obj":{}}`, string(w.Bytes()))
 }
 
+func TestJSONWriter_DeepNesting_NoPanic(t *testing.T) {
+	w := newJSONWriter()
+	depth := 70
+	for i := 0; i < depth; i++ {
+		w.Obj()
+		w.Key("n")
+	}
+	w.Str("leaf")
+	for i := 0; i < depth; i++ {
+		w.EndObj()
+	}
+	got := w.Bytes()
+	require.True(t, len(got) > 0, "should produce output without panic")
+}
+
 func TestJSONWriter_StringEscaping(t *testing.T) {
 	w := newJSONWriter()
 	w.Obj()

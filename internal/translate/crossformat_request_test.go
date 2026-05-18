@@ -1238,6 +1238,71 @@ func TestCrossFormat_OpenAIToAnthropic_ToolChoiceNoneSuppressesTools(t *testing.
 	assert.False(t, hasToolChoice, "tool_choice should not appear when none")
 }
 
+func TestCrossFormat_AnthropicToGemini_NullInputNormalizedToEmptyObject(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "user", "content": [{"type": "text", "text": "run it"}]},
+			{"role": "assistant", "content": [
+				{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": null}
+			]},
+			{"role": "user", "content": [
+				{"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"}
+			]}
+		],
+		"max_tokens": 1024
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{
+		TargetModel: "gemini-2.5-flash",
+	})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
+
+	contents, _ := doc["contents"].([]any)
+	require.NotEmpty(t, contents)
+	for _, c := range contents {
+		content := c.(map[string]any)
+		parts, _ := content["parts"].([]any)
+		for _, p := range parts {
+			part := p.(map[string]any)
+			if fc, ok := part["functionCall"].(map[string]any); ok {
+				args := fc["args"]
+				require.NotNil(t, args, "null input must be normalized to empty object, not null")
+				argsMap, ok := args.(map[string]any)
+				require.True(t, ok, "args must be an object, got %T", args)
+				assert.Empty(t, argsMap, "null input must be normalized to empty object")
+			}
+		}
+	}
+}
+
+func TestCrossFormat_AnthropicToOpenAI_EmptyToolsArrayOmitted(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "user", "content": [{"type": "text", "text": "hi"}]}
+		],
+		"tools": [ ],
+		"max_tokens": 1024
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{
+		TargetModel: "gpt-4",
+	})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc))
+
+	_, hasTools := doc["tools"]
+	assert.False(t, hasTools, "empty tools array must be omitted, not emitted as empty array")
+}
+
 func TestCrossFormat_OpenAIToGemini_InvalidToolArgsReturnsError(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4",

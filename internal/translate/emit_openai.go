@@ -451,7 +451,7 @@ const openAIMaxTools = 128
 // Anthropic tool definitions to OpenAI function-calling format.
 func writeOpenAIToolsFromAnthropic(jw *jsonWriter, body []byte) {
 	tools := gjson.GetBytes(body, "tools")
-	if !tools.Exists() || !tools.IsArray() || tools.Raw == "[]" {
+	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {
 		return
 	}
 
