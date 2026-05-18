@@ -10,14 +10,16 @@ import (
 )
 
 // ClientIdentity holds per-request user identification signals. Email is the
-// cross-protocol identity persisted to router.model_router_users.email.
+// cross-protocol identity persisted to router.model_router_users.email;
+// DisplayName is the optional free-form label persisted to display_name.
 type ClientIdentity struct {
-	DeviceID  string
-	AccountID string
-	SessionID string
-	Email     string
-	UserAgent string
-	ClientApp string
+	DeviceID    string
+	AccountID   string
+	SessionID   string
+	Email       string
+	DisplayName string
+	UserAgent   string
+	ClientApp   string
 }
 
 // ClientIdentityContextKey is the request-context key for client identity.
@@ -55,8 +57,9 @@ func ResolveUserFromContext(ctx context.Context, authSvc *auth.Service, installa
 		"installation_id", installation.ID,
 		"email_present", id.Email != "",
 		"account_present", id.AccountID != "",
+		"name_present", id.DisplayName != "",
 	)
-	return authSvc.ResolveAndStashUser(ctx, installation.ID, id.Email, id.AccountID)
+	return authSvc.ResolveAndStashUser(ctx, installation.ID, id.Email, id.AccountID, id.DisplayName)
 }
 
 // ClaudeCodeMetadata mirrors the JSON Claude Code encodes into
@@ -116,4 +119,35 @@ func NormalizeEmail(s string) string {
 		return ""
 	}
 	return s
+}
+
+// MaxDisplayNameLen bounds the free-form display name. 128 mirrors the
+// installer-side cap; longer values almost certainly indicate a header
+// smuggling attempt rather than a real name.
+const MaxDisplayNameLen = 128
+
+// NormalizeDisplayName trims and strips control characters from a free-form
+// display name. Returns "" when empty or oversized. We don't case-fold —
+// names are free-form, not lookup keys — but we do drop control bytes a
+// malicious header could carry so the value is safe to persist and render.
+func NormalizeDisplayName(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > MaxDisplayNameLen {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		// Drop ASCII control chars (incl. CR/LF) and the C1 block. Printable
+		// Unicode passes through so non-ASCII names render correctly.
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return ""
+	}
+	return out
 }

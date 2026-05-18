@@ -142,10 +142,11 @@ func injectModelAndStream(body []byte, model string, stream bool) ([]byte, error
 
 func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
 	id := proxy.ClientIdentity{
-		SessionID: proxy.NormalizeClientIdentifier(h.Get("X-Claude-Code-Session-Id")),
-		Email:     proxy.NormalizeEmail(h.Get("X-Weave-User-Email")),
-		UserAgent: h.Get("User-Agent"),
-		ClientApp: h.Get("X-App"),
+		SessionID:   proxy.NormalizeClientIdentifier(h.Get("X-Claude-Code-Session-Id")),
+		Email:       proxy.NormalizeEmail(h.Get("X-Weave-User-Email")),
+		DisplayName: proxy.NormalizeDisplayName(h.Get("X-Weave-User-Name")),
+		UserAgent:   h.Get("User-Agent"),
+		ClientApp:   h.Get("X-App"),
 	}
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
 }

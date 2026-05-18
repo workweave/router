@@ -284,9 +284,10 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 
 // ResolveAndStashUser upserts a router user and stashes the ID on ctx.
 // Email takes precedence as the lookup key. When only claudeAccountUUID is present,
-// the row is keyed on account_uuid with NULL email.
+// the row is keyed on account_uuid with NULL email. displayName is best-effort
+// metadata persisted alongside the identity; empty = leave existing value.
 // Best-effort: returns ctx unchanged on failure — must never fail an authenticated request.
-func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email, claudeAccountUUID string) context.Context {
+func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email, claudeAccountUUID, displayName string) context.Context {
 	log := observability.Get()
 	if s.users == nil || installationID == "" {
 		log.Info("ResolveAndStashUser bailout", "reason", "nil_users_or_empty_inst", "users_nil", s.users == nil, "inst_empty", installationID == "")
@@ -303,7 +304,12 @@ func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email
 		return context.WithValue(ctx, UserIDContextKey{}, cached)
 	}
 
-	log.Debug("ResolveAndStashUser upsert", "installation_id", installationID, "email_present", email != "", "account_present", claudeAccountUUID != "")
+	var namePtr *string
+	if displayName != "" {
+		namePtr = &displayName
+	}
+
+	log.Debug("ResolveAndStashUser upsert", "installation_id", installationID, "email_present", email != "", "account_present", claudeAccountUUID != "", "name_present", namePtr != nil)
 	var user *User
 	var err error
 	if email != "" {
@@ -315,11 +321,13 @@ func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email
 			InstallationID:    installationID,
 			Email:             email,
 			ClaudeAccountUUID: accountPtr,
+			DisplayName:       namePtr,
 		})
 	} else {
 		user, err = s.users.UpsertByAccountUUID(ctx, UpsertUserByAccountUUIDParams{
 			InstallationID:    installationID,
 			ClaudeAccountUUID: claudeAccountUUID,
+			DisplayName:       namePtr,
 		})
 	}
 	if err != nil {

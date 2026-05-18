@@ -107,6 +107,8 @@ type RouterModelRouterUser struct {
 	FirstSeenAt       pgtype.Timestamp
 	LastSeenAt        pgtype.Timestamp
 	DeletedAt         pgtype.Timestamp
+	// Free-form user display name (typically git user.name) carried on the X-Weave-User-Name request header. Nullable: requests without the header leave the column NULL; existing rows are not back-filled.
+	DisplayName *string
 }
 
 type RouterOrganizationBillingOverride struct {

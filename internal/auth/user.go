@@ -20,6 +20,7 @@ type User struct {
 	InstallationID    string
 	Email             string // empty when account-uuid-only
 	ClaudeAccountUUID *string
+	DisplayName       *string // free-form name from X-Weave-User-Name (git user.name)
 	FirstSeenAt       time.Time
 	LastSeenAt        time.Time
 	DeletedAt         *time.Time
@@ -31,12 +32,14 @@ type UpsertUserParams struct {
 	InstallationID    string
 	Email             string
 	ClaudeAccountUUID *string
+	DisplayName       *string
 }
 
 // UpsertUserByAccountUUIDParams is the input to UserRepository.UpsertByAccountUUID.
 type UpsertUserByAccountUUIDParams struct {
 	InstallationID    string
 	ClaudeAccountUUID string
+	DisplayName       *string
 }
 
 // UserRepository is the data-access port for end-user identities.

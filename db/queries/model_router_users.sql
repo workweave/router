@@ -1,22 +1,26 @@
 -- Upserts an end-user identity keyed on (installation_id, email), refreshing
--- last_seen_at on every hit. claude_account_uuid is overwritten only when
--- the new value is non-NULL so a request from a non-Claude-Code client
--- can't blank out the field. Returns the row so the caller can stash
--- user_id on the request context.
+-- last_seen_at on every hit. claude_account_uuid and display_name are
+-- overwritten only when the new value is non-NULL so a request from a
+-- non-Claude-Code client (or one that omits the X-Weave-User-Name header)
+-- can't blank out fields populated by earlier requests. Returns the row so
+-- the caller can stash user_id on the request context.
 -- name: UpsertModelRouterUserByEmail :one
 INSERT INTO router.model_router_users (
     installation_id,
     email,
-    claude_account_uuid
+    claude_account_uuid,
+    display_name
 )
 VALUES (
     @installation_id::uuid,
     @email::text,
-    sqlc.narg('claude_account_uuid')::uuid
+    sqlc.narg('claude_account_uuid')::uuid,
+    sqlc.narg('display_name')::text
 )
 ON CONFLICT (installation_id, email) WHERE deleted_at IS NULL DO UPDATE SET
     last_seen_at        = CURRENT_TIMESTAMP,
-    claude_account_uuid = COALESCE(EXCLUDED.claude_account_uuid, router.model_router_users.claude_account_uuid)
+    claude_account_uuid = COALESCE(EXCLUDED.claude_account_uuid, router.model_router_users.claude_account_uuid),
+    display_name        = COALESCE(EXCLUDED.display_name, router.model_router_users.display_name)
 RETURNING *;
 
 -- Upserts an end-user identity keyed on (installation_id, claude_account_uuid)
@@ -30,16 +34,20 @@ RETURNING *;
 INSERT INTO router.model_router_users (
     installation_id,
     email,
-    claude_account_uuid
+    claude_account_uuid,
+    display_name
 )
 VALUES (
     @installation_id::uuid,
     NULL,
-    @claude_account_uuid::uuid
+    @claude_account_uuid::uuid,
+    sqlc.narg('display_name')::text
 )
 ON CONFLICT (installation_id, claude_account_uuid)
   WHERE email IS NULL AND claude_account_uuid IS NOT NULL AND deleted_at IS NULL
-DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP
+DO UPDATE SET
+    last_seen_at = CURRENT_TIMESTAMP,
+    display_name = COALESCE(EXCLUDED.display_name, router.model_router_users.display_name)
 RETURNING *;
 
 -- Single-row read by id; returns sql.ErrNoRows when missing or soft-deleted.

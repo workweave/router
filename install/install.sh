@@ -207,6 +207,130 @@ refuse_if_symlink() {
   fi
 }
 
+# ---------- identity helpers ----------
+#
+# The router parses X-Weave-User-Email and X-Weave-User-Name on every protocol
+# (Anthropic, OpenAI, Gemini) and persists them onto router.model_router_users
+# so customers can attribute traffic to a person even when many people share
+# one API key. Claude Code's metadata.user_id carries only account_uuid (no
+# email), so without these headers the router only ever sees anonymous UUIDs.
+
+# normalize_email mirrors the router's proxy.NormalizeEmail: trim, lowercase,
+# enforce a single '@' with non-empty local + domain parts, and cap at 254
+# chars (RFC 5321). Returns the cleaned address on stdout, or empty string if
+# the input is missing or malformed. We validate locally so the installer
+# never plants a header value the router would silently drop, and so a
+# typo'd git config doesn't end up as a per-request identity claim.
+normalize_email() {
+  local raw="${1:-}"
+  # Trim whitespace then lowercase. tr is POSIX; the [:upper:]/[:lower:] form
+  # works on both macOS (BSD) and Linux (GNU) without needing LANG tweaks.
+  local trimmed="${raw#"${raw%%[![:space:]]*}"}"
+  trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+  local lowered
+  lowered="$(printf '%s' "$trimmed" | tr '[:upper:]' '[:lower:]')"
+  if [ -z "$lowered" ] || [ "${#lowered}" -gt 254 ]; then
+    printf ''
+    return
+  fi
+  case "$lowered" in
+    *@*@*) printf ''; return ;;
+    @*|*@) printf ''; return ;;
+    *@*)   printf '%s' "$lowered" ;;
+    *)     printf '' ;;
+  esac
+}
+
+# normalize_name trims whitespace, rejects empty/oversized, and strips control
+# chars + the colon/CR/LF chars HTTP forbids in header values. Display names
+# are free-form so we don't case-fold; we just keep the header well-formed.
+normalize_name() {
+  local raw="${1:-}"
+  local trimmed="${raw#"${raw%%[![:space:]]*}"}"
+  trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+  # Drop CR/LF/colon (header smuggling) and other control chars. tr's -d
+  # with a character class is portable across BSD/GNU.
+  local cleaned
+  cleaned="$(printf '%s' "$trimmed" | tr -d '\r\n:' | tr -d '[:cntrl:]')"
+  if [ -z "$cleaned" ] || [ "${#cleaned}" -gt 128 ]; then
+    printf ''
+    return
+  fi
+  printf '%s' "$cleaned"
+}
+
+# resolve_user_email picks the email to plant in router request headers so the
+# router can attribute traffic to a person even on shared API keys. Priority:
+# WEAVE_USER_EMAIL env override -> git config user.email -> interactive prompt
+# (pre-filled with whatever we found). In --non-interactive mode we never
+# prompt, so unset/invalid means we ship no header (router treats that as
+# account_uuid-only, same as today). Echoes the validated email on stdout.
+resolve_user_email() {
+  local candidate=""
+  if [ -n "${WEAVE_USER_EMAIL:-}" ]; then
+    candidate="$(normalize_email "$WEAVE_USER_EMAIL")"
+    if [ -z "$candidate" ]; then
+      warn "WEAVE_USER_EMAIL=\"$WEAVE_USER_EMAIL\" is not a valid email; ignoring."
+    fi
+  fi
+  if [ -z "$candidate" ]; then
+    local git_email
+    git_email="$(git config --global user.email 2>/dev/null || true)"
+    candidate="$(normalize_email "$git_email")"
+  fi
+  if [ "$non_interactive" = "true" ] || [ ! -r /dev/tty ]; then
+    printf '%s' "$candidate"
+    return
+  fi
+  if [ "$quiet" = "true" ]; then
+    printf '%s' "$candidate"
+    return
+  fi
+  local prompt_default="$candidate"
+  local response=""
+  if [ -n "$prompt_default" ]; then
+    printf "%sIdentify router traffic as %s[%s]%s (Enter to accept, '-' to skip): " \
+      "$C_DIM" "$C_BOLD" "$prompt_default" "$C_RESET" >/dev/tty
+  else
+    printf "%sEmail to identify your router traffic (blank to skip): %s" \
+      "$C_DIM" "$C_RESET" >/dev/tty
+  fi
+  read -r response </dev/tty || response=""
+  case "$response" in
+    "")   printf '%s' "$prompt_default" ;;
+    "-")  printf '' ;;
+    *)
+      local cleaned
+      cleaned="$(normalize_email "$response")"
+      if [ -z "$cleaned" ]; then
+        warn "\"$response\" is not a valid email; skipping identity header."
+      fi
+      printf '%s' "$cleaned"
+      ;;
+  esac
+}
+
+# resolve_user_name mirrors resolve_user_email but for display name. Priority:
+# WEAVE_USER_NAME env override -> git config user.name -> empty. We don't
+# prompt for name independently: if email prompting yielded nothing, name
+# almost certainly will too, and a second prompt is noise. Echoes the
+# validated name on stdout.
+resolve_user_name() {
+  local candidate=""
+  if [ -n "${WEAVE_USER_NAME:-}" ]; then
+    candidate="$(normalize_name "$WEAVE_USER_NAME")"
+    if [ -z "$candidate" ]; then
+      warn "WEAVE_USER_NAME=\"$WEAVE_USER_NAME\" is not a usable name; ignoring."
+    fi
+  fi
+  if [ -z "$candidate" ]; then
+    local git_name
+    git_name="$(git config --global user.name 2>/dev/null || true)"
+    candidate="$(normalize_name "$git_name")"
+  fi
+  printf '%s' "$candidate"
+}
+
 # ---------- uninstall delegation ----------
 #
 # `--uninstall` flips this script into a thin shim for uninstall.sh: the
@@ -452,6 +576,25 @@ if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
     printf "\n"
     [ -n "$api_key" ] || { err "no key provided"; exit 1; }
   fi
+
+# ---------- identity (user email + name) ----------
+#
+# Resolved after api_key so the prompt sequence reads naturally: key first,
+# then "who are you?". Both end up as request headers the router parses on
+# every protocol so customers can link router users to Weave accounts on the
+# dashboard. Empty values = no header (router stays in account_uuid-only
+# mode), so existing behavior is preserved when git config is unset.
+user_email="$(resolve_user_email)"
+user_name="$(resolve_user_name)"
+if [ -n "$user_email" ] && [ -n "$user_name" ]; then
+  ok "Will identify router traffic as $user_name <$user_email>"
+elif [ -n "$user_email" ]; then
+  ok "Will identify router traffic as $user_email"
+elif [ -n "$user_name" ]; then
+  ok "Will identify router traffic as $user_name"
+else
+  info "No identity set — router traffic will be attributed by account UUID only."
+fi
 
 # ---------- write the statusline script ----------
 
@@ -831,13 +974,26 @@ tmp_patch="$(mktemp)"
 # leave the cursor hidden if Ctrl-C lands during settings.json patching.
 trap '_spin_cleanup; rm -f "$tmp_patch"' EXIT INT TERM HUP
 
+# Claude Code splits ANTHROPIC_CUSTOM_HEADERS on newlines, so multiple headers
+# ride in the same env var separated by \n. Append identity headers alongside
+# the router key so a single var carries them all. When email/name are empty
+# we keep the bare router-key form so a re-install for a user who opted out
+# cleanly removes the old line.
+custom_headers="$router_key_header: $api_key"
+if [ -n "$user_email" ]; then
+  custom_headers="$custom_headers"$'\n'"X-Weave-User-Email: $user_email"
+fi
+if [ -n "$user_name" ]; then
+  custom_headers="$custom_headers"$'\n'"X-Weave-User-Name: $user_name"
+fi
+
 if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
   jq -n --arg url "$base_url" --arg sl "$statusline_path_for_settings" '{
     env: { ANTHROPIC_BASE_URL: $url },
     statusLine: { type: "command", command: $sl }
   }' >"$tmp_patch"
 else
-  jq -n --arg url "$base_url" --arg header "$router_key_header: $api_key" --arg sl "$statusline_path_for_settings" '{
+  jq -n --arg url "$base_url" --arg header "$custom_headers" --arg sl "$statusline_path_for_settings" '{
     env: { ANTHROPIC_BASE_URL: $url, ANTHROPIC_CUSTOM_HEADERS: $header },
     statusLine: { type: "command", command: $sl }
   }' >"$tmp_patch"
@@ -863,7 +1019,7 @@ fi
 ok "Settings written to $settings_file"
 
 if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
-  jq -n --arg header "$router_key_header: $api_key" '{
+  jq -n --arg header "$custom_headers" '{
     env: { ANTHROPIC_CUSTOM_HEADERS: $header }
   }' >"$tmp_patch"
   if [ -f "$local_settings_file" ]; then

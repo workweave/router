@@ -13,7 +13,7 @@ import (
 )
 
 const getModelRouterUser = `-- name: GetModelRouterUser :one
-SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
+SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 FROM router.model_router_users
 WHERE id = $1::uuid
   AND deleted_at IS NULL
@@ -21,7 +21,7 @@ WHERE id = $1::uuid
 
 // Single-row read by id; returns sql.ErrNoRows when missing or soft-deleted.
 //
-//	SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
+//	SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 //	FROM router.model_router_users
 //	WHERE id = $1::uuid
 //	  AND deleted_at IS NULL
@@ -36,12 +36,13 @@ func (q *Queries) GetModelRouterUser(ctx context.Context, id uuid.UUID) (RouterM
 		&i.FirstSeenAt,
 		&i.LastSeenAt,
 		&i.DeletedAt,
+		&i.DisplayName,
 	)
 	return i, err
 }
 
 const listModelRouterUsersForInstallation = `-- name: ListModelRouterUsersForInstallation :many
-SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
+SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 FROM router.model_router_users
 WHERE installation_id = $1::uuid
   AND deleted_at IS NULL
@@ -50,7 +51,7 @@ ORDER BY last_seen_at DESC
 
 // Lists active users for an installation (admin / dashboard; not on the request path).
 //
-//	SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
+//	SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 //	FROM router.model_router_users
 //	WHERE installation_id = $1::uuid
 //	  AND deleted_at IS NULL
@@ -72,6 +73,7 @@ func (q *Queries) ListModelRouterUsersForInstallation(ctx context.Context, insta
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.DeletedAt,
+			&i.DisplayName,
 		); err != nil {
 			return nil, err
 		}
@@ -87,22 +89,27 @@ const upsertModelRouterUserByAccountUUID = `-- name: UpsertModelRouterUserByAcco
 INSERT INTO router.model_router_users (
     installation_id,
     email,
-    claude_account_uuid
+    claude_account_uuid,
+    display_name
 )
 VALUES (
     $1::uuid,
     NULL,
-    $2::uuid
+    $2::uuid,
+    $3::text
 )
 ON CONFLICT (installation_id, claude_account_uuid)
   WHERE email IS NULL AND claude_account_uuid IS NOT NULL AND deleted_at IS NULL
-DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP
-RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
+DO UPDATE SET
+    last_seen_at = CURRENT_TIMESTAMP,
+    display_name = COALESCE(EXCLUDED.display_name, router.model_router_users.display_name)
+RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 `
 
 type UpsertModelRouterUserByAccountUUIDParams struct {
 	InstallationID    uuid.UUID
 	ClaudeAccountUUID uuid.UUID
+	DisplayName       *string
 }
 
 // Upserts an end-user identity keyed on (installation_id, claude_account_uuid)
@@ -116,19 +123,23 @@ type UpsertModelRouterUserByAccountUUIDParams struct {
 //	INSERT INTO router.model_router_users (
 //	    installation_id,
 //	    email,
-//	    claude_account_uuid
+//	    claude_account_uuid,
+//	    display_name
 //	)
 //	VALUES (
 //	    $1::uuid,
 //	    NULL,
-//	    $2::uuid
+//	    $2::uuid,
+//	    $3::text
 //	)
 //	ON CONFLICT (installation_id, claude_account_uuid)
 //	  WHERE email IS NULL AND claude_account_uuid IS NOT NULL AND deleted_at IS NULL
-//	DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP
-//	RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
+//	DO UPDATE SET
+//	    last_seen_at = CURRENT_TIMESTAMP,
+//	    display_name = COALESCE(EXCLUDED.display_name, router.model_router_users.display_name)
+//	RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 func (q *Queries) UpsertModelRouterUserByAccountUUID(ctx context.Context, arg UpsertModelRouterUserByAccountUUIDParams) (RouterModelRouterUser, error) {
-	row := q.db.QueryRow(ctx, upsertModelRouterUserByAccountUUID, arg.InstallationID, arg.ClaudeAccountUUID)
+	row := q.db.QueryRow(ctx, upsertModelRouterUserByAccountUUID, arg.InstallationID, arg.ClaudeAccountUUID, arg.DisplayName)
 	var i RouterModelRouterUser
 	err := row.Scan(
 		&i.ID,
@@ -138,6 +149,7 @@ func (q *Queries) UpsertModelRouterUserByAccountUUID(ctx context.Context, arg Up
 		&i.FirstSeenAt,
 		&i.LastSeenAt,
 		&i.DeletedAt,
+		&i.DisplayName,
 	)
 	return i, err
 }
@@ -146,47 +158,60 @@ const upsertModelRouterUserByEmail = `-- name: UpsertModelRouterUserByEmail :one
 INSERT INTO router.model_router_users (
     installation_id,
     email,
-    claude_account_uuid
+    claude_account_uuid,
+    display_name
 )
 VALUES (
     $1::uuid,
     $2::text,
-    $3::uuid
+    $3::uuid,
+    $4::text
 )
 ON CONFLICT (installation_id, email) WHERE deleted_at IS NULL DO UPDATE SET
     last_seen_at        = CURRENT_TIMESTAMP,
-    claude_account_uuid = COALESCE(EXCLUDED.claude_account_uuid, router.model_router_users.claude_account_uuid)
-RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
+    claude_account_uuid = COALESCE(EXCLUDED.claude_account_uuid, router.model_router_users.claude_account_uuid),
+    display_name        = COALESCE(EXCLUDED.display_name, router.model_router_users.display_name)
+RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 `
 
 type UpsertModelRouterUserByEmailParams struct {
 	InstallationID    uuid.UUID
 	Email             string
 	ClaudeAccountUUID pgtype.UUID
+	DisplayName       *string
 }
 
 // Upserts an end-user identity keyed on (installation_id, email), refreshing
-// last_seen_at on every hit. claude_account_uuid is overwritten only when
-// the new value is non-NULL so a request from a non-Claude-Code client
-// can't blank out the field. Returns the row so the caller can stash
-// user_id on the request context.
+// last_seen_at on every hit. claude_account_uuid and display_name are
+// overwritten only when the new value is non-NULL so a request from a
+// non-Claude-Code client (or one that omits the X-Weave-User-Name header)
+// can't blank out fields populated by earlier requests. Returns the row so
+// the caller can stash user_id on the request context.
 //
 //	INSERT INTO router.model_router_users (
 //	    installation_id,
 //	    email,
-//	    claude_account_uuid
+//	    claude_account_uuid,
+//	    display_name
 //	)
 //	VALUES (
 //	    $1::uuid,
 //	    $2::text,
-//	    $3::uuid
+//	    $3::uuid,
+//	    $4::text
 //	)
 //	ON CONFLICT (installation_id, email) WHERE deleted_at IS NULL DO UPDATE SET
 //	    last_seen_at        = CURRENT_TIMESTAMP,
-//	    claude_account_uuid = COALESCE(EXCLUDED.claude_account_uuid, router.model_router_users.claude_account_uuid)
-//	RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at
+//	    claude_account_uuid = COALESCE(EXCLUDED.claude_account_uuid, router.model_router_users.claude_account_uuid),
+//	    display_name        = COALESCE(EXCLUDED.display_name, router.model_router_users.display_name)
+//	RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 func (q *Queries) UpsertModelRouterUserByEmail(ctx context.Context, arg UpsertModelRouterUserByEmailParams) (RouterModelRouterUser, error) {
-	row := q.db.QueryRow(ctx, upsertModelRouterUserByEmail, arg.InstallationID, arg.Email, arg.ClaudeAccountUUID)
+	row := q.db.QueryRow(ctx, upsertModelRouterUserByEmail,
+		arg.InstallationID,
+		arg.Email,
+		arg.ClaudeAccountUUID,
+		arg.DisplayName,
+	)
 	var i RouterModelRouterUser
 	err := row.Scan(
 		&i.ID,
@@ -196,6 +221,7 @@ func (q *Queries) UpsertModelRouterUserByEmail(ctx context.Context, arg UpsertMo
 		&i.FirstSeenAt,
 		&i.LastSeenAt,
 		&i.DeletedAt,
+		&i.DisplayName,
 	)
 	return i, err
 }
