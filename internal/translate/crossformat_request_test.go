@@ -1208,3 +1208,31 @@ func TestCrossFormat_OpenAIToAnthropic_StopNull(t *testing.T) {
 	_, hasStop := doc["stop_sequences"]
 	assert.False(t, hasStop, "null stop value should not produce a stop_sequences field")
 }
+
+func TestCrossFormat_OpenAIToAnthropic_ToolChoiceNoneSuppressesTools(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4",
+		"messages": [{"role": "user", "content": "hi"}],
+		"tools": [
+			{"type": "function", "function": {"name": "Bash", "description": "Run a command", "parameters": {"type": "object"}}}
+		],
+		"tool_choice": "none"
+	}`)
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{
+		TargetModel: "claude-sonnet-4-20250514",
+	})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc))
+
+	// tool_choice "none" must suppress tools entirely — Anthropic has no
+	// "none" equivalent, so omitting tools is the only way to prevent
+	// the provider from making tool calls.
+	_, hasTools := doc["tools"]
+	assert.False(t, hasTools, "tool_choice=none must suppress tools in Anthropic output")
+	_, hasToolChoice := doc["tool_choice"]
+	assert.False(t, hasToolChoice, "tool_choice should not appear when none")
+}

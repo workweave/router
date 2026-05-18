@@ -97,8 +97,14 @@ func (e *RequestEnvelope) buildAnthropicFromOpenAI(opts EmitOptions) ([]byte, er
 	writeAnthropicSystemAndMessages(jw, e.body)
 	writeAnthropicMaxTokens(jw, e.body, opts.TargetModel)
 	writeAnthropicStopSequences(jw, e.body)
-	writeAnthropicTools(jw, e.body)
-	writeAnthropicToolChoice(jw, e.body)
+
+	// tool_choice "none" suppresses tools entirely — Anthropic has no direct
+	// equivalent, so omitting tools is the only way to prevent tool calls.
+	suppressTools := gjson.GetBytes(e.body, "tool_choice").String() == "none"
+	if !suppressTools {
+		writeAnthropicTools(jw, e.body)
+		writeAnthropicToolChoice(jw, e.body)
+	}
 	writeAnthropicSharedParams(jw, e.body)
 
 	jw.EndObj()
@@ -492,8 +498,7 @@ func writeAnthropicToolChoice(jw *jsonWriter, body []byte) {
 			jw.Key("tool_choice")
 			jw.Raw(`{"type":"any"}`)
 		case "none":
-			// "none" suppresses tool use; Anthropic has no direct equivalent — omit tool_choice.
-			// Tools were already written; to truly suppress, callers should filter tools upstream.
+			// Handled upstream — tools and tool_choice both suppressed.
 		}
 		return
 	}
