@@ -1157,3 +1157,54 @@ func TestCrossFormat_AnthropicToOpenAI_ToolResultSplitIntoSeparateMessages(t *te
 	}
 	assert.Equal(t, 2, toolRoleCount, "each Anthropic tool_result must become a separate OpenAI role:tool message")
 }
+
+func TestCrossFormat_AnthropicToOpenAI_ToolWithoutDescription(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [{"role": "user", "content": "hi"}],
+		"tools": [
+			{"name": "Bash", "input_schema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}}
+		]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{
+		TargetModel: "gpt-4",
+	})
+	require.NoError(t, err)
+
+	// Output must be valid JSON — missing description should not produce malformed output.
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
+
+	tools, _ := doc["tools"].([]any)
+	require.Len(t, tools, 1)
+	fn, _ := tools[0].(map[string]any)["function"].(map[string]any)
+	require.NotNil(t, fn)
+	assert.Equal(t, "Bash", fn["name"])
+	// description should be absent, not empty or malformed
+	_, hasDesc := fn["description"]
+	assert.False(t, hasDesc, "tool without description should omit the field entirely")
+}
+
+func TestCrossFormat_OpenAIToAnthropic_StopNull(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4",
+		"messages": [{"role": "user", "content": "hi"}],
+		"stop": null
+	}`)
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{
+		TargetModel: "claude-sonnet-4-20250514",
+	})
+	require.NoError(t, err)
+
+	// Output must be valid JSON — null stop value should not produce malformed output.
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
+
+	// stop_sequences should not appear when source stop is null
+	_, hasStop := doc["stop_sequences"]
+	assert.False(t, hasStop, "null stop value should not produce a stop_sequences field")
+}
