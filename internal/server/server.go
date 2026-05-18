@@ -56,10 +56,16 @@ const (
 // via middleware.WithBalanceCheck. nil leaves inference routes open (BYOK
 // or platform key still controls upstream auth).
 func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service) {
+	// Managed mode bills via prepaid credits against the platform key; any
+	// BYOK row left over in router.model_router_external_api_keys would
+	// silently double-charge the customer (upstream provider + Weave credits).
+	// Drop BYOK at the middleware boundary so no downstream consumer can see it.
+	byokDisabled := mode == DeploymentModeManaged
+
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
 
 	// /validate is a token-validity probe used by clients (not the dashboard), so it stays mounted in both modes.
-	adminAuthed := engine.Group("", middleware.WithTimeout(validateTimeout), middleware.WithAuth(authSvc))
+	adminAuthed := engine.Group("", middleware.WithTimeout(validateTimeout), middleware.WithAuth(authSvc, byokDisabled))
 	adminAuthed.GET("/validate", admin.ValidateHandler)
 
 	if mode == DeploymentModeSelfHosted {
@@ -74,7 +80,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		authPublic.GET("/me", admin.MeHandler(authSvc))
 
 		// Read-only metrics: dashboard cookie OR rk_ bearer so an installation can fetch its own data for monitoring scripts. Per-installation scoping is enforced inside the handlers.
-		metrics := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAdminOrAuth(authSvc))
+		metrics := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAdminOrAuth(authSvc, byokDisabled))
 		metrics.GET("/metrics/summary", admin.MetricsSummaryHandler(proxySvc))
 		metrics.GET("/metrics/timeseries", admin.MetricsTimeseriesHandler(proxySvc))
 		metrics.GET("/metrics/details", admin.MetricsDetailsHandler(proxySvc))
@@ -98,7 +104,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	messagesMiddleware := []gin.HandlerFunc{
 		middleware.WithTimingEntry(),
 		middleware.WithTimeout(messagesTimeout),
-		middleware.WithAuth(authSvc),
+		middleware.WithAuth(authSvc, byokDisabled),
 	}
 	if billingSvc != nil {
 		messagesMiddleware = append(messagesMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros))
@@ -113,7 +119,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	chatCompletionMiddleware := []gin.HandlerFunc{
 		middleware.WithTimingEntry(),
 		middleware.WithTimeout(chatCompletionTimeout),
-		middleware.WithAuth(authSvc),
+		middleware.WithAuth(authSvc, byokDisabled),
 	}
 	if billingSvc != nil {
 		chatCompletionMiddleware = append(chatCompletionMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros))
@@ -134,7 +140,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	// make clients fail to negotiate before any inference happens.
 	passthroughGroup := engine.Group("",
 		middleware.WithTimeout(passthroughTimeout),
-		middleware.WithAuth(authSvc),
+		middleware.WithAuth(authSvc, byokDisabled),
 	)
 	passthroughGroup.POST("/v1/messages/count_tokens", anthropicapi.PassthroughHandler(proxySvc))
 	passthroughGroup.GET("/v1/models", anthropicapi.PassthroughHandler(proxySvc))
@@ -142,7 +148,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 
 	routeMiddleware := []gin.HandlerFunc{
 		middleware.WithTimeout(routeTimeout),
-		middleware.WithAuth(authSvc),
+		middleware.WithAuth(authSvc, byokDisabled),
 	}
 	if billingSvc != nil {
 		routeMiddleware = append(routeMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros))
