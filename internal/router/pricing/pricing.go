@@ -85,17 +85,16 @@ var table = map[string]Pricing{
 	"gemini-2.0-flash":      {InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.25},
 	"gemini-2.0-flash-lite": {InputUSDPer1M: 0.075, OutputUSDPer1M: 0.30, CacheReadMultiplier: 0.25},
 
-	// OpenRouter OSS pool
-	"qwen/qwen3-235b-a22b-2507":        {InputUSDPer1M: 0.071, OutputUSDPer1M: 0.463},
+	// OSS pool (mixed direct providers — see model_registry.json for the
+	// provider mapping per row).
+	"qwen/qwen3-235b-a22b-2507":        {InputUSDPer1M: 0.071, OutputUSDPer1M: 0.463},  // OpenRouter (not on Bedrock us-east-1 as of 2026-05-17)
 	"qwen/qwen3-30b-a3b-instruct-2507": {InputUSDPer1M: 0.080, OutputUSDPer1M: 0.330},
-	"qwen/qwen3-coder-next":            {InputUSDPer1M: 0.070, OutputUSDPer1M: 0.300},
-	"qwen/qwen3-next-80b-a3b-instruct": {InputUSDPer1M: 0.090, OutputUSDPer1M: 1.100},
+	"qwen/qwen3-coder-next":            {InputUSDPer1M: 0.500, OutputUSDPer1M: 1.200},  // Bedrock us-east-1
+	"qwen/qwen3-next-80b-a3b-instruct": {InputUSDPer1M: 0.150, OutputUSDPer1M: 1.200},  // Bedrock us-east-1
 
-	// OpenRouter OSS pool: v0.25 expansion
-	"qwen/qwen3-coder":           {InputUSDPer1M: 0.220, OutputUSDPer1M: 1.800},
 	"deepseek/deepseek-v4-flash": {InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.20}, // DeepInfra: cache $0.028 → 0.028/0.14 = 0.20
 	"deepseek/deepseek-v4-pro":   {InputUSDPer1M: 0.435, OutputUSDPer1M: 0.870, CacheReadMultiplier: 0.10},
-	"moonshotai/kimi-k2.5":       {InputUSDPer1M: 0.440, OutputUSDPer1M: 2.000},
+	"moonshotai/kimi-k2.5":       {InputUSDPer1M: 0.600, OutputUSDPer1M: 3.000}, // Bedrock us-east-1
 }
 
 // For returns pricing for the given model. If the exact name isn't found,

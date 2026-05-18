@@ -26,6 +26,7 @@ training:
   n_excluded_prompts: 0
 deployed_providers:
   - anthropic
+  - bedrock
   - deepinfra
   - google
   - openai
@@ -46,7 +47,6 @@ deployed_models:
   - moonshotai/kimi-k2.5
   - qwen/qwen3-235b-a22b-2507
   - qwen/qwen3-30b-a3b-instruct-2507
-  - qwen/qwen3-coder
   - qwen/qwen3-coder-next
   - qwen/qwen3-next-80b-a3b-instruct
 cost_per_1k_input_usd:
@@ -65,7 +65,6 @@ cost_per_1k_input_usd:
   moonshotai/kimi-k2.5: 0.01044
   qwen/qwen3-235b-a22b-2507: 0.0023859999999999997
   qwen/qwen3-30b-a3b-instruct-2507: 0.00173
-  qwen/qwen3-coder: 0.009219999999999999
   qwen/qwen3-coder-next: 0.0015699999999999998
   qwen/qwen3-next-80b-a3b-instruct: 0.00559
-changelog: "v0.38: v0.37 minus mistralai/mistral-small-2603 and qwen/qwen3.5-flash-02-23 (both underperformed in eval). centroids.bin reused verbatim from v0.37; rankings/registry stripped of the two model columns. No retraining — PR 7 (v0.39) will retrain on the SOC 2 direct-provider price set."
+changelog: "v0.38: v0.37 minus underperforming models (mistralai/mistral-small-2603, qwen/qwen3.5-flash-02-23) and qwen/qwen3-coder (no SOC 2 serverless home). Provider re-points for SOC 2 isolation: deepseek-v4-flash → deepinfra; moonshotai/kimi-k2.5, qwen/qwen3-next-80b-a3b-instruct, qwen/qwen3-coder-next → bedrock (us-east-1). qwen/qwen3-235b-a22b-2507 stays on openrouter (Bedrock us-east-1 carries only the VL variant). centroids.bin reused verbatim from v0.37; rankings/registry stripped of dropped models. No retraining — PR 7 (v0.39) will retrain on the full SOC 2 direct-provider price set. cost_per_1k_input_usd reflects training-time (OpenRouter) prices — the α-blend rankings.json scores are baked at training time, so PR 6 leaves them unchanged; pricing.go is updated to Bedrock rates for request-time EV math, accepting the drift until v0.39 retrain."

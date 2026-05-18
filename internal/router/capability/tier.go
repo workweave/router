@@ -55,7 +55,6 @@ var tiers = map[string]Tier{
 	"gpt-5.4-nano":                     TierMid,
 	"gpt-5.4-mini":                     TierMid,
 	"qwen/qwen3-235b-a22b-2507":        TierMid,
-	"qwen/qwen3-coder":                 TierMid,
 	"qwen/qwen3-coder-next":            TierMid,
 	"qwen/qwen3-next-80b-a3b-instruct": TierMid,
 

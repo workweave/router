@@ -1,6 +1,6 @@
 {
   "meta": {
-    "comment": "v0.38 = v0.37 minus two underperforming models (mistralai/mistral-small-2603, qwen/qwen3.5-flash-02-23), with deepseek/deepseek-v4-flash re-pointed from openrouter → deepinfra for SOC 2 isolation. centroids.bin reused verbatim from v0.37 (clustering is model-independent). rankings.json + metadata.yaml stripped of the dropped models — argmax now operates over the smaller deployed set. No retraining; PR 7 (v0.39) replaces this bundle once full direct-provider pricing lands.",
+    "comment": "v0.38 = v0.37 minus underperforming models (mistralai/mistral-small-2603, qwen/qwen3.5-flash-02-23) and qwen/qwen3-coder (480B-A35B — no SOC 2-compliant serverless home: dedicated-only on Fireworks, absent from DeepInfra and Bedrock us-east-1 catalogs). deepseek/deepseek-v4-flash re-pointed openrouter → deepinfra. moonshotai/kimi-k2.5, qwen/qwen3-next-80b-a3b-instruct, qwen/qwen3-coder-next re-pointed openrouter → bedrock (us-east-1). qwen/qwen3-235b-a22b-2507 stays on openrouter (Bedrock us-east-1 only carries the VL variant; the Instruct-2507 we deploy is not in that catalog as of 2026-05-17). centroids.bin reused verbatim from v0.37 (clustering is model-independent); rankings.json + metadata.yaml stripped of the dropped models. No retraining; PR 7 (v0.39) replaces this bundle once full direct-provider pricing lands.",
     "last_refreshed": "2026-05-17",
     "parent": "v0.37",
     "training_recipe": "inherited from v0.37 (no retrain — model set stripped post-training)."
@@ -18,12 +18,11 @@
     {"model": "gemini-2.5-flash",                 "provider": "google",     "bench_column": "routerarena_gemini-2.5-flash",                 "direct_label": "routerarena"},
     {"model": "qwen/qwen3-235b-a22b-2507",        "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-235b-a22b-2507",        "direct_label": "routerarena"},
     {"model": "qwen/qwen3-30b-a3b-instruct-2507", "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-30b-a3b-instruct-2507", "direct_label": "routerarena"},
-    {"model": "qwen/qwen3-coder-next",            "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-coder-next",            "direct_label": "routerarena"},
-    {"model": "qwen/qwen3-next-80b-a3b-instruct", "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-next-80b-a3b-instruct", "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-coder-next",            "provider": "bedrock",    "bench_column": "routerarena_qwen/qwen3-coder-next",            "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-next-80b-a3b-instruct", "provider": "bedrock",    "bench_column": "routerarena_qwen/qwen3-next-80b-a3b-instruct", "direct_label": "routerarena"},
 
-    {"model": "qwen/qwen3-coder",                 "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-coder",                 "direct_label": "routerarena"},
     {"model": "deepseek/deepseek-v4-flash",       "provider": "deepinfra",  "bench_column": "routerarena_deepseek/deepseek-v4-flash",       "direct_label": "routerarena"},
     {"model": "deepseek/deepseek-v4-pro",         "provider": "openrouter", "bench_column": "routerarena_deepseek/deepseek-v4-pro",         "direct_label": "routerarena"},
-    {"model": "moonshotai/kimi-k2.5",             "provider": "openrouter", "bench_column": "routerarena_moonshotai/kimi-k2.5",             "direct_label": "routerarena"}
+    {"model": "moonshotai/kimi-k2.5",             "provider": "bedrock",    "bench_column": "routerarena_moonshotai/kimi-k2.5",             "direct_label": "routerarena"}
   ]
 }
