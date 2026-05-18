@@ -683,9 +683,9 @@ func TestGeminiToAnthropicResponse_MixedTextAndToolCalls(t *testing.T) {
 
 func TestGeminiToAnthropicResponse_FinishReasonMapping(t *testing.T) {
 	cases := []struct {
-		reason      string
-		hasToolUse  bool
-		expected    string
+		reason     string
+		hasToolUse bool
+		expected   string
 	}{
 		{"STOP", false, "end_turn"},
 		{"STOP", true, "tool_use"},

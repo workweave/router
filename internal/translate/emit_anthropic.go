@@ -86,10 +86,12 @@ func joinKept(beta string, keep func(string) bool) string {
 func (e *RequestEnvelope) buildAnthropicFromOpenAI(opts EmitOptions) ([]byte, error) {
 	jw := newJSONWriter()
 	jw.Obj()
-	jw.Key("model"); jw.Str(opts.TargetModel)
+	jw.Key("model")
+	jw.Str(opts.TargetModel)
 
 	if r := gjson.GetBytes(e.body, "stream"); r.Exists() {
-		jw.Key("stream"); jw.Raw(r.Raw)
+		jw.Key("stream")
+		jw.Raw(r.Raw)
 	}
 
 	writeAnthropicSystemAndMessages(jw, e.body)
@@ -129,8 +131,10 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 		// Emit a single user message with all accumulated tool_result blocks.
 		tw := newJSONWriter()
 		tw.Obj()
-		tw.Key("role"); tw.Str("user")
-		tw.Key("content"); tw.Arr()
+		tw.Key("role")
+		tw.Str("user")
+		tw.Key("content")
+		tw.Arr()
 		for _, b := range pending.blocks {
 			tw.Raw(b)
 		}
@@ -152,8 +156,10 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 				if s := content.String(); s != "" {
 					sb := newJSONWriter()
 					sb.Obj()
-					sb.Key("type"); sb.Str("text")
-					sb.Key("text"); sb.Str(s)
+					sb.Key("type")
+					sb.Str("text")
+					sb.Key("text")
+					sb.Str(s)
 					sb.EndObj()
 					systemBlocks = append(systemBlocks, string(sb.Bytes()))
 				}
@@ -163,8 +169,10 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 						if t := part.Get("text").String(); t != "" {
 							sb := newJSONWriter()
 							sb.Obj()
-							sb.Key("type"); sb.Str("text")
-							sb.Key("text"); sb.Str(t)
+							sb.Key("type")
+							sb.Str("text")
+							sb.Key("text")
+							sb.Str(t)
 							sb.EndObj()
 							systemBlocks = append(systemBlocks, string(sb.Bytes()))
 						}
@@ -193,7 +201,8 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 	flushToolBatch()
 
 	if len(systemBlocks) > 0 {
-		jw.Key("system"); jw.Arr()
+		jw.Key("system")
+		jw.Arr()
 		for _, b := range systemBlocks {
 			jw.Raw(b)
 		}
@@ -201,7 +210,8 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 	}
 
 	if len(msgParts) > 0 {
-		jw.Key("messages"); jw.Arr()
+		jw.Key("messages")
+		jw.Arr()
 		for _, m := range msgParts {
 			jw.Raw(m)
 		}
@@ -213,12 +223,15 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 func buildToolResultBlock(toolUseID string, content gjson.Result) string {
 	jw := newJSONWriter()
 	jw.Obj()
-	jw.Key("type"); jw.Str("tool_result")
-	jw.Key("tool_use_id"); jw.Str(toolUseID)
+	jw.Key("type")
+	jw.Str("tool_result")
+	jw.Key("tool_use_id")
+	jw.Str(toolUseID)
 
 	switch content.Type {
 	case gjson.String:
-		jw.Key("content"); jw.Str(content.String())
+		jw.Key("content")
+		jw.Str(content.String())
 	case gjson.JSON:
 		if content.IsArray() {
 			// Walk parts: convert text and image_url to Anthropic content blocks.
@@ -229,8 +242,10 @@ func buildToolResultBlock(toolUseID string, content gjson.Result) string {
 					if t := part.Get("text").String(); t != "" {
 						pb := newJSONWriter()
 						pb.Obj()
-						pb.Key("type"); pb.Str("text")
-						pb.Key("text"); pb.Str(t)
+						pb.Key("type")
+						pb.Str("text")
+						pb.Key("text")
+						pb.Str(t)
 						pb.EndObj()
 						parts = append(parts, string(pb.Bytes()))
 					}
@@ -243,20 +258,24 @@ func buildToolResultBlock(toolUseID string, content gjson.Result) string {
 				return true
 			})
 			if len(parts) > 0 {
-				jw.Key("content"); jw.Arr()
+				jw.Key("content")
+				jw.Arr()
 				for _, p := range parts {
 					jw.Raw(p)
 				}
 				jw.EndArr()
 			} else {
-				jw.Key("content"); jw.Str("")
+				jw.Key("content")
+				jw.Str("")
 			}
 		} else {
-			jw.Key("content"); jw.Str("")
+			jw.Key("content")
+			jw.Str("")
 		}
 	default:
 		// null or missing content
-		jw.Key("content"); jw.Str("")
+		jw.Key("content")
+		jw.Str("")
 	}
 
 	jw.EndObj()
@@ -268,7 +287,8 @@ func buildToolResultBlock(toolUseID string, content gjson.Result) string {
 func buildAnthropicAssistantMessage(msg gjson.Result) string {
 	jw := newJSONWriter()
 	jw.Obj()
-	jw.Key("role"); jw.Str("assistant")
+	jw.Key("role")
+	jw.Str("assistant")
 
 	toolCalls := msg.Get("tool_calls")
 	if !toolCalls.Exists() || !toolCalls.IsArray() || toolCalls.Get("#").Int() == 0 {
@@ -281,11 +301,14 @@ func buildAnthropicAssistantMessage(msg gjson.Result) string {
 	}
 
 	// Has tool calls: build content array with optional text prefix + tool_use blocks.
-	jw.Key("content"); jw.Arr()
+	jw.Key("content")
+	jw.Arr()
 	if text := msg.Get("content").String(); text != "" {
 		jw.Obj()
-		jw.Key("type"); jw.Str("text")
-		jw.Key("text"); jw.Str(text)
+		jw.Key("type")
+		jw.Str("text")
+		jw.Key("text")
+		jw.Str(text)
 		jw.EndObj()
 	}
 	toolCalls.ForEach(func(_, tc gjson.Result) bool {
@@ -294,9 +317,12 @@ func buildAnthropicAssistantMessage(msg gjson.Result) string {
 		argsStr := tc.Get("function.arguments").String()
 
 		jw.Obj()
-		jw.Key("type"); jw.Str("tool_use")
-		jw.Key("id"); jw.Str(id)
-		jw.Key("name"); jw.Str(name)
+		jw.Key("type")
+		jw.Str("tool_use")
+		jw.Key("id")
+		jw.Str(id)
+		jw.Key("name")
+		jw.Str(name)
 		jw.Key("input")
 		if gjson.Valid(argsStr) {
 			jw.Raw(argsStr)
@@ -317,7 +343,8 @@ func buildAnthropicAssistantMessage(msg gjson.Result) string {
 func buildAnthropicUserMessage(role string, content gjson.Result) string {
 	jw := newJSONWriter()
 	jw.Obj()
-	jw.Key("role"); jw.Str(role)
+	jw.Key("role")
+	jw.Str(role)
 	jw.Key("content")
 	writeAnthropicContentValue(jw, content)
 	jw.EndObj()
@@ -346,8 +373,10 @@ func writeAnthropicContentValue(jw *jsonWriter, content gjson.Result) {
 		switch part.Get("type").String() {
 		case "text":
 			jw.Obj()
-			jw.Key("type"); jw.Str("text")
-			jw.Key("text"); jw.Str(part.Get("text").String())
+			jw.Key("type")
+			jw.Str("text")
+			jw.Key("text")
+			jw.Str(part.Get("text").String())
 			jw.EndObj()
 		case "image_url":
 			urlStr := part.Get("image_url.url").String()
@@ -365,15 +394,22 @@ func writeAnthropicContentValue(jw *jsonWriter, content gjson.Result) {
 func buildAnthropicImageBlock(urlStr string) string {
 	jw := newJSONWriter()
 	jw.Obj()
-	jw.Key("type"); jw.Str("image")
-	jw.Key("source"); jw.Obj()
+	jw.Key("type")
+	jw.Str("image")
+	jw.Key("source")
+	jw.Obj()
 	if mime, data, ok := parseDataURL(urlStr); ok {
-		jw.Key("type"); jw.Str("base64")
-		jw.Key("media_type"); jw.Str(mime)
-		jw.Key("data"); jw.Str(data)
+		jw.Key("type")
+		jw.Str("base64")
+		jw.Key("media_type")
+		jw.Str(mime)
+		jw.Key("data")
+		jw.Str(data)
 	} else {
-		jw.Key("type"); jw.Str("url")
-		jw.Key("url"); jw.Str(urlStr)
+		jw.Key("type")
+		jw.Str("url")
+		jw.Key("url")
+		jw.Str(urlStr)
 	}
 	jw.EndObj()
 	jw.EndObj()
@@ -382,14 +418,17 @@ func buildAnthropicImageBlock(urlStr string) string {
 
 func writeAnthropicMaxTokens(jw *jsonWriter, body []byte, targetModel string) {
 	if r := gjson.GetBytes(body, "max_tokens"); r.Exists() {
-		jw.Key("max_tokens"); jw.Raw(r.Raw)
+		jw.Key("max_tokens")
+		jw.Raw(r.Raw)
 		return
 	}
 	if r := gjson.GetBytes(body, "max_completion_tokens"); r.Exists() {
-		jw.Key("max_tokens"); jw.Raw(r.Raw)
+		jw.Key("max_tokens")
+		jw.Raw(r.Raw)
 		return
 	}
-	jw.Key("max_tokens"); jw.Int(defaultOutputTokens(targetModel))
+	jw.Key("max_tokens")
+	jw.Int(defaultOutputTokens(targetModel))
 }
 
 func writeAnthropicStopSequences(jw *jsonWriter, body []byte) {
@@ -414,19 +453,23 @@ func writeAnthropicTools(jw *jsonWriter, body []byte) {
 	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {
 		return
 	}
-	jw.Key("tools"); jw.Arr()
+	jw.Key("tools")
+	jw.Arr()
 	tools.ForEach(func(_, tool gjson.Result) bool {
 		fn := tool.Get("function")
 		if !fn.Exists() {
 			return true
 		}
 		jw.Obj()
-		jw.Key("name"); jw.Raw(fn.Get("name").Raw)
+		jw.Key("name")
+		jw.Raw(fn.Get("name").Raw)
 		if desc := fn.Get("description"); desc.Exists() {
-			jw.Key("description"); jw.Raw(desc.Raw)
+			jw.Key("description")
+			jw.Raw(desc.Raw)
 		}
 		if params := fn.Get("parameters"); params.Exists() {
-			jw.Key("input_schema"); jw.Raw(params.Raw)
+			jw.Key("input_schema")
+			jw.Raw(params.Raw)
 		}
 		jw.EndObj()
 		return true
@@ -442,9 +485,11 @@ func writeAnthropicToolChoice(jw *jsonWriter, body []byte) {
 	if r.Type == gjson.String {
 		switch r.String() {
 		case "auto":
-			jw.Key("tool_choice"); jw.Raw(`{"type":"auto"}`)
+			jw.Key("tool_choice")
+			jw.Raw(`{"type":"auto"}`)
 		case "required":
-			jw.Key("tool_choice"); jw.Raw(`{"type":"any"}`)
+			jw.Key("tool_choice")
+			jw.Raw(`{"type":"any"}`)
 		case "none":
 			// "none" suppresses tool use; Anthropic has no direct equivalent — omit tool_choice.
 			// Tools were already written; to truly suppress, callers should filter tools upstream.
@@ -455,10 +500,13 @@ func writeAnthropicToolChoice(jw *jsonWriter, body []byte) {
 		if name := r.Get("function.name").String(); name != "" {
 			tw := newJSONWriter()
 			tw.Obj()
-			tw.Key("type"); tw.Str("tool")
-			tw.Key("name"); tw.Str(name)
+			tw.Key("type")
+			tw.Str("tool")
+			tw.Key("name")
+			tw.Str(name)
 			tw.EndObj()
-			jw.Key("tool_choice"); jw.Raw(string(tw.Bytes()))
+			jw.Key("tool_choice")
+			jw.Raw(string(tw.Bytes()))
 		}
 	}
 }
@@ -466,7 +514,8 @@ func writeAnthropicToolChoice(jw *jsonWriter, body []byte) {
 func writeAnthropicSharedParams(jw *jsonWriter, body []byte) {
 	for _, key := range []string{"temperature", "top_p", "top_k"} {
 		if r := gjson.GetBytes(body, key); r.Exists() {
-			jw.Key(key); jw.Raw(r.Raw)
+			jw.Key(key)
+			jw.Raw(r.Raw)
 		}
 	}
 }

@@ -9,7 +9,7 @@
 #   (and .env.local if present). Start Postgres via `make db` or point
 #   DATABASE_URL at any Postgres you already have running.
 
-.PHONY: generate generate-statusline build test test-verbose initdb migrate-up migrate-down migrate-create seed setup full-setup db dev check help install-cc uninstall-cc up down logs
+.PHONY: generate generate-statusline build test test-verbose initdb migrate-up migrate-down migrate-create seed setup full-setup db dev check fmt vet precommit install-hooks help install-cc uninstall-cc up down logs
 
 # Load DATABASE_URL from .env files (matches docker-compose defaults).
 -include .env.development
@@ -154,7 +154,27 @@ install-cc: generate-statusline ## Wire only Claude Code at the local docker-com
 uninstall-cc: ## Remove the local Claude Code → router config
 	./install/uninstall.sh
 
-check: generate build test ## Full CI-equivalent check (generate + build + test)
+fmt: ## Check gofmt (fails on unformatted files)
+	@UNFORMATTED=$$(gofmt -l .); \
+	if [ -n "$$UNFORMATTED" ]; then \
+		echo "error: Go files are not formatted. Run 'gofmt -w .'"; \
+		echo "$$UNFORMATTED"; \
+		exit 1; \
+	fi
+
+vet: ## Run go vet
+	go vet ./...
+
+precommit: fmt vet build test ## Fast pre-commit check (no codegen, no DB)
+
+install-hooks: ## Install git pre-commit hook
+	@HOOK_DIR=$$(git rev-parse --git-common-dir)/hooks; \
+	mkdir -p "$$HOOK_DIR"; \
+	cp scripts/pre-commit "$$HOOK_DIR/pre-commit"; \
+	chmod +x "$$HOOK_DIR/pre-commit"; \
+	echo "Pre-commit hook installed at $$HOOK_DIR/pre-commit"
+
+check: generate fmt vet build test ## Full CI-equivalent check
 	@if ! git diff --quiet internal/sqlc/; then \
 		echo "error: sqlc generation produced uncommitted changes"; \
 		git diff internal/sqlc/; \

@@ -601,5 +601,3 @@ func defaultOutputTokens(model string) int64 {
 	}
 	return defaultMaxOutputTokenCap
 }
-
-

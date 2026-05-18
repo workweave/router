@@ -13,17 +13,24 @@ import (
 func GeminiToOpenAIResponse(body []byte, requestModel string) ([]byte, error) {
 	jw := newJSONWriter()
 	jw.Obj()
-	jw.Key("id"); jw.Str(generateChatCmplID())
-	jw.Key("object"); jw.Str("chat.completion")
-	jw.Key("created"); jw.Int(time.Now().Unix())
-	jw.Key("model"); jw.Str(requestModel)
-	jw.Key("choices"); jw.Arr()
+	jw.Key("id")
+	jw.Str(generateChatCmplID())
+	jw.Key("object")
+	jw.Str("chat.completion")
+	jw.Key("created")
+	jw.Int(time.Now().Unix())
+	jw.Key("model")
+	jw.Str(requestModel)
+	jw.Key("choices")
+	jw.Arr()
 	jw.Obj()
-	jw.Key("index"); jw.Int(0)
+	jw.Key("index")
+	jw.Int(0)
 	jw.Key("message")
 	hasToolCalls, _ := writeOpenAIMessageFromGemini(jw, gjson.GetBytes(body, "candidates.0"))
 	finishReason := mapGeminiFinishReason(gjson.GetBytes(body, "candidates.0.finishReason").String(), hasToolCalls)
-	jw.Key("finish_reason"); jw.Str(finishReason)
+	jw.Key("finish_reason")
+	jw.Str(finishReason)
 	jw.EndObj()
 	jw.EndArr()
 	jw.Key("usage")
@@ -77,7 +84,8 @@ func writeOpenAIMessageFromGemini(jw *jsonWriter, candidate gjson.Result) (hasTo
 	}
 
 	jw.Obj()
-	jw.Key("role"); jw.Str("assistant")
+	jw.Key("role")
+	jw.Str("assistant")
 	jw.Key("content")
 	text := strings.Join(texts, "")
 	if text != "" {
@@ -86,27 +94,36 @@ func writeOpenAIMessageFromGemini(jw *jsonWriter, candidate gjson.Result) (hasTo
 		jw.Null()
 	}
 	if hasToolCalls {
-		jw.Key("tool_calls"); jw.Arr()
+		jw.Key("tool_calls")
+		jw.Arr()
 		for _, tc := range toolCalls {
 			jw.Obj()
-			jw.Key("id"); jw.Str(tc.id)
-			jw.Key("type"); jw.Str("function")
-			jw.Key("function"); jw.Obj()
-			jw.Key("name"); jw.Str(tc.name)
-			jw.Key("arguments"); jw.Str(tc.args)
+			jw.Key("id")
+			jw.Str(tc.id)
+			jw.Key("type")
+			jw.Str("function")
+			jw.Key("function")
+			jw.Obj()
+			jw.Key("name")
+			jw.Str(tc.name)
+			jw.Key("arguments")
+			jw.Str(tc.args)
 			if tc.signature != "" {
-				jw.Key("thought_signature"); jw.Str(tc.signature)
+				jw.Key("thought_signature")
+				jw.Str(tc.signature)
 			}
 			jw.EndObj()
 			if tc.signature != "" {
-				jw.Key("thought_signature"); jw.Str(tc.signature)
+				jw.Key("thought_signature")
+				jw.Str(tc.signature)
 			}
 			jw.EndObj()
 		}
 		jw.EndArr()
 	} else if leadingSig != "" {
 		// Off-spec; litellm/openai-go pass through unknown fields.
-		jw.Key("thought_signature"); jw.Str(leadingSig)
+		jw.Key("thought_signature")
+		jw.Str(leadingSig)
 	}
 	jw.EndObj()
 
@@ -122,9 +139,12 @@ func writeOpenAIUsageFromGemini(jw *jsonWriter, meta gjson.Result) {
 		total = prompt + completion
 	}
 	jw.Obj()
-	jw.Key("prompt_tokens"); jw.Int(prompt)
-	jw.Key("completion_tokens"); jw.Int(completion)
-	jw.Key("total_tokens"); jw.Int(total)
+	jw.Key("prompt_tokens")
+	jw.Int(prompt)
+	jw.Key("completion_tokens")
+	jw.Int(completion)
+	jw.Key("total_tokens")
+	jw.Int(total)
 	jw.EndObj()
 }
 
@@ -139,13 +159,20 @@ func GeminiToAnthropicResponse(body []byte, requestModel string) ([]byte, error)
 
 	jw := newJSONWriter()
 	jw.Obj()
-	jw.Key("id"); jw.Str(generateAnthropicMsgID())
-	jw.Key("type"); jw.Str("message")
-	jw.Key("role"); jw.Str("assistant")
-	jw.Key("model"); jw.Str(requestModel)
-	jw.Key("content"); jw.RawBytes(content)
-	jw.Key("stop_reason"); jw.Str(stopReason)
-	jw.Key("stop_sequence"); jw.Null()
+	jw.Key("id")
+	jw.Str(generateAnthropicMsgID())
+	jw.Key("type")
+	jw.Str("message")
+	jw.Key("role")
+	jw.Str("assistant")
+	jw.Key("model")
+	jw.Str(requestModel)
+	jw.Key("content")
+	jw.RawBytes(content)
+	jw.Key("stop_reason")
+	jw.Str(stopReason)
+	jw.Key("stop_sequence")
+	jw.Null()
 	jw.Key("usage")
 	writeAnthropicUsageFromGemini(jw, gjson.GetBytes(body, "usageMetadata"))
 	jw.EndObj()
@@ -165,12 +192,17 @@ func buildAnthropicContent(candidate gjson.Result) (hasToolUse bool, content []b
 				args = "{}"
 			}
 			jw.Obj()
-			jw.Key("type"); jw.Str("tool_use")
-			jw.Key("id"); jw.Str(embedSignatureInID(generateToolUseID(), sig))
-			jw.Key("name"); jw.Str(fc.Get("name").String())
-			jw.Key("input"); jw.Raw(args)
+			jw.Key("type")
+			jw.Str("tool_use")
+			jw.Key("id")
+			jw.Str(embedSignatureInID(generateToolUseID(), sig))
+			jw.Key("name")
+			jw.Str(fc.Get("name").String())
+			jw.Key("input")
+			jw.Raw(args)
 			if sig != "" {
-				jw.Key("thought_signature"); jw.Str(sig)
+				jw.Key("thought_signature")
+				jw.Str(sig)
 			}
 			jw.EndObj()
 			hasToolUse = true
@@ -178,10 +210,13 @@ func buildAnthropicContent(candidate gjson.Result) (hasToolUse bool, content []b
 		}
 		if t := part.Get("text").String(); t != "" {
 			jw.Obj()
-			jw.Key("type"); jw.Str("text")
-			jw.Key("text"); jw.Str(t)
+			jw.Key("type")
+			jw.Str("text")
+			jw.Key("text")
+			jw.Str(t)
 			if sig := part.Get("thoughtSignature").String(); sig != "" {
-				jw.Key("thought_signature"); jw.Str(sig)
+				jw.Key("thought_signature")
+				jw.Str(sig)
 			}
 			jw.EndObj()
 		}
@@ -194,8 +229,10 @@ func buildAnthropicContent(candidate gjson.Result) (hasToolUse bool, content []b
 // writeAnthropicUsageFromGemini writes the "usage" object in Anthropic format.
 func writeAnthropicUsageFromGemini(jw *jsonWriter, meta gjson.Result) {
 	jw.Obj()
-	jw.Key("input_tokens"); jw.Int(meta.Get("promptTokenCount").Int())
-	jw.Key("output_tokens"); jw.Int(meta.Get("candidatesTokenCount").Int())
+	jw.Key("input_tokens")
+	jw.Int(meta.Get("promptTokenCount").Int())
+	jw.Key("output_tokens")
+	jw.Int(meta.Get("candidatesTokenCount").Int())
 	jw.EndObj()
 }
 
@@ -209,11 +246,16 @@ func GeminiToOpenAIError(body []byte) []byte {
 	}
 	jw := newJSONWriter()
 	jw.Obj()
-	jw.Key("error"); jw.Obj()
-	jw.Key("message"); jw.Str(msg)
-	jw.Key("type"); jw.Str(strings.ToLower(status))
-	jw.Key("param"); jw.Null()
-	jw.Key("code"); jw.Int(code.Int())
+	jw.Key("error")
+	jw.Obj()
+	jw.Key("message")
+	jw.Str(msg)
+	jw.Key("type")
+	jw.Str(strings.ToLower(status))
+	jw.Key("param")
+	jw.Null()
+	jw.Key("code")
+	jw.Int(code.Int())
 	jw.EndObj()
 	jw.EndObj()
 	return jw.Bytes()
