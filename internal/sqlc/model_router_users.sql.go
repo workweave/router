@@ -155,29 +155,56 @@ func (q *Queries) UpsertModelRouterUserByAccountUUID(ctx context.Context, arg Up
 }
 
 const upsertModelRouterUserByEmail = `-- name: UpsertModelRouterUserByEmail :one
-INSERT INTO router.model_router_users (
-    installation_id,
-    email,
-    claude_account_uuid,
-    display_name
+WITH merged AS (
+    UPDATE router.model_router_users
+    SET email        = $1::text,
+        display_name = COALESCE($2::text, display_name),
+        last_seen_at = CURRENT_TIMESTAMP
+    WHERE installation_id     = $3::uuid
+      AND claude_account_uuid = $4::uuid
+      AND email IS NULL
+      AND deleted_at IS NULL
+    RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
+),
+inserted AS (
+    INSERT INTO router.model_router_users (
+        installation_id,
+        email,
+        claude_account_uuid,
+        display_name
+    )
+    SELECT
+        $3::uuid,
+        $1::text,
+        $4::uuid,
+        $2::text
+    WHERE NOT EXISTS (SELECT 1 FROM merged)
+    ON CONFLICT (installation_id, email) WHERE deleted_at IS NULL DO UPDATE SET
+        last_seen_at        = CURRENT_TIMESTAMP,
+        claude_account_uuid = COALESCE(EXCLUDED.claude_account_uuid, router.model_router_users.claude_account_uuid),
+        display_name        = COALESCE(EXCLUDED.display_name, router.model_router_users.display_name)
+    RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 )
-VALUES (
-    $1::uuid,
-    $2::text,
-    $3::uuid,
-    $4::text
-)
-ON CONFLICT (installation_id, email) WHERE deleted_at IS NULL DO UPDATE SET
-    last_seen_at        = CURRENT_TIMESTAMP,
-    claude_account_uuid = COALESCE(EXCLUDED.claude_account_uuid, router.model_router_users.claude_account_uuid),
-    display_name        = COALESCE(EXCLUDED.display_name, router.model_router_users.display_name)
-RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
+SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name FROM merged
+UNION ALL
+SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name FROM inserted
 `
 
 type UpsertModelRouterUserByEmailParams struct {
-	InstallationID    uuid.UUID
 	Email             string
+	DisplayName       *string
+	InstallationID    uuid.UUID
 	ClaudeAccountUUID pgtype.UUID
+}
+
+type UpsertModelRouterUserByEmailRow struct {
+	ID                uuid.UUID
+	InstallationID    uuid.UUID
+	Email             *string
+	ClaudeAccountUUID pgtype.UUID
+	FirstSeenAt       pgtype.Timestamp
+	LastSeenAt        pgtype.Timestamp
+	DeletedAt         pgtype.Timestamp
 	DisplayName       *string
 }
 
@@ -188,31 +215,56 @@ type UpsertModelRouterUserByEmailParams struct {
 // can't blank out fields populated by earlier requests. Returns the row so
 // the caller can stash user_id on the request context.
 //
-//	INSERT INTO router.model_router_users (
-//	    installation_id,
-//	    email,
-//	    claude_account_uuid,
-//	    display_name
+// Merge path: when claude_account_uuid is non-NULL and a UUID-only orphan
+// already exists for this account (created by an earlier email-less request
+// via UpsertModelRouterUserByAccountUUID), we update that row's email +
+// display_name in place instead of inserting a new email-keyed row. Without
+// this, every installer upgrade that introduces X-Weave-User-Email creates
+// duplicate rows for the same human and the dashboard picker shows both.
+// The fallback INSERT keeps the original ON CONFLICT path so concurrent
+// email-bearing requests still collapse onto a single row.
+//
+//	WITH merged AS (
+//	    UPDATE router.model_router_users
+//	    SET email        = $1::text,
+//	        display_name = COALESCE($2::text, display_name),
+//	        last_seen_at = CURRENT_TIMESTAMP
+//	    WHERE installation_id     = $3::uuid
+//	      AND claude_account_uuid = $4::uuid
+//	      AND email IS NULL
+//	      AND deleted_at IS NULL
+//	    RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
+//	),
+//	inserted AS (
+//	    INSERT INTO router.model_router_users (
+//	        installation_id,
+//	        email,
+//	        claude_account_uuid,
+//	        display_name
+//	    )
+//	    SELECT
+//	        $3::uuid,
+//	        $1::text,
+//	        $4::uuid,
+//	        $2::text
+//	    WHERE NOT EXISTS (SELECT 1 FROM merged)
+//	    ON CONFLICT (installation_id, email) WHERE deleted_at IS NULL DO UPDATE SET
+//	        last_seen_at        = CURRENT_TIMESTAMP,
+//	        claude_account_uuid = COALESCE(EXCLUDED.claude_account_uuid, router.model_router_users.claude_account_uuid),
+//	        display_name        = COALESCE(EXCLUDED.display_name, router.model_router_users.display_name)
+//	    RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 //	)
-//	VALUES (
-//	    $1::uuid,
-//	    $2::text,
-//	    $3::uuid,
-//	    $4::text
-//	)
-//	ON CONFLICT (installation_id, email) WHERE deleted_at IS NULL DO UPDATE SET
-//	    last_seen_at        = CURRENT_TIMESTAMP,
-//	    claude_account_uuid = COALESCE(EXCLUDED.claude_account_uuid, router.model_router_users.claude_account_uuid),
-//	    display_name        = COALESCE(EXCLUDED.display_name, router.model_router_users.display_name)
-//	RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
-func (q *Queries) UpsertModelRouterUserByEmail(ctx context.Context, arg UpsertModelRouterUserByEmailParams) (RouterModelRouterUser, error) {
+//	SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name FROM merged
+//	UNION ALL
+//	SELECT id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name FROM inserted
+func (q *Queries) UpsertModelRouterUserByEmail(ctx context.Context, arg UpsertModelRouterUserByEmailParams) (UpsertModelRouterUserByEmailRow, error) {
 	row := q.db.QueryRow(ctx, upsertModelRouterUserByEmail,
-		arg.InstallationID,
 		arg.Email,
-		arg.ClaudeAccountUUID,
 		arg.DisplayName,
+		arg.InstallationID,
+		arg.ClaudeAccountUUID,
 	)
-	var i RouterModelRouterUser
+	var i UpsertModelRouterUserByEmailRow
 	err := row.Scan(
 		&i.ID,
 		&i.InstallationID,

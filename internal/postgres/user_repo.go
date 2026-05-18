@@ -34,7 +34,18 @@ func (r *userRepo) UpsertByEmail(ctx context.Context, params auth.UpsertUserPara
 	if err != nil {
 		return nil, err
 	}
-	return toAuthUser(row), nil
+	// The merge-or-insert CTE returns a generated UNION row type with the
+	// same fields as RouterModelRouterUser; map by field to reuse toAuthUser.
+	return toAuthUser(sqlc.RouterModelRouterUser{
+		ID:                row.ID,
+		InstallationID:    row.InstallationID,
+		Email:             row.Email,
+		ClaudeAccountUUID: row.ClaudeAccountUUID,
+		FirstSeenAt:       row.FirstSeenAt,
+		LastSeenAt:        row.LastSeenAt,
+		DeletedAt:         row.DeletedAt,
+		DisplayName:       row.DisplayName,
+	}), nil
 }
 
 func (r *userRepo) UpsertByAccountUUID(ctx context.Context, params auth.UpsertUserByAccountUUIDParams) (*auth.User, error) {
