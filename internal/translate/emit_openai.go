@@ -145,14 +145,16 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	// OpenRouter hints
 	if targetIsOpenRouter(opts) {
 		if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
-			hintBytes, _ := json.Marshal(hint)
-			jw.Key("provider")
-			jw.RawBytes(hintBytes)
+			if hintBytes, err := json.Marshal(hint); err == nil {
+				jw.Key("provider")
+				jw.RawBytes(hintBytes)
+			}
 		}
 		if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
-			reasoningBytes, _ := json.Marshal(reasoning)
-			jw.Key("reasoning")
-			jw.RawBytes(reasoningBytes)
+			if reasoningBytes, err := json.Marshal(reasoning); err == nil {
+				jw.Key("reasoning")
+				jw.RawBytes(reasoningBytes)
+			}
 		}
 	}
 
@@ -481,9 +483,10 @@ func writeOpenAIToolsFromAnthropic(jw *jsonWriter, body []byte) {
 			jw.Raw(desc.Raw)
 		}
 		if params != nil {
-			paramBytes, _ := json.Marshal(params)
-			jw.Key("parameters")
-			jw.RawBytes(paramBytes)
+			if paramBytes, err := json.Marshal(params); err == nil {
+				jw.Key("parameters")
+				jw.RawBytes(paramBytes)
+			}
 		}
 		jw.EndObj()
 		jw.EndObj()
