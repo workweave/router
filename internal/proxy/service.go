@@ -18,10 +18,9 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
-	"workweave/router/internal/router/capability"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
-	"workweave/router/internal/router/pricing"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
@@ -61,7 +60,7 @@ type Service struct {
 	hardPinResolver func(enabled map[string]struct{}) (provider, model string, ok bool)
 	// tierClampResolver enforces the requested-model tier ceiling. Nil disables
 	// the clamp.
-	tierClampResolver func(enabled, excluded map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)
+	tierClampResolver func(enabled, excluded map[string]struct{}, ceiling catalog.Tier) (provider, model string, ok bool)
 	// telemetry is an optional repository for persisting per-request telemetry.
 	telemetry TelemetryRepository
 	// byokOnly disables deployment-level credential fallback so customer
@@ -154,11 +153,11 @@ func clampNote(res turnLoopResult) string {
 
 // upsellModelFor returns the conventional next-tier-up model name for the
 // clamp note. High tier has no upsell.
-func upsellModelFor(t capability.Tier) string {
+func upsellModelFor(t catalog.Tier) string {
 	switch t {
-	case capability.TierLow:
+	case catalog.TierLow:
 		return "claude-sonnet-4-5"
-	case capability.TierMid:
+	case catalog.TierMid:
 		return "claude-opus-4-7"
 	default:
 		return ""
@@ -342,7 +341,7 @@ func (s *Service) WithDefaultBaselineModel(model string) *Service {
 }
 
 // WithTierClampResolver installs the tier-ceiling clamp resolver. Nil disables.
-func (s *Service) WithTierClampResolver(resolver func(enabled, excluded map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)) *Service {
+func (s *Service) WithTierClampResolver(resolver func(enabled, excluded map[string]struct{}, ceiling catalog.Tier) (provider, model string, ok bool)) *Service {
 	s.tierClampResolver = resolver
 	return s
 }
@@ -351,7 +350,7 @@ func (s *Service) WithTierClampResolver(resolver func(enabled, excluded map[stri
 // configured defaultBaselineModel (which may be "").
 func (s *Service) baselineFor(requested string) string {
 	if requested != "" {
-		if _, ok := pricing.For(requested); ok {
+		if _, ok := catalog.PrimaryPriceFor(requested); ok {
 			return requested
 		}
 	}
@@ -750,10 +749,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		String("routing.embed_input", embedInput).
 		Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 		IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
-		Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
-		Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
-		Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
-		Float64("pricing.actual_output_per_1m", actPricing.OutputUSDPer1M).
+		Float64("catalog.requested_input_per_1m", reqPricing.InputUSDPer1M).
+		Float64("catalog.requested_output_per_1m", reqPricing.OutputUSDPer1M).
+		Float64("catalog.actual_input_per_1m", actPricing.InputUSDPer1M).
+		Float64("catalog.actual_output_per_1m", actPricing.OutputUSDPer1M).
 		Int64("latency.route_ms", routeMs)
 	applyPlannerAttrs(decisionBuilder, routeRes)
 	otel.Record(ctx, otel.Span{
@@ -871,10 +870,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
-		Float64("cost.requested_input_usd", pricing.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
-		Float64("cost.requested_output_usd", pricing.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
-		Float64("cost.actual_input_usd", pricing.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
-		Float64("cost.actual_output_usd", pricing.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
+		Float64("cost.requested_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
+		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
+		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
+		Float64("cost.actual_output_usd", catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
@@ -911,10 +910,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			EmbedInput:             embedInput,
 			InputTokens:            int32(in),
 			OutputTokens:           int32(out),
-			RequestedInputCostUSD:  pricing.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
-			RequestedOutputCostUSD: pricing.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M),
-			ActualInputCostUSD:     pricing.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
-			ActualOutputCostUSD:    pricing.EffectiveOutputCost(out, actPricing.OutputUSDPer1M),
+			RequestedInputCostUSD:  catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
+			RequestedOutputCostUSD: catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M),
+			ActualInputCostUSD:     catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
+			ActualOutputCostUSD:    catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M),
 			RouteLatencyMs:         routeMs,
 			UpstreamLatencyMs:      proxyMs,
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
@@ -939,7 +938,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", capability.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
 
@@ -1267,7 +1266,7 @@ func (s *Service) fireTelemetry(p InsertTelemetryParams) {
 // pricing → notional_cost=0 ledger row (still recorded so the audit
 // trail is complete even if the price table doesn't know about a
 // freshly-deployed handover model).
-func (s *Service) emitBilling(ctx context.Context, requestID, externalID string, decision router.Decision, actPricing pricing.Pricing, routeRes turnLoopResult, in, out, cacheCreation, cacheRead int) {
+func (s *Service) emitBilling(ctx context.Context, requestID, externalID string, decision router.Decision, actPricing catalog.Pricing, routeRes turnLoopResult, in, out, cacheCreation, cacheRead int) {
 	if s.billing == nil || externalID == "" {
 		return
 	}
@@ -1288,7 +1287,7 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 	if routeRes.Handover.Invoked && !routeRes.Handover.FallbackToTrim {
 		sumUsage := routeRes.Handover.SummaryUsage
 		if sumUsage.Model != "" && (sumUsage.InputTokens > 0 || sumUsage.OutputTokens > 0) {
-			sumPricing, _ := pricing.For(sumUsage.Model)
+			sumPricing, _ := catalog.PrimaryPriceFor(sumUsage.Model)
 			s.fireBilling(ctx, billing.DebitInferenceParams{
 				OrganizationID:  externalID,
 				RouterRequestID: requestID + "_summary",
@@ -1505,10 +1504,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		String("routing.embed_input", embedInput).
 		Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 		IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
-		Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
-		Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
-		Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
-		Float64("pricing.actual_output_per_1m", actPricing.OutputUSDPer1M).
+		Float64("catalog.requested_input_per_1m", reqPricing.InputUSDPer1M).
+		Float64("catalog.requested_output_per_1m", reqPricing.OutputUSDPer1M).
+		Float64("catalog.actual_input_per_1m", actPricing.InputUSDPer1M).
+		Float64("catalog.actual_output_per_1m", actPricing.OutputUSDPer1M).
 		Int64("latency.route_ms", routeMs)
 	applyPlannerAttrs(openaiDecisionBuilder, routeRes)
 	otel.Record(ctx, otel.Span{
@@ -1614,10 +1613,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
-		Float64("cost.requested_input_usd", pricing.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
-		Float64("cost.requested_output_usd", pricing.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
-		Float64("cost.actual_input_usd", pricing.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
-		Float64("cost.actual_output_usd", pricing.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
+		Float64("cost.requested_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
+		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
+		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
+		Float64("cost.actual_output_usd", catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
@@ -1659,10 +1658,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			EmbedInput:             embedInput,
 			InputTokens:            int32(in),
 			OutputTokens:           int32(out),
-			RequestedInputCostUSD:  pricing.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
-			RequestedOutputCostUSD: pricing.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M),
-			ActualInputCostUSD:     pricing.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
-			ActualOutputCostUSD:    pricing.EffectiveOutputCost(out, actPricing.OutputUSDPer1M),
+			RequestedInputCostUSD:  catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
+			RequestedOutputCostUSD: catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M),
+			ActualInputCostUSD:     catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
+			ActualOutputCostUSD:    catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M),
 			RouteLatencyMs:         routeMs,
 			UpstreamLatencyMs:      proxyMs,
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
@@ -1680,6 +1679,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", capability.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }

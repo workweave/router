@@ -9,7 +9,7 @@ import (
 
 	"workweave/router/internal/billing"
 	"workweave/router/internal/providers"
-	"workweave/router/internal/router/pricing"
+	"workweave/router/internal/router/catalog"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -97,7 +97,7 @@ func TestDebitForInference_MatchesExportedCostMath(t *testing.T) {
 	// amount different from the dashboard cost.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
 	svc := billing.NewService(repo)
-	p := pricing.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
+	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
 	balance, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
 		OrganizationID:  "org_x",
 		RouterRequestID: "req_abc",
@@ -126,7 +126,7 @@ func TestDebitForInference_OverrideWritesZeroDeltaWithNotional(t *testing.T) {
 	// the shadow billing trail the plan requires for capacity planning.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 0}
 	svc := billing.NewService(repo)
-	p := pricing.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
+	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
 	balance, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
 		OrganizationID: "org_internal",
 		Model:          "claude-sonnet-4-5",
@@ -150,7 +150,7 @@ func TestDebitForInference_BalanceCanGoNegative(t *testing.T) {
 	// min-balance threshold bounds the typical dip.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 500_000} // $0.50
 	svc := billing.NewService(repo)
-	p := pricing.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
+	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
 
 	for range 2 {
 		_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
@@ -175,7 +175,7 @@ func TestDebitForInference_ZeroTokensYieldsZeroCharge(t *testing.T) {
 	// be confusing.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 5_000_000}
 	svc := billing.NewService(repo)
-	p := pricing.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
+	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
 	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
 		OrganizationID: "org_x",
 		Pricing:        p,
@@ -192,7 +192,7 @@ func TestDebitForInference_RepoErrorPropagates(t *testing.T) {
 	svc := billing.NewService(repo)
 	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
 		OrganizationID: "org_x",
-		Pricing:        pricing.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00},
+		Pricing:        catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00},
 	})
 	assert.Error(t, err)
 }

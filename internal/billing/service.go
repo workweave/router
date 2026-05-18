@@ -4,7 +4,7 @@ import (
 	"context"
 	"math"
 
-	"workweave/router/internal/router/pricing"
+	"workweave/router/internal/router/catalog"
 )
 
 // hasOverrideContextKeyT is the request-context type for the override
@@ -100,7 +100,7 @@ type DebitInferenceParams struct {
 	OutputTokens    int
 	CacheCreation   int
 	CacheRead       int
-	Pricing         pricing.Pricing
+	Pricing         catalog.Pricing
 	HasOverride     bool
 }
 
@@ -130,8 +130,8 @@ func (s *Service) DebitForInference(ctx context.Context, p DebitInferenceParams)
 // populated, regardless of override status, so the ledger preserves a
 // shadow billing trail.
 func computeNotionalMicros(p DebitInferenceParams) int64 {
-	inUSD := pricing.EffectiveInputCost(p.InputTokens, p.CacheCreation, p.CacheRead, p.Pricing.InputUSDPer1M, p.Pricing, p.Provider)
-	outUSD := pricing.EffectiveOutputCost(p.OutputTokens, p.Pricing.OutputUSDPer1M)
+	inUSD := catalog.EffectiveInputCost(p.InputTokens, p.CacheCreation, p.CacheRead, p.Pricing.InputUSDPer1M, p.Pricing, p.Provider)
+	outUSD := catalog.EffectiveOutputCost(p.OutputTokens, p.Pricing.OutputUSDPer1M)
 	total := inUSD + outUSD
 	if math.IsNaN(total) || math.IsInf(total, 0) || total < 0 {
 		return 0
