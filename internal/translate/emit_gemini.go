@@ -115,7 +115,7 @@ func sanitizeGeminiToolsRaw(v any) any {
 			}
 			if params, ok := fdMap["parameters"]; ok && params != nil {
 				fdMap = copyMap(fdMap)
-				fdMap["parameters"] = sanitizeSchemaForGemini(params)
+				fdMap["parameters"] = sanitizeSchemaForGemini(inlineSchemaDefs(params))
 			}
 			sanitized[j] = fdMap
 		}

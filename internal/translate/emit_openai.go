@@ -13,6 +13,11 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+func hasNonEmptyTools(body []byte) bool {
+	tools := gjson.GetBytes(body, "tools")
+	return tools.Exists() && tools.IsArray() && tools.Get("#").Int() > 0
+}
+
 // PrepareOpenAI builds an OpenAI Chat Completions request body.
 func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
 	var body []byte
@@ -50,14 +55,14 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 				return nil, fmt.Errorf("set openrouter reasoning hint: %w", err)
 			}
 		}
-		if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" && gjson.GetBytes(body, "tools").Exists() {
+		if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" && hasNonEmptyTools(body) {
 			body, err = applySystemReminderToBody(body, reminder)
 			if err != nil {
 				return nil, fmt.Errorf("set system reminder: %w", err)
 			}
 		}
 		if openRouterForcesToolTemperatureZero(opts.TargetModel) &&
-			gjson.GetBytes(body, "tools").Exists() &&
+			hasNonEmptyTools(body) &&
 			!gjson.GetBytes(body, "temperature").Exists() {
 			body, err = sjson.SetBytes(body, "temperature", 0)
 			if err != nil {
@@ -124,7 +129,7 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 
 	// Tool temperature override for OpenRouter
 	if !clientSetTemp && targetIsOpenRouter(opts) && openRouterForcesToolTemperatureZero(opts.TargetModel) {
-		if gjson.GetBytes(body, "tools").Exists() {
+		if hasNonEmptyTools(body) {
 			jw.Key("temperature")
 			jw.Int(0)
 		}
@@ -166,8 +171,7 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 // converting the Anthropic system field and messages array to OpenAI format.
 func writeOpenAISystemAndMessagesFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 	systemText := flattenAnthropicSystemGJSON(gjson.GetBytes(body, "system"))
-	hasTools := gjson.GetBytes(body, "tools").Exists()
-	if targetIsOpenRouter(opts) && hasTools {
+	if targetIsOpenRouter(opts) && hasNonEmptyTools(body) {
 		if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" {
 			if systemText == "" {
 				systemText = reminder

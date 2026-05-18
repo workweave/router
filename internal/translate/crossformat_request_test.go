@@ -1286,6 +1286,62 @@ func TestCrossFormat_OpenAIToGemini_InvalidToolArgsReturnsError(t *testing.T) {
 	assert.Error(t, err, "invalid tool_call arguments should produce an error, not silently substitute {}")
 }
 
+func TestCrossFormat_AnthropicToOpenAI_EmptyToolsNoTemperatureOverride(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "user", "content": [{"type": "text", "text": "hi"}]}
+		],
+		"tools": [],
+		"max_tokens": 1024
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	// DeepSeek triggers tool-temperature-zero and system-reminder overrides.
+	prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{
+		TargetModel: "deepseek/deepseek-chat",
+	})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc))
+
+	// Empty tools must not trigger DeepSeek-specific overrides.
+	_, hasTemp := doc["temperature"]
+	assert.False(t, hasTemp, "empty tools must not trigger temperature override")
+}
+
+func TestCrossFormat_AnthropicToOpenAI_EmptyToolsNoSystemReminder(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"system": "You are helpful.",
+		"messages": [
+			{"role": "user", "content": [{"type": "text", "text": "hi"}]}
+		],
+		"tools": [],
+		"max_tokens": 1024
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{
+		TargetModel: "deepseek/deepseek-chat",
+	})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc))
+
+	msgs := getArray(t, doc, "messages")
+	for _, m := range msgs {
+		msg := m.(map[string]any)
+		if msg["role"] == "system" {
+			content, _ := msg["content"].(string)
+			assert.NotContains(t, content, "file-edit tools",
+				"empty tools must not inject DeepSeek system reminder")
+		}
+	}
+}
+
 func TestCrossFormat_AnthropicToOpenAI_ToolUseWithMissingName(t *testing.T) {
 	// tool_use block with missing "name" field — must produce valid JSON, not malformed
 	body := []byte(`{

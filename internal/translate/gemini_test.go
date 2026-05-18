@@ -878,6 +878,40 @@ func TestPrepareGemini_GeminiFormatSanitizesTools(t *testing.T) {
 	assert.NotNil(t, params["properties"])
 }
 
+func TestPrepareGemini_GeminiFormatInlinesSchemaRefs(t *testing.T) {
+	// Same-format Gemini path must inline $ref/$defs before sanitization,
+	// otherwise Gemini's allowlist strips them silently.
+	body := []byte(`{
+		"model": "gemini-3.1-pro-preview",
+		"contents": [{"role":"user","parts":[{"text":"hi"}]}],
+		"tools": [{
+			"functionDeclarations": [{
+				"name":"test",
+				"parameters":{
+					"type":"object",
+					"properties":{
+						"item": {"$ref": "#/$defs/Item"}
+					},
+					"$defs": {
+						"Item": {"type":"object","properties":{"name":{"type":"string"}}}
+					}
+				}
+			}]
+		}]
+	}`)
+	env, err := translate.ParseGemini(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+	item := params["properties"].(map[string]any)["item"].(map[string]any)
+	assert.NotContains(t, item, "$ref", "$ref must be inlined, not left as pointer")
+	assert.Equal(t, "object", item["type"], "inlined item should have type:object")
+	assert.NotContains(t, params, "$defs", "$defs must be removed after inlining")
+}
+
 func TestPrepareGemini_ConvertsBoolPropertySchemas(t *testing.T) {
 	// JSON Schema allows boolean schemas as property values (true = any type).
 	// Gemini's proto Schema rejects them. They must be converted to empty Schema.
