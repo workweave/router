@@ -1236,3 +1236,22 @@ func TestCrossFormat_OpenAIToAnthropic_ToolChoiceNoneSuppressesTools(t *testing.
 	_, hasToolChoice := doc["tool_choice"]
 	assert.False(t, hasToolChoice, "tool_choice should not appear when none")
 }
+
+func TestCrossFormat_OpenAIToGemini_InvalidToolArgsReturnsError(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4",
+		"messages": [
+			{"role": "user", "content": "hi"},
+			{"role": "assistant", "content": null, "tool_calls": [
+				{"id": "call_1", "type": "function", "function": {"name": "Bash", "arguments": "NOT VALID JSON"}}
+			]},
+			{"role": "tool", "tool_call_id": "call_1", "content": "ok"}
+		]
+	}`)
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{
+		TargetModel: "gemini-2.5-flash",
+	})
+	assert.Error(t, err, "invalid tool_call arguments should produce an error, not silently substitute {}")
+}

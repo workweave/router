@@ -5,6 +5,7 @@ package translate
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -13,6 +14,9 @@ import (
 
 // AnthropicToOpenAIResponse converts a non-streaming Anthropic response to OpenAI format.
 func AnthropicToOpenAIResponse(body []byte, requestModel string) ([]byte, error) {
+	if !gjson.ValidBytes(body) {
+		return nil, fmt.Errorf("unmarshal anthropic response: invalid JSON")
+	}
 	msgID := gjson.GetBytes(body, "id").String()
 	model := gjson.GetBytes(body, "model").String()
 	if model == "" {
@@ -156,6 +160,9 @@ func AnthropicToOpenAIError(body []byte) []byte {
 // OpenAIToAnthropicResponse converts a non-streaming OpenAI response to
 // Anthropic Messages format.
 func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
+	if !gjson.ValidBytes(body) {
+		return nil, fmt.Errorf("unmarshal openai response: invalid JSON")
+	}
 	id := gjson.GetBytes(body, "id").String()
 	if id == "" {
 		id = "msg_translated"

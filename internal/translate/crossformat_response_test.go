@@ -821,3 +821,25 @@ func TestGeminiToOpenAIError_MissingCodeIsZero(t *testing.T) {
 	// gjson.Int() returns 0 for absent fields, matching the struct-based behavior.
 	assert.Equal(t, float64(0), errObj["code"])
 }
+
+// ── Invalid JSON error contract ──────────────────────────────────────────────
+
+func TestAnthropicToOpenAIResponse_InvalidJSON_ReturnsError(t *testing.T) {
+	_, err := translate.AnthropicToOpenAIResponse([]byte(`not json`), "m")
+	assert.Error(t, err)
+}
+
+func TestOpenAIToAnthropicResponse_InvalidJSON_ReturnsError(t *testing.T) {
+	_, err := translate.OpenAIToAnthropicResponse([]byte(`not json`), "m")
+	assert.Error(t, err)
+}
+
+func TestGeminiToOpenAIResponse_InvalidJSON_ReturnsError(t *testing.T) {
+	_, err := translate.GeminiToOpenAIResponse([]byte(`not json`), "m")
+	assert.Error(t, err)
+}
+
+func TestGeminiToAnthropicResponse_InvalidJSON_ReturnsError(t *testing.T) {
+	_, err := translate.GeminiToAnthropicResponse([]byte(`not json`), "m")
+	assert.Error(t, err)
+}

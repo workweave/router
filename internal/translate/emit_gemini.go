@@ -46,7 +46,9 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 	jw.Obj()
 	switch e.format {
 	case FormatOpenAI:
-		writeGeminiFromOpenAI(jw, e.body, opts)
+		if err := writeGeminiFromOpenAI(jw, e.body, opts); err != nil {
+			return providers.PreparedRequest{}, err
+		}
 	case FormatAnthropic:
 		writeGeminiFromAnthropic(jw, e.body, opts)
 	default:
@@ -138,7 +140,7 @@ func copyMap(m map[string]any) map[string]any {
 
 // writeGeminiFromOpenAI translates an OpenAI-format body into Gemini fields
 // written directly into jw (caller has already opened the root object).
-func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) {
+func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error {
 	msgs := gjson.GetBytes(body, "messages")
 
 	// First pass: build tool_call ID → function name map for role:tool messages.
@@ -195,6 +197,7 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) {
 
 	// Second pass: write contents array.
 	hasContents := false
+	var walkErr error
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
 		switch role {
@@ -221,7 +224,11 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) {
 			jw.EndArr()
 			jw.EndObj()
 		case "assistant":
-			parts := openAIAssistantPartsGJSON(msg)
+			parts, parseErr := openAIAssistantPartsGJSON(msg)
+			if parseErr != nil {
+				walkErr = parseErr
+				return false
+			}
 			if len(parts) == 0 {
 				return true
 			}
@@ -271,6 +278,9 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) {
 		}
 		return true
 	})
+	if walkErr != nil {
+		return walkErr
+	}
 	if hasContents {
 		jw.EndArr()
 	}
@@ -278,6 +288,7 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) {
 	writeGeminiToolsFromOpenAI(jw, body)
 	writeGeminiToolChoiceFromOpenAI(jw, body)
 	writeGeminiGenerationConfigFromOpenAI(jw, body, opts.TargetModel)
+	return nil
 }
 
 // openAIUserPartsGJSON converts an OpenAI user content value to raw JSON part strings.
@@ -340,7 +351,7 @@ func openAIUserPartsGJSON(content gjson.Result) []string {
 }
 
 // openAIAssistantPartsGJSON converts an OpenAI assistant message to raw JSON part strings.
-func openAIAssistantPartsGJSON(msg gjson.Result) []string {
+func openAIAssistantPartsGJSON(msg gjson.Result) ([]string, error) {
 	var parts []string
 
 	content := msg.Get("content")
@@ -353,9 +364,14 @@ func openAIAssistantPartsGJSON(msg gjson.Result) []string {
 		parts = append(parts, string(pw.Bytes()))
 	}
 
+	var parseErr error
 	msg.Get("tool_calls").ForEach(func(_, tc gjson.Result) bool {
 		name := tc.Get("function.name").String()
 		argsStr := tc.Get("function.arguments").String()
+		if argsStr != "" && !gjson.Valid(argsStr) {
+			parseErr = fmt.Errorf("parse tool_call arguments: invalid JSON")
+			return false
+		}
 
 		pw := newJSONWriter()
 		pw.Obj()
@@ -364,7 +380,7 @@ func openAIAssistantPartsGJSON(msg gjson.Result) []string {
 		pw.Key("name")
 		pw.Str(name)
 		pw.Key("args")
-		if gjson.Valid(argsStr) {
+		if argsStr != "" {
 			pw.Raw(argsStr)
 		} else {
 			pw.Raw("{}")
@@ -379,7 +395,7 @@ func openAIAssistantPartsGJSON(msg gjson.Result) []string {
 		return true
 	})
 
-	return parts
+	return parts, parseErr
 }
 
 // openAIContentTextFromGJSON extracts text from an OpenAI content value (string or array).

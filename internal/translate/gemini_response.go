@@ -3,6 +3,7 @@ package translate
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,6 +12,9 @@ import (
 
 // GeminiToOpenAIResponse converts a non-streaming Gemini response to OpenAI format.
 func GeminiToOpenAIResponse(body []byte, requestModel string) ([]byte, error) {
+	if !gjson.ValidBytes(body) {
+		return nil, fmt.Errorf("unmarshal gemini response: invalid JSON")
+	}
 	jw := newJSONWriter()
 	jw.Obj()
 	jw.Key("id")
@@ -151,6 +155,9 @@ func writeOpenAIUsageFromGemini(jw *jsonWriter, meta gjson.Result) {
 // GeminiToAnthropicResponse converts a non-streaming Gemini response to
 // Anthropic Messages format.
 func GeminiToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
+	if !gjson.ValidBytes(body) {
+		return nil, fmt.Errorf("unmarshal gemini response: invalid JSON")
+	}
 	hasToolUse, content := buildAnthropicContent(gjson.GetBytes(body, "candidates.0"))
 	stopReason := mapGeminiFinishReasonToAnthropic(
 		gjson.GetBytes(body, "candidates.0.finishReason").String(),
