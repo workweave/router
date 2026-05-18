@@ -223,30 +223,47 @@ var Models = []Model{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00, CacheReadMultiplier: 0.25}},
 	}},
 
-	// --- OSS pool (single-binding today; PR B adds OpenRouter fallback
-	// bindings once direct-provider primaries flip in.) ---
-	{ID: "qwen/qwen3-30b-a3b-instruct-2507", Tier: TierLow, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.080, OutputUSDPer1M: 0.330}},
-	}},
+	// --- OSS pool ---
+	//
+	// Each row carries an ordered Providers list. Managed-prod deploys ship
+	// only the SOC-2-compliant primary key (Fireworks / DeepInfra / Bedrock /
+	// OpenAI / Anthropic / Google) and silently drop the trailing OpenRouter
+	// binding at boot. Self-hosters with only an OpenRouter key get every OSS
+	// model routed via that trailing binding.
+	//
+	// Verified against each upstream's live catalog 2026-05-17:
+	// - qwen/qwen3-30b-a3b-instruct-2507 — dedicated-only on Fireworks,
+	//   absent from DeepInfra + Bedrock. Dropped.
+	// - qwen/qwen3-coder (480B-A35B) — dedicated-only on Fireworks, absent
+	//   from DeepInfra + Bedrock us-east-1. Dropped.
+	// - qwen/qwen3-235b-a22b-2507 — Bedrock us-east-1 carries only the VL
+	//   variant; Instruct-2507 stays on OpenRouter until AWS publishes it.
 	{ID: "qwen/qwen3-235b-a22b-2507", Tier: TierMid, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.071, OutputUSDPer1M: 0.463}},
 	}},
-	{ID: "qwen/qwen3-coder", Tier: TierMid, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.220, OutputUSDPer1M: 1.800}},
-	}},
 	{ID: "qwen/qwen3-coder-next", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderBedrock, UpstreamID: "qwen.qwen3-coder-next",
+			Price: Pricing{InputUSDPer1M: 0.500, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.070, OutputUSDPer1M: 0.300}},
 	}},
 	{ID: "qwen/qwen3-next-80b-a3b-instruct", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderBedrock, UpstreamID: "qwen.qwen3-next-80b-a3b",
+			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.090, OutputUSDPer1M: 1.100}},
 	}},
 	{ID: "deepseek/deepseek-v4-flash", Tier: TierLow, Providers: []ProviderBinding{
+		{Provider: providers.ProviderDeepInfra, UpstreamID: "deepseek-ai/DeepSeek-V4-Flash",
+			Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "deepseek/deepseek-v4-pro", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/deepseek-v4-pro",
+			Price: Pricing{InputUSDPer1M: 1.740, OutputUSDPer1M: 3.480, CacheReadMultiplier: 0.0862}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.435, OutputUSDPer1M: 0.870, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "moonshotai/kimi-k2.5", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderBedrock, UpstreamID: "moonshotai.kimi-k2.5",
+			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 3.000}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.440, OutputUSDPer1M: 2.000}},
 	}},
 }

@@ -4,6 +4,7 @@ package openaicompat
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,23 +22,89 @@ import (
 const (
 	DefaultBaseURL   = "https://openrouter.ai/api/v1"
 	FireworksBaseURL = "https://api.fireworks.ai/inference/v1"
+	// DeepInfraBaseURL is DeepInfra's OpenAI-compatible surface. DeepInfra uses
+	// HuggingFace-form model IDs; pair with NewClientWithModelIDMap to rewrite
+	// the router's public slash-form slugs on the wire.
+	DeepInfraBaseURL = "https://api.deepinfra.com/v1/openai"
 )
+
+// BedrockMantleBaseURLTemplate is the OpenAI-compatible bedrock-mantle endpoint
+// template. Substitute the region via BedrockMantleBaseURL.
+const BedrockMantleBaseURLTemplate = "https://bedrock-mantle.%s.api.aws/v1"
+
+// BedrockMantleBaseURL returns the bedrock-mantle URL for the given region.
+// AWS recommends bedrock-mantle over the model-native bedrock-runtime surface
+// for OpenAI-compat traffic; auth is a long-term Bedrock API key, not SigV4.
+func BedrockMantleBaseURL(region string) string {
+	if region == "" {
+		region = "us-east-1"
+	}
+	return fmt.Sprintf(BedrockMantleBaseURLTemplate, region)
+}
 
 type Client struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
+	// modelIDMap rewrites the request body's "model" field before sending.
+	// Empty map (or nil) = no rewrite. Used when the router's public slash-form
+	// slug differs from the upstream's canonical ID (Bedrock dot-form,
+	// DeepInfra HuggingFace-form).
+	modelIDMap map[string]string
 }
 
 func NewClient(apiKey, baseURL string) *Client {
+	return NewClientWithModelIDMap(apiKey, baseURL, nil)
+}
+
+// NewClientWithModelIDMap builds a client that rewrites the body's top-level
+// "model" field before forwarding when the requested model has a mapping.
+// Pass nil to disable rewriting.
+func NewClientWithModelIDMap(apiKey, baseURL string, modelIDMap map[string]string) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
 	return &Client{
-		apiKey:  apiKey,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		http:    &http.Client{Transport: httputil.NewTransport(5*time.Second, 5*time.Second)},
+		apiKey:     apiKey,
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		http:       &http.Client{Transport: httputil.NewTransport(5*time.Second, 5*time.Second)},
+		modelIDMap: modelIDMap,
 	}
+}
+
+// rewriteModelField rewrites the body's top-level "model" field according to
+// modelIDMap. Returns the input unchanged when the map is empty, the body
+// isn't a JSON object, or the model isn't mapped.
+func rewriteModelField(body []byte, modelIDMap map[string]string) []byte {
+	if len(modelIDMap) == 0 || len(body) == 0 {
+		return body
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return body
+	}
+	modelRaw, ok := raw["model"]
+	if !ok {
+		return body
+	}
+	var model string
+	if err := json.Unmarshal(modelRaw, &model); err != nil {
+		return body
+	}
+	upstream, ok := modelIDMap[model]
+	if !ok {
+		return body
+	}
+	newModel, err := json.Marshal(upstream)
+	if err != nil {
+		return body
+	}
+	raw["model"] = newModel
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return body
+	}
+	return out
 }
 
 // setAuth sets the Authorization header, preferring BYOK credentials over the deployment-level key.
@@ -52,7 +119,8 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request) {
 }
 
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
-	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(prep.Body))
+	body := rewriteModelField(prep.Body, c.modelIDMap)
+	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build upstream request: %w", err)
 	}

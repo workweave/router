@@ -10,6 +10,7 @@ import (
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/catalog"
 )
 
 // ErrClusterUnavailable is returned when the cluster scorer cannot produce
@@ -153,12 +154,42 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 	}, nil
 }
 
+// resolveProviderFor walks the catalog's ordered ProviderBinding list for
+// modelID and returns the first binding whose Provider name is in
+// available. Falls back to the registry's recorded provider for models
+// absent from the catalog (defense in depth). Returns "" when no binding
+// resolves under the available set.
+func resolveProviderFor(modelID, registryProvider string, available map[string]struct{}) string {
+	m, ok := catalog.ByID(modelID)
+	if !ok {
+		if _, ok := available[registryProvider]; ok {
+			return registryProvider
+		}
+		return ""
+	}
+	for _, b := range m.Providers {
+		if _, ok := available[b.Provider]; ok {
+			return b.Provider
+		}
+	}
+	return ""
+}
+
+// filterByProviders drops entries whose model has no ProviderBinding
+// resolvable under the available set, and rewrites the entry's Provider
+// to the resolved binding so downstream dispatch lands on the right
+// upstream. Same semantics as a plain registry-Provider match for
+// single-binding models; for multi-binding rows (e.g. fireworks primary,
+// openrouter fallback) it picks the first available in catalog order.
 func filterByProviders(entries []DeployedEntry, available map[string]struct{}) []DeployedEntry {
 	out := make([]DeployedEntry, 0, len(entries))
 	for _, e := range entries {
-		if _, ok := available[e.Provider]; ok {
-			out = append(out, e)
+		resolved := resolveProviderFor(e.Model, e.Provider, available)
+		if resolved == "" {
+			continue
 		}
+		e.Provider = resolved
+		out = append(out, e)
 	}
 	return out
 }
@@ -224,14 +255,23 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		return router.Decision{}, fmt.Errorf("embedding dim %d != expected %d: %w", len(vec), s.centroids.Dim, ErrClusterUnavailable)
 	}
 
-	// Per-request gating complements boot-time filterByProviders.
+	// Per-request gating complements boot-time filterByProviders. For
+	// multi-binding catalog rows we re-walk the binding list under the
+	// per-request EnabledProviders set: a BYOK-only request may have a
+	// narrower or wider provider set than the deployment, and the chosen
+	// binding determines which upstream gets the dispatch. Track the
+	// resolved binding per model so Decision.Provider reflects it.
 	eligibleModels := s.models
+	resolvedProvider := make(map[string]string, len(s.candidates))
 	if req.EnabledProviders != nil {
 		eligibleModels = eligibleModels[:0:0]
 		for _, c := range s.candidates {
-			if _, ok := req.EnabledProviders[c.Provider]; ok {
-				eligibleModels = append(eligibleModels, c.Model)
+			r := resolveProviderFor(c.Model, c.Provider, req.EnabledProviders)
+			if r == "" {
+				continue
 			}
+			resolvedProvider[c.Model] = r
+			eligibleModels = append(eligibleModels, c.Model)
 		}
 		if len(eligibleModels) == 0 {
 			log.Warn(
@@ -299,12 +339,20 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	copy(clustersCopy, topClusters)
 	candidatesCopy := make([]string, len(eligibleModels))
 	copy(candidatesCopy, eligibleModels)
+	// Prefer the per-request resolved binding (which may differ from the
+	// boot-time default when the request's EnabledProviders narrows or
+	// widens the deployment set, e.g. self-hoster with only OPENROUTER_API_KEY
+	// served by a row whose primary binding is bedrock).
+	chosenProvider := chosen.Provider
+	if p, ok := resolvedProvider[chosen.Model]; ok {
+		chosenProvider = p
+	}
 	decision := router.Decision{
-		Provider: chosen.Provider,
+		Provider: chosenProvider,
 		Model:    chosen.Model,
 		Reason: fmt.Sprintf(
 			"cluster:%s top_p=%s model=%s provider=%s",
-			s.version, clusterIDsString(topClusters), chosen.Model, chosen.Provider,
+			s.version, clusterIDsString(topClusters), chosen.Model, chosenProvider,
 		),
 		Metadata: &router.RoutingMetadata{
 			Embedding:            embedCopy,
