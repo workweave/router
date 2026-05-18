@@ -90,6 +90,61 @@ func (e *UpstreamStatusError) Error() string {
 	return fmt.Sprintf("upstream returned status %d", e.Status)
 }
 
+// UpstreamErrorResponse is returned by adapters that buffer the upstream
+// non-2xx response instead of streaming it through. The proxy decides
+// whether to retry on a different provider or flush the buffered response
+// to the client. Body is capped at MaxBufferedErrorBytes.
+type UpstreamErrorResponse struct {
+	Status  int
+	Headers http.Header
+	Body    []byte
+}
+
+func (e *UpstreamErrorResponse) Error() string {
+	return fmt.Sprintf("upstream returned status %d (buffered)", e.Status)
+}
+
+// MaxBufferedErrorBytes caps the upstream error body buffered by adapters
+// that support failover. Beyond this the body is truncated and the rest
+// of the upstream stream is drained without retention.
+const MaxBufferedErrorBytes = 64 * 1024
+
+// IsRetryableStatus reports whether an upstream HTTP status is worth
+// retrying on a different provider. Covers transient upstream-side faults
+// (5xx + 408 timeout + 429 rate-limit). 4xx ≠ 408/429 are the client's
+// fault and won't be fixed by a different upstream.
+func IsRetryableStatus(status int) bool {
+	switch status {
+	case http.StatusRequestTimeout, // 408
+		http.StatusTooManyRequests: // 429
+		return true
+	}
+	return status >= 500 && status <= 599
+}
+
+// IsRetryable reports whether err represents an upstream failure that is
+// safe to retry on a different provider — that is, no response bytes have
+// been written to the client. True for transport-level errors from a
+// provider adapter and for *UpstreamErrorResponse with a retryable status.
+// False for *UpstreamStatusError (bytes already flushed) and nil.
+func IsRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var buffered *UpstreamErrorResponse
+	if errors.As(err, &buffered) {
+		return IsRetryableStatus(buffered.Status)
+	}
+	var flushed *UpstreamStatusError
+	if errors.As(err, &flushed) {
+		return false
+	}
+	// Anything else (transport error, build error) is treated as retryable;
+	// the per-attempt guard in proxy.dispatchWithFallback confirms no bytes
+	// were written before letting the retry happen.
+	return true
+}
+
 // PreparedRequest holds the encoded target-format request body and format-specific header overrides.
 type PreparedRequest struct {
 	Body    []byte

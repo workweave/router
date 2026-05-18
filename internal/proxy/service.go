@@ -721,9 +721,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	w.Header().Set("x-router-provider", decision.Provider)
 	w.Header().Set("x-router-model", decision.Model)
 
-	p, provErr := s.provider(decision.Provider)
-	if provErr != nil {
-		return provErr
+	if _, err := s.provider(decision.Provider); err != nil {
+		return err
 	}
 
 	reqPricing := otel.Lookup(s.baselineFor(feats.Model))
@@ -772,10 +771,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
+	guard := newFirstByteGuard(w)
 	var captureW *captureWriter
-	var sink http.ResponseWriter = w
+	var sink http.ResponseWriter = guard
 	if cacheEligible {
-		captureW = newCaptureWriter(w, semanticCacheMaxBodyBytes)
+		captureW = newCaptureWriter(guard, semanticCacheMaxBodyBytes)
 		sink = captureW
 	}
 
@@ -784,6 +784,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	crossFormat := false
 	var extractor *otel.UsageExtractor
 
+	var attempt dispatchAttempt
 	switch decision.Provider {
 	case providers.ProviderAnthropic:
 		prep, emitErr := env.PrepareAnthropic(r.Header, opts)
@@ -792,12 +793,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			return fmt.Errorf("emit body: %w", emitErr)
 		}
 		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
-		proxyWriter := sink
-		if s.usageRequired() {
-			extractor = otel.NewUsageExtractor(sink, decision.Provider)
-			proxyWriter = extractor
+		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			proxyWriter := sink
+			if s.usageRequired() {
+				extractor = otel.NewUsageExtractor(sink, d.Provider)
+				proxyWriter = extractor
+			}
+			return p.Proxy(actx, d, prep, proxyWriter, r)
 		}
-		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
 	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
 		crossFormat = true
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
@@ -806,16 +809,18 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			return fmt.Errorf("translate anthropic request: %w", emitErr)
 		}
 		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
-		var usage otel.UsageSink
-		if s.usageRequired() {
-			extractor = otel.NewUsageExtractor(nil, decision.Provider)
-			usage = extractor
+		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			var usage otel.UsageSink
+			if s.usageRequired() {
+				extractor = otel.NewUsageExtractor(nil, d.Provider)
+				usage = extractor
+			}
+			translator := translate.NewAnthropicSSETranslator(sink, d.Model, usage).
+				WithRoutingMarker(routingMarkerFor(routeRes)).
+				WithEstimatedInputTokens(feats.Tokens)
+			err := p.Proxy(actx, d, prep, translator, r)
+			return finalizeAfterProxy(err, translator.Finalize)
 		}
-		translator := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
-			WithRoutingMarker(routingMarkerFor(routeRes)).
-			WithEstimatedInputTokens(feats.Tokens)
-		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
-		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderGoogle:
 		crossFormat = true
 		prep, emitErr := env.PrepareGemini(r.Header, opts)
@@ -824,22 +829,40 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			return fmt.Errorf("translate anthropic request to gemini: %w", emitErr)
 		}
 		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
-		var usage otel.UsageSink
-		if s.usageRequired() {
-			extractor = otel.NewUsageExtractor(nil, decision.Provider)
-			usage = extractor
+		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			var usage otel.UsageSink
+			if s.usageRequired() {
+				extractor = otel.NewUsageExtractor(nil, d.Provider)
+				usage = extractor
+			}
+			// SSE chain: Gemini → OpenAI → Anthropic.
+			anthropicTr := translate.NewAnthropicSSETranslator(sink, d.Model, usage).
+				WithRoutingMarker(routingMarkerFor(routeRes)).
+				WithEstimatedInputTokens(feats.Tokens)
+			geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, d.Model, nil)
+			err := p.Proxy(actx, d, prep, geminiTr, r)
+			err = finalizeAfterProxy(err, geminiTr.Finalize)
+			return finalizeAfterProxy(err, anthropicTr.Finalize)
 		}
-		// SSE chain: Gemini → OpenAI → Anthropic.
-		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
-			WithRoutingMarker(routingMarkerFor(routeRes)).
-			WithEstimatedInputTokens(feats.Tokens)
-		geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, decision.Model, nil)
-		proxyErr = p.Proxy(ctx, decision, prep, geminiTr, r)
-		proxyErr = finalizeAfterProxy(proxyErr, geminiTr.Finalize)
-		proxyErr = finalizeAfterProxy(proxyErr, anthropicTr.Finalize)
 	default:
 		return fmt.Errorf("%w: %s (no translation path defined for inbound Anthropic Messages)", ErrProviderNotConfigured, decision.Provider)
 	}
+
+	bindings := s.resolveBindingsForDispatch(ctx, decision)
+	primaryProvider := decision.Provider
+	var winnerIdx int
+	winnerIdx, proxyErr = s.dispatchWithFallback(ctx, failoverInputs{
+		w:               w,
+		guard:           guard,
+		initialDecision: decision,
+		bindings:        bindings,
+		attempt:         attempt,
+	})
+	finalProvider := primaryProvider
+	if winnerIdx >= 0 && winnerIdx < len(bindings) {
+		finalProvider = bindings[winnerIdx].Provider
+	}
+	decision.Provider = finalProvider
 
 	// Cache store: only on success when body fits. Any top-p cluster id
 	// works for storage since LRU.Lookup scans all of them.
@@ -878,7 +901,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
-		Bool("routing.cross_format", crossFormat)
+		Bool("routing.cross_format", crossFormat).
+		String("dispatch.primary_provider", primaryProvider).
+		String("dispatch.final_provider", finalProvider).
+		Int64("dispatch.fallback_attempts", int64(winnerIdx)).
+		Bool("dispatch.failover_used", finalProvider != primaryProvider)
 	applyPlannerAttrs(upstreamBuilder, routeRes)
 	addTimingAttrs(ctx, upstreamBuilder)
 
@@ -939,7 +966,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
 
@@ -1473,9 +1500,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		}
 	}
 
-	p, provErr := s.provider(decision.Provider)
-	if provErr != nil {
-		return provErr
+	if _, err := s.provider(decision.Provider); err != nil {
+		return err
 	}
 
 	w.Header().Set("x-router-decision", decision.Reason)
@@ -1528,10 +1554,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
+	guard := newFirstByteGuard(w)
 	var captureW *captureWriter
-	var sink http.ResponseWriter = w
+	var sink http.ResponseWriter = guard
 	if cacheEligible {
-		captureW = newCaptureWriter(w, semanticCacheMaxBodyBytes)
+		captureW = newCaptureWriter(guard, semanticCacheMaxBodyBytes)
 		sink = captureW
 	}
 
@@ -1540,6 +1567,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	crossFormat := false
 	var extractor *otel.UsageExtractor
 
+	var attempt dispatchAttempt
 	switch decision.Provider {
 	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
@@ -1547,12 +1575,14 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			log.Error("Failed to emit OpenAI body", "err", emitErr)
 			return fmt.Errorf("emit body: %w", emitErr)
 		}
-		proxyWriter := sink
-		if s.usageRequired() {
-			extractor = otel.NewUsageExtractor(sink, decision.Provider)
-			proxyWriter = extractor
+		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			proxyWriter := sink
+			if s.usageRequired() {
+				extractor = otel.NewUsageExtractor(sink, d.Provider)
+				proxyWriter = extractor
+			}
+			return p.Proxy(actx, d, prep, proxyWriter, r)
 		}
-		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
 	case providers.ProviderGoogle:
 		crossFormat = true
 		prep, emitErr := env.PrepareGemini(r.Header, opts)
@@ -1560,14 +1590,16 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			log.Error("Failed to translate OpenAI request to Gemini format", "err", emitErr)
 			return fmt.Errorf("translate openai request to gemini: %w", emitErr)
 		}
-		var usage otel.UsageSink
-		if s.usageRequired() {
-			extractor = otel.NewUsageExtractor(nil, decision.Provider)
-			usage = extractor
+		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			var usage otel.UsageSink
+			if s.usageRequired() {
+				extractor = otel.NewUsageExtractor(nil, d.Provider)
+				usage = extractor
+			}
+			translator := translate.NewGeminiToOpenAISSETranslator(sink, d.Model, usage)
+			err := p.Proxy(actx, d, prep, translator, r)
+			return finalizeAfterProxy(err, translator.Finalize)
 		}
-		translator := translate.NewGeminiToOpenAISSETranslator(sink, decision.Model, usage)
-		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
-		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderAnthropic:
 		crossFormat = true
 		prep, emitErr := env.PrepareAnthropic(r.Header, opts)
@@ -1575,17 +1607,35 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			log.Error("Failed to translate OpenAI request to Anthropic format", "err", emitErr)
 			return fmt.Errorf("translate openai request: %w", emitErr)
 		}
-		var usage otel.UsageSink
-		if s.usageRequired() {
-			extractor = otel.NewUsageExtractor(nil, providers.ProviderAnthropic)
-			usage = extractor
+		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			var usage otel.UsageSink
+			if s.usageRequired() {
+				extractor = otel.NewUsageExtractor(nil, providers.ProviderAnthropic)
+				usage = extractor
+			}
+			translator := translate.NewSSETranslator(sink, d.Model, usage)
+			err := p.Proxy(actx, d, prep, translator, r)
+			return finalizeAfterProxy(err, translator.Finalize)
 		}
-		translator := translate.NewSSETranslator(sink, decision.Model, usage)
-		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
-		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	default:
 		return fmt.Errorf("%w: %s (no translation path defined)", ErrProviderNotConfigured, decision.Provider)
 	}
+
+	bindings := s.resolveBindingsForDispatch(ctx, decision)
+	primaryProvider := decision.Provider
+	var winnerIdx int
+	winnerIdx, proxyErr = s.dispatchWithFallback(ctx, failoverInputs{
+		w:               w,
+		guard:           guard,
+		initialDecision: decision,
+		bindings:        bindings,
+		attempt:         attempt,
+	})
+	finalProvider := primaryProvider
+	if winnerIdx >= 0 && winnerIdx < len(bindings) {
+		finalProvider = bindings[winnerIdx].Provider
+	}
+	decision.Provider = finalProvider
 
 	if cacheEligible && proxyErr == nil && captureW != nil {
 		if body, status, ok := captureW.captured(); ok && status == http.StatusOK {
@@ -1622,7 +1672,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
-		Bool("routing.cross_format", crossFormat)
+		Bool("routing.cross_format", crossFormat).
+		String("dispatch.primary_provider", primaryProvider).
+		String("dispatch.final_provider", finalProvider).
+		Int64("dispatch.fallback_attempts", int64(winnerIdx)).
+		Bool("dispatch.failover_used", finalProvider != primaryProvider)
 	applyPlannerAttrs(openaiUpstreamBuilder, routeRes)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
 
@@ -1681,6 +1735,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }

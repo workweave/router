@@ -142,18 +142,15 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
 
-	providers.CopyUpstreamHeaders(w, resp)
-	w.WriteHeader(resp.StatusCode)
-
 	if resp.StatusCode >= 400 {
-		var snip [1024]byte
-		n, _ := io.ReadFull(resp.Body, snip[:])
-		if n > 0 {
+		// Buffer the upstream error response — do NOT touch w. The proxy's
+		// failover loop decides whether to retry on the next binding or
+		// flush this buffer to the client.
+		bufBody, totalRead, drainErr := readCapped(resp.Body, providers.MaxBufferedErrorBytes)
+		if len(bufBody) > 0 {
 			t.StampUpstreamFirstByte()
 		}
-		_, snipWriteErr := w.Write(snip[:n])
-		rest, copyErr := io.Copy(w, resp.Body)
-		if copyErr == nil {
+		if drainErr == nil {
 			t.StampUpstreamEOF()
 		}
 		logUpstreamStatus(
@@ -161,20 +158,54 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 			resp.StatusCode,
 			"base_url", c.baseURL,
 			"routed_model", decision.Model,
-			"body_preview", string(snip[:n]),
-			"body_total_bytes", int64(n)+rest,
+			"body_preview", previewBytes(bufBody),
+			"body_total_bytes", totalRead,
 		)
-		if snipWriteErr != nil {
-			return snipWriteErr
+		errHeaders := http.Header{}
+		providers.CopyUpstreamHeaders(headerCapture{errHeaders}, resp)
+		return &providers.UpstreamErrorResponse{
+			Status:  resp.StatusCode,
+			Headers: errHeaders,
+			Body:    bufBody,
 		}
-		if copyErr != nil {
-			return copyErr
-		}
-		return &providers.UpstreamStatusError{Status: resp.StatusCode}
 	}
 
+	providers.CopyUpstreamHeaders(w, resp)
+	w.WriteHeader(resp.StatusCode)
 	return httputil.StreamBody(resp.Body, resp.StatusCode, w, t)
 }
+
+// readCapped reads up to limit bytes from r into a buffer, then drains the
+// rest without retention. Returns the buffered prefix, total bytes read,
+// and any read error (io.EOF mapped to nil).
+func readCapped(r io.Reader, limit int) ([]byte, int64, error) {
+	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
+	totalRead := int64(len(prefix))
+	if err != nil {
+		return prefix, totalRead, err
+	}
+	rest, drainErr := io.Copy(io.Discard, r)
+	totalRead += rest
+	return prefix, totalRead, drainErr
+}
+
+// previewBytes returns the first 1KB of body as a string for logging.
+func previewBytes(body []byte) string {
+	const previewLimit = 1024
+	if len(body) > previewLimit {
+		return string(body[:previewLimit])
+	}
+	return string(body)
+}
+
+// headerCapture is a minimal http.ResponseWriter that captures headers
+// only, used to reuse providers.CopyUpstreamHeaders against an http.Header
+// we own. Write/WriteHeader are no-ops.
+type headerCapture struct{ h http.Header }
+
+func (c headerCapture) Header() http.Header       { return c.h }
+func (c headerCapture) Write([]byte) (int, error) { return 0, nil }
+func (c headerCapture) WriteHeader(int)            {}
 
 // Passthrough strips the inbound /v1 prefix to avoid double-prefixing with the configured baseURL.
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {

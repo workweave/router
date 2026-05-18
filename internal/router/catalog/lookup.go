@@ -46,6 +46,25 @@ func ResolveBinding(id string, available map[string]struct{}) (ProviderBinding, 
 	return ProviderBinding{}, false
 }
 
+// AvailableBindings returns every ProviderBinding for the model whose
+// Provider name is in `available`, in catalog order. Used by the proxy's
+// per-request failover loop: index 0 is the primary, indexes >0 are
+// ordered fallbacks. Empty result means the model has no binding under
+// the available set.
+func AvailableBindings(id string, available map[string]struct{}) []ProviderBinding {
+	m, ok := ByID(id)
+	if !ok {
+		return nil
+	}
+	out := make([]ProviderBinding, 0, len(m.Providers))
+	for _, b := range m.Providers {
+		if _, ok := available[b.Provider]; ok {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 // PriceFor returns the per-(provider, model) pricing. Used by the planner
 // when both pin and fresh have a resolved provider.
 func PriceFor(provider, id string) (Pricing, bool) {

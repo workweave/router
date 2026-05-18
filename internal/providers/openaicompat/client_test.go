@@ -133,3 +133,93 @@ func TestPassthrough_StripsInboundV1Prefix(t *testing.T) {
 	assert.Equal(t, "/api/v1/models", gotPath)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
+
+// TestProxy_BuffersErrorBodyAndDoesNotTouchWriter is the core failover
+// precondition: when the upstream returns >=400, openaicompat MUST NOT
+// write headers or status to the client writer. Instead it returns
+// *UpstreamErrorResponse carrying the buffered body, leaving the
+// dispatcher free to retry on another binding.
+func TestProxy_BuffersErrorBodyAndDoesNotTouchWriter(t *testing.T) {
+	const errBody = `{"error":{"message":"fireworks is having a moment","type":"service_unavailable"}}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(errBody))
+	}))
+	defer upstream.Close()
+
+	c := openaicompat.NewClient("test-key", upstream.URL+"/api/v1")
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"deepseek/deepseek-v4-pro","messages":[]}`), Headers: make(http.Header)}
+
+	err := c.Proxy(context.Background(), router.Decision{Model: "deepseek/deepseek-v4-pro"}, prep, rec, clientReq)
+
+	require.Error(t, err)
+	var buffered *providers.UpstreamErrorResponse
+	require.ErrorAs(t, err, &buffered, "openaicompat must return *UpstreamErrorResponse for >=400 status so the dispatcher can retry")
+	assert.Equal(t, http.StatusServiceUnavailable, buffered.Status)
+	assert.Equal(t, errBody, string(buffered.Body))
+	assert.Equal(t, "application/json", buffered.Headers.Get("Content-Type"))
+
+	// The writer must remain pristine — no headers, no body, no status.
+	// httptest.ResponseRecorder defaults to 200 and reports it via Code
+	// even before WriteHeader is called, so we check that nothing was
+	// actually written instead.
+	assert.Equal(t, 0, rec.Body.Len(), "writer must not be touched on retryable upstream error")
+	assert.False(t, rec.HeaderMap.Get("Content-Type") != "", "writer headers must not be set on retryable upstream error")
+}
+
+// TestProxy_BuffersErrorBodyTruncatedAtCap ensures that a chatty upstream
+// can't OOM us via a huge error body. Beyond MaxBufferedErrorBytes the
+// remainder is drained and discarded.
+func TestProxy_BuffersErrorBodyTruncatedAtCap(t *testing.T) {
+	// 256KB body, well over the 64KB cap.
+	largeBody := strings.Repeat("x", 256*1024)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(largeBody))
+	}))
+	defer upstream.Close()
+
+	c := openaicompat.NewClient("test-key", upstream.URL+"/api/v1")
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"x","messages":[]}`), Headers: make(http.Header)}
+
+	err := c.Proxy(context.Background(), router.Decision{Model: "x"}, prep, rec, clientReq)
+
+	var buffered *providers.UpstreamErrorResponse
+	require.ErrorAs(t, err, &buffered)
+	assert.Equal(t, http.StatusBadGateway, buffered.Status)
+	assert.Equal(t, providers.MaxBufferedErrorBytes, len(buffered.Body),
+		"body must be truncated at MaxBufferedErrorBytes")
+}
+
+// TestProxy_4xxStillBuffered confirms that non-retryable 4xx is also
+// buffered — the classifier (providers.IsRetryable) decides retry
+// eligibility, not the adapter. Adapter just stops bytes from leaking
+// to the client until the dispatcher decides whether to flush or retry.
+func TestProxy_4xxStillBuffered(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad model"}`))
+	}))
+	defer upstream.Close()
+
+	c := openaicompat.NewClient("test-key", upstream.URL+"/api/v1")
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"x"}`), Headers: make(http.Header)}
+
+	err := c.Proxy(context.Background(), router.Decision{Model: "x"}, prep, rec, clientReq)
+
+	var buffered *providers.UpstreamErrorResponse
+	require.ErrorAs(t, err, &buffered)
+	assert.Equal(t, http.StatusBadRequest, buffered.Status)
+	assert.False(t, providers.IsRetryableStatus(buffered.Status),
+		"sanity: 400 must classify as non-retryable")
+}
