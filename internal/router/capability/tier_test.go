@@ -65,12 +65,10 @@ func TestValidate(t *testing.T) {
 			"qwen/qwen3-30b-a3b-instruct-2507",
 			"qwen/qwen3-coder-next",
 			"qwen/qwen3-next-80b-a3b-instruct",
-			"qwen/qwen3.5-flash-02-23",
 			"qwen/qwen3-coder",
 			"deepseek/deepseek-v4-flash",
 			"deepseek/deepseek-v4-pro",
 			"moonshotai/kimi-k2.5",
-			"mistralai/mistral-small-2603",
 		}
 		require.NoError(t, capability.Validate(deployed))
 	})
@@ -105,7 +103,7 @@ func TestIsAtOrBelow(t *testing.T) {
 		{"claude-opus-4-7", capability.TierMid, false},
 		{"claude-opus-4-7", capability.TierHigh, true},
 		{"deepseek/deepseek-v4-pro", capability.TierLow, false},
-		{"qwen/qwen3.5-flash-02-23", capability.TierLow, true},
+		{"deepseek/deepseek-v4-flash", capability.TierLow, true},
 		// Unknown tier must fail-closed: a model absent from the table
 		// can't be proven safe under a ceiling, so reject it.
 		{"made-up-model", capability.TierHigh, false},
@@ -125,7 +123,7 @@ func TestAllowedAtOrBelow(t *testing.T) {
 		require.Equal(t, capability.TierLow, capability.TierFor(m), "AllowedAtOrBelow(Low) returned %q which is not TierLow", m)
 	}
 	assert.Contains(t, low, "claude-haiku-4-5")
-	assert.Contains(t, low, "qwen/qwen3.5-flash-02-23")
+	assert.Contains(t, low, "deepseek/deepseek-v4-flash")
 	assert.NotContains(t, low, "claude-opus-4-7")
 	assert.NotContains(t, low, "claude-sonnet-4-5")
 

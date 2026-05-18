@@ -44,9 +44,7 @@ var tiers = map[string]Tier{
 	"gpt-4.1-nano":                     TierLow,
 	"gpt-4.1-mini":                     TierLow,
 	"qwen/qwen3-30b-a3b-instruct-2507": TierLow,
-	"qwen/qwen3.5-flash-02-23":         TierLow,
 	"deepseek/deepseek-v4-flash":       TierLow,
-	"mistralai/mistral-small-2603":     TierLow,
 
 	// --- Mid ---
 	"claude-sonnet-4-5":                TierMid,

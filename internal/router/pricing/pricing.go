@@ -92,12 +92,10 @@ var table = map[string]Pricing{
 	"qwen/qwen3-next-80b-a3b-instruct": {InputUSDPer1M: 0.090, OutputUSDPer1M: 1.100},
 
 	// OpenRouter OSS pool: v0.25 expansion
-	"qwen/qwen3.5-flash-02-23":     {InputUSDPer1M: 0.065, OutputUSDPer1M: 0.260},
-	"qwen/qwen3-coder":             {InputUSDPer1M: 0.220, OutputUSDPer1M: 1.800},
-	"deepseek/deepseek-v4-flash":   {InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10},
-	"deepseek/deepseek-v4-pro":     {InputUSDPer1M: 0.435, OutputUSDPer1M: 0.870, CacheReadMultiplier: 0.10},
-	"moonshotai/kimi-k2.5":         {InputUSDPer1M: 0.440, OutputUSDPer1M: 2.000},
-	"mistralai/mistral-small-2603": {InputUSDPer1M: 0.150, OutputUSDPer1M: 0.600},
+	"qwen/qwen3-coder":           {InputUSDPer1M: 0.220, OutputUSDPer1M: 1.800},
+	"deepseek/deepseek-v4-flash": {InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10},
+	"deepseek/deepseek-v4-pro":   {InputUSDPer1M: 0.435, OutputUSDPer1M: 0.870, CacheReadMultiplier: 0.10},
+	"moonshotai/kimi-k2.5":       {InputUSDPer1M: 0.440, OutputUSDPer1M: 2.000},
 }
 
 // For returns pricing for the given model. If the exact name isn't found,

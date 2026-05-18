@@ -161,14 +161,12 @@ prices='{
     "gpt-5.5-mini":                     0.0005,
     "gpt-5.5-nano":                     0.00015,
     "gpt-5.5-pro":                      0.03,
-    "mistralai/mistral-small-2603":     0.00015,
     "moonshotai/kimi-k2.5":             0.00044,
     "qwen/qwen3-235b-a22b-2507":        0.000071,
     "qwen/qwen3-30b-a3b-instruct-2507": 0.00008,
     "qwen/qwen3-coder":                 0.00022,
     "qwen/qwen3-coder-next":            0.00007,
-    "qwen/qwen3-next-80b-a3b-instruct": 0.00009,
-    "qwen/qwen3.5-flash-02-23":         0.000065
+    "qwen/qwen3-next-80b-a3b-instruct": 0.00009
   },
   "output": {
     "claude-haiku-4-5":                 0.004,
@@ -203,14 +201,12 @@ prices='{
     "gpt-5.5-mini":                     0.0025,
     "gpt-5.5-nano":                     0.0006,
     "gpt-5.5-pro":                      0.12,
-    "mistralai/mistral-small-2603":     0.0006,
     "moonshotai/kimi-k2.5":             0.002,
     "qwen/qwen3-235b-a22b-2507":        0.000463,
     "qwen/qwen3-30b-a3b-instruct-2507": 0.00033,
     "qwen/qwen3-coder":                 0.0018,
     "qwen/qwen3-coder-next":            0.0003,
-    "qwen/qwen3-next-80b-a3b-instruct": 0.0011,
-    "qwen/qwen3.5-flash-02-23":         0.00026
+    "qwen/qwen3-next-80b-a3b-instruct": 0.0011
   }
 }'
 # END_GENERATED_PRICES
