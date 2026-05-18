@@ -231,7 +231,7 @@ func main() {
 		if !byokOnly {
 			fireworksKey = config.GetOr("FIREWORKS_API_KEY", "")
 		}
-		providerMap[providers.ProviderFireworks] = openaiCompatProvider.NewClient(fireworksKey, fireworksBaseURL)
+		providerMap[providers.ProviderFireworks] = openaiCompatProvider.NewClientWithModelIDMap(fireworksKey, fireworksBaseURL, upstreamIDsForProvider(providers.ProviderFireworks))
 		switch {
 		case byokOnly:
 			logger.Info("Fireworks provider enabled (BYOK only)", "base_url", fireworksBaseURL)
@@ -240,6 +240,54 @@ func main() {
 			logger.Info("Fireworks provider enabled", "base_url", fireworksBaseURL)
 		default:
 			logger.Info("Fireworks provider registered (BYOK only — set FIREWORKS_API_KEY for deployment-level use)", "base_url", fireworksBaseURL)
+		}
+	}
+
+	{
+		// DeepInfra OpenAI-compatible surface. DeepInfra uses HuggingFace-form
+		// model IDs while the router exposes slash-form slugs; modelIDMap is
+		// derived from the catalog's per-binding UpstreamID at boot.
+		deepInfraBaseURL := config.GetOr("DEEPINFRA_BASE_URL", openaiCompatProvider.DeepInfraBaseURL)
+		deepInfraKey := ""
+		if !byokOnly {
+			deepInfraKey = config.GetOr("DEEPINFRA_API_KEY", "")
+		}
+		providerMap[providers.ProviderDeepInfra] = openaiCompatProvider.NewClientWithModelIDMap(deepInfraKey, deepInfraBaseURL, upstreamIDsForProvider(providers.ProviderDeepInfra))
+		switch {
+		case byokOnly:
+			logger.Info("DeepInfra provider enabled (BYOK only)", "base_url", deepInfraBaseURL)
+		case deepInfraKey != "":
+			envKeyedProviders[providers.ProviderDeepInfra] = struct{}{}
+			logger.Info("DeepInfra provider enabled", "base_url", deepInfraBaseURL)
+		default:
+			logger.Info("DeepInfra provider registered (BYOK only — set DEEPINFRA_API_KEY for deployment-level use)", "base_url", deepInfraBaseURL)
+		}
+	}
+
+	{
+		// Bedrock via the OpenAI-compatible "bedrock-mantle" surface
+		// (https://bedrock-mantle.{region}.api.aws/v1). AWS recommends this
+		// over the model-native bedrock-runtime/InvokeModel surface; both
+		// Qwen3 and Kimi K2.5 model IDs are addressable through it directly.
+		// Auth is a static long-term Bedrock API key (AWS_BEARER_TOKEN_BEDROCK),
+		// not SigV4, so the standard openaicompat bearer flow applies. Bedrock
+		// expects dot-form model IDs; modelIDMap is derived from the catalog
+		// at boot.
+		bedrockRegion := config.GetOr("AWS_REGION", "us-east-1")
+		bedrockBaseURL := config.GetOr("BEDROCK_BASE_URL", openaiCompatProvider.BedrockMantleBaseURL(bedrockRegion))
+		bedrockKey := ""
+		if !byokOnly {
+			bedrockKey = config.GetOr("AWS_BEARER_TOKEN_BEDROCK", "")
+		}
+		providerMap[providers.ProviderBedrock] = openaiCompatProvider.NewClientWithModelIDMap(bedrockKey, bedrockBaseURL, upstreamIDsForProvider(providers.ProviderBedrock))
+		switch {
+		case byokOnly:
+			logger.Info("Bedrock provider enabled (BYOK only)", "base_url", bedrockBaseURL)
+		case bedrockKey != "":
+			envKeyedProviders[providers.ProviderBedrock] = struct{}{}
+			logger.Info("Bedrock provider enabled", "base_url", bedrockBaseURL, "region", bedrockRegion)
+		default:
+			logger.Info("Bedrock provider registered (BYOK only — set AWS_BEARER_TOKEN_BEDROCK for deployment-level use)", "base_url", bedrockBaseURL)
 		}
 	}
 
@@ -979,4 +1027,24 @@ func envVarHint(provider string) string {
 		return v
 	}
 	return "<unknown provider " + provider + ">"
+}
+
+// upstreamIDsForProvider walks the catalog and returns the map of public
+// model ID → upstream model ID for every binding on the given provider that
+// has a non-empty UpstreamID. Returns nil when no rewriting is needed (e.g.
+// OpenRouter, where the public slug IS the upstream ID). Callers pass the
+// result straight to openaicompat.NewClientWithModelIDMap.
+func upstreamIDsForProvider(provider string) map[string]string {
+	out := make(map[string]string)
+	for _, m := range catalog.Models {
+		for _, b := range m.Providers {
+			if b.Provider == provider && b.UpstreamID != "" {
+				out[m.ID] = b.UpstreamID
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
