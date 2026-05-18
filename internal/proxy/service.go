@@ -114,8 +114,8 @@ type InstallationExcludedModelsContextKey struct{}
 // installationExcludedModelsFromContext returns the per-installation exclusion
 // list stashed on ctx by the auth middleware, or nil when none is present.
 
-// routingMarkerFor builds the "brand -> model . reason" snippet emitted
-// at the start of every cross-format streamed response.
+// routingMarkerFor builds the "brand → model · note" snippet emitted at the
+// start of every cross-format streamed response.
 func routingMarkerFor(res turnLoopResult) string {
 	decision := res.Decision
 	if decision.Model == "" {
@@ -127,11 +127,8 @@ func routingMarkerFor(res turnLoopResult) string {
 		return ""
 	}
 	parts := []string{"✦ **Weave Router** → " + decision.Model}
-	if decision.Provider != "" {
-		parts[0] += " (" + decision.Provider + ")"
-	}
 	if reason := routingReasonShort(res); reason != "" {
-		parts = append(parts, "reason: "+reason)
+		parts = append(parts, reason)
 	}
 	if note := clampNote(res); note != "" {
 		parts = append(parts, note)
@@ -144,61 +141,36 @@ func clampNote(res turnLoopResult) string {
 	if !res.TierClamped || res.PreClampModel == "" {
 		return ""
 	}
-	upsell := upsellModelFor(res.RequestedTier)
-	if upsell == "" {
-		return fmt.Sprintf("second-choice pick (would have used %s — capped to your requested %s tier)", res.PreClampModel, res.RequestedTier.String())
-	}
-	return fmt.Sprintf("second-choice pick (would have used %s — capped to your requested %s tier; request %s to unlock higher-tier picks)", res.PreClampModel, res.RequestedTier.String(), upsell)
+	return fmt.Sprintf("second-choice pick at %s tier (would have used %s)", res.RequestedTier.String(), res.PreClampModel)
 }
 
-// upsellModelFor returns the conventional next-tier-up model name for the
-// clamp note. High tier has no upsell.
-func upsellModelFor(t catalog.Tier) string {
-	switch t {
-	case catalog.TierLow:
-		return "claude-sonnet-4-5"
-	case catalog.TierMid:
-		return "claude-opus-4-7"
-	default:
-		return ""
-	}
-}
-
-// routingReasonShort returns a human-readable reason for the marker.
+// routingReasonShort returns a short user-facing reason for the routing
+// decision, or empty when the underlying code is internal recovery noise.
 func routingReasonShort(res turnLoopResult) string {
+	if res.HardPinned {
+		return "pinned for compaction / sub-agent"
+	}
 	if res.PlannerDecision.Reason != "" {
 		return humanReasonFromPlanner(res.PlannerDecision.Reason)
 	}
-	if res.HardPinned {
-		return "hard pin (compaction / sub-agent)"
-	}
-	if res.StickyHit {
-		return "tool-result follow-up"
-	}
-	return "top scorer"
+	return "best pick for this turn"
 }
 
-// humanReasonFromPlanner maps planner reason codes to marker prose.
+// humanReasonFromPlanner maps planner reason codes to short user-facing prose.
+// Recovery codes (pin_model_missing, pricing_missing) and unknown codes return
+// empty so the marker stays clean.
 func humanReasonFromPlanner(code string) string {
 	switch code {
 	case planner.ReasonEVPositive:
-		return "switched to save on cache reads"
-	case planner.ReasonEVNegative:
-		return "stayed: cache reuse beats the switch"
-	case planner.ReasonSameModel:
-		return "scorer matches the pin"
-	case planner.ReasonNoPin:
-		return "top scorer"
-	case planner.ReasonNoPriorUsage:
-		return "no cache stats yet"
-	case planner.ReasonPinModelMissing:
-		return "pin model no longer available"
-	case planner.ReasonPricingMissing:
-		return "missing pricing for a candidate"
+		return "switched for cheaper cache reuse"
+	case planner.ReasonEVNegative, planner.ReasonNoPriorUsage:
+		return "stayed on your last pick"
 	case planner.ReasonTierUpgrade:
-		return "model tier upgrade"
+		return "upgraded to a stronger tier"
+	case planner.ReasonNoPin, planner.ReasonSameModel:
+		return "best pick for this turn"
 	default:
-		return code
+		return ""
 	}
 }
 

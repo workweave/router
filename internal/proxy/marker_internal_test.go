@@ -13,7 +13,7 @@ import (
 func TestRoutingMarkerFor_TierClampNote(t *testing.T) {
 	t.Parallel()
 
-	t.Run("haiku-ceiling clamp suggests sonnet upsell", func(t *testing.T) {
+	t.Run("low-tier clamp names the would-have model", func(t *testing.T) {
 		res := turnLoopResult{
 			Decision:      router.Decision{Model: "claude-haiku-4-5", Provider: "anthropic"},
 			TierClamped:   true,
@@ -21,13 +21,12 @@ func TestRoutingMarkerFor_TierClampNote(t *testing.T) {
 			RequestedTier: catalog.TierLow,
 		}
 		got := routingMarkerFor(res)
-		assert.Contains(t, got, "second-choice pick")
-		assert.Contains(t, got, "deepseek/deepseek-v4-pro")
-		assert.Contains(t, got, "low tier")
-		assert.Contains(t, got, "claude-sonnet-4-5")
+		assert.Contains(t, got, "second-choice pick at low tier")
+		assert.Contains(t, got, "(would have used deepseek/deepseek-v4-pro)")
+		assert.NotContains(t, got, "to unlock", "upsell suffix dropped from the simplified note")
 	})
 
-	t.Run("sonnet-ceiling clamp suggests opus upsell", func(t *testing.T) {
+	t.Run("mid-tier clamp names the would-have model", func(t *testing.T) {
 		res := turnLoopResult{
 			Decision:      router.Decision{Model: "claude-sonnet-4-5", Provider: "anthropic"},
 			TierClamped:   true,
@@ -35,9 +34,9 @@ func TestRoutingMarkerFor_TierClampNote(t *testing.T) {
 			RequestedTier: catalog.TierMid,
 		}
 		got := routingMarkerFor(res)
-		assert.Contains(t, got, "claude-opus-4-7")
-		assert.Contains(t, got, "mid tier")
-		assert.Contains(t, got, "claude-opus-4-7 to unlock")
+		assert.Contains(t, got, "second-choice pick at mid tier")
+		assert.Contains(t, got, "(would have used claude-opus-4-7)")
+		assert.NotContains(t, got, "to unlock")
 	})
 
 	t.Run("no clamp emits no note", func(t *testing.T) {
@@ -69,13 +68,12 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				PlannerDecision: planner.Decision{Reason: planner.ReasonEVPositive},
 			},
 			wantContains: []string{
-				"✦ **Weave Router** → deepseek/deepseek-v4-pro (openrouter)",
-				"reason: switched to save on cache reads",
+				"✦ **Weave Router** → deepseek/deepseek-v4-pro · switched for cheaper cache reuse",
 			},
 			wantNotContain: []string{
+				"(openrouter)",
+				"reason:",
 				"ev_positive",
-				"est. save",
-				"saved $",
 			},
 		},
 		{
@@ -85,37 +83,88 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				PlannerDecision: planner.Decision{Reason: planner.ReasonEVNegative},
 			},
 			wantContains: []string{
-				"reason: stayed: cache reuse beats the switch",
+				"· stayed on your last pick",
 			},
 			wantNotContain: []string{
+				"(openrouter)",
+				"reason:",
 				"ev_negative",
-				"est. save",
 			},
 		},
 		{
-			name: "same_model: planner ran with trivial outcome",
+			name: "no_prior_usage: collapses into stayed bucket",
+			res: turnLoopResult{
+				Decision:        decision,
+				PlannerDecision: planner.Decision{Reason: planner.ReasonNoPriorUsage},
+			},
+			wantContains: []string{
+				"· stayed on your last pick",
+			},
+			wantNotContain: []string{
+				"no cache stats",
+			},
+		},
+		{
+			name: "same_model: collapses into best-pick bucket",
 			res: turnLoopResult{
 				Decision:        decision,
 				PlannerDecision: planner.Decision{Reason: planner.ReasonSameModel},
 			},
 			wantContains: []string{
-				"reason: scorer matches the pin",
+				"· best pick for this turn",
 			},
 			wantNotContain: []string{
-				"est. save",
-				"same_model",
+				"scorer matches the pin",
+				"reason:",
 			},
 		},
 		{
-			name: "no planner ran, fresh decision: top-scorer fallback reason",
+			name: "tier_upgrade: planner bumped to a higher tier",
+			res: turnLoopResult{
+				Decision:        decision,
+				PlannerDecision: planner.Decision{Reason: planner.ReasonTierUpgrade},
+			},
+			wantContains: []string{
+				"· upgraded to a stronger tier",
+			},
+		},
+		{
+			name: "pricing_missing: recovery code is silenced",
+			res: turnLoopResult{
+				Decision:        decision,
+				PlannerDecision: planner.Decision{Reason: planner.ReasonPricingMissing},
+			},
+			wantContains: []string{
+				"✦ **Weave Router** → deepseek/deepseek-v4-pro",
+			},
+			wantNotContain: []string{
+				"·",
+				"pricing",
+				"missing",
+			},
+		},
+		{
+			name: "pin_model_missing: recovery code is silenced",
+			res: turnLoopResult{
+				Decision:        decision,
+				PlannerDecision: planner.Decision{Reason: planner.ReasonPinModelMissing},
+			},
+			wantNotContain: []string{
+				"·",
+				"pin model",
+			},
+		},
+		{
+			name: "no planner ran, fresh decision: best-pick fallback",
 			res: turnLoopResult{
 				Decision: decision,
 			},
 			wantContains: []string{
-				"reason: top scorer",
+				"· best pick for this turn",
 			},
 			wantNotContain: []string{
-				"est. save",
+				"top scorer",
+				"reason:",
 			},
 		},
 		{
@@ -125,10 +174,11 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				HardPinned: true,
 			},
 			wantContains: []string{
-				"reason: hard pin (compaction / sub-agent)",
+				"· pinned for compaction / sub-agent",
 			},
 			wantNotContain: []string{
-				"est. save",
+				"hard pin",
+				"reason:",
 			},
 		},
 		{
@@ -165,19 +215,22 @@ func TestRoutingMarkerFor_EmptyDecisionEmitsNothing(t *testing.T) {
 	assert.Empty(t, got)
 }
 
-func TestRoutingMarkerFor_OmitsProviderParensWhenProviderMissing(t *testing.T) {
+func TestRoutingMarkerFor_DropsProviderEvenWhenSet(t *testing.T) {
 	got := routingMarkerFor(turnLoopResult{
-		Decision: router.Decision{Model: "claude-haiku-4-5"},
+		Decision: router.Decision{Model: "claude-haiku-4-5", Provider: "anthropic"},
 		PlannerDecision: planner.Decision{
 			Reason: planner.ReasonNoPin,
 		},
 	})
 	assert.Contains(t, got, "✦ **Weave Router** → claude-haiku-4-5 ·")
+	assert.NotContains(t, got, "(anthropic)", "provider must not leak into the user-facing marker")
 	assert.NotContains(t, got, "()")
-	assert.Contains(t, got, "reason: top scorer")
+	assert.Contains(t, got, "· best pick for this turn")
 }
 
-func TestHumanReasonFromPlanner_UnknownCodePassesThrough(t *testing.T) {
+func TestHumanReasonFromPlanner_UnknownCodeIsSilenced(t *testing.T) {
+	// Unknown codes return empty so a new planner reason can't leak its
+	// snake_case label into the user-facing marker.
 	got := humanReasonFromPlanner("brand_new_reason_v9")
-	assert.Equal(t, "brand_new_reason_v9", got)
+	assert.Empty(t, got)
 }
