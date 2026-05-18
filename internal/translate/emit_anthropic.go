@@ -469,7 +469,7 @@ func writeAnthropicTools(jw *jsonWriter, body []byte) {
 		}
 		jw.Obj()
 		jw.Key("name")
-		jw.Raw(fn.Get("name").Raw)
+		jw.Str(fn.Get("name").String())
 		if desc := fn.Get("description"); desc.Exists() {
 			jw.Key("description")
 			jw.Raw(desc.Raw)

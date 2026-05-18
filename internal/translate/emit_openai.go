@@ -291,13 +291,13 @@ func buildOpenAIToolCall(block gjson.Result) string {
 	inner := newJSONWriter()
 	inner.Obj()
 	inner.Key("id")
-	inner.Raw(block.Get("id").Raw)
+	inner.Str(block.Get("id").String())
 	inner.Key("type")
 	inner.Str("function")
 	inner.Key("function")
 	inner.Obj()
 	inner.Key("name")
-	inner.Raw(block.Get("name").Raw)
+	inner.Str(block.Get("name").String())
 	// input is a JSON object; encode it as a JSON string (arguments field).
 	inputRaw := block.Get("input").Raw
 	if inputRaw == "" {
@@ -346,7 +346,7 @@ func writeOpenAIUserFromAnthropic(jw *jsonWriter, msg gjson.Result) {
 			inner.Key("type")
 			inner.Str("text")
 			inner.Key("text")
-			inner.Raw(block.Get("text").Raw)
+			inner.Str(block.Get("text").String())
 			inner.EndObj()
 			userPartRaws = append(userPartRaws, string(inner.Bytes()))
 		case "image":
@@ -373,7 +373,7 @@ func writeOpenAIUserFromAnthropic(jw *jsonWriter, msg gjson.Result) {
 			jw.Key("role")
 			jw.Str("user")
 			jw.Key("content")
-			jw.Raw(p.Get("text").Raw)
+			jw.Str(p.Get("text").String())
 			jw.EndObj()
 			return
 		}
@@ -399,7 +399,7 @@ func buildOpenAIToolResultMessage(block gjson.Result) string {
 	inner.Key("role")
 	inner.Str("tool")
 	inner.Key("tool_call_id")
-	inner.Raw(block.Get("tool_use_id").Raw)
+	inner.Str(block.Get("tool_use_id").String())
 	inner.Key("content")
 	inner.Str(toolResultContentGJSON(block.Get("content")))
 	inner.EndObj()
@@ -475,7 +475,7 @@ func writeOpenAIToolsFromAnthropic(jw *jsonWriter, body []byte) {
 		jw.Key("function")
 		jw.Obj()
 		jw.Key("name")
-		jw.Raw(tool.Get("name").Raw)
+		jw.Str(tool.Get("name").String())
 		if desc := tool.Get("description"); desc.Exists() {
 			jw.Key("description")
 			jw.Raw(desc.Raw)

@@ -1182,9 +1182,10 @@ func TestCrossFormat_AnthropicToOpenAI_ToolWithoutDescription(t *testing.T) {
 	fn, _ := tools[0].(map[string]any)["function"].(map[string]any)
 	require.NotNil(t, fn)
 	assert.Equal(t, "Bash", fn["name"])
-	// description should be absent, not empty or malformed
-	_, hasDesc := fn["description"]
-	assert.False(t, hasDesc, "tool without description should omit the field entirely")
+	// description should be absent or null, not malformed (e.g. "description":,)
+	if desc, hasDesc := fn["description"]; hasDesc {
+		assert.Nil(t, desc, "if present, description should be null for tools without one")
+	}
 }
 
 func TestCrossFormat_OpenAIToAnthropic_StopNull(t *testing.T) {
@@ -1254,4 +1255,59 @@ func TestCrossFormat_OpenAIToGemini_InvalidToolArgsReturnsError(t *testing.T) {
 		TargetModel: "gemini-2.5-flash",
 	})
 	assert.Error(t, err, "invalid tool_call arguments should produce an error, not silently substitute {}")
+}
+
+func TestCrossFormat_AnthropicToOpenAI_ToolUseWithMissingName(t *testing.T) {
+	// tool_use block with missing "name" field — must produce valid JSON, not malformed
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "user", "content": "hi"},
+			{"role": "assistant", "content": [
+				{"type": "tool_use", "id": "toolu_123", "input": {"x": 1}}
+			]}
+		]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{TargetModel: "gpt-4"})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
+}
+
+func TestCrossFormat_AnthropicToOpenAI_ToolResultMissingToolUseID(t *testing.T) {
+	// tool_result with missing tool_use_id — must produce valid JSON
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "tool_result", "content": "done"}
+			]}
+		]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{TargetModel: "gpt-4"})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
+}
+
+func TestCrossFormat_OpenAIToAnthropic_ToolMissingFunctionName(t *testing.T) {
+	// OpenAI tool with function.name absent — must produce valid JSON
+	body := []byte(`{
+		"model": "gpt-4",
+		"messages": [{"role": "user", "content": "hi"}],
+		"tools": [{"type": "function", "function": {"description": "does stuff", "parameters": {"type": "object"}}}]
+	}`)
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-sonnet-4-20250514"})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
 }
