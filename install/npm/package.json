@@ -1,6 +1,6 @@
 {
   "name": "@workweave/router",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "One-command installer that points Claude Code at the Weave Router.",
   "bin": {
     "weave-router": "bin.js"
