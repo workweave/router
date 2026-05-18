@@ -451,6 +451,7 @@ func writeGeminiToolsFromOpenAI(jw *jsonWriter, body []byte) {
 		if params := fn.Get("parameters"); params.Exists() {
 			var schema any
 			if err := json.Unmarshal([]byte(params.Raw), &schema); err == nil {
+				schema = inlineSchemaDefs(schema)
 				schema = sanitizeSchemaForGemini(schema)
 				if schemaBytes, err := json.Marshal(schema); err == nil {
 					dw.Key("parameters")
@@ -863,6 +864,7 @@ func writeGeminiToolsFromAnthropic(jw *jsonWriter, body []byte) {
 		if params := t.Get("input_schema"); params.Exists() {
 			var schema any
 			if err := json.Unmarshal([]byte(params.Raw), &schema); err == nil {
+				schema = inlineSchemaDefs(schema)
 				schema = sanitizeSchemaForGemini(schema)
 				if schemaBytes, err := json.Marshal(schema); err == nil {
 					dw.Key("parameters")

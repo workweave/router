@@ -1296,6 +1296,95 @@ func TestCrossFormat_AnthropicToOpenAI_ToolResultMissingToolUseID(t *testing.T) 
 	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
 }
 
+func TestCrossFormat_OpenAIToGemini_SchemaRefsInlined(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4",
+		"messages": [{"role": "user", "content": "hi"}],
+		"tools": [{
+			"type": "function",
+			"function": {
+				"name": "create_item",
+				"description": "Create an item",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"item": {"$ref": "#/$defs/Item"}
+					},
+					"$defs": {
+						"Item": {"type": "object", "properties": {"name": {"type": "string"}}}
+					}
+				}
+			}
+		}]
+	}`)
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-2.5-flash"})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc))
+
+	tools, _ := doc["tools"].([]any)
+	require.Len(t, tools, 1)
+	fds, _ := tools[0].(map[string]any)["functionDeclarations"].([]any)
+	require.Len(t, fds, 1)
+	params, _ := fds[0].(map[string]any)["parameters"].(map[string]any)
+	require.NotNil(t, params)
+
+	_, hasDefs := params["$defs"]
+	assert.False(t, hasDefs, "$defs should be inlined and removed")
+
+	props, _ := params["properties"].(map[string]any)
+	item, _ := props["item"].(map[string]any)
+	require.NotNil(t, item, "item property should exist after $ref resolution")
+	assert.Equal(t, "object", item["type"], "$ref should be resolved to Item schema")
+	itemProps, _ := item["properties"].(map[string]any)
+	assert.Contains(t, itemProps, "name", "resolved Item schema should have name property")
+}
+
+func TestCrossFormat_AnthropicToGemini_SchemaRefsInlined(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [{"role": "user", "content": "hi"}],
+		"tools": [{
+			"name": "create_item",
+			"description": "Create an item",
+			"input_schema": {
+				"type": "object",
+				"properties": {
+					"item": {"$ref": "#/$defs/Item"}
+				},
+				"$defs": {
+					"Item": {"type": "object", "properties": {"name": {"type": "string"}}}
+				}
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-2.5-flash"})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &doc))
+
+	tools, _ := doc["tools"].([]any)
+	require.Len(t, tools, 1)
+	fds, _ := tools[0].(map[string]any)["functionDeclarations"].([]any)
+	require.Len(t, fds, 1)
+	params, _ := fds[0].(map[string]any)["parameters"].(map[string]any)
+	require.NotNil(t, params)
+
+	_, hasDefs := params["$defs"]
+	assert.False(t, hasDefs, "$defs should be inlined and removed")
+
+	props, _ := params["properties"].(map[string]any)
+	item, _ := props["item"].(map[string]any)
+	require.NotNil(t, item, "item property should exist after $ref resolution")
+	assert.Equal(t, "object", item["type"])
+}
+
 func TestCrossFormat_OpenAIToAnthropic_ToolMissingFunctionName(t *testing.T) {
 	// OpenAI tool with function.name absent — must produce valid JSON
 	body := []byte(`{
