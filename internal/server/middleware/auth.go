@@ -23,16 +23,25 @@ const (
 const RouterKeyHeader = "X-Weave-Router-Key"
 
 // WithAuth validates the inbound request via a bearer rk_ token only. Used on data-plane routes (`/v1/*`). On failure, short-circuits 401.
-func WithAuth(svc *auth.Service) gin.HandlerFunc {
-	return withAPIKey(svc)
+//
+// byokDisabled drops any BYOK (customer-owned provider) keys at the middleware
+// boundary so downstream proxy code can't see them. Managed-mode deployments
+// pass true: they bill via prepaid credits against the platform key and must
+// never honor a leftover row in router.model_router_external_api_keys, or the
+// customer would be charged twice (once upstream, once via credits).
+// Self-hosted passes false; BYOK is the only credentialing path there.
+func WithAuth(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
+	return withAPIKey(svc, byokDisabled)
 }
 
 // WithAdminOrAuth accepts either a signed admin session cookie OR a bearer rk_ token.
 //
 // Do not use on `/v1/*` data-plane routes — a dashboard cookie must not call provider proxy endpoints.
 // Do not use on control-plane mutations — a leaked rk_ must not mint fresh keys or rotate provider credentials; use WithAdminOnly instead.
-func WithAdminOrAuth(svc *auth.Service) gin.HandlerFunc {
-	apiKeyMW := withAPIKey(svc)
+//
+// See WithAuth for the byokDisabled semantics.
+func WithAdminOrAuth(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
+	apiKeyMW := withAPIKey(svc, byokDisabled)
 	return func(c *gin.Context) {
 		if principal := tryAdminCookie(c, svc); principal != nil {
 			c.Set(ctxKeyAdminPrincipal, principal)
@@ -61,7 +70,13 @@ func WithAdminOnly(svc *auth.Service) gin.HandlerFunc {
 }
 
 // withAPIKey is the bearer-only auth path shared by WithAuth and the fall-through branch of WithAdminOrAuth.
-func withAPIKey(svc *auth.Service) gin.HandlerFunc {
+//
+// When byokDisabled is true, BYOK rows returned by svc.VerifyAPIKey are
+// dropped before reaching the request context. Every downstream consumer of
+// the BYOK ctx value (proxy credential resolution, provider gating, usage
+// bookkeeping) reads from that single key, so gating it here makes the entire
+// code path BYOK-blind without further surgery.
+func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractToken(c)
 		installation, apiKey, externalKeys, err := svc.VerifyAPIKey(c.Request.Context(), token)
@@ -86,7 +101,7 @@ func withAPIKey(svc *auth.Service) gin.HandlerFunc {
 				ctx = context.WithValue(ctx, proxy.InstallationExcludedModelsContextKey{}, installation.ExcludedModels)
 			}
 		}
-		if externalKeys != nil {
+		if externalKeys != nil && !byokDisabled {
 			ctx = context.WithValue(ctx, proxy.ExternalAPIKeysContextKey{}, externalKeys)
 		}
 		if installation != nil && installation.ID != "" {

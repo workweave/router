@@ -11,12 +11,37 @@ import (
 	"time"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/proxy"
 	"workweave/router/internal/server/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeExternalAPIKeyRepository struct {
+	byInstallationID map[string][]*auth.ExternalAPIKey
+}
+
+func (f *fakeExternalAPIKeyRepository) Create(context.Context, auth.CreateExternalAPIKeyParams) (*auth.ExternalAPIKey, error) {
+	return nil, errors.New("not used")
+}
+
+func (f *fakeExternalAPIKeyRepository) GetForInstallation(_ context.Context, installationID string) ([]*auth.ExternalAPIKey, error) {
+	return f.byInstallationID[installationID], nil
+}
+
+func (f *fakeExternalAPIKeyRepository) SoftDeleteByProvider(context.Context, string, string) error {
+	return errors.New("not used")
+}
+
+func (f *fakeExternalAPIKeyRepository) SoftDelete(context.Context, string, string) error {
+	return errors.New("not used")
+}
+
+func (f *fakeExternalAPIKeyRepository) MarkUsed(context.Context, string) error {
+	return nil
+}
 
 type fakeAPIKeyRepository struct {
 	byHash map[string]fakeKeyRow
@@ -92,7 +117,7 @@ func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 	})
 
 	engine := gin.New()
-	engine.Use(middleware.WithAuth(svc))
+	engine.Use(middleware.WithAuth(svc, false))
 	engine.GET("/probe", func(c *gin.Context) {
 		assert.Equal(t, installation, middleware.InstallationFrom(c))
 		assert.Equal(t, apiKey, middleware.APIKeyFrom(c))
@@ -102,6 +127,70 @@ func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
 	req.Header.Set(middleware.RouterKeyHeader, routerToken)
 	req.Header.Set("Authorization", "Bearer anthropic-oauth-token")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestWithAuthManagedModeDropsBYOKFromContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const routerToken = "rk_managed"
+	hash, prefix, suffix := auth.APITokenFingerprint(routerToken)
+	apiKey := &auth.APIKey{ID: "key-managed", InstallationID: "inst-managed", KeyHash: hash, KeyPrefix: prefix, KeySuffix: suffix}
+	installation := &auth.Installation{ID: "inst-managed", ExternalID: "ext-managed"}
+	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
+		hash: {apiKey: apiKey, installation: installation},
+	}}
+	// VerifyAPIKey returns this row, so without the managed-mode gate the
+	// middleware would stash it on the request context.
+	externalRepo := &fakeExternalAPIKeyRepository{byInstallationID: map[string][]*auth.ExternalAPIKey{
+		installation.ID: {{ID: "ext-leftover", InstallationID: installation.ID, Provider: "anthropic", Plaintext: []byte("sk-ant-leftover")}},
+	}}
+	svc := auth.NewService(fakeInstallationRepository{}, repo, externalRepo, nil, auth.NoOpAPIKeyCache{}, nil, func() time.Time { return time.Now() })
+
+	engine := gin.New()
+	engine.Use(middleware.WithAuth(svc, true))
+	engine.GET("/probe", func(c *gin.Context) {
+		assert.Nil(t, c.Request.Context().Value(proxy.ExternalAPIKeysContextKey{}),
+			"managed mode must drop BYOK rows at the middleware boundary; a leftover row in the table must not reach the proxy ctx")
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set(middleware.RouterKeyHeader, routerToken)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestWithAuthSelfHostedKeepsBYOKInContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const routerToken = "rk_selfhosted"
+	hash, prefix, suffix := auth.APITokenFingerprint(routerToken)
+	apiKey := &auth.APIKey{ID: "key-self", InstallationID: "inst-self", KeyHash: hash, KeyPrefix: prefix, KeySuffix: suffix}
+	installation := &auth.Installation{ID: "inst-self", ExternalID: "ext-self"}
+	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
+		hash: {apiKey: apiKey, installation: installation},
+	}}
+	externalRepo := &fakeExternalAPIKeyRepository{byInstallationID: map[string][]*auth.ExternalAPIKey{
+		installation.ID: {{ID: "ext-byok", InstallationID: installation.ID, Provider: "anthropic", Plaintext: []byte("sk-ant-byok")}},
+	}}
+	svc := auth.NewService(fakeInstallationRepository{}, repo, externalRepo, nil, auth.NoOpAPIKeyCache{}, nil, func() time.Time { return time.Now() })
+
+	engine := gin.New()
+	engine.Use(middleware.WithAuth(svc, false))
+	engine.GET("/probe", func(c *gin.Context) {
+		v, ok := c.Request.Context().Value(proxy.ExternalAPIKeysContextKey{}).([]*auth.ExternalAPIKey)
+		require.True(t, ok, "self-hosted mode must propagate BYOK rows to the proxy ctx")
+		require.Len(t, v, 1)
+		assert.Equal(t, "anthropic", v[0].Provider)
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set(middleware.RouterKeyHeader, routerToken)
 	rr := httptest.NewRecorder()
 	engine.ServeHTTP(rr, req)
 
@@ -120,7 +209,7 @@ func TestWithAuthKeepsLegacyBearerFallback(t *testing.T) {
 	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, nil, func() time.Time { return time.Now() })
 
 	engine := gin.New()
-	engine.Use(middleware.WithAuth(svc))
+	engine.Use(middleware.WithAuth(svc, false))
 	engine.GET("/probe", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
