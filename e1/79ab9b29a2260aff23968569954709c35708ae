@@ -1,0 +1,97 @@
+internal/proxy/handover.go
+  s_fd26d4f195c783::t_a88310252065e6 84-88,91,94,99,124,128,133,138,143-166
+internal/router/pricing/pricing.go
+  s_fd26d4f195c783::t_eb62fc34dadc46 2-3,6-10
+  s_fd26d4f195c783::t_669b7d12962234 117-143
+db/migrations/0006_credit_billing.down.sql
+  s_fd26d4f195c783::t_9d7f081098f55f 1-7
+internal/billing/service.go
+  s_fd26d4f195c783::t_c37420edf02baa 1-9,32-135
+  s_fd26d4f195c783::t_2c05e7fec64895 10-31
+cmd/router/main.go
+  s_fd26d4f195c783::t_a721e1455bfaca 135-165
+  s_fd26d4f195c783::t_2fd33a7535b2b6 508
+  s_fd26d4f195c783::t_4056f65560703e 22
+  s_fd26d4f195c783::t_c75fdf4976a30c 787-801
+  s_fd26d4f195c783::t_d4051bfbcb293e 464-465
+internal/postgres/billing_repo.go
+  s_fd26d4f195c783::t_04e78b0f92b655 1-79
+internal/proxy/handover_test.go
+  s_fd26d4f195c783::t_ac1de6611facf6 164
+  s_fd26d4f195c783::t_390512476edf95 94,112,132,152
+internal/billing/repo.go
+  s_fd26d4f195c783::t_f732a7279680af 1-41
+internal/sqlc/models.go
+  s_fd26d4f195c783::t_c1ac7216d65916 112-138
+internal/server/server.go
+  s_fd26d4f195c783::t_3b20a142eeb0a4 98,102-106,110,113,117-121,125,130-134,143,146-150,154
+  s_fd26d4f195c783::t_2de1feab36ce7a 16
+  s_fd26d4f195c783::t_8a9c2d3dcf81e2 53-58
+internal/server/server_test.go
+  s_fd26d4f195c783::t_2069c0c9272af6 79
+  s_fd26d4f195c783::t_6bd94c0bddd35b 67
+internal/router/pricing/pricing_test.go
+  s_fd26d4f195c783::t_1710d2e443d36d 107,119
+  s_fd26d4f195c783::t_f2969913d711bc 101-106,108-118,120-146
+db/queries/billing.sql
+  s_fd26d4f195c783::t_fba25895757206 1-95
+internal/proxy/turnloop.go
+  s_fd26d4f195c783::t_e841f7b1e5f667 75-78
+  s_fd26d4f195c783::t_f808342e4ee7bf 253,268
+internal/proxy/service.go
+  s_fd26d4f195c783::t_922ca3ae571a72 915,1663
+  s_fd26d4f195c783::t_3630e830abe0cf 917,1665
+  s_fd26d4f195c783::t_e67e38cebd43cb 935-941
+  s_fd26d4f195c783::t_b1646834f093c5 1308-1336,1338-1353,1355-1367
+  s_fd26d4f195c783::t_12b3ba6ad92509 1259-1307
+  s_fd26d4f195c783::t_9b2de3d04ef4dd 15
+  s_fd26d4f195c783::t_b10ab445abacc2 402,404-413
+  s_fd26d4f195c783::t_f9ba624a371410 874,914,1617,1662
+  s_fd26d4f195c783::t_3965465e3e6936 876,916,1619,1664
+  s_fd26d4f195c783::t_ad4e3a39b808f5 1641-1644
+  s_fd26d4f195c783::t_9d7dfa3001aa70 1337,1354
+  s_fd26d4f195c783::t_ebf66a5b945dd3 92-95
+db/migrations/0006_credit_billing.up.sql
+  s_fd26d4f195c783::t_6f01959e710bde 1-52
+internal/server/middleware/balance_check_test.go
+  s_fd26d4f195c783::t_a89ee90e77dcc4 1-162
+internal/router/handover/summarizer.go
+  s_fd26d4f195c783::t_ae5752c67b7987 18-32,37-38,40
+internal/proxy/turnloop_test.go
+  s_fd26d4f195c783::t_6b966b3f769ac9 16
+  s_fd26d4f195c783::t_63ed309b172d25 35,38,40
+internal/billing/errors.go
+  s_fd26d4f195c783::t_b2acefa4f822fb 1-18
+internal/sqlc/billing.sql.go
+  s_fd26d4f195c783::t_c1ac7216d65916 1-255
+internal/server/middleware/balance_check.go
+  s_fd26d4f195c783::t_08b05264c6c15b 73
+  s_fd26d4f195c783::t_c0702fa9e308c4 1-72,74-96
+.env.example
+  s_fd26d4f195c783::t_4eb5b1e23269a1 52-54,57-60
+internal/billing/service_test.go
+  s_fd26d4f195c783::t_b650acc0855972 1-207
+internal/proxy/gemini.go
+  s_fd26d4f195c783::t_c63687b35e2b1c 171
+  s_fd26d4f195c783::t_756302b6bd8690 170
+  s_fd26d4f195c783::t_a559c157dc1429 192-195
+  s_fd26d4f195c783::t_5064b8294cb8ac 14
+  s_fd26d4f195c783::t_8cb7d0a82448a3 172
+  s_fd26d4f195c783::t_5e119e75e08ba5 173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "e179ab9b29a2260aff23968569954709c35708ae",
+  "prompts": {},
+  "sessions": {
+    "s_fd26d4f195c783": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "049207f3-1569-4a9a-ad09-bb77bd41bc49",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

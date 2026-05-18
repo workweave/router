@@ -1,53 +1,53 @@
+internal/postgres/repository.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 115-127
+internal/sqlc/models.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 59
+internal/sqlc/model_router_api_keys.sql.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 95,114,143
 internal/server/server.go
   s_438bcc2bdde0c8::t_b8939f33c11ae4 90-91
 db/migrations/0004_installation_routing_alpha.up.sql
   s_438bcc2bdde0c8::t_b8939f33c11ae4 1-12
-frontend/src/app/(app)/settings/page.tsx
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 19,74-91,845-940
+internal/sqlc/model_router_installations.sql.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 25,46,59,65,79,96,102,111,134,200-227
 internal/auth/service_test.go
   s_438bcc2bdde0c8::t_b8939f33c11ae4 99-100,126-136,602-630
-internal/postgres/repository.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 115-127
+internal/server/middleware/auth_test.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 81-84
+internal/api/admin/routing_alpha.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 1-75
+internal/postgres/converters.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 26
+internal/proxy/service.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 116-121,259-275,716,728-729,1371,1384-1385
+internal/auth/installation.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 21-25,45-49
+CLAUDE.md
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 512-520
+internal/router/router.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 20-27
+AGENTS.md
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 512-520
 internal/router/cluster/multiversion.go
   s_438bcc2bdde0c8::t_b8939f33c11ae4 6,8,30-49,51,55-59,75-84,86-88,113-118,121,132-142
 internal/router/cluster/multiversion_test.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 90-214
-internal/sqlc/models.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 59
-CLAUDE.md
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 512-520
-db/migrations/0004_installation_routing_alpha.down.sql
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 1-6
-internal/proxy/service.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 116-121,259-275,716,728-729,1371,1384-1385
-internal/server/middleware/auth_test.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 81-84
-internal/router/router.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 20-27
-internal/sqlc/model_router_installations.sql.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 25,46,59,65,79,96,102,111,134,200-227
-internal/auth/installation.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 21-25,45-49
-AGENTS.md
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 512-520
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 90-100,105-214
 db/queries/model_router_installations.sql
   s_438bcc2bdde0c8::t_b8939f33c11ae4 47-57
-frontend/src/lib/api.ts
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 127-132,198-203
-internal/server/middleware/auth.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 88
-internal/sqlc/model_router_api_keys.sql.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 95,114,143
-internal/postgres/converters.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 26
-internal/api/admin/routing_alpha.go
-  s_438bcc2bdde0c8::t_b8939f33c11ae4 1-75
+db/migrations/0004_installation_routing_alpha.down.sql
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 1-6
 internal/auth/service.go
   s_438bcc2bdde0c8::t_b8939f33c11ae4 20-31,211-224
+frontend/src/app/(app)/settings/page.tsx
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 19,74-91,845-940
+internal/server/middleware/auth.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 88
+frontend/src/lib/api.ts
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 127-132,198-203
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.4.7",
+  "git_ai_version": "1.4.8",
   "base_commit_sha": "8c7f4fb65bed1deb97edd0a2f4d07de432ffe303",
   "prompts": {},
   "sessions": {

@@ -1,9 +1,10 @@
 internal/router/cluster/multiversion_test.go
+  s_438bcc2bdde0c8::t_b8939f33c11ae4 90-100,105-214
   s_438bcc2bdde0c8::t_c94a12fbc1a75c 101-104
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.4.7",
+  "git_ai_version": "1.4.8",
   "base_commit_sha": "060e4cc846e904ffb57a09968a787c69b4da074b",
   "prompts": {},
   "sessions": {
