@@ -250,6 +250,9 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 		case "tool":
 			tcID := msg.Get("tool_call_id").String()
 			name := toolNames[tcID]
+			if name == "" {
+				return true
+			}
 			result := toolResultContentGJSON(msg.Get("content"))
 			if !hasContents {
 				jw.Key("contents")
@@ -712,6 +715,9 @@ func anthropicUserPartsGJSON(content gjson.Result, toolNames map[string]string) 
 			case "tool_result":
 				id := block.Get("tool_use_id").String()
 				name := toolNames[id]
+				if name == "" {
+					return true
+				}
 				result := toolResultContentGJSON(block.Get("content"))
 				pw := newJSONWriter()
 				pw.Obj()

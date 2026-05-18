@@ -77,8 +77,13 @@ func (e *RequestEnvelope) rewriteAnthropicForHandover(summary string) int {
 	rebuilt := []string{summaryBlock}
 	preserved := 0
 	if latestUser.Exists() {
-		rebuilt = append(rebuilt, latestUser.Raw)
-		preserved = 1
+		// Strip tool_result blocks: the summary has no tool_use blocks,
+		// so any tool_results would be orphaned.
+		cleaned := stripAnthropicToolResultMsg(latestUser, nil)
+		if cleaned != "" {
+			rebuilt = append(rebuilt, cleaned)
+			preserved = 1
+		}
 	}
 
 	// elided counts original conversation messages no longer present;
@@ -124,17 +129,14 @@ func (e *RequestEnvelope) trimAnthropicLastN(n int) int {
 		return 0
 	}
 	keep := all[len(all)-n:]
-	rebuilt := make([]string, 0, len(keep))
-	for _, m := range keep {
-		rebuilt = append(rebuilt, m.Raw)
-	}
+	rebuilt := stripOrphanedAnthropicToolResults(keep)
 	newMessages := "[" + strings.Join(rebuilt, ",") + "]"
 	out, err := sjson.SetRawBytes(e.body, "messages", []byte(newMessages))
 	if err != nil {
 		return 0
 	}
 	e.body = out
-	return len(all) - len(keep)
+	return len(all) - n
 }
 
 // rewriteOpenAIForHandover preserves role=="system" messages and replaces
@@ -233,16 +235,17 @@ func (e *RequestEnvelope) trimOpenAILastN(n int) int {
 		return 0
 	}
 	keep := others[len(others)-n:]
-	rebuilt := make([]string, 0, len(systems)+len(keep))
+	cleaned := stripOrphanedOpenAIToolMessages(keep)
+	rebuilt := make([]string, 0, len(systems)+len(cleaned))
 	rebuilt = append(rebuilt, systems...)
-	rebuilt = append(rebuilt, keep...)
+	rebuilt = append(rebuilt, cleaned...)
 	newMessages := "[" + strings.Join(rebuilt, ",") + "]"
 	out, err := sjson.SetRawBytes(e.body, "messages", []byte(newMessages))
 	if err != nil {
 		return 0
 	}
 	e.body = out
-	return len(others) - len(keep)
+	return len(others) - n
 }
 
 // rewriteGeminiForHandover mirrors the Anthropic path against Gemini's
@@ -312,4 +315,120 @@ func (e *RequestEnvelope) trimGeminiLastN(n int) int {
 	}
 	e.body = out
 	return len(all) - len(keep)
+}
+
+// stripOrphanedAnthropicToolResults removes tool_result content blocks from
+// Anthropic-format user messages when the referenced tool_use_id has no
+// matching tool_use block in any assistant message in the set. User messages
+// left with no content blocks after stripping are omitted entirely.
+func stripOrphanedAnthropicToolResults(msgs []gjson.Result) []string {
+	knownIDs := collectAnthropicToolUseIDs(msgs)
+	result := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Get("role").String() != "user" {
+			result = append(result, m.Raw)
+			continue
+		}
+		cleaned := stripAnthropicToolResultMsg(m, knownIDs)
+		if cleaned != "" {
+			result = append(result, cleaned)
+		}
+	}
+	return result
+}
+
+// collectAnthropicToolUseIDs returns the set of tool_use IDs present in
+// assistant messages.
+func collectAnthropicToolUseIDs(msgs []gjson.Result) map[string]struct{} {
+	ids := make(map[string]struct{})
+	for _, m := range msgs {
+		if m.Get("role").String() != "assistant" {
+			continue
+		}
+		m.Get("content").ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() == "tool_use" {
+				if id := block.Get("id").String(); id != "" {
+					ids[id] = struct{}{}
+				}
+			}
+			return true
+		})
+	}
+	return ids
+}
+
+// stripAnthropicToolResultMsg removes tool_result blocks from a user message
+// whose tool_use_id is not in knownIDs. A nil knownIDs strips all
+// tool_results. Returns "" if the message is left with no content.
+func stripAnthropicToolResultMsg(msg gjson.Result, knownIDs map[string]struct{}) string {
+	content := msg.Get("content")
+	if !content.IsArray() {
+		return msg.Raw
+	}
+
+	hasOrphans := false
+	content.ForEach(func(_, block gjson.Result) bool {
+		if block.Get("type").String() == "tool_result" {
+			id := block.Get("tool_use_id").String()
+			if _, ok := knownIDs[id]; !ok {
+				hasOrphans = true
+				return false
+			}
+		}
+		return true
+	})
+	if !hasOrphans {
+		return msg.Raw
+	}
+
+	var kept []string
+	content.ForEach(func(_, block gjson.Result) bool {
+		if block.Get("type").String() == "tool_result" {
+			id := block.Get("tool_use_id").String()
+			if _, ok := knownIDs[id]; !ok {
+				return true
+			}
+		}
+		kept = append(kept, block.Raw)
+		return true
+	})
+	if len(kept) == 0 {
+		return ""
+	}
+	newContent := "[" + strings.Join(kept, ",") + "]"
+	out, err := sjson.SetRawBytes([]byte(msg.Raw), "content", []byte(newContent))
+	if err != nil {
+		return msg.Raw
+	}
+	return string(out)
+}
+
+// stripOrphanedOpenAIToolMessages removes role:"tool" messages whose
+// tool_call_id doesn't match any assistant tool_calls[].id in the set.
+func stripOrphanedOpenAIToolMessages(msgs []string) []string {
+	knownIDs := make(map[string]struct{})
+	for _, raw := range msgs {
+		parsed := gjson.Parse(raw)
+		if parsed.Get("role").String() != "assistant" {
+			continue
+		}
+		parsed.Get("tool_calls").ForEach(func(_, tc gjson.Result) bool {
+			if id := tc.Get("id").String(); id != "" {
+				knownIDs[id] = struct{}{}
+			}
+			return true
+		})
+	}
+	result := make([]string, 0, len(msgs))
+	for _, raw := range msgs {
+		parsed := gjson.Parse(raw)
+		if parsed.Get("role").String() == "tool" {
+			tcID := parsed.Get("tool_call_id").String()
+			if _, ok := knownIDs[tcID]; !ok {
+				continue
+			}
+		}
+		result = append(result, raw)
+	}
+	return result
 }

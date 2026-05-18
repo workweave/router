@@ -217,6 +217,57 @@ func TestPrepareGemini_FromAnthropic_SystemAndToolUseRoundTripsSignature(t *test
 	assert.Equal(t, "bash", fr["name"])
 }
 
+func TestPrepareGemini_FromAnthropic_DropsOrphanedToolResult(t *testing.T) {
+	// tool_result without matching tool_use — name lookup yields "".
+	// The emitter must skip it rather than producing empty function_response.name.
+	body := []byte(`{
+		"messages": [
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"orphan","content":"stale result"},
+				{"type":"text","text":"hello"}
+			]}
+		]
+	}`)
+	env, _ := translate.ParseAnthropic(body)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{Capabilities: router.ModelSpec{}})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	contents := out["contents"].([]any)
+	require.Len(t, contents, 1)
+	parts := contents[0].(map[string]any)["parts"].([]any)
+	require.Len(t, parts, 1, "orphaned tool_result must be dropped")
+	assert.NotNil(t, parts[0].(map[string]any)["text"], "only the text part should remain")
+}
+
+func TestPrepareGemini_FromOpenAI_DropsOrphanedToolMessage(t *testing.T) {
+	body := []byte(`{
+		"model": "gemini-3.1-flash-lite-preview",
+		"messages": [
+			{"role":"user","content":"hi"},
+			{"role":"tool","tool_call_id":"orphan","content":"stale result"},
+			{"role":"assistant","content":"done"},
+			{"role":"user","content":"next"}
+		]
+	}`)
+	env, _ := translate.ParseOpenAI(body)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{Capabilities: router.ModelSpec{}})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	contents := out["contents"].([]any)
+	// user "hi", model "done", user "next" — orphaned tool message skipped.
+	require.Len(t, contents, 3)
+	for _, c := range contents {
+		entry := c.(map[string]any)
+		for _, p := range entry["parts"].([]any) {
+			part := p.(map[string]any)
+			_, hasFR := part["functionResponse"]
+			assert.False(t, hasFR, "orphaned functionResponse must not appear")
+		}
+	}
+}
+
 // ----- Gemini → OpenAI response -----
 
 func TestGeminiToOpenAIResponse_TextOnly(t *testing.T) {
