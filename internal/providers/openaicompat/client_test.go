@@ -206,3 +206,9 @@ func TestPassthrough_StripsInboundV1Prefix(t *testing.T) {
 	assert.Equal(t, "/api/v1/models", gotPath)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
+
+func TestBedrockMantleBaseURL(t *testing.T) {
+	assert.Equal(t, "https://bedrock-mantle.us-east-1.api.aws/v1", openaicompat.BedrockMantleBaseURL("us-east-1"))
+	assert.Equal(t, "https://bedrock-mantle.eu-west-2.api.aws/v1", openaicompat.BedrockMantleBaseURL("eu-west-2"))
+	assert.Equal(t, "https://bedrock-mantle.us-east-1.api.aws/v1", openaicompat.BedrockMantleBaseURL(""))
+}

@@ -23,7 +23,23 @@ const (
 	DefaultBaseURL   = "https://openrouter.ai/api/v1"
 	FireworksBaseURL = "https://api.fireworks.ai/inference/v1"
 	DeepInfraBaseURL = "https://api.deepinfra.com/v1/openai"
+	// BedrockMantleBaseURLTemplate is the AWS Bedrock OpenAI-compatible
+	// "bedrock-mantle" surface. The {region} placeholder is substituted at
+	// boot from AWS_REGION via BedrockMantleBaseURL. AWS recommends this
+	// endpoint over the model-native bedrock-runtime/InvokeModel surface
+	// for OpenAI-compat upstreams; auth is a static bearer token (the
+	// long-term Bedrock API key) rather than SigV4.
+	BedrockMantleBaseURLTemplate = "https://bedrock-mantle.{region}.api.aws/v1"
 )
+
+// BedrockMantleBaseURL returns the bedrock-mantle base URL for the given AWS
+// region (e.g. "us-east-1"). Empty region falls back to us-east-1.
+func BedrockMantleBaseURL(region string) string {
+	if region == "" {
+		region = "us-east-1"
+	}
+	return strings.Replace(BedrockMantleBaseURLTemplate, "{region}", region, 1)
+}
 
 // Client is the generic OpenAI Chat Completions adapter. The optional
 // modelIDMap rewrites the request body's top-level "model" field before

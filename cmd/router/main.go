@@ -267,6 +267,43 @@ func main() {
 	}
 
 	{
+		// Bedrock via the OpenAI-compatible "bedrock-mantle" surface
+		// (https://bedrock-mantle.{region}.api.aws/v1). AWS recommends this
+		// over the model-native bedrock-runtime/InvokeModel surface; both
+		// Qwen3 and Kimi K2.5 model IDs are addressed directly through it.
+		// Auth is a static long-term Bedrock API key (AWS_BEARER_TOKEN_BEDROCK),
+		// not SigV4, so the standard openaicompat bearer flow applies.
+		//
+		// Bedrock expects dot-form model IDs (e.g. "qwen.qwen3-coder-next"),
+		// while the registry carries the router's public slash-form slugs.
+		// The modelIDMap rewrites the body's "model" field at proxy time.
+		// Keep this map in sync with the bedrock-served rows in
+		// model_registry.json — every row whose provider is "bedrock" must
+		// have an entry here, else the upstream call 404s.
+		bedrockRegion := config.GetOr("AWS_REGION", "us-east-1")
+		bedrockBaseURL := config.GetOr("BEDROCK_BASE_URL", openaiCompatProvider.BedrockMantleBaseURL(bedrockRegion))
+		bedrockKey := ""
+		if !byokOnly {
+			bedrockKey = config.GetOr("AWS_BEARER_TOKEN_BEDROCK", "")
+		}
+		bedrockModelIDMap := map[string]string{
+			"moonshotai/kimi-k2.5":             "moonshotai.kimi-k2.5",
+			"qwen/qwen3-next-80b-a3b-instruct": "qwen.qwen3-next-80b-a3b",
+			"qwen/qwen3-coder-next":            "qwen.qwen3-coder-next",
+		}
+		providerMap[providers.ProviderBedrock] = openaiCompatProvider.NewClientWithModelIDMap(bedrockKey, bedrockBaseURL, bedrockModelIDMap)
+		switch {
+		case byokOnly:
+			logger.Info("Bedrock provider enabled (BYOK only)", "base_url", bedrockBaseURL)
+		case bedrockKey != "":
+			envKeyedProviders[providers.ProviderBedrock] = struct{}{}
+			logger.Info("Bedrock provider enabled", "base_url", bedrockBaseURL, "region", bedrockRegion)
+		default:
+			logger.Info("Bedrock provider registered (BYOK only — set AWS_BEARER_TOKEN_BEDROCK for deployment-level use)", "base_url", bedrockBaseURL)
+		}
+	}
+
+	{
 		// Native Generative Language REST surface — required for multi-turn
 		// tool use against Gemini 3.x preview models, whose opaque
 		// thought_signature field is not exposed by the OpenAI-compat

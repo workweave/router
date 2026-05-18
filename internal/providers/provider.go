@@ -18,9 +18,11 @@ const (
 	ProviderOpenRouter = "openrouter"
 	ProviderFireworks  = "fireworks"
 	ProviderDeepInfra  = "deepinfra"
+	ProviderBedrock    = "bedrock"
 )
 
 // APIKeyEnvVars maps provider name to the env var providing its deployment-level upstream API key.
+// Bedrock uses AWS-issued long-term Bedrock API keys (static bearer tokens), not SigV4 access keys.
 var APIKeyEnvVars = map[string]string{
 	ProviderAnthropic:  "ANTHROPIC_API_KEY",
 	ProviderOpenAI:     "OPENAI_API_KEY",
@@ -28,6 +30,7 @@ var APIKeyEnvVars = map[string]string{
 	ProviderOpenRouter: "OPENROUTER_API_KEY",
 	ProviderFireworks:  "FIREWORKS_API_KEY",
 	ProviderDeepInfra:  "DEEPINFRA_API_KEY",
+	ProviderBedrock:    "AWS_BEARER_TOKEN_BEDROCK",
 }
 
 // APIKeyEnvVar returns the env-var name for the given provider, or empty
