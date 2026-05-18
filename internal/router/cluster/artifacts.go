@@ -318,7 +318,8 @@ func CheapestModelInSet(meta *ArtifactMetadata, registry *ModelRegistry, availab
 func cheapestModelFiltered(meta *ArtifactMetadata, registry *ModelRegistry, available, denySet, allowSet map[string]struct{}) (provider, model string, ok bool) {
 	var bestCost float64 = -1
 	for _, e := range registry.DeployedModels {
-		if _, inSet := available[e.Provider]; !inSet {
+		resolved := resolveProviderFor(e.Model, e.Provider, available)
+		if resolved == "" {
 			continue
 		}
 		if allowSet != nil {
@@ -335,12 +336,30 @@ func cheapestModelFiltered(meta *ArtifactMetadata, registry *ModelRegistry, avai
 		}
 		if bestCost < 0 || cost < bestCost {
 			bestCost = cost
-			provider = e.Provider
+			provider = resolved
 			model = e.Model
 			ok = true
 		}
 	}
 	return
+}
+
+// RoutableModelSet returns the set of model names from registry that have
+// at least one catalog provider binding resolvable under available — the
+// same view of "routable now" that NewScorer's filter applies. Callers in
+// the composition root use this to seed the planner's available-models
+// set so a pin to e.g. deepseek-v4-flash stays valid when the deploy only
+// has OPENROUTER_API_KEY (catalog provides the trailing OpenRouter
+// fallback binding even though the registry row reads `deepinfra`).
+func RoutableModelSet(registry *ModelRegistry, available map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(registry.DeployedModels))
+	for _, e := range registry.DeployedModels {
+		if resolveProviderFor(e.Model, e.Provider, available) == "" {
+			continue
+		}
+		out[e.Model] = struct{}{}
+	}
+	return out
 }
 
 // loadRegistry validates every entry has non-empty (model, provider,

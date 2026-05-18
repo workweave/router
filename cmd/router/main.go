@@ -1006,13 +1006,7 @@ func resolveAvailableModels(availableProviders map[string]struct{}, logger *slog
 		logger.Warn("Available-models set: could not load bundle; planner will treat every pin as routable", "err", err)
 		return nil
 	}
-	out := make(map[string]struct{}, len(bundle.Registry.DeployedModels))
-	for _, e := range bundle.Registry.DeployedModels {
-		if _, ok := availableProviders[e.Provider]; !ok {
-			continue
-		}
-		out[e.Model] = struct{}{}
-	}
+	out := cluster.RoutableModelSet(bundle.Registry, availableProviders)
 	if len(out) == 0 {
 		return nil
 	}
