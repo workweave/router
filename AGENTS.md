@@ -1,6 +1,6 @@
-# router — AGENTS
+# router — CLAUDE
 
-> **Mirror notice.** Verbatim sync with [CLAUDE.md](CLAUDE.md). Claude Code reads `CLAUDE.md`; Cursor + generic agents read `AGENTS.md`. **Update both together** — divergence = bug.
+> **Mirror notice.** Verbatim sync with [AGENTS.md](AGENTS.md). Claude Code reads `CLAUDE.md`; Cursor + generic agents read `AGENTS.md`. **Update both together** — divergence = bug.
 
 Root guide for AI agents in the `router/` subproject. Covers cross-cutting design + the layer model. **First read for any task:** [README](README.md), then this file. Then read the `CLAUDE.md` inside the package you're editing — each subpackage has its own with focused recipes + invariants.
 
@@ -60,12 +60,13 @@ Three concentric layers. Imports flow inward only.
 |  |  |  internal/router    (Router iface + Request/Decision  |  |  |
 |  |  |                      + ModelSpec/ModelRegistry)       |  |  |
 |  |  |  internal/router/cache      (semantic response cache) |  |  |
-|  |  |  internal/router/capability (Low/Mid/High tier table) |  |  |
+|  |  |  internal/router/catalog    (single source of truth   |  |  |
+|  |  |                              for per-model data:      |  |  |
+|  |  |                              tier, provider bindings, |  |  |
+|  |  |                              pricing, cost math)      |  |  |
 |  |  |  internal/router/handover   (Summarizer iface +       |  |  |
 |  |  |                              envelope rewrite)        |  |  |
 |  |  |  internal/router/planner    (cache-aware EV policy)   |  |  |
-|  |  |  internal/router/pricing    (per-model USD + cache    |  |  |
-|  |  |                              read multipliers)        |  |  |
 |  |  |  internal/router/sessionpin (Pin types + Store iface) |  |  |
 |  |  |  internal/router/turntype   (turn-type detector)      |  |  |
 |  |  |  internal/providers (Client iface + types + canonical |  |  |

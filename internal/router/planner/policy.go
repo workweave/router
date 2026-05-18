@@ -9,15 +9,14 @@
 //	eviction_cost    = fresh $/M-tok × tokens × (1 − freshMult)
 //
 // where pinMult/freshMult are per-model cache-read multipliers from
-// pricing.Pricing.EffectiveCacheReadMultiplier. Switches when
+// catalog.Pricing.EffectiveCacheReadMultiplier. Switches when
 // (expected_savings − eviction_cost) > threshold, or when tier-upgrade
 // guard fires (fresh is strictly higher tier than pin).
 package planner
 
 import (
 	"workweave/router/internal/router"
-	"workweave/router/internal/router/capability"
-	"workweave/router/internal/router/pricing"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/sessionpin"
 )
 
@@ -93,8 +92,8 @@ func Decide(in Inputs, cfg EVConfig) Decision {
 		return Decision{Outcome: OutcomeStay, Reason: ReasonNoPriorUsage}
 	}
 
-	pinPrice, ok1 := pricing.For(in.Pin.Model)
-	freshPrice, ok2 := pricing.For(in.Fresh.Model)
+	pinPrice, ok1 := catalog.PrimaryPriceFor(in.Pin.Model)
+	freshPrice, ok2 := catalog.PrimaryPriceFor(in.Fresh.Model)
 	if !ok1 || !ok2 {
 		return Decision{Outcome: OutcomeStay, Reason: ReasonPricingMissing}
 	}
@@ -130,9 +129,9 @@ func Decide(in Inputs, cfg EVConfig) Decision {
 // tierUpgrade reports whether fresh is strictly higher tier than pin.
 // Unknown on either side disables the guard.
 func tierUpgrade(pin, fresh string) bool {
-	pinTier := capability.TierFor(pin)
-	freshTier := capability.TierFor(fresh)
-	if pinTier == capability.TierUnknown || freshTier == capability.TierUnknown {
+	pinTier := catalog.TierFor(pin)
+	freshTier := catalog.TierFor(fresh)
+	if pinTier == catalog.TierUnknown || freshTier == catalog.TierUnknown {
 		return false
 	}
 	return freshTier > pinTier

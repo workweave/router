@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"workweave/router/internal/router"
-	"workweave/router/internal/router/capability"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/planner"
 )
 
@@ -18,7 +18,7 @@ func TestRoutingMarkerFor_TierClampNote(t *testing.T) {
 			Decision:      router.Decision{Model: "claude-haiku-4-5", Provider: "anthropic"},
 			TierClamped:   true,
 			PreClampModel: "deepseek/deepseek-v4-pro",
-			RequestedTier: capability.TierLow,
+			RequestedTier: catalog.TierLow,
 		}
 		got := routingMarkerFor(res)
 		assert.Contains(t, got, "second-choice pick")
@@ -32,7 +32,7 @@ func TestRoutingMarkerFor_TierClampNote(t *testing.T) {
 			Decision:      router.Decision{Model: "claude-sonnet-4-5", Provider: "anthropic"},
 			TierClamped:   true,
 			PreClampModel: "claude-opus-4-7",
-			RequestedTier: capability.TierMid,
+			RequestedTier: catalog.TierMid,
 		}
 		got := routingMarkerFor(res)
 		assert.Contains(t, got, "claude-opus-4-7")
@@ -44,7 +44,7 @@ func TestRoutingMarkerFor_TierClampNote(t *testing.T) {
 		res := turnLoopResult{
 			Decision:      router.Decision{Model: "claude-opus-4-7", Provider: "anthropic"},
 			TierClamped:   false,
-			RequestedTier: capability.TierHigh,
+			RequestedTier: catalog.TierHigh,
 		}
 		got := routingMarkerFor(res)
 		assert.NotContains(t, got, "second-choice")
