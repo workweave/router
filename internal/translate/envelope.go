@@ -31,7 +31,17 @@ const (
 
 // EmitOptions parameterizes output-body construction.
 type EmitOptions struct {
-	TargetModel        string
+	TargetModel string
+	// TargetProvider is the resolved upstream provider name (the
+	// providers.Provider* constant, e.g. "openrouter", "fireworks",
+	// "deepinfra", "bedrock"). OpenAI-compat emission keys provider-
+	// specific hints (the OpenRouter `provider`/`reasoning` body fields,
+	// tool-turn temperature override, system reminders) on this so the
+	// same model slug routed to a non-OpenRouter binding (post SOC 2
+	// isolation) doesn't carry OpenRouter-only fields the direct upstream
+	// rejects with 400. Empty falls back to model-slug behavior for
+	// callers that don't plumb a provider through yet (handover summary).
+	TargetProvider     string
 	Capabilities       router.ModelSpec
 	IncludeStreamUsage bool
 }

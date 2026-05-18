@@ -765,6 +765,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	opts := translate.EmitOptions{
 		TargetModel:        decision.Model,
+		TargetProvider:     decision.Provider,
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
 	}
@@ -1520,6 +1521,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	opts := translate.EmitOptions{
 		TargetModel:        decision.Model,
+		TargetProvider:     decision.Provider,
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
 	}

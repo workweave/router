@@ -37,33 +37,49 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
-		body, err = sjson.SetBytes(body, "provider", hint)
-		if err != nil {
-			return nil, fmt.Errorf("set openrouter provider hint: %w", err)
+	if targetIsOpenRouter(opts) {
+		if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
+			body, err = sjson.SetBytes(body, "provider", hint)
+			if err != nil {
+				return nil, fmt.Errorf("set openrouter provider hint: %w", err)
+			}
 		}
-	}
-	if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
-		body, err = sjson.SetBytes(body, "reasoning", reasoning)
-		if err != nil {
-			return nil, fmt.Errorf("set openrouter reasoning hint: %w", err)
+		if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
+			body, err = sjson.SetBytes(body, "reasoning", reasoning)
+			if err != nil {
+				return nil, fmt.Errorf("set openrouter reasoning hint: %w", err)
+			}
 		}
-	}
-	if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" && gjson.GetBytes(body, "tools").Exists() {
-		body, err = applySystemReminderToBody(body, reminder)
-		if err != nil {
-			return nil, fmt.Errorf("set system reminder: %w", err)
+		if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" && gjson.GetBytes(body, "tools").Exists() {
+			body, err = applySystemReminderToBody(body, reminder)
+			if err != nil {
+				return nil, fmt.Errorf("set system reminder: %w", err)
+			}
 		}
-	}
-	if openRouterForcesToolTemperatureZero(opts.TargetModel) &&
-		gjson.GetBytes(body, "tools").Exists() &&
-		!gjson.GetBytes(body, "temperature").Exists() {
-		body, err = sjson.SetBytes(body, "temperature", 0)
-		if err != nil {
-			return nil, fmt.Errorf("set tool temperature override: %w", err)
+		if openRouterForcesToolTemperatureZero(opts.TargetModel) &&
+			gjson.GetBytes(body, "tools").Exists() &&
+			!gjson.GetBytes(body, "temperature").Exists() {
+			body, err = sjson.SetBytes(body, "temperature", 0)
+			if err != nil {
+				return nil, fmt.Errorf("set tool temperature override: %w", err)
+			}
 		}
 	}
 	return body, nil
+}
+
+// targetIsOpenRouter reports whether the emit target is the OpenRouter
+// upstream. OpenRouter-specific body fields (`provider`, `reasoning`),
+// system reminders, and tool-turn temperature overrides only belong on
+// the OpenRouter wire; direct upstreams (Fireworks/DeepInfra/Bedrock)
+// reject them. Empty TargetProvider falls back to the model-slug match
+// so the historical single-binding behavior keeps working for callers
+// that haven't been plumbed through yet (the handover summarizer).
+func targetIsOpenRouter(opts EmitOptions) bool {
+	if opts.TargetProvider != "" {
+		return opts.TargetProvider == providers.ProviderOpenRouter
+	}
+	return true
 }
 
 func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, error) {
@@ -92,7 +108,7 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 			}
 		}
 	}
-	if !clientSetTemp && openRouterForcesToolTemperatureZero(opts.TargetModel) {
+	if !clientSetTemp && targetIsOpenRouter(opts) && openRouterForcesToolTemperatureZero(opts.TargetModel) {
 		if _, hasTools := out["tools"]; hasTools {
 			out["temperature"] = 0
 		}
@@ -115,16 +131,18 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 		injectStreamUsageOption(out)
 	}
 
-	if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
-		out["provider"] = hint
-	}
-	if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
-		out["reasoning"] = reasoning
-	}
-	if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" {
-		if _, hasTools := out["tools"]; hasTools {
-			msgs, _ := out["messages"].([]any)
-			out["messages"] = injectSystemReminder(msgs, reminder)
+	if targetIsOpenRouter(opts) {
+		if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
+			out["provider"] = hint
+		}
+		if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
+			out["reasoning"] = reasoning
+		}
+		if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" {
+			if _, hasTools := out["tools"]; hasTools {
+				msgs, _ := out["messages"].([]any)
+				out["messages"] = injectSystemReminder(msgs, reminder)
+			}
 		}
 	}
 

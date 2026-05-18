@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/translate"
 
@@ -143,6 +144,71 @@ func TestPrepareOpenAI_NoReasoningOverrideForNonDeepSeek(t *testing.T) {
 				"non-deepseek targets must not get a reasoning override")
 		})
 	}
+}
+
+// SOC 2 isolation routes deepseek/moonshotai/qwen slugs to direct
+// upstreams (Fireworks/DeepInfra/Bedrock) where the OpenRouter-only
+// `provider` and `reasoning` body fields cause a 400. The emit path
+// must gate those fields on the resolved target provider.
+func TestPrepareOpenAI_AnthropicSource_SkipsHintsForNonOpenRouterProvider(t *testing.T) {
+	src := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)
+	cases := []struct {
+		name     string
+		target   string
+		provider string
+	}{
+		{"fireworks dispatches deepseek", "deepseek/deepseek-v4-pro", providers.ProviderFireworks},
+		{"deepinfra dispatches deepseek", "deepseek/deepseek-v4-flash", providers.ProviderDeepInfra},
+		{"bedrock dispatches moonshotai", "moonshotai/kimi-k2.5", providers.ProviderBedrock},
+		{"bedrock dispatches qwen", "qwen/qwen3-coder-next", providers.ProviderBedrock},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, err := translate.ParseAnthropic(src)
+			require.NoError(t, err)
+
+			out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+				TargetModel:    tc.target,
+				TargetProvider: tc.provider,
+			})
+			require.NoError(t, err)
+
+			assert.Nil(t, providerField(t, out.Body),
+				"%s must not receive OpenRouter `provider` hint", tc.provider)
+			assert.Nil(t, reasoningField(t, out.Body),
+				"%s must not receive OpenRouter `reasoning` hint", tc.provider)
+		})
+	}
+}
+
+func TestPrepareOpenAI_OpenAISource_SkipsHintsForNonOpenRouterProvider(t *testing.T) {
+	src := []byte(`{"model":"x","messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)
+	env, err := translate.ParseOpenAI(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel:    "deepseek/deepseek-v4-pro",
+		TargetProvider: providers.ProviderFireworks,
+	})
+	require.NoError(t, err)
+
+	assert.Nil(t, providerField(t, out.Body))
+	assert.Nil(t, reasoningField(t, out.Body))
+}
+
+func TestPrepareOpenAI_ExplicitOpenRouterProviderStillGetsHints(t *testing.T) {
+	src := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)
+	env, err := translate.ParseAnthropic(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel:    "deepseek/deepseek-v4-pro",
+		TargetProvider: providers.ProviderOpenRouter,
+	})
+	require.NoError(t, err)
+
+	require.NotNil(t, providerField(t, out.Body))
+	require.NotNil(t, reasoningField(t, out.Body))
 }
 
 func TestPrepareOpenAI_QwenAndGoogleGetSortHint(t *testing.T) {

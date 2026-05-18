@@ -132,6 +132,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 
 	opts := translate.EmitOptions{
 		TargetModel:        decision.Model,
+		TargetProvider:     decision.Provider,
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
 	}
