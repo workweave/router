@@ -233,6 +233,14 @@ normalize_email() {
     printf ''
     return
   fi
+  # Reject any interior whitespace or control character so the value can't
+  # smuggle a second header into the newline-delimited ANTHROPIC_CUSTOM_HEADERS
+  # var. A valid email has none, so this is shape-only — not a deliverability
+  # check.
+  if printf '%s' "$lowered" | LC_ALL=C grep -q '[[:space:][:cntrl:]]'; then
+    printf ''
+    return
+  fi
   case "$lowered" in
     *@*@*) printf ''; return ;;
     @*|*@) printf ''; return ;;
@@ -585,13 +593,20 @@ if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
 # dashboard. Empty values = no header (router stays in account_uuid-only
 # mode), so existing behavior is preserved when git config is unset.
 user_email="$(resolve_user_email)"
-user_name="$(resolve_user_name)"
+# Gate name on email: when the user explicitly opts out of email identity
+# (via '-' at the prompt or by clearing git config), don't auto-plant a
+# name from git config either. Opt-out should be all-or-nothing so the
+# router consistently sees zero identity headers when the user wants to
+# stay anonymous.
+if [ -n "$user_email" ]; then
+  user_name="$(resolve_user_name)"
+else
+  user_name=""
+fi
 if [ -n "$user_email" ] && [ -n "$user_name" ]; then
   ok "Will identify router traffic as $user_name <$user_email>"
 elif [ -n "$user_email" ]; then
   ok "Will identify router traffic as $user_email"
-elif [ -n "$user_name" ]; then
-  ok "Will identify router traffic as $user_name"
 else
   info "No identity set — router traffic will be attributed by account UUID only."
 fi
