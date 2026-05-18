@@ -1,7 +1,7 @@
 package translate
 
 import (
-	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -26,39 +26,6 @@ func openRouterSystemReminder(model string) string {
 
 const deepseekToolUseReminder = "When using file-edit tools, copy `old_string` byte-for-byte from the most recent file read — preserve tabs, leading and trailing whitespace, and unicode characters (em-dash —, smart quotes, non-breaking spaces) exactly. If an Edit call fails, re-read the file before retrying. Never fall back to shell commands (sed, awk, python) to modify files."
 
-// injectSystemReminder appends `reminder` to an existing system message in
-// `messages`, or prepends a new system message when none exists. Returns the
-// (possibly new) slice.
-func injectSystemReminder(messages []any, reminder string) []any {
-	if reminder == "" {
-		return messages
-	}
-	for i, raw := range messages {
-		msg, _ := raw.(map[string]any)
-		if msg == nil {
-			continue
-		}
-		role, _ := msg["role"].(string)
-		if role != "system" {
-			continue
-		}
-		switch content := msg["content"].(type) {
-		case string:
-			msg["content"] = content + "\n\n" + reminder
-		case []any:
-			msg["content"] = append(content, map[string]any{
-				"type": "text",
-				"text": reminder,
-			})
-		default:
-			msg["content"] = reminder
-		}
-		messages[i] = msg
-		return messages
-	}
-	return append([]any{map[string]any{"role": "system", "content": reminder}}, messages...)
-}
-
 // applySystemReminderToBody injects the reminder into a serialized OpenAI body's
 // `messages` array. Best-effort: returns the input unchanged on parse failure
 // rather than failing the request.
@@ -68,14 +35,64 @@ func applySystemReminderToBody(body []byte, reminder string) ([]byte, error) {
 	}
 	msgsResult := gjson.GetBytes(body, "messages")
 	if !msgsResult.IsArray() {
-		return sjson.SetBytes(body, "messages", []any{
-			map[string]any{"role": "system", "content": reminder},
-		})
+		// No messages array; create one with just the reminder.
+		jw := newJSONWriter()
+		jw.Arr()
+		jw.Obj()
+		jw.Key("role")
+		jw.Str("system")
+		jw.Key("content")
+		jw.Str(reminder)
+		jw.EndObj()
+		jw.EndArr()
+		return sjson.SetRawBytes(body, "messages", jw.Bytes())
 	}
-	var msgs []any
-	if err := json.Unmarshal([]byte(msgsResult.Raw), &msgs); err != nil {
-		return body, nil
+
+	// Find the first system message index.
+	sysIdx := -1
+	msgsResult.ForEach(func(key, value gjson.Result) bool {
+		if value.Get("role").String() == "system" {
+			sysIdx = int(key.Int())
+			return false
+		}
+		return true
+	})
+
+	if sysIdx >= 0 {
+		// System message exists — append reminder to its content.
+		contentPath := fmt.Sprintf("messages.%d.content", sysIdx)
+		contentResult := gjson.GetBytes(body, contentPath)
+
+		if contentResult.IsArray() {
+			// Array content: append a text block using sjson append syntax.
+			jw := newJSONWriter()
+			jw.Obj()
+			jw.Key("type")
+			jw.Str("text")
+			jw.Key("text")
+			jw.Str(reminder)
+			jw.EndObj()
+			return sjson.SetRawBytes(body, contentPath+".-1", jw.Bytes())
+		}
+		// String content (or other): append with newlines.
+		newContent := contentResult.String() + "\n\n" + reminder
+		return sjson.SetBytes(body, contentPath, newContent)
 	}
-	msgs = injectSystemReminder(msgs, reminder)
-	return sjson.SetBytes(body, "messages", msgs)
+
+	// No system message found — prepend one. Rebuild messages array with
+	// the new system message first, then existing messages.
+	jw := newJSONWriter()
+	jw.Arr()
+	jw.Obj()
+	jw.Key("role")
+	jw.Str("system")
+	jw.Key("content")
+	jw.Str(reminder)
+	jw.EndObj()
+	msgsResult.ForEach(func(_, value gjson.Result) bool {
+		jw.Raw(value.Raw)
+		return true
+	})
+	jw.EndArr()
+	return sjson.SetRawBytes(body, "messages", jw.Bytes())
 }

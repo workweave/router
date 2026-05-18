@@ -15,7 +15,7 @@ import (
 
 // INVARIANTS:
 //   - e.body is immutable after parse. Same-format emit uses gjson/sjson overrides
-//     on e.body with no cloning. Cross-format emit unmarshals into e.src once.
+//     on e.body with no cloning. Cross-format emit reads via gjson, writes via jsonWriter.
 //   - Field accessors use gjson directly on e.body.
 
 // ErrNotJSONObject is returned when the request body is not a valid JSON object.
@@ -50,7 +50,6 @@ type EmitOptions struct {
 // Use Prepare* to emit target-format bytes; accessors read fields.
 type RequestEnvelope struct {
 	body   []byte
-	src    map[string]any // lazily populated for cross-format emit
 	format Format
 }
 
@@ -88,16 +87,6 @@ func validateJSONObject(body []byte) error {
 		return fmt.Errorf("%w: body is not a JSON object", ErrNotJSONObject)
 	}
 	return nil
-}
-
-// ensureSrc lazily unmarshals e.body into e.src on first call.
-func (e *RequestEnvelope) ensureSrc() (map[string]any, error) {
-	if e.src == nil {
-		if err := json.Unmarshal(e.body, &e.src); err != nil {
-			return nil, fmt.Errorf("translate: unmarshal request body: %w", err)
-		}
-	}
-	return e.src, nil
 }
 
 func (e *RequestEnvelope) SourceFormat() Format { return e.format }
@@ -580,14 +569,6 @@ func resolvePassthroughOverrides(body []byte) (EmitOverrides, bool) {
 	}, true
 }
 
-func shallowClone(src map[string]any) map[string]any {
-	out := make(map[string]any, len(src))
-	for k, v := range src {
-		out[k] = v
-	}
-	return out
-}
-
 var modelMaxOutputTokens = map[string]int{
 	"gpt-4.1": 32768, "gpt-4.1-mini": 32768, "gpt-4.1-nano": 32768,
 	"gpt-4o": 16384, "gpt-4o-mini": 16384,
@@ -621,23 +602,4 @@ func defaultOutputTokens(model string) int64 {
 	return defaultMaxOutputTokenCap
 }
 
-// clampOutputTokens caps max_tokens/max_completion_tokens in a map.
-func clampOutputTokens(doc map[string]any, model string) {
-	cap := modelMaxOutputTokens[model]
-	if cap == 0 {
-		cap = defaultMaxOutputTokenCap
-	}
-	for _, key := range []string{"max_tokens", "max_completion_tokens"} {
-		v, ok := doc[key]
-		if !ok {
-			continue
-		}
-		f, ok := v.(float64)
-		if !ok {
-			continue
-		}
-		if f > float64(cap) {
-			doc[key] = cap
-		}
-	}
-}
+

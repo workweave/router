@@ -91,7 +91,6 @@ func (e *RequestEnvelope) rewriteAnthropicForHandover(summary string) int {
 		return 0
 	}
 	e.body = out
-	e.src = nil
 	return elided
 }
 
@@ -135,7 +134,6 @@ func (e *RequestEnvelope) trimAnthropicLastN(n int) int {
 		return 0
 	}
 	e.body = out
-	e.src = nil
 	return len(all) - len(keep)
 }
 
@@ -194,7 +192,6 @@ func (e *RequestEnvelope) rewriteOpenAIForHandover(summary string) int {
 		return 0
 	}
 	e.body = out
-	e.src = nil
 	return elided
 }
 
@@ -245,7 +242,6 @@ func (e *RequestEnvelope) trimOpenAILastN(n int) int {
 		return 0
 	}
 	e.body = out
-	e.src = nil
 	return len(others) - len(keep)
 }
 
@@ -292,7 +288,6 @@ func (e *RequestEnvelope) rewriteGeminiForHandover(summary string) int {
 		return 0
 	}
 	e.body = out
-	e.src = nil
 	return elided
 }
 
@@ -316,6 +311,5 @@ func (e *RequestEnvelope) trimGeminiLastN(n int) int {
 		return 0
 	}
 	e.body = out
-	e.src = nil
 	return len(all) - len(keep)
 }

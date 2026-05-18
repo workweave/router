@@ -3,236 +3,220 @@ package translate
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
+
+	"github.com/tidwall/gjson"
 )
 
 // GeminiToOpenAIResponse converts a non-streaming Gemini response to OpenAI format.
 func GeminiToOpenAIResponse(body []byte, requestModel string) ([]byte, error) {
-	var resp map[string]any
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("unmarshal gemini response: %w", err)
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("id"); jw.Str(generateChatCmplID())
+	jw.Key("object"); jw.Str("chat.completion")
+	jw.Key("created"); jw.Int(time.Now().Unix())
+	jw.Key("model"); jw.Str(requestModel)
+	jw.Key("choices"); jw.Arr()
+	jw.Obj()
+	jw.Key("index"); jw.Int(0)
+	jw.Key("message")
+	hasToolCalls, _ := writeOpenAIMessageFromGemini(jw, gjson.GetBytes(body, "candidates.0"))
+	finishReason := mapGeminiFinishReason(gjson.GetBytes(body, "candidates.0.finishReason").String(), hasToolCalls)
+	jw.Key("finish_reason"); jw.Str(finishReason)
+	jw.EndObj()
+	jw.EndArr()
+	jw.Key("usage")
+	writeOpenAIUsageFromGemini(jw, gjson.GetBytes(body, "usageMetadata"))
+	jw.EndObj()
+	return jw.Bytes(), nil
+}
+
+// writeOpenAIMessageFromGemini writes the "message" object for a single Gemini candidate.
+// Returns hasToolCalls and leadingSig (non-empty when a leading text part carries a thoughtSignature
+// and there are no function calls — callers may propagate it as an off-spec field).
+func writeOpenAIMessageFromGemini(jw *jsonWriter, candidate gjson.Result) (hasToolCalls bool, leadingSig string) {
+	parts := candidate.Get("content.parts")
+
+	var texts []string
+	var firstTextSig string
+	type toolCallEntry struct {
+		id        string
+		name      string
+		args      string
+		signature string
+	}
+	var toolCalls []toolCallEntry
+
+	parts.ForEach(func(_, part gjson.Result) bool {
+		if fc := part.Get("functionCall"); fc.Exists() {
+			name := fc.Get("name").String()
+			args := fc.Get("args").Raw
+			if args == "" {
+				args = "{}"
+			}
+			sig := part.Get("thoughtSignature").String()
+			id := embedSignatureInID(generateToolCallID(), sig)
+			toolCalls = append(toolCalls, toolCallEntry{id: id, name: name, args: args, signature: sig})
+			return true
+		}
+		if t := part.Get("text").String(); t != "" {
+			texts = append(texts, t)
+			if firstTextSig == "" {
+				if sig := part.Get("thoughtSignature").String(); sig != "" {
+					firstTextSig = sig
+				}
+			}
+		}
+		return true
+	})
+
+	hasToolCalls = len(toolCalls) > 0
+	if !hasToolCalls {
+		leadingSig = firstTextSig
 	}
 
-	candidates, _ := resp["candidates"].([]any)
-	var first map[string]any
-	if len(candidates) > 0 {
-		first, _ = candidates[0].(map[string]any)
-	}
-
-	textContent, toolCalls, leadingSig := extractGeminiParts(first)
-	finishReason := mapGeminiFinishReason(stringField(first, "finishReason"), len(toolCalls) > 0)
-
-	message := map[string]any{"role": "assistant"}
-	if textContent != "" {
-		message["content"] = textContent
+	jw.Obj()
+	jw.Key("role"); jw.Str("assistant")
+	jw.Key("content")
+	text := strings.Join(texts, "")
+	if text != "" {
+		jw.Str(text)
 	} else {
-		message["content"] = nil
+		jw.Null()
 	}
-	if len(toolCalls) > 0 {
-		message["tool_calls"] = toolCalls
+	if hasToolCalls {
+		jw.Key("tool_calls"); jw.Arr()
+		for _, tc := range toolCalls {
+			jw.Obj()
+			jw.Key("id"); jw.Str(tc.id)
+			jw.Key("type"); jw.Str("function")
+			jw.Key("function"); jw.Obj()
+			jw.Key("name"); jw.Str(tc.name)
+			jw.Key("arguments"); jw.Str(tc.args)
+			if tc.signature != "" {
+				jw.Key("thought_signature"); jw.Str(tc.signature)
+			}
+			jw.EndObj()
+			if tc.signature != "" {
+				jw.Key("thought_signature"); jw.Str(tc.signature)
+			}
+			jw.EndObj()
+		}
+		jw.EndArr()
 	} else if leadingSig != "" {
 		// Off-spec; litellm/openai-go pass through unknown fields.
-		message["thought_signature"] = leadingSig
+		jw.Key("thought_signature"); jw.Str(leadingSig)
 	}
+	jw.EndObj()
 
-	out := map[string]any{
-		"id":      generateChatCmplID(),
-		"object":  "chat.completion",
-		"created": time.Now().Unix(),
-		"model":   requestModel,
-		"choices": []any{map[string]any{
-			"index":         0,
-			"message":       message,
-			"finish_reason": finishReason,
-		}},
-		"usage": geminiUsageToOpenAI(resp["usageMetadata"]),
+	return hasToolCalls, leadingSig
+}
+
+// writeOpenAIUsageFromGemini writes the "usage" object from Gemini usageMetadata.
+func writeOpenAIUsageFromGemini(jw *jsonWriter, meta gjson.Result) {
+	prompt := meta.Get("promptTokenCount").Int()
+	completion := meta.Get("candidatesTokenCount").Int()
+	total := meta.Get("totalTokenCount").Int()
+	if total == 0 {
+		total = prompt + completion
 	}
-	return json.Marshal(out)
+	jw.Obj()
+	jw.Key("prompt_tokens"); jw.Int(prompt)
+	jw.Key("completion_tokens"); jw.Int(completion)
+	jw.Key("total_tokens"); jw.Int(total)
+	jw.EndObj()
 }
 
 // GeminiToAnthropicResponse converts a non-streaming Gemini response to
 // Anthropic Messages format.
 func GeminiToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
-	var resp map[string]any
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("unmarshal gemini response: %w", err)
-	}
+	hasToolUse, content := buildAnthropicContent(gjson.GetBytes(body, "candidates.0"))
+	stopReason := mapGeminiFinishReasonToAnthropic(
+		gjson.GetBytes(body, "candidates.0.finishReason").String(),
+		hasToolUse,
+	)
 
-	candidates, _ := resp["candidates"].([]any)
-	var first map[string]any
-	if len(candidates) > 0 {
-		first, _ = candidates[0].(map[string]any)
-	}
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("id"); jw.Str(generateAnthropicMsgID())
+	jw.Key("type"); jw.Str("message")
+	jw.Key("role"); jw.Str("assistant")
+	jw.Key("model"); jw.Str(requestModel)
+	jw.Key("content"); jw.RawBytes(content)
+	jw.Key("stop_reason"); jw.Str(stopReason)
+	jw.Key("stop_sequence"); jw.Null()
+	jw.Key("usage")
+	writeAnthropicUsageFromGemini(jw, gjson.GetBytes(body, "usageMetadata"))
+	jw.EndObj()
+	return jw.Bytes(), nil
+}
 
-	blocks := buildAnthropicBlocksFromGemini(first)
-	stopReason := mapGeminiFinishReasonToAnthropic(stringField(first, "finishReason"), blocksContainToolUse(blocks))
+// buildAnthropicContent walks candidate parts and returns the serialised content
+// array plus whether any tool_use block was emitted.
+func buildAnthropicContent(candidate gjson.Result) (hasToolUse bool, content []byte) {
+	jw := newJSONWriter()
+	jw.Arr()
+	candidate.Get("content.parts").ForEach(func(_, part gjson.Result) bool {
+		if fc := part.Get("functionCall"); fc.Exists() {
+			sig := part.Get("thoughtSignature").String()
+			args := fc.Get("args").Raw
+			if args == "" {
+				args = "{}"
+			}
+			jw.Obj()
+			jw.Key("type"); jw.Str("tool_use")
+			jw.Key("id"); jw.Str(embedSignatureInID(generateToolUseID(), sig))
+			jw.Key("name"); jw.Str(fc.Get("name").String())
+			jw.Key("input"); jw.Raw(args)
+			if sig != "" {
+				jw.Key("thought_signature"); jw.Str(sig)
+			}
+			jw.EndObj()
+			hasToolUse = true
+			return true
+		}
+		if t := part.Get("text").String(); t != "" {
+			jw.Obj()
+			jw.Key("type"); jw.Str("text")
+			jw.Key("text"); jw.Str(t)
+			if sig := part.Get("thoughtSignature").String(); sig != "" {
+				jw.Key("thought_signature"); jw.Str(sig)
+			}
+			jw.EndObj()
+		}
+		return true
+	})
+	jw.EndArr()
+	return hasToolUse, jw.Bytes()
+}
 
-	out := map[string]any{
-		"id":            generateAnthropicMsgID(),
-		"type":          "message",
-		"role":          "assistant",
-		"model":         requestModel,
-		"content":       blocks,
-		"stop_reason":   stopReason,
-		"stop_sequence": nil,
-		"usage":         geminiUsageToAnthropic(resp["usageMetadata"]),
-	}
-	return json.Marshal(out)
+// writeAnthropicUsageFromGemini writes the "usage" object in Anthropic format.
+func writeAnthropicUsageFromGemini(jw *jsonWriter, meta gjson.Result) {
+	jw.Obj()
+	jw.Key("input_tokens"); jw.Int(meta.Get("promptTokenCount").Int())
+	jw.Key("output_tokens"); jw.Int(meta.Get("candidatesTokenCount").Int())
+	jw.EndObj()
 }
 
 // GeminiToOpenAIError re-wraps a Gemini error envelope as an OpenAI error.
 func GeminiToOpenAIError(body []byte) []byte {
-	var g struct {
-		Error struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-			Status  string `json:"status"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &g); err != nil {
+	code := gjson.GetBytes(body, "error.code")
+	msg := gjson.GetBytes(body, "error.message").String()
+	status := gjson.GetBytes(body, "error.status").String()
+	if msg == "" && status == "" {
 		return body
 	}
-	if g.Error.Message == "" && g.Error.Status == "" {
-		return body
-	}
-	out, err := json.Marshal(map[string]any{
-		"error": map[string]any{
-			"message": g.Error.Message,
-			"type":    strings.ToLower(g.Error.Status),
-			"param":   nil,
-			"code":    g.Error.Code,
-		},
-	})
-	if err != nil {
-		return body
-	}
-	return out
-}
-
-// extractGeminiParts walks candidate.content.parts and produces the OpenAI view.
-// thoughtSignature is smuggled on function.thought_signature; leadingSig is
-// set from the first text part when no functionCalls are present.
-func extractGeminiParts(candidate map[string]any) (textContent string, toolCalls []any, leadingSig string) {
-	if candidate == nil {
-		return "", nil, ""
-	}
-	content, _ := candidate["content"].(map[string]any)
-	parts, _ := content["parts"].([]any)
-
-	var texts []string
-	var firstTextSig string
-	for _, p := range parts {
-		part, _ := p.(map[string]any)
-		if part == nil {
-			continue
-		}
-		if fc, ok := part["functionCall"].(map[string]any); ok {
-			tc := geminiFunctionCallToToolCall(fc, stringField(part, "thoughtSignature"))
-			toolCalls = append(toolCalls, tc)
-			continue
-		}
-		if t, ok := part["text"].(string); ok && t != "" {
-			texts = append(texts, t)
-			if firstTextSig == "" {
-				if sig, _ := part["thoughtSignature"].(string); sig != "" {
-					firstTextSig = sig
-				}
-			}
-		}
-	}
-	textContent = strings.Join(texts, "")
-	if len(toolCalls) == 0 {
-		leadingSig = firstTextSig
-	}
-	return textContent, toolCalls, leadingSig
-}
-
-func geminiFunctionCallToToolCall(fc map[string]any, signature string) map[string]any {
-	name, _ := fc["name"].(string)
-	args := fc["args"]
-	var argStr string
-	if args == nil {
-		argStr = "{}"
-	} else {
-		b, err := json.Marshal(args)
-		if err != nil {
-			argStr = "{}"
-		} else {
-			argStr = string(b)
-		}
-	}
-	fn := map[string]any{
-		"name":      name,
-		"arguments": argStr,
-	}
-	tc := map[string]any{
-		"id":       embedSignatureInID(generateToolCallID(), signature),
-		"type":     "function",
-		"function": fn,
-	}
-	if signature != "" {
-		// Also smuggled in tc.id for typed SDKs that drop unknown fields.
-		fn["thought_signature"] = signature
-		tc["thought_signature"] = signature
-	}
-	return tc
-}
-
-func buildAnthropicBlocksFromGemini(candidate map[string]any) []any {
-	if candidate == nil {
-		return []any{}
-	}
-	content, _ := candidate["content"].(map[string]any)
-	parts, _ := content["parts"].([]any)
-
-	var blocks []any
-	for _, p := range parts {
-		part, _ := p.(map[string]any)
-		if part == nil {
-			continue
-		}
-		if fc, ok := part["functionCall"].(map[string]any); ok {
-			sig, _ := part["thoughtSignature"].(string)
-			block := map[string]any{
-				"type":  "tool_use",
-				"id":    embedSignatureInID(generateToolUseID(), sig),
-				"name":  fc["name"],
-				"input": fc["args"],
-			}
-			if block["input"] == nil {
-				block["input"] = map[string]any{}
-			}
-			if sig != "" {
-				block["thought_signature"] = sig
-			}
-			blocks = append(blocks, block)
-			continue
-		}
-		if t, ok := part["text"].(string); ok && t != "" {
-			block := map[string]any{"type": "text", "text": t}
-			if sig, _ := part["thoughtSignature"].(string); sig != "" {
-				block["thought_signature"] = sig
-			}
-			blocks = append(blocks, block)
-		}
-	}
-	if blocks == nil {
-		return []any{}
-	}
-	return blocks
-}
-
-func blocksContainToolUse(blocks []any) bool {
-	for _, b := range blocks {
-		bm, _ := b.(map[string]any)
-		if t, _ := bm["type"].(string); t == "tool_use" {
-			return true
-		}
-	}
-	return false
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("error"); jw.Obj()
+	jw.Key("message"); jw.Str(msg)
+	jw.Key("type"); jw.Str(strings.ToLower(status))
+	jw.Key("param"); jw.Null()
+	jw.Key("code"); jw.Int(code.Int())
+	jw.EndObj()
+	jw.EndObj()
+	return jw.Bytes()
 }
 
 // mapGeminiFinishReason converts Gemini finishReason to OpenAI finish_reason.
@@ -268,54 +252,6 @@ func mapGeminiFinishReasonToAnthropic(reason string, hasToolUse bool) string {
 	default:
 		return "end_turn"
 	}
-}
-
-func geminiUsageToOpenAI(meta any) map[string]any {
-	m, _ := meta.(map[string]any)
-	if m == nil {
-		return map[string]any{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-	}
-	prompt := numField(m, "promptTokenCount")
-	completion := numField(m, "candidatesTokenCount")
-	total := numField(m, "totalTokenCount")
-	if total == 0 {
-		total = prompt + completion
-	}
-	return map[string]any{
-		"prompt_tokens":     prompt,
-		"completion_tokens": completion,
-		"total_tokens":      total,
-	}
-}
-
-func geminiUsageToAnthropic(meta any) map[string]any {
-	m, _ := meta.(map[string]any)
-	if m == nil {
-		return map[string]any{"input_tokens": 0, "output_tokens": 0}
-	}
-	return map[string]any{
-		"input_tokens":  numField(m, "promptTokenCount"),
-		"output_tokens": numField(m, "candidatesTokenCount"),
-	}
-}
-
-func numField(m map[string]any, k string) int {
-	v, ok := m[k]
-	if !ok {
-		return 0
-	}
-	if f, ok := v.(float64); ok {
-		return int(f)
-	}
-	return 0
-}
-
-func stringField(m map[string]any, k string) string {
-	if m == nil {
-		return ""
-	}
-	s, _ := m[k].(string)
-	return s
 }
 
 func generateChatCmplID() string {

@@ -42,41 +42,19 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 		return providers.PreparedRequest{Body: body, Headers: headers}, nil
 	}
 
-	src, err := e.ensureSrc()
-	if err != nil {
-		return providers.PreparedRequest{}, err
-	}
-
-	out := make(map[string]any)
-
+	jw := newJSONWriter()
+	jw.Obj()
 	switch e.format {
 	case FormatOpenAI:
-		if err := pullOpenAISystemAndContents(src, out); err != nil {
-			return providers.PreparedRequest{}, err
-		}
-		if err := pullOpenAIToolsToGemini(src, out); err != nil {
-			return providers.PreparedRequest{}, err
-		}
-		pullOpenAIToolChoiceToGemini(e.body, out)
-		pullOpenAIGenerationConfig(e.body, out, opts.TargetModel)
+		writeGeminiFromOpenAI(jw, e.body, opts)
 	case FormatAnthropic:
-		pullAnthropicSystemToGemini(src, out)
-		if err := pullAnthropicContentsToGemini(src, out); err != nil {
-			return providers.PreparedRequest{}, err
-		}
-		if err := pullAnthropicToolsToGemini(src, out); err != nil {
-			return providers.PreparedRequest{}, err
-		}
-		pullAnthropicToolChoiceToGemini(e.body, out)
-		pullAnthropicGenerationConfig(e.body, out, opts.TargetModel)
+		writeGeminiFromAnthropic(jw, e.body, opts)
 	default:
 		return providers.PreparedRequest{}, fmt.Errorf("unsupported source format for Gemini emit: %d", e.format)
 	}
+	jw.EndObj()
+	body := jw.Bytes()
 
-	body, err := json.Marshal(out)
-	if err != nil {
-		return providers.PreparedRequest{}, fmt.Errorf("marshal gemini body: %w", err)
-	}
 	// Synthetic header so proxy.Service stays ignorant of provider URL composition.
 	headers := make(http.Header)
 	if e.Stream() {
@@ -158,255 +136,360 @@ func copyMap(m map[string]any) map[string]any {
 
 // ----- OpenAI → Gemini -----
 
-func pullOpenAISystemAndContents(src map[string]any, out map[string]any) error {
-	msgs, _ := src["messages"].([]any)
-	if len(msgs) == 0 {
-		return nil
-	}
+// writeGeminiFromOpenAI translates an OpenAI-format body into Gemini fields
+// written directly into jw (caller has already opened the root object).
+func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) {
+	msgs := gjson.GetBytes(body, "messages")
 
-	// tool_call_id → function name lookup so role:tool messages can recover
-	// the function name for functionResponse.
-	toolNames := openAICollectToolCallNames(msgs)
-
-	var sysParts []string
-	var contents []any
-	for _, raw := range msgs {
-		msg, _ := raw.(map[string]any)
-		if msg == nil {
-			continue
+	// First pass: build tool_call ID → function name map for role:tool messages.
+	toolNames := make(map[string]string)
+	msgs.ForEach(func(_, msg gjson.Result) bool {
+		if msg.Get("role").String() != "assistant" {
+			return true
 		}
-		role, _ := msg["role"].(string)
-		switch role {
-		case "system":
-			if s := openAITextContent(msg["content"]); s != "" {
+		msg.Get("tool_calls").ForEach(func(_, tc gjson.Result) bool {
+			if id := tc.Get("id").String(); id != "" {
+				toolNames[id] = tc.Get("function.name").String()
+			}
+			return true
+		})
+		return true
+	})
+
+	// Collect system text.
+	var sysParts []string
+	msgs.ForEach(func(_, msg gjson.Result) bool {
+		if msg.Get("role").String() != "system" {
+			return true
+		}
+		content := msg.Get("content")
+		switch content.Type {
+		case gjson.String:
+			if s := content.String(); s != "" {
 				sysParts = append(sysParts, s)
 			}
-		case "user":
-			parts := openAIUserToGeminiParts(msg["content"])
-			if len(parts) > 0 {
-				contents = append(contents, map[string]any{"role": "user", "parts": parts})
-			}
-		case "assistant":
-			parts, err := openAIAssistantToGeminiParts(msg)
-			if err != nil {
-				return err
-			}
-			if len(parts) > 0 {
-				contents = append(contents, map[string]any{"role": "model", "parts": parts})
-			}
-		case "tool":
-			tcID, _ := msg["tool_call_id"].(string)
-			name := toolNames[tcID]
-			result := openAITextContent(msg["content"])
-			contents = append(contents, map[string]any{
-				"role":  "user",
-				"parts": []any{map[string]any{"functionResponse": map[string]any{"name": name, "response": map[string]any{"result": result}}}},
+		case gjson.JSON:
+			content.ForEach(func(_, part gjson.Result) bool {
+				if part.Get("type").String() == "text" {
+					if s := part.Get("text").String(); s != "" {
+						sysParts = append(sysParts, s)
+					}
+				}
+				return true
 			})
 		}
-	}
-
+		return true
+	})
 	if len(sysParts) > 0 {
-		out["systemInstruction"] = map[string]any{
-			"parts": []any{map[string]any{"text": strings.Join(sysParts, "\n")}},
+		jw.Key("systemInstruction")
+		jw.Obj()
+		jw.Key("parts")
+		jw.Arr()
+		jw.Obj()
+		jw.Key("text")
+		jw.Str(strings.Join(sysParts, "\n"))
+		jw.EndObj()
+		jw.EndArr()
+		jw.EndObj()
+	}
+
+	// Second pass: write contents array.
+	hasContents := false
+	msgs.ForEach(func(_, msg gjson.Result) bool {
+		role := msg.Get("role").String()
+		switch role {
+		case "system":
+			return true
+		case "user":
+			parts := openAIUserPartsGJSON(msg.Get("content"))
+			if len(parts) == 0 {
+				return true
+			}
+			if !hasContents {
+				jw.Key("contents")
+				jw.Arr()
+				hasContents = true
+			}
+			jw.Obj()
+			jw.Key("role")
+			jw.Str("user")
+			jw.Key("parts")
+			jw.Arr()
+			for _, p := range parts {
+				jw.Raw(p)
+			}
+			jw.EndArr()
+			jw.EndObj()
+		case "assistant":
+			parts := openAIAssistantPartsGJSON(msg)
+			if len(parts) == 0 {
+				return true
+			}
+			if !hasContents {
+				jw.Key("contents")
+				jw.Arr()
+				hasContents = true
+			}
+			jw.Obj()
+			jw.Key("role")
+			jw.Str("model")
+			jw.Key("parts")
+			jw.Arr()
+			for _, p := range parts {
+				jw.Raw(p)
+			}
+			jw.EndArr()
+			jw.EndObj()
+		case "tool":
+			tcID := msg.Get("tool_call_id").String()
+			name := toolNames[tcID]
+			result := toolResultContentGJSON(msg.Get("content"))
+			if !hasContents {
+				jw.Key("contents")
+				jw.Arr()
+				hasContents = true
+			}
+			jw.Obj()
+			jw.Key("role")
+			jw.Str("user")
+			jw.Key("parts")
+			jw.Arr()
+			jw.Obj()
+			jw.Key("functionResponse")
+			jw.Obj()
+			jw.Key("name")
+			jw.Str(name)
+			jw.Key("response")
+			jw.Obj()
+			jw.Key("result")
+			jw.Str(result)
+			jw.EndObj()
+			jw.EndObj()
+			jw.EndObj()
+			jw.EndArr()
+			jw.EndObj()
 		}
+		return true
+	})
+	if hasContents {
+		jw.EndArr()
 	}
-	if len(contents) > 0 {
-		out["contents"] = contents
-	}
-	return nil
+
+	writeGeminiToolsFromOpenAI(jw, body)
+	writeGeminiToolChoiceFromOpenAI(jw, body)
+	writeGeminiGenerationConfigFromOpenAI(jw, body, opts.TargetModel)
 }
 
-func openAICollectToolCallNames(msgs []any) map[string]string {
-	out := map[string]string{}
-	for _, raw := range msgs {
-		msg, _ := raw.(map[string]any)
-		if msg == nil {
-			continue
-		}
-		if r, _ := msg["role"].(string); r != "assistant" {
-			continue
-		}
-		tcs, _ := msg["tool_calls"].([]any)
-		for _, t := range tcs {
-			tc, _ := t.(map[string]any)
-			if tc == nil {
-				continue
-			}
-			id, _ := tc["id"].(string)
-			fn, _ := tc["function"].(map[string]any)
-			name, _ := fn["name"].(string)
-			if id != "" {
-				out[id] = name
-			}
-		}
-	}
-	return out
-}
-
-func openAITextContent(content any) string {
-	switch c := content.(type) {
-	case string:
-		return c
-	case []any:
-		var parts []string
-		for _, p := range c {
-			pm, _ := p.(map[string]any)
-			if pm == nil {
-				continue
-			}
-			if t, _ := pm["type"].(string); t == "text" {
-				if s, _ := pm["text"].(string); s != "" {
-					parts = append(parts, s)
-				}
-			}
-		}
-		return strings.Join(parts, "\n")
-	default:
-		return ""
-	}
-}
-
-// openAIUserToGeminiParts converts OpenAI user content into Gemini Parts.
+// openAIUserPartsGJSON converts an OpenAI user content value to raw JSON part strings.
 // http(s) image URLs are unsupported on the native surface and dropped.
-func openAIUserToGeminiParts(content any) []any {
-	switch c := content.(type) {
-	case string:
-		if c == "" {
+func openAIUserPartsGJSON(content gjson.Result) []string {
+	switch content.Type {
+	case gjson.String:
+		s := content.String()
+		if s == "" {
 			return nil
 		}
-		return []any{map[string]any{"text": c}}
-	case []any:
-		var parts []any
-		for _, p := range c {
-			pm, _ := p.(map[string]any)
-			if pm == nil {
-				continue
-			}
-			switch t, _ := pm["type"].(string); t {
+		pw := newJSONWriter()
+		pw.Obj()
+		pw.Key("text")
+		pw.Str(s)
+		pw.EndObj()
+		return []string{string(pw.Bytes())}
+	case gjson.JSON:
+		var parts []string
+		content.ForEach(func(_, p gjson.Result) bool {
+			switch p.Get("type").String() {
 			case "text":
-				if s, _ := pm["text"].(string); s != "" {
-					parts = append(parts, map[string]any{"text": s})
+				if s := p.Get("text").String(); s != "" {
+					pw := newJSONWriter()
+					pw.Obj()
+					pw.Key("text")
+					pw.Str(s)
+					pw.EndObj()
+					parts = append(parts, string(pw.Bytes()))
 				}
 			case "image_url":
-				img, _ := pm["image_url"].(map[string]any)
-				url, _ := img["url"].(string)
-				if part := dataURLToInlinePart(url); part != nil {
-					parts = append(parts, part)
+				urlStr := p.Get("image_url.url").String()
+				mime, data, ok := parseDataURL(urlStr)
+				if !ok {
+					return true
 				}
+				if _, err := base64.StdEncoding.DecodeString(data); err != nil {
+					return true
+				}
+				if mime == "" {
+					mime = "image/jpeg"
+				}
+				pw := newJSONWriter()
+				pw.Obj()
+				pw.Key("inlineData")
+				pw.Obj()
+				pw.Key("mimeType")
+				pw.Str(mime)
+				pw.Key("data")
+				pw.Str(data)
+				pw.EndObj()
+				pw.EndObj()
+				parts = append(parts, string(pw.Bytes()))
 			}
-		}
+			return true
+		})
 		return parts
 	}
 	return nil
 }
 
-// dataURLToInlinePart parses data: URLs into Gemini inlineData parts.
-func dataURLToInlinePart(url string) map[string]any {
-	if !strings.HasPrefix(url, "data:") {
-		return nil
+// openAIAssistantPartsGJSON converts an OpenAI assistant message to raw JSON part strings.
+func openAIAssistantPartsGJSON(msg gjson.Result) []string {
+	var parts []string
+
+	content := msg.Get("content")
+	if text := openAIContentTextFromGJSON(content); text != "" {
+		pw := newJSONWriter()
+		pw.Obj()
+		pw.Key("text")
+		pw.Str(text)
+		pw.EndObj()
+		parts = append(parts, string(pw.Bytes()))
 	}
-	rest := strings.TrimPrefix(url, "data:")
-	mime, payload, ok := strings.Cut(rest, ";base64,")
-	if !ok {
-		return nil
-	}
-	if mime == "" {
-		mime = "image/jpeg"
-	}
-	// Validate base64 so upstream rejects surface as client-visible errors.
-	if _, err := base64.StdEncoding.DecodeString(payload); err != nil {
-		return nil
-	}
-	return map[string]any{
-		"inlineData": map[string]any{"mimeType": mime, "data": payload},
-	}
+
+	msg.Get("tool_calls").ForEach(func(_, tc gjson.Result) bool {
+		name := tc.Get("function.name").String()
+		argsStr := tc.Get("function.arguments").String()
+
+		pw := newJSONWriter()
+		pw.Obj()
+		pw.Key("functionCall")
+		pw.Obj()
+		pw.Key("name")
+		pw.Str(name)
+		pw.Key("args")
+		if gjson.Valid(argsStr) {
+			pw.Raw(argsStr)
+		} else {
+			pw.Raw("{}")
+		}
+		pw.EndObj()
+		if sig := extractThoughtSignature(tc); sig != "" {
+			pw.Key("thoughtSignature")
+			pw.Str(sig)
+		}
+		pw.EndObj()
+		parts = append(parts, string(pw.Bytes()))
+		return true
+	})
+
+	return parts
 }
 
-// openAIAssistantToGeminiParts converts an OpenAI assistant message to Gemini
-// model-role Parts. thought_signature is preserved for Gemini 3.x multi-turn tool use.
-func openAIAssistantToGeminiParts(msg map[string]any) ([]any, error) {
-	var parts []any
-	if s := openAITextContent(msg["content"]); s != "" {
-		parts = append(parts, map[string]any{"text": s})
-	}
-	tcs, _ := msg["tool_calls"].([]any)
-	for _, t := range tcs {
-		tc, _ := t.(map[string]any)
-		if tc == nil {
-			continue
-		}
-		fn, _ := tc["function"].(map[string]any)
-		name, _ := fn["name"].(string)
-		argsStr, _ := fn["arguments"].(string)
-		var args any = map[string]any{}
-		if argsStr != "" {
-			if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
-				return nil, fmt.Errorf("parse tool_call arguments: %w", err)
+// openAIContentTextFromGJSON extracts text from an OpenAI content value (string or array).
+func openAIContentTextFromGJSON(content gjson.Result) string {
+	switch content.Type {
+	case gjson.String:
+		return content.String()
+	case gjson.JSON:
+		var sb strings.Builder
+		first := true
+		content.ForEach(func(_, p gjson.Result) bool {
+			if p.Get("type").String() == "text" {
+				if s := p.Get("text").String(); s != "" {
+					if !first {
+						sb.WriteByte('\n')
+					}
+					sb.WriteString(s)
+					first = false
+				}
 			}
-		}
-		part := map[string]any{
-			"functionCall": map[string]any{"name": name, "args": args},
-		}
-		// thought_signature may live on the tool_call, the function object,
-		// or smuggled into tc.id; round-trip whichever shape we receive.
-		if sig, _ := tc["thought_signature"].(string); sig != "" {
-			part["thoughtSignature"] = sig
-		} else if sig, _ := fn["thought_signature"].(string); sig != "" {
-			part["thoughtSignature"] = sig
-		} else if id, _ := tc["id"].(string); id != "" {
-			if _, sig := extractSignatureFromID(id); sig != "" {
-				part["thoughtSignature"] = sig
-			}
-		}
-		parts = append(parts, part)
+			return true
+		})
+		return sb.String()
 	}
-	return parts, nil
+	return ""
 }
 
-// ----- OpenAI tools / tool_choice / generationConfig → Gemini -----
+// writeGeminiToolsFromOpenAI writes the tools array into jw from an OpenAI body.
+func writeGeminiToolsFromOpenAI(jw *jsonWriter, body []byte) {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {
+		return
+	}
 
-func pullOpenAIToolsToGemini(src map[string]any, out map[string]any) error {
-	tools, _ := src["tools"].([]any)
-	if len(tools) == 0 {
-		return nil
-	}
-	var decls []any
-	for _, t := range tools {
-		tool, _ := t.(map[string]any)
-		fn, _ := tool["function"].(map[string]any)
-		if fn == nil {
-			continue
+	var decls []string
+	tools.ForEach(func(_, t gjson.Result) bool {
+		fn := t.Get("function")
+		if !fn.Exists() {
+			return true
 		}
-		decl := map[string]any{"name": fn["name"]}
-		if d, ok := fn["description"]; ok {
-			decl["description"] = d
+		name := fn.Get("name").String()
+		if name == "" {
+			return true
 		}
-		if p, ok := fn["parameters"]; ok && p != nil {
-			decl["parameters"] = sanitizeSchemaForGemini(p)
+		dw := newJSONWriter()
+		dw.Obj()
+		dw.Key("name")
+		dw.Str(name)
+		if desc := fn.Get("description"); desc.Exists() {
+			dw.Key("description")
+			dw.Str(desc.String())
 		}
-		decls = append(decls, decl)
-	}
+		if params := fn.Get("parameters"); params.Exists() {
+			var schema any
+			if err := json.Unmarshal([]byte(params.Raw), &schema); err == nil {
+				schema = sanitizeSchemaForGemini(schema)
+				if schemaBytes, err := json.Marshal(schema); err == nil {
+					dw.Key("parameters")
+					dw.RawBytes(schemaBytes)
+				}
+			}
+		}
+		dw.EndObj()
+		decls = append(decls, string(dw.Bytes()))
+		return true
+	})
+
 	if len(decls) == 0 {
-		return nil
+		return
 	}
-	out["tools"] = []any{map[string]any{"functionDeclarations": decls}}
-	return nil
+	jw.Key("tools")
+	jw.Arr()
+	jw.Obj()
+	jw.Key("functionDeclarations")
+	jw.Arr()
+	for _, d := range decls {
+		jw.Raw(d)
+	}
+	jw.EndArr()
+	jw.EndObj()
+	jw.EndArr()
 }
 
-func pullOpenAIToolChoiceToGemini(body []byte, out map[string]any) {
+// writeGeminiToolChoiceFromOpenAI writes toolConfig into jw from an OpenAI body.
+func writeGeminiToolChoiceFromOpenAI(jw *jsonWriter, body []byte) {
 	r := gjson.GetBytes(body, "tool_choice")
 	if !r.Exists() {
 		return
 	}
 	if r.Type == gjson.String {
+		var mode string
 		switch r.String() {
 		case "auto":
-			out["toolConfig"] = map[string]any{"functionCallingConfig": map[string]any{"mode": "AUTO"}}
+			mode = "AUTO"
 		case "none":
-			out["toolConfig"] = map[string]any{"functionCallingConfig": map[string]any{"mode": "NONE"}}
+			mode = "NONE"
 		case "required":
-			out["toolConfig"] = map[string]any{"functionCallingConfig": map[string]any{"mode": "ANY"}}
+			mode = "ANY"
 		}
+		if mode == "" {
+			return
+		}
+		jw.Key("toolConfig")
+		jw.Obj()
+		jw.Key("functionCallingConfig")
+		jw.Obj()
+		jw.Key("mode")
+		jw.Str(mode)
+		jw.EndObj()
+		jw.EndObj()
 		return
 	}
 	if r.IsObject() && r.Get("type").String() == "function" {
@@ -414,47 +497,480 @@ func pullOpenAIToolChoiceToGemini(body []byte, out map[string]any) {
 		if name == "" {
 			return
 		}
-		out["toolConfig"] = map[string]any{
-			"functionCallingConfig": map[string]any{
-				"mode":                 "ANY",
-				"allowedFunctionNames": []any{name},
-			},
-		}
+		jw.Key("toolConfig")
+		jw.Obj()
+		jw.Key("functionCallingConfig")
+		jw.Obj()
+		jw.Key("mode")
+		jw.Str("ANY")
+		jw.Key("allowedFunctionNames")
+		jw.Arr()
+		jw.Str(name)
+		jw.EndArr()
+		jw.EndObj()
+		jw.EndObj()
 	}
 }
 
-func pullOpenAIGenerationConfig(body []byte, out map[string]any, model string) {
-	gc := make(map[string]any)
+// writeGeminiGenerationConfigFromOpenAI writes generationConfig into jw from an OpenAI body.
+func writeGeminiGenerationConfigFromOpenAI(jw *jsonWriter, body []byte, model string) {
+	// Collect all generation config fields; only write the object if non-empty.
+	type field struct {
+		key string
+		raw string
+	}
+	var fields []field
+
 	if r := gjson.GetBytes(body, "temperature"); r.Exists() && r.Type == gjson.Number {
-		gc["temperature"] = r.Num
+		fw := newJSONWriter()
+		fw.Float(r.Num)
+		fields = append(fields, field{"temperature", string(fw.Bytes())})
 	}
 	if r := gjson.GetBytes(body, "top_p"); r.Exists() && r.Type == gjson.Number {
-		gc["topP"] = r.Num
+		fw := newJSONWriter()
+		fw.Float(r.Num)
+		fields = append(fields, field{"topP", string(fw.Bytes())})
 	}
-	if r := gjson.GetBytes(body, "max_tokens"); r.Exists() && r.Type == gjson.Number {
-		gc["maxOutputTokens"] = clampToModelOutputCap(int64(r.Num), model)
-	}
+	// max_completion_tokens takes precedence over max_tokens if both present.
 	if r := gjson.GetBytes(body, "max_completion_tokens"); r.Exists() && r.Type == gjson.Number {
-		gc["maxOutputTokens"] = clampToModelOutputCap(int64(r.Num), model)
+		fw := newJSONWriter()
+		fw.Int(clampToModelOutputCap(int64(r.Num), model))
+		fields = append(fields, field{"maxOutputTokens", string(fw.Bytes())})
+	} else if r := gjson.GetBytes(body, "max_tokens"); r.Exists() && r.Type == gjson.Number {
+		fw := newJSONWriter()
+		fw.Int(clampToModelOutputCap(int64(r.Num), model))
+		fields = append(fields, field{"maxOutputTokens", string(fw.Bytes())})
 	}
 	if r := gjson.GetBytes(body, "stop"); r.Exists() {
-		gc["stopSequences"] = stopToArray(r)
+		if raw := stopToArrayRaw(r); raw != "" {
+			fields = append(fields, field{"stopSequences", raw})
+		}
 	}
 	if r := gjson.GetBytes(body, "response_format"); r.Exists() && r.IsObject() {
 		if r.Get("type").String() == "json_object" {
-			gc["responseMimeType"] = "application/json"
+			fields = append(fields, field{"responseMimeType", `"application/json"`})
 		}
 	}
 	if r := gjson.GetBytes(body, "reasoning_effort"); r.Exists() && r.Type == gjson.String {
-		if tc, ok := mapReasoningEffortToThinkingConfig(r.String()); ok {
-			gc["thinkingConfig"] = tc
+		if raw := thinkingConfigRaw(r.String()); raw != "" {
+			fields = append(fields, field{"thinkingConfig", raw})
 		}
 	}
-	if len(gc) > 0 {
-		out["generationConfig"] = gc
+
+	if len(fields) == 0 {
+		return
+	}
+	jw.Key("generationConfig")
+	jw.Obj()
+	for _, f := range fields {
+		jw.Key(f.key)
+		jw.Raw(f.raw)
+	}
+	jw.EndObj()
+}
+
+// ----- Anthropic → Gemini -----
+
+// writeGeminiFromAnthropic translates an Anthropic-format body into Gemini fields
+// written directly into jw (caller has already opened the root object).
+func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
+	// System prompt.
+	system := gjson.GetBytes(body, "system")
+	var sysParts []string
+	switch system.Type {
+	case gjson.String:
+		if stripped := stripAnthropicBillingHeader(system.String()); stripped != "" {
+			sysParts = append(sysParts, stripped)
+		}
+	case gjson.JSON:
+		system.ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() == "text" {
+				if text := block.Get("text").String(); text != "" {
+					if stripped := stripAnthropicBillingHeader(text); stripped != "" {
+						sysParts = append(sysParts, stripped)
+					}
+				}
+			}
+			return true
+		})
+	}
+	if len(sysParts) > 0 {
+		jw.Key("systemInstruction")
+		jw.Obj()
+		jw.Key("parts")
+		jw.Arr()
+		jw.Obj()
+		jw.Key("text")
+		jw.Str(strings.Join(sysParts, "\n"))
+		jw.EndObj()
+		jw.EndArr()
+		jw.EndObj()
+	}
+
+	msgs := gjson.GetBytes(body, "messages")
+
+	// First pass: collect tool_use ID → name for tool_result recovery.
+	toolNames := make(map[string]string)
+	msgs.ForEach(func(_, msg gjson.Result) bool {
+		if msg.Get("role").String() != "assistant" {
+			return true
+		}
+		msg.Get("content").ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() == "tool_use" {
+				if id := block.Get("id").String(); id != "" {
+					toolNames[id] = block.Get("name").String()
+				}
+			}
+			return true
+		})
+		return true
+	})
+
+	// Second pass: write contents array.
+	hasContents := false
+	msgs.ForEach(func(_, msg gjson.Result) bool {
+		role := msg.Get("role").String()
+		switch role {
+		case "user":
+			parts := anthropicUserPartsGJSON(msg.Get("content"), toolNames)
+			if len(parts) == 0 {
+				return true
+			}
+			if !hasContents {
+				jw.Key("contents")
+				jw.Arr()
+				hasContents = true
+			}
+			jw.Obj()
+			jw.Key("role")
+			jw.Str("user")
+			jw.Key("parts")
+			jw.Arr()
+			for _, p := range parts {
+				jw.Raw(p)
+			}
+			jw.EndArr()
+			jw.EndObj()
+		case "assistant":
+			parts := anthropicAssistantPartsGJSON(msg.Get("content"))
+			if len(parts) == 0 {
+				return true
+			}
+			if !hasContents {
+				jw.Key("contents")
+				jw.Arr()
+				hasContents = true
+			}
+			jw.Obj()
+			jw.Key("role")
+			jw.Str("model")
+			jw.Key("parts")
+			jw.Arr()
+			for _, p := range parts {
+				jw.Raw(p)
+			}
+			jw.EndArr()
+			jw.EndObj()
+		}
+		return true
+	})
+	if hasContents {
+		jw.EndArr()
+	}
+
+	writeGeminiToolsFromAnthropic(jw, body)
+	writeGeminiToolChoiceFromAnthropic(jw, body)
+	writeGeminiGenerationConfigFromAnthropic(jw, body, opts.TargetModel)
+}
+
+// anthropicUserPartsGJSON converts an Anthropic user content value to raw JSON part strings.
+func anthropicUserPartsGJSON(content gjson.Result, toolNames map[string]string) []string {
+	switch content.Type {
+	case gjson.String:
+		s := content.String()
+		if s == "" {
+			return nil
+		}
+		pw := newJSONWriter()
+		pw.Obj()
+		pw.Key("text")
+		pw.Str(s)
+		pw.EndObj()
+		return []string{string(pw.Bytes())}
+	case gjson.JSON:
+		var parts []string
+		content.ForEach(func(_, block gjson.Result) bool {
+			switch block.Get("type").String() {
+			case "text":
+				if text := block.Get("text").String(); text != "" {
+					pw := newJSONWriter()
+					pw.Obj()
+					pw.Key("text")
+					pw.Str(text)
+					pw.EndObj()
+					parts = append(parts, string(pw.Bytes()))
+				}
+			case "image":
+				if block.Get("source.type").String() != "base64" {
+					return true
+				}
+				data := block.Get("source.data").String()
+				if data == "" {
+					return true
+				}
+				mime := block.Get("source.media_type").String()
+				if mime == "" {
+					mime = "image/jpeg"
+				}
+				pw := newJSONWriter()
+				pw.Obj()
+				pw.Key("inlineData")
+				pw.Obj()
+				pw.Key("mimeType")
+				pw.Str(mime)
+				pw.Key("data")
+				pw.Str(data)
+				pw.EndObj()
+				pw.EndObj()
+				parts = append(parts, string(pw.Bytes()))
+			case "tool_result":
+				id := block.Get("tool_use_id").String()
+				name := toolNames[id]
+				result := toolResultContentGJSON(block.Get("content"))
+				pw := newJSONWriter()
+				pw.Obj()
+				pw.Key("functionResponse")
+				pw.Obj()
+				pw.Key("name")
+				pw.Str(name)
+				pw.Key("response")
+				pw.Obj()
+				pw.Key("result")
+				pw.Str(result)
+				pw.EndObj()
+				pw.EndObj()
+				pw.EndObj()
+				parts = append(parts, string(pw.Bytes()))
+			}
+			return true
+		})
+		return parts
+	}
+	return nil
+}
+
+// anthropicAssistantPartsGJSON converts an Anthropic assistant content value to raw JSON part strings.
+func anthropicAssistantPartsGJSON(content gjson.Result) []string {
+	switch content.Type {
+	case gjson.String:
+		s := content.String()
+		if s == "" {
+			return nil
+		}
+		pw := newJSONWriter()
+		pw.Obj()
+		pw.Key("text")
+		pw.Str(s)
+		pw.EndObj()
+		return []string{string(pw.Bytes())}
+	case gjson.JSON:
+		var parts []string
+		content.ForEach(func(_, block gjson.Result) bool {
+			switch block.Get("type").String() {
+			case "text":
+				text := block.Get("text").String()
+				if text == "" {
+					return true
+				}
+				pw := newJSONWriter()
+				pw.Obj()
+				pw.Key("text")
+				pw.Str(text)
+				if sig := block.Get("thought_signature").String(); sig != "" {
+					pw.Key("thoughtSignature")
+					pw.Str(sig)
+				}
+				pw.EndObj()
+				parts = append(parts, string(pw.Bytes()))
+			case "tool_use":
+				name := block.Get("name").String()
+				// input is already a JSON object in Anthropic format.
+				inputRaw := block.Get("input").Raw
+				if inputRaw == "" {
+					inputRaw = "{}"
+				}
+				pw := newJSONWriter()
+				pw.Obj()
+				pw.Key("functionCall")
+				pw.Obj()
+				pw.Key("name")
+				pw.Str(name)
+				pw.Key("args")
+				pw.Raw(inputRaw)
+				pw.EndObj()
+				// thought_signature may live on the block or be smuggled in block.id.
+				if sig := extractThoughtSignature(block); sig != "" {
+					pw.Key("thoughtSignature")
+					pw.Str(sig)
+				}
+				pw.EndObj()
+				parts = append(parts, string(pw.Bytes()))
+			}
+			return true
+		})
+		return parts
+	}
+	return nil
+}
+
+// writeGeminiToolsFromAnthropic writes the tools array into jw from an Anthropic body.
+func writeGeminiToolsFromAnthropic(jw *jsonWriter, body []byte) {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {
+		return
+	}
+
+	var decls []string
+	tools.ForEach(func(_, t gjson.Result) bool {
+		name := t.Get("name").String()
+		if name == "" {
+			return true
+		}
+		dw := newJSONWriter()
+		dw.Obj()
+		dw.Key("name")
+		dw.Str(name)
+		if desc := t.Get("description"); desc.Exists() {
+			dw.Key("description")
+			dw.Str(desc.String())
+		}
+		if params := t.Get("input_schema"); params.Exists() {
+			var schema any
+			if err := json.Unmarshal([]byte(params.Raw), &schema); err == nil {
+				schema = sanitizeSchemaForGemini(schema)
+				if schemaBytes, err := json.Marshal(schema); err == nil {
+					dw.Key("parameters")
+					dw.RawBytes(schemaBytes)
+				}
+			}
+		}
+		dw.EndObj()
+		decls = append(decls, string(dw.Bytes()))
+		return true
+	})
+
+	if len(decls) == 0 {
+		return
+	}
+	jw.Key("tools")
+	jw.Arr()
+	jw.Obj()
+	jw.Key("functionDeclarations")
+	jw.Arr()
+	for _, d := range decls {
+		jw.Raw(d)
+	}
+	jw.EndArr()
+	jw.EndObj()
+	jw.EndArr()
+}
+
+// writeGeminiToolChoiceFromAnthropic writes toolConfig into jw from an Anthropic body.
+func writeGeminiToolChoiceFromAnthropic(jw *jsonWriter, body []byte) {
+	r := gjson.GetBytes(body, "tool_choice")
+	if !r.Exists() || !r.IsObject() {
+		return
+	}
+	switch r.Get("type").String() {
+	case "auto":
+		jw.Key("toolConfig")
+		jw.Obj()
+		jw.Key("functionCallingConfig")
+		jw.Obj()
+		jw.Key("mode")
+		jw.Str("AUTO")
+		jw.EndObj()
+		jw.EndObj()
+	case "any":
+		jw.Key("toolConfig")
+		jw.Obj()
+		jw.Key("functionCallingConfig")
+		jw.Obj()
+		jw.Key("mode")
+		jw.Str("ANY")
+		jw.EndObj()
+		jw.EndObj()
+	case "none":
+		jw.Key("toolConfig")
+		jw.Obj()
+		jw.Key("functionCallingConfig")
+		jw.Obj()
+		jw.Key("mode")
+		jw.Str("NONE")
+		jw.EndObj()
+		jw.EndObj()
+	case "tool":
+		name := r.Get("name").String()
+		if name == "" {
+			return
+		}
+		jw.Key("toolConfig")
+		jw.Obj()
+		jw.Key("functionCallingConfig")
+		jw.Obj()
+		jw.Key("mode")
+		jw.Str("ANY")
+		jw.Key("allowedFunctionNames")
+		jw.Arr()
+		jw.Str(name)
+		jw.EndArr()
+		jw.EndObj()
+		jw.EndObj()
 	}
 }
 
+// writeGeminiGenerationConfigFromAnthropic writes generationConfig into jw from an Anthropic body.
+func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model string) {
+	type field struct {
+		key string
+		raw string
+	}
+	var fields []field
+
+	if r := gjson.GetBytes(body, "temperature"); r.Exists() && r.Type == gjson.Number {
+		fw := newJSONWriter()
+		fw.Float(r.Num)
+		fields = append(fields, field{"temperature", string(fw.Bytes())})
+	}
+	if r := gjson.GetBytes(body, "top_p"); r.Exists() && r.Type == gjson.Number {
+		fw := newJSONWriter()
+		fw.Float(r.Num)
+		fields = append(fields, field{"topP", string(fw.Bytes())})
+	}
+	if r := gjson.GetBytes(body, "max_tokens"); r.Exists() && r.Type == gjson.Number {
+		fw := newJSONWriter()
+		fw.Int(clampToModelOutputCap(int64(r.Num), model))
+		fields = append(fields, field{"maxOutputTokens", string(fw.Bytes())})
+	}
+	if r := gjson.GetBytes(body, "stop_sequences"); r.Exists() {
+		if raw := stopToArrayRaw(r); raw != "" {
+			fields = append(fields, field{"stopSequences", raw})
+		}
+	}
+
+	if len(fields) == 0 {
+		return
+	}
+	jw.Key("generationConfig")
+	jw.Obj()
+	for _, f := range fields {
+		jw.Key(f.key)
+		jw.Raw(f.raw)
+	}
+	jw.EndObj()
+}
+
+// clampToModelOutputCap caps v to the model's max output token limit.
 func clampToModelOutputCap(v int64, model string) int64 {
 	cap := modelMaxOutputTokens[model]
 	if cap == 0 {
@@ -466,19 +982,54 @@ func clampToModelOutputCap(v int64, model string) int64 {
 	return v
 }
 
-func stopToArray(r gjson.Result) []any {
+// stopToArrayRaw serializes a stop gjson.Result into a raw JSON array string.
+// Returns "" when no valid stops exist.
+func stopToArrayRaw(r gjson.Result) string {
+	var items []string
 	if r.IsArray() {
-		var out []any
 		r.ForEach(func(_, v gjson.Result) bool {
-			out = append(out, v.String())
+			if s := v.String(); s != "" {
+				sw := newJSONWriter()
+				sw.Str(s)
+				items = append(items, string(sw.Bytes()))
+			}
 			return true
 		})
-		return out
+	} else if r.Type == gjson.String {
+		if s := r.String(); s != "" {
+			sw := newJSONWriter()
+			sw.Str(s)
+			items = append(items, string(sw.Bytes()))
+		}
 	}
-	if r.Type == gjson.String {
-		return []any{r.String()}
+	if len(items) == 0 {
+		return ""
 	}
-	return nil
+	return "[" + strings.Join(items, ",") + "]"
+}
+
+// thinkingConfigRaw returns the raw JSON for a Gemini thinkingConfig given an
+// OpenAI reasoning_effort string. Returns "" for unrecognised values.
+func thinkingConfigRaw(effort string) string {
+	var budget int64
+	switch effort {
+	case "none":
+		budget = 0
+	case "low":
+		budget = 1024
+	case "medium":
+		budget = 8192
+	case "high":
+		budget = 24576
+	default:
+		return ""
+	}
+	fw := newJSONWriter()
+	fw.Obj()
+	fw.Key("thinkingBudget")
+	fw.Int(budget)
+	fw.EndObj()
+	return string(fw.Bytes())
 }
 
 // mapReasoningEffortToThinkingConfig maps OpenAI reasoning_effort values to
@@ -497,246 +1048,10 @@ func mapReasoningEffortToThinkingConfig(effort string) (map[string]any, bool) {
 	return nil, false
 }
 
-// ----- Anthropic → Gemini -----
-
-func pullAnthropicSystemToGemini(src map[string]any, out map[string]any) {
-	system := src["system"]
-	var parts []string
-	switch s := system.(type) {
-	case string:
-		if stripped := stripAnthropicBillingHeader(s); stripped != "" {
-			parts = append(parts, stripped)
-		}
-	case []any:
-		for _, b := range s {
-			block, _ := b.(map[string]any)
-			if block == nil {
-				continue
-			}
-			if t, _ := block["type"].(string); t == "text" {
-				if text, _ := block["text"].(string); text != "" {
-					if stripped := stripAnthropicBillingHeader(text); stripped != "" {
-						parts = append(parts, stripped)
-					}
-				}
-			}
-		}
-	}
-	if len(parts) == 0 {
-		return
-	}
-	out["systemInstruction"] = map[string]any{
-		"parts": []any{map[string]any{"text": strings.Join(parts, "\n")}},
-	}
-}
-
-// pullAnthropicContentsToGemini converts Anthropic messages into Gemini contents.
-// Tracks tool_use_id to function name for tool_result recovery.
-func pullAnthropicContentsToGemini(src map[string]any, out map[string]any) error {
-	msgs, _ := src["messages"].([]any)
-	if len(msgs) == 0 {
-		return nil
-	}
-	toolNames := anthropicCollectToolUseNames(msgs)
-
-	var contents []any
-	for _, raw := range msgs {
-		msg, _ := raw.(map[string]any)
-		if msg == nil {
-			continue
-		}
-		role, _ := msg["role"].(string)
-		switch role {
-		case "user":
-			parts, err := anthropicUserToGeminiParts(msg["content"], toolNames)
-			if err != nil {
-				return err
-			}
-			if len(parts) > 0 {
-				contents = append(contents, map[string]any{"role": "user", "parts": parts})
-			}
-		case "assistant":
-			parts, err := anthropicAssistantToGeminiParts(msg["content"])
-			if err != nil {
-				return err
-			}
-			if len(parts) > 0 {
-				contents = append(contents, map[string]any{"role": "model", "parts": parts})
-			}
-		}
-	}
-	if len(contents) > 0 {
-		out["contents"] = contents
-	}
-	return nil
-}
-
-func anthropicCollectToolUseNames(msgs []any) map[string]string {
-	out := map[string]string{}
-	for _, raw := range msgs {
-		msg, _ := raw.(map[string]any)
-		if msg == nil {
-			continue
-		}
-		if r, _ := msg["role"].(string); r != "assistant" {
-			continue
-		}
-		blocks, _ := msg["content"].([]any)
-		for _, b := range blocks {
-			block, _ := b.(map[string]any)
-			if block == nil {
-				continue
-			}
-			if t, _ := block["type"].(string); t != "tool_use" {
-				continue
-			}
-			id, _ := block["id"].(string)
-			name, _ := block["name"].(string)
-			if id != "" {
-				out[id] = name
-			}
-		}
-	}
-	return out
-}
-
-func anthropicUserToGeminiParts(content any, toolNames map[string]string) ([]any, error) {
-	switch c := content.(type) {
-	case string:
-		if c == "" {
-			return nil, nil
-		}
-		return []any{map[string]any{"text": c}}, nil
-	case []any:
-		var parts []any
-		for _, b := range c {
-			block, _ := b.(map[string]any)
-			if block == nil {
-				continue
-			}
-			switch t, _ := block["type"].(string); t {
-			case "text":
-				if text, _ := block["text"].(string); text != "" {
-					parts = append(parts, map[string]any{"text": text})
-				}
-			case "image":
-				if part := anthropicImageToInlinePart(block); part != nil {
-					parts = append(parts, part)
-				}
-			case "tool_result":
-				id, _ := block["tool_use_id"].(string)
-				name := toolNames[id]
-				result := toolResultContent(block["content"])
-				parts = append(parts, map[string]any{
-					"functionResponse": map[string]any{"name": name, "response": map[string]any{"result": result}},
-				})
-			}
-		}
-		return parts, nil
-	}
-	return nil, nil
-}
-
-func anthropicImageToInlinePart(block map[string]any) map[string]any {
-	src, _ := block["source"].(map[string]any)
-	if src == nil {
-		return nil
-	}
-	if t, _ := src["type"].(string); t != "base64" {
-		return nil
-	}
-	data, _ := src["data"].(string)
-	mime, _ := src["media_type"].(string)
-	if data == "" {
-		return nil
-	}
-	if mime == "" {
-		mime = "image/jpeg"
-	}
-	return map[string]any{"inlineData": map[string]any{"mimeType": mime, "data": data}}
-}
-
-func anthropicAssistantToGeminiParts(content any) ([]any, error) {
-	switch c := content.(type) {
-	case string:
-		if c == "" {
-			return nil, nil
-		}
-		return []any{map[string]any{"text": c}}, nil
-	case []any:
-		var parts []any
-		for _, b := range c {
-			block, _ := b.(map[string]any)
-			if block == nil {
-				continue
-			}
-			switch t, _ := block["type"].(string); t {
-			case "text":
-				if text, _ := block["text"].(string); text != "" {
-					part := map[string]any{"text": text}
-					if sig, _ := block["thought_signature"].(string); sig != "" {
-						part["thoughtSignature"] = sig
-					}
-					parts = append(parts, part)
-				}
-			case "tool_use":
-				name, _ := block["name"].(string)
-				input := block["input"]
-				if input == nil {
-					input = map[string]any{}
-				}
-				part := map[string]any{
-					"functionCall": map[string]any{"name": name, "args": input},
-				}
-				// typed Anthropic SDKs drop off-spec fields on tool_use, so fall
-				// back to a signature smuggled inside block.id.
-				sig, _ := block["thought_signature"].(string)
-				if sig == "" {
-					if id, _ := block["id"].(string); id != "" {
-						_, sig = extractSignatureFromID(id)
-					}
-				}
-				if sig != "" {
-					part["thoughtSignature"] = sig
-				}
-				parts = append(parts, part)
-			}
-		}
-		return parts, nil
-	}
-	return nil, nil
-}
-
-func pullAnthropicToolsToGemini(src map[string]any, out map[string]any) error {
-	tools, _ := src["tools"].([]any)
-	if len(tools) == 0 {
-		return nil
-	}
-	var decls []any
-	for _, t := range tools {
-		tool, _ := t.(map[string]any)
-		if tool == nil {
-			continue
-		}
-		name, _ := tool["name"].(string)
-		if name == "" {
-			continue
-		}
-		decl := map[string]any{"name": name}
-		if d, ok := tool["description"]; ok {
-			decl["description"] = d
-		}
-		if p, ok := tool["input_schema"]; ok && p != nil {
-			decl["parameters"] = sanitizeSchemaForGemini(p)
-		}
-		decls = append(decls, decl)
-	}
-	if len(decls) == 0 {
-		return nil
-	}
-	out["tools"] = []any{map[string]any{"functionDeclarations": decls}}
-	return nil
-}
+// sanitizeGeminiTools walks the tools array of an already-Gemini-format request
+// body and runs sanitizeSchemaForGemini on every function declaration's
+// parameters. The same-format path (FormatGemini) bypasses the per-field
+// translation helpers, so tool schemas must be sanitized in-place.
 
 // geminiSchemaAllowedKeys is the set of JSON Schema keywords that Gemini's
 // function-calling API accepts, derived from the Schema struct in the Google
@@ -922,49 +1237,4 @@ func filterStringEnum(v any) []any {
 		out = append(out, s)
 	}
 	return out
-}
-
-func pullAnthropicToolChoiceToGemini(body []byte, out map[string]any) {
-	r := gjson.GetBytes(body, "tool_choice")
-	if !r.Exists() || !r.IsObject() {
-		return
-	}
-	switch r.Get("type").String() {
-	case "auto":
-		out["toolConfig"] = map[string]any{"functionCallingConfig": map[string]any{"mode": "AUTO"}}
-	case "any":
-		out["toolConfig"] = map[string]any{"functionCallingConfig": map[string]any{"mode": "ANY"}}
-	case "none":
-		out["toolConfig"] = map[string]any{"functionCallingConfig": map[string]any{"mode": "NONE"}}
-	case "tool":
-		name := r.Get("name").String()
-		if name == "" {
-			return
-		}
-		out["toolConfig"] = map[string]any{
-			"functionCallingConfig": map[string]any{
-				"mode":                 "ANY",
-				"allowedFunctionNames": []any{name},
-			},
-		}
-	}
-}
-
-func pullAnthropicGenerationConfig(body []byte, out map[string]any, model string) {
-	gc := make(map[string]any)
-	if r := gjson.GetBytes(body, "temperature"); r.Exists() && r.Type == gjson.Number {
-		gc["temperature"] = r.Num
-	}
-	if r := gjson.GetBytes(body, "top_p"); r.Exists() && r.Type == gjson.Number {
-		gc["topP"] = r.Num
-	}
-	if r := gjson.GetBytes(body, "max_tokens"); r.Exists() && r.Type == gjson.Number {
-		gc["maxOutputTokens"] = clampToModelOutputCap(int64(r.Num), model)
-	}
-	if r := gjson.GetBytes(body, "stop_sequences"); r.Exists() {
-		gc["stopSequences"] = stopToArray(r)
-	}
-	if len(gc) > 0 {
-		out["generationConfig"] = gc
-	}
 }
