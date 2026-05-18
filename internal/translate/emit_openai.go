@@ -375,7 +375,7 @@ func (e *RequestEnvelope) pullAnthropicTools(out map[string]any) error {
 		if tool == nil {
 			continue
 		}
-		params := tool["input_schema"]
+		params := inlineSchemaDefs(tool["input_schema"])
 		sanitizeOpenAIToolSchema(params)
 		fn := map[string]any{
 			"name":        tool["name"],
@@ -389,6 +389,93 @@ func (e *RequestEnvelope) pullAnthropicTools(out map[string]any) error {
 	}
 	out["tools"] = result
 	return nil
+}
+
+// inlineSchemaDefs replaces "$ref" pointers to "#/$defs/<name>" or
+// "#/definitions/<name>" with a deep copy of the referenced definition, then
+// strips the defs maps from the schema. Some OpenAI-compatible upstreams
+// (notably Fireworks) do not dereference $ref themselves and return a 400
+// ("Error resolving schema reference '#/$defs/X': AttributeError('NoneType'
+// object has no attribute 'lookup')") on tool schemas that use $defs. Inlining
+// before forwarding keeps the schema self-contained so it works on every
+// OpenAI-compat backend regardless of how its validator handles $ref.
+//
+// Cyclic refs are left intact (no infinite recursion); unresolvable refs are
+// left intact so the upstream can surface its own clearer error.
+func inlineSchemaDefs(node any) any {
+	root, ok := node.(map[string]any)
+	if !ok {
+		return node
+	}
+	defs := map[string]any{}
+	for _, key := range []string{"$defs", "definitions"} {
+		d, ok := root[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		for name, v := range d {
+			defs[key+"/"+name] = v
+		}
+	}
+	if len(defs) == 0 {
+		return node
+	}
+	resolved, _ := resolveSchemaRefs(node, defs, map[string]struct{}{}).(map[string]any)
+	delete(resolved, "$defs")
+	delete(resolved, "definitions")
+	return resolved
+}
+
+func resolveSchemaRefs(node any, defs map[string]any, visited map[string]struct{}) any {
+	switch v := node.(type) {
+	case map[string]any:
+		if ref, ok := v["$ref"].(string); ok && len(v) == 1 {
+			name := strings.TrimPrefix(ref, "#/")
+			if _, cycle := visited[name]; cycle {
+				return v
+			}
+			target, ok := defs[name]
+			if !ok {
+				return v
+			}
+			visited[name] = struct{}{}
+			out := resolveSchemaRefs(deepCopyJSON(target), defs, visited)
+			delete(visited, name)
+			return out
+		}
+		out := make(map[string]any, len(v))
+		for k, child := range v {
+			out[k] = resolveSchemaRefs(child, defs, visited)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, child := range v {
+			out[i] = resolveSchemaRefs(child, defs, visited)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func deepCopyJSON(node any) any {
+	switch v := node.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, c := range v {
+			out[k] = deepCopyJSON(c)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, c := range v {
+			out[i] = deepCopyJSON(c)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 func sanitizeOpenAIToolSchema(node any) {
