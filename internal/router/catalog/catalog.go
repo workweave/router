@@ -125,6 +125,9 @@ var Models = []Model{
 	{ID: "claude-sonnet-4-5", Tier: TierMid, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}},
 	}},
+	{ID: "claude-sonnet-4-6", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}},
+	}},
 	{ID: "claude-opus-4-6", Tier: TierHigh, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 15.00, OutputUSDPer1M: 75.00, CacheReadMultiplier: 0.10}},
 	}},
@@ -265,5 +268,10 @@ var Models = []Model{
 		{Provider: providers.ProviderBedrock, UpstreamID: "moonshotai.kimi-k2.5",
 			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 3.000}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.440, OutputUSDPer1M: 2.000}},
+	}},
+	{ID: "moonshotai/kimi-k2.6", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/kimi-k2p6",
+			Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.1684}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.10}},
 	}},
 }
