@@ -1032,22 +1032,6 @@ func thinkingConfigRaw(effort string) string {
 	return string(fw.Bytes())
 }
 
-// mapReasoningEffortToThinkingConfig maps OpenAI reasoning_effort values to
-// Gemini thinkingConfig. "none" sets thinkingBudget=0.
-func mapReasoningEffortToThinkingConfig(effort string) (map[string]any, bool) {
-	switch effort {
-	case "none":
-		return map[string]any{"thinkingBudget": 0}, true
-	case "low":
-		return map[string]any{"thinkingBudget": 1024}, true
-	case "medium":
-		return map[string]any{"thinkingBudget": 8192}, true
-	case "high":
-		return map[string]any{"thinkingBudget": 24576}, true
-	}
-	return nil, false
-}
-
 // sanitizeGeminiTools walks the tools array of an already-Gemini-format request
 // body and runs sanitizeSchemaForGemini on every function declaration's
 // parameters. The same-format path (FormatGemini) bypasses the per-field

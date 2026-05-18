@@ -13,7 +13,7 @@ type jsonWriter struct {
 	buf      *bytes.Buffer
 	bw       *bufio.Writer
 	depth    int
-	first    [16]bool
+	first    [64]bool
 	afterKey bool
 }
 

@@ -436,14 +436,15 @@ func writeAnthropicStopSequences(jw *jsonWriter, body []byte) {
 	if !r.Exists() {
 		return
 	}
-	jw.Key("stop_sequences")
 	if r.Type == gjson.String {
+		jw.Key("stop_sequences")
 		jw.Arr()
 		jw.Str(r.String())
 		jw.EndArr()
 		return
 	}
 	if r.IsArray() {
+		jw.Key("stop_sequences")
 		jw.Raw(r.Raw)
 	}
 }

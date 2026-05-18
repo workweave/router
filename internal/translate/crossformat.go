@@ -40,33 +40,7 @@ func extractThoughtSignature(part gjson.Result) string {
 	return ""
 }
 
-// toolResultContent flattens OpenAI/Anthropic tool message content to a single string.
-// Callers that work with map[string]any (emit_openai, emit_gemini) use this form.
-func toolResultContent(raw any) string {
-	switch c := raw.(type) {
-	case string:
-		return c
-	case []any:
-		var parts []string
-		for _, p := range c {
-			pm, _ := p.(map[string]any)
-			if pm == nil {
-				continue
-			}
-			if t, _ := pm["type"].(string); t == "text" {
-				if text, _ := pm["text"].(string); text != "" {
-					parts = append(parts, text)
-				}
-			}
-		}
-		return strings.Join(parts, "\n")
-	default:
-		return ""
-	}
-}
-
 // toolResultContentGJSON flattens tool result content to a single string.
-// It is the gjson-based equivalent of toolResultContent(raw any).
 func toolResultContentGJSON(content gjson.Result) string {
 	switch content.Type {
 	case gjson.String:
