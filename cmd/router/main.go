@@ -132,10 +132,12 @@ func main() {
 	// every inbound request carrying Anthropic credentials.
 	anthropicPassthroughEligible := false
 
-	// Credit billing service: wired only in managed mode and only when the
-	// router-schema billing tables exist. The boot-time health check
-	// provides a safe rollback path — drop the tables and restart the
-	// router to disable billing without code changes. Self-hosted
+	// Credit billing service: wired by default in managed mode. The
+	// boot-time health check exists only to surface the "tables actually
+	// missing" rollback path — if the check errors (timeout, transient
+	// pool unreadiness on a cold replica), we default to billing-enabled
+	// rather than silently falling into BYOK-only mode, which would 400
+	// every request for "no provider keys available". Self-hosted
 	// deployments never wire billing.
 	var billingSvc *billing.Service
 	if deploymentMode == server.DeploymentModeManaged {
@@ -145,7 +147,8 @@ func main() {
 		bootCancel()
 		switch {
 		case billingCheckErr != nil:
-			logger.Warn("Boot billing health check failed; staying in BYOK-only mode", "err", billingCheckErr)
+			logger.Warn("Boot billing health check errored; defaulting to billing-enabled in managed mode", "err", billingCheckErr)
+			billingSvc = billing.NewService(billingRepo)
 		case !tablesExist:
 			logger.Warn("Billing tables missing from router schema; staying in BYOK-only mode. Apply db migration 0006_credit_billing to enable billing.")
 		default:
