@@ -241,6 +241,32 @@ func main() {
 	}
 
 	{
+		// DeepInfra OpenAI-compatible surface. DeepInfra uses HuggingFace-form
+		// model IDs (e.g. "deepseek-ai/DeepSeek-V4-Flash"); the registry
+		// carries the router's public slash-form slugs (e.g.
+		// "deepseek/deepseek-v4-flash"). The modelIDMap rewrites the body's
+		// "model" field at proxy time so the public IDs stay stable.
+		deepInfraBaseURL := config.GetOr("DEEPINFRA_BASE_URL", openaiCompatProvider.DeepInfraBaseURL)
+		deepInfraKey := ""
+		if !byokOnly {
+			deepInfraKey = config.GetOr("DEEPINFRA_API_KEY", "")
+		}
+		deepInfraModelIDMap := map[string]string{
+			"deepseek/deepseek-v4-flash": "deepseek-ai/DeepSeek-V4-Flash",
+		}
+		providerMap[providers.ProviderDeepInfra] = openaiCompatProvider.NewClientWithModelIDMap(deepInfraKey, deepInfraBaseURL, deepInfraModelIDMap)
+		switch {
+		case byokOnly:
+			logger.Info("DeepInfra provider enabled (BYOK only)", "base_url", deepInfraBaseURL)
+		case deepInfraKey != "":
+			envKeyedProviders[providers.ProviderDeepInfra] = struct{}{}
+			logger.Info("DeepInfra provider enabled", "base_url", deepInfraBaseURL)
+		default:
+			logger.Info("DeepInfra provider registered (BYOK only — set DEEPINFRA_API_KEY for deployment-level use)", "base_url", deepInfraBaseURL)
+		}
+	}
+
+	{
 		// Native Generative Language REST surface — required for multi-turn
 		// tool use against Gemini 3.x preview models, whose opaque
 		// thought_signature field is not exposed by the OpenAI-compat

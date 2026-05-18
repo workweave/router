@@ -93,7 +93,7 @@ var table = map[string]Pricing{
 
 	// OpenRouter OSS pool: v0.25 expansion
 	"qwen/qwen3-coder":           {InputUSDPer1M: 0.220, OutputUSDPer1M: 1.800},
-	"deepseek/deepseek-v4-flash": {InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10},
+	"deepseek/deepseek-v4-flash": {InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.20}, // DeepInfra: cache $0.028 → 0.028/0.14 = 0.20
 	"deepseek/deepseek-v4-pro":   {InputUSDPer1M: 0.435, OutputUSDPer1M: 0.870, CacheReadMultiplier: 0.10},
 	"moonshotai/kimi-k2.5":       {InputUSDPer1M: 0.440, OutputUSDPer1M: 2.000},
 }

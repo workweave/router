@@ -26,6 +26,7 @@ training:
   n_excluded_prompts: 0
 deployed_providers:
   - anthropic
+  - deepinfra
   - google
   - openai
   - openrouter

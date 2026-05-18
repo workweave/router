@@ -112,6 +112,79 @@ func TestProxy_DevModeEnvKeyUsedWhenNoCredentialsOnContext(t *testing.T) {
 		"when no credentials are on context (dev mode / no BYOK), the deployment env key must be sent to OpenRouter")
 }
 
+// TestProxy_RewritesModelIDWhenMapped covers the DeepInfra / Bedrock-mantle
+// case: the registry carries a public slash-form model ID, but the upstream
+// expects a different canonical form (HuggingFace `deepseek-ai/DeepSeek-V4-Flash`,
+// Bedrock dot-form, etc.). When the client is constructed with a modelIDMap,
+// the body's top-level "model" field must be rewritten before forwarding,
+// while every other field stays verbatim.
+func TestProxy_RewritesModelIDWhenMapped(t *testing.T) {
+	var gotBody map[string]any
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		require.NoError(t, json.Unmarshal(body, &gotBody))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","object":"chat.completion"}`))
+	}))
+	defer upstream.Close()
+
+	c := openaicompat.NewClientWithModelIDMap(
+		"test-key",
+		upstream.URL+"/v1",
+		map[string]string{"deepseek/deepseek-v4-flash": "deepseek-ai/DeepSeek-V4-Flash"},
+	)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+
+	body := []byte(`{"model":"deepseek/deepseek-v4-flash","messages":[{"role":"user","content":"hi"}],"temperature":0.7}`)
+	prep := providers.PreparedRequest{Body: body, Headers: make(http.Header)}
+	err := c.Proxy(context.Background(), router.Decision{Model: "deepseek/deepseek-v4-flash"}, prep, rec, clientReq)
+
+	require.NoError(t, err)
+	assert.Equal(t, "deepseek-ai/DeepSeek-V4-Flash", gotBody["model"],
+		"mapped model IDs must be rewritten to the upstream form")
+	assert.Equal(t, 0.7, gotBody["temperature"], "non-model fields must pass through verbatim")
+	require.IsType(t, []any{}, gotBody["messages"])
+}
+
+// TestProxy_PassesUnmappedModelThrough covers the OpenRouter / Fireworks
+// path: no modelIDMap entry for a model means the body's "model" field is
+// forwarded unchanged. Guards against accidental rewriting when the map is
+// non-nil but doesn't contain this model.
+func TestProxy_PassesUnmappedModelThrough(t *testing.T) {
+	var gotBody map[string]any
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		require.NoError(t, json.Unmarshal(body, &gotBody))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	c := openaicompat.NewClientWithModelIDMap(
+		"test-key",
+		upstream.URL+"/v1",
+		map[string]string{"deepseek/deepseek-v4-flash": "deepseek-ai/DeepSeek-V4-Flash"},
+	)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+
+	body := []byte(`{"model":"deepseek/deepseek-v4-pro","messages":[]}`)
+	prep := providers.PreparedRequest{Body: body, Headers: make(http.Header)}
+	err := c.Proxy(context.Background(), router.Decision{Model: "deepseek/deepseek-v4-pro"}, prep, rec, clientReq)
+
+	require.NoError(t, err)
+	assert.Equal(t, "deepseek/deepseek-v4-pro", gotBody["model"],
+		"models not in the rewrite map must pass through unchanged")
+}
+
+func TestDeepInfraBaseURL(t *testing.T) {
+	assert.Equal(t, "https://api.deepinfra.com/v1/openai", openaicompat.DeepInfraBaseURL)
+}
+
 func TestPassthrough_StripsInboundV1Prefix(t *testing.T) {
 	var gotPath string
 

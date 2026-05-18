@@ -4,6 +4,7 @@ package openaicompat
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,22 +22,41 @@ import (
 const (
 	DefaultBaseURL   = "https://openrouter.ai/api/v1"
 	FireworksBaseURL = "https://api.fireworks.ai/inference/v1"
+	DeepInfraBaseURL = "https://api.deepinfra.com/v1/openai"
 )
 
+// Client is the generic OpenAI Chat Completions adapter. The optional
+// modelIDMap rewrites the request body's top-level "model" field before
+// forwarding — needed for upstreams (DeepInfra HF-form IDs, Bedrock dot-form
+// IDs) whose canonical model strings differ from the OpenRouter-form slugs
+// the router uses as public IDs.
 type Client struct {
-	apiKey  string
-	baseURL string
-	http    *http.Client
+	apiKey      string
+	baseURL     string
+	http        *http.Client
+	modelIDMap  map[string]string // empty = pass `decision.Model` through unchanged
 }
 
+// NewClient constructs an OpenAI-compatible client that forwards the
+// `decision.Model` value as-is to the upstream.
 func NewClient(apiKey, baseURL string) *Client {
+	return NewClientWithModelIDMap(apiKey, baseURL, nil)
+}
+
+// NewClientWithModelIDMap is like NewClient but rewrites the request body's
+// top-level "model" field according to modelIDMap before forwarding. Keys are
+// router-internal model IDs (the slash-form public IDs); values are the
+// upstream-format IDs the provider expects. Models not in the map pass through
+// unchanged. Pass nil for no rewriting.
+func NewClientWithModelIDMap(apiKey, baseURL string, modelIDMap map[string]string) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
 	return &Client{
-		apiKey:  apiKey,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		http:    &http.Client{Transport: httputil.NewTransport(5*time.Second, 5*time.Second)},
+		apiKey:     apiKey,
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		http:       &http.Client{Transport: httputil.NewTransport(5*time.Second, 5*time.Second)},
+		modelIDMap: modelIDMap,
 	}
 }
 
@@ -52,7 +72,15 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request) {
 }
 
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
-	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(prep.Body))
+	body := prep.Body
+	if upstreamModel, ok := c.modelIDMap[decision.Model]; ok {
+		rewritten, err := rewriteModelField(body, upstreamModel)
+		if err != nil {
+			return fmt.Errorf("rewrite model field for %q → %q: %w", decision.Model, upstreamModel, err)
+		}
+		body = rewritten
+	}
+	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build upstream request: %w", err)
 	}
@@ -162,6 +190,28 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	}
 	_, err = io.Copy(w, resp.Body)
 	return err
+}
+
+// rewriteModelField replaces the top-level "model" field of an OpenAI Chat
+// Completions request body with newModel, preserving every other field
+// verbatim. Used by providers (DeepInfra HF-form IDs, Bedrock dot-form IDs)
+// whose canonical model strings differ from the router's public slash-form
+// slugs.
+func rewriteModelField(body []byte, newModel string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, fmt.Errorf("parse request body: %w", err)
+	}
+	encoded, err := json.Marshal(newModel)
+	if err != nil {
+		return nil, fmt.Errorf("encode upstream model id: %w", err)
+	}
+	m["model"] = encoded
+	out, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("re-encode request body: %w", err)
+	}
+	return out, nil
 }
 
 // logUpstreamStatus logs non-2xx upstream responses with a body preview.

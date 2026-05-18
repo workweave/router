@@ -17,6 +17,7 @@ const (
 	ProviderGoogle     = "google"
 	ProviderOpenRouter = "openrouter"
 	ProviderFireworks  = "fireworks"
+	ProviderDeepInfra  = "deepinfra"
 )
 
 // APIKeyEnvVars maps provider name to the env var providing its deployment-level upstream API key.
@@ -26,6 +27,7 @@ var APIKeyEnvVars = map[string]string{
 	ProviderGoogle:     "GOOGLE_API_KEY",
 	ProviderOpenRouter: "OPENROUTER_API_KEY",
 	ProviderFireworks:  "FIREWORKS_API_KEY",
+	ProviderDeepInfra:  "DEEPINFRA_API_KEY",
 }
 
 // APIKeyEnvVar returns the env-var name for the given provider, or empty
