@@ -367,16 +367,33 @@ write_codex_config() {
   local block_email="${4:-}"
   local block_name="${5:-}"
 
+  # Escape `\` and `"` for TOML basic strings. Order matters: replace
+  # backslashes first so the quotes we add next aren't double-escaped. A
+  # display name like `John "J" Doe` would otherwise produce invalid TOML and
+  # Codex would silently fail to parse config.toml — the installer's success
+  # message wouldn't help diagnose. Router keys are alnum+`_` from the API so
+  # safe as-is, but we escape uniformly for defense-in-depth.
+  toml_escape() {
+    local s="${1//\\/\\\\}"
+    printf '%s' "${s//\"/\\\"}"
+  }
+
+  local esc_key esc_email esc_name esc_url
+  esc_key="$(toml_escape "$block_key")"
+  esc_email="$(toml_escape "$block_email")"
+  esc_name="$(toml_escape "$block_name")"
+  esc_url="$(toml_escape "$block_url")"
+
   # Plant whichever identity values we have alongside the router key so the
   # router can attribute Codex traffic to a person on shared keys. Build the
   # entries piecewise so an empty email/name is omitted entirely — the router
   # never sees a header with no value (and TOML rejects empty unquoted vals).
-  local headers_parts="\"X-Weave-Router-Key\" = \"${block_key}\""
+  local headers_parts="\"X-Weave-Router-Key\" = \"${esc_key}\""
   if [ -n "$block_email" ]; then
-    headers_parts="${headers_parts}, \"X-Weave-User-Email\" = \"${block_email}\""
+    headers_parts="${headers_parts}, \"X-Weave-User-Email\" = \"${esc_email}\""
   fi
   if [ -n "$block_name" ]; then
-    headers_parts="${headers_parts}, \"X-Weave-User-Name\" = \"${block_name}\""
+    headers_parts="${headers_parts}, \"X-Weave-User-Name\" = \"${esc_name}\""
   fi
   local headers_line="http_headers = { ${headers_parts} }"
 
@@ -390,7 +407,7 @@ model_provider = "weave"
 
 [model_providers.weave]
 name = "Weave Router"
-base_url = "${block_url}/v1"
+base_url = "${esc_url}/v1"
 wire_api = "responses"
 ${headers_line}
 ${WEAVE_CODEX_END_MARKER}
