@@ -274,4 +274,46 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.1684}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.10}},
 	}},
+	// AA top-performer additions (2026-05-18).
+	//
+	// Selection ranked OSS models on the artificialanalysis.ai API by a
+	// composite of quality (Intelligence Index v4.0), cost (blended
+	// 3:1 input:output), and effective time per 2k-token query
+	// (median TTFT + 2000/TPS). Provider availability verified against
+	// per-model "API providers" pages and OpenRouter's v1/models API.
+	//
+	// xiaomi/mimo-v2.5 — OpenRouter-only on the SOC-2 set. AA per-provider
+	// page lists only GMI + Xiaomi-direct, neither of which we currently
+	// onboard, so managed-prod resolves nothing here while self-hosters
+	// with an OpenRouter key get the trailing binding.
+	{ID: "xiaomi/mimo-v2.5", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.400, OutputUSDPer1M: 2.000, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderDeepInfra, UpstreamID: "XiaomiMiMo/MiMo-V2.5-Pro",
+			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000, CacheReadMultiplier: 0.10}},
+	}},
+	// qwen3.6-35b-a3b is a 35B-A3B MoE — Intel 44 at ~13s wall-clock per
+	// 2k tokens on DeepInfra FP8, the speed/cost end of the new Qwen3.6
+	// family. TierLow despite the MoE size because the active parameter
+	// budget + AA's Coding Index put it below v4-flash.
+	{ID: "qwen/qwen3.6-35b-a3b", Tier: TierLow, Providers: []ProviderBinding{
+		{Provider: providers.ProviderDeepInfra, UpstreamID: "Qwen/Qwen3.6-35B-A3B",
+			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 0.950}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.000, CacheReadMultiplier: 0.10}},
+	}},
+	// minimax-m2.7 sits in an unusual quality/cost spot: Intel 50 at
+	// $0.52 blended, cheaper than every TierMid model. Letting the
+	// trainer find its niche rather than pinning a tier by price alone.
+	{ID: "minimax/minimax-m2.7", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/minimax-m2p7",
+			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.279, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "z-ai/glm-5", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5",
+			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 2.080}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 1.920, CacheReadMultiplier: 0.10}},
+	}},
 }
