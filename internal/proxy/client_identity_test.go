@@ -84,6 +84,33 @@ func TestNormalizeEmail_RejectsOverLength(t *testing.T) {
 	assert.Equal(t, "", proxy.NormalizeEmail(overCap))
 }
 
+func TestNormalizeDisplayName_TrimsAndPassesUnicode(t *testing.T) {
+	assert.Equal(t, "Alice Liddell", proxy.NormalizeDisplayName("  Alice Liddell  "))
+	assert.Equal(t, "Renée Fleming", proxy.NormalizeDisplayName("Renée Fleming"))
+	assert.Equal(t, "", proxy.NormalizeDisplayName(""))
+	assert.Equal(t, "", proxy.NormalizeDisplayName("   "))
+}
+
+func TestNormalizeDisplayName_StripsControlBytes(t *testing.T) {
+	// CR/LF + control bytes must be dropped so the value can't break log
+	// lines or smuggle extra HTTP headers. Surrounding visible chars stay.
+	out := proxy.NormalizeDisplayName("Alice\r\nMallory")
+	assert.NotContains(t, out, "\r")
+	assert.NotContains(t, out, "\n")
+	assert.Equal(t, "AliceMallory", out)
+	assert.Equal(t, "Alice", proxy.NormalizeDisplayName("Alice\x00\x07"))
+}
+
+func TestNormalizeDisplayName_RejectsOverLength(t *testing.T) {
+	atCap := strings.Repeat("a", proxy.MaxDisplayNameLen)
+	require.Len(t, atCap, proxy.MaxDisplayNameLen)
+	assert.Equal(t, atCap, proxy.NormalizeDisplayName(atCap))
+
+	overCap := strings.Repeat("a", proxy.MaxDisplayNameLen+1)
+	require.Greater(t, len(overCap), proxy.MaxDisplayNameLen)
+	assert.Equal(t, "", proxy.NormalizeDisplayName(overCap))
+}
+
 func TestNormalizeClientIdentifier_PassesThroughShortValues(t *testing.T) {
 	assert.Equal(t, "dev-abc123", proxy.NormalizeClientIdentifier("dev-abc123"))
 	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000",

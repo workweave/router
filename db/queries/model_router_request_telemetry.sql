@@ -53,10 +53,10 @@ INSERT INTO router.model_router_request_telemetry (
     @embed_input::varchar,
     @input_tokens::int,
     @output_tokens::int,
-    @requested_input_cost_usd::numeric,
-    @requested_output_cost_usd::numeric,
-    @actual_input_cost_usd::numeric,
-    @actual_output_cost_usd::numeric,
+    @requested_input_cost_usd::bigint,
+    @requested_output_cost_usd::bigint,
+    @actual_input_cost_usd::bigint,
+    @actual_output_cost_usd::bigint,
     @route_latency_ms::bigint,
     @upstream_latency_ms::bigint,
     @total_latency_ms::bigint,
@@ -82,12 +82,12 @@ ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 SELECT
     COUNT(*)::bigint                                            AS request_count,
     COALESCE(SUM(input_tokens + output_tokens), 0)::bigint     AS total_tokens,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS total_requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS total_actual_cost_usd,
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS total_requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS total_actual_cost_usd,
     COALESCE(SUM(
         (requested_input_cost_usd + requested_output_cost_usd) -
         (actual_input_cost_usd + actual_output_cost_usd)
-    ), 0)::numeric                                             AS total_savings_usd
+    ), 0)::bigint                                             AS total_savings_usd
 FROM router.model_router_request_telemetry
 WHERE span_type = 'router.upstream'
   AND timestamp >= @from_time::timestamptz
@@ -97,8 +97,8 @@ WHERE span_type = 'router.upstream'
 -- name: GetTelemetryTimeseriesHourlyAll :many
 SELECT
     date_trunc('hour', timestamp)::timestamptz                                       AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE span_type = 'router.upstream'
   AND timestamp >= @from_time::timestamptz
@@ -110,8 +110,8 @@ ORDER BY bucket ASC;
 -- name: GetTelemetryTimeseriesDailyAll :many
 SELECT
     date_trunc('day', timestamp)::timestamptz                                        AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE span_type = 'router.upstream'
   AND timestamp >= @from_time::timestamptz
@@ -123,8 +123,8 @@ ORDER BY bucket ASC;
 -- name: GetTelemetryTimeseriesWeeklyAll :many
 SELECT
     date_trunc('week', timestamp)::timestamptz                                       AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE span_type = 'router.upstream'
   AND timestamp >= @from_time::timestamptz
@@ -137,12 +137,12 @@ ORDER BY bucket ASC;
 SELECT
     COUNT(*)::bigint                                            AS request_count,
     COALESCE(SUM(input_tokens + output_tokens), 0)::bigint     AS total_tokens,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS total_requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS total_actual_cost_usd,
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS total_requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS total_actual_cost_usd,
     COALESCE(SUM(
         (requested_input_cost_usd + requested_output_cost_usd) -
         (actual_input_cost_usd + actual_output_cost_usd)
-    ), 0)::numeric                                             AS total_savings_usd
+    ), 0)::bigint                                             AS total_savings_usd
 FROM router.model_router_request_telemetry
 WHERE installation_id = @installation_id::uuid
   AND span_type = 'router.upstream'
@@ -153,8 +153,8 @@ WHERE installation_id = @installation_id::uuid
 -- name: GetTelemetryTimeseriesHourly :many
 SELECT
     date_trunc('hour', timestamp)::timestamptz                                       AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE installation_id = @installation_id::uuid
   AND span_type = 'router.upstream'
@@ -167,8 +167,8 @@ ORDER BY bucket ASC;
 -- name: GetTelemetryTimeseriesDaily :many
 SELECT
     date_trunc('day', timestamp)::timestamptz                                        AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE installation_id = @installation_id::uuid
   AND span_type = 'router.upstream'
@@ -181,8 +181,8 @@ ORDER BY bucket ASC;
 -- name: GetTelemetryTimeseriesWeekly :many
 SELECT
     date_trunc('week', timestamp)::timestamptz                                       AS bucket,
-    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::numeric AS requested_cost_usd,
-    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::numeric       AS actual_cost_usd
+    COALESCE(SUM(requested_input_cost_usd + requested_output_cost_usd), 0)::bigint AS requested_cost_usd,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint       AS actual_cost_usd
 FROM router.model_router_request_telemetry
 WHERE installation_id = @installation_id::uuid
   AND span_type = 'router.upstream'
@@ -207,8 +207,8 @@ SELECT
     output_tokens,
     cache_creation_tokens,
     cache_read_tokens,
-    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
-    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
+    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
     total_latency_ms,
     upstream_status_code
 FROM router.model_router_request_telemetry
@@ -232,8 +232,8 @@ SELECT
     output_tokens,
     cache_creation_tokens,
     cache_read_tokens,
-    (requested_input_cost_usd + requested_output_cost_usd)::numeric AS requested_cost_usd,
-    (actual_input_cost_usd + actual_output_cost_usd)::numeric       AS actual_cost_usd,
+    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
     total_latency_ms,
     upstream_status_code
 FROM router.model_router_request_telemetry

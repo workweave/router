@@ -361,6 +361,105 @@ func TestScorer_FiltersOutUnregisteredProvider(t *testing.T) {
 	assert.Contains(t, got.Reason, "provider=openai")
 }
 
+// Multi-binding regression: kimi-k2.5 has catalog bindings [bedrock,
+// openrouter] (primary, fallback). A self-hoster wiring only OpenRouter
+// must still route to kimi-k2.5 — the scorer should resolve via the
+// trailing binding and emit Decision.Provider="openrouter", not drop the
+// row because the registry's Provider field says "bedrock".
+func TestScorer_MultiBindingResolvesFallbackProviderAtBoot(t *testing.T) {
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	cb := buildCentroidsBlob(t, 1, dim, c0)
+	rb := []byte(`{"rankings": {"0": {
+		"moonshotai/kimi-k2.5": 0.9,
+		"claude-haiku-4-5": 0.1
+	}}}`)
+	// Registry row's provider is "bedrock" (the SOC 2-isolated primary).
+	regb := []byte(`{
+		"deployed_models": [
+			{"model": "moonshotai/kimi-k2.5", "provider": "bedrock", "bench_column": "routerarena_moonshotai/kimi-k2.5"},
+			{"model": "claude-haiku-4-5", "provider": "anthropic", "bench_column": "routerarena_claude-haiku-4-5"}
+		]
+	}`)
+	cfg := cfgForTest()
+	cfg.TopP = 1
+
+	// Self-hoster: only OpenRouter wired. The catalog's openrouter fallback
+	// binding must keep kimi-k2.5 in the candidate set.
+	s, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()},
+		map[string]struct{}{"openrouter": {}})
+	require.NoError(t, err)
+	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.NoError(t, err)
+	assert.Equal(t, "moonshotai/kimi-k2.5", got.Model)
+	assert.Equal(t, "openrouter", got.Provider, "self-hoster should route via the trailing OpenRouter binding")
+	assert.Contains(t, got.Reason, "provider=openrouter")
+}
+
+// Multi-binding regression: when both primary and fallback are wired,
+// the primary (first in catalog order) wins. Verifies catalog's ordered
+// fallback list semantics.
+func TestScorer_MultiBindingPrefersPrimaryWhenBothAvailable(t *testing.T) {
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	cb := buildCentroidsBlob(t, 1, dim, c0)
+	rb := []byte(`{"rankings": {"0": {
+		"moonshotai/kimi-k2.5": 0.9,
+		"claude-haiku-4-5": 0.1
+	}}}`)
+	regb := []byte(`{
+		"deployed_models": [
+			{"model": "moonshotai/kimi-k2.5", "provider": "bedrock", "bench_column": "routerarena_moonshotai/kimi-k2.5"},
+			{"model": "claude-haiku-4-5", "provider": "anthropic", "bench_column": "routerarena_claude-haiku-4-5"}
+		]
+	}`)
+	cfg := cfgForTest()
+	cfg.TopP = 1
+
+	s, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()},
+		map[string]struct{}{"bedrock": {}, "openrouter": {}, "anthropic": {}})
+	require.NoError(t, err)
+	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.NoError(t, err)
+	assert.Equal(t, "moonshotai/kimi-k2.5", got.Model)
+	assert.Equal(t, "bedrock", got.Provider, "with both providers wired, the primary binding wins")
+}
+
+// Per-request EnabledProviders re-resolves the binding: a deploy with
+// both bedrock + openrouter wired can still serve a per-request BYOK
+// constraint of openrouter-only by walking down the fallback list.
+func TestScorer_MultiBindingPerRequestResolvesNarrowedSet(t *testing.T) {
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	cb := buildCentroidsBlob(t, 1, dim, c0)
+	rb := []byte(`{"rankings": {"0": {
+		"moonshotai/kimi-k2.5": 0.9,
+		"claude-haiku-4-5": 0.1
+	}}}`)
+	regb := []byte(`{
+		"deployed_models": [
+			{"model": "moonshotai/kimi-k2.5", "provider": "bedrock", "bench_column": "routerarena_moonshotai/kimi-k2.5"},
+			{"model": "claude-haiku-4-5", "provider": "anthropic", "bench_column": "routerarena_claude-haiku-4-5"}
+		]
+	}`)
+	cfg := cfgForTest()
+	cfg.TopP = 1
+
+	s, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()},
+		map[string]struct{}{"bedrock": {}, "openrouter": {}, "anthropic": {}})
+	require.NoError(t, err)
+	got, err := s.Route(context.Background(), router.Request{
+		PromptText:       strings.Repeat("x", 100),
+		EnabledProviders: map[string]struct{}{"openrouter": {}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "moonshotai/kimi-k2.5", got.Model)
+	assert.Equal(t, "openrouter", got.Provider, "per-request EnabledProviders={openrouter} must re-resolve to the openrouter fallback binding")
+}
+
 func TestScorer_DedupesDuplicateRegistryEntries(t *testing.T) {
 	dim := EmbedDim
 	c0 := make([]float32, dim)

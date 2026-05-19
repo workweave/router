@@ -60,12 +60,13 @@ Three concentric layers. Imports flow inward only.
 |  |  |  internal/router    (Router iface + Request/Decision  |  |  |
 |  |  |                      + ModelSpec/ModelRegistry)       |  |  |
 |  |  |  internal/router/cache      (semantic response cache) |  |  |
-|  |  |  internal/router/capability (Low/Mid/High tier table) |  |  |
+|  |  |  internal/router/catalog    (single source of truth   |  |  |
+|  |  |                              for per-model data:      |  |  |
+|  |  |                              tier, provider bindings, |  |  |
+|  |  |                              pricing, cost math)      |  |  |
 |  |  |  internal/router/handover   (Summarizer iface +       |  |  |
 |  |  |                              envelope rewrite)        |  |  |
 |  |  |  internal/router/planner    (cache-aware EV policy)   |  |  |
-|  |  |  internal/router/pricing    (per-model USD + cache    |  |  |
-|  |  |                              read multipliers)        |  |  |
 |  |  |  internal/router/sessionpin (Pin types + Store iface) |  |  |
 |  |  |  internal/router/turntype   (turn-type detector)      |  |  |
 |  |  |  internal/providers (Client iface + types + canonical |  |  |

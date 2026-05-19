@@ -15,13 +15,29 @@ import (
 	"workweave/router/internal/translate"
 )
 
+// Usage captures the upstream token counts of a Summarize call so callers
+// can record a separate billing ledger row for the summary turn alongside
+// the main inference debit. Zero values mean no usage was reported (e.g.
+// fallback path or implementation that doesn't track tokens).
+type Usage struct {
+	InputTokens   int
+	OutputTokens  int
+	CacheCreation int
+	CacheRead     int
+	// Model and Provider identify the upstream the summarizer dispatched
+	// to so the ledger row can record them. Empty means "not reported".
+	Model    string
+	Provider string
+}
+
 // Summarizer produces a prose summary of the prior conversation for
 // seeding a new model's context after a router switch.
 //
 // Implementations SHOULD respect the context deadline. On timeout or
-// error, callers fall back to TrimLastN.
+// error, callers fall back to TrimLastN. Usage is reported on success;
+// on error it is the zero value.
 type Summarizer interface {
-	Summarize(ctx context.Context, env *translate.RequestEnvelope) (summary string, err error)
+	Summarize(ctx context.Context, env *translate.RequestEnvelope) (summary string, usage Usage, err error)
 }
 
 // RewriteEnvelope mutates env in-place: keeps system blocks, replaces

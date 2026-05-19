@@ -13,6 +13,11 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+func hasNonEmptyTools(body []byte) bool {
+	tools := gjson.GetBytes(body, "tools")
+	return tools.Exists() && tools.IsArray() && tools.Get("#").Int() > 0
+}
+
 // PrepareOpenAI builds an OpenAI Chat Completions request body.
 func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
 	var body []byte
@@ -37,340 +42,610 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
-		body, err = sjson.SetBytes(body, "provider", hint)
-		if err != nil {
-			return nil, fmt.Errorf("set openrouter provider hint: %w", err)
+	if targetIsOpenRouter(opts) {
+		if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
+			body, err = sjson.SetBytes(body, "provider", hint)
+			if err != nil {
+				return nil, fmt.Errorf("set openrouter provider hint: %w", err)
+			}
 		}
-	}
-	if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
-		body, err = sjson.SetBytes(body, "reasoning", reasoning)
-		if err != nil {
-			return nil, fmt.Errorf("set openrouter reasoning hint: %w", err)
+		if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
+			body, err = sjson.SetBytes(body, "reasoning", reasoning)
+			if err != nil {
+				return nil, fmt.Errorf("set openrouter reasoning hint: %w", err)
+			}
 		}
-	}
-	if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" && gjson.GetBytes(body, "tools").Exists() {
-		body, err = applySystemReminderToBody(body, reminder)
-		if err != nil {
-			return nil, fmt.Errorf("set system reminder: %w", err)
+		if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" && hasNonEmptyTools(body) {
+			body, err = applySystemReminderToBody(body, reminder)
+			if err != nil {
+				return nil, fmt.Errorf("set system reminder: %w", err)
+			}
 		}
-	}
-	if openRouterForcesToolTemperatureZero(opts.TargetModel) &&
-		gjson.GetBytes(body, "tools").Exists() &&
-		!gjson.GetBytes(body, "temperature").Exists() {
-		body, err = sjson.SetBytes(body, "temperature", 0)
-		if err != nil {
-			return nil, fmt.Errorf("set tool temperature override: %w", err)
+		if openRouterForcesToolTemperatureZero(opts.TargetModel) &&
+			hasNonEmptyTools(body) &&
+			!gjson.GetBytes(body, "temperature").Exists() {
+			body, err = sjson.SetBytes(body, "temperature", 0)
+			if err != nil {
+				return nil, fmt.Errorf("set tool temperature override: %w", err)
+			}
 		}
 	}
 	return body, nil
 }
 
+// targetIsOpenRouter reports whether the emit target is the OpenRouter
+// upstream. OpenRouter-specific body fields (`provider`, `reasoning`),
+// system reminders, and tool-turn temperature overrides only belong on
+// the OpenRouter wire; direct upstreams (Fireworks/DeepInfra/Bedrock)
+// reject them. Empty TargetProvider falls back to the model-slug match
+// so the historical single-binding behavior keeps working for callers
+// that haven't been plumbed through yet (the handover summarizer).
+func targetIsOpenRouter(opts EmitOptions) bool {
+	if opts.TargetProvider != "" {
+		return opts.TargetProvider == providers.ProviderOpenRouter
+	}
+	return true
+}
+
 func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, error) {
-	out := make(map[string]any)
-	out["model"] = opts.TargetModel
+	body := e.body
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("model")
+	jw.Str(opts.TargetModel)
 
-	if r := gjson.GetBytes(e.body, "stream"); r.Exists() {
-		out["stream"] = r.Value()
+	// Stream
+	if r := gjson.GetBytes(body, "stream"); r.Exists() {
+		jw.Key("stream")
+		jw.Raw(r.Raw)
 	}
 
-	if err := e.pullAnthropicSystemAndMessages(out); err != nil {
-		return nil, err
-	}
-	pullAnthropicStopSequences(e.body, out)
-	if err := e.pullAnthropicTools(out); err != nil {
-		return nil, err
-	}
-	pullAnthropicToolChoice(e.body, out)
+	// System + Messages
+	writeOpenAISystemAndMessagesFromAnthropic(jw, body, opts)
 
+	// Stop sequences
+	if r := gjson.GetBytes(body, "stop_sequences"); r.Exists() {
+		jw.Key("stop")
+		jw.Raw(r.Raw)
+	}
+
+	// Tools
+	writeOpenAIToolsFromAnthropic(jw, body)
+
+	// Tool choice
+	writeOpenAIToolChoiceFromAnthropic(jw, body)
+
+	// Temperature, top_p
 	clientSetTemp := false
-	for _, key := range []string{"temperature", "top_p"} {
-		if r := gjson.GetBytes(e.body, key); r.Exists() {
-			out[key] = r.Value()
-			if key == "temperature" {
-				clientSetTemp = true
+	if r := gjson.GetBytes(body, "temperature"); r.Exists() {
+		jw.Key("temperature")
+		jw.Raw(r.Raw)
+		clientSetTemp = true
+	}
+	if r := gjson.GetBytes(body, "top_p"); r.Exists() {
+		jw.Key("top_p")
+		jw.Raw(r.Raw)
+	}
+
+	// Tool temperature override for OpenRouter
+	if !clientSetTemp && targetIsOpenRouter(opts) && openRouterForcesToolTemperatureZero(opts.TargetModel) {
+		if hasNonEmptyTools(body) {
+			jw.Key("temperature")
+			jw.Int(0)
+		}
+	}
+
+	// Max tokens
+	writeOpenAIMaxTokensFromAnthropic(jw, body, opts)
+
+	// Stream usage option
+	if opts.IncludeStreamUsage && gjson.GetBytes(body, "stream").Bool() {
+		jw.Key("stream_options")
+		jw.Obj()
+		jw.Key("include_usage")
+		jw.Bool(true)
+		jw.EndObj()
+	}
+
+	// OpenRouter hints
+	if targetIsOpenRouter(opts) {
+		if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
+			if hintBytes, err := json.Marshal(hint); err == nil {
+				jw.Key("provider")
+				jw.RawBytes(hintBytes)
+			}
+		}
+		if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
+			if reasoningBytes, err := json.Marshal(reasoning); err == nil {
+				jw.Key("reasoning")
+				jw.RawBytes(reasoningBytes)
 			}
 		}
 	}
-	if !clientSetTemp && openRouterForcesToolTemperatureZero(opts.TargetModel) {
-		if _, hasTools := out["tools"]; hasTools {
-			out["temperature"] = 0
-		}
-	}
-	if r := gjson.GetBytes(e.body, "max_tokens"); r.Exists() {
-		out["max_tokens"] = r.Value()
-	} else {
-		out["max_tokens"] = defaultOutputTokens(opts.TargetModel)
-	}
 
-	if mt, ok := out["max_tokens"]; ok && opts.Capabilities.Supports(router.CapReasoning) {
-		if _, alreadySet := out["max_completion_tokens"]; !alreadySet {
-			out["max_completion_tokens"] = mt
-		}
-		delete(out, "max_tokens")
-	}
-
-	clampOutputTokens(out, opts.TargetModel)
-	if opts.IncludeStreamUsage {
-		injectStreamUsageOption(out)
-	}
-
-	if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
-		out["provider"] = hint
-	}
-	if reasoning := openRouterReasoningHint(opts.TargetModel); reasoning != nil {
-		out["reasoning"] = reasoning
-	}
-	if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" {
-		if _, hasTools := out["tools"]; hasTools {
-			msgs, _ := out["messages"].([]any)
-			out["messages"] = injectSystemReminder(msgs, reminder)
-		}
-	}
-
-	return json.Marshal(out)
+	jw.EndObj()
+	return jw.Bytes(), nil
 }
 
-func injectStreamUsageOption(doc map[string]any) {
-	if stream, _ := doc["stream"].(bool); !stream {
-		return
+// writeOpenAISystemAndMessagesFromAnthropic emits the "messages" key into jw by
+// converting the Anthropic system field and messages array to OpenAI format.
+func writeOpenAISystemAndMessagesFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
+	systemText := flattenAnthropicSystemGJSON(gjson.GetBytes(body, "system"))
+	if targetIsOpenRouter(opts) && hasNonEmptyTools(body) {
+		if reminder := openRouterSystemReminder(opts.TargetModel); reminder != "" {
+			if systemText == "" {
+				systemText = reminder
+			} else {
+				systemText = systemText + "\n\n" + reminder
+			}
+		}
 	}
-	src, _ := doc["stream_options"].(map[string]any)
-	so := shallowClone(src)
-	so["include_usage"] = true
-	doc["stream_options"] = so
+
+	jw.Key("messages")
+	jw.Arr()
+
+	if systemText != "" {
+		jw.Obj()
+		jw.Key("role")
+		jw.Str("system")
+		jw.Key("content")
+		jw.Str(systemText)
+		jw.EndObj()
+	}
+
+	gjson.GetBytes(body, "messages").ForEach(func(_, msg gjson.Result) bool {
+		role := msg.Get("role").String()
+		switch role {
+		case "assistant":
+			writeOpenAIAssistantFromAnthropic(jw, msg)
+		default:
+			writeOpenAIUserFromAnthropic(jw, msg)
+		}
+		return true
+	})
+
+	jw.EndArr()
 }
 
-func flattenAnthropicSystem(system any) map[string]any {
-	switch s := system.(type) {
-	case string:
-		s = stripAnthropicBillingHeader(s)
-		if s == "" {
-			return nil
+// flattenAnthropicSystemGJSON converts the Anthropic system field (string or
+// array of text blocks) to a single plain string, stripping the billing header.
+func flattenAnthropicSystemGJSON(system gjson.Result) string {
+	switch system.Type {
+	case gjson.String:
+		return stripAnthropicBillingHeader(system.String())
+	case gjson.JSON:
+		if !system.IsArray() {
+			return ""
 		}
-		return map[string]any{"role": "system", "content": s}
-	case []any:
 		var parts []string
-		for _, b := range s {
-			block, _ := b.(map[string]any)
-			if block == nil {
-				continue
-			}
-			if t, _ := block["type"].(string); t == "text" {
-				if text, _ := block["text"].(string); text != "" {
+		system.ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() == "text" {
+				if text := block.Get("text").String(); text != "" {
 					if stripped := stripAnthropicBillingHeader(text); stripped != "" {
 						parts = append(parts, stripped)
 					}
 				}
 			}
-		}
-		if len(parts) == 0 {
-			return nil
-		}
-		return map[string]any{"role": "system", "content": strings.Join(parts, "\n")}
+			return true
+		})
+		return strings.Join(parts, "\n")
 	default:
-		return nil
+		return ""
 	}
 }
 
-func anthropicMessagesToOpenAI(systemMsg map[string]any, msgs []any) []any {
-	var out []any
-	if systemMsg != nil {
-		out = append(out, systemMsg)
-	}
-	for _, raw := range msgs {
-		msg, _ := raw.(map[string]any)
-		if msg == nil {
-			continue
-		}
-		role, _ := msg["role"].(string)
-		switch role {
-		case "assistant":
-			out = append(out, anthropicAssistantToOpenAI(msg))
-		default:
-			out = append(out, anthropicUserToOpenAI(msg)...)
-		}
-	}
-	return out
-}
+// writeOpenAIAssistantFromAnthropic emits an OpenAI assistant message from an
+// Anthropic assistant message.
+func writeOpenAIAssistantFromAnthropic(jw *jsonWriter, msg gjson.Result) {
+	jw.Obj()
+	jw.Key("role")
+	jw.Str("assistant")
 
-func anthropicAssistantToOpenAI(msg map[string]any) map[string]any {
-	out := map[string]any{"role": "assistant"}
-	switch c := msg["content"].(type) {
-	case string:
-		out["content"] = c
-		return out
-	case []any:
+	content := msg.Get("content")
+	switch content.Type {
+	case gjson.String:
+		jw.Key("content")
+		jw.Raw(content.Raw)
+	case gjson.JSON:
+		if !content.IsArray() {
+			jw.Key("content")
+			jw.Null()
+			jw.EndObj()
+			return
+		}
 		var textParts []string
-		var toolCalls []any
-		for _, b := range c {
-			block, _ := b.(map[string]any)
-			if block == nil {
-				continue
-			}
-			switch t, _ := block["type"].(string); t {
+		var toolCallRaws []string
+
+		content.ForEach(func(_, block gjson.Result) bool {
+			switch block.Get("type").String() {
 			case "text":
-				if text, _ := block["text"].(string); text != "" {
+				if text := block.Get("text").String(); text != "" {
 					textParts = append(textParts, text)
 				}
 			case "tool_use":
-				id, _ := block["id"].(string)
-				name, _ := block["name"].(string)
-				args, _ := json.Marshal(block["input"])
-				toolCalls = append(toolCalls, map[string]any{
-					"id":   id,
-					"type": "function",
-					"function": map[string]any{
-						"name":      name,
-						"arguments": string(args),
-					},
-				})
+				toolCallRaws = append(toolCallRaws, buildOpenAIToolCall(block))
 			}
-		}
+			return true
+		})
+
 		if len(textParts) > 0 {
-			out["content"] = strings.Join(textParts, "\n")
+			jw.Key("content")
+			jw.Str(strings.Join(textParts, "\n"))
 		} else {
-			out["content"] = nil
+			jw.Key("content")
+			jw.Null()
 		}
-		if len(toolCalls) > 0 {
-			out["tool_calls"] = toolCalls
+		if len(toolCallRaws) > 0 {
+			jw.Key("tool_calls")
+			jw.Arr()
+			for _, raw := range toolCallRaws {
+				jw.Raw(raw)
+			}
+			jw.EndArr()
 		}
 	default:
-		out["content"] = nil
+		jw.Key("content")
+		jw.Null()
 	}
-	return out
+
+	jw.EndObj()
 }
 
-func anthropicUserToOpenAI(msg map[string]any) []any {
-	switch c := msg["content"].(type) {
-	case string:
-		return []any{map[string]any{"role": "user", "content": c}}
-	case []any:
-		var toolMsgs []any
-		var userParts []any
-		for _, b := range c {
-			block, _ := b.(map[string]any)
-			if block == nil {
-				continue
-			}
-			switch t, _ := block["type"].(string); t {
-			case "tool_result":
-				toolMsgs = append(toolMsgs, anthropicToolResultToOpenAI(block))
-			case "text":
-				userParts = append(userParts, map[string]any{
-					"type": "text",
-					"text": block["text"],
-				})
-			case "image":
-				if part := anthropicImageToOpenAI(block); part != nil {
-					userParts = append(userParts, part)
-				}
-			}
+// buildOpenAIToolCall serializes an Anthropic tool_use block as an OpenAI tool
+// call JSON string (returned as raw JSON for direct embedding).
+func buildOpenAIToolCall(block gjson.Result) string {
+	inner := newJSONWriter()
+	inner.Obj()
+	inner.Key("id")
+	inner.Str(block.Get("id").String())
+	inner.Key("type")
+	inner.Str("function")
+	inner.Key("function")
+	inner.Obj()
+	inner.Key("name")
+	inner.Str(block.Get("name").String())
+	// input is a JSON object; encode it as a JSON string (arguments field).
+	inputRaw := block.Get("input").Raw
+	if inputRaw == "" {
+		inputRaw = "{}"
+	}
+	inner.Key("arguments")
+	inner.Str(inputRaw)
+	inner.EndObj()
+	inner.EndObj()
+	return string(inner.Bytes())
+}
+
+// writeOpenAIUserFromAnthropic emits zero or more OpenAI messages for an
+// Anthropic user message. Mixed content (tool_result + text + image) is split
+// into separate tool-role messages followed by a single user message.
+func writeOpenAIUserFromAnthropic(jw *jsonWriter, msg gjson.Result) {
+	content := msg.Get("content")
+	switch content.Type {
+	case gjson.String:
+		jw.Obj()
+		jw.Key("role")
+		jw.Str("user")
+		jw.Key("content")
+		jw.Raw(content.Raw)
+		jw.EndObj()
+		return
+	case gjson.JSON:
+		if !content.IsArray() {
+			return
 		}
-		out := append([]any{}, toolMsgs...)
-		if len(userParts) == 1 {
-			if first, _ := userParts[0].(map[string]any); first != nil {
-				if t, _ := first["type"].(string); t == "text" {
-					out = append(out, map[string]any{"role": "user", "content": first["text"]})
-					return out
-				}
-			}
-		}
-		if len(userParts) > 0 {
-			out = append(out, map[string]any{"role": "user", "content": userParts})
-		}
-		return out
 	default:
-		return nil
+		return
 	}
+
+	// Separate tool_result blocks from user content blocks.
+	var toolResultRaws []string
+	var userPartRaws []string
+
+	content.ForEach(func(_, block gjson.Result) bool {
+		switch block.Get("type").String() {
+		case "tool_result":
+			toolResultRaws = append(toolResultRaws, buildOpenAIToolResultMessage(block))
+		case "text":
+			inner := newJSONWriter()
+			inner.Obj()
+			inner.Key("type")
+			inner.Str("text")
+			inner.Key("text")
+			inner.Str(block.Get("text").String())
+			inner.EndObj()
+			userPartRaws = append(userPartRaws, string(inner.Bytes()))
+		case "image":
+			if part := buildOpenAIImagePart(block); part != "" {
+				userPartRaws = append(userPartRaws, part)
+			}
+		}
+		return true
+	})
+
+	for _, raw := range toolResultRaws {
+		jw.Raw(raw)
+	}
+
+	if len(userPartRaws) == 0 {
+		return
+	}
+
+	// Single plain text part: emit as string content.
+	if len(userPartRaws) == 1 {
+		p := gjson.Parse(userPartRaws[0])
+		if p.Get("type").String() == "text" {
+			jw.Obj()
+			jw.Key("role")
+			jw.Str("user")
+			jw.Key("content")
+			jw.Str(p.Get("text").String())
+			jw.EndObj()
+			return
+		}
+	}
+
+	jw.Obj()
+	jw.Key("role")
+	jw.Str("user")
+	jw.Key("content")
+	jw.Arr()
+	for _, raw := range userPartRaws {
+		jw.Raw(raw)
+	}
+	jw.EndArr()
+	jw.EndObj()
 }
 
-func anthropicToolResultToOpenAI(block map[string]any) map[string]any {
-	id, _ := block["tool_use_id"].(string)
-	return map[string]any{
-		"role":         "tool",
-		"tool_call_id": id,
-		"content":      toolResultContent(block["content"]),
-	}
+// buildOpenAIToolResultMessage converts an Anthropic tool_result block to an
+// OpenAI role:tool message JSON string.
+func buildOpenAIToolResultMessage(block gjson.Result) string {
+	inner := newJSONWriter()
+	inner.Obj()
+	inner.Key("role")
+	inner.Str("tool")
+	inner.Key("tool_call_id")
+	inner.Str(block.Get("tool_use_id").String())
+	inner.Key("content")
+	inner.Str(toolResultContentGJSON(block.Get("content")))
+	inner.EndObj()
+	return string(inner.Bytes())
 }
 
-func anthropicImageToOpenAI(block map[string]any) map[string]any {
-	src, _ := block["source"].(map[string]any)
-	if src == nil {
-		return nil
+// buildOpenAIImagePart converts an Anthropic image block to an OpenAI
+// image_url content-part JSON string. Returns "" if the block is malformed.
+func buildOpenAIImagePart(block gjson.Result) string {
+	src := block.Get("source")
+	if !src.Exists() {
+		return ""
 	}
-	switch t, _ := src["type"].(string); t {
+	inner := newJSONWriter()
+	inner.Obj()
+	inner.Key("type")
+	inner.Str("image_url")
+	inner.Key("image_url")
+	inner.Obj()
+	inner.Key("url")
+	switch src.Get("type").String() {
 	case "base64":
-		mediaType, _ := src["media_type"].(string)
-		data, _ := src["data"].(string)
-		if data == "" {
-			return nil
-		}
+		mediaType := src.Get("media_type").String()
 		if mediaType == "" {
 			mediaType = "image/jpeg"
 		}
-		return map[string]any{
-			"type":      "image_url",
-			"image_url": map[string]any{"url": fmt.Sprintf("data:%s;base64,%s", mediaType, data)},
+		data := src.Get("data").String()
+		if data == "" {
+			return ""
 		}
+		inner.Str("data:" + mediaType + ";base64," + data)
 	case "url":
-		urlStr, _ := src["url"].(string)
+		urlStr := src.Get("url").String()
 		if urlStr == "" {
-			return nil
+			return ""
 		}
-		return map[string]any{
-			"type":      "image_url",
-			"image_url": map[string]any{"url": urlStr},
-		}
+		inner.Str(urlStr)
+	default:
+		return ""
 	}
-	return nil
-}
-
-func (e *RequestEnvelope) pullAnthropicSystemAndMessages(out map[string]any) error {
-	src, err := e.ensureSrc()
-	if err != nil {
-		return err
-	}
-	systemMsg := flattenAnthropicSystem(src["system"])
-	if msgs, ok := src["messages"].([]any); ok {
-		out["messages"] = anthropicMessagesToOpenAI(systemMsg, msgs)
-	} else if systemMsg != nil {
-		out["messages"] = []any{systemMsg}
-	}
-	return nil
+	inner.EndObj()
+	inner.EndObj()
+	return string(inner.Bytes())
 }
 
 const openAIMaxTools = 128
 
-func (e *RequestEnvelope) pullAnthropicTools(out map[string]any) error {
-	src, err := e.ensureSrc()
-	if err != nil {
-		return err
+// writeOpenAIToolsFromAnthropic emits the "tools" key into jw by converting
+// Anthropic tool definitions to OpenAI function-calling format.
+func writeOpenAIToolsFromAnthropic(jw *jsonWriter, body []byte) {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {
+		return
 	}
-	tools, ok := src["tools"].([]any)
-	if !ok || len(tools) == 0 {
-		return nil
+
+	jw.Key("tools")
+	jw.Arr()
+	count := 0
+	tools.ForEach(func(_, tool gjson.Result) bool {
+		if count >= openAIMaxTools {
+			return false
+		}
+		count++
+		var params any
+		if schema := tool.Get("input_schema"); schema.Exists() {
+			_ = json.Unmarshal([]byte(schema.Raw), &params)
+			params = inlineSchemaDefs(params)
+			sanitizeOpenAIToolSchema(params)
+		}
+		jw.Obj()
+		jw.Key("type")
+		jw.Str("function")
+		jw.Key("function")
+		jw.Obj()
+		jw.Key("name")
+		jw.Str(tool.Get("name").String())
+		if desc := tool.Get("description"); desc.Exists() {
+			jw.Key("description")
+			jw.Raw(desc.Raw)
+		}
+		if params != nil {
+			if paramBytes, err := json.Marshal(params); err == nil {
+				jw.Key("parameters")
+				jw.RawBytes(paramBytes)
+			}
+		}
+		jw.EndObj()
+		jw.EndObj()
+		return true
+	})
+	jw.EndArr()
+}
+
+// writeOpenAIToolChoiceFromAnthropic emits the "tool_choice" key into jw by
+// converting the Anthropic tool_choice field to OpenAI format.
+func writeOpenAIToolChoiceFromAnthropic(jw *jsonWriter, body []byte) {
+	r := gjson.GetBytes(body, "tool_choice")
+	if !r.Exists() || !r.IsObject() {
+		return
 	}
-	var result []any
-	for _, t := range tools {
-		tool, _ := t.(map[string]any)
-		if tool == nil {
+	switch r.Get("type").String() {
+	case "auto":
+		jw.Key("tool_choice")
+		jw.Str("auto")
+	case "any":
+		jw.Key("tool_choice")
+		jw.Str("required")
+	case "tool":
+		nameRes := r.Get("name")
+		if nameRes.Type != gjson.String {
+			return
+		}
+		name := nameRes.String()
+		if name == "" {
+			return
+		}
+		inner := newJSONWriter()
+		inner.Obj()
+		inner.Key("type")
+		inner.Str("function")
+		inner.Key("function")
+		inner.Obj()
+		inner.Key("name")
+		inner.Str(name)
+		inner.EndObj()
+		inner.EndObj()
+		jw.Key("tool_choice")
+		jw.RawBytes(inner.Bytes())
+	}
+}
+
+// writeOpenAIMaxTokensFromAnthropic emits either "max_tokens" or
+// "max_completion_tokens" (for reasoning-capable models), clamped to the
+// model's output-token cap.
+func writeOpenAIMaxTokensFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
+	r := gjson.GetBytes(body, "max_tokens")
+	val := defaultOutputTokens(opts.TargetModel)
+	if r.Exists() {
+		val = r.Int()
+	}
+	cap := modelMaxOutputTokens[opts.TargetModel]
+	if cap == 0 {
+		cap = defaultMaxOutputTokenCap
+	}
+	if val > int64(cap) {
+		val = int64(cap)
+	}
+	if opts.Capabilities.Supports(router.CapReasoning) {
+		jw.Key("max_completion_tokens")
+	} else {
+		jw.Key("max_tokens")
+	}
+	jw.Int(val)
+}
+
+// inlineSchemaDefs replaces "$ref" pointers to "#/$defs/<name>" or
+// "#/definitions/<name>" with a deep copy of the referenced definition, then
+// strips the defs maps from the schema. Some OpenAI-compatible upstreams
+// (notably Fireworks) do not dereference $ref themselves and return a 400
+// ("Error resolving schema reference '#/$defs/X': AttributeError('NoneType'
+// object has no attribute 'lookup')") on tool schemas that use $defs. Inlining
+// before forwarding keeps the schema self-contained so it works on every
+// OpenAI-compat backend regardless of how its validator handles $ref.
+//
+// Cyclic refs are left intact (no infinite recursion); unresolvable refs are
+// left intact so the upstream can surface its own clearer error.
+func inlineSchemaDefs(node any) any {
+	root, ok := node.(map[string]any)
+	if !ok {
+		return node
+	}
+	defs := map[string]any{}
+	for _, key := range []string{"$defs", "definitions"} {
+		d, ok := root[key].(map[string]any)
+		if !ok {
 			continue
 		}
-		params := tool["input_schema"]
-		sanitizeOpenAIToolSchema(params)
-		fn := map[string]any{
-			"name":        tool["name"],
-			"description": tool["description"],
-			"parameters":  params,
+		for name, v := range d {
+			defs[key+"/"+name] = v
 		}
-		result = append(result, map[string]any{"type": "function", "function": fn})
 	}
-	if len(result) > openAIMaxTools {
-		result = result[:openAIMaxTools]
+	if len(defs) == 0 {
+		return node
 	}
-	out["tools"] = result
-	return nil
+	resolved, _ := resolveSchemaRefs(node, defs, map[string]struct{}{}).(map[string]any)
+	delete(resolved, "$defs")
+	delete(resolved, "definitions")
+	return resolved
+}
+
+func resolveSchemaRefs(node any, defs map[string]any, visited map[string]struct{}) any {
+	switch v := node.(type) {
+	case map[string]any:
+		if ref, ok := v["$ref"].(string); ok && len(v) == 1 {
+			name := strings.TrimPrefix(ref, "#/")
+			if _, cycle := visited[name]; cycle {
+				return v
+			}
+			target, ok := defs[name]
+			if !ok {
+				return v
+			}
+			visited[name] = struct{}{}
+			out := resolveSchemaRefs(deepCopyJSON(target), defs, visited)
+			delete(visited, name)
+			return out
+		}
+		out := make(map[string]any, len(v))
+		for k, child := range v {
+			out[k] = resolveSchemaRefs(child, defs, visited)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, child := range v {
+			out[i] = resolveSchemaRefs(child, defs, visited)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func deepCopyJSON(node any) any {
+	switch v := node.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, c := range v {
+			out[k] = deepCopyJSON(c)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, c := range v {
+			out[i] = deepCopyJSON(c)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 func sanitizeOpenAIToolSchema(node any) {
@@ -398,37 +673,4 @@ func sanitizeOpenAIToolSchema(node any) {
 		}
 	}
 	sanitizeOpenAIToolSchema(m["not"])
-}
-
-func pullAnthropicStopSequences(body []byte, out map[string]any) {
-	r := gjson.GetBytes(body, "stop_sequences")
-	if !r.Exists() {
-		return
-	}
-	out["stop"] = r.Value()
-}
-
-func pullAnthropicToolChoice(body []byte, out map[string]any) {
-	r := gjson.GetBytes(body, "tool_choice")
-	if !r.Exists() || !r.IsObject() {
-		return
-	}
-	switch r.Get("type").String() {
-	case "auto":
-		out["tool_choice"] = "auto"
-	case "any":
-		out["tool_choice"] = "required"
-	case "tool":
-		nameRes := r.Get("name")
-		if nameRes.Type != gjson.String {
-			return
-		}
-		name := nameRes.String()
-		if name != "" {
-			out["tool_choice"] = map[string]any{
-				"type":     "function",
-				"function": map[string]any{"name": name},
-			}
-		}
-	}
 }

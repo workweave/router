@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"math"
-	"math/big"
 	"time"
 
 	"workweave/router/internal/proxy"
@@ -12,6 +11,26 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// usdPerMicro converts BIGINT micros (USD x 1e6) back to a float64 USD value
+// at the adapter boundary. The router's in-Go cost math is float64 USD;
+// micros is the storage representation only.
+const usdPerMicro = 1.0 / 1_000_000.0
+
+// usdToMicros rounds a float64 USD value to BIGINT micros (USD x 1e6) for
+// persistence. NaN/Inf collapse to 0 — we never want to write nonsense.
+func usdToMicros(f float64) int64 {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0
+	}
+	return int64(math.Round(f * 1_000_000))
+}
+
+// microsToUSD is the inverse of usdToMicros, used when projecting stored
+// telemetry rows back into the proxy domain types.
+func microsToUSD(micros int64) float64 {
+	return float64(micros) * usdPerMicro
+}
 
 // TelemetryRepo implements proxy.TelemetryRepository via SQLC.
 type TelemetryRepo struct {
@@ -46,10 +65,10 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		EmbedInput:             p.EmbedInput,
 		InputTokens:            p.InputTokens,
 		OutputTokens:           p.OutputTokens,
-		RequestedInputCostUsd:  toNumeric(p.RequestedInputCostUSD),
-		RequestedOutputCostUsd: toNumeric(p.RequestedOutputCostUSD),
-		ActualInputCostUsd:     toNumeric(p.ActualInputCostUSD),
-		ActualOutputCostUsd:    toNumeric(p.ActualOutputCostUSD),
+		RequestedInputCostUsd:  usdToMicros(p.RequestedInputCostUSD),
+		RequestedOutputCostUsd: usdToMicros(p.RequestedOutputCostUSD),
+		ActualInputCostUsd:     usdToMicros(p.ActualInputCostUSD),
+		ActualOutputCostUsd:    usdToMicros(p.ActualOutputCostUSD),
 		RouteLatencyMs:         p.RouteLatencyMs,
 		UpstreamLatencyMs:      p.UpstreamLatencyMs,
 		TotalLatencyMs:         p.TotalLatencyMs,
@@ -85,9 +104,9 @@ func (r *TelemetryRepo) GetTelemetrySummary(ctx context.Context, installationID 
 	return proxy.TelemetrySummary{
 		RequestCount:          row.RequestCount,
 		TotalTokens:           row.TotalTokens,
-		TotalRequestedCostUSD: numericToFloat(row.TotalRequestedCostUsd),
-		TotalActualCostUSD:    numericToFloat(row.TotalActualCostUsd),
-		TotalSavingsUSD:       numericToFloat(row.TotalSavingsUsd),
+		TotalRequestedCostUSD: microsToUSD(row.TotalRequestedCostUsd),
+		TotalActualCostUSD:    microsToUSD(row.TotalActualCostUsd),
+		TotalSavingsUSD:       microsToUSD(row.TotalSavingsUsd),
 	}, nil
 }
 
@@ -112,8 +131,8 @@ func (r *TelemetryRepo) GetTelemetryTimeseries(ctx context.Context, installation
 		for _, row := range rows {
 			out = append(out, proxy.TelemetryBucket{
 				Bucket:           row.Bucket.Time,
-				RequestedCostUSD: numericToFloat(row.RequestedCostUsd),
-				ActualCostUSD:    numericToFloat(row.ActualCostUsd),
+				RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+				ActualCostUSD:    microsToUSD(row.ActualCostUsd),
 			})
 		}
 		return out, nil
@@ -130,8 +149,8 @@ func (r *TelemetryRepo) GetTelemetryTimeseries(ctx context.Context, installation
 		for _, row := range rows {
 			out = append(out, proxy.TelemetryBucket{
 				Bucket:           row.Bucket.Time,
-				RequestedCostUSD: numericToFloat(row.RequestedCostUsd),
-				ActualCostUSD:    numericToFloat(row.ActualCostUsd),
+				RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+				ActualCostUSD:    microsToUSD(row.ActualCostUsd),
 			})
 		}
 		return out, nil
@@ -149,8 +168,8 @@ func (r *TelemetryRepo) GetTelemetryTimeseries(ctx context.Context, installation
 	for _, row := range rows {
 		out = append(out, proxy.TelemetryBucket{
 			Bucket:           row.Bucket.Time,
-			RequestedCostUSD: numericToFloat(row.RequestedCostUsd),
-			ActualCostUSD:    numericToFloat(row.ActualCostUsd),
+			RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+			ActualCostUSD:    microsToUSD(row.ActualCostUsd),
 		})
 	}
 	return out, nil
@@ -169,9 +188,9 @@ func (r *TelemetryRepo) GetTelemetrySummaryAll(ctx context.Context, from, to tim
 	return proxy.TelemetrySummary{
 		RequestCount:          row.RequestCount,
 		TotalTokens:           row.TotalTokens,
-		TotalRequestedCostUSD: numericToFloat(row.TotalRequestedCostUsd),
-		TotalActualCostUSD:    numericToFloat(row.TotalActualCostUsd),
-		TotalSavingsUSD:       numericToFloat(row.TotalSavingsUsd),
+		TotalRequestedCostUSD: microsToUSD(row.TotalRequestedCostUsd),
+		TotalActualCostUSD:    microsToUSD(row.TotalActualCostUsd),
+		TotalSavingsUSD:       microsToUSD(row.TotalSavingsUsd),
 	}, nil
 }
 
@@ -192,8 +211,8 @@ func (r *TelemetryRepo) GetTelemetryTimeseriesAll(ctx context.Context, from, to 
 		for _, row := range rows {
 			out = append(out, proxy.TelemetryBucket{
 				Bucket:           row.Bucket.Time,
-				RequestedCostUSD: numericToFloat(row.RequestedCostUsd),
-				ActualCostUSD:    numericToFloat(row.ActualCostUsd),
+				RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+				ActualCostUSD:    microsToUSD(row.ActualCostUsd),
 			})
 		}
 		return out, nil
@@ -209,8 +228,8 @@ func (r *TelemetryRepo) GetTelemetryTimeseriesAll(ctx context.Context, from, to 
 		for _, row := range rows {
 			out = append(out, proxy.TelemetryBucket{
 				Bucket:           row.Bucket.Time,
-				RequestedCostUSD: numericToFloat(row.RequestedCostUsd),
-				ActualCostUSD:    numericToFloat(row.ActualCostUsd),
+				RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+				ActualCostUSD:    microsToUSD(row.ActualCostUsd),
 			})
 		}
 		return out, nil
@@ -227,8 +246,8 @@ func (r *TelemetryRepo) GetTelemetryTimeseriesAll(ctx context.Context, from, to 
 	for _, row := range rows {
 		out = append(out, proxy.TelemetryBucket{
 			Bucket:           row.Bucket.Time,
-			RequestedCostUSD: numericToFloat(row.RequestedCostUsd),
-			ActualCostUSD:    numericToFloat(row.ActualCostUsd),
+			RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+			ActualCostUSD:    microsToUSD(row.ActualCostUsd),
 		})
 	}
 	return out, nil
@@ -321,8 +340,8 @@ func telemetryRowFromRow(
 	outputTokens *int32,
 	cacheCreationTokens *int32,
 	cacheReadTokens *int32,
-	requestedCostUsd pgtype.Numeric,
-	actualCostUsd pgtype.Numeric,
+	requestedCostUsdMicros int64,
+	actualCostUsdMicros int64,
 	totalLatencyMs *int64,
 	upstreamStatusCode *int32,
 ) proxy.TelemetryRow {
@@ -357,43 +376,9 @@ func telemetryRowFromRow(
 		OutputTokens:        derefInt32(outputTokens),
 		CacheCreationTokens: cacheCreationTokens,
 		CacheReadTokens:     cacheReadTokens,
-		RequestedCostUSD:    numericToFloat(requestedCostUsd),
-		ActualCostUSD:       numericToFloat(actualCostUsd),
+		RequestedCostUSD:    microsToUSD(requestedCostUsdMicros),
+		ActualCostUSD:       microsToUSD(actualCostUsdMicros),
 		TotalLatencyMs:      derefInt64(totalLatencyMs),
 		UpstreamStatusCode:  derefInt32(upstreamStatusCode),
 	}
-}
-
-// toNumeric converts a float64 cost value to pgtype.Numeric.
-//
-// pgtype.Numeric.Scan only accepts string/[]byte/nil — passing a float64
-// returns an error which silently leaves the value Valid:false, so every
-// cost ended up persisting as NULL (→ DEFAULT 0). Build the Numeric by
-// hand from the float's mantissa/exponent at fixed scale instead.
-func toNumeric(f float64) pgtype.Numeric {
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return pgtype.Numeric{Valid: false}
-	}
-	// Cost columns are NUMERIC(16,6). Match that scale: multiply by 1e6,
-	// round to int, store with Exp = -6.
-	const scale = 6
-	scaled := math.Round(f * 1e6)
-	return pgtype.Numeric{
-		Int:   new(big.Int).SetInt64(int64(scaled)),
-		Exp:   -scale,
-		Valid: true,
-	}
-}
-
-// numericToFloat converts a pgtype.Numeric to float64, returning 0 on failure.
-// Uses Float64Value because Scan silently no-ops on a *float64 destination.
-func numericToFloat(n pgtype.Numeric) float64 {
-	if !n.Valid {
-		return 0
-	}
-	f8, err := n.Float64Value()
-	if err != nil || !f8.Valid {
-		return 0
-	}
-	return f8.Float64
 }

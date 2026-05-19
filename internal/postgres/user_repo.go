@@ -29,11 +29,23 @@ func (r *userRepo) UpsertByEmail(ctx context.Context, params auth.UpsertUserPara
 		InstallationID:    installationID,
 		Email:             params.Email,
 		ClaudeAccountUUID: claudeAccountUUIDArg(params.ClaudeAccountUUID),
+		DisplayName:       nullableTextArg(params.DisplayName),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return toAuthUser(row), nil
+	// The merge-or-insert CTE returns a generated UNION row type with the
+	// same fields as RouterModelRouterUser; map by field to reuse toAuthUser.
+	return toAuthUser(sqlc.RouterModelRouterUser{
+		ID:                row.ID,
+		InstallationID:    row.InstallationID,
+		Email:             row.Email,
+		ClaudeAccountUUID: row.ClaudeAccountUUID,
+		FirstSeenAt:       row.FirstSeenAt,
+		LastSeenAt:        row.LastSeenAt,
+		DeletedAt:         row.DeletedAt,
+		DisplayName:       row.DisplayName,
+	}), nil
 }
 
 func (r *userRepo) UpsertByAccountUUID(ctx context.Context, params auth.UpsertUserByAccountUUIDParams) (*auth.User, error) {
@@ -49,6 +61,7 @@ func (r *userRepo) UpsertByAccountUUID(ctx context.Context, params auth.UpsertUs
 	row, err := q.UpsertModelRouterUserByAccountUUID(ctx, sqlc.UpsertModelRouterUserByAccountUUIDParams{
 		InstallationID:    installationID,
 		ClaudeAccountUUID: accountUUID,
+		DisplayName:       nullableTextArg(params.DisplayName),
 	})
 	if err != nil {
 		return nil, err
@@ -101,6 +114,10 @@ func toAuthUser(row sqlc.RouterModelRouterUser) *auth.User {
 		s := uuid.UUID(row.ClaudeAccountUUID.Bytes).String()
 		user.ClaudeAccountUUID = &s
 	}
+	if row.DisplayName != nil {
+		s := *row.DisplayName
+		user.DisplayName = &s
+	}
 	return user
 }
 
@@ -113,4 +130,14 @@ func claudeAccountUUIDArg(s *string) pgtype.UUID {
 		return pgtype.UUID{Valid: false}
 	}
 	return pgtype.UUID{Bytes: parsed, Valid: true}
+}
+
+// nullableTextArg lifts an optional Go string into the *string shape SQLC
+// generates for sqlc.narg('display_name')::text. Empty values map to NULL so
+// COALESCE on conflict preserves the row's existing value.
+func nullableTextArg(s *string) *string {
+	if s == nil || *s == "" {
+		return nil
+	}
+	return s
 }

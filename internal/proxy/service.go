@@ -12,15 +12,15 @@ import (
 	"time"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/billing"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
-	"workweave/router/internal/router/capability"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
-	"workweave/router/internal/router/pricing"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
@@ -60,7 +60,7 @@ type Service struct {
 	hardPinResolver func(enabled map[string]struct{}) (provider, model string, ok bool)
 	// tierClampResolver enforces the requested-model tier ceiling. Nil disables
 	// the clamp.
-	tierClampResolver func(enabled, excluded map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)
+	tierClampResolver func(enabled, excluded map[string]struct{}, ceiling catalog.Tier) (provider, model string, ok bool)
 	// telemetry is an optional repository for persisting per-request telemetry.
 	telemetry TelemetryRepository
 	// byokOnly disables deployment-level credential fallback so customer
@@ -97,6 +97,10 @@ type Service struct {
 	// defaultBaselineModel is the cost-comparison baseline used when the inbound
 	// RequestedModel has no pricing entry. Empty means no substitution.
 	defaultBaselineModel string
+	// billing, when non-nil, debits the org's prepaid credit balance after
+	// each completed upstream call. Wired only in managed mode; the
+	// composition root leaves this nil for selfhosted deployments.
+	billing *billing.Service
 }
 
 // pinSessionTTL mirrors Anthropic's prompt-cache TTL on Sonnet/Haiku/Opus 4.5+
@@ -119,8 +123,8 @@ type InstallationExcludedModelsContextKey struct{}
 // installationExcludedModelsFromContext returns the per-installation exclusion
 // list stashed on ctx by the auth middleware, or nil when none is present.
 
-// routingMarkerFor builds the "brand -> model . reason" snippet emitted
-// at the start of every cross-format streamed response.
+// routingMarkerFor builds the "brand → model · note" snippet emitted at the
+// start of every cross-format streamed response.
 func routingMarkerFor(res turnLoopResult) string {
 	decision := res.Decision
 	if decision.Model == "" {
@@ -132,11 +136,8 @@ func routingMarkerFor(res turnLoopResult) string {
 		return ""
 	}
 	parts := []string{"✦ **Weave Router** → " + decision.Model}
-	if decision.Provider != "" {
-		parts[0] += " (" + decision.Provider + ")"
-	}
 	if reason := routingReasonShort(res); reason != "" {
-		parts = append(parts, "reason: "+reason)
+		parts = append(parts, reason)
 	}
 	if note := clampNote(res); note != "" {
 		parts = append(parts, note)
@@ -149,61 +150,36 @@ func clampNote(res turnLoopResult) string {
 	if !res.TierClamped || res.PreClampModel == "" {
 		return ""
 	}
-	upsell := upsellModelFor(res.RequestedTier)
-	if upsell == "" {
-		return fmt.Sprintf("second-choice pick (would have used %s — capped to your requested %s tier)", res.PreClampModel, res.RequestedTier.String())
-	}
-	return fmt.Sprintf("second-choice pick (would have used %s — capped to your requested %s tier; request %s to unlock higher-tier picks)", res.PreClampModel, res.RequestedTier.String(), upsell)
+	return fmt.Sprintf("second-choice pick at %s tier (would have used %s)", res.RequestedTier.String(), res.PreClampModel)
 }
 
-// upsellModelFor returns the conventional next-tier-up model name for the
-// clamp note. High tier has no upsell.
-func upsellModelFor(t capability.Tier) string {
-	switch t {
-	case capability.TierLow:
-		return "claude-sonnet-4-5"
-	case capability.TierMid:
-		return "claude-opus-4-7"
-	default:
-		return ""
-	}
-}
-
-// routingReasonShort returns a human-readable reason for the marker.
+// routingReasonShort returns a short user-facing reason for the routing
+// decision, or empty when the underlying code is internal recovery noise.
 func routingReasonShort(res turnLoopResult) string {
+	if res.HardPinned {
+		return "pinned for compaction / sub-agent"
+	}
 	if res.PlannerDecision.Reason != "" {
 		return humanReasonFromPlanner(res.PlannerDecision.Reason)
 	}
-	if res.HardPinned {
-		return "hard pin (compaction / sub-agent)"
-	}
-	if res.StickyHit {
-		return "tool-result follow-up"
-	}
-	return "top scorer"
+	return "best pick for this turn"
 }
 
-// humanReasonFromPlanner maps planner reason codes to marker prose.
+// humanReasonFromPlanner maps planner reason codes to short user-facing prose.
+// Recovery codes (pin_model_missing, pricing_missing) and unknown codes return
+// empty so the marker stays clean.
 func humanReasonFromPlanner(code string) string {
 	switch code {
 	case planner.ReasonEVPositive:
-		return "switched to save on cache reads"
-	case planner.ReasonEVNegative:
-		return "stayed: cache reuse beats the switch"
-	case planner.ReasonSameModel:
-		return "scorer matches the pin"
-	case planner.ReasonNoPin:
-		return "top scorer"
-	case planner.ReasonNoPriorUsage:
-		return "no cache stats yet"
-	case planner.ReasonPinModelMissing:
-		return "pin model no longer available"
-	case planner.ReasonPricingMissing:
-		return "missing pricing for a candidate"
+		return "switched for cheaper cache reuse"
+	case planner.ReasonEVNegative, planner.ReasonNoPriorUsage:
+		return "stayed on your last pick"
 	case planner.ReasonTierUpgrade:
-		return "model tier upgrade"
+		return "upgraded to a stronger tier"
+	case planner.ReasonNoPin, planner.ReasonSameModel:
+		return "best pick for this turn"
 	default:
-		return code
+		return ""
 	}
 }
 
@@ -346,7 +322,7 @@ func (s *Service) WithDefaultBaselineModel(model string) *Service {
 }
 
 // WithTierClampResolver installs the tier-ceiling clamp resolver. Nil disables.
-func (s *Service) WithTierClampResolver(resolver func(enabled, excluded map[string]struct{}, ceiling capability.Tier) (provider, model string, ok bool)) *Service {
+func (s *Service) WithTierClampResolver(resolver func(enabled, excluded map[string]struct{}, ceiling catalog.Tier) (provider, model string, ok bool)) *Service {
 	s.tierClampResolver = resolver
 	return s
 }
@@ -355,7 +331,7 @@ func (s *Service) WithTierClampResolver(resolver func(enabled, excluded map[stri
 // configured defaultBaselineModel (which may be "").
 func (s *Service) baselineFor(requested string) string {
 	if requested != "" {
-		if _, ok := pricing.For(requested); ok {
+		if _, ok := catalog.PrimaryPriceFor(requested); ok {
 			return requested
 		}
 	}
@@ -403,9 +379,18 @@ func (s *Service) ExcludedModelsOverride() []string {
 }
 
 // usageRequired reports whether per-request token usage must be captured.
-// Both OTel export and DB telemetry persistence need it.
+// OTel export, DB telemetry persistence, and credit billing all need it.
 func (s *Service) usageRequired() bool {
-	return s.emitter != nil || s.telemetry != nil
+	return s.emitter != nil || s.telemetry != nil || s.billing != nil
+}
+
+// WithBillingService installs the credit-billing service. Nil disables the
+// per-request debit hook. Wired only in managed mode by the composition
+// root; the WithBalanceCheck middleware is paired with it so a request
+// that depleted its balance is 402'd before reaching the proxy.
+func (s *Service) WithBillingService(b *billing.Service) *Service {
+	s.billing = b
+	return s
 }
 
 // WithDeploymentKeyedProviders restricts the default eligible set to
@@ -764,10 +749,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		String("routing.embed_input", embedInput).
 		Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 		IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
-		Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
-		Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
-		Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
-		Float64("pricing.actual_output_per_1m", actPricing.OutputUSDPer1M).
+		Float64("catalog.requested_input_per_1m", reqPricing.InputUSDPer1M).
+		Float64("catalog.requested_output_per_1m", reqPricing.OutputUSDPer1M).
+		Float64("catalog.actual_input_per_1m", actPricing.InputUSDPer1M).
+		Float64("catalog.actual_output_per_1m", actPricing.OutputUSDPer1M).
 		Int64("latency.route_ms", routeMs)
 	applyPlannerAttrs(decisionBuilder, routeRes)
 	otel.Record(ctx, otel.Span{
@@ -780,6 +765,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	opts := translate.EmitOptions{
 		TargetModel:        decision.Model,
+		TargetProvider:     decision.Provider,
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
 	}
@@ -812,7 +798,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			proxyWriter = extractor
 		}
 		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
-	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks:
+	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
 		crossFormat = true
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
 		if emitErr != nil {
@@ -885,10 +871,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
-		Float64("cost.requested_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
-		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
-		Float64("cost.actual_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
-		Float64("cost.actual_output_usd", float64(out)/1_000_000*actPricing.OutputUSDPer1M).
+		Float64("cost.requested_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
+		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
+		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
+		Float64("cost.actual_output_usd", catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
@@ -925,10 +911,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			EmbedInput:             embedInput,
 			InputTokens:            int32(in),
 			OutputTokens:           int32(out),
-			RequestedInputCostUSD:  effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
-			RequestedOutputCostUSD: float64(out) / 1_000_000 * reqPricing.OutputUSDPer1M,
-			ActualInputCostUSD:     effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
-			ActualOutputCostUSD:    float64(out) / 1_000_000 * actPricing.OutputUSDPer1M,
+			RequestedInputCostUSD:  catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
+			RequestedOutputCostUSD: catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M),
+			ActualInputCostUSD:     catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
+			ActualOutputCostUSD:    catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M),
 			RouteLatencyMs:         routeMs,
 			UpstreamLatencyMs:      proxyMs,
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
@@ -946,7 +932,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		})
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", capability.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	// Debit prepaid credits — no-op when billing is unwired (selfhosted).
+	// The cache-hit branch above already returned, so we only reach this
+	// point on a real upstream call.
+	if proxyErr == nil {
+		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
+	}
+
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
 
@@ -1023,23 +1016,6 @@ func (s *Service) logPlannerOutcome(res turnLoopResult) {
 // recordTurnUsage writes upstream token usage back to the session pin row
 // for the planner's next-turn EV math. Bounded async; drops on saturation.
 // Uses context.Background() so the DB write outlives the request ctx.
-
-// effectiveInputCost returns the true USD input cost after applying cache
-// pricing. Fresh tokens at base rate; cache-creation at 1.25x; cache-read at
-// the model's effective multiplier. upstreamProvider distinguishes Anthropic
-// (input_tokens is fresh-only) from OpenAI (prompt_tokens includes cached).
-func effectiveInputCost(inputTokens, cacheCreation, cacheRead int, pricePer1M float64, pinfo pricing.Pricing, upstreamProvider string) float64 {
-	fresh := inputTokens
-	if upstreamProvider != providers.ProviderAnthropic {
-		fresh = inputTokens - cacheCreation - cacheRead
-	}
-	if fresh < 0 {
-		fresh = 0
-	}
-	return (float64(fresh) +
-		float64(cacheCreation)*1.25 +
-		float64(cacheRead)*pinfo.EffectiveCacheReadMultiplier()) / 1_000_000 * pricePer1M
-}
 
 func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, cacheRead int) {
 	if s.pinStore == nil || res.HardPinned {
@@ -1301,6 +1277,115 @@ func (s *Service) fireTelemetry(p InsertTelemetryParams) {
 	}()
 }
 
+// emitBilling debits the customer for one upstream call and, on switch
+// turns that invoked the handover summarizer successfully, a second
+// debit for the summary call under a `_summary` request_id suffix. Safe
+// to call when billing is unwired or externalID is empty — both branches
+// no-op.
+//
+// Pricing for the summary turn is looked up from the canonical pricing
+// table by the summarizer's reported model name. Unknown model → zero
+// pricing → notional_cost=0 ledger row (still recorded so the audit
+// trail is complete even if the price table doesn't know about a
+// freshly-deployed handover model).
+func (s *Service) emitBilling(ctx context.Context, requestID, externalID string, decision router.Decision, actPricing catalog.Pricing, routeRes turnLoopResult, in, out, cacheCreation, cacheRead int) {
+	if s.billing == nil || externalID == "" {
+		return
+	}
+	hasOverride := billing.HasOverrideFromContext(ctx)
+	s.fireBilling(ctx, billing.DebitInferenceParams{
+		OrganizationID:  externalID,
+		RouterRequestID: requestID,
+		Model:           decision.Model,
+		Provider:        decision.Provider,
+		InputTokens:     in,
+		OutputTokens:    out,
+		CacheCreation:   cacheCreation,
+		CacheRead:       cacheRead,
+		Pricing:         actPricing,
+		HasOverride:     hasOverride,
+	})
+
+	if routeRes.Handover.Invoked && !routeRes.Handover.FallbackToTrim {
+		sumUsage := routeRes.Handover.SummaryUsage
+		if sumUsage.Model != "" && (sumUsage.InputTokens > 0 || sumUsage.OutputTokens > 0) {
+			sumPricing, _ := catalog.PrimaryPriceFor(sumUsage.Model)
+			s.fireBilling(ctx, billing.DebitInferenceParams{
+				OrganizationID:  externalID,
+				RouterRequestID: requestID + "_summary",
+				Model:           sumUsage.Model,
+				Provider:        sumUsage.Provider,
+				InputTokens:     sumUsage.InputTokens,
+				OutputTokens:    sumUsage.OutputTokens,
+				CacheCreation:   sumUsage.CacheCreation,
+				CacheRead:       sumUsage.CacheRead,
+				Pricing:         sumPricing,
+				HasOverride:     hasOverride,
+			})
+		}
+	}
+}
+
+// fireBilling debits the org's prepaid credit balance for one upstream
+// call. Synchronous so the ledger row is durable before handler return,
+// but uses context.Background() so cancellation by the customer doesn't
+// abort the write — the inference has already been served and we owe
+// ourselves the bookkeeping. 5s timeout matches fireTelemetry.
+//
+// On failure we log Error with full context for manual reconciliation;
+// the customer's response is unaffected because they already got it.
+// The accompanying OTel span lets log-based metrics alert on debit
+// failure rate without adding a prometheus dependency.
+//
+// Inputs are intentionally small — composition root wires up everything
+// the billing service needs; this hook only forwards token counts +
+// pricing + request metadata.
+func (s *Service) fireBilling(ctx context.Context, p billing.DebitInferenceParams) {
+	if s.billing == nil {
+		return
+	}
+	if p.OrganizationID == "" {
+		// Shouldn't happen on managed-mode authed requests; middleware
+		// already pulled installation.ExternalID. Log Debug so a synthetic
+		// test exercising the hook doesn't page on-call.
+		observability.Get().Debug("Billing debit skipped: no organization_id on request")
+		return
+	}
+	dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	balance, err := s.billing.DebitForInference(dbCtx, p)
+	if err == nil {
+		observability.Get().Debug("Billing debit complete",
+			"organization_id", p.OrganizationID,
+			"router_request_id", p.RouterRequestID,
+			"model", p.Model,
+			"balance_usd_micros", balance,
+			"override", p.HasOverride,
+		)
+		return
+	}
+	logBillingDebitFailure(ctx, p, err)
+}
+
+// logBillingDebitFailure emits a structured Error log and OTel attributes
+// so on-call alerting can fire on the resulting log/span rate without
+// requiring a new prometheus dependency. Counter-style metrics are
+// derivable from the structured log query in the dashboard panel.
+func logBillingDebitFailure(ctx context.Context, p billing.DebitInferenceParams, err error) {
+	observability.Get().Error("router_billing_debit_failed",
+		"err", err,
+		"organization_id", p.OrganizationID,
+		"router_request_id", p.RouterRequestID,
+		"model", p.Model,
+		"provider", p.Provider,
+		"input_tokens", p.InputTokens,
+		"output_tokens", p.OutputTokens,
+		"cache_creation_tokens", p.CacheCreation,
+		"cache_read_tokens", p.CacheRead,
+		"has_override", p.HasOverride,
+	)
+}
+
 // upstreamStatus extracts the HTTP status from an UpstreamStatusError, or 0.
 func upstreamStatus(err error) int {
 	var e *providers.UpstreamStatusError
@@ -1441,10 +1526,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		String("routing.embed_input", embedInput).
 		Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 		IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
-		Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
-		Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
-		Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
-		Float64("pricing.actual_output_per_1m", actPricing.OutputUSDPer1M).
+		Float64("catalog.requested_input_per_1m", reqPricing.InputUSDPer1M).
+		Float64("catalog.requested_output_per_1m", reqPricing.OutputUSDPer1M).
+		Float64("catalog.actual_input_per_1m", actPricing.InputUSDPer1M).
+		Float64("catalog.actual_output_per_1m", actPricing.OutputUSDPer1M).
 		Int64("latency.route_ms", routeMs)
 	applyPlannerAttrs(openaiDecisionBuilder, routeRes)
 	otel.Record(ctx, otel.Span{
@@ -1457,6 +1542,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	opts := translate.EmitOptions{
 		TargetModel:        decision.Model,
+		TargetProvider:     decision.Provider,
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
 	}
@@ -1476,7 +1562,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	var extractor *otel.UsageExtractor
 
 	switch decision.Provider {
-	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks:
+	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
 		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
 		if emitErr != nil {
 			log.Error("Failed to emit OpenAI body", "err", emitErr)
@@ -1550,10 +1636,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
-		Float64("cost.requested_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
-		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
-		Float64("cost.actual_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
-		Float64("cost.actual_output_usd", float64(out)/1_000_000*actPricing.OutputUSDPer1M).
+		Float64("cost.requested_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
+		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
+		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
+		Float64("cost.actual_output_usd", catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
@@ -1574,6 +1660,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
 
+	if proxyErr == nil {
+		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
+	}
+
 	installationIDOAI, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	if installationIDOAI != "" {
 		s.fireTelemetry(InsertTelemetryParams{
@@ -1591,10 +1681,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			EmbedInput:             embedInput,
 			InputTokens:            int32(in),
 			OutputTokens:           int32(out),
-			RequestedInputCostUSD:  effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
-			RequestedOutputCostUSD: float64(out) / 1_000_000 * reqPricing.OutputUSDPer1M,
-			ActualInputCostUSD:     effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
-			ActualOutputCostUSD:    float64(out) / 1_000_000 * actPricing.OutputUSDPer1M,
+			RequestedInputCostUSD:  catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
+			RequestedOutputCostUSD: catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M),
+			ActualInputCostUSD:     catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
+			ActualOutputCostUSD:    catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M),
 			RouteLatencyMs:         routeMs,
 			UpstreamLatencyMs:      proxyMs,
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
@@ -1612,7 +1702,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", capability.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
 

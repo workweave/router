@@ -14,7 +14,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
-	"workweave/router/internal/router/capability"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/sessionpin"
 
@@ -581,7 +581,7 @@ func TestService_HardPin_BypassesTierCeiling(t *testing.T) {
 		providers.ProviderAnthropic,
 		"claude-opus-4-7",
 		nil,
-	).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 		// If this fires for a hard-pin decision, the bypass is broken.
 		return providers.ProviderAnthropic, "claude-haiku-4-5", true
 	})
@@ -615,8 +615,8 @@ func TestService_TierClamp_HaikuRequestedClampsHighScore(t *testing.T) {
 	// Scorer returns High-tier model: must be rewritten.
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, ceiling capability.Tier) (string, string, bool) {
-		require.Equal(t, capability.TierLow, ceiling, "haiku requested → Low ceiling")
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, ceiling catalog.Tier) (string, string, bool) {
+		require.Equal(t, catalog.TierLow, ceiling, "haiku requested → Low ceiling")
 		return providers.ProviderAnthropic, "claude-haiku-4-5", true
 	})
 
@@ -637,7 +637,7 @@ func TestService_TierClamp_OpusRequestedNoClamp(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
 	resolverCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 		resolverCalls++
 		return "", "", false
 	})
@@ -669,7 +669,7 @@ func TestService_TierClamp_PinAboveCeilingIsClamped(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 		return providers.ProviderAnthropic, "claude-haiku-4-5", true
 	})
 
@@ -683,7 +683,7 @@ func TestService_TierClamp_PinAboveCeilingIsClamped(t *testing.T) {
 
 // TestService_TierClamp_UnknownRequestedModelDisablesClamp regression-
 // guards the PR #100 finding: RequestedTier must be derived from
-// capability.TierFor(feats.Model) directly, not via
+// catalog.TierFor(feats.Model) directly, not via
 // baselineFor(feats.Model). Substituting unknown model names through
 // baselineFor (which falls back to the default mid-tier baseline)
 // would force custom/proxy model names like "weave-router" into a
@@ -697,7 +697,7 @@ func TestService_TierClamp_UnknownRequestedModelDisablesClamp(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
 	resolverCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 		resolverCalls++
 		return providers.ProviderAnthropic, "claude-sonnet-4-5", true
 	})
@@ -728,7 +728,7 @@ func TestService_TierClamp_ExcludedModelsThreadedToResolver(t *testing.T) {
 	var capturedExcluded map[string]struct{}
 	svc := newPinSvc(fr, store).
 		WithExcludedModelsOverride([]string{"claude-haiku-4-5"}).
-		WithTierClampResolver(func(_, excluded map[string]struct{}, _ capability.Tier) (string, string, bool) {
+		WithTierClampResolver(func(_, excluded map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 			capturedExcluded = excluded
 			return providers.ProviderAnthropic, "claude-sonnet-4-5", true
 		})
@@ -771,7 +771,7 @@ func TestService_TierClamp_StaleFlagClearedOnUnclampedFinal(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
 	clampCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 		clampCalls++
 		// Resolver should never need to fire because all decisions are
 		// at or below the High ceiling.

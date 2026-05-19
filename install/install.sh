@@ -235,6 +235,14 @@ refuse_if_symlink() {
 WEAVE_CODEX_BEGIN_MARKER="# >>> weave-router managed (do not edit between markers) >>>"
 WEAVE_CODEX_END_MARKER="# <<< weave-router managed <<<"
 
+# ---------- identity helpers ----------
+#
+# The router parses X-Weave-User-Email and X-Weave-User-Name on every protocol
+# (Anthropic, OpenAI, Gemini) and persists them onto router.model_router_users
+# so customers can attribute traffic to a person even when many people share
+# one API key. Claude Code's metadata.user_id carries only account_uuid (no
+# email), so without these headers the router only ever sees anonymous UUIDs.
+
 # normalize_email mirrors the router's proxy.NormalizeEmail: trim, lowercase,
 # enforce a single '@' with non-empty local + domain parts, and cap at 254
 # chars (RFC 5321). Returns the cleaned address on stdout, or empty string if
@@ -253,12 +261,38 @@ normalize_email() {
     printf ''
     return
   fi
+  # Reject any interior whitespace or control character so the value can't
+  # smuggle a second header into the newline-delimited ANTHROPIC_CUSTOM_HEADERS
+  # var. A valid email has none, so this is shape-only — not a deliverability
+  # check.
+  if printf '%s' "$lowered" | LC_ALL=C grep -q '[[:space:][:cntrl:]]'; then
+    printf ''
+    return
+  fi
   case "$lowered" in
     *@*@*) printf ''; return ;;
     @*|*@) printf ''; return ;;
     *@*)   printf '%s' "$lowered" ;;
     *)     printf '' ;;
   esac
+}
+
+# normalize_name trims whitespace, rejects empty/oversized, and strips control
+# chars + the colon/CR/LF chars HTTP forbids in header values. Display names
+# are free-form so we don't case-fold; we just keep the header well-formed.
+normalize_name() {
+  local raw="${1:-}"
+  local trimmed="${raw#"${raw%%[![:space:]]*}"}"
+  trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+  # Drop CR/LF/colon (header smuggling) and other control chars. tr's -d
+  # with a character class is portable across BSD/GNU.
+  local cleaned
+  cleaned="$(printf '%s' "$trimmed" | tr -d '\r\n:' | tr -d '[:cntrl:]')"
+  if [ -z "$cleaned" ] || [ "${#cleaned}" -gt 128 ]; then
+    printf ''
+    return
+  fi
+  printf '%s' "$cleaned"
 }
 
 # resolve_user_email picks the email to plant in router request headers so the
@@ -412,6 +446,27 @@ TOML
   # 0600: the file holds a router key. Even at user scope, mode 644 would
   # leak the key to any local user on a shared box.
   chmod 600 "$config_file"
+}
+
+# resolve_user_name mirrors resolve_user_email but for display name. Priority:
+# WEAVE_USER_NAME env override → git config user.name → empty. We don't
+# prompt for name independently: if email prompting yielded nothing, name
+# almost certainly will too, and a second prompt is noise. Echoes the
+# validated name on stdout.
+resolve_user_name() {
+  local candidate=""
+  if [ -n "${WEAVE_USER_NAME:-}" ]; then
+    candidate="$(normalize_name "$WEAVE_USER_NAME")"
+    if [ -z "$candidate" ]; then
+      warn "WEAVE_USER_NAME=\"$WEAVE_USER_NAME\" is not a usable name; ignoring."
+    fi
+  fi
+  if [ -z "$candidate" ]; then
+    local git_name
+    git_name="$(git config --global user.name 2>/dev/null || true)"
+    candidate="$(normalize_name "$git_name")"
+  fi
+  printf '%s' "$candidate"
 }
 
 # ---------- uninstall delegation ----------
@@ -725,7 +780,8 @@ if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
     # _spin_cleanup (installed globally above) already restores stty echo on
     # any exit path, so we don't need a separate trap here — that would
     # overwrite the spinner cleanup and leak the cursor / child PID on Ctrl-C.
-    printf "%sPaste your Weave Router API key (rk_...):%s " "$C_DIM" "$C_RESET"
+    printf "%sGet your Weave Router API key at %s%s\n" "$C_BRAND" "$base_url" "$C_RESET"
+    printf "%sPaste your key here (rk_...):%s " "$C_DIM" "$C_RESET"
     stty -echo </dev/tty 2>/dev/null || true
     read -r api_key </dev/tty
     stty echo </dev/tty 2>/dev/null || true
@@ -733,21 +789,33 @@ if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
     [ -n "$api_key" ] || { err "no key provided"; exit 1; }
   fi
 
-# ---------- identity (user email) ----------
+# ---------- identity (user email + name) ----------
 #
-# The router parses X-Weave-User-Email on every protocol (Anthropic,
-# OpenAI/Codex, Gemini) and persists it onto router.model_router_users.email
-# so customers can attribute traffic to a person even when many people share
-# one API key. We plant the header at install time because Claude Code's
-# metadata.user_id payload carries only account_uuid (no email), and Codex
-# carries no identity at all — without this step the router only ever sees
-# anonymous UUIDs for non-OTLP customers.
-
+# The router parses X-Weave-User-Email and X-Weave-User-Name on every protocol
+# (Anthropic, OpenAI/Codex, Gemini) and persists them onto
+# router.model_router_users so customers can attribute traffic to a person even
+# when many people share one API key. We plant the headers at install time
+# because Claude Code's metadata.user_id payload carries only account_uuid (no
+# email), and Codex carries no identity at all — without this step the router
+# only ever sees anonymous UUIDs for non-OTLP customers.
+#
+# Gate name on email: when the user explicitly opts out of email identity (via
+# '-' at the prompt or by clearing git config), don't auto-plant a name from
+# git config either. Opt-out should be all-or-nothing so the router
+# consistently sees zero identity headers when the user wants to stay
+# anonymous.
 user_email="$(resolve_user_email)"
 if [ -n "$user_email" ]; then
+  user_name="$(resolve_user_name)"
+else
+  user_name=""
+fi
+if [ -n "$user_email" ] && [ -n "$user_name" ]; then
+  ok "Will identify router traffic as $user_name <$user_email>"
+elif [ -n "$user_email" ]; then
   ok "Will identify router traffic as $user_email"
 else
-  info "No identity email set — router traffic will be attributed by account UUID only."
+  info "No identity set — router traffic will be attributed by account UUID only."
 fi
 
 # ---------- codex install path (dispatch + exit before the Claude-only writes) ----------
@@ -942,8 +1010,9 @@ prices='{
     "claude-opus-4-6":                  0.015,
     "claude-opus-4-7":                  0.015,
     "claude-sonnet-4-5":                0.003,
+    "claude-sonnet-4-6":                0.003,
     "deepseek/deepseek-v4-flash":       0.00014,
-    "deepseek/deepseek-v4-pro":         0.000435,
+    "deepseek/deepseek-v4-pro":         0.00174,
     "gemini-2.0-flash":                 0.0001,
     "gemini-2.0-flash-lite":            0.000075,
     "gemini-2.5-flash":                 0.0003,
@@ -970,22 +1039,20 @@ prices='{
     "gpt-5.5-mini":                     0.0005,
     "gpt-5.5-nano":                     0.00015,
     "gpt-5.5-pro":                      0.03,
-    "mistralai/mistral-small-2603":     0.00015,
-    "moonshotai/kimi-k2.5":             0.00044,
+    "moonshotai/kimi-k2.5":             0.0006,
+    "moonshotai/kimi-k2.6":             0.00095,
     "qwen/qwen3-235b-a22b-2507":        0.000071,
-    "qwen/qwen3-30b-a3b-instruct-2507": 0.00008,
-    "qwen/qwen3-coder":                 0.00022,
-    "qwen/qwen3-coder-next":            0.00007,
-    "qwen/qwen3-next-80b-a3b-instruct": 0.00009,
-    "qwen/qwen3.5-flash-02-23":         0.000065
+    "qwen/qwen3-coder-next":            0.0005,
+    "qwen/qwen3-next-80b-a3b-instruct": 0.00015
   },
   "output": {
     "claude-haiku-4-5":                 0.004,
     "claude-opus-4-6":                  0.075,
     "claude-opus-4-7":                  0.075,
     "claude-sonnet-4-5":                0.015,
+    "claude-sonnet-4-6":                0.015,
     "deepseek/deepseek-v4-flash":       0.00028,
-    "deepseek/deepseek-v4-pro":         0.00087,
+    "deepseek/deepseek-v4-pro":         0.00348,
     "gemini-2.0-flash":                 0.0004,
     "gemini-2.0-flash-lite":            0.0003,
     "gemini-2.5-flash":                 0.0012,
@@ -1012,14 +1079,11 @@ prices='{
     "gpt-5.5-mini":                     0.0025,
     "gpt-5.5-nano":                     0.0006,
     "gpt-5.5-pro":                      0.12,
-    "mistralai/mistral-small-2603":     0.0006,
-    "moonshotai/kimi-k2.5":             0.002,
+    "moonshotai/kimi-k2.5":             0.003,
+    "moonshotai/kimi-k2.6":             0.004,
     "qwen/qwen3-235b-a22b-2507":        0.000463,
-    "qwen/qwen3-30b-a3b-instruct-2507": 0.00033,
-    "qwen/qwen3-coder":                 0.0018,
-    "qwen/qwen3-coder-next":            0.0003,
-    "qwen/qwen3-next-80b-a3b-instruct": 0.0011,
-    "qwen/qwen3.5-flash-02-23":         0.00026
+    "qwen/qwen3-coder-next":            0.0012,
+    "qwen/qwen3-next-80b-a3b-instruct": 0.0012
   }
 }'
 # END_GENERATED_PRICES
@@ -1190,14 +1254,17 @@ tmp_patch="$(mktemp)"
 # leave the cursor hidden if Ctrl-C lands during settings.json patching.
 trap '_spin_cleanup; rm -f "$tmp_patch"' EXIT INT TERM HUP
 
-# Claude Code splits ANTHROPIC_CUSTOM_HEADERS on newlines, so multiple
-# headers ride in the same env var separated by \n. We append the identity
-# header alongside the router key so a single var carries both. When no
-# email is set, we keep the single-header form so a re-install for a user
-# who opted out cleanly removes the old line.
+# Claude Code splits ANTHROPIC_CUSTOM_HEADERS on newlines, so multiple headers
+# ride in the same env var separated by \n. Append identity headers alongside
+# the router key so a single var carries them all. When email/name are empty
+# we keep the bare router-key form so a re-install for a user who opted out
+# cleanly removes the old line.
 custom_headers="$router_key_header: $api_key"
 if [ -n "$user_email" ]; then
   custom_headers="$custom_headers"$'\n'"X-Weave-User-Email: $user_email"
+fi
+if [ -n "$user_name" ]; then
+  custom_headers="$custom_headers"$'\n'"X-Weave-User-Name: $user_name"
 fi
 
 if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
@@ -1289,7 +1356,7 @@ if [ -n "$api_key" ]; then
       | curl -fsS --max-time 5 --header @- "$base_url/validate"
   }
   if ! spin "Validating API key" validate_key; then
-    warn "Router rejected the API key (check it matches the dashboard at $base_url/ui/)."
+    warn "Router rejected the API key (check it matches the dashboard at $base_url)."
   fi
 fi
 

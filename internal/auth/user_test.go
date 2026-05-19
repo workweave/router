@@ -66,7 +66,7 @@ func TestResolveAndStashUser_UpsertsAndStashesID(t *testing.T) {
 	repo := &fakeUserRepo{user: &auth.User{ID: "user-42", InstallationID: "inst-1", Email: "alice@example.com"}}
 	svc := makeServiceWithUsers(t, repo)
 
-	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "claude-acct-9")
+	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "claude-acct-9", "")
 
 	require.Len(t, repo.upserts, 1)
 	assert.Equal(t, "inst-1", repo.upserts[0].InstallationID)
@@ -80,7 +80,7 @@ func TestResolveAndStashUser_NoIdentitySignalIsNoOp(t *testing.T) {
 	repo := &fakeUserRepo{}
 	svc := makeServiceWithUsers(t, repo)
 
-	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "", "")
+	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "", "", "")
 
 	assert.Empty(t, repo.upserts)
 	assert.Empty(t, repo.accountUpserts)
@@ -94,7 +94,7 @@ func TestResolveAndStashUser_AccountUUIDOnlyUsesAccountUpsert(t *testing.T) {
 	repo := &fakeUserRepo{user: &auth.User{ID: "user-9", InstallationID: "inst-1"}}
 	svc := makeServiceWithUsers(t, repo)
 
-	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "", "2c2aace8-82e9-4cb1-8d1f-2f822da43177")
+	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "", "2c2aace8-82e9-4cb1-8d1f-2f822da43177", "")
 
 	assert.Empty(t, repo.upserts, "email-empty input must NOT call UpsertByEmail")
 	require.Len(t, repo.accountUpserts, 1)
@@ -110,7 +110,7 @@ func TestResolveAndStashUser_EmailPathBeatsAccountUUIDPath(t *testing.T) {
 	repo := &fakeUserRepo{user: &auth.User{ID: "user-3"}}
 	svc := makeServiceWithUsers(t, repo)
 
-	svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "2c2aace8-82e9-4cb1-8d1f-2f822da43177")
+	svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "2c2aace8-82e9-4cb1-8d1f-2f822da43177", "")
 
 	require.Len(t, repo.upserts, 1)
 	assert.Empty(t, repo.accountUpserts, "email-present input must NOT call UpsertByAccountUUID")
@@ -122,7 +122,7 @@ func TestResolveAndStashUser_NoInstallationIsNoOp(t *testing.T) {
 	repo := &fakeUserRepo{}
 	svc := makeServiceWithUsers(t, repo)
 
-	ctx := svc.ResolveAndStashUser(context.Background(), "", "alice@example.com", "")
+	ctx := svc.ResolveAndStashUser(context.Background(), "", "alice@example.com", "", "")
 
 	assert.Empty(t, repo.upserts)
 	assert.Equal(t, "", auth.UserIDFrom(ctx))
@@ -132,10 +132,46 @@ func TestResolveAndStashUser_OmitsClaudeAccountWhenEmpty(t *testing.T) {
 	repo := &fakeUserRepo{user: &auth.User{ID: "user-1"}}
 	svc := makeServiceWithUsers(t, repo)
 
-	svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "")
+	svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "", "")
 
 	require.Len(t, repo.upserts, 1)
 	assert.Nil(t, repo.upserts[0].ClaudeAccountUUID)
+}
+
+func TestResolveAndStashUser_PropagatesDisplayNameOnEmailPath(t *testing.T) {
+	repo := &fakeUserRepo{user: &auth.User{ID: "user-1"}}
+	svc := makeServiceWithUsers(t, repo)
+
+	svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "", "Alice Liddell")
+
+	require.Len(t, repo.upserts, 1)
+	require.NotNil(t, repo.upserts[0].DisplayName)
+	assert.Equal(t, "Alice Liddell", *repo.upserts[0].DisplayName)
+}
+
+func TestResolveAndStashUser_PropagatesDisplayNameOnAccountUUIDPath(t *testing.T) {
+	// Claude CLI v2.1.x ships only account_uuid in metadata.user_id, but the
+	// X-Weave-User-Name header still carries the git user.name. The display
+	// name must reach the account-uuid-keyed upsert so the dashboard has a
+	// human-readable label even when email is NULL.
+	repo := &fakeUserRepo{user: &auth.User{ID: "user-9"}}
+	svc := makeServiceWithUsers(t, repo)
+
+	svc.ResolveAndStashUser(context.Background(), "inst-1", "", "2c2aace8-82e9-4cb1-8d1f-2f822da43177", "Alice Liddell")
+
+	require.Len(t, repo.accountUpserts, 1)
+	require.NotNil(t, repo.accountUpserts[0].DisplayName)
+	assert.Equal(t, "Alice Liddell", *repo.accountUpserts[0].DisplayName)
+}
+
+func TestResolveAndStashUser_OmitsDisplayNameWhenEmpty(t *testing.T) {
+	repo := &fakeUserRepo{user: &auth.User{ID: "user-1"}}
+	svc := makeServiceWithUsers(t, repo)
+
+	svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "", "")
+
+	require.Len(t, repo.upserts, 1)
+	assert.Nil(t, repo.upserts[0].DisplayName, "empty header must map to nil so COALESCE preserves any existing row value")
 }
 
 func TestResolveAndStashUser_RepoErrorDoesNotPropagate(t *testing.T) {
@@ -143,7 +179,7 @@ func TestResolveAndStashUser_RepoErrorDoesNotPropagate(t *testing.T) {
 	svc := makeServiceWithUsers(t, repo)
 
 	// Must return the original ctx unchanged so the request still proceeds.
-	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "")
+	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "", "")
 
 	assert.Equal(t, "", auth.UserIDFrom(ctx))
 }
@@ -151,7 +187,7 @@ func TestResolveAndStashUser_RepoErrorDoesNotPropagate(t *testing.T) {
 func TestResolveAndStashUser_NilUsersIsNoOp(t *testing.T) {
 	svc := makeServiceWithUsers(t, nil)
 
-	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "")
+	ctx := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "", "")
 
 	assert.Equal(t, "", auth.UserIDFrom(ctx))
 }
@@ -170,12 +206,12 @@ func TestResolveAndStashUser_CacheHitSkipsRepo(t *testing.T) {
 	)
 
 	// First call hits repo and populates cache.
-	ctx1 := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "")
+	ctx1 := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "", "")
 	require.Equal(t, "user-1", auth.UserIDFrom(ctx1))
 	require.Len(t, repo.upserts, 1)
 
 	// Second call must hit cache and skip the upsert entirely.
-	ctx2 := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "")
+	ctx2 := svc.ResolveAndStashUser(context.Background(), "inst-1", "alice@example.com", "", "")
 	assert.Equal(t, "user-1", auth.UserIDFrom(ctx2))
 	assert.Len(t, repo.upserts, 1, "cache hit must not call repo.Upsert again")
 }
