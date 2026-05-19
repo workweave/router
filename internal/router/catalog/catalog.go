@@ -225,6 +225,9 @@ var Models = []Model{
 	{ID: "gemini-3.1-pro-preview", Tier: TierHigh, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00, CacheReadMultiplier: 0.25}},
 	}},
+	{ID: "gemini-3.5-flash", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 1.50, OutputUSDPer1M: 9.00, CacheReadMultiplier: 0.25}},
+	}},
 
 	// --- OSS pool ---
 	//
