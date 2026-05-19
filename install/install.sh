@@ -359,22 +359,26 @@ resolve_user_email() {
 # that). Inline `model_provider` keys inside `[profiles.*]` sections stay
 # untouched.
 #
-# Usage: write_codex_config <config_file_path> <base_url> <api_key> [user_email]
+# Usage: write_codex_config <config_file_path> <base_url> <api_key> [user_email] [user_name]
 write_codex_config() {
   local config_file="$1"
   local block_url="$2"
   local block_key="$3"
   local block_email="${4:-}"
+  local block_name="${5:-}"
 
-  # When we have an identity email, plant it alongside the router key so the
-  # router can attribute Codex traffic to a person on shared keys. Empty
-  # email = omit the entry entirely; we never emit a header with no value.
-  local headers_line
+  # Plant whichever identity values we have alongside the router key so the
+  # router can attribute Codex traffic to a person on shared keys. Build the
+  # entries piecewise so an empty email/name is omitted entirely — the router
+  # never sees a header with no value (and TOML rejects empty unquoted vals).
+  local headers_parts="\"X-Weave-Router-Key\" = \"${block_key}\""
   if [ -n "$block_email" ]; then
-    headers_line="http_headers = { \"X-Weave-Router-Key\" = \"${block_key}\", \"X-Weave-User-Email\" = \"${block_email}\" }"
-  else
-    headers_line="http_headers = { \"X-Weave-Router-Key\" = \"${block_key}\" }"
+    headers_parts="${headers_parts}, \"X-Weave-User-Email\" = \"${block_email}\""
   fi
+  if [ -n "$block_name" ]; then
+    headers_parts="${headers_parts}, \"X-Weave-User-Name\" = \"${block_name}\""
+  fi
+  local headers_line="http_headers = { ${headers_parts} }"
 
   local block
   block="$(cat <<TOML
@@ -821,7 +825,7 @@ fi
 # ---------- codex install path (dispatch + exit before the Claude-only writes) ----------
 
 if [ "$target" = "codex" ]; then
-  write_codex_config "$codex_config_file" "$base_url" "$api_key" "$user_email"
+  write_codex_config "$codex_config_file" "$base_url" "$api_key" "$user_email" "$user_name"
   ok "Codex config written to $codex_config_file"
 
   # Project scope: ensure the per-teammate config (which holds the router key)
