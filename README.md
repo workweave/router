@@ -23,10 +23,13 @@
 A drop-in proxy for Anthropic, OpenAI, and Gemini that picks the best model
 for *every* request: using a tiny on-box embedder, not a vibes-based prompt.
 
+[![RouterArena](https://img.shields.io/badge/RouterArena-%231-EC6341)](https://github.com/RouteWorks/RouterArena)
 [![Weave Badge](https://img.shields.io/endpoint?url=https%3A%2F%2Fapp.workweave.ai%2Fapi%2Frepository%2Fbadge%2Forg_QWsHDcRQWQEs6RpkdEZrlFK8%2F1222789989%2Fhttps%253A%252F%252Fgithub.com&cacheSeconds=3600)](https://app.workweave.ai/reports/repository/org_QWsHDcRQWQEs6RpkdEZrlFK8/https%3A%2F%2Fgithub.com/1222789989)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](go.mod)
 [![Tests](https://github.com/workweave/router/actions/workflows/test.yml/badge.svg)](https://github.com/workweave/router/actions/workflows/test.yml)
 [![License: ELv2](https://img.shields.io/badge/License-ELv2-00BFB3.svg)](https://www.elastic.co/licensing/elastic-license)
+
+**🥇 #1 on the [RouterArena leaderboard](https://github.com/RouteWorks/RouterArena)** [^2] — Acc-Cost Arena **74.61**.
 
 *Built by [Weave](https://www.workweave.ai): The #1 engineering intelligence platform,
 loved by Robinhood, PostHog, Reducto, and hundreds of others.*
@@ -162,3 +165,7 @@ Models → *Override OpenAI Base URL* → `http://localhost:8080/v1`, paste
 [^1]: Zhang, Y. et al. *Beyond GPT-5: Making LLMs Cheaper and Better via
     Performance–Efficiency Optimized Routing* (Avengers-Pro).
     arXiv:2508.12631, 2025. <https://arxiv.org/abs/2508.12631>
+
+[^2]: Lu, Y., Liu, R., Yuan, J., Cui, X., Zhang, S., Liu, H., & Xing, J.
+    *RouterArena: An Open Platform for Comprehensive Comparison of LLM
+    Routers.* arXiv:2510.00202, 2025. <https://arxiv.org/abs/2510.00202>
