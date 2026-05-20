@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -58,27 +59,38 @@ func (s *Service) handleForceModelCommand(
 	// so the existing StripRoutingMarkerFromMessages ingress stripper removes it from
 	// subsequent inbound requests. Without this, the text persists in conversation
 	// history and leaks router internals to the upstream on every following turn.
+	// Pin writes for /force-model and /unforce-model are SYNCHRONOUS by design.
+	// The async enqueuePinUpsert path drops on semaphore saturation, which here
+	// would leave Postgres holding the old active forced pin while the client
+	// gets a "cleared" acknowledgment — a subsequent loadPin would evict the
+	// in-proc expired entry and resurrect the stale row from Postgres. These
+	// are explicit user commands, not hot-path turns; an extra DB round-trip is
+	// acceptable to guarantee the pin state matches the acknowledgment.
 	var msg string
 	if cmd.Clear {
-		if s.pinStore != nil {
-			// Write an immediately-expired pin so loadPin sees a miss on the next turn.
-			// The cache entry is evicted synchronously; the DB row is updated async.
-			if s.pinCache != nil {
-				s.pinCache.Remove(pinCacheKey)
+		if s.pinStore != nil && installationID != uuid.Nil {
+			expired := sessionpin.Pin{
+				SessionKey:     sessionKey,
+				Role:           role,
+				InstallationID: installationID,
+				Provider:       "",
+				Model:          "",
+				Reason:         "user_unforced",
+				TurnCount:      1,
+				PinnedUntil:    time.Now().Add(-time.Second),
 			}
-			if installationID != uuid.Nil {
-				expired := sessionpin.Pin{
-					SessionKey:     sessionKey,
-					Role:           role,
-					InstallationID: installationID,
-					Provider:       "",
-					Model:          "",
-					Reason:         "user_unforced",
-					TurnCount:      1,
-					PinnedUntil:    time.Now().Add(-time.Second),
-				}
-				s.enqueuePinUpsert(expired, pinCacheKey)
+			// context.Background(): the request ctx may be canceled by the
+			// time the synthetic response has been written. Upserting on a
+			// canceled context would leave Postgres holding the prior pin.
+			if err := s.pinStore.Upsert(context.Background(), expired); err != nil {
+				log.Error("/unforce-model: pin store upsert failed", "err", err)
+				return err
 			}
+		}
+		// Evict the in-proc cache entry AFTER Postgres is updated so a racing
+		// reader can't repopulate the LRU from a stale Postgres row.
+		if s.pinCache != nil {
+			s.pinCache.Remove(pinCacheKey)
 		}
 		msg = "✦ **Weave Router** → force-model cleared · resuming automatic model selection\n\n"
 		// Debug (not Info) per router logging rules: session_key_hex is a stable
@@ -91,18 +103,24 @@ func (s *Service) handleForceModelCommand(
 		)
 	} else {
 		provider := inferProviderForModel(cmd.Model)
+		forced := sessionpin.Pin{
+			SessionKey:     sessionKey,
+			Role:           role,
+			InstallationID: installationID,
+			Provider:       provider,
+			Model:          cmd.Model,
+			Reason:         translate.ReasonUserForceModel,
+			TurnCount:      1,
+			PinnedUntil:    time.Now().Add(pinSessionTTL),
+		}
 		if s.pinStore != nil && installationID != uuid.Nil {
-			forced := sessionpin.Pin{
-				SessionKey:     sessionKey,
-				Role:           role,
-				InstallationID: installationID,
-				Provider:       provider,
-				Model:          cmd.Model,
-				Reason:         translate.ReasonUserForceModel,
-				TurnCount:      1,
-				PinnedUntil:    time.Now().Add(pinSessionTTL),
+			if err := s.pinStore.Upsert(context.Background(), forced); err != nil {
+				log.Error("/force-model: pin store upsert failed", "err", err)
+				return err
 			}
-			s.enqueuePinUpsert(forced, pinCacheKey)
+		}
+		if s.pinCache != nil {
+			s.pinCache.Add(pinCacheKey, forced)
 		}
 		msg = fmt.Sprintf("✦ **Weave Router** → force-model applied: %s (%s) · use /unforce-model to clear\n\n", cmd.Model, provider)
 		log.Debug("/force-model: session pin set",
