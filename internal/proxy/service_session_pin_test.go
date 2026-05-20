@@ -17,6 +17,7 @@ import (
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/sessionpin"
+	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -788,4 +789,73 @@ func TestService_TierClamp_StaleFlagClearedOnUnclampedFinal(t *testing.T) {
 	// Implicit: by passing through without clamp, the log would record
 	// tier_clamped=false / pre_clamp_model="" — the regression would
 	// have left a stale true here from a prior-stage clamp.
+}
+
+// TestService_UserForcedPin_TierClampDoesNotOverwritePin guards a regression
+// where clampToCeiling on a user-forced pin caused refreshPin to persist the
+// clamped (cheaper) model back into the pin, permanently losing the user's
+// /force-model choice after a single turn. The current turn's dispatch may
+// downgrade, but the stored pin must retain the original directive so a
+// subsequent higher-tier request resumes the forced model.
+func TestService_UserForcedPin_TierClampDoesNotOverwritePin(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderAnthropic,
+		Model:       "claude-opus-4-7", // High tier; user forced
+		Reason:      translate.ReasonUserForceModel,
+		PinnedUntil: time.Now().Add(30 * time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
+
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, ceiling capability.Tier) (string, string, bool) {
+		require.Equal(t, capability.TierLow, ceiling, "haiku-request → Low ceiling")
+		return providers.ProviderAnthropic, "claude-haiku-4-5", true
+	})
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
+
+	// This turn is clamped down to the in-ceiling model.
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
+	assert.Equal(t, 0, fr.routeCalls, "user_forced pin must skip the scorer")
+
+	// The refreshed pin must keep the ORIGINAL forced model — not the clamp.
+	waitForUpsert(t, store)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.NotEmpty(t, store.upserts)
+	upserted := store.upserts[len(store.upserts)-1]
+	assert.Equal(t, "claude-opus-4-7", upserted.Model, "tier clamp must not overwrite the user's forced model in the pin")
+	assert.Equal(t, providers.ProviderAnthropic, upserted.Provider)
+	assert.Equal(t, translate.ReasonUserForceModel, upserted.Reason, "reason must remain user_forced for the next-turn exact-match")
+}
+
+// TestService_UserForcedPin_IneligibleProviderFallsThrough covers the BYOK
+// provider-eligibility check: a forced pin whose provider is not in the
+// per-request EnabledProviders set must NOT be served. Otherwise the router
+// dispatches a turn to a provider the request has no credentials for,
+// resulting in a 401 / silent unauthenticated upstream call.
+func TestService_UserForcedPin_IneligibleProviderFallsThrough(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderOpenAI, // forced provider NOT in EnabledProviders
+		Model:       "gpt-5",
+		Reason:      translate.ReasonUserForceModel,
+		PinnedUntil: time.Now().Add(30 * time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
+	// newPinSvc only registers Anthropic, so EnabledProviders == {anthropic}.
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "ineligible-provider forced pin must fall through to the scorer")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "must dispatch to the eligible provider, not gpt-5/openai")
 }

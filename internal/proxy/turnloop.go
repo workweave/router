@@ -174,23 +174,39 @@ func (s *Service) runTurnLoop(
 	// The pin was written by /force-model and stays active until /unforce-model
 	// clears it, at which point the pin is expired and this branch is not taken.
 	//
-	// Two invariants maintained here:
+	// Invariants maintained here:
 	//   1. Excluded-model policy is still enforced: if the forced model has been
 	//      added to the installation exclusion list since the pin was written, fall
 	//      through to normal routing so the exclusion takes effect immediately.
-	//   2. The forced reason is preserved after clampToCeiling: clampToCeiling
-	//      appends "+tier_clamp" to the reason, which would break the exact-match
-	//      on the next turn. Reset it to ReasonUserForceModel before refreshing.
+	//   2. Provider eligibility is enforced per-request. In BYOK mode the request's
+	//      EnabledProviders may not contain the pinned provider (e.g. the user
+	//      forced gpt-5 but the current request only carries Anthropic BYOK creds).
+	//      Falling through to normal routing avoids a guaranteed 401/unauthenticated
+	//      upstream call.
+	//   3. The user's original forced model is preserved across turns. clampToCeiling
+	//      may downgrade the decision for this turn (and appends "+tier_clamp" to
+	//      the reason), but the pin is refreshed with the ORIGINAL pin decision so
+	//      a transient ceiling never permanently overwrites the user's directive.
 	if pinFound && pin.Reason == translate.ReasonUserForceModel {
-		if _, excluded := req.ExcludedModels[pin.Model]; !excluded {
+		_, excluded := req.ExcludedModels[pin.Model]
+		_, providerEnabled := req.EnabledProviders[pin.Provider]
+		providerEligible := req.EnabledProviders == nil || providerEnabled
+		if !excluded && providerEligible {
 			decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
 			decision.Reason = translate.ReasonUserForceModel
 			res.Decision = decision
 			res.StickyHit = true
 			res.PinTier = "user_forced"
-			s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, decision)
+			s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, pinDecision(pin))
 			return res, nil
 		}
+		// Forced pin is no longer servable on this request (excluded by policy
+		// or pinned provider not in EnabledProviders/BYOK). Treat it as missing
+		// so downstream sticky branches don't dispatch to an unauthorized
+		// provider. The pin row remains in storage — a later request whose
+		// EnabledProviders includes the forced provider will resume serving it.
+		pinFound = false
+		pin = sessionpin.Pin{}
 	}
 
 	// Tool-result turns are mid-turn continuations. Re-routing them on
