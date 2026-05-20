@@ -33,11 +33,20 @@ func TestParseForceModelCommand_ForceModel(t *testing.T) {
 			wantStripped: "Please help me with this.",
 		},
 		{
-			name:         "command with leading text",
-			input:        "Please help me.\n/force-model gemini-2.5-pro",
-			wantModel:    "gemini-2.5-pro",
+			// Security guard: a /force-model anywhere other than the leading
+			// non-empty line is ignored. Pasted content (snippets, transcripts,
+			// log dumps) frequently contains lines starting with "/" and must
+			// not silently rewrite session routing.
+			name:      "command after leading text is ignored",
+			input:     "Please help me.\n/force-model gemini-2.5-pro",
+			wantFound: false,
+		},
+		{
+			name:         "leading blank lines before command",
+			input:        "\n\n/force-model claude-opus-4-7\nthen help",
+			wantModel:    "claude-opus-4-7",
 			wantFound:    true,
-			wantStripped: "Please help me.",
+			wantStripped: "then help",
 		},
 		{
 			name:      "no command",

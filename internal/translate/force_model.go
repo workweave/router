@@ -95,14 +95,19 @@ func (env *RequestEnvelope) extractForceModelFromMessages() (ForceModelResult, b
 	}
 }
 
-// parseForceModelCommand scans text line-by-line for a /force-model or
-// /unforce-model directive. Returns the parsed result, whether found, and
-// the text with the command line removed.
+// parseForceModelCommand scans text for a /force-model or /unforce-model
+// directive on the first non-empty line. Restricting to the leading line is a
+// deliberate guard: pasted content (snippets, transcripts) frequently contains
+// strings starting with "/" that would otherwise silently rewrite session
+// routing without explicit user intent.
 func parseForceModelCommand(text string) (res ForceModelResult, found bool, stripped string) {
 	lines := strings.Split(text, "\n")
 	cmdIdx := -1
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
 		if after, ok := strings.CutPrefix(trimmed, "/force-model "); ok {
 			model := strings.TrimSpace(after)
 			if model != "" {
@@ -110,14 +115,12 @@ func parseForceModelCommand(text string) (res ForceModelResult, found bool, stri
 				found = true
 				cmdIdx = i
 			}
-			break
-		}
-		if trimmed == "/unforce-model" {
+		} else if trimmed == "/unforce-model" {
 			res = ForceModelResult{Clear: true}
 			found = true
 			cmdIdx = i
-			break
 		}
+		break
 	}
 	if !found {
 		return ForceModelResult{}, false, text

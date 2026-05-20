@@ -81,7 +81,11 @@ func (s *Service) handleForceModelCommand(
 			}
 		}
 		msg = "✦ **Weave Router** → force-model cleared · resuming automatic model selection\n\n"
-		log.Info("/unforce-model: session pin cleared",
+		// Debug (not Info) per router logging rules: session_key_hex is a stable
+		// per-session identifier and this fires on every command use. The Info
+		// signal "a session pin was cleared" isn't a major business event worth
+		// emitting at default verbosity.
+		log.Debug("/unforce-model: session pin cleared",
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
 			"role", role,
 		)
@@ -101,7 +105,7 @@ func (s *Service) handleForceModelCommand(
 			s.enqueuePinUpsert(forced, pinCacheKey)
 		}
 		msg = fmt.Sprintf("✦ **Weave Router** → force-model applied: %s (%s) · use /unforce-model to clear\n\n", cmd.Model, provider)
-		log.Info("/force-model: session pin set",
+		log.Debug("/force-model: session pin set",
 			"model", cmd.Model,
 			"provider", provider,
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
