@@ -33,6 +33,13 @@ func TestParseForceModelCommand_ForceModel(t *testing.T) {
 			wantStripped: "Please help me with this.",
 		},
 		{
+			name:         "command with same-line trailing prompt",
+			input:        "/force-model gpt-5 help me debug this",
+			wantModel:    "gpt-5",
+			wantFound:    true,
+			wantStripped: "help me debug this",
+		},
+		{
 			// Security guard: a /force-model anywhere other than the leading
 			// non-empty line is ignored. Pasted content (snippets, transcripts,
 			// log dumps) frequently contains lines starting with "/" and must

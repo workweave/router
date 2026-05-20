@@ -2,6 +2,7 @@ package proxy_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -486,7 +487,18 @@ func TestService_SessionPin_OpenAI_ForceModelCommandSetsPin(t *testing.T) {
 	assert.Equal(t, "gpt-5", store.upserts[0].Model)
 	assert.Equal(t, providers.ProviderOpenAI, store.upserts[0].Provider)
 	assert.Equal(t, translate.ReasonUserForceModel, store.upserts[0].Reason)
-	assert.Contains(t, rec.Body.String(), "force-model applied: gpt-5")
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "chat.completion", resp["object"])
+	choices, ok := resp["choices"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, choices)
+	first, ok := choices[0].(map[string]any)
+	require.True(t, ok)
+	msg, ok := first["message"].(map[string]any)
+	require.True(t, ok)
+	content, _ := msg["content"].(string)
+	assert.Contains(t, content, "force-model applied: gpt-5")
 }
 
 func TestService_SessionPin_OpenAI_UnforceModelCommandClearsPin(t *testing.T) {
@@ -511,7 +523,42 @@ func TestService_SessionPin_OpenAI_UnforceModelCommandClearsPin(t *testing.T) {
 	assert.Equal(t, "user_unforced", store.upserts[0].Reason)
 	assert.Empty(t, store.upserts[0].Provider)
 	assert.Empty(t, store.upserts[0].Model)
-	assert.Contains(t, rec.Body.String(), "force-model cleared")
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "chat.completion", resp["object"])
+	choices, ok := resp["choices"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, choices)
+	first, ok := choices[0].(map[string]any)
+	require.True(t, ok)
+	msg, ok := first["message"].(map[string]any)
+	require.True(t, ok)
+	content, _ := msg["content"].(string)
+	assert.Contains(t, content, "force-model cleared")
+}
+
+func TestService_SessionPin_OpenAI_ForceModelCommandStreamShape(t *testing.T) {
+	const forceStreamBody = `{
+		"model":"gpt-4o",
+		"stream":true,
+		"messages":[
+			{"role":"user","content":"/force-model gpt-5"}
+		]
+	}`
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-4o", Reason: "cluster"}}
+	svc := newOpenAIPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(forceStreamBody), rec, httpReq))
+
+	assert.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
+	body := rec.Body.String()
+	assert.Contains(t, body, `"object":"chat.completion.chunk"`)
+	assert.Contains(t, body, "data: [DONE]")
+	assert.NotContains(t, body, `"type":"message"`, "must not emit Anthropic wire format on OpenAI ingress")
 }
 
 func TestService_SessionPin_OpenAI_ToolResultShortCircuit(t *testing.T) {

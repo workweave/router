@@ -93,6 +93,9 @@ func (s *Service) handleForceModelCommand(
 			s.pinCache.Remove(pinCacheKey)
 		}
 		msg = "✦ **Weave Router** → force-model cleared · resuming automatic model selection\n\n"
+		if env.SourceFormat() == translate.FormatOpenAI {
+			msg = "Weave Router: force-model cleared; resuming automatic model selection"
+		}
 		// Debug (not Info) per router logging rules: session_key_hex is a stable
 		// per-session identifier and this fires on every command use. The Info
 		// signal "a session pin was cleared" isn't a major business event worth
@@ -123,6 +126,9 @@ func (s *Service) handleForceModelCommand(
 			s.pinCache.Add(pinCacheKey, forced)
 		}
 		msg = fmt.Sprintf("✦ **Weave Router** → force-model applied: %s (%s) · use /unforce-model to clear\n\n", cmd.Model, provider)
+		if env.SourceFormat() == translate.FormatOpenAI {
+			msg = fmt.Sprintf("Weave Router: force-model applied: %s (%s). Use /unforce-model to clear.", cmd.Model, provider)
+		}
 		log.Debug("/force-model: session pin set",
 			"model", cmd.Model,
 			"provider", provider,
@@ -131,7 +137,12 @@ func (s *Service) handleForceModelCommand(
 		)
 	}
 
-	return writeSyntheticAnthropicResponse(w, env, msg)
+	switch env.SourceFormat() {
+	case translate.FormatOpenAI:
+		return writeSyntheticOpenAIResponse(w, env, msg)
+	default:
+		return writeSyntheticAnthropicResponse(w, env, msg)
+	}
 }
 
 // writeSyntheticAnthropicResponse writes a minimal Anthropic Messages API
@@ -217,8 +228,106 @@ func writeSyntheticAnthropicSSE(w http.ResponseWriter, msgID, text string) error
 	return nil
 }
 
+// writeSyntheticOpenAIResponse writes a minimal OpenAI Chat Completions
+// response without hitting an upstream. Handles both streaming and
+// non-streaming request shapes.
+func writeSyntheticOpenAIResponse(w http.ResponseWriter, env *translate.RequestEnvelope, text string) error {
+	respID := fmt.Sprintf("chatcmpl_router_cmd_%x", time.Now().UnixNano())
+	if env.Stream() {
+		return writeSyntheticOpenAISSE(w, respID, text)
+	}
+	return writeSyntheticOpenAIJSON(w, respID, text)
+}
+
+func writeSyntheticOpenAIJSON(w http.ResponseWriter, respID, text string) error {
+	outTokens := len(text) / 4
+	resp := map[string]any{
+		"id":      respID,
+		"object":  "chat.completion",
+		"created": time.Now().Unix(),
+		"model":   "weave-router",
+		"choices": []any{
+			map[string]any{
+				"index": 0,
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": text,
+				},
+				"finish_reason": "stop",
+			},
+		},
+		"usage": map[string]any{
+			"prompt_tokens":     0,
+			"completion_tokens": outTokens,
+			"total_tokens":      outTokens,
+		},
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal synthetic openai response: %w", err)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, writeErr := w.Write(body)
+	return writeErr
+}
+
+func writeSyntheticOpenAISSE(w http.ResponseWriter, respID, text string) error {
+	w.Header().Set("Content-Type", "text/event-stream")
+	flusher, _ := w.(http.Flusher)
+	bw := bufio.NewWriterSize(w, 4096)
+	created := time.Now().Unix()
+	chunkStart := mustMarshalJSON(map[string]any{
+		"id":      respID,
+		"object":  "chat.completion.chunk",
+		"created": created,
+		"model":   "weave-router",
+		"choices": []any{
+			map[string]any{
+				"index": 0,
+				"delta": map[string]any{
+					"role":    "assistant",
+					"content": text,
+				},
+				"finish_reason": nil,
+			},
+		},
+	})
+	chunkStop := mustMarshalJSON(map[string]any{
+		"id":      respID,
+		"object":  "chat.completion.chunk",
+		"created": created,
+		"model":   "weave-router",
+		"choices": []any{
+			map[string]any{
+				"index":         0,
+				"delta":         map[string]any{},
+				"finish_reason": "stop",
+			},
+		},
+	})
+	events := []string{
+		openAISSEData(chunkStart),
+		openAISSEData(chunkStop),
+		openAISSEData("[DONE]"),
+	}
+	for _, ev := range events {
+		bw.WriteString(ev)
+	}
+	if err := bw.Flush(); err != nil {
+		return err
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
+	return nil
+}
+
 func sseEvent(eventType, data string) string {
 	return "event: " + eventType + "\ndata: " + data + "\n\n"
+}
+
+func openAISSEData(data string) string {
+	return "data: " + data + "\n\n"
 }
 
 func mustMarshalJSON(v any) string {

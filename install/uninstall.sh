@@ -160,9 +160,11 @@ if [ "$target" = "codex" ]; then
   # entries in prompts/ alone. The dir itself is dropped only if empty after.
   codex_prompts_dir="$codex_dir/prompts"
   if [ -d "$codex_prompts_dir" ]; then
+    refuse_if_symlink "$codex_prompts_dir"
     for cmd in force-model unforce-model; do
       cmd_file="$codex_prompts_dir/$cmd.md"
       if [ -f "$cmd_file" ]; then
+        refuse_if_symlink "$cmd_file"
         rm -f "$cmd_file"
         ok "Removed $cmd_file"
       fi
@@ -288,9 +290,11 @@ done
 # unrelated user commands.
 commands_dir="$(dirname "$settings_file")/commands"
 if [ -d "$commands_dir" ]; then
+  refuse_if_symlink "$commands_dir"
   for cmd in force-model unforce-model; do
     cmd_file="$commands_dir/$cmd.md"
     if [ -f "$cmd_file" ]; then
+      refuse_if_symlink "$cmd_file"
       rm -f "$cmd_file"
       ok "Removed $cmd_file"
     fi

@@ -4,7 +4,7 @@
 // published tarball is self-contained. Keeps a single source of truth for
 // the shell installer.
 
-const { copyFileSync, chmodSync, mkdirSync, readdirSync } = require("node:fs");
+const { copyFileSync, chmodSync, mkdirSync, readdirSync, lstatSync, realpathSync } = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
@@ -25,10 +25,20 @@ for (const f of files) {
 // script makes the bundle self-contained for `npx @workweave/router`.
 const commandsSrc = path.join(installDir, "commands");
 const commandsDst = path.join(root, "commands");
+const commandsSrcReal = realpathSync(commandsSrc);
 mkdirSync(commandsDst, { recursive: true });
 for (const f of readdirSync(commandsSrc)) {
   if (!f.endsWith(".md")) continue;
-  copyFileSync(path.join(commandsSrc, f), path.join(commandsDst, f));
+  const src = path.join(commandsSrc, f);
+  const stat = lstatSync(src);
+  if (stat.isSymbolicLink()) {
+    throw new Error(`refusing to package symlinked command file: ${src}`);
+  }
+  const srcReal = realpathSync(src);
+  if (!srcReal.startsWith(commandsSrcReal + path.sep)) {
+    throw new Error(`refusing to package command outside commands dir: ${src}`);
+  }
+  copyFileSync(srcReal, path.join(commandsDst, f));
   console.log(`copied commands/${f}`);
 }
 

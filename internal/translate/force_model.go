@@ -103,15 +103,19 @@ func (env *RequestEnvelope) extractForceModelFromMessages() (ForceModelResult, b
 func parseForceModelCommand(text string) (res ForceModelResult, found bool, stripped string) {
 	lines := strings.Split(text, "\n")
 	cmdIdx := -1
+	cmdTail := ""
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
 		if after, ok := strings.CutPrefix(trimmed, "/force-model "); ok {
-			model := strings.TrimSpace(after)
-			if model != "" {
-				res = ForceModelResult{Model: model}
+			parts := strings.Fields(strings.TrimSpace(after))
+			if len(parts) > 0 {
+				res = ForceModelResult{Model: parts[0]}
+				if len(parts) > 1 {
+					cmdTail = strings.Join(parts[1:], " ")
+				}
 				found = true
 				cmdIdx = i
 			}
@@ -125,8 +129,11 @@ func parseForceModelCommand(text string) (res ForceModelResult, found bool, stri
 	if !found {
 		return ForceModelResult{}, false, text
 	}
-	remaining := make([]string, 0, len(lines)-1)
+	remaining := make([]string, 0, len(lines))
 	remaining = append(remaining, lines[:cmdIdx]...)
+	if cmdTail != "" {
+		remaining = append(remaining, cmdTail)
+	}
 	remaining = append(remaining, lines[cmdIdx+1:]...)
 	stripped = strings.TrimSpace(strings.Join(remaining, "\n"))
 	return res, true, stripped
