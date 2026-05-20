@@ -97,6 +97,23 @@ func TestParseForceModelCommand_UnforceModel(t *testing.T) {
 	assert.Empty(t, res.Model)
 }
 
+func TestExtractForceModelCommand_OpenAIFormat(t *testing.T) {
+	body := mustMarshalJSON(t, map[string]any{
+		"model": "gpt-4o",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "/force-model gpt-5\nhelp me."},
+		},
+	})
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+
+	res, found := env.ExtractForceModelCommand()
+	require.True(t, found)
+	assert.Equal(t, "gpt-5", res.Model)
+	assert.False(t, res.Clear)
+	assert.Equal(t, "help me.", lastOpenAIUserMessageText(t, env))
+}
+
 func TestExtractForceModelCommand_ArrayContent(t *testing.T) {
 	body := mustMarshalJSON(t, map[string]any{
 		"model": "claude-sonnet-4-6",
@@ -205,4 +222,22 @@ func mustMarshalJSON(t *testing.T, v any) []byte {
 	b, err := json.Marshal(v)
 	require.NoError(t, err)
 	return b
+}
+
+func lastOpenAIUserMessageText(t *testing.T, env *translate.RequestEnvelope) string {
+	t.Helper()
+	prep, err := env.PrepareOpenAI(nil, translate.EmitOptions{TargetModel: "gpt-4o"})
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &body))
+	msgs, _ := body["messages"].([]any)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		msg, _ := msgs[i].(map[string]any)
+		if msg["role"] == "user" {
+			content, _ := msg["content"].(string)
+			return content
+		}
+	}
+	return ""
 }
