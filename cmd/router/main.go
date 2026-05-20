@@ -521,6 +521,33 @@ func main() {
 	// it nil (planner then treats every pin as still routable).
 	availableModels := resolveAvailableModels(availableProviders, logger)
 
+	// Loud scorer-fallback degradation policy. Default ON for selfhosted: a
+	// transient on-box embedder hiccup (GC pause, loaded box) must not 503 a
+	// developer's in-flight coding session. Default OFF for managed: the eval
+	// harness's regression detection relies on the strict
+	// ErrClusterUnavailable → 503 path, and managed prod should opt in only
+	// once ops trust the routing.degraded alert. ROUTER_SCORER_FALLBACK
+	// overrides per-mode: "requested" forces on, "off" forces off. The
+	// fallback is never silent — it serves the client's requested model (not a
+	// cheap default) and emits an ERROR log + routing.degraded span attr +
+	// x-router-degraded header, so regressions stay alertable.
+	scorerFallbackDefault := deploymentMode == server.DeploymentModeSelfHosted
+	scorerFallback := scorerFallbackDefault
+	scorerFallbackSource := "deployment_mode_default"
+	switch raw := strings.TrimSpace(config.GetOr("ROUTER_SCORER_FALLBACK", "")); raw {
+	case "":
+		// Unset → per-deployment-mode default.
+	case "requested":
+		scorerFallback = true
+		scorerFallbackSource = "env"
+	case "off":
+		scorerFallback = false
+		scorerFallbackSource = "env"
+	default:
+		logger.Warn("Invalid ROUTER_SCORER_FALLBACK (expected \"requested\" or \"off\"); using per-deployment-mode default", "value", raw, "default", scorerFallbackDefault)
+	}
+	logger.Info("Scorer fallback policy", "enabled", scorerFallback, "deployment_mode", string(deploymentMode), "source", scorerFallbackSource)
+
 	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithByokOnly(byokOnly).
 		WithDeploymentKeyedProviders(deploymentEligible).
@@ -532,7 +559,8 @@ func main() {
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels).
 		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
-		WithBillingService(billingSvc)
+		WithBillingService(billingSvc).
+		WithScorerFallback(scorerFallback)
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
 	// Fail loud if a deployed model is missing from the tier table;

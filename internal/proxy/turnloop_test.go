@@ -13,6 +13,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
@@ -375,4 +376,117 @@ func (recordingTelemetry) GetTelemetryRows(ctx context.Context, installationID s
 }
 func (recordingTelemetry) GetTelemetryRowsAll(ctx context.Context, from, to time.Time, limit int32) ([]proxy.TelemetryRow, error) {
 	return nil, nil
+}
+
+// newFallbackSvc builds a pin-store-less Service whose scorer always fails
+// with the given error, so the scorer-fallback policy is the only thing
+// that can keep the turn alive. Returns the fake upstream so callers can
+// assert dispatch happened (or didn't).
+func newFallbackSvc(fr *fakeRouter, enabled bool) (*proxy.Service, *fakeProvider) {
+	fp := &fakeProvider{}
+	svc := proxy.NewService(
+		fr,
+		map[string]providers.Client{providers.ProviderAnthropic: fp},
+		nil, false, nil, nil, false,
+		providers.ProviderAnthropic, "claude-haiku-4-5", nil,
+	).WithScorerFallback(enabled)
+	return svc, fp
+}
+
+// TestTurnLoop_ScorerFallbackServesRequestedModel is the core user-facing
+// guarantee: a transient scorer outage serves the client's explicitly
+// requested model instead of 503-ing the session, and does so loudly
+// (decision reason + x-router-degraded header).
+func TestTurnLoop_ScorerFallbackServesRequestedModel(t *testing.T) {
+	fr := &fakeRouter{err: cluster.ErrClusterUnavailable}
+	svc, fp := newFallbackSvc(fr, true)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"),
+		"fallback must serve the client's requested model, not a cheap default")
+	assert.Equal(t, providers.ProviderAnthropic, rec.Header().Get("x-router-provider"))
+	assert.Contains(t, rec.Header().Get("x-router-decision"), "scorer_unavailable_fallback")
+	assert.Equal(t, "scorer_unavailable", rec.Header().Get("x-router-degraded"),
+		"degradation must be loud, not silent")
+	require.Len(t, fp.proxyBodies, 1, "the turn must still reach the upstream")
+}
+
+// TestTurnLoop_ScorerFallbackDisabledSurfacesSentinel proves the policy is
+// opt-out: with fallback disabled the sentinel still propagates so the API
+// layer maps it to 503 (strict fail-closed, the managed/eval default).
+func TestTurnLoop_ScorerFallbackDisabledSurfacesSentinel(t *testing.T) {
+	fr := &fakeRouter{err: cluster.ErrClusterUnavailable}
+	svc, fp := newFallbackSvc(fr, false)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	err := svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, cluster.ErrClusterUnavailable),
+		"disabled fallback must surface the sentinel for the 503 mapping")
+	assert.Empty(t, fp.proxyBodies, "no upstream dispatch when routing hard-fails")
+	assert.Empty(t, rec.Header().Get("x-router-degraded"))
+}
+
+// TestTurnLoop_ScorerFallbackIgnoresNoEligibleProvider guards the scope
+// boundary: ErrNoEligibleProvider is a configuration error the fallback
+// cannot fix (the requested model hits the same provider constraint), so
+// it must NOT be papered over.
+func TestTurnLoop_ScorerFallbackIgnoresNoEligibleProvider(t *testing.T) {
+	fr := &fakeRouter{err: cluster.ErrNoEligibleProvider}
+	svc, fp := newFallbackSvc(fr, true)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	err := svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, cluster.ErrNoEligibleProvider),
+		"a config error must not be converted into a degraded success")
+	assert.Empty(t, fp.proxyBodies)
+}
+
+// TestTurnLoop_ScorerFallbackUnknownModelStillFails: a requested model with
+// no catalog binding has nowhere faithful to go, so the original sentinel
+// must stand rather than guessing a provider.
+func TestTurnLoop_ScorerFallbackUnknownModelStillFails(t *testing.T) {
+	fr := &fakeRouter{err: cluster.ErrClusterUnavailable}
+	svc, fp := newFallbackSvc(fr, true)
+
+	body := `{"model":"totally-unknown-model-xyz","system":"s","messages":[{"role":"user","content":"hi"}]}`
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	err := svc.ProxyMessages(ctx, []byte(body), rec, httpReq)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, cluster.ErrClusterUnavailable),
+		"no catalog binding → no faithful target → original 503 stands")
+	assert.Empty(t, fp.proxyBodies)
+}
+
+// TestTurnLoop_ScorerFallbackSkipsPinWrite: a degraded blip must never
+// become a sticky pin, or it would contaminate later healthy turns for the
+// rest of the session TTL.
+func TestTurnLoop_ScorerFallbackSkipsPinWrite(t *testing.T) {
+	store := newFakePinStore() // no existing pin
+	fr := &fakeRouter{err: cluster.ErrClusterUnavailable}
+	svc := newPinSvc(fr, store).WithScorerFallback(true)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Empty(t, store.upserts, "a degraded turn must not be persisted as a sticky pin")
 }

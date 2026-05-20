@@ -228,6 +228,18 @@ func TestRoutingMarkerFor_DropsProviderEvenWhenSet(t *testing.T) {
 	assert.Contains(t, got, "· best pick for this turn")
 }
 
+func TestRoutingMarkerFor_ScorerFallbackIsHonest(t *testing.T) {
+	got := routingMarkerFor(turnLoopResult{
+		Decision:       router.Decision{Model: "claude-opus-4-7", Provider: "anthropic"},
+		ScorerFallback: true,
+		DegradedReason: "scorer_unavailable",
+	})
+	assert.Contains(t, got, "✦ **Weave Router** → claude-opus-4-7")
+	assert.Contains(t, got, "routing degraded — scorer unavailable, served your requested model")
+	assert.NotContains(t, got, "best pick for this turn",
+		"the marker must not claim a smart pick when the scorer actually failed")
+}
+
 func TestHumanReasonFromPlanner_UnknownCodeIsSilenced(t *testing.T) {
 	// Unknown codes return empty so a new planner reason can't leak its
 	// snake_case label into the user-facing marker.

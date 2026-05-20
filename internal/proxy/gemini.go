@@ -89,6 +89,9 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	w.Header().Set("x-router-decision", decision.Reason)
 	w.Header().Set("x-router-provider", decision.Provider)
 	w.Header().Set("x-router-model", decision.Model)
+	if routeRes.ScorerFallback {
+		w.Header().Set("x-router-degraded", routeRes.DegradedReason)
+	}
 
 	reqPricing := otel.Lookup(s.baselineFor(feats.Model))
 	actPricing := otel.Lookup(decision.Model)

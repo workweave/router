@@ -101,6 +101,13 @@ type Service struct {
 	// each completed upstream call. Wired only in managed mode; the
 	// composition root leaves this nil for selfhosted deployments.
 	billing *billing.Service
+	// scorerFallback enables the loud, intent-preserving degradation policy:
+	// when the cluster scorer is unavailable, serve the client's requested
+	// model (with a routing.degraded signal + x-router-degraded header)
+	// instead of returning 503. Default on for selfhosted, off for managed
+	// so the eval harness's regression detection stays strict. See
+	// scorerFallbackDecision in turnloop.go.
+	scorerFallback bool
 }
 
 // pinSessionTTL mirrors Anthropic's prompt-cache TTL on Sonnet/Haiku/Opus 4.5+
@@ -156,6 +163,9 @@ func clampNote(res turnLoopResult) string {
 // routingReasonShort returns a short user-facing reason for the routing
 // decision, or empty when the underlying code is internal recovery noise.
 func routingReasonShort(res turnLoopResult) string {
+	if res.ScorerFallback {
+		return "⚠ routing degraded — scorer unavailable, served your requested model"
+	}
 	if res.HardPinned {
 		return "pinned for compaction / sub-agent"
 	}
@@ -390,6 +400,17 @@ func (s *Service) usageRequired() bool {
 // that depleted its balance is 402'd before reaching the proxy.
 func (s *Service) WithBillingService(b *billing.Service) *Service {
 	s.billing = b
+	return s
+}
+
+// WithScorerFallback enables the loud, intent-preserving degradation policy.
+// When true and the cluster scorer is unavailable, the orchestrator serves
+// the client's explicitly-requested model (loudly: ERROR log + routing.degraded
+// span attr + x-router-degraded header + degraded user marker) instead of
+// returning 503. False preserves strict fail-closed behavior. The composition
+// root defaults this on for selfhosted and off for managed.
+func (s *Service) WithScorerFallback(enabled bool) *Service {
+	s.scorerFallback = enabled
 	return s
 }
 
@@ -720,6 +741,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	w.Header().Set("x-router-decision", decision.Reason)
 	w.Header().Set("x-router-provider", decision.Provider)
 	w.Header().Set("x-router-model", decision.Model)
+	if routeRes.ScorerFallback {
+		w.Header().Set("x-router-degraded", routeRes.DegradedReason)
+	}
 
 	p, provErr := s.provider(decision.Provider)
 	if provErr != nil {
@@ -949,8 +973,11 @@ func sessionPinCacheKey(key [sessionpin.SessionKeyLen]byte, role string) string 
 	return hex.EncodeToString(key[:]) + ":" + role
 }
 
-// applyPlannerAttrs stamps planner and handover attributes onto a span
-// attribute builder. Safe when the planner didn't run (uses "skipped" outcome).
+// applyPlannerAttrs stamps planner, handover, and routing-degradation
+// attributes onto a span attribute builder. Safe when the planner didn't run
+// (uses "skipped" outcome). routing.degraded is the alertable signal for the
+// loud scorer-fallback path: ops key an alert on routing.degraded=true so a
+// scorer regression surfaces louder than a 503 lost in client-retry noise.
 func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilder {
 	outcome := plannerOutcomeAttr(res)
 	b.String("planner.outcome", outcome).
@@ -964,7 +991,9 @@ func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilde
 		Bool("handover.invoked", res.Handover.Invoked).
 		Int64("handover.latency_ms", res.Handover.LatencyMS).
 		Int64("handover.summary_tokens", int64(res.Handover.SummaryTokens)).
-		Bool("handover.fallback_to_trim", res.Handover.FallbackToTrim)
+		Bool("handover.fallback_to_trim", res.Handover.FallbackToTrim).
+		Bool("routing.degraded", res.ScorerFallback).
+		String("routing.degraded_reason", res.DegradedReason)
 	return b
 }
 
@@ -1502,6 +1531,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	w.Header().Set("x-router-decision", decision.Reason)
 	w.Header().Set("x-router-provider", decision.Provider)
 	w.Header().Set("x-router-model", decision.Model)
+	if routeRes.ScorerFallback {
+		w.Header().Set("x-router-degraded", routeRes.DegradedReason)
+	}
 
 	reqPricing := otel.Lookup(s.baselineFor(feats.Model))
 	actPricing := otel.Lookup(decision.Model)

@@ -37,6 +37,10 @@ The per-turn flow is more than "scorer → dispatch". Pinned session, planner ve
 
 The provider-backed `Summarizer` implementation for handover lives in [`handover.go`](handover.go); the inner-ring `handover` package only defines the contract. On summarizer timeout or error, proxy falls back to `handover.TrimLastN`.
 
+## Scorer-unavailable degradation
+
+When the cluster scorer returns `cluster.ErrClusterUnavailable` (embed timeout/error, dim mismatch, NaN argmax), `runTurnLoop` does not unconditionally 503. With `WithScorerFallback(true)` (composition root default: **on** for selfhosted, **off** for managed), `scorerFallbackDecision` (in [`turnloop.go`](turnloop.go)) serves the client's _explicitly requested_ model, resolved via `catalog.ResolveBinding` against the request's enabled-provider set. Intent-preserving (not a cheap default) and **loud, never silent**: ERROR log, `routing.degraded` OTel span attr, `x-router-degraded` response header, and a visibly degraded user-facing marker. The degraded turn skips the planner and is **not** written as a session pin (a transient blip must not become sticky). Scope: `ErrClusterUnavailable` only — `ErrNoEligibleProvider` is a config error the fallback can't fix (still 4xx); a requested model with no catalog binding still 503s. Why this doesn't reintroduce the masking the heuristic-fallback removal fixed: [`../router/cluster/CLAUDE.md`](../router/cluster/CLAUDE.md) → "Don't add fail-open fallbacks _in this package_".
+
 ## Translation
 
 `proxy.Service` is the **only caller of [`../translate`](../translate)**. Keep providers ignorant of cross-format concerns. See [translate/CLAUDE.md](../translate/CLAUDE.md) for the recipe.
@@ -50,3 +54,5 @@ Provider adapters call back into `proxy.OnUpstreamMeta` so streaming responses r
 - **Don't move provider-call logic into planner.** Planner must remain pure so EV math is provable. Anything network-touching goes in `proxy.Service`.
 - **Don't add a handover path that doesn't time out.** `Summarizer` contract says implementations MUST respect the context deadline. Falling back to `TrimLastN` on timeout is correct, not a bug.
 - **Don't cache streaming responses.** Streaming bypasses cache on purpose — captured bytes would be post-translation SSE frames, and lookup latency budget is hostile to first-token-time. If you think this should change, write a doc first.
+- **Don't make the scorer-unavailable fallback silent or a fixed cheap default.** It must stay intent-preserving (the caller's requested model) and loud (ERROR log + `routing.degraded` span attr + `x-router-degraded` header + degraded marker). Silently serving a cheap default is exactly the regression-masking the heuristic-fallback removal fixed.
+- **Don't pin or run the planner on a degraded turn.** A scorer-unavailable fallback must return before `writeNewPin`/planner — otherwise a transient blip becomes a sticky pin that contaminates later healthy turns for the session TTL.

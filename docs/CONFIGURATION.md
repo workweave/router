@@ -69,14 +69,22 @@ Set `DATABASE_URL` directly, or compose it from the individual vars:
 | `ROUTER_EMBED_ONLY_USER_MESSAGE`  | `true`                       | Feed only user-role text to the embedder. Set `false` to embed the full concatenated turn. |
 | `ROUTER_STICKY_DECISION_TTL_MS`   | `0` (disabled)               | Reuse a routing decision per API key for this many ms. |
 | `ROUTER_SESSION_PIN_ENABLED`      | `true`                       | Pin a session to its first-routed model so multi-turn conversations stay coherent. |
+| `ROUTER_SCORER_FALLBACK`          | `requested` (selfhosted) · `off` (managed) | On scorer-unavailable, serve the client's *requested* model instead of HTTP 503. `requested` = on (loud: ERROR log + `routing.degraded` span attr + `x-router-degraded` header + degraded marker); `off` = strict 503. |
 | `ROUTER_HARD_PIN_MODEL`           | *(none)*                     | Force every request to a specific model, bypassing the cluster scorer. Debugging only. |
 | `ROUTER_HARD_PIN_PROVIDER`        | *(none)*                     | Pair with `ROUTER_HARD_PIN_MODEL`. |
 | `ROUTER_ONNX_ASSETS_DIR`          | `/opt/router/assets`         | Directory containing `model.onnx` + `tokenizer.json`. |
 | `ROUTER_ONNX_LIBRARY_DIR`         | *(system default)*           | Path to `libonnxruntime` (e.g. `/opt/homebrew/lib` on Apple Silicon). |
 
-If the cluster scorer can't run (missing model, embed timeout, etc.), the
-router returns HTTP 503 — it does *not* silently fall back to a default
-model. Failures are loud by design.
+If the cluster scorer can't run (missing model, embed timeout, etc.),
+behavior depends on `ROUTER_SCORER_FALLBACK`. Self-hosted defaults to
+`requested`: the router serves the model the client explicitly asked for so
+an in-flight session survives a transient embedder hiccup — never a silent
+cheap default, and always loud (ERROR log + `routing.degraded` OTel attr +
+`x-router-degraded` header + a degraded response marker). Managed defaults
+to `off`: HTTP 503 with no fallback, keeping the eval harness's regression
+detection strict. `ErrNoEligibleProvider` (no provider for the request) and
+a requested model with no catalog binding always surface as 4xx/503
+regardless — the fallback can't faithfully honor them.
 
 ## BYOK encryption
 

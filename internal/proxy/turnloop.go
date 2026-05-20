@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -62,6 +63,15 @@ type turnLoopResult struct {
 	// PinModel is the model on the loaded pin (stamped independently of
 	// PlannerDecision so log lines can name the from-model even on stay outcomes).
 	PinModel string
+	// ScorerFallback is true when the cluster scorer was unavailable and the
+	// orchestrator served the client's explicitly-requested model instead of
+	// returning 503. Distinct from a normal decision so telemetry, the
+	// x-router-degraded header, and the user-facing marker can surface the
+	// degradation loudly (the scorer contract itself still fails honestly).
+	ScorerFallback bool
+	// DegradedReason names the degradation when ScorerFallback is true; empty
+	// otherwise. Carried onto the OTel span for alerting.
+	DegradedReason string
 	// Handover captures the summarize-or-trim step when the planner switched.
 	Handover handoverOutcome
 }
@@ -153,6 +163,11 @@ func (s *Service) runTurnLoop(
 	if s.pinStore == nil {
 		decision, err := s.router.Route(ctx, req)
 		if err != nil {
+			if fb, ok := s.scorerFallbackDecision(req, err, &res); ok {
+				res.Decision = fb
+				res.Fresh = fb
+				return res, nil
+			}
 			return res, err
 		}
 		decision = s.clampToCeiling(decision, res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
@@ -195,6 +210,15 @@ func (s *Service) runTurnLoop(
 	// Always run the scorer when no pin, or on MainLoop with a pin.
 	fresh, err := s.router.Route(ctx, req)
 	if err != nil {
+		// Degraded routing: serve the client's requested model instead of
+		// 503. Return early so a degraded blip never consults the planner
+		// or becomes a sticky pin (which would contaminate later healthy
+		// turns for the rest of the session TTL).
+		if fb, ok := s.scorerFallbackDecision(req, err, &res); ok {
+			res.Decision = fb
+			res.Fresh = fb
+			return res, nil
+		}
 		return res, err
 	}
 	fresh = s.clampToCeiling(fresh, res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
@@ -322,6 +346,59 @@ func (s *Service) clampToCeiling(decision router.Decision, ceiling catalog.Tier,
 		Model:    m,
 		Reason:   decision.Reason + "+tier_clamp",
 	}
+}
+
+// scorerFallbackDecision implements the loud, intent-preserving degradation
+// policy: when the cluster scorer is unavailable, serve the model the client
+// explicitly requested instead of failing the turn with a 503. This is NOT a
+// silent fail-open — every fallback emits an ERROR log here plus a
+// routing.degraded span attribute and an x-router-degraded response header, so
+// scorer regressions stay alertable instead of being masked (the scorer
+// contract itself still fails honestly with the sentinel). Returns
+// (decision, true) only when:
+//
+//   - the policy is enabled (ROUTER_SCORER_FALLBACK; default on for selfhosted,
+//     off for managed so the eval harness's regression detection is untouched);
+//   - the error is ErrClusterUnavailable (a transient/systemic scorer failure).
+//     ErrNoEligibleProvider is a configuration error the fallback cannot fix —
+//     the requested model hits the same provider constraint — so it is
+//     deliberately NOT caught here and still surfaces as a 4xx;
+//   - the requested model is not on the request's exclusion list (an explicit
+//     exclusion wins over keeping the session alive);
+//   - the requested model resolves to a provider in the request's enabled set
+//     (the same set the scorer gates on, so dispatch + credentials line up).
+//
+// Otherwise returns (_, false) and the caller surfaces the original error.
+func (s *Service) scorerFallbackDecision(req router.Request, routeErr error, res *turnLoopResult) (router.Decision, bool) {
+	if !s.scorerFallback {
+		return router.Decision{}, false
+	}
+	if !errors.Is(routeErr, cluster.ErrClusterUnavailable) {
+		return router.Decision{}, false
+	}
+	if _, excluded := req.ExcludedModels[req.RequestedModel]; excluded {
+		return router.Decision{}, false
+	}
+	binding, ok := catalog.ResolveBinding(req.RequestedModel, req.EnabledProviders)
+	if !ok {
+		// No eligible provider for the requested model — nowhere faithful to
+		// send it, so let the original error stand and 503.
+		return router.Decision{}, false
+	}
+	res.ScorerFallback = true
+	res.DegradedReason = "scorer_unavailable"
+	observability.Get().Error(
+		"Cluster scorer unavailable; serving client-requested model (degraded routing)",
+		"err", routeErr,
+		"requested_model", req.RequestedModel,
+		"resolved_provider", binding.Provider,
+		"turn_type", string(res.TurnType),
+	)
+	return router.Decision{
+		Provider: binding.Provider,
+		Model:    req.RequestedModel,
+		Reason:   "scorer_unavailable_fallback:requested_model",
+	}, true
 }
 
 // loadPin returns the active pin for this session, consulting the in-proc
