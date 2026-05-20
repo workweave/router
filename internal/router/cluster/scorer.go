@@ -21,6 +21,9 @@ var ErrClusterUnavailable = errors.New("cluster: routing unavailable")
 // overlap with boot-time candidates. Callers map to HTTP 4xx.
 var ErrNoEligibleProvider = errors.New("cluster: no eligible provider for request")
 
+// ErrInvalidRoutingKnobs is returned when effective routing knobs fail validation.
+var ErrInvalidRoutingKnobs = errors.New("cluster: invalid routing knobs")
+
 // Config carries the scorer's runtime knobs.
 type Config struct {
 	TopP           int
@@ -39,15 +42,19 @@ func DefaultConfig() Config {
 
 // Scorer is the cluster router for one frozen artifact version.
 type Scorer struct {
-	version    string
-	cfg        Config
-	embed      Embedder
-	centroids  *Centroids
-	rankings   Rankings
-	registry   *ModelRegistry
-	candidates []DeployedEntry
-	models     []string
-	metadata   *ArtifactMetadata // nil if absent; cache threshold source.
+	version         string
+	cfg             Config
+	embed           Embedder
+	centroids       *Centroids
+	rankings        Rankings
+	registry        *ModelRegistry
+	candidates      []DeployedEntry
+	models          []string
+	metadata        *ArtifactMetadata // nil if absent; cache threshold source.
+	isV2            bool
+	qualityMeans    Rankings
+	modelAxes       map[string]ModelAxis
+	medianVerbosity float64
 }
 
 // Version returns the artifact version (e.g. "v0.2").
@@ -127,30 +134,48 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 		models[i] = c.Model
 	}
 
-	// Validate every cluster in [0, K) has a ranking row so a missing
+	// Validate every cluster in [0, K) has a ranking/quality_means row so a missing
 	// cluster can't win top-p at request time and silently contribute zero.
-	for k := 0; k < bundle.Centroids.K; k++ {
-		row, ok := bundle.Rankings[k]
-		if !ok {
-			return nil, fmt.Errorf("cluster %s: rankings missing cluster %d (centroids has K=%d)", bundle.Version, k, bundle.Centroids.K)
+	if bundle.IsV2 {
+		for k := 0; k < bundle.Centroids.K; k++ {
+			row, ok := bundle.QualityMeans[k]
+			if !ok {
+				return nil, fmt.Errorf("cluster %s: quality_means missing cluster %d (centroids has K=%d)", bundle.Version, k, bundle.Centroids.K)
+			}
+			for _, m := range models {
+				if _, ok := row[m]; !ok {
+					return nil, fmt.Errorf("cluster %s: quality_means cluster %d missing model %q", bundle.Version, k, m)
+				}
+			}
 		}
-		for _, m := range models {
-			if _, ok := row[m]; !ok {
-				return nil, fmt.Errorf("cluster %s: rankings cluster %d missing model %q", bundle.Version, k, m)
+	} else {
+		for k := 0; k < bundle.Centroids.K; k++ {
+			row, ok := bundle.Rankings[k]
+			if !ok {
+				return nil, fmt.Errorf("cluster %s: rankings missing cluster %d (centroids has K=%d)", bundle.Version, k, bundle.Centroids.K)
+			}
+			for _, m := range models {
+				if _, ok := row[m]; !ok {
+					return nil, fmt.Errorf("cluster %s: rankings cluster %d missing model %q", bundle.Version, k, m)
+				}
 			}
 		}
 	}
 
 	return &Scorer{
-		version:    bundle.Version,
-		cfg:        cfg,
-		embed:      embed,
-		centroids:  bundle.Centroids,
-		rankings:   bundle.Rankings,
-		registry:   bundle.Registry,
-		candidates: candidates,
-		models:     models,
-		metadata:   bundle.Metadata,
+		version:         bundle.Version,
+		cfg:             cfg,
+		embed:           embed,
+		centroids:       bundle.Centroids,
+		rankings:        bundle.Rankings,
+		registry:        bundle.Registry,
+		candidates:      candidates,
+		models:          models,
+		metadata:        bundle.Metadata,
+		isV2:            bundle.IsV2,
+		qualityMeans:    bundle.QualityMeans,
+		modelAxes:       bundle.ModelAxes,
+		medianVerbosity: bundle.MedianVerbosity,
 	}, nil
 }
 
@@ -304,13 +329,241 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 
 	scoreStart := time.Now()
 	topClusters := topPNearest(vec, s.centroids, s.cfg.TopP)
-	scores := make(map[string]float32, len(eligibleModels))
-	for _, k := range topClusters {
-		row := s.rankings[k]
-		for _, m := range eligibleModels {
-			scores[m] += row[m]
+
+	var scores map[string]float32
+	var effectiveKnobsHash uint64
+
+	if s.isV2 {
+		// 1. Resolve Knobs and Validate
+		var activeKnobs DefaultRoutingKnobs
+		if s.metadata != nil && s.metadata.Training.DefaultRoutingKnobs != nil {
+			activeKnobs = *s.metadata.Training.DefaultRoutingKnobs
+		} else {
+			activeKnobs = DefaultRoutingKnobs{
+				Alpha:                make([]float64, s.centroids.K),
+				SpeedWeight:          0.0,
+				OutputCostRatio:      0.0,
+				ExpectedOutputTokens: 2000,
+				PerModelVerbosity:    false,
+			}
+			for i := range activeKnobs.Alpha {
+				activeKnobs.Alpha[i] = 0.53
+			}
+		}
+
+		if req.RoutingKnobs != nil {
+			if req.RoutingKnobs.Alpha != nil {
+				// Sledgehammer behavior: uniformly replace every alpha with the scalar
+				for i := range activeKnobs.Alpha {
+					activeKnobs.Alpha[i] = *req.RoutingKnobs.Alpha
+				}
+			}
+			if req.RoutingKnobs.SpeedWeight != nil {
+				activeKnobs.SpeedWeight = *req.RoutingKnobs.SpeedWeight
+			}
+			if req.RoutingKnobs.OutputCostRatio != nil {
+				activeKnobs.OutputCostRatio = *req.RoutingKnobs.OutputCostRatio
+			}
+			if req.RoutingKnobs.ExpectedOutputTokens != nil {
+				activeKnobs.ExpectedOutputTokens = *req.RoutingKnobs.ExpectedOutputTokens
+			}
+			if req.RoutingKnobs.PerModelVerbosity != nil {
+				activeKnobs.PerModelVerbosity = *req.RoutingKnobs.PerModelVerbosity
+			}
+		}
+
+		// Validate effective knobs
+		if len(activeKnobs.Alpha) != s.centroids.K {
+			return router.Decision{}, fmt.Errorf("%w: alpha vector length %d must equal K=%d", ErrInvalidRoutingKnobs, len(activeKnobs.Alpha), s.centroids.K)
+		}
+		for i, a := range activeKnobs.Alpha {
+			if a < 0 || a > 1 {
+				return router.Decision{}, fmt.Errorf("%w: alpha[%d] (%f) must be in [0, 1]", ErrInvalidRoutingKnobs, i, a)
+			}
+			if a+activeKnobs.SpeedWeight > 1.0+1e-9 {
+				return router.Decision{}, fmt.Errorf("%w: alpha[%d] (%f) + speed_weight (%f) must be <= 1.0", ErrInvalidRoutingKnobs, i, a, activeKnobs.SpeedWeight)
+			}
+			if a > 0.9 {
+				log.Warn("Extreme routing knob: alpha > 0.9", "cluster", i, "alpha", a)
+			}
+			if a+activeKnobs.SpeedWeight > 0.95 {
+				log.Warn("Extreme routing knob: alpha + speed_weight > 0.95", "cluster", i, "alpha", a, "speed_weight", activeKnobs.SpeedWeight)
+			}
+		}
+		if activeKnobs.SpeedWeight < 0 || activeKnobs.SpeedWeight > 1 {
+			return router.Decision{}, fmt.Errorf("%w: speed_weight (%f) must be in [0, 1]", ErrInvalidRoutingKnobs, activeKnobs.SpeedWeight)
+		}
+		if activeKnobs.OutputCostRatio < 0 || activeKnobs.OutputCostRatio > 10 {
+			return router.Decision{}, fmt.Errorf("%w: output_cost_ratio (%f) must be in [0, 10]", ErrInvalidRoutingKnobs, activeKnobs.OutputCostRatio)
+		}
+		if activeKnobs.ExpectedOutputTokens < 0 || activeKnobs.ExpectedOutputTokens > 100000 {
+			return router.Decision{}, fmt.Errorf("%w: expected_output_tokens (%d) must be in [0, 100000]", ErrInvalidRoutingKnobs, activeKnobs.ExpectedOutputTokens)
+		}
+
+		effectiveKnobsHash = ComputeKnobsHash(
+			activeKnobs.Alpha,
+			activeKnobs.SpeedWeight,
+			activeKnobs.OutputCostRatio,
+			activeKnobs.ExpectedOutputTokens,
+			activeKnobs.PerModelVerbosity,
+		)
+
+		// 2. Effective per-model cost (knob-dependent)
+		costs := make(map[string]float64, len(s.models))
+		for _, m := range s.models {
+			axis := s.modelAxes[m]
+			vFactor := 1.0
+			if activeKnobs.PerModelVerbosity && axis.VerbosityTokens != nil && s.medianVerbosity > 0 {
+				vFactor = *axis.VerbosityTokens / s.medianVerbosity
+			}
+			inputPer1K := 0.0
+			if axis.InputPer1KUSD != nil {
+				inputPer1K = *axis.InputPer1KUSD
+			}
+			outputPer1K := 0.0
+			if axis.OutputPer1KUSD != nil {
+				outputPer1K = *axis.OutputPer1KUSD
+			}
+			costs[m] = inputPer1K + activeKnobs.OutputCostRatio*outputPer1K*vFactor
+		}
+
+		// 3. Effective per-model speed
+		speeds := make(map[string]*float64, len(s.models))
+		for _, m := range s.models {
+			axis := s.modelAxes[m]
+			if axis.TTFTSeconds != nil && axis.TPS != nil && *axis.TPS > 0 {
+				val := *axis.TTFTSeconds + float64(activeKnobs.ExpectedOutputTokens) / *axis.TPS
+				speeds[m] = &val
+			} else {
+				speeds[m] = nil
+			}
+		}
+
+		// 4. Normalize over DEPLOYED model set
+		qMin := make(map[int]float32)
+		qMax := make(map[int]float32)
+		for _, k := range topClusters {
+			row := s.qualityMeans[k]
+			first := true
+			for _, m := range s.models {
+				qVal := row[m]
+				if first {
+					qMin[k] = qVal
+					qMax[k] = qVal
+					first = false
+				} else {
+					if qVal < qMin[k] {
+						qMin[k] = qVal
+					}
+					if qVal > qMax[k] {
+						qMax[k] = qVal
+					}
+				}
+			}
+		}
+
+		var cMin, cMax float64
+		firstC := true
+		for _, m := range s.models {
+			cVal := costs[m]
+			if firstC {
+				cMin = cVal
+				cMax = cVal
+				firstC = false
+			} else {
+				if cVal < cMin {
+					cMin = cVal
+				}
+				if cVal > cMax {
+					cMax = cVal
+				}
+			}
+		}
+		cRange := cMax - cMin
+
+		useSpeed := activeKnobs.SpeedWeight > 0
+		var sMin, sMax float64
+		firstS := true
+		for _, m := range s.models {
+			if !useSpeed {
+				break
+			}
+			sPtr := speeds[m]
+			if sPtr == nil {
+				continue
+			}
+			sVal := *sPtr
+			if firstS {
+				sMin = sVal
+				sMax = sVal
+				firstS = false
+			} else {
+				if sVal < sMin {
+					sMin = sVal
+				}
+				if sVal > sMax {
+					sMax = sVal
+				}
+			}
+		}
+		sRange := 0.0
+		if useSpeed && !firstS {
+			sRange = sMax - sMin
+		}
+
+		// 6. Blend per top-P cluster
+		scores = make(map[string]float32, len(eligibleModels))
+		for _, k := range topClusters {
+			row := s.qualityMeans[k]
+			wQ := float32(activeKnobs.Alpha[k])
+			wS := float32(0.0)
+			if useSpeed {
+				wS = float32(activeKnobs.SpeedWeight)
+			}
+			wC := float32(1.0) - wQ - wS
+
+			qRange := qMax[k] - qMin[k]
+
+			for _, m := range eligibleModels {
+				qVal := row[m]
+				qNorm := float32(0.0)
+				if qRange > 0 {
+					qNorm = (qVal - qMin[k]) / qRange
+				}
+
+				cVal := costs[m]
+				cNorm := float32(0.0)
+				if cRange > 0 {
+					cNorm = float32((cVal - cMin) / cRange)
+				}
+
+				sPtr := speeds[m]
+				if sPtr != nil && sRange > 0 {
+					sNorm := float32((*sPtr - sMin) / sRange)
+					blend := wQ*qNorm + wC*(1.0-cNorm) + wS*(1.0-sNorm)
+					scores[m] += blend
+				} else {
+					total := wQ + wC
+					if total > 0 {
+						blend := (wQ/total)*qNorm + (wC/total)*(1.0-cNorm)
+						scores[m] += blend
+					} else {
+						scores[m] += qNorm
+					}
+				}
+			}
+		}
+	} else {
+		// Legacy v1 flow
+		scores = make(map[string]float32, len(eligibleModels))
+		for _, k := range topClusters {
+			row := s.rankings[k]
+			for _, m := range eligibleModels {
+				scores[m] += row[m]
+			}
 		}
 	}
+
 	chosenModel, chosenScore := argmax(scores, eligibleModels)
 	scoreUs := time.Since(scoreStart).Microseconds()
 
@@ -360,6 +613,7 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			CandidateModels:      candidatesCopy,
 			ChosenScore:          chosenScore,
 			ClusterRouterVersion: s.version,
+			EffectiveKnobsHash:   effectiveKnobsHash,
 		},
 	}
 	log.Info(

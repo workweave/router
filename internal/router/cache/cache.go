@@ -83,6 +83,8 @@ type bucketKey struct {
 	installationID string
 	format         Format
 	clusterID      int
+	clusterVersion string
+	knobsHash      uint64
 }
 
 // entryKey is a 16-byte sha256-truncated embedding digest, so we don't
@@ -106,12 +108,12 @@ func (c *Cache) thresholdFor(clusterID int) float32 {
 // Lookup walks buckets for (installation, format, clusterIDs) and
 // returns the first entry whose cosine clears the threshold.
 // embedding must be L2-normalized; clusterIDs order is irrelevant.
-func (c *Cache) Lookup(installationID string, format Format, embedding []float32, clusterIDs []int) (CachedResponse, bool) {
+func (c *Cache) Lookup(installationID string, format Format, embedding []float32, clusterIDs []int, clusterVersion string, knobsHash uint64) (CachedResponse, bool) {
 	if c == nil || len(embedding) == 0 || len(clusterIDs) == 0 {
 		return CachedResponse{}, false
 	}
 	for _, cid := range clusterIDs {
-		bucket := c.bucket(installationID, format, cid, false)
+		bucket := c.bucket(installationID, format, cid, clusterVersion, knobsHash, false)
 		if bucket == nil {
 			continue
 		}
@@ -133,14 +135,14 @@ func (c *Cache) Lookup(installationID string, format Format, embedding []float32
 
 // Store persists a response. clusterID should be one of the routing
 // decision's top-p clusters. Oversized bodies are silently dropped.
-func (c *Cache) Store(installationID string, format Format, embedding []float32, clusterID int, resp CachedResponse) {
+func (c *Cache) Store(installationID string, format Format, embedding []float32, clusterID int, resp CachedResponse, clusterVersion string, knobsHash uint64) {
 	if c == nil || len(embedding) == 0 {
 		return
 	}
 	if len(resp.Body) > c.cfg.MaxBodyBytes {
 		return
 	}
-	bucket := c.bucket(installationID, format, clusterID, true)
+	bucket := c.bucket(installationID, format, clusterID, clusterVersion, knobsHash, true)
 	if bucket == nil {
 		return
 	}
@@ -155,8 +157,14 @@ func (c *Cache) Store(installationID string, format Format, embedding []float32,
 
 // bucket returns the LRU for a key. create=false returns nil for missing
 // buckets (lookup path); create=true allocates lazily.
-func (c *Cache) bucket(installationID string, format Format, clusterID int, create bool) *expirable.LRU[entryKey, *entry] {
-	key := bucketKey{installationID: installationID, format: format, clusterID: clusterID}
+func (c *Cache) bucket(installationID string, format Format, clusterID int, clusterVersion string, knobsHash uint64, create bool) *expirable.LRU[entryKey, *entry] {
+	key := bucketKey{
+		installationID: installationID,
+		format:         format,
+		clusterID:      clusterID,
+		clusterVersion: clusterVersion,
+		knobsHash:      knobsHash,
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	b, ok := c.buckets[key]

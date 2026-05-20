@@ -68,6 +68,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, providers.ProviderGoogle, r.Header),
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
+		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {

@@ -99,6 +99,11 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 					"no provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header")
 				return
 			}
+			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
+				log.Warn("Invalid routing knobs supplied", "err", err)
+				writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+				return
+			}
 			if errors.Is(err, cluster.ErrClusterUnavailable) {
 				log.Error("Cluster routing unavailable", "err", err)
 				c.Header("Retry-After", "1")

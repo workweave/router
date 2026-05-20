@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -105,17 +106,18 @@ func (r *ModelRegistry) Models() []string {
 // ArtifactMetadata is the parsed metadata.yaml. Informational at runtime;
 // routing decisions depend only on centroids + rankings + registry.
 type ArtifactMetadata struct {
-	Version           string             `yaml:"version"`
-	Parent            string             `yaml:"parent,omitempty"`
-	Status            string             `yaml:"status,omitempty"`
-	PromotedDate      string             `yaml:"promoted_date,omitempty"`
-	FrozenDate        string             `yaml:"frozen_date,omitempty"`
-	Embedder          ArtifactEmbedder   `yaml:"embedder"`
-	Training          ArtifactTraining   `yaml:"training"`
-	DeployedProviders []string           `yaml:"deployed_providers,omitempty"`
-	DeployedModels    []string           `yaml:"deployed_models,omitempty"`
-	CostPer1KInputUSD map[string]float64 `yaml:"cost_per_1k_input_usd,omitempty"`
-	Changelog         string             `yaml:"changelog,omitempty"`
+	FormatVersion     int                  `yaml:"format_version,omitempty"`
+	Version           string               `yaml:"version"`
+	Parent            string               `yaml:"parent,omitempty"`
+	Status            string               `yaml:"status,omitempty"`
+	PromotedDate      string               `yaml:"promoted_date,omitempty"`
+	FrozenDate        string               `yaml:"frozen_date,omitempty"`
+	Embedder          ArtifactEmbedder     `yaml:"embedder"`
+	Training          ArtifactTraining     `yaml:"training"`
+	DeployedProviders []string             `yaml:"deployed_providers,omitempty"`
+	DeployedModels    []string             `yaml:"deployed_models,omitempty"`
+	CostPer1KInputUSD map[string]float64   `yaml:"cost_per_1k_input_usd,omitempty"`
+	Changelog         string               `yaml:"changelog,omitempty"`
 	// CacheConfig carries per-version semantic-cache knobs.
 	CacheConfig *ArtifactCacheConfig `yaml:"cache_config,omitempty"`
 }
@@ -132,23 +134,51 @@ type ArtifactEmbedder struct {
 	MaxTokens int    `yaml:"max_tokens"`
 }
 
+type DefaultRoutingKnobs struct {
+	Alpha                []float64 `yaml:"alpha"`
+	SpeedWeight          float64   `yaml:"speed_weight"`
+	OutputCostRatio      float64   `yaml:"output_cost_ratio"`
+	ExpectedOutputTokens int       `yaml:"expected_output_tokens"`
+	PerModelVerbosity    bool      `yaml:"per_model_verbosity"`
+}
+
+type RecommendedKnobs struct {
+	Alpha           float64 `yaml:"alpha"`
+	SpeedWeight     float64 `yaml:"speed_weight"`
+	OutputCostRatio float64 `yaml:"output_cost_ratio"`
+}
+
 type ArtifactTraining struct {
-	K               int                `yaml:"k"`
-	TopP            int                `yaml:"top_p"`
-	Alpha           float64            `yaml:"alpha"`
-	Seed            int                `yaml:"seed"`
-	NPrompts        int                `yaml:"n_prompts"`
-	TrainingDataMix map[string]float64 `yaml:"training_data_mix,omitempty"`
+	K                     int                         `yaml:"k"`
+	TopP                  int                         `yaml:"top_p"`
+	Alpha                 float64                     `yaml:"alpha"`
+	Seed                  int                         `yaml:"seed"`
+	NPrompts              int                         `yaml:"n_prompts"`
+	TrainingDataMix       map[string]float64          `yaml:"training_data_mix,omitempty"`
+	DefaultRoutingKnobs   *DefaultRoutingKnobs        `yaml:"default_routing_knobs,omitempty"`
+	RecommendedUIDefaults map[string]*RecommendedKnobs `yaml:"recommended_ui_defaults,omitempty"`
+}
+
+type ModelAxis struct {
+	InputPer1KUSD     *float64 `json:"input_per_1k_usd"`
+	OutputPer1KUSD    *float64 `json:"output_per_1k_usd"`
+	TTFTSeconds       *float64 `json:"ttft_s"`
+	TPS               *float64 `json:"tps"`
+	VerbosityTokens   *float64 `json:"verbosity_tokens"`
 }
 
 // Bundle is one fully-loaded artifact set, held by one Scorer per
 // version; the Multiversion router dispatches between them.
 type Bundle struct {
-	Version   string
-	Centroids *Centroids
-	Rankings  Rankings
-	Registry  *ModelRegistry
-	Metadata  *ArtifactMetadata
+	Version         string
+	Centroids       *Centroids
+	Rankings        Rankings
+	Registry        *ModelRegistry
+	Metadata        *ArtifactMetadata
+	IsV2            bool
+	QualityMeans    Rankings
+	ModelAxes       map[string]ModelAxis
+	MedianVerbosity float64 // Precomputed median verbosity for V2 bundles
 }
 
 // ListVersions returns sorted version directories under artifacts/.
@@ -162,6 +192,20 @@ func ListVersions() ([]string, error) {
 		if !e.IsDir() {
 			continue
 		}
+		if e.Name() == "legacy" {
+			// Traverse the legacy subfolder
+			legacyEntries, err := fs.ReadDir(embeddedArtifacts, "artifacts/legacy")
+			if err != nil {
+				return nil, fmt.Errorf("artifacts: read legacy root: %w", err)
+			}
+			for _, le := range legacyEntries {
+				if !le.IsDir() {
+					continue
+				}
+				versions = append(versions, le.Name())
+			}
+			continue
+		}
 		versions = append(versions, e.Name())
 	}
 	if len(versions) == 0 {
@@ -169,6 +213,14 @@ func ListVersions() ([]string, error) {
 	}
 	sort.Strings(versions)
 	return versions, nil
+}
+
+func bundleDirForVersion(version string) string {
+	p := path.Join("artifacts", version)
+	if _, err := fs.Stat(embeddedArtifacts, p); err == nil {
+		return p
+	}
+	return path.Join("artifacts", "legacy", version)
 }
 
 // ResolveVersion turns a user-supplied version string into a concrete
@@ -189,43 +241,169 @@ func ResolveVersion(requested string) (string, error) {
 		}
 		return ResolveVersion(v)
 	}
-	if _, err := fs.Stat(embeddedArtifacts, path.Join("artifacts", requested)); err != nil {
+	dir := bundleDirForVersion(requested)
+	if _, err := fs.Stat(embeddedArtifacts, dir); err != nil {
 		return "", fmt.Errorf("artifacts: version %q not found: %w", requested, err)
 	}
 	return requested, nil
 }
 
 // LoadBundle reads centroids + rankings + registry + metadata for one
-// version. Version must already be resolved (call ResolveVersion first).
+// version from the embedded artifact tree. Version must already be
+// resolved (call ResolveVersion first).
 func LoadBundle(version string) (*Bundle, error) {
-	dir := path.Join("artifacts", version)
-	rawCentroids, err := fs.ReadFile(embeddedArtifacts, path.Join(dir, "centroids.bin"))
+	dir := bundleDirForVersion(version)
+	return loadBundleFromPath(embeddedArtifacts, version, dir)
+}
+
+// LoadBundleFromDir reads a bundle from an arbitrary on-disk directory
+// instead of the embedded tree. Used by the release-gate diff test
+// (TestV2MatchesV1) and any tooling that needs to load a bundle
+// produced into a temp directory before it's been committed.
+//
+// dir is the directory directly containing centroids.bin / metadata.yaml
+// / etc. The version label is informational only.
+func LoadBundleFromDir(dir string, version string) (*Bundle, error) {
+	return loadBundleFromPath(os.DirFS(dir), version, ".")
+}
+
+// LoadBundleFromFS is the underlying constructor used by both
+// LoadBundle and LoadBundleFromDir. fsys is any fs.FS; subdir is the
+// relative path inside fsys that holds the bundle files.
+func LoadBundleFromFS(fsys fs.FS, version, subdir string) (*Bundle, error) {
+	return loadBundleFromPath(fsys, version, subdir)
+}
+
+func loadBundleFromPath(fsys fs.FS, version, dir string) (*Bundle, error) {
+	rawCentroids, err := fs.ReadFile(fsys, path.Join(dir, "centroids.bin"))
 	if err != nil {
 		return nil, fmt.Errorf("artifacts %s: read centroids.bin: %w", version, err)
-	}
-	rawRankings, err := fs.ReadFile(embeddedArtifacts, path.Join(dir, "rankings.json"))
-	if err != nil {
-		return nil, fmt.Errorf("artifacts %s: read rankings.json: %w", version, err)
-	}
-	rawRegistry, err := fs.ReadFile(embeddedArtifacts, path.Join(dir, "model_registry.json"))
-	if err != nil {
-		return nil, fmt.Errorf("artifacts %s: read model_registry.json: %w", version, err)
 	}
 	centroids, err := loadCentroids(rawCentroids)
 	if err != nil {
 		return nil, fmt.Errorf("artifacts %s: %w", version, err)
 	}
-	rankings, err := loadRankings(rawRankings)
+
+	rawRegistry, err := fs.ReadFile(fsys, path.Join(dir, "model_registry.json"))
 	if err != nil {
-		return nil, fmt.Errorf("artifacts %s: %w", version, err)
+		return nil, fmt.Errorf("artifacts %s: read model_registry.json: %w", version, err)
 	}
 	registry, err := loadRegistry(rawRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("artifacts %s: %w", version, err)
 	}
+
 	// metadata.yaml is best-effort: a bundle without one still routes.
 	var meta *ArtifactMetadata
-	if rawMeta, err := fs.ReadFile(embeddedArtifacts, path.Join(dir, "metadata.yaml")); err == nil {
+	if rawMeta, err := fs.ReadFile(fsys, path.Join(dir, "metadata.yaml")); err == nil {
+		var m ArtifactMetadata
+		if err := yaml.Unmarshal(rawMeta, &m); err != nil {
+			return nil, fmt.Errorf("artifacts %s: parse metadata.yaml: %w", version, err)
+		}
+		meta = &m
+	}
+
+	var isV2 bool
+	var rankings Rankings
+	var qualityMeans Rankings
+	var modelAxes map[string]ModelAxis
+	var medianVerbosity float64 = 1.0
+
+	rawQualityMeans, err := fs.ReadFile(fsys, path.Join(dir, "quality_means.json"))
+	if err == nil {
+		isV2 = true
+		qualityMeans, err = loadQualityMeans(rawQualityMeans)
+		if err != nil {
+			return nil, fmt.Errorf("artifacts %s: %w", version, err)
+		}
+		rawModelAxes, err := fs.ReadFile(fsys, path.Join(dir, "model_axes.json"))
+		if err != nil {
+			return nil, fmt.Errorf("artifacts %s: read model_axes.json: %w", version, err)
+		}
+		modelAxes, err = loadModelAxes(rawModelAxes)
+		if err != nil {
+			return nil, fmt.Errorf("artifacts %s: %w", version, err)
+		}
+
+		// Perform robust load-time validation for v2 format (Fail-Fast)
+		for _, mName := range registry.Models() {
+			if _, ok := modelAxes[mName]; !ok {
+				return nil, fmt.Errorf("artifacts %s: load-time validation failed: model %q missing from model_axes.json", version, mName)
+			}
+			for k := range qualityMeans {
+				if _, ok := qualityMeans[k][mName]; !ok {
+					return nil, fmt.Errorf("artifacts %s: load-time validation failed: model %q missing from quality_means.json for cluster %d", version, mName, k)
+				}
+			}
+		}
+
+		// Precompute median of verbosity tokens over all deployed models that have data
+		var verbosityVals []float64
+		for _, mName := range registry.Models() {
+			axis, ok := modelAxes[mName]
+			if ok && axis.VerbosityTokens != nil {
+				verbosityVals = append(verbosityVals, *axis.VerbosityTokens)
+			}
+		}
+		if len(verbosityVals) > 0 {
+			sort.Float64s(verbosityVals)
+			medianVerbosity = verbosityVals[len(verbosityVals)/2]
+		}
+	} else {
+		// Fallback to v1
+		rawRankings, err := fs.ReadFile(fsys, path.Join(dir, "rankings.json"))
+		if err != nil {
+			return nil, fmt.Errorf("artifacts %s: read rankings.json: %w", version, err)
+		}
+		rankings, err = loadRankings(rawRankings)
+		if err != nil {
+			return nil, fmt.Errorf("artifacts %s: %w", version, err)
+		}
+	}
+
+	return &Bundle{
+		Version:         version,
+		Centroids:       centroids,
+		Rankings:        rankings,
+		Registry:        registry,
+		Metadata:        meta,
+		IsV2:            isV2,
+		QualityMeans:    qualityMeans,
+		ModelAxes:       modelAxes,
+		MedianVerbosity: medianVerbosity,
+	}, nil
+}
+
+// loadBundleV1Only forces v1 (rankings.json) loading even from a
+// directory that also contains quality_means.json. Used by the diff
+// test to construct a v1-shaped Scorer from a dual-format bundle.
+func loadBundleV1Only(fsys fs.FS, version, dir string) (*Bundle, error) {
+	rawCentroids, err := fs.ReadFile(fsys, path.Join(dir, "centroids.bin"))
+	if err != nil {
+		return nil, fmt.Errorf("artifacts %s: read centroids.bin: %w", version, err)
+	}
+	centroids, err := loadCentroids(rawCentroids)
+	if err != nil {
+		return nil, fmt.Errorf("artifacts %s: %w", version, err)
+	}
+	rawRegistry, err := fs.ReadFile(fsys, path.Join(dir, "model_registry.json"))
+	if err != nil {
+		return nil, fmt.Errorf("artifacts %s: read model_registry.json: %w", version, err)
+	}
+	registry, err := loadRegistry(rawRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("artifacts %s: %w", version, err)
+	}
+	rawRankings, err := fs.ReadFile(fsys, path.Join(dir, "rankings.json"))
+	if err != nil {
+		return nil, fmt.Errorf("artifacts %s: read rankings.json: %w", version, err)
+	}
+	rankings, err := loadRankings(rawRankings)
+	if err != nil {
+		return nil, fmt.Errorf("artifacts %s: %w", version, err)
+	}
+	var meta *ArtifactMetadata
+	if rawMeta, err := fs.ReadFile(fsys, path.Join(dir, "metadata.yaml")); err == nil {
 		var m ArtifactMetadata
 		if err := yaml.Unmarshal(rawMeta, &m); err != nil {
 			return nil, fmt.Errorf("artifacts %s: parse metadata.yaml: %w", version, err)
@@ -238,7 +416,14 @@ func LoadBundle(version string) (*Bundle, error) {
 		Rankings:  rankings,
 		Registry:  registry,
 		Metadata:  meta,
+		IsV2:      false,
 	}, nil
+}
+
+// LoadBundleV1Only reads a bundle from disk forcing v1 (rankings.json)
+// even if v2 files coexist. Used by the diff test driver.
+func LoadBundleV1Only(dir, version string) (*Bundle, error) {
+	return loadBundleV1Only(os.DirFS(dir), version, ".")
 }
 
 func loadCentroids(raw []byte) (*Centroids, error) {
@@ -301,6 +486,53 @@ func loadRankings(raw []byte) (Rankings, error) {
 		out[k] = models
 	}
 	return out, nil
+}
+
+type qualityMeansFile struct {
+	Meta         interface{}               `json:"meta,omitempty"`
+	QualityMeans map[string]map[string]float32 `json:"quality_means"`
+}
+
+func loadQualityMeans(raw []byte) (Rankings, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("quality_means.json is empty")
+	}
+	var f qualityMeansFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return nil, fmt.Errorf("quality_means.json parse: %w", err)
+	}
+	if len(f.QualityMeans) == 0 {
+		return nil, fmt.Errorf("quality_means.json has no clusters")
+	}
+	out := make(Rankings, len(f.QualityMeans))
+	for kStr, models := range f.QualityMeans {
+		var k int
+		_, err := fmt.Sscanf(kStr, "%d", &k)
+		if err != nil || fmt.Sprintf("%d", k) != kStr {
+			return nil, fmt.Errorf("quality_means.json: non-integer cluster key %q", kStr)
+		}
+		if len(models) == 0 {
+			return nil, fmt.Errorf("quality_means.json: cluster %d has no models", k)
+		}
+		out[k] = models
+	}
+	return out, nil
+}
+
+type modelAxesFile struct {
+	Meta interface{}          `json:"meta,omitempty"`
+	Axes map[string]ModelAxis `json:"axes"`
+}
+
+func loadModelAxes(raw []byte) (map[string]ModelAxis, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("model_axes.json is empty")
+	}
+	var f modelAxesFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return nil, fmt.Errorf("model_axes.json parse: %w", err)
+	}
+	return f.Axes, nil
 }
 
 // CheapestModel returns the lowest cost-per-1k-input entry among

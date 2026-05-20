@@ -55,9 +55,9 @@ func TestCache_IdenticalEmbeddingHits(t *testing.T) {
 	emb := l2Normalize([]float32{1, 0, 0, 0})
 	want := sampleResponse(`{"id":"resp-1"}`)
 
-	c.Store("inst-1", cache.FormatAnthropic, emb, 0, want)
+	c.Store("inst-1", cache.FormatAnthropic, emb, 0, want, "v1", 0)
 
-	got, hit := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0, 1, 2, 3})
+	got, hit := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0, 1, 2, 3}, "v1", 0)
 	require.True(t, hit, "identical embedding should hit")
 	assert.Equal(t, want.Body, got.Body)
 	assert.Equal(t, want.StatusCode, got.StatusCode)
@@ -78,9 +78,9 @@ func TestCache_NearDuplicateHitsAboveThreshold(t *testing.T) {
 	}
 	require.Greater(t, sim, float32(0.95), "test fixture cosine must be above the threshold")
 
-	c.Store("inst-1", cache.FormatAnthropic, a, 0, sampleResponse(`{"id":"resp-near"}`))
+	c.Store("inst-1", cache.FormatAnthropic, a, 0, sampleResponse(`{"id":"resp-near"}`), "v1", 0)
 
-	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, b, []int{0})
+	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, b, []int{0}, "v1", 0)
 	assert.True(t, hit, "near-duplicate above threshold should hit")
 }
 
@@ -93,9 +93,9 @@ func TestCache_BelowThresholdMisses(t *testing.T) {
 	// Distant — cosine ~0.5.
 	b := blendVectors(a, l2Normalize([]float32{0, 1, 0, 0}), 0.5)
 
-	c.Store("inst-1", cache.FormatAnthropic, a, 0, sampleResponse(`{"id":"resp"}`))
+	c.Store("inst-1", cache.FormatAnthropic, a, 0, sampleResponse(`{"id":"resp"}`), "v1", 0)
 
-	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, b, []int{0})
+	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, b, []int{0}, "v1", 0)
 	assert.False(t, hit, "below-threshold cosine must miss")
 }
 
@@ -110,12 +110,12 @@ func TestCache_PerClusterThresholdOverride(t *testing.T) {
 	a := l2Normalize([]float32{1, 0, 0, 0})
 	b := blendVectors(a, l2Normalize([]float32{0, 1, 0, 0}), 0.7) // cosine ≈ 0.7
 
-	c.Store("inst-1", cache.FormatAnthropic, a, 0, sampleResponse(`{"id":"strict"}`))
-	_, hitStrict := c.Lookup("inst-1", cache.FormatAnthropic, b, []int{0})
+	c.Store("inst-1", cache.FormatAnthropic, a, 0, sampleResponse(`{"id":"strict"}`), "v1", 0)
+	_, hitStrict := c.Lookup("inst-1", cache.FormatAnthropic, b, []int{0}, "v1", 0)
 	assert.False(t, hitStrict, "default 0.99 threshold should reject 0.7 cosine")
 
-	c.Store("inst-1", cache.FormatAnthropic, a, 7, sampleResponse(`{"id":"loose"}`))
-	resp, hitLoose := c.Lookup("inst-1", cache.FormatAnthropic, b, []int{7})
+	c.Store("inst-1", cache.FormatAnthropic, a, 7, sampleResponse(`{"id":"loose"}`), "v1", 0)
+	resp, hitLoose := c.Lookup("inst-1", cache.FormatAnthropic, b, []int{7}, "v1", 0)
 	require.True(t, hitLoose, "cluster 7 override 0.5 threshold should accept 0.7 cosine")
 	assert.Equal(t, []byte(`{"id":"loose"}`), resp.Body)
 }
@@ -124,9 +124,9 @@ func TestCache_BucketIsolationAcrossInstallations(t *testing.T) {
 	c := cache.New(cache.DefaultConfig())
 	emb := l2Normalize([]float32{1, 0, 0, 0})
 
-	c.Store("inst-A", cache.FormatAnthropic, emb, 0, sampleResponse(`{"who":"A"}`))
+	c.Store("inst-A", cache.FormatAnthropic, emb, 0, sampleResponse(`{"who":"A"}`), "v1", 0)
 
-	_, hit := c.Lookup("inst-B", cache.FormatAnthropic, emb, []int{0})
+	_, hit := c.Lookup("inst-B", cache.FormatAnthropic, emb, []int{0}, "v1", 0)
 	assert.False(t, hit, "embeddings must not cross installations")
 }
 
@@ -134,9 +134,9 @@ func TestCache_BucketIsolationAcrossFormats(t *testing.T) {
 	c := cache.New(cache.DefaultConfig())
 	emb := l2Normalize([]float32{1, 0, 0, 0})
 
-	c.Store("inst-1", cache.FormatAnthropic, emb, 0, sampleResponse(`{"fmt":"anth"}`))
+	c.Store("inst-1", cache.FormatAnthropic, emb, 0, sampleResponse(`{"fmt":"anth"}`), "v1", 0)
 
-	_, hit := c.Lookup("inst-1", cache.FormatOpenAI, emb, []int{0})
+	_, hit := c.Lookup("inst-1", cache.FormatOpenAI, emb, []int{0}, "v1", 0)
 	assert.False(t, hit, "cached Anthropic response must not replay for OpenAI")
 }
 
@@ -146,13 +146,13 @@ func TestCache_TTLExpiry(t *testing.T) {
 	c := cache.New(cfg)
 
 	emb := l2Normalize([]float32{1, 0, 0, 0})
-	c.Store("inst-1", cache.FormatAnthropic, emb, 0, sampleResponse(`{"id":"old"}`))
+	c.Store("inst-1", cache.FormatAnthropic, emb, 0, sampleResponse(`{"id":"old"}`), "v1", 0)
 
-	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0})
+	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v1", 0)
 	require.True(t, hit, "fresh entry should hit")
 
 	time.Sleep(80 * time.Millisecond)
-	_, hit = c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0})
+	_, hit = c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v1", 0)
 	assert.False(t, hit, "expired entry must miss")
 }
 
@@ -161,9 +161,9 @@ func TestCache_LookupScansAllTopPClusters(t *testing.T) {
 	emb := l2Normalize([]float32{1, 0, 0, 0})
 
 	// Store in cluster 5; top-p lookup must find it via the scan.
-	c.Store("inst-1", cache.FormatAnthropic, emb, 5, sampleResponse(`{"id":"in-5"}`))
+	c.Store("inst-1", cache.FormatAnthropic, emb, 5, sampleResponse(`{"id":"in-5"}`), "v1", 0)
 
-	got, hit := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{2, 3, 5, 7})
+	got, hit := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{2, 3, 5, 7}, "v1", 0)
 	require.True(t, hit, "top-p sweep should locate entries in any listed cluster")
 	assert.Equal(t, []byte(`{"id":"in-5"}`), got.Body)
 }
@@ -179,9 +179,9 @@ func TestCache_StoreDropsOversizedBodies(t *testing.T) {
 		StatusCode: http.StatusOK,
 		Headers:    http.Header{},
 		Body:       bigBody,
-	})
+	}, "v1", 0)
 
-	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0})
+	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v1", 0)
 	assert.False(t, hit, "oversized bodies must not be stored")
 }
 
@@ -189,17 +189,45 @@ func TestCache_NilCacheLookupAndStoreAreSafe(t *testing.T) {
 	// Disabled-mode: callers pass nil and expect no-op.
 	var c *cache.Cache
 
-	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, []float32{1}, []int{0})
+	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, []float32{1}, []int{0}, "v1", 0)
 	assert.False(t, hit, "nil cache must report a miss without panicking")
 
-	c.Store("inst-1", cache.FormatAnthropic, []float32{1}, 0, sampleResponse(`x`))
+	c.Store("inst-1", cache.FormatAnthropic, []float32{1}, 0, sampleResponse(`x`), "v1", 0)
 }
 
 func TestCache_EmptyEmbeddingMisses(t *testing.T) {
 	c := cache.New(cache.DefaultConfig())
-	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, nil, []int{0})
+	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, nil, []int{0}, "v1", 0)
 	assert.False(t, hit, "empty embedding must miss")
-	c.Store("inst-1", cache.FormatAnthropic, nil, 0, sampleResponse(`x`))
-	_, hit = c.Lookup("inst-1", cache.FormatAnthropic, l2Normalize([]float32{1, 0, 0, 0}), []int{0})
+	c.Store("inst-1", cache.FormatAnthropic, nil, 0, sampleResponse(`x`), "v1", 0)
+	_, hit = c.Lookup("inst-1", cache.FormatAnthropic, l2Normalize([]float32{1, 0, 0, 0}), []int{0}, "v1", 0)
 	assert.False(t, hit, "empty-embedding store must be a no-op")
+}
+
+func TestBucketKeyIsolatesByVersion(t *testing.T) {
+	c := cache.New(cache.DefaultConfig())
+	emb := l2Normalize([]float32{1, 0, 0, 0})
+
+	c.Store("inst-1", cache.FormatAnthropic, emb, 0, sampleResponse(`{"v":"0.51"}`), "v0.51", 0)
+
+	_, hitOther := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v0.52", 0)
+	assert.False(t, hitOther, "different cluster version must not share cache bucket")
+
+	got, hitSame := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v0.51", 0)
+	require.True(t, hitSame, "same cluster version must hit")
+	assert.Equal(t, []byte(`{"v":"0.51"}`), got.Body)
+}
+
+func TestBucketKeyIsolatesByKnobs(t *testing.T) {
+	c := cache.New(cache.DefaultConfig())
+	emb := l2Normalize([]float32{1, 0, 0, 0})
+
+	c.Store("inst-1", cache.FormatAnthropic, emb, 0, sampleResponse(`{"alpha":"0.5"}`), "v0.53", 0xDEADBEEF)
+
+	_, hitOther := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v0.53", 0xCAFEBABE)
+	assert.False(t, hitOther, "different effective knobs hash must not share cache bucket")
+
+	got, hitSame := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v0.53", 0xDEADBEEF)
+	require.True(t, hitSame, "same effective knobs hash must hit")
+	assert.Equal(t, []byte(`{"alpha":"0.5"}`), got.Body)
 }
