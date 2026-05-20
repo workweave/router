@@ -29,7 +29,7 @@ for *every* request: using a tiny on-box embedder, not a vibes-based prompt.
 [![Tests](https://github.com/workweave/router/actions/workflows/test.yml/badge.svg)](https://github.com/workweave/router/actions/workflows/test.yml)
 [![License: ELv2](https://img.shields.io/badge/License-ELv2-00BFB3.svg)](https://www.elastic.co/licensing/elastic-license)
 
-**🥇 #1 on the [RouterArena leaderboard](https://github.com/RouteWorks/RouterArena)** [^2] — Acc-Cost Arena **74.61**.
+**🥇 #1 on the [RouterArena leaderboard](https://github.com/RouteWorks/RouterArena)** [^2] — Acc-Cost Arena **76.09**.
 
 *Built by [Weave](https://www.workweave.ai): The #1 engineering intelligence platform,
 loved by Robinhood, PostHog, Reducto, and hundreds of others.*
