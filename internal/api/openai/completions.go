@@ -88,7 +88,7 @@ func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
 		Email:       proxy.NormalizeEmail(h.Get("X-Weave-User-Email")),
 		DisplayName: proxy.NormalizeDisplayName(h.Get("X-Weave-User-Name")),
 		UserAgent:   h.Get("User-Agent"),
-		ClientApp:   h.Get("X-App"),
+		ClientApp:   proxy.NormalizeClientApp(h.Get("X-App"), h.Get("User-Agent")),
 	}
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
 }

@@ -121,6 +121,45 @@ func NormalizeEmail(s string) string {
 	return s
 }
 
+// Canonical client_app values. Kept in one place so telemetry, dashboards,
+// and tests don't drift on capitalization.
+const (
+	ClientAppClaudeCode = "claude-code"
+	ClientAppCodex      = "codex"
+	ClientAppCursor     = "cursor"
+	ClientAppGeminiCLI  = "gemini-cli"
+)
+
+// MaxClientAppLen bounds the X-App header. Canonical values are short
+// (claude-code, codex, cursor); longer values are header smuggling attempts.
+const MaxClientAppLen = 32
+
+// NormalizeClientApp returns the canonical client_app for a request. If the
+// caller sent an explicit X-App header within length bounds, we trust it
+// (lower-cased). Otherwise we fall back to a coarse User-Agent classifier so
+// older installs that don't yet send X-App still get attributed. Returns ""
+// when neither signal is recognized — telemetry leaves the column NULL.
+func NormalizeClientApp(xApp, userAgent string) string {
+	xApp = strings.ToLower(strings.TrimSpace(xApp))
+	if xApp != "" && len(xApp) <= MaxClientAppLen {
+		return xApp
+	}
+	ua := strings.ToLower(userAgent)
+	switch {
+	case ua == "":
+		return ""
+	case strings.Contains(ua, "claude-cli"):
+		return ClientAppClaudeCode
+	case strings.Contains(ua, "codex_cli") || strings.Contains(ua, "codex-cli") || strings.HasPrefix(ua, "codex/"):
+		return ClientAppCodex
+	case strings.Contains(ua, "cursor"):
+		return ClientAppCursor
+	case strings.Contains(ua, "gemini-cli") || strings.Contains(ua, "google-genai"):
+		return ClientAppGeminiCLI
+	}
+	return ""
+}
+
 // MaxDisplayNameLen bounds the free-form display name. 128 mirrors the
 // installer-side cap; longer values almost certainly indicate a header
 // smuggling attempt rather than a real name.

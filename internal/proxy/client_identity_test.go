@@ -162,6 +162,32 @@ func TestResolveUserFromContext_EmailOnlyReachesEmailUpsert(t *testing.T) {
 	assert.Equal(t, "user-from-email", auth.UserIDFrom(ctx))
 }
 
+func TestNormalizeClientApp(t *testing.T) {
+	cases := []struct {
+		name      string
+		xApp      string
+		userAgent string
+		want      string
+	}{
+		{"explicit header wins", "codex", "claude-cli/2.0.1", proxy.ClientAppCodex},
+		{"explicit header lowercased", "Claude-Code", "", proxy.ClientAppClaudeCode},
+		{"explicit header trimmed", "  cursor  ", "", proxy.ClientAppCursor},
+		{"oversized header falls through to UA", strings.Repeat("a", proxy.MaxClientAppLen+1), "claude-cli/2.0.1", proxy.ClientAppClaudeCode},
+		{"UA claude-cli", "", "claude-cli/2.0.1 (cli, win32)", proxy.ClientAppClaudeCode},
+		{"UA codex_cli_rs", "", "codex_cli_rs/0.39.0 (darwin)", proxy.ClientAppCodex},
+		{"UA cursor", "", "Cursor/0.42.1 (darwin x64)", proxy.ClientAppCursor},
+		{"UA gemini-cli", "", "gemini-cli/1.0.0 (linux)", proxy.ClientAppGeminiCLI},
+		{"UA unknown returns empty", "", "curl/8.4.0", ""},
+		{"both empty returns empty", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := proxy.NormalizeClientApp(tc.xApp, tc.userAgent)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestResolveUserFromContext_BothMissingIsNoOp(t *testing.T) {
 	repo := &captureUserRepo{}
 	svc := newTestAuthSvc(repo)

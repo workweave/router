@@ -395,6 +395,10 @@ write_codex_config() {
   if [ -n "$block_name" ]; then
     headers_parts="${headers_parts}, \"X-Weave-User-Name\" = \"${esc_name}\""
   fi
+  # Tag the client so telemetry can attribute traffic to Codex vs other CLIs
+  # that share the same router key. The router otherwise has to guess from
+  # User-Agent.
+  headers_parts="${headers_parts}, \"X-App\" = \"codex\""
   local headers_line="http_headers = { ${headers_parts} }"
 
   local block
@@ -1299,6 +1303,7 @@ fi
 if [ -n "$user_name" ]; then
   custom_headers="$custom_headers"$'\n'"X-Weave-User-Name: $user_name"
 fi
+custom_headers="$custom_headers"$'\n'"X-App: claude-code"
 
 if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
   jq -n --arg url "$base_url" --arg sl "$statusline_path_for_settings" '{
