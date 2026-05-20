@@ -1336,6 +1336,43 @@ else
 fi
 ok "Settings written to $settings_file"
 
+# ---------- slash commands ----------
+#
+# Claude Code intercepts any prompt starting with `/` as a local slash command.
+# `/force-model claude-opus-4-7` would otherwise resolve to "Unknown command"
+# and never reach the router. Drop wrapper markdown files into
+# <scope>/.claude/commands/ so the typed slash command renders to a prompt of
+# the same form, which the router-side parser then picks up as the first line
+# of the user message.
+commands_src_dir=""
+for candidate in \
+  "$script_dir/commands" \
+  "$script_dir/../commands"
+do
+  if [ -d "$candidate" ]; then
+    commands_src_dir="$candidate"
+    break
+  fi
+done
+
+if [ "$target" = "claude" ] && [ -n "$commands_src_dir" ]; then
+  commands_dst_dir="$settings_dir/commands"
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$commands_dst_dir"
+  fi
+  mkdir -p "$commands_dst_dir"
+  for cmd in force-model unforce-model; do
+    src="$commands_src_dir/$cmd.md"
+    dst="$commands_dst_dir/$cmd.md"
+    [ -f "$src" ] || continue
+    if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+      refuse_if_symlink "$dst"
+    fi
+    cp "$src" "$dst"
+  done
+  ok "Slash commands written to $commands_dst_dir (/force-model, /unforce-model)"
+fi
+
 if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
   jq -n --arg header "$custom_headers" '{
     env: { ANTHROPIC_CUSTOM_HEADERS: $header }

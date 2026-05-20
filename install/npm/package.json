@@ -10,6 +10,7 @@
     "install.sh",
     "uninstall.sh",
     "cc-statusline.sh",
+    "commands/",
     "README.md",
     "LICENSE"
   ],

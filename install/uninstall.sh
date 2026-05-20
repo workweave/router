@@ -269,6 +269,22 @@ for f in "$statusline_file"; do
   fi
 done
 
+# Remove only the slash command files this installer owns; leave any other
+# files in commands/ alone. The directory itself stays if it still contains
+# unrelated user commands.
+commands_dir="$(dirname "$settings_file")/commands"
+if [ -d "$commands_dir" ]; then
+  for cmd in force-model unforce-model; do
+    cmd_file="$commands_dir/$cmd.md"
+    if [ -f "$cmd_file" ]; then
+      rm -f "$cmd_file"
+      ok "Removed $cmd_file"
+    fi
+  done
+  # Clean up the dir only if we left nothing behind.
+  rmdir "$commands_dir" 2>/dev/null || true
+fi
+
 if [ -n "$install_dir" ]; then
   ok "Weave Router uninstalled from $install_dir."
 else
