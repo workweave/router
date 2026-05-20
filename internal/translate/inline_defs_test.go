@@ -135,6 +135,41 @@ func TestInlineSchemaDefs_noDefsIsNoop(t *testing.T) {
 	}
 }
 
+func TestInlineSchemaDefs_resolvesRefWithSiblingKeys(t *testing.T) {
+	// Pydantic v2 / OpenAPI 3.1 (and MCP servers built on them, e.g. Intuit
+	// QuickBooks) emit a $ref alongside annotation siblings like description
+	// or title. Per JSON Schema Draft 7 siblings to $ref are ignored, so the
+	// $ref must still be resolved — otherwise $defs gets stripped and the
+	// upstream sees an unresolvable reference (Fireworks 400s with
+	// "Error resolving schema reference '#/$defs/X'").
+	in := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"payment_link_type": map[string]any{
+				"$ref":        "#/$defs/PaymentLinkType",
+				"description": "Type of payment link",
+			},
+		},
+		"$defs": map[string]any{
+			"PaymentLinkType": map[string]any{
+				"enum": []any{"link", "ach"},
+				"type": "string",
+			},
+		},
+	}
+	out := inlineSchemaDefs(in).(map[string]any)
+	if _, ok := out["$defs"]; ok {
+		t.Fatalf("$defs not stripped: %#v", out)
+	}
+	got := out["properties"].(map[string]any)["payment_link_type"].(map[string]any)
+	if _, hasRef := got["$ref"]; hasRef {
+		t.Fatalf("unresolved $ref remains alongside siblings: %#v", got)
+	}
+	if got["type"] != "string" {
+		t.Fatalf("target type not inlined: %#v", got)
+	}
+}
+
 func TestInlineSchemaDefs_inlineCopiesNotShares(t *testing.T) {
 	// Two refs to the same def should produce independent copies, so a later
 	// in-place mutation (e.g. sanitizeOpenAIToolSchema) can't bleed across.

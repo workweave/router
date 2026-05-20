@@ -570,6 +570,12 @@ func writeOpenAIMaxTokensFromAnthropic(jw *jsonWriter, body []byte, opts EmitOpt
 // before forwarding keeps the schema self-contained so it works on every
 // OpenAI-compat backend regardless of how its validator handles $ref.
 //
+// A $ref with sibling keys (e.g. {"$ref": "#/$defs/X", "description": "..."},
+// emitted by Pydantic v2 / OpenAPI 3.1 / many MCP servers including Intuit
+// QuickBooks) is resolved the same way: per JSON Schema Draft 7, siblings to
+// $ref are ignored, so dropping them on substitution is spec-compliant and
+// keeps the upstream from seeing an unresolvable ref after $defs is stripped.
+//
 // Cyclic refs are left intact (no infinite recursion); unresolvable refs are
 // left intact so the upstream can surface its own clearer error.
 func inlineSchemaDefs(node any) any {
@@ -599,7 +605,7 @@ func inlineSchemaDefs(node any) any {
 func resolveSchemaRefs(node any, defs map[string]any, visited map[string]struct{}) any {
 	switch v := node.(type) {
 	case map[string]any:
-		if ref, ok := v["$ref"].(string); ok && len(v) == 1 {
+		if ref, ok := v["$ref"].(string); ok {
 			name := strings.TrimPrefix(ref, "#/")
 			if _, cycle := visited[name]; cycle {
 				return v
