@@ -1,0 +1,31 @@
+internal/router/catalog/catalog_test.go
+  s_26343b7a14df66::t_80defb569664cc 34-35
+internal/router/catalog/catalog.go
+  s_26343b7a14df66::t_146f93577ed363 226-240,245-246,250-251,255-256,260-261,265-266
+internal/router/cluster/artifacts/v0.38/model_registry.json
+  s_26343b7a14df66::t_da818c7f365278 3,20-21,23-25
+internal/router/cluster/artifacts/v0.38/metadata.yaml
+  s_26343b7a14df66::t_51a1240058e955 29-31,69
+install/cc-statusline.sh
+  s_26343b7a14df66::t_ea7ec8dbcf1095 137,164,166-167,175,202,204-205
+internal/router/cluster/artifacts/v0.38/rankings.json
+  s_26343b7a14df66::t_be1c5f3fe3d4e8 332
+install/install.sh
+  s_26343b7a14df66::t_ea7ec8dbcf1095 595,622,624-625,633,660,662-663
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "66ea7cea6104fcba90fcb58a29b33bbd77a76d26",
+  "prompts": {},
+  "sessions": {
+    "s_26343b7a14df66": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2aa13dfc-2c78-48ac-858e-b5f4e8be7eef",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
