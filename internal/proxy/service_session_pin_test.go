@@ -808,8 +808,8 @@ func TestService_UserForcedPin_TierClampDoesNotOverwritePin(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
 
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, ceiling capability.Tier) (string, string, bool) {
-		require.Equal(t, capability.TierLow, ceiling, "haiku-request → Low ceiling")
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, ceiling catalog.Tier) (string, string, bool) {
+		require.Equal(t, catalog.TierLow, ceiling, "haiku-request → Low ceiling")
 		return providers.ProviderAnthropic, "claude-haiku-4-5", true
 	})
 

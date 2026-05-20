@@ -11,7 +11,7 @@ import (
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
-	"workweave/router/internal/router/capability"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
@@ -52,7 +52,7 @@ func (s *Service) handleForceModelCommand(
 	sessionKey [sessionpin.SessionKeyLen]byte,
 ) error {
 	log := observability.Get()
-	role := roleForTier(capability.TierFor(env.Model()))
+	role := roleForTier(catalog.TierFor(env.Model()))
 	pinCacheKey := sessionPinCacheKey(sessionKey, role)
 
 	// Acknowledgment text is formatted as a routing marker (✦ **Weave Router** → …\n\n)
