@@ -843,11 +843,57 @@ else
   info "No identity set — router traffic will be attributed by account UUID only."
 fi
 
+# ---------- slash command wrappers (shared by both targets) ----------
+#
+# Claude Code intercepts any prompt starting with "/" as a local slash command,
+# so a typed /force-model would resolve to "Unknown command" and never reach
+# the router. Codex CLI does the same (its built-in / menu has its own set).
+# Drop wrapper markdown files into the per-target commands directory so the
+# slash invocation expands locally into a literal "/force-model …" prompt that
+# the router's first-line parser picks up.
+#
+# Layout:
+#   Claude:  <settings_dir>/commands/{force-model,unforce-model}.md  → /force-model
+#   Codex:   <codex_dir>/prompts/{force-model,unforce-model}.md      → /prompts:force-model
+#
+# Files come from install/commands/ in the repo (or the colocated commands/
+# directory the npm package ships alongside install.sh).
+install_slash_commands() {
+  dst_dir="$1"
+  commands_src_dir=""
+  for candidate in \
+    "$script_dir/commands" \
+    "$script_dir/../commands"
+  do
+    if [ -d "$candidate" ]; then
+      commands_src_dir="$candidate"
+      break
+    fi
+  done
+  [ -n "$commands_src_dir" ] || return 0
+
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$dst_dir"
+  fi
+  mkdir -p "$dst_dir"
+  for cmd in force-model unforce-model; do
+    src="$commands_src_dir/$cmd.md"
+    dst="$dst_dir/$cmd.md"
+    [ -f "$src" ] || continue
+    if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+      refuse_if_symlink "$dst"
+    fi
+    cp "$src" "$dst"
+  done
+  ok "Slash commands written to $dst_dir (force-model, unforce-model)"
+}
+
 # ---------- codex install path (dispatch + exit before the Claude-only writes) ----------
 
 if [ "$target" = "codex" ]; then
   write_codex_config "$codex_config_file" "$base_url" "$api_key" "$user_email" "$user_name"
   ok "Codex config written to $codex_config_file"
+  install_slash_commands "$codex_dir/prompts"
 
   # Project scope: ensure the per-teammate config (which holds the router key)
   # is gitignored. The base URL is the same for every teammate, so a
@@ -1336,42 +1382,8 @@ else
 fi
 ok "Settings written to $settings_file"
 
-# ---------- slash commands ----------
-#
-# Claude Code intercepts any prompt starting with `/` as a local slash command.
-# `/force-model claude-opus-4-7` would otherwise resolve to "Unknown command"
-# and never reach the router. Drop wrapper markdown files into
-# <scope>/.claude/commands/ so the typed slash command renders to a prompt of
-# the same form, which the router-side parser then picks up as the first line
-# of the user message.
-commands_src_dir=""
-for candidate in \
-  "$script_dir/commands" \
-  "$script_dir/../commands"
-do
-  if [ -d "$candidate" ]; then
-    commands_src_dir="$candidate"
-    break
-  fi
-done
-
-if [ "$target" = "claude" ] && [ -n "$commands_src_dir" ]; then
-  commands_dst_dir="$settings_dir/commands"
-  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
-    refuse_if_symlink "$commands_dst_dir"
-  fi
-  mkdir -p "$commands_dst_dir"
-  for cmd in force-model unforce-model; do
-    src="$commands_src_dir/$cmd.md"
-    dst="$commands_dst_dir/$cmd.md"
-    [ -f "$src" ] || continue
-    if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
-      refuse_if_symlink "$dst"
-    fi
-    cp "$src" "$dst"
-  done
-  ok "Slash commands written to $commands_dst_dir (/force-model, /unforce-model)"
-fi
+# Slash command wrappers — see install_slash_commands() below for the why.
+install_slash_commands "$settings_dir/commands"
 
 if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
   jq -n --arg header "$custom_headers" '{

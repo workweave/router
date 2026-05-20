@@ -156,6 +156,20 @@ if [ "$target" = "codex" ]; then
     info "No Codex config at $codex_config_file (already uninstalled?)"
   fi
 
+  # Remove only the prompt files this installer owns; leave any user-authored
+  # entries in prompts/ alone. The dir itself is dropped only if empty after.
+  codex_prompts_dir="$codex_dir/prompts"
+  if [ -d "$codex_prompts_dir" ]; then
+    for cmd in force-model unforce-model; do
+      cmd_file="$codex_prompts_dir/$cmd.md"
+      if [ -f "$cmd_file" ]; then
+        rm -f "$cmd_file"
+        ok "Removed $cmd_file"
+      fi
+    done
+    rmdir "$codex_prompts_dir" 2>/dev/null || true
+  fi
+
   if [ -n "$install_dir" ]; then
     ok "Weave Router uninstalled from $install_dir (Codex)."
   else
