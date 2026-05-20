@@ -329,9 +329,10 @@ type AnthropicSSETranslator struct {
 	flusher http.Flusher
 	bw      *bufio.Writer
 
-	streaming  bool
-	statusCode int
-	buf        bytes.Buffer
+	streaming      bool
+	headersEmitted bool
+	statusCode     int
+	buf            bytes.Buffer
 
 	requestModel string
 
@@ -399,6 +400,9 @@ func (t *AnthropicSSETranslator) Header() http.Header {
 
 // WriteHeader routes streaming success responses through SSE.
 func (t *AnthropicSSETranslator) WriteHeader(code int) {
+	if t.headersEmitted {
+		return
+	}
 	t.statusCode = code
 	ct := t.inner.Header().Get("Content-Type")
 	t.streaming = strings.Contains(ct, "text/event-stream") && code < 400
@@ -409,12 +413,39 @@ func (t *AnthropicSSETranslator) WriteHeader(code int) {
 	if t.streaming {
 		t.inner.Header().Set("Content-Type", "text/event-stream")
 		t.inner.WriteHeader(code)
+		t.headersEmitted = true
 	}
 	observability.Get().Debug("AnthropicSSE WriteHeader",
 		"upstream_status", code,
 		"upstream_content_type", ct,
 		"streaming", t.streaming,
 	)
+}
+
+// Prelude commits SSE headers and emits message_start (+ routing marker block)
+// immediately so Anthropic-format clients see the message envelope while the
+// upstream provider is still doing prefill. Call right after the routing
+// decision when the client requested streaming (streaming=true).
+//
+// estimatedInputTokens populates message_start.usage.input_tokens since real
+// upstream usage doesn't arrive until message_delta on cross-format paths;
+// already plumbed via WithEstimatedInputTokens.
+func (t *AnthropicSSETranslator) Prelude(streaming bool) error {
+	if !streaming || t.started {
+		return nil
+	}
+	t.inner.Header().Set("Content-Type", "text/event-stream")
+	t.inner.Header().Del("Content-Length")
+	t.inner.Header().Del("Content-Encoding")
+	t.statusCode = http.StatusOK
+	t.streaming = true
+	t.inner.WriteHeader(http.StatusOK)
+	t.headersEmitted = true
+	if err := t.emitMessageStart(); err != nil {
+		return err
+	}
+	t.started = true
+	return t.emitRoutingMarkerIfConfigured()
 }
 
 func (t *AnthropicSSETranslator) Write(data []byte) (int, error) {

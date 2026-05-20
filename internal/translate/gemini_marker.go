@@ -18,8 +18,9 @@ type GeminiRoutingMarkerWriter struct {
 
 	marker string
 
-	streaming     bool
-	markerEmitted bool
+	streaming      bool
+	headersEmitted bool
+	markerEmitted  bool
 }
 
 // NewGeminiRoutingMarkerWriter creates a writer that emits marker as the first
@@ -40,8 +41,12 @@ func (w *GeminiRoutingMarkerWriter) Header() http.Header {
 }
 
 func (w *GeminiRoutingMarkerWriter) WriteHeader(code int) {
+	if w.headersEmitted {
+		return
+	}
 	ct := w.inner.Header().Get("Content-Type")
 	w.streaming = strings.Contains(ct, "text/event-stream") && code < 400
+	w.headersEmitted = true
 	w.inner.WriteHeader(code)
 }
 
@@ -55,6 +60,32 @@ func (w *GeminiRoutingMarkerWriter) Write(data []byte) (int, error) {
 		}
 	}
 	return w.inner.Write(data)
+}
+
+// Prelude commits headers and emits the routing marker immediately, before the
+// upstream provider has returned a single byte. See OpenAIRoutingMarkerWriter.Prelude.
+func (w *GeminiRoutingMarkerWriter) Prelude(streaming bool) error {
+	if !streaming || w.markerEmitted {
+		return nil
+	}
+	w.inner.Header().Set("Content-Type", "text/event-stream")
+	w.streaming = true
+	if !w.headersEmitted {
+		w.headersEmitted = true
+		w.inner.WriteHeader(http.StatusOK)
+	}
+	w.markerEmitted = true
+	if w.marker == "" {
+		w.bw.WriteString(": routing complete\n\n")
+		if err := w.bw.Flush(); err != nil {
+			return err
+		}
+		if w.flusher != nil {
+			w.flusher.Flush()
+		}
+		return nil
+	}
+	return w.emitMarkerChunk()
 }
 
 // Flush implements http.Flusher.

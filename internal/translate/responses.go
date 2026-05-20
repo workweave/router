@@ -269,9 +269,10 @@ type ResponsesWriter struct {
 	responseID     string
 	createdAt      int64
 
-	statusCode int
-	streaming  bool
-	buf        bytes.Buffer
+	statusCode      int
+	streaming       bool
+	httpHeadersSent bool
+	buf             bytes.Buffer
 
 	seq int64
 
@@ -335,6 +336,9 @@ func NewResponsesWriter(w http.ResponseWriter, model string) *ResponsesWriter {
 func (t *ResponsesWriter) Header() http.Header { return t.inner.Header() }
 
 func (t *ResponsesWriter) WriteHeader(code int) {
+	if t.httpHeadersSent {
+		return
+	}
 	t.statusCode = code
 	ct := t.inner.Header().Get("Content-Type")
 	t.streaming = strings.Contains(ct, "text/event-stream") && code < 400
@@ -353,6 +357,7 @@ func (t *ResponsesWriter) WriteHeader(code int) {
 	if t.streaming {
 		t.inner.Header().Set("Content-Type", "text/event-stream")
 		t.inner.WriteHeader(code)
+		t.httpHeadersSent = true
 	}
 }
 
@@ -369,6 +374,26 @@ func (t *ResponsesWriter) Write(data []byte) (int, error) {
 		t.headersEmitted = true
 	}
 	return n, t.processSSEBuffer()
+}
+
+// Prelude commits headers and emits response.created immediately so Codex
+// stops waiting on upstream prefill before showing any feedback. Call right
+// after routing decides when the client requested streaming (streaming=true).
+// Safe to call once; the headersEmitted guard prevents duplicate creation
+// when upstream Write later runs.
+func (t *ResponsesWriter) Prelude(streaming bool) error {
+	if !streaming || t.headersEmitted {
+		return nil
+	}
+	t.inner.Header().Set("Content-Type", "text/event-stream")
+	t.streaming = true
+	t.statusCode = http.StatusOK
+	if !t.httpHeadersSent {
+		t.inner.WriteHeader(http.StatusOK)
+		t.httpHeadersSent = true
+	}
+	t.headersEmitted = true
+	return t.emitCreated()
 }
 
 func (t *ResponsesWriter) Flush() {

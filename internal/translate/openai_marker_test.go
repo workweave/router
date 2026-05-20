@@ -108,6 +108,35 @@ func TestOpenAIRoutingMarkerWriter_MarkerEmittedOnce(t *testing.T) {
 	assert.Equal(t, 1, markerCount, "marker should be emitted exactly once")
 }
 
+func TestOpenAIRoutingMarkerWriter_PreludeFiresBeforeUpstream(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewOpenAIRoutingMarkerWriter(rec, "gpt-4o", "✦ Weave Router → gpt-4o\n\n")
+
+	require.NoError(t, w.Prelude(true))
+
+	// Prelude must have flushed both HTTP 200 + the marker chunk before any upstream byte.
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
+	events := splitSSEEvents(rec.Body.String())
+	require.Len(t, events, 1, "prelude should emit exactly one marker chunk")
+	assert.Contains(t, events[0], "Weave Router")
+
+	// A subsequent upstream chunk must NOT trigger a duplicate marker.
+	upstream := "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n"
+	_, err := w.Write([]byte(upstream))
+	require.NoError(t, err)
+	events = splitSSEEvents(rec.Body.String())
+	require.Len(t, events, 2, "marker should be emitted exactly once across prelude + upstream")
+}
+
+func TestOpenAIRoutingMarkerWriter_PreludeNoOpWhenNonStreaming(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewOpenAIRoutingMarkerWriter(rec, "gpt-4o", "marker")
+
+	require.NoError(t, w.Prelude(false))
+	assert.Empty(t, rec.Body.String(), "non-streaming Prelude must write nothing")
+}
+
 // splitSSEEvents splits SSE text into individual events (each terminated by \n\n).
 func splitSSEEvents(s string) []string {
 	raw := strings.Split(s, "\n\n")

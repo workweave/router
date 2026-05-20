@@ -20,8 +20,9 @@ type OpenAIRoutingMarkerWriter struct {
 	marker string
 	model  string
 
-	streaming     bool
-	markerEmitted bool
+	streaming      bool
+	headersEmitted bool
+	markerEmitted  bool
 }
 
 // NewOpenAIRoutingMarkerWriter creates a writer that emits marker as the first
@@ -43,8 +44,12 @@ func (w *OpenAIRoutingMarkerWriter) Header() http.Header {
 }
 
 func (w *OpenAIRoutingMarkerWriter) WriteHeader(code int) {
+	if w.headersEmitted {
+		return
+	}
 	ct := w.inner.Header().Get("Content-Type")
 	w.streaming = strings.Contains(ct, "text/event-stream") && code < 400
+	w.headersEmitted = true
 	w.inner.WriteHeader(code)
 }
 
@@ -58,6 +63,37 @@ func (w *OpenAIRoutingMarkerWriter) Write(data []byte) (int, error) {
 		}
 	}
 	return w.inner.Write(data)
+}
+
+// Prelude commits headers and emits the routing marker immediately, before the
+// upstream provider has returned a single byte. Call this right after the
+// routing decision is made when the client requested streaming (streaming=true)
+// so first-byte latency drops to ~routing time rather than upstream prefill +
+// first decode. Safe to call once; subsequent Write/WriteHeader calls are
+// idempotent. No-op when streaming is false or marker is empty.
+func (w *OpenAIRoutingMarkerWriter) Prelude(streaming bool) error {
+	if !streaming || w.markerEmitted {
+		return nil
+	}
+	w.inner.Header().Set("Content-Type", "text/event-stream")
+	w.streaming = true
+	if !w.headersEmitted {
+		w.headersEmitted = true
+		w.inner.WriteHeader(http.StatusOK)
+	}
+	w.markerEmitted = true
+	if w.marker == "" {
+		// Still flush a comment so TCP gets a packet — TTFB is what we're optimizing for.
+		w.bw.WriteString(": routing complete\n\n")
+		if err := w.bw.Flush(); err != nil {
+			return err
+		}
+		if w.flusher != nil {
+			w.flusher.Flush()
+		}
+		return nil
+	}
+	return w.emitMarkerChunk()
 }
 
 // Flush implements http.Flusher.

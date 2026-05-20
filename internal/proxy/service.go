@@ -814,6 +814,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		translator := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
 			WithRoutingMarker(routingMarkerFor(routeRes)).
 			WithEstimatedInputTokens(feats.Tokens)
+		if err := translator.Prelude(env.Stream()); err != nil {
+			log.Error("Anthropic SSE prelude failed (OpenAI upstream)", "err", err)
+		}
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
 		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderGoogle:
@@ -833,6 +836,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
 			WithRoutingMarker(routingMarkerFor(routeRes)).
 			WithEstimatedInputTokens(feats.Tokens)
+		if err := anthropicTr.Prelude(env.Stream()); err != nil {
+			log.Error("Anthropic SSE prelude failed (Gemini upstream)", "err", err)
+		}
 		geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, decision.Model, nil)
 		proxyErr = p.Proxy(ctx, decision, prep, geminiTr, r)
 		proxyErr = finalizeAfterProxy(proxyErr, geminiTr.Finalize)
@@ -1561,7 +1567,20 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	if marker := routingMarkerFor(routeRes); marker != "" {
-		sink = translate.NewOpenAIRoutingMarkerWriter(sink, decision.Model, marker)
+		// Skip the marker wrap when the outer sink is ResponsesWriter (Codex):
+		// it injects its own badge on the first text delta, and an extra
+		// marker chunk would produce a duplicate. ResponsesWriter's own
+		// Prelude is fired upstream of this call.
+		if _, isResponses := sink.(*translate.ResponsesWriter); !isResponses {
+			mw := translate.NewOpenAIRoutingMarkerWriter(sink, decision.Model, marker)
+			// Flush the marker chunk + HTTP 200 immediately so TTFB is decoupled
+			// from upstream prefill. Locks in 200; any later upstream error must
+			// surface in-stream rather than as an HTTP status.
+			if err := mw.Prelude(env.Stream()); err != nil {
+				log.Error("OpenAI routing-marker prelude failed", "err", err)
+			}
+			sink = mw
+		}
 	}
 
 	proxyStart := time.Now()
@@ -1720,11 +1739,16 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 // re-emitted as Responses-shaped SSE / JSON. This keeps the turn loop, cache,
 // pricing, and translation matrix unchanged.
 func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
-	chatBody, _, model, err := translate.ResponsesToChatCompletions(body)
+	chatBody, stream, model, err := translate.ResponsesToChatCompletions(body)
 	if err != nil {
 		return fmt.Errorf("translate responses request: %w", err)
 	}
 	wrapper := translate.NewResponsesWriter(w, model)
+	// Emit response.created immediately so Codex stops staring at a blank TUI
+	// while upstream prefills. Decoupled from upstream first-byte latency.
+	if err := wrapper.Prelude(stream); err != nil {
+		observability.Get().Error("Responses prelude failed", "err", err)
+	}
 	proxyErr := s.ProxyOpenAIChatCompletion(ctx, chatBody, wrapper, r)
 	if proxyErr != nil {
 		// On error, let the handler write the error envelope unless we've
