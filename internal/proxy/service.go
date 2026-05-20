@@ -1427,6 +1427,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 
+	body, stripErr := translate.StripRoutingMarkerFromMessages(body)
+	if stripErr != nil {
+		log.Error("Failed to strip routing marker from OpenAI messages", "err", stripErr)
+	}
 	env, parseErr := translate.ParseOpenAI(body)
 	if parseErr != nil {
 		log.Error("Failed to parse OpenAI request", "err", parseErr)
@@ -1554,6 +1558,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	if cacheEligible {
 		captureW = newCaptureWriter(w, semanticCacheMaxBodyBytes)
 		sink = captureW
+	}
+
+	if marker := routingMarkerFor(routeRes); marker != "" {
+		sink = translate.NewOpenAIRoutingMarkerWriter(sink, decision.Model, marker)
 	}
 
 	proxyStart := time.Now()

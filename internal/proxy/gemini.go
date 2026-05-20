@@ -146,12 +146,15 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 
 	proxyStart := time.Now()
 	var extractor *otel.UsageExtractor
-	proxyWriter := http.ResponseWriter(w)
-	if s.usageRequired() {
-		extractor = otel.NewUsageExtractor(w, decision.Provider)
-		proxyWriter = extractor
+	var sink http.ResponseWriter = w
+	if marker := routingMarkerFor(routeRes); marker != "" {
+		sink = translate.NewGeminiRoutingMarkerWriter(sink, marker)
 	}
-	proxyErr := p.Proxy(ctx, decision, prep, proxyWriter, r)
+	if s.usageRequired() {
+		extractor = otel.NewUsageExtractor(sink, decision.Provider)
+		sink = extractor
+	}
+	proxyErr := p.Proxy(ctx, decision, prep, sink, r)
 	proxyMs := time.Since(proxyStart).Milliseconds()
 
 	in, out := extractor.Tokens()

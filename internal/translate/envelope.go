@@ -392,7 +392,36 @@ func StripRoutingMarkerFromMessages(body []byte) ([]byte, error) {
 
 	messages.ForEach(func(_, msg gjson.Result) bool {
 		content := msg.Get("content")
-		if !content.Exists() || !content.IsArray() {
+		if !content.Exists() {
+			msgRaws = append(msgRaws, msg.Raw)
+			return true
+		}
+
+		// OpenAI format: content is a plain string.
+		if content.Type == gjson.String {
+			text := content.String()
+			if !routingMarkerPattern.MatchString(text) {
+				msgRaws = append(msgRaws, msg.Raw)
+				return true
+			}
+			stripped := routingMarkerPattern.ReplaceAllString(text, "")
+			anyChanged = true
+			encoded, err := encodeJSONStringNoHTMLEscape(stripped)
+			if err != nil {
+				walkErr = fmt.Errorf("marshal stripped string content: %w", err)
+				return false
+			}
+			newMsg, err := sjson.SetRawBytes([]byte(msg.Raw), "content", encoded)
+			if err != nil {
+				walkErr = fmt.Errorf("replace string content in message: %w", err)
+				return false
+			}
+			msgRaws = append(msgRaws, string(newMsg))
+			return true
+		}
+
+		// Anthropic format: content is an array of typed blocks.
+		if !content.IsArray() {
 			msgRaws = append(msgRaws, msg.Raw)
 			return true
 		}

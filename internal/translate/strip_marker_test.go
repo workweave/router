@@ -148,14 +148,32 @@ func TestStripRoutingMarker_EmptyAndMissingMessages(t *testing.T) {
 	}
 }
 
-func TestStripRoutingMarker_StringContentNoOp(t *testing.T) {
-	// Some clients send messages[].content as a plain string. The marker is
-	// only injected inside content arrays, so string-content messages must be
-	// returned unchanged.
+func TestStripRoutingMarker_StringContentNoMarkerNoOp(t *testing.T) {
 	body := []byte(`{"messages":[{"role":"user","content":"hello"}]}`)
 	out, err := translate.StripRoutingMarkerFromMessages(body)
 	require.NoError(t, err)
 	assert.Equal(t, body, out)
+}
+
+func TestStripRoutingMarker_StringContentStripsMarker(t *testing.T) {
+	for _, marker := range sampleMarkers {
+		body := []byte(`{"messages":[{"role":"assistant","content":"` +
+			strings.ReplaceAll(strings.ReplaceAll(marker, `"`, `\"`), "\n", `\n`) +
+			`Hello, how can I help?"}]}`)
+		out, err := translate.StripRoutingMarkerFromMessages(body)
+		require.NoError(t, err)
+		assert.NotContains(t, string(out), markerSentinel)
+		assert.Equal(t, "Hello, how can I help?", gjson.GetBytes(out, "messages.0.content").String())
+	}
+}
+
+func TestStripRoutingMarker_StringContentOnlyMarkerBecomesEmpty(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"assistant","content":"` +
+		strings.ReplaceAll(strings.ReplaceAll(sampleMarkers[0], `"`, `\"`), "\n", `\n`) +
+		`"}]}`)
+	out, err := translate.StripRoutingMarkerFromMessages(body)
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), markerSentinel)
 }
 
 func TestStripRoutingMarker_PreservesAdjacentFields(t *testing.T) {
