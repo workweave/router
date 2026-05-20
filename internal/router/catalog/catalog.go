@@ -237,11 +237,15 @@ var Models = []Model{
 	// binding at boot. Self-hosters with only an OpenRouter key get every OSS
 	// model routed via that trailing binding.
 	//
-	// Verified against each upstream's live catalog 2026-05-17:
+	// Verified against each upstream's live catalog 2026-05-17, re-checked
+	// on 2026-05-20 when the v0.55 bundle reintroduced the dedicated-only
+	// Qwen rows:
 	// - qwen/qwen3-30b-a3b-instruct-2507 — dedicated-only on Fireworks,
-	//   absent from DeepInfra + Bedrock. Dropped.
+	//   absent from DeepInfra + Bedrock. Managed-prod resolves via the
+	//   trailing OpenRouter binding.
 	// - qwen/qwen3-coder (480B-A35B) — dedicated-only on Fireworks, absent
-	//   from DeepInfra + Bedrock us-east-1. Dropped.
+	//   from DeepInfra + Bedrock us-east-1. Managed-prod resolves via the
+	//   trailing OpenRouter binding.
 	// - qwen/qwen3-235b-a22b-2507 — Bedrock us-east-1 carries only the VL
 	//   variant; Instruct-2507 stays on OpenRouter until AWS publishes it.
 	{ID: "qwen/qwen3-235b-a22b-2507", Tier: TierMid, Providers: []ProviderBinding{
@@ -318,5 +322,25 @@ var Models = []Model{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5",
 			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 2.080}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 1.920, CacheReadMultiplier: 0.10}},
+	}},
+	// v0.55 bundle additions (2026-05-20). Fireworks-dedicated rows carry
+	// an OpenRouter trailing binding so managed-prod deploys without a
+	// Fireworks key can still resolve them; pricing reflects the
+	// OpenRouter list price for the public model card on 2026-05-20.
+	{ID: "mistralai/mistral-small-2603", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.200, OutputUSDPer1M: 0.600, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "qwen/qwen3-30b-a3b-instruct-2507", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/qwen3-30b-a3b-instruct-2507",
+			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 0.600, CacheReadMultiplier: 0.1684}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.100, OutputUSDPer1M: 0.300, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "qwen/qwen3-coder", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct",
+			Price: Pricing{InputUSDPer1M: 0.900, OutputUSDPer1M: 2.700, CacheReadMultiplier: 0.1684}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 5.000, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "qwen/qwen3.5-flash-02-23", Tier: TierLow, Providers: []ProviderBinding{
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.050, OutputUSDPer1M: 0.150, CacheReadMultiplier: 0.10}},
 	}},
 }
