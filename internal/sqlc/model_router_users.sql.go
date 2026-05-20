@@ -164,6 +164,12 @@ WITH merged AS (
       AND claude_account_uuid = $4::uuid
       AND email IS NULL
       AND deleted_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM router.model_router_users
+          WHERE installation_id = $3::uuid
+            AND email = $1::text
+            AND deleted_at IS NULL
+      )
     RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 ),
 inserted AS (
@@ -224,6 +230,16 @@ type UpsertModelRouterUserByEmailRow struct {
 // The fallback INSERT keeps the original ON CONFLICT path so concurrent
 // email-bearing requests still collapse onto a single row.
 //
+// Merge is gated on the absence of an existing email-keyed row for the same
+// (installation_id, email): if one already exists (created by an earlier
+// email-bearing request that didn't carry account_uuid), the orphan UPDATE
+// would collide with the partial unique index
+// model_router_users_installation_email_unique and fail the whole upsert
+// with SQLSTATE 23505. In that case we let the INSERT path take over so the
+// existing email-keyed row gets its claude_account_uuid backfilled via the
+// ON CONFLICT DO UPDATE clause; the orphan stays in place (dashboard surfaces
+// the email-keyed row, which is the canonical identity).
+//
 //	WITH merged AS (
 //	    UPDATE router.model_router_users
 //	    SET email        = $1::text,
@@ -233,6 +249,12 @@ type UpsertModelRouterUserByEmailRow struct {
 //	      AND claude_account_uuid = $4::uuid
 //	      AND email IS NULL
 //	      AND deleted_at IS NULL
+//	      AND NOT EXISTS (
+//	          SELECT 1 FROM router.model_router_users
+//	          WHERE installation_id = $3::uuid
+//	            AND email = $1::text
+//	            AND deleted_at IS NULL
+//	      )
 //	    RETURNING id, installation_id, email, claude_account_uuid, first_seen_at, last_seen_at, deleted_at, display_name
 //	),
 //	inserted AS (

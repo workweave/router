@@ -13,6 +13,16 @@
 -- duplicate rows for the same human and the dashboard picker shows both.
 -- The fallback INSERT keeps the original ON CONFLICT path so concurrent
 -- email-bearing requests still collapse onto a single row.
+--
+-- Merge is gated on the absence of an existing email-keyed row for the same
+-- (installation_id, email): if one already exists (created by an earlier
+-- email-bearing request that didn't carry account_uuid), the orphan UPDATE
+-- would collide with the partial unique index
+-- model_router_users_installation_email_unique and fail the whole upsert
+-- with SQLSTATE 23505. In that case we let the INSERT path take over so the
+-- existing email-keyed row gets its claude_account_uuid backfilled via the
+-- ON CONFLICT DO UPDATE clause; the orphan stays in place (dashboard surfaces
+-- the email-keyed row, which is the canonical identity).
 -- name: UpsertModelRouterUserByEmail :one
 WITH merged AS (
     UPDATE router.model_router_users
@@ -23,6 +33,12 @@ WITH merged AS (
       AND claude_account_uuid = sqlc.narg('claude_account_uuid')::uuid
       AND email IS NULL
       AND deleted_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM router.model_router_users
+          WHERE installation_id = @installation_id::uuid
+            AND email = @email::text
+            AND deleted_at IS NULL
+      )
     RETURNING *
 ),
 inserted AS (
