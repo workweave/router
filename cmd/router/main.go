@@ -25,6 +25,7 @@ import (
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/postgres"
 	"workweave/router/internal/providers"
+	routerpubsub "workweave/router/internal/pubsub"
 	"workweave/router/internal/providers/anthropic"
 	googleProvider "workweave/router/internal/providers/google"
 	openaiProvider "workweave/router/internal/providers/openai"
@@ -42,6 +43,7 @@ import (
 
 	_ "time/tzdata"
 
+	gcppubsub "cloud.google.com/go/pubsub/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -335,15 +337,26 @@ func main() {
 
 	cache := auth.NewLRUAPIKeyCache(10000, 50000, 5*time.Minute, 60*time.Second)
 	userCache := auth.NewLRUUserCache(50000, 10*time.Minute)
-	notifier := postgres.NewPgxInvalidationNotifier(pool)
+
+	pubsubProjectID := config.MustGet("PUBSUB_PROJECT_ID")
+	pubsubTopicID := config.MustGet("PUBSUB_TOPIC_ROUTER_INVALIDATION")
+	pubsubSubscriptionID := config.MustGet("PUBSUB_SUBSCRIPTION_ROUTER_INVALIDATION")
+	pubsubClient, err := gcppubsub.NewClient(context.Background(), pubsubProjectID)
+	if err != nil {
+		logger.Error("Failed to create Pub/Sub client", "err", err)
+		panic(err)
+	}
+	defer pubsubClient.Close()
+
+	notifier := routerpubsub.NewInvalidationNotifier(pubsubClient.Publisher(pubsubTopicID))
 	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, repo.Users, cache, userCache, time.Now).
 		WithEncryptor(encryptor).
 		WithInstallationChangeNotifier(notifier)
 
-	// Listener fans out NOTIFY-published invalidations to this replica's cache so
+	// Listener fans out Pub/Sub-published invalidations to this replica's cache so
 	// settings changes are visible on the next request across the fleet. The 5-min
-	// cache TTL is the safety net if this goroutine fails to reconnect.
-	listener := postgres.NewInvalidationListener(pool, cache)
+	// cache TTL is the safety net if the listener falls behind.
+	listener := routerpubsub.NewInvalidationListener(pubsubClient.Subscriber(pubsubSubscriptionID), cache)
 	listenerCtx, listenerCancel := context.WithCancel(context.Background())
 	defer func() {
 		listenerCancel()
