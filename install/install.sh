@@ -519,14 +519,23 @@ write_opencode_config() {
   # each request anyway, so this list is mostly UX — what shows up when the
   # user runs /models inside opencode. Keep it short and Anthropic-shaped
   # so the bundled @ai-sdk/anthropic provider can request them.
+  #
+  # apiKey is set to the router key as well as planted in headers. opencode's
+  # @ai-sdk/anthropic provider treats apiKey as required at config-parse time
+  # and otherwise falls back to ANTHROPIC_API_KEY from the environment;
+  # without this, a user who's never had an Anthropic key in their shell hits
+  # a startup error before the router ever sees a request. The router itself
+  # ignores the value (auth runs off X-Weave-Router-Key); apiKey here is just
+  # a placeholder that satisfies the SDK's "is auth configured" check.
   local block
   block="$(jq -n \
     --arg url "$block_url/v1" \
+    --arg key "$block_key" \
     --argjson headers "$headers_json" '
     {
       npm: "@ai-sdk/anthropic",
       name: "Weave Router",
-      options: { baseURL: $url, headers: $headers },
+      options: { apiKey: $key, baseURL: $url, headers: $headers },
       models: {
         "claude-opus-4-7":   { name: "Claude Opus 4.7 (via Weave Router)" },
         "claude-sonnet-4-6": { name: "Claude Sonnet 4.6 (via Weave Router)" },
@@ -730,7 +739,15 @@ if [ -z "$install_dir" ] && [ "$scope_explicit" = "false" ] && [ "$non_interacti
       scope_cli_label="codex"
       ;;
     opencode)
-      scope_user_path="~/.config/opencode/"
+      # Match the actual install path, which honors XDG_CONFIG_HOME. Showing a
+      # hardcoded "~/.config/opencode/" here lied to users with a custom
+      # $XDG_CONFIG_HOME — they'd see one path in the prompt and the installer
+      # would write to another.
+      if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+        scope_user_path="$XDG_CONFIG_HOME/opencode/"
+      else
+        scope_user_path="~/.config/opencode/"
+      fi
       scope_project_path="<repo>/opencode.json"
       scope_cli_label="opencode"
       ;;
