@@ -107,6 +107,32 @@ func TestAllowedAtOrBelow_FiltersOutUnknownTier(t *testing.T) {
 	assert.False(t, high)
 }
 
+func TestFitsContext(t *testing.T) {
+	// Zero tokens: never filter.
+	assert.True(t, FitsContext("claude-opus-4-7", 0))
+	assert.True(t, FitsContext("definitely-not-a-model", 0))
+
+	// Unknown model: passthrough (no filter).
+	assert.True(t, FitsContext("definitely-not-a-model", 1_000_000))
+
+	// Explicit MaxInputTokens: respected.
+	assert.True(t, FitsContext("claude-opus-4-7", 199_000))
+	assert.True(t, FitsContext("claude-opus-4-7", 200_000))
+	assert.False(t, FitsContext("claude-opus-4-7", 200_001))
+	assert.True(t, FitsContext("gpt-4.1", 1_000_000))
+	assert.False(t, FitsContext("gpt-4o", 128_001))
+
+	// Per-tier fallback when MaxInputTokens == 0. qwen3.5-flash-02-23
+	// is TierLow with no explicit window; the 64k fallback should kick in.
+	// This is the regression test for the empty-Qwen-response bug: an 80k
+	// post-tool follow-up must NOT be considered fittable for a flash model.
+	assert.True(t, FitsContext("qwen/qwen3.5-flash-02-23", 60_000))
+	assert.False(t, FitsContext("qwen/qwen3.5-flash-02-23", 80_000))
+
+	// TierUnknown (passthrough rows): never filtered.
+	assert.True(t, FitsContext("gpt-5-mini", 10_000_000))
+}
+
 func TestValidateDeployed_FlagsMissingAndUntiered(t *testing.T) {
 	err := ValidateDeployed([]string{"claude-opus-4-7"})
 	assert.NoError(t, err)

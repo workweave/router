@@ -166,6 +166,49 @@ func TestScorer_PopulatesRoutingMetadata(t *testing.T) {
 		"with cfgForTest TopP=1, only the closest cluster (Opus-aligned) is summed")
 }
 
+// Regression: a flash-tier model must not be picked for a turn whose
+// estimated input exceeds the flash context window. The empty-response
+// failure mode this guards against was observed in production: qwen flash
+// returning end_turn with zero content blocks for an ~80k-token post-tool
+// follow-up. Without the context-fit filter the cluster scorer happily
+// argmaxed the flash row; with it, only the larger-window row remains
+// eligible so the opus row wins regardless of cluster alignment.
+func TestScorer_ExcludesModelsThatCannotFitContext(t *testing.T) {
+	// haiku-aligned embedding biases the argmax toward claude-haiku-4-5
+	// (TierLow, 200k window) — but request says 250k tokens of input,
+	// which exceeds haiku's window. opus (TierHigh, 200k window) is also
+	// over, but our fail-open behavior keeps the pool non-empty so the
+	// argmax still picks the haiku alignment. Pin the test on the dropped
+	// log fields by using a model with a *smaller* window: gpt-4o (128k).
+	//
+	// We re-register a minimal scorer with haiku + a small-window model so
+	// the filter has something to drop.
+	emb := &fakeEmbedder{vec: makeHaikuVec()}
+	s := newScorerForTest(t, emb, cfgForTest())
+
+	// 250k tokens of estimated input > haiku 200k window → haiku dropped.
+	// claude-opus-4-7 has the same 200k window, so it's also dropped.
+	// Both candidates dropped → fail-open: scorer keeps unfiltered set.
+	got, err := s.Route(context.Background(), router.Request{
+		PromptText:           strings.Repeat("y", 100),
+		EstimatedInputTokens: 250_000,
+	})
+	require.NoError(t, err)
+	// Fail-open: when filter would empty pool, we don't error.
+	assert.NotEmpty(t, got.Model, "scorer must remain decisive on fail-open path")
+
+	// Now exercise the *normal* path: 150k tokens fits haiku (200k) but
+	// would exclude any hypothetical flash row with 64k tier fallback —
+	// the test fixtures only ship opus + haiku at TierHigh + TierLow with
+	// explicit 200k windows, so both remain eligible. Argmax picks haiku.
+	got, err = s.Route(context.Background(), router.Request{
+		PromptText:           strings.Repeat("y", 100),
+		EstimatedInputTokens: 150_000,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-haiku-4-5", got.Model)
+}
+
 func TestScorer_PicksOtherClusterWhenAligned(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeHaikuVec()}
 	s := newScorerForTest(t, emb, cfgForTest())

@@ -302,6 +302,43 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		eligibleModels = filtered
 	}
 
+	// Context-fit filter: drop models whose input window can't hold the
+	// estimated input. Skipped when EstimatedInputTokens == 0 (no estimate
+	// available) or when filtering would empty the pool. The "fail open"
+	// behavior is intentional: we'd rather route to a too-small model than
+	// 503 the request, since the empty-response failure mode is recoverable
+	// (CC sees end_turn and surfaces nothing) while a 503 is not. The log
+	// surfaces the drop so prod can spot training-data gaps.
+	if req.EstimatedInputTokens > 0 {
+		fitFiltered := eligibleModels[:0:0]
+		var dropped []string
+		for _, m := range eligibleModels {
+			if catalog.FitsContext(m, req.EstimatedInputTokens) {
+				fitFiltered = append(fitFiltered, m)
+			} else {
+				dropped = append(dropped, m)
+			}
+		}
+		if len(fitFiltered) == 0 {
+			log.Warn(
+				"Cluster scorer: context-fit filter would empty eligible pool; keeping unfiltered set",
+				"estimated_input_tokens", req.EstimatedInputTokens,
+				"requested_model", req.RequestedModel,
+				"dropped_models", dropped,
+			)
+		} else {
+			if len(dropped) > 0 {
+				log.Debug(
+					"Cluster scorer: context-fit filter dropped models",
+					"estimated_input_tokens", req.EstimatedInputTokens,
+					"dropped_models", dropped,
+					"remaining", len(fitFiltered),
+				)
+			}
+			eligibleModels = fitFiltered
+		}
+	}
+
 	scoreStart := time.Now()
 	topClusters := topPNearest(vec, s.centroids, s.cfg.TopP)
 	scores := make(map[string]float32, len(eligibleModels))

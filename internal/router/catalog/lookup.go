@@ -94,6 +94,52 @@ func IsAtOrBelow(id string, ceiling Tier) bool {
 	return t <= ceiling
 }
 
+// Per-tier conservative input-context fallback used by FitsContext when
+// a Model.MaxInputTokens is unset (zero). Sized to the smallest credible
+// context window observed in each tier's family so the filter excludes
+// flash/low-tier models that demonstrably can't synthesize coherent
+// responses to large bodies (observed: qwen3.5-flash returning empty
+// end_turn for an 80k-token post-tool follow-up). Per-model overrides
+// in catalog.go should be added whenever a verified number is available.
+const (
+	defaultMaxInputTokensTierLow  = 64_000
+	defaultMaxInputTokensTierMid  = 128_000
+	defaultMaxInputTokensTierHigh = 200_000
+)
+
+// FitsContext reports whether the model's input context window can hold
+// the estimated input tokens for this turn. Returns true when:
+//   - tokens <= 0 (no estimate yet — don't filter)
+//   - model is absent from the catalog (passthrough — caller decides)
+//   - model has an explicit MaxInputTokens >= tokens
+//   - model has MaxInputTokens == 0 and the per-tier fallback >= tokens
+//
+// Used by the cluster scorer to exclude candidates that demonstrably
+// can't synthesize a response at the requested size.
+func FitsContext(modelID string, tokens int) bool {
+	if tokens <= 0 {
+		return true
+	}
+	m, ok := ByID(modelID)
+	if !ok {
+		return true
+	}
+	limit := m.MaxInputTokens
+	if limit == 0 {
+		switch m.Tier {
+		case TierLow:
+			limit = defaultMaxInputTokensTierLow
+		case TierMid:
+			limit = defaultMaxInputTokensTierMid
+		case TierHigh:
+			limit = defaultMaxInputTokensTierHigh
+		default:
+			return true // TierUnknown: passthrough-only, don't filter.
+		}
+	}
+	return tokens <= limit
+}
+
 // AllowedAtOrBelow returns the set of known model IDs whose tier is at or
 // below the ceiling.
 func AllowedAtOrBelow(ceiling Tier) map[string]struct{} {
