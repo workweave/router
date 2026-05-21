@@ -546,10 +546,17 @@ func (t *AnthropicSSETranslator) translateOpenAIEvent(raw []byte) error {
 
 	// strings.Clone: gjson returns strings backed by the buffer via unsafe;
 	// these fields outlive the event, so copy to survive buffer compaction.
-	if id := gjson.GetBytes(data, "id"); id.Exists() && t.messageID == "" {
+	//
+	// Check Str != "" rather than Exists(): some OpenAI-compat upstreams
+	// (notably OpenRouter for certain models) send chunks with `"id": ""`
+	// in early SSE frames before settling on a real id. gjson treats that
+	// as Exists()=true, Str="", which would latch the empty string and
+	// prevent later non-empty ids from overwriting — leaving message_start
+	// to fall back to the "msg_translated" placeholder. Same for model.
+	if id := gjson.GetBytes(data, "id"); id.Str != "" && t.messageID == "" {
 		t.messageID = strings.Clone(id.Str)
 	}
-	if m := gjson.GetBytes(data, "model"); m.Exists() && t.modelFromUpstream == "" {
+	if m := gjson.GetBytes(data, "model"); m.Str != "" && t.modelFromUpstream == "" {
 		t.modelFromUpstream = strings.Clone(m.Str)
 	}
 
