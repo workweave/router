@@ -106,18 +106,18 @@ func (r *ModelRegistry) Models() []string {
 // ArtifactMetadata is the parsed metadata.yaml. Informational at runtime;
 // routing decisions depend only on centroids + rankings + registry.
 type ArtifactMetadata struct {
-	FormatVersion     int                  `yaml:"format_version,omitempty"`
-	Version           string               `yaml:"version"`
-	Parent            string               `yaml:"parent,omitempty"`
-	Status            string               `yaml:"status,omitempty"`
-	PromotedDate      string               `yaml:"promoted_date,omitempty"`
-	FrozenDate        string               `yaml:"frozen_date,omitempty"`
-	Embedder          ArtifactEmbedder     `yaml:"embedder"`
-	Training          ArtifactTraining     `yaml:"training"`
-	DeployedProviders []string             `yaml:"deployed_providers,omitempty"`
-	DeployedModels    []string             `yaml:"deployed_models,omitempty"`
-	CostPer1KInputUSD map[string]float64   `yaml:"cost_per_1k_input_usd,omitempty"`
-	Changelog         string               `yaml:"changelog,omitempty"`
+	FormatVersion     int                `yaml:"format_version,omitempty"`
+	Version           string             `yaml:"version"`
+	Parent            string             `yaml:"parent,omitempty"`
+	Status            string             `yaml:"status,omitempty"`
+	PromotedDate      string             `yaml:"promoted_date,omitempty"`
+	FrozenDate        string             `yaml:"frozen_date,omitempty"`
+	Embedder          ArtifactEmbedder   `yaml:"embedder"`
+	Training          ArtifactTraining   `yaml:"training"`
+	DeployedProviders []string           `yaml:"deployed_providers,omitempty"`
+	DeployedModels    []string           `yaml:"deployed_models,omitempty"`
+	CostPer1KInputUSD map[string]float64 `yaml:"cost_per_1k_input_usd,omitempty"`
+	Changelog         string             `yaml:"changelog,omitempty"`
 	// CacheConfig carries per-version semantic-cache knobs.
 	CacheConfig *ArtifactCacheConfig `yaml:"cache_config,omitempty"`
 }
@@ -149,22 +149,22 @@ type RecommendedKnobs struct {
 }
 
 type ArtifactTraining struct {
-	K                     int                         `yaml:"k"`
-	TopP                  int                         `yaml:"top_p"`
-	Alpha                 float64                     `yaml:"alpha"`
-	Seed                  int                         `yaml:"seed"`
-	NPrompts              int                         `yaml:"n_prompts"`
-	TrainingDataMix       map[string]float64          `yaml:"training_data_mix,omitempty"`
-	DefaultRoutingKnobs   *DefaultRoutingKnobs        `yaml:"default_routing_knobs,omitempty"`
+	K                     int                          `yaml:"k"`
+	TopP                  int                          `yaml:"top_p"`
+	Alpha                 float64                      `yaml:"alpha"`
+	Seed                  int                          `yaml:"seed"`
+	NPrompts              int                          `yaml:"n_prompts"`
+	TrainingDataMix       map[string]float64           `yaml:"training_data_mix,omitempty"`
+	DefaultRoutingKnobs   *DefaultRoutingKnobs         `yaml:"default_routing_knobs,omitempty"`
 	RecommendedUIDefaults map[string]*RecommendedKnobs `yaml:"recommended_ui_defaults,omitempty"`
 }
 
 type ModelAxis struct {
-	InputPer1KUSD     *float64 `json:"input_per_1k_usd"`
-	OutputPer1KUSD    *float64 `json:"output_per_1k_usd"`
-	TTFTSeconds       *float64 `json:"ttft_s"`
-	TPS               *float64 `json:"tps"`
-	VerbosityTokens   *float64 `json:"verbosity_tokens"`
+	InputPer1KUSD   *float64 `json:"input_per_1k_usd"`
+	OutputPer1KUSD  *float64 `json:"output_per_1k_usd"`
+	TTFTSeconds     *float64 `json:"ttft_s"`
+	TPS             *float64 `json:"tps"`
+	VerbosityTokens *float64 `json:"verbosity_tokens"`
 }
 
 // Bundle is one fully-loaded artifact set, held by one Scorer per
@@ -489,7 +489,7 @@ func loadRankings(raw []byte) (Rankings, error) {
 }
 
 type qualityMeansFile struct {
-	Meta         interface{}               `json:"meta,omitempty"`
+	Meta         interface{}                   `json:"meta,omitempty"`
 	QualityMeans map[string]map[string]float32 `json:"quality_means"`
 }
 
