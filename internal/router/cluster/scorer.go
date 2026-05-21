@@ -148,6 +148,17 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 				}
 			}
 		}
+		// Validate bundle's default routing knobs against centroids.K so a
+		// misconfigured metadata.yaml fails at load time rather than HTTP 400-ing
+		// every v2 request. The Alpha-override path is a scalar replacement that
+		// preserves length, so once defaults are sized correctly the request-time
+		// length check is unreachable from valid overrides.
+		if bundle.Metadata != nil && bundle.Metadata.Training.DefaultRoutingKnobs != nil {
+			dk := bundle.Metadata.Training.DefaultRoutingKnobs
+			if len(dk.Alpha) != bundle.Centroids.K {
+				return nil, fmt.Errorf("cluster %s: default_routing_knobs.alpha length %d must equal K=%d", bundle.Version, len(dk.Alpha), bundle.Centroids.K)
+			}
+		}
 	} else {
 		for k := 0; k < bundle.Centroids.K; k++ {
 			row, ok := bundle.Rankings[k]
@@ -376,9 +387,20 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			}
 		}
 
-		// Validate effective knobs
+		// Validate effective knobs. Alpha length is sanity-checked here as a
+		// defensive backstop — NewScorer validates the bundle defaults against K
+		// at load time, and the override path replaces values in place without
+		// resizing, so a mismatch here means a server-side bundle/registry bug
+		// rather than bad client input. Map to ErrClusterUnavailable (HTTP 503)
+		// to avoid misreporting a server config error as a client 400.
 		if len(activeKnobs.Alpha) != s.centroids.K {
-			return router.Decision{}, fmt.Errorf("%w: alpha vector length %d must equal K=%d", ErrInvalidRoutingKnobs, len(activeKnobs.Alpha), s.centroids.K)
+			return router.Decision{}, fmt.Errorf("%w: alpha vector length %d must equal K=%d", ErrClusterUnavailable, len(activeKnobs.Alpha), s.centroids.K)
+		}
+		// Validate speed_weight bounds before the per-alpha loop so an
+		// out-of-range speed_weight is reported as such rather than masked by the
+		// combined alpha+speed_weight constraint inside the loop.
+		if activeKnobs.SpeedWeight < 0 || activeKnobs.SpeedWeight > 1 {
+			return router.Decision{}, fmt.Errorf("%w: speed_weight (%f) must be in [0, 1]", ErrInvalidRoutingKnobs, activeKnobs.SpeedWeight)
 		}
 		for i, a := range activeKnobs.Alpha {
 			if a < 0 || a > 1 {
@@ -393,9 +415,6 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			if a+activeKnobs.SpeedWeight > 0.95 {
 				log.Warn("Extreme routing knob: alpha + speed_weight > 0.95", "cluster", i, "alpha", a, "speed_weight", activeKnobs.SpeedWeight)
 			}
-		}
-		if activeKnobs.SpeedWeight < 0 || activeKnobs.SpeedWeight > 1 {
-			return router.Decision{}, fmt.Errorf("%w: speed_weight (%f) must be in [0, 1]", ErrInvalidRoutingKnobs, activeKnobs.SpeedWeight)
 		}
 		if activeKnobs.OutputCostRatio < 0 || activeKnobs.OutputCostRatio > 10 {
 			return router.Decision{}, fmt.Errorf("%w: output_cost_ratio (%f) must be in [0, 10]", ErrInvalidRoutingKnobs, activeKnobs.OutputCostRatio)
