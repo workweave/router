@@ -340,7 +340,10 @@ func main() {
 
 	pubsubProjectID := config.MustGet("PUBSUB_PROJECT_ID")
 	pubsubTopicID := config.MustGet("PUBSUB_TOPIC_ROUTER_INVALIDATION")
-	pubsubSubscriptionID := config.MustGet("PUBSUB_SUBSCRIPTION_ROUTER_INVALIDATION")
+	// Treated as a prefix: each replica derives its own subscription
+	// "<prefix>-<uuid>" so every replica receives every invalidation. A shared
+	// subscription would load-balance, defeating cross-fleet cache broadcast.
+	pubsubSubscriptionPrefix := config.MustGet("PUBSUB_SUBSCRIPTION_ROUTER_INVALIDATION")
 	pubsubClient, err := gcppubsub.NewClient(context.Background(), pubsubProjectID)
 	if err != nil {
 		logger.Error("Failed to create Pub/Sub client", "err", err)
@@ -348,7 +351,9 @@ func main() {
 	}
 	defer pubsubClient.Close()
 
-	notifier := routerpubsub.NewInvalidationNotifier(pubsubClient.Publisher(pubsubTopicID))
+	publisher := pubsubClient.Publisher(pubsubTopicID)
+	notifier := routerpubsub.NewInvalidationNotifier(publisher)
+	defer notifier.Stop()
 	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, repo.Users, cache, userCache, time.Now).
 		WithEncryptor(encryptor).
 		WithInstallationChangeNotifier(notifier)
@@ -356,7 +361,19 @@ func main() {
 	// Listener fans out Pub/Sub-published invalidations to this replica's cache so
 	// settings changes are visible on the next request across the fleet. The 5-min
 	// cache TTL is the safety net if the listener falls behind.
-	listener := routerpubsub.NewInvalidationListener(pubsubClient.Subscriber(pubsubSubscriptionID), cache)
+	subCtx, subCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	subscriptionName, deleteSubscription, err := routerpubsub.CreateReplicaSubscription(
+		subCtx, pubsubClient, pubsubProjectID, pubsubTopicID, pubsubSubscriptionPrefix,
+	)
+	subCancel()
+	if err != nil {
+		logger.Error("Failed to create per-replica invalidation subscription", "err", err)
+		panic(err)
+	}
+	defer deleteSubscription()
+	logger.Info("Created per-replica invalidation subscription", "subscription", subscriptionName)
+
+	listener := routerpubsub.NewInvalidationListener(pubsubClient.Subscriber(subscriptionName), cache)
 	listenerCtx, listenerCancel := context.WithCancel(context.Background())
 	defer func() {
 		listenerCancel()

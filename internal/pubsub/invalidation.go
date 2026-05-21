@@ -2,17 +2,32 @@ package pubsub
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 
 	gcppubsub "cloud.google.com/go/pubsub/v2"
+	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"github.com/google/uuid"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // notifyTimeout bounds the publish call so a slow Pub/Sub connection can't
 // stall the request that triggered the settings change.
 const notifyTimeout = 2 * time.Second
+
+// replicaSubscriptionTTL is the expiration policy applied to per-replica
+// subscriptions. If a replica crashes without running its deferred cleanup,
+// the subscription is reclaimed by GCP after this idle window so leaked
+// subscriptions can't accumulate forever.
+const replicaSubscriptionTTL = 24 * time.Hour
+
+// subscriptionDeleteTimeout bounds the cleanup call during shutdown so a slow
+// Pub/Sub admin API can't hold up termination indefinitely.
+const subscriptionDeleteTimeout = 10 * time.Second
 
 // InvalidationNotifier publishes installation invalidation events over GCP Pub/Sub.
 type InvalidationNotifier struct {
@@ -43,6 +58,13 @@ func (n *InvalidationNotifier) NotifyInstallationChanged(installationID string) 
 			)
 		}
 	}()
+}
+
+// Stop flushes any buffered messages and shuts the publisher's background
+// goroutines down. Must be called during graceful shutdown — Client.Close()
+// does not stop publishers.
+func (n *InvalidationNotifier) Stop() {
+	n.publisher.Stop()
 }
 
 // InvalidationListener subscribes to the invalidation topic and forwards every
@@ -83,3 +105,57 @@ func (l *InvalidationListener) Run(ctx context.Context) {
 
 // Wait blocks until Run has returned. Intended for shutdown coordination.
 func (l *InvalidationListener) Wait() { <-l.done }
+
+// CreateReplicaSubscription provisions a per-replica subscription on topicID so
+// every replica receives every invalidation message. A shared subscription
+// would load-balance — only one replica would see each message — defeating
+// the cross-fleet broadcast we need for cache invalidation.
+//
+// The subscription name is "<prefix>-<uuid>" so concurrent replicas don't
+// collide. An expiration policy is set so subscriptions leaked by crashed
+// replicas are reclaimed automatically.
+//
+// Returns the fully-qualified subscription name and a cleanup func that
+// deletes the subscription. Cleanup uses context.Background() internally so
+// shutdown completes even when the parent context is already canceled.
+func CreateReplicaSubscription(
+	ctx context.Context,
+	client *gcppubsub.Client,
+	projectID string,
+	topicID string,
+	prefix string,
+) (subscriptionName string, cleanup func(), err error) {
+	if prefix == "" {
+		return "", nil, fmt.Errorf("subscription prefix is required")
+	}
+	subID := fmt.Sprintf("%s-%s", strings.TrimRight(prefix, "-"), uuid.NewString())
+	subscriptionName = fmt.Sprintf("projects/%s/subscriptions/%s", projectID, subID)
+	topicName := fmt.Sprintf("projects/%s/topics/%s", projectID, topicID)
+
+	_, err = client.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{
+		Name:  subscriptionName,
+		Topic: topicName,
+		ExpirationPolicy: &pubsubpb.ExpirationPolicy{
+			Ttl: durationpb.New(replicaSubscriptionTTL),
+		},
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("create per-replica subscription: %w", err)
+	}
+
+	cleanup = func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), subscriptionDeleteTimeout)
+		defer cancel()
+		delErr := client.SubscriptionAdminClient.DeleteSubscription(cleanupCtx, &pubsubpb.DeleteSubscriptionRequest{
+			Subscription: subscriptionName,
+		})
+		if delErr != nil {
+			observability.Get().Warn(
+				"Failed to delete per-replica invalidation subscription; relying on expiration policy",
+				"subscription", subscriptionName,
+				"err", delErr,
+			)
+		}
+	}
+	return subscriptionName, cleanup, nil
+}
