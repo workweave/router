@@ -55,28 +55,29 @@ Point Claude Code, Codex, Cursor, or your own app at `localhost:8080`. The route
 
 ## 30-second quickstart
 
-The fastest way: point Claude Code or Codex at the **hosted** Weave Router
-with one command. No clone, no Docker, no Postgres.
+The fastest way: point Claude Code, Codex, or opencode at the **hosted**
+Weave Router with one command. No clone, no Docker, no Postgres.
 
 ```bash
 npx @workweave/router
 ```
 
-That's it. The installer asks which tool (Claude Code or Codex), walks you
-through scope (user vs. project), grabs a router key, and wires the right
-config file. Other flavors:
+That's it. The installer asks which tool (Claude Code, Codex, or opencode),
+walks you through scope (user vs. project), grabs a router key, and wires
+the right config file. Other flavors:
 
 ```bash
 npx @workweave/router --claude              # skip the picker, Claude Code
 npx @workweave/router --codex               # skip the picker, OpenAI Codex CLI
-npx @workweave/router --scope project       # per-repo, commits settings.json (or .codex/)
+npx @workweave/router --opencode            # skip the picker, opencode
+npx @workweave/router --scope project       # per-repo, commits settings.json (or .codex/ / opencode.json)
 npx @workweave/router --local               # self-hosted localhost:8080
 npx @workweave/router --base-url https://router.acme.internal
 npx @workweave/router@0.1.0                 # pin a version
 ```
 
-Requires Node ≥ 18 (Claude Code path also needs `jq`). Full flag reference:
-[install/npm/README.md](install/npm/README.md).
+Requires Node ≥ 18 (Claude Code and opencode paths also need `jq`). Full
+flag reference: [install/npm/README.md](install/npm/README.md).
 
 ### Or: self-host the whole stack
 
@@ -125,6 +126,14 @@ Codex's existing `OPENAI_API_KEY` flows through to api.openai.com for the
 plan-based passthrough; the router key rides in an `X-Weave-Router-Key` HTTP
 header. Re-install and `--uninstall --codex` rewrite/remove only the managed
 block, leaving the rest of your Codex config untouched.
+
+**opencode.** `npx @workweave/router --opencode` merges a `provider.weave`
+entry into `~/.config/opencode/opencode.json` (or `<repo>/opencode.json`
+with `--scope project`). It uses opencode's bundled `@ai-sdk/anthropic`
+provider pointed at the router's `/v1` endpoint — the router speaks the
+Anthropic Messages API natively, so opencode works unmodified. The router
+key and identity headers ride alongside the provider config; re-install
+rewrites only the managed block and `--uninstall --opencode` strips it.
 
 **Cursor** *(early beta, performance may not be the best).* Settings →
 Models → *Override OpenAI Base URL* → `http://localhost:8080/v1`, paste

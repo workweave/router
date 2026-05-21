@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 #
-# Weave Router uninstaller for Claude Code and Codex.
+# Weave Router uninstaller for Claude Code, Codex, and opencode.
 #
 # Default target is Claude Code: removes the env vars, statusLine, and local
 # router auth that install.sh added; leaves the rest of settings.json
 # untouched. Pass --codex to strip the managed [model_providers.weave]
 # block (and the matching top-level `model_provider`) from Codex's
-# config.toml — anything outside the markers is preserved.
+# config.toml — anything outside the markers is preserved. Pass --opencode
+# to strip the `provider.weave` block (and the top-level `model` key when
+# it points at the router) from opencode.json; other providers and user
+# settings are preserved.
 #
 # Usage:
 #   npx @workweave/router --uninstall                            # Claude Code, user scope
 #   npx @workweave/router --uninstall --codex                    # Codex, user scope
+#   npx @workweave/router --uninstall --opencode                 # opencode, user scope
 #   npx @workweave/router --uninstall --scope project            # run inside the repo
 #   npx @workweave/router --uninstall --dir /tmp/test            # --dir alone (user scope, .weave/)
 #   npx @workweave/router --uninstall --scope project --dir /tmp # --dir + project scope (.claude/)
@@ -52,10 +56,14 @@ while [ $# -gt 0 ]; do
     --codex)
       target="codex"; shift
       ;;
+    --opencode)
+      target="opencode"; shift
+      ;;
     --claude)
-      # No-op selector for symmetry with --codex and install.sh's --claude.
-      # Lets `./install.sh --uninstall --claude` (which forwards remaining
-      # args here) succeed instead of hitting the unknown-flag catch-all.
+      # No-op selector for symmetry with --codex / --opencode and install.sh's
+      # --claude. Lets `./install.sh --uninstall --claude` (which forwards
+      # remaining args here) succeed instead of hitting the unknown-flag
+      # catch-all.
       target="claude"; shift
       ;;
     -h|--help)
@@ -69,8 +77,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ "$target" = "claude" ] && ! command -v jq >/dev/null 2>&1; then
-  err "jq is required for the Claude Code uninstall path."
+if { [ "$target" = "claude" ] || [ "$target" = "opencode" ]; } && ! command -v jq >/dev/null 2>&1; then
+  err "jq is required for the $target uninstall path."
   exit 1
 fi
 
@@ -96,6 +104,82 @@ strip_codex_block() {
   ' "$config_file" >"$tmp"
   mv "$tmp" "$config_file"
 }
+
+# ---------- opencode uninstall path ----------
+
+if [ "$target" = "opencode" ]; then
+  # Resolve opencode_config_file based on scope/dir. Mirrors install.sh so
+  # an `install --opencode --scope project` is exactly reversed by an
+  # `uninstall --opencode --scope project`.
+  if [ -n "$install_dir" ]; then
+    install_dir="$(cd "$install_dir" 2>/dev/null && pwd || echo "$install_dir")"
+    opencode_dir="$install_dir"
+    refuse_if_symlink "$opencode_dir"
+  elif [ "$scope" = "user" ]; then
+    opencode_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+  else
+    # Project scope: same prompt + git-root fallback as install.sh.
+    project_dir=""
+    if [ "$scope_explicit" = "false" ] && [ -r /dev/tty ]; then
+      default_project_dir="$(pwd)"
+      printf "Project directory to uninstall from [default: %s]: " "$default_project_dir"
+      read -r project_dir_choice </dev/tty || project_dir_choice=""
+      project_dir="${project_dir_choice:-$default_project_dir}"
+      case "$project_dir" in
+        "~")    project_dir="$HOME" ;;
+        "~/"*)  project_dir="$HOME/${project_dir#~/}" ;;
+      esac
+      if [ ! -d "$project_dir" ]; then
+        err "directory does not exist: $project_dir"
+        exit 1
+      fi
+      project_dir="$(cd "$project_dir" && pwd)"
+    fi
+    if [ -n "${project_dir:-}" ]; then
+      opencode_dir="$project_dir"
+    else
+      if ! git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+        err "--scope project must be run inside a git repo, or use --dir <path>."
+        exit 1
+      fi
+      opencode_dir="$git_root"
+    fi
+    refuse_if_symlink "$opencode_dir"
+  fi
+  opencode_config_file="$opencode_dir/opencode.json"
+  refuse_if_symlink "$opencode_config_file"
+
+  if [ -f "$opencode_config_file" ]; then
+    # Strip `provider.weave` and any router-pointing top-level model. Other
+    # providers, user-set models that don't reference the router, and any
+    # unrelated keys are preserved.
+    cleaned="$(jq '
+      (if .provider.weave then del(.provider.weave) else . end)
+      | (if (.provider // {}) == {} then del(.provider) else . end)
+      | (if (.model // "" | tostring | startswith("weave/")) then del(.model) else . end)
+    ' "$opencode_config_file")"
+    printf '%s\n' "$cleaned" >"$opencode_config_file"
+
+    # If only the $schema marker remains (or the file is empty), drop the
+    # file entirely so we don't leave a one-key artifact.
+    remaining_keys="$(jq -r 'del(."$schema") | keys | length' "$opencode_config_file" 2>/dev/null || echo 0)"
+    if [ "$remaining_keys" = "0" ]; then
+      rm -f "$opencode_config_file"
+      ok "Removed empty $opencode_config_file"
+    else
+      ok "Cleaned $opencode_config_file"
+    fi
+  else
+    info "No opencode config at $opencode_config_file (already uninstalled?)"
+  fi
+
+  if [ -n "$install_dir" ]; then
+    ok "Weave Router uninstalled from $install_dir (opencode)."
+  else
+    ok "Weave Router uninstalled (opencode, scope=$scope)."
+  fi
+  exit 0
+fi
 
 # ---------- codex uninstall path ----------
 

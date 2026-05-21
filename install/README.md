@@ -1,23 +1,25 @@
-# Weave Router — Claude Code + Codex installer
+# Weave Router — Claude Code + Codex + opencode installer
 
-One command to point Claude Code or the OpenAI Codex CLI at the Weave Router
-permanently. No shell exports, no manual config edits.
+One command to point Claude Code, the OpenAI Codex CLI, or opencode at the
+Weave Router permanently. No shell exports, no manual config edits.
 
 ## Quick start
 
 ### Hosted Weave Router
 
 ```bash
-# Interactive: the installer asks Claude Code or Codex, then user vs. project
+# Interactive: the installer asks Claude Code / Codex / opencode, then user vs. project
 npx @workweave/router
 
 # Skip the target picker:
 npx @workweave/router --claude                     # Claude Code, user scope
 npx @workweave/router --codex                      # Codex, user scope
+npx @workweave/router --opencode                   # opencode, user scope
 
 # Project scope — only when running inside this repo:
-npx @workweave/router --claude --scope project     # Claude Code
-npx @workweave/router --codex  --scope project     # Codex
+npx @workweave/router --claude   --scope project   # Claude Code
+npx @workweave/router --codex    --scope project   # Codex
+npx @workweave/router --opencode --scope project   # opencode
 ```
 
 Prefer `curl`? The same installer is also served as a shell script:
@@ -25,6 +27,7 @@ Prefer `curl`? The same installer is also served as a shell script:
 ```bash
 curl -fsSL https://weave.ai/cc/install.sh | sh
 curl -fsSL https://weave.ai/cc/install.sh | sh -s -- --codex
+curl -fsSL https://weave.ai/cc/install.sh | sh -s -- --opencode
 curl -fsSL https://weave.ai/cc/install.sh | sh -s -- --scope project
 ```
 
@@ -34,14 +37,15 @@ Or from a clone of this repo:
 ./router/install/install.sh                    # prompts: target, then scope
 ./router/install/install.sh --claude           # skip picker, Claude Code
 ./router/install/install.sh --codex            # skip picker, Codex
+./router/install/install.sh --opencode         # skip picker, opencode
 ./router/install/install.sh --scope project    # team install
 ```
 
-When run interactively without `--claude` / `--codex`, the installer asks
-which tool to target (defaults to Claude Code on Enter). Without `--scope`,
-it then asks user vs. project (defaults to user). `--non-interactive` skips
-both prompts (target defaults to Claude Code) — useful for CI and
-`curl | sh` pipelines.
+When run interactively without `--claude` / `--codex` / `--opencode`, the
+installer asks which tool to target (defaults to Claude Code on Enter).
+Without `--scope`, it then asks user vs. project (defaults to user).
+`--non-interactive` skips both prompts (target defaults to Claude Code) —
+useful for CI and `curl | sh` pipelines.
 
 The installer also prompts for your API key (or reads `$WEAVE_ROUTER_KEY`
 for non-interactive installs).
@@ -124,14 +128,36 @@ Re-running the installer rewrites only the managed block (TOML between the
 markers + a top-level `model_provider =` outside it). Everything else —
 profiles, alternate providers, comments — stays untouched.
 
-**Onboarding flow for a new teammate (either target):**
+### opencode (`--opencode`)
+
+**User scope:**
+
+| Path                                       | Purpose                                                       |
+| ------------------------------------------ | ------------------------------------------------------------- |
+| `~/.config/opencode/opencode.json`         | Merges a `provider.weave` entry backed by opencode's `@ai-sdk/anthropic`, pointed at `<base-url>/v1`. Headers carry `X-Weave-Router-Key` plus the identity headers (`X-Weave-User-Email`, `X-Weave-User-Name`, `X-App: opencode`). Top-level `model` is set to `weave/claude-sonnet-4-6` when no model is already configured. |
+
+**Project scope (`--scope project`):**
+
+| Path                       | Committed? | Purpose                                                       |
+| -------------------------- | ---------- | ------------------------------------------------------------- |
+| `<repo>/opencode.json`     | ❌ ignored | Per-teammate config (holds the router key). Each teammate runs the installer for their own key. |
+| `<repo>/.gitignore`        | ✅ commit  | Adds `opencode.json` to the ignore list.                       |
+
+The router speaks the Anthropic Messages API natively, so opencode talks to
+it through its bundled `@ai-sdk/anthropic` provider without any patching.
+Re-running the installer rewrites only the managed `provider.weave` block;
+other providers, MCP servers, agents, and your top-level model choice stay
+untouched. `--uninstall --opencode` strips the block (and `model` only when
+it points at `weave/...`).
+
+**Onboarding flow for a new teammate (any target):**
 
 ```bash
 git clone <repo>
 cd <repo>
-npx @workweave/router --claude --scope project   # or --codex
+npx @workweave/router --claude --scope project   # or --codex / --opencode
 export WEAVE_ROUTER_KEY=rk_...                    # in shell rc / dotenv / 1Password
-claude                                             # or `CODEX_HOME=.codex codex`
+claude                                             # or `CODEX_HOME=.codex codex` / `opencode`
 ```
 
 The `--scope project` step only needs to run once per checkout (re-run if
@@ -143,6 +169,7 @@ The `--scope project` step only needs to run once per checkout (re-run if
 | -------------------------- | ----------------------------- | ---------------------------------------------------------------------- |
 | `--claude`                 | (target picker if interactive) | Skip the target picker; install for Claude Code.                       |
 | `--codex`                  | (target picker if interactive) | Skip the target picker; install for the OpenAI Codex CLI.              |
+| `--opencode`               | (target picker if interactive) | Skip the target picker; install for opencode.                          |
 | `--scope user\|project`    | interactive prompt (default `user`) | User-level install (everywhere) vs project-level (this repo only).      |
 | `--local`                  | off                           | Shortcut for the bundled docker-compose router (`localhost:8080`).      |
 | `--base-url <url>`         | `https://router.workweave.ai` | Override the router endpoint. Use for self-hosted / custom port.        |
@@ -172,13 +199,24 @@ errors invoking `cc-statusline.sh`. The script needs `jq` on PATH.
 3. Check the router's dashboard at `<base-url>/ui/dashboard` to see the
    routed decision.
 
+**opencode:**
+
+1. Open `~/.config/opencode/opencode.json` (or `<repo>/opencode.json` for
+   project scope) and confirm `provider.weave` exists with your
+   `X-Weave-Router-Key` in `options.headers`.
+2. Run `opencode` and pick one of the `weave/...` models. Issue a turn.
+3. Check the router's dashboard at `<base-url>/ui/dashboard` — traffic
+   should be tagged `X-App: opencode`.
+
 ## Uninstall
 
 ```bash
 npx @workweave/router --uninstall                       # Claude Code, user scope
 npx @workweave/router --uninstall --codex               # Codex, user scope
+npx @workweave/router --uninstall --opencode            # opencode, user scope
 npx @workweave/router --uninstall --scope project       # Claude Code, in the repo
 npx @workweave/router --uninstall --codex --scope project
+npx @workweave/router --uninstall --opencode --scope project
 ```
 
 Removes only the keys / block this installer added; everything else in

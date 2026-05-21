@@ -1,12 +1,13 @@
 # @workweave/router
 
-One command, anywhere, to point Claude Code or Codex at the Weave Router.
+One command, anywhere, to point Claude Code, Codex, or opencode at the Weave Router.
 
 ```bash
-npx @workweave/router                       # interactive: pick Claude Code or Codex, then scope
+npx @workweave/router                       # interactive: pick Claude Code / Codex / opencode, then scope
 npx @workweave/router --claude              # skip the picker, target Claude Code
 npx @workweave/router --codex               # skip the picker, target the OpenAI Codex CLI
-npx @workweave/router --scope project       # per-repo install, commit settings.json (or .codex/)
+npx @workweave/router --opencode            # skip the picker, target opencode
+npx @workweave/router --scope project       # per-repo install, commit settings.json (or .codex/ / opencode.json)
 npx @workweave/router --local               # self-hosted via docker-compose (localhost:8080)
 npx @workweave/router --base-url https://router.acme.internal
 npx @workweave/router --non-interactive     # reads $WEAVE_ROUTER_KEY, no prompts (defaults to claude)
@@ -23,6 +24,7 @@ Uninstall:
 ```bash
 npx @workweave/router --uninstall                       # Claude Code, user scope
 npx @workweave/router --uninstall --codex               # Codex, user scope
+npx @workweave/router --uninstall --opencode            # opencode, user scope
 npx @workweave/router --uninstall --scope project       # Claude Code, inside the repo
 npx @workweave/router --uninstall --codex --scope project
 ```
@@ -35,7 +37,7 @@ Node ≥ 18 — no `curl | sh`, no Git clone, no PATH fiddling. Everything the
 shell installer documents (targets, scopes, flags, environment variables)
 works identically here.
 
-Two install targets:
+Three install targets:
 
 - **Claude Code** (default) — patches `~/.claude/settings.json` (or
   `<repo>/.claude/settings.json` with `--scope project`) so `claude` routes
@@ -47,6 +49,13 @@ Two install targets:
   through to api.openai.com. The block lives between begin/end markers so
   re-running the installer rewrites it cleanly and `--uninstall --codex`
   removes it without touching the rest of your config.
+- **opencode** (`--opencode`) — merges a `provider.weave` entry (backed by
+  opencode's built-in `@ai-sdk/anthropic` provider) into
+  `~/.config/opencode/opencode.json` (or `<repo>/opencode.json` with
+  `--scope project`). The router speaks the Anthropic Messages API
+  natively, so opencode talks to it unmodified. Re-install rewrites only
+  the managed `provider.weave` block; `--uninstall --opencode` strips it
+  and leaves your other providers and settings alone.
 
 See the [main installer docs](https://github.com/workweave/router/tree/main/install)
 for the full reference.
@@ -55,8 +64,8 @@ for the full reference.
 
 - Node ≥ 18 (ships with `npx`)
 - `bash` on PATH (macOS / Linux native; Windows needs Git Bash or WSL)
-- `jq` on PATH — used by the Claude Code status line script. Not required
-  for the Codex path.
+- `jq` on PATH — used by the Claude Code status line script and the
+  opencode JSON merge. Not required for the Codex path.
 
 ## Why npx
 
