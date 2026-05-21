@@ -326,6 +326,132 @@ func (r *TelemetryRepo) GetTelemetryRowsAll(ctx context.Context, from, to time.T
 	return out, nil
 }
 
+// GetLatencyPercentilesAll returns time-bucketed latency percentiles across all installations.
+func (r *TelemetryRepo) GetLatencyPercentilesAll(ctx context.Context, from, to time.Time, granularity string, model, provider *string) ([]proxy.LatencyPercentiles, error) {
+	q := sqlc.New(r.tx)
+	fromTZ := pgtype.Timestamptz{Time: from, Valid: true}
+	toTZ := pgtype.Timestamptz{Time: to, Valid: true}
+
+	switch granularity {
+	case "week":
+		rows, err := q.GetLatencyPercentilesWeeklyAll(ctx, sqlc.GetLatencyPercentilesWeeklyAllParams{
+			FromTime:         fromTZ,
+			ToTime:           toTZ,
+			DecisionModel:    model,
+			DecisionProvider: provider,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]proxy.LatencyPercentiles, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, latencyPercentilesFromRow(
+				row.Bucket.Time, row.RequestCount,
+				row.TotalP50Ms, row.TotalP90Ms, row.TotalP99Ms,
+				row.RouteP50Ms, row.RouteP90Ms,
+				row.UpstreamP50Ms, row.UpstreamP90Ms,
+				row.TtftP50Ms, row.TtftP90Ms,
+			))
+		}
+		return out, nil
+	case "day":
+		rows, err := q.GetLatencyPercentilesDailyAll(ctx, sqlc.GetLatencyPercentilesDailyAllParams{
+			FromTime:         fromTZ,
+			ToTime:           toTZ,
+			DecisionModel:    model,
+			DecisionProvider: provider,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]proxy.LatencyPercentiles, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, latencyPercentilesFromRow(
+				row.Bucket.Time, row.RequestCount,
+				row.TotalP50Ms, row.TotalP90Ms, row.TotalP99Ms,
+				row.RouteP50Ms, row.RouteP90Ms,
+				row.UpstreamP50Ms, row.UpstreamP90Ms,
+				row.TtftP50Ms, row.TtftP90Ms,
+			))
+		}
+		return out, nil
+	}
+
+	rows, err := q.GetLatencyPercentilesHourlyAll(ctx, sqlc.GetLatencyPercentilesHourlyAllParams{
+		FromTime:         fromTZ,
+		ToTime:           toTZ,
+		DecisionModel:    model,
+		DecisionProvider: provider,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]proxy.LatencyPercentiles, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, latencyPercentilesFromRow(
+			row.Bucket.Time, row.RequestCount,
+			row.TotalP50Ms, row.TotalP90Ms, row.TotalP99Ms,
+			row.RouteP50Ms, row.RouteP90Ms,
+			row.UpstreamP50Ms, row.UpstreamP90Ms,
+			row.TtftP50Ms, row.TtftP90Ms,
+		))
+	}
+	return out, nil
+}
+
+func latencyPercentilesFromRow(
+	bucket time.Time, requestCount int64,
+	totalP50, totalP90, totalP99 int64,
+	routeP50, routeP90 int64,
+	upstreamP50, upstreamP90 int64,
+	ttftP50, ttftP90 int64,
+) proxy.LatencyPercentiles {
+	return proxy.LatencyPercentiles{
+		Bucket:        bucket,
+		RequestCount:  requestCount,
+		TotalP50Ms:    totalP50,
+		TotalP90Ms:    totalP90,
+		TotalP99Ms:    totalP99,
+		RouteP50Ms:    routeP50,
+		RouteP90Ms:    routeP90,
+		UpstreamP50Ms: upstreamP50,
+		UpstreamP90Ms: upstreamP90,
+		TTFTP50Ms:     ttftP50,
+		TTFTP90Ms:     ttftP90,
+	}
+}
+
+// GetModelPerformanceAll returns per-model performance metrics across all installations.
+func (r *TelemetryRepo) GetModelPerformanceAll(ctx context.Context, from, to time.Time) ([]proxy.ModelPerformance, error) {
+	q := sqlc.New(r.tx)
+	rows, err := q.GetModelPerformanceAll(ctx, sqlc.GetModelPerformanceAllParams{
+		FromTime: pgtype.Timestamptz{Time: from, Valid: true},
+		ToTime:   pgtype.Timestamptz{Time: to, Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]proxy.ModelPerformance, 0, len(rows))
+	for _, row := range rows {
+		deref := func(s *string) string {
+			if s == nil {
+				return ""
+			}
+			return *s
+		}
+		out = append(out, proxy.ModelPerformance{
+			DecisionModel:      deref(row.DecisionModel),
+			DecisionProvider:   deref(row.DecisionProvider),
+			RequestCount:       row.RequestCount,
+			TotalP50Ms:         row.TotalP50Ms,
+			TotalP90Ms:         row.TotalP90Ms,
+			ErrorCount:         row.ErrorCount,
+			TotalActualCostUSD: microsToUSD(row.TotalActualCostUsd),
+		})
+	}
+	return out, nil
+}
+
 // telemetryRowFromRow centralizes SQLC -> domain conversion. The {all, per-installation}
 // queries emit isomorphic but distinctly named row types, so we accept individual fields.
 func telemetryRowFromRow(

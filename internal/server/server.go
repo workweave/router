@@ -55,7 +55,7 @@ const (
 // are present; when set, every inference route is gated on prepaid balance
 // via middleware.WithBalanceCheck. nil leaves inference routes open (BYOK
 // or platform key still controls upstream auth).
-func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service) {
+func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service, internalSecret string) {
 	// Managed mode bills via prepaid credits against the platform key; any
 	// BYOK row left over in router.model_router_external_api_keys would
 	// silently double-charge the customer (upstream provider + Weave credits).
@@ -99,6 +99,15 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 			mgmt.GET("/excluded-models", admin.GetExcludedModelsHandler(authSvc, deployedModels, proxySvc))
 			mgmt.PUT("/excluded-models", admin.UpdateExcludedModelsHandler(authSvc, deployedModels, proxySvc))
 		}
+	}
+
+	if mode == DeploymentModeManaged && internalSecret != "" {
+		internal := engine.Group("/internal/v1/metrics",
+			middleware.WithTimeout(adminTimeout),
+			middleware.WithInternalSecret(internalSecret),
+		)
+		internal.GET("/latency-timeseries", admin.InternalLatencyPercentilesHandler(proxySvc))
+		internal.GET("/model-performance", admin.InternalModelPerformanceHandler(proxySvc))
 	}
 
 	messagesMiddleware := []gin.HandlerFunc{

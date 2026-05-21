@@ -575,7 +575,12 @@ func main() {
 	// handler can surface the universe of deployed models. The fallback nil
 	// keeps non-cluster routers (heuristic dev override, etc.) bootable.
 	deployedModels, _ := rtr.(*cluster.Multiversion)
-	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc)
+
+	internalSecret := config.GetOr("ROUTER_INTERNAL_SECRET", "")
+	if deploymentMode == server.DeploymentModeManaged && internalSecret != "" {
+		logger.Info("Internal metrics API enabled on /internal/v1/metrics/*")
+	}
+	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc, internalSecret)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),

@@ -65,6 +65,14 @@ func (c *captureTelemetry) GetTelemetryRowsAll(context.Context, time.Time, time.
 	return nil, nil
 }
 
+func (*captureTelemetry) GetLatencyPercentilesAll(context.Context, time.Time, time.Time, string, *string, *string) ([]proxy.LatencyPercentiles, error) {
+	return nil, nil
+}
+
+func (*captureTelemetry) GetModelPerformanceAll(context.Context, time.Time, time.Time) ([]proxy.ModelPerformance, error) {
+	return nil, nil
+}
+
 func (c *captureTelemetry) firstRow(t *testing.T) proxy.InsertTelemetryParams {
 	t.Helper()
 	select {

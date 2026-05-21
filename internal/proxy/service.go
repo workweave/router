@@ -476,6 +476,22 @@ func (s *Service) MetricsRowsAll(ctx context.Context, from, to time.Time, limit 
 	return s.telemetry.GetTelemetryRowsAll(ctx, from, to, limit)
 }
 
+// MetricsLatencyPercentilesAll returns time-bucketed latency percentiles across all installations.
+func (s *Service) MetricsLatencyPercentilesAll(ctx context.Context, from, to time.Time, granularity string, model, provider *string) ([]LatencyPercentiles, error) {
+	if s.telemetry == nil {
+		return nil, nil
+	}
+	return s.telemetry.GetLatencyPercentilesAll(ctx, from, to, granularity, model, provider)
+}
+
+// MetricsModelPerformanceAll returns per-model performance metrics across all installations.
+func (s *Service) MetricsModelPerformanceAll(ctx context.Context, from, to time.Time) ([]ModelPerformance, error) {
+	if s.telemetry == nil {
+		return nil, nil
+	}
+	return s.telemetry.GetModelPerformanceAll(ctx, from, to)
+}
+
 // ErrProviderNotConfigured is returned when a routing decision selects a
 // provider that is not present in the registry.
 var ErrProviderNotConfigured = errors.New("provider not configured")

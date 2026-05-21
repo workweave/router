@@ -12,6 +12,392 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getLatencyPercentilesDailyAll = `-- name: GetLatencyPercentilesDailyAll :many
+SELECT
+    date_trunc('day', timestamp)::timestamptz AS bucket,
+    COUNT(*)::bigint AS request_count,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p90_ms,
+    percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p99_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p90_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p90_ms,
+    (percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p50_ms,
+    (percentile_cont(0.9) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p90_ms
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= $1::timestamptz
+  AND timestamp < $2::timestamptz
+  AND ($3::varchar IS NULL OR decision_model = $3::varchar)
+  AND ($4::varchar IS NULL OR decision_provider = $4::varchar)
+GROUP BY date_trunc('day', timestamp)
+ORDER BY bucket ASC
+`
+
+type GetLatencyPercentilesDailyAllParams struct {
+	FromTime         pgtype.Timestamptz
+	ToTime           pgtype.Timestamptz
+	DecisionModel    *string
+	DecisionProvider *string
+}
+
+type GetLatencyPercentilesDailyAllRow struct {
+	Bucket        pgtype.Timestamptz
+	RequestCount  int64
+	TotalP50Ms    int64
+	TotalP90Ms    int64
+	TotalP99Ms    int64
+	RouteP50Ms    int64
+	RouteP90Ms    int64
+	UpstreamP50Ms int64
+	UpstreamP90Ms int64
+	TtftP50Ms     int64
+	TtftP90Ms     int64
+}
+
+// Cross-org daily latency percentiles.
+//
+//	SELECT
+//	    date_trunc('day', timestamp)::timestamptz AS bucket,
+//	    COUNT(*)::bigint AS request_count,
+//	    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p50_ms,
+//	    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p90_ms,
+//	    percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p99_ms,
+//	    percentile_cont(0.5) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p50_ms,
+//	    percentile_cont(0.9) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p90_ms,
+//	    percentile_cont(0.5) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p50_ms,
+//	    percentile_cont(0.9) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p90_ms,
+//	    (percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p50_ms,
+//	    (percentile_cont(0.9) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p90_ms
+//	FROM router.model_router_request_telemetry
+//	WHERE span_type = 'router.upstream'
+//	  AND timestamp >= $1::timestamptz
+//	  AND timestamp < $2::timestamptz
+//	  AND ($3::varchar IS NULL OR decision_model = $3::varchar)
+//	  AND ($4::varchar IS NULL OR decision_provider = $4::varchar)
+//	GROUP BY date_trunc('day', timestamp)
+//	ORDER BY bucket ASC
+func (q *Queries) GetLatencyPercentilesDailyAll(ctx context.Context, arg GetLatencyPercentilesDailyAllParams) ([]GetLatencyPercentilesDailyAllRow, error) {
+	rows, err := q.db.Query(ctx, getLatencyPercentilesDailyAll,
+		arg.FromTime,
+		arg.ToTime,
+		arg.DecisionModel,
+		arg.DecisionProvider,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLatencyPercentilesDailyAllRow
+	for rows.Next() {
+		var i GetLatencyPercentilesDailyAllRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.RequestCount,
+			&i.TotalP50Ms,
+			&i.TotalP90Ms,
+			&i.TotalP99Ms,
+			&i.RouteP50Ms,
+			&i.RouteP90Ms,
+			&i.UpstreamP50Ms,
+			&i.UpstreamP90Ms,
+			&i.TtftP50Ms,
+			&i.TtftP90Ms,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getLatencyPercentilesHourlyAll = `-- name: GetLatencyPercentilesHourlyAll :many
+SELECT
+    date_trunc('hour', timestamp)::timestamptz AS bucket,
+    COUNT(*)::bigint AS request_count,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p90_ms,
+    percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p99_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p90_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p90_ms,
+    (percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p50_ms,
+    (percentile_cont(0.9) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p90_ms
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= $1::timestamptz
+  AND timestamp < $2::timestamptz
+  AND ($3::varchar IS NULL OR decision_model = $3::varchar)
+  AND ($4::varchar IS NULL OR decision_provider = $4::varchar)
+GROUP BY date_trunc('hour', timestamp)
+ORDER BY bucket ASC
+`
+
+type GetLatencyPercentilesHourlyAllParams struct {
+	FromTime         pgtype.Timestamptz
+	ToTime           pgtype.Timestamptz
+	DecisionModel    *string
+	DecisionProvider *string
+}
+
+type GetLatencyPercentilesHourlyAllRow struct {
+	Bucket        pgtype.Timestamptz
+	RequestCount  int64
+	TotalP50Ms    int64
+	TotalP90Ms    int64
+	TotalP99Ms    int64
+	RouteP50Ms    int64
+	RouteP90Ms    int64
+	UpstreamP50Ms int64
+	UpstreamP90Ms int64
+	TtftP50Ms     int64
+	TtftP90Ms     int64
+}
+
+// Cross-org hourly latency percentiles for the internal monitoring dashboard.
+// Optional model/provider filters via sqlc.narg (NULL = all).
+//
+//	SELECT
+//	    date_trunc('hour', timestamp)::timestamptz AS bucket,
+//	    COUNT(*)::bigint AS request_count,
+//	    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p50_ms,
+//	    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p90_ms,
+//	    percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p99_ms,
+//	    percentile_cont(0.5) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p50_ms,
+//	    percentile_cont(0.9) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p90_ms,
+//	    percentile_cont(0.5) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p50_ms,
+//	    percentile_cont(0.9) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p90_ms,
+//	    (percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p50_ms,
+//	    (percentile_cont(0.9) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p90_ms
+//	FROM router.model_router_request_telemetry
+//	WHERE span_type = 'router.upstream'
+//	  AND timestamp >= $1::timestamptz
+//	  AND timestamp < $2::timestamptz
+//	  AND ($3::varchar IS NULL OR decision_model = $3::varchar)
+//	  AND ($4::varchar IS NULL OR decision_provider = $4::varchar)
+//	GROUP BY date_trunc('hour', timestamp)
+//	ORDER BY bucket ASC
+func (q *Queries) GetLatencyPercentilesHourlyAll(ctx context.Context, arg GetLatencyPercentilesHourlyAllParams) ([]GetLatencyPercentilesHourlyAllRow, error) {
+	rows, err := q.db.Query(ctx, getLatencyPercentilesHourlyAll,
+		arg.FromTime,
+		arg.ToTime,
+		arg.DecisionModel,
+		arg.DecisionProvider,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLatencyPercentilesHourlyAllRow
+	for rows.Next() {
+		var i GetLatencyPercentilesHourlyAllRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.RequestCount,
+			&i.TotalP50Ms,
+			&i.TotalP90Ms,
+			&i.TotalP99Ms,
+			&i.RouteP50Ms,
+			&i.RouteP90Ms,
+			&i.UpstreamP50Ms,
+			&i.UpstreamP90Ms,
+			&i.TtftP50Ms,
+			&i.TtftP90Ms,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getLatencyPercentilesWeeklyAll = `-- name: GetLatencyPercentilesWeeklyAll :many
+SELECT
+    date_trunc('week', timestamp)::timestamptz AS bucket,
+    COUNT(*)::bigint AS request_count,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p90_ms,
+    percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p99_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p90_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p90_ms,
+    (percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p50_ms,
+    (percentile_cont(0.9) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p90_ms
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= $1::timestamptz
+  AND timestamp < $2::timestamptz
+  AND ($3::varchar IS NULL OR decision_model = $3::varchar)
+  AND ($4::varchar IS NULL OR decision_provider = $4::varchar)
+GROUP BY date_trunc('week', timestamp)
+ORDER BY bucket ASC
+`
+
+type GetLatencyPercentilesWeeklyAllParams struct {
+	FromTime         pgtype.Timestamptz
+	ToTime           pgtype.Timestamptz
+	DecisionModel    *string
+	DecisionProvider *string
+}
+
+type GetLatencyPercentilesWeeklyAllRow struct {
+	Bucket        pgtype.Timestamptz
+	RequestCount  int64
+	TotalP50Ms    int64
+	TotalP90Ms    int64
+	TotalP99Ms    int64
+	RouteP50Ms    int64
+	RouteP90Ms    int64
+	UpstreamP50Ms int64
+	UpstreamP90Ms int64
+	TtftP50Ms     int64
+	TtftP90Ms     int64
+}
+
+// Cross-org weekly latency percentiles.
+//
+//	SELECT
+//	    date_trunc('week', timestamp)::timestamptz AS bucket,
+//	    COUNT(*)::bigint AS request_count,
+//	    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p50_ms,
+//	    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p90_ms,
+//	    percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p99_ms,
+//	    percentile_cont(0.5) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p50_ms,
+//	    percentile_cont(0.9) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p90_ms,
+//	    percentile_cont(0.5) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p50_ms,
+//	    percentile_cont(0.9) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p90_ms,
+//	    (percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p50_ms,
+//	    (percentile_cont(0.9) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p90_ms
+//	FROM router.model_router_request_telemetry
+//	WHERE span_type = 'router.upstream'
+//	  AND timestamp >= $1::timestamptz
+//	  AND timestamp < $2::timestamptz
+//	  AND ($3::varchar IS NULL OR decision_model = $3::varchar)
+//	  AND ($4::varchar IS NULL OR decision_provider = $4::varchar)
+//	GROUP BY date_trunc('week', timestamp)
+//	ORDER BY bucket ASC
+func (q *Queries) GetLatencyPercentilesWeeklyAll(ctx context.Context, arg GetLatencyPercentilesWeeklyAllParams) ([]GetLatencyPercentilesWeeklyAllRow, error) {
+	rows, err := q.db.Query(ctx, getLatencyPercentilesWeeklyAll,
+		arg.FromTime,
+		arg.ToTime,
+		arg.DecisionModel,
+		arg.DecisionProvider,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLatencyPercentilesWeeklyAllRow
+	for rows.Next() {
+		var i GetLatencyPercentilesWeeklyAllRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.RequestCount,
+			&i.TotalP50Ms,
+			&i.TotalP90Ms,
+			&i.TotalP99Ms,
+			&i.RouteP50Ms,
+			&i.RouteP90Ms,
+			&i.UpstreamP50Ms,
+			&i.UpstreamP90Ms,
+			&i.TtftP50Ms,
+			&i.TtftP90Ms,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getModelPerformanceAll = `-- name: GetModelPerformanceAll :many
+SELECT
+    decision_model                                                          AS decision_model,
+    decision_provider                                                       AS decision_provider,
+    COUNT(*)::bigint                                                        AS request_count,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p90_ms,
+    COUNT(*) FILTER (WHERE upstream_status_code >= 400)::bigint            AS error_count,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS total_actual_cost_usd
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= $1::timestamptz
+  AND timestamp < $2::timestamptz
+GROUP BY decision_model, decision_provider
+ORDER BY request_count DESC
+`
+
+type GetModelPerformanceAllParams struct {
+	FromTime pgtype.Timestamptz
+	ToTime   pgtype.Timestamptz
+}
+
+type GetModelPerformanceAllRow struct {
+	DecisionModel      *string
+	DecisionProvider   *string
+	RequestCount       int64
+	TotalP50Ms         int64
+	TotalP90Ms         int64
+	ErrorCount         int64
+	TotalActualCostUsd int64
+}
+
+// Cross-org per-model performance summary for the monitoring dashboard.
+//
+//	SELECT
+//	    decision_model                                                          AS decision_model,
+//	    decision_provider                                                       AS decision_provider,
+//	    COUNT(*)::bigint                                                        AS request_count,
+//	    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p50_ms,
+//	    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p90_ms,
+//	    COUNT(*) FILTER (WHERE upstream_status_code >= 400)::bigint            AS error_count,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS total_actual_cost_usd
+//	FROM router.model_router_request_telemetry
+//	WHERE span_type = 'router.upstream'
+//	  AND timestamp >= $1::timestamptz
+//	  AND timestamp < $2::timestamptz
+//	GROUP BY decision_model, decision_provider
+//	ORDER BY request_count DESC
+func (q *Queries) GetModelPerformanceAll(ctx context.Context, arg GetModelPerformanceAllParams) ([]GetModelPerformanceAllRow, error) {
+	rows, err := q.db.Query(ctx, getModelPerformanceAll, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetModelPerformanceAllRow
+	for rows.Next() {
+		var i GetModelPerformanceAllRow
+		if err := rows.Scan(
+			&i.DecisionModel,
+			&i.DecisionProvider,
+			&i.RequestCount,
+			&i.TotalP50Ms,
+			&i.TotalP90Ms,
+			&i.ErrorCount,
+			&i.TotalActualCostUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getTelemetryRows = `-- name: GetTelemetryRows :many
 SELECT
     timestamp,

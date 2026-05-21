@@ -62,10 +62,16 @@ func TestRegister_DeploymentMode(t *testing.T) {
 		"PUT /admin/v1/excluded-models",
 	}
 
+	// Internal metrics surface — mounted in managed mode with a secret.
+	internalRoutes := []string{
+		"GET /internal/v1/metrics/latency-timeseries",
+		"GET /internal/v1/metrics/model-performance",
+	}
+
 	t.Run("selfhosted mounts dashboard and product routes", func(t *testing.T) {
 		engine := gin.New()
 		// Nil services are fine: engine.Routes() inspection never invokes the closure-captured handlers.
-		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeSelfHosted, nil)
+		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeSelfHosted, nil, "")
 		got := routeSet(engine)
 		for _, want := range productRoutes {
 			assert.Contains(t, got, want, "product route missing in selfhosted mode")
@@ -73,17 +79,38 @@ func TestRegister_DeploymentMode(t *testing.T) {
 		for _, want := range dashboardRoutes {
 			assert.Contains(t, got, want, "dashboard route missing in selfhosted mode")
 		}
+		for _, unwanted := range internalRoutes {
+			assert.NotContains(t, got, unwanted, "internal route must not be mounted in selfhosted mode")
+		}
 	})
 
 	t.Run("managed skips dashboard but keeps product routes", func(t *testing.T) {
 		engine := gin.New()
-		server.Register(engine, nil, nil, nil, server.DeploymentModeManaged, nil)
+		server.Register(engine, nil, nil, nil, server.DeploymentModeManaged, nil, "")
 		got := routeSet(engine)
 		for _, want := range productRoutes {
 			assert.Contains(t, got, want, "product route missing in managed mode")
 		}
 		for _, unwanted := range dashboardRoutes {
 			assert.NotContains(t, got, unwanted, "dashboard route must not be mounted in managed mode")
+		}
+		for _, unwanted := range internalRoutes {
+			assert.NotContains(t, got, unwanted, "internal route must not be mounted without secret")
+		}
+	})
+
+	t.Run("managed with internal secret mounts internal routes", func(t *testing.T) {
+		engine := gin.New()
+		server.Register(engine, nil, nil, nil, server.DeploymentModeManaged, nil, "test-secret")
+		got := routeSet(engine)
+		for _, want := range productRoutes {
+			assert.Contains(t, got, want, "product route missing in managed+secret mode")
+		}
+		for _, unwanted := range dashboardRoutes {
+			assert.NotContains(t, got, unwanted, "dashboard route must not be mounted in managed mode")
+		}
+		for _, want := range internalRoutes {
+			assert.Contains(t, got, want, "internal route missing in managed+secret mode")
 		}
 	})
 }

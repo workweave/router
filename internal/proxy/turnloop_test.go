@@ -376,3 +376,9 @@ func (recordingTelemetry) GetTelemetryRows(ctx context.Context, installationID s
 func (recordingTelemetry) GetTelemetryRowsAll(ctx context.Context, from, to time.Time, limit int32) ([]proxy.TelemetryRow, error) {
 	return nil, nil
 }
+func (recordingTelemetry) GetLatencyPercentilesAll(ctx context.Context, from, to time.Time, granularity string, model, provider *string) ([]proxy.LatencyPercentiles, error) {
+	return nil, nil
+}
+func (recordingTelemetry) GetModelPerformanceAll(ctx context.Context, from, to time.Time) ([]proxy.ModelPerformance, error) {
+	return nil, nil
+}

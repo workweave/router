@@ -17,6 +17,8 @@ type TelemetryRepository interface {
 	GetTelemetryTimeseriesAll(ctx context.Context, from, to time.Time, granularity string) ([]TelemetryBucket, error)
 	GetTelemetryRows(ctx context.Context, installationID string, from, to time.Time, limit int32) ([]TelemetryRow, error)
 	GetTelemetryRowsAll(ctx context.Context, from, to time.Time, limit int32) ([]TelemetryRow, error)
+	GetLatencyPercentilesAll(ctx context.Context, from, to time.Time, granularity string, model, provider *string) ([]LatencyPercentiles, error)
+	GetModelPerformanceAll(ctx context.Context, from, to time.Time) ([]ModelPerformance, error)
 }
 
 // InsertTelemetryParams mirrors one router.upstream span row.
@@ -71,6 +73,33 @@ type TelemetryBucket struct {
 	Bucket           time.Time
 	RequestedCostUSD float64
 	ActualCostUSD    float64
+}
+
+// LatencyPercentiles is one time-bucket of cross-org latency aggregation.
+// TTFT fields are 0 when no rows in the bucket had a ttft_ms value.
+type LatencyPercentiles struct {
+	Bucket        time.Time
+	RequestCount  int64
+	TotalP50Ms    int64
+	TotalP90Ms    int64
+	TotalP99Ms    int64
+	RouteP50Ms    int64
+	RouteP90Ms    int64
+	UpstreamP50Ms int64
+	UpstreamP90Ms int64
+	TTFTP50Ms     int64
+	TTFTP90Ms     int64
+}
+
+// ModelPerformance is one row in the per-model performance comparison.
+type ModelPerformance struct {
+	DecisionModel      string
+	DecisionProvider   string
+	RequestCount       int64
+	TotalP50Ms         int64
+	TotalP90Ms         int64
+	ErrorCount         int64
+	TotalActualCostUSD float64
 }
 
 // TelemetryRow is one upstream span returned by the drill-down endpoint.

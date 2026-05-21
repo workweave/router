@@ -218,6 +218,93 @@ WHERE span_type = 'router.upstream'
 ORDER BY timestamp DESC
 LIMIT @row_limit::int;
 
+-- Cross-org hourly latency percentiles for the internal monitoring dashboard.
+-- Optional model/provider filters via sqlc.narg (NULL = all).
+-- name: GetLatencyPercentilesHourlyAll :many
+SELECT
+    date_trunc('hour', timestamp)::timestamptz AS bucket,
+    COUNT(*)::bigint AS request_count,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p90_ms,
+    percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p99_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p90_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p90_ms,
+    (percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p50_ms,
+    (percentile_cont(0.9) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p90_ms
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= @from_time::timestamptz
+  AND timestamp < @to_time::timestamptz
+  AND (sqlc.narg('decision_model')::varchar IS NULL OR decision_model = sqlc.narg('decision_model')::varchar)
+  AND (sqlc.narg('decision_provider')::varchar IS NULL OR decision_provider = sqlc.narg('decision_provider')::varchar)
+GROUP BY date_trunc('hour', timestamp)
+ORDER BY bucket ASC;
+
+-- Cross-org daily latency percentiles.
+-- name: GetLatencyPercentilesDailyAll :many
+SELECT
+    date_trunc('day', timestamp)::timestamptz AS bucket,
+    COUNT(*)::bigint AS request_count,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p90_ms,
+    percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p99_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p90_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p90_ms,
+    (percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p50_ms,
+    (percentile_cont(0.9) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p90_ms
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= @from_time::timestamptz
+  AND timestamp < @to_time::timestamptz
+  AND (sqlc.narg('decision_model')::varchar IS NULL OR decision_model = sqlc.narg('decision_model')::varchar)
+  AND (sqlc.narg('decision_provider')::varchar IS NULL OR decision_provider = sqlc.narg('decision_provider')::varchar)
+GROUP BY date_trunc('day', timestamp)
+ORDER BY bucket ASC;
+
+-- Cross-org weekly latency percentiles.
+-- name: GetLatencyPercentilesWeeklyAll :many
+SELECT
+    date_trunc('week', timestamp)::timestamptz AS bucket,
+    COUNT(*)::bigint AS request_count,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint   AS total_p90_ms,
+    percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p99_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY route_latency_ms)::bigint   AS route_p90_ms,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY upstream_latency_ms)::bigint AS upstream_p90_ms,
+    (percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p50_ms,
+    (percentile_cont(0.9) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL))::bigint AS ttft_p90_ms
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= @from_time::timestamptz
+  AND timestamp < @to_time::timestamptz
+  AND (sqlc.narg('decision_model')::varchar IS NULL OR decision_model = sqlc.narg('decision_model')::varchar)
+  AND (sqlc.narg('decision_provider')::varchar IS NULL OR decision_provider = sqlc.narg('decision_provider')::varchar)
+GROUP BY date_trunc('week', timestamp)
+ORDER BY bucket ASC;
+
+-- Cross-org per-model performance summary for the monitoring dashboard.
+-- name: GetModelPerformanceAll :many
+SELECT
+    decision_model                                                          AS decision_model,
+    decision_provider                                                       AS decision_provider,
+    COUNT(*)::bigint                                                        AS request_count,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p50_ms,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY total_latency_ms)::bigint  AS total_p90_ms,
+    COUNT(*) FILTER (WHERE upstream_status_code >= 400)::bigint            AS error_count,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS total_actual_cost_usd
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= @from_time::timestamptz
+  AND timestamp < @to_time::timestamptz
+GROUP BY decision_model, decision_provider
+ORDER BY request_count DESC;
+
 -- Returns individual telemetry rows scoped to a single installation.
 -- name: GetTelemetryRows :many
 SELECT

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strings"
@@ -163,6 +164,23 @@ func handleAuthError(c *gin.Context, err error) {
 		logger.Error("Auth check errored", "err", err)
 	}
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_key"})
+}
+
+// InternalSecretHeader is the header name for the shared internal secret.
+const InternalSecretHeader = "X-Weave-Internal-Secret"
+
+// WithInternalSecret gates access via a constant-time comparison of the
+// X-Weave-Internal-Secret header against the configured secret.
+func WithInternalSecret(secret string) gin.HandlerFunc {
+	expected := []byte(secret)
+	return func(c *gin.Context) {
+		got := []byte(c.GetHeader(InternalSecretHeader))
+		if subtle.ConstantTimeCompare(got, expected) != 1 {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_internal_secret"})
+			return
+		}
+		c.Next()
+	}
 }
 
 // InstallationFrom retrieves the authed installation set by WithAuth. Returns nil for admin-cookie sessions and unauthed requests.
