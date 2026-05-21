@@ -1431,9 +1431,24 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
   # The marker regex tolerates the optional "(<provider>)" segment and a
   # `[1m]` / `-YYYYMMDD` suffix on either model name so transcripts written
   # against context-tiered or dated model ids still parse cleanly.
+  #
+  # Dedup note: CC writes one JSONL entry per *content block* in an
+  # assistant turn (text, text, tool_use → 3 entries), and every entry
+  # carries the same `message.usage`. Summing per-entry triple-counts the
+  # turn. We dedupe on (message.id, message.usage) before summing:
+  #   * For native Anthropic upstreams message.id is unique per turn, so
+  #     this collapses the content-block fan-out cleanly.
+  #   * For non-Anthropic upstreams that round-trip through the router's
+  #     translator, message.id can be a constant placeholder
+  #     ("msg_translated"); usage still differs per turn (input_tokens
+  #     grows), so the composite key keeps turns distinct. Two turns with
+  #     byte-identical id AND usage would still collapse, but that's a
+  #     genuine retry/duplicate we want to drop.
   read -r session_savings tot_in tot_out tot_cache_read tot_cache_write < <(
-    jq -r --argjson p "$prices" --arg requested "$requested_norm" '
-      select(.type=="assistant") |
+    jq -rs --argjson p "$prices" --arg requested "$requested_norm" '
+      [.[] | select(.type=="assistant")] |
+      unique_by([.message.id, .message.usage]) |
+      .[] |
       .message as $m |
       ($m.model // "" | sub("\\[[^]]*\\]$"; "") | sub("-[0-9]{8}$"; "")) as $rm |
       {
