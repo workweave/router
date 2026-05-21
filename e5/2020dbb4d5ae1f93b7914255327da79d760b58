@@ -1,0 +1,19 @@
+install/npm/package.json
+  s_4e7ed014e8ae78::t_3af25b8454d484 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "e52020dbb4d5ae1f93b7914255327da79d760b58",
+  "prompts": {},
+  "sessions": {
+    "s_4e7ed014e8ae78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13bcbea4-2be4-476b-8c59-973927efe1ab",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

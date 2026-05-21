@@ -1,0 +1,46 @@
+internal/router/cluster/artifacts.go
+  6f5c0fee49cda77d 154-185
+internal/router/cluster/scorer.go
+  6f5c0fee49cda77d 44-47,54-73,156,275-282,290-293
+cmd/router/main.go
+  6f5c0fee49cda77d 32,161-162,463-533
+internal/proxy/service.go
+  6f5c0fee49cda77d 14,29-32,42,54,62-123,258-284,323-333,346,348,359,362,364,373-387,503-527,564-573,586,588,599,602,604,613-621
+internal/router/router.go
+  6f5c0fee49cda77d 21-40
+internal/proxy/service_test.go
+  6f5c0fee49cda77d 65,121,177,200,263,308
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "3dfcbb8b2949d3a0052086d5815e648b6ecf8f84",
+  "prompts": {
+    "6f5c0fee49cda77d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3434db8-cf48-4aa6-9063-d4abb18039e7",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 347,
+      "total_deletions": 25,
+      "accepted_lines": 347,
+      "overriden_lines": 0
+    },
+    "b549a8c33156104b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f16ef988-9650-474b-baf8-a0879984a687",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 159,
+      "total_deletions": 134,
+      "accepted_lines": 159,
+      "overriden_lines": 0
+    }
+  }
+}
