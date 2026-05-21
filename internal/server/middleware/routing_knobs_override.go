@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,11 +29,11 @@ func WithRoutingKnobsOverride() gin.HandlerFunc {
 
 		if raw := strings.TrimSpace(c.GetHeader(HeaderAlpha)); raw != "" {
 			val, err := strconv.ParseFloat(raw, 64)
-			if err != nil || val < 0 || val > 1 {
+			if err != nil || math.IsNaN(val) || math.IsInf(val, 0) || val < 0 || val > 1 {
 				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
 					"error": gin.H{
 						"type":    "invalid_request_error",
-						"message": HeaderAlpha + " must be a valid float between 0 and 1",
+						"message": HeaderAlpha + " must be a finite float between 0 and 1",
 					},
 				})
 				return
@@ -43,11 +44,11 @@ func WithRoutingKnobsOverride() gin.HandlerFunc {
 
 		if raw := strings.TrimSpace(c.GetHeader(HeaderSpeedWeight)); raw != "" {
 			val, err := strconv.ParseFloat(raw, 64)
-			if err != nil || val < 0 || val > 1 {
+			if err != nil || math.IsNaN(val) || math.IsInf(val, 0) || val < 0 || val > 1 {
 				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
 					"error": gin.H{
 						"type":    "invalid_request_error",
-						"message": HeaderSpeedWeight + " must be a valid float between 0 and 1",
+						"message": HeaderSpeedWeight + " must be a finite float between 0 and 1",
 					},
 				})
 				return
@@ -58,11 +59,11 @@ func WithRoutingKnobsOverride() gin.HandlerFunc {
 
 		if raw := strings.TrimSpace(c.GetHeader(HeaderOutputCostRatio)); raw != "" {
 			val, err := strconv.ParseFloat(raw, 64)
-			if err != nil || val < 0 || val > 10 {
+			if err != nil || math.IsNaN(val) || math.IsInf(val, 0) || val < 0 || val > 10 {
 				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
 					"error": gin.H{
 						"type":    "invalid_request_error",
-						"message": HeaderOutputCostRatio + " must be a valid float between 0 and 10",
+						"message": HeaderOutputCostRatio + " must be a finite float between 0 and 10",
 					},
 				})
 				return

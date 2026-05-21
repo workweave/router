@@ -338,6 +338,10 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		var activeKnobs DefaultRoutingKnobs
 		if s.metadata != nil && s.metadata.Training.DefaultRoutingKnobs != nil {
 			activeKnobs = *s.metadata.Training.DefaultRoutingKnobs
+			// Struct copy shares the Alpha slice's backing array with the
+			// bundle defaults. Clone before any potential mutation so a
+			// per-request override doesn't leak into subsequent requests.
+			activeKnobs.Alpha = append([]float64(nil), activeKnobs.Alpha...)
 		} else {
 			activeKnobs = DefaultRoutingKnobs{
 				Alpha:                make([]float64, s.centroids.K),
