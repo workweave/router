@@ -542,11 +542,23 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 				}
 
 				sPtr := speeds[m]
-				if sPtr != nil && sRange > 0 {
-					sNorm := float32((*sPtr - sMin) / sRange)
+				if sRange > 0 {
+					// Mixed-timing pool: untimed peers are treated as
+					// worst-case speed (sNorm=1, no wS bonus). This keeps
+					// wQ/wC weighting consistent across timed and untimed
+					// models — without this, the redistribution branch
+					// would silently drop the cost axis when wC=0.
+					var sNorm float32 = 1.0
+					if sPtr != nil {
+						sNorm = float32((*sPtr - sMin) / sRange)
+					}
 					blend := wQ*qNorm + wC*(1.0-cNorm) + wS*(1.0-sNorm)
 					scores[m] += blend
 				} else {
+					// No timing differentiation across the entire pool
+					// (all models lack AA timing, or all share the same
+					// speed). Redistribute wS into wQ and wC so the
+					// remaining weights still sum to 1.
 					total := wQ + wC
 					if total > 0 {
 						blend := (wQ/total)*qNorm + (wC/total)*(1.0-cNorm)

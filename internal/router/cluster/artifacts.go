@@ -267,13 +267,6 @@ func LoadBundleFromDir(dir string, version string) (*Bundle, error) {
 	return loadBundleFromPath(os.DirFS(dir), version, ".")
 }
 
-// LoadBundleFromFS is the underlying constructor used by both
-// LoadBundle and LoadBundleFromDir. fsys is any fs.FS; subdir is the
-// relative path inside fsys that holds the bundle files.
-func LoadBundleFromFS(fsys fs.FS, version, subdir string) (*Bundle, error) {
-	return loadBundleFromPath(fsys, version, subdir)
-}
-
 func loadBundleFromPath(fsys fs.FS, version, dir string) (*Bundle, error) {
 	rawCentroids, err := fs.ReadFile(fsys, path.Join(dir, "centroids.bin"))
 	if err != nil {
