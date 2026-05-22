@@ -71,6 +71,7 @@ func ResponsesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc
 				return
 			}
 			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
+				log.Warn("Invalid routing knobs supplied", "err", err)
 				writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 				return
 			}
