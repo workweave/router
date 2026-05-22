@@ -52,7 +52,12 @@ func BuildCredentialsMap(keys []*auth.ExternalAPIKey) map[string]*Credentials {
 func ExtractClientCredentials(provider string, headers http.Header) *Credentials {
 	switch provider {
 	case providers.ProviderAnthropic:
-		if key := strings.TrimSpace(headers.Get("x-api-key")); key != "" && !auth.HasAPIKeyPrefix(key) {
+		// Real Anthropic API keys carry the sk-ant- prefix; requiring it here
+		// prevents a misplaced cross-provider key (e.g. an OpenAI `sk-…`
+		// passed in `x-api-key` by mistake) from being misclassified as
+		// Anthropic creds and routed through the summarizer / upstream call.
+		if key := strings.TrimSpace(headers.Get("x-api-key")); key != "" &&
+			!auth.HasAPIKeyPrefix(key) && strings.HasPrefix(key, "sk-ant-") {
 			return &Credentials{APIKey: []byte(key), Source: "client"}
 		}
 		// Authorization: Bearer with a real Anthropic API key (sk-ant-api-…)

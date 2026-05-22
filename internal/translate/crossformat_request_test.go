@@ -498,6 +498,64 @@ func TestCrossFormat_OpenAIToGemini_ToolConversation(t *testing.T) {
 	assert.Equal(t, "package main\n\nfunc main() {}", result["result"])
 }
 
+// TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x covers the
+// mirror of the Anthropic→Gemini guard for the OpenAI surface. An OpenAI
+// client whose assistant history was produced by a non-Gemini provider
+// carries `tool_calls` without `thought_signature`. Routed to a Gemini 3.x
+// preview model, the upstream rejects the request with 400 on missing
+// thoughtSignature. The translator must drop the sig-less tool history.
+func TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x(t *testing.T) {
+	env, err := translate.ParseOpenAI(openAIToolConversation)
+	require.NoError(t, err)
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	contents := getArray(t, doc, "contents")
+
+	// No part across any turn should carry a functionCall or
+	// functionResponse — they were all sig-less and would 400.
+	for i, c := range contents {
+		msg := c.(map[string]any)
+		parts, _ := msg["parts"].([]any)
+		for _, p := range parts {
+			pmap := p.(map[string]any)
+			assert.Nil(t, pmap["functionCall"], "contents[%d] must not carry functionCall when sig-less history was dropped", i)
+			assert.Nil(t, pmap["functionResponse"], "contents[%d] must not carry functionResponse when matching functionCall was dropped", i)
+		}
+	}
+}
+
+// Gemini 2.x accepts sig-less tool calls, so the drop guard must NOT fire
+// there — same OpenAI fixture, different target model.
+func TestCrossFormat_OpenAIToGemini_KeepsToolsForGemini2x(t *testing.T) {
+	env, err := translate.ParseOpenAI(openAIToolConversation)
+	require.NoError(t, err)
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-2.5-pro"})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	contents := getArray(t, doc, "contents")
+
+	var hasFunctionCall, hasFunctionResponse bool
+	for _, c := range contents {
+		parts, _ := c.(map[string]any)["parts"].([]any)
+		for _, p := range parts {
+			pmap := p.(map[string]any)
+			if pmap["functionCall"] != nil {
+				hasFunctionCall = true
+			}
+			if pmap["functionResponse"] != nil {
+				hasFunctionResponse = true
+			}
+		}
+	}
+	assert.True(t, hasFunctionCall, "Gemini 2.x must still receive functionCall parts")
+	assert.True(t, hasFunctionResponse, "Gemini 2.x must still receive functionResponse parts")
+}
+
 func TestCrossFormat_OpenAIToGemini_Image(t *testing.T) {
 	openAIBase64Body := []byte(`{
 		"model": "gpt-4",

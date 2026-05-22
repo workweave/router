@@ -143,8 +143,15 @@ func copyMap(m map[string]any) map[string]any {
 func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error {
 	msgs := gjson.GetBytes(body, "messages")
 
-	// First pass: build tool_call ID → function name map for role:tool messages.
+	// First pass: build tool_call ID → function name map for role:tool messages,
+	// and detect any tool_call lacking a thoughtSignature. Gemini 3.x rejects
+	// requests whose history carries a functionCall without one, so when even
+	// one is missing we drop ALL tool_call + role:tool blocks. Mirrors the
+	// guard in writeGeminiFromAnthropic — covers OpenAI-surface clients whose
+	// assistant history was produced by a non-Gemini provider before a
+	// mid-session router switch.
 	toolNames := make(map[string]string)
+	anyToolCallMissingSig := false
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		if msg.Get("role").String() != "assistant" {
 			return true
@@ -153,10 +160,14 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 			if id := tc.Get("id").String(); id != "" {
 				toolNames[id] = tc.Get("function.name").String()
 			}
+			if extractThoughtSignature(tc) == "" {
+				anyToolCallMissingSig = true
+			}
 			return true
 		})
 		return true
 	})
+	dropToolBlocks := anyToolCallMissingSig && isGemini3xModel(opts.TargetModel)
 
 	// Collect system text.
 	var sysParts []string
@@ -229,6 +240,9 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 				walkErr = parseErr
 				return false
 			}
+			if dropToolBlocks {
+				parts = filterOutGeminiFunctionCallParts(parts)
+			}
 			if len(parts) == 0 {
 				return true
 			}
@@ -248,6 +262,9 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 			jw.EndArr()
 			jw.EndObj()
 		case "tool":
+			if dropToolBlocks {
+				return true
+			}
 			tcID := msg.Get("tool_call_id").String()
 			name := toolNames[tcID]
 			if name == "" {
