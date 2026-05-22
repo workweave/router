@@ -122,15 +122,13 @@ func TestFitsContext(t *testing.T) {
 	assert.True(t, FitsContext("gpt-4.1", 1_000_000))
 	assert.False(t, FitsContext("gpt-4o", 128_001))
 
-	// Per-tier fallback when MaxInputTokens == 0. qwen3.5-flash-02-23
-	// is TierLow with no explicit window; the 64k fallback should kick in.
-	// This is the regression test for the empty-Qwen-response bug: an 80k
-	// post-tool follow-up must NOT be considered fittable for a flash model.
-	assert.True(t, FitsContext("qwen/qwen3.5-flash-02-23", 60_000))
-	assert.False(t, FitsContext("qwen/qwen3.5-flash-02-23", 80_000))
-
-	// TierUnknown (passthrough rows): never filtered.
-	assert.True(t, FitsContext("gpt-5-mini", 10_000_000))
+	// Per-tier fallback when MaxInputTokens == 0. gpt-5.5-mini and -nano
+	// are TierMid with no published window (OpenAI docs / OpenRouter don't
+	// carry those slugs) → TierMid fallback of 128k applies.
+	assert.True(t, FitsContext("gpt-5.5-mini", 100_000))
+	assert.False(t, FitsContext("gpt-5.5-mini", 200_000))
+	assert.True(t, FitsContext("gpt-5.5-nano", 128_000))
+	assert.False(t, FitsContext("gpt-5.5-nano", 128_001))
 }
 
 func TestValidateDeployed_FlagsMissingAndUntiered(t *testing.T) {

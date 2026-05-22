@@ -166,44 +166,52 @@ var Models = []Model{
 	}},
 
 	// --- OpenAI GPT-5 ---
-	{ID: "gpt-5-nano", Providers: []ProviderBinding{
+	// gpt-5/mini/nano: 400k (developers.openai.com/api/docs/models/gpt-5*).
+	// gpt-5-chat: 128k (openrouter.ai/openai/gpt-5-chat). All verified 2026-05-21.
+	{ID: "gpt-5-nano", MaxInputTokens: 400_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5-mini", Providers: []ProviderBinding{
+	{ID: "gpt-5-mini", MaxInputTokens: 400_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.50, OutputUSDPer1M: 2.00, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5", Tier: TierHigh, Providers: []ProviderBinding{
+	{ID: "gpt-5", Tier: TierHigh, MaxInputTokens: 400_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 2.50, OutputUSDPer1M: 10.00, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5-chat", Providers: []ProviderBinding{
+	{ID: "gpt-5-chat", MaxInputTokens: 128_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 2.50, OutputUSDPer1M: 10.00, CacheReadMultiplier: 0.50}},
 	}},
 
 	// --- OpenAI GPT-5.4 ---
-	{ID: "gpt-5.4-nano", Tier: TierMid, Providers: []ProviderBinding{
+	// gpt-5.4 + gpt-5.4-pro: 1,050,000; mini + nano: 400k.
+	// (developers.openai.com/api/docs/models/gpt-5.4*, verified 2026-05-21.)
+	{ID: "gpt-5.4-nano", Tier: TierMid, MaxInputTokens: 400_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5.4-mini", Tier: TierMid, Providers: []ProviderBinding{
+	{ID: "gpt-5.4-mini", Tier: TierMid, MaxInputTokens: 400_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.40, OutputUSDPer1M: 1.60, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5.4", Tier: TierHigh, Providers: []ProviderBinding{
+	{ID: "gpt-5.4", Tier: TierHigh, MaxInputTokens: 1_050_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 12.00, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5.4-pro", Tier: TierHigh, Providers: []ProviderBinding{
+	{ID: "gpt-5.4-pro", Tier: TierHigh, MaxInputTokens: 1_050_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 20.00, OutputUSDPer1M: 80.00, CacheReadMultiplier: 0.50}},
 	}},
 
 	// --- OpenAI GPT-5.5 ---
+	// gpt-5.5 + gpt-5.5-pro: 1,050,000 (developers.openai.com docs, verified
+	// 2026-05-21). gpt-5.5-mini and gpt-5.5-nano are not published under
+	// those exact slugs on OpenAI docs or OpenRouter — left at 0 so the
+	// TierMid fallback (128k) applies until a verified number is available.
 	{ID: "gpt-5.5-nano", Tier: TierMid, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.15, OutputUSDPer1M: 0.60, CacheReadMultiplier: 0.50}},
 	}},
 	{ID: "gpt-5.5-mini", Tier: TierMid, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.50, OutputUSDPer1M: 2.50, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5.5", Tier: TierHigh, Providers: []ProviderBinding{
+	{ID: "gpt-5.5", Tier: TierHigh, MaxInputTokens: 1_050_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 40.00, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5.5-pro", Tier: TierHigh, Providers: []ProviderBinding{
+	{ID: "gpt-5.5-pro", Tier: TierHigh, MaxInputTokens: 1_050_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 30.00, OutputUSDPer1M: 120.00, CacheReadMultiplier: 0.50}},
 	}},
 
@@ -227,19 +235,21 @@ var Models = []Model{
 	}},
 
 	// --- Google Gemini 3.x ---
-	{ID: "gemini-3.1-flash-lite-preview", Tier: TierLow, Providers: []ProviderBinding{
+	// Whole Gemini 3.x family ships at 1M input
+	// (ai.google.dev/gemini-api/docs/gemini-3, verified 2026-05-21).
+	{ID: "gemini-3.1-flash-lite-preview", Tier: TierLow, MaxInputTokens: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.25}},
 	}},
-	{ID: "gemini-3-flash-preview", Tier: TierMid, Providers: []ProviderBinding{
+	{ID: "gemini-3-flash-preview", Tier: TierMid, MaxInputTokens: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.50, OutputUSDPer1M: 2.00, CacheReadMultiplier: 0.25}},
 	}},
-	{ID: "gemini-3-pro-preview", Tier: TierHigh, Providers: []ProviderBinding{
+	{ID: "gemini-3-pro-preview", Tier: TierHigh, MaxInputTokens: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00, CacheReadMultiplier: 0.25}},
 	}},
-	{ID: "gemini-3.1-pro-preview", Tier: TierHigh, Providers: []ProviderBinding{
+	{ID: "gemini-3.1-pro-preview", Tier: TierHigh, MaxInputTokens: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00, CacheReadMultiplier: 0.25}},
 	}},
-	{ID: "gemini-3.5-flash", Tier: TierMid, Providers: []ProviderBinding{
+	{ID: "gemini-3.5-flash", Tier: TierMid, MaxInputTokens: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 1.50, OutputUSDPer1M: 9.00, CacheReadMultiplier: 0.25}},
 	}},
 
@@ -268,7 +278,7 @@ var Models = []Model{
 	{ID: "qwen/qwen3-235b-a22b-2507", Tier: TierMid, MaxInputTokens: 262_144, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.071, OutputUSDPer1M: 0.463}},
 	}},
-	{ID: "qwen/qwen3-coder-next", Tier: TierMid, Providers: []ProviderBinding{
+	{ID: "qwen/qwen3-coder-next", Tier: TierMid, MaxInputTokens: 262_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderBedrock, UpstreamID: "qwen.qwen3-coder-next",
 			Price: Pricing{InputUSDPer1M: 0.500, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.070, OutputUSDPer1M: 0.300}},
@@ -278,12 +288,12 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.090, OutputUSDPer1M: 1.100}},
 	}},
-	{ID: "deepseek/deepseek-v4-flash", Tier: TierLow, Providers: []ProviderBinding{
+	{ID: "deepseek/deepseek-v4-flash", Tier: TierLow, MaxInputTokens: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "deepseek-ai/DeepSeek-V4-Flash",
 			Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10}},
 	}},
-	{ID: "deepseek/deepseek-v4-pro", Tier: TierHigh, Providers: []ProviderBinding{
+	{ID: "deepseek/deepseek-v4-pro", Tier: TierHigh, MaxInputTokens: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/deepseek-v4-pro",
 			Price: Pricing{InputUSDPer1M: 1.740, OutputUSDPer1M: 3.480, CacheReadMultiplier: 0.0862}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.435, OutputUSDPer1M: 0.870, CacheReadMultiplier: 0.10}},
@@ -293,7 +303,7 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 3.000}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.440, OutputUSDPer1M: 2.000}},
 	}},
-	{ID: "moonshotai/kimi-k2.6", Tier: TierHigh, MaxInputTokens: 256_000, Providers: []ProviderBinding{
+	{ID: "moonshotai/kimi-k2.6", Tier: TierHigh, MaxInputTokens: 262_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/kimi-k2p6",
 			Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.1684}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.10}},
@@ -310,10 +320,10 @@ var Models = []Model{
 	// page lists only GMI + Xiaomi-direct, neither of which we currently
 	// onboard, so managed-prod resolves nothing here while self-hosters
 	// with an OpenRouter key get the trailing binding.
-	{ID: "xiaomi/mimo-v2.5", Tier: TierMid, Providers: []ProviderBinding{
+	{ID: "xiaomi/mimo-v2.5", Tier: TierMid, MaxInputTokens: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.400, OutputUSDPer1M: 2.000, CacheReadMultiplier: 0.10}},
 	}},
-	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, Providers: []ProviderBinding{
+	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, MaxInputTokens: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "XiaomiMiMo/MiMo-V2.5-Pro",
 			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000, CacheReadMultiplier: 0.10}},
@@ -322,7 +332,7 @@ var Models = []Model{
 	// 2k tokens on DeepInfra FP8, the speed/cost end of the new Qwen3.6
 	// family. TierLow despite the MoE size because the active parameter
 	// budget + AA's Coding Index put it below v4-flash.
-	{ID: "qwen/qwen3.6-35b-a3b", Tier: TierLow, Providers: []ProviderBinding{
+	{ID: "qwen/qwen3.6-35b-a3b", Tier: TierLow, MaxInputTokens: 262_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "Qwen/Qwen3.6-35B-A3B",
 			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 0.950}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.000, CacheReadMultiplier: 0.10}},
@@ -330,12 +340,12 @@ var Models = []Model{
 	// minimax-m2.7 sits in an unusual quality/cost spot: Intel 50 at
 	// $0.52 blended, cheaper than every TierMid model. Letting the
 	// trainer find its niche rather than pinning a tier by price alone.
-	{ID: "minimax/minimax-m2.7", Tier: TierHigh, Providers: []ProviderBinding{
+	{ID: "minimax/minimax-m2.7", Tier: TierHigh, MaxInputTokens: 205_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/minimax-m2p7",
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.279, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
 	}},
-	{ID: "z-ai/glm-5", Tier: TierHigh, Providers: []ProviderBinding{
+	{ID: "z-ai/glm-5", Tier: TierHigh, MaxInputTokens: 203_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5",
 			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 2.080}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 1.920, CacheReadMultiplier: 0.10}},
@@ -344,7 +354,7 @@ var Models = []Model{
 	// an OpenRouter trailing binding so managed-prod deploys without a
 	// Fireworks key can still resolve them; pricing reflects the
 	// OpenRouter list price for the public model card on 2026-05-20.
-	{ID: "mistralai/mistral-small-2603", Tier: TierMid, Providers: []ProviderBinding{
+	{ID: "mistralai/mistral-small-2603", Tier: TierMid, MaxInputTokens: 262_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.200, OutputUSDPer1M: 0.600, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "qwen/qwen3-30b-a3b-instruct-2507", Tier: TierMid, MaxInputTokens: 262_144, Providers: []ProviderBinding{
@@ -357,7 +367,7 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.900, OutputUSDPer1M: 2.700, CacheReadMultiplier: 0.1684}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 5.000, CacheReadMultiplier: 0.10}},
 	}},
-	{ID: "qwen/qwen3.5-flash-02-23", Tier: TierLow, Providers: []ProviderBinding{
+	{ID: "qwen/qwen3.5-flash-02-23", Tier: TierLow, MaxInputTokens: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.050, OutputUSDPer1M: 0.150, CacheReadMultiplier: 0.10}},
 	}},
 }
