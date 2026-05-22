@@ -81,20 +81,22 @@ func (s *ProviderSummarizer) WithMaxTokens(n int) *ProviderSummarizer {
 var ErrEmptySummary = errors.New("handover: upstream returned no summary text")
 
 // Summarize implements handover.Summarizer. Builds an Anthropic Messages call,
-// dispatches through the configured client under a hard timeout. On failure
-// returns ("", err) so the caller can fall back to handover.TrimLastN.
-func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.RequestEnvelope) (string, error) {
+// dispatches through the configured client under a hard timeout. Returns the
+// summary text and the upstream usage breakdown so callers can debit the
+// summary as a separate ledger row. On failure returns ("", zero Usage, err)
+// so the caller can fall back to handover.TrimLastN.
+func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.RequestEnvelope) (string, handover.Usage, error) {
 	log := observability.Get()
 	if env == nil {
-		return "", errors.New("handover: nil envelope")
+		return "", handover.Usage{}, errors.New("handover: nil envelope")
 	}
 	if s.client == nil {
-		return "", errors.New("handover: nil provider client")
+		return "", handover.Usage{}, errors.New("handover: nil provider client")
 	}
 
 	body, err := buildHandoverRequestBody(env, s.model, s.maxTokens)
 	if err != nil {
-		return "", fmt.Errorf("build handover request: %w", err)
+		return "", handover.Usage{}, fmt.Errorf("build handover request: %w", err)
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, s.timeout)
@@ -119,28 +121,50 @@ func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.Reque
 	proxyErr := s.client.Proxy(callCtx, decision, prep, rec, req)
 	if proxyErr != nil {
 		log.Warn("Handover summarizer upstream call failed", "err", proxyErr, "model", s.model)
-		return "", proxyErr
+		return "", handover.Usage{}, proxyErr
 	}
 	if callCtx.Err() != nil {
 		log.Warn("Handover summarizer timed out", "err", callCtx.Err(), "model", s.model)
-		return "", callCtx.Err()
+		return "", handover.Usage{}, callCtx.Err()
 	}
 	if rec.Code >= 400 {
 		err := fmt.Errorf("handover: upstream status %d", rec.Code)
 		log.Warn("Handover summarizer non-2xx", "status", rec.Code, "model", s.model)
-		return "", err
+		return "", handover.Usage{}, err
 	}
 
 	respBody, err := io.ReadAll(rec.Body)
 	if err != nil {
-		return "", fmt.Errorf("read handover response: %w", err)
+		return "", handover.Usage{}, fmt.Errorf("read handover response: %w", err)
 	}
 	text := extractAnthropicAssistantText(respBody)
 	if text == "" {
 		log.Warn("Handover summarizer extracted no text", "model", s.model, "body_bytes", len(respBody))
-		return "", ErrEmptySummary
+		return "", handover.Usage{}, ErrEmptySummary
 	}
-	return text, nil
+	usage := extractAnthropicUsage(respBody)
+	usage.Model = s.model
+	usage.Provider = providers.ProviderAnthropic
+	return text, usage, nil
+}
+
+// extractAnthropicUsage pulls the usage block from an Anthropic non-streaming
+// Messages response. Missing fields are zero — the response shape is stable
+// enough that we don't bother distinguishing "absent" from "zero".
+func extractAnthropicUsage(body []byte) handover.Usage {
+	if !gjson.ValidBytes(body) {
+		return handover.Usage{}
+	}
+	usage := gjson.GetBytes(body, "usage")
+	if !usage.IsObject() {
+		return handover.Usage{}
+	}
+	return handover.Usage{
+		InputTokens:   int(usage.Get("input_tokens").Int()),
+		OutputTokens:  int(usage.Get("output_tokens").Int()),
+		CacheCreation: int(usage.Get("cache_creation_input_tokens").Int()),
+		CacheRead:     int(usage.Get("cache_read_input_tokens").Int()),
+	}
 }
 
 // buildHandoverRequestBody constructs a non-streaming Anthropic Messages

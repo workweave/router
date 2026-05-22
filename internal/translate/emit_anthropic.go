@@ -1,7 +1,6 @@
 package translate
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -18,19 +17,17 @@ func (e *RequestEnvelope) PrepareAnthropic(in http.Header, opts EmitOptions) (pr
 	var err error
 	switch e.format {
 	case FormatOpenAI:
-		var out map[string]any
-		out, err = e.buildAnthropicFromOpenAI(opts)
+		body, err = e.buildAnthropicFromOpenAI(opts)
 		if err != nil {
 			return providers.PreparedRequest{}, fmt.Errorf("build anthropic from openai: %w", err)
 		}
-		body, err = json.Marshal(out)
 	case FormatAnthropic:
 		body, err = e.buildAnthropicFromAnthropic(opts)
+		if err != nil {
+			return providers.PreparedRequest{}, fmt.Errorf("marshal anthropic body: %w", err)
+		}
 	default:
 		return providers.PreparedRequest{}, fmt.Errorf("unsupported source format for Anthropic emit: %d", e.format)
-	}
-	if err != nil {
-		return providers.PreparedRequest{}, fmt.Errorf("marshal anthropic body: %w", err)
 	}
 	return providers.PreparedRequest{Body: body, Headers: deriveAnthropicHeaders(in, opts)}, nil
 }
@@ -86,97 +83,408 @@ func joinKept(beta string, keep func(string) bool) string {
 	return strings.Join(kept, ",")
 }
 
-func (e *RequestEnvelope) buildAnthropicFromOpenAI(opts EmitOptions) (map[string]any, error) {
-	out := make(map[string]any)
-	out["model"] = opts.TargetModel
+func (e *RequestEnvelope) buildAnthropicFromOpenAI(opts EmitOptions) ([]byte, error) {
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("model")
+	jw.Str(opts.TargetModel)
+
 	if r := gjson.GetBytes(e.body, "stream"); r.Exists() {
-		out["stream"] = r.Value()
+		jw.Key("stream")
+		jw.Raw(r.Raw)
 	}
 
-	if err := e.pullOpenAIMessages(out); err != nil {
-		return nil, err
-	}
-	pullMaxTokens(e.body, out, opts.TargetModel)
-	pullStopSequences(e.body, out)
-	if err := e.pullOpenAITools(out); err != nil {
-		return nil, err
-	}
-	pullToolChoice(e.body, out)
-	pullSharedParams(e.body, out)
+	writeAnthropicSystemAndMessages(jw, e.body)
+	writeAnthropicMaxTokens(jw, e.body, opts.TargetModel)
+	writeAnthropicStopSequences(jw, e.body)
 
-	return out, nil
+	// tool_choice "none" suppresses tools entirely — Anthropic has no direct
+	// equivalent, so omitting tools is the only way to prevent tool calls.
+	suppressTools := gjson.GetBytes(e.body, "tool_choice").String() == "none"
+	if !suppressTools {
+		writeAnthropicTools(jw, e.body)
+		writeAnthropicToolChoice(jw, e.body)
+	}
+	writeAnthropicSharedParams(jw, e.body)
+
+	jw.EndObj()
+	return jw.Bytes(), nil
 }
 
-func (e *RequestEnvelope) pullOpenAIMessages(out map[string]any) error {
-	src, err := e.ensureSrc()
-	if err != nil {
-		return err
+// writeAnthropicSystemAndMessages walks the OpenAI messages array, extracts
+// system-role messages into the Anthropic "system" field, and writes the
+// remaining messages as Anthropic-formatted content.
+func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
+	messages := gjson.GetBytes(body, "messages")
+	if !messages.Exists() {
+		return
 	}
-	msgs, ok := src["messages"].([]any)
-	if !ok {
-		return nil
+
+	// Collect system text blocks and non-system message raws in one pass.
+	type pendingToolBatch struct {
+		active bool
+		blocks []string // raw JSON tool_result objects
 	}
-	system, translated := translateMessages(msgs)
-	out["messages"] = translated
-	if len(system) > 0 {
-		out["system"] = system
+
+	var systemBlocks []string
+	var msgParts []string // raw JSON message objects, flushed after tool batching
+	var pending pendingToolBatch
+
+	flushToolBatch := func() {
+		if !pending.active {
+			return
+		}
+		// Emit a single user message with all accumulated tool_result blocks.
+		tw := newJSONWriter()
+		tw.Obj()
+		tw.Key("role")
+		tw.Str("user")
+		tw.Key("content")
+		tw.Arr()
+		for _, b := range pending.blocks {
+			tw.Raw(b)
+		}
+		tw.EndArr()
+		tw.EndObj()
+		msgParts = append(msgParts, string(tw.Bytes()))
+		pending.active = false
+		pending.blocks = pending.blocks[:0]
 	}
-	return nil
+
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		role := msg.Get("role").String()
+		content := msg.Get("content")
+
+		switch role {
+		case "system":
+			// Collect text from system messages into the top-level system field.
+			if content.Type == gjson.String {
+				if s := content.String(); s != "" {
+					sb := newJSONWriter()
+					sb.Obj()
+					sb.Key("type")
+					sb.Str("text")
+					sb.Key("text")
+					sb.Str(s)
+					sb.EndObj()
+					systemBlocks = append(systemBlocks, string(sb.Bytes()))
+				}
+			} else if content.IsArray() {
+				content.ForEach(func(_, part gjson.Result) bool {
+					if part.Get("type").String() == "text" {
+						if t := part.Get("text").String(); t != "" {
+							sb := newJSONWriter()
+							sb.Obj()
+							sb.Key("type")
+							sb.Str("text")
+							sb.Key("text")
+							sb.Str(t)
+							sb.EndObj()
+							systemBlocks = append(systemBlocks, string(sb.Bytes()))
+						}
+					}
+					return true
+				})
+			}
+
+		case "tool":
+			// Merge consecutive tool messages into a single Anthropic user message.
+			toolCallID := msg.Get("tool_call_id").String()
+			blockRaw := buildToolResultBlock(toolCallID, content)
+			pending.active = true
+			pending.blocks = append(pending.blocks, blockRaw)
+
+		case "assistant":
+			flushToolBatch()
+			msgParts = append(msgParts, buildAnthropicAssistantMessage(msg))
+
+		default: // "user" and anything unrecognized
+			flushToolBatch()
+			msgParts = append(msgParts, buildAnthropicUserMessage(role, content))
+		}
+		return true
+	})
+	flushToolBatch()
+
+	if len(systemBlocks) > 0 {
+		jw.Key("system")
+		jw.Arr()
+		for _, b := range systemBlocks {
+			jw.Raw(b)
+		}
+		jw.EndArr()
+	}
+
+	if len(msgParts) > 0 {
+		jw.Key("messages")
+		jw.Arr()
+		for _, m := range msgParts {
+			jw.Raw(m)
+		}
+		jw.EndArr()
+	}
 }
 
-func pullMaxTokens(body []byte, out map[string]any, targetModel string) {
+// buildToolResultBlock constructs a single Anthropic tool_result JSON object.
+func buildToolResultBlock(toolUseID string, content gjson.Result) string {
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("type")
+	jw.Str("tool_result")
+	jw.Key("tool_use_id")
+	jw.Str(toolUseID)
+
+	switch content.Type {
+	case gjson.String:
+		jw.Key("content")
+		jw.Str(content.String())
+	case gjson.JSON:
+		if content.IsArray() {
+			// Walk parts: convert text and image_url to Anthropic content blocks.
+			var parts []string
+			content.ForEach(func(_, part gjson.Result) bool {
+				switch part.Get("type").String() {
+				case "text":
+					if t := part.Get("text").String(); t != "" {
+						pb := newJSONWriter()
+						pb.Obj()
+						pb.Key("type")
+						pb.Str("text")
+						pb.Key("text")
+						pb.Str(t)
+						pb.EndObj()
+						parts = append(parts, string(pb.Bytes()))
+					}
+				case "image_url":
+					urlStr := part.Get("image_url.url").String()
+					if urlStr != "" {
+						parts = append(parts, buildAnthropicImageBlock(urlStr))
+					}
+				}
+				return true
+			})
+			if len(parts) > 0 {
+				jw.Key("content")
+				jw.Arr()
+				for _, p := range parts {
+					jw.Raw(p)
+				}
+				jw.EndArr()
+			} else {
+				jw.Key("content")
+				jw.Str("")
+			}
+		} else {
+			jw.Key("content")
+			jw.Str("")
+		}
+	default:
+		// null or missing content
+		jw.Key("content")
+		jw.Str("")
+	}
+
+	jw.EndObj()
+	return string(jw.Bytes())
+}
+
+// buildAnthropicAssistantMessage converts an OpenAI assistant message to
+// Anthropic format, handling both plain-text content and tool_calls.
+func buildAnthropicAssistantMessage(msg gjson.Result) string {
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("role")
+	jw.Str("assistant")
+
+	toolCalls := msg.Get("tool_calls")
+	if !toolCalls.Exists() || !toolCalls.IsArray() || toolCalls.Get("#").Int() == 0 {
+		// No tool calls: content is string or array.
+		content := msg.Get("content")
+		jw.Key("content")
+		writeAnthropicContentValue(jw, content)
+		jw.EndObj()
+		return string(jw.Bytes())
+	}
+
+	// Has tool calls: build content array with optional text prefix + tool_use blocks.
+	jw.Key("content")
+	jw.Arr()
+	if text := msg.Get("content").String(); text != "" {
+		jw.Obj()
+		jw.Key("type")
+		jw.Str("text")
+		jw.Key("text")
+		jw.Str(text)
+		jw.EndObj()
+	}
+	toolCalls.ForEach(func(_, tc gjson.Result) bool {
+		id := tc.Get("id").String()
+		name := tc.Get("function.name").String()
+		argsStr := tc.Get("function.arguments").String()
+
+		jw.Obj()
+		jw.Key("type")
+		jw.Str("tool_use")
+		jw.Key("id")
+		jw.Str(id)
+		jw.Key("name")
+		jw.Str(name)
+		jw.Key("input")
+		if gjson.Valid(argsStr) {
+			jw.Raw(argsStr)
+		} else {
+			jw.Raw("{}")
+		}
+		jw.EndObj()
+		return true
+	})
+	jw.EndArr()
+
+	jw.EndObj()
+	return string(jw.Bytes())
+}
+
+// buildAnthropicUserMessage converts an OpenAI user (or other non-system,
+// non-tool, non-assistant) message to Anthropic format.
+func buildAnthropicUserMessage(role string, content gjson.Result) string {
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("role")
+	jw.Str(role)
+	jw.Key("content")
+	writeAnthropicContentValue(jw, content)
+	jw.EndObj()
+	return string(jw.Bytes())
+}
+
+// writeAnthropicContentValue writes a content value (string or array) in
+// Anthropic format. String content passes through verbatim; array content has
+// image_url parts converted to Anthropic image blocks.
+func writeAnthropicContentValue(jw *jsonWriter, content gjson.Result) {
+	if content.Type == gjson.String {
+		jw.Str(content.String())
+		return
+	}
+	if !content.IsArray() {
+		// null or other scalar: pass through raw
+		if content.Raw != "" {
+			jw.Raw(content.Raw)
+		} else {
+			jw.Null()
+		}
+		return
+	}
+	jw.Arr()
+	content.ForEach(func(_, part gjson.Result) bool {
+		switch part.Get("type").String() {
+		case "text":
+			jw.Obj()
+			jw.Key("type")
+			jw.Str("text")
+			jw.Key("text")
+			jw.Str(part.Get("text").String())
+			jw.EndObj()
+		case "image_url":
+			urlStr := part.Get("image_url.url").String()
+			if urlStr != "" {
+				jw.Raw(buildAnthropicImageBlock(urlStr))
+			}
+		}
+		return true
+	})
+	jw.EndArr()
+}
+
+// buildAnthropicImageBlock returns a raw JSON Anthropic image content block
+// for the given URL string (data: or regular URL).
+func buildAnthropicImageBlock(urlStr string) string {
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("type")
+	jw.Str("image")
+	jw.Key("source")
+	jw.Obj()
+	if mime, data, ok := parseDataURL(urlStr); ok {
+		jw.Key("type")
+		jw.Str("base64")
+		jw.Key("media_type")
+		jw.Str(mime)
+		jw.Key("data")
+		jw.Str(data)
+	} else {
+		jw.Key("type")
+		jw.Str("url")
+		jw.Key("url")
+		jw.Str(urlStr)
+	}
+	jw.EndObj()
+	jw.EndObj()
+	return string(jw.Bytes())
+}
+
+func writeAnthropicMaxTokens(jw *jsonWriter, body []byte, targetModel string) {
 	if r := gjson.GetBytes(body, "max_tokens"); r.Exists() {
-		out["max_tokens"] = r.Value()
+		jw.Key("max_tokens")
+		jw.Raw(r.Raw)
 		return
 	}
 	if r := gjson.GetBytes(body, "max_completion_tokens"); r.Exists() {
-		out["max_tokens"] = r.Value()
+		jw.Key("max_tokens")
+		jw.Raw(r.Raw)
 		return
 	}
-	out["max_tokens"] = defaultOutputTokens(targetModel)
+	jw.Key("max_tokens")
+	jw.Int(defaultOutputTokens(targetModel))
 }
 
-func pullStopSequences(body []byte, out map[string]any) {
+func writeAnthropicStopSequences(jw *jsonWriter, body []byte) {
 	r := gjson.GetBytes(body, "stop")
 	if !r.Exists() {
 		return
 	}
 	if r.Type == gjson.String {
-		out["stop_sequences"] = []string{r.String()}
+		jw.Key("stop_sequences")
+		jw.Arr()
+		jw.Str(r.String())
+		jw.EndArr()
 		return
 	}
 	if r.IsArray() {
-		out["stop_sequences"] = r.Value()
+		jw.Key("stop_sequences")
+		jw.Raw(r.Raw)
 	}
 }
 
-func (e *RequestEnvelope) pullOpenAITools(out map[string]any) error {
-	src, err := e.ensureSrc()
-	if err != nil {
-		return err
+func writeAnthropicTools(jw *jsonWriter, body []byte) {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {
+		return
 	}
-	tools, ok := src["tools"].([]any)
-	if !ok || len(tools) == 0 {
-		return nil
-	}
-	var result []any
-	for _, t := range tools {
-		tool, _ := t.(map[string]any)
-		fn, _ := tool["function"].(map[string]any)
-		if fn == nil {
-			continue
+	jw.Key("tools")
+	jw.Arr()
+	tools.ForEach(func(_, tool gjson.Result) bool {
+		fn := tool.Get("function")
+		if !fn.Exists() {
+			return true
 		}
-		result = append(result, map[string]any{
-			"name":         fn["name"],
-			"description":  fn["description"],
-			"input_schema": fn["parameters"],
-		})
-	}
-	out["tools"] = result
-	return nil
+		jw.Obj()
+		jw.Key("name")
+		jw.Str(fn.Get("name").String())
+		if desc := fn.Get("description"); desc.Exists() {
+			jw.Key("description")
+			jw.Raw(desc.Raw)
+		}
+		if params := fn.Get("parameters"); params.Exists() {
+			jw.Key("input_schema")
+			jw.Raw(params.Raw)
+		}
+		jw.EndObj()
+		return true
+	})
+	jw.EndArr()
 }
 
-func pullToolChoice(body []byte, out map[string]any) {
+func writeAnthropicToolChoice(jw *jsonWriter, body []byte) {
 	r := gjson.GetBytes(body, "tool_choice")
 	if !r.Exists() {
 		return
@@ -184,26 +492,36 @@ func pullToolChoice(body []byte, out map[string]any) {
 	if r.Type == gjson.String {
 		switch r.String() {
 		case "auto":
-			out["tool_choice"] = map[string]any{"type": "auto"}
+			jw.Key("tool_choice")
+			jw.Raw(`{"type":"auto"}`)
 		case "required":
-			out["tool_choice"] = map[string]any{"type": "any"}
+			jw.Key("tool_choice")
+			jw.Raw(`{"type":"any"}`)
 		case "none":
-			delete(out, "tools")
+			// Handled upstream — tools and tool_choice both suppressed.
 		}
 		return
 	}
 	if r.IsObject() {
-		name := r.Get("function.name").String()
-		if name != "" {
-			out["tool_choice"] = map[string]any{"type": "tool", "name": name}
+		if name := r.Get("function.name").String(); name != "" {
+			tw := newJSONWriter()
+			tw.Obj()
+			tw.Key("type")
+			tw.Str("tool")
+			tw.Key("name")
+			tw.Str(name)
+			tw.EndObj()
+			jw.Key("tool_choice")
+			jw.Raw(string(tw.Bytes()))
 		}
 	}
 }
 
-func pullSharedParams(body []byte, out map[string]any) {
+func writeAnthropicSharedParams(jw *jsonWriter, body []byte) {
 	for _, key := range []string{"temperature", "top_p", "top_k"} {
 		if r := gjson.GetBytes(body, key); r.Exists() {
-			out[key] = r.Value()
+			jw.Key(key)
+			jw.Raw(r.Raw)
 		}
 	}
 }
@@ -211,231 +529,4 @@ func pullSharedParams(body []byte, out map[string]any) {
 func (e *RequestEnvelope) buildAnthropicFromAnthropic(opts EmitOptions) ([]byte, error) {
 	ov := resolveAnthropicOverrides(e.body, opts)
 	return e.emitSameFormat(ov)
-}
-
-func translateMessages(msgs []any) (system []any, anthropic []any) {
-	for _, raw := range msgs {
-		msg, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		role, _ := msg["role"].(string)
-		switch role {
-		case "system":
-			system = append(system, systemBlocksFromContent(msg["content"])...)
-		case "tool":
-			appendToolResult(&anthropic, msg)
-		case "assistant":
-			anthropic = append(anthropic, translateAssistantMessage(msg))
-		default:
-			anthropic = append(anthropic, translateUserMessage(msg))
-		}
-	}
-	return system, anthropic
-}
-
-func systemBlocksFromContent(content any) []any {
-	switch c := content.(type) {
-	case string:
-		if c == "" {
-			return nil
-		}
-		return []any{map[string]any{"type": "text", "text": c}}
-	case []any:
-		var blocks []any
-		for _, part := range c {
-			p, ok := part.(map[string]any)
-			if !ok {
-				continue
-			}
-			if t, _ := p["type"].(string); t == "text" {
-				if text, _ := p["text"].(string); text != "" {
-					blocks = append(blocks, map[string]any{"type": "text", "text": text})
-				}
-			}
-		}
-		return blocks
-	default:
-		return nil
-	}
-}
-
-func appendToolResult(anthropic *[]any, msg map[string]any) {
-	toolCallID, _ := msg["tool_call_id"].(string)
-	block := map[string]any{
-		"type":        "tool_result",
-		"tool_use_id": toolCallID,
-		"content":     openAIToolContentToAnthropic(msg["content"]),
-	}
-	if n := len(*anthropic); n > 0 {
-		last, _ := (*anthropic)[n-1].(map[string]any)
-		if lastRole, _ := last["role"].(string); lastRole == "user" {
-			if existing, ok := last["content"].([]any); ok {
-				last["content"] = append(existing, block)
-				return
-			}
-		}
-	}
-	*anthropic = append(*anthropic, map[string]any{
-		"role":    "user",
-		"content": []any{block},
-	})
-}
-
-// toolResultContent flattens OpenAI tool message content to a single string.
-func toolResultContent(raw any) string {
-	switch c := raw.(type) {
-	case string:
-		return c
-	case []any:
-		var parts []string
-		for _, p := range c {
-			pm, _ := p.(map[string]any)
-			if pm == nil {
-				continue
-			}
-			if t, _ := pm["type"].(string); t == "text" {
-				if text, _ := pm["text"].(string); text != "" {
-					parts = append(parts, text)
-				}
-			}
-		}
-		return strings.Join(parts, "\n")
-	default:
-		return ""
-	}
-}
-
-// openAIToolContentToAnthropic converts OpenAI tool message content to
-// Anthropic-compatible tool_result content.
-func openAIToolContentToAnthropic(raw any) any {
-	switch c := raw.(type) {
-	case string:
-		return c
-	case []any:
-		blocks := make([]any, 0, len(c))
-		for _, p := range c {
-			pm, _ := p.(map[string]any)
-			if pm == nil {
-				continue
-			}
-			switch t, _ := pm["type"].(string); t {
-			case "text":
-				if text, _ := pm["text"].(string); text != "" {
-					blocks = append(blocks, map[string]any{"type": "text", "text": text})
-				}
-			case "image_url":
-				if block := translateImageURL(pm); block != nil {
-					blocks = append(blocks, block)
-				}
-			}
-		}
-		if len(blocks) == 0 {
-			return ""
-		}
-		return blocks
-	default:
-		return ""
-	}
-}
-
-func translateAssistantMessage(msg map[string]any) map[string]any {
-	toolCalls, hasToolCalls := msg["tool_calls"].([]any)
-	if !hasToolCalls || len(toolCalls) == 0 {
-		out := map[string]any{"role": "assistant"}
-		if content, ok := msg["content"]; ok {
-			out["content"] = translateContentToAnthropic(content)
-		}
-		return out
-	}
-	var blocks []any
-	if text, _ := msg["content"].(string); text != "" {
-		blocks = append(blocks, map[string]any{"type": "text", "text": text})
-	}
-	for _, tc := range toolCalls {
-		call, _ := tc.(map[string]any)
-		fn, _ := call["function"].(map[string]any)
-		name, _ := fn["name"].(string)
-		argsStr, _ := fn["arguments"].(string)
-		var input any
-		if json.Unmarshal([]byte(argsStr), &input) != nil {
-			input = map[string]any{}
-		}
-		id, _ := call["id"].(string)
-		blocks = append(blocks, map[string]any{
-			"type":  "tool_use",
-			"id":    id,
-			"name":  name,
-			"input": input,
-		})
-	}
-	return map[string]any{"role": "assistant", "content": blocks}
-}
-
-func translateUserMessage(msg map[string]any) map[string]any {
-	out := map[string]any{"role": msg["role"]}
-	if content, ok := msg["content"]; ok {
-		out["content"] = translateContentToAnthropic(content)
-	}
-	return out
-}
-
-func translateContentToAnthropic(content any) any {
-	parts, ok := content.([]any)
-	if !ok {
-		return content
-	}
-	var blocks []any
-	for _, part := range parts {
-		p, ok := part.(map[string]any)
-		if !ok {
-			continue
-		}
-		pType, _ := p["type"].(string)
-		switch pType {
-		case "text":
-			blocks = append(blocks, map[string]any{"type": "text", "text": p["text"]})
-		case "image_url":
-			if block := translateImageURL(p); block != nil {
-				blocks = append(blocks, block)
-			}
-		}
-	}
-	if len(blocks) > 0 {
-		return blocks
-	}
-	return content
-}
-
-func translateImageURL(part map[string]any) map[string]any {
-	imgURL, _ := part["image_url"].(map[string]any)
-	if imgURL == nil {
-		return nil
-	}
-	urlStr, _ := imgURL["url"].(string)
-	if urlStr == "" {
-		return nil
-	}
-	if strings.HasPrefix(urlStr, "data:") {
-		halves := strings.SplitN(urlStr, ",", 2)
-		if len(halves) != 2 {
-			return nil
-		}
-		mediaType := strings.TrimPrefix(strings.TrimSuffix(halves[0], ";base64"), "data:")
-		return map[string]any{
-			"type": "image",
-			"source": map[string]any{
-				"type":       "base64",
-				"media_type": mediaType,
-				"data":       halves[1],
-			},
-		}
-	}
-	return map[string]any{
-		"type": "image",
-		"source": map[string]any{
-			"type": "url",
-			"url":  urlStr,
-		},
-	}
 }

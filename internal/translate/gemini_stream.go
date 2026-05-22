@@ -172,7 +172,7 @@ func (t *GeminiToOpenAISSETranslator) translateEvent(raw []byte) error {
 			if fc := part.Get("functionCall"); fc.Exists() {
 				name := fc.Get("name").String()
 				argsRaw := fc.Get("args").Raw
-				if argsRaw == "" {
+				if argsRaw == "" || argsRaw == "null" {
 					argsRaw = "{}"
 				}
 				sig := part.Get("thoughtSignature").String()

@@ -32,8 +32,10 @@ func TestRegister_DeploymentMode(t *testing.T) {
 	productRoutes := []string{
 		"GET /health",
 		"GET /validate",
+		"GET /v1/router/models",
 		"POST /v1/messages",
 		"POST /v1/chat/completions",
+		"POST /v1/responses",
 		"POST /v1/route",
 		"POST /v1/messages/count_tokens",
 		"GET /v1/models",
@@ -64,7 +66,7 @@ func TestRegister_DeploymentMode(t *testing.T) {
 	t.Run("selfhosted mounts dashboard and product routes", func(t *testing.T) {
 		engine := gin.New()
 		// Nil services are fine: engine.Routes() inspection never invokes the closure-captured handlers.
-		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeSelfHosted)
+		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeSelfHosted, nil)
 		got := routeSet(engine)
 		for _, want := range productRoutes {
 			assert.Contains(t, got, want, "product route missing in selfhosted mode")
@@ -76,7 +78,10 @@ func TestRegister_DeploymentMode(t *testing.T) {
 
 	t.Run("managed skips dashboard but keeps product routes", func(t *testing.T) {
 		engine := gin.New()
-		server.Register(engine, nil, nil, nil, server.DeploymentModeManaged)
+		// Pass a non-nil DeployedModelsSource: managed prod always boots a
+		// *cluster.Multiversion router, so the catalog endpoint must mount
+		// even though the dashboard does not.
+		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeManaged, nil)
 		got := routeSet(engine)
 		for _, want := range productRoutes {
 			assert.Contains(t, got, want, "product route missing in managed mode")
@@ -84,5 +89,12 @@ func TestRegister_DeploymentMode(t *testing.T) {
 		for _, unwanted := range dashboardRoutes {
 			assert.NotContains(t, got, unwanted, "dashboard route must not be mounted in managed mode")
 		}
+	})
+
+	t.Run("nil deployed-models source skips catalog endpoint", func(t *testing.T) {
+		engine := gin.New()
+		server.Register(engine, nil, nil, nil, server.DeploymentModeManaged, nil)
+		got := routeSet(engine)
+		assert.NotContains(t, got, "GET /v1/router/models", "catalog endpoint must not mount without a deployed-models source")
 	})
 }

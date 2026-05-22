@@ -1,0 +1,92 @@
+version: "v0.41"
+parent: null
+status: "candidate"
+promoted_date: "2026-05-18"
+embedder:
+  model: "jina-v2-base-code-int8"
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 16
+  top_p: 4
+  alpha: 0.53
+  shrinkage_k0: 10.0
+  score_normalization: "per_prompt_minmax_across_bench_columns"
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 8013
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  output_cost_ratio: 0.0
+  speed_weight: 0.2
+  expected_output_tokens: 2000
+  per_model_verbosity: false
+  include_routerarena_labels: "routerarena_labels_full.jsonl"
+  routerarena_only: true
+  exclude_prompts: null
+  n_excluded_prompts: 0
+  include_aa_labels: "aa_quality_priors.json"
+  aa_evidence_scale: 1.0
+  aa_label_tier_weights:
+    IFBENCH: 0.3
+    LIVECODEBENCH: 1.0
+    SCICODE: 1.0
+    SWE_BENCH_VERIFIED: 1.0
+    TAU2_BENCH_TELECOM: 0.3
+    TERMINAL_BENCH_HARD: 1.0
+  aa_label_residuals:
+    fraction_under_threshold: 0.9345238095238095
+    max: 0.15017113022401213
+    mean: 0.009312707280993567
+    median: 4.536560974495452e-06
+    n_cells: 168
+    p90: 0.02728130539219235
+deployed_providers:
+  - anthropic
+  - bedrock
+  - deepinfra
+  - fireworks
+  - google
+  - openai
+  - openrouter
+deployed_models:
+  - claude-haiku-4-5
+  - claude-opus-4-7
+  - claude-sonnet-4-6
+  - deepseek/deepseek-v4-flash
+  - deepseek/deepseek-v4-pro
+  - gemini-3.1-flash-lite-preview
+  - gemini-3.1-pro-preview
+  - gpt-5.4-mini
+  - gpt-5.5
+  - minimax/minimax-m2.7
+  - moonshotai/kimi-k2.6
+  - qwen/qwen3-235b-a22b-2507
+  - qwen/qwen3-coder-next
+  - qwen/qwen3-next-80b-a3b-instruct
+  - qwen/qwen3.6-35b-a3b
+  - xiaomi/mimo-v2.5
+  - xiaomi/mimo-v2.5-pro
+  - z-ai/glm-5
+cost_per_1k_input_usd:
+  claude-haiku-4-5: 0.0008
+  claude-opus-4-7: 0.015
+  claude-sonnet-4-6: 0.003
+  deepseek/deepseek-v4-flash: 0.00014
+  deepseek/deepseek-v4-pro: 0.00174
+  gemini-3.1-flash-lite-preview: 0.0001
+  gemini-3.1-pro-preview: 0.002
+  gpt-5.4-mini: 0.0004
+  gpt-5.5: 0.005
+  minimax/minimax-m2.7: 0.0003
+  moonshotai/kimi-k2.6: 0.00095
+  qwen/qwen3-235b-a22b-2507: 7.1e-05
+  qwen/qwen3-coder-next: 0.0005
+  qwen/qwen3-next-80b-a3b-instruct: 0.00015
+  qwen/qwen3.6-35b-a3b: 0.00015
+  xiaomi/mimo-v2.5: 0.0004
+  xiaomi/mimo-v2.5-pro: 0.001
+  z-ai/glm-5: 0.0006
+changelog: "v0.41 candidate: v0.40 + 5 AA top-performer OSS additions (mimo-v2.5, mimo-v2.5-pro, qwen3.6-35b-a3b, minimax-m2.7, glm-5). New 5 ride entirely on AA priors via Phase 3 NNLS \u2014 no RouterArena labels collected yet."

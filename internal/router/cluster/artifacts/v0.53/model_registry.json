@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "comment": "v0.50 base + gemini-3.5-flash added (2026-05-19 GA release). New model carries direct RouterArena coverage from the 2026-05-19 labeling run (95.3% gradeable, mean score 0.770, mean output 91 tokens). Pricing $1.50/$9 per M; TPS 279, TTFT 14s, GPQA 0.92 / SciCode 0.53 / Tau2 0.95 / IFBench 0.76 from AA. Training recipe mirrors v0.50: speed_weight=0.08, alpha=0.53, output_cost_ratio=0.25, per-model verbosity, native-override-all AA priors.",
+    "last_refreshed": "2026-05-19",
+    "parent": "v0.50",
+    "training_recipe": "retrain — added gemini-3.5-flash to deployed pool."
+  },
+  "deployed_models": [
+    {"model": "claude-haiku-4-5",                 "provider": "anthropic",  "bench_column": "routerarena_claude-haiku-4-5",                 "direct_label": "routerarena"},
+    {"model": "claude-sonnet-4-6",                "provider": "anthropic",  "bench_column": "routerarena_claude-sonnet-4-6",                "direct_label": "routerarena"},
+    {"model": "claude-opus-4-7",                  "provider": "anthropic",  "bench_column": "routerarena_claude-opus-4-7",                  "direct_label": "routerarena"},
+    {"model": "gemini-3.1-flash-lite-preview",    "provider": "google",     "bench_column": "routerarena_gemini-3.1-flash-lite-preview",    "direct_label": "routerarena"},
+    {"model": "gemini-3.1-pro-preview",           "provider": "google",     "bench_column": "routerarena_gemini-3.1-pro-preview",           "direct_label": "routerarena"},
+    {"model": "gemini-3.5-flash",                 "provider": "google",     "bench_column": "routerarena_gemini-3.5-flash",                 "direct_label": "routerarena"},
+    {"model": "gpt-5.4-mini",                     "provider": "openai",     "bench_column": "routerarena_gpt-5.4-mini",                     "direct_label": "routerarena"},
+    {"model": "gpt-5.5",                          "provider": "openai",     "bench_column": "routerarena_gpt-5.5",                          "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-235b-a22b-2507",        "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-235b-a22b-2507",        "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-coder-next",            "provider": "bedrock",    "bench_column": "routerarena_qwen/qwen3-coder-next",            "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-next-80b-a3b-instruct", "provider": "bedrock",    "bench_column": "routerarena_qwen/qwen3-next-80b-a3b-instruct", "direct_label": "routerarena"},
+
+    {"model": "deepseek/deepseek-v4-flash",       "provider": "deepinfra",  "bench_column": "routerarena_deepseek/deepseek-v4-flash",       "direct_label": "routerarena"},
+    {"model": "deepseek/deepseek-v4-pro",         "provider": "fireworks",  "bench_column": "routerarena_deepseek/deepseek-v4-pro",         "direct_label": "routerarena"},
+    {"model": "moonshotai/kimi-k2.6",             "provider": "fireworks",  "bench_column": "routerarena_moonshotai/kimi-k2.6",             "direct_label": "routerarena"},
+
+    {"model": "xiaomi/mimo-v2.5",                 "provider": "openrouter", "bench_column": "routerarena_xiaomi/mimo-v2.5",                 "direct_label": "aa"},
+    {"model": "xiaomi/mimo-v2.5-pro",             "provider": "deepinfra",  "bench_column": "routerarena_xiaomi/mimo-v2.5-pro",             "direct_label": "aa"},
+    {"model": "qwen/qwen3.6-35b-a3b",             "provider": "deepinfra",  "bench_column": "routerarena_qwen/qwen3.6-35b-a3b",             "direct_label": "aa"},
+    {"model": "minimax/minimax-m2.7",             "provider": "fireworks",  "bench_column": "routerarena_minimax/minimax-m2.7",             "direct_label": "aa"},
+    {"model": "z-ai/glm-5",                       "provider": "deepinfra",  "bench_column": "routerarena_z-ai/glm-5",                       "direct_label": "aa"}
+  ]
+}

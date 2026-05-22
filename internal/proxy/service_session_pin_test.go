@@ -2,6 +2,7 @@ package proxy_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -14,9 +15,10 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
-	"workweave/router/internal/router/capability"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/sessionpin"
+	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -463,6 +465,102 @@ func TestService_SessionPin_OpenAI_FreshRouteCreatesPin(t *testing.T) {
 	assert.Equal(t, "gpt-4o", store.upserts[0].Model)
 }
 
+func TestService_SessionPin_OpenAI_ForceModelCommandSetsPin(t *testing.T) {
+	const forceBody = `{
+		"model":"gpt-4o",
+		"messages":[
+			{"role":"system","content":"You are helpful."},
+			{"role":"user","content":"/force-model gpt-5\nuse this model for now"}
+		]
+	}`
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-4o", Reason: "cluster"}}
+	svc := newOpenAIPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(forceBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls, "force-model command must short-circuit routing")
+	require.Len(t, store.upserts, 1)
+	assert.Equal(t, "gpt-5", store.upserts[0].Model)
+	assert.Equal(t, providers.ProviderOpenAI, store.upserts[0].Provider)
+	assert.Equal(t, translate.ReasonUserForceModel, store.upserts[0].Reason)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "chat.completion", resp["object"])
+	choices, ok := resp["choices"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, choices)
+	first, ok := choices[0].(map[string]any)
+	require.True(t, ok)
+	msg, ok := first["message"].(map[string]any)
+	require.True(t, ok)
+	content, _ := msg["content"].(string)
+	assert.Contains(t, content, "force-model applied: gpt-5")
+}
+
+func TestService_SessionPin_OpenAI_UnforceModelCommandClearsPin(t *testing.T) {
+	const unforceBody = `{
+		"model":"gpt-4o",
+		"messages":[
+			{"role":"system","content":"You are helpful."},
+			{"role":"user","content":"/unforce-model"}
+		]
+	}`
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-4o", Reason: "cluster"}}
+	svc := newOpenAIPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(unforceBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls, "unforce-model command must short-circuit routing")
+	require.Len(t, store.upserts, 1)
+	assert.Equal(t, "user_unforced", store.upserts[0].Reason)
+	assert.Empty(t, store.upserts[0].Provider)
+	assert.Empty(t, store.upserts[0].Model)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "chat.completion", resp["object"])
+	choices, ok := resp["choices"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, choices)
+	first, ok := choices[0].(map[string]any)
+	require.True(t, ok)
+	msg, ok := first["message"].(map[string]any)
+	require.True(t, ok)
+	content, _ := msg["content"].(string)
+	assert.Contains(t, content, "force-model cleared")
+}
+
+func TestService_SessionPin_OpenAI_ForceModelCommandStreamShape(t *testing.T) {
+	const forceStreamBody = `{
+		"model":"gpt-4o",
+		"stream":true,
+		"messages":[
+			{"role":"user","content":"/force-model gpt-5"}
+		]
+	}`
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-4o", Reason: "cluster"}}
+	svc := newOpenAIPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(forceStreamBody), rec, httpReq))
+
+	assert.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
+	body := rec.Body.String()
+	assert.Contains(t, body, `"object":"chat.completion.chunk"`)
+	assert.Contains(t, body, "data: [DONE]")
+	assert.NotContains(t, body, `"type":"message"`, "must not emit Anthropic wire format on OpenAI ingress")
+}
+
 func TestService_SessionPin_OpenAI_ToolResultShortCircuit(t *testing.T) {
 	// Trailing role=="tool" → turntype.ToolResult. With a pin, short-circuit
 	// the scorer (tool-result embeddings are noisy and flip decisions).
@@ -514,7 +612,15 @@ func newOpenAIHardPinSvc(fr *fakeRouter, store *fakePinStore, hardPinExplore boo
 	)
 }
 
-func TestService_HardPin_OpenAI_CompactionRoutesToHardPin(t *testing.T) {
+// TestService_OpenAI_CompactionPhraseDoesNotHardPin regression-guards the
+// Codex false-positive: Claude Code's compaction system phrase is a
+// Claude-Code-only marker, but pre-fix the detector matched it on any wire
+// format. Codex sends an `instructions` field via /v1/responses that gets
+// flattened into an OpenAI-style system message, so any incidental mention
+// of "compact" / "conversation" used to hard-pin every Codex turn to the
+// cheap model — and the resulting session pin made subsequent turns stick.
+// Compaction detection is now gated on Anthropic format only.
+func TestService_OpenAI_CompactionPhraseDoesNotHardPin(t *testing.T) {
 	const compactionOpenAIBody = `{
 		"model":"gpt-4o",
 		"messages":[
@@ -531,14 +637,8 @@ func TestService_HardPin_OpenAI_CompactionRoutesToHardPin(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(compactionOpenAIBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls, "OpenAI compaction must bypass the scorer")
-	assert.Equal(t, "gpt-4o-mini", rec.Header().Get("x-router-model"))
-
-	select {
-	case <-store.upsertCh:
-		t.Fatal("compaction turn must not write a session pin")
-	case <-time.After(100 * time.Millisecond):
-	}
+	assert.Equal(t, 1, fr.routeCalls, "OpenAI body must run the scorer, not hard-pin")
+	assert.Equal(t, "gpt-4o", rec.Header().Get("x-router-model"))
 }
 
 func TestService_HardPin_OpenAI_SubAgentHeaderHintRoutesToHardPin(t *testing.T) {
@@ -579,7 +679,7 @@ func TestService_HardPin_BypassesTierCeiling(t *testing.T) {
 		providers.ProviderAnthropic,
 		"claude-opus-4-7",
 		nil,
-	).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 		// If this fires for a hard-pin decision, the bypass is broken.
 		return providers.ProviderAnthropic, "claude-haiku-4-5", true
 	})
@@ -613,8 +713,8 @@ func TestService_TierClamp_HaikuRequestedClampsHighScore(t *testing.T) {
 	// Scorer returns High-tier model: must be rewritten.
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, ceiling capability.Tier) (string, string, bool) {
-		require.Equal(t, capability.TierLow, ceiling, "haiku requested → Low ceiling")
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, ceiling catalog.Tier) (string, string, bool) {
+		require.Equal(t, catalog.TierLow, ceiling, "haiku requested → Low ceiling")
 		return providers.ProviderAnthropic, "claude-haiku-4-5", true
 	})
 
@@ -635,7 +735,7 @@ func TestService_TierClamp_OpusRequestedNoClamp(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
 	resolverCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 		resolverCalls++
 		return "", "", false
 	})
@@ -667,7 +767,7 @@ func TestService_TierClamp_PinAboveCeilingIsClamped(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 		return providers.ProviderAnthropic, "claude-haiku-4-5", true
 	})
 
@@ -681,7 +781,7 @@ func TestService_TierClamp_PinAboveCeilingIsClamped(t *testing.T) {
 
 // TestService_TierClamp_UnknownRequestedModelDisablesClamp regression-
 // guards the PR #100 finding: RequestedTier must be derived from
-// capability.TierFor(feats.Model) directly, not via
+// catalog.TierFor(feats.Model) directly, not via
 // baselineFor(feats.Model). Substituting unknown model names through
 // baselineFor (which falls back to the default mid-tier baseline)
 // would force custom/proxy model names like "weave-router" into a
@@ -695,7 +795,7 @@ func TestService_TierClamp_UnknownRequestedModelDisablesClamp(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
 	resolverCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 		resolverCalls++
 		return providers.ProviderAnthropic, "claude-sonnet-4-5", true
 	})
@@ -726,7 +826,7 @@ func TestService_TierClamp_ExcludedModelsThreadedToResolver(t *testing.T) {
 	var capturedExcluded map[string]struct{}
 	svc := newPinSvc(fr, store).
 		WithExcludedModelsOverride([]string{"claude-haiku-4-5"}).
-		WithTierClampResolver(func(_, excluded map[string]struct{}, _ capability.Tier) (string, string, bool) {
+		WithTierClampResolver(func(_, excluded map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 			capturedExcluded = excluded
 			return providers.ProviderAnthropic, "claude-sonnet-4-5", true
 		})
@@ -769,7 +869,7 @@ func TestService_TierClamp_StaleFlagClearedOnUnclampedFinal(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
 	clampCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ capability.Tier) (string, string, bool) {
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
 		clampCalls++
 		// Resolver should never need to fire because all decisions are
 		// at or below the High ceiling.
@@ -786,4 +886,73 @@ func TestService_TierClamp_StaleFlagClearedOnUnclampedFinal(t *testing.T) {
 	// Implicit: by passing through without clamp, the log would record
 	// tier_clamped=false / pre_clamp_model="" — the regression would
 	// have left a stale true here from a prior-stage clamp.
+}
+
+// TestService_UserForcedPin_TierClampDoesNotOverwritePin guards a regression
+// where clampToCeiling on a user-forced pin caused refreshPin to persist the
+// clamped (cheaper) model back into the pin, permanently losing the user's
+// /force-model choice after a single turn. The current turn's dispatch may
+// downgrade, but the stored pin must retain the original directive so a
+// subsequent higher-tier request resumes the forced model.
+func TestService_UserForcedPin_TierClampDoesNotOverwritePin(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderAnthropic,
+		Model:       "claude-opus-4-7", // High tier; user forced
+		Reason:      translate.ReasonUserForceModel,
+		PinnedUntil: time.Now().Add(30 * time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
+
+	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, ceiling catalog.Tier) (string, string, bool) {
+		require.Equal(t, catalog.TierLow, ceiling, "haiku-request → Low ceiling")
+		return providers.ProviderAnthropic, "claude-haiku-4-5", true
+	})
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
+
+	// This turn is clamped down to the in-ceiling model.
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
+	assert.Equal(t, 0, fr.routeCalls, "user_forced pin must skip the scorer")
+
+	// The refreshed pin must keep the ORIGINAL forced model — not the clamp.
+	waitForUpsert(t, store)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.NotEmpty(t, store.upserts)
+	upserted := store.upserts[len(store.upserts)-1]
+	assert.Equal(t, "claude-opus-4-7", upserted.Model, "tier clamp must not overwrite the user's forced model in the pin")
+	assert.Equal(t, providers.ProviderAnthropic, upserted.Provider)
+	assert.Equal(t, translate.ReasonUserForceModel, upserted.Reason, "reason must remain user_forced for the next-turn exact-match")
+}
+
+// TestService_UserForcedPin_IneligibleProviderFallsThrough covers the BYOK
+// provider-eligibility check: a forced pin whose provider is not in the
+// per-request EnabledProviders set must NOT be served. Otherwise the router
+// dispatches a turn to a provider the request has no credentials for,
+// resulting in a 401 / silent unauthenticated upstream call.
+func TestService_UserForcedPin_IneligibleProviderFallsThrough(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderOpenAI, // forced provider NOT in EnabledProviders
+		Model:       "gpt-5",
+		Reason:      translate.ReasonUserForceModel,
+		PinnedUntil: time.Now().Add(30 * time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
+	// newPinSvc only registers Anthropic, so EnabledProviders == {anthropic}.
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "ineligible-provider forced pin must fall through to the scorer")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "must dispatch to the eligible provider, not gpt-5/openai")
 }

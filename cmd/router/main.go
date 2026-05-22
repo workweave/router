@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/billing"
 	"workweave/router/internal/config"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
@@ -31,7 +32,7 @@ import (
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
-	"workweave/router/internal/router/capability"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
@@ -130,13 +131,43 @@ func main() {
 	// must NOT taint envKeyedProviders since hard-pin can't rely on
 	// every inbound request carrying Anthropic credentials.
 	anthropicPassthroughEligible := false
+	// openaiPassthroughEligible mirrors anthropicPassthroughEligible for the
+	// OpenAI provider — Codex's logged-in plan flow. Same invariant: must NOT
+	// taint envKeyedProviders.
+	openaiPassthroughEligible := false
 
-	// In managed mode every provider is registered unconditionally with no
-	// deployment-level API key. The proxy service is also flipped into
-	// BYOK-only mode below, so a request without BYOK or client-supplied
-	// credentials for the chosen provider 400s at the scorer rather than
-	// silently spending the platform's API budget on customer traffic.
-	byokOnly := deploymentMode == server.DeploymentModeManaged
+	// Credit billing service: wired by default in managed mode. The
+	// boot-time health check exists only to surface the "tables actually
+	// missing" rollback path — if the check errors (timeout, transient
+	// pool unreadiness on a cold replica), we default to billing-enabled
+	// rather than silently falling into BYOK-only mode, which would 400
+	// every request for "no provider keys available". Self-hosted
+	// deployments never wire billing.
+	var billingSvc *billing.Service
+	if deploymentMode == server.DeploymentModeManaged {
+		billingRepo := postgres.NewBillingRepo(pool)
+		bootCtx, bootCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		tablesExist, billingCheckErr := billingRepo.BillingTablesExist(bootCtx)
+		bootCancel()
+		switch {
+		case billingCheckErr != nil:
+			logger.Warn("Boot billing health check errored; defaulting to billing-enabled in managed mode", "err", billingCheckErr)
+			billingSvc = billing.NewService(billingRepo)
+		case !tablesExist:
+			logger.Warn("Billing tables missing from router schema; staying in BYOK-only mode. Apply db migration 0006_credit_billing to enable billing.")
+		default:
+			billingSvc = billing.NewService(billingRepo)
+			logger.Info("Router billing enabled", "min_balance_usd_micros", billing.MinBalanceMicros)
+		}
+	}
+
+	// In managed mode without billing we keep BYOK-only behavior (zero
+	// active customers today, but we don't want to silently spend
+	// platform-key budget if billing fails to wire). With billing on, we
+	// flip to platform-key mode: the balance check gates spending and the
+	// debit hook books each call. Self-hosted stays at byokOnly=false so
+	// platform env keys work the way operators expect.
+	byokOnly := deploymentMode == server.DeploymentModeManaged && billingSvc == nil
 
 	// Anthropic is always registered. With ANTHROPIC_API_KEY (selfhosted only)
 	// the router uses its own key; otherwise the client's auth headers
@@ -176,7 +207,10 @@ func main() {
 			envKeyedProviders[providers.ProviderOpenAI] = struct{}{}
 			logger.Info("OpenAI provider enabled", "base_url", openaiBaseURL)
 		default:
-			logger.Info("OpenAI provider registered (BYOK only — set OPENAI_API_KEY for deployment-level use)", "base_url", openaiBaseURL)
+			// OpenAI in selfhosted with no env key serves the passthrough
+			// path on client Authorization headers (Codex plan flow).
+			openaiPassthroughEligible = true
+			logger.Info("OpenAI provider enabled (client auth passthrough)", "base_url", openaiBaseURL)
 		}
 	}
 
@@ -204,7 +238,7 @@ func main() {
 		if !byokOnly {
 			fireworksKey = config.GetOr("FIREWORKS_API_KEY", "")
 		}
-		providerMap[providers.ProviderFireworks] = openaiCompatProvider.NewClient(fireworksKey, fireworksBaseURL)
+		providerMap[providers.ProviderFireworks] = openaiCompatProvider.NewClientWithModelIDMap(fireworksKey, fireworksBaseURL, upstreamIDsForProvider(providers.ProviderFireworks))
 		switch {
 		case byokOnly:
 			logger.Info("Fireworks provider enabled (BYOK only)", "base_url", fireworksBaseURL)
@@ -213,6 +247,54 @@ func main() {
 			logger.Info("Fireworks provider enabled", "base_url", fireworksBaseURL)
 		default:
 			logger.Info("Fireworks provider registered (BYOK only — set FIREWORKS_API_KEY for deployment-level use)", "base_url", fireworksBaseURL)
+		}
+	}
+
+	{
+		// DeepInfra OpenAI-compatible surface. DeepInfra uses HuggingFace-form
+		// model IDs while the router exposes slash-form slugs; modelIDMap is
+		// derived from the catalog's per-binding UpstreamID at boot.
+		deepInfraBaseURL := config.GetOr("DEEPINFRA_BASE_URL", openaiCompatProvider.DeepInfraBaseURL)
+		deepInfraKey := ""
+		if !byokOnly {
+			deepInfraKey = config.GetOr("DEEPINFRA_API_KEY", "")
+		}
+		providerMap[providers.ProviderDeepInfra] = openaiCompatProvider.NewClientWithModelIDMap(deepInfraKey, deepInfraBaseURL, upstreamIDsForProvider(providers.ProviderDeepInfra))
+		switch {
+		case byokOnly:
+			logger.Info("DeepInfra provider enabled (BYOK only)", "base_url", deepInfraBaseURL)
+		case deepInfraKey != "":
+			envKeyedProviders[providers.ProviderDeepInfra] = struct{}{}
+			logger.Info("DeepInfra provider enabled", "base_url", deepInfraBaseURL)
+		default:
+			logger.Info("DeepInfra provider registered (BYOK only — set DEEPINFRA_API_KEY for deployment-level use)", "base_url", deepInfraBaseURL)
+		}
+	}
+
+	{
+		// Bedrock via the OpenAI-compatible "bedrock-mantle" surface
+		// (https://bedrock-mantle.{region}.api.aws/v1). AWS recommends this
+		// over the model-native bedrock-runtime/InvokeModel surface; both
+		// Qwen3 and Kimi K2.5 model IDs are addressable through it directly.
+		// Auth is a static long-term Bedrock API key (AWS_BEARER_TOKEN_BEDROCK),
+		// not SigV4, so the standard openaicompat bearer flow applies. Bedrock
+		// expects dot-form model IDs; modelIDMap is derived from the catalog
+		// at boot.
+		bedrockRegion := config.GetOr("AWS_REGION", "us-east-1")
+		bedrockBaseURL := config.GetOr("BEDROCK_BASE_URL", openaiCompatProvider.BedrockMantleBaseURL(bedrockRegion))
+		bedrockKey := ""
+		if !byokOnly {
+			bedrockKey = config.GetOr("AWS_BEARER_TOKEN_BEDROCK", "")
+		}
+		providerMap[providers.ProviderBedrock] = openaiCompatProvider.NewClientWithModelIDMap(bedrockKey, bedrockBaseURL, upstreamIDsForProvider(providers.ProviderBedrock))
+		switch {
+		case byokOnly:
+			logger.Info("Bedrock provider enabled (BYOK only)", "base_url", bedrockBaseURL)
+		case bedrockKey != "":
+			envKeyedProviders[providers.ProviderBedrock] = struct{}{}
+			logger.Info("Bedrock provider enabled", "base_url", bedrockBaseURL, "region", bedrockRegion)
+		default:
+			logger.Info("Bedrock provider registered (BYOK only — set AWS_BEARER_TOKEN_BEDROCK for deployment-level use)", "base_url", bedrockBaseURL)
 		}
 	}
 
@@ -364,14 +446,14 @@ func main() {
 	// whose provider is in the request's enabled set. Nil when the bundle
 	// can't load — the proxy then leaves all decisions un-clamped (preserves
 	// pre-tier-ceiling behavior).
-	var tierClampResolver func(map[string]struct{}, map[string]struct{}, capability.Tier) (string, string, bool)
+	var tierClampResolver func(map[string]struct{}, map[string]struct{}, catalog.Tier) (string, string, bool)
 	{
 		reqVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
 		if version, vErr := cluster.ResolveVersion(reqVersion); vErr == nil {
 			if bundle, bErr := cluster.LoadBundle(version); bErr == nil {
 				meta, registry := bundle.Metadata, bundle.Registry
-				tierClampResolver = func(enabled, excluded map[string]struct{}, ceiling capability.Tier) (string, string, bool) {
-					allowed := capability.AllowedAtOrBelow(ceiling)
+				tierClampResolver = func(enabled, excluded map[string]struct{}, ceiling catalog.Tier) (string, string, bool) {
+					allowed := catalog.AllowedAtOrBelow(ceiling)
 					return cluster.CheapestModelInSet(meta, registry, enabled, excluded, allowed)
 				}
 				logger.Info("Tier-clamp resolver wired", "version", version)
@@ -383,15 +465,28 @@ func main() {
 		}
 	}
 
-	// Default-eligible set for proxy.Service: env-keyed providers + the
-	// Anthropic passthrough path. BYOK and client-supplied credentials add
-	// to this set per-request inside enabledProvidersForRequest.
-	deploymentEligible := make(map[string]struct{}, len(envKeyedProviders)+1)
+	// Default-eligible set for proxy.Service: env-keyed providers only.
+	// BYOK and client-supplied credentials add to this set per-request
+	// inside enabledProvidersForRequest.
+	deploymentEligible := make(map[string]struct{}, len(envKeyedProviders))
 	for p := range envKeyedProviders {
 		deploymentEligible[p] = struct{}{}
 	}
+
+	// Passthrough-eligible providers join the eligible set ONLY when the
+	// inbound request matches their surface (see WithPassthroughEligibleProviders
+	// in internal/proxy/service.go). Adding them to deploymentEligible above
+	// would let an Anthropic-surface request route to OpenAI in passthrough
+	// mode, which would forward the inbound `x-api-key` (an Anthropic token)
+	// to api.openai.com — a cross-provider credential leak. Surface-scoping
+	// keeps each provider's passthrough credentials inside their own trust
+	// boundary.
+	passthroughEligible := make(map[string]struct{}, 2)
 	if anthropicPassthroughEligible {
-		deploymentEligible[providers.ProviderAnthropic] = struct{}{}
+		passthroughEligible[providers.ProviderAnthropic] = struct{}{}
+	}
+	if openaiPassthroughEligible {
+		passthroughEligible[providers.ProviderOpenAI] = struct{}{}
 	}
 
 	// Planner + handover config (Prism-style cache-aware routing). Defaults
@@ -429,13 +524,15 @@ func main() {
 	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithByokOnly(byokOnly).
 		WithDeploymentKeyedProviders(deploymentEligible).
+		WithPassthroughEligibleProviders(passthroughEligible).
 		WithHardPinResolver(hardPinResolver).
 		WithTierClampResolver(tierClampResolver).
 		WithPlannerEnabled(plannerEnabled).
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels).
-		WithDefaultBaselineModel(resolveDefaultBaselineModel())
+		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
+		WithBillingService(billingSvc)
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
 	// Fail loud if a deployed model is missing from the tier table;
@@ -445,7 +542,7 @@ func main() {
 		for m := range availableModels {
 			deployed = append(deployed, m)
 		}
-		if err := capability.Validate(deployed); err != nil {
+		if err := catalog.ValidateDeployed(deployed); err != nil {
 			logger.Error("Capability tier table incomplete; refusing to start with tier guard enabled", "err", err)
 			panic(err)
 		}
@@ -478,7 +575,7 @@ func main() {
 	// handler can surface the universe of deployed models. The fallback nil
 	// keeps non-cluster routers (heuristic dev override, etc.) bootable.
 	deployedModels, _ := rtr.(*cluster.Multiversion)
-	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode)
+	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),
@@ -930,13 +1027,7 @@ func resolveAvailableModels(availableProviders map[string]struct{}, logger *slog
 		logger.Warn("Available-models set: could not load bundle; planner will treat every pin as routable", "err", err)
 		return nil
 	}
-	out := make(map[string]struct{}, len(bundle.Registry.DeployedModels))
-	for _, e := range bundle.Registry.DeployedModels {
-		if _, ok := availableProviders[e.Provider]; !ok {
-			continue
-		}
-		out[e.Model] = struct{}{}
-	}
+	out := cluster.RoutableModelSet(bundle.Registry, availableProviders)
 	if len(out) == 0 {
 		return nil
 	}
@@ -951,4 +1042,24 @@ func envVarHint(provider string) string {
 		return v
 	}
 	return "<unknown provider " + provider + ">"
+}
+
+// upstreamIDsForProvider walks the catalog and returns the map of public
+// model ID → upstream model ID for every binding on the given provider that
+// has a non-empty UpstreamID. Returns nil when no rewriting is needed (e.g.
+// OpenRouter, where the public slug IS the upstream ID). Callers pass the
+// result straight to openaicompat.NewClientWithModelIDMap.
+func upstreamIDsForProvider(provider string) map[string]string {
+	out := make(map[string]string)
+	for _, m := range catalog.Models {
+		for _, b := range m.Providers {
+			if b.Provider == provider && b.UpstreamID != "" {
+				out[m.ID] = b.UpstreamID
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

@@ -1,6 +1,6 @@
-# internal/router/planner — AGENTS
+# internal/router/planner — CLAUDE
 
-> **Mirror notice.** Verbatim sync with [CLAUDE.md](CLAUDE.md). **Update both together** — divergence = bug.
+> **Mirror notice.** Verbatim sync with [AGENTS.md](AGENTS.md). **Update both together** — divergence = bug.
 
 Prism-style cache-aware EV policy. Decides STAY (preserve pinned model's upstream prompt cache) vs SWITCH (take cluster scorer's fresh decision + eat one-time cache miss) per turn. Read [root CLAUDE.md](../../../CLAUDE.md) first.
 
@@ -15,7 +15,7 @@ Decide(pin, fresh router.Decision, estimated tokens, available models) → STAY 
 
 ## Math, briefly
 
-Compares expected per-turn savings over the remaining horizon against the eviction cost of warming a new cache. The **tier-upgrade guard** fires when STAY would clearly under-serve the prompt — uses [`../capability`](../capability)'s Low/Mid/High table to overturn a cost-driven "stay" when the fresh decision is in a strictly higher tier than the pin.
+Compares expected per-turn savings over the remaining horizon against the eviction cost of warming a new cache. The **tier-upgrade guard** fires when STAY would clearly under-serve the prompt — uses [`../catalog`](../catalog)'s Low/Mid/High tier to overturn a cost-driven "stay" when the fresh decision is in a strictly higher tier than the pin.
 
 ## Invariants
 
@@ -25,4 +25,4 @@ Compares expected per-turn savings over the remaining horizon against the evicti
 ## What NOT to do
 
 - **Don't add a runtime override that mutates α-blend.** Cost weighting is baked into the cluster scorer at training time. Per-request cost knobs are a separate (P1) feature, not a planner responsibility.
-- **Don't read pricing from anywhere but [`../pricing`](../pricing).** Single source of truth — the OTel emitter and planner must agree.
+- **Don't read pricing from anywhere but [`../catalog`](../catalog).** Single source of truth — the OTel emitter and planner must agree.

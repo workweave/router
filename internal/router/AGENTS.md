@@ -1,6 +1,6 @@
-# internal/router — AGENTS
+# internal/router — CLAUDE
 
-> **Mirror notice.** Verbatim sync with [CLAUDE.md](CLAUDE.md). **Update both together** — divergence = bug.
+> **Mirror notice.** Verbatim sync with [AGENTS.md](AGENTS.md). **Update both together** — divergence = bug.
 
 Inner-ring `Router` interface + `Request`/`Decision`/`ModelSpec`/`ModelRegistry` value types. Plus subpackages for cache-aware turn-routing primitives. Read [root CLAUDE.md](../../CLAUDE.md) first.
 
@@ -8,13 +8,12 @@ Inner-ring `Router` interface + `Request`/`Decision`/`ModelSpec`/`ModelRegistry`
 
 | Package | Role | Guide |
 |---|---|---|
+| [`catalog/`](catalog) | **Single source of truth** for per-model data (tier, ordered provider bindings, pricing, cost math). Add a model here. | [catalog/CLAUDE.md](catalog/CLAUDE.md) |
 | [`cluster/`](cluster) | AvengersPro-derived primary `Router` impl (P0) | [cluster/CLAUDE.md](cluster/CLAUDE.md) |
 | [`planner/`](planner) | Cache-aware EV policy (STAY vs SWITCH) | [planner/CLAUDE.md](planner/CLAUDE.md) |
 | [`handover/`](handover) | `Summarizer` interface + envelope rewrite | [handover/CLAUDE.md](handover/CLAUDE.md) |
 | [`cache/`](cache) | Cross-request semantic response cache | [cache/CLAUDE.md](cache/CLAUDE.md) |
 | [`sessionpin/`](sessionpin) | Sticky per-session routing pin | [sessionpin/CLAUDE.md](sessionpin/CLAUDE.md) |
-| [`pricing/`](pricing) | Per-model USD + cache-read multipliers | [pricing/CLAUDE.md](pricing/CLAUDE.md) |
-| [`capability/`](capability) | Low/Mid/High capability tier table | [capability/CLAUDE.md](capability/CLAUDE.md) |
 | [`turntype/`](turntype) | Inbound turn-type classifier | [turntype/CLAUDE.md](turntype/CLAUDE.md) |
 
 All inner-ring, all I/O-free.

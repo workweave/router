@@ -103,6 +103,11 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "no provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header")
 				return
 			}
+			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
+				log.Warn("Invalid routing knobs supplied", "err", err)
+				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+				return
+			}
 			if errors.Is(err, cluster.ErrClusterUnavailable) {
 				log.Error("Cluster routing unavailable", "err", err)
 				c.Header("Retry-After", "1")
@@ -127,13 +132,15 @@ func stashClientIdentity(ctx context.Context, h http.Header, body []byte) contex
 	if email == "" {
 		email = proxy.NormalizeEmail(h.Get("X-Weave-User-Email"))
 	}
+	displayName := proxy.NormalizeDisplayName(h.Get("X-Weave-User-Name"))
 	id := proxy.ClientIdentity{
-		DeviceID:  proxy.NormalizeClientIdentifier(meta.DeviceID),
-		AccountID: proxy.NormalizeClientIdentifier(meta.AccountID),
-		SessionID: proxy.NormalizeClientIdentifier(sessionID),
-		Email:     email,
-		UserAgent: h.Get("User-Agent"),
-		ClientApp: h.Get("X-App"),
+		DeviceID:    proxy.NormalizeClientIdentifier(meta.DeviceID),
+		AccountID:   proxy.NormalizeClientIdentifier(meta.AccountID),
+		SessionID:   proxy.NormalizeClientIdentifier(sessionID),
+		Email:       email,
+		DisplayName: displayName,
+		UserAgent:   h.Get("User-Agent"),
+		ClientApp:   proxy.NormalizeClientApp(h.Get("X-App"), h.Get("User-Agent")),
 	}
 	observability.Get().Debug("anthropic stashClientIdentity",
 		"meta_raw_len", len(metaRaw),
@@ -144,7 +151,9 @@ func stashClientIdentity(ctx context.Context, h http.Header, body []byte) contex
 		"parsed_account_len", len(meta.AccountID),
 		"final_email_present", id.Email != "",
 		"final_account_present", id.AccountID != "",
+		"final_name_present", id.DisplayName != "",
 		"header_email_present", h.Get("X-Weave-User-Email") != "",
+		"header_name_present", h.Get("X-Weave-User-Name") != "",
 	)
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
 }

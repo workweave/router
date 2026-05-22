@@ -74,10 +74,10 @@ type RouterModelRouterRequestTelemetry struct {
 	EmbedInput             *string
 	InputTokens            *int32
 	OutputTokens           *int32
-	RequestedInputCostUsd  pgtype.Numeric
-	RequestedOutputCostUsd pgtype.Numeric
-	ActualInputCostUsd     pgtype.Numeric
-	ActualOutputCostUsd    pgtype.Numeric
+	RequestedInputCostUsd  *int64
+	RequestedOutputCostUsd *int64
+	ActualInputCostUsd     *int64
+	ActualOutputCostUsd    *int64
 	RouteLatencyMs         *int64
 	UpstreamLatencyMs      *int64
 	TotalLatencyMs         *int64
@@ -107,6 +107,35 @@ type RouterModelRouterUser struct {
 	FirstSeenAt       pgtype.Timestamp
 	LastSeenAt        pgtype.Timestamp
 	DeletedAt         pgtype.Timestamp
+	// Free-form user display name (typically git user.name) carried on the X-Weave-User-Name request header. Nullable: requests without the header leave the column NULL; existing rows are not back-filled.
+	DisplayName *string
+}
+
+type RouterOrganizationBillingOverride struct {
+	OrganizationID string
+	Reason         string
+	ExpiresAt      pgtype.Timestamptz
+	CreatedBy      *string
+	CreatedAt      pgtype.Timestamptz
+}
+
+type RouterOrganizationCreditBalance struct {
+	OrganizationID   string
+	BalanceUsdMicros int64
+	UpdatedAt        pgtype.Timestamptz
+}
+
+type RouterOrganizationCreditLedger struct {
+	ID                    uuid.UUID
+	OrganizationID        string
+	DeltaUsdMicros        int64
+	NotionalCostMicros    int64
+	BalanceAfterMicros    int64
+	EntryType             string
+	StripePaymentIntentID *string
+	RouterRequestID       *string
+	RouterModel           *string
+	CreatedAt             pgtype.Timestamptz
 }
 
 // Session-sticky routing pins; sliding 1h TTL matching Anthropic prompt cache

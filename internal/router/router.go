@@ -3,6 +3,14 @@ package router
 
 import "context"
 
+type Overrides struct {
+	Alpha                *float64
+	SpeedWeight          *float64
+	OutputCostRatio      *float64
+	ExpectedOutputTokens *int
+	PerModelVerbosity    *bool
+}
+
 type Request struct {
 	RequestedModel       string
 	EstimatedInputTokens int
@@ -13,6 +21,7 @@ type Request struct {
 	// Per-request model exclusion — nil or empty means no exclusion.
 	// If filtering empties eligible set, scorer returns ErrNoEligibleProvider.
 	ExcludedModels map[string]struct{}
+	RoutingKnobs   *Overrides // NEW: parsed dynamic knobs
 }
 
 type Decision struct {
@@ -31,8 +40,25 @@ type RoutingMetadata struct {
 	CandidateModels      []string
 	ChosenScore          float32
 	ClusterRouterVersion string
+	EffectiveKnobsHash   uint64 // NEW: canonical knobs hash for response-cache isolation
 }
 
 type Router interface {
 	Route(ctx context.Context, req Request) (Decision, error)
+}
+
+type routingKnobsContextKey struct{}
+
+// WithRoutingKnobs stashes Overrides on ctx.
+func WithRoutingKnobs(ctx context.Context, o *Overrides) context.Context {
+	if o == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, routingKnobsContextKey{}, o)
+}
+
+// RoutingKnobsFromContext returns Overrides from ctx or nil.
+func RoutingKnobsFromContext(ctx context.Context) *Overrides {
+	o, _ := ctx.Value(routingKnobsContextKey{}).(*Overrides)
+	return o
 }

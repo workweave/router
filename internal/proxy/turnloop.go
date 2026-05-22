@@ -9,7 +9,7 @@ import (
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router"
-	"workweave/router/internal/router/capability"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
@@ -47,7 +47,7 @@ type turnLoopResult struct {
 	// RequestedTier is the tier of the inbound requested model. Drives the
 	// tier-ceiling clamp. TierUnknown disables clamping — the right behavior
 	// for custom model names that have no known tier.
-	RequestedTier capability.Tier
+	RequestedTier catalog.Tier
 	// TierClamped is true when the original decision violated the
 	// requested-model ceiling and was rewritten.
 	TierClamped   bool
@@ -72,6 +72,10 @@ type handoverOutcome struct {
 	LatencyMS      int64
 	SummaryTokens  int
 	FallbackToTrim bool
+	// SummaryUsage captures upstream token usage for the summarizer call
+	// so proxy.fireBilling can debit it as a separate ledger row with the
+	// "_summary" request_id suffix. Zero on fallback/error paths.
+	SummaryUsage handover.Usage
 }
 
 // runTurnLoop is the format-agnostic routing orchestrator: detect turn type,
@@ -94,7 +98,7 @@ func (s *Service) runTurnLoop(
 	res := turnLoopResult{
 		TurnType:      turntype.DetectFromEnvelope(env, feats, subAgentHint),
 		PinTier:       "miss",
-		RequestedTier: capability.TierFor(feats.Model),
+		RequestedTier: catalog.TierFor(feats.Model),
 	}
 	res.PinRole = roleForTier(res.RequestedTier)
 
@@ -164,6 +168,70 @@ func (s *Service) runTurnLoop(
 	if pinFound {
 		res.PinModel = pin.Model
 		res.PinAgeSec = pinAge(pin)
+	}
+
+	// User-forced pins are immutable stickies — skip scorer and planner entirely.
+	// The pin was written by /force-model and stays active until /unforce-model
+	// clears it, at which point the pin is expired and this branch is not taken.
+	//
+	// Invariants maintained here:
+	//   1. Excluded-model policy is still enforced: if the forced model has been
+	//      added to the installation exclusion list since the pin was written, fall
+	//      through to normal routing so the exclusion takes effect immediately.
+	//   2. Provider eligibility is enforced per-request. In BYOK mode the request's
+	//      EnabledProviders may not contain the pinned provider (e.g. the user
+	//      forced gpt-5 but the current request only carries Anthropic BYOK creds).
+	//      Falling through to normal routing avoids a guaranteed 401/unauthenticated
+	//      upstream call.
+	//   3. The user's original forced model is preserved across turns. clampToCeiling
+	//      may downgrade the decision for this turn (and appends "+tier_clamp" to
+	//      the reason), but the pin is refreshed with the ORIGINAL pin decision so
+	//      a transient ceiling never permanently overwrites the user's directive.
+	if pinFound && pin.Reason == translate.ReasonUserForceModel {
+		_, excluded := req.ExcludedModels[pin.Model]
+		_, providerEnabled := req.EnabledProviders[pin.Provider]
+		providerEligible := req.EnabledProviders == nil || providerEnabled
+		if !excluded && providerEligible {
+			decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+			decision.Reason = translate.ReasonUserForceModel
+			res.Decision = decision
+			res.StickyHit = true
+			res.PinTier = "user_forced"
+			s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, pinDecision(pin))
+			return res, nil
+		}
+		// Forced pin is no longer servable on this request (excluded by policy
+		// or pinned provider not in EnabledProviders/BYOK). Treat it as missing
+		// so downstream sticky branches don't dispatch to an unauthorized
+		// provider. The pin row remains in storage — a later request whose
+		// EnabledProviders includes the forced provider will resume serving it.
+		pinFound = false
+		pin = sessionpin.Pin{}
+	}
+
+	// Previous-turn-maxed-out guard: when an OSS model's tool-call tokens fail
+	// to parse server-side (kimi <|tool_call_begin|>, qwen3 <tool_call> XML)
+	// the upstream emits them as content and generates to the output cap.
+	// Claude Code's "Output token limit hit. Resume directly…" auto-continue
+	// then re-pins the same broken model, producing a multi-minute loop. When
+	// the previous turn saturated the output cap, exclude the pinned model for
+	// this turn and treat the pin as missing so downstream sticky branches
+	// (ToolResult, !plannerEnabled) cannot re-anchor it before the scorer runs.
+	if pinFound && pin.LastOutputTokens >= prevTurnMaxedOutThreshold {
+		log.Info("Session pin maxed out on previous turn; excluding for this turn",
+			"pin_model", pin.Model,
+			"pin_provider", pin.Provider,
+			"last_output_tokens", pin.LastOutputTokens,
+		)
+		// Defensive copy: callers may share the ExcludedModels map across requests.
+		excluded := make(map[string]struct{}, len(req.ExcludedModels)+1)
+		for k := range req.ExcludedModels {
+			excluded[k] = struct{}{}
+		}
+		excluded[pin.Model] = struct{}{}
+		req.ExcludedModels = excluded
+		pinFound = false
+		pin = sessionpin.Pin{}
 	}
 
 	// Tool-result turns are mid-turn continuations. Re-routing them on
@@ -246,7 +314,7 @@ func (s *Service) runTurnLoop(
 			log.Info("Handover summarizer skipped to preserve BYOK tenant boundary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
 		default:
 			start := time.Now()
-			summary, sumErr := s.summarizer.Summarize(ctx, env)
+			summary, summaryUsage, sumErr := s.summarizer.Summarize(ctx, env)
 			res.Handover.Invoked = true
 			res.Handover.LatencyMS = time.Since(start).Milliseconds()
 			switch {
@@ -261,6 +329,7 @@ func (s *Service) runTurnLoop(
 			default:
 				handover.RewriteEnvelope(env, summary)
 				res.Handover.SummaryTokens = estimateSummaryTokens(summary)
+				res.Handover.SummaryUsage = summaryUsage
 			}
 		}
 	}
@@ -276,13 +345,13 @@ func (s *Service) runTurnLoop(
 // roleForTier maps a requested-model tier to its session-pin role. Each tier
 // gets its own row so separate-tier turns never share a pin. TierUnknown
 // falls back to DefaultRole.
-func roleForTier(t capability.Tier) string {
+func roleForTier(t catalog.Tier) string {
 	switch t {
-	case capability.TierLow:
+	case catalog.TierLow:
 		return sessionpin.DefaultRole + "_low"
-	case capability.TierMid:
+	case catalog.TierMid:
 		return sessionpin.DefaultRole + "_mid"
-	case capability.TierHigh:
+	case catalog.TierHigh:
 		return sessionpin.DefaultRole + "_high"
 	default:
 		return sessionpin.DefaultRole
@@ -294,16 +363,16 @@ func roleForTier(t capability.Tier) string {
 // in-ceiling alternative. Decisions at/below ceiling pass through.
 // TierUnknown disables clamping. Resolver failure preserves the original
 // decision as a soft fallback.
-func (s *Service) clampToCeiling(decision router.Decision, ceiling capability.Tier, enabled, excluded map[string]struct{}, res *turnLoopResult) router.Decision {
+func (s *Service) clampToCeiling(decision router.Decision, ceiling catalog.Tier, enabled, excluded map[string]struct{}, res *turnLoopResult) router.Decision {
 	// Reset state every call: the orchestrator clamps multiple decision
 	// sources per turn, and without this reset a clamp on `fresh` would leak
 	// TierClamped=true + PreClampModel into a subsequent unclamped pin decision.
 	res.TierClamped = false
 	res.PreClampModel = ""
-	if s.tierClampResolver == nil || ceiling == capability.TierUnknown {
+	if s.tierClampResolver == nil || ceiling == catalog.TierUnknown {
 		return decision
 	}
-	if capability.IsAtOrBelow(decision.Model, ceiling) {
+	if catalog.IsAtOrBelow(decision.Model, ceiling) {
 		return decision
 	}
 	p, m, ok := s.tierClampResolver(enabled, excluded, ceiling)

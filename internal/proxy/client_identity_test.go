@@ -84,6 +84,33 @@ func TestNormalizeEmail_RejectsOverLength(t *testing.T) {
 	assert.Equal(t, "", proxy.NormalizeEmail(overCap))
 }
 
+func TestNormalizeDisplayName_TrimsAndPassesUnicode(t *testing.T) {
+	assert.Equal(t, "Alice Liddell", proxy.NormalizeDisplayName("  Alice Liddell  "))
+	assert.Equal(t, "Renée Fleming", proxy.NormalizeDisplayName("Renée Fleming"))
+	assert.Equal(t, "", proxy.NormalizeDisplayName(""))
+	assert.Equal(t, "", proxy.NormalizeDisplayName("   "))
+}
+
+func TestNormalizeDisplayName_StripsControlBytes(t *testing.T) {
+	// CR/LF + control bytes must be dropped so the value can't break log
+	// lines or smuggle extra HTTP headers. Surrounding visible chars stay.
+	out := proxy.NormalizeDisplayName("Alice\r\nMallory")
+	assert.NotContains(t, out, "\r")
+	assert.NotContains(t, out, "\n")
+	assert.Equal(t, "AliceMallory", out)
+	assert.Equal(t, "Alice", proxy.NormalizeDisplayName("Alice\x00\x07"))
+}
+
+func TestNormalizeDisplayName_RejectsOverLength(t *testing.T) {
+	atCap := strings.Repeat("a", proxy.MaxDisplayNameLen)
+	require.Len(t, atCap, proxy.MaxDisplayNameLen)
+	assert.Equal(t, atCap, proxy.NormalizeDisplayName(atCap))
+
+	overCap := strings.Repeat("a", proxy.MaxDisplayNameLen+1)
+	require.Greater(t, len(overCap), proxy.MaxDisplayNameLen)
+	assert.Equal(t, "", proxy.NormalizeDisplayName(overCap))
+}
+
 func TestNormalizeClientIdentifier_PassesThroughShortValues(t *testing.T) {
 	assert.Equal(t, "dev-abc123", proxy.NormalizeClientIdentifier("dev-abc123"))
 	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000",
@@ -133,6 +160,32 @@ func TestResolveUserFromContext_EmailOnlyReachesEmailUpsert(t *testing.T) {
 	assert.Empty(t, repo.accountUpserts)
 	assert.Equal(t, "alice@example.com", repo.emailUpserts[0].Email)
 	assert.Equal(t, "user-from-email", auth.UserIDFrom(ctx))
+}
+
+func TestNormalizeClientApp(t *testing.T) {
+	cases := []struct {
+		name      string
+		xApp      string
+		userAgent string
+		want      string
+	}{
+		{"explicit header wins", "codex", "claude-cli/2.0.1", proxy.ClientAppCodex},
+		{"explicit header lowercased", "Claude-Code", "", proxy.ClientAppClaudeCode},
+		{"explicit header trimmed", "  cursor  ", "", proxy.ClientAppCursor},
+		{"oversized header falls through to UA", strings.Repeat("a", proxy.MaxClientAppLen+1), "claude-cli/2.0.1", proxy.ClientAppClaudeCode},
+		{"UA claude-cli", "", "claude-cli/2.0.1 (cli, win32)", proxy.ClientAppClaudeCode},
+		{"UA codex_cli_rs", "", "codex_cli_rs/0.39.0 (darwin)", proxy.ClientAppCodex},
+		{"UA cursor", "", "Cursor/0.42.1 (darwin x64)", proxy.ClientAppCursor},
+		{"UA gemini-cli", "", "gemini-cli/1.0.0 (linux)", proxy.ClientAppGeminiCLI},
+		{"UA unknown returns empty", "", "curl/8.4.0", ""},
+		{"both empty returns empty", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := proxy.NormalizeClientApp(tc.xApp, tc.userAgent)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestResolveUserFromContext_BothMissingIsNoOp(t *testing.T) {

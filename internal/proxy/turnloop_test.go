@@ -13,6 +13,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
@@ -31,12 +32,12 @@ type fakeSummarizer struct {
 	calls     atomic.Int32
 }
 
-func (f *fakeSummarizer) Summarize(ctx context.Context, env *translate.RequestEnvelope) (string, error) {
+func (f *fakeSummarizer) Summarize(ctx context.Context, env *translate.RequestEnvelope) (string, handover.Usage, error) {
 	f.calls.Add(1)
 	if f.errOnCall != nil {
-		return "", f.errOnCall
+		return "", handover.Usage{}, f.errOnCall
 	}
-	return f.summary, nil
+	return f.summary, handover.Usage{}, nil
 }
 
 // usageProvider is a fakeProvider that writes an Anthropic non-streaming
@@ -347,6 +348,67 @@ func TestTurnLoop_UsageWritebackPersistsCacheStats(t *testing.T) {
 	assert.Equal(t, 80, got.OutputTokens)
 	assert.Equal(t, 900, got.CachedReadTokens)
 	assert.Equal(t, 200, got.CachedWriteTokens)
+}
+
+// TestTurnLoop_MaxedOutPinExcludedFromCandidates locks in the
+// runaway-tool-call escape hatch: when the previous turn saturated the
+// output cap (a hallmark of OSS-model parse-failure runaways), the pinned
+// model is excluded from the candidate set and the pin is treated as
+// missing so sticky branches cannot re-anchor it before the scorer runs.
+// Without this, Claude Code's "Output token limit hit. Resume directly…"
+// auto-continue locks the session into the broken model for minutes.
+func TestTurnLoop_MaxedOutPinExcludedFromCandidates(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:         providers.ProviderOpenRouter,
+		Model:            "moonshotai/kimi-k2.6",
+		Reason:           "cluster:v0.52",
+		PinnedUntil:      time.Now().Add(time.Hour),
+		LastOutputTokens: 8192, // saturated previous turn
+		LastTurnEndedAt:  time.Now().Add(-10 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "fresh"}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	require.NotNil(t, fr.capturedReq, "scorer must run after a maxed-out pin is dropped")
+	assert.Contains(t, fr.capturedReq.ExcludedModels, "moonshotai/kimi-k2.6",
+		"pinned model must be excluded from candidates after a maxed-out turn")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"),
+		"router must serve the fresh decision, not the broken pin")
+}
+
+// TestTurnLoop_UnderMaxedOutThresholdKeepsPin guards against false positives:
+// a turn that produced output well below the cap is healthy, so the pin
+// must not be excluded and the planner's normal STAY logic applies.
+func TestTurnLoop_UnderMaxedOutThresholdKeepsPin(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:         providers.ProviderAnthropic,
+		Model:            "claude-haiku-4-5",
+		Reason:           "cluster:v0.52",
+		PinnedUntil:      time.Now().Add(time.Hour),
+		LastOutputTokens: 1024, // healthy, well below threshold
+		LastTurnEndedAt:  time.Now().Add(-10 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "fresh"}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	require.NotNil(t, fr.capturedReq)
+	assert.NotContains(t, fr.capturedReq.ExcludedModels, "claude-haiku-4-5",
+		"healthy pin must not be excluded from candidates")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
 }
 
 // recordingTelemetry is the minimum no-op telemetry repository that

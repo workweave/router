@@ -217,6 +217,57 @@ func TestPrepareGemini_FromAnthropic_SystemAndToolUseRoundTripsSignature(t *test
 	assert.Equal(t, "bash", fr["name"])
 }
 
+func TestPrepareGemini_FromAnthropic_DropsOrphanedToolResult(t *testing.T) {
+	// tool_result without matching tool_use — name lookup yields "".
+	// The emitter must skip it rather than producing empty function_response.name.
+	body := []byte(`{
+		"messages": [
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"orphan","content":"stale result"},
+				{"type":"text","text":"hello"}
+			]}
+		]
+	}`)
+	env, _ := translate.ParseAnthropic(body)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{Capabilities: router.ModelSpec{}})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	contents := out["contents"].([]any)
+	require.Len(t, contents, 1)
+	parts := contents[0].(map[string]any)["parts"].([]any)
+	require.Len(t, parts, 1, "orphaned tool_result must be dropped")
+	assert.NotNil(t, parts[0].(map[string]any)["text"], "only the text part should remain")
+}
+
+func TestPrepareGemini_FromOpenAI_DropsOrphanedToolMessage(t *testing.T) {
+	body := []byte(`{
+		"model": "gemini-3.1-flash-lite-preview",
+		"messages": [
+			{"role":"user","content":"hi"},
+			{"role":"tool","tool_call_id":"orphan","content":"stale result"},
+			{"role":"assistant","content":"done"},
+			{"role":"user","content":"next"}
+		]
+	}`)
+	env, _ := translate.ParseOpenAI(body)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{Capabilities: router.ModelSpec{}})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	contents := out["contents"].([]any)
+	// user "hi", model "done", user "next" — orphaned tool message skipped.
+	require.Len(t, contents, 3)
+	for _, c := range contents {
+		entry := c.(map[string]any)
+		for _, p := range entry["parts"].([]any) {
+			part := p.(map[string]any)
+			_, hasFR := part["functionResponse"]
+			assert.False(t, hasFR, "orphaned functionResponse must not appear")
+		}
+	}
+}
+
 // ----- Gemini → OpenAI response -----
 
 func TestGeminiToOpenAIResponse_TextOnly(t *testing.T) {
@@ -876,6 +927,40 @@ func TestPrepareGemini_GeminiFormatSanitizesTools(t *testing.T) {
 	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
 	assert.NotContains(t, params, "additionalProperties", "additionalProperties must be stripped in Gemini-format path")
 	assert.NotNil(t, params["properties"])
+}
+
+func TestPrepareGemini_GeminiFormatInlinesSchemaRefs(t *testing.T) {
+	// Same-format Gemini path must inline $ref/$defs before sanitization,
+	// otherwise Gemini's allowlist strips them silently.
+	body := []byte(`{
+		"model": "gemini-3.1-pro-preview",
+		"contents": [{"role":"user","parts":[{"text":"hi"}]}],
+		"tools": [{
+			"functionDeclarations": [{
+				"name":"test",
+				"parameters":{
+					"type":"object",
+					"properties":{
+						"item": {"$ref": "#/$defs/Item"}
+					},
+					"$defs": {
+						"Item": {"type":"object","properties":{"name":{"type":"string"}}}
+					}
+				}
+			}]
+		}]
+	}`)
+	env, err := translate.ParseGemini(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+	item := params["properties"].(map[string]any)["item"].(map[string]any)
+	assert.NotContains(t, item, "$ref", "$ref must be inlined, not left as pointer")
+	assert.Equal(t, "object", item["type"], "inlined item should have type:object")
+	assert.NotContains(t, params, "$defs", "$defs must be removed after inlining")
 }
 
 func TestPrepareGemini_ConvertsBoolPropertySchemas(t *testing.T) {

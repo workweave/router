@@ -436,6 +436,76 @@ func TestService_ProxyOpenAIChatCompletion_NativeOpenRouter(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"chat.completion"`)
 }
 
+// SOC 2 isolation adds DeepInfra and Bedrock as direct providers
+// served by the openaicompat client. Both surfaces must route those
+// decisions through the OpenAI-emission case rather than the default
+// "no translation path" branch; otherwise the scorer's argmax silently
+// 502s for every prompt that lands on them.
+func TestService_ProxyMessages_DispatchesDeepInfraAndBedrock(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		model    string
+	}{
+		{"deepinfra", providers.ProviderDeepInfra, "deepseek/deepseek-v4-flash"},
+		{"bedrock", providers.ProviderBedrock, "moonshotai/kimi-k2.5"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &fakeProvider{
+				proxyResponse: func(w http.ResponseWriter) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"ok"}}]}`)
+				},
+			}
+			svc := makeProxyService(
+				router.Decision{Provider: tc.provider, Model: tc.model, Reason: "test"},
+				map[string]providers.Client{tc.provider: p},
+			)
+			// Tools present + opus requested keeps the turn out of the
+			// classifier-hard-pin path so the test exercises the
+			// switch we just widened, not the hard-pin fallback.
+			body := []byte(`{"model":"claude-opus-4-7","max_tokens":16,"tools":[{"name":"calc","description":"add","input_schema":{"type":"object","properties":{"a":{"type":"integer"},"b":{"type":"integer"}},"required":["a","b"]}}],"messages":[{"role":"user","content":"What is 7+5? Use calc."}]}`)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
+			require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, req))
+			require.Len(t, p.proxyBodies, 1, "%s must reach the upstream", tc.provider)
+		})
+	}
+}
+
+func TestService_ProxyOpenAIChatCompletion_DispatchesDeepInfraAndBedrock(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		model    string
+	}{
+		{"deepinfra", providers.ProviderDeepInfra, "deepseek/deepseek-v4-flash"},
+		{"bedrock", providers.ProviderBedrock, "qwen/qwen3-coder-next"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &fakeProvider{
+				proxyResponse: func(w http.ResponseWriter) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion"}`)
+				},
+			}
+			svc := makeProxyService(
+				router.Decision{Provider: tc.provider, Model: tc.model, Reason: "test"},
+				map[string]providers.Client{tc.provider: p},
+			)
+			body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+			require.NoError(t, svc.ProxyOpenAIChatCompletion(context.Background(), []byte(body), rec, req))
+			require.Len(t, p.proxyBodies, 1, "%s must reach the upstream", tc.provider)
+		})
+	}
+}
+
 // TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer: with
 // WithByokOnly(true), registered providers must not appear in EnabledProviders
 // without per-request credentials, or argmax routes to the platform key and 402s.

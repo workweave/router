@@ -1,6 +1,7 @@
 package handover_test
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 
+	"workweave/router/internal/router"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/translate"
 )
@@ -201,4 +203,208 @@ func TestTrimLastN_NilEnvelopeReturnsZero(t *testing.T) {
 
 	got := handover.TrimLastN(nil, 5)
 	assert.Equal(t, 0, got)
+}
+
+func TestTrimLastN_StripsOrphanedAnthropicToolResults(t *testing.T) {
+	t.Parallel()
+
+	// 5 messages: user text, assistant with tool_use, user with tool_result,
+	// assistant text, user text. TrimLastN(3) keeps the last 3, which starts
+	// with the user tool_result whose matching tool_use was trimmed.
+	const body = `{
+  "model": "claude-opus-4-7",
+  "messages": [
+    {"role": "user", "content": "hello"},
+    {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "bash", "input": {}}]},
+    {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
+    {"role": "assistant", "content": "done"},
+    {"role": "user", "content": "next question"}
+  ]
+}`
+	env, err := translate.ParseAnthropic([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.TrimLastN(env, 3)
+	assert.Equal(t, 2, elided)
+
+	prep, err := env.PrepareAnthropic(nil, translate.EmitOptions{TargetModel: "claude-opus-4-7"})
+	require.NoError(t, err)
+	msgs := gjson.GetBytes(prep.Body, "messages").Array()
+
+	// The orphaned tool_result user message should be stripped entirely,
+	// leaving only [assistant "done", user "next question"].
+	require.Len(t, msgs, 2)
+	assert.Equal(t, "assistant", msgs[0].Get("role").String())
+	assert.Equal(t, "done", msgs[0].Get("content").String())
+	assert.Equal(t, "user", msgs[1].Get("role").String())
+	assert.Equal(t, "next question", msgs[1].Get("content").String())
+}
+
+func TestTrimLastN_PreservesMatchedToolResults(t *testing.T) {
+	t.Parallel()
+
+	// Last 3 messages include both tool_use and tool_result — should be preserved.
+	const body = `{
+  "model": "claude-opus-4-7",
+  "messages": [
+    {"role": "user", "content": "start"},
+    {"role": "assistant", "content": "ack"},
+    {"role": "user", "content": "do it"},
+    {"role": "assistant", "content": [{"type": "tool_use", "id": "t2", "name": "edit", "input": {}}]},
+    {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t2", "content": "edited"}]}
+  ]
+}`
+	env, err := translate.ParseAnthropic([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.TrimLastN(env, 3)
+	assert.Equal(t, 2, elided)
+
+	prep, err := env.PrepareAnthropic(nil, translate.EmitOptions{TargetModel: "claude-opus-4-7"})
+	require.NoError(t, err)
+	msgs := gjson.GetBytes(prep.Body, "messages").Array()
+
+	require.Len(t, msgs, 3)
+	assert.Equal(t, "user", msgs[0].Get("role").String())
+	assert.Equal(t, "assistant", msgs[1].Get("role").String())
+	assert.Equal(t, "edit", msgs[1].Get("content.0.name").String())
+	assert.Equal(t, "user", msgs[2].Get("role").String())
+	assert.Equal(t, "t2", msgs[2].Get("content.0.tool_use_id").String())
+}
+
+func TestTrimLastN_StripsOrphanedOpenAIToolMessages(t *testing.T) {
+	t.Parallel()
+
+	const body = `{
+  "model": "gpt-5",
+  "messages": [
+    {"role": "system", "content": "sys"},
+    {"role": "user", "content": "hi"},
+    {"role": "assistant", "content": null, "tool_calls": [{"id": "tc1", "type": "function", "function": {"name": "search", "arguments": "{}"}}]},
+    {"role": "tool", "tool_call_id": "tc1", "content": "result"},
+    {"role": "assistant", "content": "here you go"},
+    {"role": "user", "content": "thanks"}
+  ]
+}`
+	env, err := translate.ParseOpenAI([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.TrimLastN(env, 3)
+	assert.Equal(t, 2, elided)
+
+	prep, err := env.PrepareOpenAI(nil, translate.EmitOptions{TargetModel: "gpt-5"})
+	require.NoError(t, err)
+	msgs := gjson.GetBytes(prep.Body, "messages").Array()
+
+	// system preserved + orphaned tool message stripped → [system, assistant, user]
+	require.Len(t, msgs, 3)
+	assert.Equal(t, "system", msgs[0].Get("role").String())
+	assert.Equal(t, "assistant", msgs[1].Get("role").String())
+	assert.Equal(t, "here you go", msgs[1].Get("content").String())
+	assert.Equal(t, "user", msgs[2].Get("role").String())
+}
+
+func TestRewriteEnvelope_StripsToolResultsFromLatestUser(t *testing.T) {
+	t.Parallel()
+
+	// Conversation ends with a user tool_result message (mid-tool-use).
+	const body = `{
+  "model": "claude-opus-4-7",
+  "system": "sys",
+  "messages": [
+    {"role": "user", "content": "run a search"},
+    {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "search", "input": {}}]},
+    {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "found it"}]}
+  ]
+}`
+	env, err := translate.ParseAnthropic([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.RewriteEnvelope(env, "User asked for a search.")
+
+	// Latest user had only tool_results which are all orphaned after rewrite
+	// (summary has no tool_use). It gets dropped → only summary remains.
+	assert.Equal(t, 3, elided)
+
+	prep, err := env.PrepareAnthropic(nil, translate.EmitOptions{TargetModel: "claude-opus-4-7"})
+	require.NoError(t, err)
+	msgs := gjson.GetBytes(prep.Body, "messages").Array()
+	require.Len(t, msgs, 1, "only summary when latest user was purely tool_results")
+	assert.Equal(t, "assistant", msgs[0].Get("role").String())
+}
+
+// Regression test for the exact failure path observed in production:
+// mid-session model switch triggers TrimLastN → orphaned tool_result blocks
+// survive into the Anthropic→Gemini translation → empty function_response.name
+// → Gemini 400.
+func TestTrimLastN_ThenPrepareGemini_NoEmptyFunctionResponseName(t *testing.T) {
+	t.Parallel()
+
+	// Simulates a Conductor/Claude-Code session with multiple tool-use rounds
+	// followed by a text turn. TrimLastN(3) orphans the tool_result in msg[4].
+	const body = `{
+  "model": "claude-opus-4-7",
+  "system": "You are a helpful assistant.",
+  "messages": [
+    {"role": "user", "content": "explain deepinfra pricing"},
+    {"role": "assistant", "content": [
+      {"type": "text", "text": "Let me look that up."},
+      {"type": "tool_use", "id": "tu_web1", "name": "WebFetch", "input": {"url": "https://deepinfra.com/pricing"}},
+      {"type": "tool_use", "id": "tu_web2", "name": "WebSearch", "input": {"query": "deepinfra pricing"}}
+    ]},
+    {"role": "user", "content": [
+      {"type": "tool_result", "tool_use_id": "tu_web1", "content": "pricing page content"},
+      {"type": "tool_result", "tool_use_id": "tu_web2", "content": "search results"}
+    ]},
+    {"role": "assistant", "content": [{"type": "text", "text": "Here are the pricing details..."}]},
+    {"role": "user", "content": "now compare with fireworks"},
+    {"role": "assistant", "content": [
+      {"type": "tool_use", "id": "tu_web3", "name": "WebFetch", "input": {"url": "https://fireworks.ai/pricing"}},
+      {"type": "tool_use", "id": "tu_web4", "name": "WebSearch", "input": {"query": "fireworks pricing"}}
+    ]},
+    {"role": "user", "content": [
+      {"type": "tool_result", "tool_use_id": "tu_web3", "content": "fireworks pricing"},
+      {"type": "tool_result", "tool_use_id": "tu_web4", "content": "fireworks search results"}
+    ]},
+    {"role": "assistant", "content": [{"type": "text", "text": "Fireworks costs $X..."}]},
+    {"role": "user", "content": "give me similar analysis for together.ai"}
+  ]
+}`
+	env, err := translate.ParseAnthropic([]byte(body))
+	require.NoError(t, err)
+
+	// Simulate the handover switch path (summarizer not wired → TrimLastN).
+	handover.TrimLastN(env, 3)
+
+	// Now translate to Gemini — this is the path that produced the 400.
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{
+		TargetModel:  "gemini-3.1-flash-lite-preview",
+		Capabilities: router.ModelSpec{},
+	})
+	require.NoError(t, err)
+
+	// Walk every part in the Gemini output and verify no functionResponse
+	// has an empty name.
+	contents := gjson.GetBytes(prep.Body, "contents")
+	require.True(t, contents.IsArray(), "expected contents array")
+
+	contents.ForEach(func(_, entry gjson.Result) bool {
+		entry.Get("parts").ForEach(func(_, part gjson.Result) bool {
+			fr := part.Get("functionResponse")
+			if !fr.Exists() {
+				return true
+			}
+			name := fr.Get("name").String()
+			assert.NotEmpty(t, name,
+				"functionResponse.name must not be empty (would cause Gemini 400); contents entry role=%s",
+				entry.Get("role").String())
+			return true
+		})
+		return true
+	})
+
+	// Also verify the conversation is structurally valid — should have the
+	// trimmed messages without orphaned tool results.
+	contentsArr := contents.Array()
+	assert.GreaterOrEqual(t, len(contentsArr), 2, "should have at least the last assistant + user turns")
 }

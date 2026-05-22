@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "comment": "v0.39 retrain: drops gpt-4.1, gemini-2.5-flash, gemini-3-flash-preview (zero top-3 appearances in v0.38 replay); bumps claude-sonnet-4-5 -> claude-sonnet-4-6 (still on Anthropic direct) and moonshotai/kimi-k2.5 -> moonshotai/kimi-k2.6 (provider binding moves bedrock -> fireworks; K2.6 is not on Bedrock yet). Direct RouterArena labels were collected on the full 8400-prompt split for both bumped models (eval.routerarena_label, 2026-05-18) before training. centroids.bin retrained because the model set changed. Kept all three Qwen rows verbatim because Qwen3.6 has no Bedrock/Fireworks home (DeepInfra-only) and no Qwen3.6-Coder ships yet.",
+    "last_refreshed": "2026-05-18",
+    "parent": "v0.38",
+    "training_recipe": "retrain — model set delta from v0.38."
+  },
+  "deployed_models": [
+    {"model": "claude-haiku-4-5",                 "provider": "anthropic",  "bench_column": "routerarena_claude-haiku-4-5",                 "direct_label": "routerarena"},
+    {"model": "claude-sonnet-4-6",                "provider": "anthropic",  "bench_column": "routerarena_claude-sonnet-4-6",                "direct_label": "routerarena"},
+    {"model": "claude-opus-4-7",                  "provider": "anthropic",  "bench_column": "routerarena_claude-opus-4-7",                  "direct_label": "routerarena"},
+    {"model": "gemini-3.1-flash-lite-preview",    "provider": "google",     "bench_column": "routerarena_gemini-3.1-flash-lite-preview",    "direct_label": "routerarena"},
+    {"model": "gemini-3.1-pro-preview",           "provider": "google",     "bench_column": "routerarena_gemini-3.1-pro-preview",           "direct_label": "routerarena"},
+    {"model": "gpt-5.4-mini",                     "provider": "openai",     "bench_column": "routerarena_gpt-5.4-mini",                     "direct_label": "routerarena"},
+    {"model": "gpt-5.5",                          "provider": "openai",     "bench_column": "routerarena_gpt-5.5",                          "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-235b-a22b-2507",        "provider": "openrouter", "bench_column": "routerarena_qwen/qwen3-235b-a22b-2507",        "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-coder-next",            "provider": "bedrock",    "bench_column": "routerarena_qwen/qwen3-coder-next",            "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-next-80b-a3b-instruct", "provider": "bedrock",    "bench_column": "routerarena_qwen/qwen3-next-80b-a3b-instruct", "direct_label": "routerarena"},
+
+    {"model": "deepseek/deepseek-v4-flash",       "provider": "deepinfra",  "bench_column": "routerarena_deepseek/deepseek-v4-flash",       "direct_label": "routerarena"},
+    {"model": "deepseek/deepseek-v4-pro",         "provider": "fireworks",  "bench_column": "routerarena_deepseek/deepseek-v4-pro",         "direct_label": "routerarena"},
+    {"model": "moonshotai/kimi-k2.6",             "provider": "fireworks",  "bench_column": "routerarena_moonshotai/kimi-k2.6",             "direct_label": "routerarena"}
+  ]
+}

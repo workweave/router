@@ -11,6 +11,7 @@ import (
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -67,6 +68,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, providers.ProviderGoogle, r.Header),
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
+		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {
@@ -110,10 +112,10 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		String("routing.turn_type", string(tt)).
 		String("routing.embed_input", embedInput).
 		Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
-		Float64("pricing.requested_input_per_1m", reqPricing.InputUSDPer1M).
-		Float64("pricing.requested_output_per_1m", reqPricing.OutputUSDPer1M).
-		Float64("pricing.actual_input_per_1m", actPricing.InputUSDPer1M).
-		Float64("pricing.actual_output_per_1m", actPricing.OutputUSDPer1M).
+		Float64("catalog.requested_input_per_1m", reqPricing.InputUSDPer1M).
+		Float64("catalog.requested_output_per_1m", reqPricing.OutputUSDPer1M).
+		Float64("catalog.actual_input_per_1m", actPricing.InputUSDPer1M).
+		Float64("catalog.actual_output_per_1m", actPricing.OutputUSDPer1M).
 		Int64("latency.route_ms", routeMs)
 	applyPlannerAttrs(geminiDecisionBuilder, routeRes)
 	otel.Record(ctx, otel.Span{
@@ -131,6 +133,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 
 	opts := translate.EmitOptions{
 		TargetModel:        decision.Model,
+		TargetProvider:     decision.Provider,
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
 	}
@@ -144,12 +147,21 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 
 	proxyStart := time.Now()
 	var extractor *otel.UsageExtractor
-	proxyWriter := http.ResponseWriter(w)
-	if s.usageRequired() {
-		extractor = otel.NewUsageExtractor(w, decision.Provider)
-		proxyWriter = extractor
+	var sink http.ResponseWriter = w
+	if marker := routingMarkerFor(routeRes); marker != "" {
+		mw := translate.NewGeminiRoutingMarkerWriter(sink, marker)
+		// Flush marker + HTTP 200 immediately so TTFB is decoupled from
+		// upstream prefill. Locks status to 200.
+		if err := mw.Prelude(env.Stream()); err != nil {
+			log.Error("Gemini routing-marker prelude failed", "err", err)
+		}
+		sink = mw
 	}
-	proxyErr := p.Proxy(ctx, decision, prep, proxyWriter, r)
+	if s.usageRequired() {
+		extractor = otel.NewUsageExtractor(sink, decision.Provider)
+		sink = extractor
+	}
+	proxyErr := p.Proxy(ctx, decision, prep, sink, r)
 	proxyMs := time.Since(proxyStart).Milliseconds()
 
 	in, out := extractor.Tokens()
@@ -166,10 +178,10 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
-		Float64("cost.requested_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
-		Float64("cost.requested_output_usd", float64(out)/1_000_000*reqPricing.OutputUSDPer1M).
-		Float64("cost.actual_input_usd", effectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
-		Float64("cost.actual_output_usd", float64(out)/1_000_000*actPricing.OutputUSDPer1M).
+		Float64("cost.requested_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
+		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
+		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
+		Float64("cost.actual_output_usd", catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
@@ -187,6 +199,10 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	// Persist last-turn usage to the pin row so the next turn's planner
 	// has cache-hit evidence. Off the request path; drops on saturation.
 	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
+
+	if proxyErr == nil {
+		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
+	}
 
 	log.Info("ProxyGeminiGenerateContent complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
