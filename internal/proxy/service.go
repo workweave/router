@@ -1167,6 +1167,8 @@ func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers htt
 		providers.ProviderGoogle,
 		providers.ProviderOpenRouter,
 		providers.ProviderFireworks,
+		providers.ProviderDeepInfra,
+		providers.ProviderBedrock,
 	} {
 		if ExtractClientCredentials(p, headers) != nil {
 			return true
