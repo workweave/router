@@ -178,8 +178,13 @@ func (t *GeminiToOpenAISSETranslator) translateEvent(raw []byte) error {
 				sig := part.Get("thoughtSignature").String()
 				if sig == "" && t.pendingSig != "" {
 					sig = t.pendingSig
+				} else if sig != "" {
+					// Latch any newly-seen sig so later functionCalls in the
+					// same turn can inherit it. Gemini 3.x rejects next-turn
+					// requests with missing thoughtSignature on ANY functionCall
+					// part; only the first part in a turn carries one.
+					t.pendingSig = sig
 				}
-				t.pendingSig = ""
 				if err := t.emitToolCallChunk(t.toolIdx, name, argsRaw, sig); err != nil {
 					emitErr = err
 					return false

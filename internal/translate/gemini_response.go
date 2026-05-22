@@ -59,6 +59,17 @@ func writeOpenAIMessageFromGemini(jw *jsonWriter, candidate gjson.Result) (hasTo
 	}
 	var toolCalls []toolCallEntry
 
+	// First pass: find any thoughtSignature in the candidate's parts.
+	// Gemini 3.x emits one sig per turn — usually on the leading text or
+	// first functionCall — and the rest of the parts need it on round-trip.
+	var inheritedSig string
+	parts.ForEach(func(_, part gjson.Result) bool {
+		if sig := part.Get("thoughtSignature").String(); sig != "" {
+			inheritedSig = sig
+			return false
+		}
+		return true
+	})
 	parts.ForEach(func(_, part gjson.Result) bool {
 		if fc := part.Get("functionCall"); fc.Exists() {
 			name := fc.Get("name").String()
@@ -67,6 +78,9 @@ func writeOpenAIMessageFromGemini(jw *jsonWriter, candidate gjson.Result) (hasTo
 				args = "{}"
 			}
 			sig := part.Get("thoughtSignature").String()
+			if sig == "" {
+				sig = inheritedSig
+			}
 			id := embedSignatureInID(generateToolCallID(), sig)
 			toolCalls = append(toolCalls, toolCallEntry{id: id, name: name, args: args, signature: sig})
 			return true
@@ -191,9 +205,24 @@ func GeminiToAnthropicResponse(body []byte, requestModel string) ([]byte, error)
 func buildAnthropicContent(candidate gjson.Result) (hasToolUse bool, content []byte) {
 	jw := newJSONWriter()
 	jw.Arr()
+	// Capture any thoughtSignature in the candidate (usually on the leading
+	// text or first functionCall) so other functionCall parts can inherit it.
+	// Gemini 3.x rejects next-turn requests with missing thoughtSignature on
+	// any functionCall part — only one part in a turn carries the sig.
+	var inheritedSig string
+	candidate.Get("content.parts").ForEach(func(_, part gjson.Result) bool {
+		if sig := part.Get("thoughtSignature").String(); sig != "" {
+			inheritedSig = sig
+			return false
+		}
+		return true
+	})
 	candidate.Get("content.parts").ForEach(func(_, part gjson.Result) bool {
 		if fc := part.Get("functionCall"); fc.Exists() {
 			sig := part.Get("thoughtSignature").String()
+			if sig == "" {
+				sig = inheritedSig
+			}
 			args := fc.Get("args").Raw
 			if args == "" || args == "null" {
 				args = "{}"

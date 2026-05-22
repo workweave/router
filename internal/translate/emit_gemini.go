@@ -352,6 +352,22 @@ func openAIAssistantPartsGJSON(msg gjson.Result) ([]string, error) {
 		parts = append(parts, geminiTextPart(text))
 	}
 
+	// Inherit any sig from sibling tool_calls or message-level thought_signature
+	// so every functionCall carries one on round-trip to Gemini 3.x.
+	var inheritedSig string
+	if sig := msg.Get("thought_signature").String(); sig != "" {
+		inheritedSig = sig
+	}
+	if inheritedSig == "" {
+		msg.Get("tool_calls").ForEach(func(_, tc gjson.Result) bool {
+			if sig := extractThoughtSignature(tc); sig != "" {
+				inheritedSig = sig
+				return false
+			}
+			return true
+		})
+	}
+
 	var parseErr error
 	msg.Get("tool_calls").ForEach(func(_, tc gjson.Result) bool {
 		name := tc.Get("function.name").String()
@@ -374,7 +390,11 @@ func openAIAssistantPartsGJSON(msg gjson.Result) ([]string, error) {
 			pw.Raw("{}")
 		}
 		pw.EndObj()
-		if sig := extractThoughtSignature(tc); sig != "" {
+		sig := extractThoughtSignature(tc)
+		if sig == "" {
+			sig = inheritedSig
+		}
+		if sig != "" {
 			pw.Key("thoughtSignature")
 			pw.Str(sig)
 		}
@@ -598,8 +618,16 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 
 	msgs := gjson.GetBytes(body, "messages")
 
-	// First pass: collect tool_use ID → name for tool_result recovery.
+	// First pass: collect tool_use ID → name for tool_result recovery, and
+	// detect any tool_use lacking a thoughtSignature. Gemini 3.x rejects any
+	// request whose history contains a functionCall without a signature, so
+	// when even one is missing we drop ALL tool_use/tool_result blocks from
+	// the history. This prevents 400s on sticky-pin Gemini turns whose
+	// history was produced by a different provider (mimo/qwen/etc.) before
+	// a mid-session router switch.
 	toolNames := make(map[string]string)
+	anyToolUseMissingSig := false
+	dropToolBlocks := false
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		if msg.Get("role").String() != "assistant" {
 			return true
@@ -609,11 +637,20 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 				if id := block.Get("id").String(); id != "" {
 					toolNames[id] = block.Get("name").String()
 				}
+				if extractThoughtSignature(block) == "" {
+					anyToolUseMissingSig = true
+				}
 			}
 			return true
 		})
 		return true
 	})
+	// Only Gemini 3.x preview models hard-require thoughtSignature on every
+	// functionCall part. 2.x accepts sig-less calls, so don't molest those
+	// requests — the lossless translation is correct there.
+	if anyToolUseMissingSig && isGemini3xModel(opts.TargetModel) {
+		dropToolBlocks = true
+	}
 
 	// Second pass: write contents array.
 	hasContents := false
@@ -622,6 +659,9 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 		switch role {
 		case "user":
 			parts := anthropicUserPartsGJSON(msg.Get("content"), toolNames)
+			if dropToolBlocks {
+				parts = filterOutGeminiToolResponseParts(parts)
+			}
 			if len(parts) == 0 {
 				return true
 			}
@@ -642,6 +682,9 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 			jw.EndObj()
 		case "assistant":
 			parts := anthropicAssistantPartsGJSON(msg.Get("content"))
+			if dropToolBlocks {
+				parts = filterOutGeminiFunctionCallParts(parts)
+			}
 			if len(parts) == 0 {
 				return true
 			}
@@ -670,6 +713,41 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 	writeGeminiToolsFromAnthropic(jw, body)
 	writeGeminiToolChoiceFromAnthropic(jw, body)
 	writeGeminiGenerationConfigFromAnthropic(jw, body, opts.TargetModel)
+}
+
+// isGemini3xModel returns true for Gemini 3.x preview models, which require
+// thoughtSignature on every functionCall part across turns. 2.x and earlier
+// accept sig-less calls.
+func isGemini3xModel(model string) bool {
+	return strings.HasPrefix(model, "gemini-3")
+}
+
+// filterOutGeminiFunctionCallParts strips functionCall parts from a slice of
+// serialized Gemini parts. Used when the assistant history contains tool_use
+// blocks without thoughtSignature — emitting them to Gemini 3.x would 400.
+func filterOutGeminiFunctionCallParts(parts []string) []string {
+	out := parts[:0]
+	for _, p := range parts {
+		if gjson.Get(p, "functionCall").Exists() {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// filterOutGeminiToolResponseParts strips functionResponse parts so tool_results
+// dangle no longer reference functionCalls we dropped. Without this, Gemini
+// rejects functionResponses whose matching functionCalls aren't in history.
+func filterOutGeminiToolResponseParts(parts []string) []string {
+	out := parts[:0]
+	for _, p := range parts {
+		if gjson.Get(p, "functionResponse").Exists() {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // anthropicUserPartsGJSON converts an Anthropic user content value to raw JSON part strings.
@@ -751,6 +829,22 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 		}
 		return []string{geminiTextPart(s)}
 	case gjson.JSON:
+		// First pass: find any thought_signature in the assistant turn so
+		// functionCall blocks without their own sig can inherit it. Gemini 3.x
+		// rejects requests with missing thoughtSignature on any functionCall
+		// part — only one block per turn typically carries the original sig.
+		var inheritedSig string
+		content.ForEach(func(_, block gjson.Result) bool {
+			if sig := extractThoughtSignature(block); sig != "" {
+				inheritedSig = sig
+				return false
+			}
+			if sig := block.Get("thought_signature").String(); sig != "" {
+				inheritedSig = sig
+				return false
+			}
+			return true
+		})
 		var parts []string
 		content.ForEach(func(_, block gjson.Result) bool {
 			switch block.Get("type").String() {
@@ -784,8 +878,14 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 				pw.Key("args")
 				pw.Raw(inputRaw)
 				pw.EndObj()
-				// thought_signature may live on the block or be smuggled in block.id.
-				if sig := extractThoughtSignature(block); sig != "" {
+				// thought_signature may live on the block or be smuggled in
+				// block.id. Fall back to the assistant turn's first sig so
+				// every functionCall carries one on round-trip.
+				sig := extractThoughtSignature(block)
+				if sig == "" {
+					sig = inheritedSig
+				}
+				if sig != "" {
 					pw.Key("thoughtSignature")
 					pw.Str(sig)
 				}
