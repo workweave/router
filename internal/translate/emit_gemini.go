@@ -241,7 +241,13 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 				return false
 			}
 			if dropToolBlocks {
+				before := len(parts)
 				parts = filterOutGeminiFunctionCallParts(parts)
+				// Preserve role alternation when a tool-call-only assistant
+				// turn is fully drained by the drop.
+				if before > 0 && len(parts) == 0 {
+					parts = []string{geminiTextPart(droppedToolCallPlaceholder)}
+				}
 			}
 			if len(parts) == 0 {
 				return true
@@ -263,6 +269,22 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 			jw.EndObj()
 		case "tool":
 			if dropToolBlocks {
+				// Synthesize a placeholder user text part so the surrounding
+				// assistant turns don't collapse into consecutive `model`
+				// entries (Gemini 400s on non-alternating roles).
+				if !hasContents {
+					jw.Key("contents")
+					jw.Arr()
+					hasContents = true
+				}
+				jw.Obj()
+				jw.Key("role")
+				jw.Str("user")
+				jw.Key("parts")
+				jw.Arr()
+				jw.Raw(geminiTextPart(droppedToolResultPlaceholder))
+				jw.EndArr()
+				jw.EndObj()
 				return true
 			}
 			tcID := msg.Get("tool_call_id").String()
@@ -677,7 +699,16 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 		case "user":
 			parts := anthropicUserPartsGJSON(msg.Get("content"), toolNames)
 			if dropToolBlocks {
+				before := len(parts)
 				parts = filterOutGeminiToolResponseParts(parts)
+				// If the user message was non-empty but became empty solely
+				// because its tool_results were dropped, emit a placeholder so
+				// role alternation is preserved — otherwise the surrounding
+				// assistant turns would collapse into consecutive `model`
+				// entries, which Gemini rejects with a 400.
+				if before > 0 && len(parts) == 0 {
+					parts = []string{geminiTextPart(droppedToolResultPlaceholder)}
+				}
 			}
 			if len(parts) == 0 {
 				return true
@@ -700,7 +731,14 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 		case "assistant":
 			parts := anthropicAssistantPartsGJSON(msg.Get("content"))
 			if dropToolBlocks {
+				before := len(parts)
 				parts = filterOutGeminiFunctionCallParts(parts)
+				// Same placeholder rule for the model side: a tool-call-only
+				// assistant turn would otherwise be skipped, putting two
+				// `user` entries back-to-back.
+				if before > 0 && len(parts) == 0 {
+					parts = []string{geminiTextPart(droppedToolCallPlaceholder)}
+				}
 			}
 			if len(parts) == 0 {
 				return true
@@ -731,6 +769,15 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 	writeGeminiToolChoiceFromAnthropic(jw, body)
 	writeGeminiGenerationConfigFromAnthropic(jw, body, opts.TargetModel)
 }
+
+// Placeholders inserted when Gemini 3.x sig-less tool blocks are dropped from
+// the request. They preserve role alternation in the `contents` array so a
+// run of dropped tool turns doesn't collapse adjacent assistant or user turns
+// into back-to-back same-role entries (Gemini 400s on non-alternating roles).
+const (
+	droppedToolCallPlaceholder   = "[router: prior tool call omitted — provider's signed thinking state was unavailable for cross-model carry-over]"
+	droppedToolResultPlaceholder = "[router: prior tool result omitted — paired with a dropped tool call]"
+)
 
 // isGemini3xModel returns true for Gemini 3.x preview models, which require
 // thoughtSignature on every functionCall part across turns. 2.x and earlier

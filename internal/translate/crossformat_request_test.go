@@ -516,8 +516,14 @@ func TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x(t *testing.T) {
 
 	// No part across any turn should carry a functionCall or
 	// functionResponse — they were all sig-less and would 400.
+	var lastRole string
 	for i, c := range contents {
 		msg := c.(map[string]any)
+		role, _ := msg["role"].(string)
+		assert.NotEqual(t, lastRole, role,
+			"contents[%d] role=%q must not match preceding turn's role — Gemini rejects non-alternating roles; placeholders should keep alternation across drops",
+			i, role)
+		lastRole = role
 		parts, _ := msg["parts"].([]any)
 		for _, p := range parts {
 			pmap := p.(map[string]any)
