@@ -246,9 +246,15 @@ var Models = []Model{
 	// - qwen/qwen3-coder (480B-A35B) — dedicated-only on Fireworks, absent
 	//   from DeepInfra + Bedrock us-east-1. Managed-prod resolves via the
 	//   trailing OpenRouter binding.
-	// - qwen/qwen3-235b-a22b-2507 — Bedrock us-east-1 carries only the VL
-	//   variant; Instruct-2507 stays on OpenRouter until AWS publishes it.
+	// - qwen/qwen3-235b-a22b-2507 — AWS published the Instruct-2507 variant
+	//   on bedrock-mantle in all major regions (verified 2026-05-22 against
+	//   the Bedrock model card). Primary moves to Bedrock; OpenRouter
+	//   stays as a trailing fallback for self-hosters without an AWS key.
+	//   The OR primary was dropped because we observed non-SSE responses
+	//   when OR routed Qwen through Google's hosting (silent CC stalls).
 	{ID: "qwen/qwen3-235b-a22b-2507", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderBedrock, UpstreamID: "qwen.qwen3-235b-a22b-2507",
+			Price: Pricing{InputUSDPer1M: 0.2266, OutputUSDPer1M: 0.9064}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.071, OutputUSDPer1M: 0.463}},
 	}},
 	{ID: "qwen/qwen3-coder-next", Tier: TierMid, Providers: []ProviderBinding{
@@ -289,11 +295,15 @@ var Models = []Model{
 	// (median TTFT + 2000/TPS). Provider availability verified against
 	// per-model "API providers" pages and OpenRouter's v1/models API.
 	//
-	// xiaomi/mimo-v2.5 — OpenRouter-only on the SOC-2 set. AA per-provider
-	// page lists only GMI + Xiaomi-direct, neither of which we currently
-	// onboard, so managed-prod resolves nothing here while self-hosters
-	// with an OpenRouter key get the trailing binding.
+	// xiaomi/mimo-v2.5 — DeepInfra now hosts the base variant at parity
+	// pricing with OpenRouter ($0.40 in / $2.00 out / $0.08 cached per 1M,
+	// verified 2026-05-22). Moving primary off OpenRouter because OR's
+	// stream:true honoring is provider-dependent (observed non-SSE
+	// responses on the Google-hosted Qwen line). DeepInfra terminates SSE
+	// itself so the AnthropicSSETranslator sees real chunks.
 	{ID: "xiaomi/mimo-v2.5", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderDeepInfra, UpstreamID: "XiaomiMiMo/MiMo-V2.5",
+			Price: Pricing{InputUSDPer1M: 0.400, OutputUSDPer1M: 2.000, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.400, OutputUSDPer1M: 2.000, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, Providers: []ProviderBinding{
