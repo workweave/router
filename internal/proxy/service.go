@@ -107,6 +107,14 @@ type Service struct {
 // so the pin lifecycle tracks the cache it's keeping warm.
 const pinSessionTTL = time.Hour
 
+// prevTurnMaxedOutThreshold is the LastOutputTokens count above which we treat
+// the previous turn as having saturated the output cap. Set just under the
+// 8192 defaultMaxOutputTokenCap; legitimate end_turn completions almost never
+// approach this on tool-calling turns, while OSS-model parse-failure runaways
+// land exactly at the cap. Used by runTurnLoop to break the auto-continue
+// loop by excluding the pinned model for the next turn.
+const prevTurnMaxedOutThreshold = 8000
+
 // APIKeyIDContextKey is the request-context key for the authenticated api_key_id.
 type APIKeyIDContextKey struct{}
 

@@ -27,8 +27,18 @@ func openRouterProviderHint(model string) map[string]any {
 // openRouterReasoningHint returns the OpenRouter `reasoning` field to disable
 // reasoning on models that burn the entire max_tokens budget on hidden thinking.
 // Native DeepSeek serving defaults to reasoning-on and ignores effort=minimal.
+//
+// Extended to moonshotai/* (Kimi K2.x) and xiaomi/* (MiMo) because on
+// tool-calling turns these models otherwise emit native tool-call tokens
+// (<|tool_call_begin|>, Hermes <tool_call> XML) inside an unbounded reasoning
+// segment that OpenRouter's tool-call parser misses, leaving structured
+// tool_calls empty and generation running to the output cap.
+// (hermes-agent #24534, vllm #39056).
 func openRouterReasoningHint(model string) map[string]any {
-	if strings.HasPrefix(model, "deepseek/") {
+	switch {
+	case strings.HasPrefix(model, "deepseek/"),
+		strings.HasPrefix(model, "moonshotai/"),
+		strings.HasPrefix(model, "xiaomi/"):
 		return map[string]any{"enabled": false}
 	}
 	return nil

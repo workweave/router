@@ -129,8 +129,36 @@ func TestPrepareOpenAI_OpenAISource_DisablesReasoningForDeepSeek(t *testing.T) {
 	assert.Equal(t, false, r["enabled"])
 }
 
-func TestPrepareOpenAI_NoReasoningOverrideForNonDeepSeek(t *testing.T) {
-	cases := []string{"moonshotai/kimi-k2.5", "qwen/qwen3-max", "google/gemini-2.5-pro", "gpt-5"}
+func TestPrepareOpenAI_DisablesReasoningForMoonshotAndXiaomi(t *testing.T) {
+	// Kimi K2.x and MiMo emit native tool-call tokens (<|tool_call_begin|>,
+	// Hermes <tool_call> XML) inside reasoning segments that OpenRouter's
+	// tool-call parser misses, leaving structured tool_calls empty and
+	// generation running to the output cap. Disabling reasoning at the
+	// OpenRouter layer prevents that runaway. See hermes-agent#24534 and
+	// vllm#39056 for the upstream parser bugs that motivate this.
+	cases := []string{"moonshotai/kimi-k2.5", "moonshotai/kimi-k2.6", "xiaomi/mimo-v2.5", "xiaomi/mimo-v2.5-pro"}
+	for _, model := range cases {
+		t.Run(model, func(t *testing.T) {
+			src := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)
+			env, err := translate.ParseAnthropic(src)
+			require.NoError(t, err)
+
+			out, err := env.PrepareOpenAI(nil, translate.EmitOptions{TargetModel: model})
+			require.NoError(t, err)
+
+			r := reasoningField(t, out.Body)
+			require.NotNil(t, r, "%s must get a reasoning override", model)
+			assert.Equal(t, false, r["enabled"])
+		})
+	}
+}
+
+func TestPrepareOpenAI_NoReasoningOverrideForOtherModels(t *testing.T) {
+	// Qwen on OpenRouter is intentionally NOT included: its variants split
+	// across thinking and non-thinking models, and forcing reasoning off
+	// would degrade the thinking variants. The runaway-tool-call escape
+	// hatch for qwen is the turnloop maxed-out exclusion in proxy.
+	cases := []string{"qwen/qwen3-max", "qwen/qwen3-coder-next", "google/gemini-2.5-pro", "gpt-5"}
 	for _, model := range cases {
 		t.Run(model, func(t *testing.T) {
 			src := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)
@@ -141,7 +169,7 @@ func TestPrepareOpenAI_NoReasoningOverrideForNonDeepSeek(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Nil(t, reasoningField(t, out.Body),
-				"non-deepseek targets must not get a reasoning override")
+				"%s must not get a reasoning override", model)
 		})
 	}
 }

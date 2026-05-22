@@ -209,6 +209,31 @@ func (s *Service) runTurnLoop(
 		pin = sessionpin.Pin{}
 	}
 
+	// Previous-turn-maxed-out guard: when an OSS model's tool-call tokens fail
+	// to parse server-side (kimi <|tool_call_begin|>, qwen3 <tool_call> XML)
+	// the upstream emits them as content and generates to the output cap.
+	// Claude Code's "Output token limit hit. Resume directly…" auto-continue
+	// then re-pins the same broken model, producing a multi-minute loop. When
+	// the previous turn saturated the output cap, exclude the pinned model for
+	// this turn and treat the pin as missing so downstream sticky branches
+	// (ToolResult, !plannerEnabled) cannot re-anchor it before the scorer runs.
+	if pinFound && pin.LastOutputTokens >= prevTurnMaxedOutThreshold {
+		log.Info("Session pin maxed out on previous turn; excluding for this turn",
+			"pin_model", pin.Model,
+			"pin_provider", pin.Provider,
+			"last_output_tokens", pin.LastOutputTokens,
+		)
+		// Defensive copy: callers may share the ExcludedModels map across requests.
+		excluded := make(map[string]struct{}, len(req.ExcludedModels)+1)
+		for k := range req.ExcludedModels {
+			excluded[k] = struct{}{}
+		}
+		excluded[pin.Model] = struct{}{}
+		req.ExcludedModels = excluded
+		pinFound = false
+		pin = sessionpin.Pin{}
+	}
+
 	// Tool-result turns are mid-turn continuations. Re-routing them on
 	// trailing tool_result embedding flips decisions to noisy candidates;
 	// reuse the pin verbatim when present and refresh the TTL.
