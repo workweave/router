@@ -231,3 +231,27 @@ func TestBucketKeyIsolatesByKnobs(t *testing.T) {
 	require.True(t, hitSame, "same effective knobs hash must hit")
 	assert.Equal(t, []byte(`{"alpha":"0.5"}`), got.Body)
 }
+
+// TestBucketMapEvictsBeyondMaxBuckets pins the outer-map cap: bucket
+// identity includes attacker-influenceable inputs (clusterVersion,
+// knobsHash), so the outer map must evict rather than grow unbounded.
+func TestBucketMapEvictsBeyondMaxBuckets(t *testing.T) {
+	cfg := cache.DefaultConfig()
+	cfg.MaxBuckets = 4
+	c := cache.New(cfg)
+	emb := l2Normalize([]float32{1, 0, 0, 0})
+
+	c.Store("inst-1", cache.FormatAnthropic, emb, 0, sampleResponse(`{"k":"first"}`), "v1", 1)
+	_, hit := c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v1", 1)
+	require.True(t, hit, "first bucket should be present immediately after Store")
+
+	// Fill the cap with distinct knob hashes (4 more total) to evict the first.
+	for i := uint64(2); i <= 5; i++ {
+		c.Store("inst-1", cache.FormatAnthropic, emb, 0, sampleResponse(`{"k":"x"}`), "v1", i)
+	}
+
+	_, hit = c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v1", 1)
+	assert.False(t, hit, "first bucket should be evicted once MaxBuckets exceeded")
+	_, hit = c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v1", 5)
+	assert.True(t, hit, "most-recent bucket should remain after eviction")
+}

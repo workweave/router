@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 )
 
@@ -27,7 +28,12 @@ type Config struct {
 	PerClusterThreshold map[int]float32
 	DefaultThreshold    float32
 	// BucketSize caps per-(installation, format, clusterID) LRU size.
-	BucketSize   int
+	BucketSize int
+	// MaxBuckets caps the number of distinct buckets resident in memory.
+	// Bucket identity includes attacker-influenceable inputs (cluster
+	// version, knobs hash) so an unbounded outer map would let a caller
+	// drive memory growth by varying x-weave-routing-* headers.
+	MaxBuckets   int
 	TTL          time.Duration
 	MaxBodyBytes int
 }
@@ -37,6 +43,7 @@ func DefaultConfig() Config {
 	return Config{
 		DefaultThreshold: 0.95,
 		BucketSize:       1024,
+		MaxBuckets:       4096,
 		TTL:              1 * time.Hour,
 		MaxBodyBytes:     1 << 20,
 	}
@@ -45,7 +52,7 @@ func DefaultConfig() Config {
 // Cache is the in-memory semantic cache. Concurrent-safe.
 type Cache struct {
 	cfg     Config
-	buckets map[bucketKey]*expirable.LRU[entryKey, *entry]
+	buckets *lru.Cache[bucketKey, *expirable.LRU[entryKey, *entry]]
 	mu      sync.Mutex
 }
 
@@ -58,15 +65,23 @@ func New(cfg Config) *Cache {
 	if cfg.BucketSize <= 0 {
 		cfg.BucketSize = def.BucketSize
 	}
+	if cfg.MaxBuckets <= 0 {
+		cfg.MaxBuckets = def.MaxBuckets
+	}
 	if cfg.TTL <= 0 {
 		cfg.TTL = def.TTL
 	}
 	if cfg.MaxBodyBytes <= 0 {
 		cfg.MaxBodyBytes = def.MaxBodyBytes
 	}
+	buckets, err := lru.New[bucketKey, *expirable.LRU[entryKey, *entry]](cfg.MaxBuckets)
+	if err != nil {
+		// lru.New only errors on size <= 0, which we just guarded against.
+		panic(err)
+	}
 	return &Cache{
 		cfg:     cfg,
-		buckets: make(map[bucketKey]*expirable.LRU[entryKey, *entry]),
+		buckets: buckets,
 	}
 }
 
@@ -167,13 +182,13 @@ func (c *Cache) bucket(installationID string, format Format, clusterID int, clus
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	b, ok := c.buckets[key]
+	b, ok := c.buckets.Get(key)
 	if !ok {
 		if !create {
 			return nil
 		}
 		b = expirable.NewLRU[entryKey, *entry](c.cfg.BucketSize, nil, c.cfg.TTL)
-		c.buckets[key] = b
+		c.buckets.Add(key, b)
 	}
 	return b
 }
