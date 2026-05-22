@@ -206,8 +206,14 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 		jw.EndObj()
 	}
 
-	// Second pass: write contents array.
-	hasContents := false
+	// Second pass: build content entries, then post-process for role
+	// alternation before emitting. Two-pass is necessary because dropping
+	// sig-less tool turns can leave placeholder entries adjacent to real
+	// content of the same role — e.g. the OpenAI per-tool_call_id
+	// `role:"tool"` messages each contribute a user placeholder and the
+	// following real user turn would land right after. The collapser merges
+	// placeholders with real content of the same role.
+	entries := make([]contentEntry, 0, 8)
 	var walkErr error
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
@@ -219,72 +225,33 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 			if len(parts) == 0 {
 				return true
 			}
-			if !hasContents {
-				jw.Key("contents")
-				jw.Arr()
-				hasContents = true
-			}
-			jw.Obj()
-			jw.Key("role")
-			jw.Str("user")
-			jw.Key("parts")
-			jw.Arr()
-			for _, p := range parts {
-				jw.Raw(p)
-			}
-			jw.EndArr()
-			jw.EndObj()
+			entries = append(entries, contentEntry{role: "user", parts: parts})
 		case "assistant":
 			parts, parseErr := openAIAssistantPartsGJSON(msg)
 			if parseErr != nil {
 				walkErr = parseErr
 				return false
 			}
+			placeholder := false
 			if dropToolBlocks {
 				before := len(parts)
 				parts = filterOutGeminiFunctionCallParts(parts)
-				// Preserve role alternation when a tool-call-only assistant
-				// turn is fully drained by the drop.
 				if before > 0 && len(parts) == 0 {
 					parts = []string{geminiTextPart(droppedToolCallPlaceholder)}
+					placeholder = true
 				}
 			}
 			if len(parts) == 0 {
 				return true
 			}
-			if !hasContents {
-				jw.Key("contents")
-				jw.Arr()
-				hasContents = true
-			}
-			jw.Obj()
-			jw.Key("role")
-			jw.Str("model")
-			jw.Key("parts")
-			jw.Arr()
-			for _, p := range parts {
-				jw.Raw(p)
-			}
-			jw.EndArr()
-			jw.EndObj()
+			entries = append(entries, contentEntry{role: "model", parts: parts, placeholder: placeholder})
 		case "tool":
 			if dropToolBlocks {
-				// Synthesize a placeholder user text part so the surrounding
-				// assistant turns don't collapse into consecutive `model`
-				// entries (Gemini 400s on non-alternating roles).
-				if !hasContents {
-					jw.Key("contents")
-					jw.Arr()
-					hasContents = true
-				}
-				jw.Obj()
-				jw.Key("role")
-				jw.Str("user")
-				jw.Key("parts")
-				jw.Arr()
-				jw.Raw(geminiTextPart(droppedToolResultPlaceholder))
-				jw.EndArr()
-				jw.EndObj()
+				entries = append(entries, contentEntry{
+					role:        "user",
+					parts:       []string{geminiTextPart(droppedToolResultPlaceholder)},
+					placeholder: true,
+				})
 				return true
 			}
 			tcID := msg.Get("tool_call_id").String()
@@ -293,39 +260,17 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 				return true
 			}
 			result := toolResultContentGJSON(msg.Get("content"))
-			if !hasContents {
-				jw.Key("contents")
-				jw.Arr()
-				hasContents = true
-			}
-			jw.Obj()
-			jw.Key("role")
-			jw.Str("user")
-			jw.Key("parts")
-			jw.Arr()
-			jw.Obj()
-			jw.Key("functionResponse")
-			jw.Obj()
-			jw.Key("name")
-			jw.Str(name)
-			jw.Key("response")
-			jw.Obj()
-			jw.Key("result")
-			jw.Str(result)
-			jw.EndObj()
-			jw.EndObj()
-			jw.EndObj()
-			jw.EndArr()
-			jw.EndObj()
+			entries = append(entries, contentEntry{
+				role:  "user",
+				parts: []string{geminiFunctionResponsePart(name, result)},
+			})
 		}
 		return true
 	})
 	if walkErr != nil {
 		return walkErr
 	}
-	if hasContents {
-		jw.EndArr()
-	}
+	emitGeminiContents(jw, collapseConsecutiveRoles(entries))
 
 	writeGeminiToolsFromOpenAI(jw, body)
 	writeGeminiToolChoiceFromOpenAI(jw, body)
@@ -691,83 +636,131 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 		dropToolBlocks = true
 	}
 
-	// Second pass: write contents array.
-	hasContents := false
+	// Second pass: build entries, then collapse + emit. See contentEntry /
+	// collapseConsecutiveRoles — they preserve role alternation when the
+	// sig-less-tool drop guard would otherwise produce same-role runs.
+	entries := make([]contentEntry, 0, 8)
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
 		switch role {
 		case "user":
 			parts := anthropicUserPartsGJSON(msg.Get("content"), toolNames)
+			placeholder := false
 			if dropToolBlocks {
 				before := len(parts)
 				parts = filterOutGeminiToolResponseParts(parts)
-				// If the user message was non-empty but became empty solely
-				// because its tool_results were dropped, emit a placeholder so
-				// role alternation is preserved — otherwise the surrounding
-				// assistant turns would collapse into consecutive `model`
-				// entries, which Gemini rejects with a 400.
 				if before > 0 && len(parts) == 0 {
 					parts = []string{geminiTextPart(droppedToolResultPlaceholder)}
+					placeholder = true
 				}
 			}
 			if len(parts) == 0 {
 				return true
 			}
-			if !hasContents {
-				jw.Key("contents")
-				jw.Arr()
-				hasContents = true
-			}
-			jw.Obj()
-			jw.Key("role")
-			jw.Str("user")
-			jw.Key("parts")
-			jw.Arr()
-			for _, p := range parts {
-				jw.Raw(p)
-			}
-			jw.EndArr()
-			jw.EndObj()
+			entries = append(entries, contentEntry{role: "user", parts: parts, placeholder: placeholder})
 		case "assistant":
 			parts := anthropicAssistantPartsGJSON(msg.Get("content"))
+			placeholder := false
 			if dropToolBlocks {
 				before := len(parts)
 				parts = filterOutGeminiFunctionCallParts(parts)
-				// Same placeholder rule for the model side: a tool-call-only
-				// assistant turn would otherwise be skipped, putting two
-				// `user` entries back-to-back.
 				if before > 0 && len(parts) == 0 {
 					parts = []string{geminiTextPart(droppedToolCallPlaceholder)}
+					placeholder = true
 				}
 			}
 			if len(parts) == 0 {
 				return true
 			}
-			if !hasContents {
-				jw.Key("contents")
-				jw.Arr()
-				hasContents = true
-			}
-			jw.Obj()
-			jw.Key("role")
-			jw.Str("model")
-			jw.Key("parts")
-			jw.Arr()
-			for _, p := range parts {
-				jw.Raw(p)
-			}
-			jw.EndArr()
-			jw.EndObj()
+			entries = append(entries, contentEntry{role: "model", parts: parts, placeholder: placeholder})
 		}
 		return true
 	})
-	if hasContents {
-		jw.EndArr()
-	}
+	emitGeminiContents(jw, collapseConsecutiveRoles(entries))
 
 	writeGeminiToolsFromAnthropic(jw, body)
 	writeGeminiToolChoiceFromAnthropic(jw, body)
 	writeGeminiGenerationConfigFromAnthropic(jw, body, opts.TargetModel)
+}
+
+// contentEntry is a buffered Gemini `contents` array entry. Both `Prepare*`
+// paths collect entries first so a post-pass can merge placeholders with
+// real same-role content before emitting, preserving role alternation.
+type contentEntry struct {
+	role        string   // "user" or "model"
+	parts       []string // pre-serialized Gemini part JSON objects
+	placeholder bool     // synthesized by the sig-less-tool drop guard
+}
+
+// collapseConsecutiveRoles merges adjacent entries that share a role. When
+// a placeholder neighbors real same-role content, the real content wins and
+// the placeholder is dropped. Two real same-role entries merge their parts.
+// Two placeholders collapse to one. Required because the sig-less-tool drop
+// guard can otherwise emit user/user or model/model sequences (Gemini 400s
+// on non-alternating roles).
+func collapseConsecutiveRoles(in []contentEntry) []contentEntry {
+	if len(in) == 0 {
+		return in
+	}
+	out := make([]contentEntry, 0, len(in))
+	for _, e := range in {
+		if len(out) == 0 || out[len(out)-1].role != e.role {
+			out = append(out, e)
+			continue
+		}
+		prev := &out[len(out)-1]
+		switch {
+		case prev.placeholder && !e.placeholder:
+			*prev = e
+		case !prev.placeholder && e.placeholder:
+			// keep prev, drop incoming placeholder
+		default:
+			prev.parts = append(prev.parts, e.parts...)
+		}
+	}
+	return out
+}
+
+// emitGeminiContents writes the contents array from a collapsed entry slice.
+// Skips writing the key entirely when there are no entries so absence and
+// emptiness aren't conflated downstream.
+func emitGeminiContents(jw *jsonWriter, entries []contentEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	jw.Key("contents")
+	jw.Arr()
+	for _, e := range entries {
+		jw.Obj()
+		jw.Key("role")
+		jw.Str(e.role)
+		jw.Key("parts")
+		jw.Arr()
+		for _, p := range e.parts {
+			jw.Raw(p)
+		}
+		jw.EndArr()
+		jw.EndObj()
+	}
+	jw.EndArr()
+}
+
+// geminiFunctionResponsePart serializes a Gemini functionResponse part.
+func geminiFunctionResponsePart(name, result string) string {
+	pw := newJSONWriter()
+	pw.Obj()
+	pw.Key("functionResponse")
+	pw.Obj()
+	pw.Key("name")
+	pw.Str(name)
+	pw.Key("response")
+	pw.Obj()
+	pw.Key("result")
+	pw.Str(result)
+	pw.EndObj()
+	pw.EndObj()
+	pw.EndObj()
+	return string(pw.Bytes())
 }
 
 // Placeholders inserted when Gemini 3.x sig-less tool blocks are dropped from

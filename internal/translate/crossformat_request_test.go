@@ -533,6 +533,44 @@ func TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x(t *testing.T) {
 	}
 }
 
+// Multi-tool turns produce one `role:"tool"` message per tool_call_id. When
+// the sig-less drop guard fires, each tool message would naively emit its
+// own user placeholder, producing consecutive `user` entries that Gemini
+// 400s on. Verify a run of consecutive tool messages coalesces into a single
+// placeholder so role alternation is preserved.
+func TestCrossFormat_OpenAIToGemini_MultiToolDropCoalescesPlaceholders(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-5",
+		"messages":[
+			{"role":"user","content":"do two things"},
+			{"role":"assistant","content":null,"tool_calls":[
+				{"id":"call_a","type":"function","function":{"name":"Bash","arguments":"{\"cmd\":\"ls\"}"}},
+				{"id":"call_b","type":"function","function":{"name":"Read","arguments":"{\"path\":\"x\"}"}}
+			]},
+			{"role":"tool","tool_call_id":"call_a","content":"ok-a"},
+			{"role":"tool","tool_call_id":"call_b","content":"ok-b"},
+			{"role":"user","content":"thanks"}
+		]
+	}`)
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	contents := getArray(t, doc, "contents")
+
+	var lastRole string
+	for i, c := range contents {
+		role, _ := c.(map[string]any)["role"].(string)
+		assert.NotEqual(t, lastRole, role,
+			"contents[%d] role=%q must not match preceding turn's role — consecutive tool messages must coalesce into one placeholder",
+			i, role)
+		lastRole = role
+	}
+}
+
 // Gemini 2.x accepts sig-less tool calls, so the drop guard must NOT fire
 // there — same OpenAI fixture, different target model.
 func TestCrossFormat_OpenAIToGemini_KeepsToolsForGemini2x(t *testing.T) {
