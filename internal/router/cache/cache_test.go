@@ -232,12 +232,13 @@ func TestBucketKeyIsolatesByKnobs(t *testing.T) {
 	assert.Equal(t, []byte(`{"alpha":"0.5"}`), got.Body)
 }
 
-// TestBucketMapEvictsBeyondMaxBuckets pins the outer-map cap: bucket
-// identity includes attacker-influenceable inputs (clusterVersion,
-// knobsHash), so the outer map must evict rather than grow unbounded.
-func TestBucketMapEvictsBeyondMaxBuckets(t *testing.T) {
+// TestBucketMapEvictsBeyondPerInstallationCap pins the per-installation
+// cap: bucket identity includes attacker-influenceable inputs
+// (clusterVersion, knobsHash), so the per-tenant map must evict
+// LRU-style rather than grow unbounded.
+func TestBucketMapEvictsBeyondPerInstallationCap(t *testing.T) {
 	cfg := cache.DefaultConfig()
-	cfg.MaxBuckets = 4
+	cfg.MaxBucketsPerInstallation = 4
 	c := cache.New(cfg)
 	emb := l2Normalize([]float32{1, 0, 0, 0})
 
@@ -251,7 +252,29 @@ func TestBucketMapEvictsBeyondMaxBuckets(t *testing.T) {
 	}
 
 	_, hit = c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v1", 1)
-	assert.False(t, hit, "first bucket should be evicted once MaxBuckets exceeded")
+	assert.False(t, hit, "first bucket should be evicted once cap exceeded")
 	_, hit = c.Lookup("inst-1", cache.FormatAnthropic, emb, []int{0}, "v1", 5)
 	assert.True(t, hit, "most-recent bucket should remain after eviction")
+}
+
+// TestPerInstallationBucketCapIsolatesTenants pins the cross-tenant
+// guarantee: one installation churning knob hashes must not evict
+// another installation's buckets out of a shared global LRU.
+func TestPerInstallationBucketCapIsolatesTenants(t *testing.T) {
+	cfg := cache.DefaultConfig()
+	cfg.MaxBucketsPerInstallation = 2
+	c := cache.New(cfg)
+	emb := l2Normalize([]float32{1, 0, 0, 0})
+
+	// Victim stores one bucket.
+	c.Store("victim", cache.FormatAnthropic, emb, 0, sampleResponse(`{"k":"victim"}`), "v1", 99)
+
+	// Attacker churns knob hashes well past their own cap.
+	for i := uint64(0); i < 50; i++ {
+		c.Store("attacker", cache.FormatAnthropic, emb, 0, sampleResponse(`{"k":"x"}`), "v1", i)
+	}
+
+	got, hit := c.Lookup("victim", cache.FormatAnthropic, emb, []int{0}, "v1", 99)
+	require.True(t, hit, "victim bucket must survive attacker knob churn")
+	assert.Equal(t, []byte(`{"k":"victim"}`), got.Body)
 }
