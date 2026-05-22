@@ -532,7 +532,8 @@ func main() {
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels).
 		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
-		WithBillingService(billingSvc)
+		WithBillingService(billingSvc).
+		WithDebugEmptyResponse(strings.EqualFold(config.GetOr("WEAVE_ROUTER_DEBUG_EMPTY_RESPONSE", ""), "true"))
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
 	// Fail loud if a deployed model is missing from the tier table;

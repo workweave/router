@@ -353,6 +353,20 @@ type AnthropicSSETranslator struct {
 	messageID                string
 	modelFromUpstream        string
 
+	// contentBlocksEmitted counts text/tool blocks we forwarded from
+	// upstream (the routing marker block is intentionally excluded — it's
+	// not real model output). Used by EmptyTurnEmitted to flag the
+	// pathological "message_start → message_delta(end_turn)" pattern with
+	// no content blocks between, which the proxy logs as an anomaly.
+	contentBlocksEmitted int
+
+	// rawUpstreamCapture, when non-nil, receives a copy of every byte
+	// written through this translator. Allocated by the proxy only when
+	// WEAVE_ROUTER_DEBUG_EMPTY_RESPONSE=true so the empty-turn anomaly
+	// log can dump the exact upstream bytes that produced the empty turn.
+	// Kept off by default — bodies are large and may contain user data.
+	rawUpstreamCapture *bytes.Buffer
+
 	usageSink otel.UsageSink
 
 	// estimatedInputTokens is the pre-inference estimate, used to populate
@@ -383,6 +397,42 @@ func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink 
 func (t *AnthropicSSETranslator) WithRoutingMarker(marker string) *AnthropicSSETranslator {
 	t.routingMarker = marker
 	return t
+}
+
+// WithRawUpstreamCapture installs a buffer that receives every upstream byte
+// passing through Write. Used by the proxy when WEAVE_ROUTER_DEBUG_EMPTY_RESPONSE
+// is set so an empty-turn anomaly log can include the exact bytes that
+// produced the empty turn. Nil disables capture (the default).
+func (t *AnthropicSSETranslator) WithRawUpstreamCapture(buf *bytes.Buffer) *AnthropicSSETranslator {
+	t.rawUpstreamCapture = buf
+	return t
+}
+
+// EmptyTurnEmitted reports whether the translator forwarded a complete
+// streaming turn with zero content blocks (message_start →
+// message_delta(end_turn|stop) → message_stop with nothing between). This
+// is the pathological response shape that manifests as "the conversation
+// just stopped" client-side because CC sees a properly-closed turn with
+// no text or tool_use to act on. Always false until Finalize returns
+// successfully on a streaming response.
+func (t *AnthropicSSETranslator) EmptyTurnEmitted() bool {
+	if !t.streaming || !t.started || !t.closed {
+		return false
+	}
+	return t.contentBlocksEmitted == 0
+}
+
+// RawUpstreamBytes returns a copy of the bytes captured via
+// WithRawUpstreamCapture. Returns nil when capture wasn't installed.
+// Caller owns the returned slice — safe to mutate.
+func (t *AnthropicSSETranslator) RawUpstreamBytes() []byte {
+	if t.rawUpstreamCapture == nil {
+		return nil
+	}
+	b := t.rawUpstreamCapture.Bytes()
+	out := make([]byte, len(b))
+	copy(out, b)
+	return out
 }
 
 // WithEstimatedInputTokens seeds message_start.usage.input_tokens for cross-format
@@ -450,6 +500,9 @@ func (t *AnthropicSSETranslator) Prelude(streaming bool) error {
 
 func (t *AnthropicSSETranslator) Write(data []byte) (int, error) {
 	n := len(data)
+	if t.rawUpstreamCapture != nil {
+		t.rawUpstreamCapture.Write(data)
+	}
 	t.buf.Write(data)
 	if !t.streaming {
 		return n, nil
@@ -623,6 +676,7 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 			}
 			t.textOpen = true
 			t.blockIdx++
+			t.contentBlocksEmitted++
 		}
 		if err := t.emitContentBlockDeltaText(t.blockIdx-1, content); err != nil {
 			return err
@@ -655,6 +709,7 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 			blockIdx = t.blockIdx
 			t.toolBlocks[idx] = blockIdx
 			t.blockIdx++
+			t.contentBlocksEmitted++
 			if emitErr = t.emitContentBlockStartTool(blockIdx, id, name, sig); emitErr != nil {
 				return false
 			}

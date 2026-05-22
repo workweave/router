@@ -1,6 +1,7 @@
 package translate_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -467,6 +468,67 @@ func TestAnthropicSSETranslator_StreamingTextResponse(t *testing.T) {
 	assert.Contains(t, body, `"text":" world"`)
 	assert.Contains(t, body, `"stop_reason":"end_turn"`)
 	assert.Contains(t, body, "event: message_stop")
+}
+
+// Regression for the observed prod failure: upstream returns role:assistant
+// with empty content + finish_reason:stop. The translator faithfully streams
+// message_start → message_delta(end_turn) → message_stop with zero content
+// blocks. EmptyTurnEmitted() flags this so the proxy can log a structured
+// anomaly. Raw capture round-trips the upstream bytes verbatim.
+func TestAnthropicSSETranslator_EmptyTurnDetection(t *testing.T) {
+	rec := httptest.NewRecorder()
+	raw := &bytes.Buffer{}
+	translator := translate.NewAnthropicSSETranslator(rec, "qwen/qwen3.5-flash-02-23", nil).
+		WithRawUpstreamCapture(raw)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-empty\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-empty\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":80000,\"completion_tokens\":0,\"total_tokens\":80000}}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, event := range events {
+		_, err := translator.Write([]byte(event))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	assert.True(t, translator.EmptyTurnEmitted(),
+		"translator must flag zero-content-block + end_turn as an anomaly")
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "event: message_start")
+	assert.Contains(t, body, `"stop_reason":"end_turn"`)
+	assert.NotContains(t, body, `"type":"text_delta"`, "no content blocks should have streamed")
+	assert.NotContains(t, body, `"type":"tool_use"`)
+
+	captured := translator.RawUpstreamBytes()
+	assert.NotEmpty(t, captured, "raw capture must include upstream bytes")
+	assert.Contains(t, string(captured), "chatcmpl-empty")
+}
+
+// A normal text turn must NOT trip the empty-turn flag.
+func TestAnthropicSSETranslator_EmptyTurnNotFlaggedForNormalResponse(t *testing.T) {
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil)
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, event := range events {
+		_, err := translator.Write([]byte(event))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	assert.False(t, translator.EmptyTurnEmitted(),
+		"a turn with content blocks must not be flagged as empty")
 }
 
 func TestAnthropicSSETranslator_StreamingToolUse(t *testing.T) {

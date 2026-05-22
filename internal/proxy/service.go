@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -101,6 +102,12 @@ type Service struct {
 	// each completed upstream call. Wired only in managed mode; the
 	// composition root leaves this nil for selfhosted deployments.
 	billing *billing.Service
+	// debugEmptyResponse, when true, allocates a per-turn buffer that
+	// captures every byte the upstream sends through the translator so
+	// the empty-turn anomaly log can dump the exact bytes that produced
+	// the empty turn. Off by default — bodies are large and may contain
+	// user data. Wired from WEAVE_ROUTER_DEBUG_EMPTY_RESPONSE at boot.
+	debugEmptyResponse bool
 }
 
 // pinSessionTTL mirrors Anthropic's prompt-cache TTL on Sonnet/Haiku/Opus 4.5+
@@ -608,6 +615,70 @@ func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName s
 	return proxyErr
 }
 
+// WithDebugEmptyResponse toggles per-turn raw-upstream capture. When true,
+// the empty-turn anomaly log includes the bytes the upstream sent that
+// produced the empty turn. Off by default because bodies are large and
+// may contain user-content. Wired from WEAVE_ROUTER_DEBUG_EMPTY_RESPONSE.
+func (s *Service) WithDebugEmptyResponse(enabled bool) *Service {
+	s.debugEmptyResponse = enabled
+	return s
+}
+
+// emptyTurnRawCaptureMaxBytes caps how much of the raw upstream body
+// we log per anomaly. Real streaming bodies can be tens of MB; the cap
+// keeps the log line bounded while preserving the head of the response
+// where the failure mode is almost always visible (an OpenAI-compat
+// response with `choices[0].message.content == ""` plus a usage block
+// fits in <2KB).
+const emptyTurnRawCaptureMaxBytes = 8 * 1024
+
+// logEmptyTurnIfDetected emits a WARN log when the translator finished a
+// streaming turn with zero content blocks — the pathological response
+// shape where CC sees a properly-closed assistant turn with nothing to
+// render, manifesting as "the conversation just stopped." Joins on
+// request_id with the surrounding ProxyMessages-complete entry.
+//
+// When raw is non-nil (debug capture enabled), the head of the upstream
+// body is included so root cause is visible from logs alone — no
+// per-investigation tcpdump needed.
+func logEmptyTurnIfDetected(
+	log *slog.Logger,
+	requestID string,
+	decision router.Decision,
+	feats translate.RoutingFeatures,
+	translator *translate.AnthropicSSETranslator,
+	requestBody []byte,
+	raw *bytes.Buffer,
+) {
+	if !translator.EmptyTurnEmitted() {
+		return
+	}
+	attrs := []any{
+		"request_id", requestID,
+		"decision_model", decision.Model,
+		"decision_provider", decision.Provider,
+		"decision_reason", decision.Reason,
+		"message_count", feats.MessageCount,
+		"estimated_input_tokens", feats.Tokens,
+		"request_body_bytes", len(requestBody),
+	}
+	if raw != nil {
+		captured := raw.Bytes()
+		preview := captured
+		if len(preview) > emptyTurnRawCaptureMaxBytes {
+			preview = preview[:emptyTurnRawCaptureMaxBytes]
+		}
+		attrs = append(attrs,
+			"upstream_raw_bytes", len(captured),
+			"upstream_raw_preview", string(preview),
+			"upstream_raw_truncated", len(captured) > emptyTurnRawCaptureMaxBytes,
+		)
+	} else {
+		attrs = append(attrs, "upstream_raw_capture", "disabled (set WEAVE_ROUTER_DEBUG_EMPTY_RESPONSE=true to capture)")
+	}
+	log.Warn("Empty assistant turn from upstream: 0 content blocks before end_turn", attrs...)
+}
+
 // logUpstreamBody emits the fully-prepared upstream request body at Debug
 // level. Intended for per-turn byte-diff investigations of upstream
 // prompt-cache stability; gated by LOG_LEVEL=debug.
@@ -828,11 +899,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		translator := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
 			WithRoutingMarker(routingMarkerFor(routeRes)).
 			WithEstimatedInputTokens(feats.Tokens)
+		var rawCapture *bytes.Buffer
+		if s.debugEmptyResponse {
+			rawCapture = &bytes.Buffer{}
+			translator.WithRawUpstreamCapture(rawCapture)
+		}
 		if err := translator.Prelude(env.Stream()); err != nil {
 			log.Error("Anthropic SSE prelude failed (OpenAI upstream)", "err", err)
 		}
 		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
 		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
+		logEmptyTurnIfDetected(log, requestID, decision, feats, translator, prep.Body, rawCapture)
 	case providers.ProviderGoogle:
 		crossFormat = true
 		prep, emitErr := env.PrepareGemini(r.Header, opts)
@@ -850,6 +927,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		anthropicTr := translate.NewAnthropicSSETranslator(sink, decision.Model, usage).
 			WithRoutingMarker(routingMarkerFor(routeRes)).
 			WithEstimatedInputTokens(feats.Tokens)
+		var rawCapture *bytes.Buffer
+		if s.debugEmptyResponse {
+			rawCapture = &bytes.Buffer{}
+			anthropicTr.WithRawUpstreamCapture(rawCapture)
+		}
 		if err := anthropicTr.Prelude(env.Stream()); err != nil {
 			log.Error("Anthropic SSE prelude failed (Gemini upstream)", "err", err)
 		}
@@ -857,6 +939,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		proxyErr = p.Proxy(ctx, decision, prep, geminiTr, r)
 		proxyErr = finalizeAfterProxy(proxyErr, geminiTr.Finalize)
 		proxyErr = finalizeAfterProxy(proxyErr, anthropicTr.Finalize)
+		logEmptyTurnIfDetected(log, requestID, decision, feats, anthropicTr, prep.Body, rawCapture)
 	default:
 		return fmt.Errorf("%w: %s (no translation path defined for inbound Anthropic Messages)", ErrProviderNotConfigured, decision.Provider)
 	}
