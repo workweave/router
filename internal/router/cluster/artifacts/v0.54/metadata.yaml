@@ -1,0 +1,111 @@
+version: "v0.54"
+parent: "v0.53"
+status: "latest"
+promoted_date: "2026-05-22"
+embedder:
+  model: "jina-v2-base-code-int8"
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 16
+  top_p: 4
+  alpha: 1.0
+  shrinkage_k0: 750.0
+  score_normalization: "raw_bench_column_means"
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 7146
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  output_cost_ratio: 0.0
+  speed_weight: 0.0
+  expected_output_tokens: 2000
+  per_model_verbosity: false
+  include_routerarena_labels: null
+  routerarena_only: false
+  no_native_scores: false
+  exclude_prompts: null
+  n_excluded_prompts: 0
+  include_aa_labels: "aa_quality_priors.json"
+  aa_evidence_scale: 3.0
+  aa_label_tier_weights:
+    GPQA_DIAMOND: 0.3
+    IFBENCH: 0.3
+    LIVECODEBENCH: 1.0
+    MATH_500: 0.3
+    MMLU_PRO: 0.3
+    SCICODE: 1.0
+    SWE_BENCH_VERIFIED: 1.0
+    TAU2_BENCH_TELECOM: 0.3
+    TERMINAL_BENCH_HARD: 1.0
+  aa_label_residuals:
+    fraction_under_threshold: 0.5708502024291497
+    max: 0.2429133312756644
+    mean: 0.059625521958409304
+    median: 0.038888469407191734
+    n_cells: 247
+    p90: 0.14313290790179495
+deployed_providers:
+  - bedrock
+  - deepinfra
+  - fireworks
+  - google
+deployed_models:
+  - deepseek/deepseek-v4-flash
+  - deepseek/deepseek-v4-pro
+  - gemini-3.1-flash-lite-preview
+  - gemini-3.1-pro-preview
+  - qwen/qwen3-coder-next
+  - qwen/qwen3-next-80b-a3b-instruct
+cost_per_1k_input_usd:
+  deepseek/deepseek-v4-flash: 0.00014
+  deepseek/deepseek-v4-pro: 0.00174
+  gemini-3.1-flash-lite-preview: 0.0001
+  gemini-3.1-pro-preview: 0.002
+  qwen/qwen3-coder-next: 0.0005
+  qwen/qwen3-next-80b-a3b-instruct: 0.00015
+training_data:
+  routerarena_used: false
+  notes: |
+    No RouterArena prompts in any training signal. Two sources only:
+      1. OpenRouterBench per-(prompt, model) labels  (orb_labels family)
+      2. Artificial Analysis aggregate quality priors (aa_quality_priors.json)
+    Both sources are public, independent of the RouterArena eval set.
+  sources:
+    - name: "OpenRouterBench labels (orb_labels)"
+      kind: "per-(prompt, model) labels"
+      path: "eval/results/orb_sample_8k.jsonl"
+      n_prompts: 8000
+      benchmarks:
+        - arcc
+        - mmlupro
+        - medqa
+        - math500
+        - mathbench
+        - finqa
+        - gpqa
+        - livemathbench
+        - aime
+      models_labeled:
+        - deepseek/deepseek-v4-flash
+        - deepseek/deepseek-v4-pro
+        - gemini-3.1-flash-lite-preview
+        - gemini-3.1-pro-preview
+        - qwen/qwen3-coder-next
+        - qwen/qwen3-next-80b-a3b-instruct
+    - name: "Artificial Analysis quality priors"
+      kind: "aggregate per-(model, benchmark) accuracy"
+      path: "eval/aa_quality_priors.json"
+      source_url: "https://artificialanalysis.ai/leaderboards/models"
+      benchmarks:
+        - GPQA_DIAMOND
+        - MATH_500
+        - MMLU_PRO
+        - IFBENCH
+        - LIVECODEBENCH
+        - SCICODE
+        - SWE_BENCH_VERIFIED
+        - TAU2_BENCH_TELECOM
+        - TERMINAL_BENCH_HARD

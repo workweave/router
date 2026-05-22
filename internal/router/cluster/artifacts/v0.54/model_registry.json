@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "parent": "v0.60",
+    "last_refreshed": "2026-05-21",
+    "training_recipe": "v0.60 + swap qwen3-235b → gemini-3.1-pro-preview for hard-tier coverage. Native orb_labels for gemini-pro.",
+    "comment": "Target RouterArena hard tier: gemini-3.1-pro-preview is top-1 on 64% of hard-tier subsets (QANTA 38%, NarrativeQA 48%, MMLUPro 41%, SuperGLUE 57%)."
+  },
+  "deployed_models": [
+    {
+      "model": "gemini-3.1-flash-lite-preview",
+      "provider": "google",
+      "bench_column": "gemini-3.1-flash-lite-preview",
+      "direct_label": "orb_labels"
+    },
+    {
+      "model": "gemini-3.1-pro-preview",
+      "provider": "google",
+      "bench_column": "gemini-3.1-pro-preview",
+      "direct_label": "orb_labels_gemini_pro"
+    },
+    {
+      "model": "qwen/qwen3-coder-next",
+      "provider": "bedrock",
+      "bench_column": "qwen-qwen3-coder-next",
+      "direct_label": "orb_labels"
+    },
+    {
+      "model": "qwen/qwen3-next-80b-a3b-instruct",
+      "provider": "bedrock",
+      "bench_column": "qwen-qwen3-next-80b-a3b-instruct",
+      "direct_label": "orb_labels"
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "provider": "deepinfra",
+      "bench_column": "deepseek-deepseek-v4-flash",
+      "direct_label": "orb_labels"
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "provider": "fireworks",
+      "bench_column": "deepseek-deepseek-v4-pro",
+      "direct_label": "orb_labels"
+    }
+  ]
+}

@@ -1,0 +1,187 @@
+{
+  "meta": {
+    "aa_evidence_scale": 3.0,
+    "aa_label_residuals": {
+      "fraction_under_threshold": 0.5708502024291497,
+      "max": 0.2429133312756644,
+      "mean": 0.059625521958409304,
+      "median": 0.038888469407191734,
+      "n_cells": 247,
+      "p90": 0.14313290790179495
+    },
+    "aa_label_tier_weights": {
+      "GPQA_DIAMOND": 0.3,
+      "IFBENCH": 0.3,
+      "LIVECODEBENCH": 1.0,
+      "MATH_500": 0.3,
+      "MMLU_PRO": 0.3,
+      "SCICODE": 1.0,
+      "SWE_BENCH_VERIFIED": 1.0,
+      "TAU2_BENCH_TELECOM": 0.3,
+      "TERMINAL_BENCH_HARD": 1.0
+    },
+    "alpha": 1.0,
+    "cost_per_1k_input_usd": {
+      "deepseek/deepseek-v4-flash": 0.00014,
+      "deepseek/deepseek-v4-pro": 0.00174,
+      "gemini-3.1-flash-lite-preview": 0.0001,
+      "gemini-3.1-pro-preview": 0.002,
+      "qwen/qwen3-coder-next": 0.0005,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.00015
+    },
+    "embedder_model": "jina-v2-base-code-int8",
+    "exclude_prompts": null,
+    "expected_output_tokens": 2000,
+    "include_aa_labels": "aa_quality_priors.json",
+    "include_routerarena_labels": null,
+    "k": 16,
+    "n_excluded_prompts": 0,
+    "n_prompts": 7146,
+    "no_native_scores": false,
+    "output_cost_ratio": 0.0,
+    "per_model_verbosity": false,
+    "per_model_zscore": false,
+    "router_version": "weave-router-v0.1-bootstrap",
+    "routerarena_only": false,
+    "score_normalization": "raw_bench_column_means",
+    "seed": 42,
+    "shrinkage_k0": 750.0,
+    "speed_weight": 0.0,
+    "top_p": 4,
+    "training_data_mix": {
+      "d1": 1.0,
+      "d2": 0.0,
+      "d3": 0.0
+    }
+  },
+  "rankings": {
+    "0": {
+      "deepseek/deepseek-v4-flash": 0.9608367567138549,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.8705654726496299,
+      "qwen/qwen3-coder-next": 0.4971586637899738,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.29013859930593405
+    },
+    "1": {
+      "deepseek/deepseek-v4-flash": 0.9330680885374906,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.5047634272110769,
+      "qwen/qwen3-coder-next": 0.44046074891095144,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.23476317288541002
+    },
+    "10": {
+      "deepseek/deepseek-v4-flash": 0.9639369669120899,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.8886833536152816,
+      "qwen/qwen3-coder-next": 0.5152620460811953,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.3095270712107449
+    },
+    "11": {
+      "deepseek/deepseek-v4-flash": 0.9680329669443781,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.8589750815986701,
+      "qwen/qwen3-coder-next": 0.5032657799406288,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.3430594223223946
+    },
+    "12": {
+      "deepseek/deepseek-v4-flash": 0.9678980389922199,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.801242222779774,
+      "qwen/qwen3-coder-next": 0.5369568360393446,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.3407710792279667
+    },
+    "13": {
+      "deepseek/deepseek-v4-flash": 0.9670116741142698,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.020766180454449203,
+      "gemini-3.1-pro-preview": 0.9133249241063862,
+      "qwen/qwen3-coder-next": 0.587747787427393,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.0
+    },
+    "14": {
+      "deepseek/deepseek-v4-flash": 0.8630527263369709,
+      "deepseek/deepseek-v4-pro": 0.989268091975019,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 1.0,
+      "qwen/qwen3-coder-next": 0.2700403642280186,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.0376821365775313
+    },
+    "15": {
+      "deepseek/deepseek-v4-flash": 0.9502355853048841,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.06115831688186246,
+      "gemini-3.1-pro-preview": 0.7877717611504439,
+      "qwen/qwen3-coder-next": 0.4142867508419262,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.0
+    },
+    "2": {
+      "deepseek/deepseek-v4-flash": 0.9801884248585022,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.9137803373218764,
+      "qwen/qwen3-coder-next": 0.46737014801844545,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.3821838746710816
+    },
+    "3": {
+      "deepseek/deepseek-v4-flash": 0.8470358248567978,
+      "deepseek/deepseek-v4-pro": 0.9238589411499387,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 1.0,
+      "qwen/qwen3-coder-next": 0.47968012202264076,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.3453427694484356
+    },
+    "4": {
+      "deepseek/deepseek-v4-flash": 0.9635906883685081,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.7307430686458601,
+      "qwen/qwen3-coder-next": 0.033693624276515725,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.4701268503912129
+    },
+    "5": {
+      "deepseek/deepseek-v4-flash": 1.0,
+      "deepseek/deepseek-v4-pro": 0.990594943722752,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.7303592298612127,
+      "qwen/qwen3-coder-next": 0.5108576774554536,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.4451642700027739
+    },
+    "6": {
+      "deepseek/deepseek-v4-flash": 0.9779456156634728,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.8243642683854566,
+      "qwen/qwen3-coder-next": 0.603673713507528,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.42451060831840215
+    },
+    "7": {
+      "deepseek/deepseek-v4-flash": 0.9469767688126325,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.9854045431337302,
+      "qwen/qwen3-coder-next": 0.515221386529073,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.8493822904326654
+    },
+    "8": {
+      "deepseek/deepseek-v4-flash": 0.9492045680734968,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.6717705152654031,
+      "qwen/qwen3-coder-next": 0.39741143765244263,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.2362620123366671
+    },
+    "9": {
+      "deepseek/deepseek-v4-flash": 0.9748369438994354,
+      "deepseek/deepseek-v4-pro": 1.0,
+      "gemini-3.1-flash-lite-preview": 0.0,
+      "gemini-3.1-pro-preview": 0.9420836303796888,
+      "qwen/qwen3-coder-next": 0.5436538524612179,
+      "qwen/qwen3-next-80b-a3b-instruct": 0.34989410346930677
+    }
+  }
+}
