@@ -36,8 +36,15 @@ type Usage struct {
 // Implementations SHOULD respect the context deadline. On timeout or
 // error, callers fall back to TrimLastN. Usage is reported on success;
 // on error it is the zero value.
+//
+// Provider returns the upstream provider this summarizer dispatches to
+// (e.g. "anthropic"). The orchestrator uses this to plumb matching
+// client/BYOK creds through so summarization can run on the caller's
+// own account when the request is BYOK or carries client-supplied keys,
+// avoiding tenant data crossing the deployment key boundary.
 type Summarizer interface {
 	Summarize(ctx context.Context, env *translate.RequestEnvelope) (summary string, usage Usage, err error)
+	Provider() string
 }
 
 // RewriteEnvelope mutates env in-place: keeps system blocks, replaces

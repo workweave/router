@@ -40,6 +40,8 @@ func (f *fakeSummarizer) Summarize(ctx context.Context, env *translate.RequestEn
 	return f.summary, handover.Usage{}, nil
 }
 
+func (f *fakeSummarizer) Provider() string { return providers.ProviderAnthropic }
+
 // usageProvider is a fakeProvider that writes an Anthropic non-streaming
 // response with the configured token-usage payload so the OTel
 // UsageExtractor surfaces non-zero usage to the cache-stats writeback.
@@ -251,18 +253,50 @@ func TestTurnLoop_HandoverFallsBackToTrimWhenSummarizerNotWired(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "switch must proceed even without a summarizer")
 }
 
-// TestTurnLoop_HandoverSkippedWhenRequestHasClientCreds guards the
-// BYOK/tenant-boundary invariant: when a request supplies its own
-// provider credentials, the deployment-level summarizer must NOT be
-// invoked (it would route prior conversation context through the
-// platform account, violating the tenant boundary). The orchestrator
-// falls back to TrimLastN and the switch proceeds.
-func TestTurnLoop_HandoverSkippedWhenRequestHasClientCreds(t *testing.T) {
+// TestTurnLoop_HandoverUsesClientCredsForSummarizerProvider verifies the
+// caller-keyed summarization path: when the request forwards credentials
+// for the summarizer's own provider, the orchestrator runs summarization
+// using the caller's credentials rather than skipping it. This preserves
+// the tenant boundary (no traffic through the deployment account) while
+// still producing a clean handover envelope that cross-provider models
+// (e.g. Gemini 3.x, which requires thoughtSignature on every functionCall)
+// can accept.
+func TestTurnLoop_HandoverUsesClientCredsForSummarizerProvider(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
 		Provider:        providers.ProviderAnthropic,
 		Model:           "claude-opus-4-7",
+		Reason:          "cluster:v0.2",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 5000,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
+	sz := &fakeSummarizer{summary: "Prior conversation summary."}
+	svc := newPinSvc(fr, store).WithSummarizer(sz)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	httpReq.Header.Set("x-api-key", "sk-ant-customer-byok-key")
+	require.NoError(t, svc.ProxyMessages(ctx, largeBody(t), rec, httpReq))
+
+	assert.Equal(t, int32(1), sz.calls.Load(), "summarizer must run with the caller's own Anthropic key (no tenant boundary crossed)")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
+}
+
+// TestTurnLoop_HandoverSkippedWhenClientCredsCrossProvider keeps the
+// tenant-boundary guard: if the request is BYOK/client-keyed for a
+// DIFFERENT provider than the summarizer's, the deployment summarizer
+// would route prior conversation through the platform account. Skip
+// summarization in that case and fall back to TrimLastN.
+func TestTurnLoop_HandoverSkippedWhenClientCredsCrossProvider(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:        providers.ProviderOpenAI,
+		Model:           "gpt-5",
 		Reason:          "cluster:v0.2",
 		PinnedUntil:     time.Now().Add(time.Hour),
 		LastInputTokens: 5000,
@@ -275,13 +309,11 @@ func TestTurnLoop_HandoverSkippedWhenRequestHasClientCreds(t *testing.T) {
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	// Client-supplied Anthropic key on the request: BYOK-flavored, so the
-	// deployment summarizer must be skipped to preserve the tenant
-	// boundary.
-	httpReq.Header.Set("x-api-key", "sk-ant-customer-byok-key")
+	// Client-supplied OpenAI key — does NOT match the Anthropic summarizer.
+	httpReq.Header.Set("Authorization", "Bearer sk-customer-openai-key")
 	require.NoError(t, svc.ProxyMessages(ctx, largeBody(t), rec, httpReq))
 
-	assert.Equal(t, int32(0), sz.calls.Load(), "summarizer must NOT be invoked when the request carries BYOK creds")
+	assert.Equal(t, int32(0), sz.calls.Load(), "summarizer must NOT run when client creds are for a different provider than the summarizer")
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "switch must still happen via TrimLastN fallback")
 }
 

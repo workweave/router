@@ -27,8 +27,9 @@ import (
 const DefaultHandoverModel = "claude-haiku-4-5"
 
 // DefaultHandoverTimeout bounds the summarizer call so a slow upstream
-// cannot block the request path.
-const DefaultHandoverTimeout = 3 * time.Second
+// cannot block the request path. Tuned to allow haiku-class summarization
+// of ~20k-token sessions, which observed ~5-7s p95 on Anthropic.
+const DefaultHandoverTimeout = 8 * time.Second
 
 // DefaultHandoverMaxTokens caps the synthesized summary length.
 const DefaultHandoverMaxTokens = 800
@@ -74,6 +75,11 @@ func (s *ProviderSummarizer) WithMaxTokens(n int) *ProviderSummarizer {
 		s.maxTokens = n
 	}
 	return s
+}
+
+// Provider returns the upstream provider this summarizer dispatches to.
+func (s *ProviderSummarizer) Provider() string {
+	return providers.ProviderAnthropic
 }
 
 // ErrEmptySummary is returned when the upstream call succeeded but no

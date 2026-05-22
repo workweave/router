@@ -292,29 +292,46 @@ func (s *Service) runTurnLoop(
 	}
 
 	// Switch path: when switching off a warm cache, attempt bounded-cost
-	// handover. On summarizer error fall back to TrimLastN. When the
-	// summarizer is not wired or the request carries BYOK/client credentials,
-	// skip summarization and trim instead — the switch turn must NOT forward
-	// the full prior conversation to the new model.
+	// handover. On summarizer error fall back to TrimLastN.
 	//
 	// Privacy guard: the summarizer is wired with deployment-level creds.
-	// Calling it on a BYOK/client-creds request would route prior conversation
-	// through the platform account, violating tenant data boundaries.
+	// Routing a BYOK/client request's prior conversation through that
+	// deployment account would cross the tenant boundary. We avoid that by
+	// preferring per-request creds for the summarizer's provider when the
+	// caller forwarded them (BYOK or inbound Authorization/x-api-key for
+	// that provider) — that's the caller's own account, not the platform's.
+	// Only when the request is BYOK/client-keyed AND no matching creds for
+	// the summarizer's provider were forwarded do we skip and trim.
 	if pinFound {
+		var (
+			sumProvider       string
+			sumCreds          *Credentials
+			canCallSummarizer bool
+		)
+		if s.summarizer != nil {
+			sumProvider = s.summarizer.Provider()
+			sumCreds = resolveSummarizerCreds(ctx, sumProvider, reqHeaders)
+			nonDepCreds := s.requestUsesNonDeploymentCreds(ctx, reqHeaders)
+			canCallSummarizer = sumCreds != nil || !nonDepCreds
+		}
 		switch {
 		case s.summarizer == nil:
 			elided := handover.TrimLastN(env, 3)
 			res.Handover.Invoked = true
 			res.Handover.FallbackToTrim = true
 			log.Info("Handover summarizer not wired; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
-		case s.requestUsesNonDeploymentCreds(ctx, reqHeaders):
+		case !canCallSummarizer:
 			elided := handover.TrimLastN(env, 3)
 			res.Handover.Invoked = true
 			res.Handover.FallbackToTrim = true
-			log.Info("Handover summarizer skipped to preserve BYOK tenant boundary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
+			log.Info("Handover summarizer skipped to preserve tenant boundary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model, "sum_provider", sumProvider)
 		default:
+			summCtx := ctx
+			if sumCreds != nil {
+				summCtx = context.WithValue(ctx, CredentialsContextKey{}, sumCreds)
+			}
 			start := time.Now()
-			summary, summaryUsage, sumErr := s.summarizer.Summarize(ctx, env)
+			summary, summaryUsage, sumErr := s.summarizer.Summarize(summCtx, env)
 			res.Handover.Invoked = true
 			res.Handover.LatencyMS = time.Since(start).Milliseconds()
 			switch {
@@ -501,6 +518,26 @@ func estimateSummaryTokens(s string) int {
 		return 0
 	}
 	return len(s) / 4
+}
+
+// resolveSummarizerCreds returns BYOK or client-supplied credentials for
+// provider when available on the request. Used by the handover orchestrator
+// to run summarization on the caller's own account, avoiding tenant data
+// crossing the deployment key boundary when the request is BYOK/client-keyed.
+// Returns nil when no caller-supplied creds for the provider exist; callers
+// then either use the deployment key (if request is fully deployment-keyed)
+// or skip summarization (if request is BYOK/client-keyed for a different
+// provider).
+func resolveSummarizerCreds(ctx context.Context, provider string, headers http.Header) *Credentials {
+	if provider == "" {
+		return nil
+	}
+	if byok := BuildCredentialsMap(externalKeysFromContext(ctx)); byok != nil {
+		if creds, ok := byok[provider]; ok {
+			return creds
+		}
+	}
+	return ExtractClientCredentials(provider, headers)
 }
 
 // sortedEnabledKeys returns a deterministic slice of the keys in m for
