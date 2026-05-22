@@ -1,0 +1,98 @@
+version: "v0.54"
+parent: "v0.52"
+status: "latest"
+promoted_date: "2026-05-22"
+embedder:
+  model: "jina-v2-base-code-int8"
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 16
+  top_p: 4
+  alpha: 0.7
+  shrinkage_k0: 10.0
+  score_normalization: "per_prompt_minmax_across_bench_columns"
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 8013
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  output_cost_ratio: 0.25
+  speed_weight: 0.08
+  expected_output_tokens: 2000
+  per_model_verbosity: true
+  include_routerarena_labels: "routerarena_labels_combined.jsonl"
+  routerarena_only: true
+  no_native_scores: false
+  exclude_prompts: null
+  n_excluded_prompts: 0
+  include_aa_labels: "aa_quality_priors.json"
+  aa_evidence_scale: 3.0
+  aa_label_tier_weights:
+    GPQA_DIAMOND: 0.3
+    IFBENCH: 0.3
+    LIVECODEBENCH: 1.0
+    MATH_500: 0.3
+    MMLU_PRO: 0.3
+    SCICODE: 1.0
+    SWE_BENCH_VERIFIED: 1.0
+    TAU2_BENCH_TELECOM: 2.0
+    TERMINAL_BENCH_HARD: 1.0
+  aa_label_residuals:
+    fraction_under_threshold: 0.5748987854251012
+    max: 0.2512706123617234
+    mean: 0.058675303168627575
+    median: 0.035149668365967224
+    n_cells: 247
+    p90: 0.14147123159631428
+deployed_providers:
+  - anthropic
+  - bedrock
+  - deepinfra
+  - fireworks
+  - google
+  - openai
+  - openrouter
+deployed_models:
+  - claude-haiku-4-5
+  - claude-opus-4-7
+  - claude-sonnet-4-6
+  - deepseek/deepseek-v4-flash
+  - deepseek/deepseek-v4-pro
+  - gemini-3.1-flash-lite-preview
+  - gemini-3.1-pro-preview
+  - gemini-3.5-flash
+  - gpt-5.4-mini
+  - gpt-5.5
+  - minimax/minimax-m2.7
+  - moonshotai/kimi-k2.6
+  - qwen/qwen3-235b-a22b-2507
+  - qwen/qwen3-coder-next
+  - qwen/qwen3-next-80b-a3b-instruct
+  - qwen/qwen3.6-35b-a3b
+  - xiaomi/mimo-v2.5
+  - xiaomi/mimo-v2.5-pro
+  - z-ai/glm-5
+cost_per_1k_input_usd:
+  claude-haiku-4-5: 0.0018
+  claude-opus-4-7: 0.03375
+  claude-sonnet-4-6: 0.00675
+  deepseek/deepseek-v4-flash: 0.00020999999999999998
+  deepseek/deepseek-v4-pro: 0.00261
+  gemini-3.1-flash-lite-preview: 0.0002
+  gemini-3.1-pro-preview: 0.004
+  gemini-3.5-flash: 0.00375
+  gpt-5.4-mini: 0.0008
+  gpt-5.5: 0.015
+  minimax/minimax-m2.7: 0.0006
+  moonshotai/kimi-k2.6: 0.00195
+  qwen/qwen3-235b-a22b-2507: 0.00018675
+  qwen/qwen3-coder-next: 0.0007999999999999999
+  qwen/qwen3-next-80b-a3b-instruct: 0.00045
+  qwen/qwen3.6-35b-a3b: 0.0003875
+  xiaomi/mimo-v2.5: 0.0009
+  xiaomi/mimo-v2.5-pro: 0.00175
+  z-ai/glm-5: 0.00112
+changelog: "v0.55 + aa_evidence_scale 1.0->3.0 (match v0.54) + alpha 0.53->0.70 (tilt \u03b1-blend toward quality). Goal: make TAU2-2.0 tier-weight actually bite on mimo et al."
