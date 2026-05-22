@@ -856,10 +856,6 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 				inheritedSig = sig
 				return false
 			}
-			if sig := block.Get("thought_signature").String(); sig != "" {
-				inheritedSig = sig
-				return false
-			}
 			return true
 		})
 		var parts []string
