@@ -1,0 +1,29 @@
+internal/proxy/service.go
+  s_baa9be4173b803::t_6e35ca6b4b745d 1037-1076,1110-1116
+internal/proxy/client_identity_test.go
+  s_baa9be4173b803::t_d53e256fd19ccd 66-91
+internal/api/openai/completions.go
+  s_baa9be4173b803::t_ef80a4810f0cb8 93
+internal/api/anthropic/messages.go
+  s_baa9be4173b803::t_2d4587c78cfde9 134-136
+internal/api/gemini/generate_content.go
+  s_baa9be4173b803::t_35aad3c99ea833 165
+internal/proxy/client_identity.go
+  s_baa9be4173b803::t_1b58027460b9f0 91-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "259c0bc4631924d0235f848f5bc6a28150c597be",
+  "prompts": {},
+  "sessions": {
+    "s_baa9be4173b803": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9456ca5e-1ec4-4c6c-be05-89ec4c148873",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}
