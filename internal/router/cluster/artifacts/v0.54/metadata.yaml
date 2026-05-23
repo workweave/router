@@ -38,15 +38,15 @@ training:
     MMLU_PRO: 0.3
     SCICODE: 1.0
     SWE_BENCH_VERIFIED: 1.0
-    TAU2_BENCH_TELECOM: 2.0
+    TAU2_BENCH_TELECOM: 0.3
     TERMINAL_BENCH_HARD: 1.0
   aa_label_residuals:
-    fraction_under_threshold: 0.5748987854251012
-    max: 0.2512706123617234
-    mean: 0.058675303168627575
-    median: 0.035149668365967224
+    fraction_under_threshold: 0.5708502024291497
+    max: 0.2429133312756644
+    mean: 0.059625521958409304
+    median: 0.038888469407191734
     n_cells: 247
-    p90: 0.14147123159631428
+    p90: 0.14313290790179495
 deployed_providers:
   - anthropic
   - bedrock
@@ -95,4 +95,4 @@ cost_per_1k_input_usd:
   xiaomi/mimo-v2.5: 0.0009
   xiaomi/mimo-v2.5-pro: 0.00175
   z-ai/glm-5: 0.00112
-changelog: "v0.55 + aa_evidence_scale 1.0->3.0 (match v0.54) + alpha 0.53->0.70 (tilt \u03b1-blend toward quality). Goal: make TAU2-2.0 tier-weight actually bite on mimo et al."
+changelog: "Auto-bumped from v0.52 on training run."
