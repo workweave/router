@@ -184,6 +184,43 @@ func TestExtractForceModelCommand_ArrayContent(t *testing.T) {
 	assert.Equal(t, "Help me.", stripped)
 }
 
+func TestExtractForceModelCommand_ArrayContentMultipleTextBlocks(t *testing.T) {
+	// Claude Code clients sometimes split a slash-command turn into multiple
+	// text blocks: one carries the injected <command-name>/<command-args>
+	// tags, and the typed directive lands in a separate block. The parser
+	// must scan every text block, not just the first.
+	body := mustMarshalJSON(t, map[string]any{
+		"model": "claude-sonnet-4-6",
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "text", "text": "<command-message>force-model</command-message>\n<command-name>/force-model</command-name>\n<command-args>qwen/qwen3.6-35b-a3b</command-args>"},
+					map[string]any{"type": "text", "text": "/force-model qwen/qwen3.6-35b-a3b"},
+				},
+			},
+		},
+		"max_tokens": 1024,
+	})
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	res, found := env.ExtractForceModelCommand()
+	require.True(t, found, "directive in a non-first text block must still be recognized")
+	assert.Equal(t, "qwen/qwen3.6-35b-a3b", res.Model)
+
+	// The directive block should be empty (or stripped) after extraction.
+	raw, _ := env.PrepareAnthropic(nil, translate.EmitOptions{TargetModel: "claude-sonnet-4-6"})
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(raw.Body, &got))
+	msgs, _ := got["messages"].([]any)
+	last, _ := msgs[len(msgs)-1].(map[string]any)
+	blocks, _ := last["content"].([]any)
+	require.Len(t, blocks, 2)
+	second, _ := blocks[1].(map[string]any)
+	assert.Equal(t, "", second["text"], "the directive-bearing text block must be stripped")
+}
+
 func TestExtractForceModelCommand_NoUserMessage(t *testing.T) {
 	body := mustMarshalJSON(t, map[string]any{
 		"model": "claude-sonnet-4-6",

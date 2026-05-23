@@ -68,27 +68,37 @@ func (env *RequestEnvelope) extractForceModelFromMessages() (ForceModelResult, b
 		return res, true
 
 	case lastContent.Type == gjson.JSON && lastContent.IsArray():
-		textIdx := -1
-		var textVal string
+		// Scan every text block in order. Claude Code clients sometimes split
+		// the user turn into multiple text parts (one carrying injected
+		// <command-name>/<command-args> tags, another carrying the typed
+		// directive), so inspecting only the first block silently lets
+		// /force-model fall through to upstream routing.
+		type textBlock struct {
+			idx  int
+			text string
+		}
+		var blocks []textBlock
 		lastContent.ForEach(func(key, block gjson.Result) bool {
-			if block.Get("type").String() == "text" && textIdx < 0 {
-				textIdx = int(key.Int())
-				textVal = block.Get("text").String()
+			if block.Get("type").String() == "text" {
+				blocks = append(blocks, textBlock{idx: int(key.Int()), text: block.Get("text").String()})
 			}
 			return true
 		})
-		if textIdx < 0 {
+		if len(blocks) == 0 {
 			return ForceModelResult{}, false
 		}
-		res, found, stripped := parseForceModelCommand(textVal)
-		if !found {
-			return ForceModelResult{}, false
+		for _, b := range blocks {
+			res, found, stripped := parseForceModelCommand(b.text)
+			if !found {
+				continue
+			}
+			blockPath := "messages." + idxStr + ".content." + strconv.Itoa(b.idx) + ".text"
+			if newBody, err := sjson.SetBytes(env.body, blockPath, stripped); err == nil {
+				env.body = newBody
+			}
+			return res, true
 		}
-		blockPath := "messages." + idxStr + ".content." + strconv.Itoa(textIdx) + ".text"
-		if newBody, err := sjson.SetBytes(env.body, blockPath, stripped); err == nil {
-			env.body = newBody
-		}
-		return res, true
+		return ForceModelResult{}, false
 
 	default:
 		return ForceModelResult{}, false
