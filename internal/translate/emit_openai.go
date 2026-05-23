@@ -69,6 +69,15 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 				return nil, fmt.Errorf("set tool temperature override: %w", err)
 			}
 		}
+		// Qwen3 anti-loop: presence_penalty=1.5 per the Qwen3 model card.
+		// Only applied when the client has not specified one itself, so a
+		// caller that has its own tuning preference still wins.
+		if isQwen3Family(opts.TargetModel) && !gjson.GetBytes(body, "presence_penalty").Exists() {
+			body, err = sjson.SetBytes(body, "presence_penalty", qwen3PresencePenalty)
+			if err != nil {
+				return nil, fmt.Errorf("set qwen3 presence_penalty: %w", err)
+			}
+		}
 	}
 	return body, nil
 }
@@ -133,6 +142,14 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 			jw.Key("temperature")
 			jw.Int(0)
 		}
+	}
+
+	// Qwen3 anti-loop presence_penalty (cross-format). Only added when the
+	// client did not set one. Mirrors the same-format branch above.
+	if targetIsOpenRouter(opts) && isQwen3Family(opts.TargetModel) &&
+		!gjson.GetBytes(body, "presence_penalty").Exists() {
+		jw.Key("presence_penalty")
+		jw.Float(qwen3PresencePenalty)
 	}
 
 	// Max tokens

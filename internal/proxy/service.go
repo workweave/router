@@ -689,6 +689,18 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 	}
 
+	// Tool-call loop break: when the same (tool_name, args) appears at least
+	// loopDetectionMaxRepeats times in the last loopDetectionWindowSize
+	// assistant turns, synthesize end_turn and expire the session pin. Catches
+	// runaway OSS-model tool-call cycles (qwen3, in particular) that the
+	// previous-turn-maxed-out guard misses because each individual tool call
+	// returns quickly and well under the output cap.
+	if loop, sig, count := detectToolCallLoop(env); loop {
+		loopSessionKey := DeriveSessionKey(env, apiKeyID)
+		loopRole := roleForTier(catalog.TierFor(feats.Model))
+		return s.handleToolCallLoopBreak(w, env, sig, count, installationID, loopSessionKey, loopRole, feats.Model, providers.ProviderAnthropic)
+	}
+
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
 	routeStart := time.Now()
@@ -1491,6 +1503,14 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
 			return s.handleForceModelCommand(w, env, cmd, installationID, cmdSessionKey)
 		}
+	}
+
+	// Tool-call loop break: same path as the Anthropic ingress. See the
+	// detectToolCallLoop / handleToolCallLoopBreak doc comments for rationale.
+	if loop, sig, count := detectToolCallLoop(env); loop {
+		loopSessionKey := DeriveSessionKey(env, apiKeyID)
+		loopRole := roleForTier(catalog.TierFor(feats.Model))
+		return s.handleToolCallLoopBreak(w, env, sig, count, installationID, loopSessionKey, loopRole, feats.Model, providers.ProviderOpenAI)
 	}
 
 	// OpenAI signals sub-agent identity via x-weave-subagent-type (no metadata.user_id).

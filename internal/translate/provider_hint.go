@@ -52,3 +52,16 @@ func openRouterReasoningHint(model string) map[string]any {
 func openRouterForcesToolTemperatureZero(model string) bool {
 	return strings.HasPrefix(model, "deepseek/")
 }
+
+// isQwen3Family reports whether the model id belongs to the qwen3.x family.
+// Qwen3 variants (instruct, coder, qwen3-next, qwen3.6-*) are documented to
+// drift into tool-call / thinking loops without a non-zero presence_penalty;
+// the Qwen3 model card recommends presence_penalty=1.5 to suppress this.
+func isQwen3Family(model string) bool {
+	return strings.HasPrefix(model, "qwen/qwen3")
+}
+
+// qwen3PresencePenalty is the recommended Qwen3 presence_penalty value from
+// the official model card; applied only when the client has not set
+// presence_penalty itself.
+const qwen3PresencePenalty = 1.5
