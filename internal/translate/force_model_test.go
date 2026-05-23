@@ -72,6 +72,45 @@ func TestParseForceModelCommand_ForceModel(t *testing.T) {
 			wantFound:    true,
 			wantStripped: "",
 		},
+		{
+			// Claude Code injects <system-reminder> blocks ahead of the user's
+			// typed text. The command must still be recognized; injected blocks
+			// must be preserved in the stripped output.
+			name:         "leading system-reminder before command",
+			input:        "<system-reminder>be helpful</system-reminder>\n/force-model gpt-5",
+			wantModel:    "gpt-5",
+			wantFound:    true,
+			wantStripped: "<system-reminder>be helpful</system-reminder>",
+		},
+		{
+			name:         "multiple leading injected tag blocks",
+			input:        "<system-reminder>foo</system-reminder>\n<command-name>x</command-name>\n/force-model claude-opus-4-7\nthen help",
+			wantModel:    "claude-opus-4-7",
+			wantFound:    true,
+			wantStripped: "<system-reminder>foo</system-reminder>\n<command-name>x</command-name>\nthen help",
+		},
+		{
+			name:         "multiline system-reminder body",
+			input:        "<system-reminder>\nline one\nline two\n</system-reminder>\n/force-model gemini-2.5-pro",
+			wantModel:    "gemini-2.5-pro",
+			wantFound:    true,
+			wantStripped: "<system-reminder>\nline one\nline two\n</system-reminder>",
+		},
+		{
+			// Security guard preserved: an unclosed tag does not satisfy the
+			// prefix matcher, so a stray /force-model after it is still ignored.
+			name:      "unclosed tag does not unlock leading-line guard",
+			input:     "<system-reminder>unclosed\n/force-model gpt-5",
+			wantFound: false,
+		},
+		{
+			// Tags with attributes are not part of Claude Code's injection set
+			// and must not unlock the guard — they may originate from pasted
+			// HTML/XML content.
+			name:      "tag with attributes does not unlock leading-line guard",
+			input:     "<div class=\"x\">hi</div>\n/force-model gpt-5",
+			wantFound: false,
+		},
 	}
 
 	for _, tt := range tests {

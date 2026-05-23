@@ -100,8 +100,17 @@ func (env *RequestEnvelope) extractForceModelFromMessages() (ForceModelResult, b
 // deliberate guard: pasted content (snippets, transcripts) frequently contains
 // strings starting with "/" that would otherwise silently rewrite session
 // routing without explicit user intent.
+//
+// Complete leading <tag>...</tag> blocks (Claude Code injects <system-reminder>,
+// <command-name>, <local-command-stdout>, etc. ahead of the user's typed text)
+// are skipped before the leading-line check is applied. Skipped blocks are
+// preserved in the stripped output so downstream prompt context is intact.
 func parseForceModelCommand(text string) (res ForceModelResult, found bool, stripped string) {
-	lines := strings.Split(text, "\n")
+	prefixEnd := leadingInjectedPrefixEnd(text)
+	prefix := text[:prefixEnd]
+	body := text[prefixEnd:]
+
+	lines := strings.Split(body, "\n")
 	cmdIdx := -1
 	cmdTail := ""
 	for i, line := range lines {
@@ -135,6 +144,64 @@ func parseForceModelCommand(text string) (res ForceModelResult, found bool, stri
 		remaining = append(remaining, cmdTail)
 	}
 	remaining = append(remaining, lines[cmdIdx+1:]...)
-	stripped = strings.TrimSpace(strings.Join(remaining, "\n"))
+	bodyStripped := strings.Join(remaining, "\n")
+	stripped = strings.TrimSpace(prefix + bodyStripped)
 	return res, true, stripped
+}
+
+// leadingInjectedPrefixEnd returns the byte offset in text after any leading
+// whitespace and complete <tag>...</tag> blocks. Only simple tag names (letters,
+// digits, '-', '_') with no attributes are recognized so that arbitrary pasted
+// XML/HTML — which may contain a stray /force-model line — does not satisfy the
+// guard. Unclosed or attribute-bearing tags terminate the prefix scan.
+func leadingInjectedPrefixEnd(text string) int {
+	i := 0
+	for i < len(text) {
+		// Skip whitespace between blocks.
+		j := i
+		for j < len(text) {
+			c := text[j]
+			if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+				break
+			}
+			j++
+		}
+		if j >= len(text) || text[j] != '<' {
+			return i
+		}
+		// Parse the opening tag name.
+		nameStart := j + 1
+		nameEnd := nameStart
+		for nameEnd < len(text) {
+			c := text[nameEnd]
+			if c == '>' {
+				break
+			}
+			if !isTagNameByte(c, nameEnd == nameStart) {
+				return i
+			}
+			nameEnd++
+		}
+		if nameEnd >= len(text) || nameEnd == nameStart {
+			return i
+		}
+		closeTag := "</" + text[nameStart:nameEnd] + ">"
+		closeIdx := strings.Index(text[nameEnd+1:], closeTag)
+		if closeIdx < 0 {
+			return i
+		}
+		i = nameEnd + 1 + closeIdx + len(closeTag)
+	}
+	return i
+}
+
+func isTagNameByte(c byte, first bool) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
+		return true
+	case !first && (c >= '0' && c <= '9' || c == '-' || c == '_'):
+		return true
+	default:
+		return false
+	}
 }
