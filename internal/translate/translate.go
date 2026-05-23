@@ -200,6 +200,18 @@ func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error)
 
 func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result) {
 	jw.Arr()
+	reasoning := message.Get("reasoning_content").String()
+	if reasoning == "" {
+		reasoning = message.Get("reasoning").String()
+	}
+	if reasoning != "" {
+		jw.Obj()
+		jw.Key("type")
+		jw.Str("thinking")
+		jw.Key("thinking")
+		jw.Str(reasoning)
+		jw.EndObj()
+	}
 	if text := message.Get("content").String(); text != "" {
 		jw.Obj()
 		jw.Key("type")

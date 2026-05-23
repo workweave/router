@@ -555,6 +555,100 @@ func TestAnthropicSSETranslator_NonStreamingResponse(t *testing.T) {
 	assert.Equal(t, "Hello!", block["text"])
 }
 
+// Qwen via OpenRouter (and DeepSeek native) emit reasoning traces in
+// `reasoning` / `reasoning_content` deltas. Without translation these either
+// vanished or — when the model embedded the reasoning inline — leaked into the
+// visible text channel.
+func TestAnthropicSSETranslator_StreamingReasoningEmitsThinkingBlock(t *testing.T) {
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "qwen/qwen3-coder-next", nil)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-r1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-r1\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"Let me check the layout file.\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-r1\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\" Then the admin section.\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-r1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"The scrollbar comes from html overflow.\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-r1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":12,\"total_tokens\":22}}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"type":"thinking"`, "thinking content_block_start must be emitted")
+	assert.Contains(t, body, `"type":"thinking_delta"`)
+	assert.Contains(t, body, `"thinking":"Let me check the layout file."`)
+	assert.Contains(t, body, `"thinking":" Then the admin section."`)
+	assert.Contains(t, body, `"type":"text_delta"`)
+	assert.Contains(t, body, `"text":"The scrollbar comes from html overflow."`)
+	// Reasoning prose must not leak into the visible text channel.
+	assert.NotContains(t, body, `"text":"Let me check the layout file."`)
+
+	// Block ordering: thinking block opens, stops, then text block opens.
+	thinkingStart := strings.Index(body, `"content_block":{"type":"thinking"`)
+	textStart := strings.Index(body, `"content_block":{"type":"text"`)
+	require.GreaterOrEqual(t, thinkingStart, 0)
+	require.GreaterOrEqual(t, textStart, 0)
+	assert.Less(t, thinkingStart, textStart, "thinking block must precede text block")
+}
+
+// DeepSeek and some Qwen variants surface reasoning under `reasoning_content`
+// rather than the OpenRouter-normalized `reasoning`. Both paths must work.
+func TestAnthropicSSETranslator_StreamingReasoningContentField(t *testing.T) {
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "deepseek/deepseek-v4-pro", nil)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-r2\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"thought\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-r2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-r2\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"thinking":"thought"`)
+	assert.Contains(t, body, `"text":"answer"`)
+}
+
+func TestAnthropicSSETranslator_NonStreamingReasoningEmitsThinkingBlock(t *testing.T) {
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "qwen/qwen3-coder-next", nil)
+
+	translator.Header().Set("Content-Type", "application/json")
+	translator.WriteHeader(http.StatusOK)
+
+	openAIResp := `{"id":"chatcmpl-r3","object":"chat.completion","created":1234567890,"model":"qwen/qwen3-coder-next","choices":[{"index":0,"message":{"role":"assistant","reasoning":"Let me think.","content":"The answer is 42."},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":8,"total_tokens":18}}`
+	_, err := translator.Write([]byte(openAIResp))
+	require.NoError(t, err)
+	require.NoError(t, translator.Finalize())
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
+
+	content, _ := doc["content"].([]any)
+	require.Len(t, content, 2)
+	thinkBlk, _ := content[0].(map[string]any)
+	textBlk, _ := content[1].(map[string]any)
+	assert.Equal(t, "thinking", thinkBlk["type"])
+	assert.Equal(t, "Let me think.", thinkBlk["thinking"])
+	assert.Equal(t, "text", textBlk["type"])
+	assert.Equal(t, "The answer is 42.", textBlk["text"])
+}
+
 func TestAnthropicSSETranslator_EmptyStreamEmitsSyntheticMessage(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil)

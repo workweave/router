@@ -341,8 +341,14 @@ type AnthropicSSETranslator struct {
 	closed   bool
 	blockIdx int
 	// textOpen avoids empty text blocks for tool-only responses.
-	textOpen   bool
-	toolBlocks map[int]int
+	textOpen bool
+	// thinkingOpen tracks an open Anthropic thinking content block carrying
+	// upstream reasoning (OpenRouter `reasoning`, DeepSeek/Qwen `reasoning_content`).
+	// Without this, reasoning either gets dropped or leaks into the visible
+	// text channel; clients see "Let me check..." narration mixed with the
+	// real answer.
+	thinkingOpen bool
+	toolBlocks   map[int]int
 
 	finishReason             string
 	usageInputTokens         int
@@ -616,7 +622,40 @@ func (t *AnthropicSSETranslator) extractAndForwardUsage(data []byte) {
 }
 
 func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
+	// Reasoning arrives under different keys depending on upstream:
+	//   - OpenRouter normalizes to `reasoning`
+	//   - DeepSeek / Qwen native expose `reasoning_content`
+	// Either way it must surface as an Anthropic thinking block, not text.
+	reasoning := delta.Get("reasoning_content").Str
+	if reasoning == "" {
+		reasoning = delta.Get("reasoning").Str
+	}
+	if reasoning != "" {
+		if t.textOpen {
+			if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+				return err
+			}
+			t.textOpen = false
+		}
+		if !t.thinkingOpen {
+			if err := t.emitContentBlockStartThinking(t.blockIdx); err != nil {
+				return err
+			}
+			t.thinkingOpen = true
+			t.blockIdx++
+		}
+		if err := t.emitContentBlockDeltaThinking(t.blockIdx-1, reasoning); err != nil {
+			return err
+		}
+	}
+
 	if content := delta.Get("content").Str; content != "" {
+		if t.thinkingOpen {
+			if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+				return err
+			}
+			t.thinkingOpen = false
+		}
 		if !t.textOpen {
 			if err := t.emitContentBlockStartText(t.blockIdx); err != nil {
 				return err
@@ -645,6 +684,13 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 					return false
 				}
 				t.textOpen = false
+			}
+			if t.thinkingOpen {
+				if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+					emitErr = err
+					return false
+				}
+				t.thinkingOpen = false
 			}
 			id := tc.Get("id").Str
 			name := tc.Get("function.name").Str
@@ -705,6 +751,12 @@ func (t *AnthropicSSETranslator) finishStream() error {
 			return err
 		}
 		t.textOpen = false
+	}
+	if t.thinkingOpen {
+		if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+			return err
+		}
+		t.thinkingOpen = false
 	}
 	for _, blockIdx := range t.toolBlocks {
 		if err := t.emitContentBlockStop(blockIdx); err != nil {
@@ -767,6 +819,24 @@ func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name, 
 		sse.WriteJSONString(t.bw, sig)
 	}
 	t.bw.WriteString(",\"input\":{}}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *AnthropicSSETranslator) emitContentBlockStartThinking(index int) error {
+	observability.Get().Debug("AnthropicSSE emit", "event", "content_block_start", "type", "thinking")
+	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString(",\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *AnthropicSSETranslator) emitContentBlockDeltaThinking(index int, text string) error {
+	observability.Get().Debug("AnthropicSSE emit", "event", "content_block_delta", "type", "thinking_delta")
+	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString(",\"delta\":{\"type\":\"thinking_delta\",\"thinking\":")
+	sse.WriteJSONString(t.bw, text)
+	t.bw.WriteString("}}\n\n")
 	return t.flushEvent()
 }
 
