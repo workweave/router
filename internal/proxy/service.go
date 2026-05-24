@@ -932,6 +932,15 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 	decision.Provider = finalProvider
 
+	// Re-resolve actual pricing for the binding that actually served the
+	// request. The pre-dispatch lookup (`otel.Lookup(decision.Model)`)
+	// always returns the catalog's PRIMARY binding price; on a successful
+	// failover we'd otherwise debit + report the primary's per-1M rate
+	// while the request was actually billed at the fallback's rate.
+	if actBindingPricing, ok := catalog.PriceFor(finalProvider, decision.Model); ok {
+		actPricing = actBindingPricing
+	}
+
 	// Cache store: only on success when body fits. Any top-p cluster id
 	// works for storage since LRU.Lookup scans all of them.
 	if cacheEligible && proxyErr == nil && captureW != nil {
@@ -1483,11 +1492,18 @@ func logBillingDebitFailure(ctx context.Context, p billing.DebitInferenceParams,
 	)
 }
 
-// upstreamStatus extracts the HTTP status from an UpstreamStatusError, or 0.
+// upstreamStatus extracts the HTTP status from an upstream-typed error.
+// Covers both UpstreamStatusError (bytes already flushed to client) and
+// UpstreamErrorResponse (body buffered by the openaicompat adapter for
+// the failover loop). Returns 0 for non-upstream errors.
 func upstreamStatus(err error) int {
-	var e *providers.UpstreamStatusError
-	if errors.As(err, &e) {
-		return e.Status
+	var statusErr *providers.UpstreamStatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.Status
+	}
+	var bufferedErr *providers.UpstreamErrorResponse
+	if errors.As(err, &bufferedErr) {
+		return bufferedErr.Status
 	}
 	return 0
 }
@@ -1811,6 +1827,12 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		finalProvider = bindings[winnerIdx].Provider
 	}
 	decision.Provider = finalProvider
+
+	// Re-resolve actual pricing for the binding that actually served the
+	// request — see ProxyMessages for the rationale.
+	if actBindingPricing, ok := catalog.PriceFor(finalProvider, decision.Model); ok {
+		actPricing = actBindingPricing
+	}
 
 	if cacheEligible && proxyErr == nil && captureW != nil {
 		if body, status, ok := captureW.captured(); ok && status == http.StatusOK {

@@ -32,10 +32,10 @@ import (
 //     prep rebuild is wired correctly.
 func TestProxyMessages_FireworksFailureFallbackToOpenRouter(t *testing.T) {
 	var (
-		mu                       sync.Mutex
-		openRouterReceivedBody   []byte
-		fireworksRequestCount    int
-		openRouterRequestCount   int
+		mu                     sync.Mutex
+		openRouterReceivedBody []byte
+		fireworksRequestCount  int
+		openRouterRequestCount int
 	)
 
 	fireworks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -34,7 +34,7 @@ import (
 //     the chain), Committed() is false. Dispatch decides:
 //     - retry: caller invokes Discard() to reset buffer + headers.
 //     - exhaustion: caller invokes Discard() then writes the format-
-//       specific error envelope via the unwrapped inner writer.
+//     specific error envelope via the unwrapped inner writer.
 //
 // Committed() is the new retry gate; replaces firstByteGuard.written.
 type preludeBuffer struct {
@@ -409,4 +409,3 @@ func flushUpstreamErrorAsAnthropic(w http.ResponseWriter, err error) {
 func attemptIdxLabel(i int) string {
 	return strconv.Itoa(i)
 }
-

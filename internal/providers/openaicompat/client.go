@@ -194,7 +194,7 @@ type headerCapture struct{ h http.Header }
 
 func (c headerCapture) Header() http.Header       { return c.h }
 func (c headerCapture) Write([]byte) (int, error) { return 0, nil }
-func (c headerCapture) WriteHeader(int)            {}
+func (c headerCapture) WriteHeader(int)           {}
 
 // Passthrough strips the inbound /v1 prefix to avoid double-prefixing with the configured baseURL.
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
