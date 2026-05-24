@@ -21,7 +21,9 @@ import (
 // scriptedClient is a stub providers.Client where each Proxy call returns the
 // next entry in the err slice. recordedDecisions captures the decisions the
 // helper actually dispatched against, in order, so the test can assert which
-// provider got called when.
+// provider got called when. gotCredentials captures the credentials observed
+// on ctx at dispatch time so tests can assert credential isolation across
+// the fallback boundary.
 type scriptedClient struct {
 	name             string
 	errs             []error
@@ -29,12 +31,14 @@ type scriptedClient struct {
 	calls            atomic.Int32
 	gotDecisions     []router.Decision
 	gotPreparedModel []string
+	gotCredentials   []*Credentials
 }
 
 func (c *scriptedClient) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	idx := int(c.calls.Add(1) - 1)
 	c.gotDecisions = append(c.gotDecisions, decision)
 	c.gotPreparedModel = append(c.gotPreparedModel, decision.Model)
+	c.gotCredentials = append(c.gotCredentials, CredentialsFromContext(ctx))
 	if c.stampFirstByte {
 		otel.TimingFrom(ctx).StampUpstreamFirstByte()
 	}
@@ -287,6 +291,46 @@ func TestProxyWithFallback_RespectsEnabledProviders_AllowsEligible(t *testing.T)
 	require.NoError(t, err)
 	assert.True(t, outcome.Attempted)
 	assert.Equal(t, providers.ProviderOpenRouter, decision.Provider)
+}
+
+func TestProxyWithFallback_StripsOriginalProviderCredentials(t *testing.T) {
+	// Original provider had BYOK credentials in ctx. The fallback target has
+	// no BYOK match; resolveAndInjectCredentials returns ctx unchanged for the
+	// new provider, but we must NOT carry the original provider's
+	// CredentialsContextKey value across the boundary — otherwise the next
+	// upstream sees an Authorization header populated from a different
+	// provider's BYOK key.
+	first := &scriptedClient{name: "bedrock", errs: []error{httputil.ErrUpstreamIdleTimeout}}
+	second := &scriptedClient{name: "openrouter"}
+	clients := map[string]providers.Client{
+		providers.ProviderBedrock:    first,
+		providers.ProviderOpenRouter: second,
+	}
+	s := newFallbackService(t, clients)
+
+	ctx, _ := otel.WithTiming(context.Background())
+	// Seed BYOK credentials bound to Bedrock.
+	bedrockCreds := &Credentials{APIKey: []byte("sk-bedrock-byok")}
+	ctx = context.WithValue(ctx, CredentialsContextKey{}, bedrockCreds)
+
+	decision := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: providers.ProviderBedrock}
+	env := envelopeFromAnthropic(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	enabledProviders := map[string]struct{}{providers.ProviderBedrock: {}, providers.ProviderOpenRouter: {}}
+	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, enabledProviders, w, r)
+
+	require.NoError(t, err)
+	require.True(t, outcome.Attempted)
+	// First call: bedrock provider, original BYOK creds OK.
+	require.Equal(t, int32(1), first.calls.Load())
+	require.Len(t, first.gotCredentials, 1)
+	assert.Equal(t, bedrockCreds, first.gotCredentials[0], "first attempt must see the original BYOK creds")
+	// Fallback call: openrouter provider, must NOT inherit bedrock creds.
+	require.Equal(t, int32(1), second.calls.Load())
+	require.Len(t, second.gotCredentials, 1)
+	assert.Nil(t, second.gotCredentials[0], "fallback provider must not inherit the original provider's BYOK credentials")
 }
 
 func TestClassifyFallbackError(t *testing.T) {

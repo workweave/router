@@ -95,7 +95,15 @@ func (s *Service) proxyWithFallback(
 		return fmt.Errorf("emit body (fallback): %w", err), outcome
 	}
 
-	ctx2 := resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
+	// Strip the original provider's credentials from ctx before re-resolving
+	// for the fallback target. BYOK credentials and inbound client headers are
+	// provider-specific; without this, a Bedrock BYOK key in ctx would be
+	// forwarded as the Authorization header to OpenRouter when
+	// resolveAndInjectCredentials finds no creds for the new provider and
+	// leaves the original CredentialsContextKey value in place. That's a
+	// cross-provider credential leak.
+	ctx2 := context.WithValue(ctx, CredentialsContextKey{}, (*Credentials)(nil))
+	ctx2 = resolveAndInjectCredentials(ctx2, decision.Provider, r.Header)
 	p2, err := s.provider(decision.Provider)
 	if err != nil {
 		return err, outcome
