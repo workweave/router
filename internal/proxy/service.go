@@ -708,13 +708,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
+	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderAnthropic, r.Header)
 	routeStart := time.Now()
 	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, router.Request{
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		PromptText:           promptText,
-		EnabledProviders:     s.enabledProvidersForRequest(ctx, providers.ProviderAnthropic, r.Header),
+		EnabledProviders:     enabledProviders,
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
 		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
@@ -864,7 +865,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		if err := translator.Prelude(env.Stream()); err != nil {
 			log.Error("Anthropic SSE prelude failed (OpenAI upstream)", "err", err)
 		}
-		proxyErr, fallback = s.proxyWithFallback(ctx, &decision, env, opts, translator, r)
+		proxyErr, fallback = s.proxyWithFallback(ctx, &decision, env, opts, enabledProviders, translator, r)
 		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderGoogle:
 		crossFormat = true
@@ -1529,13 +1530,14 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// OpenAI signals sub-agent identity via x-weave-subagent-type (no metadata.user_id).
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
+	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header)
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		PromptText:           promptText,
-		EnabledProviders:     s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header),
+		EnabledProviders:     enabledProviders,
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
 		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
@@ -1667,7 +1669,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			extractor = otel.NewUsageExtractor(sink, decision.Provider)
 			proxyWriter = extractor
 		}
-		proxyErr, fallback = s.proxyWithFallback(ctx, &decision, env, opts, proxyWriter, r)
+		proxyErr, fallback = s.proxyWithFallback(ctx, &decision, env, opts, enabledProviders, proxyWriter, r)
 	case providers.ProviderGoogle:
 		crossFormat = true
 		prep, emitErr := env.PrepareGemini(r.Header, opts)

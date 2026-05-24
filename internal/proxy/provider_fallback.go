@@ -35,6 +35,12 @@ type fallbackOutcome struct {
 // translated into the response writer, the client has committed to this
 // response and the second attempt would mix two streams.
 //
+// enabledProviders carries the per-request provider eligibility set produced
+// by enabledProvidersForRequest — BYOK requests narrow this beyond the
+// deploy-wired set, and a fallback that ignored it could silently spend
+// deployment credentials on a provider the request never authorized. A nil
+// or empty map disables the eligibility filter (deploy-wired only).
+//
 // On fallback the caller's decision.Provider is mutated to the new binding
 // so downstream cost math, billing, and the ProxyMessages complete log
 // reflect the actually-served provider. decision.Model is unchanged because
@@ -44,6 +50,7 @@ func (s *Service) proxyWithFallback(
 	decision *router.Decision,
 	env *translate.RequestEnvelope,
 	opts translate.EmitOptions,
+	enabledProviders map[string]struct{},
 	sink http.ResponseWriter,
 	r *http.Request,
 ) (proxyErr error, outcome fallbackOutcome) {
@@ -74,7 +81,7 @@ func (s *Service) proxyWithFallback(
 		return proxyErr, outcome
 	}
 
-	nextBinding, ok := s.findFallbackBinding(decision.Model, decision.Provider)
+	nextBinding, ok := s.findFallbackBinding(decision.Model, decision.Provider, enabledProviders)
 	if !ok {
 		return proxyErr, outcome
 	}
@@ -118,9 +125,16 @@ func classifyFallbackError(err error) (reason string, retryable bool) {
 }
 
 // findFallbackBinding walks the catalog's ordered binding list and returns
-// the first entry whose provider is wired in this deploy and is not the
-// just-failed provider. Returns false when no eligible alternative exists.
-func (s *Service) findFallbackBinding(modelID, failedProvider string) (catalog.ProviderBinding, bool) {
+// the first entry that is (a) wired in this deploy, (b) eligible for this
+// request, and (c) not the just-failed provider. Returns false when no
+// eligible alternative exists.
+//
+// enabledProviders is the per-request eligibility set from
+// enabledProvidersForRequest — BYOK requests narrow it beyond the deploy-wired
+// set, and routing on a binding outside this set would charge deployment
+// credentials for a provider the request did not authorize. nil disables the
+// per-request filter (deploy-wired only).
+func (s *Service) findFallbackBinding(modelID, failedProvider string, enabledProviders map[string]struct{}) (catalog.ProviderBinding, bool) {
 	m, ok := catalog.ByID(modelID)
 	if !ok {
 		return catalog.ProviderBinding{}, false
@@ -131,6 +145,11 @@ func (s *Service) findFallbackBinding(modelID, failedProvider string) (catalog.P
 		}
 		if _, wired := s.providers[b.Provider]; !wired {
 			continue
+		}
+		if enabledProviders != nil {
+			if _, eligible := enabledProviders[b.Provider]; !eligible {
+				continue
+			}
 		}
 		return b, true
 	}

@@ -92,6 +92,25 @@ func TestNoProgressTracker_AgesOutOldEntries(t *testing.T) {
 	assert.Equal(t, 1, count)
 }
 
+func TestNoProgressTracker_ZeroSessionKeyIsSkipped(t *testing.T) {
+	// runTurnLoop leaves routeRes.SessionKey at the zero value on hard-pin
+	// paths (Explore SubAgentDispatch under hardPinExplore) and when
+	// pinStore is nil. Without this guard those dispatches would all share
+	// one LRU bucket and trip the detector even though they come from
+	// unrelated sessions.
+	tr := newNoProgressTracker()
+	var zero [sessionpin.SessionKeyLen]byte
+	d := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: "bedrock"}
+	fp := computeNoProgressFingerprint(d, "prompt")
+	now := time.Now()
+
+	for i := 0; i < noProgressMatchThreshold*2; i++ {
+		looped, count := tr.recordAndDetect(zero, "high", fp, now)
+		assert.False(t, looped, "zero session key must never trip the detector (call %d)", i)
+		assert.Equal(t, 0, count)
+	}
+}
+
 func TestNoProgressTracker_NilReceiverIsNoOp(t *testing.T) {
 	var tr *noProgressTracker
 	key := sessionKeyFromString("session-nil")

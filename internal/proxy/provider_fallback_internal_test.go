@@ -80,7 +80,7 @@ func TestProxyWithFallback_HappyPathNoFallback(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: decision.Provider}, w, r)
+	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: decision.Provider}, nil, w, r)
 
 	require.NoError(t, err)
 	assert.False(t, outcome.Attempted)
@@ -104,7 +104,7 @@ func TestProxyWithFallback_RetriesOnIdleTimeoutBeforeFirstByte(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, w, r)
+	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, nil, w, r)
 
 	require.NoError(t, err)
 	assert.True(t, outcome.Attempted)
@@ -132,7 +132,7 @@ func TestProxyWithFallback_RetriesOnUpstream5xxBeforeFirstByte(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, w, r)
+	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, nil, w, r)
 
 	require.NoError(t, err)
 	assert.True(t, outcome.Attempted)
@@ -161,7 +161,7 @@ func TestProxyWithFallback_NoRetryAfterFirstByte(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, w, r)
+	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, nil, w, r)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, httputil.ErrUpstreamIdleTimeout)
@@ -185,7 +185,7 @@ func TestProxyWithFallback_NoRetryOn4xx(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, w, r)
+	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, nil, w, r)
 
 	require.Error(t, err)
 	assert.False(t, outcome.Attempted, "4xx (e.g. 429 rate-limit) is the caller's problem; do not retry against another provider")
@@ -206,7 +206,7 @@ func TestProxyWithFallback_NoBindingsToFallbackToReturnsOriginalError(t *testing
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderAnthropic}, w, r)
+	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderAnthropic}, nil, w, r)
 
 	require.Error(t, err)
 	assert.False(t, outcome.Attempted)
@@ -228,10 +228,65 @@ func TestProxyWithFallback_SkipsBindingsWithUnwiredProvider(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, w, r)
+	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, nil, w, r)
 
 	require.Error(t, err)
 	assert.False(t, outcome.Attempted)
+}
+
+func TestProxyWithFallback_RespectsEnabledProviders_BYOK(t *testing.T) {
+	// BYOK request: customer only authorized the deploy to spend its
+	// Bedrock credentials. After a Bedrock idle timeout the catalog still
+	// lists OpenRouter as the next binding and the deploy has an OpenRouter
+	// client wired, but the request never authorized that provider — silently
+	// falling over would charge deployment credentials for a provider the
+	// request did not opt into.
+	first := &scriptedClient{name: "bedrock", errs: []error{httputil.ErrUpstreamIdleTimeout}}
+	second := &scriptedClient{name: "openrouter"}
+	clients := map[string]providers.Client{
+		providers.ProviderBedrock:    first,
+		providers.ProviderOpenRouter: second,
+	}
+	s := newFallbackService(t, clients)
+
+	ctx, _ := otel.WithTiming(context.Background())
+	decision := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: providers.ProviderBedrock}
+	env := envelopeFromAnthropic(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	enabledProviders := map[string]struct{}{providers.ProviderBedrock: {}}
+	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, enabledProviders, w, r)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, httputil.ErrUpstreamIdleTimeout)
+	assert.False(t, outcome.Attempted, "OpenRouter is wired but not in the request's eligible set; fallback must not fire")
+	assert.Equal(t, int32(0), second.calls.Load(), "openrouter must not be dispatched against")
+	assert.Equal(t, providers.ProviderBedrock, decision.Provider, "no eligible fallback → decision stays on the original provider")
+}
+
+func TestProxyWithFallback_RespectsEnabledProviders_AllowsEligible(t *testing.T) {
+	// Same setup but the request authorized both providers — fallback fires.
+	first := &scriptedClient{name: "bedrock", errs: []error{httputil.ErrUpstreamIdleTimeout}}
+	second := &scriptedClient{name: "openrouter"}
+	clients := map[string]providers.Client{
+		providers.ProviderBedrock:    first,
+		providers.ProviderOpenRouter: second,
+	}
+	s := newFallbackService(t, clients)
+
+	ctx, _ := otel.WithTiming(context.Background())
+	decision := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: providers.ProviderBedrock}
+	env := envelopeFromAnthropic(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	enabledProviders := map[string]struct{}{providers.ProviderBedrock: {}, providers.ProviderOpenRouter: {}}
+	err, outcome := s.proxyWithFallback(ctx, &decision, env, translate.EmitOptions{TargetModel: decision.Model, TargetProvider: providers.ProviderBedrock}, enabledProviders, w, r)
+
+	require.NoError(t, err)
+	assert.True(t, outcome.Attempted)
+	assert.Equal(t, providers.ProviderOpenRouter, decision.Provider)
 }
 
 func TestClassifyFallbackError(t *testing.T) {

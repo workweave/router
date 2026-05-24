@@ -96,8 +96,17 @@ func newNoProgressTracker() *noProgressTracker {
 // reports whether the burst now exceeds the loop threshold. A nil tracker
 // returns (false, 0) so production-style construction can stay optional in
 // tests and selfhosted deploys.
+//
+// Zero-valued sessionKey is treated as "no anchor available" and skipped.
+// runTurnLoop leaves SessionKey unset on hard-pin paths (Explore
+// SubAgentDispatch when hardPinExplore is on) and when pinStore is nil; the
+// all-zero key would otherwise collapse unrelated sessions into one LRU
+// bucket and false-positive trip the detector on cross-session bursts.
 func (t *noProgressTracker) recordAndDetect(sessionKey [sessionpin.SessionKeyLen]byte, role string, fp noProgressFingerprint, now time.Time) (looped bool, count int) {
 	if t == nil || t.cache == nil {
+		return false, 0
+	}
+	if sessionKey == ([sessionpin.SessionKeyLen]byte{}) {
 		return false, 0
 	}
 	key := sessionPinCacheKey(sessionKey, role)
