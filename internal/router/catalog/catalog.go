@@ -125,6 +125,9 @@ var Models = []Model{
 	{ID: "claude-sonnet-4-5", Tier: TierMid, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}},
 	}},
+	{ID: "claude-sonnet-4-6", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}},
+	}},
 	{ID: "claude-opus-4-6", Tier: TierHigh, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 15.00, OutputUSDPer1M: 75.00, CacheReadMultiplier: 0.10}},
 	}},
@@ -222,6 +225,9 @@ var Models = []Model{
 	{ID: "gemini-3.1-pro-preview", Tier: TierHigh, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00, CacheReadMultiplier: 0.25}},
 	}},
+	{ID: "gemini-3.5-flash", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 1.50, OutputUSDPer1M: 9.00, CacheReadMultiplier: 0.25}},
+	}},
 
 	// --- OSS pool ---
 	//
@@ -231,14 +237,24 @@ var Models = []Model{
 	// binding at boot. Self-hosters with only an OpenRouter key get every OSS
 	// model routed via that trailing binding.
 	//
-	// Verified against each upstream's live catalog 2026-05-17:
+	// Verified against each upstream's live catalog 2026-05-17, re-checked
+	// on 2026-05-20 when the v0.55 bundle reintroduced the dedicated-only
+	// Qwen rows:
 	// - qwen/qwen3-30b-a3b-instruct-2507 — dedicated-only on Fireworks,
-	//   absent from DeepInfra + Bedrock. Dropped.
+	//   absent from DeepInfra + Bedrock. Managed-prod resolves via the
+	//   trailing OpenRouter binding.
 	// - qwen/qwen3-coder (480B-A35B) — dedicated-only on Fireworks, absent
-	//   from DeepInfra + Bedrock us-east-1. Dropped.
-	// - qwen/qwen3-235b-a22b-2507 — Bedrock us-east-1 carries only the VL
-	//   variant; Instruct-2507 stays on OpenRouter until AWS publishes it.
+	//   from DeepInfra + Bedrock us-east-1. Managed-prod resolves via the
+	//   trailing OpenRouter binding.
+	// - qwen/qwen3-235b-a22b-2507 — AWS published the Instruct-2507 variant
+	//   on bedrock-mantle in all major regions (verified 2026-05-22 against
+	//   the Bedrock model card). Primary moves to Bedrock; OpenRouter
+	//   stays as a trailing fallback for self-hosters without an AWS key.
+	//   The OR primary was dropped because we observed non-SSE responses
+	//   when OR routed Qwen through Google's hosting (silent CC stalls).
 	{ID: "qwen/qwen3-235b-a22b-2507", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderBedrock, UpstreamID: "qwen.qwen3-235b-a22b-2507",
+			Price: Pricing{InputUSDPer1M: 0.2266, OutputUSDPer1M: 0.9064}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.071, OutputUSDPer1M: 0.463}},
 	}},
 	{ID: "qwen/qwen3-coder-next", Tier: TierMid, Providers: []ProviderBinding{
@@ -265,5 +281,71 @@ var Models = []Model{
 		{Provider: providers.ProviderBedrock, UpstreamID: "moonshotai.kimi-k2.5",
 			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 3.000}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.440, OutputUSDPer1M: 2.000}},
+	}},
+	{ID: "moonshotai/kimi-k2.6", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/kimi-k2p6",
+			Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.1684}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.10}},
+	}},
+	// AA top-performer additions (2026-05-18).
+	//
+	// Selection ranked OSS models on the artificialanalysis.ai API by a
+	// composite of quality (Intelligence Index v4.0), cost (blended
+	// 3:1 input:output), and effective time per 2k-token query
+	// (median TTFT + 2000/TPS). Provider availability verified against
+	// per-model "API providers" pages and OpenRouter's v1/models API.
+	//
+	// xiaomi/mimo-v2.5 (base) was removed 2026-05-23 after sustained
+	// tool-calling failures in real Claude Code sessions: malformed empty-input
+	// tool_use blocks, hallucinated tool names, and same-tool same-args
+	// re-issue loops on weak agent prompts. Matches public reports against
+	// OpenCode (#24095) and Crush (#1699). The pro variant is kept — slower
+	// but doesn't exhibit the same instability in our sweep.
+	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderDeepInfra, UpstreamID: "XiaomiMiMo/MiMo-V2.5-Pro",
+			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000, CacheReadMultiplier: 0.10}},
+	}},
+	// qwen3.6-35b-a3b is a 35B-A3B MoE — Intel 44 at ~13s wall-clock per
+	// 2k tokens on DeepInfra FP8, the speed/cost end of the new Qwen3.6
+	// family. TierLow despite the MoE size because the active parameter
+	// budget + AA's Coding Index put it below v4-flash.
+	{ID: "qwen/qwen3.6-35b-a3b", Tier: TierLow, Providers: []ProviderBinding{
+		{Provider: providers.ProviderDeepInfra, UpstreamID: "Qwen/Qwen3.6-35B-A3B",
+			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 0.950}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.000, CacheReadMultiplier: 0.10}},
+	}},
+	// minimax-m2.7 sits in an unusual quality/cost spot: Intel 50 at
+	// $0.52 blended, cheaper than every TierMid model. Letting the
+	// trainer find its niche rather than pinning a tier by price alone.
+	{ID: "minimax/minimax-m2.7", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/minimax-m2p7",
+			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.279, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "z-ai/glm-5", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5",
+			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 2.080}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 1.920, CacheReadMultiplier: 0.10}},
+	}},
+	// v0.55 bundle additions (2026-05-20). Fireworks-dedicated rows carry
+	// an OpenRouter trailing binding so managed-prod deploys without a
+	// Fireworks key can still resolve them; pricing reflects the
+	// OpenRouter list price for the public model card on 2026-05-20.
+	{ID: "mistralai/mistral-small-2603", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.200, OutputUSDPer1M: 0.600, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "qwen/qwen3-30b-a3b-instruct-2507", Tier: TierMid, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/qwen3-30b-a3b-instruct-2507",
+			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 0.600, CacheReadMultiplier: 0.1684}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.100, OutputUSDPer1M: 0.300, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "qwen/qwen3-coder", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct",
+			Price: Pricing{InputUSDPer1M: 0.900, OutputUSDPer1M: 2.700, CacheReadMultiplier: 0.1684}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 5.000, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "qwen/qwen3.5-flash-02-23", Tier: TierLow, Providers: []ProviderBinding{
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.050, OutputUSDPer1M: 0.150, CacheReadMultiplier: 0.10}},
 	}},
 }

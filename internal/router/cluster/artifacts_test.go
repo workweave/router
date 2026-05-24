@@ -172,7 +172,11 @@ func TestEmbeddedArtifacts_AllVersionsLoadable(t *testing.T) {
 			require.NoError(t, err, "committed bundle %s must parse end-to-end", v)
 			assert.Equal(t, v, bundle.Version)
 			assert.NotNil(t, bundle.Centroids)
-			assert.NotEmpty(t, bundle.Rankings)
+			if bundle.IsV2 {
+				assert.NotEmpty(t, bundle.QualityMeans)
+			} else {
+				assert.NotEmpty(t, bundle.Rankings)
+			}
 			assert.NotNil(t, bundle.Registry)
 			assert.NotEmpty(t, bundle.Registry.DeployedModels)
 		})
@@ -193,6 +197,31 @@ func TestResolveVersion_UnknownErrors(t *testing.T) {
 	_, err := ResolveVersion("v99.99")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "v99.99")
+}
+
+// ListVersions must surface bundles in artifacts/ AND artifacts/legacy/,
+// flattened into the same list, without leaking the "legacy" pseudo-name.
+func TestListVersions_FlattensLegacyAndOmitsPseudoName(t *testing.T) {
+	versions, err := ListVersions()
+	require.NoError(t, err)
+	require.NotEmpty(t, versions)
+	for _, v := range versions {
+		assert.NotEqual(t, "legacy", v, "the legacy subdirectory must not appear as a version")
+	}
+	// Sanity: at least one known legacy version is reachable.
+	assert.Contains(t, versions, "v0.21", "legacy v0.21 must remain reachable after the move")
+}
+
+// Confirms bundleDirForVersion resolves legacy bundles transparently —
+// callers don't have to know whether a version lives at the root or
+// under legacy/.
+func TestResolveVersion_LegacyBundleIsReachable(t *testing.T) {
+	resolved, err := ResolveVersion("v0.21")
+	require.NoError(t, err)
+	assert.Equal(t, "v0.21", resolved)
+	bundle, err := LoadBundle(resolved)
+	require.NoError(t, err)
+	assert.False(t, bundle.IsV2, "v0.21 is v1 format")
 }
 
 func TestCheapestModel(t *testing.T) {

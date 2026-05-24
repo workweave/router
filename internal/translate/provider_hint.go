@@ -27,8 +27,18 @@ func openRouterProviderHint(model string) map[string]any {
 // openRouterReasoningHint returns the OpenRouter `reasoning` field to disable
 // reasoning on models that burn the entire max_tokens budget on hidden thinking.
 // Native DeepSeek serving defaults to reasoning-on and ignores effort=minimal.
+//
+// Extended to moonshotai/* (Kimi K2.x) and xiaomi/* (MiMo) because on
+// tool-calling turns these models otherwise emit native tool-call tokens
+// (<|tool_call_begin|>, Hermes <tool_call> XML) inside an unbounded reasoning
+// segment that OpenRouter's tool-call parser misses, leaving structured
+// tool_calls empty and generation running to the output cap.
+// (hermes-agent #24534, vllm #39056).
 func openRouterReasoningHint(model string) map[string]any {
-	if strings.HasPrefix(model, "deepseek/") {
+	switch {
+	case strings.HasPrefix(model, "deepseek/"),
+		strings.HasPrefix(model, "moonshotai/"),
+		strings.HasPrefix(model, "xiaomi/"):
 		return map[string]any{"enabled": false}
 	}
 	return nil
@@ -42,3 +52,16 @@ func openRouterReasoningHint(model string) map[string]any {
 func openRouterForcesToolTemperatureZero(model string) bool {
 	return strings.HasPrefix(model, "deepseek/")
 }
+
+// isQwen3Family reports whether the model id belongs to the qwen3.x family.
+// Qwen3 variants (instruct, coder, qwen3-next, qwen3.6-*) are documented to
+// drift into tool-call / thinking loops without a non-zero presence_penalty;
+// the Qwen3 model card recommends presence_penalty=1.5 to suppress this.
+func isQwen3Family(model string) bool {
+	return strings.HasPrefix(model, "qwen/qwen3")
+}
+
+// qwen3PresencePenalty is the recommended Qwen3 presence_penalty value from
+// the official model card; applied only when the client has not set
+// presence_penalty itself.
+const qwen3PresencePenalty = 1.5

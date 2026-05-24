@@ -8,8 +8,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
@@ -37,17 +39,51 @@ func NewClient(apiKey, baseURL string) *Client {
 	}
 }
 
+// setAuth applies authentication to the upstream request. Precedence:
+// (1) per-request BYOK credentials in ctx; (2) deployment-level API key;
+// (3) passthrough of the client's own OpenAI auth header (Codex plan flow).
+//
+// The passthrough tier strips `Authorization: Bearer rk_...` because the
+// router auth middleware accepts the same header for router-key auth — we
+// must not relay a router credential to OpenAI just because no BYOK or
+// deployment key is configured. Mirrors the !HasAPIKeyPrefix guard in
+// proxy.ExtractClientCredentials.
+func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) {
+	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
+		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
+		return
+	}
+	if c.apiKey != "" {
+		upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
+		return
+	}
+	v := inbound.Header.Get("authorization")
+	if v == "" {
+		return
+	}
+	// Only forward if the Bearer token isn't a router-issued key. Any other
+	// shape (incl. raw or malformed) we still forward — upstream will 401 on
+	// invalid creds, which is the correct failure mode for "no auth resolvable".
+	// Match the bearer prefix case-insensitively to mirror the router auth
+	// middleware's extractBearer; otherwise `authorization: bearer rk_...`
+	// (lowercased by some clients) bypasses this guard and the router key
+	// crosses the trust boundary to OpenAI.
+	const bearerPrefix = "Bearer "
+	if len(v) > len(bearerPrefix) && strings.EqualFold(v[:len(bearerPrefix)], bearerPrefix) {
+		if auth.HasAPIKeyPrefix(strings.TrimSpace(v[len(bearerPrefix):])) {
+			return
+		}
+	}
+	upstream.Header.Set("Authorization", v)
+}
+
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewReader(prep.Body))
 	if err != nil {
 		return fmt.Errorf("build upstream request: %w", err)
 	}
 	upstream.Header.Set("Content-Type", "application/json")
-	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
-		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
-	} else if c.apiKey != "" {
-		upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
+	c.setAuth(ctx, upstream, r)
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
@@ -139,11 +175,7 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		upstream.Header.Set("Content-Type", ct)
 	}
-	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
-		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
-	} else if c.apiKey != "" {
-		upstream.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
+	c.setAuth(ctx, upstream, r)
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}

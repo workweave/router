@@ -695,3 +695,502 @@ func TestScorer_DeployedModelsReturnsBootCandidates(t *testing.T) {
 	assert.Contains(t, models, "gpt-5")
 	assert.Contains(t, models, "claude-opus-4-7")
 }
+
+func TestScorer_V2DynamicScoring(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	regBlob := []byte(`{
+		"deployed_models": [
+			{"model": "claude-opus-4-7", "provider": "anthropic", "bench_column": "gpt-5", "proxy": true},
+			{"model": "claude-haiku-4-5", "provider": "anthropic", "bench_column": "gemini-2.5-flash", "proxy": true}
+		]
+	}`)
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	c1 := make([]float32, dim)
+	c1[1] = 1
+	full := append(append([]float32{}, c0...), c1...)
+	centroidsBlob := buildCentroidsBlob(t, 2, dim, full)
+
+	centroids, err := loadCentroids(centroidsBlob)
+	require.NoError(t, err)
+	registry, err := loadRegistry(regBlob)
+	require.NoError(t, err)
+
+	qualityMeans := Rankings{
+		0: map[string]float32{"claude-opus-4-7": 0.9, "claude-haiku-4-5": 0.1},
+		1: map[string]float32{"claude-opus-4-7": 0.1, "claude-haiku-4-5": 0.9},
+	}
+
+	opusInputPrice := 0.015
+	opusOutputPrice := 0.075
+	haikuInputPrice := 0.00025
+	haikuOutputPrice := 0.00125
+
+	opusTTFT := 0.8
+	opusTPS := 60.0
+	haikuTTFT := 0.2
+	haikuTPS := 120.0
+
+	opusVerbosity := 4000.0
+	haikuVerbosity := 1000.0
+
+	modelAxes := map[string]ModelAxis{
+		"claude-opus-4-7": {
+			InputPer1KUSD:   &opusInputPrice,
+			OutputPer1KUSD:  &opusOutputPrice,
+			TTFTSeconds:     &opusTTFT,
+			TPS:             &opusTPS,
+			VerbosityTokens: &opusVerbosity,
+		},
+		"claude-haiku-4-5": {
+			InputPer1KUSD:   &haikuInputPrice,
+			OutputPer1KUSD:  &haikuOutputPrice,
+			TTFTSeconds:     &haikuTTFT,
+			TPS:             &haikuTPS,
+			VerbosityTokens: &haikuVerbosity,
+		},
+	}
+
+	meta := &ArtifactMetadata{
+		FormatVersion: 2,
+		Training: ArtifactTraining{
+			K:    2,
+			TopP: 2,
+			DefaultRoutingKnobs: &DefaultRoutingKnobs{
+				Alpha:                []float64{0.5, 0.5},
+				SpeedWeight:          0.0,
+				OutputCostRatio:      0.0,
+				ExpectedOutputTokens: 2000,
+				PerModelVerbosity:    false,
+			},
+		},
+	}
+
+	bundle := &Bundle{
+		Version:         "v2-test",
+		Centroids:       centroids,
+		Registry:        registry,
+		Metadata:        meta,
+		IsV2:            true,
+		QualityMeans:    qualityMeans,
+		ModelAxes:       modelAxes,
+		MedianVerbosity: 2500.0,
+	}
+
+	cfg := DefaultConfig()
+	cfg.TopP = 1
+	scorer, err := NewScorer(bundle, cfg, emb, allProviders())
+	require.NoError(t, err)
+
+	// Test case 1: Default knobs (alpha=0.5, speed_weight=0, output_cost_ratio=0).
+	dec, err := scorer.Route(context.Background(), router.Request{
+		RequestedModel: "auto",
+		PromptText:     "test",
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, dec.Model)
+	assert.NotNil(t, dec.Metadata)
+	assert.NotZero(t, dec.Metadata.EffectiveKnobsHash)
+
+	// Test case 2: Override alpha to 1.0 (extreme quality-preferring).
+	alphaVal := 1.0
+	decQuality, err := scorer.Route(context.Background(), router.Request{
+		RequestedModel: "auto",
+		PromptText:     "test",
+		RoutingKnobs: &router.Overrides{
+			Alpha: &alphaVal,
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", decQuality.Model)
+
+	// Test case 3: Override alpha to 0.0 (extreme cost-preferring).
+	alphaValZero := 0.0
+	decCost, err := scorer.Route(context.Background(), router.Request{
+		RequestedModel: "auto",
+		PromptText:     "test",
+		RoutingKnobs: &router.Overrides{
+			Alpha: &alphaValZero,
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-haiku-4-5", decCost.Model)
+
+	// Test case 4: Out-of-bounds validation.
+	badAlpha := -0.1
+	_, err = scorer.Route(context.Background(), router.Request{
+		RequestedModel: "auto",
+		PromptText:     "test",
+		RoutingKnobs: &router.Overrides{
+			Alpha: &badAlpha,
+		},
+	})
+	assert.ErrorIs(t, err, ErrInvalidRoutingKnobs)
+}
+
+// v2BundleOpts is the optional knob configuration for newV2BundleForTest.
+type v2BundleOpts struct {
+	qualityMeans    Rankings // overrides the default opus/haiku table
+	modelAxes       map[string]ModelAxis
+	medianVerbosity float64
+	defaultKnobs    *DefaultRoutingKnobs
+}
+
+// newV2BundleForTest builds a synthetic two-cluster v2 bundle that
+// matches twoClusterArtifacts (Opus + Haiku across clusters 0 and 1),
+// with per-axis overrides via opts. Returns a Scorer wired against
+// fakeEmbedder.
+func newV2BundleForTest(t *testing.T, emb Embedder, opts v2BundleOpts) *Scorer {
+	t.Helper()
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	c1 := make([]float32, dim)
+	c1[1] = 1
+	full := append(append([]float32{}, c0...), c1...)
+	centroidsBlob := buildCentroidsBlob(t, 2, dim, full)
+	centroids, err := loadCentroids(centroidsBlob)
+	require.NoError(t, err)
+
+	registry, err := loadRegistry([]byte(`{
+		"deployed_models": [
+			{"model": "claude-opus-4-7", "provider": "anthropic", "bench_column": "gpt-5", "proxy": true},
+			{"model": "claude-haiku-4-5", "provider": "anthropic", "bench_column": "gemini-2.5-flash", "proxy": true}
+		]
+	}`))
+	require.NoError(t, err)
+
+	qm := opts.qualityMeans
+	if qm == nil {
+		qm = Rankings{
+			0: {"claude-opus-4-7": 0.9, "claude-haiku-4-5": 0.1},
+			1: {"claude-opus-4-7": 0.1, "claude-haiku-4-5": 0.9},
+		}
+	}
+
+	axes := opts.modelAxes
+	if axes == nil {
+		opusInputP := 0.015
+		opusOutputP := 0.075
+		haikuInputP := 0.00025
+		haikuOutputP := 0.00125
+		opusTTFT := 0.8
+		opusTPS := 60.0
+		haikuTTFT := 0.2
+		haikuTPS := 120.0
+		axes = map[string]ModelAxis{
+			"claude-opus-4-7": {
+				InputPer1KUSD:  &opusInputP,
+				OutputPer1KUSD: &opusOutputP,
+				TTFTSeconds:    &opusTTFT,
+				TPS:            &opusTPS,
+			},
+			"claude-haiku-4-5": {
+				InputPer1KUSD:  &haikuInputP,
+				OutputPer1KUSD: &haikuOutputP,
+				TTFTSeconds:    &haikuTTFT,
+				TPS:            &haikuTPS,
+			},
+		}
+	}
+
+	median := opts.medianVerbosity
+	if median == 0 {
+		median = 1.0
+	}
+
+	defaults := opts.defaultKnobs
+	if defaults == nil {
+		defaults = &DefaultRoutingKnobs{
+			Alpha:                []float64{0.5, 0.5},
+			SpeedWeight:          0.0,
+			OutputCostRatio:      0.0,
+			ExpectedOutputTokens: 2000,
+			PerModelVerbosity:    false,
+		}
+	}
+
+	meta := &ArtifactMetadata{
+		FormatVersion: 2,
+		Training: ArtifactTraining{
+			K:                   2,
+			TopP:                2,
+			DefaultRoutingKnobs: defaults,
+		},
+	}
+
+	bundle := &Bundle{
+		Version:         "v2-test",
+		Centroids:       centroids,
+		Registry:        registry,
+		Metadata:        meta,
+		IsV2:            true,
+		QualityMeans:    qm,
+		ModelAxes:       axes,
+		MedianVerbosity: median,
+	}
+
+	cfg := DefaultConfig()
+	cfg.TopP = 1
+	scorer, err := NewScorer(bundle, cfg, emb, allProviders())
+	require.NoError(t, err)
+	return scorer
+}
+
+// TestDegenerateRangeFallthrough confirms that when every model ties on
+// quality in a cluster (q_range==0), the blend collapses to cost (+ speed
+// when enabled) only — matching the trainer's behavior at line 597/623.
+func TestDegenerateRangeFallthrough(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	tied := Rankings{
+		0: {"claude-opus-4-7": 0.5, "claude-haiku-4-5": 0.5},
+		1: {"claude-opus-4-7": 0.5, "claude-haiku-4-5": 0.5},
+	}
+	scorer := newV2BundleForTest(t, emb, v2BundleOpts{
+		qualityMeans: tied,
+		defaultKnobs: &DefaultRoutingKnobs{
+			Alpha:                []float64{0.5, 0.5},
+			SpeedWeight:          0.0,
+			OutputCostRatio:      1.0, // cost matters
+			ExpectedOutputTokens: 2000,
+		},
+	})
+	dec, err := scorer.Route(context.Background(), router.Request{PromptText: "test"})
+	require.NoError(t, err)
+	// With quality tied and cost-aware blend, Haiku (cheaper) must win.
+	assert.Equal(t, "claude-haiku-4-5", dec.Model, "tied quality should let cost decide")
+}
+
+// TestSpeedRangeZeroFallsBackToTwoAxis covers the case where exactly one
+// deployed model has AA timing data, so s_range==0. The blend must fall
+// back to (quality + cost) with w_s redistributed.
+func TestSpeedRangeZeroFallsBackToTwoAxis(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	opusInputP := 0.015
+	opusOutputP := 0.075
+	haikuInputP := 0.00025
+	haikuOutputP := 0.00125
+	opusTTFT := 0.8
+	opusTPS := 60.0
+	axes := map[string]ModelAxis{
+		"claude-opus-4-7": {
+			InputPer1KUSD:  &opusInputP,
+			OutputPer1KUSD: &opusOutputP,
+			TTFTSeconds:    &opusTTFT,
+			TPS:            &opusTPS,
+		},
+		"claude-haiku-4-5": {
+			// No AA timing data — sPtr will be nil.
+			InputPer1KUSD:  &haikuInputP,
+			OutputPer1KUSD: &haikuOutputP,
+		},
+	}
+	scorer := newV2BundleForTest(t, emb, v2BundleOpts{
+		modelAxes: axes,
+		defaultKnobs: &DefaultRoutingKnobs{
+			Alpha:                []float64{0.5, 0.5},
+			SpeedWeight:          0.3,
+			OutputCostRatio:      0.0,
+			ExpectedOutputTokens: 2000,
+		},
+	})
+	dec, err := scorer.Route(context.Background(), router.Request{PromptText: "test"})
+	require.NoError(t, err)
+	// With s_range==0, both models hit redistribution; Opus wins on
+	// quality (cluster 0, opus=0.9 vs haiku=0.1).
+	assert.Equal(t, "claude-opus-4-7", dec.Model, "s_range==0 must not crash; quality still decides")
+}
+
+// TestKnobOverrideOnlyReweights verifies that supplying explicit
+// overrides equal to the bundle defaults yields the same decision as
+// not supplying overrides — proves overrides reweight, they don't
+// silently change anything else.
+func TestKnobOverrideOnlyReweights(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	scorer := newV2BundleForTest(t, emb, v2BundleOpts{})
+
+	decDefault, err := scorer.Route(context.Background(), router.Request{PromptText: "test"})
+	require.NoError(t, err)
+
+	a := 0.5
+	w := 0.0
+	r := 0.0
+	tk := 2000
+	v := false
+	decOverride, err := scorer.Route(context.Background(), router.Request{
+		PromptText: "test",
+		RoutingKnobs: &router.Overrides{
+			Alpha:                &a,
+			SpeedWeight:          &w,
+			OutputCostRatio:      &r,
+			ExpectedOutputTokens: &tk,
+			PerModelVerbosity:    &v,
+		},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, decDefault.Model, decOverride.Model, "override matching defaults must yield identical decision")
+	assert.Equal(t, decDefault.Metadata.EffectiveKnobsHash, decOverride.Metadata.EffectiveKnobsHash, "matching knobs must hash identically")
+}
+
+// TestAlphaScalarReplacesVector confirms the sledgehammer behavior:
+// a scalar alpha override uniformly overwrites every per-cluster alpha,
+// discarding calibration. Set distinct per-cluster alphas and verify
+// they're gone after override.
+func TestAlphaScalarReplacesVector(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+
+	// Per-cluster calibrated alphas: cluster 0 cares about quality more.
+	calibrated := &DefaultRoutingKnobs{
+		Alpha:                []float64{0.9, 0.1},
+		SpeedWeight:          0.0,
+		OutputCostRatio:      1.0, // cost active
+		ExpectedOutputTokens: 2000,
+	}
+	scorer := newV2BundleForTest(t, emb, v2BundleOpts{defaultKnobs: calibrated})
+
+	// At default knobs, vec aligned with cluster 0, alpha[0]=0.9 → quality dominates → Opus.
+	decDefault, err := scorer.Route(context.Background(), router.Request{PromptText: "test"})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", decDefault.Model, "alpha[0]=0.9 + cluster 0 should pick Opus")
+
+	// Override alpha=0.0 (scalar). Both clusters get alpha=0 → cost dominates → Haiku.
+	zero := 0.0
+	decOverride, err := scorer.Route(context.Background(), router.Request{
+		PromptText:   "test",
+		RoutingKnobs: &router.Overrides{Alpha: &zero},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-haiku-4-5", decOverride.Model, "scalar alpha=0 must overwrite per-cluster 0.9, letting cost decide")
+}
+
+// TestZeroAATimingFallback covers the case where w_s > 0 but no model
+// has AA timing data. The blend should fall to (quality + cost) across
+// the board with w_s proportionally redistributed.
+func TestZeroAATimingFallback(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	opusInputP := 0.015
+	opusOutputP := 0.075
+	haikuInputP := 0.00025
+	haikuOutputP := 0.00125
+	axes := map[string]ModelAxis{
+		"claude-opus-4-7": {
+			InputPer1KUSD:  &opusInputP,
+			OutputPer1KUSD: &opusOutputP,
+			// No TTFT or TPS.
+		},
+		"claude-haiku-4-5": {
+			InputPer1KUSD:  &haikuInputP,
+			OutputPer1KUSD: &haikuOutputP,
+		},
+	}
+	scorer := newV2BundleForTest(t, emb, v2BundleOpts{
+		modelAxes: axes,
+		defaultKnobs: &DefaultRoutingKnobs{
+			Alpha:                []float64{0.5, 0.5},
+			SpeedWeight:          0.5, // active, but no model has timing
+			OutputCostRatio:      0.0,
+			ExpectedOutputTokens: 2000,
+		},
+	})
+	dec, err := scorer.Route(context.Background(), router.Request{PromptText: "test"})
+	require.NoError(t, err)
+	// No timing data, w_s redistributed; quality dominates redistribution → Opus.
+	assert.Equal(t, "claude-opus-4-7", dec.Model)
+}
+
+// TestPureSpeedMissingTimingFallsBackToQuality covers the extreme
+// configuration where alpha=0, w_s=1 (pure speed). For a model with no
+// AA timing, total = alpha + (1-alpha-w_s) = 0, so the fallback returns
+// the raw qNorm — preventing a NaN or panic.
+func TestPureSpeedMissingTimingFallsBackToQuality(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	haikuInputP := 0.00025
+	haikuOutputP := 0.00125
+	opusInputP := 0.015
+	opusOutputP := 0.075
+	axes := map[string]ModelAxis{
+		"claude-opus-4-7": {
+			// No AA timing data.
+			InputPer1KUSD:  &opusInputP,
+			OutputPer1KUSD: &opusOutputP,
+		},
+		"claude-haiku-4-5": {
+			// No AA timing data.
+			InputPer1KUSD:  &haikuInputP,
+			OutputPer1KUSD: &haikuOutputP,
+		},
+	}
+	scorer := newV2BundleForTest(t, emb, v2BundleOpts{
+		modelAxes: axes,
+		defaultKnobs: &DefaultRoutingKnobs{
+			Alpha:                []float64{0.0, 0.0},
+			SpeedWeight:          1.0,
+			OutputCostRatio:      0.0,
+			ExpectedOutputTokens: 2000,
+		},
+	})
+	dec, err := scorer.Route(context.Background(), router.Request{PromptText: "test"})
+	require.NoError(t, err)
+	// With alpha=0, w_s=1, total fallback kicks in; raw qNorm wins. Opus
+	// has qNorm=1 in cluster 0; Haiku has 0. Opus must win.
+	assert.Equal(t, "claude-opus-4-7", dec.Model)
+}
+
+// TestInvalidEffectiveKnobs covers the validation paths that must return
+// ErrInvalidRoutingKnobs.
+func TestInvalidEffectiveKnobs(t *testing.T) {
+	cases := []struct {
+		name  string
+		knobs router.Overrides
+	}{
+		{
+			name: "alpha out of range",
+			knobs: func() router.Overrides {
+				a := 1.5
+				return router.Overrides{Alpha: &a}
+			}(),
+		},
+		{
+			name: "alpha+speed_weight exceeds 1",
+			knobs: func() router.Overrides {
+				a := 0.8
+				w := 0.5
+				return router.Overrides{Alpha: &a, SpeedWeight: &w}
+			}(),
+		},
+		{
+			name: "speed_weight out of range",
+			knobs: func() router.Overrides {
+				w := 1.5
+				return router.Overrides{SpeedWeight: &w}
+			}(),
+		},
+		{
+			name: "output_cost_ratio out of range",
+			knobs: func() router.Overrides {
+				r := 11.0
+				return router.Overrides{OutputCostRatio: &r}
+			}(),
+		},
+		{
+			name: "expected_output_tokens out of range",
+			knobs: func() router.Overrides {
+				tk := 200000
+				return router.Overrides{ExpectedOutputTokens: &tk}
+			}(),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			emb := &fakeEmbedder{vec: makeOpusVec()}
+			scorer := newV2BundleForTest(t, emb, v2BundleOpts{})
+			_, err := scorer.Route(context.Background(), router.Request{
+				PromptText:   "test",
+				RoutingKnobs: &tc.knobs,
+			})
+			assert.ErrorIs(t, err, ErrInvalidRoutingKnobs, "%s must return ErrInvalidRoutingKnobs", tc.name)
+		})
+	}
+}

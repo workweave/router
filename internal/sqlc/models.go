@@ -136,6 +136,7 @@ type RouterOrganizationCreditLedger struct {
 	RouterRequestID       *string
 	RouterModel           *string
 	CreatedAt             pgtype.Timestamptz
+	Memo                  *string
 }
 
 // Session-sticky routing pins; sliding 1h TTL matching Anthropic prompt cache

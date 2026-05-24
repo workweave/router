@@ -329,9 +329,10 @@ type AnthropicSSETranslator struct {
 	flusher http.Flusher
 	bw      *bufio.Writer
 
-	streaming  bool
-	statusCode int
-	buf        bytes.Buffer
+	streaming      bool
+	headersEmitted bool
+	statusCode     int
+	buf            bytes.Buffer
 
 	requestModel string
 
@@ -340,8 +341,14 @@ type AnthropicSSETranslator struct {
 	closed   bool
 	blockIdx int
 	// textOpen avoids empty text blocks for tool-only responses.
-	textOpen   bool
-	toolBlocks map[int]int
+	textOpen bool
+	// thinkingOpen tracks an open Anthropic thinking content block carrying
+	// upstream reasoning (OpenRouter `reasoning`, DeepSeek/Qwen `reasoning_content`).
+	// Without this, reasoning either gets dropped or leaks into the visible
+	// text channel; clients see "Let me check..." narration mixed with the
+	// real answer.
+	thinkingOpen bool
+	toolBlocks   map[int]int
 
 	finishReason             string
 	usageInputTokens         int
@@ -399,6 +406,9 @@ func (t *AnthropicSSETranslator) Header() http.Header {
 
 // WriteHeader routes streaming success responses through SSE.
 func (t *AnthropicSSETranslator) WriteHeader(code int) {
+	if t.headersEmitted {
+		return
+	}
 	t.statusCode = code
 	ct := t.inner.Header().Get("Content-Type")
 	t.streaming = strings.Contains(ct, "text/event-stream") && code < 400
@@ -409,12 +419,39 @@ func (t *AnthropicSSETranslator) WriteHeader(code int) {
 	if t.streaming {
 		t.inner.Header().Set("Content-Type", "text/event-stream")
 		t.inner.WriteHeader(code)
+		t.headersEmitted = true
 	}
 	observability.Get().Debug("AnthropicSSE WriteHeader",
 		"upstream_status", code,
 		"upstream_content_type", ct,
 		"streaming", t.streaming,
 	)
+}
+
+// Prelude commits SSE headers and emits message_start (+ routing marker block)
+// immediately so Anthropic-format clients see the message envelope while the
+// upstream provider is still doing prefill. Call right after the routing
+// decision when the client requested streaming (streaming=true).
+//
+// estimatedInputTokens populates message_start.usage.input_tokens since real
+// upstream usage doesn't arrive until message_delta on cross-format paths;
+// already plumbed via WithEstimatedInputTokens.
+func (t *AnthropicSSETranslator) Prelude(streaming bool) error {
+	if !streaming || t.started {
+		return nil
+	}
+	t.inner.Header().Set("Content-Type", "text/event-stream")
+	t.inner.Header().Del("Content-Length")
+	t.inner.Header().Del("Content-Encoding")
+	t.statusCode = http.StatusOK
+	t.streaming = true
+	t.inner.WriteHeader(http.StatusOK)
+	t.headersEmitted = true
+	if err := t.emitMessageStart(); err != nil {
+		return err
+	}
+	t.started = true
+	return t.emitRoutingMarkerIfConfigured()
 }
 
 func (t *AnthropicSSETranslator) Write(data []byte) (int, error) {
@@ -515,10 +552,17 @@ func (t *AnthropicSSETranslator) translateOpenAIEvent(raw []byte) error {
 
 	// strings.Clone: gjson returns strings backed by the buffer via unsafe;
 	// these fields outlive the event, so copy to survive buffer compaction.
-	if id := gjson.GetBytes(data, "id"); id.Exists() && t.messageID == "" {
+	//
+	// Check Str != "" rather than Exists(): some OpenAI-compat upstreams
+	// (notably OpenRouter for certain models) send chunks with `"id": ""`
+	// in early SSE frames before settling on a real id. gjson treats that
+	// as Exists()=true, Str="", which would latch the empty string and
+	// prevent later non-empty ids from overwriting — leaving message_start
+	// to fall back to the "msg_translated" placeholder. Same for model.
+	if id := gjson.GetBytes(data, "id"); id.Str != "" && t.messageID == "" {
 		t.messageID = strings.Clone(id.Str)
 	}
-	if m := gjson.GetBytes(data, "model"); m.Exists() && t.modelFromUpstream == "" {
+	if m := gjson.GetBytes(data, "model"); m.Str != "" && t.modelFromUpstream == "" {
 		t.modelFromUpstream = strings.Clone(m.Str)
 	}
 
@@ -578,7 +622,40 @@ func (t *AnthropicSSETranslator) extractAndForwardUsage(data []byte) {
 }
 
 func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
+	// Reasoning arrives under different keys depending on upstream:
+	//   - OpenRouter normalizes to `reasoning`
+	//   - DeepSeek / Qwen native expose `reasoning_content`
+	// Either way it must surface as an Anthropic thinking block, not text.
+	reasoning := delta.Get("reasoning_content").Str
+	if reasoning == "" {
+		reasoning = delta.Get("reasoning").Str
+	}
+	if reasoning != "" {
+		if t.textOpen {
+			if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+				return err
+			}
+			t.textOpen = false
+		}
+		if !t.thinkingOpen {
+			if err := t.emitContentBlockStartThinking(t.blockIdx); err != nil {
+				return err
+			}
+			t.thinkingOpen = true
+			t.blockIdx++
+		}
+		if err := t.emitContentBlockDeltaThinking(t.blockIdx-1, reasoning); err != nil {
+			return err
+		}
+	}
+
 	if content := delta.Get("content").Str; content != "" {
+		if t.thinkingOpen {
+			if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+				return err
+			}
+			t.thinkingOpen = false
+		}
 		if !t.textOpen {
 			if err := t.emitContentBlockStartText(t.blockIdx); err != nil {
 				return err
@@ -607,6 +684,13 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 					return false
 				}
 				t.textOpen = false
+			}
+			if t.thinkingOpen {
+				if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+					emitErr = err
+					return false
+				}
+				t.thinkingOpen = false
 			}
 			id := tc.Get("id").Str
 			name := tc.Get("function.name").Str
@@ -667,6 +751,12 @@ func (t *AnthropicSSETranslator) finishStream() error {
 			return err
 		}
 		t.textOpen = false
+	}
+	if t.thinkingOpen {
+		if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+			return err
+		}
+		t.thinkingOpen = false
 	}
 	for _, blockIdx := range t.toolBlocks {
 		if err := t.emitContentBlockStop(blockIdx); err != nil {
@@ -729,6 +819,24 @@ func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name, 
 		sse.WriteJSONString(t.bw, sig)
 	}
 	t.bw.WriteString(",\"input\":{}}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *AnthropicSSETranslator) emitContentBlockStartThinking(index int) error {
+	observability.Get().Debug("AnthropicSSE emit", "event", "content_block_start", "type", "thinking")
+	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString(",\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *AnthropicSSETranslator) emitContentBlockDeltaThinking(index int, text string) error {
+	observability.Get().Debug("AnthropicSSE emit", "event", "content_block_delta", "type", "thinking_delta")
+	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString(",\"delta\":{\"type\":\"thinking_delta\",\"thinking\":")
+	sse.WriteJSONString(t.bw, text)
+	t.bw.WriteString("}}\n\n")
 	return t.flushEvent()
 }
 

@@ -1,12 +1,14 @@
 package anthropic
 
 import (
+	"errors"
 	"io"
 	"net/http"
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/translate"
 
 	"github.com/gin-gonic/gin"
@@ -45,8 +47,14 @@ func RouteHandler(svc *proxy.Service) gin.HandlerFunc {
 			EstimatedInputTokens: feats.Tokens,
 			HasTools:             feats.HasTools,
 			PromptText:           promptText,
+			RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 		})
 		if routeErr != nil {
+			if errors.Is(routeErr, cluster.ErrInvalidRoutingKnobs) {
+				log.Warn("Invalid routing knobs supplied on route", "err", routeErr)
+				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", routeErr.Error())
+				return
+			}
 			log.Error("Routing failed", "err", routeErr)
 			writeAnthropicError(c, http.StatusBadGateway, "api_error", "routing failed")
 			return

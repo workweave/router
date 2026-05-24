@@ -39,6 +39,27 @@ services:
       # so the migrate sidecar can land its `schema_migrations` table there.
       - ./db/init:/docker-entrypoint-initdb.d:ro
 
+  # Pub/Sub emulator used for cross-replica cache invalidation. In production
+  # this is GCP Pub/Sub; locally we run Google's emulator so `docker compose up`
+  # is self-contained (no GCP credentials required). The entrypoint pre-creates
+  # the invalidation topic; per-replica subscriptions are created by the router
+  # itself at startup.
+  pubsub-emulator:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    entrypoint: ["/entrypoint.sh"]
+    ports:
+      - "8085:8085"
+    environment:
+      PUBSUB_PROJECT_ID: router-local
+      PUBSUB_TOPIC_ROUTER_INVALIDATION: router-installation-invalidate
+    volumes:
+      - ./db/pubsub/entrypoint.sh:/entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8085 >/dev/null || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   # One-shot migration runner. Exits with status 0 once all pending migrations
   # are applied. The `server` service waits on this via service_completed_successfully
   # so it never starts against an unmigrated DB.
@@ -67,6 +88,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      pubsub-emulator:
+        condition: service_healthy
     # Load API keys from the same .env files `make dev` uses, so
     # docker compose up and make dev resolve identically. Compose
     # evaluates env_file entries in order; .env.local wins on
@@ -99,6 +122,14 @@ services:
       # that doesn't exist inside the container. The Dockerfile copies
       # libonnxruntime.so to /usr/lib which is on the default linker path.
       ROUTER_ONNX_LIBRARY_DIR: /usr/lib
+      # Pub/Sub broadcast for cross-replica cache invalidation. main.go
+      # panics at startup if any of these is unset (config.MustGet). The
+      # gcppubsub client honors PUBSUB_EMULATOR_HOST and routes there
+      # instead of GCP — so no credentials are needed for local dev.
+      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+      PUBSUB_PROJECT_ID: router-local
+      PUBSUB_TOPIC_ROUTER_INVALIDATION: router-installation-invalidate
+      PUBSUB_SUBSCRIPTION_ROUTER_INVALIDATION: router-installation-invalidate
     ports:
       - "8080:8080"
     restart: unless-stopped

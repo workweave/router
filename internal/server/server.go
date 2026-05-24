@@ -64,6 +64,17 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
 
+	// /v1/router/models surfaces the active artifact's deployed-models list so
+	// the Weave control plane can validate per-org exclusion submissions
+	// against the live universe instead of hand-copying it on every gitlink
+	// bump. Read-only metadata — unauthed so managed mode (no admin keys
+	// issuable on-router) can call it; the list is published publicly on the
+	// RouterArena leaderboard so there is no leak risk. nil source skips the
+	// route in tests that don't wire a cluster scorer.
+	if deployedModels != nil {
+		engine.GET("/v1/router/models", middleware.WithTimeout(healthTimeout), admin.CatalogModelsHandler(deployedModels))
+	}
+
 	// /validate is a token-validity probe used by clients (not the dashboard), so it stays mounted in both modes.
 	adminAuthed := engine.Group("", middleware.WithTimeout(validateTimeout), middleware.WithAuth(authSvc, byokDisabled))
 	adminAuthed.GET("/validate", admin.ValidateHandler)
@@ -112,6 +123,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	messagesMiddleware = append(messagesMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
+		middleware.WithRoutingKnobsOverride(),
 	)
 	messagesGroup := engine.Group("", messagesMiddleware...)
 	messagesGroup.POST("/v1/messages", anthropicapi.MessagesHandler(proxySvc, authSvc))
@@ -127,9 +139,13 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	chatCompletionMiddleware = append(chatCompletionMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
+		middleware.WithRoutingKnobsOverride(),
 	)
 	chatCompletionGroup := engine.Group("", chatCompletionMiddleware...)
 	chatCompletionGroup.POST("/v1/chat/completions", openaiapi.ChatCompletionHandler(proxySvc, authSvc))
+	// Responses surface required by Codex CLI after wire_api="chat" was retired;
+	// translated internally to chat completions so the turn loop is reused.
+	chatCompletionGroup.POST("/v1/responses", openaiapi.ResponsesHandler(proxySvc, authSvc))
 	// Action suffix (:generateContent or :streamGenerateContent) lives inside modelAction because Gin treats `:` outside the leading position as a literal.
 	chatCompletionGroup.POST("/v1beta/models/:modelAction", geminiapi.GenerateContentHandler(proxySvc, authSvc))
 
@@ -156,6 +172,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	routeMiddleware = append(routeMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
+		middleware.WithRoutingKnobsOverride(),
 	)
 	routeGroup := engine.Group("", routeMiddleware...)
 	routeGroup.POST("/v1/route", anthropicapi.RouteHandler(proxySvc))

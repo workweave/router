@@ -15,17 +15,16 @@ import (
 const markerSentinel = "✦ **Weave Router**"
 
 // Sample markers covering every humanReasonFromPlanner output and the
-// no-planner fallbacks ("hard pin", "tool-result follow-up", "top scorer")
-// plus the clamp note tail. Keep in sync with internal/proxy/service.go.
+// no-planner fallbacks plus the clamp note tail.
+// Keep in sync with internal/proxy/service.go.
 var sampleMarkers = []string{
-	"✦ **Weave Router** → claude-haiku-4-5 (anthropic) · reason: top scorer\n\n",
-	"✦ **Weave Router** → deepseek/deepseek-v4-pro (openrouter) · reason: scorer matches the pin\n\n",
-	"✦ **Weave Router** → deepseek/deepseek-v4-pro (openrouter) · reason: tool-result follow-up\n\n",
-	"✦ **Weave Router** → deepseek/deepseek-v4-pro (openrouter) · reason: switched to save on cache reads\n\n",
-	"✦ **Weave Router** → deepseek/deepseek-v4-pro (openrouter) · reason: stayed: cache reuse beats the switch\n\n",
-	"✦ **Weave Router** → claude-sonnet-4-5 (anthropic) · reason: model tier upgrade\n\n",
-	"✦ **Weave Router** → gemini-3.1-flash-lite-preview (google) · reason: hard pin (compaction / sub-agent)\n\n",
-	"✦ **Weave Router** → claude-opus-4-7 · reason: top scorer · second-choice pick (would have used claude-sonnet-4-5 — capped to your requested mid tier; request claude-opus-4-7 to unlock higher-tier picks)\n\n",
+	"✦ **Weave Router** → claude-haiku-4-5 · best pick for this turn\n\n",
+	"✦ **Weave Router** → deepseek/deepseek-v4-pro · switched for cheaper cache reuse\n\n",
+	"✦ **Weave Router** → deepseek/deepseek-v4-pro · stayed on your last pick\n\n",
+	"✦ **Weave Router** → claude-sonnet-4-5 · upgraded to a stronger tier\n\n",
+	"✦ **Weave Router** → gemini-3.1-flash-lite-preview · pinned for compaction / sub-agent\n\n",
+	"✦ **Weave Router** → deepseek/deepseek-v4-pro\n\n",
+	"✦ **Weave Router** → claude-haiku-4-5 · best pick for this turn · second-choice pick at low tier (would have used deepseek/deepseek-v4-pro)\n\n",
 }
 
 func TestStripRoutingMarker_AssistantBlockExactMatch(t *testing.T) {
@@ -149,14 +148,32 @@ func TestStripRoutingMarker_EmptyAndMissingMessages(t *testing.T) {
 	}
 }
 
-func TestStripRoutingMarker_StringContentNoOp(t *testing.T) {
-	// Some clients send messages[].content as a plain string. The marker is
-	// only injected inside content arrays, so string-content messages must be
-	// returned unchanged.
+func TestStripRoutingMarker_StringContentNoMarkerNoOp(t *testing.T) {
 	body := []byte(`{"messages":[{"role":"user","content":"hello"}]}`)
 	out, err := translate.StripRoutingMarkerFromMessages(body)
 	require.NoError(t, err)
 	assert.Equal(t, body, out)
+}
+
+func TestStripRoutingMarker_StringContentStripsMarker(t *testing.T) {
+	for _, marker := range sampleMarkers {
+		body := []byte(`{"messages":[{"role":"assistant","content":"` +
+			strings.ReplaceAll(strings.ReplaceAll(marker, `"`, `\"`), "\n", `\n`) +
+			`Hello, how can I help?"}]}`)
+		out, err := translate.StripRoutingMarkerFromMessages(body)
+		require.NoError(t, err)
+		assert.NotContains(t, string(out), markerSentinel)
+		assert.Equal(t, "Hello, how can I help?", gjson.GetBytes(out, "messages.0.content").String())
+	}
+}
+
+func TestStripRoutingMarker_StringContentOnlyMarkerBecomesEmpty(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"assistant","content":"` +
+		strings.ReplaceAll(strings.ReplaceAll(sampleMarkers[0], `"`, `\"`), "\n", `\n`) +
+		`"}]}`)
+	out, err := translate.StripRoutingMarkerFromMessages(body)
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), markerSentinel)
 }
 
 func TestStripRoutingMarker_PreservesAdjacentFields(t *testing.T) {

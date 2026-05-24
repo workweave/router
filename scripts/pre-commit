@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Git pre-commit hook — mirrors the CI checks in .github/workflows/test.yml.
+# Install: make install-hooks
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "==> gofmt"
+UNFORMATTED=$(gofmt -l .)
+if [ -n "$UNFORMATTED" ]; then
+    echo "error: Go files are not formatted. Run 'gofmt -w .'"
+    echo "$UNFORMATTED"
+    exit 1
+fi
+
+echo "==> go vet"
+go vet ./...
+
+echo "==> go build"
+go build -o /dev/null ./...
+
+echo "==> go test"
+go test -count=1 ./...
+
+echo "All pre-commit checks passed."

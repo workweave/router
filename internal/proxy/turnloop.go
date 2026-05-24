@@ -170,6 +170,70 @@ func (s *Service) runTurnLoop(
 		res.PinAgeSec = pinAge(pin)
 	}
 
+	// User-forced pins are immutable stickies — skip scorer and planner entirely.
+	// The pin was written by /force-model and stays active until /unforce-model
+	// clears it, at which point the pin is expired and this branch is not taken.
+	//
+	// Invariants maintained here:
+	//   1. Excluded-model policy is still enforced: if the forced model has been
+	//      added to the installation exclusion list since the pin was written, fall
+	//      through to normal routing so the exclusion takes effect immediately.
+	//   2. Provider eligibility is enforced per-request. In BYOK mode the request's
+	//      EnabledProviders may not contain the pinned provider (e.g. the user
+	//      forced gpt-5 but the current request only carries Anthropic BYOK creds).
+	//      Falling through to normal routing avoids a guaranteed 401/unauthenticated
+	//      upstream call.
+	//   3. The user's original forced model is preserved across turns. clampToCeiling
+	//      may downgrade the decision for this turn (and appends "+tier_clamp" to
+	//      the reason), but the pin is refreshed with the ORIGINAL pin decision so
+	//      a transient ceiling never permanently overwrites the user's directive.
+	if pinFound && pin.Reason == translate.ReasonUserForceModel {
+		_, excluded := req.ExcludedModels[pin.Model]
+		_, providerEnabled := req.EnabledProviders[pin.Provider]
+		providerEligible := req.EnabledProviders == nil || providerEnabled
+		if !excluded && providerEligible {
+			decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+			decision.Reason = translate.ReasonUserForceModel
+			res.Decision = decision
+			res.StickyHit = true
+			res.PinTier = "user_forced"
+			s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, pinDecision(pin))
+			return res, nil
+		}
+		// Forced pin is no longer servable on this request (excluded by policy
+		// or pinned provider not in EnabledProviders/BYOK). Treat it as missing
+		// so downstream sticky branches don't dispatch to an unauthorized
+		// provider. The pin row remains in storage — a later request whose
+		// EnabledProviders includes the forced provider will resume serving it.
+		pinFound = false
+		pin = sessionpin.Pin{}
+	}
+
+	// Previous-turn-maxed-out guard: when an OSS model's tool-call tokens fail
+	// to parse server-side (kimi <|tool_call_begin|>, qwen3 <tool_call> XML)
+	// the upstream emits them as content and generates to the output cap.
+	// Claude Code's "Output token limit hit. Resume directly…" auto-continue
+	// then re-pins the same broken model, producing a multi-minute loop. When
+	// the previous turn saturated the output cap, exclude the pinned model for
+	// this turn and treat the pin as missing so downstream sticky branches
+	// (ToolResult, !plannerEnabled) cannot re-anchor it before the scorer runs.
+	if pinFound && pin.LastOutputTokens >= prevTurnMaxedOutThreshold {
+		log.Info("Session pin maxed out on previous turn; excluding for this turn",
+			"pin_model", pin.Model,
+			"pin_provider", pin.Provider,
+			"last_output_tokens", pin.LastOutputTokens,
+		)
+		// Defensive copy: callers may share the ExcludedModels map across requests.
+		excluded := make(map[string]struct{}, len(req.ExcludedModels)+1)
+		for k := range req.ExcludedModels {
+			excluded[k] = struct{}{}
+		}
+		excluded[pin.Model] = struct{}{}
+		req.ExcludedModels = excluded
+		pinFound = false
+		pin = sessionpin.Pin{}
+	}
+
 	// Tool-result turns are mid-turn continuations. Re-routing them on
 	// trailing tool_result embedding flips decisions to noisy candidates;
 	// reuse the pin verbatim when present and refresh the TTL.
@@ -228,29 +292,46 @@ func (s *Service) runTurnLoop(
 	}
 
 	// Switch path: when switching off a warm cache, attempt bounded-cost
-	// handover. On summarizer error fall back to TrimLastN. When the
-	// summarizer is not wired or the request carries BYOK/client credentials,
-	// skip summarization and trim instead — the switch turn must NOT forward
-	// the full prior conversation to the new model.
+	// handover. On summarizer error fall back to TrimLastN.
 	//
 	// Privacy guard: the summarizer is wired with deployment-level creds.
-	// Calling it on a BYOK/client-creds request would route prior conversation
-	// through the platform account, violating tenant data boundaries.
+	// Routing a BYOK/client request's prior conversation through that
+	// deployment account would cross the tenant boundary. We avoid that by
+	// preferring per-request creds for the summarizer's provider when the
+	// caller forwarded them (BYOK or inbound Authorization/x-api-key for
+	// that provider) — that's the caller's own account, not the platform's.
+	// Only when the request is BYOK/client-keyed AND no matching creds for
+	// the summarizer's provider were forwarded do we skip and trim.
 	if pinFound {
+		var (
+			sumProvider       string
+			sumCreds          *Credentials
+			canCallSummarizer bool
+		)
+		if s.summarizer != nil {
+			sumProvider = s.summarizer.Provider()
+			sumCreds = resolveSummarizerCreds(ctx, sumProvider, reqHeaders)
+			nonDepCreds := s.requestUsesNonDeploymentCreds(ctx, reqHeaders)
+			canCallSummarizer = sumCreds != nil || !nonDepCreds
+		}
 		switch {
 		case s.summarizer == nil:
 			elided := handover.TrimLastN(env, 3)
 			res.Handover.Invoked = true
 			res.Handover.FallbackToTrim = true
 			log.Info("Handover summarizer not wired; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
-		case s.requestUsesNonDeploymentCreds(ctx, reqHeaders):
+		case !canCallSummarizer:
 			elided := handover.TrimLastN(env, 3)
 			res.Handover.Invoked = true
 			res.Handover.FallbackToTrim = true
-			log.Info("Handover summarizer skipped to preserve BYOK tenant boundary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
+			log.Info("Handover summarizer skipped to preserve tenant boundary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model, "sum_provider", sumProvider)
 		default:
+			summCtx := ctx
+			if sumCreds != nil {
+				summCtx = context.WithValue(ctx, CredentialsContextKey{}, sumCreds)
+			}
 			start := time.Now()
-			summary, summaryUsage, sumErr := s.summarizer.Summarize(ctx, env)
+			summary, summaryUsage, sumErr := s.summarizer.Summarize(summCtx, env)
 			res.Handover.Invoked = true
 			res.Handover.LatencyMS = time.Since(start).Milliseconds()
 			switch {
@@ -437,6 +518,26 @@ func estimateSummaryTokens(s string) int {
 		return 0
 	}
 	return len(s) / 4
+}
+
+// resolveSummarizerCreds returns BYOK or client-supplied credentials for
+// provider when available on the request. Used by the handover orchestrator
+// to run summarization on the caller's own account, avoiding tenant data
+// crossing the deployment key boundary when the request is BYOK/client-keyed.
+// Returns nil when no caller-supplied creds for the provider exist; callers
+// then either use the deployment key (if request is fully deployment-keyed)
+// or skip summarization (if request is BYOK/client-keyed for a different
+// provider).
+func resolveSummarizerCreds(ctx context.Context, provider string, headers http.Header) *Credentials {
+	if provider == "" {
+		return nil
+	}
+	if byok := BuildCredentialsMap(externalKeysFromContext(ctx)); byok != nil {
+		if creds, ok := byok[provider]; ok {
+			return creds
+		}
+	}
+	return ExtractClientCredentials(provider, headers)
 }
 
 // sortedEnabledKeys returns a deterministic slice of the keys in m for

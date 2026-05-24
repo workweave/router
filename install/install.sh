@@ -1,24 +1,40 @@
 #!/usr/bin/env bash
 #
-# Configures Claude Code to permanently route through the Weave Router by
-# writing the router base URL, router auth header, and a status line into
-# Claude Code's settings.json. After running, `claude` Just Works — no shell
-# exports, no manual settings edits.
+# Weave Router installer for Claude Code, Codex, and opencode.
 #
-# Two scopes:
+# Configures Claude Code (default), the OpenAI Codex CLI (`--codex`), or
+# opencode (`--opencode`) to permanently route through the Weave Router.
+# For Claude Code this writes the router base URL, router auth header,
+# and a status line into Claude Code's settings.json. For Codex it writes
+# a `model_providers.weave` entry plus `model_provider = "weave"` into
+# ~/.codex/config.toml (managed block delimited by markers). For opencode
+# it merges a `provider.weave` block (anthropic-compatible) into
+# opencode.json — since the file is JSON, install/uninstall are structural
+# (jq) rather than marker-delimited.
+#
+# Two scopes (apply to all targets):
 #   - user (default):  ~/.claude/settings.json  + ~/.weave/cc-statusline.sh
+#                      ~/.codex/config.toml                       (with --codex)
+#                      ~/.config/opencode/opencode.json           (with --opencode)
 #   - project:         <repo>/.claude/settings.json + <repo>/.claude/cc-statusline.sh
+#                      <repo>/.codex/config.toml                  (with --codex)
+#                      <repo>/opencode.json                       (with --opencode)
 #
 # Or pass --dir to install into any directory:
 #   - dir:              <dir>/.claude/settings.json + <dir>/.claude/cc-statusline.sh
+#                       <dir>/.codex/config.toml                  (with --codex)
+#                       <dir>/opencode.json                       (with --opencode)
 #
 # Usage:
-#   npx @workweave/router                                  # hosted router, user scope
+#   npx @workweave/router                                  # interactive picker (Claude Code, Codex, opencode)
+#   npx @workweave/router --claude                         # skip the picker, target Claude Code
+#   npx @workweave/router --codex                          # skip the picker, target the OpenAI Codex CLI
+#   npx @workweave/router --opencode                       # skip the picker, target opencode
 #   npx @workweave/router --scope project                  # commit-with-team install
 #   npx @workweave/router --dir /tmp/my-sandbox            # isolated throwaway install
 #   npx @workweave/router --local                          # local router on localhost:8080
 #   npx @workweave/router --base-url http://localhost:8080 # self-hosted, custom port
-#   npx @workweave/router --non-interactive                # require WEAVE_ROUTER_KEY env var
+#   npx @workweave/router --non-interactive                # require WEAVE_ROUTER_KEY env var (defaults target to claude)
 #   npx @workweave/router --quiet                          # suppress banner, ping check, and trailing tips
 #   npx @workweave/router --uninstall                      # remove a previous install (delegates to uninstall.sh)
 
@@ -37,6 +53,17 @@ base_url=""
 non_interactive="false"
 quiet="false"
 router_key_header="X-Weave-Router-Key"
+# Target tool whose config we patch. "claude" (default) writes Claude Code
+# settings.json; "codex" writes ~/.codex/config.toml; "opencode" merges a
+# provider block into opencode.json. Each target carries its own
+# credential-passthrough story in the router: Claude Code's logged-in
+# Anthropic key flows through unchanged, Codex's `OPENAI_API_KEY` flows
+# through via the same header path, and opencode talks to the router via
+# its anthropic-compatible API surface. target_explicit tracks whether
+# --claude / --codex / --opencode was passed so an interactive run can
+# prompt for the choice.
+target="claude"
+target_explicit="false"
 
 # ---------- helpers ----------
 
@@ -78,11 +105,17 @@ skip() { printf "%s⊙%s %s%s%s\n" "$C_DIM" "$C_RESET" "$C_DIM" "$*" "$C_RESET";
 print_banner() {
   [ "$quiet" = "true" ] && return 0
   [ "$tty_out" = "true" ] || return 0
+  local target_label
+  case "$target" in
+    codex)    target_label="Codex installer" ;;
+    opencode) target_label="opencode installer" ;;
+    *)        target_label="Claude Code installer" ;;
+  esac
   printf '\n'
   printf '%s  ╦ ╦╔═╗╔═╗╦  ╦╔═╗%s\n' "$C_BRAND" "$C_RESET"
   printf '%s  ║║║║╣ ╠═╣╚╗╔╝║╣ %s\n' "$C_BRAND" "$C_RESET"
   printf '%s  ╚╩╝╚═╝╩ ╩ ╚╝ ╚═╝%s\n' "$C_BRAND" "$C_RESET"
-  printf '  %sWeave Router · Claude Code installer%s\n\n' "$C_DIM" "$C_RESET"
+  printf '  %sWeave Router · %s%s\n\n' "$C_DIM" "$target_label" "$C_RESET"
 }
 
 # ---------- spinner ----------
@@ -207,6 +240,12 @@ refuse_if_symlink() {
   fi
 }
 
+# Markers that delimit the block this installer manages inside Codex's
+# config.toml. Kept on disk verbatim so a re-install (or uninstall.sh
+# --codex) can find and replace the block instead of duplicating it.
+WEAVE_CODEX_BEGIN_MARKER="# >>> weave-router managed (do not edit between markers) >>>"
+WEAVE_CODEX_END_MARKER="# <<< weave-router managed <<<"
+
 # ---------- identity helpers ----------
 #
 # The router parses X-Weave-User-Email and X-Weave-User-Name on every protocol
@@ -269,7 +308,7 @@ normalize_name() {
 
 # resolve_user_email picks the email to plant in router request headers so the
 # router can attribute traffic to a person even on shared API keys. Priority:
-# WEAVE_USER_EMAIL env override -> git config user.email -> interactive prompt
+# WEAVE_USER_EMAIL env override → git config user.email → interactive prompt
 # (pre-filled with whatever we found). In --non-interactive mode we never
 # prompt, so unset/invalid means we ship no header (router treats that as
 # account_uuid-only, same as today). Echoes the validated email on stdout.
@@ -290,6 +329,10 @@ resolve_user_email() {
     printf '%s' "$candidate"
     return
   fi
+  # Interactive: confirm/edit. Empty input keeps the suggested default; a
+  # literal `-` lets the user opt out (ship no header). This stays out of
+  # --quiet runs because --quiet implies the caller doesn't want prompts;
+  # they can still use WEAVE_USER_EMAIL to provide one explicitly.
   if [ "$quiet" = "true" ]; then
     printf '%s' "$candidate"
     return
@@ -318,8 +361,217 @@ resolve_user_email() {
   esac
 }
 
+# write_codex_config writes a managed [model_providers.weave] block to the
+# Codex CLI's config.toml. Sets `model_provider = "weave"` at the top level so
+# Codex picks the routed provider by default. Both lines live inside the
+# managed-block markers so uninstall removes them cleanly. We strip any
+# top-level `model_provider = ...` declaration OUTSIDE the markers before
+# appending so the file doesn't end up with a duplicate key (TOML rejects
+# that). Inline `model_provider` keys inside `[profiles.*]` sections stay
+# untouched.
+#
+# Usage: write_codex_config <config_file_path> <base_url> <api_key> [user_email] [user_name]
+write_codex_config() {
+  local config_file="$1"
+  local block_url="$2"
+  local block_key="$3"
+  local block_email="${4:-}"
+  local block_name="${5:-}"
+
+  # Escape `\` and `"` for TOML basic strings. Order matters: replace
+  # backslashes first so the quotes we add next aren't double-escaped. A
+  # display name like `John "J" Doe` would otherwise produce invalid TOML and
+  # Codex would silently fail to parse config.toml — the installer's success
+  # message wouldn't help diagnose. Router keys are alnum+`_` from the API so
+  # safe as-is, but we escape uniformly for defense-in-depth.
+  toml_escape() {
+    local s="${1//\\/\\\\}"
+    printf '%s' "${s//\"/\\\"}"
+  }
+
+  local esc_key esc_email esc_name esc_url
+  esc_key="$(toml_escape "$block_key")"
+  esc_email="$(toml_escape "$block_email")"
+  esc_name="$(toml_escape "$block_name")"
+  esc_url="$(toml_escape "$block_url")"
+
+  # Plant whichever identity values we have alongside the router key so the
+  # router can attribute Codex traffic to a person on shared keys. Build the
+  # entries piecewise so an empty email/name is omitted entirely — the router
+  # never sees a header with no value (and TOML rejects empty unquoted vals).
+  local headers_parts="\"X-Weave-Router-Key\" = \"${esc_key}\""
+  if [ -n "$block_email" ]; then
+    headers_parts="${headers_parts}, \"X-Weave-User-Email\" = \"${esc_email}\""
+  fi
+  if [ -n "$block_name" ]; then
+    headers_parts="${headers_parts}, \"X-Weave-User-Name\" = \"${esc_name}\""
+  fi
+  # Tag the client so telemetry can attribute traffic to Codex vs other CLIs
+  # that share the same router key. The router otherwise has to guess from
+  # User-Agent.
+  headers_parts="${headers_parts}, \"X-App\" = \"codex\""
+  local headers_line="http_headers = { ${headers_parts} }"
+
+  local block
+  block="$(cat <<TOML
+${WEAVE_CODEX_BEGIN_MARKER}
+# Managed by the Weave Router installer. Re-running the installer rewrites
+# this block; \`./uninstall.sh --codex\` removes it. To opt out without
+# uninstalling, change the model_provider value below.
+model_provider = "weave"
+
+[model_providers.weave]
+name = "Weave Router"
+base_url = "${esc_url}/v1"
+wire_api = "responses"
+${headers_line}
+${WEAVE_CODEX_END_MARKER}
+TOML
+)"
+
+  if [ -f "$config_file" ]; then
+    local tmp; tmp="$(mktemp -t weave-codex.XXXXXX)"
+    # Strip the managed block (between markers) plus any top-level
+    # `model_provider =` outside it. We define "top-level" as everything
+    # before the first `[section]` header. The awk handles both passes in
+    # one sweep so we never emit a duplicate.
+    awk -v begin="$WEAVE_CODEX_BEGIN_MARKER" -v end="$WEAVE_CODEX_END_MARKER" '
+      $0 == begin { skip = 1; next }
+      $0 == end   { skip = 0; next }
+      skip        { next }
+      /^[[:space:]]*\[/ { in_section = 1 }
+      !in_section && /^[[:space:]]*model_provider[[:space:]]*=/ { next }
+      { print }
+    ' "$config_file" >"$tmp"
+
+    # Insert the managed block at TOML top-level scope, NOT end-of-file. In
+    # TOML, every bare key after a `[section]` header belongs to that
+    # section, so appending `model_provider = "weave"` after a user's
+    # existing `[profiles.foo]` would silently scope it as
+    # `profiles.foo.model_provider` — Codex would never see the top-level
+    # default and routing would silently fail to activate. We splice the
+    # block in just before the first user section header so:
+    #   <user's top-level keys>           ← still top-level
+    #   <our managed block>               ← model_provider stays top-level
+    #     [model_providers.weave]         ← scoped section, OK anywhere
+    #   <user's sections>                 ← re-scope, unaffected
+    local first_section
+    first_section="$(awk '/^[[:space:]]*\[/ { print NR; exit }' "$tmp")"
+    if [ -n "$first_section" ]; then
+      # BSD `head -n 0` (macOS default) errors with "illegal line count"
+      # and trips `set -euo pipefail`, leaving an empty config. Skip the
+      # head call entirely when the file starts with a section header.
+      {
+        if [ "$first_section" -gt 1 ]; then
+          head -n "$((first_section - 1))" "$tmp"
+        fi
+        printf "%s\n" "$block"
+        tail -n "+${first_section}" "$tmp"
+      } >"$config_file"
+    else
+      # No section headers in the existing file — every prior user key was
+      # already at top-level. Our block ends with its own [section], so
+      # appending is safe (no bare keys follow).
+      cp "$tmp" "$config_file"
+      printf "\n%s\n" "$block" >>"$config_file"
+    fi
+    rm -f "$tmp"
+  else
+    printf "%s\n" "$block" >"$config_file"
+  fi
+  # 0600: the file holds a router key. Even at user scope, mode 644 would
+  # leak the key to any local user on a shared box.
+  chmod 600 "$config_file"
+}
+
+# write_opencode_config merges a managed `provider.weave` entry into opencode's
+# opencode.json (anthropic-compatible — the router speaks the Anthropic
+# Messages API natively, so opencode's bundled @ai-sdk/anthropic provider
+# works unmodified). Re-running rewrites the block in-place via jq; uninstall
+# strips it the same way. We also set `model` at the top level so a fresh
+# `opencode` invocation picks the router by default; if the user has set
+# their own model already, we leave it alone.
+#
+# Usage: write_opencode_config <config_file_path> <base_url> <api_key> [user_email] [user_name]
+write_opencode_config() {
+  local config_file="$1"
+  local block_url="$2"
+  local block_key="$3"
+  local block_email="${4:-}"
+  local block_name="${5:-}"
+
+  # Build the headers object piecewise so empty email/name vanish from the
+  # final JSON. opencode forwards the `headers` map verbatim to the upstream
+  # provider, so the router sees the same X-Weave-* triplet here that it
+  # would from Claude Code or Codex. The X-App tag lets router telemetry
+  # attribute traffic to opencode specifically.
+  local headers_json
+  headers_json="$(jq -n \
+    --arg key   "$block_key" \
+    --arg email "$block_email" \
+    --arg name  "$block_name" '
+    {"X-Weave-Router-Key": $key, "X-App": "opencode"}
+    | (if $email != "" then . + {"X-Weave-User-Email": $email} else . end)
+    | (if $name  != "" then . + {"X-Weave-User-Name":  $name } else . end)
+  ')"
+
+  # Headline models we surface in opencode's picker. The router re-routes
+  # each request anyway, so this list is mostly UX — what shows up when the
+  # user runs /models inside opencode. Keep it short and Anthropic-shaped
+  # so the bundled @ai-sdk/anthropic provider can request them.
+  #
+  # apiKey is set to the router key as well as planted in headers. opencode's
+  # @ai-sdk/anthropic provider treats apiKey as required at config-parse time
+  # and otherwise falls back to ANTHROPIC_API_KEY from the environment;
+  # without this, a user who's never had an Anthropic key in their shell hits
+  # a startup error before the router ever sees a request. The router itself
+  # ignores the value (auth runs off X-Weave-Router-Key); apiKey here is just
+  # a placeholder that satisfies the SDK's "is auth configured" check.
+  local block
+  block="$(jq -n \
+    --arg url "$block_url/v1" \
+    --arg key "$block_key" \
+    --argjson headers "$headers_json" '
+    {
+      npm: "@ai-sdk/anthropic",
+      name: "Weave Router",
+      options: { apiKey: $key, baseURL: $url, headers: $headers },
+      models: {
+        "claude-opus-4-7":   { name: "Claude Opus 4.7 (via Weave Router)" },
+        "claude-sonnet-4-6": { name: "Claude Sonnet 4.6 (via Weave Router)" },
+        "claude-haiku-4-5":  { name: "Claude Haiku 4.5 (via Weave Router)" }
+      }
+    }
+  ')"
+
+  # Merge into any existing opencode.json. We always overwrite provider.weave
+  # so re-install reflects the latest key/identity, but we leave the rest of
+  # the file (other providers, mcp, agent settings) untouched. Top-level
+  # `model` is only set when the user hasn't already picked one.
+  local merged
+  if [ -f "$config_file" ]; then
+    merged="$(jq --argjson block "$block" '
+      .provider = ((.provider // {}) | .weave = $block)
+      | (if (.model // "") == "" then .model = "weave/claude-sonnet-4-6" else . end)
+      | (.["$schema"] //= "https://opencode.ai/config.json")
+    ' "$config_file")"
+  else
+    merged="$(jq -n --argjson block "$block" '
+      {
+        "$schema": "https://opencode.ai/config.json",
+        model: "weave/claude-sonnet-4-6",
+        provider: { weave: $block }
+      }
+    ')"
+  fi
+  printf '%s\n' "$merged" >"$config_file"
+  # 0600: the file holds a router key. Even at user scope, mode 644 would
+  # leak the key to any local user on a shared box.
+  chmod 600 "$config_file"
+}
+
 # resolve_user_name mirrors resolve_user_email but for display name. Priority:
-# WEAVE_USER_NAME env override -> git config user.name -> empty. We don't
+# WEAVE_USER_NAME env override → git config user.name → empty. We don't
 # prompt for name independently: if email prompting yielded nothing, name
 # almost certainly will too, and a second prompt is noise. Echoes the
 # validated name on stdout.
@@ -417,6 +669,18 @@ while [ $# -gt 0 ]; do
       install_dir="${2:-}"; shift 2
       [ -n "$install_dir" ] || { err "--dir requires a path"; exit 2; }
       ;;
+    --codex)
+      target="codex"; target_explicit="true"; shift
+      ;;
+    --opencode)
+      target="opencode"; target_explicit="true"; shift
+      ;;
+    --claude)
+      # No-op selector for symmetry with --codex / --opencode. Useful in
+      # pipelines that want to skip the interactive picker without depending
+      # on the default.
+      target="claude"; target_explicit="true"; shift
+      ;;
     -h|--help)
       usage 0
       ;;
@@ -432,9 +696,33 @@ fi
 # trim trailing slash for cleanliness
 base_url="${base_url%/}"
 
+# ---------- interactive target prompt ----------
+
+# If neither --claude nor --codex was passed and we have a controlling
+# terminal, ask which tool to install for. Non-interactive runs (CI,
+# `curl | sh --non-interactive`) silently use the "claude" default — same
+# behavior the script had before --codex existed, so existing pipelines
+# don't change semantics. We prompt BEFORE print_banner so the banner's
+# target label (Claude Code installer / Codex installer) reflects the choice.
+if [ "$target_explicit" = "false" ] && [ "$non_interactive" = "false" ] && [ -r /dev/tty ]; then
+  printf "%sInstall target:%s\n" "$C_BOLD" "$C_RESET"
+  printf "  %s1)%s Claude Code  %s— patches ~/.claude/settings.json (or <repo>/.claude/)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "  %s2)%s Codex        %s— patches ~/.codex/config.toml (or <repo>/.codex/)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "  %s3)%s opencode     %s— patches ~/.config/opencode/opencode.json (or <repo>/opencode.json)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "Choose %s[1/2/3]%s (default %s1%s): " "$C_BOLD" "$C_RESET" "$C_BOLD" "$C_RESET"
+  read -r target_choice </dev/tty || target_choice=""
+  case "${target_choice:-1}" in
+    1|""|claude|c|C)  target="claude" ;;
+    2|codex|x|X)      target="codex" ;;
+    3|opencode|o|O)   target="opencode" ;;
+    *) err "invalid choice: $target_choice"; exit 2 ;;
+  esac
+fi
+
 # Banner runs before the interactive scope prompt so the very first thing
 # users see when `make full-setup` hands off to install.sh is the wordmark,
-# not a bare "Install scope:" line.
+# not a bare "Install scope:" line. Target prompt above already finalized
+# $target, so the banner's per-target label reflects the user's choice.
 print_banner
 
 # ---------- interactive scope prompt ----------
@@ -443,9 +731,35 @@ print_banner
 # scope to install into. Non-interactive runs (CI, `curl | sh --non-interactive`)
 # silently use the "user" default.
 if [ -z "$install_dir" ] && [ "$scope_explicit" = "false" ] && [ "$non_interactive" = "false" ] && [ -r /dev/tty ]; then
+  # Per-target paths so the prompt text matches what actually gets written.
+  case "$target" in
+    codex)
+      scope_user_path="~/.codex/"
+      scope_project_path="<repo>/.codex/"
+      scope_cli_label="codex"
+      ;;
+    opencode)
+      # Match the actual install path, which honors XDG_CONFIG_HOME. Showing a
+      # hardcoded "~/.config/opencode/" here lied to users with a custom
+      # $XDG_CONFIG_HOME — they'd see one path in the prompt and the installer
+      # would write to another.
+      if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+        scope_user_path="$XDG_CONFIG_HOME/opencode/"
+      else
+        scope_user_path="~/.config/opencode/"
+      fi
+      scope_project_path="<repo>/opencode.json"
+      scope_cli_label="opencode"
+      ;;
+    *)
+      scope_user_path="~/.claude/"
+      scope_project_path="<repo>/.claude/"
+      scope_cli_label="claude"
+      ;;
+  esac
   printf "%sInstall scope:%s\n" "$C_BOLD" "$C_RESET"
-  printf "  %s1)%s user     %s— write to ~/.claude/ (applies everywhere you run claude)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
-  printf "  %s2)%s project  %s— write to <repo>/.claude/ (applies only inside this repo)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "  %s1)%s user     %s— write to %s (applies everywhere you run %s)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$scope_user_path" "$scope_cli_label" "$C_RESET"
+  printf "  %s2)%s project  %s— write to %s (applies only inside this repo)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$scope_project_path" "$C_RESET"
   printf "Choose %s[1/2]%s (default %s1%s): " "$C_BOLD" "$C_RESET" "$C_BOLD" "$C_RESET"
   read -r scope_choice </dev/tty || scope_choice=""
   case "${scope_choice:-1}" in
@@ -477,15 +791,36 @@ fi
 
 # ---------- pre-flight ----------
 
-[ "$quiet" = "true" ] || info "scope=${C_BOLD}${scope}${C_RESET}  base_url=${C_BOLD}${base_url}${C_RESET}"
+[ "$quiet" = "true" ] || info "scope=${C_BOLD}${scope}${C_RESET}  target=${C_BOLD}${target}${C_RESET}  base_url=${C_BOLD}${base_url}${C_RESET}"
 
-require_cmd jq    "macOS: 'brew install jq' · Debian/Ubuntu: 'sudo apt install jq'"
+# Codex install only writes a TOML file (managed via awk) so jq isn't needed.
+# Claude Code's settings.json and opencode's opencode.json patching both use
+# jq to deep-merge / structurally rewrite JSON.
+if [ "$target" = "claude" ] || [ "$target" = "opencode" ]; then
+  require_cmd jq    "macOS: 'brew install jq' · Debian/Ubuntu: 'sudo apt install jq'"
+fi
 require_cmd curl  "macOS/Linux: usually preinstalled — check your package manager"
 
-if ! command -v claude >/dev/null 2>&1; then
-  warn "'claude' not found on PATH. Install Claude Code from https://claude.com/code, then re-run this script."
-  warn "Continuing — settings.json will be written and will take effect once Claude Code is installed."
-fi
+case "$target" in
+  claude)
+    if ! command -v claude >/dev/null 2>&1; then
+      warn "'claude' not found on PATH. Install Claude Code from https://claude.com/code, then re-run this script."
+      warn "Continuing — settings.json will be written and will take effect once Claude Code is installed."
+    fi
+    ;;
+  codex)
+    if ! command -v codex >/dev/null 2>&1; then
+      warn "'codex' not found on PATH. Install via 'npm install -g @openai/codex' (or brew install codex), then re-run this script."
+      warn "Continuing — config.toml will be written and will take effect once Codex is installed."
+    fi
+    ;;
+  opencode)
+    if ! command -v opencode >/dev/null 2>&1; then
+      warn "'opencode' not found on PATH. Install from https://opencode.ai (or 'npm install -g opencode-ai'), then re-run this script."
+      warn "Continuing — opencode.json will be written and will take effect once opencode is installed."
+    fi
+    ;;
+esac
 
 script_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)"
 
@@ -518,42 +853,87 @@ else
   esac
 fi
 
-case "$scope" in
-  user)
-    settings_dir="$settings_base/.claude"
-    settings_file="$settings_dir/settings.json"
-    local_settings_file=""
-    statusline_dir="${settings_base}/.weave"
-    statusline_file="$statusline_dir/cc-statusline.sh"
-    statusline_path_for_settings="$statusline_file"
-    ;;
-  project)
-    settings_dir="$settings_base/.claude"
-    settings_file="$settings_dir/settings.json"
-    local_settings_file="$settings_dir/settings.local.json"
-    statusline_dir="$settings_base/.claude"
-    statusline_file="$statusline_dir/cc-statusline.sh"
-    # Portable relative path for real repos (teammates can clone anywhere).
-    # Absolute path when --dir overrides (no meaningful $CLAUDE_PROJECT_DIR).
-    if [ -z "$install_dir" ]; then
-      statusline_path_for_settings="\${CLAUDE_PROJECT_DIR}/.claude/cc-statusline.sh"
-    else
+if [ "$target" = "claude" ]; then
+  case "$scope" in
+    user)
+      settings_dir="$settings_base/.claude"
+      settings_file="$settings_dir/settings.json"
+      local_settings_file=""
+      statusline_dir="${settings_base}/.weave"
+      statusline_file="$statusline_dir/cc-statusline.sh"
       statusline_path_for_settings="$statusline_file"
-    fi
-    ;;
-esac
+      ;;
+    project)
+      settings_dir="$settings_base/.claude"
+      settings_file="$settings_dir/settings.json"
+      local_settings_file="$settings_dir/settings.local.json"
+      statusline_dir="$settings_base/.claude"
+      statusline_file="$statusline_dir/cc-statusline.sh"
+      # Portable relative path for real repos (teammates can clone anywhere).
+      # Absolute path when --dir overrides (no meaningful $CLAUDE_PROJECT_DIR).
+      if [ -z "$install_dir" ]; then
+        statusline_path_for_settings="\${CLAUDE_PROJECT_DIR}/.claude/cc-statusline.sh"
+      else
+        statusline_path_for_settings="$statusline_file"
+      fi
+      ;;
+  esac
 
-# Symlink containment: refuse if any target path is a symlink. User-scope paths
-# under $HOME are trusted; project-scope and --dir paths come from a git repo or
-# user-supplied directory that may be hostile, so we check those.
-if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
-  refuse_if_symlink "$settings_dir"
-  refuse_if_symlink "$settings_file"
-  refuse_if_symlink "$local_settings_file"
-  refuse_if_symlink "$statusline_file"
+  # Symlink containment: refuse if any target path is a symlink. User-scope
+  # paths under $HOME are trusted; project-scope and --dir paths come from a
+  # git repo or user-supplied directory that may be hostile, so we check those.
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$settings_dir"
+    refuse_if_symlink "$settings_file"
+    refuse_if_symlink "$local_settings_file"
+    refuse_if_symlink "$statusline_file"
+  fi
+
+  mkdir -p "$settings_dir" "$statusline_dir"
+elif [ "$target" = "codex" ]; then
+  # Codex CLI reads config from ~/.codex/config.toml by default. For project
+  # scope we write to <repo>/.codex/config.toml; the user invokes Codex with
+  # `CODEX_HOME=<repo>/.codex codex` (or runs from the repo if Codex auto-
+  # discovers). The router key is embedded in the file so it stays per-
+  # teammate — .codex/config.toml goes in .gitignore in project scope.
+  codex_dir="$settings_base/.codex"
+  codex_config_file="$codex_dir/config.toml"
+
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$codex_dir"
+    refuse_if_symlink "$codex_config_file"
+  fi
+
+  mkdir -p "$codex_dir"
+else
+  # opencode discovers config in this order: $XDG_CONFIG_HOME/opencode/opencode.json
+  # (or ~/.config/opencode/opencode.json) for user scope, and opencode.json /
+  # opencode.jsonc walked up from CWD for project scope. We standardize on
+  # opencode.json at the repo root for project scope (the option teammates can
+  # commit) and the XDG path for user scope. The router key is embedded so
+  # opencode.json goes in .gitignore for project scope, same as Codex.
+  case "$scope" in
+    user)
+      opencode_dir="${XDG_CONFIG_HOME:-$settings_base/.config}/opencode"
+      ;;
+    project)
+      opencode_dir="$settings_base"
+      ;;
+  esac
+  # --dir overrides both scopes: drop opencode.json straight into <dir>/ so
+  # the sandbox is self-contained (mirrors how --dir behaves for Codex).
+  if [ -n "$install_dir" ]; then
+    opencode_dir="$install_dir"
+  fi
+  opencode_config_file="$opencode_dir/opencode.json"
+
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$opencode_dir"
+    refuse_if_symlink "$opencode_config_file"
+  fi
+
+  mkdir -p "$opencode_dir"
 fi
-
-mkdir -p "$settings_dir" "$statusline_dir"
 
 # ---------- token handling ----------
 
@@ -587,17 +967,20 @@ if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
 
 # ---------- identity (user email + name) ----------
 #
-# Resolved after api_key so the prompt sequence reads naturally: key first,
-# then "who are you?". Both end up as request headers the router parses on
-# every protocol so customers can link router users to Weave accounts on the
-# dashboard. Empty values = no header (router stays in account_uuid-only
-# mode), so existing behavior is preserved when git config is unset.
+# The router parses X-Weave-User-Email and X-Weave-User-Name on every protocol
+# (Anthropic, OpenAI/Codex, Gemini) and persists them onto
+# router.model_router_users so customers can attribute traffic to a person even
+# when many people share one API key. We plant the headers at install time
+# because Claude Code's metadata.user_id payload carries only account_uuid (no
+# email), and Codex carries no identity at all — without this step the router
+# only ever sees anonymous UUIDs for non-OTLP customers.
+#
+# Gate name on email: when the user explicitly opts out of email identity (via
+# '-' at the prompt or by clearing git config), don't auto-plant a name from
+# git config either. Opt-out should be all-or-nothing so the router
+# consistently sees zero identity headers when the user wants to stay
+# anonymous.
 user_email="$(resolve_user_email)"
-# Gate name on email: when the user explicitly opts out of email identity
-# (via '-' at the prompt or by clearing git config), don't auto-plant a
-# name from git config either. Opt-out should be all-or-nothing so the
-# router consistently sees zero identity headers when the user wants to
-# stay anonymous.
 if [ -n "$user_email" ]; then
   user_name="$(resolve_user_name)"
 else
@@ -609,6 +992,156 @@ elif [ -n "$user_email" ]; then
   ok "Will identify router traffic as $user_email"
 else
   info "No identity set — router traffic will be attributed by account UUID only."
+fi
+
+# ---------- slash command wrappers (shared by both targets) ----------
+#
+# Claude Code intercepts any prompt starting with "/" as a local slash command,
+# so a typed /force-model would resolve to "Unknown command" and never reach
+# the router. Codex CLI does the same (its built-in / menu has its own set).
+# Drop wrapper markdown files into the per-target commands directory so the
+# slash invocation expands locally into a literal "/force-model …" prompt that
+# the router's first-line parser picks up.
+#
+# Layout:
+#   Claude:  <settings_dir>/commands/{force-model,unforce-model}.md  → /force-model
+#   Codex:   <codex_dir>/prompts/{force-model,unforce-model}.md      → /prompts:force-model
+#
+# Files come from install/commands/ in the repo (or the colocated commands/
+# directory the npm package ships alongside install.sh).
+install_slash_commands() {
+  dst_dir="$1"
+  commands_src_dir=""
+  for candidate in \
+    "$script_dir/commands" \
+    "$script_dir/../commands"
+  do
+    if [ -d "$candidate" ]; then
+      commands_src_dir="$candidate"
+      break
+    fi
+  done
+  [ -n "$commands_src_dir" ] || return 0
+
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$dst_dir"
+  fi
+  mkdir -p "$dst_dir"
+  for cmd in force-model unforce-model; do
+    src="$commands_src_dir/$cmd.md"
+    dst="$dst_dir/$cmd.md"
+    [ -f "$src" ] || continue
+    if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+      refuse_if_symlink "$dst"
+    fi
+    cp "$src" "$dst"
+  done
+  ok "Slash commands written to $dst_dir (force-model, unforce-model)"
+}
+
+# ---------- codex install path (dispatch + exit before the Claude-only writes) ----------
+
+if [ "$target" = "codex" ]; then
+  write_codex_config "$codex_config_file" "$base_url" "$api_key" "$user_email" "$user_name"
+  ok "Codex config written to $codex_config_file"
+  install_slash_commands "$codex_dir/prompts"
+
+  # Project scope: ensure the per-teammate config (which holds the router key)
+  # is gitignored. The base URL is the same for every teammate, so a
+  # committed shared file would still leak the per-key portion. Easier to
+  # ignore the whole config and have each teammate run the installer.
+  if [ "$scope" = "project" ] && [ -z "$install_dir" ] && [ -n "${git_root:-}" ]; then
+    gitignore="$git_root/.gitignore"
+    refuse_if_symlink "$gitignore"
+    for entry in \
+      ".codex/config.toml"
+    do
+      if [ ! -f "$gitignore" ] || ! grep -qxF "$entry" "$gitignore"; then
+        printf '%s\n' "$entry" >>"$gitignore"
+      fi
+    done
+    ok "Updated $gitignore (ignored .codex/config.toml)"
+  fi
+
+  # Post-install verification: same probes the Claude path runs so a working
+  # install gives the same green checks regardless of target.
+  if [ "$quiet" != "true" ]; then
+    if ! spin "Pinging $base_url/health" curl -fsS --max-time 5 "$base_url/health"; then
+      warn "Could not reach $base_url/health within 5s. Settings are written; verify the router is running."
+    fi
+  fi
+
+  if [ -n "$api_key" ]; then
+    # Pass the router key via stdin (`@-`) instead of -H so it never lands in
+    # the process arg list. Mirrors the Claude-path validate logic.
+    validate_codex_key() {
+      printf '%s: %s\n' "$router_key_header" "$api_key" \
+        | curl -fsS --max-time 5 --header @- "$base_url/validate"
+    }
+    if ! spin "Validating API key" validate_codex_key; then
+      warn "Router rejected the API key (check it matches the dashboard at $base_url/ui/)."
+    fi
+  fi
+
+  printf "\n"
+  printf "%s✓%s %s%sWeave Router installed for Codex.%s\n" \
+    "$C_GREEN" "$C_RESET" "$C_BOLD" "$C_BRAND" "$C_RESET"
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    # Codex auto-discovers ~/.codex; for non-user installs the caller has to
+    # point CODEX_HOME at the directory we wrote so Codex finds our config.
+    info "Run Codex with CODEX_HOME=$codex_dir codex so it picks up this config."
+  fi
+  exit 0
+fi
+
+# ---------- opencode install path (dispatch + exit before the Claude-only writes) ----------
+
+if [ "$target" = "opencode" ]; then
+  write_opencode_config "$opencode_config_file" "$base_url" "$api_key" "$user_email" "$user_name"
+  ok "opencode config written to $opencode_config_file"
+
+  # Project scope: the per-teammate config carries the router key, so it
+  # stays out of git. Same reasoning as the Codex path — base URL is shared,
+  # but the key is per-person.
+  if [ "$scope" = "project" ] && [ -z "$install_dir" ] && [ -n "${git_root:-}" ]; then
+    gitignore="$git_root/.gitignore"
+    refuse_if_symlink "$gitignore"
+    for entry in \
+      "opencode.json"
+    do
+      if [ ! -f "$gitignore" ] || ! grep -qxF "$entry" "$gitignore"; then
+        printf '%s\n' "$entry" >>"$gitignore"
+      fi
+    done
+    ok "Updated $gitignore (ignored opencode.json)"
+  fi
+
+  # Post-install verification: same probes the Claude/Codex paths run.
+  if [ "$quiet" != "true" ]; then
+    if ! spin "Pinging $base_url/health" curl -fsS --max-time 5 "$base_url/health"; then
+      warn "Could not reach $base_url/health within 5s. Settings are written; verify the router is running."
+    fi
+  fi
+
+  if [ -n "$api_key" ]; then
+    validate_opencode_key() {
+      printf '%s: %s\n' "$router_key_header" "$api_key" \
+        | curl -fsS --max-time 5 --header @- "$base_url/validate"
+    }
+    if ! spin "Validating API key" validate_opencode_key; then
+      warn "Router rejected the API key (check it matches the dashboard at $base_url/ui/)."
+    fi
+  fi
+
+  printf "\n"
+  printf "%s✓%s %s%sWeave Router installed for opencode.%s\n" \
+    "$C_GREEN" "$C_RESET" "$C_BOLD" "$C_BRAND" "$C_RESET"
+  if [ -n "$install_dir" ]; then
+    # --dir installs land outside opencode's discovery roots, so the caller
+    # has to point opencode at the file explicitly.
+    info "Run opencode with OPENCODE_CONFIG=$opencode_config_file opencode."
+  fi
+  exit 0
 fi
 
 # ---------- write the statusline script ----------
@@ -749,6 +1282,7 @@ prices='{
     "claude-opus-4-6":                  0.015,
     "claude-opus-4-7":                  0.015,
     "claude-sonnet-4-5":                0.003,
+    "claude-sonnet-4-6":                0.003,
     "deepseek/deepseek-v4-flash":       0.00014,
     "deepseek/deepseek-v4-pro":         0.00174,
     "gemini-2.0-flash":                 0.0001,
@@ -760,6 +1294,7 @@ prices='{
     "gemini-3-pro-preview":             0.002,
     "gemini-3.1-flash-lite-preview":    0.0001,
     "gemini-3.1-pro-preview":           0.002,
+    "gemini-3.5-flash":                 0.0015,
     "gpt-4.1":                          0.002,
     "gpt-4.1-mini":                     0.0004,
     "gpt-4.1-nano":                     0.0001,
@@ -777,16 +1312,26 @@ prices='{
     "gpt-5.5-mini":                     0.0005,
     "gpt-5.5-nano":                     0.00015,
     "gpt-5.5-pro":                      0.03,
+    "minimax/minimax-m2.7":             0.0003,
+    "mistralai/mistral-small-2603":     0.0002,
     "moonshotai/kimi-k2.5":             0.0006,
-    "qwen/qwen3-235b-a22b-2507":        0.000071,
+    "moonshotai/kimi-k2.6":             0.00095,
+    "qwen/qwen3-235b-a22b-2507":        0.0002266,
+    "qwen/qwen3-30b-a3b-instruct-2507": 0.00015,
+    "qwen/qwen3-coder":                 0.0009,
     "qwen/qwen3-coder-next":            0.0005,
-    "qwen/qwen3-next-80b-a3b-instruct": 0.00015
+    "qwen/qwen3-next-80b-a3b-instruct": 0.00015,
+    "qwen/qwen3.5-flash-02-23":         0.00005,
+    "qwen/qwen3.6-35b-a3b":             0.00015,
+    "xiaomi/mimo-v2.5-pro":             0.001,
+    "z-ai/glm-5":                       0.0006
   },
   "output": {
     "claude-haiku-4-5":                 0.004,
     "claude-opus-4-6":                  0.075,
     "claude-opus-4-7":                  0.075,
     "claude-sonnet-4-5":                0.015,
+    "claude-sonnet-4-6":                0.015,
     "deepseek/deepseek-v4-flash":       0.00028,
     "deepseek/deepseek-v4-pro":         0.00348,
     "gemini-2.0-flash":                 0.0004,
@@ -798,6 +1343,7 @@ prices='{
     "gemini-3-pro-preview":             0.008,
     "gemini-3.1-flash-lite-preview":    0.0004,
     "gemini-3.1-pro-preview":           0.008,
+    "gemini-3.5-flash":                 0.009,
     "gpt-4.1":                          0.008,
     "gpt-4.1-mini":                     0.0016,
     "gpt-4.1-nano":                     0.0004,
@@ -815,10 +1361,19 @@ prices='{
     "gpt-5.5-mini":                     0.0025,
     "gpt-5.5-nano":                     0.0006,
     "gpt-5.5-pro":                      0.12,
+    "minimax/minimax-m2.7":             0.0012,
+    "mistralai/mistral-small-2603":     0.0006,
     "moonshotai/kimi-k2.5":             0.003,
-    "qwen/qwen3-235b-a22b-2507":        0.000463,
+    "moonshotai/kimi-k2.6":             0.004,
+    "qwen/qwen3-235b-a22b-2507":        0.0009064,
+    "qwen/qwen3-30b-a3b-instruct-2507": 0.0006,
+    "qwen/qwen3-coder":                 0.0027,
     "qwen/qwen3-coder-next":            0.0012,
-    "qwen/qwen3-next-80b-a3b-instruct": 0.0012
+    "qwen/qwen3-next-80b-a3b-instruct": 0.0012,
+    "qwen/qwen3.5-flash-02-23":         0.00015,
+    "qwen/qwen3.6-35b-a3b":             0.00095,
+    "xiaomi/mimo-v2.5-pro":             0.003,
+    "z-ai/glm-5":                       0.00208
   }
 }'
 # END_GENERATED_PRICES
@@ -874,9 +1429,24 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
   # The marker regex tolerates the optional "(<provider>)" segment and a
   # `[1m]` / `-YYYYMMDD` suffix on either model name so transcripts written
   # against context-tiered or dated model ids still parse cleanly.
+  #
+  # Dedup note: CC writes one JSONL entry per *content block* in an
+  # assistant turn (text, text, tool_use → 3 entries), and every entry
+  # carries the same `message.usage`. Summing per-entry triple-counts the
+  # turn. We dedupe on (message.id, message.usage) before summing:
+  #   * For native Anthropic upstreams message.id is unique per turn, so
+  #     this collapses the content-block fan-out cleanly.
+  #   * For non-Anthropic upstreams that round-trip through the router's
+  #     translator, message.id can be a constant placeholder
+  #     ("msg_translated"); usage still differs per turn (input_tokens
+  #     grows), so the composite key keeps turns distinct. Two turns with
+  #     byte-identical id AND usage would still collapse, but that's a
+  #     genuine retry/duplicate we want to drop.
   read -r session_savings tot_in tot_out tot_cache_read tot_cache_write < <(
-    jq -r --argjson p "$prices" --arg requested "$requested_norm" '
-      select(.type=="assistant") |
+    jq -rs --argjson p "$prices" --arg requested "$requested_norm" '
+      [.[] | select(.type=="assistant")] |
+      unique_by([.message.id, .message.usage]) |
+      .[] |
       .message as $m |
       ($m.model // "" | sub("\\[[^]]*\\]$"; "") | sub("-[0-9]{8}$"; "")) as $rm |
       {
@@ -1001,6 +1571,7 @@ fi
 if [ -n "$user_name" ]; then
   custom_headers="$custom_headers"$'\n'"X-Weave-User-Name: $user_name"
 fi
+custom_headers="$custom_headers"$'\n'"X-App: claude-code"
 
 if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
   jq -n --arg url "$base_url" --arg sl "$statusline_path_for_settings" '{
@@ -1032,6 +1603,9 @@ else
   cp "$tmp_patch" "$settings_file"
 fi
 ok "Settings written to $settings_file"
+
+# Slash command wrappers — see install_slash_commands() below for the why.
+install_slash_commands "$settings_dir/commands"
 
 if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
   jq -n --arg header "$custom_headers" '{

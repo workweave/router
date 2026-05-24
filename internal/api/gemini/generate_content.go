@@ -99,6 +99,11 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 					"no provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header")
 				return
 			}
+			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
+				log.Warn("Invalid routing knobs supplied", "err", err)
+				writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+				return
+			}
 			if errors.Is(err, cluster.ErrClusterUnavailable) {
 				log.Error("Cluster routing unavailable", "err", err)
 				c.Header("Retry-After", "1")
@@ -146,7 +151,7 @@ func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
 		Email:       proxy.NormalizeEmail(h.Get("X-Weave-User-Email")),
 		DisplayName: proxy.NormalizeDisplayName(h.Get("X-Weave-User-Name")),
 		UserAgent:   h.Get("User-Agent"),
-		ClientApp:   h.Get("X-App"),
+		ClientApp:   proxy.NormalizeClientApp(h.Get("X-App"), h.Get("User-Agent")),
 	}
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
 }

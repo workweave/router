@@ -68,6 +68,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, providers.ProviderGoogle, r.Header),
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
+		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {
@@ -146,12 +147,21 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 
 	proxyStart := time.Now()
 	var extractor *otel.UsageExtractor
-	proxyWriter := http.ResponseWriter(w)
-	if s.usageRequired() {
-		extractor = otel.NewUsageExtractor(w, decision.Provider)
-		proxyWriter = extractor
+	var sink http.ResponseWriter = w
+	if marker := routingMarkerFor(routeRes); marker != "" {
+		mw := translate.NewGeminiRoutingMarkerWriter(sink, marker)
+		// Flush marker + HTTP 200 immediately so TTFB is decoupled from
+		// upstream prefill. Locks status to 200.
+		if err := mw.Prelude(env.Stream()); err != nil {
+			log.Error("Gemini routing-marker prelude failed", "err", err)
+		}
+		sink = mw
 	}
-	proxyErr := p.Proxy(ctx, decision, prep, proxyWriter, r)
+	if s.usageRequired() {
+		extractor = otel.NewUsageExtractor(sink, decision.Provider)
+		sink = extractor
+	}
+	proxyErr := p.Proxy(ctx, decision, prep, sink, r)
 	proxyMs := time.Since(proxyStart).Milliseconds()
 
 	in, out := extractor.Tokens()

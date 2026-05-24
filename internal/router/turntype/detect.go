@@ -57,7 +57,11 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 		return TitleGen
 	}
 	systemText := env.SystemText()
-	if isCompaction(systemText) {
+	// Compaction is a Claude-Code-only signal and Claude Code always talks
+	// Anthropic wire format. Gating on format keeps Codex / OpenAI clients —
+	// whose system prompts can incidentally mention "compact" and
+	// "conversation" — out of the hard pin.
+	if env.SourceFormat() == translate.FormatAnthropic && isCompaction(systemText) {
 		return Compaction
 	}
 	if isSubAgentDispatch(env.MetadataUserID(), env.FirstUserMessageText(), subAgentHint) {
@@ -114,8 +118,7 @@ func isTitleGen(env *translate.RequestEnvelope, hasTools bool) bool {
 // context-compaction instruction markers.
 func isCompaction(systemText string) bool {
 	lower := strings.ToLower(systemText)
-	return strings.Contains(lower, "your task is to create a detailed summary") ||
-		(strings.Contains(lower, "compact") && strings.Contains(lower, "conversation"))
+	return strings.Contains(lower, "your task is to create a detailed summary")
 }
 
 // isSubAgentDispatch reports whether the request originates from a

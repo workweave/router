@@ -4,13 +4,14 @@ package openaicompat
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
@@ -79,28 +80,12 @@ func rewriteModelField(body []byte, modelIDMap map[string]string) []byte {
 	if len(modelIDMap) == 0 || len(body) == 0 {
 		return body
 	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return body
-	}
-	modelRaw, ok := raw["model"]
-	if !ok {
-		return body
-	}
-	var model string
-	if err := json.Unmarshal(modelRaw, &model); err != nil {
-		return body
-	}
+	model := gjson.GetBytes(body, "model").String()
 	upstream, ok := modelIDMap[model]
 	if !ok {
 		return body
 	}
-	newModel, err := json.Marshal(upstream)
-	if err != nil {
-		return body
-	}
-	raw["model"] = newModel
-	out, err := json.Marshal(raw)
+	out, err := sjson.SetBytes(body, "model", upstream)
 	if err != nil {
 		return body
 	}

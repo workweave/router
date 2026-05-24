@@ -7,6 +7,9 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const checkBillingTablesExist = `-- name: CheckBillingTablesExist :one
@@ -205,6 +208,19 @@ type ListOrgLedgerParams struct {
 	RowLimit       int32
 }
 
+type ListOrgLedgerRow struct {
+	ID                    uuid.UUID
+	OrganizationID        string
+	DeltaUsdMicros        int64
+	NotionalCostMicros    int64
+	BalanceAfterMicros    int64
+	EntryType             string
+	StripePaymentIntentID *string
+	RouterRequestID       *string
+	RouterModel           *string
+	CreatedAt             pgtype.Timestamptz
+}
+
 // Paginated read for the dashboard ledger panel. Sorted newest-first so the
 // UI can render without an extra ORDER BY in Go.
 //
@@ -223,15 +239,15 @@ type ListOrgLedgerParams struct {
 //	WHERE organization_id = $1::varchar
 //	ORDER BY created_at DESC
 //	LIMIT $2::int
-func (q *Queries) ListOrgLedger(ctx context.Context, arg ListOrgLedgerParams) ([]RouterOrganizationCreditLedger, error) {
+func (q *Queries) ListOrgLedger(ctx context.Context, arg ListOrgLedgerParams) ([]ListOrgLedgerRow, error) {
 	rows, err := q.db.Query(ctx, listOrgLedger, arg.OrganizationID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []RouterOrganizationCreditLedger
+	var items []ListOrgLedgerRow
 	for rows.Next() {
-		var i RouterOrganizationCreditLedger
+		var i ListOrgLedgerRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OrganizationID,

@@ -52,14 +52,33 @@ func BuildCredentialsMap(keys []*auth.ExternalAPIKey) map[string]*Credentials {
 func ExtractClientCredentials(provider string, headers http.Header) *Credentials {
 	switch provider {
 	case providers.ProviderAnthropic:
-		if key := strings.TrimSpace(headers.Get("x-api-key")); key != "" && !auth.HasAPIKeyPrefix(key) {
+		// Real Anthropic API keys carry the sk-ant- prefix; requiring it here
+		// prevents a misplaced cross-provider key (e.g. an OpenAI `sk-…`
+		// passed in `x-api-key` by mistake) from being misclassified as
+		// Anthropic creds and routed through the summarizer / upstream call.
+		if key := strings.TrimSpace(headers.Get("x-api-key")); key != "" &&
+			!auth.HasAPIKeyPrefix(key) && strings.HasPrefix(key, "sk-ant-") {
 			return &Credentials{APIKey: []byte(key), Source: "client"}
+		}
+		// Authorization: Bearer with a real Anthropic API key (sk-ant-api-…)
+		// is legitimate client creds; OAuth bearers (sk-ant-oat-…) are
+		// session tokens for Claude Code's Claude.ai login and can't be used
+		// for direct API calls — they must not enable Anthropic upstream
+		// (would 401) nor be misidentified as creds for any other provider.
+		if raw, found := strings.CutPrefix(headers.Get("Authorization"), "Bearer "); found {
+			key := strings.TrimSpace(raw)
+			if strings.HasPrefix(key, "sk-ant-api-") && !auth.HasAPIKeyPrefix(key) {
+				return &Credentials{APIKey: []byte(key), Source: "client"}
+			}
 		}
 	case providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
 		authHeader := headers.Get("Authorization")
 		if raw, found := strings.CutPrefix(authHeader, "Bearer "); found {
 			key := strings.TrimSpace(raw)
-			if key != "" && !auth.HasAPIKeyPrefix(key) {
+			// Reject Anthropic-shaped tokens (API keys AND OAuth bearers)
+			// here so one Bearer header doesn't get misidentified as creds
+			// for every Bearer-using provider.
+			if key != "" && !auth.HasAPIKeyPrefix(key) && !strings.HasPrefix(key, "sk-ant-") {
 				return &Credentials{APIKey: []byte(key), Source: "client"}
 			}
 		}

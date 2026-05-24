@@ -1,7 +1,7 @@
 // Package cache implements a semantic response cache. Short-circuits
 // near-duplicate non-streaming requests by cosine similarity on prompt
-// embedding; per-(installation, inbound-format) isolation. TTL is the only
-// eviction.
+// embedding; per-(installation, inbound-format) isolation. Entries expire
+// lazily on Lookup once they exceed the configured TTL.
 package cache
 
 import (
@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2/expirable"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 // CachedResponse captures the upstream response in the inbound wire format.
@@ -26,27 +26,52 @@ type CachedResponse struct {
 type Config struct {
 	PerClusterThreshold map[int]float32
 	DefaultThreshold    float32
-	// BucketSize caps per-(installation, format, clusterID) LRU size.
-	BucketSize   int
-	TTL          time.Duration
-	MaxBodyBytes int
+	// BucketSize caps each per-(installation, format, clusterID, clusterVersion,
+	// knobsHash) LRU.
+	BucketSize int
+	// MaxBucketsPerInstallation caps the number of distinct buckets each
+	// installation may hold. Bucket identity includes attacker-influenceable
+	// inputs (cluster version, knobs hash), so without a per-installation cap
+	// one tenant could vary x-weave-routing-* headers to evict other tenants'
+	// buckets out of a shared global LRU.
+	MaxBucketsPerInstallation int
+	// MaxInstallations caps the number of distinct installations tracked.
+	// Installations come from authenticated bearer tokens, not request
+	// headers, so this is defense in depth.
+	MaxInstallations int
+	TTL              time.Duration
+	MaxBodyBytes     int
 }
 
 // DefaultConfig returns conservative defaults tuned for staging.
 func DefaultConfig() Config {
 	return Config{
-		DefaultThreshold: 0.95,
-		BucketSize:       1024,
-		TTL:              1 * time.Hour,
-		MaxBodyBytes:     1 << 20,
+		DefaultThreshold:          0.95,
+		BucketSize:                1024,
+		MaxBucketsPerInstallation: 512,
+		MaxInstallations:          1024,
+		TTL:                       1 * time.Hour,
+		MaxBodyBytes:              1 << 20,
 	}
 }
 
 // Cache is the in-memory semantic cache. Concurrent-safe.
+//
+// Per-bucket TTL is implemented with `storedAt` on each entry checked
+// lazily by Lookup, not via a background goroutine. expirable.LRU was
+// the obvious fit but its v2.0.7 cleanup goroutine has no public
+// shutdown — using it for inner buckets would leak one goroutine per
+// evicted bucket whenever an installation churned past
+// MaxBucketsPerInstallation.
 type Cache struct {
-	cfg     Config
-	buckets map[bucketKey]*expirable.LRU[entryKey, *entry]
-	mu      sync.Mutex
+	cfg           Config
+	now           func() time.Time
+	installations *lru.Cache[string, *installationCache]
+	mu            sync.Mutex
+}
+
+type installationCache struct {
+	buckets *lru.Cache[bucketKey, *lru.Cache[entryKey, *entry]]
 }
 
 // New constructs a Cache; zero Config fields fall through to DefaultConfig.
@@ -58,15 +83,27 @@ func New(cfg Config) *Cache {
 	if cfg.BucketSize <= 0 {
 		cfg.BucketSize = def.BucketSize
 	}
+	if cfg.MaxBucketsPerInstallation <= 0 {
+		cfg.MaxBucketsPerInstallation = def.MaxBucketsPerInstallation
+	}
+	if cfg.MaxInstallations <= 0 {
+		cfg.MaxInstallations = def.MaxInstallations
+	}
 	if cfg.TTL <= 0 {
 		cfg.TTL = def.TTL
 	}
 	if cfg.MaxBodyBytes <= 0 {
 		cfg.MaxBodyBytes = def.MaxBodyBytes
 	}
+	installations, err := lru.New[string, *installationCache](cfg.MaxInstallations)
+	if err != nil {
+		// lru.New only errors on size <= 0, which we just guarded against.
+		panic(err)
+	}
 	return &Cache{
-		cfg:     cfg,
-		buckets: make(map[bucketKey]*expirable.LRU[entryKey, *entry]),
+		cfg:           cfg,
+		now:           time.Now,
+		installations: installations,
 	}
 }
 
@@ -80,9 +117,10 @@ const (
 )
 
 type bucketKey struct {
-	installationID string
 	format         Format
 	clusterID      int
+	clusterVersion string
+	knobsHash      uint64
 }
 
 // entryKey is a 16-byte sha256-truncated embedding digest, so we don't
@@ -92,6 +130,7 @@ type entryKey [16]byte
 type entry struct {
 	embedding []float32
 	response  CachedResponse
+	storedAt  time.Time
 }
 
 // thresholdFor returns the cosine threshold for clusterID, falling
@@ -106,12 +145,13 @@ func (c *Cache) thresholdFor(clusterID int) float32 {
 // Lookup walks buckets for (installation, format, clusterIDs) and
 // returns the first entry whose cosine clears the threshold.
 // embedding must be L2-normalized; clusterIDs order is irrelevant.
-func (c *Cache) Lookup(installationID string, format Format, embedding []float32, clusterIDs []int) (CachedResponse, bool) {
+func (c *Cache) Lookup(installationID string, format Format, embedding []float32, clusterIDs []int, clusterVersion string, knobsHash uint64) (CachedResponse, bool) {
 	if c == nil || len(embedding) == 0 || len(clusterIDs) == 0 {
 		return CachedResponse{}, false
 	}
+	now := c.now()
 	for _, cid := range clusterIDs {
-		bucket := c.bucket(installationID, format, cid, false)
+		bucket := c.bucket(installationID, format, cid, clusterVersion, knobsHash, false)
 		if bucket == nil {
 			continue
 		}
@@ -120,6 +160,10 @@ func (c *Cache) Lookup(installationID string, format Format, embedding []float32
 		for _, k := range bucket.Keys() {
 			e, ok := bucket.Get(k)
 			if !ok {
+				continue
+			}
+			if now.Sub(e.storedAt) > c.cfg.TTL {
+				bucket.Remove(k)
 				continue
 			}
 			sim := cosine(embedding, e.embedding)
@@ -133,14 +177,14 @@ func (c *Cache) Lookup(installationID string, format Format, embedding []float32
 
 // Store persists a response. clusterID should be one of the routing
 // decision's top-p clusters. Oversized bodies are silently dropped.
-func (c *Cache) Store(installationID string, format Format, embedding []float32, clusterID int, resp CachedResponse) {
+func (c *Cache) Store(installationID string, format Format, embedding []float32, clusterID int, resp CachedResponse, clusterVersion string, knobsHash uint64) {
 	if c == nil || len(embedding) == 0 {
 		return
 	}
 	if len(resp.Body) > c.cfg.MaxBodyBytes {
 		return
 	}
-	bucket := c.bucket(installationID, format, clusterID, true)
+	bucket := c.bucket(installationID, format, clusterID, clusterVersion, knobsHash, true)
 	if bucket == nil {
 		return
 	}
@@ -150,22 +194,46 @@ func (c *Cache) Store(installationID string, format Format, embedding []float32,
 	bucket.Add(entryKeyFor(embedCopy), &entry{
 		embedding: embedCopy,
 		response:  resp,
+		storedAt:  c.now(),
 	})
 }
 
 // bucket returns the LRU for a key. create=false returns nil for missing
-// buckets (lookup path); create=true allocates lazily.
-func (c *Cache) bucket(installationID string, format Format, clusterID int, create bool) *expirable.LRU[entryKey, *entry] {
-	key := bucketKey{installationID: installationID, format: format, clusterID: clusterID}
+// buckets (lookup path); create=true allocates lazily, capping per-
+// installation so one tenant cannot churn knob hashes to evict another's
+// buckets.
+func (c *Cache) bucket(installationID string, format Format, clusterID int, clusterVersion string, knobsHash uint64, create bool) *lru.Cache[entryKey, *entry] {
+	key := bucketKey{
+		format:         format,
+		clusterID:      clusterID,
+		clusterVersion: clusterVersion,
+		knobsHash:      knobsHash,
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	b, ok := c.buckets[key]
+	ic, ok := c.installations.Get(installationID)
 	if !ok {
 		if !create {
 			return nil
 		}
-		b = expirable.NewLRU[entryKey, *entry](c.cfg.BucketSize, nil, c.cfg.TTL)
-		c.buckets[key] = b
+		buckets, err := lru.New[bucketKey, *lru.Cache[entryKey, *entry]](c.cfg.MaxBucketsPerInstallation)
+		if err != nil {
+			panic(err)
+		}
+		ic = &installationCache{buckets: buckets}
+		c.installations.Add(installationID, ic)
+	}
+	b, ok := ic.buckets.Get(key)
+	if !ok {
+		if !create {
+			return nil
+		}
+		b, err := lru.New[entryKey, *entry](c.cfg.BucketSize)
+		if err != nil {
+			panic(err)
+		}
+		ic.buckets.Add(key, b)
+		return b
 	}
 	return b
 }

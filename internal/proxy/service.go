@@ -73,6 +73,15 @@ type Service struct {
 	// upstream API key is configured at the deployment level. When nil, all
 	// registered providers are treated as deployment-keyed (legacy behavior).
 	deploymentKeyedProviders map[string]struct{}
+	// passthroughEligibleProviders is the subset of registered providers
+	// reachable via client-supplied auth headers (no deployment key, no
+	// BYOK). Entries here are added to the eligible set only when the
+	// inbound request came in via the matching surface — otherwise the
+	// OpenAI client would forward an Anthropic-surface request's `x-api-key`
+	// to api.openai.com (and vice versa), which is a cross-provider
+	// credential leak even when upstream 401s. Surface-scoping ensures
+	// passthrough creds only enable the upstream they were issued for.
+	passthroughEligibleProviders map[string]struct{}
 	// planner parameterizes the Prism-style EV policy for stay-vs-switch.
 	planner planner.EVConfig
 	// plannerEnabled is the kill switch. When false, the orchestrator falls
@@ -98,6 +107,14 @@ type Service struct {
 // so the pin lifecycle tracks the cache it's keeping warm.
 const pinSessionTTL = time.Hour
 
+// prevTurnMaxedOutThreshold is the LastOutputTokens count above which we treat
+// the previous turn as having saturated the output cap. Set just under the
+// 8192 defaultMaxOutputTokenCap; legitimate end_turn completions almost never
+// approach this on tool-calling turns, while OSS-model parse-failure runaways
+// land exactly at the cap. Used by runTurnLoop to break the auto-continue
+// loop by excluding the pinned model for the next turn.
+const prevTurnMaxedOutThreshold = 8000
+
 // APIKeyIDContextKey is the request-context key for the authenticated api_key_id.
 type APIKeyIDContextKey struct{}
 
@@ -114,8 +131,8 @@ type InstallationExcludedModelsContextKey struct{}
 // installationExcludedModelsFromContext returns the per-installation exclusion
 // list stashed on ctx by the auth middleware, or nil when none is present.
 
-// routingMarkerFor builds the "brand -> model . reason" snippet emitted
-// at the start of every cross-format streamed response.
+// routingMarkerFor builds the "brand → model · note" snippet emitted at the
+// start of every cross-format streamed response.
 func routingMarkerFor(res turnLoopResult) string {
 	decision := res.Decision
 	if decision.Model == "" {
@@ -127,11 +144,8 @@ func routingMarkerFor(res turnLoopResult) string {
 		return ""
 	}
 	parts := []string{"✦ **Weave Router** → " + decision.Model}
-	if decision.Provider != "" {
-		parts[0] += " (" + decision.Provider + ")"
-	}
 	if reason := routingReasonShort(res); reason != "" {
-		parts = append(parts, "reason: "+reason)
+		parts = append(parts, reason)
 	}
 	if note := clampNote(res); note != "" {
 		parts = append(parts, note)
@@ -144,61 +158,36 @@ func clampNote(res turnLoopResult) string {
 	if !res.TierClamped || res.PreClampModel == "" {
 		return ""
 	}
-	upsell := upsellModelFor(res.RequestedTier)
-	if upsell == "" {
-		return fmt.Sprintf("second-choice pick (would have used %s — capped to your requested %s tier)", res.PreClampModel, res.RequestedTier.String())
-	}
-	return fmt.Sprintf("second-choice pick (would have used %s — capped to your requested %s tier; request %s to unlock higher-tier picks)", res.PreClampModel, res.RequestedTier.String(), upsell)
+	return fmt.Sprintf("second-choice pick at %s tier (would have used %s)", res.RequestedTier.String(), res.PreClampModel)
 }
 
-// upsellModelFor returns the conventional next-tier-up model name for the
-// clamp note. High tier has no upsell.
-func upsellModelFor(t catalog.Tier) string {
-	switch t {
-	case catalog.TierLow:
-		return "claude-sonnet-4-5"
-	case catalog.TierMid:
-		return "claude-opus-4-7"
-	default:
-		return ""
-	}
-}
-
-// routingReasonShort returns a human-readable reason for the marker.
+// routingReasonShort returns a short user-facing reason for the routing
+// decision, or empty when the underlying code is internal recovery noise.
 func routingReasonShort(res turnLoopResult) string {
+	if res.HardPinned {
+		return "pinned for compaction / sub-agent"
+	}
 	if res.PlannerDecision.Reason != "" {
 		return humanReasonFromPlanner(res.PlannerDecision.Reason)
 	}
-	if res.HardPinned {
-		return "hard pin (compaction / sub-agent)"
-	}
-	if res.StickyHit {
-		return "tool-result follow-up"
-	}
-	return "top scorer"
+	return "best pick for this turn"
 }
 
-// humanReasonFromPlanner maps planner reason codes to marker prose.
+// humanReasonFromPlanner maps planner reason codes to short user-facing prose.
+// Recovery codes (pin_model_missing, pricing_missing) and unknown codes return
+// empty so the marker stays clean.
 func humanReasonFromPlanner(code string) string {
 	switch code {
 	case planner.ReasonEVPositive:
-		return "switched to save on cache reads"
-	case planner.ReasonEVNegative:
-		return "stayed: cache reuse beats the switch"
-	case planner.ReasonSameModel:
-		return "scorer matches the pin"
-	case planner.ReasonNoPin:
-		return "top scorer"
-	case planner.ReasonNoPriorUsage:
-		return "no cache stats yet"
-	case planner.ReasonPinModelMissing:
-		return "pin model no longer available"
-	case planner.ReasonPricingMissing:
-		return "missing pricing for a candidate"
+		return "switched for cheaper cache reuse"
+	case planner.ReasonEVNegative, planner.ReasonNoPriorUsage:
+		return "stayed on your last pick"
 	case planner.ReasonTierUpgrade:
-		return "model tier upgrade"
+		return "upgraded to a stronger tier"
+	case planner.ReasonNoPin, planner.ReasonSameModel:
+		return "best pick for this turn"
 	default:
-		return code
+		return ""
 	}
 }
 
@@ -425,6 +414,25 @@ func (s *Service) WithDeploymentKeyedProviders(set map[string]struct{}) *Service
 		copied[p] = struct{}{}
 	}
 	s.deploymentKeyedProviders = copied
+	return s
+}
+
+// WithPassthroughEligibleProviders names providers that are reachable via
+// client-supplied auth headers (no deployment key, no BYOK). Entries are
+// surface-scoped in enabledProvidersForRequest: an Anthropic-surface
+// request can enable Anthropic via passthrough but NOT OpenAI, and vice
+// versa. Without this guard, cross-surface routing would forward the
+// wrong credential type to a third-party API.
+func (s *Service) WithPassthroughEligibleProviders(set map[string]struct{}) *Service {
+	if set == nil {
+		s.passthroughEligibleProviders = nil
+		return s
+	}
+	copied := make(map[string]struct{}, len(set))
+	for p := range set {
+		copied[p] = struct{}{}
+	}
+	s.passthroughEligibleProviders = copied
 	return s
 }
 
@@ -668,6 +676,31 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	clientID := ClientIdentityFrom(ctx)
 	bypassEval := hasEvalOverrideHeader(r)
 
+	// Handle /force-model <model> and /unforce-model commands before routing.
+	// The command is stripped from env.body so the upstream never sees it.
+	// Session key is derived before extraction: ExtractForceModelCommand mutates
+	// env.body, and DeriveSessionKey falls back to prompt text when
+	// metadata.user_id is absent. Deriving after the strip would produce a key
+	// that mismatches subsequent turns where the unstripped message is present.
+	if s.pinStore != nil {
+		cmdSessionKey := DeriveSessionKey(env, apiKeyID)
+		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
+			return s.handleForceModelCommand(w, env, cmd, installationID, cmdSessionKey)
+		}
+	}
+
+	// Tool-call loop break: when the same (tool_name, args) appears at least
+	// loopDetectionMaxRepeats times in the last loopDetectionWindowSize
+	// assistant turns, synthesize end_turn and expire the session pin. Catches
+	// runaway OSS-model tool-call cycles (qwen3, in particular) that the
+	// previous-turn-maxed-out guard misses because each individual tool call
+	// returns quickly and well under the output cap.
+	if loop, sig, count := detectToolCallLoop(env); loop {
+		loopSessionKey := DeriveSessionKey(env, apiKeyID)
+		loopRole := roleForTier(catalog.TierFor(feats.Model))
+		return s.handleToolCallLoopBreak(w, env, sig, count, installationID, loopSessionKey, loopRole, feats.Model, providers.ProviderAnthropic)
+	}
+
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
 	routeStart := time.Now()
@@ -678,6 +711,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, providers.ProviderAnthropic, r.Header),
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
+		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
 	if routeErr != nil {
 		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
@@ -695,7 +729,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// metadata, externalID present, not eval traffic.
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {
-		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
+		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)
 			otel.Record(ctx, otel.Span{
 				Name:  "router.cache_hit",
@@ -818,6 +852,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			translator := translate.NewAnthropicSSETranslator(sink, d.Model, usage).
 				WithRoutingMarker(routingMarkerFor(routeRes)).
 				WithEstimatedInputTokens(feats.Tokens)
+			if err := translator.Prelude(env.Stream()); err != nil {
+				log.Error("Anthropic SSE prelude failed (OpenAI upstream)", "err", err)
+			}
 			err := p.Proxy(actx, d, prep, translator, r)
 			return finalizeAfterProxy(err, translator.Finalize)
 		}
@@ -839,6 +876,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			anthropicTr := translate.NewAnthropicSSETranslator(sink, d.Model, usage).
 				WithRoutingMarker(routingMarkerFor(routeRes)).
 				WithEstimatedInputTokens(feats.Tokens)
+			if err := anthropicTr.Prelude(env.Stream()); err != nil {
+				log.Error("Anthropic SSE prelude failed (Gemini upstream)", "err", err)
+			}
 			geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, d.Model, nil)
 			err := p.Proxy(actx, d, prep, geminiTr, r)
 			err = finalizeAfterProxy(err, geminiTr.Finalize)
@@ -873,7 +913,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				Headers:    cloneCacheHeaders(w.Header()),
 				Body:       body,
 			}
-			s.semanticCache.Store(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs[0], storeResp)
+			s.semanticCache.Store(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs[0], storeResp, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash)
 		}
 	}
 
@@ -1166,6 +1206,8 @@ func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers htt
 		providers.ProviderGoogle,
 		providers.ProviderOpenRouter,
 		providers.ProviderFireworks,
+		providers.ProviderDeepInfra,
+		providers.ProviderBedrock,
 	} {
 		if ExtractClientCredentials(p, headers) != nil {
 			return true
@@ -1201,6 +1243,27 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 			continue
 		}
 		out[k.Provider] = struct{}{}
+	}
+	// Passthrough-eligible providers are surface-scoped: a provider
+	// registered without a deployment key joins the eligible set only when
+	// the inbound surface matches. Otherwise an Anthropic-surface request's
+	// `x-api-key` would flow to api.openai.com (and vice versa) when no
+	// BYOK / env keys are configured — a cross-provider credential leak
+	// even when upstream 401s.
+	//
+	// Skip when the request is router-key-authed (installationID set) and
+	// surfaceProvider isn't already enrolled via BYOK. Passthrough depends on
+	// the client's inbound auth header, but for router-key auth that header
+	// IS the router key — setAuth strips it, so the upstream call would
+	// dispatch unauthenticated and 401 instead of failing fast with a 503.
+	if surfaceProvider != "" {
+		if _, ok := s.passthroughEligibleProviders[surfaceProvider]; ok {
+			_, alreadyByok := out[surfaceProvider]
+			routerKeyAuthed := installationIDFromContext(ctx) != (uuid.UUID{})
+			if !routerKeyAuthed || alreadyByok {
+				out[surfaceProvider] = struct{}{}
+			}
+		}
 	}
 	// Client-supplied headers are only consulted when NOT authed via a
 	// router key. A router-key-authed request carrying an inbound bearer
@@ -1433,6 +1496,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 
+	body, stripErr := translate.StripRoutingMarkerFromMessages(body)
+	if stripErr != nil {
+		log.Error("Failed to strip routing marker from OpenAI messages", "err", stripErr)
+	}
 	env, parseErr := translate.ParseOpenAI(body)
 	if parseErr != nil {
 		log.Error("Failed to parse OpenAI request", "err", parseErr)
@@ -1452,6 +1519,27 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	bypassEval := hasEvalOverrideHeader(r)
 
+	// Handle /force-model <model> and /unforce-model commands before routing.
+	// The command is stripped from env.body so the upstream never sees it.
+	// Session key is derived before extraction: ExtractForceModelCommand mutates
+	// env.body, and DeriveSessionKey falls back to prompt text when
+	// metadata.user_id is absent. Deriving after the strip would produce a key
+	// that mismatches subsequent turns where the unstripped message is present.
+	if s.pinStore != nil {
+		cmdSessionKey := DeriveSessionKey(env, apiKeyID)
+		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
+			return s.handleForceModelCommand(w, env, cmd, installationID, cmdSessionKey)
+		}
+	}
+
+	// Tool-call loop break: same path as the Anthropic ingress. See the
+	// detectToolCallLoop / handleToolCallLoopBreak doc comments for rationale.
+	if loop, sig, count := detectToolCallLoop(env); loop {
+		loopSessionKey := DeriveSessionKey(env, apiKeyID)
+		loopRole := roleForTier(catalog.TierFor(feats.Model))
+		return s.handleToolCallLoopBreak(w, env, sig, count, installationID, loopSessionKey, loopRole, feats.Model, providers.ProviderOpenAI)
+	}
+
 	// OpenAI signals sub-agent identity via x-weave-subagent-type (no metadata.user_id).
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
@@ -1463,6 +1551,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		PromptText:           promptText,
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header),
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
+		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {
@@ -1478,7 +1567,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {
-		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs); hit {
+		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)
 			otel.Record(ctx, otel.Span{
 				Name:  "router.cache_hit",
@@ -1560,6 +1649,23 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	if cacheEligible {
 		captureW = newCaptureWriter(guard, semanticCacheMaxBodyBytes)
 		sink = captureW
+	}
+
+	if marker := routingMarkerFor(routeRes); marker != "" {
+		// Skip the marker wrap when the outer sink is ResponsesWriter (Codex):
+		// it injects its own badge on the first text delta, and an extra
+		// marker chunk would produce a duplicate. ResponsesWriter's own
+		// Prelude is fired upstream of this call.
+		if _, isResponses := sink.(*translate.ResponsesWriter); !isResponses {
+			mw := translate.NewOpenAIRoutingMarkerWriter(sink, decision.Model, marker)
+			// Flush the marker chunk + HTTP 200 immediately so TTFB is decoupled
+			// from upstream prefill. Locks in 200; any later upstream error must
+			// surface in-stream rather than as an HTTP status.
+			if err := mw.Prelude(env.Stream()); err != nil {
+				log.Error("OpenAI routing-marker prelude failed", "err", err)
+			}
+			sink = mw
+		}
 	}
 
 	proxyStart := time.Now()
@@ -1644,7 +1750,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 				Headers:    cloneCacheHeaders(w.Header()),
 				Body:       body,
 			}
-			s.semanticCache.Store(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs[0], storeResp)
+			s.semanticCache.Store(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs[0], storeResp, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash)
 		}
 	}
 
@@ -1737,4 +1843,30 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
+}
+
+// ProxyOpenAIResponses routes an OpenAI Responses API request. The Responses
+// wire format is translated to Chat Completions on entry, dispatched through
+// the existing chat-completions path, then the chat-completions response is
+// re-emitted as Responses-shaped SSE / JSON. This keeps the turn loop, cache,
+// pricing, and translation matrix unchanged.
+func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
+	chatBody, stream, model, err := translate.ResponsesToChatCompletions(body)
+	if err != nil {
+		return fmt.Errorf("translate responses request: %w", err)
+	}
+	wrapper := translate.NewResponsesWriter(w, model)
+	// Emit response.created immediately so Codex stops staring at a blank TUI
+	// while upstream prefills. Decoupled from upstream first-byte latency.
+	if err := wrapper.Prelude(stream); err != nil {
+		observability.Get().Error("Responses prelude failed", "err", err)
+	}
+	proxyErr := s.ProxyOpenAIChatCompletion(ctx, chatBody, wrapper, r)
+	if proxyErr != nil {
+		// On error, let the handler write the error envelope unless we've
+		// already committed to streaming — in which case the chat-completions
+		// path will have surfaced a status error and we just propagate.
+		return proxyErr
+	}
+	return wrapper.Finalize()
 }
