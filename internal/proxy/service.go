@@ -41,6 +41,10 @@ type Service struct {
 	// pinCache absorbs the hot path; 30s TTL is short enough that pinned_until
 	// in the pin store remains source of truth for validity.
 	pinCache *expirable.LRU[string, sessionpin.Pin]
+	// noProgress tracks per-session dispatch fingerprints to catch the
+	// cross-envelope subagent loop (parent agent re-spawning identical
+	// sub-conversations). Nil disables the detector.
+	noProgress *noProgressTracker
 	// pinWriteSem bounds concurrent async pin-upsert goroutines with drop-on-full semantics.
 	pinWriteSem chan struct{}
 	// usageWriteSem bounds concurrent async last-turn-usage writeback goroutines,
@@ -257,6 +261,7 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		semanticCache:        semanticCache,
 		pinStore:             pinStore,
 		pinCache:             pinCache,
+		noProgress:           newNoProgressTracker(),
 		pinWriteSem:          pinWriteSem,
 		usageWriteSem:        usageWriteSem,
 		hardPinExplore:       hardPinExplore,
@@ -724,6 +729,19 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	pinAgeSec := routeRes.PinAgeSec
 	routeMs := time.Since(routeStart).Milliseconds()
 	s.logPlannerOutcome(routeRes)
+
+	// Cross-envelope no-progress detector: if this session has dispatched the
+	// same (decision_model, decision_provider, prompt-prefix) burst >=
+	// noProgressMatchThreshold times within noProgressTimeWindow, the parent
+	// agent is in a sub-agent spawn loop and another dispatch will only
+	// reproduce the same useless response. Break the pin and emit a synthetic
+	// stop instead.
+	if fp := computeNoProgressFingerprint(decision, promptText); s.noProgress != nil {
+		role := roleForTier(catalog.TierFor(feats.Model))
+		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, role, fp, time.Now()); looped {
+			return s.handleNoProgressBreak(w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider)
+		}
+	}
 
 	// Semantic-cache eligibility: configured, non-streaming, decision has
 	// metadata, externalID present, not eval traffic.
