@@ -837,13 +837,20 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
 		crossFormat = true
-		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
-		if emitErr != nil {
-			log.Error("Failed to translate Anthropic request to OpenAI format", "err", emitErr, "decision_provider", decision.Provider)
-			return fmt.Errorf("translate anthropic request: %w", emitErr)
-		}
-		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
+		// Prep rebuilt per attempt: targetIsOpenRouter(opts) gates four
+		// OpenRouter-only body fields (provider hint, reasoning, system
+		// reminder, tool-temp override). If the primary is Fireworks and
+		// we fail over to OpenRouter, the second attempt's body must be
+		// re-emitted with TargetProvider = openrouter so those gates fire.
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			attemptOpts := opts
+			attemptOpts.TargetProvider = d.Provider
+			prep, emitErr := env.PrepareOpenAI(r.Header, attemptOpts)
+			if emitErr != nil {
+				log.Error("Failed to translate Anthropic request to OpenAI format", "err", emitErr, "decision_provider", d.Provider)
+				return fmt.Errorf("translate anthropic request: %w", emitErr)
+			}
+			logUpstreamBody(log, routeRes.SessionKey, d, feats, prep.Body)
 			var usage otel.UsageSink
 			if s.usageRequired() {
 				extractor = otel.NewUsageExtractor(nil, d.Provider)
@@ -1676,12 +1683,19 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	var attempt dispatchAttempt
 	switch decision.Provider {
 	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
-		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
-		if emitErr != nil {
-			log.Error("Failed to emit OpenAI body", "err", emitErr)
-			return fmt.Errorf("emit body: %w", emitErr)
-		}
+		// Prep rebuilt per attempt: targetIsOpenRouter(opts) gates four
+		// OpenRouter-only body fields (provider hint, reasoning, system
+		// reminder, tool-temp override) that the Fireworks/DeepInfra/
+		// Bedrock primary should not see. On failover to OpenRouter the
+		// body must be re-emitted with TargetProvider = openrouter.
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			attemptOpts := opts
+			attemptOpts.TargetProvider = d.Provider
+			prep, emitErr := env.PrepareOpenAI(r.Header, attemptOpts)
+			if emitErr != nil {
+				log.Error("Failed to emit OpenAI body", "err", emitErr, "decision_provider", d.Provider)
+				return fmt.Errorf("emit body: %w", emitErr)
+			}
 			proxyWriter := sink
 			if s.usageRequired() {
 				extractor = otel.NewUsageExtractor(sink, d.Provider)
