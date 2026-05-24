@@ -381,6 +381,10 @@ func TestProvidersIsRetryable(t *testing.T) {
 		{"buffered 401", &providers.UpstreamErrorResponse{Status: 401}, false},
 		{"flushed UpstreamStatusError 503", &providers.UpstreamStatusError{Status: 503}, false},
 		{"transport error", errors.New("dial tcp: connection refused"), true},
+		{"context.Canceled", context.Canceled, false},
+		{"context.DeadlineExceeded", context.DeadlineExceeded, false},
+		{"wrapped context.Canceled", fmt.Errorf("upstream call: %w", context.Canceled), false},
+		{"wrapped context.DeadlineExceeded", fmt.Errorf("upstream call: %w", context.DeadlineExceeded), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

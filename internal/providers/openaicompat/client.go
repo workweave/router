@@ -161,15 +161,19 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 }
 
 // readCapped reads up to limit bytes from r into a buffer, then drains the
-// rest without retention. Returns the buffered prefix, total bytes read,
-// and any read error (io.EOF mapped to nil).
+// rest without retention up to maxDrain to bound failover latency on a
+// slow upstream returning a large error body. The connection is closed by
+// the caller's defer regardless, so the unread tail is discarded by Close.
+// Returns the buffered prefix, total bytes read, and any read error
+// (io.EOF mapped to nil).
 func readCapped(r io.Reader, limit int) ([]byte, int64, error) {
 	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
 	totalRead := int64(len(prefix))
 	if err != nil {
 		return prefix, totalRead, err
 	}
-	rest, drainErr := io.Copy(io.Discard, r)
+	const maxDrain = 1 << 20 // 1 MiB
+	rest, drainErr := io.Copy(io.Discard, io.LimitReader(r, maxDrain))
 	totalRead += rest
 	return prefix, totalRead, drainErr
 }

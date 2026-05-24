@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
@@ -227,18 +228,10 @@ func flushBufferedIfPresent(w http.ResponseWriter, err error) {
 	_, _ = w.Write(resp.Body)
 }
 
-// attemptIdxLabel is a tiny formatter to keep callers free of fmt
-// allocations in the hot path. Covers up to 9 fallbacks before degrading
-// to a generic label — current catalog never exceeds 2.
+// attemptIdxLabel formats the fallback attempt index for the
+// x-router-fallback-attempt response header. Caller already gates on
+// i > 0, so i=0 never reaches here.
 func attemptIdxLabel(i int) string {
-	switch i {
-	case 1:
-		return "1"
-	case 2:
-		return "2"
-	case 3:
-		return "3"
-	}
-	return "n"
+	return strconv.Itoa(i)
 }
 

@@ -131,6 +131,13 @@ func IsRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Client-side cancellation and per-request deadlines are owned by the
+	// caller, not the upstream. Retrying on a different binding would
+	// either fire after the client is gone or use a budget that has
+	// already elapsed; either way it's wasted upstream load.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
 	var buffered *UpstreamErrorResponse
 	if errors.As(err, &buffered) {
 		return IsRetryableStatus(buffered.Status)
