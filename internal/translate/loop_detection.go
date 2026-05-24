@@ -16,6 +16,99 @@ type ToolCallSig struct {
 	InputHash string
 }
 
+// AssistantToolCallArgsPreview returns short string previews of the raw
+// argument JSON for each assistant tool call, in order, starting at offset.
+// Used by the proxy's loop detector to log what was actually in the window
+// when a loop trips, so a real loop (5 identical args) can be told apart
+// from a false positive (5 distinct args sharing a canonicalize hash) at a
+// glance in the logs. Names are included so multi-tool windows are readable.
+func (e *RequestEnvelope) AssistantToolCallArgsPreview(offset, maxLen int) []string {
+	switch e.format {
+	case FormatAnthropic:
+		return anthropicAssistantToolCallArgsPreview(e.body, offset, maxLen)
+	case FormatOpenAI:
+		return openAIAssistantToolCallArgsPreview(e.body, offset, maxLen)
+	default:
+		return nil
+	}
+}
+
+func anthropicAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []string {
+	var out []string
+	idx := 0
+	msgs := gjson.GetBytes(body, "messages")
+	if !msgs.IsArray() {
+		return nil
+	}
+	msgs.ForEach(func(_, msg gjson.Result) bool {
+		if msg.Get("role").String() != "assistant" {
+			return true
+		}
+		content := msg.Get("content")
+		if !content.IsArray() {
+			return true
+		}
+		content.ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() != "tool_use" {
+				return true
+			}
+			name := block.Get("name").String()
+			if name == "" {
+				return true
+			}
+			if idx >= offset {
+				preview := block.Get("input").Raw
+				if len(preview) > maxLen {
+					preview = preview[:maxLen] + "…"
+				}
+				out = append(out, name+":"+preview)
+			}
+			idx++
+			return true
+		})
+		return true
+	})
+	return out
+}
+
+func openAIAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []string {
+	var out []string
+	idx := 0
+	msgs := gjson.GetBytes(body, "messages")
+	if !msgs.IsArray() {
+		return nil
+	}
+	msgs.ForEach(func(_, msg gjson.Result) bool {
+		if msg.Get("role").String() != "assistant" {
+			return true
+		}
+		toolCalls := msg.Get("tool_calls")
+		if !toolCalls.IsArray() {
+			return true
+		}
+		toolCalls.ForEach(func(_, tc gjson.Result) bool {
+			if tc.Get("type").String() != "function" {
+				return true
+			}
+			name := tc.Get("function.name").String()
+			if name == "" {
+				return true
+			}
+			if idx >= offset {
+				preview := tc.Get("function.arguments").String()
+				if len(preview) > maxLen {
+					preview = preview[:maxLen] + "…"
+				}
+				out = append(out, name+":"+preview)
+			}
+			idx++
+			return true
+		})
+		return true
+	})
+	return out
+}
+
 // AssistantToolCallSignatures returns the ordered list of tool invocations
 // emitted by assistant messages in the request body. Order matches message
 // order, and within a message, content-block order.
@@ -57,8 +150,21 @@ func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
 				return true
 			}
 			name := block.Get("name").String()
-			input := block.Get("input").Raw
-			sigs = append(sigs, ToolCallSig{Name: name, InputHash: hashCanonicalJSON(input)})
+			if name == "" {
+				return true
+			}
+			// Skip entries with empty input. Cross-format translation of a
+			// stream-incomplete tool call (OpenAI/openaicompat upstream →
+			// Anthropic inbound) can emit `input:{}` to satisfy the schema.
+			// Claude Code echoes those back in the assistant history; with no
+			// real args every empty-input call collides to the same hash and
+			// 5 of them in a window false-positive trip the loop detector.
+			// Real tool calls always carry at least one argument.
+			input := block.Get("input")
+			if !isMeaningfulInput(input) {
+				return true
+			}
+			sigs = append(sigs, ToolCallSig{Name: name, InputHash: hashCanonicalJSON(input.Raw)})
 			return true
 		})
 		return true
@@ -85,16 +191,62 @@ func openAIAssistantToolCallSigs(body []byte) []ToolCallSig {
 				return true
 			}
 			name := tc.Get("function.name").String()
-			// OpenAI delivers arguments as a JSON-encoded string. Hash the
-			// canonical form so semantically-identical args with different
-			// whitespace still collide.
+			if name == "" {
+				return true
+			}
+			// OpenAI delivers arguments as a JSON-encoded string. Skip
+			// empty/object-empty values for the same reason the Anthropic
+			// path does — stream-incomplete tool_calls produce hash
+			// collisions that aren't real loops.
 			argsRaw := tc.Get("function.arguments").String()
+			if !isMeaningfulInputRaw(argsRaw) {
+				return true
+			}
 			sigs = append(sigs, ToolCallSig{Name: name, InputHash: hashCanonicalJSON(argsRaw)})
 			return true
 		})
 		return true
 	})
 	return sigs
+}
+
+// isMeaningfulInput reports whether a tool_use input field carries any real
+// arguments. Missing, null, empty-string, and empty-object inputs are
+// rejected — they're artifacts of stream-incomplete tool calls bouncing
+// through cross-format translation, not real model invocations.
+func isMeaningfulInput(r gjson.Result) bool {
+	if !r.Exists() {
+		return false
+	}
+	if r.IsObject() {
+		empty := true
+		r.ForEach(func(_, _ gjson.Result) bool {
+			empty = false
+			return false
+		})
+		return !empty
+	}
+	return isMeaningfulInputRaw(r.Raw)
+}
+
+// isMeaningfulInputRaw is the string-input variant (OpenAI tool_calls deliver
+// arguments as a JSON-encoded string). Treats "", "{}", and "null" as empty.
+func isMeaningfulInputRaw(raw string) bool {
+	switch raw {
+	case "", "{}", "null":
+		return false
+	}
+	parsed := gjson.Parse(raw)
+	if !parsed.IsObject() {
+		// Any non-empty scalar / array counts as meaningful.
+		return raw != ""
+	}
+	empty := true
+	parsed.ForEach(func(_, _ gjson.Result) bool {
+		empty = false
+		return false
+	})
+	return !empty
 }
 
 // hashCanonicalJSON returns a stable hex sha256 of the canonical form of a

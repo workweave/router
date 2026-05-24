@@ -41,6 +41,87 @@ func TestAssistantToolCallSignatures_Anthropic(t *testing.T) {
 	assert.NotEqual(t, sigs[1].InputHash, sigs[2].InputHash, "different tool args must produce different hash")
 }
 
+func TestAssistantToolCallSignatures_SkipsEmptyNameEntries(t *testing.T) {
+	// Some upstreams emit tool_use blocks without a `name` field (mid-stream
+	// snapshots, cross-format translation artifacts). Counting them collapses
+	// every nameless entry to the same map key and false-positive trips the
+	// loop detector after 5 distinct real tool calls. They must be ignored.
+	body := mustMarshalJSON(t, map[string]any{
+		"model": "claude-sonnet-4-6",
+		"messages": []any{
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "1", "name": "Read", "input": map[string]any{"path": "a"}},
+				map[string]any{"type": "tool_use", "id": "2", "input": map[string]any{}},
+				map[string]any{"type": "tool_use", "id": "3", "name": "", "input": map[string]any{}},
+				map[string]any{"type": "tool_use", "id": "4", "name": "Bash", "input": map[string]any{"command": "ls"}},
+			}},
+		},
+		"max_tokens": 256,
+	})
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 2, "nameless tool_use entries must be filtered")
+	assert.Equal(t, "Read", sigs[0].Name)
+	assert.Equal(t, "Bash", sigs[1].Name)
+}
+
+func TestAssistantToolCallSignatures_SkipsEmptyInputEntries(t *testing.T) {
+	// Cross-format translation of stream-incomplete tool calls (deepinfra /
+	// openaicompat upstream → Anthropic inbound) emits `input:{}` to satisfy
+	// the schema. Claude Code echoes those back in the assistant history.
+	// Without filtering, 5 of them all hash to the same empty-canonical key
+	// and false-positive trip the loop detector even when the surrounding
+	// real Read calls each have distinct file paths. This is the bug
+	// observed against xiaomi/mimo-v2.5 on deepinfra in dev.
+	body := mustMarshalJSON(t, map[string]any{
+		"model": "claude-sonnet-4-6",
+		"messages": []any{
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "1", "name": "Read", "input": map[string]any{"file_path": "/a"}},
+				map[string]any{"type": "tool_use", "id": "2", "name": "Read", "input": map[string]any{}},
+				map[string]any{"type": "tool_use", "id": "3", "name": "Read", "input": map[string]any{"file_path": "/b"}},
+				map[string]any{"type": "tool_use", "id": "4", "name": "Read", "input": map[string]any{}},
+				map[string]any{"type": "tool_use", "id": "5", "name": "Read", "input": map[string]any{"file_path": "/c"}},
+				map[string]any{"type": "tool_use", "id": "6", "name": "Read", "input": map[string]any{}},
+				map[string]any{"type": "tool_use", "id": "7", "name": "Read", "input": map[string]any{}},
+			}},
+		},
+		"max_tokens": 256,
+	})
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 3, "empty-input tool_use entries must be filtered")
+	// The three real Reads have distinct file_paths, so their hashes differ.
+	assert.NotEqual(t, sigs[0].InputHash, sigs[1].InputHash)
+	assert.NotEqual(t, sigs[1].InputHash, sigs[2].InputHash)
+}
+
+func TestAssistantToolCallSignatures_OpenAI_SkipsEmptyNameEntries(t *testing.T) {
+	body := mustMarshalJSON(t, map[string]any{
+		"model": "gpt-4o",
+		"messages": []any{
+			map[string]any{"role": "assistant", "tool_calls": []any{
+				map[string]any{"id": "1", "type": "function", "function": map[string]any{"name": "ls", "arguments": `{"path":"/a"}`}},
+				map[string]any{"id": "2", "type": "function", "function": map[string]any{"arguments": `{"path":"/b"}`}}, // missing name
+				map[string]any{"id": "3", "type": "function", "function": map[string]any{"name": "", "arguments": `{"path":"/c"}`}}, // empty name
+				map[string]any{"id": "4", "type": "function", "function": map[string]any{"name": "ls", "arguments": "{}"}},          // empty args
+				map[string]any{"id": "5", "type": "function", "function": map[string]any{"name": "cat", "arguments": `{"file":"/d"}`}},
+			}},
+		},
+	})
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 2, "missing-name, empty-name, and empty-args entries all filtered")
+	assert.Equal(t, "ls", sigs[0].Name)
+	assert.Equal(t, "cat", sigs[1].Name)
+}
+
 func TestAssistantToolCallSignatures_Anthropic_KeyOrderInvariant(t *testing.T) {
 	bodyA := mustMarshalJSON(t, map[string]any{
 		"model": "claude-sonnet-4-6",

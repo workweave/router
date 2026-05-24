@@ -48,6 +48,18 @@ func detectToolCallLoop(env *translate.RequestEnvelope) (looped bool, sig transl
 		counts[key]++
 		keys[key] = s
 		if counts[key] >= loopDetectionMaxRepeats {
+			// Dump the full ordered window so we can tell a real loop
+			// (5× identical args) from a false positive (5 distinct
+			// args that canonicalize-collide). On a true loop every
+			// printed entry will match; on a false positive they'll
+			// look different in this log even though they share a hash.
+			log := observability.Get()
+			args := env.AssistantToolCallArgsPreview(start, 200)
+			log.Info("loop detector window dump",
+				"tool_name", s.Name,
+				"input_hash", s.InputHash,
+				"window_args", args,
+			)
 			return true, s, counts[key]
 		}
 	}
