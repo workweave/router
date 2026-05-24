@@ -43,6 +43,9 @@ func NewNativeClient(apiKey, baseURL string) *NativeClient {
 
 // Proxy posts to :generateContent or :streamGenerateContent?alt=sse depending on the Gemini stream hint header.
 func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
 	stream := prep.Headers.Get(translate.GeminiStreamHintHeader) == "true"
 	prep.Headers.Del(translate.GeminiStreamHintHeader)
 
@@ -107,7 +110,7 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 		return &providers.UpstreamStatusError{Status: resp.StatusCode}
 	}
 
-	return httputil.StreamBody(resp.Body, resp.StatusCode, w, t)
+	return httputil.StreamBody(ctx, cancel, httputil.DefaultSSEIdleTimeout, resp.Body, resp.StatusCode, w, t)
 }
 
 // Passthrough rewrites inbound /v1/ paths to /v1beta/ for the native API surface.
