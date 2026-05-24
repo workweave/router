@@ -356,6 +356,12 @@ func (s *Service) resolveBindingsForDispatch(ctx context.Context, decision route
 // flushErr callback by entry points whose inbound wire format matches
 // the upstream's (OpenAI Chat Completions inbound + OpenAI-compat
 // upstream). No-op for any other error type.
+//
+// Content-Length and Content-Encoding are dropped: providers.MaxBufferedErrorBytes
+// caps the body we hold, so the upstream's advertised length may exceed the
+// bytes we actually Write — forwarding it verbatim would either deadlock
+// clients waiting for missing bytes or break HTTP framing. The Go net/http
+// layer recomputes Content-Length from the bytes that pass through Write.
 func flushBufferedIfPresent(w http.ResponseWriter, err error) {
 	var resp *providers.UpstreamErrorResponse
 	if !errors.As(err, &resp) {
@@ -366,12 +372,64 @@ func flushBufferedIfPresent(w http.ResponseWriter, err error) {
 		if _, hop := providers.HopByHopHeaders[canon]; hop {
 			continue
 		}
+		if canon == "Content-Length" || canon == "Content-Encoding" {
+			continue
+		}
 		for _, v := range vs {
 			w.Header().Add(k, v)
 		}
 	}
 	w.WriteHeader(resp.Status)
 	_, _ = w.Write(resp.Body)
+}
+
+// emitAnthropicSSEErrorEvent writes an Anthropic-shape `event: error` SSE
+// frame to sink and returns *UpstreamStatusError to signal "bytes already
+// flushed to client" (so the dispatch loop's format-specific flushErr —
+// which only acts on *UpstreamErrorResponse — becomes a no-op).
+//
+// Used by single-binding cross-format streaming closures when the upstream
+// errors after translator.Prelude() has already committed HTTP 200 +
+// `message_start` to the wire: appending a JSON error envelope at that
+// point produces a corrupt SSE stream, while an `event: error` frame
+// terminates cleanly within the format the client is parsing.
+//
+// Returns err unchanged when it is not a *UpstreamErrorResponse.
+func emitAnthropicSSEErrorEvent(sink http.ResponseWriter, err error) error {
+	var resp *providers.UpstreamErrorResponse
+	if !errors.As(err, &resp) {
+		return err
+	}
+	anthErrJSON := translate.OpenAIToAnthropicError(resp.Body)
+	_, _ = sink.Write([]byte("event: error\ndata: "))
+	_, _ = sink.Write(anthErrJSON)
+	_, _ = sink.Write([]byte("\n\n"))
+	if f, ok := sink.(http.Flusher); ok {
+		f.Flush()
+	}
+	return &providers.UpstreamStatusError{Status: resp.Status}
+}
+
+// emitOpenAISSEErrorEvent writes an OpenAI-shape `data: {...}` SSE frame
+// carrying the upstream error envelope verbatim, then returns
+// *UpstreamStatusError (see emitAnthropicSSEErrorEvent for the rationale).
+// Used by single-binding ProxyOpenAIChatCompletion streaming closures
+// where the OpenAIRoutingMarkerWriter has already committed HTTP 200 +
+// the routing-marker chat.completion chunk.
+//
+// Returns err unchanged when it is not a *UpstreamErrorResponse.
+func emitOpenAISSEErrorEvent(sink http.ResponseWriter, err error) error {
+	var resp *providers.UpstreamErrorResponse
+	if !errors.As(err, &resp) {
+		return err
+	}
+	_, _ = sink.Write([]byte("data: "))
+	_, _ = sink.Write(resp.Body)
+	_, _ = sink.Write([]byte("\n\n"))
+	if f, ok := sink.(http.Flusher); ok {
+		f.Flush()
+	}
+	return &providers.UpstreamStatusError{Status: resp.Status}
 }
 
 // flushUpstreamErrorAsAnthropic is the flushErr callback for ProxyMessages.

@@ -231,3 +231,48 @@ func TestProxyMessages_SingleBindingPreservesEagerPrelude(t *testing.T) {
 	// No fallback header for single-binding requests.
 	assert.Empty(t, rec.Header().Get("x-router-fallback-from"))
 }
+
+// TestProxyMessages_SingleBindingStreamingErrorAfterPrelude reproduces the
+// review finding: when a single-binding cross-format streaming request
+// has Prelude committed (HTTP 200 + `message_start` already on the wire)
+// and the upstream then returns a buffered 503, the response must
+// terminate as an in-stream `event: error` SSE frame — NOT a trailing
+// JSON envelope, which would corrupt the SSE stream the client is
+// parsing.
+func TestProxyMessages_SingleBindingStreamingErrorAfterPrelude(t *testing.T) {
+	// Stub upstream OpenAI-compat provider that 503s on every request.
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"upstream unavailable","type":"upstream_error"}}`))
+	}))
+	defer stub.Close()
+
+	// gpt-5 is single-binding to openai in catalog; route there from an
+	// inbound Anthropic Messages request so the cross-format
+	// AnthropicSSETranslator + Prelude path runs.
+	svc := proxy.NewService(
+		&fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-5"}},
+		map[string]providers.Client{
+			providers.ProviderOpenAI: openaicompat.NewClient("test-key", stub.URL),
+		},
+		nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil,
+	).WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderOpenAI: {}})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+
+	_ = svc.ProxyMessages(context.Background(), body, rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code, "Prelude already committed 200; status stays 200")
+	assert.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"),
+		"Content-Type stays SSE; we do not write a trailing JSON envelope that would corrupt the stream")
+
+	respBody := rec.Body.String()
+	assert.Contains(t, respBody, "event: message_start", "Prelude bytes still on the wire")
+	assert.Contains(t, respBody, "event: error", "in-stream error event terminates the SSE stream coherently")
+	assert.Contains(t, respBody, `"type":"error"`, "error event body is Anthropic-shape")
+	assert.Contains(t, respBody, "upstream unavailable", "translated upstream message reaches the client")
+	assert.NotContains(t, respBody, "\n\n{", "no trailing JSON-after-double-newline that would break SSE parsers")
+}

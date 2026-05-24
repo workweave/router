@@ -900,6 +900,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				preludeBuf.Seal()
 			}
 			err := p.Proxy(actx, d, prep, translator, r)
+			// Single-binding streaming: Prelude already committed
+			// HTTP 200 + message_start; render the upstream error as
+			// an in-stream `event: error` frame so the SSE stream
+			// stays coherent rather than getting a trailing JSON
+			// envelope appended by the dispatch loop's flushErr.
+			if err != nil && env.Stream() && preludeBuf == nil {
+				err = emitAnthropicSSEErrorEvent(sink, err)
+			}
 			return finalizeAfterProxy(err, translator.Finalize)
 		}
 	case providers.ProviderGoogle:
@@ -928,6 +936,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			}
 			geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, d.Model, nil)
 			err := p.Proxy(actx, d, prep, geminiTr, r)
+			// Single-binding streaming: see ProxyMessages OpenAI-compat
+			// case for rationale — render upstream error as in-stream
+			// `event: error` rather than corrupt the SSE stream.
+			if err != nil && env.Stream() && preludeBuf == nil {
+				err = emitAnthropicSSEErrorEvent(sink, err)
+			}
 			err = finalizeAfterProxy(err, geminiTr.Finalize)
 			return finalizeAfterProxy(err, anthropicTr.Finalize)
 		}
@@ -1784,7 +1798,15 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			if preludeBuf != nil {
 				preludeBuf.Seal()
 			}
-			return p.Proxy(actx, d, prep, proxyWriter, r)
+			err := p.Proxy(actx, d, prep, proxyWriter, r)
+			// Single-binding streaming: the routing-marker Prelude already
+			// committed HTTP 200 + the marker chunk to the wire; render the
+			// upstream error as an in-stream `data: {...}` frame instead of
+			// letting dispatch's flushErr append a corrupting JSON envelope.
+			if err != nil && env.Stream() && preludeBuf == nil {
+				err = emitOpenAISSEErrorEvent(sink, err)
+			}
+			return err
 		}
 	case providers.ProviderGoogle:
 		crossFormat = true
@@ -1805,6 +1827,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 				preludeBuf.Seal()
 			}
 			err := p.Proxy(actx, d, prep, translator, r)
+			// Single-binding streaming: see same-format OpenAI case above.
+			if err != nil && env.Stream() && preludeBuf == nil {
+				err = emitOpenAISSEErrorEvent(sink, err)
+			}
 			return finalizeAfterProxy(err, translator.Finalize)
 		}
 	case providers.ProviderAnthropic:
@@ -1826,6 +1852,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 				preludeBuf.Seal()
 			}
 			err := p.Proxy(actx, d, prep, translator, r)
+			// Single-binding streaming: see same-format OpenAI case above.
+			if err != nil && env.Stream() && preludeBuf == nil {
+				err = emitOpenAISSEErrorEvent(sink, err)
+			}
 			return finalizeAfterProxy(err, translator.Finalize)
 		}
 	default:
