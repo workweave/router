@@ -136,7 +136,7 @@ func TestPrepareOpenAI_DisablesReasoningForMoonshotAndXiaomi(t *testing.T) {
 	// generation running to the output cap. Disabling reasoning at the
 	// OpenRouter layer prevents that runaway. See hermes-agent#24534 and
 	// vllm#39056 for the upstream parser bugs that motivate this.
-	cases := []string{"moonshotai/kimi-k2.5", "moonshotai/kimi-k2.6", "xiaomi/mimo-v2.5", "xiaomi/mimo-v2.5-pro"}
+	cases := []string{"moonshotai/kimi-k2.5", "moonshotai/kimi-k2.6", "xiaomi/mimo-v2.5-pro"}
 	for _, model := range cases {
 		t.Run(model, func(t *testing.T) {
 			src := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)

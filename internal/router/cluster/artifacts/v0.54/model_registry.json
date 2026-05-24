@@ -22,7 +22,6 @@
     {"model": "deepseek/deepseek-v4-pro",         "provider": "fireworks",  "bench_column": "routerarena_deepseek/deepseek-v4-pro",         "direct_label": "routerarena"},
     {"model": "moonshotai/kimi-k2.6",             "provider": "fireworks",  "bench_column": "routerarena_moonshotai/kimi-k2.6",             "direct_label": "routerarena"},
 
-    {"model": "xiaomi/mimo-v2.5",                 "provider": "openrouter", "bench_column": "routerarena_xiaomi/mimo-v2.5",                 "direct_label": "aa"},
     {"model": "xiaomi/mimo-v2.5-pro",             "provider": "deepinfra",  "bench_column": "routerarena_xiaomi/mimo-v2.5-pro",             "direct_label": "aa"},
     {"model": "qwen/qwen3.6-35b-a3b",             "provider": "deepinfra",  "bench_column": "routerarena_qwen/qwen3.6-35b-a3b",             "direct_label": "aa"},
     {"model": "minimax/minimax-m2.7",             "provider": "fireworks",  "bench_column": "routerarena_minimax/minimax-m2.7",             "direct_label": "aa"},

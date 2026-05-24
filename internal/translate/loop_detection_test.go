@@ -106,7 +106,7 @@ func TestAssistantToolCallSignatures_OpenAI_SkipsEmptyNameEntries(t *testing.T) 
 		"messages": []any{
 			map[string]any{"role": "assistant", "tool_calls": []any{
 				map[string]any{"id": "1", "type": "function", "function": map[string]any{"name": "ls", "arguments": `{"path":"/a"}`}},
-				map[string]any{"id": "2", "type": "function", "function": map[string]any{"arguments": `{"path":"/b"}`}}, // missing name
+				map[string]any{"id": "2", "type": "function", "function": map[string]any{"arguments": `{"path":"/b"}`}},             // missing name
 				map[string]any{"id": "3", "type": "function", "function": map[string]any{"name": "", "arguments": `{"path":"/c"}`}}, // empty name
 				map[string]any{"id": "4", "type": "function", "function": map[string]any{"name": "ls", "arguments": "{}"}},          // empty args
 				map[string]any{"id": "5", "type": "function", "function": map[string]any{"name": "cat", "arguments": `{"file":"/d"}`}},

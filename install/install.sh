@@ -1323,7 +1323,6 @@ prices='{
     "qwen/qwen3-next-80b-a3b-instruct": 0.00015,
     "qwen/qwen3.5-flash-02-23":         0.00005,
     "qwen/qwen3.6-35b-a3b":             0.00015,
-    "xiaomi/mimo-v2.5":                 0.0004,
     "xiaomi/mimo-v2.5-pro":             0.001,
     "z-ai/glm-5":                       0.0006
   },
@@ -1373,7 +1372,6 @@ prices='{
     "qwen/qwen3-next-80b-a3b-instruct": 0.0012,
     "qwen/qwen3.5-flash-02-23":         0.00015,
     "qwen/qwen3.6-35b-a3b":             0.00095,
-    "xiaomi/mimo-v2.5":                 0.002,
     "xiaomi/mimo-v2.5-pro":             0.003,
     "z-ai/glm-5":                       0.00208
   }

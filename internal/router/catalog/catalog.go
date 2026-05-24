@@ -295,17 +295,12 @@ var Models = []Model{
 	// (median TTFT + 2000/TPS). Provider availability verified against
 	// per-model "API providers" pages and OpenRouter's v1/models API.
 	//
-	// xiaomi/mimo-v2.5 — DeepInfra now hosts the base variant at parity
-	// pricing with OpenRouter ($0.40 in / $2.00 out / $0.08 cached per 1M,
-	// verified 2026-05-22). Moving primary off OpenRouter because OR's
-	// stream:true honoring is provider-dependent (observed non-SSE
-	// responses on the Google-hosted Qwen line). DeepInfra terminates SSE
-	// itself so the AnthropicSSETranslator sees real chunks.
-	{ID: "xiaomi/mimo-v2.5", Tier: TierMid, Providers: []ProviderBinding{
-		{Provider: providers.ProviderDeepInfra, UpstreamID: "XiaomiMiMo/MiMo-V2.5",
-			Price: Pricing{InputUSDPer1M: 0.400, OutputUSDPer1M: 2.000, CacheReadMultiplier: 0.20}},
-		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.400, OutputUSDPer1M: 2.000, CacheReadMultiplier: 0.10}},
-	}},
+	// xiaomi/mimo-v2.5 (base) was removed 2026-05-23 after sustained
+	// tool-calling failures in real Claude Code sessions: malformed empty-input
+	// tool_use blocks, hallucinated tool names, and same-tool same-args
+	// re-issue loops on weak agent prompts. Matches public reports against
+	// OpenCode (#24095) and Crush (#1699). The pro variant is kept — slower
+	// but doesn't exhibit the same instability in our sweep.
 	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "XiaomiMiMo/MiMo-V2.5-Pro",
 			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000}},
