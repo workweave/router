@@ -92,30 +92,65 @@ func newNoProgressTracker() *noProgressTracker {
 	}
 }
 
-// recordAndDetect records the fingerprint against the session's ring and
-// reports whether the burst now exceeds the loop threshold. A nil tracker
-// returns (false, 0) so production-style construction can stay optional in
-// tests and selfhosted deploys.
+// recordAndDetect records the fingerprint against a bucket keyed by
+// sessionKey (preferred) or installationID (fallback) and reports whether
+// the burst now exceeds the loop threshold. A nil tracker returns (false, 0)
+// so production-style construction can stay optional in tests and
+// selfhosted deploys.
 //
-// Zero-valued sessionKey is treated as "no anchor available" and skipped.
-// runTurnLoop leaves SessionKey unset on hard-pin paths (Explore
-// SubAgentDispatch when hardPinExplore is on) and when pinStore is nil; the
-// all-zero key would otherwise collapse unrelated sessions into one LRU
-// bucket and false-positive trip the detector on cross-session bursts.
-func (t *noProgressTracker) recordAndDetect(sessionKey [sessionpin.SessionKeyLen]byte, role string, fp noProgressFingerprint, now time.Time) (looped bool, count int) {
+// Bucket selection:
+//   - non-zero sessionKey → per-session bucket (normal path)
+//   - zero sessionKey + non-nil installationID → per-installation bucket,
+//     used by hard-pin paths (Explore SubAgentDispatch under hardPinExplore)
+//     and routing with pinStore nil. Coarser than per-session but still
+//     keeps detection coverage; the fingerprint's (model, provider, prompt)
+//     tuple distinguishes unrelated work in the same installation from a
+//     real loop.
+//   - zero sessionKey + nil installationID → no anchor available; skipped
+//     to avoid one global zero-key bucket false-positive-tripping across
+//     unrelated unauthenticated traffic.
+func (t *noProgressTracker) recordAndDetect(sessionKey [sessionpin.SessionKeyLen]byte, installationID uuid.UUID, role string, fp noProgressFingerprint, now time.Time) (looped bool, count int) {
 	if t == nil || t.cache == nil {
 		return false, 0
 	}
-	if sessionKey == ([sessionpin.SessionKeyLen]byte{}) {
+	key, ok := noProgressBucketKey(sessionKey, installationID, role)
+	if !ok {
 		return false, 0
 	}
-	key := sessionPinCacheKey(sessionKey, role)
-	ring, ok := t.cache.Get(key)
-	if !ok || ring == nil {
+	ring, ringOk := t.cache.Get(key)
+	if !ringOk || ring == nil {
 		ring = &fingerprintRing{}
 		t.cache.Add(key, ring)
 	}
 	return ring.recordAndDetect(fp, now)
+}
+
+// noProgressBucketKey picks the LRU bucket for a dispatch. Returns ok=false
+// when neither anchor is available — the caller must skip detection rather
+// than falling back to a global zero-keyed bucket.
+func noProgressBucketKey(sessionKey [sessionpin.SessionKeyLen]byte, installationID uuid.UUID, role string) (string, bool) {
+	if sessionKey != ([sessionpin.SessionKeyLen]byte{}) {
+		return "session:" + sessionPinCacheKey(sessionKey, role), true
+	}
+	if installationID != uuid.Nil {
+		return "install:" + installationID.String() + ":" + role, true
+	}
+	return "", false
+}
+
+// shortSessionKey returns the first 16 hex chars (64 bits) of a session key
+// for use in Info-level logs. Mirrors the auth.APIKey "KeyPrefix" convention
+// (8-char prefix is considered safe) at a wider bit margin so an incident
+// triager can still correlate two log lines from the same break event,
+// while limiting long-window cross-request correlation across retained logs.
+//
+// "" for an all-zero key so logs visibly distinguish missing-anchor breaks
+// from real-session breaks.
+func shortSessionKey(sessionKey [sessionpin.SessionKeyLen]byte) string {
+	if sessionKey == ([sessionpin.SessionKeyLen]byte{}) {
+		return ""
+	}
+	return fmt.Sprintf("%x", sessionKey[:8])
 }
 
 // handleNoProgressBreak writes a synthetic end_turn response, expires the
@@ -155,11 +190,15 @@ func (s *Service) handleNoProgressBreak(
 		"time_window", noProgressTimeWindow.String(),
 		"decision_model", decisionModel,
 		"decision_provider", decisionProvider,
-		"session_key_hex", fmt.Sprintf("%x", sessionKey),
+		"session_key_prefix", shortSessionKey(sessionKey),
 		"role", role,
 	)
 
-	if s.pinStore != nil && installationID != uuid.Nil {
+	// Skip pin upsert when sessionKey is zero — writing a zero-keyed pin row
+	// would create a zombie entry shared by every zero-keyed session in the
+	// pin store. Hard-pin paths and selfhosted deploys without a pinStore
+	// hit this path and don't need persisted pin expiry anyway.
+	if s.pinStore != nil && installationID != uuid.Nil && sessionKey != ([sessionpin.SessionKeyLen]byte{}) {
 		expired := sessionpin.Pin{
 			SessionKey:     sessionKey,
 			Role:           role,

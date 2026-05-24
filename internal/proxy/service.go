@@ -739,7 +739,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// stop instead.
 	if fp := computeNoProgressFingerprint(decision, promptText); s.noProgress != nil {
 		role := roleForTier(catalog.TierFor(feats.Model))
-		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, role, fp, time.Now()); looped {
+		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
 			return s.handleNoProgressBreak(w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider)
 		}
 	}
