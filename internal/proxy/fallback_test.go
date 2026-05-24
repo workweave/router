@@ -69,19 +69,23 @@ func TestDispatchWithFallback_PrimarySucceedsNoRetry(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	guard := newFirstByteGuard(rec)
+	buf := newPreludeBuffer(rec)
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
 		w:               rec,
-		guard:           guard,
+		buf:             buf,
 		initialDecision: router.Decision{Model: "deepseek/deepseek-v4-pro"},
 		bindings: []catalog.ProviderBinding{
 			{Provider: "fireworks"},
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			return p.Proxy(ctx, d, providers.PreparedRequest{}, guard, r)
+			// Production closures call buf.Seal() between the Prelude
+			// phase and the upstream call. These tests have no Prelude,
+			// so Seal happens immediately before p.Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
 	})
 
@@ -108,19 +112,23 @@ func TestDispatchWithFallback_RetriesOnRetryableBufferedError(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	guard := newFirstByteGuard(rec)
+	buf := newPreludeBuffer(rec)
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
 		w:               rec,
-		guard:           guard,
+		buf:             buf,
 		initialDecision: router.Decision{Model: "deepseek/deepseek-v4-pro"},
 		bindings: []catalog.ProviderBinding{
 			{Provider: "fireworks"},
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			return p.Proxy(ctx, d, providers.PreparedRequest{}, guard, r)
+			// Production closures call buf.Seal() between the Prelude
+			// phase and the upstream call. These tests have no Prelude,
+			// so Seal happens immediately before p.Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
 	})
 
@@ -148,19 +156,23 @@ func TestDispatchWithFallback_RetriesOnTransportError(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	guard := newFirstByteGuard(rec)
+	buf := newPreludeBuffer(rec)
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
 		w:               rec,
-		guard:           guard,
+		buf:             buf,
 		initialDecision: router.Decision{Model: "deepseek/deepseek-v4-pro"},
 		bindings: []catalog.ProviderBinding{
 			{Provider: "fireworks"},
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			return p.Proxy(ctx, d, providers.PreparedRequest{}, guard, r)
+			// Production closures call buf.Seal() between the Prelude
+			// phase and the upstream call. These tests have no Prelude,
+			// so Seal happens immediately before p.Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
 	})
 
@@ -183,20 +195,25 @@ func TestDispatchWithFallback_NoRetryOnNonRetryableStatus(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	guard := newFirstByteGuard(rec)
+	buf := newPreludeBuffer(rec)
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
 		w:               rec,
-		guard:           guard,
+		buf:             buf,
 		initialDecision: router.Decision{Model: "deepseek/deepseek-v4-pro"},
 		bindings: []catalog.ProviderBinding{
 			{Provider: "fireworks"},
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			return p.Proxy(ctx, d, providers.PreparedRequest{}, guard, r)
+			// Production closures call buf.Seal() between the Prelude
+			// phase and the upstream call. These tests have no Prelude,
+			// so Seal happens immediately before p.Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
+		flushErr: flushBufferedIfPresent,
 	})
 
 	require.Error(t, err)
@@ -226,19 +243,23 @@ func TestDispatchWithFallback_NoRetryAfterBytesFlushed(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	guard := newFirstByteGuard(rec)
+	buf := newPreludeBuffer(rec)
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
 		w:               rec,
-		guard:           guard,
+		buf:             buf,
 		initialDecision: router.Decision{Model: "deepseek/deepseek-v4-pro"},
 		bindings: []catalog.ProviderBinding{
 			{Provider: "fireworks"},
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			return p.Proxy(ctx, d, providers.PreparedRequest{}, guard, r)
+			// Production closures call buf.Seal() between the Prelude
+			// phase and the upstream call. These tests have no Prelude,
+			// so Seal happens immediately before p.Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
 	})
 
@@ -263,20 +284,25 @@ func TestDispatchWithFallback_BothFailFinalBodyFlushed(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	guard := newFirstByteGuard(rec)
+	buf := newPreludeBuffer(rec)
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
 		w:               rec,
-		guard:           guard,
+		buf:             buf,
 		initialDecision: router.Decision{Model: "deepseek/deepseek-v4-pro"},
 		bindings: []catalog.ProviderBinding{
 			{Provider: "fireworks"},
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			return p.Proxy(ctx, d, providers.PreparedRequest{}, guard, r)
+			// Production closures call buf.Seal() between the Prelude
+			// phase and the upstream call. These tests have no Prelude,
+			// so Seal happens immediately before p.Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
+		flushErr: flushBufferedIfPresent,
 	})
 
 	require.Error(t, err)
@@ -299,17 +325,22 @@ func TestDispatchWithFallback_SingleBindingPath(t *testing.T) {
 	s := newServiceWithProviders(t, map[string]providers.Client{"anthropic": only})
 
 	rec := httptest.NewRecorder()
-	guard := newFirstByteGuard(rec)
+	buf := newPreludeBuffer(rec)
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
 		w:               rec,
-		guard:           guard,
+		buf:             buf,
 		initialDecision: router.Decision{Model: "claude-opus-4-7"},
 		bindings:        []catalog.ProviderBinding{{Provider: "anthropic"}},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			return p.Proxy(ctx, d, providers.PreparedRequest{}, guard, r)
+			// Production closures call buf.Seal() between the Prelude
+			// phase and the upstream call. These tests have no Prelude,
+			// so Seal happens immediately before p.Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
+		flushErr: flushBufferedIfPresent,
 	})
 
 	require.Error(t, err)
@@ -392,3 +423,99 @@ func TestProvidersIsRetryable(t *testing.T) {
 		})
 	}
 }
+
+// TestPreludeBuffer_BuffersUntilSealedFirstWrite asserts the core
+// preludeBuffer contract: pre-Seal writes are buffered; the first
+// post-Seal write triggers commit, ordering the buffered Prelude bytes
+// ahead of the upstream content on the wire.
+func TestPreludeBuffer_BuffersUntilSealedFirstWrite(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Content-Type", "application/json") // simulate middleware default
+	buf := newPreludeBuffer(rec)
+
+	// Simulate translator.Prelude phase: set SSE content type, write status,
+	// emit message_start.
+	buf.Header().Set("Content-Type", "text/event-stream")
+	buf.Header().Del("Content-Length")
+	buf.WriteHeader(http.StatusOK)
+	_, _ = buf.Write([]byte("event: message_start\n\n"))
+	assert.False(t, buf.Committed(), "pre-seal writes do not commit")
+	assert.Empty(t, rec.Body.String(), "inner writer untouched pre-seal")
+
+	// Seal + first upstream chunk write.
+	buf.Seal()
+	_, _ = buf.Write([]byte("event: content_block_start\n\n"))
+	assert.True(t, buf.Committed(), "post-seal write commits")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "event: message_start\n\nevent: content_block_start\n\n", rec.Body.String(),
+		"buffered prelude flushed in order before the post-seal chunk")
+	assert.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"),
+		"Prelude's Content-Type override flushed with the commit")
+}
+
+// TestPreludeBuffer_DiscardResetsBufferAndHeaders asserts that Discard()
+// drops buffered bytes and restores Header() to the construction-time
+// snapshot, so a retry can begin with a pristine writer.
+func TestPreludeBuffer_DiscardResetsBufferAndHeaders(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Content-Type", "application/json")
+	rec.Header().Set("Content-Length", "0")
+	buf := newPreludeBuffer(rec)
+
+	// Attempt 1: Prelude writes + status + body.
+	buf.Header().Set("Content-Type", "text/event-stream")
+	buf.Header().Del("Content-Length")
+	buf.Header().Set("x-router-fallback-from", "fireworks")
+	buf.WriteHeader(http.StatusOK)
+	_, _ = buf.Write([]byte("attempt-1-prelude"))
+
+	// Primary errored before any bytes flushed: Discard.
+	buf.Discard()
+
+	assert.False(t, buf.Committed(), "Discard does not commit")
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"),
+		"Content-Type restored to construction-time snapshot")
+	assert.Equal(t, "0", rec.Header().Get("Content-Length"),
+		"Content-Length deleted by Prelude restored")
+	assert.Empty(t, rec.Header().Get("x-router-fallback-from"),
+		"Prelude-added headers removed")
+
+	// Attempt 2: Prelude + success.
+	buf.Header().Set("Content-Type", "text/event-stream")
+	buf.WriteHeader(http.StatusOK)
+	_, _ = buf.Write([]byte("attempt-2-prelude"))
+	buf.Seal()
+	_, _ = buf.Write([]byte("first-upstream-byte"))
+
+	assert.Equal(t, "attempt-2-preludefirst-upstream-byte", rec.Body.String(),
+		"only attempt-2's bytes reach the client; attempt-1 was discarded")
+}
+
+// TestPreludeBuffer_NoOpFlushPreCommit asserts that Flush() does not
+// reach the inner writer until commit fires. This is critical: a
+// translator's Flush() call between Prelude writes and the upstream
+// commit must not leak partial bytes to the client.
+func TestPreludeBuffer_NoOpFlushPreCommit(t *testing.T) {
+	flushCount := 0
+	w := &fakeFlushTracker{ResponseRecorder: httptest.NewRecorder(), onFlush: func() { flushCount++ }}
+	buf := newPreludeBuffer(w)
+
+	buf.WriteHeader(http.StatusOK)
+	_, _ = buf.Write([]byte("prelude"))
+	buf.Flush()
+	assert.Equal(t, 0, flushCount, "pre-commit Flush is a no-op")
+
+	buf.Seal()
+	_, _ = buf.Write([]byte("chunk")) // triggers commit
+	assert.Equal(t, 1, flushCount, "commit flushes inner exactly once")
+
+	buf.Flush()
+	assert.Equal(t, 2, flushCount, "post-commit Flush passes through")
+}
+
+type fakeFlushTracker struct {
+	*httptest.ResponseRecorder
+	onFlush func()
+}
+
+func (f *fakeFlushTracker) Flush() { f.onFlush() }
