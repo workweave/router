@@ -69,15 +69,10 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 				return nil, fmt.Errorf("set tool temperature override: %w", err)
 			}
 		}
-		// Qwen3 anti-loop: presence_penalty=1.5 per the Qwen3 model card.
-		// Only applied when the client has not specified one itself, so a
-		// caller that has its own tuning preference still wins.
-		if isQwen3Family(opts.TargetModel) && !gjson.GetBytes(body, "presence_penalty").Exists() {
-			body, err = sjson.SetBytes(body, "presence_penalty", qwen3PresencePenalty)
-			if err != nil {
-				return nil, fmt.Errorf("set qwen3 presence_penalty: %w", err)
-			}
-		}
+	}
+	body, err = applyQwen3SamplersIfNeeded(body, opts.TargetModel)
+	if err != nil {
+		return nil, err
 	}
 	return body, nil
 }
@@ -144,14 +139,6 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 		}
 	}
 
-	// Qwen3 anti-loop presence_penalty (cross-format). Only added when the
-	// client did not set one. Mirrors the same-format branch above.
-	if targetIsOpenRouter(opts) && isQwen3Family(opts.TargetModel) &&
-		!gjson.GetBytes(body, "presence_penalty").Exists() {
-		jw.Key("presence_penalty")
-		jw.Float(qwen3PresencePenalty)
-	}
-
 	// Max tokens
 	writeOpenAIMaxTokensFromAnthropic(jw, body, opts)
 
@@ -181,7 +168,40 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	}
 
 	jw.EndObj()
-	return jw.Bytes(), nil
+	return applyQwen3SamplersIfNeeded(jw.Bytes(), opts.TargetModel)
+}
+
+// applyQwen3SamplersIfNeeded layers the Qwen3 model-card sampling defaults onto
+// the outbound body when the target is a qwen3-family model and the client did
+// not set them. Applied across all OpenAI-compat providers (OpenRouter, Bedrock,
+// DeepInfra, Fireworks) — the recommendation is model-keyed, not provider-keyed,
+// and Qwen3 only routes to OpenAI-compat backends so unknown-field rejection
+// (e.g. OpenAI native strict mode) is not in scope.
+func applyQwen3SamplersIfNeeded(body []byte, model string) ([]byte, error) {
+	if !isQwen3Family(model) {
+		return body, nil
+	}
+	type sampler struct {
+		key string
+		val float64
+	}
+	defaults := []sampler{
+		{"temperature", qwen3Temperature},
+		{"top_p", qwen3TopP},
+		{"presence_penalty", qwen3PresencePenalty},
+		{"repetition_penalty", qwen3RepetitionPenalty},
+	}
+	for _, s := range defaults {
+		if gjson.GetBytes(body, s.key).Exists() {
+			continue
+		}
+		out, err := sjson.SetBytes(body, s.key, s.val)
+		if err != nil {
+			return nil, fmt.Errorf("set qwen3 %s: %w", s.key, err)
+		}
+		body = out
+	}
+	return body, nil
 }
 
 // writeOpenAISystemAndMessagesFromAnthropic emits the "messages" key into jw by

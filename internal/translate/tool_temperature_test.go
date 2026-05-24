@@ -81,7 +81,10 @@ func TestToolTemperature_AnthropicSource_NoOverrideWithoutTools(t *testing.T) {
 }
 
 func TestToolTemperature_AnthropicSource_NoOverrideForOtherModels(t *testing.T) {
-	cases := []string{"gpt-5", "moonshotai/kimi-k2.5", "qwen/qwen3-max", "google/gemini-2.5-pro"}
+	// qwen3 models get their own non-zero temperature default from the Qwen
+	// sampler block (covered in qwen3_sampling_test.go); deepseek is the
+	// only family with a tool-turn temperature=0 override.
+	cases := []string{"gpt-5", "moonshotai/kimi-k2.5", "google/gemini-2.5-pro"}
 	for _, model := range cases {
 		t.Run(model, func(t *testing.T) {
 			src := []byte(`{
