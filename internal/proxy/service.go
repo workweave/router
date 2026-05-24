@@ -817,6 +817,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	var proxyErr error
 	crossFormat := false
 	var extractor *otel.UsageExtractor
+	var fallback fallbackOutcome
 
 	switch decision.Provider {
 	case providers.ProviderAnthropic:
@@ -834,12 +835,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
 	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
 		crossFormat = true
-		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
-		if emitErr != nil {
-			log.Error("Failed to translate Anthropic request to OpenAI format", "err", emitErr, "decision_provider", decision.Provider)
-			return fmt.Errorf("translate anthropic request: %w", emitErr)
-		}
-		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
 		var usage otel.UsageSink
 		if s.usageRequired() {
 			extractor = otel.NewUsageExtractor(nil, decision.Provider)
@@ -851,7 +846,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		if err := translator.Prelude(env.Stream()); err != nil {
 			log.Error("Anthropic SSE prelude failed (OpenAI upstream)", "err", err)
 		}
-		proxyErr = p.Proxy(ctx, decision, prep, translator, r)
+		proxyErr, fallback = s.proxyWithFallback(ctx, &decision, env, opts, translator, r)
 		proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 	case providers.ProviderGoogle:
 		crossFormat = true
@@ -979,7 +974,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "fallback_attempted", fallback.Attempted, "fallback_from_provider", fallback.FromProvider, "fallback_to_provider", fallback.ToProvider, "fallback_reason", fallback.Reason)
 	return proxyErr
 }
 
@@ -1645,20 +1640,16 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	var proxyErr error
 	crossFormat := false
 	var extractor *otel.UsageExtractor
+	var fallback fallbackOutcome
 
 	switch decision.Provider {
 	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
-		prep, emitErr := env.PrepareOpenAI(r.Header, opts)
-		if emitErr != nil {
-			log.Error("Failed to emit OpenAI body", "err", emitErr)
-			return fmt.Errorf("emit body: %w", emitErr)
-		}
 		proxyWriter := sink
 		if s.usageRequired() {
 			extractor = otel.NewUsageExtractor(sink, decision.Provider)
 			proxyWriter = extractor
 		}
-		proxyErr = p.Proxy(ctx, decision, prep, proxyWriter, r)
+		proxyErr, fallback = s.proxyWithFallback(ctx, &decision, env, opts, proxyWriter, r)
 	case providers.ProviderGoogle:
 		crossFormat = true
 		prep, emitErr := env.PrepareGemini(r.Header, opts)
@@ -1787,7 +1778,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "fallback_attempted", fallback.Attempted, "fallback_from_provider", fallback.FromProvider, "fallback_to_provider", fallback.ToProvider, "fallback_reason", fallback.Reason)
 	return proxyErr
 }
 

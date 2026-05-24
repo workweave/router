@@ -1,6 +1,6 @@
-# internal/proxy — AGENTS
+# internal/proxy — CLAUDE
 
-> **Mirror notice.** Verbatim sync with [CLAUDE.md](CLAUDE.md). **Update both together** — divergence = bug.
+> **Mirror notice.** Verbatim sync with [AGENTS.md](AGENTS.md). **Update both together** — divergence = bug.
 
 Routing/dispatch service. Per-turn orchestrator that composes scorer, planner, handover, cache, sessionpin, pricing, capability, turntype, usage, providers, and translate. Read [root CLAUDE.md](../../CLAUDE.md) first.
 
@@ -40,6 +40,16 @@ The provider-backed `Summarizer` implementation for handover lives in [`handover
 ## Translation
 
 `proxy.Service` is the **only caller of [`../translate`](../translate)**. Keep providers ignorant of cross-format concerns. See [translate/CLAUDE.md](../translate/CLAUDE.md) for the recipe.
+
+## Runtime provider fallback
+
+The OpenAI-compat dispatch branches (Anthropic→OpenAI cross-format and OpenAI same-format) go through `proxyWithFallback` in [`provider_fallback.go`](provider_fallback.go). On a pre-first-byte retryable failure (`httputil.ErrUpstreamIdleTimeout` or `UpstreamStatusError{Status: 5xx}`) it walks `catalog.Model.Providers`, swaps to the next eligible binding, re-emits the body for the new TargetProvider, and retries once. After fallback the caller's `*router.Decision` reflects the actually-served provider so cost math, billing, and the ProxyMessages/ProxyOpenAIChatCompletion complete logs are accurate.
+
+**Invariants:**
+- Retry only when `otel.Timing.UpstreamFirstByteNanos == 0`. Once any upstream byte has reached the translator, switching providers mid-stream would interleave two model outputs in one Anthropic message envelope.
+- One retry attempt, not a chain. If the second binding also fails, the error is returned.
+- Skipped for 4xx (client error) and non-classified failures (connect-time errors, body parse errors).
+- The original `message_start` event (already emitted by the translator's Prelude) carries the original model name — content from the new binding flows in after as deltas. This is a deliberate trade: the alternative is buffering the prelude in memory until first byte, which complicates the translator.
 
 ## `OnUpstreamMeta` callbacks
 
