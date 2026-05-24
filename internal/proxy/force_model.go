@@ -18,26 +18,54 @@ import (
 	"github.com/google/uuid"
 )
 
-// inferProviderForModel returns the provider name for a given model identifier
-// using well-known naming conventions. Falls back to Anthropic for unrecognized
-// models so the forced pin is routable; the upstream call will 400 if wrong,
-// surfacing the mistyped model name to the user.
-func inferProviderForModel(model string) string {
+// resolveForceModel maps a user-typed model identifier to its canonical
+// catalog ID and primary provider binding. The catalog is the source of
+// truth — heuristics are only a fallback for models not yet listed there.
+//
+// Resolution order:
+//  1. Exact match against `catalog.ByID` (the input is already canonical).
+//  2. Suffix match: scan the catalog for any model whose ID ends with
+//     "/" + input. Lets users type bare names like `qwen3-235b-a22b-2507`
+//     and have the pin route to `qwen/qwen3-235b-a22b-2507` on its real
+//     binding (bedrock, in this case) instead of misclassifying it as
+//     Anthropic.
+//  3. Naming heuristic for slash-prefixed IDs not in the catalog (e.g. a
+//     user pinning a bare OpenRouter model we haven't curated yet).
+//  4. Final fallback for well-known proprietary prefixes.
+//
+// Returns the canonical ID (possibly different from input) and the
+// provider name to attach to the session pin.
+func resolveForceModel(model string) (canonicalID, provider string) {
+	if m, ok := catalog.ByID(model); ok && len(m.Providers) > 0 {
+		return m.ID, m.Providers[0].Provider
+	}
+	if !strings.Contains(model, "/") {
+		suffix := "/" + model
+		var matched catalog.Model
+		var matches int
+		for _, m := range catalog.Models {
+			if strings.HasSuffix(m.ID, suffix) {
+				matched = m
+				matches++
+			}
+		}
+		if matches == 1 && len(matched.Providers) > 0 {
+			return matched.ID, matched.Providers[0].Provider
+		}
+	}
 	switch {
 	case strings.HasPrefix(model, "claude-"):
-		return providers.ProviderAnthropic
+		return model, providers.ProviderAnthropic
 	case strings.HasPrefix(model, "gpt-"),
 		model == "o1", model == "o3", model == "o1-pro", model == "o3-pro",
 		strings.HasPrefix(model, "o1-"), strings.HasPrefix(model, "o3-"), strings.HasPrefix(model, "o4-"):
-		return providers.ProviderOpenAI
+		return model, providers.ProviderOpenAI
 	case strings.HasPrefix(model, "gemini-"):
-		return providers.ProviderGoogle
+		return model, providers.ProviderGoogle
 	case strings.Contains(model, "/"):
-		// Slash-prefixed IDs (deepseek/deepseek-v4-pro, qwen/qwen3-*, etc.)
-		// are OpenRouter-namespaced.
-		return providers.ProviderOpenRouter
+		return model, providers.ProviderOpenRouter
 	default:
-		return providers.ProviderAnthropic
+		return model, providers.ProviderAnthropic
 	}
 }
 
@@ -105,13 +133,13 @@ func (s *Service) handleForceModelCommand(
 			"role", role,
 		)
 	} else {
-		provider := inferProviderForModel(cmd.Model)
+		canonicalModel, provider := resolveForceModel(cmd.Model)
 		forced := sessionpin.Pin{
 			SessionKey:     sessionKey,
 			Role:           role,
 			InstallationID: installationID,
 			Provider:       provider,
-			Model:          cmd.Model,
+			Model:          canonicalModel,
 			Reason:         translate.ReasonUserForceModel,
 			TurnCount:      1,
 			PinnedUntil:    time.Now().Add(pinSessionTTL),
@@ -125,12 +153,13 @@ func (s *Service) handleForceModelCommand(
 		if s.pinCache != nil {
 			s.pinCache.Add(pinCacheKey, forced)
 		}
-		msg = fmt.Sprintf("✦ **Weave Router** → force-model applied: %s (%s) · use /unforce-model to clear\n\n", cmd.Model, provider)
+		msg = fmt.Sprintf("✦ **Weave Router** → force-model applied: %s (%s) · use /unforce-model to clear\n\n", canonicalModel, provider)
 		if env.SourceFormat() == translate.FormatOpenAI {
-			msg = fmt.Sprintf("Weave Router: force-model applied: %s (%s). Use /unforce-model to clear.", cmd.Model, provider)
+			msg = fmt.Sprintf("Weave Router: force-model applied: %s (%s). Use /unforce-model to clear.", canonicalModel, provider)
 		}
 		log.Debug("/force-model: session pin set",
-			"model", cmd.Model,
+			"input_model", cmd.Model,
+			"canonical_model", canonicalModel,
 			"provider", provider,
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
 			"role", role,
