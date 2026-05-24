@@ -55,13 +55,22 @@ func openRouterForcesToolTemperatureZero(model string) bool {
 
 // isQwen3Family reports whether the model id belongs to the qwen3.x family.
 // Qwen3 variants (instruct, coder, qwen3-next, qwen3.6-*) are documented to
-// drift into tool-call / thinking loops without a non-zero presence_penalty;
-// the Qwen3 model card recommends presence_penalty=1.5 to suppress this.
+// drift into tool-call / thinking loops without the recommended sampling
+// defaults; the Qwen3 model card publishes a tuned set of params for
+// agentic/code workloads which we layer in when the client did not set them.
 func isQwen3Family(model string) bool {
 	return strings.HasPrefix(model, "qwen/qwen3")
 }
 
-// qwen3PresencePenalty is the recommended Qwen3 presence_penalty value from
-// the official model card; applied only when the client has not set
-// presence_penalty itself.
-const qwen3PresencePenalty = 1.5
+// Qwen3 sampling defaults from the official model card and Unsloth runbook
+// (huggingface.co/Qwen/Qwen3-235B-A22B-Instruct-2507 — "Sampling Parameters").
+// Applied only when the client has not set the corresponding field, so callers
+// with their own tuning still win. presence_penalty=1.5 specifically suppresses
+// the "same tool, same args, N times in a row" loop the Instruct variant is
+// prone to without CoT.
+const (
+	qwen3Temperature       = 0.7
+	qwen3TopP              = 0.8
+	qwen3PresencePenalty   = 1.5
+	qwen3RepetitionPenalty = 1.05
+)

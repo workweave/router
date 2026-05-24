@@ -38,6 +38,9 @@ func NewClient(apiKey, baseURL string) *Client {
 }
 
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
 	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(prep.Body))
 	if err != nil {
 		return fmt.Errorf("build upstream request: %w", err)
@@ -66,7 +69,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
-	return httputil.StreamBody(resp.Body, resp.StatusCode, w, t)
+	return httputil.StreamBody(ctx, cancel, httputil.DefaultSSEIdleTimeout, resp.Body, resp.StatusCode, w, t)
 }
 
 // Passthrough strips the inbound /v1 prefix to avoid double-prefixing with DefaultBaseURL.

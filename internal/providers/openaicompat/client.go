@@ -104,6 +104,9 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request) {
 }
 
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
 	body := rewriteModelField(prep.Body, c.modelIDMap)
 	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
@@ -157,7 +160,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
-	return httputil.StreamBody(resp.Body, resp.StatusCode, w, t)
+	return httputil.StreamBody(ctx, cancel, httputil.DefaultSSEIdleTimeout, resp.Body, resp.StatusCode, w, t)
 }
 
 // readCapped reads up to limit bytes from r into a buffer, then drains the

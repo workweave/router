@@ -338,6 +338,34 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		eligibleModels = filtered
 	}
 
+	// Tool-use quality filter. When the inbound carries tools, drop any
+	// model the catalog has marked ToolUseLow (e.g. instruct-only variants
+	// that hallucinate tool calls). Soft filter: if the subtraction would
+	// empty the eligible pool, fall back to the unfiltered set rather than
+	// 4xx-ing the request — this is a quality preference, not a correctness
+	// gate.
+	if req.HasTools {
+		if blacklist := catalog.ToolUseLowSet(); len(blacklist) > 0 {
+			filtered := eligibleModels[:0:0]
+			var dropped []string
+			for _, m := range eligibleModels {
+				if _, drop := blacklist[m]; drop {
+					dropped = append(dropped, m)
+					continue
+				}
+				filtered = append(filtered, m)
+			}
+			if len(filtered) > 0 && len(dropped) > 0 {
+				log.Debug(
+					"Cluster scorer: tool-use blacklist applied",
+					"dropped_models", dropped,
+					"requested_model", req.RequestedModel,
+				)
+				eligibleModels = filtered
+			}
+		}
+	}
+
 	scoreStart := time.Now()
 	topClusters := topPNearest(vec, s.centroids, s.cfg.TopP)
 

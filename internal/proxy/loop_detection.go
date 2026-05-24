@@ -104,7 +104,7 @@ func (s *Service) handleToolCallLoopBreak(
 		"window_size", loopDetectionWindowSize,
 		"decision_model", decisionModel,
 		"decision_provider", decisionProvider,
-		"session_key_hex", fmt.Sprintf("%x", sessionKey),
+		"session_key_prefix", shortSessionKey(sessionKey),
 		"role", role,
 	)
 

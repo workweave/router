@@ -680,6 +680,72 @@ func TestScorer_ExcludedModelsEmptyingPoolReturnsErrNoEligibleProvider(t *testin
 	assert.False(t, errors.Is(err, ErrClusterUnavailable))
 }
 
+// has_tools=true must subtract catalog.ToolUseLowSet from the argmax pool
+// so qwen3-235b-Instruct (and other instruct-only weak tool callers) cannot
+// be picked for agentic workloads.
+func TestScorer_HasToolsExcludesToolUseLowFromArgmax(t *testing.T) {
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	cb := buildCentroidsBlob(t, 1, dim, c0)
+	// Ranking puts qwen3-235b above claude-opus so without the filter it
+	// would win; the filter must demote it on has_tools=true.
+	rb := []byte(`{"rankings": {"0": {
+		"qwen/qwen3-235b-a22b-2507": 0.95,
+		"claude-opus-4-7": 0.10
+	}}}`)
+	regb := []byte(`{
+		"deployed_models": [
+			{"model": "qwen/qwen3-235b-a22b-2507", "provider": "bedrock", "bench_column": "routerarena_qwen/qwen3-235b-a22b-2507"},
+			{"model": "claude-opus-4-7", "provider": "anthropic", "bench_column": "gpt-5", "proxy": true}
+		]
+	}`)
+	cfg := cfgForTest()
+	cfg.TopP = 1
+	s, err := NewScorer(bundleFromBlobs(t, "v-test-toolfilter", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()},
+		map[string]struct{}{"bedrock": {}, "anthropic": {}})
+	require.NoError(t, err)
+
+	// No tools: qwen3-235b wins (highest score).
+	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.NoError(t, err)
+	assert.Equal(t, "qwen/qwen3-235b-a22b-2507", got.Model, "without tools, qwen3-235b should win on score")
+
+	// With tools: filter drops qwen3-235b → claude-opus wins.
+	got, err = s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100), HasTools: true})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", got.Model, "has_tools=true must drop ToolUseLow models from argmax")
+}
+
+// Soft-filter regression: if the ToolUseLow filter would empty the eligible
+// pool, fall back to the unfiltered set rather than 4xx-ing — this is a
+// quality preference, not a correctness gate.
+func TestScorer_HasToolsFallsBackWhenFilterEmptiesPool(t *testing.T) {
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	cb := buildCentroidsBlob(t, 1, dim, c0)
+	rb := []byte(`{"rankings": {"0": {
+		"qwen/qwen3-235b-a22b-2507": 0.95
+	}}}`)
+	regb := []byte(`{
+		"deployed_models": [
+			{"model": "qwen/qwen3-235b-a22b-2507", "provider": "bedrock", "bench_column": "routerarena_qwen/qwen3-235b-a22b-2507"}
+		]
+	}`)
+	cfg := cfgForTest()
+	cfg.TopP = 1
+	s, err := NewScorer(bundleFromBlobs(t, "v-test-fallback", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()},
+		map[string]struct{}{"bedrock": {}})
+	require.NoError(t, err)
+
+	// has_tools=true: filter would empty the pool, so we keep qwen3-235b
+	// rather than returning an error.
+	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100), HasTools: true})
+	require.NoError(t, err)
+	assert.Equal(t, "qwen/qwen3-235b-a22b-2507", got.Model, "filter must fall back when it would empty the pool")
+}
+
 // DeployedModels returns the full provider-filtered candidate list, not the
 // per-request eligible subset.
 func TestScorer_DeployedModelsReturnsBootCandidates(t *testing.T) {

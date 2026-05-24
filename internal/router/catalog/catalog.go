@@ -83,6 +83,19 @@ type ProviderBinding struct {
 	Price Pricing
 }
 
+// ToolUseQuality marks a model's qualitative reliability under has_tools=true
+// turns. ToolUseUnknown (the zero value) means "no concerns recorded"; ToolUseLow
+// flags models that hallucinate tool calls, emit malformed tool_use blocks, or
+// loop on the same tool. The cluster scorer excludes ToolUseLow models from
+// argmax when the inbound request carries tools, falling back to the unfiltered
+// pool only if the blacklist would otherwise empty the eligible set.
+type ToolUseQuality int
+
+const (
+	ToolUseUnknown ToolUseQuality = iota
+	ToolUseLow
+)
+
 // Model is one logical model — the unit the router decides on.
 type Model struct {
 	// ID is the public slash-form (or bare) model ID exposed to clients,
@@ -91,6 +104,10 @@ type Model struct {
 	// Tier is the coarse capability bucket. TierUnknown means the model
 	// is not deployable as a routing target (passthrough only).
 	Tier Tier
+	// ToolUseQuality marks a model's reliability under has_tools=true. Zero
+	// value (ToolUseUnknown) is the default — set ToolUseLow to remove the
+	// model from agentic argmax pools.
+	ToolUseQuality ToolUseQuality
 	// Providers is the ordered fallback list. First binding whose
 	// Provider name is in the available set wins. Must be non-empty.
 	Providers []ProviderBinding
@@ -252,7 +269,13 @@ var Models = []Model{
 	//   stays as a trailing fallback for self-hosters without an AWS key.
 	//   The OR primary was dropped because we observed non-SSE responses
 	//   when OR routed Qwen through Google's hosting (silent CC stalls).
-	{ID: "qwen/qwen3-235b-a22b-2507", Tier: TierMid, Providers: []ProviderBinding{
+	//   ToolUseLow: Instruct-2507 is the non-thinking variant and is
+	//   documented (Qwen model card, arxiv 2604.02155) to under-perform
+	//   the Thinking variant on tool use; production traffic against the
+	//   Bedrock binding (2026-05-23) showed the model returning narrative
+	//   "I edited the file" responses with zero tool_use blocks. Excluded
+	//   from agentic argmax pools until the Thinking variant lands.
+	{ID: "qwen/qwen3-235b-a22b-2507", Tier: TierMid, ToolUseQuality: ToolUseLow, Providers: []ProviderBinding{
 		{Provider: providers.ProviderBedrock, UpstreamID: "qwen.qwen3-235b-a22b-2507",
 			Price: Pricing{InputUSDPer1M: 0.2266, OutputUSDPer1M: 0.9064}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.071, OutputUSDPer1M: 0.463}},

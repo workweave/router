@@ -125,6 +125,21 @@ func AllowedAtOrBelow(ceiling Tier) map[string]struct{} {
 	return out
 }
 
+// ToolUseLowSet returns the set of model IDs whose ToolUseQuality is
+// ToolUseLow. The cluster scorer subtracts this set from the eligible pool
+// when req.HasTools is true; falls back to the unfiltered pool when the
+// subtraction would empty the eligible set so a routing decision is always
+// returned.
+func ToolUseLowSet() map[string]struct{} {
+	out := make(map[string]struct{}, len(Models))
+	for _, m := range Models {
+		if m.ToolUseQuality == ToolUseLow {
+			out[m.ID] = struct{}{}
+		}
+	}
+	return out
+}
+
 // AllPrimaryPricing returns a copy of the primary-binding pricing for
 // every known model, keyed by model ID. Used by the OTel emitter and the
 // genprices install-script generator.

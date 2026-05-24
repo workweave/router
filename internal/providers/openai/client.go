@@ -4,6 +4,7 @@ package openai
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -78,6 +79,9 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *h
 }
 
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
 	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewReader(prep.Body))
 	if err != nil {
 		return fmt.Errorf("build upstream request: %w", err)
@@ -115,8 +119,11 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 
 	// Manual stream loop for per-chunk diagnostics; non-debug takes the fast path.
 	if !log.Enabled(ctx, slog.LevelDebug) {
-		return httputil.StreamBody(resp.Body, status, w, t)
+		return httputil.StreamBody(ctx, cancel, httputil.DefaultSSEIdleTimeout, resp.Body, status, w, t)
 	}
+
+	mark, stop := httputil.StartIdleWatchdog(ctx, cancel, httputil.DefaultSSEIdleTimeout)
+	defer stop()
 
 	flusher, _ := w.(http.Flusher)
 	buf := make([]byte, httputil.FlushChunk)
@@ -124,6 +131,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	for {
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
+			mark()
 			t.StampUpstreamFirstByte()
 			if bytesRead == 0 {
 				log.Debug("OpenAI upstream first chunk",
@@ -149,6 +157,10 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 			return nil
 		}
 		if readErr != nil {
+			if cause := context.Cause(ctx); errors.Is(cause, httputil.ErrUpstreamIdleTimeout) {
+				log.Debug("OpenAI upstream sse idle", "bytes_read", bytesRead)
+				return httputil.ErrUpstreamIdleTimeout
+			}
 			log.Debug("OpenAI upstream read failed", "err", readErr, "bytes_read", bytesRead)
 			return readErr
 		}

@@ -107,6 +107,34 @@ func TestAllowedAtOrBelow_FiltersOutUnknownTier(t *testing.T) {
 	assert.False(t, high)
 }
 
+func TestToolUseLowSet_IncludesQwen3_235BInstruct(t *testing.T) {
+	// Production traffic on 2026-05-23 saw Instruct-2507 emit narrative
+	// "I edited the file" without tool_use blocks — flagged ToolUseLow so
+	// the cluster scorer excludes it from agentic argmax. If this assertion
+	// fires, either the entry was downgraded back to ToolUseUnknown or the
+	// catalog row was renamed.
+	set := ToolUseLowSet()
+	_, found := set["qwen/qwen3-235b-a22b-2507"]
+	assert.True(t, found, "qwen/qwen3-235b-a22b-2507 must be marked ToolUseLow")
+}
+
+func TestToolUseLowSet_OmitsHealthyModels(t *testing.T) {
+	set := ToolUseLowSet()
+	for _, id := range []string{"claude-opus-4-7", "deepseek/deepseek-v4-pro", "moonshotai/kimi-k2.5"} {
+		_, found := set[id]
+		assert.Falsef(t, found, "%s must NOT be in the ToolUseLow set", id)
+	}
+}
+
+func TestModel_ToolUseQualityDefaultsToUnknown(t *testing.T) {
+	// Zero-value safety: an unset ToolUseQuality must default to
+	// ToolUseUnknown so the scorer treats the model as healthy until
+	// proven otherwise. Guards against a future iota reorder that would
+	// silently flip every catalog row to ToolUseLow.
+	var m Model
+	assert.Equal(t, ToolUseUnknown, m.ToolUseQuality)
+}
+
 func TestValidateDeployed_FlagsMissingAndUntiered(t *testing.T) {
 	err := ValidateDeployed([]string{"claude-opus-4-7"})
 	assert.NoError(t, err)
