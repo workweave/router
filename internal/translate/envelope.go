@@ -159,6 +159,13 @@ func (e *RequestEnvelope) ClientSessionID() string {
 	if raw == "" {
 		return ""
 	}
+	// Claude Code (post 0.x) packs the identifier as a stringified JSON object
+	// like {"device_id":"…","session_id":"<uuid>","account_id":"…"}. Probe the
+	// well-known session-id keys first; only fall through to regex on the raw
+	// string when no key matches.
+	if id := jsonSessionIDField(raw); id != "" {
+		return id
+	}
 	if m := clientSessionEmbeddedUUID.FindStringSubmatch(raw); m != nil {
 		return m[1]
 	}
@@ -169,6 +176,25 @@ func (e *RequestEnvelope) ClientSessionID() string {
 		return raw[:clientSessionIDMaxLen]
 	}
 	return raw
+}
+
+// jsonSessionIDField returns the value of the first matching session-id field
+// when raw is a JSON object, else "". Order matches observed client shapes:
+// Claude Code uses "session_id"; OpenAI surfaces have variously used
+// "sessionId", and chat-style clients sometimes use "conversation_id".
+func jsonSessionIDField(raw string) string {
+	if len(raw) == 0 || raw[0] != '{' {
+		return ""
+	}
+	if !gjson.Valid(raw) {
+		return ""
+	}
+	for _, key := range [...]string{"session_id", "sessionId", "conversation_id", "conversationId"} {
+		if v := gjson.Get(raw, key).String(); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // SystemText returns the concatenated system-prompt text format-neutrally.

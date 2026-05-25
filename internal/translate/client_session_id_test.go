@@ -21,6 +21,21 @@ func TestRequestEnvelope_ClientSessionID_Anthropic(t *testing.T) {
 			want: "4dbee464-ebf7-437f-9f20-db5a6f7fe3b4",
 		},
 		{
+			name: "claude code stringified-json metadata.user_id",
+			body: `{"messages":[{"role":"user","content":"hi"}],"metadata":{"user_id":"{\"device_id\":\"71490f370101aac16255e0a02d8db8039ca8db7608335ae1b4\",\"account_id\":\"abcd1234\",\"session_id\":\"7937b7f5-465f-4419-99f3-2d1666ba13db\"}"}}`,
+			want: "7937b7f5-465f-4419-99f3-2d1666ba13db",
+		},
+		{
+			name: "stringified-json metadata.user_id sessionId camelCase",
+			body: `{"messages":[{"role":"user","content":"hi"}],"metadata":{"user_id":"{\"deviceId\":\"x\",\"sessionId\":\"3abddf3d-dc4a-4102-96c1-e675b5c790cb\"}"}}`,
+			want: "3abddf3d-dc4a-4102-96c1-e675b5c790cb",
+		},
+		{
+			name: "json object with no recognized session key falls back to truncation",
+			body: `{"messages":[{"role":"user","content":"hi"}],"metadata":{"user_id":"{\"device_id\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123\",\"account_id\":\"xyz\"}"}}`,
+			want: `{"device_id":"abcdef0123456789abcdef0123456789abcdef0123456789ab`,
+		},
+		{
 			name: "bare uuid in metadata.user_id",
 			body: `{"messages":[{"role":"user","content":"hi"}],"metadata":{"user_id":"31ab679a-f79b-4860-881e-a184dc3d2e2d"}}`,
 			want: "31ab679a-f79b-4860-881e-a184dc3d2e2d",
