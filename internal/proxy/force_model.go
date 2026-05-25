@@ -73,13 +73,14 @@ func resolveForceModel(model string) (canonicalID, provider string) {
 // It writes (or expires) the session pin and returns a synthetic Anthropic-format
 // acknowledgment response without dispatching to any upstream.
 func (s *Service) handleForceModelCommand(
+	ctx context.Context,
 	w http.ResponseWriter,
 	env *translate.RequestEnvelope,
 	cmd translate.ForceModelResult,
 	installationID uuid.UUID,
 	sessionKey [sessionpin.SessionKeyLen]byte,
 ) error {
-	log := observability.Get()
+	log := observability.FromContext(ctx)
 	role := roleForTier(catalog.TierFor(env.Model()))
 	pinCacheKey := sessionPinCacheKey(sessionKey, role)
 

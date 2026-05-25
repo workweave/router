@@ -641,7 +641,7 @@ func logUpstreamBody(log *slog.Logger, sessionKey [sessionpin.SessionKeyLen]byte
 // ProxyMessages routes a raw Anthropic-Messages request body and streams the
 // upstream response back. The routing decision is reflected in x-router-* headers.
 func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
-	log := observability.Get()
+	log := observability.FromContext(ctx)
 	requestStart := time.Now()
 	requestID := uuid.New().String()
 	buf := otel.NewBuffer(s.emitter)
@@ -681,6 +681,21 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	clientID := ClientIdentityFrom(ctx)
 	bypassEval := hasEvalOverrideHeader(r)
 
+	// Bind session_key/request_id/api_key_id/ingress onto a ctx-scoped logger so
+	// every downstream log line in this turn carries them. The derived key is
+	// reused for the force-model and loop-break paths below to avoid a second
+	// hash + a divergent key in the rare case env.body mutates mid-flow.
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "anthropic_messages")
+	log.Debug("ProxyMessages start",
+		"requested_model", feats.Model,
+		"stream", env.Stream(),
+		"message_count", feats.MessageCount,
+		"has_tools", feats.HasTools,
+		"total_input_tokens", feats.Tokens,
+		"prompt_preview", preview(promptText, 200),
+	)
+
 	// Handle /force-model <model> and /unforce-model commands before routing.
 	// The command is stripped from env.body so the upstream never sees it.
 	// Session key is derived before extraction: ExtractForceModelCommand mutates
@@ -688,9 +703,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// metadata.user_id is absent. Deriving after the strip would produce a key
 	// that mismatches subsequent turns where the unstripped message is present.
 	if s.pinStore != nil {
-		cmdSessionKey := DeriveSessionKey(env, apiKeyID)
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
-			return s.handleForceModelCommand(w, env, cmd, installationID, cmdSessionKey)
+			log.Info("ProxyMessages force-model command", "force_model_cmd", cmd)
+			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey)
 		}
 	}
 
@@ -701,10 +716,15 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// previous-turn-maxed-out guard misses because each individual tool call
 	// returns quickly and well under the output cap.
 	if loop, sig, count := detectToolCallLoop(env); loop {
-		loopSessionKey := DeriveSessionKey(env, apiKeyID)
 		loopRole := roleForTier(catalog.TierFor(feats.Model))
-		return s.handleToolCallLoopBreak(w, env, sig, count, installationID, loopSessionKey, loopRole, feats.Model, providers.ProviderAnthropic)
+		log.Info("ProxyMessages tool-call loop detected", "tool_sig", sig, "repeat_count", count, "role", loopRole)
+		return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderAnthropic)
 	}
+
+	// Surface inbound tool_use / tool_result blocks the model is about to see.
+	// Lets us audit whether a misbehaving turn was provoked by a malformed prior
+	// tool_result or an out-of-shape tool spec, without dumping the whole body.
+	logInboundToolTraffic(log, env)
 
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
@@ -729,7 +749,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	pinTier := routeRes.PinTier
 	pinAgeSec := routeRes.PinAgeSec
 	routeMs := time.Since(routeStart).Milliseconds()
-	s.logPlannerOutcome(routeRes)
+	s.logPlannerOutcome(ctx, routeRes)
 
 	// Cross-envelope no-progress detector: if this session has dispatched the
 	// same (decision_model, decision_provider, prompt-prefix) burst >=
@@ -740,7 +760,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if fp := computeNoProgressFingerprint(decision, promptText); s.noProgress != nil {
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
-			return s.handleNoProgressBreak(w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider)
+			return s.handleNoProgressBreak(ctx, w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider)
 		}
 	}
 
@@ -1122,11 +1142,11 @@ func plannerOutcomeAttr(res turnLoopResult) string {
 
 // logPlannerOutcome emits a structured log line for the planner's verdict.
 // Switch turns are Info; stay turns are Debug.
-func (s *Service) logPlannerOutcome(res turnLoopResult) {
+func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 	if res.PlannerDecision.Reason == "" {
 		return
 	}
-	log := observability.Get()
+	log := observability.FromContext(ctx)
 	if res.PlannerDecision.Outcome == planner.OutcomeSwitch {
 		log.Info("router switched models",
 			"from", res.PinModel,
@@ -1562,7 +1582,7 @@ func finalizeAfterProxy(proxyErr error, fn func() error) error {
 // ProxyOpenAIChatCompletion routes an OpenAI Chat Completion request,
 // translating cross-format when the decision picks a non-OpenAI provider.
 func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
-	log := observability.Get()
+	log := observability.FromContext(ctx)
 	requestStart := time.Now()
 	requestID := uuid.New().String()
 	buf := otel.NewBuffer(s.emitter)
@@ -1596,6 +1616,19 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	bypassEval := hasEvalOverrideHeader(r)
 
+	// Bind session-scoped logger; see the matching block in ProxyMessages for
+	// the rationale around deriving the key once and reusing it.
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "openai_chat_completions")
+	log.Debug("ProxyOpenAIChatCompletion start",
+		"requested_model", feats.Model,
+		"stream", env.Stream(),
+		"message_count", feats.MessageCount,
+		"has_tools", feats.HasTools,
+		"total_input_tokens", feats.Tokens,
+		"prompt_preview", preview(promptText, 200),
+	)
+
 	// Handle /force-model <model> and /unforce-model commands before routing.
 	// The command is stripped from env.body so the upstream never sees it.
 	// Session key is derived before extraction: ExtractForceModelCommand mutates
@@ -1603,19 +1636,21 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// metadata.user_id is absent. Deriving after the strip would produce a key
 	// that mismatches subsequent turns where the unstripped message is present.
 	if s.pinStore != nil {
-		cmdSessionKey := DeriveSessionKey(env, apiKeyID)
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
-			return s.handleForceModelCommand(w, env, cmd, installationID, cmdSessionKey)
+			log.Info("ProxyOpenAIChatCompletion force-model command", "force_model_cmd", cmd)
+			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey)
 		}
 	}
 
 	// Tool-call loop break: same path as the Anthropic ingress. See the
 	// detectToolCallLoop / handleToolCallLoopBreak doc comments for rationale.
 	if loop, sig, count := detectToolCallLoop(env); loop {
-		loopSessionKey := DeriveSessionKey(env, apiKeyID)
 		loopRole := roleForTier(catalog.TierFor(feats.Model))
-		return s.handleToolCallLoopBreak(w, env, sig, count, installationID, loopSessionKey, loopRole, feats.Model, providers.ProviderOpenAI)
+		log.Info("ProxyOpenAIChatCompletion tool-call loop detected", "tool_sig", sig, "repeat_count", count, "role", loopRole)
+		return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderOpenAI)
 	}
+
+	logInboundToolTraffic(log, env)
 
 	// OpenAI signals sub-agent identity via x-weave-subagent-type (no metadata.user_id).
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
@@ -1641,7 +1676,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	stickyHit := routeRes.StickyHit
 	pinTier := routeRes.PinTier
 	pinAgeSec := routeRes.PinAgeSec
-	s.logPlannerOutcome(routeRes)
+	s.logPlannerOutcome(ctx, routeRes)
 
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {

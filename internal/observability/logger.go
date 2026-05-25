@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"strings"
@@ -13,6 +14,36 @@ import (
 )
 
 const ginContextKey = "router_logger"
+
+// loggerContextKey is the private key used to stash a request-scoped
+// *slog.Logger on a context.Context. Private type prevents collisions with
+// other packages' context values.
+type loggerContextKey struct{}
+
+// WithLogger returns a new context that carries the given logger. Downstream
+// code reading the logger with FromContext sees this logger (with all its
+// pre-bound attributes) instead of the global default.
+func WithLogger(ctx context.Context, log *slog.Logger) context.Context {
+	if log == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, loggerContextKey{}, log)
+}
+
+// FromContext returns the request-scoped logger stashed by WithLogger, or the
+// global default logger if none is set. Always non-nil. Initializes the
+// LOG_LEVEL-honoring handler on first call, matching Get().
+func FromContext(ctx context.Context) *slog.Logger {
+	initOnce.Do(initLogger)
+	if ctx != nil {
+		if v := ctx.Value(loggerContextKey{}); v != nil {
+			if logger, ok := v.(*slog.Logger); ok {
+				return logger
+			}
+		}
+	}
+	return slog.Default()
+}
 
 // initOnce installs a slog handler honoring LOG_LEVEL on first Get(). Without
 // this, slog.Default() falls back to Go's stdlib handler at INFO, silently

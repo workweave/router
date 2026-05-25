@@ -94,13 +94,19 @@ func (s *Service) runTurnLoop(
 	reqHeaders http.Header,
 	req router.Request,
 ) (turnLoopResult, error) {
-	log := observability.Get()
+	log := observability.FromContext(ctx)
 	res := turnLoopResult{
 		TurnType:      turntype.DetectFromEnvelope(env, feats, subAgentHint),
 		PinTier:       "miss",
 		RequestedTier: catalog.TierFor(feats.Model),
 	}
 	res.PinRole = roleForTier(res.RequestedTier)
+	log.Debug("turnloop classified",
+		"turn_type", string(res.TurnType),
+		"requested_tier", res.RequestedTier.String(),
+		"pin_role", res.PinRole,
+		"sub_agent_hint", subAgentHint,
+	)
 
 	// Hard pins bypass pin lookup, pin write, planner, and scorer entirely.
 	// Probes and title-gen MUST NOT create a session pin — the Anthropic SDK
@@ -168,6 +174,15 @@ func (s *Service) runTurnLoop(
 	if pinFound {
 		res.PinModel = pin.Model
 		res.PinAgeSec = pinAge(pin)
+		log.Debug("turnloop pin lookup hit",
+			"pin_model", pin.Model,
+			"pin_provider", pin.Provider,
+			"pin_reason", pin.Reason,
+			"pin_age_s", res.PinAgeSec,
+			"last_output_tokens", pin.LastOutputTokens,
+		)
+	} else {
+		log.Debug("turnloop pin lookup miss", "role", res.PinRole)
 	}
 
 	// User-forced pins are immutable stickies — skip scorer and planner entirely.
@@ -197,7 +212,7 @@ func (s *Service) runTurnLoop(
 			res.Decision = decision
 			res.StickyHit = true
 			res.PinTier = "user_forced"
-			s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, pinDecision(pin))
+			s.refreshPin(ctx, installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, pinDecision(pin))
 			return res, nil
 		}
 		// Forced pin is no longer servable on this request (excluded by policy
@@ -242,7 +257,7 @@ func (s *Service) runTurnLoop(
 		res.Decision = decision
 		res.StickyHit = true
 		res.PinTier = "postgres_tool_result_sc"
-		s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, decision)
+		s.refreshPin(ctx, installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, decision)
 		return res, nil
 	}
 
@@ -252,21 +267,34 @@ func (s *Service) runTurnLoop(
 		res.Decision = decision
 		res.StickyHit = true
 		res.PinTier = "postgres"
-		s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, decision)
+		s.refreshPin(ctx, installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, decision)
 		return res, nil
 	}
 
 	// Always run the scorer when no pin, or on MainLoop with a pin.
 	fresh, err := s.router.Route(ctx, req)
 	if err != nil {
+		log.Error("turnloop scorer failed", "err", err, "requested_model", req.RequestedModel)
 		return res, err
 	}
+	log.Debug("turnloop scorer decision",
+		"fresh_model", fresh.Model,
+		"fresh_provider", fresh.Provider,
+		"fresh_reason", fresh.Reason,
+	)
 	fresh = s.clampToCeiling(fresh, res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+	if res.TierClamped {
+		log.Debug("turnloop scorer clamped to ceiling",
+			"pre_clamp_model", res.PreClampModel,
+			"clamped_model", fresh.Model,
+			"requested_tier", res.RequestedTier.String(),
+		)
+	}
 	res.Fresh = fresh
 
 	if !s.plannerEnabled {
 		res.Decision = fresh
-		s.writeNewPin(installationID, res.SessionKey, pinCacheKey, res.PinRole, fresh)
+		s.writeNewPin(ctx, installationID, res.SessionKey, pinCacheKey, res.PinRole, fresh)
 		return res, nil
 	}
 
@@ -287,7 +315,7 @@ func (s *Service) runTurnLoop(
 		res.Decision = stay
 		res.StickyHit = true
 		res.PinTier = "postgres_stay_" + decision.Reason
-		s.refreshPin(installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, stay)
+		s.refreshPin(ctx, installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, stay)
 		return res, nil
 	}
 
@@ -355,7 +383,7 @@ func (s *Service) runTurnLoop(
 	if pinFound {
 		res.PinTier = "switch_" + decision.Reason
 	}
-	s.writeNewPin(installationID, res.SessionKey, pinCacheKey, res.PinRole, fresh)
+	s.writeNewPin(ctx, installationID, res.SessionKey, pinCacheKey, res.PinRole, fresh)
 	return res, nil
 }
 
@@ -408,7 +436,7 @@ func (s *Service) clampToCeiling(decision router.Decision, ceiling catalog.Tier,
 // loadPin returns the active pin for this session, consulting the in-proc
 // LRU first then Postgres. Expired rows are treated as misses.
 func (s *Service) loadPin(ctx context.Context, pinCacheKey string, sessionKey [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool) {
-	log := observability.Get()
+	log := observability.FromContext(ctx)
 	log.Debug("loadPin called", "role", role, "session_key_hex", fmt.Sprintf("%x", sessionKey))
 	if s.pinCache != nil {
 		if pin, ok := s.pinCache.Get(pinCacheKey); ok {
@@ -442,7 +470,7 @@ func (s *Service) loadPin(ctx context.Context, pinCacheKey string, sessionKey [s
 // refreshPin extends the TTL on an existing pin. Carries the existing pin's
 // usage forward so the planner has evidence before the next UpdateUsage
 // writeback lands. Async, bounded; drops on saturation.
-func (s *Service) refreshPin(installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, existing sessionpin.Pin, pinCacheKey string, role string, chosen router.Decision) {
+func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, existing sessionpin.Pin, pinCacheKey string, role string, chosen router.Decision) {
 	if installationID == uuid.Nil {
 		return
 	}
@@ -461,15 +489,16 @@ func (s *Service) refreshPin(installationID uuid.UUID, sessionKey [sessionpin.Se
 		LastOutputTokens:      existing.LastOutputTokens,
 		LastTurnEndedAt:       existing.LastTurnEndedAt,
 	}
-	s.enqueuePinUpsert(p, pinCacheKey)
+	s.enqueuePinUpsert(ctx, p, pinCacheKey)
 }
 
 // writeNewPin records a freshly-routed decision as the active pin. Used on
 // first-turn routing and switch turns. UpdateUsage fills in usage stats later.
-func (s *Service) writeNewPin(installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, pinCacheKey string, role string, chosen router.Decision) {
-	observability.Get().Debug("writeNewPin called", "installation_id", installationID.String(), "role", role, "model", chosen.Model, "session_key_hex", fmt.Sprintf("%x", sessionKey))
+func (s *Service) writeNewPin(ctx context.Context, installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, pinCacheKey string, role string, chosen router.Decision) {
+	log := observability.FromContext(ctx)
+	log.Debug("writeNewPin called", "installation_id", installationID.String(), "role", role, "model", chosen.Model, "session_key_hex", fmt.Sprintf("%x", sessionKey))
 	if installationID == uuid.Nil {
-		observability.Get().Debug("writeNewPin: skipping because installationID is uuid.Nil")
+		log.Debug("writeNewPin: skipping because installationID is uuid.Nil")
 		return
 	}
 	p := sessionpin.Pin{
@@ -482,25 +511,27 @@ func (s *Service) writeNewPin(installationID uuid.UUID, sessionKey [sessionpin.S
 		TurnCount:      1,
 		PinnedUntil:    time.Now().Add(pinSessionTTL),
 	}
-	s.enqueuePinUpsert(p, pinCacheKey)
+	s.enqueuePinUpsert(ctx, p, pinCacheKey)
 }
 
 // enqueuePinUpsert pushes a pin write onto the bounded async worker pool.
 // Drops on saturation. Primes the in-proc LRU so the next turn avoids Postgres.
-func (s *Service) enqueuePinUpsert(p sessionpin.Pin, pinCacheKey string) {
-	log := observability.Get()
+//
+// The caller's ctx is used only to capture the request-scoped logger before
+// the goroutine spawns; the actual Upsert always runs on context.Background()
+// because the request ctx is canceled by the time the response has finished
+// streaming.
+func (s *Service) enqueuePinUpsert(ctx context.Context, p sessionpin.Pin, pinCacheKey string) {
+	log := observability.FromContext(ctx)
 	select {
 	case s.pinWriteSem <- struct{}{}:
 		go func(pin sessionpin.Pin) {
 			defer func() { <-s.pinWriteSem }()
-			// context.Background(): the request ctx is canceled by the
-			// time the response has finished streaming, which would drop
-			// the write and break provider continuity next turn.
 			if err := s.pinStore.Upsert(context.Background(), pin); err != nil {
-				observability.Get().Error("session pin upsert failed", "err", err)
+				log.Error("session pin upsert failed", "err", err)
 				return
 			}
-			observability.Get().Debug("session pin upsert ok", "installation_id", pin.InstallationID.String(), "role", pin.Role, "model", pin.Model)
+			log.Debug("session pin upsert ok", "installation_id", pin.InstallationID.String(), "role", pin.Role, "model", pin.Model)
 		}(p)
 	default:
 		log.Debug("session pin upsert dropped: semaphore full")

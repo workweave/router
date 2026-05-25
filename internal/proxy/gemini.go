@@ -30,7 +30,7 @@ var ErrGeminiCrossFormatUnsupported = errors.New("gemini cross-format emit not i
 // and "stream" (true for :streamGenerateContent) fields into body before
 // calling; both are stripped before forwarding upstream.
 func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
-	log := observability.Get()
+	log := observability.FromContext(ctx)
 	requestStart := time.Now()
 	requestID := uuid.New().String()
 	buf := otel.NewBuffer(s.emitter)
@@ -58,6 +58,16 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		embedInput = "only_user_message"
 	}
 
+	ctx, log, _ = bindRequestLogger(ctx, env, apiKeyID, requestID, "gemini_generate_content")
+	log.Debug("ProxyGeminiGenerateContent start",
+		"requested_model", feats.Model,
+		"stream", env.Stream(),
+		"message_count", feats.MessageCount,
+		"has_tools", feats.HasTools,
+		"total_input_tokens", feats.Tokens,
+		"prompt_preview", preview(promptText, 200),
+	)
+
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
 	routeStart := time.Now()
@@ -80,7 +90,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	stickyHit := routeRes.StickyHit
 	pinTier := routeRes.PinTier
 	pinAgeSec := routeRes.PinAgeSec
-	s.logPlannerOutcome(routeRes)
+	s.logPlannerOutcome(ctx, routeRes)
 
 	p, provErr := s.provider(decision.Provider)
 	if provErr != nil {

@@ -75,6 +75,7 @@ func detectToolCallLoop(env *translate.RequestEnvelope) (looped bool, sig transl
 // the response, because the client is already stuck and getting a clean break
 // out is more important than guaranteeing the pin row reflects the new state.
 func (s *Service) handleToolCallLoopBreak(
+	ctx context.Context,
 	w http.ResponseWriter,
 	env *translate.RequestEnvelope,
 	sig translate.ToolCallSig,
@@ -85,7 +86,7 @@ func (s *Service) handleToolCallLoopBreak(
 	decisionModel string,
 	decisionProvider string,
 ) error {
-	log := observability.Get()
+	log := observability.FromContext(ctx)
 
 	msg := fmt.Sprintf(
 		"✦ **Weave Router** → tool-call loop detected: `%s` was called %d times in the last %d turns with identical arguments. Stopping this turn and clearing the session pin so the next message re-routes to a fresh model.\n\nIf the task is genuinely incomplete, send a follow-up message describing what's still needed; the router will pick a different model.\n\n",

@@ -92,7 +92,7 @@ var ErrEmptySummary = errors.New("handover: upstream returned no summary text")
 // summary as a separate ledger row. On failure returns ("", zero Usage, err)
 // so the caller can fall back to handover.TrimLastN.
 func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.RequestEnvelope) (string, handover.Usage, error) {
-	log := observability.Get()
+	log := observability.FromContext(ctx)
 	if env == nil {
 		return "", handover.Usage{}, errors.New("handover: nil envelope")
 	}

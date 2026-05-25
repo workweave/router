@@ -198,7 +198,7 @@ type failoverInputs struct {
 // straight to w so the client sees the underlying provider's response
 // envelope rather than a generic 502 from us.
 func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (winnerIdx int, err error) {
-	log := observability.Get()
+	log := observability.FromContext(ctx)
 	if len(in.bindings) == 0 {
 		return -1, &providers.UpstreamStatusError{Status: http.StatusBadGateway}
 	}

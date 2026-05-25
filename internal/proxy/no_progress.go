@@ -162,6 +162,7 @@ func shortSessionKey(sessionKey [sessionpin.SessionKeyLen]byte) string {
 // cross-envelope nature so a human reading the chat history can tell the
 // two break modes apart.
 func (s *Service) handleNoProgressBreak(
+	ctx context.Context,
 	w http.ResponseWriter,
 	env *translate.RequestEnvelope,
 	count int,
@@ -171,7 +172,7 @@ func (s *Service) handleNoProgressBreak(
 	decisionModel string,
 	decisionProvider string,
 ) error {
-	log := observability.Get()
+	log := observability.FromContext(ctx)
 
 	msg := fmt.Sprintf(
 		"✦ **Weave Router** → no-progress loop detected: %d consecutive requests under this session routed to `%s` (`%s`) with no observable progress in %s. Stopping this turn and clearing the session pin so the next message re-routes.\n\nIf the task is genuinely incomplete, send a follow-up message describing what's still needed; the router will pick a different model.\n\n",
