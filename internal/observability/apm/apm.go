@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	otelgin "go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
@@ -118,6 +119,14 @@ func initLocked() {
 	)
 	otel.SetMeterProvider(meterProvider)
 
+	// Without this the MeterProvider has no instruments registered against
+	// it and the only metric SigNoz receives is the empty resource heartbeat.
+	// otelruntime.Start hooks runtime/metrics (goroutines, heap, GC pauses,
+	// cgo calls) into the global MeterProvider just set above.
+	if err := otelruntime.Start(otelruntime.WithMinimumReadMemStatsInterval(15 * time.Second)); err != nil {
+		log.Warn("APM init: runtime instrumentation failed; SDK traces still active", "err", err)
+	}
+
 	log.Info("APM enabled",
 		"endpoint", endpoint,
 		"service", serviceName,
@@ -157,11 +166,21 @@ func Middleware() gin.HandlerFunc {
 	)
 }
 
-// Shutdown flushes the trace + metric pipelines. Safe to call multiple times
-// and safe when Init was never called.
+// Shutdown flushes the trace + metric pipelines with a 5s default budget.
+// Safe to call multiple times and safe when Init was never called.
+//
+// Most callers should prefer ShutdownWithContext so the parent process can
+// budget the flush against its own SIGTERM window.
 func Shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	ShutdownWithContext(ctx)
+}
+
+// ShutdownWithContext flushes the trace + metric pipelines under the caller's
+// deadline. Use this from a process-level shutdown handler that's already
+// budgeting its remaining SIGTERM time across multiple flush stages.
+func ShutdownWithContext(ctx context.Context) {
 	if tracerProvider != nil {
 		_ = tracerProvider.Shutdown(ctx)
 	}
