@@ -22,6 +22,7 @@ import (
 	"workweave/router/internal/billing"
 	"workweave/router/internal/config"
 	"workweave/router/internal/observability"
+	"workweave/router/internal/observability/apm"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/postgres"
 	"workweave/router/internal/providers"
@@ -592,12 +593,19 @@ func main() {
 		logger.Info("Model exclusion override active", "excluded_models", cleaned)
 	}
 
+	// APM (SigNoz / apm.app.workweave.ai) — adds standard HTTP server spans
+	// and Go runtime metrics to the same OTel resource shape as the rest of
+	// the Weave services. No-op when WV_APM_OTLP_ENDPOINT is unset.
+	apm.Init()
+	defer apm.Shutdown()
+
 	engine := gin.New()
 	engine.UnescapePathValues = true
 	engine.UseRawPath = true
 	engine.Use(
 		observability.Middleware(),
 		observability.AccessLog(),
+		apm.Middleware(),
 		gin.Recovery(),
 	)
 
