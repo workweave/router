@@ -83,11 +83,13 @@ func initLocked() {
 		return
 	}
 
-	// Insecure: this is the internal collector behind the LB, same convention
-	// as backend/internal/app/telemetry/otel.go. WV_APM_OTLP_INSECURE=false
-	// flips to TLS for external collectors during local testing against
-	// apm.app.workweave.ai directly.
-	insecure := config.GetOr("WV_APM_OTLP_INSECURE", "true") == "true"
+	// TLS by default. The router runs outside the cluster the SigNoz
+	// collector is on for some deployments, so silently shipping spans over
+	// plaintext gRPC would leak whatever's in attributes (api_key_id, model
+	// names, decision reasons) to anyone on-path. Operators opt into insecure
+	// transport explicitly via WV_APM_OTLP_INSECURE=true when the collector
+	// is reachable only over a trusted internal network.
+	insecure := config.GetOr("WV_APM_OTLP_INSECURE", "false") == "true"
 
 	traceExporter, err := newTraceExporter(ctx, endpoint, insecure)
 	if err != nil {

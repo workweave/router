@@ -645,6 +645,13 @@ func main() {
 	select {
 	case err := <-serverErr:
 		logger.Error("Server exited with error", "err", err)
+		// Flush APM here too: a ListenAndServe failure bypasses the SIGTERM
+		// path below, so without an explicit shutdown the buffered SDK
+		// traces + metrics describing the failure itself would never reach
+		// SigNoz — exactly when they'd be most useful.
+		apmFailCtx, apmFailCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		defer apmFailCancel()
+		apm.ShutdownWithContext(apmFailCtx)
 		return
 	case sig := <-stop:
 		logger.Info("Received shutdown signal; draining", "signal", sig.String())
