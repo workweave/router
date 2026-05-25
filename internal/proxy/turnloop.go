@@ -101,7 +101,7 @@ func (s *Service) runTurnLoop(
 		RequestedTier: catalog.TierFor(feats.Model),
 	}
 	res.PinRole = roleForTier(res.RequestedTier)
-	log.Debug("turnloop classified",
+	log.Info("turnloop classified",
 		"turn_type", string(res.TurnType),
 		"requested_tier", res.RequestedTier.String(),
 		"pin_role", res.PinRole,
@@ -174,7 +174,7 @@ func (s *Service) runTurnLoop(
 	if pinFound {
 		res.PinModel = pin.Model
 		res.PinAgeSec = pinAge(pin)
-		log.Debug("turnloop pin lookup hit",
+		log.Info("turnloop pin lookup hit",
 			"pin_model", pin.Model,
 			"pin_provider", pin.Provider,
 			"pin_reason", pin.Reason,
@@ -182,7 +182,7 @@ func (s *Service) runTurnLoop(
 			"last_output_tokens", pin.LastOutputTokens,
 		)
 	} else {
-		log.Debug("turnloop pin lookup miss", "role", res.PinRole)
+		log.Info("turnloop pin lookup miss", "role", res.PinRole)
 	}
 
 	// User-forced pins are immutable stickies — skip scorer and planner entirely.
@@ -277,14 +277,14 @@ func (s *Service) runTurnLoop(
 		log.Error("turnloop scorer failed", "err", err, "requested_model", req.RequestedModel)
 		return res, err
 	}
-	log.Debug("turnloop scorer decision",
+	log.Info("turnloop scorer decision",
 		"fresh_model", fresh.Model,
 		"fresh_provider", fresh.Provider,
 		"fresh_reason", fresh.Reason,
 	)
 	fresh = s.clampToCeiling(fresh, res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
 	if res.TierClamped {
-		log.Debug("turnloop scorer clamped to ceiling",
+		log.Info("turnloop scorer clamped to ceiling",
 			"pre_clamp_model", res.PreClampModel,
 			"clamped_model", fresh.Model,
 			"requested_tier", res.RequestedTier.String(),
@@ -496,9 +496,9 @@ func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sess
 // first-turn routing and switch turns. UpdateUsage fills in usage stats later.
 func (s *Service) writeNewPin(ctx context.Context, installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, pinCacheKey string, role string, chosen router.Decision) {
 	log := observability.FromContext(ctx)
-	log.Debug("writeNewPin called", "installation_id", installationID.String(), "role", role, "model", chosen.Model, "session_key_hex", fmt.Sprintf("%x", sessionKey))
+	log.Info("writeNewPin called", "installation_id", installationID.String(), "role", role, "model", chosen.Model, "session_key_hex", fmt.Sprintf("%x", sessionKey))
 	if installationID == uuid.Nil {
-		log.Debug("writeNewPin: skipping because installationID is uuid.Nil")
+		log.Info("writeNewPin: skipping because installationID is uuid.Nil")
 		return
 	}
 	p := sessionpin.Pin{

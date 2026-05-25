@@ -687,7 +687,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// hash + a divergent key in the rare case env.body mutates mid-flow.
 	var sessionKey [sessionpin.SessionKeyLen]byte
 	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "anthropic_messages")
-	log.Debug("ProxyMessages start",
+	log.Info("ProxyMessages start",
 		"requested_model", feats.Model,
 		"stream", env.Stream(),
 		"message_count", feats.MessageCount,
@@ -1161,7 +1161,7 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 		)
 		return
 	}
-	log.Debug("router stayed on pinned model",
+	log.Info("router stayed on pinned model",
 		"model", res.Decision.Model,
 		"reason", res.PlannerDecision.Reason,
 		"expected_savings_usd", res.PlannerDecision.ExpectedSavingsUSD,
@@ -1620,7 +1620,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// the rationale around deriving the key once and reusing it.
 	var sessionKey [sessionpin.SessionKeyLen]byte
 	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "openai_chat_completions")
-	log.Debug("ProxyOpenAIChatCompletion start",
+	log.Info("ProxyOpenAIChatCompletion start",
 		"requested_model", feats.Model,
 		"stream", env.Stream(),
 		"message_count", feats.MessageCount,

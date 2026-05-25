@@ -59,7 +59,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	}
 
 	ctx, log, _ = bindRequestLogger(ctx, env, apiKeyID, requestID, "gemini_generate_content")
-	log.Debug("ProxyGeminiGenerateContent start",
+	log.Info("ProxyGeminiGenerateContent start",
 		"requested_model", feats.Model,
 		"stream", env.Stream(),
 		"message_count", feats.MessageCount,

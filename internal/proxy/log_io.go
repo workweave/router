@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"context"
 	"log/slog"
 	"strings"
 
@@ -35,7 +34,7 @@ func preview(s string, n int) string {
 // Gemini envelopes are skipped — the underlying preview helper only knows
 // Anthropic + OpenAI shapes today.
 func logInboundToolTraffic(log *slog.Logger, env *translate.RequestEnvelope) {
-	if env == nil || !log.Enabled(context.Background(), slog.LevelDebug) {
+	if env == nil {
 		return
 	}
 	const tailWindow = 5
@@ -52,7 +51,7 @@ func logInboundToolTraffic(log *slog.Logger, env *translate.RequestEnvelope) {
 	for _, s := range sigs {
 		names = append(names, s.Name)
 	}
-	log.Debug("inbound tool_use history",
+	log.Info("inbound tool_use history",
 		"total_tool_calls", len(sigs),
 		"tool_names", names,
 		"tail_window_args", args,
@@ -72,16 +71,13 @@ func logAssistantOutputSummary(
 	stopReason string,
 	outputTokens int,
 ) {
-	if !log.Enabled(context.Background(), slog.LevelDebug) {
-		return
-	}
 	names := make([]string, 0, len(toolCalls))
 	args := make([]string, 0, len(toolCalls))
 	for _, tc := range toolCalls {
 		names = append(names, tc.Name)
 		args = append(args, preview(tc.ArgsJSON, 160))
 	}
-	log.Debug("assistant output summary",
+	log.Info("assistant output summary",
 		"text_blocks", textBlocks,
 		"thinking_blocks", thinkingBlocks,
 		"tool_use_count", len(toolCalls),
