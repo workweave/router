@@ -111,6 +111,66 @@ func (e *RequestEnvelope) MetadataUserID() string {
 	return gjson.GetBytes(e.body, "metadata.user_id").String()
 }
 
+// clientSessionEmbeddedUUID matches a UUID following an explicit "session_" or
+// "session-" or "sessionId=" / "sessionId:" marker. Lets us pull the bare
+// session UUID out of bundled identifiers like Claude Code's
+// "user_<account>_account__session_<session>".
+var clientSessionEmbeddedUUID = regexp.MustCompile(
+	`(?i)session[_\-]?(?:id[=:])?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`,
+)
+
+// clientSessionTrailingUUID matches a UUID at the end of a string. Fallback for
+// formats that just dump the session UUID with no marker prefix.
+var clientSessionTrailingUUID = regexp.MustCompile(
+	`([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`,
+)
+
+const clientSessionIDMaxLen = 64
+
+// ClientSessionID returns the calling client's own session identifier, suitable
+// for log correlation. Unlike the internal session_key (a sha256 over apiKeyID
+// + user_id used for sticky-pin lookup), this is the value the client knows
+// itself by — so running `/status` in Claude Code (or the equivalent in
+// OpenCode / Codex) yields a string the operator can grep for in router logs.
+//
+// Per-ingress source:
+//   - Anthropic (`metadata.user_id`): Claude Code packs the bundle
+//     "user_<account>_account__session_<session>"; we pull the trailing UUID.
+//   - OpenAI (`user`): Codex / OpenCode put the session UUID here directly;
+//     same extraction handles wrapped forms.
+//   - Gemini: no canonical field today; we still check `metadata.user_id` so a
+//     wrapper that sets it gets picked up.
+//
+// If the raw value contains a UUID-shaped session marker we return the bare
+// UUID; otherwise we return the raw value truncated to clientSessionIDMaxLen
+// so a free-form string still grep-correlates without bloating log lines.
+// Returns "" when nothing usable is set.
+func (e *RequestEnvelope) ClientSessionID() string {
+	var raw string
+	switch e.format {
+	case FormatAnthropic, FormatGemini:
+		raw = gjson.GetBytes(e.body, "metadata.user_id").String()
+	case FormatOpenAI:
+		raw = gjson.GetBytes(e.body, "user").String()
+		if raw == "" {
+			raw = gjson.GetBytes(e.body, "metadata.user_id").String()
+		}
+	}
+	if raw == "" {
+		return ""
+	}
+	if m := clientSessionEmbeddedUUID.FindStringSubmatch(raw); m != nil {
+		return m[1]
+	}
+	if m := clientSessionTrailingUUID.FindStringSubmatch(raw); m != nil {
+		return m[1]
+	}
+	if len(raw) > clientSessionIDMaxLen {
+		return raw[:clientSessionIDMaxLen]
+	}
+	return raw
+}
+
 // SystemText returns the concatenated system-prompt text format-neutrally.
 func (e *RequestEnvelope) SystemText() string {
 	switch e.format {

@@ -42,6 +42,14 @@ func bindRequestLogger(
 		"api_key_id", apiKeyID,
 		"ingress", ingress,
 	)
+	// client_session_id is the calling client's own session id (e.g. Claude
+	// Code's /status UUID). Bound when the client surfaces one so operators
+	// can grep logs by the id the user actually sees.
+	if env != nil {
+		if cs := env.ClientSessionID(); cs != "" {
+			log = log.With("client_session_id", cs)
+		}
+	}
 	return observability.WithLogger(ctx, log), log, key
 }
 
