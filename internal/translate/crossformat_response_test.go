@@ -411,6 +411,29 @@ func TestOpenAIToAnthropicResponse_StopReasonMapping(t *testing.T) {
 	}
 }
 
+// Anthropic invariant: when the OpenAI message carries tool_calls, the
+// translated response must report stop_reason="tool_use" regardless of the
+// upstream finish_reason. GLM-5.1 on DeepInfra and other vLLM-backed OpenAI-
+// compat serves close tool-emitting turns with finish_reason="stop"; without
+// promotion the client sees tool_use blocks + stop_reason="end_turn" and
+// Claude Code loops on the partial tool call.
+func TestOpenAIToAnthropicResponse_PromotesStopReasonWhenToolCallsPresent(t *testing.T) {
+	body := []byte(`{
+		"id": "chatcmpl-glm",
+		"object": "chat.completion",
+		"model": "z-ai/glm-5.1",
+		"choices": [{"index": 0, "message": {"role": "assistant", "content": null, "tool_calls": [
+			{"id": "call_glm", "type": "function", "function": {"name": "Read", "arguments": "{\"path\":\"a.go\"}"}}
+		]}, "finish_reason": "stop"}],
+		"usage": {"prompt_tokens": 40, "completion_tokens": 20, "total_tokens": 60}
+	}`)
+	out, err := translate.OpenAIToAnthropicResponse(body, "z-ai/glm-5.1")
+	require.NoError(t, err)
+	doc := unmarshal(t, out)
+	assert.Equal(t, "tool_use", doc["stop_reason"],
+		"tool_calls present → stop_reason must be tool_use even when upstream finish_reason=stop")
+}
+
 func TestOpenAIToAnthropicResponse_UsageTranslation(t *testing.T) {
 	out, err := translate.OpenAIToAnthropicResponse(openAITextResponse, "gpt-4")
 	require.NoError(t, err)
