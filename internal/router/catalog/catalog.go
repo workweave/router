@@ -351,6 +351,14 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 2.080}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 1.920, CacheReadMultiplier: 0.10}},
 	}},
+	// GLM-5.1 ships the streaming tool-call fix that GLM-5 lacks (tool_stream=true
+	// per Z.AI docs). Wired up for /force-model testing and v0.56 routing; the
+	// emit_openai layer injects tool_stream + disables thinking for this slug.
+	{ID: "z-ai/glm-5.1", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5.1",
+			Price: Pricing{InputUSDPer1M: 1.050, OutputUSDPer1M: 3.500}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.980, OutputUSDPer1M: 3.080, CacheReadMultiplier: 0.18 / 0.98}},
+	}},
 	// v0.55 bundle additions (2026-05-20). Fireworks-dedicated rows carry
 	// an OpenRouter trailing binding so managed-prod deploys without a
 	// Fireworks key can still resolve them; pricing reflects the

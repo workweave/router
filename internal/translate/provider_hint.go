@@ -38,7 +38,8 @@ func openRouterReasoningHint(model string) map[string]any {
 	switch {
 	case strings.HasPrefix(model, "deepseek/"),
 		strings.HasPrefix(model, "moonshotai/"),
-		strings.HasPrefix(model, "xiaomi/"):
+		strings.HasPrefix(model, "xiaomi/"),
+		model == "z-ai/glm-5.1":
 		return map[string]any{"enabled": false}
 	}
 	return nil
@@ -51,6 +52,17 @@ func openRouterReasoningHint(model string) map[string]any {
 // Callers still skip the override when the client set temperature explicitly.
 func openRouterForcesToolTemperatureZero(model string) bool {
 	return strings.HasPrefix(model, "deepseek/")
+}
+
+// isGLM51 reports whether the model id is z-ai/glm-5.1. GLM-5.1 shipped the
+// streaming tool-call fix behind an opt-in flag (tool_stream=true per Z.AI
+// docs https://docs.z.ai/guides/capabilities/stream-tool); without it the
+// model reverts to the GLM-5 behavior where tool_call envelopes arrive with
+// empty arguments. We also disable thinking-mode on the DeepInfra path
+// (chat_template_kwargs.enable_thinking=false) so reasoning blocks don't leak
+// into the response stream; OpenRouter handles the same via openRouterReasoningHint.
+func isGLM51(model string) bool {
+	return model == "z-ai/glm-5.1"
 }
 
 // isQwen3Family reports whether the model id belongs to the qwen3.x family.

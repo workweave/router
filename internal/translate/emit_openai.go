@@ -74,6 +74,10 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
+	body, err = applyGLM51FlagsIfNeeded(body, opts)
+	if err != nil {
+		return nil, err
+	}
 	return body, nil
 }
 
@@ -168,7 +172,50 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	}
 
 	jw.EndObj()
-	return applyQwen3SamplersIfNeeded(jw.Bytes(), opts.TargetModel)
+	body, err := applyQwen3SamplersIfNeeded(jw.Bytes(), opts.TargetModel)
+	if err != nil {
+		return nil, err
+	}
+	return applyGLM51FlagsIfNeeded(body, opts)
+}
+
+// applyGLM51FlagsIfNeeded sets the request-body knobs GLM-5.1 needs to behave
+// correctly on tool-heavy turns. Two knobs, both gated on isGLM51:
+//
+//  1. tool_stream=true — opt-in flag per Z.AI docs that switches GLM-5.1 from
+//     "emit tool envelope, send args as one late chunk (or never)" to proper
+//     incremental argument streaming. Without it, GLM-5.1 reproduces the
+//     GLM-5 empty-input loop documented in
+//     docs/investigations/2026-05-26-glm5-empty-tool-loop.md.
+//
+//  2. chat_template_kwargs.enable_thinking=false — DeepInfra serves GLM-5.1
+//     on vLLM, which honors the Jinja template kwarg to disable thinking
+//     mode. Default is on; we don't want reasoning blocks leaking into the
+//     response stream. OpenRouter routes the same disable through its native
+//     reasoning={enabled:false} hint (see openRouterReasoningHint), so the
+//     chat_template_kwargs path only fires for non-OpenRouter targets.
+//
+// Both knobs respect client-set values so a caller forcing thinking-on or
+// tool_stream-off still wins.
+func applyGLM51FlagsIfNeeded(body []byte, opts EmitOptions) ([]byte, error) {
+	if !isGLM51(opts.TargetModel) {
+		return body, nil
+	}
+	if !gjson.GetBytes(body, "tool_stream").Exists() {
+		out, err := sjson.SetBytes(body, "tool_stream", true)
+		if err != nil {
+			return nil, fmt.Errorf("set glm-5.1 tool_stream: %w", err)
+		}
+		body = out
+	}
+	if !targetIsOpenRouter(opts) && !gjson.GetBytes(body, "chat_template_kwargs.enable_thinking").Exists() {
+		out, err := sjson.SetBytes(body, "chat_template_kwargs.enable_thinking", false)
+		if err != nil {
+			return nil, fmt.Errorf("set glm-5.1 chat_template_kwargs.enable_thinking: %w", err)
+		}
+		body = out
+	}
+	return body, nil
 }
 
 // applyQwen3SamplersIfNeeded layers the Qwen3 model-card sampling defaults onto

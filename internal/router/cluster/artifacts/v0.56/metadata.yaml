@@ -1,0 +1,88 @@
+version: "v0.56"
+parent: null
+status: "candidate"
+promoted_date: "2026-05-25"
+embedder:
+  model: "jina-v2-base-code-int8"
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 16
+  top_p: 4
+  alpha: 0.8
+  shrinkage_k0: 10.0
+  score_normalization: "per_prompt_minmax_across_bench_columns"
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 8013
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  output_cost_ratio: 0.25
+  speed_weight: 0.08
+  expected_output_tokens: 2000
+  per_model_verbosity: true
+  include_routerarena_labels: "routerarena_labels_combined.jsonl"
+  routerarena_only: true
+  exclude_prompts: null
+  n_excluded_prompts: 0
+  include_aa_labels: "aa_quality_priors_v0.56.json"
+  aa_evidence_scale: 3.0
+  aa_label_tier_weights:
+    GPQA_DIAMOND: 0.3
+    IFBENCH: 0.3
+    LIVECODEBENCH: 1.0
+    MATH_500: 0.3
+    MMLU_PRO: 0.3
+    SCICODE: 1.0
+    SWE_BENCH_VERIFIED: 1.0
+    TAU2_BENCH_TELECOM: 0.3
+    TERMINAL_BENCH_HARD: 1.0
+  aa_label_residuals:
+    fraction_under_threshold: 0.5708502024291497
+    max: 0.2429133312756644
+    mean: 0.059625521958409304
+    median: 0.038888469407191734
+    n_cells: 247
+    p90: 0.14313290790179495
+deployed_providers:
+  - anthropic
+  - bedrock
+  - deepinfra
+  - fireworks
+  - google
+  - openai
+deployed_models:
+  - claude-haiku-4-5
+  - claude-opus-4-7
+  - claude-sonnet-4-6
+  - deepseek/deepseek-v4-flash
+  - deepseek/deepseek-v4-pro
+  - gemini-3.1-flash-lite-preview
+  - gemini-3.1-pro-preview
+  - gemini-3.5-flash
+  - gpt-5.4-mini
+  - gpt-5.5
+  - moonshotai/kimi-k2.6
+  - qwen/qwen3-coder-next
+  - qwen/qwen3-next-80b-a3b-instruct
+  - xiaomi/mimo-v2.5-pro
+  - z-ai/glm-5.1
+cost_per_1k_input_usd:
+  claude-haiku-4-5: 0.0018
+  claude-opus-4-7: 0.03375
+  claude-sonnet-4-6: 0.00675
+  deepseek/deepseek-v4-flash: 0.00020999999999999998
+  deepseek/deepseek-v4-pro: 0.00261
+  gemini-3.1-flash-lite-preview: 0.0002
+  gemini-3.1-pro-preview: 0.004
+  gemini-3.5-flash: 0.00375
+  gpt-5.4-mini: 0.0008
+  gpt-5.5: 0.015
+  moonshotai/kimi-k2.6: 0.00195
+  qwen/qwen3-coder-next: 0.0007999999999999999
+  qwen/qwen3-next-80b-a3b-instruct: 0.00045
+  xiaomi/mimo-v2.5-pro: 0.00175
+  z-ai/glm-5.1: 0.001925
+changelog: "v0.55 base; glm-5 -> glm-5.1 alias via bench_column proxy. No re-inference; same hyperparams as v0.55. Fixes empty-tool-call loop documented at docs/investigations/2026-05-26-glm5-empty-tool-loop.md."
