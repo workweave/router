@@ -537,6 +537,68 @@ func TestAnthropicSSETranslator_PromotesStopReasonWhenToolUseEmitted(t *testing.
 		"end_turn alongside emitted tool_use violates Anthropic spec and triggers client loops")
 }
 
+// Summary must expose, post-stream, the signals needed to diagnose the
+// GLM-5.1/DeepInfra tool loop from logs alone: the raw upstream finish_reason,
+// the promoted stop_reason, the fact that promotion fired, the tool_use block
+// count, and the upstream completion-token count.
+func TestAnthropicSSETranslator_SummaryReportsPromotionAndToolUse(t *testing.T) {
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "z-ai/glm-5.1", nil)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-glm\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"Read\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n",
+		// Second distinct tool call (new index) must count as a separate block.
+		"data: {\"id\":\"chatcmpl-glm\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_b\",\"type\":\"function\",\"function\":{\"name\":\"Grep\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n",
+		// vLLM/DeepInfra bug: tool turn closes with finish_reason="stop", not "tool_calls".
+		"data: {\"id\":\"chatcmpl-glm\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":40,\"completion_tokens\":12,\"total_tokens\":52}}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, event := range events {
+		_, err := translator.Write([]byte(event))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	got := translator.Summary()
+	assert.Equal(t, "stop", got.UpstreamFinishReason,
+		"raw upstream finish_reason must be preserved for diagnosis, not the promoted value")
+	assert.Equal(t, "tool_use", got.StopReason, "emitted stop_reason reflects the promotion")
+	assert.True(t, got.StopReasonPromoted,
+		"promotion must be flagged when finish_reason=stop carries tool_use blocks")
+	assert.Equal(t, 2, got.ToolUseBlocks, "both emitted tool calls must be counted")
+	assert.Equal(t, 12, got.OutputTokens, "upstream completion_tokens must be surfaced")
+}
+
+// When the upstream closes cleanly with finish_reason="stop" and no tool calls,
+// Summary must NOT report a promotion — otherwise the flag is meaningless.
+func TestAnthropicSSETranslator_SummaryNoPromotionOnPlainStop(t *testing.T) {
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "z-ai/glm-5.1", nil)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-glm\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"done\"},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-glm\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"total_tokens\":12}}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, event := range events {
+		_, err := translator.Write([]byte(event))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	got := translator.Summary()
+	assert.Equal(t, "stop", got.UpstreamFinishReason)
+	assert.Equal(t, "end_turn", got.StopReason, "plain stop maps to end_turn")
+	assert.False(t, got.StopReasonPromoted, "no tool_use blocks → no promotion")
+	assert.Equal(t, 0, got.ToolUseBlocks)
+}
+
 // Load-bearing: Gemini 3.x requires the opaque thought_signature round-tripped
 // on the next turn's functionCall part. The Gemini→OpenAI translator smuggles
 // it as function.thought_signature on the tool_call chunk; AnthropicSSE must

@@ -353,6 +353,14 @@ type AnthropicSSETranslator struct {
 	// opened. finishStream clears toolBlocks before emitMessageDelta, so we
 	// can't read len(toolBlocks) at delta time; the latch outlives the map.
 	toolUseEmitted bool
+	// toolUseCount counts tool_use content blocks opened across the response.
+	// Like toolUseEmitted it outlives toolBlocks (which finishStream clears),
+	// so a post-stream observer can report how many tools the model emitted.
+	toolUseCount int
+	// emittedStopReason records the stop_reason actually written by
+	// emitMessageDelta (after the tool_use promotion). Surfaced via Summary so
+	// the proxy can log what the client saw without re-deriving it.
+	emittedStopReason string
 
 	finishReason             string
 	usageInputTokens         int
@@ -402,6 +410,38 @@ func (t *AnthropicSSETranslator) WithEstimatedInputTokens(n int) *AnthropicSSETr
 		t.estimatedInputTokens = n
 	}
 	return t
+}
+
+// ResponseSummary reports translated-response signals an observer can log
+// after the stream completes. It exists to answer, from logs alone, what an
+// OpenAI-compat upstream actually returned and whether the tool_use stop_reason
+// promotion (see emitMessageDelta) had to fire for this turn.
+type ResponseSummary struct {
+	// UpstreamFinishReason is the raw OpenAI finish_reason as received
+	// ("stop", "tool_calls", "length", ""), before any Anthropic mapping.
+	UpstreamFinishReason string
+	// StopReason is the Anthropic stop_reason actually emitted to the client
+	// (post tool_use promotion). Empty if the stream ended before message_delta.
+	StopReason string
+	// StopReasonPromoted is true when tool_use blocks forced stop_reason to
+	// "tool_use" over an upstream finish_reason that mapped to something else.
+	StopReasonPromoted bool
+	// ToolUseBlocks is the number of tool_use content blocks emitted.
+	ToolUseBlocks int
+	// OutputTokens is the upstream completion_tokens count, when reported.
+	OutputTokens int
+}
+
+// Summary returns the response summary for observability. Call after Finalize;
+// before the stream completes the fields reflect partial state.
+func (t *AnthropicSSETranslator) Summary() ResponseSummary {
+	return ResponseSummary{
+		UpstreamFinishReason: t.finishReason,
+		StopReason:           t.emittedStopReason,
+		StopReasonPromoted:   t.toolUseEmitted && openAIFinishToAnthropic(t.finishReason) != "tool_use",
+		ToolUseBlocks:        t.toolUseCount,
+		OutputTokens:         t.usageOutputTokens,
+	}
 }
 
 func (t *AnthropicSSETranslator) Header() http.Header {
@@ -705,6 +745,7 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 			blockIdx = t.blockIdx
 			t.toolBlocks[idx] = blockIdx
 			t.toolUseEmitted = true
+			t.toolUseCount++
 			t.blockIdx++
 			if emitErr = t.emitContentBlockStartTool(blockIdx, id, name, sig); emitErr != nil {
 				return false
@@ -885,6 +926,7 @@ func (t *AnthropicSSETranslator) emitMessageDelta() error {
 	if t.toolUseEmitted {
 		stopReason = "tool_use"
 	}
+	t.emittedStopReason = stopReason
 	observability.Get().Debug("AnthropicSSE emit", "event", "message_delta", "stop_reason", stopReason)
 	t.bw.WriteString("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":")
 	sse.WriteJSONString(t.bw, stopReason)

@@ -909,6 +909,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	var proxyErr error
 	crossFormat := false
 	var extractor *otel.UsageExtractor
+	// respSummary captures the winning attempt's translated-response signals
+	// (finish_reason, emitted stop_reason, tool_use count) for the completion
+	// log. Populated by the translator-backed paths; stays zero for the
+	// Anthropic-native passthrough path, which has no translator.
+	var respSummary translate.ResponseSummary
 
 	var attempt dispatchAttempt
 	switch decision.Provider {
@@ -969,7 +974,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			if err != nil && env.Stream() && preludeBuf == nil {
 				err = emitAnthropicSSEErrorEvent(sink, err)
 			}
-			return finalizeAfterProxy(err, translator.Finalize)
+			finErr := finalizeAfterProxy(err, translator.Finalize)
+			respSummary = translator.Summary()
+			return finErr
 		}
 	case providers.ProviderGoogle:
 		crossFormat = true
@@ -1004,7 +1011,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				err = emitAnthropicSSEErrorEvent(sink, err)
 			}
 			err = finalizeAfterProxy(err, geminiTr.Finalize)
-			return finalizeAfterProxy(err, anthropicTr.Finalize)
+			finErr := finalizeAfterProxy(err, anthropicTr.Finalize)
+			respSummary = anthropicTr.Summary()
+			return finErr
 		}
 	default:
 		return fmt.Errorf("%w: %s (no translation path defined for inbound Anthropic Messages)", ErrProviderNotConfigured, decision.Provider)
@@ -1137,7 +1146,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "resp_output_tokens", respSummary.OutputTokens)
 	return proxyErr
 }
 
