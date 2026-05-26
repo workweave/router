@@ -349,6 +349,10 @@ type AnthropicSSETranslator struct {
 	// real answer.
 	thinkingOpen bool
 	toolBlocks   map[int]int
+	// suppressedTools holds tool_call indices we refused to open because the
+	// first delta carried no function name (see emitDelta). Later argument
+	// fragments reuse the same index, so we must remember to drop them too.
+	suppressedTools map[int]struct{}
 	// toolUseEmitted latches true the first time a tool_use content block is
 	// opened. finishStream clears toolBlocks before emitMessageDelta, so we
 	// can't read len(toolBlocks) at delta time; the latch outlives the map.
@@ -387,12 +391,13 @@ type AnthropicSSETranslator struct {
 func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink otel.UsageSink) *AnthropicSSETranslator {
 	flusher, _ := w.(http.Flusher)
 	return &AnthropicSSETranslator{
-		inner:        w,
-		flusher:      flusher,
-		bw:           bufio.NewWriterSize(w, 8192),
-		requestModel: requestModel,
-		toolBlocks:   make(map[int]int),
-		usageSink:    sink,
+		inner:           w,
+		flusher:         flusher,
+		bw:              bufio.NewWriterSize(w, 8192),
+		requestModel:    requestModel,
+		toolBlocks:      make(map[int]int),
+		suppressedTools: make(map[int]struct{}),
+		usageSink:       sink,
 	}
 }
 
@@ -720,8 +725,28 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 	var emitErr error
 	toolCalls.ForEach(func(_, tc gjson.Result) bool {
 		idx := int(tc.Get("index").Int())
+		if _, suppressed := t.suppressedTools[idx]; suppressed {
+			// Argument fragments of a tool_call we refused to open. Drop them
+			// so they don't stream into a stale/zero block index.
+			return true
+		}
 		blockIdx, ok := t.toolBlocks[idx]
 		if !ok {
+			id := tc.Get("id").Str
+			name := tc.Get("function.name").Str
+			// A tool_call whose first delta carries no function name is
+			// malformed. OpenAI-compat upstreams (GLM, Qwen, Kimi, gpt-oss on
+			// vLLM/SGLang/DeepInfra) intermittently emit one, often closing the
+			// turn with finish_reason="stop". Emitting it as a tool_use block
+			// makes the client invoke tool "" -> "No such tool available" ->
+			// retry -> infinite loop. Drop it: the turn ends on its real
+			// stop_reason and any text already streamed survives. Guard runs
+			// before closing text/thinking so a dropped tool can't truncate a
+			// legitimate text block.
+			if name == "" {
+				t.suppressedTools[idx] = struct{}{}
+				return true
+			}
 			if t.textOpen {
 				if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
 					emitErr = err
@@ -736,8 +761,6 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 				}
 				t.thinkingOpen = false
 			}
-			id := tc.Get("id").Str
-			name := tc.Get("function.name").Str
 			sig := tc.Get("function.thought_signature").Str
 			if sig == "" {
 				sig = tc.Get("thought_signature").Str

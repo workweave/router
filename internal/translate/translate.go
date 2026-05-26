@@ -178,8 +178,11 @@ func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error)
 	// Anthropic invariant: tool_use blocks ⇒ stop_reason="tool_use". Some
 	// OpenAI-compat upstreams (GLM-5.1 on DeepInfra, vLLM Qwen/MiMo serves)
 	// close a tool turn with finish_reason="stop" instead of "tool_calls".
-	// Mirror the streaming-path promotion in emitMessageDelta.
-	if tc := message.Get("tool_calls"); tc.IsArray() && len(tc.Array()) > 0 {
+	// Mirror the streaming-path promotion in emitMessageDelta. Count only
+	// named tool calls: nameless ones are dropped in
+	// writeAnthropicContentFromOpenAI, so promoting on their presence would
+	// force stop_reason="tool_use" with no tool_use block — the loop again.
+	if anyNamedToolCall(message.Get("tool_calls")) {
 		finishReason = "tool_calls"
 	}
 
@@ -230,6 +233,11 @@ func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result) {
 	message.Get("tool_calls").ForEach(func(_, tc gjson.Result) bool {
 		id := tc.Get("id").String()
 		name := tc.Get("function.name").String()
+		// Drop nameless tool_calls; see anyNamedToolCall. Mirrors the
+		// streaming guard in emitDelta.
+		if name == "" {
+			return true
+		}
 		argsStr := tc.Get("function.arguments").String()
 
 		var inputRaw string
@@ -265,6 +273,25 @@ func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result) {
 		return true
 	})
 	jw.EndArr()
+}
+
+// anyNamedToolCall reports whether the OpenAI tool_calls array contains at
+// least one call with a non-empty function name. A nameless tool_call is
+// malformed: OpenAI-compat upstreams (GLM, Qwen, Kimi, gpt-oss on
+// vLLM/SGLang/DeepInfra) intermittently emit one, often alongside
+// finish_reason="stop". Forwarding it as an Anthropic tool_use block makes the
+// client invoke tool "" -> "No such tool available" -> retry -> infinite loop,
+// so such calls are dropped and must not drive the stop_reason promotion.
+func anyNamedToolCall(toolCalls gjson.Result) bool {
+	found := false
+	toolCalls.ForEach(func(_, tc gjson.Result) bool {
+		if tc.Get("function.name").String() != "" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 // isEditToolName reports whether name is a file-edit tool subject to escape normalization.
