@@ -349,6 +349,10 @@ type AnthropicSSETranslator struct {
 	// real answer.
 	thinkingOpen bool
 	toolBlocks   map[int]int
+	// toolUseEmitted latches true the first time a tool_use content block is
+	// opened. finishStream clears toolBlocks before emitMessageDelta, so we
+	// can't read len(toolBlocks) at delta time; the latch outlives the map.
+	toolUseEmitted bool
 
 	finishReason             string
 	usageInputTokens         int
@@ -700,6 +704,7 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 			}
 			blockIdx = t.blockIdx
 			t.toolBlocks[idx] = blockIdx
+			t.toolUseEmitted = true
 			t.blockIdx++
 			if emitErr = t.emitContentBlockStartTool(blockIdx, id, name, sig); emitErr != nil {
 				return false
@@ -870,6 +875,16 @@ func (t *AnthropicSSETranslator) emitContentBlockStop(index int) error {
 
 func (t *AnthropicSSETranslator) emitMessageDelta() error {
 	stopReason := openAIFinishToAnthropic(t.finishReason)
+	// Anthropic invariant: a response containing tool_use blocks MUST report
+	// stop_reason="tool_use". OpenAI-compat upstreams (notably GLM-5.1 on
+	// DeepInfra/vLLM, plus various Qwen/MiMo serves) sometimes close a tool
+	// turn with finish_reason="stop" or "" instead of "tool_calls". Without
+	// this promotion, the client receives tool_use blocks alongside
+	// stop_reason="end_turn"; Claude Code executes the (often partial-arg)
+	// tool_use anyway, gets the same result, and we loop.
+	if t.toolUseEmitted {
+		stopReason = "tool_use"
+	}
 	observability.Get().Debug("AnthropicSSE emit", "event", "message_delta", "stop_reason", stopReason)
 	t.bw.WriteString("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":")
 	sse.WriteJSONString(t.bw, stopReason)

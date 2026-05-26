@@ -501,6 +501,42 @@ func TestAnthropicSSETranslator_StreamingToolUse(t *testing.T) {
 	assert.Contains(t, body, "event: message_stop")
 }
 
+// Anthropic invariant: any response containing tool_use blocks MUST report
+// stop_reason="tool_use", regardless of what the OpenAI-compat upstream sent
+// as finish_reason. GLM-5.1 on DeepInfra (vLLM, tool_stream=true) and other
+// OpenAI-compat serves have been observed closing tool-emitting turns with
+// finish_reason="stop" or "" instead of "tool_calls"; without this promotion
+// the client receives tool_use blocks alongside stop_reason="end_turn" and
+// Claude Code executes the (often partial-arg) tool_use anyway, looping on
+// the identical result.
+func TestAnthropicSSETranslator_PromotesStopReasonWhenToolUseEmitted(t *testing.T) {
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "z-ai/glm-5.1", nil)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"data: {\"id\":\"chatcmpl-glm\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"index\":0,\"id\":\"call_glm\",\"type\":\"function\",\"function\":{\"name\":\"Read\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n",
+		"data: {\"id\":\"chatcmpl-glm\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+		// vLLM/DeepInfra bug: tool turn closes with finish_reason="stop", not "tool_calls".
+		"data: {\"id\":\"chatcmpl-glm\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":5,\"total_tokens\":25}}\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, event := range events {
+		_, err := translator.Write([]byte(event))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"type":"tool_use"`)
+	assert.Contains(t, body, `"stop_reason":"tool_use"`,
+		"tool_use blocks present → stop_reason must be tool_use even when upstream finish_reason=stop")
+	assert.NotContains(t, body, `"stop_reason":"end_turn"`,
+		"end_turn alongside emitted tool_use violates Anthropic spec and triggers client loops")
+}
+
 // Load-bearing: Gemini 3.x requires the opaque thought_signature round-tripped
 // on the next turn's functionCall part. The Gemini→OpenAI translator smuggles
 // it as function.thought_signature on the tool_call chunk; AnthropicSSE must

@@ -175,6 +175,13 @@ func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error)
 	firstChoice := gjson.GetBytes(body, "choices.0")
 	message := firstChoice.Get("message")
 	finishReason := firstChoice.Get("finish_reason").String()
+	// Anthropic invariant: tool_use blocks ⇒ stop_reason="tool_use". Some
+	// OpenAI-compat upstreams (GLM-5.1 on DeepInfra, vLLM Qwen/MiMo serves)
+	// close a tool turn with finish_reason="stop" instead of "tool_calls".
+	// Mirror the streaming-path promotion in emitMessageDelta.
+	if tc := message.Get("tool_calls"); tc.IsArray() && len(tc.Array()) > 0 {
+		finishReason = "tool_calls"
+	}
 
 	jw := newJSONWriter()
 	jw.Obj()
