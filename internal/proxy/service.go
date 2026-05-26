@@ -945,6 +945,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
 			attemptOpts := opts
 			attemptOpts.TargetProvider = d.Provider
+			respSummary = translate.ResponseSummary{}
 			prep, emitErr := env.PrepareOpenAI(r.Header, attemptOpts)
 			if emitErr != nil {
 				log.Error("Failed to translate Anthropic request to OpenAI format", "err", emitErr, "decision_provider", d.Provider)
@@ -987,6 +988,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			respSummary = translate.ResponseSummary{}
 			var usage otel.UsageSink
 			if s.usageRequired() {
 				extractor = otel.NewUsageExtractor(nil, d.Provider)
