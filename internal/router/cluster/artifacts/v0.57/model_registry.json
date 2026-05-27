@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "comment": "v0.55 base with one change: z-ai/glm-5 deployed slot replaced by z-ai/glm-5.1 using the SAME labels (proxy via bench_column = routerarena_z-ai/glm-5). No re-inference. GLM-5.1 shares the same Z.AI base model as GLM-5 but ships the streaming tool-call fix (tool_stream=true), which fixes the empty-input tool_use loop documented in docs/investigations/2026-05-26-glm5-empty-tool-loop.md. Direct-label flipped from 'aa' to 'routerarena' on this entry — v0.55 had it as 'aa' but we do in fact have 8400 native routerarena rows for glm-5.",
+    "last_refreshed": "2026-05-26",
+    "parent": "v0.55",
+    "training_recipe": "v0.55 hyperparameters unchanged: k=16, top_p=4, alpha=0.80, shrinkage_k0=10, score_normalization=minmax, output_cost_ratio=0.25, speed_weight=0.08, per_model_verbosity=true, include_aa_labels, aa_evidence_scale=3.0. Only deployed_models changes."
+  },
+  "deployed_models": [
+    {"model": "claude-haiku-4-5",                 "provider": "anthropic",  "bench_column": "routerarena_claude-haiku-4-5",                 "direct_label": "routerarena"},
+    {"model": "claude-sonnet-4-6",                "provider": "anthropic",  "bench_column": "routerarena_claude-sonnet-4-6",                "direct_label": "routerarena"},
+    {"model": "claude-opus-4-7",                  "provider": "anthropic",  "bench_column": "routerarena_claude-opus-4-7",                  "direct_label": "routerarena"},
+    {"model": "gemini-3.1-flash-lite-preview",    "provider": "google",     "bench_column": "routerarena_gemini-3.1-flash-lite-preview",    "direct_label": "routerarena"},
+    {"model": "gemini-3.1-pro-preview",           "provider": "google",     "bench_column": "routerarena_gemini-3.1-pro-preview",           "direct_label": "routerarena"},
+    {"model": "gemini-3.5-flash",                 "provider": "google",     "bench_column": "routerarena_gemini-3.5-flash",                 "direct_label": "routerarena"},
+    {"model": "gpt-5.4-mini",                     "provider": "openai",     "bench_column": "routerarena_gpt-5.4-mini",                     "direct_label": "routerarena"},
+    {"model": "gpt-5.5",                          "provider": "openai",     "bench_column": "routerarena_gpt-5.5",                          "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-coder-next",            "provider": "bedrock",    "bench_column": "routerarena_qwen/qwen3-coder-next",            "direct_label": "routerarena"},
+    {"model": "qwen/qwen3-next-80b-a3b-instruct", "provider": "bedrock",    "bench_column": "routerarena_qwen/qwen3-next-80b-a3b-instruct", "direct_label": "routerarena"},
+
+    {"model": "deepseek/deepseek-v4-flash",       "provider": "deepinfra",  "bench_column": "routerarena_deepseek/deepseek-v4-flash",       "direct_label": "routerarena"},
+    {"model": "deepseek/deepseek-v4-pro",         "provider": "fireworks",  "bench_column": "routerarena_deepseek/deepseek-v4-pro",         "direct_label": "routerarena"},
+    {"model": "moonshotai/kimi-k2.6",             "provider": "fireworks",  "bench_column": "routerarena_moonshotai/kimi-k2.6",             "direct_label": "routerarena"},
+
+    {"model": "xiaomi/mimo-v2.5-pro",             "provider": "deepinfra",  "bench_column": "routerarena_xiaomi/mimo-v2.5-pro",             "direct_label": "aa"},
+    {"model": "z-ai/glm-5.1",                     "provider": "deepinfra",  "bench_column": "routerarena_z-ai/glm-5",                       "direct_label": "routerarena", "proxy": true, "proxy_note": "Reusing GLM-5 labels. GLM-5.1 shares the same base model; the difference is a runtime fix (tool_stream=true + chat_template_kwargs.enable_thinking=false) for the empty-tool-call streaming bug, not capability."}
+  ]
+}
