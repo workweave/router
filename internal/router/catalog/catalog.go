@@ -145,11 +145,18 @@ var Models = []Model{
 	{ID: "claude-sonnet-4-6", Tier: TierMid, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}},
 	}},
+	// Opus 4.5+ shipped at $5/$25 per MTok (down from $15/$75 on Opus 4.1
+	// and earlier). The 4.6 / 4.7 entries were stale at the legacy price
+	// until 4.8 landed and forced a triple-check against
+	// platform.claude.com/docs/en/about-claude/pricing.
 	{ID: "claude-opus-4-6", Tier: TierHigh, Providers: []ProviderBinding{
-		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 15.00, OutputUSDPer1M: 75.00, CacheReadMultiplier: 0.10}},
+		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "claude-opus-4-7", Tier: TierHigh, Providers: []ProviderBinding{
-		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 15.00, OutputUSDPer1M: 75.00, CacheReadMultiplier: 0.10}},
+		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "claude-opus-4-8", Tier: TierHigh, Providers: []ProviderBinding{
+		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
 
 	// --- OpenAI GPT-4.x (legacy) ---

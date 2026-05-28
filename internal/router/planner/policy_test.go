@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	modelOpus    = "claude-opus-4-7"   // $15.00 input / $75.00 output per 1M, cache mult 0.10
+	modelOpus    = "claude-opus-4-7"   // $5.00 input / $25.00 output per 1M, cache mult 0.10
 	modelSonnet  = "claude-sonnet-4-5" // $3.00 input / $15.00 output, cache mult 0.10
 	modelHaiku   = "claude-haiku-4-5"  // $0.80 input / $4.00 output, cache mult 0.10
 	modelGPT5    = "gpt-5"             // $2.50 input / $10.00 output, cache mult 0.50 (cross-provider)
@@ -138,10 +138,10 @@ func TestDecide(t *testing.T) {
 			// EV math for switch from opus -> haiku, 50k input, 3 turns.
 			// Savings are multiplied by CacheReadMultiplier (0.1) because in
 			// steady state most input tokens come from cache on both models:
-			//   savingsPerTurn = (15.00 - 0.80) * 0.1 * 50000 / 1e6 = $0.071
-			//   evictionCost   = 0.80 * 50000 * 0.9 / 1e6           = $0.036
-			//   expectedSavings = 0.071 * 3 = $0.213
-			//   delta = 0.213 - 0.036 = $0.177 >> $0.001 -> Switch.
+			//   savingsPerTurn = (5.00 - 0.80) * 0.1 * 50000 / 1e6 = $0.021
+			//   evictionCost   = 0.80 * 50000 * 0.9 / 1e6          = $0.036
+			//   expectedSavings = 0.021 * 3 = $0.063
+			//   delta = 0.063 - 0.036 = $0.027 > $0.001 -> Switch.
 			name: "ev_positive: opus -> haiku on a large prompt",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
@@ -152,15 +152,15 @@ func TestDecide(t *testing.T) {
 			cfg:                    defaultCfg,
 			want:                   planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonEVPositive},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: 0.213,
+			wantExpectedSavingsUSD: 0.063,
 			wantEvictionCostUSD:    0.036,
 		},
 		{
 			// Symmetric flip: pinning haiku, fresh recommends opus.
-			//   savingsPerTurn = (0.80 - 15.00) * 0.1 * 50000 / 1e6 = -$0.071
-			//   evictionCost   = 15.00 * 50000 * 0.9 / 1e6          = $0.675
-			//   expectedSavings = -0.071 * 3 = -$0.213
-			//   delta = -0.213 - 0.675 = -$0.888 < $0.001 -> Stay.
+			//   savingsPerTurn = (0.80 - 5.00) * 0.1 * 50000 / 1e6 = -$0.021
+			//   evictionCost   = 5.00 * 50000 * 0.9 / 1e6          = $0.225
+			//   expectedSavings = -0.021 * 3 = -$0.063
+			//   delta = -0.063 - 0.225 = -$0.288 < $0.001 -> Stay.
 			name: "ev_negative: haiku -> opus is a huge net loss",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelHaiku),
@@ -171,69 +171,71 @@ func TestDecide(t *testing.T) {
 			cfg:                    defaultCfg,
 			want:                   planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: -0.213,
-			wantEvictionCostUSD:    0.675,
+			wantExpectedSavingsUSD: -0.063,
+			wantEvictionCostUSD:    0.225,
 		},
 		{
-			// Opus -> sonnet, tuned to land just BELOW threshold under the
-			// corrected (cache-read-aware) EV math.
-			//   per-token net = (3 * 0.1 * (15.00 - 3.00) - 0.9 * 3.00) / 1e6
-			//                 = (3.60 - 2.70) / 1e6 = 0.90 / 1e6
-			//   at tokens = 1111: net = 0.90 * 1111 / 1e6 = $0.0009999
-			//   threshold = $0.001 -> net is 0.01% below.
-			//   expectedSavings = (15.00 - 3.00) * 0.1 * 1111 / 1e6 * 3 = $0.0039996
-			//   evictionCost    = 3.00 * 1111 * 0.9 / 1e6              = $0.0029997
-			//   delta = 0.0039996 - 0.0029997 = $0.0009999 -> Stay.
-			// (sonnet -> haiku no longer straddles threshold: under the
-			// corrected math its per-token net is negative at every horizon.)
+			// Opus -> haiku, tuned to land just BELOW threshold under the
+			// corrected (cache-read-aware) EV math at the new $5/$25 opus
+			// pricing (was $15/$75; the old opus->sonnet boundary case no
+			// longer straddles — sonnet's $3 input dominates opus's $0.50
+			// cache-read at every horizon).
+			//   per-token net = (3 * 0.1 * (5.00 - 0.80) - 0.9 * 0.80) / 1e6
+			//                 = (1.26 - 0.72) / 1e6 = 0.54 / 1e6
+			//   at tokens = 1851: net = 0.54 * 1851 / 1e6 = $0.00099954
+			//   threshold = $0.001 -> net is 0.05% below.
+			//   expectedSavings = (5.00 - 0.80) * 0.1 * 1851 / 1e6 * 3 = $0.00233226
+			//   evictionCost    = 0.80 * 1851 * 0.9 / 1e6              = $0.00133272
+			//   delta = 0.00233226 - 0.00133272 = $0.00099954 -> Stay.
 			name: "ev_near_threshold: just below threshold stays stable",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
-				Fresh:                router.Decision{Model: modelSonnet},
-				EstimatedInputTokens: 1111,
+				Fresh:                router.Decision{Model: modelHaiku},
+				EstimatedInputTokens: 1851,
 				AvailableModels:      availableAll,
 			},
 			cfg:                    defaultCfg,
 			want:                   planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: 0.0039996,
-			wantEvictionCostUSD:    0.0029997,
+			wantExpectedSavingsUSD: 0.00233226,
+			wantEvictionCostUSD:    0.00133272,
 		},
 		{
-			// Same opus -> sonnet math, one extra token nudges across:
-			//   at tokens = 1112: net = 0.90 * 1112 / 1e6 = $0.0010008
-			//   threshold = $0.001 -> net is 0.08% above.
-			//   expectedSavings = (15.00 - 3.00) * 0.1 * 1112 / 1e6 * 3 = $0.0040032
-			//   evictionCost    = 3.00 * 1112 * 0.9 / 1e6              = $0.0030024
-			//   delta = 0.0040032 - 0.0030024 = $0.0010008 -> Switch.
+			// Same opus -> haiku math, two extra tokens nudge across:
+			//   at tokens = 1853: net = 0.54 * 1853 / 1e6 = $0.00100062
+			//   threshold = $0.001 -> net is 0.06% above.
+			//   expectedSavings = (5.00 - 0.80) * 0.1 * 1853 / 1e6 * 3 = $0.00233478
+			//   evictionCost    = 0.80 * 1853 * 0.9 / 1e6              = $0.00133416
+			//   delta = 0.00233478 - 0.00133416 = $0.00100062 -> Switch.
 			name: "ev_near_threshold: just above threshold flips to switch",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
-				Fresh:                router.Decision{Model: modelSonnet},
-				EstimatedInputTokens: 1112,
+				Fresh:                router.Decision{Model: modelHaiku},
+				EstimatedInputTokens: 1853,
 				AvailableModels:      availableAll,
 			},
 			cfg:                    defaultCfg,
 			want:                   planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonEVPositive},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: 0.0040032,
-			wantEvictionCostUSD:    0.0030024,
+			wantExpectedSavingsUSD: 0.00233478,
+			wantEvictionCostUSD:    0.00133416,
 		},
 		{
 			// Cross-provider regression: opus (Anthropic, mult 0.10) ->
-			// gpt-5 (OpenAI, mult 0.50) on a 50k prompt.
-			//   savingsPerTurn  = (15.00 * 0.10 - 2.50 * 0.50) * 50000 / 1e6
-			//                   = (1.50 - 1.25) * 0.05 = $0.0125
-			//   expectedSavings = 0.0125 * 3 = $0.0375
+			// gpt-5 (OpenAI, mult 0.50) on a 50k prompt at the new $5/$25
+			// opus pricing.
+			//   savingsPerTurn  = (5.00 * 0.10 - 2.50 * 0.50) * 50000 / 1e6
+			//                   = (0.50 - 1.25) * 0.05 = -$0.0375
+			//   expectedSavings = -0.0375 * 3 = -$0.1125
 			//   evictionCost    = 2.50 * 50000 * (1 - 0.50) / 1e6 = $0.0625
-			//   delta = 0.0375 - 0.0625 = -$0.025 -> Stay.
+			//   delta = -0.1125 - 0.0625 = -$0.175 -> Stay.
 			//
-			// Sanity vs the old (broken) global-0.10 math: that path would
-			// have computed savingsPerTurn = (15 - 2.5) * 0.10 * 0.05 =
-			// $0.0625 and evictionCost = 2.50 * 0.05 * 0.90 = $0.1125, delta
-			// $0.075 — i.e. would have wrongly chosen to switch. Per-model
-			// multipliers correctly say "stay on opus" because gpt-5's
-			// 50% cache-read pricing eats most of the per-turn savings.
+			// Under the (now-corrected) catalog pricing, opus's per-token
+			// cost matches gpt-5's nominal input price, but gpt-5's 50%
+			// cache-read multiplier (vs opus's 10%) actually makes gpt-5
+			// *more* expensive in cache steady-state — so the planner
+			// stays on opus regardless of any prompt size. The old global-
+			// 0.10 path would have wrongly switched here.
 			name: "ev_cross_provider: opus -> gpt-5 stays under per-model math",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
@@ -244,7 +246,7 @@ func TestDecide(t *testing.T) {
 			cfg:                    defaultCfg,
 			want:                   planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: 0.0375,
+			wantExpectedSavingsUSD: -0.1125,
 			wantEvictionCostUSD:    0.0625,
 		},
 		{
@@ -260,8 +262,8 @@ func TestDecide(t *testing.T) {
 			cfg:                    defaultCfg, // TierUpgradeEnabled = false
 			want:                   planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: -0.213,
-			wantEvictionCostUSD:    0.675,
+			wantExpectedSavingsUSD: -0.063,
+			wantEvictionCostUSD:    0.225,
 		},
 		{
 			// Same EV-loss as above; guard on flips it because opus is
@@ -276,8 +278,8 @@ func TestDecide(t *testing.T) {
 			cfg:                    tierUpgradeCfg,
 			want:                   planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonTierUpgrade},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: -0.213,
-			wantEvictionCostUSD:    0.675,
+			wantExpectedSavingsUSD: -0.063,
+			wantEvictionCostUSD:    0.225,
 		},
 		{
 			// Sonnet (Mid) -> haiku (Low) is a downgrade; guard must

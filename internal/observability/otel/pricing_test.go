@@ -16,7 +16,9 @@ func TestLookup(t *testing.T) {
 		wantOutput float64
 	}{
 		// ── Anthropic ──────────────────────────────────────────
-		{name: "claude-opus-4-7", model: "claude-opus-4-7", wantInput: 15.00, wantOutput: 75.00},
+		{name: "claude-opus-4-8", model: "claude-opus-4-8", wantInput: 5.00, wantOutput: 25.00},
+		{name: "claude-opus-4-7", model: "claude-opus-4-7", wantInput: 5.00, wantOutput: 25.00},
+		{name: "claude-opus-4-6", model: "claude-opus-4-6", wantInput: 5.00, wantOutput: 25.00},
 		{name: "claude-sonnet-4-5", model: "claude-sonnet-4-5", wantInput: 3.00, wantOutput: 15.00},
 		{name: "claude-haiku-4-5", model: "claude-haiku-4-5", wantInput: 0.80, wantOutput: 4.00},
 
@@ -61,7 +63,8 @@ func TestLookup(t *testing.T) {
 		// ── Dated variants (8-digit suffix normalization) ──────
 		{name: "claude-haiku-4-5-20251001", model: "claude-haiku-4-5-20251001", wantInput: 0.80, wantOutput: 4.00},
 		{name: "claude-sonnet-4-5-20260315", model: "claude-sonnet-4-5-20260315", wantInput: 3.00, wantOutput: 15.00},
-		{name: "claude-opus-4-7-20260101", model: "claude-opus-4-7-20260101", wantInput: 15.00, wantOutput: 75.00},
+		{name: "claude-opus-4-7-20260101", model: "claude-opus-4-7-20260101", wantInput: 5.00, wantOutput: 25.00},
+		{name: "claude-opus-4-8-20260528", model: "claude-opus-4-8-20260528", wantInput: 5.00, wantOutput: 25.00},
 		{name: "gpt-5-12345678", model: "gpt-5-12345678", wantInput: 2.50, wantOutput: 10.00},
 		{name: "gpt-4o-20250101", model: "gpt-4o-20250101", wantInput: 2.50, wantOutput: 10.00},
 		{name: "gpt-4o-mini-20260601", model: "gpt-4o-mini-20260601", wantInput: 0.15, wantOutput: 0.60},

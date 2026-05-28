@@ -72,7 +72,7 @@ func TestPriceFor_UnknownProviderForKnownModel(t *testing.T) {
 func TestPriceFor_KnownPair(t *testing.T) {
 	p, ok := PriceFor(providers.ProviderAnthropic, "claude-opus-4-7")
 	require.True(t, ok)
-	assert.Equal(t, 15.00, p.InputUSDPer1M)
+	assert.Equal(t, 5.00, p.InputUSDPer1M)
 	assert.Equal(t, 0.10, p.CacheReadMultiplier)
 }
 

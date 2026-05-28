@@ -65,6 +65,7 @@ var googleBase = NewSpec()
 var openAICompatBase = NewSpec()
 
 var registry = map[string]ModelSpec{
+	"claude-opus-4-8":   anthropicFull,
 	"claude-opus-4-7":   anthropicFull,
 	"claude-sonnet-4-6": anthropicFull,
 	"claude-opus-4-6":   anthropicFull,
