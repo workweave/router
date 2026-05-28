@@ -98,6 +98,28 @@ info() { printf "%s==>%s %s\n" "$C_CYAN" "$C_RESET" "$*"; }
 ok()   { printf "%s✓%s %s\n" "$C_GREEN" "$C_RESET" "$*"; }
 skip() { printf "%s⊙%s %s%s%s\n" "$C_DIM" "$C_RESET" "$C_DIM" "$*" "$C_RESET"; }
 
+# uninstall_cmd echoes the npx one-liner that reverses the current install,
+# matching the target (--codex/--opencode), scope, and --dir so the hint we
+# print after a successful install is copy-paste-correct. Kept in sync with
+# uninstall.sh's flag surface.
+uninstall_cmd() {
+  local cmd="npx @workweave/router --uninstall"
+  case "$target" in
+    codex)    cmd="$cmd --codex" ;;
+    opencode) cmd="$cmd --opencode" ;;
+  esac
+  [ "$scope" = "project" ] && cmd="$cmd --scope project"
+  [ -n "$install_dir" ] && cmd="$cmd --dir $install_dir"
+  printf '%s' "$cmd"
+}
+
+# print_uninstall_hint prints the reverse command on its own labeled line so
+# every successful install ends by telling the user exactly how to undo it.
+print_uninstall_hint() {
+  printf "%sTo uninstall:%s %s%s%s\n" \
+    "$C_BOLD" "$C_RESET" "$C_CYAN" "$(uninstall_cmd)" "$C_RESET"
+}
+
 # ---------- banner ----------
 #
 # Print the WEAVE wordmark in brand orange. Skipped under --quiet or when
@@ -1092,6 +1114,7 @@ if [ "$target" = "codex" ]; then
     # point CODEX_HOME at the directory we wrote so Codex finds our config.
     info "Run Codex with CODEX_HOME=$codex_dir codex so it picks up this config."
   fi
+  print_uninstall_hint
   exit 0
 fi
 
@@ -1142,6 +1165,7 @@ if [ "$target" = "opencode" ]; then
     # has to point opencode at the file explicitly.
     info "Run opencode with OPENCODE_CONFIG=$opencode_config_file opencode."
   fi
+  print_uninstall_hint
   exit 0
 fi
 
@@ -1679,3 +1703,4 @@ fi
 printf "\n"
 printf "%s✓%s %s%sWeave Router installed for Claude Code.%s\n" \
   "$C_GREEN" "$C_RESET" "$C_BOLD" "$C_BRAND" "$C_RESET"
+print_uninstall_hint
