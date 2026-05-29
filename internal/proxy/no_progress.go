@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -42,15 +43,33 @@ const (
 )
 
 // noProgressFingerprint identifies one dispatch attempt by routed model,
-// provider, and a stable hash of the prompt prefix.
+// provider, message count, and a stable hash of the prompt prefix.
 type noProgressFingerprint [32]byte
 
-func computeNoProgressFingerprint(decision router.Decision, promptText string) noProgressFingerprint {
+// computeNoProgressFingerprint hashes the routed (model, provider), the
+// conversation's message count, and the prompt prefix into a single
+// fingerprint.
+//
+// messageCount is load-bearing for false-positive avoidance. The prompt
+// prefix alone is constant across a single agentic task: in the default
+// embed-only-user-message mode promptText is the user's typed task (tool
+// results are stripped), so every iteration of a healthy tool-call loop
+// shares the same prefix and the bare (model, provider, prefix) fingerprint
+// would collide on every dispatch — tripping the detector on any session that
+// fires >= noProgressMatchThreshold turns to one model within the window.
+//
+// A genuinely stuck sub-agent spawn loop replays independent envelope-1
+// requests, so its message count stays flat and the fingerprints still
+// collide. A progressing agent appends an assistant turn plus a tool_result
+// turn each iteration, so its message count climbs monotonically and each
+// dispatch yields a distinct fingerprint that never accumulates to the
+// threshold. Folding messageCount in is what separates the two.
+func computeNoProgressFingerprint(decision router.Decision, promptText string, messageCount int) noProgressFingerprint {
 	p := promptText
 	if len(p) > noProgressPromptPrefix {
 		p = p[:noProgressPromptPrefix]
 	}
-	return sha256.Sum256([]byte(decision.Model + "\x00" + decision.Provider + "\x00" + p))
+	return sha256.Sum256([]byte(decision.Model + "\x00" + decision.Provider + "\x00" + strconv.Itoa(messageCount) + "\x00" + p))
 }
 
 type fingerprintEntry struct {
