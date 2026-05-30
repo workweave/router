@@ -103,19 +103,20 @@ skip() { printf "%s⊙%s %s%s%s\n" "$C_DIM" "$C_RESET" "$C_DIM" "$*" "$C_RESET";
 # print after a successful install is copy-paste-correct. Kept in sync with
 # uninstall.sh's flag surface.
 uninstall_cmd() {
-  local cmd="npx @workweave/router --uninstall"
+  local cmd="npx -y @workweave/router --uninstall"
   case "$target" in
     codex)    cmd="$cmd --codex" ;;
     opencode) cmd="$cmd --opencode" ;;
   esac
   [ "$scope" = "project" ] && cmd="$cmd --scope project"
-  [ -n "$install_dir" ] && cmd="$cmd --dir $install_dir"
+  [ -n "$install_dir" ] && cmd="$cmd --dir $(printf '%q' "$install_dir")"
   printf '%s' "$cmd"
 }
 
 # print_uninstall_hint prints the reverse command on its own labeled line so
 # every successful install ends by telling the user exactly how to undo it.
 print_uninstall_hint() {
+  [ "$quiet" = "true" ] && return 0
   printf "%sTo uninstall:%s %s%s%s\n" \
     "$C_BOLD" "$C_RESET" "$C_CYAN" "$(uninstall_cmd)" "$C_RESET"
 }
