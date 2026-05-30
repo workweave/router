@@ -1125,12 +1125,28 @@ toggle_claude() {
         if [ "$proj" = "true" ]; then
           local_base="$(json_get "$local_settings_file" '.env.ANTHROPIC_BASE_URL')"
           if [ -n "$local_base" ] && ! router_shaped_url "$local_base"; then
-            merged="$(jq '(.env // {}) |= del(.ANTHROPIC_BASE_URL)
-                          | (if (.env // {} | length) == 0 then del(.env) else . end)' "$local_settings_file")"
-            printf '%s\n' "$merged" >"$local_settings_file"
-            chmod 600 "$local_settings_file"
-            ok "Claude Code is now ${C_BOLD}on${C_RESET} (routing through the Weave Router). Restart Claude Code for it to take effect."
-            return 0
+            # We're off, but the parked sidecar is gone. The router key header
+            # (ANTHROPIC_CUSTOM_HEADERS) lives only in the local file / sidecar
+            # in project scope — never in committed settings.json — so we can
+            # only re-enable cleanly if the header survived in the local file.
+            # If it didn't, clearing the override would point Claude Code at the
+            # router with no auth (401s); leave the working direct setup in
+            # place and tell the user to reinstall instead of faking success.
+            local local_hdr; local_hdr="$(json_get "$local_settings_file" '.env.ANTHROPIC_CUSTOM_HEADERS')"
+            case "$local_hdr" in
+              *X-Weave-Router-Key*)
+                merged="$(jq '(.env // {}) |= del(.ANTHROPIC_BASE_URL)
+                              | (if (.env // {} | length) == 0 then del(.env) else . end)' "$local_settings_file")"
+                printf '%s\n' "$merged" >"$local_settings_file"
+                chmod 600 "$local_settings_file"
+                ok "Claude Code is now ${C_BOLD}on${C_RESET} (routing through the Weave Router). Restart Claude Code for it to take effect."
+                return 0
+                ;;
+              *)
+                warn "Claude Code is off and the parked router key is missing (its sidecar was deleted). Re-run the installer to restore the router key — leaving the current direct-to-Anthropic setup in place so requests don't fail auth."
+                return 0
+                ;;
+            esac
           fi
         fi
         if router_shaped_url "$committed_base"; then
@@ -1243,6 +1259,16 @@ toggle_opencode() {
         restore_model="$(jq -r '.model // "weave/claude-sonnet-4-6"' "$parked")"
       elif [ "$has_weave" != "true" ]; then
         warn "opencode isn't configured for the router. Run the installer first."; return 0
+      else
+        # No parked model (sidecar deleted by hand). Derive the default from the
+        # installed provider.weave.models block rather than a hardcoded literal
+        # that silently diverges when the installer's default changes — prefer a
+        # sonnet entry, else the first model the installer registered.
+        restore_model="$(jq -r '
+          (.provider.weave.models // {} | keys) as $k
+          | (([$k[] | select(test("sonnet"))] | first) // $k[0] // "claude-sonnet-4-6")
+          | "weave/" + .
+        ' "$f" 2>/dev/null || echo "weave/claude-sonnet-4-6")"
       fi
       merged="$(jq --arg m "$restore_model" '.model = $m' "$f")"
       printf '%s\n' "$merged" >"$f"
