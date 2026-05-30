@@ -1069,6 +1069,15 @@ toggle_claude() {
   else
     active="$settings_file"
   fi
+  # Symlink containment for the parked sidecar: project/--dir paths come from a
+  # possibly-hostile repo, and `off` writes $parked via shell redirection (which
+  # follows symlinks). A repo could pre-place it as a symlink to clobber an
+  # arbitrary file or siphon the router-key-bearing parked data. The config
+  # files themselves are already guarded during path resolution; this covers the
+  # sidecar. User scope ($HOME) is trusted, matching the installer.
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$parked"
+  fi
   local parked_present="false"
   if [ -f "$parked" ]; then parked_present="true"; fi
   committed_base="$(json_get "$settings_file" '.env.ANTHROPIC_BASE_URL')"
@@ -1259,6 +1268,12 @@ toggle_codex() {
 toggle_opencode() {
   local f="$opencode_config_file" parked="$opencode_dir/.weave-parked.json"
   local model="" has_weave="false" parked_present="false" on="false" restore_model merged
+  # Symlink containment for the parked sidecar — `off` writes it via shell
+  # redirection; a hostile project repo could pre-place it as a symlink. The
+  # opencode.json itself is already guarded during path resolution.
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$parked"
+  fi
   if [ -f "$parked" ]; then parked_present="true"; fi
   if [ -f "$f" ]; then
     model="$(jq -r '.model // empty' "$f" 2>/dev/null || true)"
