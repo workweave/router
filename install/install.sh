@@ -1035,6 +1035,19 @@ json_get() {
   jq -r "${2} // empty" "$1" 2>/dev/null || true
 }
 
+# claude_key_present returns 0 when the given settings file's
+# env.ANTHROPIC_CUSTOM_HEADERS carries the router key header. "On" is only valid
+# when this is true: in project scope the committed settings.json holds the
+# router URL but the key header lives only in the per-teammate settings.local.json
+# (or the parked sidecar), so a router URL alone doesn't mean requests can
+# authenticate.
+claude_key_present() {
+  case "$(json_get "$1" '.env.ANTHROPIC_CUSTOM_HEADERS')" in
+    *X-Weave-Router-Key*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # gitignore_add appends an entry to the repo .gitignore in project scope so a
 # parked sidecar (which may carry the router key header) never gets committed.
 # No-op for user scope and --dir, matching how install handles its own ignores.
@@ -1071,12 +1084,23 @@ toggle_claude() {
         if [ -n "$local_base" ] && ! router_shaped_url "$local_base"; then
           ok "Claude Code (project): ${C_BOLD}off${C_RESET} — routing directly to Anthropic. Run '$on_hint' to re-enable."
         elif router_shaped_url "$committed_base"; then
-          ok "Claude Code (project): ${C_BOLD}on${C_RESET} — routing through $committed_base."
+          # Router URL is committed, but it only authenticates if this teammate's
+          # settings.local.json carries the key header. A fresh clone (shared
+          # settings.json, no personal local file) has the URL but no key.
+          if claude_key_present "$local_settings_file"; then
+            ok "Claude Code (project): ${C_BOLD}on${C_RESET} — routing through $committed_base."
+          else
+            warn "Claude Code (project): router URL is set but your personal router key is missing (no settings.local.json) — requests won't authenticate. Run the installer to add your key."
+          fi
         else
           info "Claude Code (project): not configured for the router. Run the installer first."
         fi
       elif router_shaped_url "$committed_base"; then
-        ok "Claude Code: ${C_BOLD}on${C_RESET} — routing through $committed_base."
+        if claude_key_present "$settings_file"; then
+          ok "Claude Code: ${C_BOLD}on${C_RESET} — routing through $committed_base."
+        else
+          warn "Claude Code: router URL is set but the router key header is missing — requests won't authenticate. Run the installer to restore it."
+        fi
       else
         info "Claude Code: not configured for the router. Run the installer first."
       fi
@@ -1126,37 +1150,50 @@ toggle_claude() {
           local_base="$(json_get "$local_settings_file" '.env.ANTHROPIC_BASE_URL')"
           if [ -n "$local_base" ] && ! router_shaped_url "$local_base"; then
             # We're off, but the parked sidecar is gone. The router key header
-            # (ANTHROPIC_CUSTOM_HEADERS) lives only in the local file / sidecar
-            # in project scope — never in committed settings.json — so we can
-            # only re-enable cleanly if the header survived in the local file.
-            # If it didn't, clearing the override would point Claude Code at the
-            # router with no auth (401s); leave the working direct setup in
-            # place and tell the user to reinstall instead of faking success.
-            local local_hdr; local_hdr="$(json_get "$local_settings_file" '.env.ANTHROPIC_CUSTOM_HEADERS')"
-            case "$local_hdr" in
-              *X-Weave-Router-Key*)
-                merged="$(jq '(.env // {}) |= del(.ANTHROPIC_BASE_URL)
-                              | (if (.env // {} | length) == 0 then del(.env) else . end)' "$local_settings_file")"
-                printf '%s\n' "$merged" >"$local_settings_file"
-                chmod 600 "$local_settings_file"
-                ok "Claude Code is now ${C_BOLD}on${C_RESET} (routing through the Weave Router). Restart Claude Code for it to take effect."
-                return 0
-                ;;
-              *)
-                warn "Claude Code is off and the parked router key is missing (its sidecar was deleted). Re-run the installer to restore the router key — leaving the current direct-to-Anthropic setup in place so requests don't fail auth."
-                return 0
-                ;;
-            esac
+            # lives only in the local file / sidecar in project scope — never in
+            # committed settings.json — so we can only re-enable cleanly if the
+            # header survived in the local file. If it didn't, clearing the
+            # override would point Claude Code at the router with no auth
+            # (401s); leave the working direct setup in place and tell the user
+            # to reinstall instead of faking success.
+            if claude_key_present "$local_settings_file"; then
+              merged="$(jq '(.env // {}) |= del(.ANTHROPIC_BASE_URL)
+                            | (if (.env // {} | length) == 0 then del(.env) else . end)' "$local_settings_file")"
+              printf '%s\n' "$merged" >"$local_settings_file"
+              chmod 600 "$local_settings_file"
+              ok "Claude Code is now ${C_BOLD}on${C_RESET} (routing through the Weave Router). Restart Claude Code for it to take effect."
+            else
+              warn "Claude Code is off and the parked router key is missing (its sidecar was deleted). Re-run the installer to restore the router key — leaving the current direct-to-Anthropic setup in place so requests don't fail auth."
+            fi
+            return 0
           fi
         fi
-        if router_shaped_url "$committed_base"; then
+        # No direct override (or user scope). "On" requires both the router URL
+        # and the key header — a committed router URL with no local key (e.g. a
+        # fresh clone) can't authenticate, so don't claim it's already on.
+        if ! router_shaped_url "$committed_base"; then
+          warn "No parked router config found. Run the installer to set up Claude Code."
+        elif claude_key_present "$active"; then
           ok "Claude Code is already on — nothing to do."
         else
-          warn "No parked router config found. Run the installer to set up Claude Code."
+          warn "Router URL is set but the router key is missing — run the installer to add your key (project scope writes it to settings.local.json)."
         fi
         return 0
       fi
-      parked_env="$(jq '.env' "$parked")"
+      # Sidecar present: restore it — but only if the result actually carries
+      # the router key. An off that ran with an empty/absent settings.local.json
+      # parks {"env":{}}; blindly restoring that would drop the direct override
+      # and leave the committed router URL unauthenticated while printing
+      # success. Refuse that and tell the user to reinstall.
+      parked_env="$(jq -c '.env // {}' "$parked")"
+      parked_has_key="false"
+      if printf '%s' "$parked_env" | jq -e '(.ANTHROPIC_CUSTOM_HEADERS // "") | test("X-Weave-Router-Key")' >/dev/null 2>&1; then
+        parked_has_key="true"
+      fi
+      if [ "$parked_has_key" != "true" ] && ! claude_key_present "$active"; then
+        warn "Can't re-enable: the parked config has no router key (it was created without one). Re-run the installer to set up your router key — leaving the current direct-to-Anthropic setup in place."
+        return 0
+      fi
       merged="$(jq --argjson p "$parked_env" '.env = (((.env // {}) | del(.ANTHROPIC_BASE_URL)) + $p)' "$active")"
       printf '%s\n' "$merged" >"$active"
       [ "$proj" = "true" ] && chmod 600 "$active"
