@@ -178,6 +178,38 @@ The `--scope project` step only needs to run once per checkout (re-run if
 Override the default base URL globally by setting `$WEAVE_ROUTER_URL` before
 running the installer.
 
+## Switching on and off
+
+Once installed, flip a client between the Weave Router and talking to its
+provider directly — without losing the router config, so switching back is
+instant. These never prompt for a key and require an explicit client:
+
+```bash
+npx @workweave/router off --claude       # route Claude Code directly to Anthropic
+npx @workweave/router on --claude        # route Claude Code through the router again
+npx @workweave/router status --codex     # report whether Codex is on the router or direct
+npx @workweave/router off --opencode --scope project   # project-scoped opencode
+```
+
+Inside Claude Code you can also run the slash commands `/router-off`,
+`/router-on`, and `/router-status` (installed alongside `/force-model`).
+
+What each `off` does (and `on` reverses byte-for-byte):
+
+- **Claude Code** — parks `ANTHROPIC_BASE_URL` + the key header out of
+  `settings.json` so Claude Code falls back to its own Anthropic login. In
+  project scope only the gitignored `settings.local.json` is touched, so the
+  committed `settings.json` never shows up in `git diff`. **Claude Code reads
+  env at launch, so quit and reopen it for an on/off to take effect.**
+- **Codex** — comments the `model_provider = "weave"` line; the
+  `[model_providers.weave]` block stays. Takes effect on the next `codex` run.
+- **opencode** — parks and removes the top-level `weave/...` model so opencode
+  reverts to its own default; `provider.weave` stays. Next `opencode` run.
+
+**Cursor** has no config file we own — its base URL lives in Cursor's own
+settings UI. To toggle it, open **Settings → Models → Override OpenAI Base
+URL** and turn the override (`<base-url>/v1`) on or off there.
+
 ## Verifying
 
 **Claude Code:**

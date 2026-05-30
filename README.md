@@ -139,6 +139,13 @@ rewrites only the managed block and `--uninstall --opencode` strips it.
 Models → *Override OpenAI Base URL* → `http://localhost:8080/v1`, paste
 `rk_...` as the API key.
 
+**Switching on/off.** After installing, `npx @workweave/router off --claude`
+(or `--codex` / `--opencode`) routes that client straight to its provider
+again without discarding the router config; `on` flips it back, and `status`
+reports which way it's pointing. Claude Code also gets `/router-off`,
+`/router-on`, and `/router-status` slash commands. Cursor toggles via the same
+Settings → Models override above. See [install/README.md](install/README.md#switching-on-and-off).
+
 > Two keys, don't mix them up:
 > - `sk-or-...` / `sk-ant-...` / `sk-...` = your **upstream** provider key. Lives in `.env.local`.
 > - `rk_...` = your **router** key. Clients send this as a Bearer token.

@@ -19,6 +19,21 @@ Version-pin for reproducible setups:
 npx @workweave/router@0.1.0 --claude --scope project
 ```
 
+Switch on/off without uninstalling (keeps your config so switching back is
+instant; requires an explicit client):
+
+```bash
+npx @workweave/router off --claude      # route Claude Code directly to Anthropic
+npx @workweave/router on --claude       # route Claude Code through the router again
+npx @workweave/router status --codex    # is Codex on the router or direct?
+```
+
+Claude Code reads its router setting at launch, so quit and reopen it after an
+on/off. Codex and opencode pick it up on their next run. Inside Claude Code the
+slash commands `/router-off`, `/router-on`, and `/router-status` do the same.
+Cursor has no config file we own — toggle its base URL override in **Settings →
+Models** instead.
+
 Uninstall:
 
 ```bash

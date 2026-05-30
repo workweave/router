@@ -37,6 +37,18 @@
 #   npx @workweave/router --non-interactive                # require WEAVE_ROUTER_KEY env var (defaults target to claude)
 #   npx @workweave/router --quiet                          # suppress banner, ping check, and trailing tips
 #   npx @workweave/router --uninstall                      # remove a previous install (delegates to uninstall.sh)
+#
+# Toggle an existing install on/off without losing the router config (so
+# switching back is instant). These never prompt for a key and require an
+# explicit client (--claude / --codex / --opencode); they only flip config
+# that install.sh already wrote:
+#   npx @workweave/router off --claude                     # route directly to Anthropic again (Claude Code)
+#   npx @workweave/router on --codex                       # route through the Weave Router again (Codex)
+#   npx @workweave/router status --opencode                # report whether opencode is on the router or direct
+# Claude Code reads env at launch, so an off/on takes effect on the next
+# `claude` start; Codex and opencode re-read config every invocation.
+# Cursor's base URL lives in its own settings UI (no file we own), so there's
+# nothing to toggle here — flip "Override OpenAI Base URL" in Cursor settings.
 
 set -euo pipefail
 
@@ -64,6 +76,11 @@ router_key_header="X-Weave-Router-Key"
 # prompt for the choice.
 target="claude"
 target_explicit="false"
+
+# Operation mode. "install" (default) writes/refreshes config. "off"/"on"/
+# "status" toggle or report an existing install without touching the router
+# key/identity — see the toggle_* helpers and the dispatch block below.
+mode="install"
 
 # ---------- helpers ----------
 
@@ -705,6 +722,11 @@ while [ $# -gt 0 ]; do
       # on the default.
       target="claude"; target_explicit="true"; shift
       ;;
+    off|--off|on|--on|status|--status)
+      # Toggle/report verbs. Bare (off) or dashed (--off) both accepted; the
+      # npm wrapper forwards argv verbatim so either form reaches us.
+      mode="${1#--}"; shift
+      ;;
     -h|--help)
       usage 0
       ;;
@@ -713,6 +735,17 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+# Toggle verbs only flip config install.sh already wrote: no key, no identity,
+# no prompts. Require an explicit client so we never guess which config to
+# touch, and suppress every interactive prompt downstream.
+if [ "$mode" != "install" ]; then
+  non_interactive="true"
+  if [ "$target_explicit" != "true" ]; then
+    err "'$mode' requires an explicit client: --claude, --codex, or --opencode"
+    exit 2
+  fi
+fi
 
 if [ -z "$base_url" ]; then
   base_url="$DEFAULT_BASE_URL"
@@ -747,7 +780,8 @@ fi
 # users see when `make full-setup` hands off to install.sh is the wordmark,
 # not a bare "Install scope:" line. Target prompt above already finalized
 # $target, so the banner's per-target label reflects the user's choice.
-print_banner
+# Toggle verbs stay terse — skip the banner so `status` prints one clean line.
+[ "$mode" = "install" ] && print_banner
 
 # ---------- interactive scope prompt ----------
 
@@ -815,15 +849,22 @@ fi
 
 # ---------- pre-flight ----------
 
-[ "$quiet" = "true" ] || info "scope=${C_BOLD}${scope}${C_RESET}  target=${C_BOLD}${target}${C_RESET}  base_url=${C_BOLD}${base_url}${C_RESET}"
+if [ "$mode" = "install" ]; then
+  [ "$quiet" = "true" ] || info "scope=${C_BOLD}${scope}${C_RESET}  target=${C_BOLD}${target}${C_RESET}  base_url=${C_BOLD}${base_url}${C_RESET}"
+else
+  [ "$quiet" = "true" ] || info "mode=${C_BOLD}${mode}${C_RESET}  scope=${C_BOLD}${scope}${C_RESET}  target=${C_BOLD}${target}${C_RESET}"
+fi
 
 # Codex install only writes a TOML file (managed via awk) so jq isn't needed.
 # Claude Code's settings.json and opencode's opencode.json patching both use
-# jq to deep-merge / structurally rewrite JSON.
+# jq to deep-merge / structurally rewrite JSON. Toggling those clients reads
+# and rewrites the same JSON, so jq is required there too.
 if [ "$target" = "claude" ] || [ "$target" = "opencode" ]; then
   require_cmd jq    "macOS: 'brew install jq' · Debian/Ubuntu: 'sudo apt install jq'"
 fi
-require_cmd curl  "macOS/Linux: usually preinstalled — check your package manager"
+# curl is only used by the install path's health/validate probes; toggles never
+# hit the network.
+[ "$mode" = "install" ] && require_cmd curl  "macOS/Linux: usually preinstalled — check your package manager"
 
 case "$target" in
   claude)
@@ -959,6 +1000,252 @@ else
   mkdir -p "$opencode_dir"
 fi
 
+# ---------- off / on / status (toggle an existing install) ----------
+#
+# Flip a client between the Weave Router and talking to its provider directly,
+# WITHOUT discarding the router config — so switching back is one command. We
+# only run this for the `off`/`on`/`status` verbs; `install` falls straight
+# through to the write path below. An explicit client was already required
+# during arg parsing, so exactly one of the toggle_* helpers fires.
+#
+# Per-client "off" mechanics (each leaves the router config in place so "on"
+# restores it byte-for-byte):
+#   Claude Code — moves ANTHROPIC_BASE_URL + the key header out of settings
+#                 into a parked sidecar; CC falls back to its own login.
+#   Codex       — comments the `model_provider = "weave"` line inside the
+#                 managed block; the [model_providers.weave] section stays.
+#   opencode    — parks the top-level `model` and removes it; opencode reverts
+#                 to its own default. The provider.weave block stays.
+# Claude Code reads env at launch, so its toggle lands on the next `claude`
+# start; Codex/opencode re-read config every run.
+
+# router_shaped_url returns 0 when a base URL points at the router — i.e. it's
+# neither empty nor Anthropic's own endpoint (what "off" falls back to).
+router_shaped_url() {
+  case "$1" in
+    ""|https://api.anthropic.com*|http://api.anthropic.com*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# json_get prints a jq scalar from a file, or empty when the file/key is
+# absent. Never trips set -e.
+json_get() {
+  [ -f "$1" ] || return 0
+  jq -r "${2} // empty" "$1" 2>/dev/null || true
+}
+
+# gitignore_add appends an entry to the repo .gitignore in project scope so a
+# parked sidecar (which may carry the router key header) never gets committed.
+# No-op for user scope and --dir, matching how install handles its own ignores.
+gitignore_add() {
+  [ "$scope" = "project" ] && [ -z "$install_dir" ] && [ -n "${git_root:-}" ] || return 0
+  local gi="$git_root/.gitignore" entry="$1"
+  refuse_if_symlink "$gi"
+  if [ ! -f "$gi" ] || ! grep -qxF "$entry" "$gi"; then
+    printf '%s\n' "$entry" >>"$gi"
+  fi
+}
+
+toggle_claude() {
+  local parked="$settings_dir/.weave-parked.json"
+  local proj="false" active committed_base local_base parked_env merged
+  if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
+    proj="true"
+    active="$local_settings_file"
+  else
+    active="$settings_file"
+  fi
+  local parked_present="false"
+  if [ -f "$parked" ]; then parked_present="true"; fi
+  committed_base="$(json_get "$settings_file" '.env.ANTHROPIC_BASE_URL')"
+
+  case "$mode" in
+    status)
+      local on_hint="on --claude"
+      [ "$proj" = "true" ] && on_hint="on --claude --scope project"
+      if [ "$parked_present" = "true" ]; then
+        ok "Claude Code: ${C_BOLD}off${C_RESET} — routing directly to Anthropic. Run '$on_hint' to re-enable."
+      elif [ "$proj" = "true" ]; then
+        local_base="$(json_get "$local_settings_file" '.env.ANTHROPIC_BASE_URL')"
+        if [ -n "$local_base" ] && ! router_shaped_url "$local_base"; then
+          ok "Claude Code (project): ${C_BOLD}off${C_RESET} — routing directly to Anthropic. Run '$on_hint' to re-enable."
+        elif router_shaped_url "$committed_base"; then
+          ok "Claude Code (project): ${C_BOLD}on${C_RESET} — routing through $committed_base."
+        else
+          info "Claude Code (project): not configured for the router. Run the installer first."
+        fi
+      elif router_shaped_url "$committed_base"; then
+        ok "Claude Code: ${C_BOLD}on${C_RESET} — routing through $committed_base."
+      else
+        info "Claude Code: not configured for the router. Run the installer first."
+      fi
+      ;;
+    off)
+      if [ "$parked_present" = "true" ]; then
+        ok "Claude Code is already off — nothing to do."
+        return 0
+      fi
+      if ! router_shaped_url "$committed_base"; then
+        info "Claude Code isn't configured for the router. Run the installer first."
+        return 0
+      fi
+      if [ "$proj" = "true" ]; then
+        # Park the whole local env (carries the key header), then override the
+        # base URL to Anthropic in the local file only — committed settings.json
+        # is never touched, so this stays out of `git diff`.
+        if [ -f "$local_settings_file" ]; then
+          jq '{env: (.env // {})}' "$local_settings_file" >"$parked"
+          merged="$(jq '.env = ((.env // {} | del(.ANTHROPIC_CUSTOM_HEADERS)) + {ANTHROPIC_BASE_URL: "https://api.anthropic.com"})' "$local_settings_file")"
+        else
+          printf '{"env":{}}\n' >"$parked"
+          merged='{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}'
+        fi
+        printf '%s\n' "$merged" >"$local_settings_file"
+        chmod 600 "$local_settings_file" "$parked"
+        gitignore_add ".claude/.weave-parked.json"
+      else
+        # Park just the router-owned env keys, then strip them so Claude Code
+        # falls back to its own Anthropic login.
+        jq '{env: ((.env // {}) | {ANTHROPIC_BASE_URL, ANTHROPIC_CUSTOM_HEADERS} | with_entries(select(.value != null)))}' "$settings_file" >"$parked"
+        chmod 600 "$parked"
+        merged="$(jq '(.env // {}) |= del(.ANTHROPIC_BASE_URL, .ANTHROPIC_CUSTOM_HEADERS)
+                      | (if (.env // {} | length) == 0 then del(.env) else . end)' "$settings_file")"
+        printf '%s\n' "$merged" >"$settings_file"
+      fi
+      ok "Claude Code is now ${C_BOLD}off${C_RESET} (direct to Anthropic). Restart Claude Code for it to take effect."
+      ;;
+    on)
+      if [ "$parked_present" != "true" ]; then
+        if router_shaped_url "$committed_base"; then
+          ok "Claude Code is already on — nothing to do."
+        else
+          warn "No parked router config found. Run the installer to set up Claude Code."
+        fi
+        return 0
+      fi
+      parked_env="$(jq '.env' "$parked")"
+      merged="$(jq --argjson p "$parked_env" '.env = (((.env // {}) | del(.ANTHROPIC_BASE_URL)) + $p)' "$active")"
+      printf '%s\n' "$merged" >"$active"
+      [ "$proj" = "true" ] && chmod 600 "$active"
+      rm -f "$parked"
+      ok "Claude Code is now ${C_BOLD}on${C_RESET} (routing through the Weave Router). Restart Claude Code for it to take effect."
+      ;;
+  esac
+}
+
+toggle_codex() {
+  local f="$codex_config_file" state="absent" tmp
+  if [ -f "$f" ]; then
+    state="$(awk -v b="$WEAVE_CODEX_BEGIN_MARKER" -v e="$WEAVE_CODEX_END_MARKER" '
+      $0==b{inblk=1; next}
+      $0==e{inblk=0; next}
+      inblk && /^[[:space:]]*model_provider[[:space:]]*=[[:space:]]*"weave"/ {st="on"}
+      inblk && /^[[:space:]]*#[[:space:]]*model_provider[[:space:]]*=[[:space:]]*"weave"/ {if(st=="")st="off"}
+      END{print (st==""?"absent":st)}
+    ' "$f")"
+  fi
+
+  case "$mode" in
+    status)
+      case "$state" in
+        on)  ok "Codex: ${C_BOLD}on${C_RESET} — routing through the Weave Router." ;;
+        off) ok "Codex: ${C_BOLD}off${C_RESET} — using Codex's default provider. Run 'on --codex' to re-enable." ;;
+        *)   info "Codex: not configured for the router. Run the installer first." ;;
+      esac
+      ;;
+    off)
+      if [ "$state" = "absent" ]; then info "Codex isn't configured for the router. Run the installer first."; return 0; fi
+      if [ "$state" = "off" ]; then ok "Codex is already off — nothing to do."; return 0; fi
+      tmp="$(mktemp -t weave-codex-toggle.XXXXXX)"
+      awk -v b="$WEAVE_CODEX_BEGIN_MARKER" -v e="$WEAVE_CODEX_END_MARKER" '
+        $0==b{inblk=1; print; next}
+        $0==e{inblk=0; print; next}
+        inblk && /^[[:space:]]*model_provider[[:space:]]*=[[:space:]]*"weave"[[:space:]]*$/ {
+          print "# " $0 "  # weave-router: off (run on to re-enable)"; next
+        }
+        {print}
+      ' "$f" >"$tmp" && mv "$tmp" "$f"
+      chmod 600 "$f"
+      ok "Codex is now ${C_BOLD}off${C_RESET} (default provider). Takes effect on your next 'codex' run."
+      ;;
+    on)
+      if [ "$state" = "absent" ]; then warn "No managed Weave block in $f. Run the installer to set up Codex."; return 0; fi
+      if [ "$state" = "on" ]; then ok "Codex is already on — nothing to do."; return 0; fi
+      tmp="$(mktemp -t weave-codex-toggle.XXXXXX)"
+      awk -v b="$WEAVE_CODEX_BEGIN_MARKER" -v e="$WEAVE_CODEX_END_MARKER" '
+        $0==b{inblk=1; print; next}
+        $0==e{inblk=0; print; next}
+        inblk && /^[[:space:]]*#[[:space:]]*model_provider[[:space:]]*=[[:space:]]*"weave"/ {
+          print "model_provider = \"weave\""; next
+        }
+        {print}
+      ' "$f" >"$tmp" && mv "$tmp" "$f"
+      chmod 600 "$f"
+      ok "Codex is now ${C_BOLD}on${C_RESET} (routing through the Weave Router). Takes effect on your next 'codex' run."
+      ;;
+  esac
+}
+
+toggle_opencode() {
+  local f="$opencode_config_file" parked="$opencode_dir/.weave-parked.json"
+  local model="" has_weave="false" parked_present="false" on="false" restore_model merged
+  if [ -f "$parked" ]; then parked_present="true"; fi
+  if [ -f "$f" ]; then
+    model="$(jq -r '.model // empty' "$f" 2>/dev/null || true)"
+    if [ "$(jq -r '((.provider // {}) | has("weave"))' "$f" 2>/dev/null || true)" = "true" ]; then has_weave="true"; fi
+  fi
+  case "$model" in weave/*) on="true" ;; esac
+
+  case "$mode" in
+    status)
+      if [ "$on" = "true" ]; then
+        ok "opencode: ${C_BOLD}on${C_RESET} — default model is $model (via the Weave Router)."
+      elif [ "$has_weave" = "true" ] || [ "$parked_present" = "true" ]; then
+        ok "opencode: ${C_BOLD}off${C_RESET} — not using the Weave Router model. Run 'on --opencode' to re-enable."
+      else
+        info "opencode: not configured for the router. Run the installer first."
+      fi
+      ;;
+    off)
+      if [ "$on" != "true" ]; then
+        if [ "$has_weave" = "true" ]; then ok "opencode is already off — nothing to do."; else info "opencode isn't configured for the router. Run the installer first."; fi
+        return 0
+      fi
+      jq '{model: .model}' "$f" >"$parked"
+      chmod 600 "$parked"
+      merged="$(jq 'del(.model)' "$f")"
+      printf '%s\n' "$merged" >"$f"
+      chmod 600 "$f"
+      gitignore_add ".weave-parked.json"
+      ok "opencode is now ${C_BOLD}off${C_RESET} — pick a non-Weave model with /models. Takes effect on your next opencode run."
+      ;;
+    on)
+      if [ "$on" = "true" ]; then ok "opencode is already on — nothing to do."; return 0; fi
+      restore_model="weave/claude-sonnet-4-6"
+      if [ "$parked_present" = "true" ]; then
+        restore_model="$(jq -r '.model // "weave/claude-sonnet-4-6"' "$parked")"
+      elif [ "$has_weave" != "true" ]; then
+        warn "opencode isn't configured for the router. Run the installer first."; return 0
+      fi
+      merged="$(jq --arg m "$restore_model" '.model = $m' "$f")"
+      printf '%s\n' "$merged" >"$f"
+      chmod 600 "$f"
+      rm -f "$parked"
+      ok "opencode is now ${C_BOLD}on${C_RESET} (default model $restore_model via the Weave Router). Takes effect on your next opencode run."
+      ;;
+  esac
+}
+
+if [ "$mode" != "install" ]; then
+  case "$target" in
+    claude)   toggle_claude ;;
+    codex)    toggle_codex ;;
+    opencode) toggle_opencode ;;
+  esac
+  exit 0
+fi
+
 # ---------- token handling ----------
 
 api_key=""
@@ -1051,16 +1338,38 @@ install_slash_commands() {
     refuse_if_symlink "$dst_dir"
   fi
   mkdir -p "$dst_dir"
-  for cmd in force-model unforce-model; do
+
+  # force-model/unforce-model are router-intercepted prompt expansions and
+  # apply to every target. The router-off/on/status wrappers shell out to this
+  # installer to flip the *local* config, so they're Claude Code-only and need
+  # the install scope baked into the command (the .md can't discover it at
+  # invocation time). {{SCOPE}} is substituted accordingly.
+  installed="force-model, unforce-model"
+  cmds="force-model unforce-model"
+  if [ "$target" = "claude" ]; then
+    cmds="$cmds router-off router-on router-status"
+    installed="$installed, router-off, router-on, router-status"
+  fi
+
+  local scope_args=""
+  if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
+    scope_args=" --scope project"
+  fi
+
+  for cmd in $cmds; do
     src="$commands_src_dir/$cmd.md"
     dst="$dst_dir/$cmd.md"
     [ -f "$src" ] || continue
     if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
       refuse_if_symlink "$dst"
     fi
-    cp "$src" "$dst"
+    # Substitute the {{SCOPE}} placeholder (only the router-* wrappers carry it;
+    # cp-equivalent for the others since the token is absent).
+    local body; body="$(cat "$src")"
+    body="${body//\{\{SCOPE\}\}/$scope_args}"
+    printf '%s\n' "$body" >"$dst"
   done
-  ok "Slash commands written to $dst_dir (force-model, unforce-model)"
+  ok "Slash commands written to $dst_dir ($installed)"
 }
 
 # ---------- codex install path (dispatch + exit before the Claude-only writes) ----------
