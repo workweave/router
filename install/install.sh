@@ -1117,6 +1117,22 @@ toggle_claude() {
       ;;
     on)
       if [ "$parked_present" != "true" ]; then
+        # Project scope can still carry a direct-override in settings.local.json
+        # even with no sidecar (e.g. the parked file was deleted by hand). That
+        # override wins over the committed router URL, so traffic is really
+        # going direct — drop it so "on" matches what "status" reports, instead
+        # of falsely claiming we're already on.
+        if [ "$proj" = "true" ]; then
+          local_base="$(json_get "$local_settings_file" '.env.ANTHROPIC_BASE_URL')"
+          if [ -n "$local_base" ] && ! router_shaped_url "$local_base"; then
+            merged="$(jq '(.env // {}) |= del(.ANTHROPIC_BASE_URL)
+                          | (if (.env // {} | length) == 0 then del(.env) else . end)' "$local_settings_file")"
+            printf '%s\n' "$merged" >"$local_settings_file"
+            chmod 600 "$local_settings_file"
+            ok "Claude Code is now ${C_BOLD}on${C_RESET} (routing through the Weave Router). Restart Claude Code for it to take effect."
+            return 0
+          fi
+        fi
         if router_shaped_url "$committed_base"; then
           ok "Claude Code is already on — nothing to do."
         else
