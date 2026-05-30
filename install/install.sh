@@ -1185,7 +1185,9 @@ toggle_claude() {
         elif claude_key_present "$active"; then
           ok "Claude Code is already on — nothing to do."
         else
-          warn "Router URL is set but the router key is missing — run the installer to add your key (project scope writes it to settings.local.json)."
+          # $active is settings.local.json in project scope, settings.json for
+          # user/--dir — name the right file so the hint isn't misleading.
+          warn "Router URL is set but the router key is missing — run the installer to add your key (written to $(basename "$active"))."
         fi
         return 0
       fi
