@@ -1351,8 +1351,14 @@ install_slash_commands() {
     installed="$installed, router-off, router-on, router-status"
   fi
 
+  # Bake the same scope selector the toggle needs to find this install: --dir
+  # overrides scope (mirrors install/uninstall path resolution), so a sandbox
+  # install gets `--dir <path>` and the slash commands flip that dir rather
+  # than the default user-scope paths. printf %q quotes paths with spaces.
   local scope_args=""
-  if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
+  if [ -n "$install_dir" ]; then
+    scope_args=" --dir $(printf '%q' "$install_dir")"
+  elif [ "$scope" = "project" ]; then
     scope_args=" --scope project"
   fi
 
