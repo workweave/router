@@ -1,35 +1,42 @@
 #!/usr/bin/env bash
 #
-# Weave Router installer for Claude Code, Codex, and opencode.
+# Weave Router installer for Claude Code, Codex, opencode, and pi.
 #
-# Configures Claude Code (default), the OpenAI Codex CLI (`--codex`), or
-# opencode (`--opencode`) to permanently route through the Weave Router.
-# For Claude Code this writes the router base URL, router auth header,
-# and a status line into Claude Code's settings.json. For Codex it writes
-# a `model_providers.weave` entry plus `model_provider = "weave"` into
+# Configures Claude Code (default), the OpenAI Codex CLI (`--codex`),
+# opencode (`--opencode`), or pi (`--pi`) to permanently route through the
+# Weave Router. For Claude Code this writes the router base URL, router auth
+# header, and a status line into Claude Code's settings.json. For Codex it
+# writes a `model_providers.weave` entry plus `model_provider = "weave"` into
 # ~/.codex/config.toml (managed block delimited by markers). For opencode
 # it merges a `provider.weave` block (anthropic-compatible) into
 # opencode.json — since the file is JSON, install/uninstall are structural
-# (jq) rather than marker-delimited.
+# (jq) rather than marker-delimited. For pi it merges a `weave` provider into
+# ~/.pi/agent/models.json, sets it as the default in settings.json, and adds
+# the @workweave/pi-router extension (which also adds a parallel subagent
+# `dispatch` tool) — all structural (jq) merges.
 #
 # Two scopes (apply to all targets):
 #   - user (default):  ~/.claude/settings.json  + ~/.weave/cc-statusline.sh
 #                      ~/.codex/config.toml                       (with --codex)
 #                      ~/.config/opencode/opencode.json           (with --opencode)
+#                      ~/.pi/agent/{models,settings}.json         (with --pi)
 #   - project:         <repo>/.claude/settings.json + <repo>/.claude/cc-statusline.sh
 #                      <repo>/.codex/config.toml                  (with --codex)
 #                      <repo>/opencode.json                       (with --opencode)
+#                      <repo>/.pi/ (run: PI_CODING_AGENT_DIR=<repo>/.pi pi)  (with --pi)
 #
 # Or pass --dir to install into any directory:
 #   - dir:              <dir>/.claude/settings.json + <dir>/.claude/cc-statusline.sh
 #                       <dir>/.codex/config.toml                  (with --codex)
 #                       <dir>/opencode.json                       (with --opencode)
+#                       <dir>/.pi/ (run: PI_CODING_AGENT_DIR=<dir>/.pi pi)   (with --pi)
 #
 # Usage:
 #   npx @workweave/router                                  # interactive picker (Claude Code, Codex, opencode)
 #   npx @workweave/router --claude                         # skip the picker, target Claude Code
 #   npx @workweave/router --codex                          # skip the picker, target the OpenAI Codex CLI
 #   npx @workweave/router --opencode                       # skip the picker, target opencode
+#   npx @workweave/router --pi                              # skip the picker, target pi
 #   npx @workweave/router --scope project                  # commit-with-team install
 #   npx @workweave/router --dir /tmp/my-sandbox            # isolated throwaway install
 #   npx @workweave/router --local                          # local router on localhost:8080
@@ -124,6 +131,7 @@ uninstall_cmd() {
   case "$target" in
     codex)    cmd="$cmd --codex" ;;
     opencode) cmd="$cmd --opencode" ;;
+    pi)       cmd="$cmd --pi" ;;
   esac
   [ "$scope" = "project" ] && cmd="$cmd --scope project"
   [ -n "$install_dir" ] && cmd="$cmd --dir $(printf '%q' "$install_dir")"
@@ -149,6 +157,7 @@ print_banner() {
   case "$target" in
     codex)    target_label="Codex installer" ;;
     opencode) target_label="opencode installer" ;;
+    pi)       target_label="pi installer" ;;
     *)        target_label="Claude Code installer" ;;
   esac
   printf '\n'
@@ -567,6 +576,12 @@ write_opencode_config() {
   # a startup error before the router ever sees a request. The router itself
   # ignores the value (auth runs off X-Weave-Router-Key); apiKey here is just
   # a placeholder that satisfies the SDK's "is auth configured" check.
+  # baseURL KEEPS its /v1 here — do NOT align it with the pi block, which is
+  # root. opencode's @ai-sdk/anthropic (Vercel) appends only /messages to
+  # baseURL (its default is api.anthropic.com/v1), so /v1 yields the correct
+  # /v1/messages. Dropping it would hit /messages and 404. (pi uses the official
+  # @anthropic-ai/sdk, which appends /v1/messages to a root baseURL — opposite
+  # convention.) Verified by install/pi-router/test/opencode_smoke.sh.
   local block
   block="$(jq -n \
     --arg url "$block_url/v1" \
@@ -609,6 +624,113 @@ write_opencode_config() {
   # 0600: the file holds a router key. Even at user scope, mode 644 would
   # leak the key to any local user on a shared box.
   chmod 600 "$config_file"
+}
+
+# write_pi_models_config merges a managed `weave` provider into pi's
+# models.json (anthropic-compatible — the router speaks Anthropic Messages
+# natively). The header set carries identity plus the main-loop routing knobs
+# (quality bias); the @workweave/pi-router extension re-registers the provider
+# per process to flip those knobs for subagents/compaction. apiKey is the
+# router key as well as a header — pi treats apiKey as required to consider auth
+# configured, but the router authenticates off X-Weave-Router-Key
+# (authHeader:false keeps Authorization free for BYOK). Re-running rewrites
+# `.providers.weave` in place; uninstall strips it. chmod 600 — holds the key.
+#
+# Usage: write_pi_models_config <models_file> <base_url> <api_key> [user_email] [user_name]
+write_pi_models_config() {
+  local config_file="$1"
+  local block_url="$2"
+  local block_key="$3"
+  local block_email="${4:-}"
+  local block_name="${5:-}"
+
+  # Identity + the main-loop (quality) routing knobs. Built piecewise so an
+  # empty email/name vanishes from the JSON entirely.
+  local headers_json
+  headers_json="$(jq -n \
+    --arg key   "$block_key" \
+    --arg email "$block_email" \
+    --arg name  "$block_name" '
+    {
+      "X-Weave-Router-Key": $key,
+      "X-App": "pi",
+      "x-weave-routing-marker": "off",
+      "x-weave-routing-alpha": "0.8",
+      "x-weave-routing-speed-weight": "0.05",
+      "x-weave-routing-output-cost-ratio": "0.5",
+      "x-weave-routing-expected-output-tokens": "3000"
+    }
+    | (if $email != "" then . + {"X-Weave-User-Email": $email} else . end)
+    | (if $name  != "" then . + {"X-Weave-User-Name":  $name } else . end)
+  ')"
+
+  # Headline models surfaced in pi's /model picker. The router re-routes every
+  # request regardless, so this list is UX; keep it Anthropic-shaped and in
+  # sync with @workweave/pi-router's WEAVE_MODELS constant.
+  #
+  # baseUrl is the router ROOT (no /v1): pi's anthropic-messages provider uses
+  # @anthropic-ai/sdk, which appends /v1/messages itself. Unlike the codex block
+  # above (OpenAI-style, base ends in /v1), a /v1 suffix here would produce
+  # /v1/v1/messages and 404.
+  local block
+  block="$(jq -n \
+    --arg url "$block_url" \
+    --arg key "$block_key" \
+    --argjson headers "$headers_json" '
+    {
+      baseUrl: $url,
+      api: "anthropic-messages",
+      apiKey: $key,
+      authHeader: false,
+      headers: $headers,
+      models: [
+        { id: "claude-opus-4-8",   name: "Claude Opus 4.8 (via Weave Router)",   reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 64000 },
+        { id: "claude-opus-4-7",   name: "Claude Opus 4.7 (via Weave Router)",   reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 64000 },
+        { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (via Weave Router)", reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 64000 },
+        { id: "claude-haiku-4-5",  name: "Claude Haiku 4.5 (via Weave Router)",  reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 32000 }
+      ]
+    }
+  ')"
+
+  # Overwrite provider.weave only; leave any other providers/models the user
+  # added untouched.
+  local merged
+  if [ -f "$config_file" ]; then
+    merged="$(jq --argjson block "$block" '.providers = ((.providers // {}) | .weave = $block)' "$config_file")"
+  else
+    merged="$(jq -n --argjson block "$block" '{ providers: { weave: $block } }')"
+  fi
+  printf '%s\n' "$merged" >"$config_file"
+  # 0600: the headers + apiKey hold the router key.
+  chmod 600 "$config_file"
+}
+
+# write_pi_settings_config makes the `weave` provider pi's default and loads the
+# @workweave/pi-router extension. defaultProvider/defaultModel are set only when
+# unset (don't clobber a user's pick); the npm package source is appended to
+# `packages` idempotently — pi auto-installs missing packages on startup, so the
+# source entry is enough. No secret lives here, so no chmod 600.
+#
+# Usage: write_pi_settings_config <settings_file>
+write_pi_settings_config() {
+  local settings_file="$1"
+  local pkg="npm:@workweave/pi-router"
+  local merged
+  if [ -f "$settings_file" ]; then
+    merged="$(jq --arg pkg "$pkg" '
+      (.packages //= [])
+      | (if (.packages | index($pkg)) then . else .packages += [$pkg] end)
+      | (if (.defaultProvider // "") == "" then .defaultProvider = "weave" else . end)
+      | (if (.defaultModel // "") == "" then .defaultModel = "claude-sonnet-4-6" else . end)
+    ' "$settings_file")"
+  else
+    merged="$(jq -n --arg pkg "$pkg" '{
+      defaultProvider: "weave",
+      defaultModel: "claude-sonnet-4-6",
+      packages: [$pkg]
+    }')"
+  fi
+  printf '%s\n' "$merged" >"$settings_file"
 }
 
 # resolve_user_name mirrors resolve_user_email but for display name. Priority:
@@ -716,6 +838,9 @@ while [ $# -gt 0 ]; do
     --opencode)
       target="opencode"; target_explicit="true"; shift
       ;;
+    --pi)
+      target="pi"; target_explicit="true"; shift
+      ;;
     --claude)
       # No-op selector for symmetry with --codex / --opencode. Useful in
       # pipelines that want to skip the interactive picker without depending
@@ -747,6 +872,14 @@ if [ "$mode" != "install" ]; then
   fi
 fi
 
+# Toggle verbs (off/on/status) aren't implemented for pi — its config is a
+# structural models.json/settings.json merge, reversed by the uninstaller
+# rather than a single env/key line we can park and restore.
+if [ "$mode" != "install" ] && [ "$target" = "pi" ]; then
+  err "toggle verbs (off/on/status) aren't supported for --pi. Use 'npx @workweave/router --uninstall --pi' to remove, or re-run the installer to refresh."
+  exit 2
+fi
+
 if [ -z "$base_url" ]; then
   base_url="$DEFAULT_BASE_URL"
 fi
@@ -766,12 +899,14 @@ if [ "$target_explicit" = "false" ] && [ "$non_interactive" = "false" ] && [ -r 
   printf "  %s1)%s Claude Code  %s— patches ~/.claude/settings.json (or <repo>/.claude/)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
   printf "  %s2)%s Codex        %s— patches ~/.codex/config.toml (or <repo>/.codex/)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
   printf "  %s3)%s opencode     %s— patches ~/.config/opencode/opencode.json (or <repo>/opencode.json)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
-  printf "Choose %s[1/2/3]%s (default %s1%s): " "$C_BOLD" "$C_RESET" "$C_BOLD" "$C_RESET"
+  printf "  %s4)%s pi           %s— patches ~/.pi/agent/models.json + settings.json (or <repo>/.pi/)%s\n" "$C_BRAND" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "Choose %s[1/2/3/4]%s (default %s1%s): " "$C_BOLD" "$C_RESET" "$C_BOLD" "$C_RESET"
   read -r target_choice </dev/tty || target_choice=""
   case "${target_choice:-1}" in
     1|""|claude|c|C)  target="claude" ;;
     2|codex|x|X)      target="codex" ;;
     3|opencode|o|O)   target="opencode" ;;
+    4|pi|p|P)         target="pi" ;;
     *) err "invalid choice: $target_choice"; exit 2 ;;
   esac
 fi
@@ -808,6 +943,11 @@ if [ -z "$install_dir" ] && [ "$scope_explicit" = "false" ] && [ "$non_interacti
       fi
       scope_project_path="<repo>/opencode.json"
       scope_cli_label="opencode"
+      ;;
+    pi)
+      scope_user_path="~/.pi/agent/"
+      scope_project_path="<repo>/.pi/"
+      scope_cli_label="pi"
       ;;
     *)
       scope_user_path="~/.claude/"
@@ -859,7 +999,7 @@ fi
 # Claude Code's settings.json and opencode's opencode.json patching both use
 # jq to deep-merge / structurally rewrite JSON. Toggling those clients reads
 # and rewrites the same JSON, so jq is required there too.
-if [ "$target" = "claude" ] || [ "$target" = "opencode" ]; then
+if [ "$target" = "claude" ] || [ "$target" = "opencode" ] || [ "$target" = "pi" ]; then
   require_cmd jq    "macOS: 'brew install jq' · Debian/Ubuntu: 'sudo apt install jq'"
 fi
 # curl is only used by the install path's health/validate probes; toggles never
@@ -883,6 +1023,12 @@ case "$target" in
     if ! command -v opencode >/dev/null 2>&1; then
       warn "'opencode' not found on PATH. Install from https://opencode.ai (or 'npm install -g opencode-ai'), then re-run this script."
       warn "Continuing — opencode.json will be written and will take effect once opencode is installed."
+    fi
+    ;;
+  pi)
+    if ! command -v pi >/dev/null 2>&1; then
+      warn "'pi' not found on PATH. Install with 'npm install -g @mariozechner/pi-coding-agent', then re-run this script."
+      warn "Continuing — models.json/settings.json will be written and take effect once pi is installed."
     fi
     ;;
 esac
@@ -970,6 +1116,31 @@ elif [ "$target" = "codex" ]; then
   fi
 
   mkdir -p "$codex_dir"
+elif [ "$target" = "pi" ]; then
+  # pi reads ~/.pi/agent/ by default, so a plain `pi` picks up a user-scope
+  # install with no env var. models.json is global-only in pi (there is no
+  # project-level models file), so for project/--dir scope we point
+  # PI_CODING_AGENT_DIR at a repo-local .pi that holds the whole config
+  # (models.json + settings.json + key) — the same shape as Codex's CODEX_HOME.
+  # The router key is embedded, so .pi goes in .gitignore for project scope.
+  case "$scope" in
+    user)    pi_dir="$settings_base/.pi/agent" ;;
+    project) pi_dir="$settings_base/.pi" ;;
+  esac
+  # --dir is a self-contained sandbox: flat .pi, launched via PI_CODING_AGENT_DIR.
+  [ -n "$install_dir" ] && pi_dir="$install_dir/.pi"
+  pi_models_file="$pi_dir/models.json"
+  pi_settings_file="$pi_dir/settings.json"
+  pi_key_file="$pi_dir/.weave_router_key"
+
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$pi_dir"
+    refuse_if_symlink "$pi_models_file"
+    refuse_if_symlink "$pi_settings_file"
+    refuse_if_symlink "$pi_key_file"
+  fi
+
+  mkdir -p "$pi_dir"
 else
   # opencode discovers config in this order: $XDG_CONFIG_HOME/opencode/opencode.json
   # (or ~/.config/opencode/opencode.json) for user scope, and opencode.json /
@@ -1576,6 +1747,74 @@ if [ "$target" = "opencode" ]; then
     # --dir installs land outside opencode's discovery roots, so the caller
     # has to point opencode at the file explicitly.
     info "Run opencode with OPENCODE_CONFIG=$opencode_config_file opencode."
+  fi
+  print_uninstall_hint
+  exit 0
+fi
+
+# ---------- pi install path (dispatch + exit before the Claude-only writes) ----------
+
+if [ "$target" = "pi" ]; then
+  write_pi_models_config "$pi_models_file" "$base_url" "$api_key" "$user_email" "$user_name"
+  ok "pi models config written to $pi_models_file"
+  write_pi_settings_config "$pi_settings_file"
+  ok "pi settings written to $pi_settings_file (provider weave + @workweave/pi-router)"
+
+  if [ -n "$api_key" ]; then
+    printf '%s\n' "$api_key" >"$pi_key_file"
+    chmod 600 "$pi_key_file"
+    ok "Router key written to $pi_key_file"
+  fi
+
+  # Project scope: the repo-local .pi carries the router key, so keep it out of
+  # git. Same reasoning as the Codex/opencode paths — base URL is shared, the
+  # key is per-person.
+  if [ "$scope" = "project" ] && [ -z "$install_dir" ] && [ -n "${git_root:-}" ]; then
+    # Write the .gitignore in the directory that CONTAINS .pi (the chosen project
+    # dir), not the git root: gitignore entries with a slash are anchored to the
+    # .gitignore's own location, so a root-level ".pi/models.json" would NOT match
+    # a nested <subdir>/.pi/ — leaking the router key. dirname "$pi_dir" == the
+    # project dir (== git root when they're the same).
+    gitignore="$(dirname "$pi_dir")/.gitignore"
+    refuse_if_symlink "$gitignore"
+    for entry in \
+      ".pi/models.json" \
+      ".pi/settings.json" \
+      ".pi/.weave_router_key"
+    do
+      if [ ! -f "$gitignore" ] || ! grep -qxF "$entry" "$gitignore"; then
+        printf '%s\n' "$entry" >>"$gitignore"
+      fi
+    done
+    ok "Updated $gitignore (ignored repo-local .pi router config)"
+  fi
+
+  # Post-install verification: same probes the Claude/Codex/opencode paths run.
+  if [ "$quiet" != "true" ]; then
+    if ! spin "Pinging $base_url/health" curl -fsS --max-time 5 "$base_url/health"; then
+      warn "Could not reach $base_url/health within 5s. Settings are written; verify the router is running."
+    fi
+  fi
+
+  if [ -n "$api_key" ]; then
+    validate_pi_key() {
+      printf '%s: %s\n' "$router_key_header" "$api_key" \
+        | curl -fsS --max-time 5 --header @- "$base_url/validate"
+    }
+    if ! spin "Validating API key" validate_pi_key; then
+      warn "Router rejected the API key (check it matches the dashboard at $base_url/ui/)."
+    fi
+  fi
+
+  printf "\n"
+  printf "%s✓%s %s%sWeave Router installed for pi.%s\n" \
+    "$C_GREEN" "$C_RESET" "$C_BOLD" "$C_BRAND" "$C_RESET"
+  # Billing note: pi normally draws on a Claude subscription (OAuth); routing
+  # through the router switches to per-token billing on the router deployment
+  # key (or BYOK). Surface it at install so the change isn't a surprise.
+  info "pi now bills per token on the Weave Router key, not your Claude subscription."
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    info "Run pi with PI_CODING_AGENT_DIR=$pi_dir pi so it picks up this config."
   fi
   print_uninstall_hint
   exit 0

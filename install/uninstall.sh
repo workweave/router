@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Weave Router uninstaller for Claude Code, Codex, and opencode.
+# Weave Router uninstaller for Claude Code, Codex, opencode, and pi.
 #
 # Default target is Claude Code: removes the env vars, statusLine, and local
 # router auth that install.sh added; leaves the rest of settings.json
@@ -9,12 +9,15 @@
 # config.toml — anything outside the markers is preserved. Pass --opencode
 # to strip the `provider.weave` block (and the top-level `model` key when
 # it points at the router) from opencode.json; other providers and user
-# settings are preserved.
+# settings are preserved. Pass --pi to strip the `weave` provider from
+# pi's models.json, drop @workweave/pi-router from settings.json, revert the
+# weave defaults, and remove the router key file.
 #
 # Usage:
 #   npx @workweave/router --uninstall                            # Claude Code, user scope
 #   npx @workweave/router --uninstall --codex                    # Codex, user scope
 #   npx @workweave/router --uninstall --opencode                 # opencode, user scope
+#   npx @workweave/router --uninstall --pi                       # pi, user scope
 #   npx @workweave/router --uninstall --scope project            # run inside the repo
 #   npx @workweave/router --uninstall --dir /tmp/test            # --dir alone (user scope, .weave/)
 #   npx @workweave/router --uninstall --scope project --dir /tmp # --dir + project scope (.claude/)
@@ -59,6 +62,9 @@ while [ $# -gt 0 ]; do
     --opencode)
       target="opencode"; shift
       ;;
+    --pi)
+      target="pi"; shift
+      ;;
     --claude)
       # No-op selector for symmetry with --codex / --opencode and install.sh's
       # --claude. Lets `./install.sh --uninstall --claude` (which forwards
@@ -77,7 +83,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if { [ "$target" = "claude" ] || [ "$target" = "opencode" ]; } && ! command -v jq >/dev/null 2>&1; then
+if { [ "$target" = "claude" ] || [ "$target" = "opencode" ] || [ "$target" = "pi" ]; } && ! command -v jq >/dev/null 2>&1; then
   err "jq is required for the $target uninstall path."
   exit 1
 fi
@@ -185,6 +191,111 @@ if [ "$target" = "opencode" ]; then
     ok "Weave Router uninstalled from $install_dir (opencode)."
   else
     ok "Weave Router uninstalled (opencode, scope=$scope)."
+  fi
+  exit 0
+fi
+
+# ---------- pi uninstall path ----------
+
+if [ "$target" = "pi" ]; then
+  # Resolve the pi agent dir based on scope/dir. Mirrors install.sh: user scope
+  # is pi's default ~/.pi/agent; project/--dir scope is a repo-local .pi.
+  if [ -n "$install_dir" ]; then
+    install_dir="$(cd "$install_dir" 2>/dev/null && pwd || echo "$install_dir")"
+    pi_dir="$install_dir/.pi"
+    refuse_if_symlink "$pi_dir"
+  elif [ "$scope" = "user" ]; then
+    pi_dir="$HOME/.pi/agent"
+  else
+    # Project scope: same prompt + git-root fallback as the opencode path.
+    project_dir=""
+    if [ "$scope_explicit" = "false" ] && [ -r /dev/tty ]; then
+      default_project_dir="$(pwd)"
+      printf "Project directory to uninstall from [default: %s]: " "$default_project_dir"
+      read -r project_dir_choice </dev/tty || project_dir_choice=""
+      project_dir="${project_dir_choice:-$default_project_dir}"
+      case "$project_dir" in
+        "~")    project_dir="$HOME" ;;
+        "~/"*)  project_dir="$HOME/${project_dir#~/}" ;;
+      esac
+      if [ ! -d "$project_dir" ]; then
+        err "directory does not exist: $project_dir"
+        exit 1
+      fi
+      project_dir="$(cd "$project_dir" && pwd)"
+    fi
+    if [ -n "${project_dir:-}" ]; then
+      pi_dir="$project_dir/.pi"
+    else
+      if ! git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+        err "--scope project must be run inside a git repo, or use --dir <path>."
+        exit 1
+      fi
+      pi_dir="$git_root/.pi"
+    fi
+    refuse_if_symlink "$pi_dir"
+  fi
+
+  pi_models_file="$pi_dir/models.json"
+  pi_settings_file="$pi_dir/settings.json"
+  pi_key_file="$pi_dir/.weave_router_key"
+  refuse_if_symlink "$pi_models_file"
+  refuse_if_symlink "$pi_settings_file"
+  refuse_if_symlink "$pi_key_file"
+
+  # models.json: drop provider.weave; remove the file if nothing else remains.
+  # Other providers/models the user added are preserved.
+  if [ -f "$pi_models_file" ]; then
+    cleaned="$(jq '
+      (if .providers.weave then del(.providers.weave) else . end)
+      | (if (.providers // {}) == {} then del(.providers) else . end)
+    ' "$pi_models_file")"
+    printf '%s\n' "$cleaned" >"$pi_models_file"
+    if [ "$(jq -r 'keys | length' "$pi_models_file" 2>/dev/null || echo 0)" = "0" ]; then
+      rm -f "$pi_models_file"
+      ok "Removed empty $pi_models_file"
+    else
+      ok "Cleaned $pi_models_file"
+    fi
+  else
+    info "No pi models config at $pi_models_file (already uninstalled?)"
+  fi
+
+  # settings.json: drop our package and revert defaults that still point at the
+  # router. Leaving defaultProvider="weave" after removing the provider would
+  # break pi startup, so reverting is the correct reverse of the install.
+  # defaultModel is reverted ONLY when defaultProvider was "weave" (the state
+  # install creates): install sets defaultModel only when it was empty, so a user
+  # who independently picked claude-sonnet-4-6 with their own provider keeps it.
+  if [ -f "$pi_settings_file" ]; then
+    cleaned="$(jq '
+      (if .packages then .packages -= ["npm:@workweave/pi-router"] else . end)
+      | (if (.packages // []) == [] then del(.packages) else . end)
+      | (if .defaultProvider == "weave"
+           then del(.defaultProvider)
+                | (if .defaultModel == "claude-sonnet-4-6" then del(.defaultModel) else . end)
+           else . end)
+    ' "$pi_settings_file")"
+    printf '%s\n' "$cleaned" >"$pi_settings_file"
+    if [ "$(jq -r 'keys | length' "$pi_settings_file" 2>/dev/null || echo 0)" = "0" ]; then
+      rm -f "$pi_settings_file"
+      ok "Removed empty $pi_settings_file"
+    else
+      ok "Cleaned $pi_settings_file"
+    fi
+  else
+    info "No pi settings at $pi_settings_file (already uninstalled?)"
+  fi
+
+  if [ -f "$pi_key_file" ]; then
+    rm -f "$pi_key_file"
+    ok "Removed $pi_key_file"
+  fi
+
+  if [ -n "$install_dir" ]; then
+    ok "Weave Router uninstalled from $install_dir (pi)."
+  else
+    ok "Weave Router uninstalled (pi, scope=$scope)."
   fi
   exit 0
 fi
