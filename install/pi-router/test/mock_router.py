@@ -300,6 +300,7 @@ class Handler(BaseHTTPRequestHandler):
                 "email": self.headers.get("x-weave-user-email"),
                 "name": self.headers.get("x-weave-user-name"),
                 "knobs": {h: self.headers.get(h) for h in KNOB_HEADERS},
+                "marker_opt": self.headers.get("x-weave-routing-marker"),
                 "has_tool_result": tool_result_present,
                 "user_text": user_text[:60],
                 "served": served,

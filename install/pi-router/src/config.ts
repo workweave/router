@@ -200,7 +200,14 @@ export function identityHeaders(role: Role, key: string): Record<string, string>
 
 /** The full static header set for this process's `weave` provider. */
 export function providerHeaders(role: Role, key: string): Record<string, string> {
-	return { ...identityHeaders(role, key), ...knobHeaders(knobsForRole(role)) };
+	return {
+		...identityHeaders(role, key),
+		...knobHeaders(knobsForRole(role)),
+		// pi surfaces the routed model in its status bar (from x-router-model), so
+		// opt out of the router's in-band "✦ Weave Router → …" badge — it arrives as
+		// a separate text block that hides the answer in pi's renderer. (router #263)
+		"X-Weave-Routing-Marker": "off",
+	};
 }
 
 // ---------- model list ----------

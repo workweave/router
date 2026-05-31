@@ -654,6 +654,7 @@ write_pi_models_config() {
     {
       "X-Weave-Router-Key": $key,
       "X-App": "pi",
+      "x-weave-routing-marker": "off",
       "x-weave-routing-alpha": "0.8",
       "x-weave-routing-speed-weight": "0.05",
       "x-weave-routing-output-cost-ratio": "0.5",

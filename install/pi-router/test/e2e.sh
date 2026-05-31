@@ -138,6 +138,8 @@ fi
   && ok "main loop: X-Weave-Router-Key forwarded" || bad "router key not forwarded"
 [ "$(jqcount '.app=="pi" and .email=="e2e@workweave.ai"')" -ge 1 ] \
   && ok "main loop: identity email forwarded" || bad "identity email not forwarded"
+[ "$(jqcount '.app=="pi" and .marker_opt=="off"')" -ge 1 ] \
+  && ok "main loop: opted out of in-band routing marker (X-Weave-Routing-Marker: off)" || bad "routing-marker opt-out header not sent"
 grep -q "weave-routed-model: claude-opus-4-8" "$WORK/main.out" \
   && ok "x-router-model surfaced (headless stderr marker)" || bad "routed-model marker absent (see $WORK/main.out)"
 
@@ -161,6 +163,8 @@ SUBAGENT_REQS="$(jqcount '.app=="pi-subagent"')"
   && ok "subagents: speed/cheap knobs 0.25 / 0.45 / 2 / 1500 (parent WEAVE_ROUTING_* not inherited)" || bad "subagent knobs wrong (did parent WEAVE_ROUTING_* leak into children?)"
 [ "$(jqcount '.app=="pi-subagent" and (.user_id // "" | startswith("subagent:"))')" -ge 2 ] \
   && ok "subagents: metadata.user_id = subagent:<uuid>" || bad "subagent user_id wrong"
+[ "$(jqcount '.app=="pi-subagent" and .marker_opt=="off"')" -ge 2 ] \
+  && ok "subagents: opted out of in-band routing marker (else finalText = the badge)" || bad "subagent routing-marker opt-out not sent"
 UNIQUE_SUBAGENT_IDS="$(jq -s '[.[] | select(.app=="pi-subagent") | .user_id] | unique | length' "$LOG")"
 [ "$UNIQUE_SUBAGENT_IDS" -ge 2 ] \
   && ok "each subagent got a distinct session id ($UNIQUE_SUBAGENT_IDS unique)" || bad "subagent ids not distinct ($UNIQUE_SUBAGENT_IDS)"

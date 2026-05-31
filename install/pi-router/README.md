@@ -30,7 +30,9 @@ npm on next start.
   them concurrently, and returns only each subagent's final answer — intermediate
   tool output stays in the child, so the main context stays small.
 - **Routed-model display.** Shows the model the router actually chose
-  (`x-router-model`) in the status bar.
+  (`x-router-model`) in the status bar, and opts the request out of the router's
+  in-band routing badge (`X-Weave-Routing-Marker: off`) — pi can't render that
+  separate marker text block inline, and the status bar already conveys the model.
 - **Safety backstop.** Blocks a few catastrophic shell commands (`rm -rf /`,
   `mkfs`, `dd of=/dev/…`, fork bombs, force-push to main). Disable with
   `WEAVE_NO_SAFETY=1`.
