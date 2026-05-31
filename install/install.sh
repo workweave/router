@@ -1770,7 +1770,12 @@ if [ "$target" = "pi" ]; then
   # git. Same reasoning as the Codex/opencode paths — base URL is shared, the
   # key is per-person.
   if [ "$scope" = "project" ] && [ -z "$install_dir" ] && [ -n "${git_root:-}" ]; then
-    gitignore="$git_root/.gitignore"
+    # Write the .gitignore in the directory that CONTAINS .pi (the chosen project
+    # dir), not the git root: gitignore entries with a slash are anchored to the
+    # .gitignore's own location, so a root-level ".pi/models.json" would NOT match
+    # a nested <subdir>/.pi/ — leaking the router key. dirname "$pi_dir" == the
+    # project dir (== git root when they're the same).
+    gitignore="$(dirname "$pi_dir")/.gitignore"
     refuse_if_symlink "$gitignore"
     for entry in \
       ".pi/models.json" \

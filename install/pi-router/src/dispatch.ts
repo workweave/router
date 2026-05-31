@@ -101,14 +101,16 @@ async function mapWithConcurrencyLimit<TIn, TOut>(
 	return results;
 }
 
-/** Last assistant text block across the child's emitted messages. */
+/** Full text of the child's last assistant message (all text blocks joined). */
 function finalAssistantText(messages: Message[]): string {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
 		if (msg.role !== "assistant") continue;
+		const texts: string[] = [];
 		for (const part of msg.content ?? []) {
-			if (part.type === "text") return part.text;
+			if (part.type === "text") texts.push(part.text);
 		}
+		if (texts.length > 0) return texts.join("");
 	}
 	return "";
 }
@@ -140,7 +142,9 @@ function runChild(
 		tools = undefined; // readOnly:false + opt-in => full toolset
 	}
 	if (tools && !allowDangerousTools) {
-		tools = tools.filter((t) => !DANGEROUS_SUBAGENT_TOOLS.has(t.toLowerCase()));
+		// Trim first: pi's `--tools` parser trims each entry, so " bash" would slip
+		// past a non-trimmed check here and then get re-enabled downstream.
+		tools = tools.map((t) => t.trim()).filter((t) => t !== "" && !DANGEROUS_SUBAGENT_TOOLS.has(t.toLowerCase()));
 		if (tools.length === 0) tools = DEFAULT_READONLY_TOOLS;
 	}
 	if (tools) args.push("--tools", tools.join(","));
@@ -250,7 +254,10 @@ function runChild(
 			resolve(result);
 		};
 
-		proc.on("close", (code) => settle(code ?? 0));
+		// A null exit code means the child was killed by a signal (timeout / abort /
+		// crash) — settle as failure (1), not success (0), so a killed subagent with
+		// no output can't be counted as succeeded.
+		proc.on("close", (code) => settle(code ?? 1));
 		proc.on("error", (err) => {
 			stderrBuf += `${err.message}\n`;
 			settle(1);

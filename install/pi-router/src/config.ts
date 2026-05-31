@@ -89,7 +89,10 @@ function readWeaveProvider(): WeaveProviderConfig {
 	} catch {
 		/* no models.json — fall through to env/defaults */
 	}
-	cachedWeaveProvider = result;
+	// Cache only a successful, non-empty read. An empty result (file missing or no
+	// weave block yet) must not be cached forever — a later install/write should be
+	// picked up on the next call.
+	if (result.baseUrl || result.apiKey) cachedWeaveProvider = result;
 	return result;
 }
 
