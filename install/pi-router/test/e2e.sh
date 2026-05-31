@@ -144,7 +144,11 @@ grep -q "weave-routed-model: claude-opus-4-8" "$WORK/main.out" \
 # -------------------------------------------------------------------------
 phase "Phase 3 — dispatch fan-out (real subagent processes)"
 # -------------------------------------------------------------------------
+# WEAVE_ROUTING_* are set on the PARENT on purpose: dispatch must NOT leak them
+# into children, so the subagent-knob assertion below (still 0.25/0.45) doubles
+# as the regression test for that env-isolation fix.
 with_timeout 120 env PI_CODING_AGENT_DIR="$PI_DIR" \
+  WEAVE_ROUTING_ALPHA=0.99 WEAVE_ROUTING_SPEED_WEIGHT=0.02 \
   pi -e "$EXT" --no-session --offline --model weave/claude-sonnet-4-6 \
   -p "__DISPATCH__ run two quick parallel checks." >"$WORK/dispatch.out" 2>&1 </dev/null || true
 
@@ -154,7 +158,7 @@ SUBAGENT_REQS="$(jqcount '.app=="pi-subagent"')"
 [ "$SUBAGENT_REQS" -ge 2 ] \
   && ok "spawned $SUBAGENT_REQS subagent requests (>=2 expected)" || bad "only $SUBAGENT_REQS subagent requests (want >=2)"
 [ "$(jqcount '.app=="pi-subagent" and .knobs["x-weave-routing-alpha"]=="0.25" and .knobs["x-weave-routing-speed-weight"]=="0.45" and .knobs["x-weave-routing-output-cost-ratio"]=="2" and .knobs["x-weave-routing-expected-output-tokens"]=="1500"')" -ge 2 ] \
-  && ok "subagents: speed/cheap knobs 0.25 / 0.45 / 2 / 1500" || bad "subagent knobs wrong"
+  && ok "subagents: speed/cheap knobs 0.25 / 0.45 / 2 / 1500 (parent WEAVE_ROUTING_* not inherited)" || bad "subagent knobs wrong (did parent WEAVE_ROUTING_* leak into children?)"
 [ "$(jqcount '.app=="pi-subagent" and (.user_id // "" | startswith("subagent:"))')" -ge 2 ] \
   && ok "subagents: metadata.user_id = subagent:<uuid>" || bad "subagent user_id wrong"
 UNIQUE_SUBAGENT_IDS="$(jq -s '[.[] | select(.app=="pi-subagent") | .user_id] | unique | length' "$LOG")"

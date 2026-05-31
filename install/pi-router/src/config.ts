@@ -241,3 +241,11 @@ export const DISPATCH_CONCURRENCY = Math.max(1, numEnv("WEAVE_PI_DISPATCH_CONCUR
 export const MAX_SUBAGENTS = 8;
 export const SUBAGENT_TIMEOUT_MS = Math.max(1000, numEnv("WEAVE_PI_SUBAGENT_TIMEOUT_MS", 600000));
 export const DEFAULT_READONLY_TOOLS = ["read", "grep", "find", "ls"];
+
+// Tools that let a subagent mutate the filesystem or run arbitrary commands.
+// dispatch strips these from model-requested per-task `tools` (and downgrades
+// readOnly:false's "all tools") unless WEAVE_PI_ALLOW_SUBAGENT_TOOLS=1, so a
+// prompt-injected main loop can't silently escalate a read-only fan-out into
+// writes/exec. The catastrophic-command gate in safety.ts is a separate, narrower
+// backstop; this is the capability gate.
+export const DANGEROUS_SUBAGENT_TOOLS = new Set(["bash", "edit", "write", "patch", "multiedit", "apply_patch"]);

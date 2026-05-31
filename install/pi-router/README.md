@@ -46,7 +46,8 @@ npm on next start.
 | `WEAVE_PI_SUBAGENT_MODEL` | `claude-sonnet-4-6` | `weave/<model>` handle children launch with (router re-routes) |
 | `WEAVE_PI_DISPATCH_CONCURRENCY` | `4` | Max concurrent subagents |
 | `WEAVE_PI_SUBAGENT_TIMEOUT_MS` | `600000` | Per-subagent timeout |
-| `WEAVE_ROUTING_ALPHA` / `…_SPEED_WEIGHT` / `…_OUTPUT_COST_RATIO` / `…_EXPECTED_OUTPUT_TOKENS` | role preset | Override individual routing knobs |
+| `WEAVE_PI_ALLOW_SUBAGENT_TOOLS` | unset | `1` lets `dispatch` grant subagents write/exec tools (bash, write, edit); default strips them |
+| `WEAVE_ROUTING_ALPHA` / `…_SPEED_WEIGHT` / `…_OUTPUT_COST_RATIO` / `…_EXPECTED_OUTPUT_TOKENS` | role preset | Override individual routing knobs (main process only — children always use their role preset) |
 | `WEAVE_NO_SAFETY` | unset | `1` disables the catastrophic-bash gate |
 | `WEAVE_CHEAP_COMPACTION` | unset | `1` enables the (experimental) cheap-compaction path |
 

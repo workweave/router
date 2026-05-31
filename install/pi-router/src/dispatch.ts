@@ -21,6 +21,7 @@ import type { Message } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 import {
+	DANGEROUS_SUBAGENT_TOOLS,
 	DEFAULT_READONLY_TOOLS,
 	DISPATCH_CONCURRENCY,
 	getRouterBaseUrl,
@@ -39,7 +40,7 @@ const TaskItem = Type.Object({
 	prompt: Type.String({ description: "The full instruction for this subagent." }),
 	tools: Type.Optional(
 		Type.Array(Type.String(), {
-			description: "Tool names this subagent may use (e.g. read, grep, bash). Overrides readOnly for this task.",
+			description: "Tool names this subagent may use (e.g. read, grep). Overrides readOnly for this task. Dangerous tools (bash, write, edit) are ignored unless WEAVE_PI_ALLOW_SUBAGENT_TOOLS=1.",
 		}),
 	),
 	cwd: Type.Optional(Type.String({ description: "Working directory for this subagent. Defaults to the parent cwd." })),
@@ -54,7 +55,7 @@ const DispatchParams = Type.Object({
 	readOnly: Type.Optional(
 		Type.Boolean({
 			default: true,
-			description: "When true (default), subagents get read-only tools (read, grep, find, ls). Per-task `tools` overrides this.",
+			description: "When true (default), subagents get read-only tools (read, grep, find, ls). Per-task `tools` overrides this. Without WEAVE_PI_ALLOW_SUBAGENT_TOOLS=1, readOnly:false still yields read-only tools (no silent bash/write).",
 		}),
 	),
 });
@@ -105,7 +106,7 @@ function finalAssistantText(messages: Message[]): string {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
 		if (msg.role !== "assistant") continue;
-		for (const part of msg.content) {
+		for (const part of msg.content ?? []) {
 			if (part.type === "text") return part.text;
 		}
 	}
@@ -122,7 +123,26 @@ function runChild(
 	index: number,
 ): Promise<ChildResult> {
 	const args = ["--print", "--mode", "json", "--no-session", "-e", selfPath, "--model", `${PROVIDER_NAME}/${SUBAGENT_MODEL}`];
-	const tools = task.tools && task.tools.length > 0 ? task.tools : readOnly ? DEFAULT_READONLY_TOOLS : undefined;
+
+	// Secure-by-default tool gating. Task input is model-influenced, so without an
+	// explicit opt-in we never hand a child write/exec tools: model-requested
+	// `tools` are stripped of dangerous entries, and readOnly:false's "all tools"
+	// is downgraded to read-only. WEAVE_PI_ALLOW_SUBAGENT_TOOLS=1 restores full
+	// flexibility. Stops a prompt-injected main loop from escalating a read-only
+	// fan-out into arbitrary command/file execution under the user's identity.
+	const allowDangerousTools = process.env.WEAVE_PI_ALLOW_SUBAGENT_TOOLS === "1";
+	let tools: string[] | undefined;
+	if (task.tools && task.tools.length > 0) {
+		tools = task.tools;
+	} else if (readOnly || !allowDangerousTools) {
+		tools = DEFAULT_READONLY_TOOLS;
+	} else {
+		tools = undefined; // readOnly:false + opt-in => full toolset
+	}
+	if (tools && !allowDangerousTools) {
+		tools = tools.filter((t) => !DANGEROUS_SUBAGENT_TOOLS.has(t.toLowerCase()));
+		if (tools.length === 0) tools = DEFAULT_READONLY_TOOLS;
+	}
 	if (tools) args.push("--tools", tools.join(","));
 	args.push(task.prompt);
 
@@ -134,6 +154,13 @@ function runChild(
 		WEAVE_ROUTER_KEY: key,
 		WEAVE_ROUTER_URL: getRouterBaseUrl(),
 	};
+	// Don't let the main loop's per-knob routing overrides leak into children:
+	// knobsForRole prefers env values over the role preset, which would route
+	// subagents on the main loop's quality knobs instead of the speed/cheap ones.
+	delete env.WEAVE_ROUTING_ALPHA;
+	delete env.WEAVE_ROUTING_SPEED_WEIGHT;
+	delete env.WEAVE_ROUTING_OUTPUT_COST_RATIO;
+	delete env.WEAVE_ROUTING_EXPECTED_OUTPUT_TOKENS;
 	if (identity.email) env.WEAVE_USER_EMAIL = identity.email;
 	if (identity.name) env.WEAVE_USER_NAME = identity.name;
 
@@ -180,15 +207,17 @@ function runChild(
 		const timer = setTimeout(() => {
 			timedOut = true;
 			proc.kill("SIGTERM");
+			// proc.killed flips true the instant SIGTERM is *sent*, so escalate based
+			// on whether the process actually exited (settled), not proc.killed.
 			setTimeout(() => {
-				if (!proc.killed) proc.kill("SIGKILL");
+				if (!settled) proc.kill("SIGKILL");
 			}, SIGKILL_GRACE_MS);
 		}, SUBAGENT_TIMEOUT_MS);
 
 		const onAbort = () => {
 			proc.kill("SIGTERM");
 			setTimeout(() => {
-				if (!proc.killed) proc.kill("SIGKILL");
+				if (!settled) proc.kill("SIGKILL");
 			}, SIGKILL_GRACE_MS);
 		};
 		if (signal) {
@@ -201,17 +230,22 @@ function runChild(
 			settled = true;
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", onAbort);
-			if (stdoutBuf.trim()) processLine(stdoutBuf);
-
 			result.exitCode = exitCode;
-			result.finalText = finalAssistantText(messages);
-			result.routedModel = lastRoutedModel(stderrBuf);
-			if (exitCode !== 0 && !result.finalText) {
-				result.error = timedOut
-					? `timed out after ${Math.round(SUBAGENT_TIMEOUT_MS / 1000)}s`
-					: signal?.aborted
-						? "aborted"
-						: lastStderrLine(stderrBuf) || `exited with code ${exitCode}`;
+			// resolve() must always run — a parse error here would otherwise strand
+			// this promise and block the whole dispatch via mapWithConcurrencyLimit.
+			try {
+				if (stdoutBuf.trim()) processLine(stdoutBuf);
+				result.finalText = finalAssistantText(messages);
+				result.routedModel = lastRoutedModel(stderrBuf);
+				if (exitCode !== 0 && !result.finalText) {
+					result.error = timedOut
+						? `timed out after ${Math.round(SUBAGENT_TIMEOUT_MS / 1000)}s`
+						: signal?.aborted
+							? "aborted"
+							: lastStderrLine(stderrBuf) || `exited with code ${exitCode}`;
+				}
+			} catch (err) {
+				if (!result.error) result.error = `failed to read subagent output: ${(err as Error).message}`;
 			}
 			resolve(result);
 		};
