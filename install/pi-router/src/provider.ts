@@ -10,7 +10,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
 	getRole,
-	getRouterV1Url,
+	getRouterBaseUrl,
 	isSubagent,
 	PROVIDER_NAME,
 	providerHeaders,
@@ -36,7 +36,9 @@ export function registerWeave(pi: ExtensionAPI): void {
 
 	pi.registerProvider(PROVIDER_NAME, {
 		name: "Weave Router",
-		baseUrl: getRouterV1Url(),
+		// Root URL, no /v1: the anthropic-messages provider uses @anthropic-ai/sdk,
+		// which appends /v1/messages to baseUrl. A /v1 here yields /v1/v1/messages.
+		baseUrl: getRouterBaseUrl(),
 		// Planted to satisfy pi's "is auth configured" check. The router ignores
 		// it (auth runs off X-Weave-Router-Key); authHeader:false keeps
 		// Authorization free for BYOK.

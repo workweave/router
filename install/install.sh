@@ -576,6 +576,12 @@ write_opencode_config() {
   # a startup error before the router ever sees a request. The router itself
   # ignores the value (auth runs off X-Weave-Router-Key); apiKey here is just
   # a placeholder that satisfies the SDK's "is auth configured" check.
+  # baseURL KEEPS its /v1 here — do NOT align it with the pi block, which is
+  # root. opencode's @ai-sdk/anthropic (Vercel) appends only /messages to
+  # baseURL (its default is api.anthropic.com/v1), so /v1 yields the correct
+  # /v1/messages. Dropping it would hit /messages and 404. (pi uses the official
+  # @anthropic-ai/sdk, which appends /v1/messages to a root baseURL — opposite
+  # convention.) Verified by install/pi-router/test/opencode_smoke.sh.
   local block
   block="$(jq -n \
     --arg url "$block_url/v1" \
@@ -660,9 +666,14 @@ write_pi_models_config() {
   # Headline models surfaced in pi's /model picker. The router re-routes every
   # request regardless, so this list is UX; keep it Anthropic-shaped and in
   # sync with @workweave/pi-router's WEAVE_MODELS constant.
+  #
+  # baseUrl is the router ROOT (no /v1): pi's anthropic-messages provider uses
+  # @anthropic-ai/sdk, which appends /v1/messages itself. Unlike the codex block
+  # above (OpenAI-style, base ends in /v1), a /v1 suffix here would produce
+  # /v1/v1/messages and 404.
   local block
   block="$(jq -n \
-    --arg url "$block_url/v1" \
+    --arg url "$block_url" \
     --arg key "$block_key" \
     --argjson headers "$headers_json" '
     {

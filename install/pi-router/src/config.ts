@@ -40,22 +40,22 @@ function numEnv(name: string, fallback: number): number {
 // ---------- router endpoint ----------
 
 /**
- * Router base URL (no trailing slash). Order: WEAVE_ROUTER_URL env (children
- * inherit it), then the installer-written models.json baseUrl (so the extension
- * always agrees with however the user installed — hosted, --local, or custom),
- * then the local default. Without the models.json fallback, a hosted install
- * with no env var would be silently re-pointed at localhost.
+ * Router base URL — the ROOT, with no /v1 and no trailing slash. pi's
+ * anthropic-messages provider uses @anthropic-ai/sdk, which appends /v1/messages
+ * to this; a trailing /v1 would produce /v1/v1/messages and 404. Order:
+ * WEAVE_ROUTER_URL env (children inherit it), then the installer-written
+ * models.json baseUrl (so the extension always agrees with however the user
+ * installed — hosted, --local, or custom), then the local default. Without the
+ * models.json fallback, a hosted install with no env var would be silently
+ * re-pointed at localhost. The /v1 strip on the models.json value keeps installs
+ * written by an older installer (which appended /v1) working after an update.
  */
 export function getRouterBaseUrl(): string {
 	const env = process.env.WEAVE_ROUTER_URL?.trim();
-	if (env) return env.replace(/\/+$/, "");
+	if (env) return env.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
 	const fromModels = readWeaveProvider().baseUrl?.trim();
 	if (fromModels) return fromModels.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
 	return "http://localhost:8080";
-}
-
-export function getRouterV1Url(): string {
-	return `${getRouterBaseUrl()}/v1`;
 }
 
 // ---------- router key resolution ----------
