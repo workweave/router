@@ -135,6 +135,26 @@ type InstallationExcludedModelsContextKey struct{}
 // installationExcludedModelsFromContext returns the per-installation exclusion
 // list stashed on ctx by the auth middleware, or nil when none is present.
 
+// routingMarkerHeader lets a client suppress the in-band "✦ **Weave Router** → …"
+// routing badge. Programmatic clients that surface the routed model out-of-band
+// (e.g. pi reads the x-router-model response header into its status bar) and
+// render the assistant message into their own UI can't show a standalone marker
+// text block without it hiding the actual answer. Any of off/false/0/none
+// disables it; absent or anything else keeps the default.
+const routingMarkerHeader = "X-Weave-Routing-Marker"
+
+// suppressMarkerIfRequested returns "" when the request opted out of the routing
+// marker via routingMarkerHeader, otherwise the marker unchanged. Scoped to the
+// per-turn routing badge; the no-progress / loop / force-model markers are
+// standalone single-block messages and are intentionally always emitted.
+func suppressMarkerIfRequested(h http.Header, marker string) string {
+	switch strings.ToLower(strings.TrimSpace(h.Get(routingMarkerHeader))) {
+	case "off", "false", "0", "none":
+		return ""
+	}
+	return marker
+}
+
 // routingMarkerFor builds the "brand → model · note" snippet emitted at the
 // start of every cross-format streamed response.
 func routingMarkerFor(res turnLoopResult) string {
@@ -960,7 +980,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				usage = extractor
 			}
 			translator := translate.NewAnthropicSSETranslator(sink, d.Model, usage).
-				WithRoutingMarker(routingMarkerFor(routeRes)).
+				WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
 				WithEstimatedInputTokens(feats.Tokens)
 			if err := translator.Prelude(env.Stream()); err != nil {
 				log.Error("Anthropic SSE prelude failed (OpenAI upstream)", "err", err)
@@ -998,7 +1018,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			}
 			// SSE chain: Gemini → OpenAI → Anthropic.
 			anthropicTr := translate.NewAnthropicSSETranslator(sink, d.Model, usage).
-				WithRoutingMarker(routingMarkerFor(routeRes)).
+				WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
 				WithEstimatedInputTokens(feats.Tokens)
 			if err := anthropicTr.Prelude(env.Stream()); err != nil {
 				log.Error("Anthropic SSE prelude failed (Gemini upstream)", "err", err)
@@ -1839,7 +1859,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		sink = captureW
 	}
 
-	marker := routingMarkerFor(routeRes)
+	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
 	_, isResponses := w.(*translate.ResponsesWriter)
 	// markerSink wraps sink with an OpenAIRoutingMarkerWriter that emits
 	// the routing-marker chunk + HTTP 200 eagerly (Prelude). Skipped when

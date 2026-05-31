@@ -158,7 +158,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	proxyStart := time.Now()
 	var extractor *otel.UsageExtractor
 	var sink http.ResponseWriter = w
-	if marker := routingMarkerFor(routeRes); marker != "" {
+	if marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes)); marker != "" {
 		mw := translate.NewGeminiRoutingMarkerWriter(sink, marker)
 		// Flush marker + HTTP 200 immediately so TTFB is decoupled from
 		// upstream prefill. Locks status to 200.
