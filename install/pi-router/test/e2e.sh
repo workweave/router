@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# End-to-end test for @workweave/pi-router + the `install.sh --pi` target.
+# End-to-end test for @workweave/router + the `install.sh --pi` target.
 #
 # Drives a REAL `pi` process against a mock Weave Router (mock_router.py) and
 # asserts the routed-request shape the router actually receives: routing knobs,
@@ -111,7 +111,7 @@ grep -q '"path":"/validate"' "$LOG" && ok "installer validated key (/validate)" 
 
 # Idempotency: a second install must not duplicate the package entry.
 bash "$INSTALL_SH" --pi --base-url "$BASE_URL" --dir "$WORK" >>"$WORK/install.out" 2>&1 </dev/null || true
-PKGCOUNT="$(jq '[.packages[]? | select(. == "npm:@workweave/pi-router")] | length' "$PI_DIR/settings.json")"
+PKGCOUNT="$(jq '[.packages[]? | select(. == "npm:@workweave/router")] | length' "$PI_DIR/settings.json")"
 [ "$PKGCOUNT" = "1" ] && ok "idempotent re-install: single pi-router package entry" || bad "package entry count = $PKGCOUNT (want 1)"
 
 # The npm package is not published pre-merge; drop it so `-e` is the sole loader.

@@ -1,4 +1,6 @@
-# @workweave/pi-router
+# Weave Router pi extension
+
+> Bundled inside the [`@workweave/router`](https://www.npmjs.com/package/@workweave/router) package — not published separately. `src/` here is the source of truth; `npm run prepack` copies it into the package.
 
 A [pi](https://pi.dev) extension that routes every request through the
 [WorkWeave Router](https://github.com/workweave/router) — a trained, per-request
@@ -12,9 +14,9 @@ WEAVE_ROUTER_KEY=rk_… npx -y @workweave/router --pi --local  # local router (h
 ```
 
 That writes `~/.pi/agent/models.json` (the `weave` provider), adds
-`npm:@workweave/pi-router` to `~/.pi/agent/settings.json` `packages`, and stores
-the key in `~/.pi/agent/.weave_router_key`. pi auto-installs this package from
-npm on next start.
+`npm:@workweave/router` to `~/.pi/agent/settings.json` `packages`, and stores
+the key in `~/.pi/agent/.weave_router_key`. pi auto-installs `@workweave/router`
+from npm on next start and loads this extension via its `pi.extensions` field.
 
 ## What it does
 

@@ -1,37 +1,13 @@
 {
-  "name": "@workweave/pi-router",
-  "version": "0.1.0",
-  "description": "Route the pi coding agent through the WorkWeave Router: automatic per-request model selection, quality/speed knob biasing, sticky sessions, and parallel context-isolated subagents.",
+  "name": "@workweave/router-pi-extension",
+  "private": true,
   "type": "module",
-  "license": "SEE LICENSE IN LICENSE",
-  "keywords": [
-    "pi-package",
-    "weave",
-    "router",
-    "pi",
-    "llm-router",
-    "anthropic"
-  ],
-  "pi": {
-    "extensions": [
-      "./src/index.ts"
-    ]
-  },
-  "files": [
-    "src",
-    "README.md"
-  ],
+  "description": "The pi routing extension bundled into @workweave/router. NOT published separately: src/ is copied into the @workweave/router package at prepack and loaded via that package's pi.extensions. This manifest just marks the sources as ESM and declares the pi peer deps for local typecheck.",
   "peerDependencies": {
     "@mariozechner/pi-agent-core": "*",
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*",
     "typebox": "*"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/workweave/router.git",
-    "directory": "install/pi-router"
-  },
-  "homepage": "https://workweave.ai"
+  }
 }

@@ -4,7 +4,7 @@
 // published tarball is self-contained. Keeps a single source of truth for
 // the shell installer.
 
-const { copyFileSync, chmodSync, mkdirSync, readdirSync, lstatSync, realpathSync } = require("node:fs");
+const { copyFileSync, cpSync, chmodSync, mkdirSync, readdirSync, lstatSync, realpathSync } = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
@@ -41,6 +41,20 @@ for (const f of readdirSync(commandsSrc)) {
   copyFileSync(srcReal, path.join(commandsDst, f));
   console.log(`copied commands/${f}`);
 }
+
+// Bundle the pi extension so the single @workweave/router package is BOTH the
+// installer and the pi-router extension: pi loads it via the "pi.extensions"
+// field in package.json, and install.sh adds `npm:@workweave/router` to pi's
+// settings. Source of truth lives at install/pi-router/src.
+const piSrc = path.join(installDir, "pi-router", "src");
+const piDst = path.join(root, "pi-router", "src");
+mkdirSync(path.dirname(piDst), { recursive: true });
+cpSync(piSrc, piDst, { recursive: true });
+// package.json marks the sources as ESM (type:module); README is docs.
+for (const f of ["package.json", "README.md"]) {
+  copyFileSync(path.join(installDir, "pi-router", f), path.join(root, "pi-router", f));
+}
+console.log("copied pi-router/ (extension)");
 
 // LICENSE lives at the repo root and applies to the whole project. npm
 // surfaces it on the package page when bundled alongside package.json.
