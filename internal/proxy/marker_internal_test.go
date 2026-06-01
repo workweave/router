@@ -215,6 +215,18 @@ func TestRoutingMarkerFor_EmptyDecisionEmitsNothing(t *testing.T) {
 	assert.Empty(t, got)
 }
 
+func TestRoutingMarkerFor_SuggestionModeSuppressed(t *testing.T) {
+	res := turnLoopResult{
+		Decision:       router.Decision{Model: "gpt-5.5", Provider: "openai"},
+		SuggestionMode: true,
+		PlannerDecision: planner.Decision{
+			Reason: planner.ReasonSameModel,
+		},
+	}
+	got := routingMarkerFor(res)
+	assert.Empty(t, got, "suggestion-mode responses must not emit the routing badge")
+}
+
 func TestRoutingMarkerFor_DropsProviderEvenWhenSet(t *testing.T) {
 	got := routingMarkerFor(turnLoopResult{
 		Decision: router.Decision{Model: "claude-haiku-4-5", Provider: "anthropic"},

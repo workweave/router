@@ -162,6 +162,9 @@ func routingMarkerFor(res turnLoopResult) string {
 	if decision.Model == "" {
 		return ""
 	}
+	if res.SuggestionMode {
+		return ""
+	}
 	// Suppress the marker on tool-result follow-ups: every post-tool turn would
 	// otherwise re-emit a duplicate mid-stream.
 	if res.PlannerDecision.Reason == "" && !res.HardPinned && !res.TierClamped && res.StickyHit {
@@ -804,6 +807,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
 		return routeErr
 	}
+	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision
 	tt := routeRes.TurnType
 	stickyHit := routeRes.StickyHit
@@ -1745,6 +1749,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		log.Error("Routing failed for OpenAI request", "err", err, "route_ms", routeMs, "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
 		return err
 	}
+	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision
 	tt := routeRes.TurnType
 	stickyHit := routeRes.StickyHit
