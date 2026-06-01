@@ -269,7 +269,7 @@ if [ "$target" = "pi" ]; then
   # who independently picked claude-sonnet-4-6 with their own provider keeps it.
   if [ -f "$pi_settings_file" ]; then
     cleaned="$(jq '
-      (if .packages then .packages -= ["npm:@workweave/router"] else . end)
+      (if .packages then .packages -= ["npm:@workweave/router", "npm:@workweave/pi-router"] else . end)
       | (if (.packages // []) == [] then del(.packages) else . end)
       | (if .defaultProvider == "weave"
            then del(.defaultProvider)
