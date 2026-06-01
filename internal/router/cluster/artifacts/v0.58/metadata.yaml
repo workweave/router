@@ -1,0 +1,126 @@
+format_version: 2
+version: "v0.58"
+parent: null
+status: "candidate"
+promoted_date: "2026-06-01"
+embedder:
+  model: "jina-v2-base-code-int8"
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 16
+  top_p: 4
+  alpha: 0.8
+  shrinkage_k0: 10.0
+  score_normalization: "per_prompt_minmax_across_bench_columns"
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 8593
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  output_cost_ratio: 0.25
+  speed_weight: 0.08
+  expected_output_tokens: 2000
+  per_model_verbosity: true
+  include_routerarena_labels: "v064_inputs.jsonl"
+  routerarena_only: true
+  exclude_prompts: null
+  n_excluded_prompts: 0
+  include_aa_labels: "aa_quality_priors_v0.56.json"
+  aa_evidence_scale: 3.0
+  aa_label_tier_weights:
+    GPQA_DIAMOND: 0.3
+    IFBENCH: 0.3
+    LIVECODEBENCH: 1.0
+    MATH_500: 0.3
+    MMLU_PRO: 0.3
+    SCICODE: 1.0
+    SWE_BENCH_VERIFIED: 1.0
+    TAU2_BENCH_TELECOM: 0.3
+    TERMINAL_BENCH_HARD: 1.0
+  aa_label_residuals:
+    fraction_under_threshold: 0.5708502024291497
+    max: 0.2429133312756644
+    mean: 0.059625521958409304
+    median: 0.038888469407191734
+    n_cells: 247
+    p90: 0.14313290790179495
+  default_routing_knobs:
+    alpha:
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+      - 0.8
+    speed_weight: 0.08
+    output_cost_ratio: 0.25
+    expected_output_tokens: 2000
+    per_model_verbosity: true
+  recommended_ui_defaults:
+    quality_pareto:
+      alpha: 0.6
+      speed_weight: 0.1
+      output_cost_ratio: 0.25
+    cost_pareto:
+      alpha: 0.4
+      speed_weight: 0.05
+      output_cost_ratio: 0.4
+    balanced:
+      alpha: 0.5
+      speed_weight: 0.12
+      output_cost_ratio: 0.25
+deployed_providers:
+  - anthropic
+  - bedrock
+  - deepinfra
+  - fireworks
+  - google
+  - openai
+deployed_models:
+  - claude-haiku-4-5
+  - claude-opus-4-7
+  - claude-opus-4-8
+  - claude-sonnet-4-6
+  - deepseek/deepseek-v4-flash
+  - deepseek/deepseek-v4-pro
+  - gemini-3.1-flash-lite-preview
+  - gemini-3.1-pro-preview
+  - gemini-3.5-flash
+  - gpt-5.4-mini
+  - gpt-5.5
+  - moonshotai/kimi-k2.6
+  - qwen/qwen3-coder-next
+  - qwen/qwen3-next-80b-a3b-instruct
+  - xiaomi/mimo-v2.5-pro
+  - z-ai/glm-5.1
+cost_per_1k_input_usd:
+  claude-haiku-4-5: 0.0018
+  claude-opus-4-7: 0.008819595476294042
+  claude-opus-4-8: 0.008580361026533275
+  claude-sonnet-4-6: 0.005257503262287952
+  deepseek/deepseek-v4-flash: 0.00020999999999999998
+  deepseek/deepseek-v4-pro: 0.00261
+  gemini-3.1-flash-lite-preview: 0.0028746411483253588
+  gemini-3.1-pro-preview: 0.005304045237059591
+  gemini-3.5-flash: 0.00375
+  gpt-5.4-mini: 0.0006247933884297521
+  gpt-5.5: 0.014956502827316226
+  moonshotai/kimi-k2.6: 0.005073096998695086
+  qwen/qwen3-coder-next: 0.0007999999999999999
+  qwen/qwen3-next-80b-a3b-instruct: 0.00045
+  xiaomi/mimo-v2.5-pro: 0.00175
+  z-ai/glm-5.1: 0.0022637342322749023
+changelog: "Initial training run for v0.58."
