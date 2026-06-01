@@ -105,6 +105,10 @@ type Service struct {
 	// each completed upstream call. Wired only in managed mode; the
 	// composition root leaves this nil for selfhosted deployments.
 	billing *billing.Service
+	// phaseRouting parameterizes phase-aware routing (research / planning).
+	// Zero value (Enabled=false) preserves normal routing until WithPhaseRouting
+	// is wired at boot.
+	phaseRouting PhaseRoutingConfig
 }
 
 // pinSessionTTL mirrors Anthropic's prompt-cache TTL on Sonnet/Haiku/Opus 4.5+
@@ -175,6 +179,9 @@ func routingMarkerFor(res turnLoopResult) string {
 		parts = append(parts, reason)
 	}
 	if note := clampNote(res); note != "" {
+		parts = append(parts, note)
+	}
+	if note := phaseNote(res); note != "" {
 		parts = append(parts, note)
 	}
 	return strings.Join(parts, " · ") + "\n\n"
@@ -360,6 +367,13 @@ func (s *Service) WithDefaultBaselineModel(model string) *Service {
 // WithTierClampResolver installs the tier-ceiling clamp resolver. Nil disables.
 func (s *Service) WithTierClampResolver(resolver func(enabled, excluded map[string]struct{}, ceiling catalog.Tier) (provider, model string, ok bool)) *Service {
 	s.tierClampResolver = resolver
+	return s
+}
+
+// WithPhaseRouting installs phase-aware routing config. Zero value (Enabled
+// false) disables it.
+func (s *Service) WithPhaseRouting(cfg PhaseRoutingConfig) *Service {
+	s.phaseRouting = cfg
 	return s
 }
 
@@ -860,6 +874,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	w.Header().Set("x-router-decision", decision.Reason)
 	w.Header().Set("x-router-provider", decision.Provider)
 	w.Header().Set("x-router-model", decision.Model)
+	setPhaseHeader(w, routeRes)
 
 	if _, err := s.provider(decision.Provider); err != nil {
 		return err
@@ -885,6 +900,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		String("routing.session_pin_tier", pinTier).
 		Int64("routing.session_pin_age_s", pinAgeSec).
 		String("routing.turn_type", string(tt)).
+		String("routing.phase", string(routeRes.Phase)).
 		String("routing.embed_input", embedInput).
 		Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 		IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
@@ -1174,7 +1190,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "resp_output_tokens", respSummary.OutputTokens)
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "phase", string(routeRes.Phase), "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "resp_output_tokens", respSummary.OutputTokens)
 	return proxyErr
 }
 
@@ -1788,6 +1804,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	w.Header().Set("x-router-decision", decision.Reason)
 	w.Header().Set("x-router-provider", decision.Provider)
 	w.Header().Set("x-router-model", decision.Model)
+	setPhaseHeader(w, routeRes)
 
 	reqPricing := otel.Lookup(s.baselineFor(feats.Model))
 	actPricing := otel.Lookup(decision.Model)
@@ -1809,6 +1826,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		String("routing.session_pin_tier", pinTier).
 		Int64("routing.session_pin_age_s", pinAgeSec).
 		String("routing.turn_type", string(tt)).
+		String("routing.phase", string(routeRes.Phase)).
 		String("routing.embed_input", embedInput).
 		Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 		IntSlice("routing.cluster_ids", clusterIDsFromDecision(decision)).
@@ -2096,7 +2114,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "phase", string(routeRes.Phase), "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
 
