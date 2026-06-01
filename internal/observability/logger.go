@@ -80,10 +80,14 @@ func newHandler(level slog.Level) slog.Handler {
 	case "tint":
 		return tint.NewHandler(os.Stderr, &tint.Options{Level: level, TimeFormat: time.Kitchen})
 	}
-	// Auto: a TTY (local dev) gets pretty colorized output; everything else
-	// (Cloud Run, piped, redirected) gets structured GCP JSON.
+	// Auto: a TTY (local dev) gets human-readable output — colorized when color
+	// is enabled, plain text when NO_COLOR/LOG_COLOR disables it. Only non-TTY
+	// streams (Cloud Run, piped, redirected) get structured GCP JSON.
 	if useColor() {
 		return tint.NewHandler(os.Stderr, &tint.Options{Level: level, TimeFormat: time.Kitchen})
+	}
+	if isTerminal() {
+		return slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	}
 	return slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level:       level,
@@ -120,6 +124,13 @@ func useColor() bool {
 	if _, ok := os.LookupEnv("NO_COLOR"); ok {
 		return false
 	}
+	return isTerminal()
+}
+
+// isTerminal reports whether stderr is an interactive terminal, independent of
+// any color preference. The auto format uses this to keep TTY output
+// human-readable (text) rather than JSON when color is disabled.
+func isTerminal() bool {
 	return isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())
 }
 
