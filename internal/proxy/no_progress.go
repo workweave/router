@@ -43,33 +43,63 @@ const (
 )
 
 // noProgressFingerprint identifies one dispatch attempt by routed model,
-// provider, message count, and a stable hash of the prompt prefix.
+// provider, message count, tool-call progress, and a stable hash of the
+// prompt prefix.
 type noProgressFingerprint [32]byte
 
-// computeNoProgressFingerprint hashes the routed (model, provider), the
-// conversation's message count, and the prompt prefix into a single
-// fingerprint.
+// toolProgressMarker summarizes how far an agent's tool-call history has
+// advanced this turn: the count of meaningful assistant tool calls plus the
+// signature (name + canonical-arg hash) of the most recent one. Empty when the
+// envelope carries no assistant tool calls (e.g. a tool-free chat turn) or for
+// Gemini-format requests, which AssistantToolCallSignatures does not parse.
 //
-// messageCount is load-bearing for false-positive avoidance. The prompt
-// prefix alone is constant across a single agentic task: in the default
-// embed-only-user-message mode promptText is the user's typed task (tool
-// results are stripped), so every iteration of a healthy tool-call loop
+// Feeding this into the no-progress fingerprint is what lets the detector tell
+// a progressing tool-call loop (count climbs / last call changes each turn)
+// apart from a stuck one (count and last call constant) without relying on the
+// top-level message count, which Claude Code sub-agents hold flat.
+func toolProgressMarker(env *translate.RequestEnvelope) string {
+	if env == nil {
+		return ""
+	}
+	sigs := env.AssistantToolCallSignatures()
+	if len(sigs) == 0 {
+		return ""
+	}
+	last := sigs[len(sigs)-1]
+	return strconv.Itoa(len(sigs)) + "\x00" + last.Name + "\x00" + last.InputHash
+}
+
+// computeNoProgressFingerprint hashes the routed (model, provider), the
+// conversation's message count, a tool-call progress marker, and the prompt
+// prefix into a single fingerprint.
+//
+// The prompt prefix alone is constant across a single agentic task: in the
+// default embed-only-user-message mode promptText is the user's typed task
+// (tool results are stripped), so every iteration of a healthy tool-call loop
 // shares the same prefix and the bare (model, provider, prefix) fingerprint
 // would collide on every dispatch — tripping the detector on any session that
 // fires >= noProgressMatchThreshold turns to one model within the window.
 //
-// A genuinely stuck sub-agent spawn loop replays independent envelope-1
-// requests, so its message count stays flat and the fingerprints still
-// collide. A progressing agent appends an assistant turn plus a tool_result
-// turn each iteration, so its message count climbs monotonically and each
-// dispatch yields a distinct fingerprint that never accumulates to the
-// threshold. Folding messageCount in is what separates the two.
-func computeNoProgressFingerprint(decision router.Decision, promptText string, messageCount int) noProgressFingerprint {
+// progressMarker is the primary false-positive guard. A progressing agent
+// appends a new, distinct tool call each turn, so toolProgressMarker advances
+// (its count climbs and the last-call signature changes) and each dispatch
+// yields a distinct fingerprint that never accumulates to the threshold. A
+// genuinely stuck agent — a sub-agent spawn loop replaying independent
+// envelope-1 requests, or a model re-issuing one identical call — keeps the
+// marker constant, so the fingerprints still collide and the detector fires.
+//
+// messageCount is folded in as a secondary signal for tool-free loops, where a
+// growing transcript is the only progress signal available. It is NOT
+// sufficient on its own: Claude Code's Explore sub-agent holds the top-level
+// message count flat (tool_use blocks accrete inside a handful of messages)
+// while genuinely progressing, which the message-count guard alone mistook for
+// a loop.
+func computeNoProgressFingerprint(decision router.Decision, promptText string, messageCount int, progressMarker string) noProgressFingerprint {
 	p := promptText
 	if len(p) > noProgressPromptPrefix {
 		p = p[:noProgressPromptPrefix]
 	}
-	return sha256.Sum256([]byte(decision.Model + "\x00" + decision.Provider + "\x00" + strconv.Itoa(messageCount) + "\x00" + p))
+	return sha256.Sum256([]byte(decision.Model + "\x00" + decision.Provider + "\x00" + strconv.Itoa(messageCount) + "\x00" + progressMarker + "\x00" + p))
 }
 
 type fingerprintEntry struct {

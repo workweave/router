@@ -817,14 +817,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	s.logPlannerOutcome(ctx, routeRes)
 
 	// Cross-envelope no-progress detector: if this session has dispatched the
-	// same (decision_model, decision_provider, message_count, prompt-prefix)
-	// burst >= noProgressMatchThreshold times within noProgressTimeWindow, the
-	// parent agent is in a sub-agent spawn loop and another dispatch will only
+	// same (decision_model, decision_provider, message_count, tool-progress,
+	// prompt-prefix) burst >= noProgressMatchThreshold times within
+	// noProgressTimeWindow, the agent is stuck (a sub-agent spawn loop, or a
+	// model re-issuing one identical call) and another dispatch will only
 	// reproduce the same useless response. Break the pin and emit a synthetic
-	// stop instead. message_count is folded in so a progressing agent (whose
-	// transcript grows each turn) yields a distinct fingerprint per dispatch
-	// and is never mistaken for a flat-transcript spawn loop.
-	if fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount); s.noProgress != nil {
+	// stop instead. The tool-progress marker is the primary guard: a
+	// progressing agent appends a new, distinct tool call each turn, so its
+	// fingerprint diverges and it is never mistaken for a stuck loop — even when
+	// the top-level message count stays flat, as it does for Claude Code's
+	// Explore sub-agent.
+	if fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env)); s.noProgress != nil {
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
 			return s.handleNoProgressBreak(ctx, w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider)
