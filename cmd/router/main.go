@@ -275,6 +275,28 @@ func main() {
 	}
 
 	{
+		// Parasail OpenAI-compatible serverless surface. Parasail uses its
+		// own "parasail-"-prefixed model slugs while the router exposes
+		// slash-form slugs; modelIDMap is derived from the catalog's
+		// per-binding UpstreamID at boot.
+		parasailBaseURL := config.GetOr("PARASAIL_BASE_URL", openaiCompatProvider.ParasailBaseURL)
+		parasailKey := ""
+		if !byokOnly {
+			parasailKey = config.GetOr("PARASAIL_API_KEY", "")
+		}
+		providerMap[providers.ProviderParasail] = openaiCompatProvider.NewClientWithModelIDMap(parasailKey, parasailBaseURL, upstreamIDsForProvider(providers.ProviderParasail))
+		switch {
+		case byokOnly:
+			logger.Info("Parasail provider enabled (BYOK only)", "base_url", parasailBaseURL)
+		case parasailKey != "":
+			envKeyedProviders[providers.ProviderParasail] = struct{}{}
+			logger.Info("Parasail provider enabled", "base_url", parasailBaseURL)
+		default:
+			logger.Info("Parasail provider registered (BYOK only — set PARASAIL_API_KEY for deployment-level use)", "base_url", parasailBaseURL)
+		}
+	}
+
+	{
 		// Bedrock via the OpenAI-compatible "bedrock-mantle" surface
 		// (https://bedrock-mantle.{region}.api.aws/v1). AWS recommends this
 		// over the model-native bedrock-runtime/InvokeModel surface; both

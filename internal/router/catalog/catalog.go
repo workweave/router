@@ -297,7 +297,17 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.090, OutputUSDPer1M: 1.100}},
 	}},
+	// Parasail primary: AA/OpenRouter p50s (2026-06-01) put it ahead of
+	// DeepInfra on V4 Flash end-to-end — ~0.6s TTFT vs ~1.3s and ~34 vs ~23
+	// tok/s — at the same $0.14/$0.28. DeepInfra stays as the first fallback;
+	// a Parasail 5xx/408/429 fails over to it. Parasail publishes no prompt
+	// caching (CacheReadMultiplier defaults to the conservative 0.5).
+	// UpstreamID is Parasail's serverless slug — VERIFY against GET
+	// /v1/models with a live key before deploy; a wrong slug 404s (non-
+	// retryable) instead of failing over.
 	{ID: "deepseek/deepseek-v4-flash", Tier: TierLow, Providers: []ProviderBinding{
+		{Provider: providers.ProviderParasail, UpstreamID: "parasail-deepseek-v4-flash",
+			Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280}},
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "deepseek-ai/DeepSeek-V4-Flash",
 			Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10}},
