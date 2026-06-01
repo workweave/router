@@ -69,7 +69,7 @@ func (s *Service) applyPlanningFloor(req router.Request) router.Request {
 	if floor == catalog.TierUnknown {
 		return req
 	}
-	if !anyAvailableAtOrAboveFloor(s.availableModels, req.ExcludedModels, floor) {
+	if !anyAvailableAtOrAboveFloor(s.availableModels, req.ExcludedModels, req.EnabledProviders, floor) {
 		return req
 	}
 	below := catalog.AllowedAtOrBelow(floor - 1)
@@ -88,17 +88,30 @@ func (s *Service) applyPlanningFloor(req router.Request) router.Request {
 }
 
 // anyAvailableAtOrAboveFloor reports whether at least one available, non-excluded
-// model has a known tier at or above the floor. Unknown-tier (custom) models
-// never count toward the floor.
-func anyAvailableAtOrAboveFloor(available, excluded map[string]struct{}, floor catalog.Tier) bool {
+// model has a known tier at or above the floor AND is reachable by this request.
+// Unknown-tier (custom) models never count toward the floor.
+//
+// enabledProviders is the per-request provider gate: nil means unrestricted
+// (the scorer falls back to the deploy-wide set, which s.availableModels already
+// reflects). When non-nil (BYOK / passthrough), a deploy-wide high-tier model
+// the request can't authenticate to must NOT satisfy the floor — otherwise the
+// floor would exclude every model the request CAN route to and the scorer would
+// 503, breaking applyPlanningFloor's soft-fallback guarantee.
+func anyAvailableAtOrAboveFloor(available, excluded, enabledProviders map[string]struct{}, floor catalog.Tier) bool {
 	for m := range available {
 		if _, ex := excluded[m]; ex {
 			continue
 		}
 		t := catalog.TierFor(m)
-		if t != catalog.TierUnknown && t >= floor {
-			return true
+		if t == catalog.TierUnknown || t < floor {
+			continue
 		}
+		if enabledProviders != nil {
+			if _, ok := catalog.ResolveBinding(m, enabledProviders); !ok {
+				continue
+			}
+		}
+		return true
 	}
 	return false
 }

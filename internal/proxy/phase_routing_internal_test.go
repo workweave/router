@@ -3,6 +3,7 @@ package proxy
 import (
 	"testing"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
 
@@ -71,6 +72,34 @@ func TestApplyPlanningFloor_DoesNotMutateCallerExclusions(t *testing.T) {
 	assert.Len(t, original, 1, "caller's ExcludedModels map must not be mutated")
 	_, kept := out.ExcludedModels["installation-excluded"]
 	assert.True(t, kept, "pre-existing exclusion must carry through")
+}
+
+func TestApplyPlanningFloor_SoftFallbackWhenHighUnreachableByEnabledProviders(t *testing.T) {
+	// BYOK: the deploy has a High-tier model (claude-opus-4-8 on Anthropic) but
+	// this request only carries OpenAI creds, which reach a Mid model. The floor
+	// must be skipped — applying it would exclude the only reachable model and
+	// 503.
+	s := &Service{
+		phaseRouting:    PhaseRoutingConfig{PlanningFloor: catalog.TierHigh},
+		availableModels: map[string]struct{}{"claude-opus-4-8": {}, "gpt-5.4-mini": {}},
+	}
+	req := router.Request{EnabledProviders: map[string]struct{}{providers.ProviderOpenAI: {}}}
+	out := s.applyPlanningFloor(req)
+	assert.Empty(t, out.ExcludedModels, "High model unreachable for this request: floor must be skipped, not 503")
+}
+
+func TestApplyPlanningFloor_AppliesWhenHighReachableByEnabledProviders(t *testing.T) {
+	s := &Service{
+		phaseRouting:    PhaseRoutingConfig{PlanningFloor: catalog.TierHigh},
+		availableModels: map[string]struct{}{"claude-opus-4-8": {}, "gpt-5.4-mini": {}},
+	}
+	req := router.Request{EnabledProviders: map[string]struct{}{providers.ProviderAnthropic: {}}}
+	out := s.applyPlanningFloor(req)
+
+	_, opusExcluded := out.ExcludedModels["claude-opus-4-8"]
+	_, miniExcluded := out.ExcludedModels["gpt-5.4-mini"]
+	assert.False(t, opusExcluded, "reachable High-tier model stays eligible")
+	assert.True(t, miniExcluded, "Mid-tier model excluded once a reachable High model exists")
 }
 
 func TestApplyPlanningFloor_DisabledFloorIsNoop(t *testing.T) {
