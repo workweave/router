@@ -85,4 +85,24 @@ cost_per_1k_input_usd:
   qwen/qwen3-next-80b-a3b-instruct: 0.00045
   xiaomi/mimo-v2.5-pro: 0.00175
   z-ai/glm-5.1: 0.0022637342322749023
-changelog: "v0.57: measured Tier1 (tier1-20260526 Aider Polyglot) speed+verbosity overrides on v0.56 base (glm-5.1 alias). Real eval wall-clock sec/query + completion-token means replace AA timing/verbosity for the 9 evaluated models; deepseek-v4-pro/flash timeout-floor latency 200s/170s (ranked slowest). AA priors from glm-5.1 variant (aa_quality_priors_v0.56.json). Full 8013 prompts. Validated via true 80/20 holdout (v3.03): regret 0.125 vs v0.55 0.139. parent v0.56, PROMOTED."
+# Measured median output throughput (tokens/sec), provider -> model. Sourced
+# from production router_telemetry p50 over 30d (output_tokens>100). Read only
+# by the tier-clamp and hard-pin selectors (FastestModel) to prefer fast over
+# cheap; the scorer carries its own speed_weight and ignores this. Only the
+# nine models with adequate prod volume are annotated; un-annotated models
+# fall through to cost-only selection.
+tok_per_s:
+  google:
+    gemini-3.1-flash-lite-preview: 157.9
+    gemini-3.5-flash: 77.3
+    gemini-3.1-pro-preview: 35.1
+  fireworks:
+    moonshotai/kimi-k2.6: 63.7
+    deepseek/deepseek-v4-pro: 42.4
+  anthropic:
+    claude-haiku-4-5: 60.2
+    claude-opus-4-7: 55.3
+  deepinfra:
+    z-ai/glm-5.1: 26.4
+    deepseek/deepseek-v4-flash: 24.0
+changelog: "v0.57: measured Tier1 (tier1-20260526 Aider Polyglot) speed+verbosity overrides on v0.56 base (glm-5.1 alias). Real eval wall-clock sec/query + completion-token means replace AA timing/verbosity for the 9 evaluated models; deepseek-v4-pro/flash timeout-floor latency 200s/170s (ranked slowest). AA priors from glm-5.1 variant (aa_quality_priors_v0.56.json). Full 8013 prompts. Validated via true 80/20 holdout (v3.03): regret 0.125 vs v0.55 0.139. parent v0.56, PROMOTED. tok_per_s: added measured prod throughput (p50/30d) for clamp+hard-pin FastestModel selection (routing centroids/rankings unchanged)."

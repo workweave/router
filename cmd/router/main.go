@@ -460,9 +460,9 @@ func main() {
 			if bundle, bErr := cluster.LoadBundle(version); bErr == nil {
 				meta, registry := bundle.Metadata, bundle.Registry
 				hardPinResolver = func(enabled map[string]struct{}) (string, string, bool) {
-					return cluster.CheapestModel(meta, registry, enabled)
+					return cluster.FastestModel(meta, registry, enabled)
 				}
-				logger.Info("Hard-pin resolver wired for byokOnly mode (per-request cheapest model from cluster bundle)", "version", version)
+				logger.Info("Hard-pin resolver wired for byokOnly mode (per-request fastest model from cluster bundle)", "version", version)
 			} else {
 				logger.Warn("Hard-pin resolver disabled: cluster bundle failed to load; byokOnly hard-pin will fall back to boot-time defaults", "err", bErr, "version", version)
 			}
@@ -472,11 +472,12 @@ func main() {
 	}
 
 	// Tier-clamp resolver enforces the requested-model ceiling. Loads the
-	// default cluster bundle once and, on each call, returns the cheapest
-	// deployed model whose capability tier is at or below the ceiling and
-	// whose provider is in the request's enabled set. Nil when the bundle
-	// can't load — the proxy then leaves all decisions un-clamped (preserves
-	// pre-tier-ceiling behavior).
+	// default cluster bundle once and, on each call, returns the fastest
+	// (by measured tok/s) deployed model whose capability tier is at or below
+	// the ceiling and whose provider is in the request's enabled set, falling
+	// back to cheapest when the bundle lacks speed annotations. Nil when the
+	// bundle can't load — the proxy then leaves all decisions un-clamped
+	// (preserves pre-tier-ceiling behavior).
 	var tierClampResolver func(map[string]struct{}, map[string]struct{}, catalog.Tier) (string, string, bool)
 	{
 		reqVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
@@ -485,7 +486,7 @@ func main() {
 				meta, registry := bundle.Metadata, bundle.Registry
 				tierClampResolver = func(enabled, excluded map[string]struct{}, ceiling catalog.Tier) (string, string, bool) {
 					allowed := catalog.AllowedAtOrBelow(ceiling)
-					return cluster.CheapestModelInSet(meta, registry, enabled, excluded, allowed)
+					return cluster.FastestModelInSet(meta, registry, enabled, excluded, allowed)
 				}
 				logger.Info("Tier-clamp resolver wired", "version", version)
 			} else {
@@ -1035,8 +1036,9 @@ func resolveDefaultBaselineModel() string {
 }
 
 // resolveHardPinModel returns the (provider, model) to use for compaction and
-// Explore hard-pins. Operator override wins; otherwise the cheapest model in
-// the default artifact bundle among available providers is selected.
+// Explore hard-pins. Operator override wins; otherwise the fastest model (by
+// measured tok/s) in the default artifact bundle among available providers is
+// selected, falling back to cheapest when the bundle lacks speed annotations.
 // Falls back to (defaultHardPinProvider, defaultHardPinModel) when no bundle is loadable.
 func resolveHardPinModel(available map[string]struct{}, logger *slog.Logger) (provider, model string) {
 	if m := config.GetOr("ROUTER_HARD_PIN_MODEL", ""); m != "" {
@@ -1055,9 +1057,9 @@ func resolveHardPinModel(available map[string]struct{}, logger *slog.Logger) (pr
 		logger.Warn("Hard-pin model: could not load bundle; using default", "err", err, "default_model", defaultHardPinModel)
 		return defaultHardPinProvider, defaultHardPinModel
 	}
-	p, m, ok := cluster.CheapestModel(bundle.Metadata, bundle.Registry, available)
+	p, m, ok := cluster.FastestModel(bundle.Metadata, bundle.Registry, available)
 	if !ok {
-		logger.Warn("Hard-pin model: no cost-annotated model found for available providers; using default", "default_model", defaultHardPinModel)
+		logger.Warn("Hard-pin model: no model found for available providers; using default", "default_model", defaultHardPinModel)
 		return defaultHardPinProvider, defaultHardPinModel
 	}
 	return p, m

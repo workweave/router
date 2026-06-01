@@ -117,7 +117,15 @@ type ArtifactMetadata struct {
 	DeployedProviders []string           `yaml:"deployed_providers,omitempty"`
 	DeployedModels    []string           `yaml:"deployed_models,omitempty"`
 	CostPer1KInputUSD map[string]float64 `yaml:"cost_per_1k_input_usd,omitempty"`
-	Changelog         string             `yaml:"changelog,omitempty"`
+	// TokPerS holds measured median output throughput (tokens/sec) keyed by
+	// provider then model — e.g. TokPerS["google"]["gemini-3.1-flash-lite-preview"].
+	// Provider-keyed because the same model's throughput varies sharply by
+	// provider. Consumed by FastestModel to break the tier-clamp / hard-pin
+	// out of cost-only selection; absent or partial annotation degrades to
+	// cost-only via CheapestModel. Informational to the scorer (which carries
+	// its own speed_weight); only the clamp/hard-pin selectors read it.
+	TokPerS   map[string]map[string]float64 `yaml:"tok_per_s,omitempty"`
+	Changelog string                        `yaml:"changelog,omitempty"`
 	// CacheConfig carries per-version semantic-cache knobs.
 	CacheConfig *ArtifactCacheConfig `yaml:"cache_config,omitempty"`
 }
@@ -565,6 +573,62 @@ func cheapestModelFiltered(meta *ArtifactMetadata, registry *ModelRegistry, avai
 			model = e.Model
 			ok = true
 		}
+	}
+	return
+}
+
+// FastestModel returns the highest measured-throughput (tok/s) entry among
+// registry entries whose provider is in available. Throughput is read from
+// meta.TokPerS keyed by the resolved provider, so the same model on a slow
+// provider can lose to a different model on a fast one. Falls back to
+// CheapestModel when the bundle carries no usable speed annotation — it
+// never returns a worse decision than the cost-only selector.
+func FastestModel(meta *ArtifactMetadata, registry *ModelRegistry, available map[string]struct{}) (provider, model string, ok bool) {
+	return fastestModelFiltered(meta, registry, available, nil, nil)
+}
+
+// FastestModelInSet is FastestModel restricted to an allowlist and denylist.
+// Used by the tier-clamp resolver, where allowSet is the at-or-below-ceiling
+// model set.
+func FastestModelInSet(meta *ArtifactMetadata, registry *ModelRegistry, available, denySet, allowSet map[string]struct{}) (provider, model string, ok bool) {
+	return fastestModelFiltered(meta, registry, available, denySet, allowSet)
+}
+
+func fastestModelFiltered(meta *ArtifactMetadata, registry *ModelRegistry, available, denySet, allowSet map[string]struct{}) (provider, model string, ok bool) {
+	var bestSpeed float64 = -1
+	for _, e := range registry.DeployedModels {
+		resolved := resolveProviderFor(e.Model, e.Provider, available)
+		if resolved == "" {
+			continue
+		}
+		if allowSet != nil {
+			if _, allowed := allowSet[e.Model]; !allowed {
+				continue
+			}
+		}
+		if _, denied := denySet[e.Model]; denied {
+			continue
+		}
+		byModel, hasProvider := meta.TokPerS[resolved]
+		if !hasProvider {
+			continue
+		}
+		speed, hasSpeed := byModel[e.Model]
+		if !hasSpeed {
+			continue
+		}
+		if speed > bestSpeed {
+			bestSpeed = speed
+			provider = resolved
+			model = e.Model
+			ok = true
+		}
+	}
+	if !ok {
+		// No speed-annotated candidate resolved (un-annotated bundle, or
+		// every in-ceiling model lacks a tok/s entry). Preserve the
+		// established cost-only behavior rather than failing the clamp.
+		return cheapestModelFiltered(meta, registry, available, denySet, allowSet)
 	}
 	return
 }
