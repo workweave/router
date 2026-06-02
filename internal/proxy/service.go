@@ -946,6 +946,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// log. Populated by the translator-backed paths; stays zero for the
 	// Anthropic-native passthrough path, which has no translator.
 	var respSummary translate.ResponseSummary
+	// reqStats captures the translation-time mutations applied to the
+	// winning attempt's upstream request body. Overwritten on each attempt;
+	// on dispatch success it reflects the binding that actually ran. Zero
+	// for Anthropic-native passthrough — that path skips the translator.
+	var reqStats providers.RequestMutationStats
 
 	var attempt dispatchAttempt
 	switch decision.Provider {
@@ -983,6 +988,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				log.Error("Failed to translate Anthropic request to OpenAI format", "err", emitErr, "decision_provider", d.Provider)
 				return fmt.Errorf("translate anthropic request: %w", emitErr)
 			}
+			reqStats = prep.Stats
 			logUpstreamBody(log, routeRes.SessionKey, d, feats, prep.Body)
 			var usage otel.UsageSink
 			if s.usageRequired() {
@@ -1017,6 +1023,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	case providers.ProviderGoogle:
 		crossFormat = true
 		prep, emitErr := env.PrepareGemini(r.Header, opts)
+		reqStats = prep.Stats
 		if emitErr != nil {
 			log.Error("Failed to translate Anthropic request to Gemini format", "err", emitErr)
 			return fmt.Errorf("translate anthropic request to gemini: %w", emitErr)
@@ -1184,7 +1191,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
 	return proxyErr
 }
 

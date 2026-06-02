@@ -68,22 +68,20 @@ func isClaudeCodeOnlyTool(name string) bool {
 // blocks from past turns) is not rewritten because those represent history
 // the model has already acted on — rewriting it would invalidate prompt
 // caches and could leave dangling tool_use_id references.
-func filterClaudeCodeOnlyToolsFromAnthropicBody(body []byte) ([]byte, error) {
+func filterClaudeCodeOnlyToolsFromAnthropicBody(body []byte) (out []byte, removed int, err error) {
 	tools := gjson.GetBytes(body, "tools")
 	if !tools.Exists() || !tools.IsArray() {
-		return body, nil
+		return body, 0, nil
 	}
 
-	anyMatch := false
 	tools.ForEach(func(_, t gjson.Result) bool {
 		if isClaudeCodeOnlyTool(t.Get("name").String()) {
-			anyMatch = true
-			return false
+			removed++
 		}
 		return true
 	})
-	if !anyMatch {
-		return body, nil
+	if removed == 0 {
+		return body, 0, nil
 	}
 
 	jw := newJSONWriter()
@@ -95,5 +93,6 @@ func filterClaudeCodeOnlyToolsFromAnthropicBody(body []byte) ([]byte, error) {
 		return true
 	})
 	jw.EndArr()
-	return sjson.SetRawBytes(body, "tools", jw.Bytes())
+	out, err = sjson.SetRawBytes(body, "tools", jw.Bytes())
+	return out, removed, err
 }

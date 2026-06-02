@@ -156,6 +156,28 @@ func IsRetryable(err error) bool {
 type PreparedRequest struct {
 	Body    []byte
 	Headers http.Header
+	// Stats records translation-time mutations applied to the body, for
+	// observability. Zero-value when no mutation fired; populated by the
+	// translate package as a side effect of Prepare*. The proxy reads these
+	// after dispatch and folds them into the ProxyMessages-complete log so
+	// per-PR mitigation impact can be measured in production traffic.
+	Stats RequestMutationStats
+}
+
+// RequestMutationStats reports translation-time mitigations the router
+// applied to the upstream request body. Surfaced in the ProxyMessages-
+// complete log with keys:
+//   - cc_only_tools_stripped
+//   - gemini_reminder_injected
+type RequestMutationStats struct {
+	// CCOnlyToolsStripped is the count of Claude-Code-only tools removed
+	// from the request before dispatching to a non-Anthropic upstream. See
+	// translate/claudecode_tool_filter.go (router PR #277).
+	CCOnlyToolsStripped int
+	// GeminiReminderInjected is true when the Gemini 3.x tool-use reminder
+	// (geminiToolUseReminder) was appended to systemInstruction for this
+	// request. See translate/system_reminder.go (router PR #276).
+	GeminiReminderInjected bool
 }
 
 type Client interface {

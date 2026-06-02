@@ -21,12 +21,13 @@ func hasNonEmptyTools(body []byte) bool {
 // PrepareOpenAI builds an OpenAI Chat Completions request body.
 func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
 	var body []byte
+	var stats providers.RequestMutationStats
 	var err error
 	switch e.format {
 	case FormatOpenAI:
 		body, err = e.buildOpenAIFromOpenAI(opts)
 	case FormatAnthropic:
-		body, err = e.buildOpenAIFromAnthropic(opts)
+		body, stats, err = e.buildOpenAIFromAnthropic(opts)
 	default:
 		return providers.PreparedRequest{}, fmt.Errorf("unsupported source format for OpenAI emit: %d", e.format)
 	}
@@ -38,7 +39,7 @@ func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (provi
 	if err != nil {
 		return providers.PreparedRequest{}, err
 	}
-	return providers.PreparedRequest{Body: body, Headers: headers}, nil
+	return providers.PreparedRequest{Body: body, Headers: headers, Stats: stats}, nil
 }
 
 // applySessionAffinity attaches an upstream-specific prompt-cache routing hint
@@ -133,14 +134,16 @@ func targetIsOpenRouter(opts EmitOptions) bool {
 	return true
 }
 
-func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, error) {
-	body, err := filterClaudeCodeOnlyToolsFromAnthropicBody(e.body)
+func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, providers.RequestMutationStats, error) {
+	var stats providers.RequestMutationStats
+	body, removed, err := filterClaudeCodeOnlyToolsFromAnthropicBody(e.body)
 	if err != nil {
-		return nil, fmt.Errorf("strip claude-code-only tools: %w", err)
+		return nil, stats, fmt.Errorf("strip claude-code-only tools: %w", err)
 	}
+	stats.CCOnlyToolsStripped = removed
 	body, _, err = applyExploreLoopReminderToAnthropicBody(body)
 	if err != nil {
-		return nil, fmt.Errorf("inject explore-loop reminder: %w", err)
+		return nil, stats, fmt.Errorf("inject explore-loop reminder: %w", err)
 	}
 	jw := newJSONWriter()
 	jw.Obj()
@@ -219,9 +222,13 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	jw.EndObj()
 	body, err = applyQwen3SamplersIfNeeded(jw.Bytes(), opts.TargetModel)
 	if err != nil {
-		return nil, err
+		return nil, stats, err
 	}
-	return applyGLM51FlagsIfNeeded(body, opts)
+	body, err = applyGLM51FlagsIfNeeded(body, opts)
+	if err != nil {
+		return nil, stats, err
+	}
+	return body, stats, nil
 }
 
 // applyGLM51FlagsIfNeeded sets the request-body knobs GLM-5.1 needs to behave
