@@ -44,6 +44,12 @@ type EmitOptions struct {
 	TargetProvider     string
 	Capabilities       router.ModelSpec
 	IncludeStreamUsage bool
+	// SessionAffinity is a stable per-conversation identifier forwarded to
+	// the upstream as a prompt-cache stickiness hint so a session's turns
+	// land on the same serverless replica (where the prefix KV-cache lives)
+	// rather than being load-balanced to a cold one. The knob differs per
+	// upstream — see applySessionAffinity. Empty disables the hint.
+	SessionAffinity string
 }
 
 // RequestEnvelope wraps a parsed request body regardless of wire format.
