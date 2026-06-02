@@ -304,6 +304,11 @@ type EmitOverrides struct {
 	DefaultMaxTokensValue   int64
 	InjectStreamUsage       bool
 	StripThinkingBlocks     bool
+	// RewriteThinkingAdaptive replaces the inbound thinking block with
+	// {"type":"adaptive"} and sets output_config.effort. Used when the target
+	// model only accepts adaptive thinking (claude-opus-4-6+ / sonnet-4-6+).
+	RewriteThinkingAdaptive bool
+	OutputConfigEffort      string
 }
 
 func (e *RequestEnvelope) emitSameFormat(ov EmitOverrides) ([]byte, error) {
@@ -355,6 +360,21 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 			out, err = sjson.SetBytes(out, "stream_options.include_usage", true)
 			if err != nil {
 				return nil, fmt.Errorf("set stream_options.include_usage: %w", err)
+			}
+		}
+	}
+
+	if ov.RewriteThinkingAdaptive {
+		out, err = sjson.SetBytes(out, "thinking", map[string]string{"type": "adaptive"})
+		if err != nil {
+			return nil, fmt.Errorf("rewrite thinking to adaptive: %w", err)
+		}
+		if ov.OutputConfigEffort != "" {
+			if !gjson.GetBytes(out, "output_config.effort").Exists() {
+				out, err = sjson.SetBytes(out, "output_config.effort", ov.OutputConfigEffort)
+				if err != nil {
+					return nil, fmt.Errorf("set output_config.effort: %w", err)
+				}
 			}
 		}
 	}
@@ -630,6 +650,24 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	return ov
 }
 
+// effortForBudget maps the legacy thinking.budget_tokens value onto the
+// adaptive output_config.effort tier. The thresholds match Anthropic's
+// published guidance: ≤4k tokens is "low" headroom, ≤16k is "medium", and
+// anything larger is "high". Zero or missing budget defaults to "medium" so
+// pre-rollout clients keep working.
+func effortForBudget(budgetTokens int64) string {
+	switch {
+	case budgetTokens <= 0:
+		return "medium"
+	case budgetTokens <= 4096:
+		return "low"
+	case budgetTokens <= 16384:
+		return "medium"
+	default:
+		return "high"
+	}
+}
+
 func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	ov := EmitOverrides{
 		Model: opts.TargetModel,
@@ -643,7 +681,14 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		case "adaptive":
 			shouldDelete = !opts.Capabilities.Supports(router.CapAdaptiveThinking)
 		case "enabled":
-			shouldDelete = !opts.Capabilities.Supports(router.CapExtendedThinking)
+			if opts.Capabilities.Supports(router.CapExtendedThinking) {
+				// Target accepts the legacy shape; leave it untouched.
+			} else if opts.Capabilities.Supports(router.CapAdaptiveThinking) {
+				ov.RewriteThinkingAdaptive = true
+				ov.OutputConfigEffort = effortForBudget(thinkingResult.Get("budget_tokens").Int())
+			} else {
+				shouldDelete = true
+			}
 		default:
 			shouldDelete = !opts.Capabilities.Supports(router.CapAdaptiveThinking) && !opts.Capabilities.Supports(router.CapExtendedThinking)
 		}

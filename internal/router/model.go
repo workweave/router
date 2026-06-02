@@ -49,7 +49,10 @@ func Lookup(model string) ModelSpec {
 }
 
 var (
-	anthropicFull     = NewSpec(CapAdaptiveThinking, CapExtendedThinking)
+	// claude-opus-4-6+ and claude-sonnet-4-6+ only accept thinking.type=adaptive;
+	// the legacy thinking.type=enabled shape returns 400 from Anthropic since the
+	// rollout of output_config.effort.
+	anthropicAdaptive = NewSpec(CapAdaptiveThinking)
 	anthropicExtended = NewSpec(CapExtendedThinking)
 )
 
@@ -65,10 +68,10 @@ var googleBase = NewSpec()
 var openAICompatBase = NewSpec()
 
 var registry = map[string]ModelSpec{
-	"claude-opus-4-8":   anthropicFull,
-	"claude-opus-4-7":   anthropicFull,
-	"claude-sonnet-4-6": anthropicFull,
-	"claude-opus-4-6":   anthropicFull,
+	"claude-opus-4-8":   anthropicAdaptive,
+	"claude-opus-4-7":   anthropicAdaptive,
+	"claude-sonnet-4-6": anthropicAdaptive,
+	"claude-opus-4-6":   anthropicAdaptive,
 
 	// claude-haiku-4-5 returns 400 "adaptive thinking is not supported on
 	// this model" when a Claude Code body with thinking.type=adaptive is

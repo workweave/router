@@ -2,6 +2,7 @@ package translate_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -243,7 +244,7 @@ func TestAnthropicSameFormat_RedactedThinkingBlocksFiltered(t *testing.T) {
 }
 
 func TestAnthropicSameFormat_ThinkingBlocksKeptForCapableModel(t *testing.T) {
-	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"thought"},{"type":"text","text":"reply"}]}],"max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":5000}}`)
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"thought"},{"type":"text","text":"reply"}]}],"max_tokens":1024,"thinking":{"type":"adaptive"}}`)
 	opts := translate.EmitOptions{
 		TargetModel:  "claude-opus-4-7",
 		Capabilities: router.Lookup("claude-opus-4-7"),
@@ -254,6 +255,63 @@ func TestAnthropicSameFormat_ThinkingBlocksKeptForCapableModel(t *testing.T) {
 	assistantMsg, _ := msgs[1].(map[string]any)
 	content, _ := assistantMsg["content"].([]any)
 	require.Len(t, content, 2, "thinking blocks should be preserved for capable models")
+}
+
+// Pi and other legacy Anthropic clients still send the pre-rollout
+// thinking.type=enabled shape. claude-opus-4-6+ rejects that with HTTP 400, so
+// the router must upconvert to thinking.type=adaptive and inject
+// output_config.effort derived from budget_tokens. Production session
+// 019e89de-f555-755b-a98b-d00cbef7a299 hit this on 2026-06-02.
+func TestAnthropicSameFormat_EnabledThinkingUpconvertedToAdaptive(t *testing.T) {
+	tests := []struct {
+		name         string
+		budgetTokens int
+		wantEffort   string
+	}{
+		{"low budget", 2048, "low"},
+		{"medium budget (pi default)", 8192, "medium"},
+		{"high budget", 32000, "high"},
+		{"missing budget defaults to medium", 0, "medium"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			thinkingField := `"thinking":{"type":"enabled"}`
+			if tc.budgetTokens > 0 {
+				thinkingField = fmt.Sprintf(`"thinking":{"type":"enabled","budget_tokens":%d}`, tc.budgetTokens)
+			}
+			body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,` + thinkingField + `}`)
+			opts := translate.EmitOptions{
+				TargetModel:  "claude-opus-4-7",
+				Capabilities: router.Lookup("claude-opus-4-7"),
+			}
+			out := parseAndEmit(t, body, "anthropic", opts)
+
+			thinking, _ := out["thinking"].(map[string]any)
+			require.NotNil(t, thinking, "thinking should remain on the body")
+			assert.Equal(t, "adaptive", thinking["type"], "legacy enabled must be upconverted to adaptive")
+			_, hasBudget := thinking["budget_tokens"]
+			assert.False(t, hasBudget, "budget_tokens has no meaning under adaptive thinking and must be dropped")
+
+			outputConfig, _ := out["output_config"].(map[string]any)
+			require.NotNil(t, outputConfig, "output_config.effort is required when adaptive thinking is set")
+			assert.Equal(t, tc.wantEffort, outputConfig["effort"])
+		})
+	}
+}
+
+// Inbound clients that already specify output_config.effort should win over
+// the budget-derived default — the router only fills in a default when the
+// caller said nothing.
+func TestAnthropicSameFormat_EnabledThinkingPreservesExplicitEffort(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":8192},"output_config":{"effort":"high"}}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-7",
+		Capabilities: router.Lookup("claude-opus-4-7"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	outputConfig, _ := out["output_config"].(map[string]any)
+	require.NotNil(t, outputConfig)
+	assert.Equal(t, "high", outputConfig["effort"], "caller-supplied effort must not be overwritten")
 }
 
 func TestPassthroughSameFormat_FieldsScrubbed(t *testing.T) {
