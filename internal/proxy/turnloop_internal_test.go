@@ -11,13 +11,18 @@ import (
 
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/sessionpin"
+	"workweave/router/internal/translate"
 )
 
 // stubPinStore is a minimal sessionpin.Store for testing recordTurnUsage.
+// getPin/getFound configure the Get response; both default to a miss so
+// existing tests that rely on "no Postgres row" keep working unchanged.
 type stubPinStore struct {
 	mu          sync.Mutex
 	lastUsage   sessionpin.Usage
 	usageCalled chan struct{}
+	getPin      sessionpin.Pin
+	getFound    bool
 }
 
 func newStubPinStore() *stubPinStore {
@@ -25,7 +30,9 @@ func newStubPinStore() *stubPinStore {
 }
 
 func (s *stubPinStore) Get(context.Context, [sessionpin.SessionKeyLen]byte, string) (sessionpin.Pin, bool, error) {
-	return sessionpin.Pin{}, false, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getPin, s.getFound, nil
 }
 
 func (s *stubPinStore) Upsert(context.Context, sessionpin.Pin) error { return nil }
@@ -185,4 +192,61 @@ func TestLoadPin_ServesFreshLRUEntry(t *testing.T) {
 	require.True(t, found, "non-expired LRU entry should be returned without hitting Postgres")
 	assert.Equal(t, fresh.Model, pin.Model)
 	assert.Equal(t, fresh.Provider, pin.Provider)
+}
+
+// TestLoadPin_ForcedPinBypassesStaleLRU guards the cross-replica coherence
+// fix for user-forced pins. /force-model on one Cloud Run replica rewrites the
+// Postgres row but cannot evict another replica's LRU entry, and that entry's
+// TTL keeps resetting every turn — so a corrected re-force is shadowed by the
+// stale local copy indefinitely. loadPin must ignore a cached user_forced pin
+// and re-read Postgres so the latest directive wins.
+func TestLoadPin_ForcedPinBypassesStaleLRU(t *testing.T) {
+	store := newStubPinStore()
+	svc := NewService(
+		nil,
+		nil,
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	require.NotNil(t, svc.pinCache)
+
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	for i := range sessionKey {
+		sessionKey[i] = byte(i + 1)
+	}
+	cacheKey := sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
+
+	// Stale forced pin cached locally (the truncated "gpt-" from the first,
+	// botched /force-model), still well within its TTL.
+	stale := sessionpin.Pin{
+		SessionKey:  sessionKey,
+		Role:        sessionpin.DefaultRole,
+		Provider:    "openai",
+		Model:       "gpt-",
+		Reason:      translate.ReasonUserForceModel,
+		TurnCount:   1,
+		PinnedUntil: time.Now().Add(time.Hour),
+	}
+	svc.pinCache.Add(cacheKey, stale)
+
+	// Postgres holds the corrected re-force written by another replica.
+	store.getPin = sessionpin.Pin{
+		SessionKey:  sessionKey,
+		Role:        sessionpin.DefaultRole,
+		Provider:    "openai",
+		Model:       "gpt-5.5",
+		Reason:      translate.ReasonUserForceModel,
+		TurnCount:   1,
+		PinnedUntil: time.Now().Add(time.Hour),
+	}
+	store.getFound = true
+
+	pin, found := svc.loadPin(context.Background(), cacheKey, sessionKey, sessionpin.DefaultRole)
+	require.True(t, found, "forced pin must resolve from Postgres")
+	assert.Equal(t, "gpt-5.5", pin.Model, "forced pin must re-read Postgres, not serve the stale LRU copy")
 }

@@ -20,7 +20,8 @@ import (
 
 // resolveForceModel maps a user-typed model identifier to its canonical
 // catalog ID and primary provider binding. The catalog is the source of
-// truth — heuristics are only a fallback for models not yet listed there.
+// truth — heuristics are only a best-effort provider guess for inputs that
+// are not in it.
 //
 // Resolution order:
 //  1. Exact match against `catalog.ByID` (the input is already canonical).
@@ -29,15 +30,18 @@ import (
 //     and have the pin route to `qwen/qwen3-235b-a22b-2507` on its real
 //     binding (bedrock, in this case) instead of misclassifying it as
 //     Anthropic.
-//  3. Naming heuristic for slash-prefixed IDs not in the catalog (e.g. a
-//     user pinning a bare OpenRouter model we haven't curated yet).
-//  4. Final fallback for well-known proprietary prefixes.
+//  3. Naming heuristic for IDs not in the catalog (provider guess only).
 //
-// Returns the canonical ID (possibly different from input) and the
-// provider name to attach to the session pin.
-func resolveForceModel(model string) (canonicalID, provider string) {
+// The returned `known` flag is true only for catalog matches (1 and 2). A
+// false `known` means the input has no catalog entry and therefore no known
+// tier: the requested-model tier ceiling would rewrite a pin to it on every
+// turn (clampToCeiling treats unknown tiers as above-ceiling), so the user
+// would never actually be served the model. Callers must reject the command
+// rather than pin an unservable directive. The heuristic provider is still
+// returned for logging.
+func resolveForceModel(model string) (canonicalID, provider string, known bool) {
 	if m, ok := catalog.ByID(model); ok && len(m.Providers) > 0 {
-		return m.ID, m.Providers[0].Provider
+		return m.ID, m.Providers[0].Provider, true
 	}
 	if !strings.Contains(model, "/") {
 		suffix := "/" + model
@@ -50,22 +54,22 @@ func resolveForceModel(model string) (canonicalID, provider string) {
 			}
 		}
 		if matches == 1 && len(matched.Providers) > 0 {
-			return matched.ID, matched.Providers[0].Provider
+			return matched.ID, matched.Providers[0].Provider, true
 		}
 	}
 	switch {
 	case strings.HasPrefix(model, "claude-"):
-		return model, providers.ProviderAnthropic
+		return model, providers.ProviderAnthropic, false
 	case strings.HasPrefix(model, "gpt-"),
 		model == "o1", model == "o3", model == "o1-pro", model == "o3-pro",
 		strings.HasPrefix(model, "o1-"), strings.HasPrefix(model, "o3-"), strings.HasPrefix(model, "o4-"):
-		return model, providers.ProviderOpenAI
+		return model, providers.ProviderOpenAI, false
 	case strings.HasPrefix(model, "gemini-"):
-		return model, providers.ProviderGoogle
+		return model, providers.ProviderGoogle, false
 	case strings.Contains(model, "/"):
-		return model, providers.ProviderOpenRouter
+		return model, providers.ProviderOpenRouter, false
 	default:
-		return model, providers.ProviderAnthropic
+		return model, providers.ProviderAnthropic, false
 	}
 }
 
@@ -133,8 +137,24 @@ func (s *Service) handleForceModelCommand(
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
 			"role", role,
 		)
+	} else if canonicalModel, provider, known := resolveForceModel(cmd.Model); !known {
+		// The model isn't in the catalog, so it has no known tier. A pin to an
+		// unknown-tier model is rewritten by the requested-model tier ceiling on
+		// every turn (clampToCeiling treats unknown tiers as above-ceiling), so
+		// the user would silently be served a tier-default model instead of the
+		// one they asked for — e.g. a truncated "/force-model gpt-" routing to an
+		// OSS fallback. Reject the directive rather than pin something we can't
+		// honor; the previous pin (if any) is left untouched.
+		log.Info("/force-model: rejected unknown model",
+			"input_model", cmd.Model,
+			"session_key_hex", fmt.Sprintf("%x", sessionKey),
+			"role", role,
+		)
+		msg = fmt.Sprintf("✦ **Weave Router** → force-model: %q isn't a recognized model · keeping automatic routing. Use a full model id, e.g. claude-opus-4-8, gpt-5.5, or gemini-3-pro-preview.\n\n", cmd.Model)
+		if env.SourceFormat() == translate.FormatOpenAI {
+			msg = fmt.Sprintf("Weave Router: force-model: %q isn't a recognized model; keeping automatic routing. Use a full model id, e.g. claude-opus-4-8, gpt-5.5, or gemini-3-pro-preview.", cmd.Model)
+		}
 	} else {
-		canonicalModel, provider := resolveForceModel(cmd.Model)
 		forced := sessionpin.Pin{
 			SessionKey:     sessionKey,
 			Role:           role,
