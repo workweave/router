@@ -138,6 +138,10 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	if err != nil {
 		return nil, fmt.Errorf("strip claude-code-only tools: %w", err)
 	}
+	body, _, err = applyExploreLoopReminderToAnthropicBody(body)
+	if err != nil {
+		return nil, fmt.Errorf("inject explore-loop reminder: %w", err)
+	}
 	jw := newJSONWriter()
 	jw.Obj()
 	jw.Key("model")

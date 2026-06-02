@@ -54,6 +54,10 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 		if err != nil {
 			return providers.PreparedRequest{}, fmt.Errorf("strip claude-code-only tools: %w", err)
 		}
+		filtered, _, err = applyExploreLoopReminderToAnthropicBody(filtered)
+		if err != nil {
+			return providers.PreparedRequest{}, fmt.Errorf("inject explore-loop reminder: %w", err)
+		}
 		writeGeminiFromAnthropic(jw, filtered, opts)
 	default:
 		return providers.PreparedRequest{}, fmt.Errorf("unsupported source format for Gemini emit: %d", e.format)

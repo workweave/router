@@ -527,6 +527,15 @@ func writeAnthropicSharedParams(jw *jsonWriter, body []byte) {
 }
 
 func (e *RequestEnvelope) buildAnthropicFromAnthropic(opts EmitOptions) ([]byte, error) {
+	// Apply the explore-loop reminder to the inbound Anthropic body before
+	// passing it through. emitSameFormat re-serialises e.body so we mutate
+	// e.body directly. The reminder no-ops on requests below the
+	// exploreLoopMinReads threshold or where Edit/Write has already fired.
+	mutated, _, err := applyExploreLoopReminderToAnthropicBody(e.body)
+	if err != nil {
+		return nil, fmt.Errorf("inject explore-loop reminder: %w", err)
+	}
+	e.body = mutated
 	ov := resolveAnthropicOverrides(e.body, opts)
 	return e.emitSameFormat(ov)
 }
