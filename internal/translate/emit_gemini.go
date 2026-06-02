@@ -56,10 +56,6 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 			return providers.PreparedRequest{}, fmt.Errorf("strip claude-code-only tools: %w", err)
 		}
 		stats.CCOnlyToolsStripped = removed
-		filtered, _, err = applyExploreLoopReminderToAnthropicBody(filtered)
-		if err != nil {
-			return providers.PreparedRequest{}, fmt.Errorf("inject explore-loop reminder: %w", err)
-		}
 		// Mirror writeGeminiFromAnthropic's reminder gate so Stats reflects
 		// whether the system-prompt reminder reached upstream. Computing it
 		// here costs only the model-prefix check + a tools array length
