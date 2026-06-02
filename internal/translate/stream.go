@@ -798,9 +798,19 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 			}
 		}
 		if args := tc.Get("function.arguments").Str; args != "" {
-			if emitErr = t.emitContentBlockDeltaJSON(blockIdx, args); emitErr != nil {
-				return false
-			}
+			// Buffer-only: do NOT forward input_json_delta yet. The translator
+			// emits exactly one input_json_delta per tool block at
+			// content_block_stop time, after validation. This converts the
+			// "OpenAI-compat upstream streams malformed args → Claude Code
+			// parser dies on content_block_stop" failure mode into a clean
+			// recoverable turn: invalid args are replaced with `{}` and CC
+			// runs the tool (which then errors on missing required params),
+			// instead of CC's strict parser rejecting the entire turn.
+			//
+			// Latency cost: tool-use TTFB rises from "as upstream emits each
+			// args fragment" to "one delta at block close." Tool args are
+			// typically <1KB even for Write/Edit, so the perceptible cost is
+			// well under the per-tool dispatch budget.
 			buf, ok := t.toolArgsBuffer[blockIdx]
 			if !ok {
 				buf = &strings.Builder{}
@@ -814,11 +824,10 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 }
 
 // validateBufferedToolArgs checks the accumulated input_json_delta payload for
-// a tool_use block at content_block_stop time. Logs a structured warn and
-// latches t.toolArgsInvalid when the payload fails to parse as JSON, so the
-// proxy can count malformed-tool turns from logs without re-deriving them.
-// Args are not modified — active drop is a follow-up gated on observed
-// frequency from this signal.
+// a tool_use block at content_block_stop time. Latches t.toolArgsInvalid + logs
+// at error level when the payload fails to parse as JSON, so the proxy can
+// count malformed-tool turns from logs and emitValidatedToolArgsDelta can
+// substitute `{}` rather than forward the bad bytes to a strict client parser.
 func (t *AnthropicSSETranslator) validateBufferedToolArgs(blockIdx int) {
 	buf, ok := t.toolArgsBuffer[blockIdx]
 	if !ok {
@@ -834,13 +843,33 @@ func (t *AnthropicSSETranslator) validateBufferedToolArgs(blockIdx int) {
 	if len(preview) > previewMax {
 		preview = preview[:previewMax]
 	}
-	observability.Get().Warn(
-		"AnthropicSSE tool_use args failed JSON validation",
+	observability.Get().Error(
+		"AnthropicSSE tool_use args failed JSON validation — substituting empty args",
 		"block_index", blockIdx,
 		"upstream_model", t.modelFromUpstream,
 		"args_len", len(args),
 		"args_preview", preview,
 	)
+}
+
+// emitValidatedToolArgsDelta emits exactly one input_json_delta event for the
+// given tool block, carrying the validated buffered arguments — or `{}` if
+// validation flagged them invalid. Called once per tool block at
+// content_block_stop time. A no-op for blocks with no buffered args (tools
+// that take no input). The substitute `{}` converts a stream-parser-fatal
+// turn into a tool-call that the client can dispatch (the tool then errors
+// on missing required params, which the client retries via a user message
+// — re-routing through the scorer to a different model).
+func (t *AnthropicSSETranslator) emitValidatedToolArgsDelta(blockIdx int) error {
+	buf, ok := t.toolArgsBuffer[blockIdx]
+	if !ok || buf.Len() == 0 {
+		return nil
+	}
+	payload := buf.String()
+	if _, invalid := t.toolArgsInvalid[blockIdx]; invalid {
+		payload = "{}"
+	}
+	return t.emitContentBlockDeltaJSON(blockIdx, payload)
 }
 
 // emitRoutingMarkerIfConfigured emits the routing marker as a standalone text
@@ -888,6 +917,9 @@ func (t *AnthropicSSETranslator) finishStream() error {
 	}
 	for _, blockIdx := range t.toolBlocks {
 		t.validateBufferedToolArgs(blockIdx)
+		if err := t.emitValidatedToolArgsDelta(blockIdx); err != nil {
+			return err
+		}
 		if err := t.emitContentBlockStop(blockIdx); err != nil {
 			return err
 		}
