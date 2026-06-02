@@ -212,10 +212,21 @@ func (s *Service) runTurnLoop(
 		providerEligible := req.EnabledProviders == nil || providerEnabled
 		if !excluded && providerEligible {
 			decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
-			decision.Reason = translate.ReasonUserForceModel
+			if res.TierClamped {
+				// The forced model exceeds this turn's tier ceiling and was
+				// downgraded. Keep clampToCeiling's "user_forced+tier_clamp"
+				// reason rather than overwriting it back to plain "user_forced":
+				// otherwise the decision log and routing badge misreport the turn
+				// as served on the user's forced model when it was not. The pin
+				// itself is still refreshed with the original forced decision
+				// below, so the directive survives the transient clamp.
+				res.PinTier = "user_forced+tier_clamp"
+			} else {
+				decision.Reason = translate.ReasonUserForceModel
+				res.PinTier = "user_forced"
+			}
 			res.Decision = decision
 			res.StickyHit = true
-			res.PinTier = "user_forced"
 			s.refreshPin(ctx, installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, pinDecision(pin))
 			return res, nil
 		}
@@ -448,10 +459,18 @@ func (s *Service) loadPin(ctx context.Context, pinCacheKey string, sessionKey [s
 			// turn (resetting the 30s eviction clock), so without this guard
 			// an expired entry whose refreshPin write was dropped could keep
 			// being served past its PinnedUntil.
-			if pin.PinnedUntil.After(time.Now()) {
+			if !pin.PinnedUntil.After(time.Now()) {
+				s.pinCache.Remove(pinCacheKey)
+			} else if pin.Reason != translate.ReasonUserForceModel {
 				return pin, true
 			}
-			s.pinCache.Remove(pinCacheKey)
+			// User-forced pins fall through to Postgres on every turn instead of
+			// trusting the LRU. /force-model on one Cloud Run replica rewrites the
+			// Postgres row but cannot evict another replica's cached pin, and that
+			// entry's TTL keeps resetting every turn (recordTurnUsage re-Adds it),
+			// so a corrected re-force is otherwise shadowed by the stale local copy
+			// indefinitely. Forced pins are rare and explicit; the extra per-turn
+			// read keeps replicas converged on the user's latest directive.
 		}
 	}
 	pin, found, err := s.pinStore.Get(ctx, sessionKey, role)

@@ -14,65 +14,87 @@ func TestResolveForceModel(t *testing.T) {
 		input        string
 		wantID       string
 		wantProvider string
+		wantKnown    bool
 	}{
 		// Catalog matches: provider comes from the primary binding, even
-		// when the model name doesn't follow the bare-prefix heuristic.
+		// when the model name doesn't follow the bare-prefix heuristic. These
+		// resolve to a real catalog entry, so known is true.
 		{
 			name:         "catalog anthropic",
 			input:        "claude-opus-4-7",
 			wantID:       "claude-opus-4-7",
 			wantProvider: providers.ProviderAnthropic,
+			wantKnown:    true,
 		},
 		{
 			name:         "catalog google",
 			input:        "gemini-3.1-flash-lite-preview",
 			wantID:       "gemini-3.1-flash-lite-preview",
 			wantProvider: providers.ProviderGoogle,
+			wantKnown:    true,
 		},
 		{
 			name:         "catalog bedrock — slash form",
 			input:        "qwen/qwen3-235b-a22b-2507",
 			wantID:       "qwen/qwen3-235b-a22b-2507",
 			wantProvider: providers.ProviderBedrock,
+			wantKnown:    true,
 		},
 		{
 			name:         "catalog bedrock — bare suffix match",
 			input:        "qwen3-235b-a22b-2507",
 			wantID:       "qwen/qwen3-235b-a22b-2507",
 			wantProvider: providers.ProviderBedrock,
+			wantKnown:    true,
 		},
-		// Heuristic fallback for models not in the catalog.
+		// Heuristic fallback: not in the catalog, so known is false. The
+		// provider is a best-effort guess for logging only; the handler rejects
+		// these rather than pinning a model with no known tier.
 		{
-			name:         "heuristic openai — gpt-5 not in v0.54 catalog",
-			input:        "gpt-5",
-			wantID:       "gpt-5",
+			name:         "heuristic openai — gpt-6 not in catalog",
+			input:        "gpt-6",
+			wantID:       "gpt-6",
 			wantProvider: providers.ProviderOpenAI,
+			wantKnown:    false,
 		},
 		{
 			name:         "heuristic openai — o3",
 			input:        "o3",
 			wantID:       "o3",
 			wantProvider: providers.ProviderOpenAI,
+			wantKnown:    false,
 		},
 		{
 			name:         "heuristic openrouter — unknown slash model",
 			input:        "mistral/mistral-small-2603",
 			wantID:       "mistral/mistral-small-2603",
 			wantProvider: providers.ProviderOpenRouter,
+			wantKnown:    false,
 		},
 		{
 			name:         "heuristic anthropic — unknown bareword",
 			input:        "totally-not-a-model",
 			wantID:       "totally-not-a-model",
 			wantProvider: providers.ProviderAnthropic,
+			wantKnown:    false,
+		},
+		// Truncated command (the bug this guard closes): "/force-model gpt-"
+		// parses to "gpt-", which matches no catalog entry.
+		{
+			name:         "truncated gpt- is not known",
+			input:        "gpt-",
+			wantID:       "gpt-",
+			wantProvider: providers.ProviderOpenAI,
+			wantKnown:    false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotID, gotProvider := resolveForceModel(tt.input)
+			gotID, gotProvider, gotKnown := resolveForceModel(tt.input)
 			assert.Equal(t, tt.wantID, gotID, "canonical id")
 			assert.Equal(t, tt.wantProvider, gotProvider, "provider")
+			assert.Equal(t, tt.wantKnown, gotKnown, "known")
 		})
 	}
 }
