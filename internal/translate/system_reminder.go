@@ -24,7 +24,25 @@ func openRouterSystemReminder(model string) string {
 	return ""
 }
 
+// geminiSystemReminder returns a system-message addendum for Gemini 3.x. Empty
+// for non-Gemini models or older Gemini families.
+//
+// Gemini 3.x in agentic-coding traces (SWE-bench Verified) reads source files
+// extensively, then ends turns describing the proposed edit in markdown
+// instead of calling Edit/Write. The behavior persists even when the request
+// carries Edit/Write tool schemas. This addendum is the Gemini analogue to
+// deepseekToolUseReminder: it tells the model the exploration-only turn is
+// the failure mode, not the success mode.
+func geminiSystemReminder(model string) string {
+	if isGemini3xModel(model) {
+		return geminiToolUseReminder
+	}
+	return ""
+}
+
 const deepseekToolUseReminder = "When using file-edit tools, copy `old_string` byte-for-byte from the most recent file read — preserve tabs, leading and trailing whitespace, and unicode characters (em-dash —, smart quotes, non-breaking spaces) exactly. If an Edit call fails, re-read the file before retrying. Never fall back to shell commands (sed, awk, python) to modify files."
+
+const geminiToolUseReminder = "When asked to fix code, always call the Edit or Write tool to apply changes — do not describe the edit in prose or markdown and stop. A turn that explores files without producing an Edit/Write call counts as the model giving up. After you have read enough to know what to change, the next step is the tool call, not a summary."
 
 // applySystemReminderToBody injects the reminder into a serialized OpenAI body's
 // `messages` array. Best-effort: returns the input unchanged on parse failure

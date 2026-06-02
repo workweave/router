@@ -353,6 +353,20 @@ type AnthropicSSETranslator struct {
 	// first delta carried no function name (see emitDelta). Later argument
 	// fragments reuse the same index, so we must remember to drop them too.
 	suppressedTools map[int]struct{}
+	// toolArgsBuffer accumulates input_json_delta fragments per Anthropic
+	// content-block index so we can validate the final concatenated args at
+	// content_block_stop. OpenAI-compat upstreams (GLM, Kimi, Qwen, gpt-oss on
+	// vLLM/SGLang) intermittently emit a JSON object whose final form fails
+	// to parse — partial keys, unbalanced braces, mid-string truncation.
+	// Without validation we relay malformed tool_use input downstream and
+	// the client retries or errors silently; with it we get a structured
+	// warn log on every malformed turn for observability and an explicit
+	// signal that active drop is the next step if this turns out frequent.
+	toolArgsBuffer map[int]*strings.Builder
+	// toolArgsInvalid latches per-block-index when buffered args fail to
+	// parse as JSON at content_block_stop. Surfaced via Summary so the
+	// proxy can count malformed-tool turns from logs alone.
+	toolArgsInvalid map[int]struct{}
 	// toolUseEmitted latches true the first time a tool_use content block is
 	// opened. finishStream clears toolBlocks before emitMessageDelta, so we
 	// can't read len(toolBlocks) at delta time; the latch outlives the map.
@@ -397,6 +411,8 @@ func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink 
 		requestModel:    requestModel,
 		toolBlocks:      make(map[int]int),
 		suppressedTools: make(map[int]struct{}),
+		toolArgsBuffer:  make(map[int]*strings.Builder),
+		toolArgsInvalid: make(map[int]struct{}),
 		usageSink:       sink,
 	}
 }
@@ -433,6 +449,12 @@ type ResponseSummary struct {
 	StopReasonPromoted bool
 	// ToolUseBlocks is the number of tool_use content blocks emitted.
 	ToolUseBlocks int
+	// InvalidToolArgsBlocks counts tool_use blocks whose buffered
+	// input_json_delta payload failed JSON validation at content_block_stop.
+	// Non-zero indicates an OpenAI-compat upstream emitted malformed tool
+	// arguments that the client will likely fail to parse. See
+	// validateBufferedToolArgs.
+	InvalidToolArgsBlocks int
 	// OutputTokens is the upstream completion_tokens count, when reported.
 	OutputTokens int
 }
@@ -441,11 +463,12 @@ type ResponseSummary struct {
 // before the stream completes the fields reflect partial state.
 func (t *AnthropicSSETranslator) Summary() ResponseSummary {
 	return ResponseSummary{
-		UpstreamFinishReason: t.finishReason,
-		StopReason:           t.emittedStopReason,
-		StopReasonPromoted:   t.toolUseEmitted && openAIFinishToAnthropic(t.finishReason) != "tool_use",
-		ToolUseBlocks:        t.toolUseCount,
-		OutputTokens:         t.usageOutputTokens,
+		UpstreamFinishReason:  t.finishReason,
+		StopReason:            t.emittedStopReason,
+		StopReasonPromoted:    t.toolUseEmitted && openAIFinishToAnthropic(t.finishReason) != "tool_use",
+		ToolUseBlocks:         t.toolUseCount,
+		InvalidToolArgsBlocks: len(t.toolArgsInvalid),
+		OutputTokens:          t.usageOutputTokens,
 	}
 }
 
@@ -778,10 +801,46 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 			if emitErr = t.emitContentBlockDeltaJSON(blockIdx, args); emitErr != nil {
 				return false
 			}
+			buf, ok := t.toolArgsBuffer[blockIdx]
+			if !ok {
+				buf = &strings.Builder{}
+				t.toolArgsBuffer[blockIdx] = buf
+			}
+			buf.WriteString(args)
 		}
 		return true
 	})
 	return emitErr
+}
+
+// validateBufferedToolArgs checks the accumulated input_json_delta payload for
+// a tool_use block at content_block_stop time. Logs a structured warn and
+// latches t.toolArgsInvalid when the payload fails to parse as JSON, so the
+// proxy can count malformed-tool turns from logs without re-deriving them.
+// Args are not modified — active drop is a follow-up gated on observed
+// frequency from this signal.
+func (t *AnthropicSSETranslator) validateBufferedToolArgs(blockIdx int) {
+	buf, ok := t.toolArgsBuffer[blockIdx]
+	if !ok {
+		return
+	}
+	args := buf.String()
+	if args == "" || gjson.Valid(args) {
+		return
+	}
+	t.toolArgsInvalid[blockIdx] = struct{}{}
+	preview := args
+	const previewMax = 200
+	if len(preview) > previewMax {
+		preview = preview[:previewMax]
+	}
+	observability.Get().Warn(
+		"AnthropicSSE tool_use args failed JSON validation",
+		"block_index", blockIdx,
+		"upstream_model", t.modelFromUpstream,
+		"args_len", len(args),
+		"args_preview", preview,
+	)
 }
 
 // emitRoutingMarkerIfConfigured emits the routing marker as a standalone text
@@ -828,6 +887,7 @@ func (t *AnthropicSSETranslator) finishStream() error {
 		t.thinkingOpen = false
 	}
 	for _, blockIdx := range t.toolBlocks {
+		t.validateBufferedToolArgs(blockIdx)
 		if err := t.emitContentBlockStop(blockIdx); err != nil {
 			return err
 		}

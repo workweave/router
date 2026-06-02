@@ -193,6 +193,9 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 		}
 		return true
 	})
+	if reminder := geminiSystemReminder(opts.TargetModel); reminder != "" && hasNonEmptyTools(body) {
+		sysParts = append(sysParts, reminder)
+	}
 	if len(sysParts) > 0 {
 		jw.Key("systemInstruction")
 		jw.Obj()
@@ -586,6 +589,9 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 			}
 			return true
 		})
+	}
+	if reminder := geminiSystemReminder(opts.TargetModel); reminder != "" && hasNonEmptyTools(body) {
+		sysParts = append(sysParts, reminder)
 	}
 	if len(sysParts) > 0 {
 		jw.Key("systemInstruction")
