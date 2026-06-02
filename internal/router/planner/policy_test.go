@@ -300,6 +300,93 @@ func TestDecide(t *testing.T) {
 			wantExpectedSavingsUSD: 0.00066,
 			wantEvictionCostUSD:    0.00072,
 		},
+		{
+			// Cold pin: the provider's cache TTL lapsed, so neither the pin's
+			// cache-read discount nor the eviction cost applies — both sides are
+			// priced uncached. opus -> haiku still switches, but on raw input
+			// price rather than the cache-read delta.
+			//   savingsPerTurn  = (5.00 - 0.80) * 50000 / 1e6 = $0.21
+			//   expectedSavings = 0.21 * 3 = $0.63
+			//   evictionCost    = 0 (nothing warm to evict)
+			//   delta = 0.63 - 0 = $0.63 > $0.001 -> Switch.
+			name: "cold_ev_positive: opus -> haiku prices uncached",
+			in: planner.Inputs{
+				Pin:                  pinWithUsage(modelOpus),
+				Fresh:                router.Decision{Model: modelHaiku},
+				EstimatedInputTokens: 50_000,
+				AvailableModels:      availableAll,
+				PinCacheCold:         true,
+			},
+			cfg:                    defaultCfg,
+			want:                   planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonEVPositive},
+			expectEVMath:           true,
+			wantExpectedSavingsUSD: 0.63,
+			wantEvictionCostUSD:    0,
+		},
+		{
+			// Regression guard: the warm twin of this case (ev_cross_provider)
+			// STAYS because gpt-5's 0.50 cache-read multiplier makes it pricier
+			// than opus in cache steady-state. Once the cache is cold that
+			// multiplier no longer applies, so the raw $2.50 vs $5.00 input
+			// price wins and the planner correctly switches instead of clinging
+			// to a stale pin.
+			//   savingsPerTurn  = (5.00 - 2.50) * 50000 / 1e6 = $0.125
+			//   expectedSavings = 0.125 * 3 = $0.375
+			//   evictionCost    = 0
+			//   delta = 0.375 > $0.001 -> Switch.
+			name: "cold_cross_provider: opus -> gpt-5 switches once cache is cold",
+			in: planner.Inputs{
+				Pin:                  pinWithUsage(modelOpus),
+				Fresh:                router.Decision{Model: modelGPT5},
+				EstimatedInputTokens: 50_000,
+				AvailableModels:      availableAll,
+				PinCacheCold:         true,
+			},
+			cfg:                    defaultCfg,
+			want:                   planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonEVPositive},
+			expectEVMath:           true,
+			wantExpectedSavingsUSD: 0.375,
+			wantEvictionCostUSD:    0,
+		},
+		{
+			// Cold pin but the pin is the cheaper model: no cache to preserve,
+			// yet switching to the pricier fresh model is a raw-price loss, so
+			// the planner stays. evictionCost is still zero.
+			//   savingsPerTurn  = (0.80 - 5.00) * 50000 / 1e6 = -$0.21
+			//   expectedSavings = -0.21 * 3 = -$0.63
+			//   delta = -0.63 < $0.001 -> Stay.
+			name: "cold_ev_negative: haiku -> opus stays on raw price",
+			in: planner.Inputs{
+				Pin:                  pinWithUsage(modelHaiku),
+				Fresh:                router.Decision{Model: modelOpus},
+				EstimatedInputTokens: 50_000,
+				AvailableModels:      availableAll,
+				PinCacheCold:         true,
+			},
+			cfg:                    defaultCfg,
+			want:                   planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
+			expectEVMath:           true,
+			wantExpectedSavingsUSD: -0.63,
+			wantEvictionCostUSD:    0,
+		},
+		{
+			// Cold pin does not disable the tier-upgrade guard: haiku -> opus is
+			// a raw-price loss (would stay on EV alone) but opus is strictly
+			// higher tier, so the guard still flips it to switch.
+			name: "cold_tier_upgrade: guard still fires when cache is cold",
+			in: planner.Inputs{
+				Pin:                  pinWithUsage(modelHaiku),
+				Fresh:                router.Decision{Model: modelOpus},
+				EstimatedInputTokens: 50_000,
+				AvailableModels:      availableAll,
+				PinCacheCold:         true,
+			},
+			cfg:                    tierUpgradeCfg,
+			want:                   planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonTierUpgrade},
+			expectEVMath:           true,
+			wantExpectedSavingsUSD: -0.63,
+			wantEvictionCostUSD:    0,
+		},
 	}
 
 	for _, tc := range cases {
@@ -315,6 +402,7 @@ func TestDecide(t *testing.T) {
 				assert.InDelta(t, tc.wantExpectedSavingsUSD, got.ExpectedSavingsUSD, 1e-9, "expected_savings_usd")
 				assert.InDelta(t, tc.wantEvictionCostUSD, got.EvictionCostUSD, 1e-9, "eviction_cost_usd")
 				assert.Equal(t, tc.cfg.ThresholdUSD, got.ThresholdUSD, "threshold_usd echoed")
+				assert.Equal(t, tc.in.PinCacheCold, got.PinCacheCold, "pin_cache_cold echoed")
 			} else {
 				// When the EV math never ran, all three USD fields are
 				// left zero — this is what the orchestrator stamps for

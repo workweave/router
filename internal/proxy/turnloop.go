@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"workweave/router/internal/observability"
+	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/cluster"
@@ -33,6 +34,16 @@ func installationIDFromContext(ctx context.Context) uuid.UUID {
 		return uuid.Nil
 	}
 	return id
+}
+
+// cacheWarm reports whether the pin's upstream prompt cache is likely still
+// warm — a prior turn completed within the pinned provider's best-effort cache
+// TTL. A cold pin earns no cache-read discount in the planner's EV math.
+func cacheWarm(pin sessionpin.Pin) bool {
+	if pin.LastTurnEndedAt.IsZero() {
+		return false
+	}
+	return time.Since(pin.LastTurnEndedAt) < providers.CacheTTLFor(pin.Provider)
 }
 
 // turnLoopResult bundles the routing decision and pin/planner state.
@@ -183,6 +194,7 @@ func (s *Service) runTurnLoop(
 			"pin_provider", pin.Provider,
 			"pin_reason", pin.Reason,
 			"pin_age_s", res.PinAgeSec,
+			"pin_cache_warm", cacheWarm(pin),
 			"last_output_tokens", pin.LastOutputTokens,
 		)
 	} else {
@@ -307,6 +319,7 @@ func (s *Service) runTurnLoop(
 		Fresh:                fresh,
 		EstimatedInputTokens: feats.Tokens,
 		AvailableModels:      s.availableModels,
+		PinCacheCold:         pinFound && !cacheWarm(pin),
 	}
 	if !pinFound {
 		plannerIn.Pin = sessionpin.Pin{}

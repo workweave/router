@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"workweave/router/internal/router"
 )
@@ -37,6 +38,36 @@ var APIKeyEnvVars = map[string]string{
 // when the provider is unknown.
 func APIKeyEnvVar(provider string) string {
 	return APIKeyEnvVars[provider]
+}
+
+// CacheTTL is the best-effort upstream prompt-cache lifetime per provider —
+// roughly how long a cached prefix survives between turns of the same session.
+// Anthropic sells a 1h extended cache, which is what pinSessionTTL is sized to;
+// the OpenAI-compatible OSS providers cache on a best-effort, minutes-scale
+// window with no documented TTL guarantee, so a pin can long outlive the cache
+// it was meant to keep warm. The planner reads this to stop crediting a stale
+// pin a cache-read discount it no longer earns.
+var CacheTTL = map[string]time.Duration{
+	ProviderAnthropic:  time.Hour,
+	ProviderOpenAI:     5 * time.Minute,
+	ProviderGoogle:     5 * time.Minute,
+	ProviderOpenRouter: 5 * time.Minute,
+	ProviderFireworks:  5 * time.Minute,
+	ProviderDeepInfra:  5 * time.Minute,
+	ProviderBedrock:    5 * time.Minute,
+}
+
+// DefaultCacheTTL is the conservative fallback cache lifetime for providers
+// absent from CacheTTL.
+const DefaultCacheTTL = 5 * time.Minute
+
+// CacheTTLFor returns the best-effort prompt-cache lifetime for a provider,
+// falling back to DefaultCacheTTL for unknown providers.
+func CacheTTLFor(provider string) time.Duration {
+	if ttl, ok := CacheTTL[provider]; ok {
+		return ttl
+	}
+	return DefaultCacheTTL
 }
 
 // HopByHopHeaders are stripped from upstream responses per RFC 7230 §6.1.

@@ -12,6 +12,15 @@
 // catalog.Pricing.EffectiveCacheReadMultiplier. Switches when
 // (expected_savings − eviction_cost) > threshold, or when tier-upgrade
 // guard fires (fresh is strictly higher tier than pin).
+//
+// Cache-warmth gate: the cache-read multipliers and the eviction cost only
+// apply while the pin's upstream prompt cache is still warm. When Inputs
+// reports the pin cold (the provider's cache TTL has lapsed — short and
+// best-effort on the OSS compat providers, unlike Anthropic's 1h window),
+// both sides are priced uncached (pinMult = freshMult = 1, eviction_cost = 0):
+// staying buys no cache reuse the fresh route wouldn't also pay, and the
+// one-time prefill is incurred either way. This stops a phantom cache from
+// gluing a session to a stale pin once the real cache is gone.
 package planner
 
 import (
@@ -35,6 +44,9 @@ type Decision struct {
 	ExpectedSavingsUSD float64
 	EvictionCostUSD    float64
 	ThresholdUSD       float64
+	// PinCacheCold echoes the warmth assumption the EV math ran under, for
+	// observability. Only meaningful on the EV path; false on early returns.
+	PinCacheCold bool
 }
 
 // EVConfig parameterizes the policy. Constructed once at boot from env.
@@ -56,6 +68,13 @@ type Inputs struct {
 	Fresh                router.Decision
 	EstimatedInputTokens int
 	AvailableModels      map[string]struct{}
+	// PinCacheCold reports that the pin's upstream prompt cache has lapsed —
+	// no turn completed within the pinned provider's cache TTL. The proxy
+	// computes this (it owns the clock); the planner stays a pure function.
+	// When true, the EV math prices both sides uncached. The zero value means
+	// "assume warm", preserving the original cache-discounted behavior for any
+	// caller that does not supply warmth information.
+	PinCacheCold bool
 }
 
 const (
@@ -100,17 +119,25 @@ func Decide(in Inputs, cfg EVConfig) Decision {
 
 	tokens := float64(in.EstimatedInputTokens)
 	// Per-model cache-read multipliers scale savings: only the cache-read
-	// portion of per-turn delta accrues over the horizon.
-	pinMult := pinPrice.EffectiveCacheReadMultiplier()
-	freshMult := freshPrice.EffectiveCacheReadMultiplier()
+	// portion of per-turn delta accrues over the horizon — but only while the
+	// pin's cache is warm. A cold pin earns no discount and switching evicts
+	// nothing (both sides pay one cold prefill), so price both uncached and
+	// let raw economics and the tier guard decide.
+	pinMult, freshMult := 1.0, 1.0
+	var evictionCost float64
+	if !in.PinCacheCold {
+		pinMult = pinPrice.EffectiveCacheReadMultiplier()
+		freshMult = freshPrice.EffectiveCacheReadMultiplier()
+		evictionCost = freshPrice.InputUSDPer1M * tokens * (1 - freshMult) / 1e6
+	}
 	savingsPerTurn := (pinPrice.InputUSDPer1M*pinMult - freshPrice.InputUSDPer1M*freshMult) * tokens / 1e6
-	evictionCost := freshPrice.InputUSDPer1M * tokens * (1 - freshMult) / 1e6
 	expectedSavings := savingsPerTurn * float64(cfg.ExpectedRemainingTurns)
 
 	d := Decision{
 		ExpectedSavingsUSD: expectedSavings,
 		EvictionCostUSD:    evictionCost,
 		ThresholdUSD:       cfg.ThresholdUSD,
+		PinCacheCold:       in.PinCacheCold,
 	}
 	switch {
 	case expectedSavings-evictionCost > cfg.ThresholdUSD:

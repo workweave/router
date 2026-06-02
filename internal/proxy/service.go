@@ -1213,6 +1213,7 @@ func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilde
 		String("planner.pin_model", res.PinModel).
 		String("planner.fresh_model", res.Fresh.Model).
 		String("planner.chosen_model", res.Decision.Model).
+		Bool("planner.pin_cache_warm", !res.PlannerDecision.PinCacheCold).
 		Bool("handover.invoked", res.Handover.Invoked).
 		Int64("handover.latency_ms", res.Handover.LatencyMS).
 		Int64("handover.summary_tokens", int64(res.Handover.SummaryTokens)).
@@ -1250,6 +1251,7 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 			"expected_savings_usd", res.PlannerDecision.ExpectedSavingsUSD,
 			"eviction_cost_usd", res.PlannerDecision.EvictionCostUSD,
 			"threshold_usd", res.PlannerDecision.ThresholdUSD,
+			"pin_cache_warm", !res.PlannerDecision.PinCacheCold,
 			"handover_invoked", res.Handover.Invoked,
 			"handover_fallback_to_trim", res.Handover.FallbackToTrim,
 			"handover_latency_ms", res.Handover.LatencyMS,
@@ -1262,6 +1264,7 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 		"expected_savings_usd", res.PlannerDecision.ExpectedSavingsUSD,
 		"eviction_cost_usd", res.PlannerDecision.EvictionCostUSD,
 		"threshold_usd", res.PlannerDecision.ThresholdUSD,
+		"pin_cache_warm", !res.PlannerDecision.PinCacheCold,
 	)
 }
 
