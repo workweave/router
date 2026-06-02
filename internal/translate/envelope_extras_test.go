@@ -9,6 +9,66 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRequestEnvelope_HasToolNamed(t *testing.T) {
+	cases := []struct {
+		name  string
+		parse func([]byte) (*translate.RequestEnvelope, error)
+		body  string
+		tool  string
+		want  bool
+	}{
+		{
+			name:  "anthropic tool present",
+			parse: translate.ParseAnthropic,
+			body:  `{"tools":[{"name":"Bash","input_schema":{"type":"object"}},{"name":"ExitPlanMode","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"hi"}]}`,
+			tool:  "ExitPlanMode",
+			want:  true,
+		},
+		{
+			name:  "anthropic tool absent",
+			parse: translate.ParseAnthropic,
+			body:  `{"tools":[{"name":"Bash","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"hi"}]}`,
+			tool:  "ExitPlanMode",
+			want:  false,
+		},
+		{
+			name:  "openai tool present under function.name",
+			parse: translate.ParseOpenAI,
+			body:  `{"tools":[{"type":"function","function":{"name":"ExitPlanMode"}}],"messages":[{"role":"user","content":"hi"}]}`,
+			tool:  "ExitPlanMode",
+			want:  true,
+		},
+		{
+			name:  "gemini tool present under functionDeclarations",
+			parse: translate.ParseGemini,
+			body:  `{"tools":[{"functionDeclarations":[{"name":"Bash"},{"name":"ExitPlanMode"}]}],"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`,
+			tool:  "ExitPlanMode",
+			want:  true,
+		},
+		{
+			name:  "empty tools is false",
+			parse: translate.ParseAnthropic,
+			body:  `{"tools":[],"messages":[{"role":"user","content":"hi"}]}`,
+			tool:  "ExitPlanMode",
+			want:  false,
+		},
+		{
+			name:  "empty name query is false",
+			parse: translate.ParseAnthropic,
+			body:  `{"tools":[{"name":"Bash","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"hi"}]}`,
+			tool:  "",
+			want:  false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, err := tc.parse([]byte(tc.body))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, env.HasToolNamed(tc.tool))
+		})
+	}
+}
+
 func TestRequestEnvelope_SystemText_Anthropic(t *testing.T) {
 	cases := []struct {
 		name string

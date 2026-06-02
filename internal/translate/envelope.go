@@ -269,6 +269,40 @@ func (e *RequestEnvelope) HasTools() bool {
 	return r.Int() > 0
 }
 
+// HasToolNamed reports whether the request's tools array declares a tool with
+// the given name. Format-neutral:
+//   - Anthropic: tools.#.name
+//   - OpenAI:    tools.#.function.name
+//   - Gemini:    tools.#.functionDeclarations.#.name
+func (e *RequestEnvelope) HasToolNamed(name string) bool {
+	if name == "" {
+		return false
+	}
+	switch e.format {
+	case FormatAnthropic:
+		for _, t := range gjson.GetBytes(e.body, "tools.#.name").Array() {
+			if t.String() == name {
+				return true
+			}
+		}
+	case FormatOpenAI:
+		for _, t := range gjson.GetBytes(e.body, "tools.#.function.name").Array() {
+			if t.String() == name {
+				return true
+			}
+		}
+	case FormatGemini:
+		for _, decls := range gjson.GetBytes(e.body, "tools.#.functionDeclarations").Array() {
+			for _, d := range decls.Get("#.name").Array() {
+				if d.String() == name {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // RequestsTitleSchema reports whether the request asks for a JSON-schema response
 // with a top-level string "title" property. Used to identify Claude Code's
 // sidebar-title generation call without content-matching the system prompt.

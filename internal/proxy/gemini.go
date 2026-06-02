@@ -101,6 +101,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	w.Header().Set("x-router-decision", decision.Reason)
 	w.Header().Set("x-router-provider", decision.Provider)
 	w.Header().Set("x-router-model", decision.Model)
+	setPhaseHeader(w, routeRes)
 
 	reqPricing := otel.Lookup(s.baselineFor(feats.Model))
 	actPricing := otel.Lookup(decision.Model)
@@ -121,6 +122,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		String("routing.session_pin_tier", pinTier).
 		Int64("routing.session_pin_age_s", pinAgeSec).
 		String("routing.turn_type", string(tt)).
+		String("routing.phase", string(routeRes.Phase)).
 		String("routing.embed_input", embedInput).
 		Int64("routing.estimated_input_tokens", int64(feats.Tokens)).
 		Float64("catalog.requested_input_per_1m", reqPricing.InputUSDPer1M).

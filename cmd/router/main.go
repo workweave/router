@@ -553,6 +553,11 @@ func main() {
 	// it nil (planner then treats every pin as still routable).
 	availableModels := resolveAvailableModels(availableProviders, logger)
 
+	// Phase-aware routing: a detected coding-agent phase (research / planning)
+	// nudges the scorer's quality/speed knobs and, for planning, floors the
+	// tier. Default ON; per-phase knobs + floor tunable per deployment.
+	phaseRoutingCfg := buildPhaseRoutingConfig(logger)
+
 	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithByokOnly(byokOnly).
 		WithDeploymentKeyedProviders(deploymentEligible).
@@ -563,8 +568,10 @@ func main() {
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels).
+		WithPhaseRouting(phaseRoutingCfg).
 		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
 		WithBillingService(billingSvc)
+	logger.Info("Phase routing configured", "enabled", phaseRoutingCfg.Enabled, "planning_floor", phaseRoutingCfg.PlanningFloor.String())
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
 	// Fail loud if a deployed model is missing from the tier table;
@@ -898,6 +905,56 @@ func parseEnvFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	return v
+}
+
+// buildPhaseRoutingConfig assembles the phase-aware routing config from
+// ROUTER_PHASE_* env. Default ON. Panics (fail-fast) on a knob combo the
+// cluster scorer would reject (Alpha+SpeedWeight>1.0), so misconfiguration
+// aborts the process rather than 4xx-ing every research/planning turn.
+func buildPhaseRoutingConfig(logger *slog.Logger) proxy.PhaseRoutingConfig {
+	enabled := config.GetOr("ROUTER_PHASE_ROUTING_ENABLED", "true") == "true"
+	researchAlpha := parseEnvFloat("ROUTER_PHASE_RESEARCH_ALPHA", proxy.DefaultPhaseResearchAlpha)
+	researchSpeed := parseEnvFloat("ROUTER_PHASE_RESEARCH_SPEED_WEIGHT", proxy.DefaultPhaseResearchSpeedWeight)
+	planningAlpha := parseEnvFloat("ROUTER_PHASE_PLANNING_ALPHA", proxy.DefaultPhasePlanningAlpha)
+	planningSpeed := parseEnvFloat("ROUTER_PHASE_PLANNING_SPEED_WEIGHT", proxy.DefaultPhasePlanningSpeedWeight)
+	planningFloor := parsePhaseTierFloor(config.GetOr("ROUTER_PHASE_PLANNING_TIER_FLOOR", "high"))
+
+	if enabled {
+		for _, k := range []struct {
+			phase        string
+			alpha, speed float64
+		}{
+			{"research", researchAlpha, researchSpeed},
+			{"planning", planningAlpha, planningSpeed},
+		} {
+			if k.alpha < 0 || k.alpha >= 1 || k.speed < 0 || k.alpha+k.speed > 1.0 {
+				logger.Error("Invalid phase routing knobs; refusing to start", "phase", k.phase, "alpha", k.alpha, "speed_weight", k.speed)
+				panic(fmt.Sprintf("invalid phase routing knobs for %s: alpha=%v speed_weight=%v (require 0<=alpha<1, speed_weight>=0, alpha+speed_weight<=1.0)", k.phase, k.alpha, k.speed))
+			}
+		}
+	}
+
+	return proxy.PhaseRoutingConfig{
+		Enabled:       enabled,
+		ResearchKnobs: router.Overrides{Alpha: &researchAlpha, SpeedWeight: &researchSpeed},
+		PlanningKnobs: router.Overrides{Alpha: &planningAlpha, SpeedWeight: &planningSpeed},
+		PlanningFloor: planningFloor,
+	}
+}
+
+// parsePhaseTierFloor maps a tier-floor env value to a catalog.Tier.
+// "none" / unrecognized disables the floor.
+func parsePhaseTierFloor(s string) catalog.Tier {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "high":
+		return catalog.TierHigh
+	case "mid":
+		return catalog.TierMid
+	case "low":
+		return catalog.TierLow
+	default:
+		return catalog.TierUnknown
+	}
 }
 
 // boolDefault renders a bool default for config.GetOr on bool envs.

@@ -68,6 +68,9 @@ type turnLoopResult struct {
 	// x-weave-suggestion-mode header. The routing marker is suppressed so
 	// the badge does not appear in suggestion-overlay responses.
 	SuggestionMode bool
+	// Phase is the detected coding-agent workflow phase (research / planning),
+	// or PhaseNone when phase routing is disabled or no phase was detected.
+	Phase turntype.Phase
 }
 
 // handoverOutcome describes the synchronous handover step.
@@ -105,8 +108,30 @@ func (s *Service) runTurnLoop(
 		RequestedTier: catalog.TierFor(feats.Model),
 	}
 	res.PinRole = roleForTier(res.RequestedTier)
+
+	// Phase-aware routing: a detected coding-agent phase supplies default routing
+	// knobs (composed UNDER any per-request x-weave-routing-* override so the
+	// header wins) and, for planning, a tier floor. These apply on the scorer
+	// path, which runs fresh on every MainLoop turn — so the planning floor still
+	// shapes a pinned turn's fresh decision, and the planner's tier-upgrade guard
+	// escapes a cheaper pin. The pin role is deliberately NOT phase-scoped: it
+	// stays the tier role used by the tool-call/no-progress loop breakers and the
+	// force-model pin, so a phase turn and those breakers never diverge on which
+	// pin to expire. Hard-pinned turns (below) return before any of this matters.
+	if s.phaseRouting.Enabled {
+		res.Phase = turntype.DetectPhase(env, res.TurnType)
+		switch res.Phase {
+		case turntype.PhaseResearch:
+			req.RoutingKnobs = composePhaseKnobs(s.phaseRouting.ResearchKnobs, req.RoutingKnobs)
+		case turntype.PhasePlanning:
+			req.RoutingKnobs = composePhaseKnobs(s.phaseRouting.PlanningKnobs, req.RoutingKnobs)
+			req = s.applyPlanningFloor(req)
+		}
+	}
+
 	log.Info("turnloop classified",
 		"turn_type", string(res.TurnType),
+		"phase", string(res.Phase),
 		"requested_tier", res.RequestedTier.String(),
 		"pin_role", res.PinRole,
 		"sub_agent_hint", subAgentHint,
