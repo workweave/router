@@ -50,6 +50,13 @@ type Pin struct {
 	LastOutputTokens          int
 	LastTurnEndedAt           time.Time
 	ConsecutiveUpstreamErrors int
+	// LastServedModel is the model that actually served the previous turn,
+	// written by Store.UpdateUsage (post-turn) and left untouched by Upsert.
+	// A /force-model pin overwrites Model via Upsert but not this field, so
+	// the next turn can compare it against the new target model to detect a
+	// mid-session model switch (and strip Anthropic thinking-block signatures
+	// the new model would otherwise reject with a 400).
+	LastServedModel string
 }
 
 // Usage captures the previous turn's upstream token accounting.
@@ -59,6 +66,8 @@ type Usage struct {
 	CachedWriteTokens int
 	OutputTokens      int
 	EndedAt           time.Time
+	// ServedModel is the model that served the turn this usage came from.
+	ServedModel string
 }
 
 // Store is the I/O surface for session pins. Get returns (zero, false, nil)

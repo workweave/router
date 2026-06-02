@@ -50,6 +50,15 @@ type EmitOptions struct {
 	// rather than being load-balanced to a cold one. The knob differs per
 	// upstream — see applySessionAffinity. Empty disables the hint.
 	SessionAffinity string
+	// ModelSwitched reports that the model serving this turn differs from the
+	// one that served the previous turn in the same session. Anthropic
+	// thinking-block `signature`s are only valid for the model that produced
+	// them, so historical thinking blocks carried over from a different model
+	// (after auto-routing or a /force-model switch) make Anthropic reject the
+	// request with `Invalid signature in thinking block` (400). When set, the
+	// Anthropic emit path strips thinking blocks from the conversation so the
+	// stale signatures never reach the upstream.
+	ModelSwitched bool
 }
 
 // RequestEnvelope wraps a parsed request body regardless of wire format.
@@ -706,6 +715,15 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	}
 
 	if !opts.Capabilities.Supports(router.CapAdaptiveThinking) && !opts.Capabilities.Supports(router.CapExtendedThinking) {
+		ov.StripThinkingBlocks = true
+	}
+
+	// On a mid-session model switch, any thinking blocks carried over in the
+	// conversation history were signed by the previous model; Anthropic rejects
+	// them with `Invalid signature in thinking block` (400). Strip them so the
+	// stale signatures never reach the upstream. The new model produces its own
+	// thinking fresh, so nothing is lost beyond cross-model reasoning continuity.
+	if opts.ModelSwitched {
 		ov.StripThinkingBlocks = true
 	}
 

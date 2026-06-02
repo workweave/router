@@ -74,6 +74,7 @@ func (r *SessionPinRepo) UpdateUsage(ctx context.Context, sessionKey [sessionpin
 		LastCachedWriteTokens: int32(usage.CachedWriteTokens),
 		LastOutputTokens:      int32(usage.OutputTokens),
 		LastTurnEndedAt:       pgtype.Timestamptz{Time: endedAt.UTC(), Valid: true},
+		LastServedModel:       usage.ServedModel,
 	})
 }
 
@@ -129,6 +130,7 @@ func toSessionPin(row sqlc.RouterSessionPin) sessionpin.Pin {
 		LastCachedWriteTokens: int(row.LastCachedWriteTokens),
 		LastOutputTokens:      int(row.LastOutputTokens),
 		LastTurnEndedAt:       timestamptzOrZero(row.LastTurnEndedAt),
+		LastServedModel:       row.LastServedModel,
 	}
 	// Bounded copy guards against a corrupt row panicking the request handler.
 	copy(pin.SessionKey[:], row.SessionKey)

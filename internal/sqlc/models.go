@@ -159,4 +159,5 @@ type RouterSessionPin struct {
 	LastOutputTokens          int32
 	LastTurnEndedAt           pgtype.Timestamptz
 	ConsecutiveUpstreamErrors int32
+	LastServedModel           string
 }

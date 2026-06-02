@@ -73,6 +73,12 @@ type turnLoopResult struct {
 	// PinModel is the model on the loaded pin (stamped independently of
 	// PlannerDecision so log lines can name the from-model even on stay outcomes).
 	PinModel string
+	// PriorServedModel is the model that actually served the previous turn in
+	// this session (the pin's LastServedModel), independent of PinModel — a
+	// /force-model write changes PinModel but not this. Compared against the
+	// current decision model to detect a mid-session switch so the Anthropic
+	// emit path can strip thinking blocks whose signatures the new model rejects.
+	PriorServedModel string
 	// Handover captures the summarize-or-trim step when the planner switched.
 	Handover handoverOutcome
 	// SuggestionMode is true when the request arrived with the
@@ -188,6 +194,7 @@ func (s *Service) runTurnLoop(
 	pin, pinFound := s.loadPin(ctx, pinCacheKey, res.SessionKey, res.PinRole)
 	if pinFound {
 		res.PinModel = pin.Model
+		res.PriorServedModel = pin.LastServedModel
 		res.PinAgeSec = pinAge(pin)
 		log.Info("turnloop pin lookup hit",
 			"pin_model", pin.Model,

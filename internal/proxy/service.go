@@ -911,6 +911,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
 		SessionAffinity:    sessionAffinityHint(routeRes.SessionKey),
+		ModelSwitched:      routeRes.PriorServedModel != "" && routeRes.PriorServedModel != decision.Model,
 	}
 
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
@@ -1296,6 +1297,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 		CachedWriteTokens: cacheCreation,
 		OutputTokens:      out,
 		EndedAt:           time.Now(),
+		ServedModel:       res.Decision.Model,
 	}
 	key := res.SessionKey
 	role := res.PinRole
@@ -1316,6 +1318,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 			pin.LastCachedWriteTokens = usage.CachedWriteTokens
 			pin.LastOutputTokens = usage.OutputTokens
 			pin.LastTurnEndedAt = usage.EndedAt
+			pin.LastServedModel = usage.ServedModel
 			s.pinCache.Add(pinCacheKey, pin)
 		}
 	}
@@ -1859,6 +1862,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
 		SessionAffinity:    sessionAffinityHint(routeRes.SessionKey),
+		ModelSwitched:      routeRes.PriorServedModel != "" && routeRes.PriorServedModel != decision.Model,
 	}
 
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)

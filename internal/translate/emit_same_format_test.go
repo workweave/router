@@ -314,6 +314,46 @@ func TestAnthropicSameFormat_EnabledThinkingPreservesExplicitEffort(t *testing.T
 	assert.Equal(t, "high", outputConfig["effort"], "caller-supplied effort must not be overwritten")
 }
 
+func TestAnthropicSameFormat_ThinkingBlocksStrippedOnModelSwitch(t *testing.T) {
+	// A capable model would normally keep historical thinking blocks, but on a
+	// mid-session model switch their `signature`s were issued by the previous
+	// model and Anthropic rejects them with `Invalid signature in thinking
+	// block` (400). ModelSwitched forces the strip so the stale signature never
+	// reaches the upstream, while the text block survives.
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"thought","signature":"sig-from-other-model"},{"type":"text","text":"reply"}]}],"max_tokens":1024,"thinking":{"type":"adaptive"}}`)
+	opts := translate.EmitOptions{
+		TargetModel:   "claude-opus-4-7",
+		Capabilities:  router.Lookup("claude-opus-4-7"),
+		ModelSwitched: true,
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	msgs, _ := out["messages"].([]any)
+	require.Len(t, msgs, 2)
+	assistantMsg, _ := msgs[1].(map[string]any)
+	content, _ := assistantMsg["content"].([]any)
+	require.Len(t, content, 1, "thinking block with stale signature must be stripped on a model switch")
+	block, _ := content[0].(map[string]any)
+	assert.Equal(t, "text", block["type"], "only the text block should survive the strip")
+}
+
+func TestAnthropicSameFormat_ThinkingBlocksKeptWhenNoModelSwitch(t *testing.T) {
+	// Same capable model with ModelSwitched=false (the steady-state, same-model
+	// turn): thinking blocks and their valid signatures must be preserved so
+	// prompt-cache hits and reasoning continuity are not needlessly destroyed.
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"thought","signature":"valid-sig"},{"type":"text","text":"reply"}]}],"max_tokens":1024,"thinking":{"type":"adaptive"}}`)
+	opts := translate.EmitOptions{
+		TargetModel:   "claude-opus-4-7",
+		Capabilities:  router.Lookup("claude-opus-4-7"),
+		ModelSwitched: false,
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	msgs, _ := out["messages"].([]any)
+	require.Len(t, msgs, 2)
+	assistantMsg, _ := msgs[1].(map[string]any)
+	content, _ := assistantMsg["content"].([]any)
+	require.Len(t, content, 2, "thinking blocks must be preserved when the model did not change")
+}
+
 func TestPassthroughSameFormat_FieldsScrubbed(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"effort":"high","thinking":{"type":"enabled"},"context_management":{"mode":"auto"},"output_config":{"length":"verbose"}}`)
 	env, err := translate.ParseAnthropic(body)

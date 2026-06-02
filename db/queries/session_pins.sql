@@ -53,14 +53,18 @@ ON CONFLICT (session_key, role) DO UPDATE SET
 -- turn to compute switch EV against eviction cost. The UPDATE matches
 -- by (session_key, role); if the pin has been evicted or never
 -- existed, zero rows are affected and the adapter wraps that as a
--- successful no-op.
+-- successful no-op. last_served_model records the model that actually
+-- served this turn; it lives here (not in UpsertSessionPin) so a
+-- /force-model upsert cannot overwrite the genuinely-last-served model
+-- before the next turn reads it to detect a mid-session model switch.
 -- name: UpdateSessionPinUsage :exec
 UPDATE router.session_pins
 SET last_input_tokens        = @last_input_tokens::int,
     last_cached_read_tokens  = @last_cached_read_tokens::int,
     last_cached_write_tokens = @last_cached_write_tokens::int,
     last_output_tokens       = @last_output_tokens::int,
-    last_turn_ended_at       = @last_turn_ended_at::timestamptz
+    last_turn_ended_at       = @last_turn_ended_at::timestamptz,
+    last_served_model        = @last_served_model::varchar
 WHERE session_key = @session_key::bytea
   AND role        = @role::varchar;
 
