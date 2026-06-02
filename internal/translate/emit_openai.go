@@ -134,7 +134,10 @@ func targetIsOpenRouter(opts EmitOptions) bool {
 }
 
 func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, error) {
-	body := e.body
+	body, err := filterClaudeCodeOnlyToolsFromAnthropicBody(e.body)
+	if err != nil {
+		return nil, fmt.Errorf("strip claude-code-only tools: %w", err)
+	}
 	jw := newJSONWriter()
 	jw.Obj()
 	jw.Key("model")
@@ -210,7 +213,7 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	}
 
 	jw.EndObj()
-	body, err := applyQwen3SamplersIfNeeded(jw.Bytes(), opts.TargetModel)
+	body, err = applyQwen3SamplersIfNeeded(jw.Bytes(), opts.TargetModel)
 	if err != nil {
 		return nil, err
 	}

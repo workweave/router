@@ -50,7 +50,11 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 			return providers.PreparedRequest{}, err
 		}
 	case FormatAnthropic:
-		writeGeminiFromAnthropic(jw, e.body, opts)
+		filtered, err := filterClaudeCodeOnlyToolsFromAnthropicBody(e.body)
+		if err != nil {
+			return providers.PreparedRequest{}, fmt.Errorf("strip claude-code-only tools: %w", err)
+		}
+		writeGeminiFromAnthropic(jw, filtered, opts)
 	default:
 		return providers.PreparedRequest{}, fmt.Errorf("unsupported source format for Gemini emit: %d", e.format)
 	}
