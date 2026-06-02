@@ -22,6 +22,18 @@ func shortKey(key [sessionpin.SessionKeyLen]byte) string {
 	return hex.EncodeToString(key[:8])
 }
 
+// sessionAffinityHint returns the full hex session key for use as an upstream
+// prompt-cache stickiness hint (translate.EmitOptions.SessionAffinity), or ""
+// for the zero key so requests with no derivable session don't all collapse
+// onto one synthetic affinity bucket.
+func sessionAffinityHint(key [sessionpin.SessionKeyLen]byte) string {
+	var zero [sessionpin.SessionKeyLen]byte
+	if key == zero {
+		return ""
+	}
+	return hex.EncodeToString(key[:])
+}
+
 // bindRequestLogger derives the session key and returns a new context carrying
 // a request-scoped logger pre-bound with session_key, request_id, api_key_id,
 // and ingress. Downstream code reading via observability.FromContext gets these

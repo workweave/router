@@ -1,9 +1,14 @@
 {
   "name": "@workweave/router",
-  "version": "0.1.8",
-  "description": "One-command installer that points Claude Code at the Weave Router.",
+  "version": "0.2.1",
+  "description": "One-command installer that points Claude Code, Codex, opencode, or pi at the Weave Router. For pi it also ships the routing extension, loaded via pi.extensions.",
   "bin": {
     "weave-router": "bin.js"
+  },
+  "pi": {
+    "extensions": [
+      "./pi-router/src/index.ts"
+    ]
   },
   "files": [
     "bin.js",
@@ -11,6 +16,7 @@
     "uninstall.sh",
     "cc-statusline.sh",
     "commands/",
+    "pi-router/",
     "README.md",
     "LICENSE"
   ],
@@ -19,6 +25,20 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-agent-core": "*",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@mariozechner/pi-agent-core": { "optional": true },
+    "@mariozechner/pi-ai": { "optional": true },
+    "@mariozechner/pi-coding-agent": { "optional": true },
+    "@mariozechner/pi-tui": { "optional": true },
+    "typebox": { "optional": true }
   },
   "repository": {
     "type": "git",
@@ -33,6 +53,8 @@
     "claude",
     "claude-code",
     "anthropic",
-    "llm-router"
+    "llm-router",
+    "pi",
+    "pi-package"
   ]
 }

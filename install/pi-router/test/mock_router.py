@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mock Weave Router for the @workweave/pi-router end-to-end test.
+"""Mock Weave Router for the @workweave/router end-to-end test.
 
 Speaks just enough of the Anthropic Messages API to drive a real pi process
 headlessly, with no real model spend and no network beyond localhost:

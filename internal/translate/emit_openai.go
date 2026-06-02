@@ -33,7 +33,45 @@ func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (provi
 	if err != nil {
 		return providers.PreparedRequest{}, err
 	}
-	return providers.PreparedRequest{Body: body, Headers: make(http.Header)}, nil
+	headers := make(http.Header)
+	body, err = applySessionAffinity(body, headers, opts)
+	if err != nil {
+		return providers.PreparedRequest{}, err
+	}
+	return providers.PreparedRequest{Body: body, Headers: headers}, nil
+}
+
+// applySessionAffinity attaches an upstream-specific prompt-cache routing hint
+// derived from opts.SessionAffinity (a stable per-conversation identifier).
+// Serverless upstreams fan a session's turns across replicas and hold the
+// prefix KV-cache per replica; without a stickiness hint, a turn can land on a
+// cold replica and pay a full prefill (the deepseek-v4-pro/Fireworks incident:
+// 60k-token turn, zero cache read, 26s TTFT). Each upstream exposes a different
+// knob:
+//   - Fireworks / DeepInfra: x-session-affinity request header
+//   - OpenRouter: x-session-id request header (its sticky-routing key, ≤256 chars)
+//   - OpenAI: prompt_cache_key body field (combined with the prefix hash)
+//
+// Bedrock (explicit cachePoint caching, centrally routed — no replica roulette)
+// and any unrecognized target get nothing. No-op when SessionAffinity is empty,
+// which also covers the handover summarizer's empty-TargetProvider calls.
+func applySessionAffinity(body []byte, headers http.Header, opts EmitOptions) ([]byte, error) {
+	if opts.SessionAffinity == "" {
+		return body, nil
+	}
+	switch opts.TargetProvider {
+	case providers.ProviderFireworks, providers.ProviderDeepInfra:
+		headers.Set("x-session-affinity", opts.SessionAffinity)
+	case providers.ProviderOpenRouter:
+		headers.Set("x-session-id", opts.SessionAffinity)
+	case providers.ProviderOpenAI:
+		out, err := sjson.SetBytes(body, "prompt_cache_key", opts.SessionAffinity)
+		if err != nil {
+			return nil, fmt.Errorf("set prompt_cache_key: %w", err)
+		}
+		return out, nil
+	}
+	return body, nil
 }
 
 func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error) {
@@ -96,7 +134,10 @@ func targetIsOpenRouter(opts EmitOptions) bool {
 }
 
 func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, error) {
-	body := e.body
+	body, err := filterClaudeCodeOnlyToolsFromAnthropicBody(e.body)
+	if err != nil {
+		return nil, fmt.Errorf("strip claude-code-only tools: %w", err)
+	}
 	jw := newJSONWriter()
 	jw.Obj()
 	jw.Key("model")
@@ -172,7 +213,7 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, er
 	}
 
 	jw.EndObj()
-	body, err := applyQwen3SamplersIfNeeded(jw.Bytes(), opts.TargetModel)
+	body, err = applyQwen3SamplersIfNeeded(jw.Bytes(), opts.TargetModel)
 	if err != nil {
 		return nil, err
 	}

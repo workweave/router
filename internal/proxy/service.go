@@ -162,6 +162,9 @@ func routingMarkerFor(res turnLoopResult) string {
 	if decision.Model == "" {
 		return ""
 	}
+	if res.SuggestionMode {
+		return ""
+	}
 	// Suppress the marker on tool-result follow-ups: every post-tool turn would
 	// otherwise re-emit a duplicate mid-stream.
 	if res.PlannerDecision.Reason == "" && !res.HardPinned && !res.TierClamped && res.StickyHit {
@@ -804,6 +807,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
 		return routeErr
 	}
+	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision
 	tt := routeRes.TurnType
 	stickyHit := routeRes.StickyHit
@@ -813,14 +817,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	s.logPlannerOutcome(ctx, routeRes)
 
 	// Cross-envelope no-progress detector: if this session has dispatched the
-	// same (decision_model, decision_provider, message_count, prompt-prefix)
-	// burst >= noProgressMatchThreshold times within noProgressTimeWindow, the
-	// parent agent is in a sub-agent spawn loop and another dispatch will only
+	// same (decision_model, decision_provider, message_count, tool-progress,
+	// prompt-prefix) burst >= noProgressMatchThreshold times within
+	// noProgressTimeWindow, the agent is stuck (a sub-agent spawn loop, or a
+	// model re-issuing one identical call) and another dispatch will only
 	// reproduce the same useless response. Break the pin and emit a synthetic
-	// stop instead. message_count is folded in so a progressing agent (whose
-	// transcript grows each turn) yields a distinct fingerprint per dispatch
-	// and is never mistaken for a flat-transcript spawn loop.
-	if fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount); s.noProgress != nil {
+	// stop instead. The tool-progress marker is the primary guard: a
+	// progressing agent appends a new, distinct tool call each turn, so its
+	// fingerprint diverges and it is never mistaken for a stuck loop — even when
+	// the top-level message count stays flat, as it does for Claude Code's
+	// Explore sub-agent.
+	if fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env)); s.noProgress != nil {
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
 			return s.handleNoProgressBreak(ctx, w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider)
@@ -903,23 +910,26 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		TargetProvider:     decision.Provider,
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
+		SessionAffinity:    sessionAffinityHint(routeRes.SessionKey),
 	}
 
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
-	// Determine binding list up front. When more than one is eligible, wrap
-	// the client writer with a preludeBuffer so the per-attempt Prelude
-	// bytes don't commit the response before the upstream first byte —
-	// otherwise the first attempt's Prelude would lock in HTTP 200 +
-	// message_start and any retry would smash a second response envelope
-	// onto the wire.
+	// Wrap the client writer in a preludeBuffer for every request, not just
+	// multi-binding ones. The buffer absorbs per-attempt Prelude bytes (the
+	// routing-marker text block + message_start) so that when the upstream
+	// errors before producing its first byte, we discard the buffered prelude
+	// and render an upstream-error envelope instead of stranding the marker
+	// on the wire. Single-binding requests previously bypassed the buffer for
+	// TTFB, but the v0.58 SWE-bench bake-off attributed 46/84 empty-patch
+	// failures to that bypass: half of all upstream calls api_error'd, and
+	// each one delivered a turn that was just `✦ **Weave Router** → …` text
+	// to Claude Code, which then rejected the turn for missing tool_use.
+	// The TTFB cost is a single round-trip's worth of buffered SSE bytes
+	// (~200B) released the moment the upstream's first byte arrives.
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
-	var preludeBuf *preludeBuffer
-	var rootSink http.ResponseWriter = w
-	if len(bindings) > 1 {
-		preludeBuf = newPreludeBuffer(w)
-		rootSink = preludeBuf
-	}
+	preludeBuf := newPreludeBuffer(w)
+	var rootSink http.ResponseWriter = preludeBuf
 	var captureW *captureWriter
 	var sink http.ResponseWriter = rootSink
 	if cacheEligible {
@@ -989,12 +999,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				preludeBuf.Seal()
 			}
 			err := p.Proxy(actx, d, prep, translator, r)
-			// Single-binding streaming: Prelude already committed
-			// HTTP 200 + message_start; render the upstream error as
-			// an in-stream `event: error` frame so the SSE stream
-			// stays coherent rather than getting a trailing JSON
-			// envelope appended by the dispatch loop's flushErr.
-			if err != nil && env.Stream() && preludeBuf == nil {
+			// Post-commit streaming error: the preludeBuffer has already
+			// flushed HTTP 200 + message_start past the buffer to the
+			// wire, so the dispatch loop's flushErr would append a
+			// trailing JSON envelope that corrupts the SSE stream.
+			// Render the upstream error as an in-stream `event: error`
+			// frame instead. Pre-commit errors are handled cleanly by
+			// dispatchWithFallback (Discard + flushErr).
+			if err != nil && env.Stream() && preludeBuf.Committed() {
 				err = emitAnthropicSSEErrorEvent(sink, err)
 			}
 			finErr := finalizeAfterProxy(err, translator.Finalize)
@@ -1028,10 +1040,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			}
 			geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, d.Model, nil)
 			err := p.Proxy(actx, d, prep, geminiTr, r)
-			// Single-binding streaming: see ProxyMessages OpenAI-compat
+			// Post-commit streaming error: see ProxyMessages OpenAI-compat
 			// case for rationale — render upstream error as in-stream
 			// `event: error` rather than corrupt the SSE stream.
-			if err != nil && env.Stream() && preludeBuf == nil {
+			if err != nil && env.Stream() && preludeBuf.Committed() {
 				err = emitAnthropicSSEErrorEvent(sink, err)
 			}
 			err = finalizeAfterProxy(err, geminiTr.Finalize)
@@ -1170,7 +1182,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "resp_output_tokens", respSummary.OutputTokens)
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
 	return proxyErr
 }
 
@@ -1745,6 +1757,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		log.Error("Routing failed for OpenAI request", "err", err, "route_ms", routeMs, "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
 		return err
 	}
+	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision
 	tt := routeRes.TurnType
 	stickyHit := routeRes.StickyHit
@@ -1826,20 +1839,17 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		TargetProvider:     decision.Provider,
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
+		SessionAffinity:    sessionAffinityHint(routeRes.SessionKey),
 	}
 
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
-	// See ProxyMessages for the preludeBuffer rationale — wrap only when
-	// failover is possible so single-binding requests keep main #220's
-	// TTFB-decoupled Prelude semantics exactly.
+	// See ProxyMessages for the preludeBuffer rationale — wrap unconditionally
+	// so single-binding upstream errors don't strand the routing-marker chunk
+	// on the wire when the upstream never produces a first byte.
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
-	var preludeBuf *preludeBuffer
-	var rootSink http.ResponseWriter = w
-	if len(bindings) > 1 {
-		preludeBuf = newPreludeBuffer(w)
-		rootSink = preludeBuf
-	}
+	preludeBuf := newPreludeBuffer(w)
+	var rootSink http.ResponseWriter = preludeBuf
 
 	// Responses entry point delegates the eager response.created emit to
 	// this layer because it has the post-routing binding count. Fire only
@@ -1908,11 +1918,13 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 				preludeBuf.Seal()
 			}
 			err := p.Proxy(actx, d, prep, proxyWriter, r)
-			// Single-binding streaming: the routing-marker Prelude already
-			// committed HTTP 200 + the marker chunk to the wire; render the
-			// upstream error as an in-stream `data: {...}` frame instead of
-			// letting dispatch's flushErr append a corrupting JSON envelope.
-			if err != nil && env.Stream() && preludeBuf == nil {
+			// Post-commit streaming error: the routing-marker chunk has
+			// already been flushed past the buffer to the wire; render
+			// the upstream error as an in-stream `data: {...}` frame
+			// instead of letting dispatch's flushErr append a corrupting
+			// JSON envelope. Pre-commit errors are handled by
+			// dispatchWithFallback (Discard + flushErr).
+			if err != nil && env.Stream() && preludeBuf.Committed() {
 				err = emitOpenAISSEErrorEvent(sink, err)
 			}
 			return err
@@ -1936,8 +1948,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 				preludeBuf.Seal()
 			}
 			err := p.Proxy(actx, d, prep, translator, r)
-			// Single-binding streaming: see same-format OpenAI case above.
-			if err != nil && env.Stream() && preludeBuf == nil {
+			// Post-commit streaming error: see same-format OpenAI case above.
+			if err != nil && env.Stream() && preludeBuf.Committed() {
 				err = emitOpenAISSEErrorEvent(sink, err)
 			}
 			return finalizeAfterProxy(err, translator.Finalize)
@@ -1961,8 +1973,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 				preludeBuf.Seal()
 			}
 			err := p.Proxy(actx, d, prep, translator, r)
-			// Single-binding streaming: see same-format OpenAI case above.
-			if err != nil && env.Stream() && preludeBuf == nil {
+			// Post-commit streaming error: see same-format OpenAI case above.
+			if err != nil && env.Stream() && preludeBuf.Committed() {
 				err = emitOpenAISSEErrorEvent(sink, err)
 			}
 			return finalizeAfterProxy(err, translator.Finalize)

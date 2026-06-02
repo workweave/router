@@ -1,0 +1,128 @@
+{
+  "meta": {
+    "comment": "v0.59 \u2014 fork of v0.58 with z-ai/glm-5.1 removed from deployed_models. GLM-5.1 produces tool-call JSON that Claude Code's strict Anthropic parser rejects; 66 of 73 api_error shards in the v0.58 SWE-bench-CC bake-off were glm-5.1 main-agent turns. Demoting until either (a) translator-side {} substitution at PR #281 plus a fresh bake-off proves the failure mode is contained, or (b) we have a working tool-format adapter for GLM-5.1.",
+    "last_refreshed": "2026-05-31",
+    "parent": "v0.58",
+    "training_recipe": "k=16, alpha=0.80, shrinkage_k0=10, score_normalization=minmax, output_cost_ratio=0.25, speed_weight=0.08, per_model_verbosity=true, include_aa_labels (v0.56-keyed), aa_evidence_scale=3.0. Direct labels: routerarena_combined (236k rows incl Tier 1 Aider + Tier 2 LCB) + Tier 3 SWE-bench Easy shards. measured_speed/verbosity from tier1_20260530.json (incl opus-4.8 14.1s/ex, 1317 out_tok/ex)."
+  },
+  "deployed_models": [
+    {
+      "model": "claude-haiku-4-5",
+      "provider": "anthropic",
+      "bench_column": "routerarena_claude-haiku-4-5",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_anthropic/claude-haiku-4-5"
+      ]
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "bench_column": "routerarena_claude-sonnet-4-6",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_anthropic/claude-sonnet-4-6"
+      ]
+    },
+    {
+      "model": "claude-opus-4-7",
+      "provider": "anthropic",
+      "bench_column": "routerarena_claude-opus-4-7",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_anthropic/claude-opus-4-7"
+      ]
+    },
+    {
+      "model": "gemini-3.1-flash-lite-preview",
+      "provider": "google",
+      "bench_column": "routerarena_gemini-3.1-flash-lite-preview",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_gemini/gemini-3.1-flash-lite"
+      ]
+    },
+    {
+      "model": "gemini-3.1-pro-preview",
+      "provider": "google",
+      "bench_column": "routerarena_gemini-3.1-pro-preview",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_gemini/gemini-3.1-pro-preview"
+      ]
+    },
+    {
+      "model": "gemini-3.5-flash",
+      "provider": "google",
+      "bench_column": "routerarena_gemini-3.5-flash",
+      "direct_label": "routerarena"
+    },
+    {
+      "model": "gpt-5.4-mini",
+      "provider": "openai",
+      "bench_column": "routerarena_gpt-5.4-mini",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_openai/gpt-5.4-mini"
+      ]
+    },
+    {
+      "model": "gpt-5.5",
+      "provider": "openai",
+      "bench_column": "routerarena_gpt-5.5",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_openai/gpt-5.5"
+      ]
+    },
+    {
+      "model": "qwen/qwen3-coder-next",
+      "provider": "bedrock",
+      "bench_column": "routerarena_qwen/qwen3-coder-next",
+      "direct_label": "routerarena"
+    },
+    {
+      "model": "qwen/qwen3-next-80b-a3b-instruct",
+      "provider": "bedrock",
+      "bench_column": "routerarena_qwen/qwen3-next-80b-a3b-instruct",
+      "direct_label": "routerarena"
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "provider": "deepinfra",
+      "bench_column": "routerarena_deepseek/deepseek-v4-flash",
+      "direct_label": "routerarena"
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "provider": "fireworks",
+      "bench_column": "routerarena_deepseek/deepseek-v4-pro",
+      "direct_label": "routerarena"
+    },
+    {
+      "model": "moonshotai/kimi-k2.6",
+      "provider": "fireworks",
+      "bench_column": "routerarena_moonshotai/kimi-k2.6",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_fireworks_ai/accounts/fireworks/models/kimi-k2p6"
+      ]
+    },
+    {
+      "model": "xiaomi/mimo-v2.5-pro",
+      "provider": "deepinfra",
+      "bench_column": "routerarena_xiaomi/mimo-v2.5-pro",
+      "direct_label": "aa"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "provider": "anthropic",
+      "bench_column": "routerarena_claude-opus-4-8",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_anthropic/claude-opus-4-8"
+      ],
+      "note": "Opus 4.8 (SOTA on Aider + SWE-bench Easy). RouterArena labels generated 2026-05-31 (.34 spent, 8010 gradeable)."
+    }
+  ]
+}

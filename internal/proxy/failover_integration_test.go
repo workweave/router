@@ -232,14 +232,15 @@ func TestProxyMessages_SingleBindingPreservesEagerPrelude(t *testing.T) {
 	assert.Empty(t, rec.Header().Get("x-router-fallback-from"))
 }
 
-// TestProxyMessages_SingleBindingStreamingErrorAfterPrelude reproduces the
-// review finding: when a single-binding cross-format streaming request
-// has Prelude committed (HTTP 200 + `message_start` already on the wire)
-// and the upstream then returns a buffered 503, the response must
-// terminate as an in-stream `event: error` SSE frame — NOT a trailing
-// JSON envelope, which would corrupt the SSE stream the client is
-// parsing.
-func TestProxyMessages_SingleBindingStreamingErrorAfterPrelude(t *testing.T) {
+// TestProxyMessages_SingleBindingStreamingPreCommitError asserts the fixed
+// behavior: when a single-binding cross-format streaming request gets an
+// upstream error BEFORE any upstream byte arrives, the preludeBuffer
+// discards the buffered prelude and the client receives a clean
+// Anthropic-shape JSON error envelope at the upstream's status — not a
+// stranded `message_start` text-only turn that Claude Code would reject
+// for missing tool_use. This is the v0.58 SWE-bench bake-off regression
+// fix.
+func TestProxyMessages_SingleBindingStreamingPreCommitError(t *testing.T) {
 	// Stub upstream OpenAI-compat provider that 503s on every request.
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -265,14 +266,16 @@ func TestProxyMessages_SingleBindingStreamingErrorAfterPrelude(t *testing.T) {
 
 	_ = svc.ProxyMessages(context.Background(), body, rec, req)
 
-	assert.Equal(t, http.StatusOK, rec.Code, "Prelude already committed 200; status stays 200")
-	assert.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"),
-		"Content-Type stays SSE; we do not write a trailing JSON envelope that would corrupt the stream")
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code,
+		"pre-commit upstream error surfaces upstream's status, not a stranded HTTP 200")
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"),
+		"pre-commit error is a clean JSON envelope, not a half-emitted SSE stream")
 
 	respBody := rec.Body.String()
-	assert.Contains(t, respBody, "event: message_start", "Prelude bytes still on the wire")
-	assert.Contains(t, respBody, "event: error", "in-stream error event terminates the SSE stream coherently")
-	assert.Contains(t, respBody, `"type":"error"`, "error event body is Anthropic-shape")
+	assert.NotContains(t, respBody, "event: message_start",
+		"prelude bytes were buffered and discarded — no stranded marker on the wire")
+	assert.NotContains(t, respBody, "✦ **Weave Router**",
+		"routing marker discarded with the prelude buffer")
+	assert.Contains(t, respBody, `"type":"error"`, "Anthropic-shape error envelope")
 	assert.Contains(t, respBody, "upstream unavailable", "translated upstream message reaches the client")
-	assert.NotContains(t, respBody, "\n\n{", "no trailing JSON-after-double-newline that would break SSE parsers")
 }

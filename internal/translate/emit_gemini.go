@@ -50,7 +50,11 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 			return providers.PreparedRequest{}, err
 		}
 	case FormatAnthropic:
-		writeGeminiFromAnthropic(jw, e.body, opts)
+		filtered, err := filterClaudeCodeOnlyToolsFromAnthropicBody(e.body)
+		if err != nil {
+			return providers.PreparedRequest{}, fmt.Errorf("strip claude-code-only tools: %w", err)
+		}
+		writeGeminiFromAnthropic(jw, filtered, opts)
 	default:
 		return providers.PreparedRequest{}, fmt.Errorf("unsupported source format for Gemini emit: %d", e.format)
 	}
@@ -193,6 +197,9 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 		}
 		return true
 	})
+	if reminder := geminiSystemReminder(opts.TargetModel); reminder != "" && hasNonEmptyTools(body) {
+		sysParts = append(sysParts, reminder)
+	}
 	if len(sysParts) > 0 {
 		jw.Key("systemInstruction")
 		jw.Obj()
@@ -586,6 +593,9 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 			}
 			return true
 		})
+	}
+	if reminder := geminiSystemReminder(opts.TargetModel); reminder != "" && hasNonEmptyTools(body) {
+		sysParts = append(sysParts, reminder)
 	}
 	if len(sysParts) > 0 {
 		jw.Key("systemInstruction")

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# End-to-end test for @workweave/pi-router + the `install.sh --pi` target.
+# End-to-end test for @workweave/router + the `install.sh --pi` target.
 #
 # Drives a REAL `pi` process against a mock Weave Router (mock_router.py) and
 # asserts the routed-request shape the router actually receives: routing knobs,
@@ -109,10 +109,15 @@ PERM="$(stat -f '%Lp' "$PI_DIR/.weave_router_key" 2>/dev/null || stat -c '%a' "$
 grep -q '"path":"/health"'   "$LOG" && ok "installer pinged /health"      || bad "no /health probe reached mock"
 grep -q '"path":"/validate"' "$LOG" && ok "installer validated key (/validate)" || bad "no /validate probe reached mock"
 
-# Idempotency: a second install must not duplicate the package entry.
+# Idempotency + legacy migration: seed an old @workweave/pi-router entry (the
+# pre-fold id), re-install, and confirm the new id stays single and the legacy
+# id is dropped.
+tmp="$(jq '.packages += ["npm:@workweave/pi-router"]' "$PI_DIR/settings.json")"; printf '%s\n' "$tmp" >"$PI_DIR/settings.json"
 bash "$INSTALL_SH" --pi --base-url "$BASE_URL" --dir "$WORK" >>"$WORK/install.out" 2>&1 </dev/null || true
-PKGCOUNT="$(jq '[.packages[]? | select(. == "npm:@workweave/pi-router")] | length' "$PI_DIR/settings.json")"
-[ "$PKGCOUNT" = "1" ] && ok "idempotent re-install: single pi-router package entry" || bad "package entry count = $PKGCOUNT (want 1)"
+PKGCOUNT="$(jq '[.packages[]? | select(. == "npm:@workweave/router")] | length' "$PI_DIR/settings.json")"
+[ "$PKGCOUNT" = "1" ] && ok "idempotent re-install: single @workweave/router package entry" || bad "package entry count = $PKGCOUNT (want 1)"
+[ "$(jq '[.packages[]? | select(. == "npm:@workweave/pi-router")] | length' "$PI_DIR/settings.json")" = "0" ] \
+  && ok "legacy npm:@workweave/pi-router entry migrated away" || bad "legacy pi-router entry not removed"
 
 # The npm package is not published pre-merge; drop it so `-e` is the sole loader.
 STRIPPED="$(jq 'del(.packages)' "$PI_DIR/settings.json")"

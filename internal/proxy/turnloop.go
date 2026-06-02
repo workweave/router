@@ -64,6 +64,10 @@ type turnLoopResult struct {
 	PinModel string
 	// Handover captures the summarize-or-trim step when the planner switched.
 	Handover handoverOutcome
+	// SuggestionMode is true when the request arrived with the
+	// x-weave-suggestion-mode header. The routing marker is suppressed so
+	// the badge does not appear in suggestion-overlay responses.
+	SuggestionMode bool
 }
 
 // handoverOutcome describes the synchronous handover step.

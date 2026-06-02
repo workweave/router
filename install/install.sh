@@ -12,7 +12,7 @@
 # opencode.json — since the file is JSON, install/uninstall are structural
 # (jq) rather than marker-delimited. For pi it merges a `weave` provider into
 # ~/.pi/agent/models.json, sets it as the default in settings.json, and adds
-# the @workweave/pi-router extension (which also adds a parallel subagent
+# the @workweave/router extension (which also adds a parallel subagent
 # `dispatch` tool) — all structural (jq) merges.
 #
 # Two scopes (apply to all targets):
@@ -629,7 +629,7 @@ write_opencode_config() {
 # write_pi_models_config merges a managed `weave` provider into pi's
 # models.json (anthropic-compatible — the router speaks Anthropic Messages
 # natively). The header set carries identity plus the main-loop routing knobs
-# (quality bias); the @workweave/pi-router extension re-registers the provider
+# (quality bias); the @workweave/router extension re-registers the provider
 # per process to flip those knobs for subagents/compaction. apiKey is the
 # router key as well as a header — pi treats apiKey as required to consider auth
 # configured, but the router authenticates off X-Weave-Router-Key
@@ -666,7 +666,7 @@ write_pi_models_config() {
 
   # Headline models surfaced in pi's /model picker. The router re-routes every
   # request regardless, so this list is UX; keep it Anthropic-shaped and in
-  # sync with @workweave/pi-router's WEAVE_MODELS constant.
+  # sync with @workweave/router's WEAVE_MODELS constant.
   #
   # baseUrl is the router ROOT (no /v1): pi's anthropic-messages provider uses
   # @anthropic-ai/sdk, which appends /v1/messages itself. Unlike the codex block
@@ -706,20 +706,24 @@ write_pi_models_config() {
 }
 
 # write_pi_settings_config makes the `weave` provider pi's default and loads the
-# @workweave/pi-router extension. defaultProvider is always set to "weave" — the
+# @workweave/router extension. defaultProvider is always set to "weave" — the
 # installer's job is to route via Weave; uninstall reverts it. defaultModel is set
 # only when unset (don't clobber a user's model pick). The npm package source is
 # appended to `packages` idempotently — pi auto-installs missing packages on
-# startup, so the source entry is enough. No secret lives here, so no chmod 600.
+# startup — and the legacy `npm:@workweave/pi-router` id (from before the
+# extension was folded into @workweave/router) is dropped so a config from the
+# old layout can't keep a dangling/duplicate entry. No secret lives here, so no
+# chmod 600.
 #
 # Usage: write_pi_settings_config <settings_file>
 write_pi_settings_config() {
   local settings_file="$1"
-  local pkg="npm:@workweave/pi-router"
+  local pkg="npm:@workweave/router"
   local merged
   if [ -f "$settings_file" ]; then
     merged="$(jq --arg pkg "$pkg" '
       (.packages //= [])
+      | (.packages -= ["npm:@workweave/pi-router"])
       | (if (.packages | index($pkg)) then . else .packages += [$pkg] end)
       | .defaultProvider = "weave"
       | (if (.defaultModel // "") == "" then .defaultModel = "claude-sonnet-4-6" else . end)
@@ -1759,7 +1763,7 @@ if [ "$target" = "pi" ]; then
   write_pi_models_config "$pi_models_file" "$base_url" "$api_key" "$user_email" "$user_name"
   ok "pi models config written to $pi_models_file"
   write_pi_settings_config "$pi_settings_file"
-  ok "pi settings written to $pi_settings_file (provider weave + @workweave/pi-router)"
+  ok "pi settings written to $pi_settings_file (provider weave + @workweave/router)"
 
   if [ -n "$api_key" ]; then
     printf '%s\n' "$api_key" >"$pi_key_file"

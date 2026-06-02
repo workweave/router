@@ -10,7 +10,7 @@
 # to strip the `provider.weave` block (and the top-level `model` key when
 # it points at the router) from opencode.json; other providers and user
 # settings are preserved. Pass --pi to strip the `weave` provider from
-# pi's models.json, drop @workweave/pi-router from settings.json, revert the
+# pi's models.json, drop @workweave/router from settings.json, revert the
 # weave defaults, and remove the router key file.
 #
 # Usage:
@@ -269,7 +269,7 @@ if [ "$target" = "pi" ]; then
   # who independently picked claude-sonnet-4-6 with their own provider keeps it.
   if [ -f "$pi_settings_file" ]; then
     cleaned="$(jq '
-      (if .packages then .packages -= ["npm:@workweave/pi-router"] else . end)
+      (if .packages then .packages -= ["npm:@workweave/router", "npm:@workweave/pi-router"] else . end)
       | (if (.packages // []) == [] then del(.packages) else . end)
       | (if .defaultProvider == "weave"
            then del(.defaultProvider)

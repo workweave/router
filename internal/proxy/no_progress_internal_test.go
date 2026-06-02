@@ -1,11 +1,13 @@
 package proxy
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/sessionpin"
+	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -20,16 +22,16 @@ func sessionKeyFromString(s string) [sessionpin.SessionKeyLen]byte {
 
 func TestComputeNoProgressFingerprint_StableAcrossCalls(t *testing.T) {
 	d := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: "bedrock"}
-	a := computeNoProgressFingerprint(d, "explore RSVP files in this repository", 1)
-	b := computeNoProgressFingerprint(d, "explore RSVP files in this repository", 1)
+	a := computeNoProgressFingerprint(d, "explore RSVP files in this repository", 1, "")
+	b := computeNoProgressFingerprint(d, "explore RSVP files in this repository", 1, "")
 	assert.Equal(t, a, b)
 }
 
 func TestComputeNoProgressFingerprint_DistinguishesModel(t *testing.T) {
 	d1 := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: "bedrock"}
 	d2 := router.Decision{Model: "deepseek/deepseek-v4-flash", Provider: "deepinfra"}
-	a := computeNoProgressFingerprint(d1, "explore", 1)
-	b := computeNoProgressFingerprint(d2, "explore", 1)
+	a := computeNoProgressFingerprint(d1, "explore", 1, "")
+	b := computeNoProgressFingerprint(d2, "explore", 1, "")
 	assert.NotEqual(t, a, b)
 }
 
@@ -40,19 +42,31 @@ func TestComputeNoProgressFingerprint_PromptPrefixOnly(t *testing.T) {
 	for i := range prefix {
 		prefix[i] = 'a'
 	}
-	a := computeNoProgressFingerprint(d, string(prefix)+"suffix1", 1)
-	b := computeNoProgressFingerprint(d, string(prefix)+"suffix2", 1)
+	a := computeNoProgressFingerprint(d, string(prefix)+"suffix1", 1, "")
+	b := computeNoProgressFingerprint(d, string(prefix)+"suffix2", 1, "")
 	assert.Equal(t, a, b, "only the first %d bytes of prompt text matter for the fingerprint", noProgressPromptPrefix)
 }
 
 func TestComputeNoProgressFingerprint_DistinguishesMessageCount(t *testing.T) {
 	d := router.Decision{Model: "gemini-3.1-pro-preview", Provider: "google"}
-	// Same model/provider/prompt-prefix, different message count: a healthy
-	// agentic loop grows its transcript each turn, so the fingerprints must
+	// Same model/provider/prompt-prefix/tool-progress, different message count:
+	// a tool-free loop grows its transcript each turn, so the fingerprints must
 	// diverge even though the user's typed task (the prompt prefix) is constant.
-	a := computeNoProgressFingerprint(d, "explore RSVP files", 10)
-	b := computeNoProgressFingerprint(d, "explore RSVP files", 12)
+	a := computeNoProgressFingerprint(d, "explore RSVP files", 10, "")
+	b := computeNoProgressFingerprint(d, "explore RSVP files", 12, "")
 	assert.NotEqual(t, a, b, "a growing message count must change the fingerprint")
+}
+
+func TestComputeNoProgressFingerprint_DistinguishesToolProgress(t *testing.T) {
+	d := router.Decision{Model: "deepseek/deepseek-v4-flash", Provider: "deepinfra"}
+	// Everything constant except the tool-progress marker — the case Claude
+	// Code's Explore sub-agent hits, where model/provider/message_count and the
+	// user's task prompt are all flat but the tool-call history advances. The
+	// fingerprint must diverge so the detector does not mistake progress for a
+	// loop.
+	a := computeNoProgressFingerprint(d, "investigate the bug", 5, "42\x00Read\x00hash-a")
+	b := computeNoProgressFingerprint(d, "investigate the bug", 5, "43\x00Read\x00hash-b")
+	assert.NotEqual(t, a, b, "an advancing tool-progress marker must change the fingerprint")
 }
 
 func TestNoProgressTracker_DoesNotTripWhenMessageCountGrows(t *testing.T) {
@@ -69,28 +83,89 @@ func TestNoProgressTracker_DoesNotTripWhenMessageCountGrows(t *testing.T) {
 	now := time.Now()
 
 	for i := 0; i < noProgressMatchThreshold*2; i++ {
-		fp := computeNoProgressFingerprint(d, "implement the feature", 4+2*i)
+		fp := computeNoProgressFingerprint(d, "implement the feature", 4+2*i, "")
 		looped, _ := tr.recordAndDetect(key, install, "high", fp, now)
 		assert.False(t, looped, "a progressing loop (growing message count) must not trip (call %d)", i)
 	}
 }
 
-func TestNoProgressTracker_TripsWhenMessageCountFlat(t *testing.T) {
-	// A genuine sub-agent spawn loop replays independent envelope-1 requests:
-	// the transcript never grows, so message count stays flat and the detector
-	// must still fire.
+func TestNoProgressTracker_DoesNotTripWhenToolProgressGrows(t *testing.T) {
+	// Regression (Claude Code Explore sub-agent): the top-level message count
+	// stays flat across turns — tool_use blocks accrete inside a handful of
+	// messages — and tool_result turns are stripped from promptText in
+	// embed-only mode, so model/provider/message_count/prompt-prefix are all
+	// constant. It must NOT trip, because the agent appends a new, distinct tool
+	// call each turn, so the tool-progress marker advances.
+	tr := newNoProgressTracker()
+	key := sessionKeyFromString("session-explore")
+	install := uuid.New()
+	d := router.Decision{Model: "deepseek/deepseek-v4-flash", Provider: "deepinfra"}
+	now := time.Now()
+
+	for i := 0; i < noProgressMatchThreshold*2; i++ {
+		// Flat message count (5) and constant task prompt, but a growing
+		// tool-call history: the count climbs and the last call differs (a Read
+		// of a different file) each turn.
+		progress := strconv.Itoa(40+i) + "\x00Read\x00hash-" + strconv.Itoa(i)
+		fp := computeNoProgressFingerprint(d, "investigate the stuck name", 5, progress)
+		looped, _ := tr.recordAndDetect(key, install, "low", fp, now)
+		assert.False(t, looped, "a progressing tool-call loop must not trip even with flat message count (call %d)", i)
+	}
+}
+
+func TestNoProgressTracker_TripsWhenMessageCountAndToolProgressFlat(t *testing.T) {
+	// A genuine stuck loop — a sub-agent spawn loop replaying independent
+	// envelope-1 requests, or a model re-issuing one identical tool call — never
+	// advances: the transcript stays flat and the same single tool call repeats,
+	// so both the message count and the tool-progress marker are constant. The
+	// detector must still fire.
 	tr := newNoProgressTracker()
 	key := sessionKeyFromString("session-spawn-loop")
 	install := uuid.New()
 	d := router.Decision{Model: "gemini-3.1-pro-preview", Provider: "google"}
 	now := time.Now()
-	fp := computeNoProgressFingerprint(d, "spawn sub-agent", 2)
+	fp := computeNoProgressFingerprint(d, "spawn sub-agent", 2, "1\x00Agent\x00same-hash")
 
 	var looped bool
 	for i := 0; i < noProgressMatchThreshold; i++ {
 		looped, _ = tr.recordAndDetect(key, install, "high", fp, now)
 	}
-	assert.True(t, looped, "a flat-transcript spawn loop must still trip the detector")
+	assert.True(t, looped, "a flat-transcript, flat-tool-progress loop must still trip the detector")
+}
+
+func TestToolProgressMarker_AdvancesWithToolCalls(t *testing.T) {
+	// Two consecutive turns of a healthy Explore-style loop: the second appends
+	// a new, distinct tool call (a Read of a different file). The marker must
+	// change so the no-progress fingerprint diverges between turns.
+	turn1 := []byte(`{"model":"claude-haiku-4-5","max_tokens":256,"messages":[` +
+		`{"role":"user","content":"find the bug"},` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Grep","input":{"pattern":"scim","path":"/a"}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"1","content":"x"}]}` +
+		`]}`)
+	turn2 := []byte(`{"model":"claude-haiku-4-5","max_tokens":256,"messages":[` +
+		`{"role":"user","content":"find the bug"},` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Grep","input":{"pattern":"scim","path":"/a"}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"1","content":"x"}]},` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"2","name":"Read","input":{"file_path":"/b/sync_users.go"}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"2","content":"y"}]}` +
+		`]}`)
+
+	env1, err := translate.ParseAnthropic(turn1)
+	require.NoError(t, err)
+	env2, err := translate.ParseAnthropic(turn2)
+	require.NoError(t, err)
+
+	m1 := toolProgressMarker(env1)
+	m2 := toolProgressMarker(env2)
+	assert.NotEmpty(t, m1)
+	assert.NotEqual(t, m1, m2, "appending a new distinct tool call must advance the progress marker")
+}
+
+func TestToolProgressMarker_EmptyWithoutToolCalls(t *testing.T) {
+	body := []byte(`{"model":"claude-haiku-4-5","max_tokens":256,"messages":[{"role":"user","content":"hi"}]}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	assert.Equal(t, "", toolProgressMarker(env), "a tool-free turn has no tool-progress marker")
 }
 
 func TestNoProgressTracker_TripsAfterThresholdHits(t *testing.T) {
@@ -98,7 +173,7 @@ func TestNoProgressTracker_TripsAfterThresholdHits(t *testing.T) {
 	key := sessionKeyFromString("session-abc")
 	install := uuid.New()
 	d := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: "bedrock"}
-	fp := computeNoProgressFingerprint(d, "prompt", 1)
+	fp := computeNoProgressFingerprint(d, "prompt", 1, "")
 	now := time.Now()
 
 	for i := 1; i < noProgressMatchThreshold; i++ {
@@ -120,7 +195,7 @@ func TestNoProgressTracker_DoesNotTripWhenFingerprintsDiffer(t *testing.T) {
 
 	for i := 0; i < noProgressMatchThreshold*2; i++ {
 		d := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: "bedrock"}
-		fp := computeNoProgressFingerprint(d, "prompt-distinct-"+time.Duration(i).String(), 1)
+		fp := computeNoProgressFingerprint(d, "prompt-distinct-"+time.Duration(i).String(), 1, "")
 		looped, _ := tr.recordAndDetect(key, install, "high", fp, now)
 		assert.False(t, looped, "distinct fingerprints must not trip the detector (call %d)", i)
 	}
@@ -131,7 +206,7 @@ func TestNoProgressTracker_AgesOutOldEntries(t *testing.T) {
 	key := sessionKeyFromString("session-aging")
 	install := uuid.New()
 	d := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: "bedrock"}
-	fp := computeNoProgressFingerprint(d, "prompt", 1)
+	fp := computeNoProgressFingerprint(d, "prompt", 1, "")
 
 	old := time.Now().Add(-2 * noProgressTimeWindow)
 	for i := 0; i < noProgressMatchThreshold-1; i++ {
@@ -153,7 +228,7 @@ func TestNoProgressTracker_ZeroSessionKeyWithInstallationFallsBack(t *testing.T)
 	var zero [sessionpin.SessionKeyLen]byte
 	install := uuid.New()
 	d := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: "bedrock"}
-	fp := computeNoProgressFingerprint(d, "prompt", 1)
+	fp := computeNoProgressFingerprint(d, "prompt", 1, "")
 	now := time.Now()
 
 	for i := 1; i < noProgressMatchThreshold; i++ {
@@ -172,7 +247,7 @@ func TestNoProgressTracker_ZeroSessionKeyAndZeroInstallationIsSkipped(t *testing
 	tr := newNoProgressTracker()
 	var zero [sessionpin.SessionKeyLen]byte
 	d := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: "bedrock"}
-	fp := computeNoProgressFingerprint(d, "prompt", 1)
+	fp := computeNoProgressFingerprint(d, "prompt", 1, "")
 	now := time.Now()
 
 	for i := 0; i < noProgressMatchThreshold*2; i++ {
@@ -190,7 +265,7 @@ func TestNoProgressTracker_ZeroSessionDifferentInstallationsAreIsolated(t *testi
 	installA := uuid.New()
 	installB := uuid.New()
 	d := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: "bedrock"}
-	fp := computeNoProgressFingerprint(d, "prompt", 1)
+	fp := computeNoProgressFingerprint(d, "prompt", 1, "")
 	now := time.Now()
 
 	for i := 0; i < noProgressMatchThreshold-1; i++ {
@@ -206,7 +281,7 @@ func TestNoProgressTracker_NilReceiverIsNoOp(t *testing.T) {
 	var tr *noProgressTracker
 	key := sessionKeyFromString("session-nil")
 	d := router.Decision{Model: "x", Provider: "y"}
-	fp := computeNoProgressFingerprint(d, "p", 1)
+	fp := computeNoProgressFingerprint(d, "p", 1, "")
 	looped, count := tr.recordAndDetect(key, uuid.New(), "high", fp, time.Now())
 	assert.False(t, looped)
 	assert.Equal(t, 0, count)
@@ -215,7 +290,7 @@ func TestNoProgressTracker_NilReceiverIsNoOp(t *testing.T) {
 func TestNoProgressTracker_SeparateSessionsDoNotInterfere(t *testing.T) {
 	tr := newNoProgressTracker()
 	d := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: "bedrock"}
-	fp := computeNoProgressFingerprint(d, "prompt", 1)
+	fp := computeNoProgressFingerprint(d, "prompt", 1, "")
 	now := time.Now()
 	install := uuid.New()
 
@@ -241,7 +316,7 @@ func TestNoProgressTracker_DifferentRolesAreSeparateRings(t *testing.T) {
 	key := sessionKeyFromString("session-roles")
 	install := uuid.New()
 	d := router.Decision{Model: "x", Provider: "y"}
-	fp := computeNoProgressFingerprint(d, "p", 1)
+	fp := computeNoProgressFingerprint(d, "p", 1, "")
 	now := time.Now()
 
 	// Same session key, different role → different LRU entry. Filling the

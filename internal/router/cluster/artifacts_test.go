@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"workweave/router/internal/router/catalog"
 )
 
 // buildCentroidsBlob produces centroids.bin bytes from in-memory data,
@@ -331,4 +333,147 @@ func TestCheapestModelInSet(t *testing.T) {
 		_, _, ok := CheapestModelInSet(meta, registry, available, deny, nil)
 		assert.False(t, ok)
 	})
+}
+
+func TestFastestModel(t *testing.T) {
+	// model-c is cheapest but slowest; model-a is fastest. A cost-only
+	// selector returns model-c — FastestModel must return model-a.
+	meta := &ArtifactMetadata{
+		CostPer1KInputUSD: map[string]float64{
+			"model-a": 3.00,
+			"model-b": 0.50,
+			"model-c": 0.10,
+		},
+		TokPerS: map[string]map[string]float64{
+			"anthropic": {"model-a": 150.0},
+			"google":    {"model-b": 80.0, "model-c": 20.0},
+		},
+	}
+	registry := &ModelRegistry{
+		DeployedModels: []DeployedEntry{
+			{Model: "model-a", Provider: "anthropic", BenchColumn: "col-a"},
+			{Model: "model-b", Provider: "google", BenchColumn: "col-b"},
+			{Model: "model-c", Provider: "google", BenchColumn: "col-c"},
+		},
+	}
+
+	t.Run("picks fastest across providers, not cheapest", func(t *testing.T) {
+		available := map[string]struct{}{"anthropic": {}, "google": {}}
+		p, m, ok := FastestModel(meta, registry, available)
+		require.True(t, ok)
+		assert.Equal(t, "anthropic", p)
+		assert.Equal(t, "model-a", m, "model-c is cheapest but slowest")
+	})
+
+	t.Run("speed is provider-keyed", func(t *testing.T) {
+		// Only google available: model-a's anthropic speed is unreachable,
+		// so the fastest reachable model is model-b (80) over model-c (20).
+		available := map[string]struct{}{"google": {}}
+		p, m, ok := FastestModel(meta, registry, available)
+		require.True(t, ok)
+		assert.Equal(t, "google", p)
+		assert.Equal(t, "model-b", m)
+	})
+
+	t.Run("falls back to cheapest when bundle has no tok_per_s", func(t *testing.T) {
+		metaNoSpeed := &ArtifactMetadata{CostPer1KInputUSD: meta.CostPer1KInputUSD}
+		available := map[string]struct{}{"anthropic": {}, "google": {}}
+		p, m, ok := FastestModel(metaNoSpeed, registry, available)
+		require.True(t, ok)
+		assert.Equal(t, "google", p)
+		assert.Equal(t, "model-c", m, "no speed data → cost-only cheapest")
+	})
+
+	t.Run("ok=false when no provider matches", func(t *testing.T) {
+		available := map[string]struct{}{"openai": {}}
+		_, _, ok := FastestModel(meta, registry, available)
+		assert.False(t, ok)
+	})
+}
+
+func TestFastestModelInSet(t *testing.T) {
+	meta := &ArtifactMetadata{
+		CostPer1KInputUSD: map[string]float64{
+			"flash-lite": 0.20, // cheapest-ish, fastest
+			"v4-flash":   0.10, // cheapest, slowest
+			"mid-model":  1.00,
+		},
+		TokPerS: map[string]map[string]float64{
+			"google":    {"flash-lite": 158.0, "mid-model": 35.0},
+			"deepinfra": {"v4-flash": 24.0},
+		},
+	}
+	registry := &ModelRegistry{
+		DeployedModels: []DeployedEntry{
+			{Model: "flash-lite", Provider: "google", BenchColumn: "col-fl"},
+			{Model: "v4-flash", Provider: "deepinfra", BenchColumn: "col-vf"},
+			{Model: "mid-model", Provider: "google", BenchColumn: "col-mid"},
+		},
+	}
+	available := map[string]struct{}{"google": {}, "deepinfra": {}}
+
+	t.Run("low-tier clamp prefers fast flash-lite over cheap v4-flash", func(t *testing.T) {
+		// Mirrors the real haiku-tier clamp: both models are in-ceiling;
+		// cost-only picks v4-flash (the slow one), FastestModel picks
+		// flash-lite.
+		allow := map[string]struct{}{"flash-lite": {}, "v4-flash": {}}
+		p, m, ok := FastestModelInSet(meta, registry, available, nil, allow)
+		require.True(t, ok)
+		assert.Equal(t, "google", p)
+		assert.Equal(t, "flash-lite", m)
+	})
+
+	t.Run("falls back to cheapest within allowSet when none annotated", func(t *testing.T) {
+		metaNoSpeed := &ArtifactMetadata{CostPer1KInputUSD: meta.CostPer1KInputUSD}
+		allow := map[string]struct{}{"flash-lite": {}, "v4-flash": {}}
+		p, m, ok := FastestModelInSet(metaNoSpeed, registry, available, nil, allow)
+		require.True(t, ok)
+		assert.Equal(t, "deepinfra", p)
+		assert.Equal(t, "v4-flash", m, "no speed → cheapest in allowSet")
+	})
+
+	t.Run("denySet excludes the fastest, falls to next fastest", func(t *testing.T) {
+		allow := map[string]struct{}{"flash-lite": {}, "mid-model": {}}
+		deny := map[string]struct{}{"flash-lite": {}}
+		p, m, ok := FastestModelInSet(meta, registry, available, deny, allow)
+		require.True(t, ok)
+		assert.Equal(t, "google", p)
+		assert.Equal(t, "mid-model", m, "flash-lite faster but denylisted")
+	})
+
+	t.Run("ok=false when allowSet has no available model", func(t *testing.T) {
+		allow := map[string]struct{}{"nope": {}}
+		_, _, ok := FastestModelInSet(meta, registry, available, nil, allow)
+		assert.False(t, ok)
+	})
+}
+
+// Integration guard against the real shipped bundle: the low-tier clamp
+// (the path that funneled production traffic onto the slowest provider)
+// must now resolve to the fastest annotated low-tier model rather than the
+// cheapest. Pins the actual symptom this change fixes; will fail loudly if
+// a future bundle drops the flash-lite speed annotation or its tier.
+func TestFastestModel_RealLatestBundle_LowTierPrefersFastFlash(t *testing.T) {
+	version, err := ResolveVersion(LatestVersion)
+	require.NoError(t, err)
+	bundle, err := LoadBundle(version)
+	require.NoError(t, err)
+	if len(bundle.Metadata.TokPerS) == 0 {
+		t.Skip("latest bundle carries no tok_per_s annotations yet")
+	}
+	available := make(map[string]struct{}, len(bundle.Metadata.DeployedProviders))
+	for _, p := range bundle.Metadata.DeployedProviders {
+		available[p] = struct{}{}
+	}
+	allow := catalog.AllowedAtOrBelow(catalog.TierLow)
+
+	fastP, fastM, ok := FastestModelInSet(bundle.Metadata, bundle.Registry, available, nil, allow)
+	require.True(t, ok)
+	_, cheapM, ok := CheapestModelInSet(bundle.Metadata, bundle.Registry, available, nil, allow)
+	require.True(t, ok)
+
+	assert.Equal(t, "gemini-3.1-flash-lite-preview", fastM, "fastest low-tier model")
+	assert.Equal(t, "google", fastP)
+	assert.Equal(t, "deepseek/deepseek-v4-flash", cheapM, "cheapest low-tier model (the slow incumbent)")
+	assert.NotEqual(t, cheapM, fastM, "fastest must diverge from cheapest on the low-tier clamp")
 }
