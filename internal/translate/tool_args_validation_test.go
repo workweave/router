@@ -102,6 +102,84 @@ func TestAnthropicSSETranslator_FlagsEachInvalidBlockIndependently(t *testing.T)
 		"only the truncated block must be flagged; the valid sibling is unaffected")
 }
 
+// driveAnthropicSSEWithTools is driveAnthropicSSEWithSummary plus an
+// explicit "request had tools" flag, enabling the text-only-turn nudge
+// synthesis path.
+func driveAnthropicSSEWithTools(
+	t *testing.T,
+	model string,
+	hadTools bool,
+	events []string,
+) (string, translate.ResponseSummary) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, model, nil).
+		WithRequestHadTools(hadTools)
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+	return rec.Body.String(), translator.Summary()
+}
+
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_SynthesizesBash(t *testing.T) {
+	// Gemini / Mimo failure mode: upstream emits prose + <think> XML as
+	// plain text deltas, no tool_calls. Request HAD tools available.
+	// finishStream must synthesize a Bash tool_use so Claude Code's loop
+	// doesn't die on "tool call could not be parsed".
+	body, summary := driveAnthropicSSEWithTools(t, "gemini-3.1-pro-preview", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<think>Let me look at the file…</think>"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":" I will read the relevant code first."},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.True(t, summary.TextOnlyTurnNudged,
+		"upstream emitted no tool_use on a request with tools — nudge must fire")
+	assert.Equal(t, 1, summary.ToolUseBlocks,
+		"after the nudge the response carries exactly one synthetic tool_use block")
+	assert.Equal(t, "tool_use", summary.StopReason,
+		"stop_reason promotes to tool_use so Claude Code dispatches the synthetic call")
+	assert.Contains(t, body, `"name":"Bash"`, "synthetic call routes through Bash")
+	assert.Contains(t, body, "previous turn produced no tool_use",
+		"nudge text instructs the model to switch to real tools")
+	assert.Contains(t, body, `"id":"toolu_router_nudge_`,
+		"synthetic id is prefixed so log auditors can match it in stream transcripts")
+}
+
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_NoToolsInRequest(t *testing.T) {
+	// When the inbound request had no tools the model legitimately had
+	// nothing else to do — nudge must NOT fire (would inject a Bash call
+	// the client never declared).
+	body, summary := driveAnthropicSSEWithTools(t, "claude-opus-4-8", false, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Here is the explanation you asked for."},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.False(t, summary.TextOnlyTurnNudged,
+		"text-only response is correct when no tools were available")
+	assert.Equal(t, 0, summary.ToolUseBlocks)
+	assert.NotContains(t, body, "toolu_router_nudge_",
+		"no synthetic block when tools weren't available")
+}
+
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedWhenToolUseAlreadyEmitted(t *testing.T) {
+	// Normal happy path: model emitted a real tool_use. Nudge must skip.
+	_, summary := driveAnthropicSSEWithTools(t, "claude-opus-4-8", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"Read","arguments":"{\"path\":\"a.go\"}"}}]},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.False(t, summary.TextOnlyTurnNudged,
+		"a real tool_use was emitted; nudge must not fire")
+	assert.Equal(t, 1, summary.ToolUseBlocks, "exactly one real tool_use, no synthetic addition")
+}
+
 func TestAnthropicSSETranslator_EmptyArgsNotFlagged(t *testing.T) {
 	// Some tools take no input. The upstream emits no arguments fragment at
 	// all (or an empty one). An empty buffer is the trivial case — not

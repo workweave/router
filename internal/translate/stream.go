@@ -3,6 +3,7 @@ package translate
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -399,6 +400,18 @@ type AnthropicSSETranslator struct {
 	// routingMarker is emitted as a standalone text block at index 0.
 	routingMarker string
 	markerEmitted bool
+
+	// requestHadTools is true when the inbound Anthropic Messages request
+	// carried a non-empty tools array. Used at finishStream to detect the
+	// "model produced no tool_use when tools were available" case (Gemini-3.1
+	// and Mimo-v2.5 sometimes emit prose + <think> XML as plain text instead
+	// of tool_use blocks) and synthesize a recovery nudge that keeps Claude
+	// Code's agentic loop alive.
+	requestHadTools bool
+
+	// nudgeEmitted latches true when finishStream emitted the text-only
+	// recovery nudge, so Summary can surface it for log analysis.
+	nudgeEmitted bool
 }
 
 // NewAnthropicSSETranslator wraps w. Call Finalize after upstream returns.
@@ -433,6 +446,16 @@ func (t *AnthropicSSETranslator) WithEstimatedInputTokens(n int) *AnthropicSSETr
 	return t
 }
 
+// WithRequestHadTools tells the translator whether the inbound Anthropic
+// Messages request carried tools. Enables the finishStream recovery path
+// that synthesizes a Bash nudge when the upstream emitted prose/thinking
+// text but no tool_use block — the dominant residual empty-patch failure
+// mode on Gemini-3.1-Pro and Mimo-v2.5-Pro after PRs #280 / #281.
+func (t *AnthropicSSETranslator) WithRequestHadTools(hadTools bool) *AnthropicSSETranslator {
+	t.requestHadTools = hadTools
+	return t
+}
+
 // ResponseSummary reports translated-response signals an observer can log
 // after the stream completes. It exists to answer, from logs alone, what an
 // OpenAI-compat upstream actually returned and whether the tool_use stop_reason
@@ -455,6 +478,10 @@ type ResponseSummary struct {
 	// arguments that the client will likely fail to parse. See
 	// validateBufferedToolArgs.
 	InvalidToolArgsBlocks int
+	// TextOnlyTurnNudged is true when finishStream synthesized a Bash
+	// recovery nudge because the upstream produced no tool_use block on a
+	// request that had tools available. See synthesizeTextOnlyTurnNudge.
+	TextOnlyTurnNudged bool
 	// OutputTokens is the upstream completion_tokens count, when reported.
 	OutputTokens int
 }
@@ -468,6 +495,7 @@ func (t *AnthropicSSETranslator) Summary() ResponseSummary {
 		StopReasonPromoted:    t.toolUseEmitted && openAIFinishToAnthropic(t.finishReason) != "tool_use",
 		ToolUseBlocks:         t.toolUseCount,
 		InvalidToolArgsBlocks: len(t.toolArgsInvalid),
+		TextOnlyTurnNudged:    t.nudgeEmitted,
 		OutputTokens:          t.usageOutputTokens,
 	}
 }
@@ -872,6 +900,62 @@ func (t *AnthropicSSETranslator) emitValidatedToolArgsDelta(blockIdx int) error 
 	return t.emitContentBlockDeltaJSON(blockIdx, payload)
 }
 
+// routerNudgeCommand is the Bash payload synthesized when the upstream
+// produced no tool_use on a request that had tools available. The echo
+// surfaces as a tool_result in the next turn's context, nudging the model
+// to use a real tool. Bash is chosen because every Claude Code request
+// includes it in tools, making the fabricated call dispatchable.
+const routerNudgeCommand = "echo '[router] previous turn produced no tool_use; please use Edit/Write/Read/Bash/Grep — do not respond with prose or <think> tags only.'"
+
+// synthesizeTextOnlyTurnNudge fabricates a single Bash tool_use block when the
+// upstream produced an assistant turn with no tool_use blocks AND the inbound
+// request had tools available. Targets the bucket-C residual empty-patch
+// failure mode: Gemini-3.1-Pro and Mimo-v2.5-Pro sometimes emit prose plus
+// XML <think> tags as plain text, which Claude Code's strict parser refuses
+// with "tool call could not be parsed (retry also failed)" and the session
+// dies. Substituting a synthetic Bash echo turns the dead-end into a normal
+// tool_use turn: Claude Code dispatches the Bash, gets the nudge as a
+// tool_result, the next assistant turn re-emits with a real tool, and the
+// agentic loop survives.
+//
+// No-op when the upstream already emitted a tool_use, when the inbound
+// request had no tools (the model legitimately had nothing else to do), or
+// when nothing has been written to the stream yet (an unrelated upstream
+// error — preludeBuffer + flushErr handles that path).
+func (t *AnthropicSSETranslator) synthesizeTextOnlyTurnNudge() error {
+	if t.toolUseEmitted || !t.requestHadTools || !t.started {
+		return nil
+	}
+	blockIdx := t.blockIdx
+	id := "toolu_router_nudge_" + t.messageID
+	if err := t.emitContentBlockStartTool(blockIdx, id, "Bash", ""); err != nil {
+		return err
+	}
+	args, err := json.Marshal(map[string]string{
+		"command":     routerNudgeCommand,
+		"description": "router recovery nudge: previous turn had no tool_use",
+	})
+	if err != nil {
+		return err
+	}
+	if err := t.emitContentBlockDeltaJSON(blockIdx, string(args)); err != nil {
+		return err
+	}
+	if err := t.emitContentBlockStop(blockIdx); err != nil {
+		return err
+	}
+	t.blockIdx++
+	t.toolUseEmitted = true
+	t.toolUseCount++
+	t.nudgeEmitted = true
+	observability.Get().Error(
+		"AnthropicSSE synthesized text-only-turn recovery nudge",
+		"upstream_model", t.modelFromUpstream,
+		"request_model", t.requestModel,
+	)
+	return nil
+}
+
 // emitRoutingMarkerIfConfigured emits the routing marker as a standalone text
 // block at the current index, once per response.
 func (t *AnthropicSSETranslator) emitRoutingMarkerIfConfigured() error {
@@ -925,6 +1009,10 @@ func (t *AnthropicSSETranslator) finishStream() error {
 		}
 	}
 	t.toolBlocks = map[int]int{}
+
+	if err := t.synthesizeTextOnlyTurnNudge(); err != nil {
+		return err
+	}
 
 	if err := t.emitMessageDelta(); err != nil {
 		return err
