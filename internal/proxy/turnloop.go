@@ -531,6 +531,7 @@ func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sess
 		LastCachedWriteTokens: existing.LastCachedWriteTokens,
 		LastOutputTokens:      existing.LastOutputTokens,
 		LastTurnEndedAt:       existing.LastTurnEndedAt,
+		LastServedModel:       existing.LastServedModel,
 	}
 	s.enqueuePinUpsert(ctx, p, pinCacheKey)
 }

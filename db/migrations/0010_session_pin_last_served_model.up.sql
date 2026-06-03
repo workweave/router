@@ -6,7 +6,11 @@ BEGIN;
 -- means a /force-model write does not clobber the genuinely-last-served model,
 -- so the next turn can still detect that the model changed and strip stale
 -- Anthropic thinking-block signatures that the new model would reject with 400.
+-- IF NOT EXISTS: this column was applied to production directly from an
+-- unmerged branch before migration 0009 (consecutive_upstream_errors) landed
+-- on main. Using IF NOT EXISTS ensures the migration is idempotent on the
+-- production instance that already has the column.
 ALTER TABLE router.session_pins
-    ADD COLUMN last_served_model VARCHAR NOT NULL DEFAULT '';
+    ADD COLUMN IF NOT EXISTS last_served_model VARCHAR NOT NULL DEFAULT '';
 
 COMMIT;
