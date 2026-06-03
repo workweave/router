@@ -19,6 +19,12 @@ WHERE session_key = @session_key::bytea
 -- from the ON CONFLICT update set: only UpdateSessionPinUsage writes
 -- them, so the at-start-of-turn refresh here cannot clobber the
 -- previous turn's usage with zeros before the planner reads it.
+--
+-- consecutive_upstream_errors is preserved on a same-model refresh (so
+-- the two-strike eviction counter accumulates across turns of the same
+-- sticky pin) but reset to 0 on a switch (different model = clean
+-- slate). The reset on switch also covers the loop-break / force-model
+-- pin-expiry writes, which set pinned_model to the empty string.
 -- name: UpsertSessionPin :exec
 INSERT INTO router.session_pins (
   session_key, role, installation_id, pinned_provider,
@@ -34,7 +40,12 @@ ON CONFLICT (session_key, role) DO UPDATE SET
   decision_reason = EXCLUDED.decision_reason,
   turn_count      = router.session_pins.turn_count + 1,
   pinned_until    = EXCLUDED.pinned_until,
-  last_seen_at    = CURRENT_TIMESTAMP;
+  last_seen_at    = CURRENT_TIMESTAMP,
+  consecutive_upstream_errors = CASE
+    WHEN router.session_pins.pinned_model = EXCLUDED.pinned_model
+      THEN router.session_pins.consecutive_upstream_errors
+    ELSE 0
+  END;
 
 -- Records the previous turn's upstream token usage on an existing pin
 -- row. Fired off the request path after the upstream response
@@ -52,6 +63,29 @@ SET last_input_tokens        = @last_input_tokens::int,
     last_turn_ended_at       = @last_turn_ended_at::timestamptz
 WHERE session_key = @session_key::bytea
   AND role        = @role::varchar;
+
+-- Atomically increments consecutive_upstream_errors and returns the
+-- new value. The turn loop calls this after a non-retryable upstream
+-- 4xx on a sticky-pinned turn; the returned count drives the
+-- two-strike eviction decision. Returns sql.ErrNoRows if no pin
+-- exists, which the adapter maps to a no-op (pin must already be
+-- evicted by another path, e.g. force-model / loop-break).
+-- name: IncrementSessionPinUpstreamErrors :one
+UPDATE router.session_pins
+SET consecutive_upstream_errors = consecutive_upstream_errors + 1
+WHERE session_key = @session_key::bytea
+  AND role        = @role::varchar
+RETURNING consecutive_upstream_errors;
+
+-- Clears the two-strike counter after a successful turn. UPDATE
+-- matches by (session_key, role); zero rows affected on missing pin
+-- is a successful no-op like UpdateSessionPinUsage.
+-- name: ResetSessionPinUpstreamErrors :exec
+UPDATE router.session_pins
+SET consecutive_upstream_errors = 0
+WHERE session_key = @session_key::bytea
+  AND role        = @role::varchar
+  AND consecutive_upstream_errors > 0;
 
 -- Garbage-collects pins that have been expired for >24h. The 24h grace
 -- means a transient Postgres outage doesn't immediately prune live pins;

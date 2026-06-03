@@ -26,15 +26,18 @@ import (
 )
 
 type fakePinStore struct {
-	mu       sync.Mutex
-	pin      sessionpin.Pin
-	hasPin   bool
-	getErr   error
-	getCalls int
-	upserts  []sessionpin.Pin
-	upsertCh chan struct{}
-	usages   []sessionpin.Usage
-	usageCh  chan struct{}
+	mu               sync.Mutex
+	pin              sessionpin.Pin
+	hasPin           bool
+	getErr           error
+	getCalls         int
+	upserts          []sessionpin.Pin
+	upsertCh         chan struct{}
+	usages           []sessionpin.Usage
+	usageCh          chan struct{}
+	incrementCalls   int
+	incrementReturns int // value returned by IncrementUpstreamErrors when hasPin is true
+	resetCalls       int
 }
 
 func newFakePinStore() *fakePinStore {
@@ -79,6 +82,23 @@ func (f *fakePinStore) UpdateUsage(ctx context.Context, key [sessionpin.SessionK
 	case f.usageCh <- struct{}{}:
 	default:
 	}
+	return nil
+}
+
+func (f *fakePinStore) IncrementUpstreamErrors(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.incrementCalls++
+	if !f.hasPin {
+		return 0, nil
+	}
+	return f.incrementReturns, nil
+}
+
+func (f *fakePinStore) ResetUpstreamErrors(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resetCalls++
 	return nil
 }
 

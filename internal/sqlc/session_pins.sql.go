@@ -13,7 +13,7 @@ import (
 )
 
 const getSessionPin = `-- name: GetSessionPin :one
-SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at
+SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors
 FROM router.session_pins
 WHERE session_key = $1::bytea
   AND role        = $2::varchar
@@ -31,7 +31,7 @@ type GetSessionPinParams struct {
 // last_turn_ended_at carry the previous turn's upstream usage; the
 // planner reads them to weigh switch EV against eviction cost.
 //
-//	SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at
+//	SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors
 //	FROM router.session_pins
 //	WHERE session_key = $1::bytea
 //	  AND role        = $2::varchar
@@ -54,8 +54,68 @@ func (q *Queries) GetSessionPin(ctx context.Context, arg GetSessionPinParams) (R
 		&i.LastCachedWriteTokens,
 		&i.LastOutputTokens,
 		&i.LastTurnEndedAt,
+		&i.ConsecutiveUpstreamErrors,
 	)
 	return i, err
+}
+
+const incrementSessionPinUpstreamErrors = `-- name: IncrementSessionPinUpstreamErrors :one
+UPDATE router.session_pins
+SET consecutive_upstream_errors = consecutive_upstream_errors + 1
+WHERE session_key = $1::bytea
+  AND role        = $2::varchar
+RETURNING consecutive_upstream_errors
+`
+
+type IncrementSessionPinUpstreamErrorsParams struct {
+	SessionKey []byte
+	Role       string
+}
+
+// Atomically increments consecutive_upstream_errors and returns the
+// new value. The turn loop calls this after a non-retryable upstream
+// 4xx on a sticky-pinned turn; the returned count drives the
+// two-strike eviction decision. Returns sql.ErrNoRows if no pin
+// exists, which the adapter maps to a no-op (pin must already be
+// evicted by another path, e.g. force-model / loop-break).
+//
+//	UPDATE router.session_pins
+//	SET consecutive_upstream_errors = consecutive_upstream_errors + 1
+//	WHERE session_key = $1::bytea
+//	  AND role        = $2::varchar
+//	RETURNING consecutive_upstream_errors
+func (q *Queries) IncrementSessionPinUpstreamErrors(ctx context.Context, arg IncrementSessionPinUpstreamErrorsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementSessionPinUpstreamErrors, arg.SessionKey, arg.Role)
+	var consecutive_upstream_errors int32
+	err := row.Scan(&consecutive_upstream_errors)
+	return consecutive_upstream_errors, err
+}
+
+const resetSessionPinUpstreamErrors = `-- name: ResetSessionPinUpstreamErrors :exec
+UPDATE router.session_pins
+SET consecutive_upstream_errors = 0
+WHERE session_key = $1::bytea
+  AND role        = $2::varchar
+  AND consecutive_upstream_errors > 0
+`
+
+type ResetSessionPinUpstreamErrorsParams struct {
+	SessionKey []byte
+	Role       string
+}
+
+// Clears the two-strike counter after a successful turn. UPDATE
+// matches by (session_key, role); zero rows affected on missing pin
+// is a successful no-op like UpdateSessionPinUsage.
+//
+//	UPDATE router.session_pins
+//	SET consecutive_upstream_errors = 0
+//	WHERE session_key = $1::bytea
+//	  AND role        = $2::varchar
+//	  AND consecutive_upstream_errors > 0
+func (q *Queries) ResetSessionPinUpstreamErrors(ctx context.Context, arg ResetSessionPinUpstreamErrorsParams) error {
+	_, err := q.db.Exec(ctx, resetSessionPinUpstreamErrors, arg.SessionKey, arg.Role)
+	return err
 }
 
 const sweepExpiredSessionPins = `-- name: SweepExpiredSessionPins :exec
@@ -140,7 +200,12 @@ ON CONFLICT (session_key, role) DO UPDATE SET
   decision_reason = EXCLUDED.decision_reason,
   turn_count      = router.session_pins.turn_count + 1,
   pinned_until    = EXCLUDED.pinned_until,
-  last_seen_at    = CURRENT_TIMESTAMP
+  last_seen_at    = CURRENT_TIMESTAMP,
+  consecutive_upstream_errors = CASE
+    WHEN router.session_pins.pinned_model = EXCLUDED.pinned_model
+      THEN router.session_pins.consecutive_upstream_errors
+    ELSE 0
+  END
 `
 
 type UpsertSessionPinParams struct {
@@ -164,6 +229,12 @@ type UpsertSessionPinParams struct {
 // them, so the at-start-of-turn refresh here cannot clobber the
 // previous turn's usage with zeros before the planner reads it.
 //
+// consecutive_upstream_errors is preserved on a same-model refresh (so
+// the two-strike eviction counter accumulates across turns of the same
+// sticky pin) but reset to 0 on a switch (different model = clean
+// slate). The reset on switch also covers the loop-break / force-model
+// pin-expiry writes, which set pinned_model to the empty string.
+//
 //	INSERT INTO router.session_pins (
 //	  session_key, role, installation_id, pinned_provider,
 //	  pinned_model, decision_reason, turn_count, pinned_until
@@ -178,7 +249,12 @@ type UpsertSessionPinParams struct {
 //	  decision_reason = EXCLUDED.decision_reason,
 //	  turn_count      = router.session_pins.turn_count + 1,
 //	  pinned_until    = EXCLUDED.pinned_until,
-//	  last_seen_at    = CURRENT_TIMESTAMP
+//	  last_seen_at    = CURRENT_TIMESTAMP,
+//	  consecutive_upstream_errors = CASE
+//	    WHEN router.session_pins.pinned_model = EXCLUDED.pinned_model
+//	      THEN router.session_pins.consecutive_upstream_errors
+//	    ELSE 0
+//	  END
 func (q *Queries) UpsertSessionPin(ctx context.Context, arg UpsertSessionPinParams) error {
 	_, err := q.db.Exec(ctx, upsertSessionPin,
 		arg.SessionKey,

@@ -77,6 +77,37 @@ func (r *SessionPinRepo) UpdateUsage(ctx context.Context, sessionKey [sessionpin
 	})
 }
 
+// IncrementUpstreamErrors atomically bumps the consecutive-error
+// counter and returns the new value. A missing pin (already evicted
+// by force-model or loop-break, or never created) surfaces as
+// (0, nil) so the turn loop's two-strike check treats it as a no-op
+// — the relevant signal is gone and there's no row left to evict.
+func (r *SessionPinRepo) IncrementUpstreamErrors(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) (int, error) {
+	q := sqlc.New(r.tx)
+	count, err := q.IncrementSessionPinUpstreamErrors(ctx, sqlc.IncrementSessionPinUpstreamErrorsParams{
+		SessionKey: sessionKey[:],
+		Role:       role,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return int(count), nil
+}
+
+// ResetUpstreamErrors clears the consecutive-error counter after a
+// successful turn. Missing pin = successful no-op (mirrors
+// UpdateUsage's semantics).
+func (r *SessionPinRepo) ResetUpstreamErrors(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) error {
+	q := sqlc.New(r.tx)
+	return q.ResetSessionPinUpstreamErrors(ctx, sqlc.ResetSessionPinUpstreamErrorsParams{
+		SessionKey: sessionKey[:],
+		Role:       role,
+	})
+}
+
 func (r *SessionPinRepo) SweepExpired(ctx context.Context) error {
 	q := sqlc.New(r.tx)
 	return q.SweepExpiredSessionPins(ctx)
