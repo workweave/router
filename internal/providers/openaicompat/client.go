@@ -27,6 +27,10 @@ const (
 	// HuggingFace-form model IDs; pair with NewClientWithModelIDMap to rewrite
 	// the router's public slash-form slugs on the wire.
 	DeepInfraBaseURL = "https://api.deepinfra.com/v1/openai"
+	// ParasailBaseURL is Parasail's OpenAI-compatible serverless surface.
+	// Parasail uses its own "parasail-"-prefixed model slugs; pair with
+	// NewClientWithModelIDMap to rewrite the router's public slash-form slugs.
+	ParasailBaseURL = "https://api.parasail.io/v1"
 )
 
 // BedrockMantleBaseURLTemplate is the OpenAI-compatible bedrock-mantle endpoint
