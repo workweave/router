@@ -126,11 +126,12 @@ func driveAnthropicSSEWithTools(
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SynthesizesBash(t *testing.T) {
-	// Gemini / Mimo failure mode: upstream emits prose + <think> XML as
-	// plain text deltas, no tool_calls. Request HAD tools available.
-	// finishStream must synthesize a Bash tool_use so Claude Code's loop
-	// doesn't die on "tool call could not be parsed".
-	body, summary := driveAnthropicSSEWithTools(t, "gemini-3.1-pro-preview", true, []string{
+	// OpenAI-compat failure mode (e.g. Mimo-v2.5): upstream emits prose +
+	// <think> XML as plain text deltas, no tool_calls. Request HAD tools
+	// available. finishStream must synthesize a Bash tool_use so Claude
+	// Code's loop doesn't die on "tool call could not be parsed". (Gemini-3.x
+	// is deliberately excluded — see the _SuppressedOnGemini3x test below.)
+	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<think>Let me look at the file…</think>"},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":" I will read the relevant code first."},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
@@ -148,6 +149,28 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_SynthesizesBash(t *testing.T) 
 		"nudge text instructs the model to switch to real tools")
 	assert.Contains(t, body, `"id":"toolu_router_nudge_`,
 		"synthetic id is prefixed so log auditors can match it in stream transcripts")
+}
+
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_SuppressedOnGemini3x(t *testing.T) {
+	// Regression: the synthetic Bash block has no thoughtSignature. On
+	// Gemini-3.x the next turn drops the ENTIRE tool_use/tool_result history
+	// (anyToolUseMissingSig → dropToolBlocks in emit_gemini.go), wiping the
+	// agent's working context and looping it to the turn ceiling. So even
+	// though the request had tools and the upstream emitted only text, the
+	// nudge MUST be suppressed when the routed model is Gemini-3.x.
+	body, summary := driveAnthropicSSEWithTools(t, "gemini-3.1-pro-preview", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<think>Let me look at the file…</think>"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":" I will read the relevant code first."},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.False(t, summary.TextOnlyTurnNudged,
+		"nudge must be suppressed on Gemini-3.x — a sig-less tool_use poisons the next turn's history")
+	assert.Equal(t, 0, summary.ToolUseBlocks,
+		"no synthetic tool_use is emitted on the Gemini-3.x path")
+	assert.NotContains(t, body, "toolu_router_nudge_",
+		"no synthetic nudge block reaches a Gemini-3.x client")
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_NoToolsInRequest(t *testing.T) {

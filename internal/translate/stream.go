@@ -922,8 +922,28 @@ const routerNudgeCommand = "echo '[router] previous turn produced no tool_use; p
 // request had no tools (the model legitimately had nothing else to do), or
 // when nothing has been written to the stream yet (an unrelated upstream
 // error — preludeBuffer + flushErr handles that path).
+//
+// CRITICAL no-op on Gemini-3.x: the synthesized block is a tool_use with no
+// thoughtSignature. Gemini-3.x requires a thoughtSignature on every
+// functionCall part across turns; on the next turn writeGeminiFromAnthropic
+// sees the sig-less nudge, sets anyToolUseMissingSig and drops the ENTIRE
+// tool_use/tool_result history (emit_gemini.go dropToolBlocks). That wipes
+// every prior Read/Grep/Bash result, so the model loses its working context,
+// re-runs the same discovery commands, never edits, and loops to the turn
+// ceiling (error_max_turns). Empirically this nudge made Gemini-3.x strictly
+// worse (≥90-turn loops 4 → 46 across the v0.59 SWE-bench bake-off), so we
+// suppress it here and let the turn end as text. The OpenAI-compat models the
+// nudge was built for (e.g. Mimo-v2.5) have no such guard and still benefit.
 func (t *AnthropicSSETranslator) synthesizeTextOnlyTurnNudge() error {
 	if t.toolUseEmitted || !t.requestHadTools || !t.started {
+		return nil
+	}
+	if isGemini3xModel(t.requestModel) || isGemini3xModel(t.modelFromUpstream) {
+		observability.Get().Debug(
+			"AnthropicSSE suppressed text-only-turn nudge on Gemini-3.x (sig-less tool_use would poison next-turn history)",
+			"upstream_model", t.modelFromUpstream,
+			"request_model", t.requestModel,
+		)
 		return nil
 	}
 	blockIdx := t.blockIdx
