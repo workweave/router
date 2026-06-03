@@ -412,6 +412,12 @@ type AnthropicSSETranslator struct {
 	// nudgeEmitted latches true when finishStream emitted the text-only
 	// recovery nudge, so Summary can surface it for log analysis.
 	nudgeEmitted bool
+
+	// stopReasonDemoted latches true when emitMessageDelta demoted a
+	// finish_reason="tool_calls" turn to end_turn because no tool_use block
+	// survived. Surfaced via Summary so the proxy can count the degenerate
+	// tool-call turns that previously dead-ended agent clients.
+	stopReasonDemoted bool
 }
 
 // NewAnthropicSSETranslator wraps w. Call Finalize after upstream returns.
@@ -482,6 +488,17 @@ type ResponseSummary struct {
 	// recovery nudge because the upstream produced no tool_use block on a
 	// request that had tools available. See synthesizeTextOnlyTurnNudge.
 	TextOnlyTurnNudged bool
+	// StopReasonDemoted is true when a finish_reason="tool_calls" turn was
+	// demoted to end_turn because no tool_use block survived (see
+	// emitMessageDelta). It marks the degenerate tool-call turns that
+	// previously dead-ended agent clients with stop_reason="tool_use" and zero
+	// tool_use blocks.
+	StopReasonDemoted bool
+	// SuppressedToolCalls counts tool_calls dropped for carrying no function
+	// name (see emitDelta). Non-zero alongside StopReasonDemoted points at the
+	// nameless-call case; zero alongside it points at the call-emitted-as-text
+	// case — enough to tell the two apart from logs without dumping bodies.
+	SuppressedToolCalls int
 	// OutputTokens is the upstream completion_tokens count, when reported.
 	OutputTokens int
 }
@@ -496,6 +513,8 @@ func (t *AnthropicSSETranslator) Summary() ResponseSummary {
 		ToolUseBlocks:         t.toolUseCount,
 		InvalidToolArgsBlocks: len(t.toolArgsInvalid),
 		TextOnlyTurnNudged:    t.nudgeEmitted,
+		StopReasonDemoted:     t.stopReasonDemoted,
+		SuppressedToolCalls:   len(t.suppressedTools),
 		OutputTokens:          t.usageOutputTokens,
 	}
 }
@@ -1148,6 +1167,19 @@ func (t *AnthropicSSETranslator) emitMessageDelta() error {
 	// tool_use anyway, gets the same result, and we loop.
 	if t.toolUseEmitted {
 		stopReason = "tool_use"
+	} else if stopReason == "tool_use" {
+		// finish_reason="tool_calls" but no tool_use block survived: every
+		// tool_call was nameless and dropped (see emitDelta), or the upstream
+		// emitted the call as plain text the parser never structured. Relaying
+		// stop_reason="tool_use" with zero tool_use blocks dead-ends agent
+		// clients — they wait for a tool call that never arrives and the turn
+		// stalls, so the user keeps nudging ("keep going") to no effect. The
+		// text-only-turn nudge handles the tools-present case before we reach
+		// here; this guards the rest (request carried no tools, or the nudge
+		// did not fire) so the Anthropic invariant — tool_use stop_reason iff a
+		// tool_use block exists — holds in both directions.
+		stopReason = "end_turn"
+		t.stopReasonDemoted = true
 	}
 	t.emittedStopReason = stopReason
 	observability.Get().Debug("AnthropicSSE emit", "event", "message_delta", "stop_reason", stopReason)

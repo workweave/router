@@ -396,10 +396,14 @@ func TestOpenAIToAnthropicResponse_MixedTextAndToolCalls(t *testing.T) {
 }
 
 func TestOpenAIToAnthropicResponse_StopReasonMapping(t *testing.T) {
+	// finish_reason="tool_calls" is intentionally absent: with no tool_use
+	// block it demotes to end_turn, and with one it promotes to tool_use — a
+	// context-dependent mapping covered by the Promotes/Demotes tests below.
+	// The cases here use a tool-free message body, so only the content-agnostic
+	// mappings belong.
 	cases := []struct{ openai, anthropic string }{
 		{"stop", "end_turn"},
 		{"length", "max_tokens"},
-		{"tool_calls", "tool_use"},
 	}
 	for _, c := range cases {
 		body := `{"id":"x","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"` + c.openai + `"}]}`

@@ -175,15 +175,20 @@ func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error)
 	firstChoice := gjson.GetBytes(body, "choices.0")
 	message := firstChoice.Get("message")
 	finishReason := firstChoice.Get("finish_reason").String()
-	// Anthropic invariant: tool_use blocks ⇒ stop_reason="tool_use". Some
-	// OpenAI-compat upstreams (GLM-5.1 on DeepInfra, vLLM Qwen/MiMo serves)
-	// close a tool turn with finish_reason="stop" instead of "tool_calls".
-	// Mirror the streaming-path promotion in emitMessageDelta. Count only
-	// named tool calls: nameless ones are dropped in
-	// writeAnthropicContentFromOpenAI, so promoting on their presence would
-	// force stop_reason="tool_use" with no tool_use block — the loop again.
+	// Anthropic invariant: a tool_use stop_reason holds iff at least one
+	// tool_use block exists. Some OpenAI-compat upstreams (GLM-5.1 on
+	// DeepInfra, vLLM Qwen/MiMo serves) violate it in both directions, so we
+	// correct both — mirroring the streaming path in emitMessageDelta:
+	//   - Promote: a named tool call is present but the turn closed with
+	//     finish_reason="stop" instead of "tool_calls".
+	//   - Demote: finish_reason="tool_calls" but every call was nameless and
+	//     dropped by writeAnthropicContentFromOpenAI (or the call leaked into
+	//     text). Left as tool_use it would ship a tool_use stop_reason with
+	//     zero tool_use blocks and dead-end the client.
 	if anyNamedToolCall(message.Get("tool_calls")) {
 		finishReason = "tool_calls"
+	} else if finishReason == "tool_calls" {
+		finishReason = "stop"
 	}
 
 	jw := newJSONWriter()
