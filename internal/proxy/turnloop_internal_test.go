@@ -48,6 +48,14 @@ func (s *stubPinStore) UpdateUsage(_ context.Context, _ [sessionpin.SessionKeyLe
 	return nil
 }
 
+func (s *stubPinStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) (int, error) {
+	return 0, nil
+}
+
+func (s *stubPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) error {
+	return nil
+}
+
 func (s *stubPinStore) SweepExpired(context.Context) error { return nil }
 
 // TestRecordTurnUsage_UpdatesInProcCache guards the LRU-coherence invariant:
