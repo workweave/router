@@ -283,6 +283,24 @@ func (s *Service) runTurnLoop(
 		pin = sessionpin.Pin{}
 	}
 
+	// Context-window overflow guard: if the pre-filter in ProxyMessages /
+	// ProxyOpenAIChatCompletion added the pinned model to ExcludedModels
+	// (because this turn's estimated context exceeds the model's window),
+	// treat the pin as missing so downstream sticky branches (ToolResult,
+	// OutcomeStay, !plannerEnabled) cannot re-anchor to an over-capacity
+	// model. Sessions grow over time; the filter correctly evicts the pin
+	// on the turn where the window is first breached.
+	if pinFound {
+		if _, overCapacity := req.ExcludedModels[pin.Model]; overCapacity {
+			log.Info("Session pin excluded by context-window pre-filter; falling through to scorer",
+				"pin_model", pin.Model,
+				"pin_provider", pin.Provider,
+			)
+			pinFound = false
+			pin = sessionpin.Pin{}
+		}
+	}
+
 	// Tool-result turns are mid-turn continuations. Re-routing them on
 	// trailing tool_result embedding flips decisions to noisy candidates;
 	// reuse the pin verbatim when present and refresh the TTL.
