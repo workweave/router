@@ -113,6 +113,38 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		"request_id", resp.Header.Get("X-Request-Id"),
 	)
 
+	// Buffer non-2xx and surface as UpstreamErrorResponse so the dispatch
+	// loop can fail over (multi-binding models) or render the upstream error
+	// envelope in the inbound format (single-binding models like gpt-*).
+	// Writing the upstream status straight through corrupts the SSE stream
+	// when a translator's Prelude already committed `200 + message_start`
+	// to the prelude buffer, and silently drops the upstream error body —
+	// neither debugging signal nor failover survive.
+	if resp.StatusCode >= 400 {
+		bufBody, totalRead, drainErr := readCapped(resp.Body, providers.MaxBufferedErrorBytes)
+		if len(bufBody) > 0 {
+			t.StampUpstreamFirstByte()
+		}
+		if drainErr == nil {
+			t.StampUpstreamEOF()
+		}
+		logUpstreamStatus(
+			"Upstream OpenAI returned error status",
+			resp.StatusCode,
+			"base_url", c.baseURL,
+			"routed_model", decision.Model,
+			"body_preview", previewBytes(bufBody),
+			"body_total_bytes", totalRead,
+		)
+		errHeaders := http.Header{}
+		providers.CopyUpstreamHeaders(headerCapture{errHeaders}, resp)
+		return &providers.UpstreamErrorResponse{
+			Status:  resp.StatusCode,
+			Headers: errHeaders,
+			Body:    bufBody,
+		}
+	}
+
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 	status := resp.StatusCode
@@ -203,8 +235,75 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
+	if resp.StatusCode >= 400 {
+		var snip [1024]byte
+		n, _ := io.ReadFull(resp.Body, snip[:])
+		_, snipWriteErr := w.Write(snip[:n])
+		rest, copyErr := io.Copy(w, resp.Body)
+		logUpstreamStatus(
+			"Upstream OpenAI returned error status (passthrough)",
+			resp.StatusCode,
+			"base_url", c.baseURL,
+			"path", r.URL.Path,
+			"body_preview", string(snip[:n]),
+			"body_total_bytes", int64(n)+rest,
+		)
+		if snipWriteErr != nil {
+			return snipWriteErr
+		}
+		if copyErr != nil {
+			return copyErr
+		}
+		return &providers.UpstreamStatusError{Status: resp.StatusCode}
+	}
 	_, err = io.Copy(w, resp.Body)
 	return err
+}
+
+// readCapped reads up to limit bytes from r into a buffer, then drains the
+// rest without retention up to maxDrain to bound failover latency on a slow
+// upstream returning a large error body. The connection is closed by the
+// caller's defer regardless, so the unread tail is discarded by Close.
+func readCapped(r io.Reader, limit int) ([]byte, int64, error) {
+	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
+	totalRead := int64(len(prefix))
+	if err != nil {
+		return prefix, totalRead, err
+	}
+	const maxDrain = 1 << 20 // 1 MiB
+	rest, drainErr := io.Copy(io.Discard, io.LimitReader(r, maxDrain))
+	totalRead += rest
+	return prefix, totalRead, drainErr
+}
+
+// previewBytes returns the first 1KB of body as a string for logging.
+func previewBytes(body []byte) string {
+	const previewLimit = 1024
+	if len(body) > previewLimit {
+		return string(body[:previewLimit])
+	}
+	return string(body)
+}
+
+// headerCapture is a minimal http.ResponseWriter that captures headers only,
+// used to reuse providers.CopyUpstreamHeaders against an http.Header we own.
+// Write/WriteHeader are no-ops.
+type headerCapture struct{ h http.Header }
+
+func (c headerCapture) Header() http.Header       { return c.h }
+func (c headerCapture) Write([]byte) (int, error) { return 0, nil }
+func (c headerCapture) WriteHeader(int)           {}
+
+// logUpstreamStatus logs non-2xx upstream responses with a body preview.
+// Severity is ERROR for >=500 and >=400 except 429 (which is a routine
+// rate-limit signal that callers handle via failover).
+func logUpstreamStatus(msg string, status int, attrs ...any) {
+	merged := append([]any{"status", status}, attrs...)
+	if status >= 500 || (status >= 400 && status != http.StatusTooManyRequests) {
+		observability.Get().Error(msg, merged...)
+		return
+	}
+	observability.Get().Warn(msg, merged...)
 }
 
 var _ providers.Client = (*Client)(nil)
