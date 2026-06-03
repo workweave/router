@@ -197,6 +197,48 @@ func TestAssistantToolCallSignatures_EmptyAndNonAssistant(t *testing.T) {
 	assert.Nil(t, env.AssistantToolCallSignatures())
 }
 
+func TestAssistantToolCallSignatures_SkipsRouterNudgeEntries(t *testing.T) {
+	// Router-synthesized recovery nudges have a constant command string so their
+	// InputHash never changes. If a model emits consecutive text-only turns the
+	// router injects a nudge each time; once 5 accumulate in the history both
+	// detectToolCallLoop and toolProgressMarker see 5 identical Bash sigs and
+	// fire — killing the session the nudge was trying to rescue. Nudges must be
+	// invisible to the detectors.
+	body := mustMarshalJSON(t, map[string]any{
+		"model": "claude-sonnet-4-6",
+		"messages": []any{
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "toolu_router_nudge_msg1", "name": "Bash", "input": map[string]any{
+					"command":     "echo '[router] previous turn produced no tool_use; please use Edit/Write/Read/Bash/Grep — do not respond with prose or <think> tags only.'",
+					"description": "router recovery nudge: previous turn had no tool_use",
+				}},
+			}},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "toolu_router_nudge_msg1", "content": ""},
+			}},
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "toolu_router_nudge_msg2", "name": "Bash", "input": map[string]any{
+					"command":     "echo '[router] previous turn produced no tool_use; please use Edit/Write/Read/Bash/Grep — do not respond with prose or <think> tags only.'",
+					"description": "router recovery nudge: previous turn had no tool_use",
+				}},
+			}},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "toolu_router_nudge_msg2", "content": ""},
+			}},
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "toolu_real_1", "name": "Read", "input": map[string]any{"file_path": "/foo.go"}},
+			}},
+		},
+		"max_tokens": 256,
+	})
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 1, "router nudge tool_use entries must be filtered; only the real Read should appear")
+	assert.Equal(t, "Read", sigs[0].Name)
+}
+
 // mustMarshalJSON is shared with force_model_test.go; redeclared here would be
 // a compile error so the existing one is reused.
 var _ = json.Marshal

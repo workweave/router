@@ -153,6 +153,15 @@ func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
 			if name == "" {
 				return true
 			}
+			// Skip router-synthesized recovery nudges. Nudges carry a constant
+			// command string (routerNudgeCommand), so their InputHash never
+			// changes. If a model emits consecutive text-only turns the router
+			// injects a nudge each time; once 5 accumulate in the window both
+			// detectToolCallLoop and toolProgressMarker see 5 identical Bash
+			// sigs and fire — killing the session the nudge was meant to rescue.
+			if strings.HasPrefix(block.Get("id").String(), "toolu_router_nudge_") {
+				return true
+			}
 			// Skip entries with empty input. Cross-format translation of a
 			// stream-incomplete tool call (OpenAI/openaicompat upstream →
 			// Anthropic inbound) can emit `input:{}` to satisfy the schema.
