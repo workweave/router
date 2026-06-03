@@ -244,6 +244,51 @@ func (s *Service) excludedModelsForRequest(ctx context.Context) map[string]struc
 	return out
 }
 
+// contextWindowOverheadFactor scales the raw body-bytes token estimate to
+// account for JSON structure overhead (field names, brackets, quotes) inflating
+// byte count relative to actual tokens. The inverse of 5 bytes/token
+// comes from empirical Anthropic request bodies; tool-heavy sessions run higher.
+// This constant is intentionally baked into FullTokenEstimate (body/5).
+
+// contextWindowOutputReserve is the minimum tokens reserved for the model's
+// response when comparing the request estimate against the context window.
+const contextWindowOutputReserve = 8_000
+
+// excludeContextOverflowModels returns a copy of excluded augmented with every
+// model in available whose context window is too small to serve the request.
+// est is the full-body token estimate (translate.RequestEnvelope.FullTokenEstimate).
+// outputReserve is the expected output budget (feats.MaxTokens or the const above).
+// Returns the original excluded map unchanged when no models are added.
+func excludeContextOverflowModels(est, outputReserve int, excluded, available map[string]struct{}) (map[string]struct{}, int) {
+	if est <= 0 {
+		return excluded, 0
+	}
+	needed := est + outputReserve
+	var out map[string]struct{}
+	added := 0
+	for model := range available {
+		if _, alreadyExcluded := excluded[model]; alreadyExcluded {
+			continue
+		}
+		cw := catalog.ContextWindowFor(model)
+		if needed <= cw {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]struct{}, len(excluded)+1)
+			for k := range excluded {
+				out[k] = struct{}{}
+			}
+		}
+		out[model] = struct{}{}
+		added++
+	}
+	if added == 0 {
+		return excluded, 0
+	}
+	return out, added
+}
+
 // CredentialsFromContext returns the resolved credentials stashed on ctx.
 func CredentialsFromContext(ctx context.Context) *Credentials {
 	v := ctx.Value(CredentialsContextKey{})
@@ -793,6 +838,24 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
 	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderAnthropic, r.Header)
+
+	// Pre-filter models whose context window cannot fit this request.
+	// FullTokenEstimate uses raw body bytes (÷5) to capture tool definitions,
+	// tool calls, and tool results that feats.Tokens (text-only) misses.
+	outputReserve := contextWindowOutputReserve
+	if feats.MaxTokens > outputReserve {
+		outputReserve = feats.MaxTokens
+	}
+	baseExcluded := s.excludedModelsForRequest(ctx)
+	excluded, ctxExcluded := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserve, baseExcluded, s.availableModels)
+	if ctxExcluded > 0 {
+		log.Info("context window pre-filter: excluded over-capacity models",
+			"full_token_estimate", env.FullTokenEstimate(),
+			"output_reserve", outputReserve,
+			"excluded_count", ctxExcluded,
+		)
+	}
+
 	routeStart := time.Now()
 	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, router.Request{
 		RequestedModel:       feats.Model,
@@ -800,7 +863,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		HasTools:             feats.HasTools,
 		PromptText:           promptText,
 		EnabledProviders:     enabledProviders,
-		ExcludedModels:       s.excludedModelsForRequest(ctx),
+		ExcludedModels:       excluded,
 		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
 	if routeErr != nil {
@@ -1764,6 +1827,22 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
 	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header)
+
+	// Pre-filter models whose context window cannot fit this request.
+	outputReserveOAI := contextWindowOutputReserve
+	if feats.MaxTokens > outputReserveOAI {
+		outputReserveOAI = feats.MaxTokens
+	}
+	baseExcludedOAI := s.excludedModelsForRequest(ctx)
+	excludedOAI, ctxExcludedOAI := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserveOAI, baseExcludedOAI, s.availableModels)
+	if ctxExcludedOAI > 0 {
+		log.Info("context window pre-filter: excluded over-capacity models",
+			"full_token_estimate", env.FullTokenEstimate(),
+			"output_reserve", outputReserveOAI,
+			"excluded_count", ctxExcludedOAI,
+		)
+	}
+
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
 		RequestedModel:       feats.Model,
@@ -1771,7 +1850,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		HasTools:             feats.HasTools,
 		PromptText:           promptText,
 		EnabledProviders:     enabledProviders,
-		ExcludedModels:       s.excludedModelsForRequest(ctx),
+		ExcludedModels:       excludedOAI,
 		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()

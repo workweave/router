@@ -125,6 +125,20 @@ func AllowedAtOrBelow(ceiling Tier) map[string]struct{} {
 	return out
 }
 
+// DefaultContextWindow is the fallback context window in tokens for models
+// with no ContextWindow set in the catalog.
+const DefaultContextWindow = 128_000
+
+// ContextWindowFor returns the context window in tokens for the given model.
+// Returns DefaultContextWindow when the model is absent or has no ContextWindow set.
+func ContextWindowFor(id string) int {
+	m, ok := ByID(id)
+	if !ok || m.ContextWindow <= 0 {
+		return DefaultContextWindow
+	}
+	return m.ContextWindow
+}
+
 // ToolUseLowSet returns the set of model IDs whose ToolUseQuality is
 // ToolUseLow. The cluster scorer subtracts this set from the eligible pool
 // when req.HasTools is true; falls back to the unfiltered pool when the

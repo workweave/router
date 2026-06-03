@@ -6,11 +6,12 @@ Single source of truth for per-model data: capability tier, ordered list of prov
 
 ## What's here
 
-- `Model` — one struct per logical model. Fields: `ID`, `Tier`, `Providers []ProviderBinding`.
+- `Model` — one struct per logical model. Fields: `ID`, `Tier`, `ContextWindow`, `Providers []ProviderBinding`.
 - `ProviderBinding` — one `(Provider, UpstreamID, Price)` tuple. A model's bindings are ordered: the first whose `Provider` name is in the deploy's available set wins.
 - `Pricing` — per-binding input / output / cache-read pricing.
 - `Tier` — Low / Mid / High.
-- Lookup helpers: `ByID`, `ResolveBinding`, `PriceFor(provider, id)`, `PrimaryPriceFor(id)`, `TierFor`, `IsAtOrBelow`, `AllowedAtOrBelow`, `AllPrimaryPricing`, `ValidateDeployed`.
+- `ContextWindow` — model's total input+output token budget in tokens. 0 falls back to `DefaultContextWindow` (128K).
+- Lookup helpers: `ByID`, `ResolveBinding`, `PriceFor(provider, id)`, `PrimaryPriceFor(id)`, `TierFor`, `IsAtOrBelow`, `AllowedAtOrBelow`, `AllPrimaryPricing`, `ValidateDeployed`, `ContextWindowFor`.
 - Cost math: `EffectiveInputCost`, `EffectiveOutputCost` — the OTel emitter, telemetry write path, and billing debit hook all funnel through these.
 
 ## Adding a model

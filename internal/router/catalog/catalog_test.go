@@ -135,6 +135,19 @@ func TestModel_ToolUseQualityDefaultsToUnknown(t *testing.T) {
 	assert.Equal(t, ToolUseUnknown, m.ToolUseQuality)
 }
 
+func TestContextWindowFor_KnownModels(t *testing.T) {
+	// Anthropic models have 200K context.
+	assert.Equal(t, 200_000, ContextWindowFor("claude-opus-4-8"))
+	assert.Equal(t, 200_000, ContextWindowFor("claude-haiku-4-5"))
+	// GPT-4.1 family has 1M context.
+	assert.Equal(t, 1_047_576, ContextWindowFor("gpt-4.1"))
+	// OSS models have 128K context.
+	assert.Equal(t, 131_072, ContextWindowFor("deepseek/deepseek-v4-pro"))
+	assert.Equal(t, 131_072, ContextWindowFor("moonshotai/kimi-k2.5"))
+	// Unknown model falls back to DefaultContextWindow.
+	assert.Equal(t, DefaultContextWindow, ContextWindowFor("not-a-real-model"))
+}
+
 func TestValidateDeployed_FlagsMissingAndUntiered(t *testing.T) {
 	err := ValidateDeployed([]string{"claude-opus-4-7"})
 	assert.NoError(t, err)
