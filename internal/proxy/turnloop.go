@@ -79,12 +79,32 @@ type turnLoopResult struct {
 	// current decision model to detect a mid-session switch so the Anthropic
 	// emit path can strip thinking blocks whose signatures the new model rejects.
 	PriorServedModel string
+	// SessionEverSwitched is the pin's latched has_ever_switched flag: true once
+	// the session has served two different models at any point. PriorServedModel
+	// only flags the single switch-back turn, but the stale-signed thinking
+	// blocks a cross-model excursion left in the client transcript persist on
+	// every later turn, so the emit path ORs this into ModelSwitched to keep
+	// stripping them for the life of the session.
+	SessionEverSwitched bool
 	// Handover captures the summarize-or-trim step when the planner switched.
 	Handover handoverOutcome
 	// SuggestionMode is true when the request arrived with the
 	// x-weave-suggestion-mode header. The routing marker is suppressed so
 	// the badge does not appear in suggestion-overlay responses.
 	SuggestionMode bool
+}
+
+// modelSwitched reports whether the Anthropic emit path must strip historical
+// thinking blocks for this turn. Two cases force a strip: the transition turn
+// itself (the model serving this turn differs from the one that served the
+// previous turn), and any turn in a session that has ever switched — because
+// Claude Code re-sends its full transcript every turn, so the stale-signed
+// blocks an earlier cross-model excursion left behind keep coming back and
+// would 400 with `Invalid signature in thinking block` on every later turn,
+// not just the switch-back.
+func (r turnLoopResult) modelSwitched() bool {
+	transition := r.PriorServedModel != "" && r.PriorServedModel != r.Decision.Model
+	return transition || r.SessionEverSwitched
 }
 
 // handoverOutcome describes the synchronous handover step.
@@ -194,6 +214,7 @@ func (s *Service) runTurnLoop(
 	if pinFound {
 		res.PinModel = pin.Model
 		res.PriorServedModel = pin.LastServedModel
+		res.SessionEverSwitched = pin.HasEverSwitched
 		res.PinAgeSec = pinAge(pin)
 		log.Info("turnloop pin lookup hit",
 			"pin_model", pin.Model,
@@ -202,6 +223,7 @@ func (s *Service) runTurnLoop(
 			"pin_age_s", res.PinAgeSec,
 			"pin_cache_warm", cacheWarm(pin),
 			"last_output_tokens", pin.LastOutputTokens,
+			"session_ever_switched", pin.HasEverSwitched,
 		)
 	} else {
 		log.Info("turnloop pin lookup miss", "role", res.PinRole)

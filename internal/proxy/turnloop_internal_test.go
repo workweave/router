@@ -172,3 +172,60 @@ func TestLoadPin_ServesFreshPostgresPin(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", pin.Model)
 	assert.Equal(t, "anthropic", pin.Provider)
 }
+
+// TestModelSwitched covers the switch → stay → stay lifecycle that motivated
+// the has_ever_switched latch. The transition turn alone is not enough: once a
+// session has served two models, the stale-signed thinking blocks persist in
+// the client transcript, so every subsequent same-model turn must keep
+// stripping or Anthropic 400s.
+func TestModelSwitched(t *testing.T) {
+	tests := []struct {
+		name             string
+		priorServedModel string
+		decisionModel    string
+		everSwitched     bool
+		want             bool
+	}{
+		{
+			name:          "first turn of a session never switches",
+			decisionModel: "claude-opus-4-7",
+			want:          false,
+		},
+		{
+			name:             "steady-state same model, never switched",
+			priorServedModel: "claude-opus-4-7",
+			decisionModel:    "claude-opus-4-7",
+			want:             false,
+		},
+		{
+			name:             "transition turn flips models",
+			priorServedModel: "deepseek-v4-pro",
+			decisionModel:    "claude-opus-4-7",
+			want:             true,
+		},
+		{
+			name:             "switch-back transition turn",
+			priorServedModel: "deepseek-v4-pro",
+			decisionModel:    "claude-opus-4-7",
+			everSwitched:     true,
+			want:             true,
+		},
+		{
+			name:             "stay turn after a prior switch still strips",
+			priorServedModel: "claude-opus-4-7",
+			decisionModel:    "claude-opus-4-7",
+			everSwitched:     true,
+			want:             true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res := turnLoopResult{
+				Decision:            router.Decision{Model: tc.decisionModel},
+				PriorServedModel:    tc.priorServedModel,
+				SessionEverSwitched: tc.everSwitched,
+			}
+			assert.Equal(t, tc.want, res.modelSwitched())
+		})
+	}
+}

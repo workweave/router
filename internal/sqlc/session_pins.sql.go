@@ -13,7 +13,7 @@ import (
 )
 
 const getSessionPin = `-- name: GetSessionPin :one
-SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model
+SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model, has_ever_switched
 FROM router.session_pins
 WHERE session_key = $1::bytea
   AND role        = $2::varchar
@@ -31,7 +31,7 @@ type GetSessionPinParams struct {
 // last_turn_ended_at carry the previous turn's upstream usage; the
 // planner reads them to weigh switch EV against eviction cost.
 //
-//	SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model
+//	SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model, has_ever_switched
 //	FROM router.session_pins
 //	WHERE session_key = $1::bytea
 //	  AND role        = $2::varchar
@@ -56,6 +56,7 @@ func (q *Queries) GetSessionPin(ctx context.Context, arg GetSessionPinParams) (R
 		&i.LastTurnEndedAt,
 		&i.ConsecutiveUpstreamErrors,
 		&i.LastServedModel,
+		&i.HasEverSwitched,
 	)
 	return i, err
 }
@@ -143,6 +144,8 @@ SET last_input_tokens        = $1::int,
     last_cached_write_tokens = $3::int,
     last_output_tokens       = $4::int,
     last_turn_ended_at       = $5::timestamptz,
+    has_ever_switched        = has_ever_switched
+      OR (last_served_model <> '' AND last_served_model <> $6::varchar),
     last_served_model        = $6::varchar
 WHERE session_key = $7::bytea
   AND role        = $8::varchar
@@ -169,6 +172,14 @@ type UpdateSessionPinUsageParams struct {
 // served this turn; it lives here (not in UpsertSessionPin) so a
 // /force-model upsert cannot overwrite the genuinely-last-served model
 // before the next turn reads it to detect a mid-session model switch.
+// has_ever_switched latches true the first time the just-served model
+// differs from a prior non-empty last_served_model. ModelSwitched (derived
+// from last_served_model) strips stale Anthropic thinking-block signatures
+// only on the single transition turn, but Claude Code re-sends its full
+// transcript every turn, so once a session has switched at all, the latch
+// keeps the emit path stripping on every subsequent same-model turn for the
+// session's life — the only window in which those poisoned blocks would
+// otherwise reach Anthropic and 400.
 //
 //	UPDATE router.session_pins
 //	SET last_input_tokens        = $1::int,
@@ -176,6 +187,8 @@ type UpdateSessionPinUsageParams struct {
 //	    last_cached_write_tokens = $3::int,
 //	    last_output_tokens       = $4::int,
 //	    last_turn_ended_at       = $5::timestamptz,
+//	    has_ever_switched        = has_ever_switched
+//	      OR (last_served_model <> '' AND last_served_model <> $6::varchar),
 //	    last_served_model        = $6::varchar
 //	WHERE session_key = $7::bytea
 //	  AND role        = $8::varchar

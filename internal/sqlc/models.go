@@ -160,4 +160,5 @@ type RouterSessionPin struct {
 	LastTurnEndedAt           pgtype.Timestamptz
 	ConsecutiveUpstreamErrors int32
 	LastServedModel           string
+	HasEverSwitched           bool
 }

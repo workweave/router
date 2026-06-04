@@ -57,6 +57,13 @@ type Pin struct {
 	// mid-session model switch (and strip Anthropic thinking-block signatures
 	// the new model would otherwise reject with a 400).
 	LastServedModel string
+	// HasEverSwitched latches true the first time this session served a model
+	// different from the prior LastServedModel. It stays set for the life of
+	// the pin and is flipped atomically inside Store.UpdateUsage. The emit
+	// path ORs it into ModelSwitched so the stale-signed thinking blocks an
+	// earlier cross-model excursion left in the client transcript are stripped
+	// on every subsequent turn, not just the single switch-back turn.
+	HasEverSwitched bool
 }
 
 // Usage captures the previous turn's upstream token accounting.
