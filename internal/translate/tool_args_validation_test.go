@@ -241,6 +241,22 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresWhenLeadingWithToolishMar
 	assert.Contains(t, body, `"id":"toolu_router_nudge_`)
 }
 
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresWhenLeadingWithRedactedThinking(t *testing.T) {
+	// Redacted thinking can leak into the content channel as XML-ish text
+	// rather than structured reasoning. Even with finish_reason="stop", that is
+	// the same parser-dead-end as <think>, not a clean final answer.
+	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<redacted_thinking>opaque</redacted_thinking>"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.True(t, summary.TextOnlyTurnNudged,
+		"a turn leading with redacted thinking markup is the failure mode — nudge must fire despite finish_reason=stop")
+	assert.Equal(t, 1, summary.ToolUseBlocks)
+	assert.Contains(t, body, `"id":"toolu_router_nudge_`)
+}
+
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedWhenProseMentionsMarkup(t *testing.T) {
 	// The substring-match trap: a legitimate final answer that *discusses* tag
 	// syntax — e.g. a model explaining this very router code — contains

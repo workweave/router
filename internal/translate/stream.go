@@ -948,7 +948,7 @@ func (t *AnthropicSSETranslator) emitValidatedToolArgsDelta(blockIdx int) error 
 // surfaces as a tool_result in the next turn's context, nudging the model
 // to use a real tool. Bash is chosen because every Claude Code request
 // includes it in tools, making the fabricated call dispatchable.
-const routerNudgeCommand = "echo '[router] previous turn produced no tool_use; please use Edit/Write/Read/Bash/Grep — do not respond with prose or <think> tags only.'"
+const routerNudgeCommand = "echo '[router] previous turn produced no tool_use; please use Edit/Write/Read/Bash/Grep — do not respond with prose or thinking tags only.'"
 
 // leadingContentCap bounds how much of the content channel's opening text the
 // translator retains for the leadsWithToolishMarkup check. Large enough to hold
@@ -957,14 +957,15 @@ const leadingContentCap = 64
 
 // toolishMarkupMarkers are the opening tokens of tool-call / raw-reasoning
 // markup a model leaks into the content channel instead of emitting a
-// structured tool_use block: <think> reasoning that wasn't routed to
-// reasoning_content, or a tool call serialized as XML the upstream never
-// structured into tool_calls. Claude Code's strict parser rejects these ("tool
-// call could not be parsed"), dead-ending the turn — which is exactly what the
-// nudge rescues. Matched only at the START of the turn (see
+// structured tool_use block: <think> / <redacted_thinking> reasoning that
+// wasn't routed to reasoning_content, or a tool call serialized as XML the
+// upstream never structured into tool_calls. Claude Code's strict parser
+// rejects these ("tool call could not be parsed"), dead-ending the turn —
+// which is exactly what the nudge rescues. Matched only at the START of the
+// turn (see
 // leadsWithToolishMarkup): the leak opens the turn with the markup, whereas a
 // legitimate answer that discusses these tags has them mid-prose.
-var toolishMarkupMarkers = []string{"<think", "<tool_call", "<function", "<invoke"}
+var toolishMarkupMarkers = []string{"<think", "<redacted_thinking", "<tool_call", "<function", "<invoke"}
 
 // leadsWithToolishMarkup reports whether the turn's content opens with
 // tool-call/raw-reasoning markup, ignoring leading whitespace. Anchoring to the
@@ -984,7 +985,7 @@ func leadsWithToolishMarkup(content string) bool {
 // upstream produced an assistant turn with no tool_use blocks AND the inbound
 // request had tools available. Targets the bucket-C residual empty-patch
 // failure mode: Gemini-3.1-Pro and Mimo-v2.5-Pro sometimes emit prose plus
-// XML <think> tags as plain text, which Claude Code's strict parser refuses
+// XML thinking tags as plain text, which Claude Code's strict parser refuses
 // with "tool call could not be parsed (retry also failed)" and the session
 // dies. Substituting a synthetic Bash echo turns the dead-end into a normal
 // tool_use turn: Claude Code dispatches the Bash, gets the nudge as a
