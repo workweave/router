@@ -68,7 +68,7 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				PlannerDecision: planner.Decision{Reason: planner.ReasonEVPositive},
 			},
 			wantContains: []string{
-				"✦ **Weave Router** → deepseek/deepseek-v4-pro · switched for cheaper cache reuse",
+				"✦ **Weave Router** → deepseek/deepseek-v4-pro · switched for positive EV after cache eviction",
 			},
 			wantNotContain: []string{
 				"(openrouter)",
