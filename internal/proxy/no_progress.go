@@ -141,28 +141,49 @@ func newNoProgressTracker() *noProgressTracker {
 	}
 }
 
-// compactionTracker detects Claude Code context compaction events by comparing
-// each turn's message count against the last seen count for the same session.
-// A drop in message count indicates that the client replaced old turns with a
-// summary block, which can leave a non-Anthropic model unaware of completed
-// work (edits, decisions) that were only visible in the now-elided turns.
+// compactionState is what compactionTracker stores per session: the last-seen
+// top-level message count and the last-seen assistant tool-call count.
+// Both can independently signal that the client trimmed its history window.
+type compactionState struct {
+	msgCount      int
+	toolCallCount int
+}
+
+// compactionTracker detects Claude Code context window trimming by comparing
+// each turn's message count and assistant tool-call count against the last
+// seen values for the same session. Either count dropping is a signal that the
+// client elided old turns, which can leave a non-Anthropic model unaware of
+// completed work (edits, decisions) that were only visible in the now-elided
+// turns.
+//
+// Two independent signals are needed because Claude Code can trim history in
+// two distinct ways:
+//   - Full compaction: replaces all old messages with a summary block, so
+//     messageCount drops sharply (e.g. 20 → 3).
+//   - Rolling-window trimming: drops the oldest message pair each turn to
+//     keep a roughly fixed window, so messageCount stays flat while the
+//     assistant tool-call count shrinks by one per turn (the pattern
+//     observed in session 543151ce: 9 → 8 → 7 → 6 → 5).
+//
+// Detecting only messageCount drops misses the rolling-window case.
 //
 // nil receivers are valid (no-op), matching noProgressTracker semantics.
 type compactionTracker struct {
-	cache *lru.LRU[string, int]
+	cache *lru.LRU[string, compactionState]
 }
 
 func newCompactionTracker() *compactionTracker {
 	return &compactionTracker{
-		cache: lru.NewLRU[string, int](noProgressCacheSize, nil, noProgressCacheTTL),
+		cache: lru.NewLRU[string, compactionState](noProgressCacheSize, nil, noProgressCacheTTL),
 	}
 }
 
-// checkAndRecord records messageCount for the session and reports whether this
-// turn's count is lower than the previously recorded count (compaction event).
-// Returns false on the first observation for a session (no prior count to
-// compare against). Also returns false when no bucket anchor is available.
-func (t *compactionTracker) checkAndRecord(sessionKey [sessionpin.SessionKeyLen]byte, installationID uuid.UUID, role string, messageCount int) bool {
+// checkAndRecord records the session's current message count and tool-call
+// count, then reports whether either dropped versus the prior observation
+// (history-trimming event). Returns false on the first observation for a
+// session (no prior state to compare against) and when no bucket anchor is
+// available.
+func (t *compactionTracker) checkAndRecord(sessionKey [sessionpin.SessionKeyLen]byte, installationID uuid.UUID, role string, messageCount, toolCallCount int) bool {
 	if t == nil || t.cache == nil {
 		return false
 	}
@@ -171,8 +192,8 @@ func (t *compactionTracker) checkAndRecord(sessionKey [sessionpin.SessionKeyLen]
 		return false
 	}
 	last, found := t.cache.Get(key)
-	t.cache.Add(key, messageCount)
-	return found && messageCount < last
+	t.cache.Add(key, compactionState{msgCount: messageCount, toolCallCount: toolCallCount})
+	return found && (messageCount < last.msgCount || toolCallCount < last.toolCallCount)
 }
 
 // recordAndDetect records the fingerprint against a bucket keyed by

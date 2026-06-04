@@ -902,18 +902,19 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 	}
 
-	// Compaction-aware handover: when Claude Code's context compaction fires,
-	// it replaces old turns with a summary block and messageCount drops. On
-	// non-Anthropic upstreams this is dangerous — the model loses awareness of
-	// completed edits and decisions that lived only in the now-elided turns,
-	// causing it to re-apply work it already did. Detect the drop and rewrite
-	// the envelope with a handover summary so the non-Anthropic model gets
-	// explicit "work already done" context before seeing the compacted history.
+	// Compaction-aware handover: Claude Code can trim its history window in two
+	// ways — full compaction (messageCount drops sharply) or rolling-window
+	// trimming (messageCount flat but tool-call count shrinks by one per turn).
+	// Either case leaves the non-Anthropic model without awareness of edits and
+	// decisions that lived only in the now-elided turns. Detect either drop and
+	// rewrite the envelope with a handover summary before dispatch.
 	if decision.Provider != providers.ProviderAnthropic && s.compaction != nil {
 		role := roleForTier(catalog.TierFor(feats.Model))
-		if s.compaction.checkAndRecord(routeRes.SessionKey, installationID, role, feats.MessageCount) {
-			log.Info("Compaction detected on non-Anthropic route; rewriting context with handover summary",
+		toolCallCount := len(env.AssistantToolCallSignatures())
+		if s.compaction.checkAndRecord(routeRes.SessionKey, installationID, role, feats.MessageCount, toolCallCount) {
+			log.Info("Context trimming detected on non-Anthropic route; rewriting context with handover summary",
 				"message_count", feats.MessageCount,
+				"tool_call_count", toolCallCount,
 				"decision_model", decision.Model,
 				"decision_provider", decision.Provider,
 			)

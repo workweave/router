@@ -340,35 +340,63 @@ func TestShortSessionKey_TruncatesAndRedactsZero(t *testing.T) {
 }
 
 func TestCompactionTracker_DetectsMessageCountDrop(t *testing.T) {
+	// Full compaction: messageCount drops sharply, tool-call count also drops.
 	ct := newCompactionTracker()
 	key := sessionKeyFromString("session-compaction")
 	install := uuid.New()
 
 	// First observation: no prior — must return false.
-	assert.False(t, ct.checkAndRecord(key, install, "high", 10), "first observation must not report compaction")
+	assert.False(t, ct.checkAndRecord(key, install, "high", 20, 9), "first observation must not report compaction")
 
-	// Count grows: progressing session.
-	assert.False(t, ct.checkAndRecord(key, install, "high", 12), "growing count must not report compaction")
+	// Both counts grow: progressing session.
+	assert.False(t, ct.checkAndRecord(key, install, "high", 22, 10), "growing counts must not report compaction")
 
-	// Count drops: compaction event.
-	assert.True(t, ct.checkAndRecord(key, install, "high", 5), "drop in message count must be reported as compaction")
+	// messageCount drops sharply (full compaction): fire.
+	assert.True(t, ct.checkAndRecord(key, install, "high", 3, 0), "sharp messageCount drop must be reported as compaction")
 
-	// Count stable after compaction.
-	assert.False(t, ct.checkAndRecord(key, install, "high", 5), "stable count must not report compaction")
+	// Counts stable after compaction.
+	assert.False(t, ct.checkAndRecord(key, install, "high", 5, 2), "growing counts after compaction must not report compaction")
+}
+
+func TestCompactionTracker_DetectsRollingWindowTrimming(t *testing.T) {
+	// Rolling-window trimming (the pattern observed in session 543151ce):
+	// messageCount stays flat because old message pairs are swapped for new
+	// ones, but the assistant tool-call count shrinks by one per turn as the
+	// oldest tool call drops out of the visible window.
+	ct := newCompactionTracker()
+	key := sessionKeyFromString("session-rolling")
+	install := uuid.New()
+
+	// Establish baseline: 10 messages, 9 tool calls.
+	ct.checkAndRecord(key, install, "high", 10, 9)
+
+	// messageCount flat (10→10), toolCallCount drops (9→8): fire.
+	assert.True(t, ct.checkAndRecord(key, install, "high", 10, 8),
+		"flat messageCount + shrinking toolCallCount must be detected as rolling-window trim")
+}
+
+func TestCompactionTracker_NoFalsePositiveWhenBothGrow(t *testing.T) {
+	ct := newCompactionTracker()
+	key := sessionKeyFromString("session-growing")
+	install := uuid.New()
+
+	ct.checkAndRecord(key, install, "high", 10, 5)
+	assert.False(t, ct.checkAndRecord(key, install, "high", 12, 6), "both counts growing must not fire")
+	assert.False(t, ct.checkAndRecord(key, install, "high", 14, 6), "flat toolCallCount (no new tool call) must not fire")
 }
 
 func TestCompactionTracker_NilReceiverIsNoOp(t *testing.T) {
 	var ct *compactionTracker
 	key := sessionKeyFromString("session-nil")
-	assert.False(t, ct.checkAndRecord(key, uuid.New(), "high", 5))
+	assert.False(t, ct.checkAndRecord(key, uuid.New(), "high", 5, 3))
 }
 
 func TestCompactionTracker_ZeroAnchorsSkipped(t *testing.T) {
 	ct := newCompactionTracker()
 	var zero [sessionpin.SessionKeyLen]byte
 	// No session key, no installation — must skip rather than bucket globally.
-	ct.checkAndRecord(zero, uuid.Nil, "high", 10)
-	assert.False(t, ct.checkAndRecord(zero, uuid.Nil, "high", 5), "no anchor → compaction detection must be skipped")
+	ct.checkAndRecord(zero, uuid.Nil, "high", 10, 5)
+	assert.False(t, ct.checkAndRecord(zero, uuid.Nil, "high", 5, 3), "no anchor → compaction detection must be skipped")
 }
 
 func TestCompactionTracker_SeparateSessionsAreIsolated(t *testing.T) {
@@ -377,10 +405,10 @@ func TestCompactionTracker_SeparateSessionsAreIsolated(t *testing.T) {
 	keyA := sessionKeyFromString("session-A")
 	keyB := sessionKeyFromString("session-B")
 
-	ct.checkAndRecord(keyA, install, "high", 20)
-	ct.checkAndRecord(keyB, install, "high", 10)
+	ct.checkAndRecord(keyA, install, "high", 20, 9)
+	ct.checkAndRecord(keyB, install, "high", 10, 5)
 
 	// Drop on A must not affect B's baseline.
-	assert.True(t, ct.checkAndRecord(keyA, install, "high", 5), "drop on A must be detected")
-	assert.False(t, ct.checkAndRecord(keyB, install, "high", 12), "B growing from 10→12 must not be compaction")
+	assert.True(t, ct.checkAndRecord(keyA, install, "high", 5, 3), "drop on A must be detected")
+	assert.False(t, ct.checkAndRecord(keyB, install, "high", 12, 6), "B growing from 10→12 must not be compaction")
 }
