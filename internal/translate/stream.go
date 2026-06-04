@@ -811,8 +811,16 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 		}
 	}
 
+	// GLM-5.1 (and other vLLM/SGLang OpenAI-compat upstreams) emit
+	// `"tool_calls": null` on every plain-text delta. gjson treats null as
+	// Exists()=true but IsArray()=false, and ForEach over a null yields ONE
+	// zero-value iteration (index=0, name=""). That spuriously trips the
+	// nameless-call guard below and latches suppressedTools[0], so the real
+	// named tool_call that arrives later at index 0 gets dropped as a
+	// "fragment of a suppressed call" — the turn ends as an empty end_turn and
+	// the agent idles. Only iterate real arrays.
 	toolCalls := delta.Get("tool_calls")
-	if !toolCalls.Exists() {
+	if !toolCalls.IsArray() {
 		return nil
 	}
 

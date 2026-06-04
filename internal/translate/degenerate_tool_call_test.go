@@ -104,6 +104,31 @@ func TestAnthropicSSETranslator_NamedToolCallWithToolCallsFinishStillToolUse(t *
 	assert.False(t, summary.StopReasonDemoted, "a real tool_use block must not be demoted")
 }
 
+func TestAnthropicSSETranslator_NullToolCallsOnTextDeltasDoNotSuppressRealCall(t *testing.T) {
+	// Prod loop (session ba584c9d, z-ai/glm-5.1 on DeepInfra): GLM-5.1 streams
+	// `"tool_calls": null` on every plain-text delta, THEN emits the real named
+	// tool_call in a later frame. gjson's ForEach over a JSON null yields one
+	// zero-value iteration (index=0, name=""), which used to trip the
+	// nameless-call guard and latch suppressedTools[0]; the real Bash call (also
+	// index 0) was then dropped as a "fragment of a suppressed call", so the
+	// client got an empty end_turn and the agent idled. The real call must
+	// survive as a tool_use block.
+	body, summary := driveAnthropicSSEWithTools(t, "z-ai/glm-5.1", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","content":"I'll run that.","tool_calls":null},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","content":" One sec.","tool_calls":null},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","content":"","tool_calls":[{"index":0,"id":"call_ok","type":"function","function":{"name":"Bash","arguments":"{\"command\":\"git status\"}"}}]},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":null},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":20,"completion_tokens":9}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.Contains(t, body, `"type":"tool_use"`, "the real named call must become a tool_use block")
+	assert.Contains(t, body, `"name":"Bash"`)
+	assert.Contains(t, body, `"stop_reason":"tool_use"`)
+	assert.Equal(t, 1, summary.ToolUseBlocks)
+	assert.Equal(t, 0, summary.SuppressedToolCalls, "null tool_calls on text deltas must not be counted as suppressed calls")
+	assert.False(t, summary.StopReasonDemoted, "a surviving real tool_use must not be demoted")
+}
+
 func TestOpenAIToAnthropicResponse_DemotesToolCallsFinishWithEmptyCalls(t *testing.T) {
 	// Non-streaming twin: finish_reason="tool_calls" with an empty tool_calls
 	// array. Demote to end_turn rather than ship tool_use with zero blocks.
