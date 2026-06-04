@@ -861,6 +861,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		)
 	}
 
+	// Snapshot inbound tool-call count before runTurnLoop potentially mutates
+	// env (model-switch handover calls TrimLastN / RewriteForHandover). The
+	// compaction tracker must compare the count the client actually sent, not
+	// the post-router-trim count, to avoid false-positive detection when the
+	// router itself is the one that shortened the message window.
+	inboundToolCallCount := len(env.AssistantToolCallSignatures())
+
 	routeStart := time.Now()
 	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, router.Request{
 		RequestedModel:       feats.Model,
@@ -911,11 +918,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	compactionHandoverRan := false
 	if decision.Provider != providers.ProviderAnthropic && s.compaction != nil {
 		role := roleForTier(catalog.TierFor(feats.Model))
-		toolCallCount := len(env.AssistantToolCallSignatures())
-		if s.compaction.checkAndRecord(routeRes.SessionKey, installationID, role, feats.MessageCount, toolCallCount) {
+		if s.compaction.checkAndRecord(routeRes.SessionKey, installationID, role, feats.MessageCount, inboundToolCallCount) {
 			log.Info("Context trimming detected on non-Anthropic route; rewriting context with handover summary",
 				"message_count", feats.MessageCount,
-				"tool_call_count", toolCallCount,
+				"tool_call_count", inboundToolCallCount,
 				"decision_model", decision.Model,
 				"decision_provider", decision.Provider,
 			)
