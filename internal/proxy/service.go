@@ -210,7 +210,7 @@ func routingReasonShort(res turnLoopResult) string {
 func humanReasonFromPlanner(code string) string {
 	switch code {
 	case planner.ReasonEVPositive:
-		return "switched for cheaper cache reuse"
+		return "switched for positive EV after cache eviction"
 	case planner.ReasonEVNegative, planner.ReasonNoPriorUsage:
 		return "stayed on your last pick"
 	case planner.ReasonTierUpgrade:
