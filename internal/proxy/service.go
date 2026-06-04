@@ -22,7 +22,6 @@ import (
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
 	"workweave/router/internal/router/sessionpin"
-	"workweave/router/internal/router/turntype"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -918,13 +917,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// rewrite the envelope with a handover summary before dispatch.
 	compactionHandoverRan := false
 	var compactionHandoverOutcome handoverOutcome
-	// Skip detection on genuine Claude Code compaction turns (turntype.Compaction):
-	// those requests are Claude Code asking the router to summarize, not a
-	// main-loop turn where the model needs completed-work context. Applying the
-	// handover rewrite there would corrupt the summarization request, and recording
-	// the trimmed baseline from the compaction body would poison the tracker so
-	// the immediately-following main-loop turn never sees a count drop.
-	if decision.Provider != providers.ProviderAnthropic && s.compaction != nil && tt != turntype.Compaction {
+	// Skip detection for all hard-pinned turn types (Compaction, Probe, TitleGen,
+	// Classifier, SubAgentDispatch with hardPinExplore). These turns carry far
+	// fewer messages than main-loop turns — a Probe or TitleGen after a long
+	// session would show a sharp count drop that mimics client history trimming
+	// and falsely trigger runCompactionHandover. Hard-pinned turns also do not
+	// model the conversational context the compaction handover is meant to
+	// preserve, so rewrites there would be both wrong and wasteful.
+	if decision.Provider != providers.ProviderAnthropic && s.compaction != nil && !routeRes.HardPinned {
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if s.compaction.checkAndRecord(routeRes.SessionKey, installationID, role, feats.MessageCount, inboundToolCallCount) {
 			log.Info("Context trimming detected on non-Anthropic route; rewriting context with handover summary",
