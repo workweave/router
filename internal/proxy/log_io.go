@@ -58,6 +58,12 @@ func logInboundToolTraffic(log *slog.Logger, env *translate.RequestEnvelope) {
 	)
 }
 
+func logInboundRequestDiagnostics(log *slog.Logger, env *translate.RequestEnvelope) {
+	logInboundToolTraffic(log, env)
+	logInboundConversationTail(log, env)
+	logInboundSystemTail(log, env)
+}
+
 // logInboundConversationTail emits a structured summary of the last few
 // inbound messages, with role + per-block type/name/preview. Pairs with
 // logInboundToolTraffic: the tool-call view shows what the model previously

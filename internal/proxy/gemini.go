@@ -68,6 +68,8 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		"prompt_preview", preview(promptText, 200),
 	)
 
+	logInboundRequestDiagnostics(log, env)
+
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
 	routeStart := time.Now()

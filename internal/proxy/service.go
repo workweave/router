@@ -849,9 +849,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Surface inbound tool_use / tool_result blocks the model is about to see.
 	// Lets us audit whether a misbehaving turn was provoked by a malformed prior
 	// tool_result or an out-of-shape tool spec, without dumping the whole body.
-	logInboundToolTraffic(log, env)
-	logInboundConversationTail(log, env)
-	logInboundSystemTail(log, env)
+	logInboundRequestDiagnostics(log, env)
 
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
@@ -1900,7 +1898,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderOpenAI)
 	}
 
-	logInboundToolTraffic(log, env)
+	logInboundRequestDiagnostics(log, env)
 
 	// OpenAI signals sub-agent identity via x-weave-subagent-type (no metadata.user_id).
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
@@ -1972,10 +1970,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	if _, err := s.provider(decision.Provider); err != nil {
 		return err
 	}
-
-	logInboundToolTraffic(log, env)
-	logInboundConversationTail(log, env)
-	logInboundSystemTail(log, env)
 
 	w.Header().Set(HeaderRouterDecision, decision.Reason)
 	w.Header().Set(HeaderRouterProvider, decision.Provider)
