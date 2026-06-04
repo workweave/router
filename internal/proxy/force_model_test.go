@@ -47,6 +47,55 @@ func TestResolveForceModel(t *testing.T) {
 			wantProvider: providers.ProviderBedrock,
 			wantKnown:    true,
 		},
+		{
+			name:         "alias gpt",
+			input:        "gpt",
+			wantID:       "gpt-5.5",
+			wantProvider: providers.ProviderOpenAI,
+			wantKnown:    true,
+		},
+		{
+			name:         "alias gpt hyphen minor version",
+			input:        "gpt-5-5",
+			wantID:       "gpt-5.5",
+			wantProvider: providers.ProviderOpenAI,
+			wantKnown:    true,
+		},
+		{
+			name:         "alias claude",
+			input:        "claude",
+			wantID:       "claude-opus-4-8",
+			wantProvider: providers.ProviderAnthropic,
+			wantKnown:    true,
+		},
+		{
+			name:         "alias opus",
+			input:        "opus",
+			wantID:       "claude-opus-4-8",
+			wantProvider: providers.ProviderAnthropic,
+			wantKnown:    true,
+		},
+		{
+			name:         "alias opus dotted version",
+			input:        "opus-4.8",
+			wantID:       "claude-opus-4-8",
+			wantProvider: providers.ProviderAnthropic,
+			wantKnown:    true,
+		},
+		{
+			name:         "alias mixed case and whitespace",
+			input:        "  Gemini  ",
+			wantID:       "gemini-3-pro-preview",
+			wantProvider: providers.ProviderGoogle,
+			wantKnown:    true,
+		},
+		{
+			name:         "alias qwen",
+			input:        "qwen",
+			wantID:       "qwen/qwen3-coder",
+			wantProvider: providers.ProviderFireworks,
+			wantKnown:    true,
+		},
 		// Heuristic fallback: not in the catalog, so known is false. The
 		// provider is a best-effort guess for logging only; the handler rejects
 		// these rather than pinning a model with no known tier.

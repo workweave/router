@@ -18,21 +18,66 @@ import (
 	"github.com/google/uuid"
 )
 
+var forceModelAliases = map[string]string{
+	"anthropic":      "claude-opus-4-8",
+	"claude":         "claude-opus-4-8",
+	"opus":           "claude-opus-4-8",
+	"claude-opus":    "claude-opus-4-8",
+	"opus-4-8":       "claude-opus-4-8",
+	"opus-4.8":       "claude-opus-4-8",
+	"claude-4-8":     "claude-opus-4-8",
+	"claude-4.8":     "claude-opus-4-8",
+	"sonnet":         "claude-sonnet-4-6",
+	"claude-sonnet":  "claude-sonnet-4-6",
+	"sonnet-4-6":     "claude-sonnet-4-6",
+	"sonnet-4.6":     "claude-sonnet-4-6",
+	"haiku":          "claude-haiku-4-5",
+	"claude-haiku":   "claude-haiku-4-5",
+	"haiku-4-5":      "claude-haiku-4-5",
+	"haiku-4.5":      "claude-haiku-4-5",
+	"gpt":            "gpt-5.5",
+	"openai":         "gpt-5.5",
+	"gpt-5-5":        "gpt-5.5",
+	"gpt-5-5-pro":    "gpt-5.5-pro",
+	"gpt-5-5-mini":   "gpt-5.5-mini",
+	"gpt-5-5-nano":   "gpt-5.5-nano",
+	"gpt-5-4":        "gpt-5.4",
+	"gpt-5-4-pro":    "gpt-5.4-pro",
+	"gpt-5-4-mini":   "gpt-5.4-mini",
+	"gpt-5-4-nano":   "gpt-5.4-nano",
+	"google":         "gemini-3-pro-preview",
+	"gemini":         "gemini-3-pro-preview",
+	"gemini-pro":     "gemini-3-pro-preview",
+	"gemini-flash":   "gemini-3-flash-preview",
+	"deepseek":       "deepseek/deepseek-v4-pro",
+	"deepseek-pro":   "deepseek/deepseek-v4-pro",
+	"deepseek-flash": "deepseek/deepseek-v4-flash",
+	"qwen":           "qwen/qwen3-coder",
+	"qwen-coder":     "qwen/qwen3-coder",
+	"kimi":           "moonshotai/kimi-k2.6",
+	"glm":            "z-ai/glm-5.1",
+	"zai":            "z-ai/glm-5.1",
+	"z-ai":           "z-ai/glm-5.1",
+	"minimax":        "minimax/minimax-m2.7",
+	"mistral":        "mistralai/mistral-small-2603",
+}
+
 // resolveForceModel maps a user-typed model identifier to its canonical
 // catalog ID and primary provider binding. The catalog is the source of
 // truth — heuristics are only a best-effort provider guess for inputs that
 // are not in it.
 //
 // Resolution order:
-//  1. Exact match against `catalog.ByID` (the input is already canonical).
-//  2. Suffix match: scan the catalog for any model whose ID ends with
+//  1. Alias match for common user-facing shortcuts.
+//  2. Exact match against `catalog.ByID` (the input is already canonical).
+//  3. Suffix match: scan the catalog for any model whose ID ends with
 //     "/" + input. Lets users type bare names like `qwen3-235b-a22b-2507`
 //     and have the pin route to `qwen/qwen3-235b-a22b-2507` on its real
 //     binding (bedrock, in this case) instead of misclassifying it as
 //     Anthropic.
-//  3. Naming heuristic for IDs not in the catalog (provider guess only).
+//  4. Naming heuristic for IDs not in the catalog (provider guess only).
 //
-// The returned `known` flag is true only for catalog matches (1 and 2). A
+// The returned `known` flag is true only for catalog matches (1, 2, and 3). A
 // false `known` means the input has no catalog entry and therefore no known
 // tier: the requested-model tier ceiling would rewrite a pin to it on every
 // turn (clampToCeiling treats unknown tiers as above-ceiling), so the user
@@ -40,6 +85,10 @@ import (
 // rather than pin an unservable directive. The heuristic provider is still
 // returned for logging.
 func resolveForceModel(model string) (canonicalID, provider string, known bool) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if alias, ok := forceModelAliases[model]; ok {
+		model = alias
+	}
 	if m, ok := catalog.ByID(model); ok && len(m.Providers) > 0 {
 		return m.ID, m.Providers[0].Provider, true
 	}
