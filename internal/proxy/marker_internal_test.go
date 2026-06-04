@@ -68,7 +68,7 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				PlannerDecision: planner.Decision{Reason: planner.ReasonEVPositive},
 			},
 			wantContains: []string{
-				"✦ **Weave Router** → deepseek/deepseek-v4-pro · switched for positive EV after cache eviction",
+				"✦ **Weave Router** → deepseek/deepseek-v4-pro · " + markerReasonSwitched,
 			},
 			wantNotContain: []string{
 				"(openrouter)",
@@ -83,7 +83,7 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				PlannerDecision: planner.Decision{Reason: planner.ReasonEVNegative},
 			},
 			wantContains: []string{
-				"· stayed on your last pick",
+				"· " + markerReasonStayed,
 			},
 			wantNotContain: []string{
 				"(openrouter)",
@@ -98,7 +98,7 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				PlannerDecision: planner.Decision{Reason: planner.ReasonNoPriorUsage},
 			},
 			wantContains: []string{
-				"· stayed on your last pick",
+				"· " + markerReasonStayed,
 			},
 			wantNotContain: []string{
 				"no cache stats",
@@ -111,7 +111,7 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				PlannerDecision: planner.Decision{Reason: planner.ReasonSameModel},
 			},
 			wantContains: []string{
-				"· best pick for this turn",
+				"· " + markerReasonBestPick,
 			},
 			wantNotContain: []string{
 				"scorer matches the pin",
@@ -125,7 +125,7 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				PlannerDecision: planner.Decision{Reason: planner.ReasonTierUpgrade},
 			},
 			wantContains: []string{
-				"· upgraded to a stronger tier",
+				"· " + markerReasonTierUpgrade,
 			},
 		},
 		{
@@ -160,7 +160,7 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				Decision: decision,
 			},
 			wantContains: []string{
-				"· best pick for this turn",
+				"· " + markerReasonBestPick,
 			},
 			wantNotContain: []string{
 				"top scorer",
@@ -174,7 +174,7 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				HardPinned: true,
 			},
 			wantContains: []string{
-				"· pinned for compaction / sub-agent",
+				"· " + markerReasonHardPinned,
 			},
 			wantNotContain: []string{
 				"hard pin",
@@ -237,7 +237,7 @@ func TestRoutingMarkerFor_DropsProviderEvenWhenSet(t *testing.T) {
 	assert.Contains(t, got, "✦ **Weave Router** → claude-haiku-4-5 ·")
 	assert.NotContains(t, got, "(anthropic)", "provider must not leak into the user-facing marker")
 	assert.NotContains(t, got, "()")
-	assert.Contains(t, got, "· best pick for this turn")
+	assert.Contains(t, got, "· "+markerReasonBestPick)
 }
 
 func TestHumanReasonFromPlanner_UnknownCodeIsSilenced(t *testing.T) {

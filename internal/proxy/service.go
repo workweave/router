@@ -192,16 +192,27 @@ func clampNote(res turnLoopResult) string {
 	return fmt.Sprintf("second-choice pick at %s tier (would have used %s)", res.RequestedTier.String(), res.PreClampModel)
 }
 
+// User-facing routing-marker prose. These are the single source of truth for
+// the marker wording; tests assert the mapping against these constants rather
+// than re-spelling the literals.
+const (
+	markerReasonHardPinned  = "pinned for compaction / sub-agent"
+	markerReasonSwitched    = "switched for positive EV after cache eviction"
+	markerReasonStayed      = "stayed on your last pick"
+	markerReasonTierUpgrade = "upgraded to a stronger tier"
+	markerReasonBestPick    = "best pick for this turn"
+)
+
 // routingReasonShort returns a short user-facing reason for the routing
 // decision, or empty when the underlying code is internal recovery noise.
 func routingReasonShort(res turnLoopResult) string {
 	if res.HardPinned {
-		return "pinned for compaction / sub-agent"
+		return markerReasonHardPinned
 	}
 	if res.PlannerDecision.Reason != "" {
 		return humanReasonFromPlanner(res.PlannerDecision.Reason)
 	}
-	return "best pick for this turn"
+	return markerReasonBestPick
 }
 
 // humanReasonFromPlanner maps planner reason codes to short user-facing prose.
@@ -210,13 +221,13 @@ func routingReasonShort(res turnLoopResult) string {
 func humanReasonFromPlanner(code string) string {
 	switch code {
 	case planner.ReasonEVPositive:
-		return "switched for positive EV after cache eviction"
+		return markerReasonSwitched
 	case planner.ReasonEVNegative, planner.ReasonNoPriorUsage:
-		return "stayed on your last pick"
+		return markerReasonStayed
 	case planner.ReasonTierUpgrade:
-		return "upgraded to a stronger tier"
+		return markerReasonTierUpgrade
 	case planner.ReasonNoPin, planner.ReasonSameModel:
-		return "best pick for this turn"
+		return markerReasonBestPick
 	default:
 		return ""
 	}
