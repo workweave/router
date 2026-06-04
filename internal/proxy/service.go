@@ -908,6 +908,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Either case leaves the non-Anthropic model without awareness of edits and
 	// decisions that lived only in the now-elided turns. Detect either drop and
 	// rewrite the envelope with a handover summary before dispatch.
+	compactionHandoverRan := false
 	if decision.Provider != providers.ProviderAnthropic && s.compaction != nil {
 		role := roleForTier(catalog.TierFor(feats.Model))
 		toolCallCount := len(env.AssistantToolCallSignatures())
@@ -919,12 +920,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				"decision_provider", decision.Provider,
 			)
 			s.runCompactionHandover(ctx, env, r.Header, decision.Model)
+			compactionHandoverRan = true
 		}
 	}
 
 	// Semantic-cache eligibility: configured, non-streaming, decision has
 	// metadata, externalID present, not eval traffic.
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
+	// Skip when a compaction handover rewrote env: the embedding in
+	// decision.Metadata was computed from the pre-handover body, so a cache
+	// hit would return a response built for different upstream context.
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !compactionHandoverRan
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)
