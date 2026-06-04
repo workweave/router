@@ -304,8 +304,17 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 			}
 		}
 
-		if !providers.IsRetryable(attemptErr) || i == len(in.bindings)-1 {
-			// Final attempt or non-retryable. Drop the buffered Prelude
+		// Fail over to the next binding on a transient fault OR a
+		// model-not-found 404. The 404 case is NOT in IsRetryable (re-hitting
+		// the same provider for a model it doesn't serve is futile, and it's
+		// excluded from same-binding retry above for that reason) — but a
+		// *different* provider binding may carry the model, so it's worth one
+		// cross-binding hop. This rescues a stale/wrong upstream id (e.g. a
+		// Bedrock binding the gateway renamed) that would otherwise hard-fail
+		// the turn with a "model may not exist" error at the client.
+		canFailover := providers.IsRetryable(attemptErr) || providers.IsUpstreamModelNotFound(attemptErr)
+		if !canFailover || i == len(in.bindings)-1 {
+			// Final attempt or non-failable. Drop the buffered Prelude
 			// (the next bytes the client sees should be the error envelope,
 			// not a half-emitted message_start) and let the entry point
 			// render the upstream error in the right wire format.

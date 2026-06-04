@@ -183,6 +183,22 @@ func IsRetryable(err error) bool {
 	return true
 }
 
+// IsUpstreamModelNotFound reports whether err is a buffered upstream 404.
+// In a routing dispatch a 404 means the chosen provider does not serve the
+// requested model — a stale/wrong upstream id (e.g. a Bedrock binding the
+// gateway renamed) or a provider with no active endpoints for it. Retrying
+// the SAME binding is futile, but a DIFFERENT provider binding may carry
+// the model, so this gates cross-binding failover (not same-binding retry).
+// It is deliberately distinct from IsRetryable, which covers transient
+// faults worth re-hitting the same provider for.
+func IsUpstreamModelNotFound(err error) bool {
+	var buffered *UpstreamErrorResponse
+	if errors.As(err, &buffered) {
+		return buffered.Status == http.StatusNotFound
+	}
+	return false
+}
+
 // PreparedRequest holds the encoded target-format request body and format-specific header overrides.
 type PreparedRequest struct {
 	Body    []byte

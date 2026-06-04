@@ -225,6 +225,82 @@ func TestDispatchWithFallback_NoRetryOnNonRetryableStatus(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestDispatchWithFallback_ModelNotFoundFailsOverToNextBinding(t *testing.T) {
+	// A 404 means the primary provider doesn't serve this model (stale/wrong
+	// upstream id). It is NOT in IsRetryable, so it must not retry the same
+	// binding — but a different provider binding may carry the model, so the
+	// dispatcher should fail over rather than hard-fail the turn.
+	primary := &fakeClient{
+		name:     "bedrock",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 404, Body: []byte(`{"message":"model does not exist"}`)}}},
+	}
+	fallback := &fakeClient{
+		name:     "openrouter",
+		outcomes: []fakeOutcome{{writeBytes: []byte("rescued")}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		"bedrock":    primary,
+		"openrouter": fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "qwen/qwen3-next-80b-a3b-instruct"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: "bedrock"},
+			{Provider: "openrouter"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.NoError(t, err, "404 on primary must fail over to the next binding")
+	assert.Equal(t, 1, winnerIdx, "fallback (index 1) wins")
+	assert.Equal(t, 1, primary.calls, "primary tried once — a 404 must not trigger same-binding retry")
+	assert.Equal(t, 1, fallback.calls)
+	assert.Equal(t, "rescued", rec.Body.String())
+}
+
+func TestDispatchWithFallback_ModelNotFoundSingleBindingFlushes(t *testing.T) {
+	// 404 on the only binding: no provider to fail over to, and a 404 must
+	// not same-binding-retry (futile). The 404 envelope flushes after one try.
+	only := &fakeClient{
+		name:     "bedrock",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 404, Body: []byte(`nope`)}}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{"bedrock": only})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "qwen/qwen3-next-80b-a3b-instruct"},
+		bindings:        []catalog.ProviderBinding{{Provider: "bedrock"}},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, only.calls, "404 must not same-binding-retry")
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
 func TestDispatchWithFallback_NoRetryAfterBytesFlushed(t *testing.T) {
 	// Primary writes some bytes, *then* errors. Even though the error is
 	// retryable in isolation, the dispatcher can't retry — partial SSE is
@@ -531,6 +607,7 @@ func TestProvidersIsRetryable(t *testing.T) {
 		{"buffered 408", &providers.UpstreamErrorResponse{Status: 408}, true},
 		{"buffered 400", &providers.UpstreamErrorResponse{Status: 400}, false},
 		{"buffered 401", &providers.UpstreamErrorResponse{Status: 401}, false},
+		{"buffered 404 not retryable (handled via failover, not retry)", &providers.UpstreamErrorResponse{Status: 404}, false},
 		{"flushed UpstreamStatusError 503", &providers.UpstreamStatusError{Status: 503}, false},
 		{"transport error", errors.New("dial tcp: connection refused"), true},
 		{"context.Canceled", context.Canceled, false},
@@ -541,6 +618,26 @@ func TestProvidersIsRetryable(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			assert.Equal(t, c.want, providers.IsRetryable(c.err))
+		})
+	}
+}
+
+func TestProvidersIsUpstreamModelNotFound(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"buffered 404", &providers.UpstreamErrorResponse{Status: 404}, true},
+		{"buffered 503", &providers.UpstreamErrorResponse{Status: 503}, false},
+		{"buffered 400", &providers.UpstreamErrorResponse{Status: 400}, false},
+		{"flushed 404 (already on wire)", &providers.UpstreamStatusError{Status: 404}, false},
+		{"transport error", errors.New("dial tcp"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, providers.IsUpstreamModelNotFound(c.err))
 		})
 	}
 }
