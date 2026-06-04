@@ -605,10 +605,10 @@ func (s *Service) writeCachedResponse(w http.ResponseWriter, resp cache.CachedRe
 			w.Header().Add(k, v)
 		}
 	}
-	w.Header().Set("x-router-decision", decision.Reason)
-	w.Header().Set("x-router-provider", decision.Provider)
-	w.Header().Set("x-router-model", decision.Model)
-	w.Header().Set("x-router-cache", "hit")
+	w.Header().Set(HeaderRouterDecision, decision.Reason)
+	w.Header().Set(HeaderRouterProvider, decision.Provider)
+	w.Header().Set(HeaderRouterModel, decision.Model)
+	w.Header().Set(HeaderRouterCache, RouterCacheHit)
 	if resp.StatusCode != 0 && resp.StatusCode != http.StatusOK {
 		w.WriteHeader(resp.StatusCode)
 	}
@@ -971,9 +971,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 	}
 
-	w.Header().Set("x-router-decision", decision.Reason)
-	w.Header().Set("x-router-provider", decision.Provider)
-	w.Header().Set("x-router-model", decision.Model)
+	w.Header().Set(HeaderRouterDecision, decision.Reason)
+	w.Header().Set(HeaderRouterProvider, decision.Provider)
+	w.Header().Set(HeaderRouterModel, decision.Model)
 
 	if _, err := s.provider(decision.Provider); err != nil {
 		return err
@@ -1960,9 +1960,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		return err
 	}
 
-	w.Header().Set("x-router-decision", decision.Reason)
-	w.Header().Set("x-router-provider", decision.Provider)
-	w.Header().Set("x-router-model", decision.Model)
+	w.Header().Set(HeaderRouterDecision, decision.Reason)
+	w.Header().Set(HeaderRouterProvider, decision.Provider)
+	w.Header().Set(HeaderRouterModel, decision.Model)
 
 	reqPricing := otel.Lookup(s.baselineFor(feats.Model))
 	actPricing := otel.Lookup(decision.Model)

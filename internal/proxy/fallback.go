@@ -240,10 +240,10 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 		// Safe to rewrite until the buffer commits; on retry the previous
 		// value is overwritten via Discard's header restore + this Set.
 		if !committed(in.buf) {
-			in.w.Header().Set("x-router-provider", b.Provider)
+			in.w.Header().Set(HeaderRouterProvider, b.Provider)
 			if i > 0 {
-				in.w.Header().Set("x-router-fallback-from", in.bindings[0].Provider)
-				in.w.Header().Set("x-router-fallback-attempt", attemptIdxLabel(i))
+				in.w.Header().Set(HeaderRouterFallbackFrom, in.bindings[0].Provider)
+				in.w.Header().Set(HeaderRouterFallbackAttempt, attemptIdxLabel(i))
 			}
 		}
 

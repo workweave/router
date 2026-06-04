@@ -102,7 +102,7 @@ func TestService_Cache_HitShortCircuitsProvider(t *testing.T) {
 	assert.Len(t, provider.proxyBodies, 1, "cache hit must not invoke provider a second time")
 
 	assert.Equal(t, `{"id":"first","content":"hi"}`, rec2.Body.String())
-	assert.Equal(t, "hit", rec2.Header().Get("x-router-cache"))
+	assert.Equal(t, proxy.RouterCacheHit, rec2.Header().Get(proxy.HeaderRouterCache))
 }
 
 func TestService_Cache_StreamingBypasses(t *testing.T) {
@@ -126,7 +126,7 @@ func TestService_Cache_StreamingBypasses(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec2, httpReq2))
 
 	assert.Len(t, provider.proxyBodies, 2, "streaming requests must always hit the provider — no caching")
-	assert.Empty(t, rec2.Header().Get("x-router-cache"), "streaming responses carry no x-router-cache marker")
+	assert.Empty(t, rec2.Header().Get(proxy.HeaderRouterCache), "streaming responses carry no x-router-cache marker")
 }
 
 func TestService_Cache_HeuristicDecisionBypasses(t *testing.T) {
@@ -197,5 +197,5 @@ func TestService_Cache_DisabledByNilCache(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec2, httpReq2))
 
 	assert.Len(t, provider.proxyBodies, 2, "nil cache must be a transparent passthrough")
-	assert.Empty(t, rec2.Header().Get("x-router-cache"))
+	assert.Empty(t, rec2.Header().Get(proxy.HeaderRouterCache))
 }

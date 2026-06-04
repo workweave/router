@@ -179,7 +179,7 @@ func TestService_SessionPin_PostgresHitKeepsPinnedModel(t *testing.T) {
 	// planner then keeps the pinned model because we have no prior-turn
 	// usage to justify paying eviction cost.
 	assert.Equal(t, 1, fr.routeCalls, "scorer runs every MainLoop turn under the planner")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 	waitForUpsert(t, store)
 }
 
@@ -241,7 +241,7 @@ func TestService_SessionPin_ExpiredPinIsIgnored(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "expired pin must not be served (sweep races leave stale rows)")
-	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
 // Eval-override headers must NOT bypass session-key pinning; the
@@ -264,7 +264,7 @@ func TestService_SessionPin_EvalOverrideHeaderKeepsSessionKeyPinning(t *testing.
 	// wins under ReasonNoPriorUsage.
 	assert.Equal(t, 1, fr.routeCalls, "scorer runs every MainLoop turn under the planner")
 	assert.Equal(t, 1, store.getCalls)
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
 // compactionBody triggers the compaction detector (§3.4).
@@ -319,7 +319,7 @@ func TestService_HardPin_Compaction_ByokOnly_UsesRequestResolver(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(compactionBody), rec, httpReq))
 
 	assert.Equal(t, 0, fr.routeCalls, "compaction must bypass the cluster scorer")
-	assert.Equal(t, "claude-haiku-anthropic-byok", rec.Header().Get("x-router-model"),
+	assert.Equal(t, "claude-haiku-anthropic-byok", rec.Header().Get(proxy.HeaderRouterModel),
 		"per-request resolver must land hard-pin on the installation's BYOK provider, not the boot-time default")
 }
 
@@ -364,7 +364,7 @@ func TestService_HardPin_CompactionAlwaysRoutesToHaiku(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(compactionBody), rec, httpReq))
 
 	assert.Equal(t, 0, fr.routeCalls, "compaction must bypass the cluster scorer")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 	assert.Equal(t, 0, store.getCalls, "compaction must not consult the pin store")
 
 	select {
@@ -396,7 +396,7 @@ func TestService_HardPin_ExploreRoutesToHaikuWhenFlagOn(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(exploreBody), rec, httpReq))
 
 	assert.Equal(t, 0, fr.routeCalls, "Explore must bypass cluster scorer when hardPinExplore=on")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 
 	select {
 	case <-store.upsertCh:
@@ -416,7 +416,7 @@ func TestService_HardPin_ExploreFallsThroughWhenFlagOff(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(exploreBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "Explore must fall through when hardPinExplore=off")
-	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
 // OpenAI ingress: same Stage 1 path via ProxyOpenAIChatCompletion.
@@ -464,7 +464,7 @@ func TestService_SessionPin_OpenAI_PostgresHitKeepsPinnedModel(t *testing.T) {
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(openAIPinTestBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "scorer runs every MainLoop turn under the planner")
-	assert.Equal(t, "gpt-5", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "gpt-5", rec.Header().Get(proxy.HeaderRouterModel))
 	waitForUpsert(t, store)
 }
 
@@ -610,7 +610,7 @@ func TestService_SessionPin_OpenAI_ToolResultShortCircuit(t *testing.T) {
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(toolResultBody), rec, httpReq))
 
 	assert.Equal(t, 0, fr.routeCalls, "tool-result with existing pin must not re-run the scorer")
-	assert.Equal(t, "gpt-5", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "gpt-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
 // newOpenAIHardPinSvc configures a service whose hard-pin target is on the
@@ -658,7 +658,7 @@ func TestService_OpenAI_CompactionPhraseDoesNotHardPin(t *testing.T) {
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(compactionOpenAIBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "OpenAI body must run the scorer, not hard-pin")
-	assert.Equal(t, "gpt-4o", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "gpt-4o", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
 func TestService_HardPin_OpenAI_SubAgentHeaderHintRoutesToHardPin(t *testing.T) {
@@ -673,7 +673,7 @@ func TestService_HardPin_OpenAI_SubAgentHeaderHintRoutesToHardPin(t *testing.T) 
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(openAIPinTestBody), rec, httpReq))
 
 	assert.Equal(t, 0, fr.routeCalls, "x-weave-subagent-type must trigger Explore hard-pin")
-	assert.Equal(t, "gpt-4o-mini", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "gpt-4o-mini", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
 // TestService_HardPin_BypassesTierCeiling regression-guards the PR #100
@@ -712,7 +712,7 @@ func TestService_HardPin_BypassesTierCeiling(t *testing.T) {
 	body := `{"model":"claude-haiku-4-5","system":"Your task is to create a detailed summary of the conversation so far.","messages":[{"role":"user","content":"go"}]}`
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
 
-	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"), "operator hard-pin must win over the tier ceiling")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "operator hard-pin must win over the tier ceiling")
 }
 
 // haikuClampBody requests a Low-tier model (haiku); the scorer is
@@ -743,7 +743,7 @@ func TestService_TierClamp_HaikuRequestedClampsHighScore(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
 
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "decision must be clamped to in-ceiling model")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "decision must be clamped to in-ceiling model")
 }
 
 // TestService_TierClamp_OpusRequestedNoClamp confirms High-tier
@@ -765,7 +765,7 @@ func TestService_TierClamp_OpusRequestedNoClamp(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"), "opus ceiling allows High picks unchanged")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "opus ceiling allows High picks unchanged")
 	assert.Equal(t, 0, resolverCalls, "resolver must not be called when decision is at or below ceiling")
 }
 
@@ -796,7 +796,7 @@ func TestService_TierClamp_PinAboveCeilingIsClamped(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
 
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
 // TestService_ForcedPin_ClampedReasonSurfacesTierClamp guards the reporting
@@ -826,8 +826,8 @@ func TestService_ForcedPin_ClampedReasonSurfacesTierClamp(t *testing.T) {
 	// Requesting haiku (Low ceiling) forces the High forced pin to clamp.
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
 
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "clamped forced pin must serve the in-ceiling model")
-	assert.Equal(t, translate.ReasonUserForceModel+"+tier_clamp", rec.Header().Get("x-router-decision"), "clamped forced pin must report the tier_clamp suffix, not plain user_forced")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "clamped forced pin must serve the in-ceiling model")
+	assert.Equal(t, translate.ReasonUserForceModel+"+tier_clamp", rec.Header().Get(proxy.HeaderRouterDecision), "clamped forced pin must report the tier_clamp suffix, not plain user_forced")
 }
 
 // TestService_ForcedPin_UnclampedReasonStaysUserForced is the companion: an
@@ -856,8 +856,8 @@ func TestService_ForcedPin_UnclampedReasonStaysUserForced(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
 	assert.Equal(t, 0, clampCalls, "in-ceiling forced pin must not invoke the clamp resolver")
-	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
-	assert.Equal(t, translate.ReasonUserForceModel, rec.Header().Get("x-router-decision"), "in-ceiling forced pin keeps the plain user_forced reason")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel))
+	assert.Equal(t, translate.ReasonUserForceModel, rec.Header().Get(proxy.HeaderRouterDecision), "in-ceiling forced pin keeps the plain user_forced reason")
 }
 
 // TestService_TierClamp_UnknownRequestedModelDisablesClamp regression-
@@ -889,7 +889,7 @@ func TestService_TierClamp_UnknownRequestedModelDisablesClamp(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
 
 	assert.Equal(t, 0, resolverCalls, "unknown requested model must yield TierUnknown ceiling, disabling the clamp")
-	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"), "scorer pick must pass through unclamped for unknown requested models")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "scorer pick must pass through unclamped for unknown requested models")
 }
 
 // TestService_TierClamp_ExcludedModelsThreadedToResolver regression-
@@ -962,7 +962,7 @@ func TestService_TierClamp_StaleFlagClearedOnUnclampedFinal(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	assert.Equal(t, "claude-opus-4-7", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel))
 	assert.Equal(t, 0, clampCalls, "no clamp should fire under a High ceiling with in-ceiling models")
 	// Implicit: by passing through without clamp, the log would record
 	// tier_clamped=false / pre_clamp_model="" — the regression would
@@ -997,7 +997,7 @@ func TestService_UserForcedPin_TierClampDoesNotOverwritePin(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
 
 	// This turn is clamped down to the in-ceiling model.
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"))
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 	assert.Equal(t, 0, fr.routeCalls, "user_forced pin must skip the scorer")
 
 	// The refreshed pin must keep the ORIGINAL forced model — not the clamp.
@@ -1035,5 +1035,5 @@ func TestService_UserForcedPin_IneligibleProviderFallsThrough(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "ineligible-provider forced pin must fall through to the scorer")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get("x-router-model"), "must dispatch to the eligible provider, not gpt-5/openai")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "must dispatch to the eligible provider, not gpt-5/openai")
 }
