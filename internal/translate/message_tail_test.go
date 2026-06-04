@@ -83,6 +83,41 @@ func TestMessageTailPreview_OpenAI(t *testing.T) {
 	assert.Equal(t, "file contents", msgs[1].Blocks[0].Preview)
 }
 
+func TestMessageTailPreview_Gemini(t *testing.T) {
+	body := []byte(`{
+		"model": "gemini-2.5-pro",
+		"contents": [
+			{"role": "user", "parts": [{"text": "hello"}]},
+			{"role": "model", "parts": [
+				{"text": "ok reading"},
+				{"functionCall": {"name": "Read", "args": {"file_path": "/foo.go"}}}
+			]},
+			{"role": "user", "parts": [
+				{"functionResponse": {"name": "Read", "response": {"result": "file contents"}}}
+			]}
+		]
+	}`)
+
+	env, err := ParseGemini(body)
+	require.NoError(t, err)
+
+	msgs := env.MessageTailPreview(2, 100)
+	require.Len(t, msgs, 2)
+
+	assert.Equal(t, "model", msgs[0].Role)
+	assert.Len(t, msgs[0].Blocks, 2)
+	assert.Equal(t, "text", msgs[0].Blocks[0].Type)
+	assert.Equal(t, "ok reading", msgs[0].Blocks[0].Preview)
+	assert.Equal(t, "tool_use", msgs[0].Blocks[1].Type)
+	assert.Equal(t, "Read", msgs[0].Blocks[1].Name)
+
+	assert.Equal(t, "user", msgs[1].Role)
+	assert.Len(t, msgs[1].Blocks, 1)
+	assert.Equal(t, "tool_result", msgs[1].Blocks[0].Type)
+	assert.Equal(t, "Read", msgs[1].Blocks[0].Name)
+	assert.JSONEq(t, `{"result":"file contents"}`, msgs[1].Blocks[0].Preview)
+}
+
 func TestSystemTextTail(t *testing.T) {
 	body := []byte(`{
 		"model": "claude-opus-4-7",

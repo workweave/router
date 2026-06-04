@@ -24,8 +24,7 @@ type MessagePreview struct {
 }
 
 // MessageTailPreview returns the last n messages with each block summarized
-// for log output. Returns nil for Gemini-format requests; raw-byte body
-// logging via logUpstreamBody continues to cover that ingress.
+// for log output.
 func (e *RequestEnvelope) MessageTailPreview(n, maxLen int) []MessagePreview {
 	if n <= 0 || maxLen <= 0 {
 		return nil
@@ -35,6 +34,8 @@ func (e *RequestEnvelope) MessageTailPreview(n, maxLen int) []MessagePreview {
 		return anthropicMessageTailPreview(e.body, n, maxLen)
 	case FormatOpenAI:
 		return openAIMessageTailPreview(e.body, n, maxLen)
+	case FormatGemini:
+		return geminiMessageTailPreview(e.body, n, maxLen)
 	default:
 		return nil
 	}
@@ -174,6 +175,64 @@ func openAIMessageTailPreview(body []byte, n, maxLen int) []MessagePreview {
 		out = append(out, mp)
 	}
 	return out
+}
+
+func geminiMessageTailPreview(body []byte, n, maxLen int) []MessagePreview {
+	contents := gjson.GetBytes(body, "contents")
+	if !contents.IsArray() {
+		return nil
+	}
+	all := contents.Array()
+	if len(all) == 0 {
+		return nil
+	}
+	start := len(all) - n
+	if start < 0 {
+		start = 0
+	}
+	out := make([]MessagePreview, 0, len(all)-start)
+	for _, msg := range all[start:] {
+		mp := MessagePreview{Role: msg.Get("role").String()}
+		parts := msg.Get("parts")
+		if parts.IsArray() {
+			parts.ForEach(func(_, part gjson.Result) bool {
+				mp.Blocks = append(mp.Blocks, geminiPartPreview(part, maxLen))
+				return true
+			})
+		}
+		out = append(out, mp)
+	}
+	return out
+}
+
+func geminiPartPreview(part gjson.Result, maxLen int) MessageBlockPreview {
+	if text := part.Get("text").String(); text != "" {
+		if part.Get("thought").Bool() {
+			return MessageBlockPreview{Type: "thinking", Preview: truncatePreview(text, maxLen)}
+		}
+		return MessageBlockPreview{Type: "text", Preview: truncatePreview(text, maxLen)}
+	}
+	if fc := part.Get("functionCall"); fc.Exists() {
+		return MessageBlockPreview{
+			Type:    "tool_use",
+			Name:    truncatePreview(fc.Get("name").String(), blockNameMaxLen),
+			Preview: truncatePreview(fc.Get("args").Raw, maxLen),
+		}
+	}
+	if fr := part.Get("functionResponse"); fr.Exists() {
+		return MessageBlockPreview{
+			Type:    "tool_result",
+			Name:    truncatePreview(fr.Get("name").String(), blockNameMaxLen),
+			Preview: truncatePreview(fr.Get("response").Raw, maxLen),
+		}
+	}
+	if inlineData := part.Get("inlineData"); inlineData.Exists() {
+		return MessageBlockPreview{Type: "image", Name: truncatePreview(inlineData.Get("mimeType").String(), blockNameMaxLen)}
+	}
+	if fileData := part.Get("fileData"); fileData.Exists() {
+		return MessageBlockPreview{Type: "file", Name: truncatePreview(fileData.Get("mimeType").String(), blockNameMaxLen)}
+	}
+	return MessageBlockPreview{Type: "part"}
 }
 
 // SystemTextTail returns the system-prompt length plus head and tail

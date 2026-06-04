@@ -71,9 +71,6 @@ func logInboundRequestDiagnostics(log *slog.Logger, env *translate.RequestEnvelo
 // user prompt, last tool_result) the model is about to react to. Used to
 // diagnose stuck conversations where bytes change but the model keeps
 // emitting the same prefix.
-//
-// Gemini envelopes are skipped — MessageTailPreview returns nil for them
-// and the raw-body log continues to cover that ingress.
 func logInboundConversationTail(log *slog.Logger, env *translate.RequestEnvelope) {
 	if env == nil {
 		return
