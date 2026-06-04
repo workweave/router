@@ -100,6 +100,10 @@ type Service struct {
 	// each completed upstream call. Wired only in managed mode; the
 	// composition root leaves this nil for selfhosted deployments.
 	billing *billing.Service
+	// retrySleep, when non-nil, overrides the same-binding backoff wait in
+	// dispatchWithFallback. Tests inject a no-op to avoid real delays; prod
+	// leaves it nil and falls back to sleepWithContext.
+	retrySleep func(context.Context, time.Duration) error
 }
 
 // pinSessionTTL mirrors Anthropic's prompt-cache TTL on Sonnet/Haiku/Opus 4.5+

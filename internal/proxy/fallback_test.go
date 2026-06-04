@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -313,16 +314,25 @@ func TestDispatchWithFallback_BothFailFinalBodyFlushed(t *testing.T) {
 	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 }
 
-func TestDispatchWithFallback_SingleBindingPath(t *testing.T) {
-	// Models with one binding (Anthropic/OpenAI/Google) flow through the
-	// helper with len(bindings)==1 — the loop runs exactly once and
-	// behavior matches the pre-failover dispatch.
+// noopSleep is the injected backoff for retry tests — keeps them fast and
+// deterministic while still driving the same-binding retry loop.
+func noopSleep(context.Context, time.Duration) error { return nil }
+
+func TestDispatchWithFallback_SingleBindingExhaustsRetries(t *testing.T) {
+	// A single-binding model (Anthropic/OpenAI/Google) has no provider to
+	// fail over to, so a persistent retryable error is retried in place up
+	// to maxSameBindingRetries before the buffered envelope flushes.
 	only := &fakeClient{
-		name:     "anthropic",
-		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`down`)}}},
+		name: "anthropic",
+		outcomes: []fakeOutcome{
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`down`)}},
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`down`)}},
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`down`)}},
+		},
 	}
 
 	s := newServiceWithProviders(t, map[string]providers.Client{"anthropic": only})
+	s.retrySleep = noopSleep
 
 	rec := httptest.NewRecorder()
 	buf := newPreludeBuffer(rec)
@@ -334,9 +344,6 @@ func TestDispatchWithFallback_SingleBindingPath(t *testing.T) {
 		initialDecision: router.Decision{Model: "claude-opus-4-7"},
 		bindings:        []catalog.ProviderBinding{{Provider: "anthropic"}},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			// Production closures call buf.Seal() between the Prelude
-			// phase and the upstream call. These tests have no Prelude,
-			// so Seal happens immediately before p.Proxy.
 			buf.Seal()
 			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
@@ -345,9 +352,123 @@ func TestDispatchWithFallback_SingleBindingPath(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, 0, winnerIdx)
-	// Buffered body still flushes on exhaustion — even with one binding,
-	// an empty fallback set means this is the final attempt.
-	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Equal(t, 1+maxSameBindingRetries, only.calls, "initial attempt + maxSameBindingRetries")
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "final upstream envelope still flushes on exhaustion")
+}
+
+func TestDispatchWithFallback_SingleBindingRetrySucceeds(t *testing.T) {
+	// Transient blip on the sole provider clears on retry — the turn is
+	// rescued instead of dying with a 503.
+	only := &fakeClient{
+		name: "anthropic",
+		outcomes: []fakeOutcome{
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`blip`)}},
+			{writeBytes: []byte("rescued")},
+		},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{"anthropic": only})
+	s.retrySleep = noopSleep
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "claude-opus-4-7"},
+		bindings:        []catalog.ProviderBinding{{Provider: "anthropic"}},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, winnerIdx)
+	assert.Equal(t, 2, only.calls, "one failure + one successful retry")
+	assert.Equal(t, "rescued", rec.Body.String(), "client sees only the successful retry's bytes")
+}
+
+func TestDispatchWithFallback_SingleBindingNonRetryableNoRetry(t *testing.T) {
+	// A 4xx is the model/request's fault, not a transient blip — retrying
+	// the same binding would just burn latency. Fail fast.
+	only := &fakeClient{
+		name:     "anthropic",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 400, Body: []byte(`bad`)}}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{"anthropic": only})
+	s.retrySleep = noopSleep
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "claude-opus-4-7"},
+		bindings:        []catalog.ProviderBinding{{Provider: "anthropic"}},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, only.calls, "non-retryable status must not retry")
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestDispatchWithFallback_SingleBindingBackoffAbortsOnCancel(t *testing.T) {
+	// If the client disconnects (ctx canceled) during backoff, the loop
+	// stops rather than burning the next attempt.
+	only := &fakeClient{
+		name: "anthropic",
+		outcomes: []fakeOutcome{
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`down`)}},
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`down`)}},
+		},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{"anthropic": only})
+	s.retrySleep = func(context.Context, time.Duration) error { return context.Canceled }
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "claude-opus-4-7"},
+		bindings:        []catalog.ProviderBinding{{Provider: "anthropic"}},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, only.calls, "backoff abort stops before the second attempt")
+}
+
+func TestSameBindingBackoff(t *testing.T) {
+	assert.Equal(t, 250*time.Millisecond, sameBindingBackoff(0))
+	assert.Equal(t, 500*time.Millisecond, sameBindingBackoff(1))
+}
+
+func TestSleepWithContext(t *testing.T) {
+	assert.NoError(t, sleepWithContext(context.Background(), time.Millisecond))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.ErrorIs(t, sleepWithContext(ctx, time.Hour), context.Canceled)
 }
 
 func TestShouldFailover(t *testing.T) {

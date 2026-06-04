@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
@@ -235,36 +236,72 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 			return i, provErr
 		}
 
-		// Reflect the current attempt in the response header so debugging
-		// logs / x-router-* headers match where the request actually went.
-		// Safe to rewrite until the buffer commits; on retry the previous
-		// value is overwritten via Discard's header restore + this Set.
-		if !committed(in.buf) {
-			in.w.Header().Set(HeaderRouterProvider, b.Provider)
-			if i > 0 {
-				in.w.Header().Set(HeaderRouterFallbackFrom, in.bindings[0].Provider)
-				in.w.Header().Set(HeaderRouterFallbackAttempt, attemptIdxLabel(i))
+		// Same-binding retry loop. A retryable transient blip on this
+		// provider often clears on a quick in-place retry — but only for
+		// single-binding models, which have no other provider to walk to.
+		// Multi-binding models break after the first attempt (see the
+		// len>1 guard below) and fail straight over to the next binding.
+		var attemptErr error
+		for sb := 0; ; sb++ {
+			// Reflect the current attempt in the response header so debugging
+			// logs / x-router-* headers match where the request actually went.
+			// Safe to rewrite until the buffer commits; on retry the previous
+			// value is overwritten via Discard's header restore + this Set.
+			if !committed(in.buf) {
+				in.w.Header().Set(HeaderRouterProvider, b.Provider)
+				if i > 0 {
+					in.w.Header().Set(HeaderRouterFallbackFrom, in.bindings[0].Provider)
+					in.w.Header().Set(HeaderRouterFallbackAttempt, attemptIdxLabel(i))
+				}
 			}
-		}
 
-		attemptErr := in.attempt(attemptCtx, decision, p)
-		if attemptErr == nil {
-			if i > 0 {
-				log.Info("dispatchWithFallback: succeeded on fallback",
-					"model", decision.Model,
-					"primary_provider", in.bindings[0].Provider,
-					"final_provider", b.Provider,
-					"attempt_index", i)
+			attemptErr = in.attempt(attemptCtx, decision, p)
+			if attemptErr == nil {
+				if i > 0 {
+					log.Info("dispatchWithFallback: succeeded on fallback",
+						"model", decision.Model,
+						"primary_provider", in.bindings[0].Provider,
+						"final_provider", b.Provider,
+						"attempt_index", i)
+				}
+				return i, nil
 			}
-			return i, nil
-		}
 
-		// If anything has already reached the client (preludeBuffer.commit
-		// fired during the attempt), we are committed to this attempt and
-		// must return its error — even if the error type itself would be
-		// retryable in isolation.
-		if committed(in.buf) {
-			return i, attemptErr
+			// If anything has already reached the client (preludeBuffer.commit
+			// fired during the attempt), we are committed to this attempt and
+			// must return its error — even if the error type itself would be
+			// retryable in isolation.
+			if committed(in.buf) {
+				return i, attemptErr
+			}
+
+			// Stop retrying this binding when: the error is non-retryable,
+			// the same-binding budget is spent, or the model has more than
+			// one binding (cross-binding failover to a *different* provider
+			// is strictly better than re-hitting the same flaky one). The
+			// same-binding retry exists solely for single-binding models,
+			// which have no other provider to walk to.
+			if !providers.IsRetryable(attemptErr) || sb >= maxSameBindingRetries || len(in.bindings) > 1 {
+				break
+			}
+			// Drop the buffered Prelude so the retry begins with a pristine
+			// writer, back off (abortable on ctx cancel), and try again.
+			if in.buf != nil {
+				in.buf.Discard()
+			}
+			log.Warn("dispatchWithFallback: retrying same binding after transient error",
+				"model", decision.Model,
+				"provider", b.Provider,
+				"attempt_index", i,
+				"same_binding_retry", sb+1,
+				"err", attemptErr)
+			sleep := s.retrySleep
+			if sleep == nil {
+				sleep = sleepWithContext
+			}
+			if err := sleep(attemptCtx, sameBindingBackoff(sb)); err != nil {
+				return i, attemptErr
+			}
 		}
 
 		if !providers.IsRetryable(attemptErr) || i == len(in.bindings)-1 {
@@ -300,6 +337,41 @@ func committed(b *preludeBuffer) bool {
 		return false
 	}
 	return b.Committed()
+}
+
+const (
+	// maxSameBindingRetries bounds how many times dispatchWithFallback
+	// re-tries the SAME provider binding after a retryable transient error
+	// (5xx/408/429, connection reset) before giving up on it. This is the
+	// only failover path single-binding models (gemini, opus) have: cross-
+	// binding failover walks to a different provider, but most catalog
+	// models carry one binding, so a sole-provider blip would otherwise
+	// kill the turn outright. 2 retries = up to 3 attempts per binding.
+	maxSameBindingRetries = 2
+	// sameBindingBackoffBase is the first inter-retry delay; it doubles per
+	// attempt (250ms, 500ms). Small enough to stay well inside agentic and
+	// interactive turn budgets, large enough to ride out a provider blip.
+	sameBindingBackoffBase = 250 * time.Millisecond
+)
+
+// sameBindingBackoff is the delay before same-binding retry attempt+1
+// (0-indexed): exponential off sameBindingBackoffBase.
+func sameBindingBackoff(attempt int) time.Duration {
+	return sameBindingBackoffBase << attempt
+}
+
+// sleepWithContext waits d, returning early with ctx.Err() if ctx is
+// canceled or its deadline elapses first — a client disconnect or budget
+// expiry must abort the backoff rather than burn the remaining budget.
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // shouldFailover reports whether the request is eligible for multi-binding
