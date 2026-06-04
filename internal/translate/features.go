@@ -325,6 +325,13 @@ func contentTextGJSON(v gjson.Result) string {
 	return b.String()
 }
 
+// classifyLastMessageGJSON maps an Anthropic message's role + content to the
+// shared LastKind enum. Any user message carrying at least one tool_result
+// block is a continuation of an in-flight tool flow, even when the client
+// wraps the result with accompanying text (Claude Code emits <system-reminder>
+// text blocks alongside tool_results). Switching models on these turns would
+// hand the new model a tool_result destined for the previous model's tool_use,
+// so they must short-circuit to the session pin.
 func classifyLastMessageGJSON(role string, content gjson.Result) string {
 	if role == "assistant" {
 		return "assistant"
@@ -333,17 +340,14 @@ func classifyLastMessageGJSON(role string, content gjson.Result) string {
 		return "user_prompt"
 	}
 	hasToolResult := false
-	hasText := false
 	content.ForEach(func(_, block gjson.Result) bool {
-		switch block.Get("type").String() {
-		case "tool_result":
+		if block.Get("type").String() == "tool_result" {
 			hasToolResult = true
-		case "text":
-			hasText = true
+			return false
 		}
 		return true
 	})
-	if hasToolResult && !hasText {
+	if hasToolResult {
 		return "tool_result"
 	}
 	return "user_prompt"

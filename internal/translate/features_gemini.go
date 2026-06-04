@@ -57,7 +57,9 @@ func (e *RequestEnvelope) geminiRoutingFeatures(extractOnlyUser bool) RoutingFea
 	return feats
 }
 
-// classifyLastMessageGemini maps a Gemini contents[] entry to the shared LastKind enum.
+// classifyLastMessageGemini maps a Gemini contents[] entry to the shared
+// LastKind enum. Mirrors the Anthropic classifier: any functionResponse part
+// makes the turn a tool-flow continuation regardless of accompanying text.
 func classifyLastMessageGemini(msg gjson.Result) string {
 	if msg.Get("role").String() == "model" {
 		return "assistant"
@@ -67,17 +69,14 @@ func classifyLastMessageGemini(msg gjson.Result) string {
 		return "user_prompt"
 	}
 	hasToolResult := false
-	hasText := false
 	parts.ForEach(func(_, part gjson.Result) bool {
 		if part.Get("functionResponse").Exists() {
 			hasToolResult = true
-		}
-		if part.Get("text").Exists() {
-			hasText = true
+			return false
 		}
 		return true
 	})
-	if hasToolResult && !hasText {
+	if hasToolResult {
 		return "tool_result"
 	}
 	return "user_prompt"

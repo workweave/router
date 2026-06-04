@@ -32,14 +32,18 @@ func TestDetectFromEnvelope_Anthropic(t *testing.T) {
 			want: turntype.ToolResult,
 		},
 		{
-			name: "tool_result with text block is main_loop",
+			// Claude Code wraps tool_results in <system-reminder> text blocks,
+			// so a mixed text + tool_result message is still a tool-flow
+			// continuation — the assistant just emitted a tool_use, the tool
+			// ran, and switching models now would orphan that tool_use.
+			name: "tool_result mixed with text is still tool_result",
 			body: `{"model":"claude-sonnet-4-5","messages":[
 				{"role":"user","content":[
 					{"type":"tool_result","tool_use_id":"t1","content":"output"},
-					{"type":"text","text":"did you see this?"}
+					{"type":"text","text":"<system-reminder>note</system-reminder>"}
 				]}
 			]}`,
-			want: turntype.MainLoop,
+			want: turntype.ToolResult,
 		},
 		{
 			name: "last message is assistant — main_loop",
@@ -401,6 +405,18 @@ func TestDetectFromEnvelope_Gemini(t *testing.T) {
 				{"role":"user","parts":[{"text":"run grep"}]},
 				{"role":"model","parts":[{"functionCall":{"name":"Bash","args":{}}}]},
 				{"role":"user","parts":[{"functionResponse":{"name":"Bash","response":{"out":"x"}}}]}
+			]}`,
+			want: turntype.ToolResult,
+		},
+		{
+			// Mirror of the Anthropic mixed-content case: a functionResponse
+			// alongside text is still a tool-flow continuation.
+			name: "functionResponse mixed with text is still tool_result",
+			body: `{"contents":[
+				{"role":"user","parts":[
+					{"functionResponse":{"name":"Bash","response":{"out":"x"}}},
+					{"text":"note"}
+				]}
 			]}`,
 			want: turntype.ToolResult,
 		},
