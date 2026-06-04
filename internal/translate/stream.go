@@ -413,6 +413,22 @@ type AnthropicSSETranslator struct {
 	// recovery nudge, so Summary can surface it for log analysis.
 	nudgeEmitted bool
 
+	// sawText latches true once any non-empty content-channel text delta is
+	// emitted. Lets synthesizeTextOnlyTurnNudge tell a model that produced a
+	// real (if tool-free) answer apart from a turn that emitted nothing.
+	sawText bool
+
+	// leadingContent accumulates up to leadingContentCap bytes of the content
+	// channel's opening text so the nudge can tell whether the turn *led* with
+	// tool-call / raw-reasoning markup. The parse-failure mode the nudge targets
+	// opens the turn with the markup: a model dumping <think> reasoning or an
+	// unstructured tool call into the content channel because the server didn't
+	// route it to reasoning_content / tool_calls. A legitimate final answer that
+	// merely mentions "<think>" mid-prose — e.g. a model explaining tag syntax —
+	// must NOT trip it, so the check is anchored to the start (see
+	// leadsWithToolishMarkup), not a substring scan anywhere in the text.
+	leadingContent strings.Builder
+
 	// stopReasonDemoted latches true when emitMessageDelta demoted a
 	// finish_reason="tool_calls" turn to end_turn because no tool_use block
 	// survived. Surfaced via Summary so the proxy can count the degenerate
@@ -782,6 +798,14 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 			t.textOpen = true
 			t.blockIdx++
 		}
+		t.sawText = true
+		if n := t.leadingContent.Len(); n < leadingContentCap {
+			if room := leadingContentCap - n; len(content) > room {
+				t.leadingContent.WriteString(content[:room])
+			} else {
+				t.leadingContent.WriteString(content)
+			}
+		}
 		if err := t.emitContentBlockDeltaText(t.blockIdx-1, content); err != nil {
 			return err
 		}
@@ -926,6 +950,36 @@ func (t *AnthropicSSETranslator) emitValidatedToolArgsDelta(blockIdx int) error 
 // includes it in tools, making the fabricated call dispatchable.
 const routerNudgeCommand = "echo '[router] previous turn produced no tool_use; please use Edit/Write/Read/Bash/Grep — do not respond with prose or <think> tags only.'"
 
+// leadingContentCap bounds how much of the content channel's opening text the
+// translator retains for the leadsWithToolishMarkup check. Large enough to hold
+// any marker plus a little leading whitespace; small enough to stay cheap.
+const leadingContentCap = 64
+
+// toolishMarkupMarkers are the opening tokens of tool-call / raw-reasoning
+// markup a model leaks into the content channel instead of emitting a
+// structured tool_use block: <think> reasoning that wasn't routed to
+// reasoning_content, or a tool call serialized as XML the upstream never
+// structured into tool_calls. Claude Code's strict parser rejects these ("tool
+// call could not be parsed"), dead-ending the turn — which is exactly what the
+// nudge rescues. Matched only at the START of the turn (see
+// leadsWithToolishMarkup): the leak opens the turn with the markup, whereas a
+// legitimate answer that discusses these tags has them mid-prose.
+var toolishMarkupMarkers = []string{"<think", "<tool_call", "<function", "<invoke"}
+
+// leadsWithToolishMarkup reports whether the turn's content opens with
+// tool-call/raw-reasoning markup, ignoring leading whitespace. Anchoring to the
+// start is deliberate: a substring scan would misfire on a clean final answer
+// that merely mentions "<think>" somewhere in its prose.
+func leadsWithToolishMarkup(content string) bool {
+	s := strings.TrimLeft(content, " \t\r\n")
+	for _, m := range toolishMarkupMarkers {
+		if strings.HasPrefix(s, m) {
+			return true
+		}
+	}
+	return false
+}
+
 // synthesizeTextOnlyTurnNudge fabricates a single Bash tool_use block when the
 // upstream produced an assistant turn with no tool_use blocks AND the inbound
 // request had tools available. Targets the bucket-C residual empty-patch
@@ -942,6 +996,17 @@ const routerNudgeCommand = "echo '[router] previous turn produced no tool_use; p
 // when nothing has been written to the stream yet (an unrelated upstream
 // error — preludeBuffer + flushErr handles that path).
 //
+// Final-answer guard: a tool-free text turn is only nudged when it actually
+// looks like the parse-failure mode, not when a model simply finished its
+// work. Concretely, the nudge is suppressed when finish_reason="stop" (or "")
+// AND the emitted text is clean prose (no tool-call-like markup). That is the
+// shape of a legitimate final answer — e.g. DeepSeek summarizing completed
+// work — and stapling a synthetic Bash call onto it would revive an
+// already-finished turn. finish_reason="tool_calls" (the upstream signaled a
+// tool the parser couldn't structure) and content carrying tool-call markup
+// still nudge; finish_reason="length" (truncation) never does, since a Bash
+// echo cannot help a turn that was cut off mid-output.
+//
 // CRITICAL no-op on Gemini-3.x: the synthesized block is a tool_use with no
 // thoughtSignature. Gemini-3.x requires a thoughtSignature on every
 // functionCall part across turns; on the next turn writeGeminiFromAnthropic
@@ -956,6 +1021,20 @@ const routerNudgeCommand = "echo '[router] previous turn produced no tool_use; p
 func (t *AnthropicSSETranslator) synthesizeTextOnlyTurnNudge() error {
 	if t.toolUseEmitted || !t.requestHadTools || !t.started {
 		return nil
+	}
+	switch t.finishReason {
+	case "length":
+		// Truncated mid-output; the model needs to continue, not run a Bash
+		// echo. Nudging here just burns a turn.
+		return nil
+	case "stop", "":
+		// Ambiguous bucket: a clean prose answer (model genuinely done) and a
+		// turn that led with leaked <think>/tool-call markup both land here.
+		// Only nudge the latter; a turn that produced prose not opening with
+		// markup is a real final answer.
+		if t.sawText && !leadsWithToolishMarkup(t.leadingContent.String()) {
+			return nil
+		}
 	}
 	if isGemini3xModel(t.requestModel) || isGemini3xModel(t.modelFromUpstream) {
 		observability.Get().Debug(

@@ -203,6 +203,109 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedWhenToolUseAlreadyEmitt
 	assert.Equal(t, 1, summary.ToolUseBlocks, "exactly one real tool_use, no synthetic addition")
 }
 
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedOnCleanProseFinalAnswer(t *testing.T) {
+	// The false positive this guard fixes: a model (e.g. DeepSeek) finishes its
+	// work and returns a clean prose final answer with finish_reason="stop".
+	// Tools were available, but the text carries no tool-call-like markup, so
+	// the turn is a legitimate completion — stapling a synthetic Bash call onto
+	// it would revive an already-finished turn. Nudge must NOT fire.
+	body, summary := driveAnthropicSSEWithTools(t, "deepseek-v3.2", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"I've finished the refactor and all tests pass."},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":" Let me know if you need anything else."},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.False(t, summary.TextOnlyTurnNudged,
+		"clean prose finish_reason=stop is a real final answer — nudge must not fire")
+	assert.Equal(t, 0, summary.ToolUseBlocks, "no synthetic tool_use on a legitimate completion")
+	assert.Equal(t, "end_turn", summary.StopReason, "turn ends naturally, not promoted to tool_use")
+	assert.NotContains(t, body, "toolu_router_nudge_")
+	assert.Contains(t, body, "I've finished the refactor", "the model's real answer survives")
+}
+
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresWhenLeadingWithToolishMarkup(t *testing.T) {
+	// finish_reason="stop" but the turn OPENS with a tool call leaked into the
+	// content channel as plain text (the parse-failure mode Claude Code
+	// rejects). Leading markup is the discriminator that keeps the nudge firing
+	// even though the upstream said "stop" — this is NOT a clean final answer.
+	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\":\"Edit\"}</tool_call>"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.True(t, summary.TextOnlyTurnNudged,
+		"a turn leading with tool-call markup is the failure mode — nudge must fire despite finish_reason=stop")
+	assert.Equal(t, 1, summary.ToolUseBlocks)
+	assert.Contains(t, body, `"id":"toolu_router_nudge_`)
+}
+
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedWhenProseMentionsMarkup(t *testing.T) {
+	// The substring-match trap: a legitimate final answer that *discusses* tag
+	// syntax — e.g. a model explaining this very router code — contains
+	// "<think" mid-prose. Because the markup is not at the START of the turn,
+	// it's a real answer, not a leak, and must NOT be nudged.
+	body, summary := driveAnthropicSSEWithTools(t, "deepseek-v3.2", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"The detector trips when content begins with a <think> tag, "},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"so prose mentioning <tool_call> or <function> mid-sentence is fine."},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":20}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.False(t, summary.TextOnlyTurnNudged,
+		"markup mentioned mid-prose is a real answer, not a leak — nudge must not fire")
+	assert.Equal(t, 0, summary.ToolUseBlocks)
+	assert.NotContains(t, body, "toolu_router_nudge_")
+}
+
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresOnToolCallsFinish(t *testing.T) {
+	// finish_reason="tool_calls" means the upstream itself signaled a tool call
+	// that never materialized as a structured block. The model intended a tool,
+	// so the nudge is correct even though the visible text is clean prose.
+	body, summary := driveAnthropicSSEWithTools(t, "z-ai/glm-5.1", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"I'll create the PR now."},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":20,"completion_tokens":6}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.True(t, summary.TextOnlyTurnNudged,
+		"finish_reason=tool_calls with no structured call — the model wanted a tool; nudge must fire")
+	assert.Equal(t, 1, summary.ToolUseBlocks)
+	assert.Contains(t, body, `"id":"toolu_router_nudge_`)
+}
+
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedOnLengthTruncation(t *testing.T) {
+	// finish_reason="length": the model was cut off mid-output. A Bash echo
+	// can't help a truncated turn — it needs to continue. Nudge must NOT fire.
+	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Here is the first part of the plan and then"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":40,"completion_tokens":4096}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.False(t, summary.TextOnlyTurnNudged,
+		"truncated (finish_reason=length) turns must not be nudged")
+	assert.Equal(t, 0, summary.ToolUseBlocks)
+	assert.NotContains(t, body, "toolu_router_nudge_")
+}
+
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresOnEmptyTurn(t *testing.T) {
+	// A turn that emits no text and no tool_use at all (finish_reason=stop) is
+	// not a final answer — it's an empty dead-end. The nudge still fires to
+	// keep the loop alive, since the clean-prose guard only suppresses turns
+	// that actually produced prose.
+	_, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":0}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.True(t, summary.TextOnlyTurnNudged,
+		"an empty turn is a dead-end, not a final answer — nudge must fire")
+	assert.Equal(t, 1, summary.ToolUseBlocks)
+}
+
 func TestAnthropicSSETranslator_EmptyArgsNotFlagged(t *testing.T) {
 	// Some tools take no input. The upstream emits no arguments fragment at
 	// all (or an empty one). An empty buffer is the trivial case — not
