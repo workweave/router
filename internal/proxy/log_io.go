@@ -58,6 +58,75 @@ func logInboundToolTraffic(log *slog.Logger, env *translate.RequestEnvelope) {
 	)
 }
 
+// logInboundConversationTail emits a structured summary of the last few
+// inbound messages, with role + per-block type/name/preview. Pairs with
+// logInboundToolTraffic: the tool-call view shows what the model previously
+// invoked, this view shows the visible prose context (assistant text, last
+// user prompt, last tool_result) the model is about to react to. Used to
+// diagnose stuck conversations where bytes change but the model keeps
+// emitting the same prefix.
+//
+// Gemini envelopes are skipped — MessageTailPreview returns nil for them
+// and the raw-body log continues to cover that ingress.
+func logInboundConversationTail(log *slog.Logger, env *translate.RequestEnvelope) {
+	if env == nil {
+		return
+	}
+	const tailWindow = 4
+	const maxLen = 200
+	msgs := env.MessageTailPreview(tailWindow, maxLen)
+	if len(msgs) == 0 {
+		return
+	}
+	lines := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		var b strings.Builder
+		b.WriteString(m.Role)
+		b.WriteString(" :: ")
+		for i, blk := range m.Blocks {
+			if i > 0 {
+				b.WriteString(" || ")
+			}
+			b.WriteString(blk.Type)
+			if blk.Name != "" {
+				b.WriteByte('[')
+				b.WriteString(blk.Name)
+				b.WriteByte(']')
+			}
+			if blk.Preview != "" {
+				b.WriteString(": ")
+				b.WriteString(strings.ReplaceAll(blk.Preview, "\n", " "))
+			}
+		}
+		lines = append(lines, b.String())
+	}
+	log.Info("inbound conversation tail",
+		"window", tailWindow,
+		"max_len", maxLen,
+		"messages", lines,
+	)
+}
+
+// logInboundSystemTail emits the system-prompt length plus head/tail
+// excerpts. The static Claude Code system prompt dwarfs any per-turn
+// system_reminder injections; logging head + tail makes those injections
+// visible without paying to log the whole prompt every turn.
+func logInboundSystemTail(log *slog.Logger, env *translate.RequestEnvelope) {
+	if env == nil {
+		return
+	}
+	const maxLen = 200
+	length, head, tail := env.SystemTextTail(maxLen)
+	if length == 0 {
+		return
+	}
+	log.Info("inbound system tail",
+		"system_len", length,
+		"system_head", head,
+		"system_tail", tail,
+	)
+}
+
 // logAssistantOutputSummary emits a Debug summary of the assistant blocks the
 // upstream produced this turn: counts of text / tool_use / thinking blocks and
 // short previews of each tool_use call. Streaming providers should call this
