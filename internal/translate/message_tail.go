@@ -82,13 +82,13 @@ func anthropicBlockPreview(block gjson.Result, maxLen int) MessageBlockPreview {
 	case "tool_use":
 		return MessageBlockPreview{
 			Type:    t,
-			Name:    block.Get("name").String(),
+			Name:    truncatePreview(block.Get("name").String(), blockNameMaxLen),
 			Preview: truncatePreview(block.Get("input").Raw, maxLen),
 		}
 	case "tool_result":
 		return MessageBlockPreview{
 			Type:    t,
-			Name:    block.Get("tool_use_id").String(),
+			Name:    truncatePreview(block.Get("tool_use_id").String(), blockNameMaxLen),
 			Preview: truncatePreview(toolResultContentText(block.Get("content")), maxLen),
 		}
 	default:
@@ -152,7 +152,7 @@ func openAIMessageTailPreview(body []byte, n, maxLen int) []MessagePreview {
 				toolCalls.ForEach(func(_, tc gjson.Result) bool {
 					mp.Blocks = append(mp.Blocks, MessageBlockPreview{
 						Type:    "tool_use",
-						Name:    tc.Get("function.name").String(),
+						Name:    truncatePreview(tc.Get("function.name").String(), blockNameMaxLen),
 						Preview: truncatePreview(tc.Get("function.arguments").String(), maxLen),
 					})
 					return true
@@ -160,7 +160,7 @@ func openAIMessageTailPreview(body []byte, n, maxLen int) []MessagePreview {
 			}
 		case "tool":
 			// Surface as tool_result for symmetry with the Anthropic shape.
-			id := msg.Get("tool_call_id").String()
+			id := truncatePreview(msg.Get("tool_call_id").String(), blockNameMaxLen)
 			if len(mp.Blocks) > 0 {
 				mp.Blocks[0].Type = "tool_result"
 				mp.Blocks[0].Name = id
@@ -191,6 +191,12 @@ func (e *RequestEnvelope) SystemTextTail(maxLen int) (length int, head, tail str
 	}
 	return length, s[:maxLen], s[length-maxLen:]
 }
+
+// blockNameMaxLen caps tool names and tool_use_ids in the conversation tail
+// log. The Anthropic→OpenAI translator packs thoughtSignatures into
+// tool_use_ids and the resulting base64 string can exceed 4 KB, dwarfing
+// every other block in the log line.
+const blockNameMaxLen = 48
 
 func truncatePreview(s string, maxLen int) string {
 	if maxLen <= 0 || len(s) <= maxLen {

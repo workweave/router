@@ -73,7 +73,7 @@ func logInboundConversationTail(log *slog.Logger, env *translate.RequestEnvelope
 		return
 	}
 	const tailWindow = 4
-	const maxLen = 200
+	const maxLen = 500
 	msgs := env.MessageTailPreview(tailWindow, maxLen)
 	if len(msgs) == 0 {
 		return
@@ -115,7 +115,7 @@ func logInboundSystemTail(log *slog.Logger, env *translate.RequestEnvelope) {
 	if env == nil {
 		return
 	}
-	const maxLen = 200
+	const maxLen = 500
 	length, head, tail := env.SystemTextTail(maxLen)
 	if length == 0 {
 		return
