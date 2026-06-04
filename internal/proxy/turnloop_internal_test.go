@@ -95,11 +95,11 @@ func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	assert.False(t, store.lastUsage.EndedAt.IsZero(), "EndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
 
-// TestLoadPin_DiscardsExpiredPostgresPin guards the expiry filter: rows whose
-// PinnedUntil has passed must be treated as misses so the orchestrator
-// re-routes via the cluster scorer. The sweeper is best-effort and races
-// against high-throughput sessions, so loadPin must guard for itself.
-func TestLoadPin_DiscardsExpiredPostgresPin(t *testing.T) {
+// TestLoadPin_DoesNotServeExpiredPostgresPinButKeepsEmitHistory guards the
+// expiry filter: expired rows must be routing misses, but their
+// has_ever_switched / last_served_model history still protects Anthropic emit
+// from poisoned thinking blocks that remain in the client transcript.
+func TestLoadPin_DoesNotServeExpiredPostgresPinButKeepsEmitHistory(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(
 		nil,
@@ -120,19 +120,29 @@ func TestLoadPin_DiscardsExpiredPostgresPin(t *testing.T) {
 	}
 
 	store.getPin = sessionpin.Pin{
-		SessionKey:  sessionKey,
-		Role:        sessionpin.DefaultRole,
-		Provider:    "anthropic",
-		Model:       "claude-opus-4-7",
-		Reason:      "fresh",
-		TurnCount:   1,
-		PinnedUntil: time.Now().Add(-time.Minute),
+		SessionKey:      sessionKey,
+		Role:            sessionpin.DefaultRole,
+		Provider:        "anthropic",
+		Model:           "claude-opus-4-7",
+		Reason:          "fresh",
+		TurnCount:       1,
+		PinnedUntil:     time.Now().Add(-time.Minute),
+		LastServedModel: "claude-opus-4-7",
+		HasEverSwitched: true,
 	}
 	store.getFound = true
 
 	pin, found := svc.loadPin(context.Background(), sessionKey, sessionpin.DefaultRole)
 	assert.False(t, found, "expired Postgres row must not be served")
-	assert.Equal(t, sessionpin.Pin{}, pin, "miss must return the zero pin")
+	assert.Equal(t, "claude-opus-4-7", pin.LastServedModel, "expired row history must be available for emit")
+	assert.True(t, pin.HasEverSwitched, "expired row latch must be available for emit")
+
+	res := turnLoopResult{
+		Decision:            router.Decision{Model: "claude-opus-4-7"},
+		PriorServedModel:    pin.LastServedModel,
+		SessionEverSwitched: pin.HasEverSwitched,
+	}
+	assert.True(t, res.modelSwitched(), "expired switched-session history must still strip thinking blocks")
 }
 
 // TestLoadPin_ServesFreshPostgresPin is the companion: a non-expired Postgres

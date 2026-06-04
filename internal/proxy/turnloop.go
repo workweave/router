@@ -211,10 +211,10 @@ func (s *Service) runTurnLoop(
 	res.SessionKey = DeriveSessionKey(env, apiKeyID)
 
 	pin, pinFound := s.loadPin(ctx, res.SessionKey, res.PinRole)
+	res.PriorServedModel = pin.LastServedModel
+	res.SessionEverSwitched = pin.HasEverSwitched
 	if pinFound {
 		res.PinModel = pin.Model
-		res.PriorServedModel = pin.LastServedModel
-		res.SessionEverSwitched = pin.HasEverSwitched
 		res.PinAgeSec = pinAge(pin)
 		log.Info("turnloop pin lookup hit",
 			"pin_model", pin.Model,
@@ -507,8 +507,9 @@ func (s *Service) clampToCeiling(decision router.Decision, ceiling catalog.Tier,
 	}
 }
 
-// loadPin returns the active pin for this session from Postgres.
-// Expired rows are treated as misses.
+// loadPin returns the stored pin and whether it may actively serve this turn.
+// Expired rows are misses for routing, but their history fields still protect
+// Anthropic emit from stale thinking-block signatures in the client transcript.
 func (s *Service) loadPin(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool) {
 	log := observability.FromContext(ctx)
 	log.Debug("loadPin called", "role", role, "session_key_hex", fmt.Sprintf("%x", sessionKey))
@@ -521,7 +522,7 @@ func (s *Service) loadPin(ctx context.Context, sessionKey [sessionpin.SessionKey
 		return sessionpin.Pin{}, false
 	}
 	if !pin.PinnedUntil.After(time.Now()) {
-		return sessionpin.Pin{}, false
+		return pin, false
 	}
 	return pin, true
 }
