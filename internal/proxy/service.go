@@ -25,7 +25,6 @@ import (
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
-	"github.com/hashicorp/golang-lru/v2/expirable"
 )
 
 // Service orchestrates routing decisions and provider dispatch.
@@ -38,9 +37,6 @@ type Service struct {
 	// pinStore persists session-sticky routing decisions. Nil when the feature
 	// flag is off; the orchestrator then runs the scorer every turn.
 	pinStore sessionpin.Store
-	// pinCache absorbs the hot path; 30s TTL is short enough that pinned_until
-	// in the pin store remains source of truth for validity.
-	pinCache *expirable.LRU[string, sessionpin.Pin]
 	// noProgress tracks per-session dispatch fingerprints to catch the
 	// cross-envelope subagent loop (parent agent re-spawning identical
 	// sub-conversations). Nil disables the detector.
@@ -49,11 +45,6 @@ type Service struct {
 	// drops) so the router can rewrite non-Anthropic requests with a handover
 	// summary before the model loses awareness of prior completed work.
 	compaction *compactionTracker
-	// pinWriteSem bounds concurrent async pin-upsert goroutines with drop-on-full semantics.
-	pinWriteSem chan struct{}
-	// usageWriteSem bounds concurrent async last-turn-usage writeback goroutines,
-	// with the same drop-on-full semantics as pinWriteSem.
-	usageWriteSem chan struct{}
 	// hardPinExplore gates the Explore sub-agent hard-pin.
 	hardPinExplore bool
 	// hardPinProvider/hardPinModel route compaction (and, when hardPinExplore is
@@ -328,14 +319,6 @@ const DefaultPlannerExpectedRemainingTurns = 3
 const DefaultPlannerTierUpgradeEnabled = true
 
 func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedOnlyUserMessage bool, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
-	var pinCache *expirable.LRU[string, sessionpin.Pin]
-	var pinWriteSem chan struct{}
-	var usageWriteSem chan struct{}
-	if pinStore != nil {
-		pinCache = expirable.NewLRU[string, sessionpin.Pin](10000, nil, 30*time.Second)
-		pinWriteSem = make(chan struct{}, 64)
-		usageWriteSem = make(chan struct{}, 64)
-	}
 	return &Service{
 		router:               r,
 		providers:            providerMap,
@@ -343,11 +326,8 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		embedOnlyUserMessage: embedOnlyUserMessage,
 		semanticCache:        semanticCache,
 		pinStore:             pinStore,
-		pinCache:             pinCache,
 		noProgress:           newNoProgressTracker(),
 		compaction:           newCompactionTracker(),
-		pinWriteSem:          pinWriteSem,
-		usageWriteSem:        usageWriteSem,
 		hardPinExplore:       hardPinExplore,
 		hardPinProvider:      hardPinProvider,
 		hardPinModel:         hardPinModel,
@@ -1343,12 +1323,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	return proxyErr
 }
 
-// sessionPinCacheKey produces the in-proc LRU key for a (session_key, role)
-// pair. Hex-encoded for the string-keyed LRU.
-func sessionPinCacheKey(key [sessionpin.SessionKeyLen]byte, role string) string {
-	return hex.EncodeToString(key[:]) + ":" + role
-}
-
 // applyPlannerAttrs stamps planner and handover attributes onto a span
 // attribute builder. Safe when the planner didn't run (uses "skipped" outcome).
 func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilder {
@@ -1416,10 +1390,6 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 	)
 }
 
-// recordTurnUsage writes upstream token usage back to the session pin row
-// for the planner's next-turn EV math. Bounded async; drops on saturation.
-// Uses context.Background() so the DB write outlives the request ctx.
-
 func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, cacheRead int) {
 	if s.pinStore == nil || res.HardPinned {
 		return
@@ -1439,40 +1409,12 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 		EndedAt:           time.Now(),
 		ServedModel:       res.Decision.Model,
 	}
-	key := res.SessionKey
 	role := res.PinRole
 	if role == "" {
 		role = sessionpin.DefaultRole
 	}
-
-	// Keep the in-proc LRU coherent with the DB writeback. Without this,
-	// loadPin's Tier-1 hit serves a stale pin with zero usage and the
-	// planner returns ReasonNoPriorUsage forever (the 30s LRU TTL keeps
-	// resetting under typical agentic turn cadence), which silently
-	// disables EV-based switching for all active sessions.
-	if s.pinCache != nil {
-		pinCacheKey := sessionPinCacheKey(key, role)
-		if pin, ok := s.pinCache.Get(pinCacheKey); ok {
-			pin.LastInputTokens = usage.InputTokens
-			pin.LastCachedReadTokens = usage.CachedReadTokens
-			pin.LastCachedWriteTokens = usage.CachedWriteTokens
-			pin.LastOutputTokens = usage.OutputTokens
-			pin.LastTurnEndedAt = usage.EndedAt
-			pin.LastServedModel = usage.ServedModel
-			s.pinCache.Add(pinCacheKey, pin)
-		}
-	}
-
-	select {
-	case s.usageWriteSem <- struct{}{}:
-		go func() {
-			defer func() { <-s.usageWriteSem }()
-			if err := s.pinStore.UpdateUsage(context.Background(), key, role, usage); err != nil {
-				observability.Get().Debug("session pin usage writeback failed", "err", err)
-			}
-		}()
-	default:
-		observability.Get().Debug("session pin usage writeback dropped: semaphore full")
+	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, usage); err != nil {
+		observability.Get().Error("session pin usage writeback failed", "err", err)
 	}
 }
 

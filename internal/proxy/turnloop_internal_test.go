@@ -11,22 +11,21 @@ import (
 
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/sessionpin"
-	"workweave/router/internal/translate"
 )
 
 // stubPinStore is a minimal sessionpin.Store for testing recordTurnUsage.
 // getPin/getFound configure the Get response; both default to a miss so
 // existing tests that rely on "no Postgres row" keep working unchanged.
 type stubPinStore struct {
-	mu          sync.Mutex
-	lastUsage   sessionpin.Usage
-	usageCalled chan struct{}
-	getPin      sessionpin.Pin
-	getFound    bool
+	mu        sync.Mutex
+	lastUsage sessionpin.Usage
+	usageHits int
+	getPin    sessionpin.Pin
+	getFound  bool
 }
 
 func newStubPinStore() *stubPinStore {
-	return &stubPinStore{usageCalled: make(chan struct{}, 1)}
+	return &stubPinStore{}
 }
 
 func (s *stubPinStore) Get(context.Context, [sessionpin.SessionKeyLen]byte, string) (sessionpin.Pin, bool, error) {
@@ -39,12 +38,9 @@ func (s *stubPinStore) Upsert(context.Context, sessionpin.Pin) error { return ni
 
 func (s *stubPinStore) UpdateUsage(_ context.Context, _ [sessionpin.SessionKeyLen]byte, _ string, u sessionpin.Usage) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.lastUsage = u
-	s.mu.Unlock()
-	select {
-	case s.usageCalled <- struct{}{}:
-	default:
-	}
+	s.usageHits++
 	return nil
 }
 
@@ -58,13 +54,12 @@ func (s *stubPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionK
 
 func (s *stubPinStore) SweepExpired(context.Context) error { return nil }
 
-// TestRecordTurnUsage_UpdatesInProcCache guards the LRU-coherence invariant:
-// when recordTurnUsage persists usage, the in-proc pin cache entry must
-// reflect the new Last* fields. Without this, loadPin's Tier-1 hit serves a
-// stale zero-usage pin and the planner returns ReasonNoPriorUsage forever.
-func TestRecordTurnUsage_UpdatesInProcCache(t *testing.T) {
+// TestRecordTurnUsage_WritesToStore guards the synchronous UpdateUsage write:
+// recordTurnUsage must persist Last* fields to Postgres in-line on the request
+// path so the planner has prior-turn evidence by the time the next turn loads
+// the pin.
+func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	store := newStubPinStore()
-	// NewService wires a real expirable LRU when pinStore is set.
 	svc := NewService(
 		nil,
 		nil,
@@ -76,52 +71,35 @@ func TestRecordTurnUsage_UpdatesInProcCache(t *testing.T) {
 		"anthropic", "claude-haiku-4-5",
 		nil,
 	)
-	require.NotNil(t, svc.pinCache, "Service must wire an in-proc pin cache when pinStore is set")
 
 	var sessionKey [sessionpin.SessionKeyLen]byte
 	for i := range sessionKey {
 		sessionKey[i] = byte(i + 1)
 	}
-	cacheKey := sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
-
-	// Pre-warm the cache as writeNewPin/refreshPin would.
-	initial := sessionpin.Pin{
-		SessionKey:  sessionKey,
-		Role:        sessionpin.DefaultRole,
-		Provider:    "anthropic",
-		Model:       "claude-opus-4-7",
-		Reason:      "fresh",
-		TurnCount:   1,
-		PinnedUntil: time.Now().Add(time.Hour),
-	}
-	svc.pinCache.Add(cacheKey, initial)
 
 	res := turnLoopResult{
 		Decision:   router.Decision{Provider: "anthropic", Model: "claude-opus-4-7"},
 		SessionKey: sessionKey,
+		PinRole:    sessionpin.DefaultRole,
 	}
 	svc.recordTurnUsage(res, 1200, 80, 200, 900)
 
-	select {
-	case <-store.usageCalled:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected UpdateUsage on the store within 2s; none observed")
-	}
-
-	got, ok := svc.pinCache.Get(cacheKey)
-	require.True(t, ok, "LRU entry must survive recordTurnUsage")
-	assert.Equal(t, 1200, got.LastInputTokens, "LRU LastInputTokens must reflect recorded usage")
-	assert.Equal(t, 900, got.LastCachedReadTokens, "LRU LastCachedReadTokens must reflect recorded usage")
-	assert.Equal(t, 200, got.LastCachedWriteTokens, "LRU LastCachedWriteTokens must reflect recorded usage")
-	assert.Equal(t, 80, got.LastOutputTokens, "LRU LastOutputTokens must reflect recorded usage")
-	assert.False(t, got.LastTurnEndedAt.IsZero(), "LRU LastTurnEndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Equal(t, 1, store.usageHits, "UpdateUsage must run synchronously on the request path")
+	assert.Equal(t, 1200, store.lastUsage.InputTokens)
+	assert.Equal(t, 900, store.lastUsage.CachedReadTokens)
+	assert.Equal(t, 200, store.lastUsage.CachedWriteTokens)
+	assert.Equal(t, 80, store.lastUsage.OutputTokens)
+	assert.Equal(t, "claude-opus-4-7", store.lastUsage.ServedModel)
+	assert.False(t, store.lastUsage.EndedAt.IsZero(), "EndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
 
-// TestLoadPin_EvictsExpiredLRUEntry guards the LRU tier's expiry check.
-// recordTurnUsage refreshes LRU entries on every turn, so expired entries
-// could keep being served if expiry isn't checked — particularly when
-// refreshPin's bounded enqueue drops but recordTurnUsage keeps landing.
-func TestLoadPin_EvictsExpiredLRUEntry(t *testing.T) {
+// TestLoadPin_DiscardsExpiredPostgresPin guards the expiry filter: rows whose
+// PinnedUntil has passed must be treated as misses so the orchestrator
+// re-routes via the cluster scorer. The sweeper is best-effort and races
+// against high-throughput sessions, so loadPin must guard for itself.
+func TestLoadPin_DiscardsExpiredPostgresPin(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(
 		nil,
@@ -134,18 +112,14 @@ func TestLoadPin_EvictsExpiredLRUEntry(t *testing.T) {
 		"anthropic", "claude-haiku-4-5",
 		nil,
 	)
-	require.NotNil(t, svc.pinCache)
+	require.NotNil(t, svc.pinStore)
 
 	var sessionKey [sessionpin.SessionKeyLen]byte
 	for i := range sessionKey {
 		sessionKey[i] = byte(i + 1)
 	}
-	cacheKey := sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
 
-	// Pre-warm the LRU with an expired pin. The stub store returns no rows
-	// on Get, so any non-expired LRU entry would be the only source of a
-	// "found" result.
-	expired := sessionpin.Pin{
+	store.getPin = sessionpin.Pin{
 		SessionKey:  sessionKey,
 		Role:        sessionpin.DefaultRole,
 		Provider:    "anthropic",
@@ -154,18 +128,16 @@ func TestLoadPin_EvictsExpiredLRUEntry(t *testing.T) {
 		TurnCount:   1,
 		PinnedUntil: time.Now().Add(-time.Minute),
 	}
-	svc.pinCache.Add(cacheKey, expired)
+	store.getFound = true
 
-	pin, found := svc.loadPin(context.Background(), cacheKey, sessionKey, sessionpin.DefaultRole)
-	assert.False(t, found, "expired LRU entry must not be served")
+	pin, found := svc.loadPin(context.Background(), sessionKey, sessionpin.DefaultRole)
+	assert.False(t, found, "expired Postgres row must not be served")
 	assert.Equal(t, sessionpin.Pin{}, pin, "miss must return the zero pin")
-	_, stillCached := svc.pinCache.Get(cacheKey)
-	assert.False(t, stillCached, "expired LRU entry must be evicted on lookup so subsequent turns hit Postgres")
 }
 
-// TestLoadPin_ServesFreshLRUEntry is the companion test: a non-expired LRU
-// entry hits Tier 1 without touching Postgres.
-func TestLoadPin_ServesFreshLRUEntry(t *testing.T) {
+// TestLoadPin_ServesFreshPostgresPin is the companion: a non-expired Postgres
+// row is returned verbatim.
+func TestLoadPin_ServesFreshPostgresPin(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(
 		nil,
@@ -183,9 +155,8 @@ func TestLoadPin_ServesFreshLRUEntry(t *testing.T) {
 	for i := range sessionKey {
 		sessionKey[i] = byte(i + 1)
 	}
-	cacheKey := sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
 
-	fresh := sessionpin.Pin{
+	store.getPin = sessionpin.Pin{
 		SessionKey:  sessionKey,
 		Role:        sessionpin.DefaultRole,
 		Provider:    "anthropic",
@@ -194,67 +165,10 @@ func TestLoadPin_ServesFreshLRUEntry(t *testing.T) {
 		TurnCount:   1,
 		PinnedUntil: time.Now().Add(time.Hour),
 	}
-	svc.pinCache.Add(cacheKey, fresh)
-
-	pin, found := svc.loadPin(context.Background(), cacheKey, sessionKey, sessionpin.DefaultRole)
-	require.True(t, found, "non-expired LRU entry should be returned without hitting Postgres")
-	assert.Equal(t, fresh.Model, pin.Model)
-	assert.Equal(t, fresh.Provider, pin.Provider)
-}
-
-// TestLoadPin_ForcedPinBypassesStaleLRU guards the cross-replica coherence
-// fix for user-forced pins. /force-model on one Cloud Run replica rewrites the
-// Postgres row but cannot evict another replica's LRU entry, and that entry's
-// TTL keeps resetting every turn — so a corrected re-force is shadowed by the
-// stale local copy indefinitely. loadPin must ignore a cached user_forced pin
-// and re-read Postgres so the latest directive wins.
-func TestLoadPin_ForcedPinBypassesStaleLRU(t *testing.T) {
-	store := newStubPinStore()
-	svc := NewService(
-		nil,
-		nil,
-		nil,
-		false,
-		nil,
-		store,
-		false,
-		"anthropic", "claude-haiku-4-5",
-		nil,
-	)
-	require.NotNil(t, svc.pinCache)
-
-	var sessionKey [sessionpin.SessionKeyLen]byte
-	for i := range sessionKey {
-		sessionKey[i] = byte(i + 1)
-	}
-	cacheKey := sessionPinCacheKey(sessionKey, sessionpin.DefaultRole)
-
-	// Stale forced pin cached locally (the truncated "gpt-" from the first,
-	// botched /force-model), still well within its TTL.
-	stale := sessionpin.Pin{
-		SessionKey:  sessionKey,
-		Role:        sessionpin.DefaultRole,
-		Provider:    "openai",
-		Model:       "gpt-",
-		Reason:      translate.ReasonUserForceModel,
-		TurnCount:   1,
-		PinnedUntil: time.Now().Add(time.Hour),
-	}
-	svc.pinCache.Add(cacheKey, stale)
-
-	// Postgres holds the corrected re-force written by another replica.
-	store.getPin = sessionpin.Pin{
-		SessionKey:  sessionKey,
-		Role:        sessionpin.DefaultRole,
-		Provider:    "openai",
-		Model:       "gpt-5.5",
-		Reason:      translate.ReasonUserForceModel,
-		TurnCount:   1,
-		PinnedUntil: time.Now().Add(time.Hour),
-	}
 	store.getFound = true
 
-	pin, found := svc.loadPin(context.Background(), cacheKey, sessionKey, sessionpin.DefaultRole)
-	require.True(t, found, "forced pin must resolve from Postgres")
-	assert.Equal(t, "gpt-5.5", pin.Model, "forced pin must re-read Postgres, not serve the stale LRU copy")
+	pin, found := svc.loadPin(context.Background(), sessionKey, sessionpin.DefaultRole)
+	require.True(t, found, "non-expired Postgres row must be returned")
+	assert.Equal(t, "claude-opus-4-7", pin.Model)
+	assert.Equal(t, "anthropic", pin.Provider)
 }

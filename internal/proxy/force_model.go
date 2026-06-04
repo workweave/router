@@ -86,19 +86,11 @@ func (s *Service) handleForceModelCommand(
 ) error {
 	log := observability.FromContext(ctx)
 	role := roleForTier(catalog.TierFor(env.Model()))
-	pinCacheKey := sessionPinCacheKey(sessionKey, role)
 
 	// Acknowledgment text is formatted as a routing marker (✦ **Weave Router** → …\n\n)
 	// so the existing StripRoutingMarkerFromMessages ingress stripper removes it from
 	// subsequent inbound requests. Without this, the text persists in conversation
 	// history and leaks router internals to the upstream on every following turn.
-	// Pin writes for /force-model and /unforce-model are SYNCHRONOUS by design.
-	// The async enqueuePinUpsert path drops on semaphore saturation, which here
-	// would leave Postgres holding the old active forced pin while the client
-	// gets a "cleared" acknowledgment — a subsequent loadPin would evict the
-	// in-proc expired entry and resurrect the stale row from Postgres. These
-	// are explicit user commands, not hot-path turns; an extra DB round-trip is
-	// acceptable to guarantee the pin state matches the acknowledgment.
 	var msg string
 	if cmd.Clear {
 		if s.pinStore != nil && installationID != uuid.Nil {
@@ -119,11 +111,6 @@ func (s *Service) handleForceModelCommand(
 				log.Error("/unforce-model: pin store upsert failed", "err", err)
 				return err
 			}
-		}
-		// Evict the in-proc cache entry AFTER Postgres is updated so a racing
-		// reader can't repopulate the LRU from a stale Postgres row.
-		if s.pinCache != nil {
-			s.pinCache.Remove(pinCacheKey)
 		}
 		msg = "✦ **Weave Router** → force-model cleared · resuming automatic model selection\n\n"
 		if env.SourceFormat() == translate.FormatOpenAI {
@@ -155,13 +142,15 @@ func (s *Service) handleForceModelCommand(
 			msg = fmt.Sprintf("Weave Router: force-model: %q isn't a recognized model; keeping automatic routing. Use a full model id, e.g. claude-opus-4-8, gpt-5.5, or gemini-3-pro-preview.", cmd.Model)
 		}
 	} else {
-		// Preserve LastServedModel from the existing LRU entry so the next turn
-		// can still detect a model switch and strip stale Anthropic thinking-block
+		// Preserve LastServedModel from the prior pin so the next turn can still
+		// detect a model switch and strip stale Anthropic thinking-block
 		// signatures. Without this carry-forward, the full Pin replacement here
 		// would zero out LastServedModel, defeating the /force-model switch detection.
 		var lastServedModel string
-		if s.pinCache != nil {
-			if existing, ok := s.pinCache.Get(pinCacheKey); ok {
+		if s.pinStore != nil {
+			if existing, found, err := s.pinStore.Get(ctx, sessionKey, role); err != nil {
+				log.Error("/force-model: prior pin lookup failed", "err", err)
+			} else if found {
 				lastServedModel = existing.LastServedModel
 			}
 		}
@@ -181,9 +170,6 @@ func (s *Service) handleForceModelCommand(
 				log.Error("/force-model: pin store upsert failed", "err", err)
 				return err
 			}
-		}
-		if s.pinCache != nil {
-			s.pinCache.Add(pinCacheKey, forced)
 		}
 		msg = fmt.Sprintf("✦ **Weave Router** → force-model applied: %s (%s) · use /unforce-model to clear\n\n", canonicalModel, provider)
 		if env.SourceFormat() == translate.FormatOpenAI {

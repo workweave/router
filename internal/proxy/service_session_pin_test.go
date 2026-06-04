@@ -183,31 +183,27 @@ func TestService_SessionPin_PostgresHitKeepsPinnedModel(t *testing.T) {
 	waitForUpsert(t, store)
 }
 
-// In-proc LRU short-circuits the Postgres GET on a hit. The scorer
-// still runs every MainLoop turn under the planner, but Tier-2 must
-// only be consulted on Tier-1 miss.
-func TestService_SessionPin_InProcCacheAvoidsPostgresOnSecondTurn(t *testing.T) {
+// Every turn must consult Postgres for its session pin — there is no
+// in-process cache. The scorer still runs every MainLoop turn under the
+// planner regardless of pin state.
+func TestService_SessionPin_EveryTurnReadsPostgres(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5", Reason: "fresh"}}
 	svc := newPinSvc(fr, store)
 
 	ctx := authedCtx(uuid.New().String())
 
-	// Turn 1: fresh route + async upsert + LRU populate.
 	rec1 := httptest.NewRecorder()
 	httpReq1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec1, httpReq1))
-	waitForUpsert(t, store)
 	require.Equal(t, 1, fr.routeCalls)
-	require.Equal(t, 1, store.getCalls, "tier-1 miss must consult tier-2 once")
+	require.Equal(t, 1, store.getCalls, "first turn must read the pin store")
 
-	// Turn 2: in-proc LRU hit; scorer runs (planner re-eval) but
-	// tier-2 must not be consulted.
 	rec2 := httptest.NewRecorder()
 	httpReq2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec2, httpReq2))
 	assert.Equal(t, 2, fr.routeCalls, "planner re-evaluates every MainLoop turn")
-	assert.Equal(t, 1, store.getCalls, "second turn must be served by tier-1; tier-2 must not be consulted")
+	assert.Equal(t, 2, store.getCalls, "second turn must also read Postgres — there is no in-process cache")
 }
 
 func TestService_SessionPin_StoreErrorFallsThroughToFreshRoute(t *testing.T) {

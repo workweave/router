@@ -131,9 +131,6 @@ func (s *Service) handleToolCallLoopBreak(
 			log.Error("loop-break: pin store upsert failed", "err", err)
 		}
 	}
-	if s.pinCache != nil {
-		s.pinCache.Remove(sessionPinCacheKey(sessionKey, role))
-	}
 
 	switch env.SourceFormat() {
 	case translate.FormatOpenAI:

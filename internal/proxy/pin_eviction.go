@@ -73,7 +73,6 @@ func (s *Service) maybeEvictPinAfterUpstreamErr(
 	}
 
 	log := observability.FromContext(ctx)
-	pinCacheKey := sessionPinCacheKey(sessionKey, role)
 
 	if proxyErr == nil {
 		// Background ctx: the request ctx is canceled by the time the
@@ -114,8 +113,7 @@ func (s *Service) maybeEvictPinAfterUpstreamErr(
 	// Threshold reached. Expire the pin so the NEXT turn re-routes via
 	// the cluster scorer. Mirrors the loop-break / no-progress / force
 	// -model "expired pin" pattern: upsert a row with PinnedUntil in
-	// the past so loadPin discards it, plus an in-proc cache evict so
-	// the next turn doesn't serve the stale entry.
+	// the past so loadPin discards it.
 	expired := sessionpin.Pin{
 		SessionKey:     sessionKey,
 		Role:           role,
@@ -129,9 +127,6 @@ func (s *Service) maybeEvictPinAfterUpstreamErr(
 	if err := s.pinStore.Upsert(context.Background(), expired); err != nil {
 		log.Error("pin eviction upsert failed", "err", err, "role", role)
 		return
-	}
-	if s.pinCache != nil {
-		s.pinCache.Remove(pinCacheKey)
 	}
 	log.Info("session pin evicted after consecutive upstream errors",
 		"role", role,

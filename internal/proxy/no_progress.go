@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -234,7 +235,7 @@ func (t *noProgressTracker) recordAndDetect(sessionKey [sessionpin.SessionKeyLen
 // than falling back to a global zero-keyed bucket.
 func noProgressBucketKey(sessionKey [sessionpin.SessionKeyLen]byte, installationID uuid.UUID, role string) (string, bool) {
 	if sessionKey != ([sessionpin.SessionKeyLen]byte{}) {
-		return "session:" + sessionPinCacheKey(sessionKey, role), true
+		return "session:" + hex.EncodeToString(sessionKey[:]) + ":" + role, true
 	}
 	if installationID != uuid.Nil {
 		return "install:" + installationID.String() + ":" + role, true
@@ -317,9 +318,6 @@ func (s *Service) handleNoProgressBreak(
 		if err := s.pinStore.Upsert(context.Background(), expired); err != nil {
 			log.Error("no-progress-break: pin store upsert failed", "err", err)
 		}
-	}
-	if s.pinCache != nil {
-		s.pinCache.Remove(sessionPinCacheKey(sessionKey, role))
 	}
 
 	switch env.SourceFormat() {

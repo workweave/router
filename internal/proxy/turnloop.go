@@ -189,9 +189,8 @@ func (s *Service) runTurnLoop(
 	}
 
 	res.SessionKey = DeriveSessionKey(env, apiKeyID)
-	pinCacheKey := sessionPinCacheKey(res.SessionKey, res.PinRole)
 
-	pin, pinFound := s.loadPin(ctx, pinCacheKey, res.SessionKey, res.PinRole)
+	pin, pinFound := s.loadPin(ctx, res.SessionKey, res.PinRole)
 	if pinFound {
 		res.PinModel = pin.Model
 		res.PriorServedModel = pin.LastServedModel
@@ -246,7 +245,7 @@ func (s *Service) runTurnLoop(
 			}
 			res.Decision = decision
 			res.StickyHit = true
-			s.refreshPin(ctx, installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, pinDecision(pin))
+			s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, pinDecision(pin))
 			return res, nil
 		}
 		// Forced pin is no longer servable on this request (excluded by policy
@@ -309,7 +308,7 @@ func (s *Service) runTurnLoop(
 		res.Decision = decision
 		res.StickyHit = true
 		res.PinTier = "postgres_tool_result_sc"
-		s.refreshPin(ctx, installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, decision)
+		s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, decision)
 		return res, nil
 	}
 
@@ -319,7 +318,7 @@ func (s *Service) runTurnLoop(
 		res.Decision = decision
 		res.StickyHit = true
 		res.PinTier = "postgres"
-		s.refreshPin(ctx, installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, decision)
+		s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, decision)
 		return res, nil
 	}
 
@@ -346,7 +345,7 @@ func (s *Service) runTurnLoop(
 
 	if !s.plannerEnabled {
 		res.Decision = fresh
-		s.writeNewPin(ctx, installationID, res.SessionKey, pinCacheKey, res.PinRole, fresh)
+		s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, fresh)
 		return res, nil
 	}
 
@@ -368,7 +367,7 @@ func (s *Service) runTurnLoop(
 		res.Decision = stay
 		res.StickyHit = true
 		res.PinTier = "postgres_stay_" + decision.Reason
-		s.refreshPin(ctx, installationID, res.SessionKey, pin, pinCacheKey, res.PinRole, stay)
+		s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, stay)
 		return res, nil
 	}
 
@@ -436,7 +435,7 @@ func (s *Service) runTurnLoop(
 	if pinFound {
 		res.PinTier = "switch_" + decision.Reason
 	}
-	s.writeNewPin(ctx, installationID, res.SessionKey, pinCacheKey, res.PinRole, fresh)
+	s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, fresh)
 	return res, nil
 }
 
@@ -486,31 +485,11 @@ func (s *Service) clampToCeiling(decision router.Decision, ceiling catalog.Tier,
 	}
 }
 
-// loadPin returns the active pin for this session, consulting the in-proc
-// LRU first then Postgres. Expired rows are treated as misses.
-func (s *Service) loadPin(ctx context.Context, pinCacheKey string, sessionKey [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool) {
+// loadPin returns the active pin for this session from Postgres.
+// Expired rows are treated as misses.
+func (s *Service) loadPin(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool) {
 	log := observability.FromContext(ctx)
 	log.Debug("loadPin called", "role", role, "session_key_hex", fmt.Sprintf("%x", sessionKey))
-	if s.pinCache != nil {
-		if pin, ok := s.pinCache.Get(pinCacheKey); ok {
-			// Check expiry: recordTurnUsage refreshes LRU entries on every
-			// turn (resetting the 30s eviction clock), so without this guard
-			// an expired entry whose refreshPin write was dropped could keep
-			// being served past its PinnedUntil.
-			if !pin.PinnedUntil.After(time.Now()) {
-				s.pinCache.Remove(pinCacheKey)
-			} else if pin.Reason != translate.ReasonUserForceModel {
-				return pin, true
-			}
-			// User-forced pins fall through to Postgres on every turn instead of
-			// trusting the LRU. /force-model on one Cloud Run replica rewrites the
-			// Postgres row but cannot evict another replica's cached pin, and that
-			// entry's TTL keeps resetting every turn (recordTurnUsage re-Adds it),
-			// so a corrected re-force is otherwise shadowed by the stale local copy
-			// indefinitely. Forced pins are rare and explicit; the extra per-turn
-			// read keeps replicas converged on the user's latest directive.
-		}
-	}
 	pin, found, err := s.pinStore.Get(ctx, sessionKey, role)
 	if err != nil {
 		log.Error("session pin store unavailable; falling through to cluster scorer", "err", err)
@@ -522,16 +501,13 @@ func (s *Service) loadPin(ctx context.Context, pinCacheKey string, sessionKey [s
 	if !pin.PinnedUntil.After(time.Now()) {
 		return sessionpin.Pin{}, false
 	}
-	if s.pinCache != nil {
-		s.pinCache.Add(pinCacheKey, pin)
-	}
 	return pin, true
 }
 
 // refreshPin extends the TTL on an existing pin. Carries the existing pin's
 // usage forward so the planner has evidence before the next UpdateUsage
-// writeback lands. Async, bounded; drops on saturation.
-func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, existing sessionpin.Pin, pinCacheKey string, role string, chosen router.Decision) {
+// writeback lands.
+func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, existing sessionpin.Pin, role string, chosen router.Decision) {
 	if installationID == uuid.Nil {
 		return
 	}
@@ -551,12 +527,12 @@ func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sess
 		LastTurnEndedAt:       existing.LastTurnEndedAt,
 		LastServedModel:       existing.LastServedModel,
 	}
-	s.enqueuePinUpsert(ctx, p, pinCacheKey)
+	s.upsertPin(ctx, p)
 }
 
 // writeNewPin records a freshly-routed decision as the active pin. Used on
 // first-turn routing and switch turns. UpdateUsage fills in usage stats later.
-func (s *Service) writeNewPin(ctx context.Context, installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, pinCacheKey string, role string, chosen router.Decision) {
+func (s *Service) writeNewPin(ctx context.Context, installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, role string, chosen router.Decision) {
 	log := observability.FromContext(ctx)
 	log.Info("writeNewPin called", "installation_id", installationID.String(), "role", role, "model", chosen.Model, "session_key_hex", fmt.Sprintf("%x", sessionKey))
 	if installationID == uuid.Nil {
@@ -573,34 +549,19 @@ func (s *Service) writeNewPin(ctx context.Context, installationID uuid.UUID, ses
 		TurnCount:      1,
 		PinnedUntil:    time.Now().Add(pinSessionTTL),
 	}
-	s.enqueuePinUpsert(ctx, p, pinCacheKey)
+	s.upsertPin(ctx, p)
 }
 
-// enqueuePinUpsert pushes a pin write onto the bounded async worker pool.
-// Drops on saturation. Primes the in-proc LRU so the next turn avoids Postgres.
-//
-// The caller's ctx is used only to capture the request-scoped logger before
-// the goroutine spawns; the actual Upsert always runs on context.Background()
-// because the request ctx is canceled by the time the response has finished
-// streaming.
-func (s *Service) enqueuePinUpsert(ctx context.Context, p sessionpin.Pin, pinCacheKey string) {
+// upsertPin synchronously persists a pin write. context.Background() is used
+// so the DB write survives request-ctx cancellation after the response has
+// finished streaming.
+func (s *Service) upsertPin(ctx context.Context, p sessionpin.Pin) {
 	log := observability.FromContext(ctx)
-	select {
-	case s.pinWriteSem <- struct{}{}:
-		go func(pin sessionpin.Pin) {
-			defer func() { <-s.pinWriteSem }()
-			if err := s.pinStore.Upsert(context.Background(), pin); err != nil {
-				log.Error("session pin upsert failed", "err", err)
-				return
-			}
-			log.Debug("session pin upsert ok", "installation_id", pin.InstallationID.String(), "role", pin.Role, "model", pin.Model)
-		}(p)
-	default:
-		log.Debug("session pin upsert dropped: semaphore full")
+	if err := s.pinStore.Upsert(context.Background(), p); err != nil {
+		log.Error("session pin upsert failed", "err", err)
+		return
 	}
-	if s.pinCache != nil {
-		s.pinCache.Add(pinCacheKey, p)
-	}
+	log.Debug("session pin upsert ok", "installation_id", p.InstallationID.String(), "role", p.Role, "model", p.Model)
 }
 
 // estimateSummaryTokens is a rough char/4 estimate. The summarizer
