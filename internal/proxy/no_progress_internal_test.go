@@ -338,3 +338,49 @@ func TestShortSessionKey_TruncatesAndRedactsZero(t *testing.T) {
 	assert.Len(t, got, 16, "must log only the first 8 bytes (16 hex chars) to limit cross-request correlation")
 	assert.NotContains(t, got, "somemore", "tail bytes must not appear in logs")
 }
+
+func TestCompactionTracker_DetectsMessageCountDrop(t *testing.T) {
+	ct := newCompactionTracker()
+	key := sessionKeyFromString("session-compaction")
+	install := uuid.New()
+
+	// First observation: no prior — must return false.
+	assert.False(t, ct.checkAndRecord(key, install, "high", 10), "first observation must not report compaction")
+
+	// Count grows: progressing session.
+	assert.False(t, ct.checkAndRecord(key, install, "high", 12), "growing count must not report compaction")
+
+	// Count drops: compaction event.
+	assert.True(t, ct.checkAndRecord(key, install, "high", 5), "drop in message count must be reported as compaction")
+
+	// Count stable after compaction.
+	assert.False(t, ct.checkAndRecord(key, install, "high", 5), "stable count must not report compaction")
+}
+
+func TestCompactionTracker_NilReceiverIsNoOp(t *testing.T) {
+	var ct *compactionTracker
+	key := sessionKeyFromString("session-nil")
+	assert.False(t, ct.checkAndRecord(key, uuid.New(), "high", 5))
+}
+
+func TestCompactionTracker_ZeroAnchorsSkipped(t *testing.T) {
+	ct := newCompactionTracker()
+	var zero [sessionpin.SessionKeyLen]byte
+	// No session key, no installation — must skip rather than bucket globally.
+	ct.checkAndRecord(zero, uuid.Nil, "high", 10)
+	assert.False(t, ct.checkAndRecord(zero, uuid.Nil, "high", 5), "no anchor → compaction detection must be skipped")
+}
+
+func TestCompactionTracker_SeparateSessionsAreIsolated(t *testing.T) {
+	ct := newCompactionTracker()
+	install := uuid.New()
+	keyA := sessionKeyFromString("session-A")
+	keyB := sessionKeyFromString("session-B")
+
+	ct.checkAndRecord(keyA, install, "high", 20)
+	ct.checkAndRecord(keyB, install, "high", 10)
+
+	// Drop on A must not affect B's baseline.
+	assert.True(t, ct.checkAndRecord(keyA, install, "high", 5), "drop on A must be detected")
+	assert.False(t, ct.checkAndRecord(keyB, install, "high", 12), "B growing from 10→12 must not be compaction")
+}

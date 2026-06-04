@@ -141,6 +141,40 @@ func newNoProgressTracker() *noProgressTracker {
 	}
 }
 
+// compactionTracker detects Claude Code context compaction events by comparing
+// each turn's message count against the last seen count for the same session.
+// A drop in message count indicates that the client replaced old turns with a
+// summary block, which can leave a non-Anthropic model unaware of completed
+// work (edits, decisions) that were only visible in the now-elided turns.
+//
+// nil receivers are valid (no-op), matching noProgressTracker semantics.
+type compactionTracker struct {
+	cache *lru.LRU[string, int]
+}
+
+func newCompactionTracker() *compactionTracker {
+	return &compactionTracker{
+		cache: lru.NewLRU[string, int](noProgressCacheSize, nil, noProgressCacheTTL),
+	}
+}
+
+// checkAndRecord records messageCount for the session and reports whether this
+// turn's count is lower than the previously recorded count (compaction event).
+// Returns false on the first observation for a session (no prior count to
+// compare against). Also returns false when no bucket anchor is available.
+func (t *compactionTracker) checkAndRecord(sessionKey [sessionpin.SessionKeyLen]byte, installationID uuid.UUID, role string, messageCount int) bool {
+	if t == nil || t.cache == nil {
+		return false
+	}
+	key, ok := noProgressBucketKey(sessionKey, installationID, role)
+	if !ok {
+		return false
+	}
+	last, found := t.cache.Get(key)
+	t.cache.Add(key, messageCount)
+	return found && messageCount < last
+}
+
 // recordAndDetect records the fingerprint against a bucket keyed by
 // sessionKey (preferred) or installationID (fallback) and reports whether
 // the burst now exceeds the loop threshold. A nil tracker returns (false, 0)

@@ -45,6 +45,10 @@ type Service struct {
 	// cross-envelope subagent loop (parent agent re-spawning identical
 	// sub-conversations). Nil disables the detector.
 	noProgress *noProgressTracker
+	// compaction detects Claude Code context compaction events (message count
+	// drops) so the router can rewrite non-Anthropic requests with a handover
+	// summary before the model loses awareness of prior completed work.
+	compaction *compactionTracker
 	// pinWriteSem bounds concurrent async pin-upsert goroutines with drop-on-full semantics.
 	pinWriteSem chan struct{}
 	// usageWriteSem bounds concurrent async last-turn-usage writeback goroutines,
@@ -330,6 +334,7 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		pinStore:             pinStore,
 		pinCache:             pinCache,
 		noProgress:           newNoProgressTracker(),
+		compaction:           newCompactionTracker(),
 		pinWriteSem:          pinWriteSem,
 		usageWriteSem:        usageWriteSem,
 		hardPinExplore:       hardPinExplore,
@@ -894,6 +899,25 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
 			return s.handleNoProgressBreak(ctx, w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider)
+		}
+	}
+
+	// Compaction-aware handover: when Claude Code's context compaction fires,
+	// it replaces old turns with a summary block and messageCount drops. On
+	// non-Anthropic upstreams this is dangerous — the model loses awareness of
+	// completed edits and decisions that lived only in the now-elided turns,
+	// causing it to re-apply work it already did. Detect the drop and rewrite
+	// the envelope with a handover summary so the non-Anthropic model gets
+	// explicit "work already done" context before seeing the compacted history.
+	if decision.Provider != providers.ProviderAnthropic && s.compaction != nil {
+		role := roleForTier(catalog.TierFor(feats.Model))
+		if s.compaction.checkAndRecord(routeRes.SessionKey, installationID, role, feats.MessageCount) {
+			log.Info("Compaction detected on non-Anthropic route; rewriting context with handover summary",
+				"message_count", feats.MessageCount,
+				"decision_model", decision.Model,
+				"decision_provider", decision.Provider,
+			)
+			s.runCompactionHandover(ctx, env, r.Header, decision.Model)
 		}
 	}
 
