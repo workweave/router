@@ -924,7 +924,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// and falsely trigger runCompactionHandover. Hard-pinned turns also do not
 	// model the conversational context the compaction handover is meant to
 	// preserve, so rewrites there would be both wrong and wasteful.
-	if decision.Provider != providers.ProviderAnthropic && s.compaction != nil && !routeRes.HardPinned {
+	//
+	// Also skip when the planner already ran a model-switch handover for this
+	// turn (routeRes.Handover.Invoked). Applying runCompactionHandover on top of
+	// an already-rewritten envelope would double-trim it.
+	if decision.Provider != providers.ProviderAnthropic && s.compaction != nil && !routeRes.HardPinned && !routeRes.Handover.Invoked {
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if s.compaction.checkAndRecord(routeRes.SessionKey, installationID, role, feats.MessageCount, inboundToolCallCount) {
 			log.Info("Context trimming detected on non-Anthropic route; rewriting context with handover summary",
