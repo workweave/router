@@ -22,6 +22,7 @@ import (
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
 	"workweave/router/internal/router/sessionpin"
+	"workweave/router/internal/router/turntype"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -916,7 +917,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// decisions that lived only in the now-elided turns. Detect either drop and
 	// rewrite the envelope with a handover summary before dispatch.
 	compactionHandoverRan := false
-	if decision.Provider != providers.ProviderAnthropic && s.compaction != nil {
+	var compactionHandoverOutcome handoverOutcome
+	// Skip detection on genuine Claude Code compaction turns (turntype.Compaction):
+	// those requests are Claude Code asking the router to summarize, not a
+	// main-loop turn where the model needs completed-work context. Applying the
+	// handover rewrite there would corrupt the summarization request, and recording
+	// the trimmed baseline from the compaction body would poison the tracker so
+	// the immediately-following main-loop turn never sees a count drop.
+	if decision.Provider != providers.ProviderAnthropic && s.compaction != nil && tt != turntype.Compaction {
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if s.compaction.checkAndRecord(routeRes.SessionKey, installationID, role, feats.MessageCount, inboundToolCallCount) {
 			log.Info("Context trimming detected on non-Anthropic route; rewriting context with handover summary",
@@ -925,7 +933,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				"decision_model", decision.Model,
 				"decision_provider", decision.Provider,
 			)
-			s.runCompactionHandover(ctx, env, r.Header, decision.Model)
+			compactionHandoverOutcome = s.runCompactionHandover(ctx, env, r.Header, decision.Model)
 			compactionHandoverRan = true
 		}
 	}
@@ -1289,6 +1297,24 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// point on a real upstream call.
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
+		if compactionHandoverOutcome.Invoked && !compactionHandoverOutcome.FallbackToTrim {
+			sumUsage := compactionHandoverOutcome.SummaryUsage
+			if sumUsage.Model != "" && (sumUsage.InputTokens > 0 || sumUsage.OutputTokens > 0) {
+				sumPricing, _ := catalog.PrimaryPriceFor(sumUsage.Model)
+				s.fireBilling(ctx, billing.DebitInferenceParams{
+					OrganizationID:  externalID,
+					RouterRequestID: requestID + "_compaction_summary",
+					Model:           sumUsage.Model,
+					Provider:        sumUsage.Provider,
+					InputTokens:     sumUsage.InputTokens,
+					OutputTokens:    sumUsage.OutputTokens,
+					CacheCreation:   sumUsage.CacheCreation,
+					CacheRead:       sumUsage.CacheRead,
+					Pricing:         sumPricing,
+					HasOverride:     billing.HasOverrideFromContext(ctx),
+				})
+			}
+		}
 	}
 
 	// Two-strike pin eviction: a session pinned to a model that keeps

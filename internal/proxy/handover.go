@@ -263,8 +263,11 @@ var _ handover.Summarizer = (*ProviderSummarizer)(nil)
 // wired and credentials allow, fall back to TrimLastN on any error. Errors are
 // logged but never returned — a failed compaction rewrite is better than a
 // failed request; the model will at least see the compacted body.
-func (s *Service) runCompactionHandover(ctx context.Context, env *translate.RequestEnvelope, reqHeaders http.Header, decisionModel string) {
+// Returns a handoverOutcome so the caller can bill the summary upstream call.
+func (s *Service) runCompactionHandover(ctx context.Context, env *translate.RequestEnvelope, reqHeaders http.Header, decisionModel string) handoverOutcome {
 	log := observability.FromContext(ctx)
+	var out handoverOutcome
+	out.Invoked = true
 
 	var (
 		sumProvider       string
@@ -281,26 +284,35 @@ func (s *Service) runCompactionHandover(ctx context.Context, env *translate.Requ
 	switch {
 	case s.summarizer == nil:
 		elided := handover.TrimLastN(env, 3)
+		out.FallbackToTrim = true
 		log.Info("Compaction handover: summarizer not wired; trimmed instead", "elided_messages", elided, "decision_model", decisionModel)
 	case !canCallSummarizer:
 		elided := handover.TrimLastN(env, 3)
+		out.FallbackToTrim = true
 		log.Info("Compaction handover: summarizer skipped (tenant boundary); trimmed instead", "elided_messages", elided, "decision_model", decisionModel)
 	default:
 		summCtx := ctx
 		if sumCreds != nil {
 			summCtx = context.WithValue(ctx, CredentialsContextKey{}, sumCreds)
 		}
-		summary, _, sumErr := s.summarizer.Summarize(summCtx, env)
+		start := time.Now()
+		summary, summaryUsage, sumErr := s.summarizer.Summarize(summCtx, env)
+		out.LatencyMS = time.Since(start).Milliseconds()
 		switch {
 		case sumErr != nil:
 			elided := handover.TrimLastN(env, 3)
+			out.FallbackToTrim = true
 			log.Warn("Compaction handover: summarizer failed; trimmed instead", "err", sumErr, "elided_messages", elided, "decision_model", decisionModel)
 		case summary == "":
 			elided := handover.TrimLastN(env, 3)
+			out.FallbackToTrim = true
 			log.Warn("Compaction handover: summarizer returned empty; trimmed instead", "elided_messages", elided, "decision_model", decisionModel)
 		default:
 			handover.RewriteEnvelope(env, summary)
+			out.SummaryTokens = estimateSummaryTokens(summary)
+			out.SummaryUsage = summaryUsage
 			log.Info("Compaction handover: context rewritten with summary", "summary_len", len(summary), "decision_model", decisionModel)
 		}
 	}
+	return out
 }
