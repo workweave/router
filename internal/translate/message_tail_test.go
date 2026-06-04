@@ -97,7 +97,7 @@ func TestSystemTextTail(t *testing.T) {
 	fullText := "You are Claude. You can use tools."
 	assert.Equal(t, len(fullText), length)
 	assert.Equal(t, "You are Claude.", head)
-	assert.Equal(t, " can use tools.", tail)  // last 15 chars
+	assert.Equal(t, " can use tools.", tail) // last 15 chars
 }
 
 func TestSystemTextTail_Short(t *testing.T) {
