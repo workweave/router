@@ -44,6 +44,30 @@ func TestAnthropicSSETranslator_DemotesToolCallsFinishWithNamelessCall(t *testin
 	assert.Equal(t, 1, summary.SuppressedToolCalls, "the nameless call is the suppression that drove the demote")
 }
 
+func TestAnthropicSSETranslator_SuppressedToolCallFinishDoesNotNudge(t *testing.T) {
+	// The prod loop (session 081e0a3d, model z-ai/glm-5.1 on DeepInfra): the
+	// upstream closes finish_reason="tool_calls" with a nameless call that gets
+	// dropped, AND the request HAD tools available. Without the suppressed-call
+	// guard, synthesizeTextOnlyTurnNudge fires (its switch has no "tool_calls"
+	// case), stapling a synthetic Bash call onto every such turn. Because the
+	// degenerate shape recurs each turn, the nudge loops to the turn ceiling.
+	// The model already emitted a (malformed) tool call; the drop handled it, so
+	// the nudge must stay silent.
+	body, summary := driveAnthropicSSEWithTools(t, "z-ai/glm-5.1", true, []string{
+		`data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"","arguments":"{}"}}]},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":20,"completion_tokens":8}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.False(t, summary.TextOnlyTurnNudged,
+		"a suppressed (nameless) tool_call must not trigger the text-only nudge")
+	assert.Equal(t, 0, summary.ToolUseBlocks, "no synthetic tool_use block is emitted")
+	assert.NotContains(t, body, "toolu_router_nudge_", "no synthetic nudge block reaches the client")
+	assert.Equal(t, 1, summary.SuppressedToolCalls)
+	assert.Equal(t, "end_turn", summary.StopReason, "tool_calls finish with no surviving block still demotes")
+}
+
 func TestAnthropicSSETranslator_DemotesToolCallsFinishWithNoStructuredCall(t *testing.T) {
 	// finish_reason="tool_calls" but the upstream emitted only text — the call
 	// leaked into prose the parser never structured (SuppressedToolCalls == 0).

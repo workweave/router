@@ -1023,6 +1023,16 @@ func (t *AnthropicSSETranslator) synthesizeTextOnlyTurnNudge() error {
 	if t.toolUseEmitted || !t.requestHadTools || !t.started {
 		return nil
 	}
+	// The model DID emit a structured tool call this turn — it was just
+	// dropped for being malformed (nameless function; see emitDelta /
+	// suppressedTools). The drop already saved the client from invoking tool ""
+	// in a loop; synthesizing a "use a tool" nudge on top would re-add a
+	// tool_use the model never sent and, for finish_reason="tool_calls"
+	// upstreams (GLM-5.1, Qwen, Kimi on vLLM/SGLang/DeepInfra), fire on every
+	// turn the upstream emits the degenerate shape, looping to the turn ceiling.
+	if len(t.suppressedTools) > 0 {
+		return nil
+	}
 	switch t.finishReason {
 	case "length":
 		// Truncated mid-output; the model needs to continue, not run a Bash
