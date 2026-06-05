@@ -1,0 +1,137 @@
+format_version: 2
+version: v0.62
+parent: null
+status: candidate
+promoted_date: '2026-06-03'
+embedder:
+  model: jina-v2-base-code-int8
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 16
+  top_p: 4
+  alpha: per-cluster (0.99 on opus-top hard-agentic clusters, 0.9 else)
+  shrinkage_k0: 10.0
+  score_normalization: per_prompt_zscore_across_bench_columns
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 8207
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  output_cost_ratio: 0.0
+  speed_weight: 0.0
+  expected_output_tokens: 2000
+  per_model_verbosity: true
+  include_routerarena_labels: routerarena_labels_combined.jsonl
+  routerarena_only: true
+  bench_coding_only: false
+  include_benchmark_corpus: false
+  benchmark_corpus_loaders: null
+  source_fractions: null
+  exclude_prompts: null
+  n_excluded_prompts: 0
+  include_aa_labels: aa_quality_priors_v0.56.json
+  aa_evidence_scale: 3.0
+  cold_model_aa_boost: 1.0
+  aa_label_tier_weights:
+    GPQA_DIAMOND: 0.3
+    IFBENCH: 0.3
+    LIVECODEBENCH: 1.0
+    MATH_500: 0.3
+    MMLU_PRO: 0.3
+    SCICODE: 1.0
+    SWE_BENCH_VERIFIED: 1.0
+    TAU2_BENCH_TELECOM: 0.3
+    TERMINAL_BENCH_HARD: 1.0
+  aa_label_residuals:
+    fraction_under_threshold: 0.5708502024291497
+    max: 0.2429133312756644
+    mean: 0.059625521958409304
+    median: 0.038888469407191734
+    n_cells: 247
+    p90: 0.14313290790179495
+  default_routing_knobs:
+    alpha:
+    - 0.9
+    - 0.99
+    - 0.9
+    - 0.9
+    - 0.9
+    - 0.9
+    - 0.99
+    - 0.9
+    - 0.9
+    - 0.99
+    - 0.9
+    - 0.9
+    - 0.99
+    - 0.9
+    - 0.9
+    - 0.99
+    speed_weight: 0.0
+    output_cost_ratio: 0.0
+    expected_output_tokens: 2000
+    per_model_verbosity: true
+  recommended_ui_defaults:
+    quality_pareto:
+      alpha: 0.6
+      speed_weight: 0.1
+      output_cost_ratio: 0.25
+    cost_pareto:
+      alpha: 0.4
+      speed_weight: 0.05
+      output_cost_ratio: 0.4
+    balanced:
+      alpha: 0.5
+      speed_weight: 0.12
+      output_cost_ratio: 0.25
+deployed_providers:
+- anthropic
+- bedrock
+- deepinfra
+- fireworks
+- google
+- openai
+deployed_models:
+- claude-haiku-4-5
+- claude-opus-4-7
+- claude-opus-4-8
+- claude-sonnet-4-6
+- deepseek/deepseek-v4-flash
+- deepseek/deepseek-v4-pro
+- gemini-3.1-flash-lite-preview
+- gemini-3.1-pro-preview
+- gemini-3.5-flash
+- gpt-5.4-mini
+- gpt-5.5
+- moonshotai/kimi-k2.6
+- qwen/qwen3-coder-next
+- qwen/qwen3-next-80b-a3b-instruct
+- xiaomi/mimo-v2.5-pro
+cost_per_1k_input_usd:
+  claude-haiku-4-5: 0.0008
+  claude-opus-4-7: 0.005
+  claude-opus-4-8: 0.005
+  claude-sonnet-4-6: 0.003
+  deepseek/deepseek-v4-flash: 0.00014
+  deepseek/deepseek-v4-pro: 0.00174
+  gemini-3.1-flash-lite-preview: 0.0001
+  gemini-3.1-pro-preview: 0.002
+  gemini-3.5-flash: 0.0015
+  gpt-5.4-mini: 0.0004
+  gpt-5.5: 0.005
+  moonshotai/kimi-k2.6: 0.00095
+  qwen/qwen3-coder-next: 0.0005
+  qwen/qwen3-next-80b-a3b-instruct: 0.00015
+  xiaomi/mimo-v2.5-pro: 0.001
+changelog: 'v0.62 quality_pareto: v0.60 recipe + alpha 0.90 / speed 0 / cost 0 to
+  fix Terminal-bench cheap-routing'
+notes_v0_63: 'v0.63 = v0.62 bundle (identical centroids/quality_means/model_axes/registry)
+  with per-cluster default alpha: 0.99 on clusters where claude-opus-4-8 is the argmax
+  quality model [1, 6, 9, 12, 15] (hard agentic/coding), 0.9 elsewhere. Lifts opus-4-8
+  share on the hard clusters (SWE-bench Pro/Easy/Terminal-bench) while keeping cheap
+  models on easy/general traffic (Pareto). Offline-screened: TB 38.3->39.3 (cov 94%),
+  Pro 8.8->10.5, Easy 76.3->80.1, opus easy-share 28->30%. No retrain (runtime re-blends
+  live from quality_means via scorer.go default_routing_knobs).'
