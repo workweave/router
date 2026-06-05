@@ -278,6 +278,24 @@ func (e *RequestEnvelope) HasTools() bool {
 	return r.Int() > 0
 }
 
+// HasImages reports whether any message carries image (or other inline media)
+// content. Used to keep image-bearing turns off text-only models, which reject
+// image parts with a 4xx (e.g. DeepInfra's "does not accept image input" on
+// GLM-5.1). A single image anywhere in the history is enough — clients like
+// Cursor re-send earlier pasted screenshots on every subsequent turn.
+func (e *RequestEnvelope) HasImages() bool {
+	switch e.format {
+	case FormatAnthropic:
+		return anthropicHasImages(e.body)
+	case FormatOpenAI:
+		return openAIHasImages(e.body)
+	case FormatGemini:
+		return geminiHasImages(e.body)
+	default:
+		return false
+	}
+}
+
 // RequestsTitleSchema reports whether the request asks for a JSON-schema response
 // with a top-level string "title" property. Used to identify Claude Code's
 // sidebar-title generation call without content-matching the system prompt.

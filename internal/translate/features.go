@@ -13,6 +13,7 @@ type RoutingFeatures struct {
 	Tokens       int
 	Model        string
 	HasTools     bool
+	HasImages    bool
 	PromptText   string
 	MessageCount int
 	// MaxTokens is the caller's requested output cap. 0 means unset.
@@ -78,6 +79,7 @@ func (e *RequestEnvelope) anthropicRoutingFeatures(extractOnlyUser bool) Routing
 		Tokens:       len(text) / 4,
 		Model:        e.Model(),
 		HasTools:     e.HasTools(),
+		HasImages:    e.HasImages(),
 		PromptText:   text,
 		MessageCount: msgCount,
 		MaxTokens:    intGJSON(gjson.GetBytes(e.body, "max_tokens")),
@@ -121,6 +123,7 @@ func (e *RequestEnvelope) openAIRoutingFeatures(extractOnlyUser bool) RoutingFea
 		Tokens:       len(text) / 4,
 		Model:        e.Model(),
 		HasTools:     e.HasTools(),
+		HasImages:    e.HasImages(),
 		PromptText:   text,
 		MessageCount: msgCount,
 		MaxTokens:    openAIMaxTokens(e.body),
@@ -447,4 +450,48 @@ func appendText(b *strings.Builder, s string) {
 		b.WriteByte('\n')
 	}
 	b.WriteString(s)
+}
+
+// anthropicHasImages reports whether any message content block is an "image"
+// block. Anthropic carries images as {"type":"image","source":{...}} entries in
+// a message's content array; string content never has an image.
+func anthropicHasImages(body []byte) bool {
+	found := false
+	gjson.GetBytes(body, "messages").ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.IsArray() {
+			return true
+		}
+		content.ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() == "image" {
+				found = true
+				return false
+			}
+			return true
+		})
+		return !found
+	})
+	return found
+}
+
+// openAIHasImages reports whether any message content part is an "image_url"
+// part. OpenAI carries images as {"type":"image_url","image_url":{...}} entries
+// in a message's content array; string content never has an image.
+func openAIHasImages(body []byte) bool {
+	found := false
+	gjson.GetBytes(body, "messages").ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.IsArray() {
+			return true
+		}
+		content.ForEach(func(_, part gjson.Result) bool {
+			if part.Get("type").String() == "image_url" {
+				found = true
+				return false
+			}
+			return true
+		})
+		return !found
+	})
+	return found
 }

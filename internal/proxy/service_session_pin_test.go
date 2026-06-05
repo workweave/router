@@ -183,6 +183,46 @@ func TestService_SessionPin_PostgresHitKeepsPinnedModel(t *testing.T) {
 	waitForUpsert(t, store)
 }
 
+// A session pinned to a text-only model must not serve an image-bearing turn.
+// The guard evicts the pin and routes on the scorer's fresh (image-capable)
+// decision instead — without it, the pin would 4xx upstream the moment a
+// screenshot lands in the conversation (DeepInfra 405 "does not accept image
+// input" on GLM-5.1).
+func TestService_SessionPin_ImageTurnEvictsTextOnlyPin(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:      "deepinfra",
+		Model:         "z-ai/glm-5.1",
+		Reason:        "cluster:v0.57",
+		PinnedUntil:   time.Now().Add(30 * time.Minute),
+		FirstPinnedAt: time.Now().Add(-5 * time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster:v0.57"}}
+	svc := newPinSvc(fr, store)
+
+	imageBody := []byte(`{
+		"model":"claude-opus-4-7",
+		"system":"sys",
+		"messages":[{"role":"user","content":[
+			{"type":"text","text":"what is in this screenshot"},
+			{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAA"}}
+		]}]
+	}`)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, imageBody, rec, httpReq))
+
+	require.NotNil(t, fr.capturedReq, "scorer must run after the text-only pin is evicted")
+	assert.True(t, fr.capturedReq.HasImages, "routing request must carry the image signal")
+	_, evicted := fr.capturedReq.ExcludedModels["z-ai/glm-5.1"]
+	assert.True(t, evicted, "text-only pin model must be excluded from the fresh route")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel),
+		"served model must be the image-capable fresh decision, not the text-only pin")
+}
+
 // Every turn must consult Postgres for its session pin — there is no
 // in-process cache. The scorer still runs every MainLoop turn under the
 // planner regardless of pin state.

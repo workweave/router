@@ -322,6 +322,29 @@ func (s *Service) runTurnLoop(
 		}
 	}
 
+	// Image-input guard: when this turn carries image content but the pinned
+	// model is text-only, exclude it and fall through to the scorer so an
+	// image-capable model is chosen. Without this, a session pinned to a
+	// text-only model on earlier text turns 4xxs the moment the user pastes a
+	// screenshot — the pin would otherwise bypass the image-aware fresh
+	// decision via the sticky branches below. Runs before those branches for
+	// the same reason as the context-window guard.
+	if pinFound && req.HasImages && !catalog.AcceptsImages(pin.Model) {
+		log.Info("Session pin is text-only for image-bearing turn; excluding for this turn",
+			"pin_model", pin.Model,
+			"pin_provider", pin.Provider,
+		)
+		// Defensive copy: callers may share the ExcludedModels map across requests.
+		excluded := make(map[string]struct{}, len(req.ExcludedModels)+1)
+		for k := range req.ExcludedModels {
+			excluded[k] = struct{}{}
+		}
+		excluded[pin.Model] = struct{}{}
+		req.ExcludedModels = excluded
+		pinFound = false
+		pin = sessionpin.Pin{}
+	}
+
 	// Tool-result turns are mid-turn continuations. Re-routing them on
 	// trailing tool_result embedding flips decisions to noisy candidates;
 	// reuse the pin verbatim when present and refresh the TTL.

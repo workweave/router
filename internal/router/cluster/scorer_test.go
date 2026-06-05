@@ -177,6 +177,69 @@ func TestScorer_PicksOtherClusterWhenAligned(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", got.Model)
 }
 
+// imageFilterArtifacts: K=1 fixture whose single cluster ranks the text-only
+// z-ai/glm-5.1 above the image-capable claude-opus-4-7. Without an image in the
+// request the scorer picks glm-5.1; with one it must drop glm-5.1 and fall to
+// opus.
+func imageFilterArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBlob []byte) {
+	t.Helper()
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	centroidsBlob = buildCentroidsBlob(t, 1, dim, c0)
+	rankingsBlob = []byte(`{
+		"rankings": {
+			"0": {"z-ai/glm-5.1": 0.9, "claude-opus-4-7": 0.1}
+		}
+	}`)
+	registryBlob = []byte(`{
+		"deployed_models": [
+			{"model": "z-ai/glm-5.1", "provider": "deepinfra", "bench_column": "x", "proxy": true},
+			{"model": "claude-opus-4-7", "provider": "anthropic", "bench_column": "y", "proxy": true}
+		]
+	}`)
+	return
+}
+
+func TestScorer_DropsTextOnlyModelOnImageTurn(t *testing.T) {
+	cb, rb, regb := imageFilterArtifacts(t)
+	bundle := bundleFromBlobs(t, "v-test", cb, rb, regb)
+	available := map[string]struct{}{"anthropic": {}, "deepinfra": {}}
+	s, err := NewScorer(bundle, cfgForTest(), &fakeEmbedder{vec: makeOpusVec()}, available)
+	require.NoError(t, err)
+
+	// No image: the higher-ranked text-only model wins.
+	textTurn, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.NoError(t, err)
+	assert.Equal(t, "z-ai/glm-5.1", textTurn.Model, "text turn routes to the cluster-preferred model")
+
+	// Image present: glm-5.1 is dropped, opus is the only image-capable candidate.
+	imageTurn, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100), HasImages: true})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", imageTurn.Model, "image turn must skip the text-only model")
+	assert.NotContains(t, imageTurn.Metadata.CandidateModels, "z-ai/glm-5.1",
+		"text-only model must be absent from the image-turn candidate set")
+}
+
+func TestScorer_KeepsTextOnlyPoolWhenNoImageCapableCandidate(t *testing.T) {
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	cb := buildCentroidsBlob(t, 1, dim, c0)
+	rb := []byte(`{"rankings": {"0": {"z-ai/glm-5.1": 0.9}}}`)
+	regb := []byte(`{"deployed_models": [{"model": "z-ai/glm-5.1", "provider": "deepinfra", "bench_column": "x", "proxy": true}]}`)
+	bundle := bundleFromBlobs(t, "v-test", cb, rb, regb)
+	s, err := NewScorer(bundle, cfgForTest(), &fakeEmbedder{vec: makeOpusVec()}, map[string]struct{}{"deepinfra": {}})
+	require.NoError(t, err)
+
+	// Soft fallback: no image-capable candidate deployed, so the scorer still
+	// returns a decision rather than erroring — the upstream reports the
+	// rejection instead.
+	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100), HasImages: true})
+	require.NoError(t, err)
+	assert.Equal(t, "z-ai/glm-5.1", got.Model)
+}
+
 func TestScorer_ReturnsErrOnEmbedderError(t *testing.T) {
 	emb := &fakeEmbedder{err: errors.New("ort exploded")}
 	s := newScorerForTest(t, emb, cfgForTest())

@@ -15,7 +15,11 @@ type Request struct {
 	RequestedModel       string
 	EstimatedInputTokens int
 	HasTools             bool
-	PromptText           string
+	// HasImages is true when the request carries image content. The scorer
+	// drops text-only models from the eligible pool; the turn loop evicts a
+	// text-only session pin.
+	HasImages  bool
+	PromptText string
 	// Per-request provider gating — nil means unrestricted.
 	EnabledProviders map[string]struct{}
 	// Per-request model exclusion — nil or empty means no exclusion.

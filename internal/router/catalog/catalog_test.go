@@ -135,6 +135,44 @@ func TestModel_ToolUseQualityDefaultsToUnknown(t *testing.T) {
 	assert.Equal(t, ToolUseUnknown, m.ToolUseQuality)
 }
 
+func TestImageUnsupportedSet_IncludesTextOnlyModels(t *testing.T) {
+	// Text-only OSS models reject image content parts with a 4xx (DeepInfra
+	// 405 "does not accept image input" on GLM-5.1 is the canonical case).
+	// They must be flagged so the scorer keeps image-bearing turns off them.
+	set := ImageUnsupportedSet()
+	for _, id := range []string{"z-ai/glm-5.1", "z-ai/glm-5", "deepseek/deepseek-v4-pro", "moonshotai/kimi-k2.6", "qwen/qwen3-coder"} {
+		_, found := set[id]
+		assert.Truef(t, found, "%s must be flagged ImageInputUnsupported", id)
+	}
+}
+
+func TestImageUnsupportedSet_OmitsMultimodalModels(t *testing.T) {
+	// First-party models (Anthropic / OpenAI / Google) are all multimodal and
+	// must keep the default. mistral-small-2603 is a multimodal OSS row and is
+	// deliberately left unflagged.
+	set := ImageUnsupportedSet()
+	for _, id := range []string{"claude-opus-4-7", "gpt-5.5", "gemini-3.1-pro-preview", "mistralai/mistral-small-2603"} {
+		_, found := set[id]
+		assert.Falsef(t, found, "%s must NOT be flagged ImageInputUnsupported", id)
+	}
+}
+
+func TestAcceptsImages(t *testing.T) {
+	assert.False(t, AcceptsImages("z-ai/glm-5.1"), "text-only model rejects images")
+	assert.True(t, AcceptsImages("claude-opus-4-7"), "multimodal model accepts images")
+	// Unknown models default to image-capable so an unrecognized passthrough or
+	// force-model target is never wrongly evicted from an image-bearing turn.
+	assert.True(t, AcceptsImages("some-future-model"), "unknown model defaults to image-capable")
+}
+
+func TestModel_ImageInputDefaultsToUnknown(t *testing.T) {
+	// Zero-value safety: an unset ImageInput must default to ImageInputUnknown
+	// (treated as image-capable) so a new first-party model is never silently
+	// excluded from image turns.
+	var m Model
+	assert.Equal(t, ImageInputUnknown, m.ImageInput)
+}
+
 func TestContextWindowFor_KnownModels(t *testing.T) {
 	// Anthropic models have 200K context.
 	assert.Equal(t, 200_000, ContextWindowFor("claude-opus-4-8"))

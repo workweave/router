@@ -366,6 +366,42 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		}
 	}
 
+	// Image-input filter. When the inbound carries image content, drop every
+	// model the catalog has marked ImageInputUnsupported (text-only OSS models
+	// that 4xx on image parts). Soft filter with the same empty-pool fallback as
+	// the tool-use filter: if no image-capable candidate is deployed (e.g. an
+	// OSS-only self-host), keep the unfiltered pool and let the upstream report
+	// the rejection rather than 503-ing here. The managed pool always carries
+	// vision-capable Claude/Gemini/GPT candidates, so the drop is effective.
+	if req.HasImages {
+		if textOnly := catalog.ImageUnsupportedSet(); len(textOnly) > 0 {
+			filtered := eligibleModels[:0:0]
+			var dropped []string
+			for _, m := range eligibleModels {
+				if _, drop := textOnly[m]; drop {
+					dropped = append(dropped, m)
+					continue
+				}
+				filtered = append(filtered, m)
+			}
+			switch {
+			case len(filtered) == 0 && len(dropped) > 0:
+				log.Warn(
+					"Cluster scorer: image-bearing request but no image-capable candidate; keeping text-only pool",
+					"dropped_models", dropped,
+					"requested_model", req.RequestedModel,
+				)
+			case len(dropped) > 0:
+				log.Debug(
+					"Cluster scorer: image-input filter applied",
+					"dropped_models", dropped,
+					"requested_model", req.RequestedModel,
+				)
+				eligibleModels = filtered
+			}
+		}
+	}
+
 	scoreStart := time.Now()
 	topClusters := topPNearest(vec, s.centroids, s.cfg.TopP)
 
@@ -696,6 +732,7 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		"requested_model", req.RequestedModel,
 		"total_input_tokens", req.EstimatedInputTokens,
 		"has_tools", req.HasTools,
+		"has_images", req.HasImages,
 	)
 	return decision, nil
 }

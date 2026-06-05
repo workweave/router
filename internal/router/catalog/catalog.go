@@ -96,6 +96,21 @@ const (
 	ToolUseLow
 )
 
+// ImageInput marks whether a model accepts image content parts. ImageInputUnknown
+// (the zero value) means "no restriction recorded" — first-party models (Anthropic,
+// OpenAI, Google) are all multimodal, so they keep the default. ImageInputUnsupported
+// flags text-only models that reject image parts with an upstream 4xx (e.g. DeepInfra's
+// "Model … does not accept image input" on GLM-5.1). The cluster scorer subtracts the
+// ImageInputUnsupported set from the eligible pool when the inbound request carries
+// images, mirroring the ToolUseLow filter — flag a new text-only OSS model here the
+// same way you'd assess its tool-use quality.
+type ImageInput int
+
+const (
+	ImageInputUnknown ImageInput = iota
+	ImageInputUnsupported
+)
+
 // Model is one logical model — the unit the router decides on.
 type Model struct {
 	// ID is the public slash-form (or bare) model ID exposed to clients,
@@ -111,6 +126,10 @@ type Model struct {
 	// value (ToolUseUnknown) is the default — set ToolUseLow to remove the
 	// model from agentic argmax pools.
 	ToolUseQuality ToolUseQuality
+	// ImageInput marks whether the model accepts image content parts. Zero
+	// value (ImageInputUnknown) is the default — set ImageInputUnsupported on
+	// text-only models so the scorer keeps image-bearing turns off them.
+	ImageInput ImageInput
 	// Providers is the ordered fallback list. First binding whose
 	// Provider name is in the available set wins. Must be non-empty.
 	Providers []ProviderBinding
@@ -285,37 +304,37 @@ var Models = []Model{
 	//   Bedrock binding (2026-05-23) showed the model returning narrative
 	//   "I edited the file" responses with zero tool_use blocks. Excluded
 	//   from agentic argmax pools until the Thinking variant lands.
-	{ID: "qwen/qwen3-235b-a22b-2507", Tier: TierMid, ContextWindow: 131_072, ToolUseQuality: ToolUseLow, Providers: []ProviderBinding{
+	{ID: "qwen/qwen3-235b-a22b-2507", Tier: TierMid, ContextWindow: 131_072, ToolUseQuality: ToolUseLow, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderBedrock, UpstreamID: "qwen.qwen3-235b-a22b-2507",
 			Price: Pricing{InputUSDPer1M: 0.2266, OutputUSDPer1M: 0.9064}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.071, OutputUSDPer1M: 0.463}},
 	}},
-	{ID: "qwen/qwen3-coder-next", Tier: TierMid, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "qwen/qwen3-coder-next", Tier: TierMid, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderBedrock, UpstreamID: "qwen.qwen3-coder-next",
 			Price: Pricing{InputUSDPer1M: 0.500, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.070, OutputUSDPer1M: 0.300}},
 	}},
-	{ID: "qwen/qwen3-next-80b-a3b-instruct", Tier: TierMid, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "qwen/qwen3-next-80b-a3b-instruct", Tier: TierMid, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderBedrock, UpstreamID: "qwen.qwen3-next-80b-a3b-instruct",
 			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.090, OutputUSDPer1M: 1.100}},
 	}},
-	{ID: "deepseek/deepseek-v4-flash", Tier: TierLow, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "deepseek/deepseek-v4-flash", Tier: TierLow, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "deepseek-ai/DeepSeek-V4-Flash",
 			Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10}},
 	}},
-	{ID: "deepseek/deepseek-v4-pro", Tier: TierHigh, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "deepseek/deepseek-v4-pro", Tier: TierHigh, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/deepseek-v4-pro",
 			Price: Pricing{InputUSDPer1M: 1.740, OutputUSDPer1M: 3.480, CacheReadMultiplier: 0.0862}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.435, OutputUSDPer1M: 0.870, CacheReadMultiplier: 0.10}},
 	}},
-	{ID: "moonshotai/kimi-k2.5", Tier: TierHigh, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "moonshotai/kimi-k2.5", Tier: TierHigh, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderBedrock, UpstreamID: "moonshotai.kimi-k2.5",
 			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 3.000}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.440, OutputUSDPer1M: 2.000}},
 	}},
-	{ID: "moonshotai/kimi-k2.6", Tier: TierHigh, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "moonshotai/kimi-k2.6", Tier: TierHigh, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/kimi-k2p6",
 			Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.1684}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.10}},
@@ -334,7 +353,7 @@ var Models = []Model{
 	// re-issue loops on weak agent prompts. Matches public reports against
 	// OpenCode (#24095) and Crush (#1699). The pro variant is kept — slower
 	// but doesn't exhibit the same instability in our sweep.
-	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "XiaomiMiMo/MiMo-V2.5-Pro",
 			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000, CacheReadMultiplier: 0.10}},
@@ -343,7 +362,7 @@ var Models = []Model{
 	// 2k tokens on DeepInfra FP8, the speed/cost end of the new Qwen3.6
 	// family. TierLow despite the MoE size because the active parameter
 	// budget + AA's Coding Index put it below v4-flash.
-	{ID: "qwen/qwen3.6-35b-a3b", Tier: TierLow, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "qwen/qwen3.6-35b-a3b", Tier: TierLow, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "Qwen/Qwen3.6-35B-A3B",
 			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 0.950}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.000, CacheReadMultiplier: 0.10}},
@@ -351,12 +370,12 @@ var Models = []Model{
 	// minimax-m2.7 sits in an unusual quality/cost spot: Intel 50 at
 	// $0.52 blended, cheaper than every TierMid model. Letting the
 	// trainer find its niche rather than pinning a tier by price alone.
-	{ID: "minimax/minimax-m2.7", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
+	{ID: "minimax/minimax-m2.7", Tier: TierHigh, ContextWindow: 1_000_000, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/minimax-m2p7",
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.279, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
 	}},
-	{ID: "z-ai/glm-5", Tier: TierHigh, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "z-ai/glm-5", Tier: TierHigh, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5",
 			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 2.080}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 1.920, CacheReadMultiplier: 0.10}},
@@ -364,7 +383,7 @@ var Models = []Model{
 	// GLM-5.1 ships the streaming tool-call fix that GLM-5 lacks (tool_stream=true
 	// per Z.AI docs). Wired up for /force-model testing and v0.56 routing; the
 	// emit_openai layer injects tool_stream + disables thinking for this slug.
-	{ID: "z-ai/glm-5.1", Tier: TierHigh, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "z-ai/glm-5.1", Tier: TierHigh, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5.1",
 			Price: Pricing{InputUSDPer1M: 1.050, OutputUSDPer1M: 3.500}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.980, OutputUSDPer1M: 3.080, CacheReadMultiplier: 0.18 / 0.98}},
@@ -376,17 +395,17 @@ var Models = []Model{
 	{ID: "mistralai/mistral-small-2603", Tier: TierMid, ContextWindow: 131_072, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.200, OutputUSDPer1M: 0.600, CacheReadMultiplier: 0.10}},
 	}},
-	{ID: "qwen/qwen3-30b-a3b-instruct-2507", Tier: TierMid, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "qwen/qwen3-30b-a3b-instruct-2507", Tier: TierMid, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/qwen3-30b-a3b-instruct-2507",
 			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 0.600, CacheReadMultiplier: 0.1684}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.100, OutputUSDPer1M: 0.300, CacheReadMultiplier: 0.10}},
 	}},
-	{ID: "qwen/qwen3-coder", Tier: TierHigh, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "qwen/qwen3-coder", Tier: TierHigh, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct",
 			Price: Pricing{InputUSDPer1M: 0.900, OutputUSDPer1M: 2.700, CacheReadMultiplier: 0.1684}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 5.000, CacheReadMultiplier: 0.10}},
 	}},
-	{ID: "qwen/qwen3.5-flash-02-23", Tier: TierLow, ContextWindow: 131_072, Providers: []ProviderBinding{
+	{ID: "qwen/qwen3.5-flash-02-23", Tier: TierLow, ContextWindow: 131_072, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.050, OutputUSDPer1M: 0.150, CacheReadMultiplier: 0.10}},
 	}},
 }

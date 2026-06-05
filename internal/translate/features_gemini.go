@@ -40,6 +40,7 @@ func (e *RequestEnvelope) geminiRoutingFeatures(extractOnlyUser bool) RoutingFea
 		Tokens:       len(text) / 4,
 		Model:        e.Model(),
 		HasTools:     e.HasTools(),
+		HasImages:    e.HasImages(),
 		PromptText:   text,
 		MessageCount: msgCount,
 		MaxTokens:    intGJSON(gjson.GetBytes(e.body, "generationConfig.maxOutputTokens")),
@@ -125,6 +126,27 @@ func geminiPartsText(parts gjson.Result) string {
 		return true
 	})
 	return b.String()
+}
+
+// geminiHasImages reports whether any contents[] part carries inline or
+// referenced media. Gemini sends non-text media as inlineData (base64 blob) or
+// fileData (Files API URI); both camelCase (REST) and snake_case (some SDKs)
+// spellings appear in the wild. Any such part means the turn needs a multimodal
+// model.
+func geminiHasImages(body []byte) bool {
+	found := false
+	gjson.GetBytes(body, "contents").ForEach(func(_, content gjson.Result) bool {
+		content.Get("parts").ForEach(func(_, part gjson.Result) bool {
+			if part.Get("inlineData").Exists() || part.Get("inline_data").Exists() ||
+				part.Get("fileData").Exists() || part.Get("file_data").Exists() {
+				found = true
+				return false
+			}
+			return true
+		})
+		return !found
+	})
+	return found
 }
 
 // geminiLastUserMessage walks contents[] backwards for the last role=="user" entry.

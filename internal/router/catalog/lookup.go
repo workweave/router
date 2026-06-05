@@ -154,6 +154,33 @@ func ToolUseLowSet() map[string]struct{} {
 	return out
 }
 
+// ImageUnsupportedSet returns the set of model IDs flagged
+// ImageInputUnsupported. The cluster scorer subtracts this set from the
+// eligible pool when the inbound request carries image content, falling back
+// to the unfiltered pool when the subtraction would empty the eligible set so
+// a routing decision is always returned. Mirrors ToolUseLowSet.
+func ImageUnsupportedSet() map[string]struct{} {
+	out := make(map[string]struct{}, len(Models))
+	for _, m := range Models {
+		if m.ImageInput == ImageInputUnsupported {
+			out[m.ID] = struct{}{}
+		}
+	}
+	return out
+}
+
+// AcceptsImages reports whether the model accepts image content parts. Unknown
+// models and models with no ImageInput flag are treated as image-capable — only
+// an explicit ImageInputUnsupported flag returns false. Used by the turn loop to
+// evict a text-only session pin when the current turn carries an image.
+func AcceptsImages(id string) bool {
+	m, ok := ByID(id)
+	if !ok {
+		return true
+	}
+	return m.ImageInput != ImageInputUnsupported
+}
+
 // AllPrimaryPricing returns a copy of the primary-binding pricing for
 // every known model, keyed by model ID. Used by the OTel emitter and the
 // genprices install-script generator.
