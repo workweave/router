@@ -131,6 +131,13 @@ type CredentialsContextKey struct{}
 // installation's model exclusion list. Carried as []string.
 type InstallationExcludedModelsContextKey struct{}
 
+// InstallationRoutingKnobsContextKey is the context key for the authed
+// installation's persisted routing preference ("speed / price / quality"
+// dials). Carried as *router.Overrides with only Alpha (quality) and
+// SpeedWeight set; the per-request x-weave-routing-* header override takes
+// precedence over it. See routingKnobsForRequest.
+type InstallationRoutingKnobsContextKey struct{}
+
 // installationExcludedModelsFromContext returns the per-installation exclusion
 // list stashed on ctx by the auth middleware, or nil when none is present.
 
@@ -235,6 +242,20 @@ func installationExcludedModelsFromContext(ctx context.Context) []string {
 	}
 	out, _ := v.([]string)
 	return out
+}
+
+// routingKnobsForRequest resolves the routing knobs for a request. The
+// per-request x-weave-routing-* header override (used by the eval harness)
+// wins; otherwise the authed installation's persisted preference applies;
+// otherwise nil leaves the scorer on its tuned bundle defaults.
+func routingKnobsForRequest(ctx context.Context) *router.Overrides {
+	if k := router.RoutingKnobsFromContext(ctx); k != nil {
+		return k
+	}
+	if v, ok := ctx.Value(InstallationRoutingKnobsContextKey{}).(*router.Overrides); ok {
+		return v
+	}
+	return nil
 }
 
 // excludedModelsForRequest returns the request's model exclusion set.
@@ -871,7 +892,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		PromptText:           promptText,
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excluded,
-		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
+		RoutingKnobs:         routingKnobsForRequest(ctx),
 	})
 	if routeErr != nil {
 		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
@@ -1874,7 +1895,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		PromptText:           promptText,
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excludedOAI,
-		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
+		RoutingKnobs:         routingKnobsForRequest(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {

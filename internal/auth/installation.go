@@ -18,6 +18,14 @@ type Installation struct {
 	// ExcludedModels is the per-installation model exclusion list.
 	// Empty means no exclusion.
 	ExcludedModels []string
+	// RoutingQualityWeight and RoutingSpeedWeight are the per-installation
+	// routing preference ("speed / price / quality" dials), stored as
+	// normalized fractions in [0, 1]. Quality overrides the scorer's
+	// per-cluster Alpha and speed maps to SpeedWeight; price is the implied
+	// remainder. nil means no preference -- the scorer keeps its tuned
+	// per-cluster defaults. The two are written and cleared as a pair.
+	RoutingQualityWeight *float64
+	RoutingSpeedWeight   *float64
 }
 
 type CreateInstallationParams struct {
