@@ -10,7 +10,9 @@ embedder:
 training:
   k: 16
   top_p: 4
-  alpha: per-cluster (0.99 on opus-top hard-agentic clusters, 0.9 else)
+  # Base alpha 0.9; per-cluster overrides (0.99 on opus-top hard-agentic
+  # clusters [1,6,9,12,15]) live in default_routing_knobs.alpha below.
+  alpha: 0.9
   shrinkage_k0: 10.0
   score_normalization: per_prompt_zscore_across_bench_columns
   per_model_zscore: false
