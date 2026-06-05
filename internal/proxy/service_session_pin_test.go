@@ -961,6 +961,49 @@ func TestService_TierClamp_ExcludedModelsThreadedToResolver(t *testing.T) {
 	assert.True(t, denied, "ExcludedModels must propagate to the tier-clamp resolver")
 }
 
+// haikuImageClampBody is an image-bearing haiku-tier request: the scorer's
+// over-ceiling vision pick must be clamped, but the clamp resolver must not be
+// allowed to pick a text-only in-ceiling model.
+const haikuImageClampBody = `{
+	"model":"claude-haiku-4-5",
+	"system":"sys",
+	"messages":[{"role":"user","content":[
+		{"type":"text","text":"what is in this screenshot"},
+		{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAA"}}
+	]}]
+}`
+
+// TestService_TierClamp_ImageTurnDeniesTextOnlyModels guards the Cursor
+// finding that the tier clamp can re-introduce a text-only model after the
+// scorer's image-input filter ran: clampToCeiling picks on cost/speed alone,
+// so an image-bearing turn whose scorer pick exceeds the ceiling could be
+// rewritten to a cheaper in-ceiling model flagged ImageInputUnsupported,
+// 4xx-ing upstream. The clamp must add the ImageInputUnsupported set to the
+// resolver denylist on image turns.
+func TestService_TierClamp_ImageTurnDeniesTextOnlyModels(t *testing.T) {
+	store := newFakePinStore()
+	// Scorer returns an over-ceiling (High-tier) vision pick; clamp will fire.
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.57"}}
+
+	var capturedExcluded map[string]struct{}
+	svc := newPinSvc(fr, store).
+		WithTierClampResolver(func(_, excluded map[string]struct{}, _ catalog.Tier) (string, string, bool) {
+			capturedExcluded = excluded
+			return providers.ProviderAnthropic, "claude-haiku-4-5", true
+		})
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuImageClampBody), rec, httpReq))
+
+	require.NotNil(t, capturedExcluded, "clamp resolver must run on the over-ceiling image-turn pick")
+	for _, id := range []string{"z-ai/glm-5.1", "deepseek/deepseek-v4-pro", "moonshotai/kimi-k2.6"} {
+		_, denied := capturedExcluded[id]
+		assert.Truef(t, denied, "image turn must deny text-only model %s from the tier-clamp resolver", id)
+	}
+}
+
 // TestService_TierClamp_StaleFlagClearedOnUnclampedFinal regression-
 // guards the case Cursor flagged on PR #100: when the orchestrator
 // clamps an early-stage decision (e.g. the fresh scorer output) and a

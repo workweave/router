@@ -202,7 +202,7 @@ func (s *Service) runTurnLoop(
 		if err != nil {
 			return res, err
 		}
-		decision = s.clampToCeiling(decision, res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+		decision = s.clampToCeiling(decision, res.RequestedTier, req.HasImages, req.EnabledProviders, req.ExcludedModels, &res)
 		res.Decision = decision
 		res.Fresh = decision
 		return res, nil
@@ -251,7 +251,7 @@ func (s *Service) runTurnLoop(
 		_, providerEnabled := req.EnabledProviders[pin.Provider]
 		providerEligible := req.EnabledProviders == nil || providerEnabled
 		if !excluded && providerEligible {
-			decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+			decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.HasImages, req.EnabledProviders, req.ExcludedModels, &res)
 			if res.TierClamped {
 				// The forced model exceeds this turn's tier ceiling and was
 				// downgraded. Keep clampToCeiling's "user_forced+tier_clamp"
@@ -348,7 +348,7 @@ func (s *Service) runTurnLoop(
 	// trailing tool_result embedding flips decisions to noisy candidates;
 	// reuse the pin verbatim when present and refresh the TTL.
 	if res.TurnType == turntype.ToolResult && pinFound {
-		decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+		decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.HasImages, req.EnabledProviders, req.ExcludedModels, &res)
 		res.Decision = decision
 		res.StickyHit = true
 		res.PinTier = "postgres_tool_result_sc"
@@ -358,7 +358,7 @@ func (s *Service) runTurnLoop(
 
 	// Planner-disabled + pin found: preserve first-decision-wins behavior.
 	if !s.plannerEnabled && pinFound {
-		decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+		decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.HasImages, req.EnabledProviders, req.ExcludedModels, &res)
 		res.Decision = decision
 		res.StickyHit = true
 		res.PinTier = "postgres"
@@ -377,7 +377,7 @@ func (s *Service) runTurnLoop(
 		"fresh_provider", fresh.Provider,
 		"fresh_reason", fresh.Reason,
 	)
-	fresh = s.clampToCeiling(fresh, res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+	fresh = s.clampToCeiling(fresh, res.RequestedTier, req.HasImages, req.EnabledProviders, req.ExcludedModels, &res)
 	if res.TierClamped {
 		log.Info("turnloop scorer clamped to ceiling",
 			"pre_clamp_model", res.PreClampModel,
@@ -407,7 +407,7 @@ func (s *Service) runTurnLoop(
 	res.PlannerDecision = decision
 
 	if decision.Outcome == planner.OutcomeStay && pinFound {
-		stay := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.EnabledProviders, req.ExcludedModels, &res)
+		stay := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.HasImages, req.EnabledProviders, req.ExcludedModels, &res)
 		res.Decision = stay
 		res.StickyHit = true
 		res.PinTier = "postgres_stay_" + decision.Reason
@@ -504,7 +504,16 @@ func roleForTier(t catalog.Tier) string {
 // in-ceiling alternative. Decisions at/below ceiling pass through.
 // TierUnknown disables clamping. Resolver failure preserves the original
 // decision as a soft fallback.
-func (s *Service) clampToCeiling(decision router.Decision, ceiling catalog.Tier, enabled, excluded map[string]struct{}, res *turnLoopResult) router.Decision {
+//
+// hasImages threads the image-input constraint into the clamp: the resolver
+// picks on cost/speed alone and would otherwise swap the scorer's
+// vision-capable pick for a cheaper in-ceiling text-only model, which 4xxs
+// upstream on image parts and defeats the scorer's image-input filter. On
+// image turns we add the ImageInputUnsupported set to the resolver denylist;
+// if that leaves no in-ceiling candidate the resolver returns ok=false and we
+// keep the original (vision-capable, possibly above-ceiling) decision —
+// correctness beats the soft cost ceiling on an image-bearing turn.
+func (s *Service) clampToCeiling(decision router.Decision, ceiling catalog.Tier, hasImages bool, enabled, excluded map[string]struct{}, res *turnLoopResult) router.Decision {
 	// Reset state every call: the orchestrator clamps multiple decision
 	// sources per turn, and without this reset a clamp on `fresh` would leak
 	// TierClamped=true + PreClampModel into a subsequent unclamped pin decision.
@@ -515,6 +524,20 @@ func (s *Service) clampToCeiling(decision router.Decision, ceiling catalog.Tier,
 	}
 	if catalog.IsAtOrBelow(decision.Model, ceiling) {
 		return decision
+	}
+	if hasImages {
+		if textOnly := catalog.ImageUnsupportedSet(); len(textOnly) > 0 {
+			// Defensive copy: excluded is the caller's req.ExcludedModels,
+			// which may be shared across requests — never mutate it in place.
+			merged := make(map[string]struct{}, len(excluded)+len(textOnly))
+			for k := range excluded {
+				merged[k] = struct{}{}
+			}
+			for k := range textOnly {
+				merged[k] = struct{}{}
+			}
+			excluded = merged
+		}
 	}
 	p, m, ok := s.tierClampResolver(enabled, excluded, ceiling)
 	if !ok {
