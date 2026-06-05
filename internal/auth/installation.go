@@ -42,4 +42,8 @@ type InstallationRepository interface {
 	// UpdateExcludedModels replaces the per-installation exclusion list.
 	// An empty (or nil) slice clears the list.
 	UpdateExcludedModels(ctx context.Context, externalID, id string, models []string) error
+	// UpdateRoutingPreferences sets the routing dial weights (normalized
+	// fractions in [0, 1]). Passing nil, nil clears the preference so the
+	// scorer reverts to its tuned defaults.
+	UpdateRoutingPreferences(ctx context.Context, externalID, id string, qualityWeight, speedWeight *float64) error
 }

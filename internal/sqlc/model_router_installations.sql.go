@@ -200,3 +200,41 @@ func (q *Queries) UpdateModelRouterInstallationExcludedModels(ctx context.Contex
 	_, err := q.db.Exec(ctx, updateModelRouterInstallationExcludedModels, arg.ExcludedModels, arg.ID, arg.ExternalID)
 	return err
 }
+
+const updateModelRouterInstallationRoutingPreferences = `-- name: UpdateModelRouterInstallationRoutingPreferences :exec
+UPDATE router.model_router_installations
+SET routing_quality_weight = $1,
+    routing_speed_weight = $2,
+    updated_at = NOW()
+WHERE id = $3::uuid
+  AND external_id = $4::varchar
+  AND deleted_at IS NULL
+`
+
+type UpdateModelRouterInstallationRoutingPreferencesParams struct {
+	RoutingQualityWeight *float64
+	RoutingSpeedWeight   *float64
+	ID                   uuid.UUID
+	ExternalID           string
+}
+
+// Sets the routing preference dial weights (normalized fractions in [0, 1]),
+// scoped to an external_id to prevent cross-tenant updates. NULL on both
+// clears the preference so the scorer reverts to its tuned defaults.
+//
+//	UPDATE router.model_router_installations
+//	SET routing_quality_weight = $1,
+//	    routing_speed_weight = $2,
+//	    updated_at = NOW()
+//	WHERE id = $3::uuid
+//	  AND external_id = $4::varchar
+//	  AND deleted_at IS NULL
+func (q *Queries) UpdateModelRouterInstallationRoutingPreferences(ctx context.Context, arg UpdateModelRouterInstallationRoutingPreferencesParams) error {
+	_, err := q.db.Exec(ctx, updateModelRouterInstallationRoutingPreferences,
+		arg.RoutingQualityWeight,
+		arg.RoutingSpeedWeight,
+		arg.ID,
+		arg.ExternalID,
+	)
+	return err
+}

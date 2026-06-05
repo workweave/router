@@ -44,3 +44,15 @@ SET excluded_models = @excluded_models::text[],
 WHERE id = @id::uuid
   AND external_id = @external_id::varchar
   AND deleted_at IS NULL;
+
+-- Sets the routing preference dial weights (normalized fractions in [0, 1]),
+-- scoped to an external_id to prevent cross-tenant updates. NULL on both
+-- clears the preference so the scorer reverts to its tuned defaults.
+-- name: UpdateModelRouterInstallationRoutingPreferences :exec
+UPDATE router.model_router_installations
+SET routing_quality_weight = sqlc.narg('routing_quality_weight'),
+    routing_speed_weight = sqlc.narg('routing_speed_weight'),
+    updated_at = NOW()
+WHERE id = @id::uuid
+  AND external_id = @external_id::varchar
+  AND deleted_at IS NULL;
