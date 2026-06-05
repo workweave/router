@@ -18,6 +18,16 @@ import (
 	"github.com/google/uuid"
 )
 
+// ForceModelHeader pins the session to a specific model, mirroring the
+// /force-model chat command. The header form exists so the directive is usable
+// from headless clients (the eval harness, CI smoke runs) where the slash
+// command is unreliable: Claude Code eats "/force-model …" as a client-side
+// slash command before it ever reaches the router, and a typed two-call pin
+// consumes a turn. A header rides on every request, so the pin is (re)written
+// and served on the same turn. Empty or unrecognized values are ignored and
+// routing proceeds automatically rather than failing the request.
+const ForceModelHeader = "x-weave-force-model"
+
 var forceModelAliases = map[string]string{
 	"anthropic":      "claude-opus-4-8",
 	"claude":         "claude-opus-4-8",
@@ -122,6 +132,89 @@ func resolveForceModel(model string) (canonicalID, provider string, known bool) 
 	}
 }
 
+// setForceModelPin upserts an immutable user-forced session pin for the given
+// session/role. It preserves the prior pin's LastServedModel so the next turn
+// can still detect a mid-session model switch and strip stale Anthropic
+// thinking-block signatures. No-op when the pin store is unconfigured or
+// installationID is nil (pin rows require an installation_id).
+func (s *Service) setForceModelPin(
+	ctx context.Context,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+	role string,
+	installationID uuid.UUID,
+	canonicalModel, provider string,
+) error {
+	if s.pinStore == nil || installationID == uuid.Nil {
+		return nil
+	}
+	log := observability.FromContext(ctx)
+	var lastServedModel string
+	existing, found, err := s.pinStore.Get(ctx, sessionKey, role)
+	if err != nil {
+		log.Error("force-model: prior pin lookup failed", "err", err)
+	} else if found {
+		lastServedModel = existing.LastServedModel
+	}
+	forced := sessionpin.Pin{
+		SessionKey:      sessionKey,
+		Role:            role,
+		InstallationID:  installationID,
+		Provider:        provider,
+		Model:           canonicalModel,
+		Reason:          translate.ReasonUserForceModel,
+		TurnCount:       1,
+		PinnedUntil:     time.Now().Add(pinSessionTTL),
+		LastServedModel: lastServedModel,
+	}
+	// context.Background(): the request ctx may already be canceled by the time
+	// this runs (synthetic response written, or client disconnected). Upserting
+	// on a canceled context would leave Postgres holding the prior pin.
+	return s.pinStore.Upsert(context.Background(), forced)
+}
+
+// applyForceModelHeader honors the x-weave-force-model request header by writing
+// a user-forced session pin, the same sticky the /force-model command writes.
+// The pin is (re)written on every request that carries the header, so the turn
+// loop's user-forced branch serves the requested model on this turn and stays on
+// it for the session. Unrecognized models are ignored (routing proceeds
+// automatically); the request is never failed on a bad header value.
+func (s *Service) applyForceModelHeader(
+	ctx context.Context,
+	r *http.Request,
+	env *translate.RequestEnvelope,
+	installationID uuid.UUID,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+) {
+	if s.pinStore == nil {
+		return
+	}
+	raw := strings.TrimSpace(r.Header.Get(ForceModelHeader))
+	if raw == "" {
+		return
+	}
+	log := observability.FromContext(ctx)
+	canonicalModel, provider, known := resolveForceModel(raw)
+	if !known {
+		log.Info("x-weave-force-model: ignoring unrecognized model; routing automatically",
+			"input_model", raw,
+			"session_key_hex", fmt.Sprintf("%x", sessionKey),
+		)
+		return
+	}
+	role := roleForTier(catalog.TierFor(env.Model()))
+	if err := s.setForceModelPin(ctx, sessionKey, role, installationID, canonicalModel, provider); err != nil {
+		log.Error("x-weave-force-model: pin store upsert failed", "err", err)
+		return
+	}
+	log.Info("x-weave-force-model applied",
+		"input_model", raw,
+		"canonical_model", canonicalModel,
+		"provider", provider,
+		"session_key_hex", fmt.Sprintf("%x", sessionKey),
+		"role", role,
+	)
+}
+
 // handleForceModelCommand processes a /force-model or /unforce-model directive.
 // It writes (or expires) the session pin and returns a synthetic Anthropic-format
 // acknowledgment response without dispatching to any upstream.
@@ -191,34 +284,9 @@ func (s *Service) handleForceModelCommand(
 			msg = fmt.Sprintf("Weave Router: force-model: %q isn't a recognized model; keeping automatic routing. Use a full model id, e.g. claude-opus-4-8, gpt-5.5, or gemini-3-pro-preview.", cmd.Model)
 		}
 	} else {
-		// Preserve LastServedModel from the prior pin so the next turn can still
-		// detect a model switch and strip stale Anthropic thinking-block
-		// signatures. Without this carry-forward, the full Pin replacement here
-		// would zero out LastServedModel, defeating the /force-model switch detection.
-		var lastServedModel string
-		if s.pinStore != nil {
-			if existing, found, err := s.pinStore.Get(ctx, sessionKey, role); err != nil {
-				log.Error("/force-model: prior pin lookup failed", "err", err)
-			} else if found {
-				lastServedModel = existing.LastServedModel
-			}
-		}
-		forced := sessionpin.Pin{
-			SessionKey:      sessionKey,
-			Role:            role,
-			InstallationID:  installationID,
-			Provider:        provider,
-			Model:           canonicalModel,
-			Reason:          translate.ReasonUserForceModel,
-			TurnCount:       1,
-			PinnedUntil:     time.Now().Add(pinSessionTTL),
-			LastServedModel: lastServedModel,
-		}
-		if s.pinStore != nil && installationID != uuid.Nil {
-			if err := s.pinStore.Upsert(context.Background(), forced); err != nil {
-				log.Error("/force-model: pin store upsert failed", "err", err)
-				return err
-			}
+		if err := s.setForceModelPin(ctx, sessionKey, role, installationID, canonicalModel, provider); err != nil {
+			log.Error("/force-model: pin store upsert failed", "err", err)
+			return err
 		}
 		msg = fmt.Sprintf("✦ **Weave Router** → force-model applied: %s (%s) · use /unforce-model to clear\n\n", canonicalModel, provider)
 		if env.SourceFormat() == translate.FormatOpenAI {

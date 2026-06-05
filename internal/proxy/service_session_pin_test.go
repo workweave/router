@@ -1033,3 +1033,53 @@ func TestService_UserForcedPin_IneligibleProviderFallsThrough(t *testing.T) {
 	assert.Equal(t, 1, fr.routeCalls, "ineligible-provider forced pin must fall through to the scorer")
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "must dispatch to the eligible provider, not gpt-5/openai")
 }
+
+// The x-weave-force-model header is the headless equivalent of /force-model:
+// it must write an immutable user_forced pin for the alias-resolved canonical
+// model so the turn loop's user-forced branch serves it for the session.
+func TestService_ForceModelHeader_WritesUserForcedPin(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "fresh"}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	httpReq.Header.Set(proxy.ForceModelHeader, "opus")
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var forced *sessionpin.Pin
+	for i := range store.upserts {
+		if store.upserts[i].Reason == translate.ReasonUserForceModel {
+			forced = &store.upserts[i]
+			break
+		}
+	}
+	require.NotNil(t, forced, "header must write a user_forced pin upsert")
+	assert.Equal(t, "claude-opus-4-8", forced.Model, "alias 'opus' resolves to the canonical id")
+	assert.Equal(t, providers.ProviderAnthropic, forced.Provider)
+}
+
+// An unrecognized x-weave-force-model value must be ignored: routing proceeds
+// automatically and no user_forced pin is written, so a typo can't strand a
+// session on an unservable directive.
+func TestService_ForceModelHeader_UnknownModelIgnored(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "fresh"}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	httpReq.Header.Set(proxy.ForceModelHeader, "totally-not-a-model")
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	waitForUpsert(t, store) // normal routing still writes a fresh pin
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for _, p := range store.upserts {
+		assert.NotEqual(t, translate.ReasonUserForceModel, p.Reason, "unrecognized header must not write a user_forced pin")
+	}
+}

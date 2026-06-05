@@ -818,6 +818,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 	}
 
+	// Honor the x-weave-force-model header (headless equivalent of /force-model).
+	// Writes the user-forced pin and falls through to normal routing, which picks
+	// the pin up and serves the requested model on this same turn.
+	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
+
 	// Tool-call loop break: when the same (tool_name, args) appears at least
 	// loopDetectionMaxRepeats times in the last loopDetectionWindowSize
 	// assistant turns, synthesize end_turn and expire the session pin. Catches
@@ -1835,6 +1840,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey)
 		}
 	}
+
+	// Honor the x-weave-force-model header (headless equivalent of /force-model).
+	// Writes the user-forced pin and falls through to normal routing, which picks
+	// the pin up and serves the requested model on this same turn.
+	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
 
 	// Tool-call loop break: same path as the Anthropic ingress. See the
 	// detectToolCallLoop / handleToolCallLoopBreak doc comments for rationale.
