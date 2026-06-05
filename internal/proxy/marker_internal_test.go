@@ -184,10 +184,42 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 		{
 			name: "tool-result short-circuit: marker suppressed",
 			res: turnLoopResult{
-				Decision:  decision,
-				StickyHit: true,
+				Decision:         decision,
+				StickyHit:        true,
+				PriorServedModel: "deepseek/deepseek-v4-pro",
 			},
 			wantEmpty: true,
+		},
+		{
+			name: "tool-result but model switched: marker shown despite sticky hit",
+			res: turnLoopResult{
+				Decision:         router.Decision{Model: "claude-haiku-4-5", Provider: "anthropic"},
+				StickyHit:        true,
+				PriorServedModel: "deepseek/deepseek-v4-pro",
+			},
+			wantContains: []string{
+				"✦ **Weave Router** → claude-haiku-4-5 · " + markerReasonBestPick,
+			},
+			wantNotContain: []string{
+				"(anthropic)",
+			},
+		},
+		{
+			name: "recovery code with model switch: marker shown without reason",
+			res: turnLoopResult{
+				Decision:         router.Decision{Model: "claude-haiku-4-5", Provider: "anthropic"},
+				StickyHit:        true,
+				PriorServedModel: "deepseek/deepseek-v4-pro",
+				PlannerDecision:  planner.Decision{Reason: "pin_model_missing"},
+			},
+			wantContains: []string{
+				"✦ **Weave Router** → claude-haiku-4-5\n\n",
+			},
+			wantNotContain: []string{
+				"(anthropic)",
+				"pin_model_missing",
+				markerReasonBestPick,
+			},
 		},
 	}
 

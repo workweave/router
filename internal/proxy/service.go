@@ -165,8 +165,11 @@ func routingMarkerFor(res turnLoopResult) string {
 		return ""
 	}
 	// Suppress the marker on tool-result follow-ups: every post-tool turn would
-	// otherwise re-emit a duplicate mid-stream.
-	if res.PlannerDecision.Reason == "" && !res.HardPinned && !res.TierClamped && res.StickyHit {
+	// otherwise re-emit a duplicate mid-stream. But always show the marker if the
+	// model changed, even if the reason code is unknown (recovery codes return
+	// empty from humanReasonFromPlanner).
+	modelChanged := res.PriorServedModel != "" && res.PriorServedModel != res.Decision.Model
+	if res.PlannerDecision.Reason == "" && !res.HardPinned && !res.TierClamped && res.StickyHit && !modelChanged {
 		return ""
 	}
 	parts := []string{"✦ **Weave Router** → " + decision.Model}
