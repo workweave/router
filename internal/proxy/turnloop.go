@@ -323,24 +323,23 @@ func (s *Service) runTurnLoop(
 	}
 
 	// Image-input guard: when this turn carries image content but the pinned
-	// model is text-only, exclude it and fall through to the scorer so an
-	// image-capable model is chosen. Without this, a session pinned to a
-	// text-only model on earlier text turns 4xxs the moment the user pastes a
-	// screenshot — the pin would otherwise bypass the image-aware fresh
-	// decision via the sticky branches below. Runs before those branches for
-	// the same reason as the context-window guard.
+	// model is text-only, drop the pin and fall through to the scorer so an
+	// image-capable model is chosen. The scorer's own image-input filter then
+	// removes text-only models from the eligible pool, with a soft empty-pool
+	// fallback (an OSS-only self-host with no image-capable candidate keeps the
+	// text-only pool and lets the upstream surface the 4xx). We deliberately do
+	// NOT add the pin to ExcludedModels: exclusion is a hard filter that errors
+	// on an empty pool, which would turn that soft fallback into a routing
+	// failure on exactly those deploys. Without this guard, a session pinned to
+	// a text-only model on earlier text turns 4xxs the moment the user pastes a
+	// screenshot — the pin would otherwise bypass the image-aware fresh decision
+	// via the sticky branches below. Runs before those branches for the same
+	// reason as the context-window guard.
 	if pinFound && req.HasImages && !catalog.AcceptsImages(pin.Model) {
-		log.Info("Session pin is text-only for image-bearing turn; excluding for this turn",
+		log.Info("Session pin is text-only for image-bearing turn; falling through to scorer",
 			"pin_model", pin.Model,
 			"pin_provider", pin.Provider,
 		)
-		// Defensive copy: callers may share the ExcludedModels map across requests.
-		excluded := make(map[string]struct{}, len(req.ExcludedModels)+1)
-		for k := range req.ExcludedModels {
-			excluded[k] = struct{}{}
-		}
-		excluded[pin.Model] = struct{}{}
-		req.ExcludedModels = excluded
 		pinFound = false
 		pin = sessionpin.Pin{}
 	}
