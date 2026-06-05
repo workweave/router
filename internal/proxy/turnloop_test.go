@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // fakeSummarizer is a deterministic handover.Summarizer for tests.
@@ -101,6 +102,51 @@ func largeBody(t *testing.T) []byte {
 		"system":"sys",
 		"messages":[{"role":"user","content":"` + prompt + `"}]
 	}`)
+}
+
+// largeMultiTurnBody yields a ~10k-token conversation of six non-system
+// messages so a trim-to-last-3 fallback would be observable: the forwarded
+// body would shrink from 6 messages to 3. Used to prove the handover failure
+// path preserves the full history rather than trimming it.
+func largeMultiTurnBody(t *testing.T) []byte {
+	t.Helper()
+	chunk := strings.Repeat("aaaa ", 1600) // ~2k tokens each
+	msgs := []string{
+		`{"role":"user","content":"FIRST-USER-MARKER ` + chunk + `"}`,
+		`{"role":"assistant","content":"` + chunk + `"}`,
+		`{"role":"user","content":"` + chunk + `"}`,
+		`{"role":"assistant","content":"` + chunk + `"}`,
+		`{"role":"user","content":"` + chunk + `"}`,
+		`{"role":"user","content":"latest question"}`,
+	}
+	return []byte(`{"model":"claude-opus-4-7","system":"sys","messages":[` + strings.Join(msgs, ",") + `]}`)
+}
+
+// forwardedMessageCount returns the number of messages in the body the
+// orchestrator forwarded to the upstream provider on its first Proxy call.
+func forwardedMessageCount(t *testing.T, p *fakeProvider) int {
+	t.Helper()
+	require.NotEmpty(t, p.proxyBodies, "upstream must have been called")
+	return int(gjson.GetBytes(p.proxyBodies[0], "messages.#").Int())
+}
+
+// newPinSvcCapturing mirrors newPinSvc but returns the upstream fakeProvider
+// so a test can inspect the body forwarded after handover.
+func newPinSvcCapturing(fr *fakeRouter, store *fakePinStore) (*proxy.Service, *fakeProvider) {
+	p := &fakeProvider{}
+	svc := proxy.NewService(
+		fr,
+		map[string]providers.Client{providers.ProviderAnthropic: p},
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		providers.ProviderAnthropic,
+		"claude-haiku-4-5",
+		nil,
+	)
+	return svc, p
 }
 
 // TestTurnLoop_ToolResultWithPinSkipsScorerAndPlanner pins down the
@@ -198,10 +244,12 @@ func TestTurnLoop_PlannerSwitchesOnPositiveEV(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", last.Model, "switch must persist the new model on the pin")
 }
 
-// TestTurnLoop_SummarizerErrorFallsBackToTrim asserts the graceful-
-// degradation path: a summarizer error must not abort the request; the
-// orchestrator falls back to trim-last-N and proceeds with the switch.
-func TestTurnLoop_SummarizerErrorFallsBackToTrim(t *testing.T) {
+// TestTurnLoop_SummarizerErrorPreservesFullHistory asserts the failure
+// path: a summarizer error must not abort the request, and must NOT trim the
+// conversation — the orchestrator forwards the full prior history to the new
+// model so it keeps the context it needs. Trimming to the last few turns
+// silently lobotomized switched-to models in prod.
+func TestTurnLoop_SummarizerErrorPreservesFullHistory(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -214,23 +262,25 @@ func TestTurnLoop_SummarizerErrorFallsBackToTrim(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
 	sz := &fakeSummarizer{errOnCall: errors.New("upstream haiku 500")}
-	svc := newPinSvc(fr, store).WithSummarizer(sz)
+	svc, provider := newPinSvcCapturing(fr, store)
+	svc.WithSummarizer(sz)
 
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	require.NoError(t, svc.ProxyMessages(ctx, largeBody(t), rec, httpReq))
+	require.NoError(t, svc.ProxyMessages(ctx, largeMultiTurnBody(t), rec, httpReq))
 
-	assert.Equal(t, int32(1), sz.calls.Load(), "summarizer must be tried before fallback")
+	assert.Equal(t, int32(1), sz.calls.Load(), "summarizer must be tried before the fallback")
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "switch must still happen on summarizer error")
+	assert.Equal(t, 6, forwardedMessageCount(t, provider), "all 6 messages must be forwarded — the failure path must not trim history")
+	assert.Contains(t, string(provider.proxyBodies[0]), "FIRST-USER-MARKER", "the earliest user turn must survive (trim-to-last-N would drop it)")
 }
 
-// TestTurnLoop_HandoverFallsBackToTrimWhenSummarizerNotWired guards the
-// documented graceful-degrade path: when no summarizer is wired (e.g. a
-// self-hoster without an Anthropic key for handover), the switch turn
-// must still bound the input to the new model by trimming history, not
-// forward the full conversation unchanged.
-func TestTurnLoop_HandoverFallsBackToTrimWhenSummarizerNotWired(t *testing.T) {
+// TestTurnLoop_HandoverPreservesFullHistoryWhenSummarizerNotWired guards the
+// no-summarizer path: when no summarizer is wired (e.g. a self-hoster without
+// an Anthropic key for handover), the switch turn must forward the full
+// conversation unchanged rather than trimming it.
+func TestTurnLoop_HandoverPreservesFullHistoryWhenSummarizerNotWired(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -243,14 +293,15 @@ func TestTurnLoop_HandoverFallsBackToTrimWhenSummarizerNotWired(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
 	// No WithSummarizer call — Service.summarizer stays nil.
-	svc := newPinSvc(fr, store)
+	svc, provider := newPinSvcCapturing(fr, store)
 
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	require.NoError(t, svc.ProxyMessages(ctx, largeBody(t), rec, httpReq))
+	require.NoError(t, svc.ProxyMessages(ctx, largeMultiTurnBody(t), rec, httpReq))
 
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "switch must proceed even without a summarizer")
+	assert.Equal(t, 6, forwardedMessageCount(t, provider), "all 6 messages must be forwarded when no summarizer is wired — no trimming")
 }
 
 // TestTurnLoop_HandoverUsesClientCredsForSummarizerProvider verifies the
@@ -290,7 +341,7 @@ func TestTurnLoop_HandoverUsesClientCredsForSummarizerProvider(t *testing.T) {
 // tenant-boundary guard: if the request is BYOK/client-keyed for a
 // DIFFERENT provider than the summarizer's, the deployment summarizer
 // would route prior conversation through the platform account. Skip
-// summarization in that case and fall back to TrimLastN.
+// summarization in that case and pass the full history through unchanged.
 func TestTurnLoop_HandoverSkippedWhenClientCredsCrossProvider(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -314,7 +365,7 @@ func TestTurnLoop_HandoverSkippedWhenClientCredsCrossProvider(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, largeBody(t), rec, httpReq))
 
 	assert.Equal(t, int32(0), sz.calls.Load(), "summarizer must NOT run when client creds are for a different provider than the summarizer")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "switch must still happen via TrimLastN fallback")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "switch must still happen with full history passed through")
 }
 
 // TestTurnLoop_PlannerDisabledPreservesFirstDecisionWins exercises the

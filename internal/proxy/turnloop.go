@@ -109,10 +109,15 @@ func (r turnLoopResult) modelSwitched() bool {
 
 // handoverOutcome describes the synchronous handover step.
 type handoverOutcome struct {
-	Invoked        bool
-	LatencyMS      int64
-	SummaryTokens  int
-	FallbackToTrim bool
+	Invoked       bool
+	LatencyMS     int64
+	SummaryTokens int
+	// FallbackToFullHistory is set when handover was invoked but no summary
+	// was applied (summarizer unwired, tenant-boundary skip, timeout, error,
+	// or empty summary). The original body is passed through unchanged rather
+	// than trimmed, so the model keeps full prior context. No summary ledger
+	// row is billed on this path.
+	FallbackToFullHistory bool
 	// SummaryUsage captures upstream token usage for the summarizer call
 	// so proxy.fireBilling can debit it as a separate ledger row with the
 	// "_summary" request_id suffix. Zero on fallback/error paths.
@@ -394,7 +399,9 @@ func (s *Service) runTurnLoop(
 	}
 
 	// Switch path: when switching off a warm cache, attempt bounded-cost
-	// handover. On summarizer error fall back to TrimLastN.
+	// handover. On any summarizer failure we keep the full prior history
+	// rather than trimming it — a more expensive switch turn is always
+	// preferable to silently dropping the conversation the new model needs.
 	//
 	// Privacy guard: the summarizer is wired with deployment-level creds.
 	// Routing a BYOK/client request's prior conversation through that
@@ -403,7 +410,8 @@ func (s *Service) runTurnLoop(
 	// caller forwarded them (BYOK or inbound Authorization/x-api-key for
 	// that provider) — that's the caller's own account, not the platform's.
 	// Only when the request is BYOK/client-keyed AND no matching creds for
-	// the summarizer's provider were forwarded do we skip and trim.
+	// the summarizer's provider were forwarded do we skip summarization and
+	// pass the full history through.
 	if pinFound {
 		var (
 			sumProvider       string
@@ -418,15 +426,13 @@ func (s *Service) runTurnLoop(
 		}
 		switch {
 		case s.summarizer == nil:
-			elided := handover.TrimLastN(env, 3)
 			res.Handover.Invoked = true
-			res.Handover.FallbackToTrim = true
-			log.Info("Handover summarizer not wired; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
+			res.Handover.FallbackToFullHistory = true
+			log.Info("Handover summarizer not wired; preserved full history instead", "pin_model", pin.Model, "fresh_model", fresh.Model)
 		case !canCallSummarizer:
-			elided := handover.TrimLastN(env, 3)
 			res.Handover.Invoked = true
-			res.Handover.FallbackToTrim = true
-			log.Info("Handover summarizer skipped to preserve tenant boundary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model, "sum_provider", sumProvider)
+			res.Handover.FallbackToFullHistory = true
+			log.Info("Handover summarizer skipped to preserve tenant boundary; preserved full history instead", "pin_model", pin.Model, "fresh_model", fresh.Model, "sum_provider", sumProvider)
 		default:
 			summCtx := ctx
 			if sumCreds != nil {
@@ -438,13 +444,11 @@ func (s *Service) runTurnLoop(
 			res.Handover.LatencyMS = time.Since(start).Milliseconds()
 			switch {
 			case sumErr != nil:
-				elided := handover.TrimLastN(env, 3)
-				res.Handover.FallbackToTrim = true
-				log.Warn("Handover summarizer failed; trimmed envelope instead", "err", sumErr, "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
+				res.Handover.FallbackToFullHistory = true
+				log.Warn("Handover summarizer failed; preserved full history instead", "err", sumErr, "pin_model", pin.Model, "fresh_model", fresh.Model)
 			case summary == "":
-				elided := handover.TrimLastN(env, 3)
-				res.Handover.FallbackToTrim = true
-				log.Warn("Handover summarizer returned empty summary; trimmed envelope instead", "elided_messages", elided, "pin_model", pin.Model, "fresh_model", fresh.Model)
+				res.Handover.FallbackToFullHistory = true
+				log.Warn("Handover summarizer returned empty summary; preserved full history instead", "pin_model", pin.Model, "fresh_model", fresh.Model)
 			default:
 				handover.RewriteEnvelope(env, summary)
 				res.Handover.SummaryTokens = estimateSummaryTokens(summary)

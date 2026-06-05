@@ -87,7 +87,7 @@ type Service struct {
 	// back to first-decision-wins behavior.
 	plannerEnabled bool
 	// summarizer produces a bounded-cost handover summary on switch turns.
-	// nil falls straight to handover.TrimLastN.
+	// nil passes the full prior history through unchanged.
 	summarizer handover.Summarizer
 	// availableModels is the boot-time set of model names whose providers are
 	// registered. Read by the planner to decide whether a pin's model is still
@@ -368,7 +368,8 @@ func (s *Service) WithPlannerEnabled(enabled bool) *Service {
 }
 
 // WithSummarizer installs the cheap-model summarizer for handover on switch
-// turns. nil disables the summary step; TrimLastN is used instead.
+// turns. nil disables the summary step; the full prior history is passed
+// through unchanged.
 func (s *Service) WithSummarizer(sz handover.Summarizer) *Service {
 	s.summarizer = sz
 	return s
@@ -865,10 +866,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	// Snapshot inbound tool-call count before runTurnLoop potentially mutates
-	// env (model-switch handover calls TrimLastN / RewriteForHandover). The
-	// compaction tracker must compare the count the client actually sent, not
-	// the post-router-trim count, to avoid false-positive detection when the
-	// router itself is the one that shortened the message window.
+	// env (model-switch handover may call RewriteForHandover). The compaction
+	// tracker must compare the count the client actually sent, not the
+	// post-rewrite count, to avoid false-positive detection when the router
+	// itself is the one that shortened the message window.
 	inboundToolCallCount := len(env.AssistantToolCallSignatures())
 
 	routeStart := time.Now()
@@ -1304,7 +1305,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// point on a real upstream call.
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
-		if compactionHandoverOutcome.Invoked && !compactionHandoverOutcome.FallbackToTrim {
+		if compactionHandoverOutcome.Invoked && !compactionHandoverOutcome.FallbackToFullHistory {
 			sumUsage := compactionHandoverOutcome.SummaryUsage
 			if sumUsage.Model != "" && (sumUsage.InputTokens > 0 || sumUsage.OutputTokens > 0) {
 				sumPricing, _ := catalog.PrimaryPriceFor(sumUsage.Model)
@@ -1351,7 +1352,7 @@ func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilde
 		Bool("handover.invoked", res.Handover.Invoked).
 		Int64("handover.latency_ms", res.Handover.LatencyMS).
 		Int64("handover.summary_tokens", int64(res.Handover.SummaryTokens)).
-		Bool("handover.fallback_to_trim", res.Handover.FallbackToTrim)
+		Bool("handover.fallback_to_full_history", res.Handover.FallbackToFullHistory)
 	return b
 }
 
@@ -1387,7 +1388,7 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 			"threshold_usd", res.PlannerDecision.ThresholdUSD,
 			"pin_cache_warm", !res.PlannerDecision.PinCacheCold,
 			"handover_invoked", res.Handover.Invoked,
-			"handover_fallback_to_trim", res.Handover.FallbackToTrim,
+			"handover_fallback_to_full_history", res.Handover.FallbackToFullHistory,
 			"handover_latency_ms", res.Handover.LatencyMS,
 		)
 		return
@@ -1483,8 +1484,8 @@ func externalKeysFromContext(ctx context.Context) []*auth.ExternalAPIKey {
 // or client-supplied creds for upstream calls. The summarizer is wired with
 // deployment-level creds; calling it on a BYOK request would route prior
 // conversation context through the platform account, violating tenant data
-// boundaries. The orchestrator uses this to skip the summarizer and fall
-// through to TrimLastN.
+// boundaries. The orchestrator uses this to skip the summarizer and pass the
+// full prior history through unchanged.
 func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers http.Header) bool {
 	if s.byokOnly {
 		return true
@@ -1667,7 +1668,7 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 		HasOverride:     hasOverride,
 	})
 
-	if routeRes.Handover.Invoked && !routeRes.Handover.FallbackToTrim {
+	if routeRes.Handover.Invoked && !routeRes.Handover.FallbackToFullHistory {
 		sumUsage := routeRes.Handover.SummaryUsage
 		if sumUsage.Model != "" && (sumUsage.InputTokens > 0 || sumUsage.OutputTokens > 0) {
 			sumPricing, _ := catalog.PrimaryPriceFor(sumUsage.Model)

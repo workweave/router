@@ -90,7 +90,7 @@ var ErrEmptySummary = errors.New("handover: upstream returned no summary text")
 // dispatches through the configured client under a hard timeout. Returns the
 // summary text and the upstream usage breakdown so callers can debit the
 // summary as a separate ledger row. On failure returns ("", zero Usage, err)
-// so the caller can fall back to handover.TrimLastN.
+// so the caller can pass the full prior history through unchanged.
 func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.RequestEnvelope) (string, handover.Usage, error) {
 	log := observability.FromContext(ctx)
 	if env == nil {
@@ -260,9 +260,11 @@ var _ handover.Summarizer = (*ProviderSummarizer)(nil)
 // lived only in those elided turns.
 //
 // Mirrors the model-switch handover in runTurnLoop: run the summarizer when
-// wired and credentials allow, fall back to TrimLastN on any error. Errors are
-// logged but never returned — a failed compaction rewrite is better than a
-// failed request; the model will at least see the compacted body.
+// wired and credentials allow, and on any failure pass the compacted body
+// through unchanged rather than trimming it. Errors are logged but never
+// returned — a failed compaction rewrite is better than a failed request, and
+// passing the full compacted body keeps Claude Code's own compaction summary
+// intact (trimming to the last few turns would discard it).
 // Returns a handoverOutcome so the caller can bill the summary upstream call.
 func (s *Service) runCompactionHandover(ctx context.Context, env *translate.RequestEnvelope, reqHeaders http.Header, decisionModel string) handoverOutcome {
 	log := observability.FromContext(ctx)
@@ -283,13 +285,11 @@ func (s *Service) runCompactionHandover(ctx context.Context, env *translate.Requ
 
 	switch {
 	case s.summarizer == nil:
-		elided := handover.TrimLastN(env, 3)
-		out.FallbackToTrim = true
-		log.Info("Compaction handover: summarizer not wired; trimmed instead", "elided_messages", elided, "decision_model", decisionModel)
+		out.FallbackToFullHistory = true
+		log.Info("Compaction handover: summarizer not wired; preserved compacted body instead", "decision_model", decisionModel)
 	case !canCallSummarizer:
-		elided := handover.TrimLastN(env, 3)
-		out.FallbackToTrim = true
-		log.Info("Compaction handover: summarizer skipped (tenant boundary); trimmed instead", "elided_messages", elided, "decision_model", decisionModel)
+		out.FallbackToFullHistory = true
+		log.Info("Compaction handover: summarizer skipped (tenant boundary); preserved compacted body instead", "decision_model", decisionModel)
 	default:
 		summCtx := ctx
 		if sumCreds != nil {
@@ -300,13 +300,11 @@ func (s *Service) runCompactionHandover(ctx context.Context, env *translate.Requ
 		out.LatencyMS = time.Since(start).Milliseconds()
 		switch {
 		case sumErr != nil:
-			elided := handover.TrimLastN(env, 3)
-			out.FallbackToTrim = true
-			log.Warn("Compaction handover: summarizer failed; trimmed instead", "err", sumErr, "elided_messages", elided, "decision_model", decisionModel)
+			out.FallbackToFullHistory = true
+			log.Warn("Compaction handover: summarizer failed; preserved compacted body instead", "err", sumErr, "decision_model", decisionModel)
 		case summary == "":
-			elided := handover.TrimLastN(env, 3)
-			out.FallbackToTrim = true
-			log.Warn("Compaction handover: summarizer returned empty; trimmed instead", "elided_messages", elided, "decision_model", decisionModel)
+			out.FallbackToFullHistory = true
+			log.Warn("Compaction handover: summarizer returned empty; preserved compacted body instead", "decision_model", decisionModel)
 		default:
 			handover.RewriteEnvelope(env, summary)
 			out.SummaryTokens = estimateSummaryTokens(summary)
