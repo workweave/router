@@ -560,8 +560,8 @@ func writeGeminiGenerationConfigFromOpenAI(jw *jsonWriter, body []byte, model st
 			fields = append(fields, field{"responseMimeType", `"application/json"`})
 		}
 	}
-	if r := gjson.GetBytes(body, "reasoning_effort"); r.Exists() && r.Type == gjson.String {
-		if raw := thinkingConfigRaw(r.String()); raw != "" {
+	if effort := geminiReasoningEffort(body); effort != "" {
+		if raw := thinkingConfigRaw(effort); raw != "" {
 			fields = append(fields, field{"thinkingConfig", raw})
 		}
 	}
@@ -1106,6 +1106,13 @@ func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model
 			fields = append(fields, field{"stopSequences", raw})
 		}
 	}
+	// Claude Code drives reasoning via `thinking`; without mapping it to a
+	// Gemini thinkingConfig the target reasons at its minimal default.
+	if effort := geminiReasoningEffort(body); effort != "" {
+		if raw := thinkingConfigRaw(effort); raw != "" {
+			fields = append(fields, field{"thinkingConfig", raw})
+		}
+	}
 
 	if len(fields) == 0 {
 		return
@@ -1155,6 +1162,21 @@ func stopToArrayRaw(r gjson.Result) string {
 		return ""
 	}
 	return "[" + strings.Join(items, ",") + "]"
+}
+
+// geminiReasoningEffort resolves the reasoning effort for a Gemini request,
+// preferring an explicit reasoning_effort and falling back to an Anthropic-style
+// thinking budget. Claude Code (an Anthropic client) sends `thinking`, not
+// `reasoning_effort`; without this fallback the Gemini target gets no
+// thinkingConfig and runs at its minimal default.
+func geminiReasoningEffort(body []byte) string {
+	if r := gjson.GetBytes(body, "reasoning_effort"); r.Exists() && r.Type == gjson.String {
+		return r.String()
+	}
+	if t := gjson.GetBytes(body, "thinking"); t.Exists() {
+		return effortForBudget(t.Get("budget_tokens").Int())
+	}
+	return ""
 }
 
 // thinkingConfigRaw returns the raw JSON for a Gemini thinkingConfig given an

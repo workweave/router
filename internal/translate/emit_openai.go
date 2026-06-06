@@ -190,6 +190,21 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, pr
 	// Max tokens
 	writeOpenAIMaxTokensFromAnthropic(jw, body, opts)
 
+	// Reasoning effort: Claude Code (an Anthropic client) drives reasoning via
+	// `thinking`, not `reasoning_effort`. Map the thinking budget onto
+	// reasoning_effort for reasoning-capable targets so the upstream actually
+	// reasons — without this, reasoning models (gpt-5.x) run at their minimal
+	// default. A client-set reasoning_effort wins.
+	if opts.Capabilities.Supports(router.CapReasoning) {
+		if r := gjson.GetBytes(body, "reasoning_effort"); r.Exists() && r.Type == gjson.String {
+			jw.Key("reasoning_effort")
+			jw.Str(r.String())
+		} else if t := gjson.GetBytes(body, "thinking"); t.Exists() {
+			jw.Key("reasoning_effort")
+			jw.Str(effortForBudget(t.Get("budget_tokens").Int()))
+		}
+	}
+
 	// Stream usage option
 	if opts.IncludeStreamUsage && gjson.GetBytes(body, "stream").Bool() {
 		jw.Key("stream_options")

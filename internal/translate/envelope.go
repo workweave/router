@@ -336,6 +336,10 @@ type EmitOverrides struct {
 	// model only accepts adaptive thinking (claude-opus-4-6+ / sonnet-4-6+).
 	RewriteThinkingAdaptive bool
 	OutputConfigEffort      string
+	// SetReasoningEffort sets `reasoning_effort` on an OpenAI-format request.
+	// Translates an Anthropic client's `thinking` budget into the OpenAI
+	// reasoning control so reasoning-capable targets actually reason.
+	SetReasoningEffort string
 }
 
 func (e *RequestEnvelope) emitSameFormat(ov EmitOverrides) ([]byte, error) {
@@ -403,6 +407,13 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 					return nil, fmt.Errorf("set output_config.effort: %w", err)
 				}
 			}
+		}
+	}
+
+	if ov.SetReasoningEffort != "" {
+		out, err = sjson.SetBytes(out, "reasoning_effort", ov.SetReasoningEffort)
+		if err != nil {
+			return nil, fmt.Errorf("set reasoning_effort: %w", err)
 		}
 	}
 
@@ -630,15 +641,24 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		Model: opts.TargetModel,
 	}
 
+	// Anthropic clients (e.g. Claude Code) drive reasoning via `thinking`, not
+	// `reasoning_effort`. Map the thinking budget onto reasoning_effort for
+	// reasoning-capable OpenAI targets so the upstream actually reasons; without
+	// this the `thinking` delete below leaves the model at its minimal default.
+	thinking := gjson.GetBytes(body, "thinking")
+	hasInboundEffort := gjson.GetBytes(body, "reasoning_effort").Exists()
+	supportsReasoning := opts.Capabilities.Supports(router.CapReasoning)
+
 	ov.DeleteKeys = append(ov.DeleteKeys, "thinking")
 
-	if gjson.GetBytes(body, "reasoning_effort").Exists() && !opts.Capabilities.Supports(router.CapReasoning) {
+	if hasInboundEffort && !supportsReasoning {
 		ov.DeleteKeys = append(ov.DeleteKeys, "reasoning_effort")
+	} else if !hasInboundEffort && supportsReasoning && thinking.Exists() {
+		ov.SetReasoningEffort = effortForBudget(thinking.Get("budget_tokens").Int())
 	}
 
 	hasMaxTokens := gjson.GetBytes(body, "max_tokens").Exists()
 	hasMaxComp := gjson.GetBytes(body, "max_completion_tokens").Exists()
-	supportsReasoning := opts.Capabilities.Supports(router.CapReasoning)
 
 	if hasMaxTokens && supportsReasoning {
 		if !hasMaxComp {
