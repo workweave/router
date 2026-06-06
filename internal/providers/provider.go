@@ -200,9 +200,22 @@ func IsUpstreamModelNotFound(err error) bool {
 }
 
 // PreparedRequest holds the encoded target-format request body and format-specific header overrides.
+// Endpoint selects which upstream path a provider client POSTs to. The zero
+// value is the default chat/completions surface; EndpointResponses routes to
+// the OpenAI Responses API (`/v1/responses`), required for reasoning models
+// (gpt-5.x) that reject reasoning_effort + tools on chat/completions.
+type Endpoint int
+
+const (
+	EndpointChatCompletions Endpoint = iota
+	EndpointResponses
+)
+
 type PreparedRequest struct {
 	Body    []byte
 	Headers http.Header
+	// Endpoint selects the upstream surface (zero value = chat/completions).
+	Endpoint Endpoint
 	// Stats records translation-time mutations applied to the body, for
 	// observability. Zero-value when no mutation fired; populated by the
 	// translate package as a side effect of Prepare*. The proxy reads these

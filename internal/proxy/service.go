@@ -1100,9 +1100,22 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			attemptOpts := opts
 			attemptOpts.TargetProvider = d.Provider
 			respSummary = translate.ResponseSummary{}
-			prep, emitErr := env.PrepareOpenAI(r.Header, attemptOpts)
+			// Reasoning OpenAI models (gpt-5.x) reject reasoning_effort + tools
+			// on /v1/chat/completions; an agentic Anthropic client that asks the
+			// model to reason must go through the Responses API instead. Scoped
+			// to the direct OpenAI provider (the only one with /v1/responses).
+			useResponses := d.Provider == providers.ProviderOpenAI &&
+				attemptOpts.Capabilities.Supports(router.CapReasoning) &&
+				feats.HasTools && env.ReasoningRequested()
+			var prep providers.PreparedRequest
+			var emitErr error
+			if useResponses {
+				prep, emitErr = env.PrepareOpenAIResponses(r.Header, attemptOpts)
+			} else {
+				prep, emitErr = env.PrepareOpenAI(r.Header, attemptOpts)
+			}
 			if emitErr != nil {
-				log.Error("Failed to translate Anthropic request to OpenAI format", "err", emitErr, "decision_provider", d.Provider)
+				log.Error("Failed to translate Anthropic request to OpenAI format", "err", emitErr, "decision_provider", d.Provider, "responses_api", useResponses)
 				return fmt.Errorf("translate anthropic request: %w", emitErr)
 			}
 			reqStats = prep.Stats
@@ -1112,10 +1125,18 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				extractor = otel.NewUsageExtractor(nil, d.Provider)
 				usage = extractor
 			}
-			translator := translate.NewAnthropicSSETranslator(sink, d.Model, usage).
-				WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
-				WithEstimatedInputTokens(feats.Tokens).
-				WithRequestHadTools(feats.HasTools)
+			var translator translate.ResponseTranslator
+			if useResponses {
+				translator = translate.NewResponsesToAnthropicWriter(sink, d.Model, usage).
+					WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
+					WithEstimatedInputTokens(feats.Tokens).
+					WithRequestHadTools(feats.HasTools)
+			} else {
+				translator = translate.NewAnthropicSSETranslator(sink, d.Model, usage).
+					WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
+					WithEstimatedInputTokens(feats.Tokens).
+					WithRequestHadTools(feats.HasTools)
+			}
 			if err := translator.Prelude(env.Stream()); err != nil {
 				log.Error("Anthropic SSE prelude failed (OpenAI upstream)", "err", err)
 			}

@@ -82,7 +82,11 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
-	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewReader(prep.Body))
+	path := "/v1/chat/completions"
+	if prep.Endpoint == providers.EndpointResponses {
+		path = "/v1/responses"
+	}
+	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(prep.Body))
 	if err != nil {
 		return fmt.Errorf("build upstream request: %w", err)
 	}

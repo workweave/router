@@ -1106,6 +1106,14 @@ func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model
 			fields = append(fields, field{"stopSequences", raw})
 		}
 	}
+	// Claude Code drives reasoning via `thinking`; map its budget onto a Gemini
+	// thinkingConfig (native generateContent honors it) so gemini-3.x reasons
+	// instead of running at its minimal default. reasoning_effort wins if set.
+	if effort := geminiReasoningEffort(body); effort != "" {
+		if raw := thinkingConfigRaw(effort); raw != "" {
+			fields = append(fields, field{"thinkingConfig", raw})
+		}
+	}
 
 	if len(fields) == 0 {
 		return
@@ -1159,6 +1167,19 @@ func stopToArrayRaw(r gjson.Result) string {
 
 // thinkingConfigRaw returns the raw JSON for a Gemini thinkingConfig given an
 // OpenAI reasoning_effort string. Returns "" for unrecognised values.
+// geminiReasoningEffort resolves the reasoning effort for a native-Gemini
+// request: an explicit reasoning_effort, else an Anthropic-style `thinking`
+// budget (Claude Code sends `thinking`, not reasoning_effort). "" = none.
+func geminiReasoningEffort(body []byte) string {
+	if r := gjson.GetBytes(body, "reasoning_effort"); r.Exists() && r.Type == gjson.String {
+		return r.String()
+	}
+	if t := gjson.GetBytes(body, "thinking"); t.Exists() && t.Get("type").String() != "disabled" {
+		return effortForBudget(t.Get("budget_tokens").Int())
+	}
+	return ""
+}
+
 func thinkingConfigRaw(effort string) string {
 	var budget int64
 	switch effort {
