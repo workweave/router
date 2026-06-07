@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
@@ -65,6 +66,19 @@ func reasoningEffortFromAnthropic(body []byte) string {
 	return ""
 }
 
+// responsesReasoningEffort applies model-specific effort policy on top of the
+// budget-derived effort. gpt-5.x has a measured "medium" dead-zone on hard
+// agentic coding (SWE-bench Pro: low 16%, medium 0%, high 41% ≈ opus) — medium
+// is strictly dominated by both neighbors, so never serve it to a gpt-5.x
+// reasoning model; promote to high. Small budgets still resolve to low via
+// effortForBudget, so easy traffic is untouched. Other models pass through.
+func responsesReasoningEffort(eff, model string) string {
+	if eff == "medium" && strings.HasPrefix(model, "gpt-5") {
+		return "high"
+	}
+	return eff
+}
+
 func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte, providers.RequestMutationStats, error) {
 	var stats providers.RequestMutationStats
 	body, removed, err := filterClaudeCodeOnlyToolsFromAnthropicBody(e.body)
@@ -91,7 +105,7 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 	}
 
 	if opts.Capabilities.Supports(router.CapReasoning) {
-		if eff := reasoningEffortFromAnthropic(body); eff != "" {
+		if eff := responsesReasoningEffort(reasoningEffortFromAnthropic(body), opts.TargetModel); eff != "" {
 			jw.Key("reasoning")
 			jw.Obj()
 			jw.Key("effort")

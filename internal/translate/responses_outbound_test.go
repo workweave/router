@@ -106,10 +106,13 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 
 // budget→effort ladder.
 func TestPrepareOpenAIResponses_EffortLadder(t *testing.T) {
+	// gpt-5.x has a measured "medium" dead-zone on hard agentic coding (Pro:
+	// low 16%, medium 0%, high 41%), so the medium band (budget ≤16384) is
+	// promoted to high. Small budgets still resolve to low — easy stays cheap.
 	for _, tc := range []struct {
 		budget int
 		want   string
-	}{{2048, "low"}, {8192, "medium"}, {31999, "high"}} {
+	}{{2048, "low"}, {8192, "high"}, {16384, "high"}, {31999, "high"}} {
 		body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":` + itoa(tc.budget) + `}}`)
 		env, err := translate.ParseAnthropic(body)
 		require.NoError(t, err)
@@ -175,7 +178,8 @@ func TestResponsesToAnthropicResponse_StopReasons(t *testing.T) {
 }
 
 // gemini-3.x (native) must receive a thinkingConfig derived from the Anthropic
-// thinking budget so it reasons.
+// thinking budget so it reasons. Gemini 3.x uses the string `thinkingLevel`;
+// the legacy numeric `thinkingBudget` is suboptimal for 3.x and mixing both 400s.
 func TestPrepareGemini_ThinkingBudgetToThinkingConfig(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":31999}}`)
 	env, err := translate.ParseAnthropic(body)
@@ -188,5 +192,24 @@ func TestPrepareGemini_ThinkingBudgetToThinkingConfig(t *testing.T) {
 	require.True(t, ok, "generationConfig present")
 	tc, ok := gen["thinkingConfig"].(map[string]any)
 	require.True(t, ok, "thinkingConfig set from thinking budget")
-	assert.EqualValues(t, 24576, tc["thinkingBudget"], "high budget -> gemini high thinkingBudget")
+	assert.Equal(t, "high", tc["thinkingLevel"], "high budget -> gemini-3.x thinkingLevel high")
+	_, hasBudget := tc["thinkingBudget"]
+	assert.False(t, hasBudget, "gemini-3.x must NOT send the legacy thinkingBudget")
+}
+
+// gemini-2.5 (legacy) keeps the numeric thinkingBudget — thinkingLevel is 3.x only.
+func TestPrepareGemini_ThinkingBudget_Legacy25(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":31999}}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(nil, translate.EmitOptions{TargetModel: "gemini-2.5-pro"})
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+	gen, _ := out["generationConfig"].(map[string]any)
+	tc, ok := gen["thinkingConfig"].(map[string]any)
+	require.True(t, ok, "thinkingConfig set from thinking budget")
+	assert.EqualValues(t, 24576, tc["thinkingBudget"], "high budget -> gemini-2.5 thinkingBudget 24576")
+	_, hasLevel := tc["thinkingLevel"]
+	assert.False(t, hasLevel, "gemini-2.5 must NOT send thinkingLevel")
 }

@@ -147,16 +147,34 @@ func TestPrepareGemini_ToolChoiceVariants(t *testing.T) {
 }
 
 func TestPrepareGemini_ReasoningEffortMapsToThinkingBudget(t *testing.T) {
+	// No target model => legacy (gemini-2.5) path: numeric thinkingBudget.
 	cases := map[string]int{"low": 1024, "medium": 8192, "high": 24576, "none": 0}
 	for effort, budget := range cases {
 		body := []byte(`{"messages":[{"role":"user","content":"x"}],"reasoning_effort":"` + effort + `"}`)
 		env, _ := translate.ParseOpenAI(body)
-		prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+		prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-2.5-pro"})
 		require.NoError(t, err, effort)
 		out := mustUnmarshal(t, prep.Body)
 		gc := out["generationConfig"].(map[string]any)
 		tc := gc["thinkingConfig"].(map[string]any)
 		assert.EqualValues(t, budget, tc["thinkingBudget"], effort)
+	}
+}
+
+func TestPrepareGemini_ReasoningEffortMapsToThinkingLevel_Gemini3x(t *testing.T) {
+	// OpenAI-format ingress (reasoning_effort) → gemini-3.x: string thinkingLevel,
+	// no legacy thinkingBudget. "none" is omitted (3.x cannot disable thinking).
+	for _, effort := range []string{"low", "medium", "high"} {
+		body := []byte(`{"messages":[{"role":"user","content":"x"}],"reasoning_effort":"` + effort + `"}`)
+		env, _ := translate.ParseOpenAI(body)
+		prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+		require.NoError(t, err, effort)
+		out := mustUnmarshal(t, prep.Body)
+		gc := out["generationConfig"].(map[string]any)
+		tc := gc["thinkingConfig"].(map[string]any)
+		assert.Equal(t, effort, tc["thinkingLevel"], effort)
+		_, hasBudget := tc["thinkingBudget"]
+		assert.False(t, hasBudget, "gemini-3.x must not send thinkingBudget (%s)", effort)
 	}
 }
 

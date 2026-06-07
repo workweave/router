@@ -561,7 +561,7 @@ func writeGeminiGenerationConfigFromOpenAI(jw *jsonWriter, body []byte, model st
 		}
 	}
 	if r := gjson.GetBytes(body, "reasoning_effort"); r.Exists() && r.Type == gjson.String {
-		if raw := thinkingConfigRaw(r.String()); raw != "" {
+		if raw := thinkingConfigRaw(r.String(), model); raw != "" {
 			fields = append(fields, field{"thinkingConfig", raw})
 		}
 	}
@@ -1110,7 +1110,7 @@ func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model
 	// thinkingConfig (native generateContent honors it) so gemini-3.x reasons
 	// instead of running at its minimal default. reasoning_effort wins if set.
 	if effort := geminiReasoningEffort(body); effort != "" {
-		if raw := thinkingConfigRaw(effort); raw != "" {
+		if raw := thinkingConfigRaw(effort, model); raw != "" {
 			fields = append(fields, field{"thinkingConfig", raw})
 		}
 	}
@@ -1180,7 +1180,28 @@ func geminiReasoningEffort(body []byte) string {
 	return ""
 }
 
-func thinkingConfigRaw(effort string) string {
+func thinkingConfigRaw(effort, model string) string {
+	// Gemini 3.x uses thinkingLevel (string); the legacy numeric thinkingBudget
+	// is "accepted for backwards compatibility" but documented as suboptimal for
+	// 3.x, and mixing both fields 400s. Gemini 2.5 keeps thinkingBudget.
+	if isGemini3xModel(model) {
+		var level string
+		switch effort {
+		case "low", "medium", "high":
+			level = effort
+		default:
+			// "none"/unknown: 3.x cannot disable thinking — omit the config and
+			// let the model use its default level rather than send an invalid value.
+			return ""
+		}
+		fw := newJSONWriter()
+		fw.Obj()
+		fw.Key("thinkingLevel")
+		fw.Str(level)
+		fw.EndObj()
+		return string(fw.Bytes())
+	}
+
 	var budget int64
 	switch effort {
 	case "none":
