@@ -329,8 +329,13 @@ type EmitOverrides struct {
 	ClampMaxCompTokensValue int64
 	DefaultMaxTokensKey     string
 	DefaultMaxTokensValue   int64
-	InjectStreamUsage       bool
-	StripThinkingBlocks     bool
+	InjectStreamUsage   bool
+	StripThinkingBlocks bool
+	// SanitizeToolUseIDs rewrites tool_use.id / tool_use_id values that contain
+	// characters outside ^[a-zA-Z0-9_-]+$. Always set when targeting Anthropic:
+	// non-Anthropic upstreams (e.g. Kimi-k2.6) emit IDs like "functions.Read:0"
+	// that Anthropic rejects when the history is forwarded back to it.
+	SanitizeToolUseIDs bool
 	// RewriteThinkingAdaptive replaces the inbound thinking block with
 	// {"type":"adaptive"} and sets output_config.effort. Used when the target
 	// model only accepts adaptive thinking (claude-opus-4-6+ / sonnet-4-6+).
@@ -351,6 +356,13 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 		out, err = stripThinkingBlocksBytes(out)
 		if err != nil {
 			return nil, fmt.Errorf("strip thinking blocks: %w", err)
+		}
+	}
+
+	if ov.SanitizeToolUseIDs {
+		out, err = sanitizeToolUseIDsBytes(out)
+		if err != nil {
+			return nil, fmt.Errorf("sanitize tool_use ids: %w", err)
 		}
 	}
 
@@ -496,6 +508,97 @@ func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
 
 	newMessagesArray := "[" + strings.Join(msgRaws, ",") + "]"
 	return sjson.SetRawBytes(body, "messages", []byte(newMessagesArray))
+}
+
+// sanitizeToolUseIDsBytes rewrites tool_use.id and tool_use_id in
+// messages[*].content[*] that contain characters outside ^[a-zA-Z0-9_-]+$.
+// Non-Anthropic upstreams (e.g. Kimi-k2.6) emit IDs like "functions.Read:0";
+// Anthropic rejects those with a 400 when the history is forwarded back to it.
+func sanitizeToolUseIDsBytes(body []byte) ([]byte, error) {
+	messages := gjson.GetBytes(body, "messages")
+	if !messages.Exists() || !messages.IsArray() {
+		return body, nil
+	}
+
+	anyChanged := false
+	var msgRaws []string
+	var walkErr error
+
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.Exists() || !content.IsArray() {
+			msgRaws = append(msgRaws, msg.Raw)
+			return true
+		}
+
+		needsRewrite := false
+		content.ForEach(func(_, block gjson.Result) bool {
+			switch block.Get("type").String() {
+			case "tool_use":
+				if id := block.Get("id").String(); sanitizeToolUseID(id) != id {
+					needsRewrite = true
+					return false
+				}
+			case "tool_result":
+				if id := block.Get("tool_use_id").String(); sanitizeToolUseID(id) != id {
+					needsRewrite = true
+					return false
+				}
+			}
+			return true
+		})
+
+		if !needsRewrite {
+			msgRaws = append(msgRaws, msg.Raw)
+			return true
+		}
+
+		anyChanged = true
+		var rewritten []string
+		content.ForEach(func(_, block gjson.Result) bool {
+			raw := block.Raw
+			var err error
+			switch block.Get("type").String() {
+			case "tool_use":
+				if id := block.Get("id").String(); sanitizeToolUseID(id) != id {
+					raw, err = sjson.Set(raw, "id", sanitizeToolUseID(id))
+					if err != nil {
+						walkErr = fmt.Errorf("rewrite tool_use id: %w", err)
+						return false
+					}
+				}
+			case "tool_result":
+				if id := block.Get("tool_use_id").String(); sanitizeToolUseID(id) != id {
+					raw, err = sjson.Set(raw, "tool_use_id", sanitizeToolUseID(id))
+					if err != nil {
+						walkErr = fmt.Errorf("rewrite tool_use_id: %w", err)
+						return false
+					}
+				}
+			}
+			rewritten = append(rewritten, raw)
+			return true
+		})
+		if walkErr != nil {
+			return false
+		}
+
+		newMsg, err := sjson.SetRaw(msg.Raw, "content", "["+strings.Join(rewritten, ",")+"]")
+		if err != nil {
+			walkErr = fmt.Errorf("replace content in message: %w", err)
+			return false
+		}
+		msgRaws = append(msgRaws, newMsg)
+		return true
+	})
+
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	if !anyChanged {
+		return body, nil
+	}
+	return sjson.SetRawBytes(body, "messages", []byte("["+strings.Join(msgRaws, ",")+"]"))
 }
 
 // encodeJSONStringNoHTMLEscape marshals s without HTML-escaping <, >, or &.
@@ -697,7 +800,8 @@ func effortForBudget(budgetTokens int64) string {
 
 func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	ov := EmitOverrides{
-		Model: opts.TargetModel,
+		Model:              opts.TargetModel,
+		SanitizeToolUseIDs: true,
 	}
 
 	thinkingResult := gjson.GetBytes(body, "thinking")

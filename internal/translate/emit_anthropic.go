@@ -232,7 +232,7 @@ func buildToolResultBlock(toolUseID string, content gjson.Result) string {
 	jw.Key("type")
 	jw.Str("tool_result")
 	jw.Key("tool_use_id")
-	jw.Str(toolUseID)
+	jw.Str(sanitizeToolUseID(toolUseID))
 
 	switch content.Type {
 	case gjson.String:
@@ -318,7 +318,7 @@ func buildAnthropicAssistantMessage(msg gjson.Result) string {
 		jw.EndObj()
 	}
 	toolCalls.ForEach(func(_, tc gjson.Result) bool {
-		id := tc.Get("id").String()
+		id := sanitizeToolUseID(tc.Get("id").String())
 		name := tc.Get("function.name").String()
 		argsStr := tc.Get("function.arguments").String()
 
@@ -529,4 +529,26 @@ func writeAnthropicSharedParams(jw *jsonWriter, body []byte) {
 func (e *RequestEnvelope) buildAnthropicFromAnthropic(opts EmitOptions) ([]byte, error) {
 	ov := resolveAnthropicOverrides(e.body, opts)
 	return e.emitSameFormat(ov)
+}
+
+// sanitizeToolUseID replaces characters that Anthropic rejects in tool_use.id
+// (required pattern: ^[a-zA-Z0-9_-]+$). Non-Anthropic upstreams (e.g.
+// Kimi-k2.6) emit IDs like "functions.Read:0" containing dots and colons; when
+// the router switches a session back to Anthropic those IDs cause a 400.
+func sanitizeToolUseID(id string) string {
+	if id == "" {
+		return id
+	}
+	b := []byte(id)
+	changed := false
+	for i, c := range b {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+			b[i] = '_'
+			changed = true
+		}
+	}
+	if !changed {
+		return id
+	}
+	return string(b)
 }

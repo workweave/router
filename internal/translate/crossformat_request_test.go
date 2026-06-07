@@ -1587,3 +1587,72 @@ func TestCrossFormat_OpenAIToAnthropic_ToolMissingFunctionName(t *testing.T) {
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
 }
+
+// TestSanitizeToolUseIDs_OpenAIToAnthropic checks that tool call IDs containing
+// dots or colons (e.g. Kimi-k2.6's "functions.Read:0") are sanitized before
+// forwarding to Anthropic, which rejects them with pattern ^[a-zA-Z0-9_-]+$.
+func TestSanitizeToolUseIDs_OpenAIToAnthropic(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4",
+		"messages": [
+			{"role": "assistant", "content": null, "tool_calls": [
+				{"id": "functions.Read:0", "type": "function", "function": {"name": "Read", "arguments": "{}"}}
+			]},
+			{"role": "tool", "tool_call_id": "functions.Read:0", "content": "file contents"}
+		]
+	}`)
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-sonnet-4-20250514"})
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+	msgs := out["messages"].([]any)
+
+	// assistant message: tool_use.id must be sanitized
+	asst := msgs[0].(map[string]any)
+	content := asst["content"].([]any)
+	toolUse := content[0].(map[string]any)
+	assert.Equal(t, "tool_use", toolUse["type"])
+	assert.Equal(t, "functions_Read_0", toolUse["id"], "dots and colons must be replaced with underscores")
+
+	// user message: tool_result.tool_use_id must match
+	user := msgs[1].(map[string]any)
+	userContent := user["content"].([]any)
+	toolResult := userContent[0].(map[string]any)
+	assert.Equal(t, "tool_result", toolResult["type"])
+	assert.Equal(t, "functions_Read_0", toolResult["tool_use_id"], "tool_use_id must match the sanitized tool_use id")
+}
+
+// TestSanitizeToolUseIDs_AnthropicToAnthropic checks that the same-format path
+// also sanitizes non-Anthropic tool IDs carried in Anthropic-format history.
+func TestSanitizeToolUseIDs_AnthropicToAnthropic(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-opus-4-7",
+		"messages": [
+			{"role": "assistant", "content": [
+				{"type": "tool_use", "id": "functions.Grep:11", "name": "Grep", "input": {}}
+			]},
+			{"role": "user", "content": [
+				{"type": "tool_result", "tool_use_id": "functions.Grep:11", "content": "results"}
+			]}
+		]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-opus-4-7"})
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+	msgs := out["messages"].([]any)
+
+	asst := msgs[0].(map[string]any)
+	block := asst["content"].([]any)[0].(map[string]any)
+	assert.Equal(t, "functions_Grep_11", block["id"], "tool_use.id must be sanitized in same-format path")
+
+	user := msgs[1].(map[string]any)
+	result := user["content"].([]any)[0].(map[string]any)
+	assert.Equal(t, "functions_Grep_11", result["tool_use_id"], "tool_use_id must be sanitized in same-format path")
+}
