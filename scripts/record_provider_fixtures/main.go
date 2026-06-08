@@ -61,13 +61,13 @@ var cases = []recordCase{
 	{"openai_chat/basic_text.upstream.sse", formatOpenAIChat, "deepseek/deepseek-v4-pro", providers.ProviderOpenRouter,
 		`{"model":"deepseek/deepseek-v4-pro","stream":true,"max_tokens":1024,"messages":[{"role":"user","content":"Say hi."}]}`},
 	{"openai_chat/toolcall.upstream.sse", formatOpenAIChat, "deepseek/deepseek-v4-pro", providers.ProviderOpenRouter,
-		`{"model":"deepseek/deepseek-v4-pro","stream":true,"max_tokens":1024,"tools":` + weatherTool + `,"messages":[{"role":"user","content":"Weather in NYC? Use the tool."}]}`},
+		`{"model":"deepseek/deepseek-v4-pro","stream":true,"max_tokens":1024,"tools":` + weatherTool + `,"messages":[{"role":"user","content":"Weather in NYC?"}]}`},
 	{"gemini_native/basic_text.upstream.sse", formatGemini, "gemini-3.1-pro-preview", providers.ProviderGoogle,
 		`{"model":"gemini-3.1-pro-preview","stream":true,"max_tokens":1024,"messages":[{"role":"user","content":"Say hi."}]}`},
 	{"gemini_native/toolcall.upstream.sse", formatGemini, "gemini-3.1-pro-preview", providers.ProviderGoogle,
-		`{"model":"gemini-3.1-pro-preview","stream":true,"max_tokens":1024,"tools":` + weatherTool + `,"messages":[{"role":"user","content":"Weather in NYC? Use the tool."}]}`},
+		`{"model":"gemini-3.1-pro-preview","stream":true,"max_tokens":1024,"tools":` + weatherTool + `,"messages":[{"role":"user","content":"Weather in NYC?"}]}`},
 	{"responses/toolcall.upstream.sse", formatOpenAIResponses, "gpt-5.5", providers.ProviderOpenAI,
-		`{"model":"gpt-5.5","stream":true,"max_tokens":2048,"thinking":{"type":"enabled","budget_tokens":24576},"tools":` + weatherTool + `,"messages":[{"role":"user","content":"Weather in NYC? Use the tool."}]}`},
+		`{"model":"gpt-5.5","stream":true,"max_tokens":2048,"thinking":{"type":"enabled","budget_tokens":24576},"tools":` + weatherTool + `,"messages":[{"role":"user","content":"Weather in NYC?"}]}`},
 }
 
 const weatherTool = `[{"name":"get_weather","description":"Get the weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]`
