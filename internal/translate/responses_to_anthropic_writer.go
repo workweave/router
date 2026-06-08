@@ -208,7 +208,13 @@ func (t *ResponsesToAnthropicWriter) translateResponsesEvent(raw []byte) error {
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		return t.handleReasoningDelta(data)
 	case "response.function_call_arguments.delta":
-		t.bufferToolArgs(data)
+		t.bufferToolArgs(data, "delta", true)
+		return nil
+	case "response.function_call_arguments.done":
+		// The terminal arg event carries the complete `arguments` string. Adopt
+		// it as authoritative so a tool call whose deltas were absent or lost
+		// still emits the real parameters rather than `{}`.
+		t.bufferToolArgs(data, "arguments", false)
 		return nil
 	case "response.output_item.done":
 		return t.handleOutputItemDone(data)
@@ -253,14 +259,24 @@ func (t *ResponsesToAnthropicWriter) handleReasoningDelta(data []byte) error {
 	return t.emitContentBlockDeltaThinking(idx, gjson.GetBytes(data, "delta").String())
 }
 
-func (t *ResponsesToAnthropicWriter) bufferToolArgs(data []byte) {
+// bufferToolArgs accumulates a tool call's arguments for an output_index.
+// appendMode=true appends a streamed fragment from `field`; appendMode=false
+// replaces the buffer with an authoritative complete value from `field`.
+func (t *ResponsesToAnthropicWriter) bufferToolArgs(data []byte, field string, appendMode bool) {
+	s := gjson.GetBytes(data, field).String()
+	if s == "" && appendMode {
+		return
+	}
 	oi := int(gjson.GetBytes(data, "output_index").Int())
 	buf, ok := t.toolArgs[oi]
 	if !ok {
 		buf = &strings.Builder{}
 		t.toolArgs[oi] = buf
 	}
-	buf.WriteString(gjson.GetBytes(data, "delta").String())
+	if !appendMode {
+		buf.Reset()
+	}
+	buf.WriteString(s)
 }
 
 func (t *ResponsesToAnthropicWriter) handleOutputItemDone(data []byte) error {
@@ -270,7 +286,9 @@ func (t *ResponsesToAnthropicWriter) handleOutputItemDone(data []byte) error {
 		return nil
 	}
 	if t.itemKind[oi] == "tool_use" {
-		if err := t.emitValidatedToolArgsDelta(oi, idx); err != nil {
+		// item.arguments on the terminal event is the authoritative complete
+		// args; use it when the streamed deltas were absent or malformed.
+		if err := t.emitValidatedToolArgsDelta(oi, idx, gjson.GetBytes(data, "item.arguments").String()); err != nil {
 			return err
 		}
 	}
@@ -332,22 +350,23 @@ func (t *ResponsesToAnthropicWriter) captureFinalResponse(data []byte) {
 }
 
 func (t *ResponsesToAnthropicWriter) finishStream() error {
-	// Close any still-open blocks (a tool block's args are flushed at
-	// output_item.done; reaching here with one open means the stream ended
-	// early, so close defensively without args).
+	// Close any still-open blocks. Reaching here with one open means the stream
+	// ended before its output_item.done (truncation); flush any buffered tool
+	// args first so a partial tool call still delivers its input_json_delta.
 	for oi, idx := range t.itemBlocks {
+		if t.itemKind[oi] == "tool_use" {
+			if err := t.emitValidatedToolArgsDelta(oi, idx, ""); err != nil {
+				return err
+			}
+		}
 		delete(t.itemBlocks, oi)
 		delete(t.itemKind, oi)
 		if err := t.emitContentBlockStop(idx); err != nil {
 			return err
 		}
 	}
-	stop := t.finalStopReason
-	if stop == "" {
-		stop = "end_turn"
-	}
-	t.emittedStopReason = stop
-	if err := t.emitMessageDelta(stop); err != nil {
+	t.emittedStopReason = t.reconciledStopReason()
+	if err := t.emitMessageDelta(t.emittedStopReason); err != nil {
 		return err
 	}
 	if err := t.emitMessageStop(); err != nil {
@@ -355,6 +374,23 @@ func (t *ResponsesToAnthropicWriter) finishStream() error {
 	}
 	t.closed = true
 	return nil
+}
+
+// reconciledStopReason enforces the Anthropic invariant that a turn with
+// tool_use blocks reports stop_reason "tool_use" and one without never does —
+// independent of the terminal Responses payload, which can be absent (truncated
+// stream) or disagree with what was actually streamed. Mirrors the promotion /
+// demotion in AnthropicSSETranslator.emitMessageDelta.
+func (t *ResponsesToAnthropicWriter) reconciledStopReason() string {
+	switch {
+	case t.toolUseCount > 0:
+		return "tool_use"
+	case t.finalStopReason == "" || t.finalStopReason == "tool_use":
+		// No terminal event, or it claimed tool_use with no block surviving.
+		return "end_turn"
+	default:
+		return t.finalStopReason
+	}
 }
 
 // --- non-streaming path ---
@@ -528,22 +564,30 @@ func (t *ResponsesToAnthropicWriter) emitContentBlockDeltaThinking(index int, te
 }
 
 // emitValidatedToolArgsDelta emits a single input_json_delta for a tool block,
-// carrying the buffered arguments — or `{}` when they are empty or fail to
-// parse, so a malformed concatenation can't break the client's tool-args parser.
-func (t *ResponsesToAnthropicWriter) emitValidatedToolArgsDelta(oi, index int) error {
+// carrying the buffered arguments. When those are empty or fail to parse it
+// falls back to fallback (the authoritative `arguments` from the terminal
+// item), and only as a last resort `{}` — so a malformed concatenation or a
+// lost delta stream can't break the client's tool-args parser.
+func (t *ResponsesToAnthropicWriter) emitValidatedToolArgsDelta(oi, index int, fallback string) error {
 	buf, ok := t.toolArgs[oi]
 	delete(t.toolArgs, oi)
-	args := "{}"
+	buffered := ""
 	if ok {
-		if s := buf.String(); s != "" && gjson.Valid(s) {
-			args = s
-		} else if s != "" {
-			observability.Get().Error(
-				"ResponsesToAnthropic tool_use args failed JSON validation — substituting empty args",
-				"block_index", index,
-				"args_len", len(s),
-			)
-		}
+		buffered = buf.String()
+	}
+	args := "{}"
+	switch {
+	case buffered != "" && gjson.Valid(buffered):
+		args = buffered
+	case fallback != "" && gjson.Valid(fallback):
+		args = fallback
+	case buffered != "" || fallback != "":
+		observability.Get().Error(
+			"ResponsesToAnthropic tool_use args failed JSON validation — substituting empty args",
+			"block_index", index,
+			"buffered_len", len(buffered),
+			"fallback_len", len(fallback),
+		)
 	}
 	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))

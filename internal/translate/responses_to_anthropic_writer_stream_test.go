@@ -143,6 +143,63 @@ func TestResponsesToAnthropicWriter_NonStreamingClient(t *testing.T) {
 	assert.Equal(t, "NYC", input["location"])
 }
 
+// A function_call that streams no argument deltas still delivers its real
+// arguments: the translator falls back to the authoritative item.arguments on
+// the terminal output_item.done rather than emitting {}.
+func TestResponsesToAnthropicWriter_ToolArgsFromDoneEvent(t *testing.T) {
+	const fixture = `event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"","status":"in_progress"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"{\"path\":\"x.go\"}","status":"completed"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"r","status":"completed","output":[{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"{\"path\":\"x.go\"}"}],"usage":{"input_tokens":10,"output_tokens":5}}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(true))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"partial_json":"{\"path\":\"x.go\"}"`,
+		"no arg deltas → fall back to item.arguments on output_item.done, not {}")
+	assert.NotContains(t, body, `"partial_json":"{}"`)
+	assert.Contains(t, body, `"stop_reason":"tool_use"`)
+}
+
+// A stream truncated before response.completed still reconciles to
+// stop_reason=tool_use (a tool block was emitted) and flushes the partial
+// tool args, rather than defaulting to end_turn with a dropped input_json_delta.
+func TestResponsesToAnthropicWriter_TruncatedToolStream(t *testing.T) {
+	const fixture = `event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Bash","arguments":"","status":"in_progress"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"command\":"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"\"ls\"}"}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(true))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize()) // no response.completed arrived
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"partial_json":"{\"command\":\"ls\"}"`,
+		"buffered tool args flushed on early close")
+	assert.Contains(t, body, `"stop_reason":"tool_use"`,
+		"a tool_use block was emitted → invariant forces tool_use even with no terminal event")
+	assert.Contains(t, body, "event: message_stop")
+}
+
 // A routing marker is emitted as content block 0; upstream content then starts
 // at block 1.
 func TestResponsesToAnthropicWriter_RoutingMarker(t *testing.T) {
