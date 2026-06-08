@@ -1,6 +1,8 @@
 package translate
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +14,29 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// maxToolCallIDLen is OpenAI's limit on tool_calls[].id; it rejects longer ids
+// with a 400 ("string too long").
+const maxToolCallIDLen = 64
+
+// clampOpenAIToolCallID makes a tool-call id safe for the OpenAI wire format.
+// Any Gemini thoughtSignature smuggled into the id (embedSignatureInID) is
+// dropped first — OpenAI cannot use it, and the bare id is usually within the
+// limit. An id still over 64 chars is replaced with a deterministic hash of the
+// original id, so a tool_use block and its matching tool_result (same original
+// id) map to the same value and stay paired.
+func clampOpenAIToolCallID(id string) string {
+	if id == "" {
+		return id
+	}
+	cleanID, _ := extractSignatureFromID(id)
+	cleanID = sanitizeToolUseID(cleanID)
+	if len(cleanID) <= maxToolCallIDLen {
+		return cleanID
+	}
+	sum := sha1.Sum([]byte(id))
+	return "tc_" + hex.EncodeToString(sum[:])
+}
 
 func hasNonEmptyTools(body []byte) bool {
 	tools := gjson.GetBytes(body, "tools")
@@ -429,7 +454,7 @@ func buildOpenAIToolCall(block gjson.Result) string {
 	inner := newJSONWriter()
 	inner.Obj()
 	inner.Key("id")
-	inner.Str(sanitizeToolUseID(block.Get("id").String()))
+	inner.Str(clampOpenAIToolCallID(block.Get("id").String()))
 	inner.Key("type")
 	inner.Str("function")
 	inner.Key("function")
@@ -537,7 +562,7 @@ func buildOpenAIToolResultMessage(block gjson.Result) string {
 	inner.Key("role")
 	inner.Str("tool")
 	inner.Key("tool_call_id")
-	inner.Str(sanitizeToolUseID(block.Get("tool_use_id").String()))
+	inner.Str(clampOpenAIToolCallID(block.Get("tool_use_id").String()))
 	inner.Key("content")
 	inner.Str(toolResultContentGJSON(block.Get("content")))
 	inner.EndObj()
