@@ -317,6 +317,25 @@ data: {"type":"response.failed","response":{"id":"r","status":"failed","error":{
 	assert.NotContains(t, body, "event: message_stop", "no success trailer after an error close")
 }
 
+// response.failed with no error object is still surfaced as an error (generic
+// message), not a normal success close.
+func TestResponsesToAnthropicWriter_StreamingFailedNoErrorObject(t *testing.T) {
+	const fixture = `event: response.failed
+data: {"type":"response.failed","response":{"id":"r","status":"failed","output":[]}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(true))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "event: error")
+	assert.NotContains(t, body, "event: message_stop")
+}
+
 // A function_call delivered only on output_item.done (no output_item.added)
 // still opens a tool_use block with its real id/name/args.
 func TestResponsesToAnthropicWriter_DoneOnlyToolCall(t *testing.T) {

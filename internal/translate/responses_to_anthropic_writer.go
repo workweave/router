@@ -232,11 +232,11 @@ func (t *ResponsesToAnthropicWriter) translateResponsesEvent(raw []byte) error {
 		// event instead of closing the turn as if it succeeded.
 		return t.emitStreamErrorEvent(gjson.GetBytes(data, "code").String(), gjson.GetBytes(data, "message").String())
 	case "response.failed":
-		if e := gjson.GetBytes(data, "response.error"); e.Exists() {
-			return t.emitStreamErrorEvent(e.Get("code").String(), e.Get("message").String())
-		}
-		t.captureFinalResponse(data)
-		return nil
+		// response.failed is always an upstream failure — surface it as an error
+		// even when no error object rode along (responsesError fills a generic
+		// message), matching the buffered path's status:"failed" rejection.
+		e := gjson.GetBytes(data, "response.error")
+		return t.emitStreamErrorEvent(e.Get("code").String(), e.Get("message").String())
 	case "response.completed", "response.incomplete":
 		t.captureFinalResponse(data)
 		return nil
