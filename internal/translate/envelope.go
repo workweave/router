@@ -329,8 +329,8 @@ type EmitOverrides struct {
 	ClampMaxCompTokensValue int64
 	DefaultMaxTokensKey     string
 	DefaultMaxTokensValue   int64
-	InjectStreamUsage   bool
-	StripThinkingBlocks bool
+	InjectStreamUsage       bool
+	StripThinkingBlocks     bool
 	// SanitizeToolUseIDs rewrites tool_use.id / tool_use_id values that contain
 	// characters outside ^[a-zA-Z0-9_-]+$. Always set when targeting Anthropic:
 	// non-Anthropic upstreams (e.g. Kimi-k2.6) emit IDs like "functions.Read:0"
