@@ -16,11 +16,11 @@ func TestForcedReasoningEffort(t *testing.T) {
 		{"gpt-5.4-mini", false, "low"},
 		{"gpt-5.4-mini", true, "high"},
 		{"gemini-3.1-pro-preview", false, "low"},
-		{"gemini-3.1-pro-preview", true, "low"},     // effort-immune: escalation ignored
-		{"claude-opus-4-8", false, ""},               // adaptive path untouched
+		{"gemini-3.1-pro-preview", true, "low"}, // effort-immune: escalation ignored
+		{"claude-opus-4-8", false, ""},          // adaptive path untouched
 		{"claude-opus-4-8", true, ""},
 		{"deepseek/deepseek-v4-pro", true, ""},
-		{"gemini-2.5-flash", true, ""},               // only gemini-3.x is pinned
+		{"gemini-2.5-flash", true, ""}, // only gemini-3.x is pinned
 	}
 	for _, tc := range cases {
 		got := forcedReasoningEffort(tc.model, tc.escalate)
