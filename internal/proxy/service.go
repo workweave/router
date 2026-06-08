@@ -1343,6 +1343,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		String("client.session_id", clientID.SessionID).
 		String("client.user_agent", clientID.UserAgent).
 		String("client.app", clientID.ClientApp).
+		String("requested.model", feats.Model).
+		String("decision.model", decision.Model).
 		Int64("usage.input_tokens", int64(in)).
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
@@ -2284,6 +2286,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		String("client.session_id", clientID.SessionID).
 		String("client.user_agent", clientID.UserAgent).
 		String("client.app", clientID.ClientApp).
+		String("requested.model", feats.Model).
+		String("decision.model", decision.Model).
 		Int64("usage.input_tokens", int64(in)).
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
