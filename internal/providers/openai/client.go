@@ -39,13 +39,22 @@ type Client struct {
 }
 
 func NewClient(apiKey, baseURL string) *Client {
+	return NewClientWithResponseHeaderTimeout(apiKey, baseURL, responseHeaderTimeout)
+}
+
+// NewClientWithResponseHeaderTimeout is NewClient with a caller-chosen
+// time-to-first-byte guard. Production uses the 120s default via NewClient;
+// the override exists so a test can inject a small timeout and exercise the
+// bounded-stall behavior (a stalled upstream surfaces an error, not a hang —
+// the #331 belt-and-suspenders) without waiting the full default.
+func NewClientWithResponseHeaderTimeout(apiKey, baseURL string, headerTimeout time.Duration) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
 	return &Client{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		http:    &http.Client{Transport: httputil.NewTransportWithResponseHeaderTimeout(5*time.Second, 5*time.Second, responseHeaderTimeout)},
+		http:    &http.Client{Transport: httputil.NewTransportWithResponseHeaderTimeout(5*time.Second, 5*time.Second, headerTimeout)},
 	}
 }
 
