@@ -23,6 +23,15 @@ import (
 
 const DefaultBaseURL = "https://api.openai.com"
 
+// responseHeaderTimeout guards time-to-first-byte for OpenAI upstreams. It is
+// raised above the 30s default because the Responses API (gpt-5.x reasoning)
+// can take well over 30s to emit its first streamed event under high effort;
+// the default would false-trip "http2: timeout awaiting response headers" on a
+// healthy model. Once the stream is flowing, inter-event gaps are bounded by
+// StreamBody's idle watchdog, so this generous header budget cannot reintroduce
+// an unbounded hang. Applies to both /v1/chat/completions and /v1/responses.
+const responseHeaderTimeout = 120 * time.Second
+
 type Client struct {
 	apiKey  string
 	baseURL string
@@ -36,7 +45,7 @@ func NewClient(apiKey, baseURL string) *Client {
 	return &Client{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		http:    &http.Client{Transport: httputil.NewTransport(5*time.Second, 5*time.Second)},
+		http:    &http.Client{Transport: httputil.NewTransportWithResponseHeaderTimeout(5*time.Second, 5*time.Second, responseHeaderTimeout)},
 	}
 }
 

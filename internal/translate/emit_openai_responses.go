@@ -16,8 +16,13 @@ import (
 // request from an Anthropic Messages envelope. Reasoning-capable OpenAI models
 // (gpt-5.x) reject `reasoning_effort` + tools on `/v1/chat/completions`, so an
 // agentic Anthropic client (Claude Code) that wants the model to reason must go
-// through the Responses API instead. Phase 1: non-streaming upstream
-// (`stream:false`); the caller buffers + re-emits as Anthropic.
+// through the Responses API instead. The upstream call streams (`stream:true`):
+// a non-streaming Responses call buffers the entire reasoning+output before
+// emitting any response headers, which for gpt-5.x at high effort routinely
+// exceeds the transport's response-header timeout and fails the turn with
+// "http2: timeout awaiting response headers". Streaming returns headers + the
+// first event immediately; ResponsesToAnthropicWriter translates the event
+// stream into Anthropic SSE on the fly.
 func (e *RequestEnvelope) PrepareOpenAIResponses(in http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
 	if e.format != FormatAnthropic {
 		return providers.PreparedRequest{}, fmt.Errorf("PrepareOpenAIResponses: only Anthropic ingress is supported, got format %d", e.format)
@@ -92,10 +97,10 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 	jw.Key("model")
 	jw.Str(opts.TargetModel)
 	jw.Key("stream")
-	jw.Bool(false)
+	jw.Bool(true)
 	// Stateless: we send the full history each turn and don't rely on
-	// server-side state. (Phase 1 also omits echoing prior reasoning items;
-	// the model reasons fresh from the message history.)
+	// server-side state. (We also omit echoing prior reasoning items; the model
+	// reasons fresh from the message history.)
 	jw.Key("store")
 	jw.Bool(false)
 

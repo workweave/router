@@ -54,7 +54,7 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	require.NoError(t, json.Unmarshal(prep.Body, &out))
 
 	assert.Equal(t, "gpt-5.5", out["model"])
-	assert.Equal(t, false, out["stream"])
+	assert.Equal(t, true, out["stream"], "Responses upstream must stream so a slow gpt-5.x prefill doesn't trip the response-header timeout")
 	assert.Equal(t, false, out["store"])
 	assert.Equal(t, "You are helpful.", out["instructions"])
 	reasoning, _ := out["reasoning"].(map[string]any)

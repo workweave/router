@@ -2,7 +2,9 @@ package translate
 
 import (
 	"bufio"
+	"bytes"
 	"net/http"
+	"strings"
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
@@ -11,12 +13,15 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// ResponsesToAnthropicWriter adapts a NON-streaming OpenAI Responses upstream
-// response into an Anthropic Messages response for the client. It buffers the
-// upstream JSON, translates it with ResponsesToAnthropicResponse, then either
-// writes a one-shot Anthropic JSON body (non-streaming client) or replays it as
-// a synthetic Anthropic SSE sequence (streaming client). It exposes the same
-// Prelude/Write/Finalize/Summary surface the proxy's OpenAI dispatch expects.
+// ResponsesToAnthropicWriter adapts a STREAMING OpenAI Responses upstream
+// (`POST /v1/responses` with `stream:true`) into an Anthropic Messages response
+// for the client. For a streaming client it parses the Responses SSE event
+// stream and emits Anthropic SSE incrementally (reasoning → thinking, output
+// text → text, function_call → tool_use); for a non-streaming client it buffers
+// the stream and renders a one-shot Anthropic JSON body from the terminal
+// `response.completed` event via ResponsesToAnthropicResponse. It exposes the
+// Prelude/Write/Finalize/Summary surface the proxy's OpenAI dispatch expects,
+// mirroring AnthropicSSETranslator so the dispatch closure is identical.
 type ResponsesToAnthropicWriter struct {
 	inner        http.ResponseWriter
 	flusher      http.Flusher
@@ -28,19 +33,44 @@ type ResponsesToAnthropicWriter struct {
 	estimatedInputTokens int
 	requestHadTools      bool
 
-	buf            []byte
+	buf            bytes.Buffer
 	statusCode     int
 	streaming      bool
 	headersEmitted bool
 	started        bool
+	// closed guards against a second close after Finalize emits the trailer.
+	closed bool
 
-	// summary fields
-	emittedStopReason string
+	// blockIdx is the next Anthropic content-block index to assign.
+	blockIdx int
+	// itemBlocks maps an OpenAI Responses output_index to the Anthropic content
+	// block index opened for it. Responses emits output items sequentially, but
+	// keying by output_index keeps each item's deltas correlated to its block
+	// regardless of ordering.
+	itemBlocks map[int]int
+	// itemKind records the Anthropic block kind per output_index so the matching
+	// output_item.done can close it correctly.
+	itemKind map[int]string
+	// toolArgs accumulates function_call_arguments deltas per output_index. The
+	// concatenated payload is validated and emitted as a single input_json_delta
+	// at item close — mirroring AnthropicSSETranslator, a payload that fails to
+	// parse becomes `{}` rather than killing the client's strict tool-args
+	// parser mid-turn.
+	toolArgs map[int]*strings.Builder
+
+	// Captured from the terminal response.completed/.failed/.incomplete event.
+	finalStopReason string
+	hasUsage        bool
+	usageInput      int
+	usageOutput     int
+	usageCacheRead  int
+
+	// Summary fields.
 	toolUseCount      int
-	outputTokens      int
+	emittedStopReason string
 }
 
-// NewResponsesToAnthropicWriter wraps w to translate a buffered Responses
+// NewResponsesToAnthropicWriter wraps w to translate a streaming Responses
 // upstream into Anthropic for the client.
 func NewResponsesToAnthropicWriter(w http.ResponseWriter, requestModel string, sink otel.UsageSink) *ResponsesToAnthropicWriter {
 	flusher, _ := w.(http.Flusher)
@@ -51,6 +81,9 @@ func NewResponsesToAnthropicWriter(w http.ResponseWriter, requestModel string, s
 		requestModel: requestModel,
 		usageSink:    sink,
 		statusCode:   http.StatusOK,
+		itemBlocks:   make(map[int]int),
+		itemKind:     make(map[int]string),
+		toolArgs:     make(map[int]*strings.Builder),
 	}
 }
 
@@ -73,9 +106,8 @@ func (t *ResponsesToAnthropicWriter) WithRequestHadTools(hadTools bool) *Respons
 
 func (t *ResponsesToAnthropicWriter) Header() http.Header { return t.inner.Header() }
 
-// WriteHeader captures the upstream status. The Responses upstream is always
-// non-streaming JSON, so we never switch to SSE here — the streaming decision
-// is the CLIENT's, committed in Prelude.
+// WriteHeader captures the upstream status. The streaming decision is the
+// CLIENT's, committed in Prelude, so we never flip to SSE here.
 func (t *ResponsesToAnthropicWriter) WriteHeader(code int) {
 	if t.headersEmitted {
 		return
@@ -83,9 +115,16 @@ func (t *ResponsesToAnthropicWriter) WriteHeader(code int) {
 	t.statusCode = code
 }
 
+// Write receives upstream Responses bytes. When the client is streaming, it
+// parses complete SSE events and emits Anthropic frames on the fly; otherwise
+// it buffers the raw stream for Finalize.
 func (t *ResponsesToAnthropicWriter) Write(data []byte) (int, error) {
-	t.buf = append(t.buf, data...)
-	return len(data), nil
+	n := len(data)
+	t.buf.Write(data)
+	if !t.streaming {
+		return n, nil
+	}
+	return n, t.processResponsesSSEBuffer()
 }
 
 func (t *ResponsesToAnthropicWriter) Flush() {
@@ -94,10 +133,9 @@ func (t *ResponsesToAnthropicWriter) Flush() {
 	}
 }
 
-// Prelude commits SSE headers + message_start eagerly when the client requested
-// streaming, mirroring AnthropicSSETranslator so the dispatch closure is
-// identical. The content blocks are emitted later in Finalize once the buffered
-// upstream body is translated.
+// Prelude commits SSE headers + message_start (+ routing marker block) eagerly
+// when the client requested streaming, so the client sees the message envelope
+// while the upstream is still reasoning.
 func (t *ResponsesToAnthropicWriter) Prelude(streaming bool) error {
 	if !streaming || t.started {
 		return nil
@@ -110,198 +148,265 @@ func (t *ResponsesToAnthropicWriter) Prelude(streaming bool) error {
 	t.inner.WriteHeader(http.StatusOK)
 	t.headersEmitted = true
 	t.started = true
-	if err := t.emitMessageStartFrame(t.requestModel, "msg_responses", t.estimatedInputTokens); err != nil {
+	if err := t.emitMessageStart(); err != nil {
 		return err
 	}
-	return t.emitRoutingMarkerFrame()
+	return t.emitRoutingMarkerIfConfigured()
 }
 
-// Finalize translates the buffered Responses body and emits it: SSE replay for
-// a streaming client, one-shot JSON otherwise.
+// Finalize emits the streaming trailer (message_delta + message_stop) for a
+// streaming client, or renders the buffered stream as one-shot Anthropic JSON
+// for a non-streaming client.
 func (t *ResponsesToAnthropicWriter) Finalize() error {
-	if t.statusCode >= 400 {
-		return t.finalizeError()
+	if t.streaming {
+		if t.closed {
+			return nil
+		}
+		return t.finishStream()
 	}
-	anthropic, err := ResponsesToAnthropicResponse(t.buf, t.requestModel)
-	if err != nil {
-		observability.Get().Error("ResponsesToAnthropic: translate failed", "err", err)
-		return t.finalizeError()
-	}
-	root := gjson.ParseBytes(anthropic)
-	t.recordUsage(root.Get("usage"))
-	t.emittedStopReason = root.Get("stop_reason").String()
-	t.outputTokens = int(root.Get("usage.output_tokens").Int())
-
-	if !t.streaming {
-		t.inner.Header().Set("Content-Type", "application/json")
-		t.inner.Header().Del("Content-Length")
-		t.inner.WriteHeader(http.StatusOK)
-		_, err := t.inner.Write(anthropic)
-		return err
-	}
-	return t.replayAsSSE(root)
+	return t.finalizeBuffered()
 }
 
 func (t *ResponsesToAnthropicWriter) Summary() ResponseSummary {
 	return ResponseSummary{
 		StopReason:    t.emittedStopReason,
 		ToolUseBlocks: t.toolUseCount,
-		OutputTokens:  t.outputTokens,
+		OutputTokens:  t.usageOutput,
 	}
 }
 
-func (t *ResponsesToAnthropicWriter) recordUsage(usage gjson.Result) {
+// --- streaming path ---
+
+func (t *ResponsesToAnthropicWriter) processResponsesSSEBuffer() error {
+	for {
+		event, n := sse.SplitNext(t.buf.Bytes())
+		if n == 0 {
+			return nil
+		}
+		err := t.translateResponsesEvent(event)
+		t.buf.Next(n)
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func (t *ResponsesToAnthropicWriter) translateResponsesEvent(raw []byte) error {
+	_, data := sse.ParseEvent(raw)
+	if len(data) == 0 {
+		return nil
+	}
+	// Match on the in-payload `type` (the `event:` line duplicates it but is
+	// sometimes dropped by intermediaries). Unknown response.* events are
+	// ignored; the ones below cover reasoning, text, tool calls, and the
+	// terminal envelope.
+	switch gjson.GetBytes(data, "type").String() {
+	case "response.output_item.added":
+		return t.handleOutputItemAdded(data)
+	case "response.output_text.delta":
+		return t.handleTextDelta(data)
+	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+		return t.handleReasoningDelta(data)
+	case "response.function_call_arguments.delta":
+		t.bufferToolArgs(data)
+		return nil
+	case "response.output_item.done":
+		return t.handleOutputItemDone(data)
+	case "response.completed", "response.incomplete", "response.failed":
+		t.captureFinalResponse(data)
+		return nil
+	}
+	return nil
+}
+
+func (t *ResponsesToAnthropicWriter) handleOutputItemAdded(data []byte) error {
+	oi := int(gjson.GetBytes(data, "output_index").Int())
+	item := gjson.GetBytes(data, "item")
+	if item.Get("type").String() != "function_call" {
+		// message / reasoning blocks open lazily on their first delta so a
+		// reasoning item that surfaces no summary text never opens an empty
+		// thinking block.
+		return nil
+	}
+	idx := t.blockIdx
+	t.itemBlocks[oi] = idx
+	t.itemKind[oi] = "tool_use"
+	t.toolUseCount++
+	t.blockIdx++
+	// Anthropic tool_use.id maps from call_id (not the fc_ item id).
+	return t.emitContentBlockStartTool(idx, item.Get("call_id").String(), item.Get("name").String())
+}
+
+func (t *ResponsesToAnthropicWriter) handleTextDelta(data []byte) error {
+	idx, err := t.openBlock(int(gjson.GetBytes(data, "output_index").Int()), "text")
+	if err != nil {
+		return err
+	}
+	return t.emitContentBlockDeltaText(idx, gjson.GetBytes(data, "delta").String())
+}
+
+func (t *ResponsesToAnthropicWriter) handleReasoningDelta(data []byte) error {
+	idx, err := t.openBlock(int(gjson.GetBytes(data, "output_index").Int()), "thinking")
+	if err != nil {
+		return err
+	}
+	return t.emitContentBlockDeltaThinking(idx, gjson.GetBytes(data, "delta").String())
+}
+
+func (t *ResponsesToAnthropicWriter) bufferToolArgs(data []byte) {
+	oi := int(gjson.GetBytes(data, "output_index").Int())
+	buf, ok := t.toolArgs[oi]
+	if !ok {
+		buf = &strings.Builder{}
+		t.toolArgs[oi] = buf
+	}
+	buf.WriteString(gjson.GetBytes(data, "delta").String())
+}
+
+func (t *ResponsesToAnthropicWriter) handleOutputItemDone(data []byte) error {
+	oi := int(gjson.GetBytes(data, "output_index").Int())
+	idx, ok := t.itemBlocks[oi]
+	if !ok {
+		return nil
+	}
+	if t.itemKind[oi] == "tool_use" {
+		if err := t.emitValidatedToolArgsDelta(oi, idx); err != nil {
+			return err
+		}
+	}
+	delete(t.itemBlocks, oi)
+	delete(t.itemKind, oi)
+	return t.emitContentBlockStop(idx)
+}
+
+// openBlock returns the Anthropic block index for output_index oi, opening a
+// new block of the given kind (text/thinking) on first use.
+func (t *ResponsesToAnthropicWriter) openBlock(oi int, kind string) (int, error) {
+	if idx, ok := t.itemBlocks[oi]; ok {
+		return idx, nil
+	}
+	idx := t.blockIdx
+	t.itemBlocks[oi] = idx
+	t.itemKind[oi] = kind
+	t.blockIdx++
+	if kind == "thinking" {
+		return idx, t.emitContentBlockStartThinking(idx)
+	}
+	return idx, t.emitContentBlockStartText(idx)
+}
+
+// captureFinalResponse records usage + stop reason from a terminal event's
+// nested `response` object.
+func (t *ResponsesToAnthropicWriter) captureFinalResponse(data []byte) {
+	resp := gjson.GetBytes(data, "response")
+	if !resp.Exists() {
+		return
+	}
+	hasToolCall := false
+	resp.Get("output").ForEach(func(_, item gjson.Result) bool {
+		if item.Get("type").String() == "function_call" {
+			hasToolCall = true
+			return false
+		}
+		return true
+	})
+	switch {
+	case hasToolCall:
+		t.finalStopReason = "tool_use"
+	case resp.Get("incomplete_details.reason").String() == "max_output_tokens" || resp.Get("status").String() == "incomplete":
+		t.finalStopReason = "max_tokens"
+	default:
+		t.finalStopReason = "end_turn"
+	}
+	usage := resp.Get("usage")
+	if usage.Exists() {
+		t.hasUsage = true
+		t.usageInput = int(usage.Get("input_tokens").Int())
+		t.usageOutput = int(usage.Get("output_tokens").Int())
+		t.usageCacheRead = int(usage.Get("input_tokens_details.cached_tokens").Int())
+		if t.usageSink != nil {
+			t.usageSink.RecordUsage(t.usageInput, t.usageOutput)
+			t.usageSink.RecordCacheUsage(0, t.usageCacheRead)
+		}
+	}
+}
+
+func (t *ResponsesToAnthropicWriter) finishStream() error {
+	// Close any still-open blocks (a tool block's args are flushed at
+	// output_item.done; reaching here with one open means the stream ended
+	// early, so close defensively without args).
+	for oi, idx := range t.itemBlocks {
+		delete(t.itemBlocks, oi)
+		delete(t.itemKind, oi)
+		if err := t.emitContentBlockStop(idx); err != nil {
+			return err
+		}
+	}
+	stop := t.finalStopReason
+	if stop == "" {
+		stop = "end_turn"
+	}
+	t.emittedStopReason = stop
+	if err := t.emitMessageDelta(stop); err != nil {
+		return err
+	}
+	if err := t.emitMessageStop(); err != nil {
+		return err
+	}
+	t.closed = true
+	return nil
+}
+
+// --- non-streaming path ---
+
+// finalizeBuffered renders the buffered Responses stream as a one-shot Anthropic
+// JSON body for a non-streaming client. It extracts the final `response` object
+// from the terminal SSE event and reuses ResponsesToAnthropicResponse.
+func (t *ResponsesToAnthropicWriter) finalizeBuffered() error {
+	if t.statusCode >= 400 {
+		return t.finalizeError()
+	}
+	finalResp := extractFinalResponseObject(t.buf.Bytes())
+	if finalResp == nil {
+		observability.Get().Error("ResponsesToAnthropic: no terminal response event in stream")
+		return t.finalizeError()
+	}
+	anthropic, err := ResponsesToAnthropicResponse(finalResp, t.requestModel)
+	if err != nil {
+		observability.Get().Error("ResponsesToAnthropic: translate failed", "err", err)
+		return t.finalizeError()
+	}
+	root := gjson.ParseBytes(anthropic)
+	t.recordBufferedUsage(root.Get("usage"))
+	t.emittedStopReason = root.Get("stop_reason").String()
+	t.usageOutput = int(root.Get("usage.output_tokens").Int())
+	root.Get("content").ForEach(func(_, block gjson.Result) bool {
+		if block.Get("type").String() == "tool_use" {
+			t.toolUseCount++
+		}
+		return true
+	})
+
+	t.inner.Header().Set("Content-Type", "application/json")
+	t.inner.Header().Del("Content-Length")
+	t.inner.WriteHeader(http.StatusOK)
+	_, err = t.inner.Write(anthropic)
+	return err
+}
+
+func (t *ResponsesToAnthropicWriter) recordBufferedUsage(usage gjson.Result) {
 	if t.usageSink == nil || !usage.Exists() {
 		return
 	}
-	in := int(usage.Get("input_tokens").Int())
-	out := int(usage.Get("output_tokens").Int())
-	cacheRead := int(usage.Get("cache_read_input_tokens").Int())
-	t.usageSink.RecordUsage(in, out)
-	t.usageSink.RecordCacheUsage(0, cacheRead)
+	t.usageSink.RecordUsage(int(usage.Get("input_tokens").Int()), int(usage.Get("output_tokens").Int()))
+	t.usageSink.RecordCacheUsage(0, int(usage.Get("cache_read_input_tokens").Int()))
 }
 
-// replayAsSSE emits the translated Anthropic message as an SSE sequence.
-// message_start (+ routing marker) was already emitted by Prelude; here we emit
-// the content blocks starting at the next index, then message_delta + stop.
-func (t *ResponsesToAnthropicWriter) replayAsSSE(msg gjson.Result) error {
-	idx := 0
-	if t.routingMarker != "" {
-		idx = 1 // routing marker occupies block 0
-	}
-	var emitErr error
-	msg.Get("content").ForEach(func(_, block gjson.Result) bool {
-		switch block.Get("type").String() {
-		case "thinking":
-			emitErr = t.emitThinkingBlock(idx, block.Get("thinking").String())
-		case "text":
-			emitErr = t.emitTextBlock(idx, block.Get("text").String())
-		case "tool_use":
-			t.toolUseCount++
-			emitErr = t.emitToolUseBlock(idx, block.Get("id").String(), block.Get("name").String(), block.Get("input").Raw)
-		default:
-			return true
-		}
-		idx++
-		return emitErr == nil
-	})
-	if emitErr != nil {
-		return emitErr
-	}
-	if err := t.emitMessageDeltaFrame(msg.Get("stop_reason").String(), t.outputTokens); err != nil {
-		return err
-	}
-	return t.emitMessageStopFrame()
-}
-
-// --- SSE frame emitters (self-contained; mirror AnthropicSSETranslator wire shapes) ---
-
-func (t *ResponsesToAnthropicWriter) flushEvent() error {
-	if err := t.bw.Flush(); err != nil {
-		return err
-	}
-	if t.flusher != nil {
-		t.flusher.Flush()
-	}
-	return nil
-}
-
-func (t *ResponsesToAnthropicWriter) emitMessageStartFrame(model, id string, inputTokens int) error {
-	t.bw.WriteString("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":")
-	sse.WriteJSONString(t.bw, id)
-	t.bw.WriteString(",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":")
-	sse.WriteJSONString(t.bw, model)
-	t.bw.WriteString(",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":")
-	sse.WriteJSONInt(t.bw, int64(inputTokens))
-	t.bw.WriteString(",\"output_tokens\":0}}}\n\n")
-	return t.flushEvent()
-}
-
-func (t *ResponsesToAnthropicWriter) emitRoutingMarkerFrame() error {
-	if t.routingMarker == "" {
-		return nil
-	}
-	if err := t.emitTextBlock(0, t.routingMarker); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (t *ResponsesToAnthropicWriter) emitTextBlock(index int, text string) error {
-	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
-	sse.WriteJSONInt(t.bw, int64(index))
-	t.bw.WriteString(",\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
-	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
-	sse.WriteJSONInt(t.bw, int64(index))
-	t.bw.WriteString(",\"delta\":{\"type\":\"text_delta\",\"text\":")
-	sse.WriteJSONString(t.bw, text)
-	t.bw.WriteString("}}\n\n")
-	return t.emitBlockStop(index)
-}
-
-func (t *ResponsesToAnthropicWriter) emitThinkingBlock(index int, text string) error {
-	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
-	sse.WriteJSONInt(t.bw, int64(index))
-	t.bw.WriteString(",\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n")
-	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
-	sse.WriteJSONInt(t.bw, int64(index))
-	t.bw.WriteString(",\"delta\":{\"type\":\"thinking_delta\",\"thinking\":")
-	sse.WriteJSONString(t.bw, text)
-	t.bw.WriteString("}}\n\n")
-	return t.emitBlockStop(index)
-}
-
-func (t *ResponsesToAnthropicWriter) emitToolUseBlock(index int, id, name, inputRaw string) error {
-	if inputRaw == "" {
-		inputRaw = "{}"
-	}
-	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
-	sse.WriteJSONInt(t.bw, int64(index))
-	t.bw.WriteString(",\"content_block\":{\"type\":\"tool_use\",\"id\":")
-	sse.WriteJSONString(t.bw, id)
-	t.bw.WriteString(",\"name\":")
-	sse.WriteJSONString(t.bw, name)
-	t.bw.WriteString(",\"input\":{}}}\n\n")
-	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
-	sse.WriteJSONInt(t.bw, int64(index))
-	t.bw.WriteString(",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":")
-	sse.WriteJSONString(t.bw, inputRaw)
-	t.bw.WriteString("}}\n\n")
-	return t.emitBlockStop(index)
-}
-
-func (t *ResponsesToAnthropicWriter) emitBlockStop(index int) error {
-	t.bw.WriteString("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":")
-	sse.WriteJSONInt(t.bw, int64(index))
-	t.bw.WriteString("}\n\n")
-	return t.flushEvent()
-}
-
-func (t *ResponsesToAnthropicWriter) emitMessageDeltaFrame(stopReason string, outputTokens int) error {
-	if stopReason == "" {
-		stopReason = "end_turn"
-	}
-	t.bw.WriteString("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":")
-	sse.WriteJSONString(t.bw, stopReason)
-	t.bw.WriteString(",\"stop_sequence\":null},\"usage\":{\"output_tokens\":")
-	sse.WriteJSONInt(t.bw, int64(outputTokens))
-	t.bw.WriteString("}}\n\n")
-	return t.flushEvent()
-}
-
-func (t *ResponsesToAnthropicWriter) emitMessageStopFrame() error {
-	t.bw.WriteString("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
-	return t.flushEvent()
-}
-
+// finalizeError renders a one-shot Anthropic error body. Only reached on the
+// non-streaming path; streaming errors are rendered by the dispatch's
+// emitAnthropicSSEErrorEvent before Finalize and closed out by finishStream.
 func (t *ResponsesToAnthropicWriter) finalizeError() error {
-	errBody := ResponsesToAnthropicError(t.buf)
-	if t.streaming {
-		t.bw.WriteString("event: error\ndata: ")
-		t.bw.Write(errBody)
-		t.bw.WriteString("\n\n")
-		return t.flushEvent()
-	}
+	errBody := ResponsesToAnthropicError(t.buf.Bytes())
 	if !t.headersEmitted {
 		t.inner.Header().Set("Content-Type", "application/json")
 		t.inner.Header().Del("Content-Length")
@@ -314,3 +419,184 @@ func (t *ResponsesToAnthropicWriter) finalizeError() error {
 	_, err := t.inner.Write(errBody)
 	return err
 }
+
+// extractFinalResponseObject scans a buffered Responses SSE stream for the last
+// terminal event (response.completed/.incomplete/.failed) and returns its
+// nested `response` object as raw JSON, or nil if none is present.
+func extractFinalResponseObject(sseBytes []byte) []byte {
+	var out []byte
+	rest := sseBytes
+	for {
+		event, n := sse.SplitNext(rest)
+		if n == 0 {
+			break
+		}
+		rest = rest[n:]
+		_, data := sse.ParseEvent(event)
+		if len(data) == 0 {
+			continue
+		}
+		switch gjson.GetBytes(data, "type").String() {
+		case "response.completed", "response.incomplete", "response.failed":
+			if resp := gjson.GetBytes(data, "response"); resp.Exists() {
+				out = []byte(resp.Raw)
+			}
+		}
+	}
+	return out
+}
+
+// --- Anthropic SSE frame emitters (wire shapes mirror AnthropicSSETranslator) ---
+
+func (t *ResponsesToAnthropicWriter) emitMessageStart() error {
+	model := t.requestModel
+	t.bw.WriteString("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":")
+	sse.WriteJSONString(t.bw, "msg_responses")
+	t.bw.WriteString(",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":")
+	sse.WriteJSONString(t.bw, model)
+	t.bw.WriteString(",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":")
+	sse.WriteJSONInt(t.bw, int64(t.estimatedInputTokens))
+	t.bw.WriteString(",\"output_tokens\":0}}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *ResponsesToAnthropicWriter) emitRoutingMarkerIfConfigured() error {
+	if t.routingMarker == "" {
+		return nil
+	}
+	idx := t.blockIdx
+	if err := t.emitContentBlockStartText(idx); err != nil {
+		return err
+	}
+	if err := t.emitContentBlockDeltaText(idx, t.routingMarker); err != nil {
+		return err
+	}
+	if err := t.emitContentBlockStop(idx); err != nil {
+		return err
+	}
+	t.blockIdx++
+	return nil
+}
+
+func (t *ResponsesToAnthropicWriter) emitContentBlockStartText(index int) error {
+	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString(",\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *ResponsesToAnthropicWriter) emitContentBlockStartThinking(index int) error {
+	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString(",\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *ResponsesToAnthropicWriter) emitContentBlockStartTool(index int, id, name string) error {
+	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString(",\"content_block\":{\"type\":\"tool_use\",\"id\":")
+	sse.WriteJSONString(t.bw, id)
+	t.bw.WriteString(",\"name\":")
+	sse.WriteJSONString(t.bw, name)
+	t.bw.WriteString(",\"input\":{}}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *ResponsesToAnthropicWriter) emitContentBlockDeltaText(index int, text string) error {
+	if text == "" {
+		return nil
+	}
+	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString(",\"delta\":{\"type\":\"text_delta\",\"text\":")
+	sse.WriteJSONString(t.bw, text)
+	t.bw.WriteString("}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *ResponsesToAnthropicWriter) emitContentBlockDeltaThinking(index int, text string) error {
+	if text == "" {
+		return nil
+	}
+	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString(",\"delta\":{\"type\":\"thinking_delta\",\"thinking\":")
+	sse.WriteJSONString(t.bw, text)
+	t.bw.WriteString("}}\n\n")
+	return t.flushEvent()
+}
+
+// emitValidatedToolArgsDelta emits a single input_json_delta for a tool block,
+// carrying the buffered arguments — or `{}` when they are empty or fail to
+// parse, so a malformed concatenation can't break the client's tool-args parser.
+func (t *ResponsesToAnthropicWriter) emitValidatedToolArgsDelta(oi, index int) error {
+	buf, ok := t.toolArgs[oi]
+	delete(t.toolArgs, oi)
+	args := "{}"
+	if ok {
+		if s := buf.String(); s != "" && gjson.Valid(s) {
+			args = s
+		} else if s != "" {
+			observability.Get().Error(
+				"ResponsesToAnthropic tool_use args failed JSON validation — substituting empty args",
+				"block_index", index,
+				"args_len", len(s),
+			)
+		}
+	}
+	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString(",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":")
+	sse.WriteJSONString(t.bw, args)
+	t.bw.WriteString("}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *ResponsesToAnthropicWriter) emitContentBlockStop(index int) error {
+	t.bw.WriteString("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString("}\n\n")
+	return t.flushEvent()
+}
+
+func (t *ResponsesToAnthropicWriter) emitMessageDelta(stopReason string) error {
+	t.bw.WriteString("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":")
+	sse.WriteJSONString(t.bw, stopReason)
+	t.bw.WriteString(",\"stop_sequence\":null},\"usage\":{")
+	if t.hasUsage {
+		// Anthropic's input_tokens is fresh-only; subtract cached reads so the
+		// statusline formula doesn't double-count.
+		freshInput := max(0, t.usageInput-t.usageCacheRead)
+		t.bw.WriteString("\"input_tokens\":")
+		sse.WriteJSONInt(t.bw, int64(freshInput))
+		t.bw.WriteString(",\"output_tokens\":")
+		sse.WriteJSONInt(t.bw, int64(t.usageOutput))
+		if t.usageCacheRead > 0 {
+			t.bw.WriteString(",\"cache_read_input_tokens\":")
+			sse.WriteJSONInt(t.bw, int64(t.usageCacheRead))
+		}
+	} else {
+		t.bw.WriteString("\"output_tokens\":0")
+	}
+	t.bw.WriteString("}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *ResponsesToAnthropicWriter) emitMessageStop() error {
+	t.bw.WriteString("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	return t.flushEvent()
+}
+
+func (t *ResponsesToAnthropicWriter) flushEvent() error {
+	if err := t.bw.Flush(); err != nil {
+		return err
+	}
+	if t.flusher != nil {
+		t.flusher.Flush()
+	}
+	return nil
+}
+
+var _ http.ResponseWriter = (*ResponsesToAnthropicWriter)(nil)
+var _ http.Flusher = (*ResponsesToAnthropicWriter)(nil)

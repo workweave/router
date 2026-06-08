@@ -49,14 +49,31 @@ func sseIdleTimeoutFromEnv() time.Duration {
 	return time.Duration(n) * time.Second
 }
 
+// DefaultResponseHeaderTimeout is the time-to-first-byte guard applied by
+// NewTransport. Streaming upstreams return headers immediately, so 30s is ample
+// for them; it only bites a non-streaming upstream that buffers a slow response.
+const DefaultResponseHeaderTimeout = 30 * time.Second
+
 // NewTransport returns a pooled http.Transport sized for sustained traffic to a single upstream host.
 //
 // KeepAlive=30s is the critical setting against AWS NAT-GW / NLB / VPC-endpoint
 // reapers (350s fixed idle): the dialer's TCP keepalives keep the connection
 // live so the zero-byte-stall failure mode can't accumulate at the network layer.
-// ResponseHeaderTimeout=30s only guards time-to-first-byte; per-read inactivity
+// ResponseHeaderTimeout only guards time-to-first-byte; per-read inactivity
 // during streaming is enforced by StreamBody's watchdog.
 func NewTransport(dialTimeout, tlsTimeout time.Duration) *http.Transport {
+	return NewTransportWithResponseHeaderTimeout(dialTimeout, tlsTimeout, DefaultResponseHeaderTimeout)
+}
+
+// NewTransportWithResponseHeaderTimeout is NewTransport with a caller-chosen
+// time-to-first-byte guard. Upstreams whose first byte can legitimately arrive
+// later than the 30s default pass a larger value: the OpenAI Responses API for
+// gpt-5.x high-effort reasoning can take well over 30s to emit its first SSE
+// event, so a 30s header timeout false-trips even when the model is healthy.
+// Per-read inactivity once the stream is flowing is still bounded by
+// StreamBody's idle watchdog (DefaultSSEIdleTimeout), so a generous header
+// timeout does not reintroduce an unbounded hang.
+func NewTransportWithResponseHeaderTimeout(dialTimeout, tlsTimeout, responseHeaderTimeout time.Duration) *http.Transport {
 	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -68,7 +85,7 @@ func NewTransport(dialTimeout, tlsTimeout time.Duration) *http.Transport {
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   tlsTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
+		ResponseHeaderTimeout: responseHeaderTimeout,
 		ForceAttemptHTTP2:     true,
 	}
 }
