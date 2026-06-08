@@ -291,6 +291,32 @@ data: {"type":"error","code":"server_error","message":"upstream exploded"}
 	assert.Contains(t, e["message"], "upstream exploded", "real upstream message surfaced, not empty")
 }
 
+// A streaming client sees a stream-level failure (response.failed over HTTP 200)
+// as an Anthropic `event: error`, not a silent normal close.
+func TestResponsesToAnthropicWriter_StreamingErrorEvent(t *testing.T) {
+	const fixture = `event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress","content":[]}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"partial"}
+
+event: response.failed
+data: {"type":"response.failed","response":{"id":"r","status":"failed","error":{"code":"server_error","message":"model crashed mid-stream"}}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(true))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "event: error", "stream-level failure surfaces as an Anthropic error event")
+	assert.Contains(t, body, "model crashed mid-stream")
+	assert.NotContains(t, body, "event: message_stop", "no success trailer after an error close")
+}
+
 // A routing marker is emitted as content block 0; upstream content then starts
 // at block 1.
 func TestResponsesToAnthropicWriter_RoutingMarker(t *testing.T) {

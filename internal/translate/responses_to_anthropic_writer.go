@@ -198,14 +198,17 @@ func (t *ResponsesToAnthropicWriter) processResponsesSSEBuffer() error {
 }
 
 func (t *ResponsesToAnthropicWriter) translateResponsesEvent(raw []byte) error {
+	if t.closed {
+		return nil
+	}
 	_, data := sse.ParseEvent(raw)
 	if len(data) == 0 {
 		return nil
 	}
 	// Match on the in-payload `type` (the `event:` line duplicates it but is
 	// sometimes dropped by intermediaries). Unknown response.* events are
-	// ignored; the ones below cover reasoning, text, tool calls, and the
-	// terminal envelope.
+	// ignored; the ones below cover reasoning, text, tool calls, the terminal
+	// envelope, and stream-level failures.
 	switch gjson.GetBytes(data, "type").String() {
 	case "response.output_item.added":
 		return t.handleOutputItemAdded(data)
@@ -224,7 +227,17 @@ func (t *ResponsesToAnthropicWriter) translateResponsesEvent(raw []byte) error {
 		return nil
 	case "response.output_item.done":
 		return t.handleOutputItemDone(data)
-	case "response.completed", "response.incomplete", "response.failed":
+	case "error":
+		// Stream-level failure over HTTP 200 — surface it as an Anthropic error
+		// event instead of closing the turn as if it succeeded.
+		return t.emitStreamErrorEvent(gjson.GetBytes(data, "code").String(), gjson.GetBytes(data, "message").String())
+	case "response.failed":
+		if e := gjson.GetBytes(data, "response.error"); e.Exists() {
+			return t.emitStreamErrorEvent(e.Get("code").String(), e.Get("message").String())
+		}
+		t.captureFinalResponse(data)
+		return nil
+	case "response.completed", "response.incomplete":
 		t.captureFinalResponse(data)
 		return nil
 	}
@@ -775,6 +788,20 @@ func (t *ResponsesToAnthropicWriter) emitMessageDelta(stopReason string) error {
 func (t *ResponsesToAnthropicWriter) emitMessageStop() error {
 	t.bw.WriteString("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 	return t.flushEvent()
+}
+
+// emitStreamErrorEvent writes an Anthropic `event: error` frame for a
+// stream-level failure (an `error` or `response.failed` event over HTTP 200) and
+// marks the stream closed so finishStream does not also emit a success trailer.
+func (t *ResponsesToAnthropicWriter) emitStreamErrorEvent(errType, msg string) error {
+	t.bw.WriteString("event: error\ndata: ")
+	t.bw.Write(responsesError(errType, msg))
+	t.bw.WriteString("\n\n")
+	if err := t.flushEvent(); err != nil {
+		return err
+	}
+	t.closed = true
+	return nil
 }
 
 func (t *ResponsesToAnthropicWriter) flushEvent() error {
