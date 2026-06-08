@@ -130,8 +130,9 @@ func toSessionPin(row sqlc.RouterSessionPin) sessionpin.Pin {
 		LastCachedWriteTokens: int(row.LastCachedWriteTokens),
 		LastOutputTokens:      int(row.LastOutputTokens),
 		LastTurnEndedAt:       timestamptzOrZero(row.LastTurnEndedAt),
-		LastServedModel:       row.LastServedModel,
-		HasEverSwitched:       row.HasEverSwitched,
+		LastServedModel:           row.LastServedModel,
+		HasEverSwitched:           row.HasEverSwitched,
+		ConsecutiveUpstreamErrors: int(row.ConsecutiveUpstreamErrors),
 	}
 	// Bounded copy guards against a corrupt row panicking the request handler.
 	copy(pin.SessionKey[:], row.SessionKey)

@@ -290,7 +290,7 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 
 	writeGeminiToolsFromOpenAI(jw, body)
 	writeGeminiToolChoiceFromOpenAI(jw, body)
-	writeGeminiGenerationConfigFromOpenAI(jw, body, opts.TargetModel)
+	writeGeminiGenerationConfigFromOpenAI(jw, body, opts.TargetModel, opts.ForceReasoningEffort)
 	return nil
 }
 
@@ -522,7 +522,7 @@ func writeGeminiToolChoiceFromOpenAI(jw *jsonWriter, body []byte) {
 }
 
 // writeGeminiGenerationConfigFromOpenAI writes generationConfig into jw from an OpenAI body.
-func writeGeminiGenerationConfigFromOpenAI(jw *jsonWriter, body []byte, model string) {
+func writeGeminiGenerationConfigFromOpenAI(jw *jsonWriter, body []byte, model, forceEffort string) {
 	// Collect all generation config fields; only write the object if non-empty.
 	type field struct {
 		key string
@@ -560,8 +560,15 @@ func writeGeminiGenerationConfigFromOpenAI(jw *jsonWriter, body []byte, model st
 			fields = append(fields, field{"responseMimeType", `"application/json"`})
 		}
 	}
+	effort := ""
 	if r := gjson.GetBytes(body, "reasoning_effort"); r.Exists() && r.Type == gjson.String {
-		if raw := thinkingConfigRaw(r.String(), model); raw != "" {
+		effort = r.String()
+	}
+	if forceEffort != "" {
+		effort = forceEffort
+	}
+	if effort != "" {
+		if raw := thinkingConfigRaw(effort, model); raw != "" {
 			fields = append(fields, field{"thinkingConfig", raw})
 		}
 	}

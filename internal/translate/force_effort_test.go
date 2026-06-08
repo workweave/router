@@ -68,6 +68,24 @@ func TestForceReasoningEffort_GeminiOverride(t *testing.T) {
 	assert.Equal(t, "low", tc["thinkingLevel"])
 }
 
+// The override also applies on the OpenAI→Gemini cross-format path (the
+// request arrives as OpenAI chat/completions and is translated to native Gemini).
+func TestForceReasoningEffort_GeminiFromOpenAI(t *testing.T) {
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"high"}`)
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{
+		TargetModel:          "gemini-3.1-pro-preview",
+		ForceReasoningEffort: "low",
+	})
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+	gc := out["generationConfig"].(map[string]any)
+	tc := gc["thinkingConfig"].(map[string]any)
+	assert.Equal(t, "low", tc["thinkingLevel"])
+}
+
 func itoaLocal(n int) string {
 	if n == 0 {
 		return "0"
