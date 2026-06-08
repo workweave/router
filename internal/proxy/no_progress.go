@@ -150,6 +150,25 @@ type compactionState struct {
 	toolCallCount int
 }
 
+// compactionMinHistoryMessages is the smallest conversation size for which a
+// count drop is read as real history trimming. Below it there is no substantial
+// history to lose, so a drop is some other (benign) shape:
+//   - A freshly spawned sub-agent opens its turn at messageCount=1, which looks
+//     like a sharp drop relative to the prior sub-agent that shared the same
+//     (session, role) bucket and left it at ~3.
+//   - Claude Code's Explore sub-agent holds a flat ~3-message window and varies
+//     its per-turn assistant tool-call count widely (e.g. 11→6→3); every such
+//     decrease would otherwise false-trip the rolling-window signal.
+//
+// Real full compaction comes from a large conversation (the client compacts on
+// token pressure, so the prior message count is in the dozens-plus), and real
+// rolling-window trimming keeps a correspondingly large flat window — both stay
+// well above this floor. Erring toward fewer fires is the safe bias: skipping
+// the handover passes the body (including Claude Code's own compaction summary)
+// through unchanged, whereas a false fire replaces live context with a lossy
+// summary and corrupts an in-flight sub-agent.
+const compactionMinHistoryMessages = 8
+
 // compactionTracker detects Claude Code context window trimming by comparing
 // each turn's message count and assistant tool-call count against the last
 // seen values for the same session. Either count dropping is a signal that the
@@ -167,6 +186,10 @@ type compactionState struct {
 //     observed in session 543151ce: 9 → 8 → 7 → 6 → 5).
 //
 // Detecting only messageCount drops misses the rolling-window case.
+//
+// Both signals are gated by compactionMinHistoryMessages so the small flat
+// windows of freshly spawned sub-agents and Claude Code's Explore sub-agent are
+// not mistaken for trimming (see that constant's doc).
 //
 // nil receivers are valid (no-op), matching noProgressTracker semantics.
 type compactionTracker struct {
@@ -194,7 +217,24 @@ func (t *compactionTracker) checkAndRecord(sessionKey [sessionpin.SessionKeyLen]
 	}
 	last, found := t.cache.Get(key)
 	t.cache.Add(key, compactionState{msgCount: messageCount, toolCallCount: toolCallCount})
-	return found && (messageCount < last.msgCount || toolCallCount < last.toolCallCount)
+	if !found {
+		return false
+	}
+	// Full compaction: a messageCount drop from a substantial prior conversation.
+	// Gating on the prior size rejects the fresh-sub-agent case (a new dispatch
+	// opening at messageCount=1 against a prior sub-agent's small count in the
+	// shared bucket), which is not history loss.
+	if messageCount < last.msgCount && last.msgCount >= compactionMinHistoryMessages {
+		return true
+	}
+	// Rolling-window trimming: messageCount stays flat while the assistant
+	// tool-call count shrinks. Gating on a substantial current window rejects
+	// Claude Code's Explore sub-agent, which holds a flat ~3-message window and
+	// swings its per-turn tool-call count widely without any trimming.
+	if toolCallCount < last.toolCallCount && messageCount >= compactionMinHistoryMessages {
+		return true
+	}
+	return false
 }
 
 // recordAndDetect records the fingerprint against a bucket keyed by

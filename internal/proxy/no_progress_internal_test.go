@@ -375,6 +375,40 @@ func TestCompactionTracker_DetectsRollingWindowTrimming(t *testing.T) {
 		"flat messageCount + shrinking toolCallCount must be detected as rolling-window trim")
 }
 
+func TestCompactionTracker_NoFalsePositiveOnFreshSubAgentDispatch(t *testing.T) {
+	// A sub-agent shares the (session, role) bucket with the previous sub-agent
+	// of the same tier. When a new sub-agent is spawned its opening turn carries
+	// messageCount=1, which is a drop relative to the prior sub-agent's small
+	// count — but it is a fresh dispatch, not history trimming, so it must not
+	// fire (the prior conversation was too small to have lost anything).
+	ct := newCompactionTracker()
+	key := sessionKeyFromString("session-subagent")
+	install := uuid.New()
+
+	// Prior sub-agent left the bucket at a small count.
+	ct.checkAndRecord(key, install, "low", 3, 2)
+
+	// Fresh sub-agent dispatch opens at messageCount=1, tool-call count 0.
+	assert.False(t, ct.checkAndRecord(key, install, "low", 1, 0),
+		"fresh sub-agent dispatch (small prior, mc=1) must not be reported as compaction")
+}
+
+func TestCompactionTracker_NoFalsePositiveOnExploreToolCallSwing(t *testing.T) {
+	// Claude Code's Explore sub-agent holds a flat ~3-message window and varies
+	// its per-turn assistant tool-call count widely. A decrease in that count is
+	// natural model behavior, not rolling-window trimming, and must not fire
+	// because the window is too small to be a real rolling window.
+	ct := newCompactionTracker()
+	key := sessionKeyFromString("session-explore")
+	install := uuid.New()
+
+	ct.checkAndRecord(key, install, "low", 3, 11)
+	assert.False(t, ct.checkAndRecord(key, install, "low", 3, 6),
+		"flat small-window tool-call decrease (Explore) must not be reported as trimming")
+	assert.False(t, ct.checkAndRecord(key, install, "low", 3, 3),
+		"further small-window tool-call decrease must not be reported as trimming")
+}
+
 func TestCompactionTracker_NoFalsePositiveWhenBothGrow(t *testing.T) {
 	ct := newCompactionTracker()
 	key := sessionKeyFromString("session-growing")
