@@ -381,3 +381,50 @@ func extractDataField(event string) string {
 	}
 	return ""
 }
+
+// TestAnthropicRoutingMarkerWriter_EventSplitAcrossWrites verifies that SSE
+// events split across multiple Write calls are buffered and emitted correctly
+// (regression test for the persistent buffer fix).
+func TestAnthropicRoutingMarkerWriter_EventSplitAcrossWrites(t *testing.T) {
+	rec := httptest.NewRecorder()
+	markerText := "✦ **Weave Router** → claude-opus-4"
+	w := translate.NewAnthropicRoutingMarkerWriter(rec, "claude-opus-4", markerText)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+
+	// Simulate the upstream splitting an event across two Write calls.
+	// This is a common case when the upstream is buffering at TCP window boundaries.
+	upstreamEvent := `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"The answer is 42."}}`
+
+	// First Write: partial event line (everything up to JSON close + newline).
+	part1 := "event: content_block_delta\ndata: " + upstreamEvent[:len(upstreamEvent)-2]
+	_, err := w.Write([]byte(part1))
+	require.NoError(t, err)
+
+	// Second Write: rest of the event (close of JSON + trailing blank line).
+	part2 := upstreamEvent[len(upstreamEvent)-2:] + "\n\n"
+	_, err = w.Write([]byte(part2))
+	require.NoError(t, err)
+
+	body := rec.Body.String()
+	events := splitSSEEvents(body)
+
+	// Expect: marker prelude (4 events) + shifted content_block_delta at index 1.
+	assert.GreaterOrEqual(t, len(events), 5, "should have prelude + content_block_delta")
+
+	// Find the rewritten content_block_delta.
+	var foundShiftedDelta bool
+	for _, event := range events {
+		if strings.Contains(event, "content_block_delta") {
+			data := extractDataField(event)
+			idx := gjson.Get(data, "index").Int()
+			text := gjson.Get(data, "delta.text").String()
+			if idx == 1 && text == "The answer is 42." {
+				foundShiftedDelta = true
+				break
+			}
+		}
+	}
+	assert.True(t, foundShiftedDelta, "split event must be reassembled with shifted index and preserved text")
+}

@@ -24,6 +24,8 @@ type AnthropicRoutingMarkerWriter struct {
 	marker string
 	model  string
 
+	buf bytes.Buffer
+
 	streaming      bool
 	headersEmitted bool
 	markerEmitted  bool
@@ -150,9 +152,12 @@ func (w *AnthropicRoutingMarkerWriter) emitPreludeEvents() error {
 // content_block_* indices by +1. Non-indexed events (message_delta,
 // message_stop, ping, error) pass through unchanged.
 func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error) {
-	buf := bytes.NewBuffer(data)
+	// Accumulate into a persistent buffer so an SSE event split across two
+	// Write calls is held until its terminating blank line arrives, rather
+	// than being parsed as a truncated (and silently dropped) event.
+	w.buf.Write(data)
 	for {
-		event, n := sse.SplitNext(buf.Bytes())
+		event, n := sse.SplitNext(w.buf.Bytes())
 		if n == 0 {
 			break
 		}
@@ -163,14 +168,14 @@ func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error)
 			if _, err := w.inner.Write(event[:n]); err != nil {
 				return 0, err
 			}
-			buf.Next(n)
+			w.buf.Next(n)
 			continue
 		}
 
 		switch string(eventType) {
 		case "message_start":
 			// Drop upstream's message_start; we already sent one.
-			buf.Next(n)
+			w.buf.Next(n)
 			continue
 
 		case "content_block_start", "content_block_delta", "content_block_stop":
@@ -182,7 +187,7 @@ func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error)
 				if _, err := w.inner.Write(event[:n]); err != nil {
 					return 0, err
 				}
-				buf.Next(n)
+				w.buf.Next(n)
 				continue
 			}
 			// Rebuild the SSE event: event type line + rewritten data.
@@ -202,14 +207,14 @@ func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error)
 			if err := w.bw.Flush(); err != nil {
 				return 0, err
 			}
-			buf.Next(n)
+			w.buf.Next(n)
 
 		default:
 			// message_delta, message_stop, ping, error, etc. — pass through untouched.
 			if _, err := w.inner.Write(event[:n]); err != nil {
 				return 0, err
 			}
-			buf.Next(n)
+			w.buf.Next(n)
 		}
 	}
 	return len(data), nil
