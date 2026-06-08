@@ -3,6 +3,7 @@ package translate_test
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"workweave/router/internal/translate"
@@ -752,6 +753,46 @@ func TestCrossFormat_AnthropicToOpenAI_ToolConversation(t *testing.T) {
 	assert.Equal(t, "tool", toolResultMsg["role"])
 	assert.Equal(t, "toolu_abc", toolResultMsg["tool_call_id"])
 	assert.Equal(t, "package main\n\nfunc main() {}", toolResultMsg["content"])
+}
+
+func TestCrossFormat_AnthropicToOpenAI_OverlongToolUseIDClampedAndPaired(t *testing.T) {
+	// OpenAI rejects tool_calls[].id over 64 chars (400 "string too long").
+	// Cross-format round-trips can produce such IDs; the emit must clamp them,
+	// and the tool_use id must stay paired with its tool_result tool_call_id.
+	longID := "toolu_" + strings.Repeat("a", 1411)
+	body := []byte(`{
+		"model": "claude-opus-4-8",
+		"max_tokens": 1024,
+		"messages": [
+			{"role": "user", "content": "read it"},
+			{"role": "assistant", "content": [
+				{"type": "text", "text": "reading"},
+				{"type": "tool_use", "id": "` + longID + `", "name": "Read", "input": {"path": "main.go"}}
+			]},
+			{"role": "user", "content": [
+				{"type": "tool_result", "tool_use_id": "` + longID + `", "content": "ok"}
+			]}
+		]
+	}`)
+
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{
+		TargetModel:    "gpt-4",
+		TargetProvider: "openai",
+	})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	msgs := getArray(t, doc, "messages")
+
+	tc := msgAt(t, msgs, 1)["tool_calls"].([]any)[0].(map[string]any)
+	emittedID, _ := tc["id"].(string)
+	assert.LessOrEqual(t, len(emittedID), 64, "tool_call id clamped under OpenAI limit")
+	assert.NotEqual(t, longID, emittedID, "over-length id was rewritten")
+
+	toolResultID := msgAt(t, msgs, 2)["tool_call_id"]
+	assert.Equal(t, emittedID, toolResultID, "tool_use id and tool_result id stay paired after clamp")
 }
 
 func TestCrossFormat_AnthropicToOpenAI_Image(t *testing.T) {

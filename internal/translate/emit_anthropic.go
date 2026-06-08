@@ -1,6 +1,8 @@
 package translate
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -630,13 +632,27 @@ func writeAnthropicTextBlock(jw *jsonWriter, text string) {
 	jw.EndObj()
 }
 
+// maxToolUseIDLen is the strictest tool-call id length across upstreams: OpenAI
+// rejects tool_calls[].id over 64 chars (400 "string too long"). Anthropic is
+// more lenient, but clamping to the strict bound keeps a single rule.
+const maxToolUseIDLen = 64
+
 // sanitizeToolUseID replaces characters that Anthropic rejects in tool_use.id
-// (required pattern: ^[a-zA-Z0-9_-]+$). Non-Anthropic upstreams (e.g.
-// Kimi-k2.6) emit IDs like "functions.Read:0" containing dots and colons; when
-// the router switches a session back to Anthropic those IDs cause a 400.
+// (required pattern: ^[a-zA-Z0-9_-]+$) and clamps over-length IDs. Non-Anthropic
+// upstreams (e.g. Kimi-k2.6) emit IDs like "functions.Read:0" containing dots
+// and colons; cross-format round-trips occasionally produce IDs far over the
+// 64-char OpenAI limit. Both cause an upstream 400 when the session switches.
+//
+// Over-length IDs are replaced with a deterministic hash of the original ID, so
+// a tool_use block and its matching tool_result (which carry the same original
+// ID) map to the same clamped value and stay paired.
 func sanitizeToolUseID(id string) string {
 	if id == "" {
 		return id
+	}
+	if len(id) > maxToolUseIDLen {
+		sum := sha1.Sum([]byte(id))
+		return "tc_" + hex.EncodeToString(sum[:])
 	}
 	b := []byte(id)
 	changed := false
