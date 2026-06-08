@@ -125,8 +125,10 @@ func TestProxy_RouterKeyDoesNotOverrideConfiguredAnthropicKey(t *testing.T) {
 	assert.Equal(t, "router-anthropic-key", gotAPIKey)
 }
 
-func TestProxy_ReturnsUpstreamStatusErrorOn4xx(t *testing.T) {
+func TestProxy_BuffersUpstream4xx(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Custom-Upstream", "abc")
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"adaptive thinking is not supported on this model"}}`))
 	}))
@@ -139,16 +141,34 @@ func TestProxy_ReturnsUpstreamStatusErrorOn4xx(t *testing.T) {
 	prep := providers.PreparedRequest{Body: []byte(`{"model":"x"}`), Headers: make(http.Header)}
 	err := c.Proxy(context.Background(), router.Decision{Model: "claude-haiku-4-5"}, prep, rec, clientReq)
 
-	var statusErr *providers.UpstreamStatusError
-	require.ErrorAs(t, err, &statusErr,
-		"upstream 4xx must surface as a typed *providers.UpstreamStatusError "+
-			"so proxy.Service can log upstream_status without changing the "+
-			"transparent pass-through of the error envelope")
-	assert.Equal(t, http.StatusBadRequest, statusErr.Status)
-	assert.Equal(t, http.StatusBadRequest, rec.Code,
-		"upstream status must still be teed through to the client unchanged")
-	assert.Contains(t, rec.Body.String(), "adaptive thinking is not supported",
-		"upstream error envelope must still be teed through verbatim")
+	var buffered *providers.UpstreamErrorResponse
+	require.ErrorAs(t, err, &buffered,
+		"non-2xx upstream responses must be buffered so proxy.Service can discard marker Prelude bytes and retry or flush cleanly")
+	assert.Equal(t, http.StatusBadRequest, buffered.Status)
+	assert.Equal(t, "abc", buffered.Headers.Get("X-Custom-Upstream"))
+	assert.Contains(t, string(buffered.Body), "adaptive thinking is not supported")
+	assert.Empty(t, rec.Body.String(), "buffered upstream errors must not write through the response writer")
+}
+
+func TestProxy_BuffersRetryable429(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`))
+	}))
+	defer upstream.Close()
+
+	c := anthropic.NewClient("k", upstream.URL)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"x"}`), Headers: make(http.Header)}
+	err := c.Proxy(context.Background(), router.Decision{Model: "claude-haiku-4-5"}, prep, rec, clientReq)
+
+	var buffered *providers.UpstreamErrorResponse
+	require.ErrorAs(t, err, &buffered)
+	assert.Equal(t, http.StatusTooManyRequests, buffered.Status)
+	assert.True(t, providers.IsRetryable(err), "buffered 429 must remain eligible for clean pre-commit retry")
+	assert.Empty(t, rec.Body.String(), "retryable upstream errors must not commit response bytes")
 }
 
 func TestProxy_StripsDynamicHopByHopHeaders(t *testing.T) {

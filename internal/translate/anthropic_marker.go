@@ -190,15 +190,6 @@ func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error)
 				w.buf.Next(n)
 				continue
 			}
-			// Rebuild the SSE event: event type line + rewritten data.
-			// eventData is a subslice of event starting after "data: ".
-			// The prefix before eventData is the "event: X\ndata: " part plus a newline before the data boundary.
-			// Since event = "event: X\ndata: JSON", and eventData = "JSON" (subslice of event),
-			// we can compute the prefix: event[:offset] where offset = dataStart - event[0].
-			// dataStart is computed from the offset of eventData within event.
-			//
-			// Because eventData is a subslice of event (both from the same backing array),
-			// we can find the boundary by scanning event for "\ndata: ".
 			w.bw.WriteString("event: ")
 			w.bw.Write(eventType)
 			w.bw.WriteString("\ndata: ")

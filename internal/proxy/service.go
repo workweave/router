@@ -1070,18 +1070,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	var reqStats providers.RequestMutationStats
 
 	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
-	// markerSink wraps sink with an AnthropicRoutingMarkerWriter that emits
-	// the routing-marker chunk + HTTP 200 eagerly (Prelude). Called per
-	// attempt so retries re-emit into a fresh preludeBuffer state.
+	// markerSink wraps sink with an AnthropicRoutingMarkerWriter per attempt.
+	// Unlike translator-backed paths, the Anthropic-native writer must wait
+	// for upstream headers so non-2xx responses can stay buffered/retryable.
 	makeMarkerSink := func() http.ResponseWriter {
 		if marker == "" {
 			return sink
 		}
-		mw := translate.NewAnthropicRoutingMarkerWriter(sink, decision.Model, marker)
-		if err := mw.Prelude(env.Stream()); err != nil {
-			log.Error("Anthropic routing-marker prelude failed", "err", err)
-		}
-		return mw
+		return translate.NewAnthropicRoutingMarkerWriter(sink, decision.Model, marker)
 	}
 	var attempt dispatchAttempt
 	switch decision.Provider {

@@ -80,36 +80,32 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
 
-	providers.CopyUpstreamHeaders(w, resp)
-	w.WriteHeader(resp.StatusCode)
-
 	if resp.StatusCode >= 400 {
-		var snip [1024]byte
-		n, _ := io.ReadFull(resp.Body, snip[:])
-		if n > 0 {
+		bufBody, totalRead, drainErr := readCapped(resp.Body, providers.MaxBufferedErrorBytes)
+		if len(bufBody) > 0 {
 			t.StampUpstreamFirstByte()
 		}
-		_, snipWriteErr := w.Write(snip[:n])
-		rest, copyErr := io.Copy(w, resp.Body)
-		if copyErr == nil {
+		if drainErr == nil {
 			t.StampUpstreamEOF()
 		}
 		logUpstreamStatus(
 			"Upstream Anthropic returned error status",
 			resp.StatusCode,
 			"routed_model", decision.Model,
-			"body_preview", string(snip[:n]),
-			"body_total_bytes", int64(n)+rest,
+			"body_preview", previewBytes(bufBody),
+			"body_total_bytes", totalRead,
 		)
-		if snipWriteErr != nil {
-			return snipWriteErr
+		errHeaders := http.Header{}
+		providers.CopyUpstreamHeaders(headerCapture{errHeaders}, resp)
+		return &providers.UpstreamErrorResponse{
+			Status:  resp.StatusCode,
+			Headers: errHeaders,
+			Body:    bufBody,
 		}
-		if copyErr != nil {
-			return copyErr
-		}
-		return &providers.UpstreamStatusError{Status: resp.StatusCode}
 	}
 
+	providers.CopyUpstreamHeaders(w, resp)
+	w.WriteHeader(resp.StatusCode)
 	return httputil.StreamBody(ctx, cancel, httputil.DefaultSSEIdleTimeout, resp.Body, resp.StatusCode, w, t)
 }
 
@@ -174,5 +170,31 @@ func logUpstreamStatus(msg string, status int, attrs ...any) {
 	}
 	observability.Get().Warn(msg, merged...)
 }
+
+func readCapped(r io.Reader, limit int) ([]byte, int64, error) {
+	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
+	totalRead := int64(len(prefix))
+	if err != nil {
+		return prefix, totalRead, err
+	}
+	const maxDrain = 1 << 20 // 1 MiB
+	rest, drainErr := io.Copy(io.Discard, io.LimitReader(r, maxDrain))
+	totalRead += rest
+	return prefix, totalRead, drainErr
+}
+
+func previewBytes(body []byte) string {
+	const previewLimit = 1024
+	if len(body) > previewLimit {
+		return string(body[:previewLimit])
+	}
+	return string(body)
+}
+
+type headerCapture struct{ h http.Header }
+
+func (c headerCapture) Header() http.Header       { return c.h }
+func (c headerCapture) Write([]byte) (int, error) { return 0, nil }
+func (c headerCapture) WriteHeader(int)           {}
 
 var _ providers.Client = (*Client)(nil)

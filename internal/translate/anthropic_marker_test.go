@@ -401,6 +401,7 @@ func TestAnthropicRoutingMarkerWriter_EventSplitAcrossWrites(t *testing.T) {
 	part1 := "event: content_block_delta\ndata: " + upstreamEvent[:len(upstreamEvent)-2]
 	_, err := w.Write([]byte(part1))
 	require.NoError(t, err)
+	require.Len(t, splitSSEEvents(rec.Body.String()), 4, "partial event should stay buffered after the first write")
 
 	// Second Write: rest of the event (close of JSON + trailing blank line).
 	part2 := upstreamEvent[len(upstreamEvent)-2:] + "\n\n"
@@ -411,7 +412,7 @@ func TestAnthropicRoutingMarkerWriter_EventSplitAcrossWrites(t *testing.T) {
 	events := splitSSEEvents(body)
 
 	// Expect: marker prelude (4 events) + shifted content_block_delta at index 1.
-	assert.GreaterOrEqual(t, len(events), 5, "should have prelude + content_block_delta")
+	require.Len(t, events, 5, "should have prelude + one reassembled content_block_delta")
 
 	// Find the rewritten content_block_delta.
 	var foundShiftedDelta bool
