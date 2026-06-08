@@ -9,6 +9,7 @@ import (
 	"workweave/router/internal/router"
 
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // PrepareAnthropic builds an Anthropic Messages request body.
@@ -530,8 +531,103 @@ func writeAnthropicSharedParams(jw *jsonWriter, body []byte) {
 }
 
 func (e *RequestEnvelope) buildAnthropicFromAnthropic(opts EmitOptions) ([]byte, error) {
-	ov := resolveAnthropicOverrides(e.body, opts)
-	return e.emitSameFormat(ov)
+	body, err := hoistAnthropicSystemMessages(e.body)
+	if err != nil {
+		return nil, fmt.Errorf("hoist system messages: %w", err)
+	}
+	ov := resolveAnthropicOverrides(body, opts)
+	return applyOverrides(body, ov)
+}
+
+// hoistAnthropicSystemMessages moves any role:"system" entries out of the
+// "messages" array and merges their text into the top-level "system" field.
+// Anthropic's Messages API rejects a system role inside messages (400
+// "role 'system' must precede an 'assistant' message or end the array"); a
+// system-bearing body can reach this same-format emit path on a mid-session
+// switch back to an Anthropic model. The OpenAI->Anthropic emit path already
+// hoists in writeAnthropicSystemAndMessages; this is the same guarantee for the
+// same-format path. No-op when no system message is present.
+func hoistAnthropicSystemMessages(body []byte) ([]byte, error) {
+	msgs := gjson.GetBytes(body, "messages")
+	if !msgs.IsArray() {
+		return body, nil
+	}
+
+	var hoisted []string // text extracted from in-array system messages, in order
+	var kept []string    // raw non-system message objects
+	for _, msg := range msgs.Array() {
+		if msg.Get("role").String() == "system" {
+			hoisted = append(hoisted, anthropicSystemTexts(msg.Get("content"))...)
+			continue
+		}
+		kept = append(kept, msg.Raw)
+	}
+	if len(hoisted) == 0 {
+		return body, nil
+	}
+
+	// Merge: existing top-level system blocks first, then the hoisted text.
+	sw := newJSONWriter()
+	sw.Arr()
+	switch existing := gjson.GetBytes(body, "system"); {
+	case existing.Type == gjson.String:
+		if s := existing.String(); s != "" {
+			writeAnthropicTextBlock(sw, s)
+		}
+	case existing.IsArray():
+		existing.ForEach(func(_, b gjson.Result) bool {
+			sw.Raw(b.Raw)
+			return true
+		})
+	}
+	for _, t := range hoisted {
+		writeAnthropicTextBlock(sw, t)
+	}
+	sw.EndArr()
+
+	out, err := sjson.SetRawBytes(body, "messages", []byte("["+strings.Join(kept, ",")+"]"))
+	if err != nil {
+		return nil, fmt.Errorf("rebuild messages: %w", err)
+	}
+	out, err = sjson.SetRawBytes(out, "system", sw.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("set system: %w", err)
+	}
+	return out, nil
+}
+
+// anthropicSystemTexts extracts text strings from a system message's content,
+// which may be a plain string or an array of content blocks.
+func anthropicSystemTexts(content gjson.Result) []string {
+	if content.Type == gjson.String {
+		if s := content.String(); s != "" {
+			return []string{s}
+		}
+		return nil
+	}
+	if !content.IsArray() {
+		return nil
+	}
+	var out []string
+	content.ForEach(func(_, part gjson.Result) bool {
+		if part.Get("type").String() == "text" {
+			if t := part.Get("text").String(); t != "" {
+				out = append(out, t)
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// writeAnthropicTextBlock writes a {"type":"text","text":...} object.
+func writeAnthropicTextBlock(jw *jsonWriter, text string) {
+	jw.Obj()
+	jw.Key("type")
+	jw.Str("text")
+	jw.Key("text")
+	jw.Str(text)
+	jw.EndObj()
 }
 
 // sanitizeToolUseID replaces characters that Anthropic rejects in tool_use.id

@@ -164,6 +164,61 @@ func TestAnthropicSameFormat_ModelRewrite(t *testing.T) {
 	require.Len(t, msgs, 1)
 }
 
+func TestAnthropicSameFormat_SystemMessageHoistedWhenNoSystemField(t *testing.T) {
+	// A role:"system" message inside the messages array is invalid for the
+	// Anthropic Messages API; it must be hoisted to the top-level system field.
+	body := []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"},{"role":"system","content":"be terse"},{"role":"assistant","content":"ok"}],"max_tokens":1024}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-7",
+		Capabilities: router.Lookup("claude-opus-4-7"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+
+	msgs, _ := out["messages"].([]any)
+	require.Len(t, msgs, 2, "system message removed from array")
+	for _, m := range msgs {
+		mm, _ := m.(map[string]any)
+		assert.NotEqual(t, "system", mm["role"], "no system role left in messages")
+	}
+	sys, _ := out["system"].([]any)
+	require.Len(t, sys, 1)
+	block, _ := sys[0].(map[string]any)
+	assert.Equal(t, "text", block["type"])
+	assert.Equal(t, "be terse", block["text"])
+}
+
+func TestAnthropicSameFormat_SystemMessageMergedWithExistingSystem(t *testing.T) {
+	// Existing top-level system is preserved and the hoisted text appended.
+	body := []byte(`{"model":"claude-sonnet-4-20250514","system":"top-level rules","messages":[{"role":"system","content":[{"type":"text","text":"extra rule"}]},{"role":"user","content":"hi"}],"max_tokens":1024}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-7",
+		Capabilities: router.Lookup("claude-opus-4-7"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+
+	msgs, _ := out["messages"].([]any)
+	require.Len(t, msgs, 1)
+	sys, _ := out["system"].([]any)
+	require.Len(t, sys, 2, "existing system block kept, hoisted block appended")
+	first, _ := sys[0].(map[string]any)
+	second, _ := sys[1].(map[string]any)
+	assert.Equal(t, "top-level rules", first["text"])
+	assert.Equal(t, "extra rule", second["text"])
+}
+
+func TestAnthropicSameFormat_NoSystemMessageIsNoOp(t *testing.T) {
+	// Common case: no in-array system message — body passes through unchanged.
+	body := []byte(`{"model":"claude-sonnet-4-20250514","system":"rules","messages":[{"role":"user","content":"hi"}],"max_tokens":1024}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-7",
+		Capabilities: router.Lookup("claude-opus-4-7"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	assert.Equal(t, "rules", out["system"], "untouched string system field")
+	msgs, _ := out["messages"].([]any)
+	require.Len(t, msgs, 1)
+}
+
 func TestAnthropicSameFormat_UnknownFieldsPreserved(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"custom_field":"preserved","metadata":{"key":"val"}}`)
 	opts := translate.EmitOptions{
