@@ -171,6 +171,9 @@ var Models = []Model{
 	// and earlier). The 4.6 / 4.7 entries were stale at the legacy price
 	// until 4.8 landed and forced a triple-check against
 	// platform.claude.com/docs/en/about-claude/pricing.
+	// Opus 4.6+, Opus 4.7+, Opus 4.8 support 1M context via context-1m-2025-08-07 beta;
+	// the catalog conservatively reports 200K, and the pre-filter dynamically expands
+	// to 1M when the beta header is present (see contextWindowForRequest in proxy/service.go).
 	{ID: "claude-opus-4-6", Tier: TierHigh, ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
@@ -200,44 +203,44 @@ var Models = []Model{
 	}},
 
 	// --- OpenAI GPT-5 ---
-	{ID: "gpt-5-nano", ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5-nano", ContextWindow: 400_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5-mini", ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5-mini", ContextWindow: 400_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.50, OutputUSDPer1M: 2.00, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5", Tier: TierHigh, ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5", Tier: TierHigh, ContextWindow: 400_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 2.50, OutputUSDPer1M: 10.00, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5-chat", ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5-chat", ContextWindow: 400_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 2.50, OutputUSDPer1M: 10.00, CacheReadMultiplier: 0.50}},
 	}},
 
 	// --- OpenAI GPT-5.4 ---
-	{ID: "gpt-5.4-nano", Tier: TierMid, ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5.4-nano", Tier: TierMid, ContextWindow: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5.4-mini", Tier: TierMid, ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5.4-mini", Tier: TierMid, ContextWindow: 400_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.40, OutputUSDPer1M: 1.60, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5.4", Tier: TierHigh, ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5.4", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 12.00, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5.4-pro", Tier: TierHigh, ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5.4-pro", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 20.00, OutputUSDPer1M: 80.00, CacheReadMultiplier: 0.50}},
 	}},
 
 	// --- OpenAI GPT-5.5 ---
-	{ID: "gpt-5.5-nano", Tier: TierMid, ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5.5-nano", Tier: TierMid, ContextWindow: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.15, OutputUSDPer1M: 0.60, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5.5-mini", Tier: TierMid, ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5.5-mini", Tier: TierMid, ContextWindow: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.50, OutputUSDPer1M: 2.50, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5.5", Tier: TierHigh, ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5.5", Tier: TierHigh, ContextWindow: 1_050_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 40.00, CacheReadMultiplier: 0.50}},
 	}},
-	{ID: "gpt-5.5-pro", Tier: TierHigh, ContextWindow: 128_000, Providers: []ProviderBinding{
+	{ID: "gpt-5.5-pro", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 30.00, OutputUSDPer1M: 120.00, CacheReadMultiplier: 0.50}},
 	}},
 

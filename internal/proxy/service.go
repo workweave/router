@@ -267,12 +267,40 @@ func (s *Service) excludedModelsForRequest(ctx context.Context) map[string]struc
 // response when comparing the request estimate against the context window.
 const contextWindowOutputReserve = 8_000
 
+// hasContext1MBeta reports whether the anthropic-beta header contains context-1m-2025-08-07.
+func hasContext1MBeta(header http.Header) bool {
+	beta := header.Get("anthropic-beta")
+	if beta == "" {
+		return false
+	}
+	parts := strings.Split(beta, ",")
+	for _, p := range parts {
+		if strings.TrimSpace(p) == "context-1m-2025-08-07" {
+			return true
+		}
+	}
+	return false
+}
+
+// contextWindowForRequest returns the effective context window for a model.
+// For models with CapExtendedContext (Opus 4.6+, Sonnet 4.6), returns 1M if the
+// client sent context-1m-2025-08-07 beta; otherwise returns the catalog default (200K).
+// For other models, returns the catalog context window unchanged.
+func contextWindowForRequest(modelID string, extendedContextRequested bool) int {
+	spec := router.Lookup(modelID)
+	if extendedContextRequested && spec.Supports(router.CapExtendedContext) {
+		return 1_000_000
+	}
+	return catalog.ContextWindowFor(modelID)
+}
+
 // excludeContextOverflowModels returns a copy of excluded augmented with every
 // model in available whose context window is too small to serve the request.
 // est is the full-body token estimate (translate.RequestEnvelope.FullTokenEstimate).
 // outputReserve is the expected output budget (feats.MaxTokens or the const above).
+// extendedContextRequested indicates whether the client sent context-1m-2025-08-07 beta.
 // Returns the original excluded map unchanged when no models are added.
-func excludeContextOverflowModels(est, outputReserve int, excluded, available map[string]struct{}) (map[string]struct{}, int) {
+func excludeContextOverflowModels(est, outputReserve int, excluded, available map[string]struct{}, extendedContextRequested bool) (map[string]struct{}, int) {
 	if est <= 0 {
 		return excluded, 0
 	}
@@ -283,7 +311,7 @@ func excludeContextOverflowModels(est, outputReserve int, excluded, available ma
 		if _, alreadyExcluded := excluded[model]; alreadyExcluded {
 			continue
 		}
-		cw := catalog.ContextWindowFor(model)
+		cw := contextWindowForRequest(model, extendedContextRequested)
 		if needed <= cw {
 			continue
 		}
@@ -856,7 +884,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		outputReserve = feats.MaxTokens
 	}
 	baseExcluded := s.excludedModelsForRequest(ctx)
-	excluded, ctxExcluded := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserve, baseExcluded, s.availableModels)
+	extendedContext := hasContext1MBeta(r.Header)
+	excluded, ctxExcluded := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserve, baseExcluded, s.availableModels, extendedContext)
 	if ctxExcluded > 0 {
 		log.Info("context window pre-filter: excluded over-capacity models",
 			"full_token_estimate", env.FullTokenEstimate(),
@@ -1893,7 +1922,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		outputReserveOAI = feats.MaxTokens
 	}
 	baseExcludedOAI := s.excludedModelsForRequest(ctx)
-	excludedOAI, ctxExcludedOAI := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserveOAI, baseExcludedOAI, s.availableModels)
+	excludedOAI, ctxExcludedOAI := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserveOAI, baseExcludedOAI, s.availableModels, false)
 	if ctxExcludedOAI > 0 {
 		log.Info("context window pre-filter: excluded over-capacity models",
 			"full_token_estimate", env.FullTokenEstimate(),

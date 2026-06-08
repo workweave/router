@@ -9,6 +9,7 @@ const (
 	CapAdaptiveThinking ModelCapability = "adaptive_thinking"
 	CapExtendedThinking ModelCapability = "extended_thinking"
 	CapReasoning        ModelCapability = "reasoning"
+	CapExtendedContext  ModelCapability = "extended_context"
 )
 
 // ModelSpec describes what a model supports. Zero value is safe: provider
@@ -52,7 +53,9 @@ var (
 	// claude-opus-4-6+ and claude-sonnet-4-6+ only accept thinking.type=adaptive;
 	// the legacy thinking.type=enabled shape returns 400 from Anthropic since the
 	// rollout of output_config.effort.
-	anthropicAdaptive = NewSpec(CapAdaptiveThinking)
+	// Opus 4.6+, Opus 4.7+, Opus 4.8, and Sonnet 4.6 support 1M context via
+	// context-1m-2025-08-07 beta; Haiku 4.5 and Sonnet 4.5 are limited to 200K.
+	anthropicAdaptive = NewSpec(CapAdaptiveThinking, CapExtendedContext)
 	anthropicExtended = NewSpec(CapExtendedThinking)
 )
 

@@ -174,12 +174,20 @@ func TestModel_ImageInputDefaultsToUnknown(t *testing.T) {
 }
 
 func TestContextWindowFor_KnownModels(t *testing.T) {
-	// Anthropic models have 200K context.
+	// Anthropic models report 200K in the catalog; they support 1M via context-1m-2025-08-07
+	// beta when explicitly requested by the client (see contextWindowForRequest in proxy/service.go).
 	assert.Equal(t, 200_000, ContextWindowFor("claude-opus-4-8"))
+	assert.Equal(t, 200_000, ContextWindowFor("claude-sonnet-4-6"))
 	assert.Equal(t, 200_000, ContextWindowFor("claude-haiku-4-5"))
+	// GPT-5 family has large context windows.
+	assert.Equal(t, 400_000, ContextWindowFor("gpt-5"))
+	assert.Equal(t, 1_000_000, ContextWindowFor("gpt-5.4"))
+	assert.Equal(t, 1_050_000, ContextWindowFor("gpt-5.5"))
 	// GPT-4.1 family has 1M context.
 	assert.Equal(t, 1_047_576, ContextWindowFor("gpt-4.1"))
-	// OSS models have 128K context.
+	// Gemini models have 1M context.
+	assert.Equal(t, 1_048_576, ContextWindowFor("gemini-3.5-flash"))
+	// OSS models have 128K-131K context.
 	assert.Equal(t, 131_072, ContextWindowFor("deepseek/deepseek-v4-pro"))
 	assert.Equal(t, 131_072, ContextWindowFor("moonshotai/kimi-k2.5"))
 	// Unknown model falls back to DefaultContextWindow.
