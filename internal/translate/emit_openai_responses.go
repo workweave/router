@@ -105,7 +105,11 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 	}
 
 	if opts.Capabilities.Supports(router.CapReasoning) {
-		if eff := responsesReasoningEffort(reasoningEffortFromAnthropic(body), opts.TargetModel); eff != "" {
+		eff := reasoningEffortFromAnthropic(body)
+		if opts.ForceReasoningEffort != "" {
+			eff = opts.ForceReasoningEffort
+		}
+		if eff := responsesReasoningEffort(eff, opts.TargetModel); eff != "" {
 			jw.Key("reasoning")
 			jw.Obj()
 			jw.Key("effort")

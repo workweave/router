@@ -527,6 +527,7 @@ func main() {
 	// when its provider client is registered; otherwise the orchestrator
 	// falls back to handover.TrimLastN on switch turns.
 	plannerEnabled := config.GetOr("ROUTER_PLANNER_ENABLED", "true") == "true"
+	effortEscalation := config.GetOr("ROUTER_EFFORT_ESCALATION", "false") == "true"
 	plannerCfg := planner.EVConfig{
 		ThresholdUSD:           parseEnvFloat("ROUTER_SWITCH_EV_THRESHOLD_USD", proxy.DefaultPlannerThresholdUSD),
 		ExpectedRemainingTurns: parseEnvInt("ROUTER_SWITCH_EXPECTED_REMAINING_TURNS", proxy.DefaultPlannerExpectedRemainingTurns),
@@ -560,11 +561,13 @@ func main() {
 		WithHardPinResolver(hardPinResolver).
 		WithTierClampResolver(tierClampResolver).
 		WithPlannerEnabled(plannerEnabled).
+		WithEffortEscalation(effortEscalation).
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels).
 		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
 		WithBillingService(billingSvc)
+	logger.Info("Effort escalation configured", "enabled", effortEscalation)
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
 	// Fail loud if a deployed model is missing from the tier table;

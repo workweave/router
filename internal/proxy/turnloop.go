@@ -92,6 +92,13 @@ type turnLoopResult struct {
 	// x-weave-suggestion-mode header. The routing marker is suppressed so
 	// the badge does not appear in suggestion-overlay responses.
 	SuggestionMode bool
+	// EscalateEffort is true when the previous turn in this session looked like
+	// an observable failure (produced no output, or the pin carried a consecutive
+	// upstream error). The escalate-on-failure effort policy reads it to bump a
+	// gpt-5.x turn from low to high effort. It reflects the loaded pin's prior-turn
+	// state regardless of any same-turn pin-drop guards below, and is a no-op
+	// unless Service.effortEscalation is enabled.
+	EscalateEffort bool
 }
 
 // modelSwitched reports whether the Anthropic emit path must strip historical
@@ -218,6 +225,13 @@ func (s *Service) runTurnLoop(
 	pin, pinFound := s.loadPin(ctx, res.SessionKey, res.PinRole)
 	res.PriorServedModel = pin.LastServedModel
 	res.SessionEverSwitched = pin.HasEverSwitched
+	// Escalate-on-failure signal: a prior turn that completed (LastTurnEndedAt set)
+	// but produced no output, or left a consecutive upstream error, is an
+	// observable failure. Computed from the loaded pin before any same-turn
+	// pin-drop guards below so it reflects the prior turn's outcome. The policy
+	// that acts on it (Service.effortEscalation) is gated separately.
+	res.EscalateEffort = pinFound && !pin.LastTurnEndedAt.IsZero() &&
+		(pin.LastOutputTokens == 0 || pin.ConsecutiveUpstreamErrors > 0)
 	if pinFound {
 		res.PinModel = pin.Model
 		res.PinAgeSec = pinAge(pin)

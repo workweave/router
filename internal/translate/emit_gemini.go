@@ -699,7 +699,7 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 
 	writeGeminiToolsFromAnthropic(jw, body)
 	writeGeminiToolChoiceFromAnthropic(jw, body)
-	writeGeminiGenerationConfigFromAnthropic(jw, body, opts.TargetModel)
+	writeGeminiGenerationConfigFromAnthropic(jw, body, opts.TargetModel, opts.ForceReasoningEffort)
 }
 
 // contentEntry is a buffered Gemini `contents` array entry. Both `Prepare*`
@@ -1079,7 +1079,7 @@ func writeGeminiToolChoiceFromAnthropic(jw *jsonWriter, body []byte) {
 }
 
 // writeGeminiGenerationConfigFromAnthropic writes generationConfig into jw from an Anthropic body.
-func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model string) {
+func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model, forceEffort string) {
 	type field struct {
 		key string
 		raw string
@@ -1109,7 +1109,11 @@ func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model
 	// Claude Code drives reasoning via `thinking`; map its budget onto a Gemini
 	// thinkingConfig (native generateContent honors it) so gemini-3.x reasons
 	// instead of running at its minimal default. reasoning_effort wins if set.
-	if effort := geminiReasoningEffort(body); effort != "" {
+	effort := geminiReasoningEffort(body)
+	if forceEffort != "" {
+		effort = forceEffort
+	}
+	if effort != "" {
 		if raw := thinkingConfigRaw(effort, model); raw != "" {
 			fields = append(fields, field{"thinkingConfig", raw})
 		}

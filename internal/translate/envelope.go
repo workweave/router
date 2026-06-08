@@ -59,6 +59,14 @@ type EmitOptions struct {
 	// Anthropic emit path strips thinking blocks from the conversation so the
 	// stale signatures never reach the upstream.
 	ModelSwitched bool
+	// ForceReasoningEffort, when non-empty ("low"/"medium"/"high"), overrides the
+	// request-derived reasoning effort for reasoning-capable targets (gpt-5.x via
+	// the Responses API, gemini-3.x via thinkingConfig). Set by the proxy's
+	// escalate-on-failure policy: gpt-5.x serves "low" by default and "high" after
+	// an observed failed/no-progress turn; gemini is pinned "low" (effort-immune on
+	// hard tasks). Empty leaves the request-derived effort untouched, so the
+	// feature is a no-op unless the policy is enabled.
+	ForceReasoningEffort string
 }
 
 // RequestEnvelope wraps a parsed request body regardless of wire format.

@@ -86,6 +86,11 @@ type Service struct {
 	// plannerEnabled is the kill switch. When false, the orchestrator falls
 	// back to first-decision-wins behavior.
 	plannerEnabled bool
+	// effortEscalation enables the escalate-on-failure reasoning-effort policy:
+	// gpt-5.x serves low effort by default and high after an observed
+	// failed/no-progress turn; gemini is pinned low. Off by default (set from
+	// ROUTER_EFFORT_ESCALATION) so it can be baked off before enabling.
+	effortEscalation bool
 	// summarizer produces a bounded-cost handover summary on switch turns.
 	// nil passes the full prior history through unchanged.
 	summarizer handover.Summarizer
@@ -393,6 +398,38 @@ func (s *Service) WithPlanner(cfg planner.EVConfig) *Service {
 func (s *Service) WithPlannerEnabled(enabled bool) *Service {
 	s.plannerEnabled = enabled
 	return s
+}
+
+// WithEffortEscalation enables the escalate-on-failure reasoning-effort policy.
+// When false (default) the router leaves request-derived effort untouched.
+func (s *Service) WithEffortEscalation(enabled bool) *Service {
+	s.effortEscalation = enabled
+	return s
+}
+
+// forcedReasoningEffort implements the escalate-on-failure effort policy and
+// returns the EmitOptions.ForceReasoningEffort override ("" = no override):
+//
+//   - gpt-5.x: "low" by default, "high" once escalate is set (an observed
+//     failed/no-progress prior turn). Measured on SWE-Bench Pro, serving low
+//     then retrying high on failure beats both fixed policies (low 24% < high
+//     32% < escalate ~40% resolved) because it spends high only where it flips
+//     the outcome and avoids the cases high regresses.
+//   - gemini-3.x: pinned "low" — effort-immune on hard tasks (0/15 effort-helps
+//     in the sweep), so high is wasted spend.
+//   - everything else (incl. anthropic adaptive): "" — left to its own path.
+func forcedReasoningEffort(model string, escalate bool) string {
+	switch {
+	case strings.HasPrefix(model, "gpt-5"):
+		if escalate {
+			return "high"
+		}
+		return "low"
+	case strings.HasPrefix(model, "gemini-3"):
+		return "low"
+	default:
+		return ""
+	}
 }
 
 // WithSummarizer installs the cheap-model summarizer for handover on switch
@@ -1057,6 +1094,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		IncludeStreamUsage: s.usageRequired(),
 		SessionAffinity:    sessionAffinityHint(routeRes.SessionKey),
 		ModelSwitched:      routeRes.modelSwitched(),
+	}
+	if s.effortEscalation {
+		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
 	}
 
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
@@ -2052,6 +2092,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		IncludeStreamUsage: s.usageRequired(),
 		SessionAffinity:    sessionAffinityHint(routeRes.SessionKey),
 		ModelSwitched:      routeRes.modelSwitched(),
+	}
+	if s.effortEscalation {
+		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
 	}
 
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
