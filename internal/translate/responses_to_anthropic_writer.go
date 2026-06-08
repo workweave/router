@@ -514,6 +514,15 @@ func (t *ResponsesToAnthropicWriter) finalizeBuffered() error {
 		observability.Get().Error("ResponsesToAnthropic: no terminal response event in stream")
 		return t.finalizeError()
 	}
+	// A failed terminal response is an error, not an (empty) assistant turn —
+	// surface it the way the streaming path does, rather than building success
+	// JSON from a failed payload. `incomplete` (max_output_tokens) is a valid
+	// truncated response and is left to ResponsesToAnthropicResponse.
+	respErr := gjson.GetBytes(finalResp, "error")
+	if gjson.GetBytes(finalResp, "status").String() == "failed" || (respErr.Exists() && respErr.Type != gjson.Null) {
+		observability.Get().Error("ResponsesToAnthropic: upstream response failed", "request_model", t.requestModel)
+		return t.finalizeError()
+	}
 	anthropic, err := ResponsesToAnthropicResponse(finalResp, t.requestModel)
 	if err != nil {
 		observability.Get().Error("ResponsesToAnthropic: translate failed", "err", err)

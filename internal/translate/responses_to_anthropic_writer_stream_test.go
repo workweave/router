@@ -340,6 +340,29 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","ou
 	assert.Contains(t, body, `"stop_reason":"tool_use"`)
 }
 
+// A non-streaming client also gets an error envelope (not empty success JSON)
+// when the buffered stream ends in response.failed — symmetric with the
+// streaming path's event: error.
+func TestResponsesToAnthropicWriter_NonStreamingFailedResponse(t *testing.T) {
+	const fixture = `event: response.failed
+data: {"type":"response.failed","response":{"id":"r","status":"failed","error":{"code":"server_error","message":"boom"},"output":[]}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(false))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	var msg map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &msg))
+	assert.Equal(t, "error", msg["type"], "failed response → error envelope, not an empty assistant message")
+	e, _ := msg["error"].(map[string]any)
+	require.NotNil(t, e)
+	assert.Contains(t, e["message"], "boom")
+}
+
 // A routing marker is emitted as content block 0; upstream content then starts
 // at block 1.
 func TestResponsesToAnthropicWriter_RoutingMarker(t *testing.T) {
