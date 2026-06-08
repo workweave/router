@@ -200,6 +200,41 @@ data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_
 	assert.Contains(t, body, "event: message_stop")
 }
 
+// An upstream that delivers a reasoning summary and message text only on
+// output_item.done (no *.delta events) still produces visible thinking + text
+// blocks on the streaming path, rather than an empty assistant turn.
+func TestResponsesToAnthropicWriter_DoneOnlyContent(t *testing.T) {
+	const fixture = `event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[],"status":"in_progress"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"weighed the options"}],"status":"completed"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":1,"item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress","content":[]}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":1,"item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"final answer"}]}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"r","status":"completed","output":[{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"weighed the options"}]},{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"final answer"}]}],"usage":{"input_tokens":7,"output_tokens":3}}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(true))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"content_block":{"type":"thinking"`)
+	assert.Contains(t, body, `"thinking_delta","thinking":"weighed the options"`)
+	assert.Contains(t, body, `"content_block":{"type":"text"`)
+	assert.Contains(t, body, `"text_delta","text":"final answer"`)
+	assert.Contains(t, body, `"stop_reason":"end_turn"`)
+}
+
 // A routing marker is emitted as content block 0; upstream content then starts
 // at block 1.
 func TestResponsesToAnthropicWriter_RoutingMarker(t *testing.T) {

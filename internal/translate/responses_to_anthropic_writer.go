@@ -281,20 +281,70 @@ func (t *ResponsesToAnthropicWriter) bufferToolArgs(data []byte, field string, a
 
 func (t *ResponsesToAnthropicWriter) handleOutputItemDone(data []byte) error {
 	oi := int(gjson.GetBytes(data, "output_index").Int())
+	item := gjson.GetBytes(data, "item")
 	idx, ok := t.itemBlocks[oi]
 	if !ok {
-		return nil
+		// No delta opened a block for this item. Some upstreams send a
+		// message/reasoning item's full content only on output_item.done; without
+		// this a delta-less item would yield an empty assistant turn on the
+		// streaming path (the non-streaming path already rebuilds from
+		// response.completed). Synthesize the block from the terminal item.
+		return t.emitDoneOnlyItem(item)
 	}
 	if t.itemKind[oi] == "tool_use" {
 		// item.arguments on the terminal event is the authoritative complete
 		// args; use it when the streamed deltas were absent or malformed.
-		if err := t.emitValidatedToolArgsDelta(oi, idx, gjson.GetBytes(data, "item.arguments").String()); err != nil {
+		if err := t.emitValidatedToolArgsDelta(oi, idx, item.Get("arguments").String()); err != nil {
 			return err
 		}
 	}
 	delete(t.itemBlocks, oi)
 	delete(t.itemKind, oi)
 	return t.emitContentBlockStop(idx)
+}
+
+// emitDoneOnlyItem synthesizes a content block from a completed output item that
+// opened no block via streamed deltas — some upstreams deliver a message's full
+// text or a reasoning item's summary only on output_item.done. Emitted as one
+// start/delta/stop so a delta-less item still produces visible content.
+func (t *ResponsesToAnthropicWriter) emitDoneOnlyItem(item gjson.Result) error {
+	switch item.Get("type").String() {
+	case "message":
+		var text strings.Builder
+		item.Get("content").ForEach(func(_, part gjson.Result) bool {
+			if part.Get("type").String() == "output_text" {
+				text.WriteString(part.Get("text").String())
+			}
+			return true
+		})
+		if text.Len() == 0 {
+			return nil
+		}
+		idx := t.blockIdx
+		t.blockIdx++
+		if err := t.emitContentBlockStartText(idx); err != nil {
+			return err
+		}
+		if err := t.emitContentBlockDeltaText(idx, text.String()); err != nil {
+			return err
+		}
+		return t.emitContentBlockStop(idx)
+	case "reasoning":
+		text := joinReasoningSummary(item.Get("summary"))
+		if text == "" {
+			return nil
+		}
+		idx := t.blockIdx
+		t.blockIdx++
+		if err := t.emitContentBlockStartThinking(idx); err != nil {
+			return err
+		}
+		if err := t.emitContentBlockDeltaThinking(idx, text); err != nil {
+			return err
+		}
+		return t.emitContentBlockStop(idx)
+	}
+	return nil
 }
 
 // openBlock returns the Anthropic block index for output_index oi, opening a
@@ -582,11 +632,22 @@ func (t *ResponsesToAnthropicWriter) emitValidatedToolArgsDelta(oi, index int, f
 	case fallback != "" && gjson.Valid(fallback):
 		args = fallback
 	case buffered != "" || fallback != "":
+		bad := buffered
+		if bad == "" {
+			bad = fallback
+		}
+		const previewMax = 200
+		preview := bad
+		if len(preview) > previewMax {
+			preview = preview[:previewMax]
+		}
 		observability.Get().Error(
 			"ResponsesToAnthropic tool_use args failed JSON validation — substituting empty args",
 			"block_index", index,
+			"request_model", t.requestModel,
 			"buffered_len", len(buffered),
 			"fallback_len", len(fallback),
+			"args_preview", preview,
 		)
 	}
 	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
