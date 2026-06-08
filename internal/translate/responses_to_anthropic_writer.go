@@ -325,12 +325,12 @@ func (t *ResponsesToAnthropicWriter) handleOutputItemDone(data []byte) error {
 	item := gjson.GetBytes(data, "item")
 	idx, ok := t.itemBlocks[oi]
 	if !ok {
-		// No delta opened a block for this item. Some upstreams send a
-		// message/reasoning item's full content only on output_item.done; without
-		// this a delta-less item would yield an empty assistant turn on the
-		// streaming path (the non-streaming path already rebuilds from
+		// No delta opened a block for this item. Some upstreams send an item's
+		// full content only on output_item.done (or output_item.added was lost);
+		// without this a delta-less item would yield an empty assistant turn on
+		// the streaming path (the non-streaming path already rebuilds from
 		// response.completed). Synthesize the block from the terminal item.
-		return t.emitDoneOnlyItem(item)
+		return t.emitDoneOnlyItem(oi, item)
 	}
 	if t.itemKind[oi] == "tool_use" {
 		// item.arguments on the terminal event is the authoritative complete
@@ -345,11 +345,27 @@ func (t *ResponsesToAnthropicWriter) handleOutputItemDone(data []byte) error {
 }
 
 // emitDoneOnlyItem synthesizes a content block from a completed output item that
-// opened no block via streamed deltas — some upstreams deliver a message's full
-// text or a reasoning item's summary only on output_item.done. Emitted as one
-// start/delta/stop so a delta-less item still produces visible content.
-func (t *ResponsesToAnthropicWriter) emitDoneOnlyItem(item gjson.Result) error {
+// opened no block via streamed deltas — some upstreams deliver an item's full
+// content only on output_item.done, or output_item.added was lost. Emitted as
+// one start/delta/stop so a delta-less item still produces content.
+func (t *ResponsesToAnthropicWriter) emitDoneOnlyItem(oi int, item gjson.Result) error {
 	switch item.Get("type").String() {
+	case "function_call":
+		name := item.Get("name").String()
+		if name == "" {
+			delete(t.toolArgs, oi)
+			return nil // nameless call → drop, as in handleOutputItemAdded
+		}
+		idx := t.blockIdx
+		t.blockIdx++
+		t.toolUseCount++
+		if err := t.emitContentBlockStartTool(idx, item.Get("call_id").String(), name); err != nil {
+			return err
+		}
+		if err := t.emitValidatedToolArgsDelta(oi, idx, item.Get("arguments").String()); err != nil {
+			return err
+		}
+		return t.emitContentBlockStop(idx)
 	case "message":
 		var text strings.Builder
 		item.Get("content").ForEach(func(_, part gjson.Result) bool {

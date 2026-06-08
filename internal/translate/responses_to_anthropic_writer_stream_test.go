@@ -317,6 +317,29 @@ data: {"type":"response.failed","response":{"id":"r","status":"failed","error":{
 	assert.NotContains(t, body, "event: message_stop", "no success trailer after an error close")
 }
 
+// A function_call delivered only on output_item.done (no output_item.added)
+// still opens a tool_use block with its real id/name/args.
+func TestResponsesToAnthropicWriter_DoneOnlyToolCall(t *testing.T) {
+	const fixture = `event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_z","name":"Grep","arguments":"{\"pattern\":\"foo\"}","status":"completed"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"r","status":"completed","output":[{"id":"fc_1","type":"function_call","call_id":"call_z","name":"Grep","arguments":"{\"pattern\":\"foo\"}"}],"usage":{"input_tokens":4,"output_tokens":2}}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(true))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"type":"tool_use","id":"call_z","name":"Grep"`)
+	assert.Contains(t, body, `"partial_json":"{\"pattern\":\"foo\"}"`)
+	assert.Contains(t, body, `"stop_reason":"tool_use"`)
+}
+
 // A routing marker is emitted as content block 0; upstream content then starts
 // at block 1.
 func TestResponsesToAnthropicWriter_RoutingMarker(t *testing.T) {
