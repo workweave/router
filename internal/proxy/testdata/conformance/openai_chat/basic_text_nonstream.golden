@@ -1,0 +1,20 @@
+{
+  "data": {
+    "content": [
+      {
+        "text": "Hello!",
+        "type": "text"
+      }
+    ],
+    "id": "<id>",
+    "model": "deepseek/deepseek-v4-pro",
+    "role": "assistant",
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "input_tokens": 5,
+      "output_tokens": 2
+    }
+  }
+}

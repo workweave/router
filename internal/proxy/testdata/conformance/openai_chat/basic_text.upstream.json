@@ -1,0 +1,1 @@
+{"id":"chatcmpl-3","object":"chat.completion","created":1,"model":"deepseek/deepseek-v4-pro","choices":[{"index":0,"message":{"role":"assistant","content":"Hello!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}

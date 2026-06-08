@@ -1,0 +1,81 @@
+[
+  {
+    "event": "message_start",
+    "data": {
+      "message": {
+        "content": [],
+        "id": "<id>",
+        "model": "gemini-3.1-pro-preview",
+        "role": "assistant",
+        "stop_reason": null,
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 0
+        }
+      },
+      "type": "message_start"
+    }
+  },
+  {
+    "event": "content_block_start",
+    "data": {
+      "content_block": {
+        "text": "",
+        "type": "text"
+      },
+      "index": 0,
+      "type": "content_block_start"
+    }
+  },
+  {
+    "event": "content_block_delta",
+    "data": {
+      "delta": {
+        "text": "Hi",
+        "type": "text_delta"
+      },
+      "index": 0,
+      "type": "content_block_delta"
+    }
+  },
+  {
+    "event": "content_block_delta",
+    "data": {
+      "delta": {
+        "text": " there!",
+        "type": "text_delta"
+      },
+      "index": 0,
+      "type": "content_block_delta"
+    }
+  },
+  {
+    "event": "content_block_stop",
+    "data": {
+      "index": 0,
+      "type": "content_block_stop"
+    }
+  },
+  {
+    "event": "message_delta",
+    "data": {
+      "delta": {
+        "stop_reason": "end_turn",
+        "stop_sequence": null
+      },
+      "type": "message_delta",
+      "usage": {
+        "input_tokens": 5,
+        "output_tokens": 3
+      }
+    }
+  },
+  {
+    "event": "message_stop",
+    "data": {
+      "type": "message_stop"
+    }
+  }
+]
