@@ -56,6 +56,9 @@ func filterBetaHeader(beta, targetModel string) string {
 }
 
 func betaCompatible(token string, spec router.ModelSpec) bool {
+	if strings.Contains(token, "context-1m") {
+		return spec.Supports(router.CapExtendedContext)
+	}
 	if strings.Contains(token, "interleaved-thinking") ||
 		strings.Contains(token, "adaptive-thinking") {
 		return spec.Supports(router.CapAdaptiveThinking)
