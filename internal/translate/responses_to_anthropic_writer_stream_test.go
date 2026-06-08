@@ -235,6 +235,62 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","ou
 	assert.Contains(t, body, `"stop_reason":"end_turn"`)
 }
 
+// A function_call with no name is dropped (never opened as a tool_use block),
+// so the client can't be sent on an invoke-"" loop; the turn demotes to
+// end_turn since no tool_use block survives.
+func TestResponsesToAnthropicWriter_NamelessToolDropped(t *testing.T) {
+	const fixture = `event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_x","type":"function_call","call_id":"call_x","name":"","arguments":"","status":"in_progress"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_x","output_index":0,"delta":"{\"a\":1}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_x","type":"function_call","call_id":"call_x","name":"","arguments":"{\"a\":1}","status":"completed"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"r","status":"completed","output":[{"id":"fc_x","type":"function_call","call_id":"call_x","name":"","arguments":"{\"a\":1}"}],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(true))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	body := rec.Body.String()
+	assert.NotContains(t, body, `"type":"tool_use"`, "nameless function_call must not open a tool_use block")
+	assert.NotContains(t, body, "input_json_delta")
+	assert.Contains(t, body, `"stop_reason":"end_turn"`, "no surviving tool_use block → demote to end_turn")
+	assert.Contains(t, body, "event: message_stop")
+}
+
+// On the non-streaming path, an upstream stream that ends without a terminal
+// response event but carries an `error` event yields a real Anthropic error
+// envelope — not an empty 502 from feeding raw SSE to the JSON error mapper.
+func TestResponsesToAnthropicWriter_NonStreamingErrorFromStream(t *testing.T) {
+	const fixture = `event: error
+data: {"type":"error","code":"server_error","message":"upstream exploded"}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(false)) // non-streaming client → buffered
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	assert.NotContains(t, rec.Body.String(), "event: ")
+	var msg map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &msg))
+	assert.Equal(t, "error", msg["type"])
+	e, _ := msg["error"].(map[string]any)
+	require.NotNil(t, e)
+	assert.Contains(t, e["message"], "upstream exploded", "real upstream message surfaced, not empty")
+}
+
 // A routing marker is emitted as content block 0; upstream content then starts
 // at block 1.
 func TestResponsesToAnthropicWriter_RoutingMarker(t *testing.T) {

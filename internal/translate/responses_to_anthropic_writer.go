@@ -57,6 +57,11 @@ type ResponsesToAnthropicWriter struct {
 	// parse becomes `{}` rather than killing the client's strict tool-args
 	// parser mid-turn.
 	toolArgs map[int]*strings.Builder
+	// suppressed holds output_indexes of function_call items dropped for carrying
+	// no name. A nameless tool_use makes the client invoke tool "" in a loop, so
+	// (mirroring AnthropicSSETranslator) we never open a block for it and drop its
+	// later arg deltas / done event.
+	suppressed map[int]struct{}
 
 	// Captured from the terminal response.completed/.failed/.incomplete event.
 	finalStopReason string
@@ -84,6 +89,7 @@ func NewResponsesToAnthropicWriter(w http.ResponseWriter, requestModel string, s
 		itemBlocks:   make(map[int]int),
 		itemKind:     make(map[int]string),
 		toolArgs:     make(map[int]*strings.Builder),
+		suppressed:   make(map[int]struct{}),
 	}
 }
 
@@ -234,13 +240,27 @@ func (t *ResponsesToAnthropicWriter) handleOutputItemAdded(data []byte) error {
 		// thinking block.
 		return nil
 	}
+	name := item.Get("name").String()
+	if name == "" {
+		// A nameless tool call would make the client invoke tool "" and loop.
+		// Drop it: skip the block, drop later arg deltas + the done event. The
+		// turn ends on its real stop_reason (reconciledStopReason demotes a
+		// terminal tool_use claim with no surviving block to end_turn).
+		t.suppressed[oi] = struct{}{}
+		observability.Get().Error(
+			"ResponsesToAnthropic dropping nameless function_call",
+			"request_model", t.requestModel,
+			"call_id", item.Get("call_id").String(),
+		)
+		return nil
+	}
 	idx := t.blockIdx
 	t.itemBlocks[oi] = idx
 	t.itemKind[oi] = "tool_use"
 	t.toolUseCount++
 	t.blockIdx++
 	// Anthropic tool_use.id maps from call_id (not the fc_ item id).
-	return t.emitContentBlockStartTool(idx, item.Get("call_id").String(), item.Get("name").String())
+	return t.emitContentBlockStartTool(idx, item.Get("call_id").String(), name)
 }
 
 func (t *ResponsesToAnthropicWriter) handleTextDelta(data []byte) error {
@@ -268,6 +288,9 @@ func (t *ResponsesToAnthropicWriter) bufferToolArgs(data []byte, field string, a
 		return
 	}
 	oi := int(gjson.GetBytes(data, "output_index").Int())
+	if _, dropped := t.suppressed[oi]; dropped {
+		return
+	}
 	buf, ok := t.toolArgs[oi]
 	if !ok {
 		buf = &strings.Builder{}
@@ -281,6 +304,11 @@ func (t *ResponsesToAnthropicWriter) bufferToolArgs(data []byte, field string, a
 
 func (t *ResponsesToAnthropicWriter) handleOutputItemDone(data []byte) error {
 	oi := int(gjson.GetBytes(data, "output_index").Int())
+	if _, dropped := t.suppressed[oi]; dropped {
+		delete(t.suppressed, oi)
+		delete(t.toolArgs, oi)
+		return nil
+	}
 	item := gjson.GetBytes(data, "item")
 	idx, ok := t.itemBlocks[oi]
 	if !ok {
@@ -492,7 +520,7 @@ func (t *ResponsesToAnthropicWriter) recordBufferedUsage(usage gjson.Result) {
 // non-streaming path; streaming errors are rendered by the dispatch's
 // emitAnthropicSSEErrorEvent before Finalize and closed out by finishStream.
 func (t *ResponsesToAnthropicWriter) finalizeError() error {
-	errBody := ResponsesToAnthropicError(t.buf.Bytes())
+	errBody := t.anthropicErrorFromBuffer()
 	if !t.headersEmitted {
 		t.inner.Header().Set("Content-Type", "application/json")
 		t.inner.Header().Del("Content-Length")
@@ -504,6 +532,62 @@ func (t *ResponsesToAnthropicWriter) finalizeError() error {
 	}
 	_, err := t.inner.Write(errBody)
 	return err
+}
+
+// anthropicErrorFromBuffer builds an Anthropic error envelope from whatever the
+// upstream left in buf. With stream:true the buffer is raw SSE, not a JSON error
+// body, so feeding it straight to ResponsesToAnthropicError yields an empty
+// message; instead scan the stream for a terminal `error` event or a failed
+// response's error, falling back to a clear generic message.
+func (t *ResponsesToAnthropicWriter) anthropicErrorFromBuffer() []byte {
+	b := t.buf.Bytes()
+	if gjson.ValidBytes(b) && gjson.GetBytes(b, "error").Exists() {
+		return ResponsesToAnthropicError(b)
+	}
+	rest := b
+	for {
+		event, n := sse.SplitNext(rest)
+		if n == 0 {
+			break
+		}
+		rest = rest[n:]
+		_, data := sse.ParseEvent(event)
+		if len(data) == 0 {
+			continue
+		}
+		switch gjson.GetBytes(data, "type").String() {
+		case "error":
+			return responsesError(gjson.GetBytes(data, "code").String(), gjson.GetBytes(data, "message").String())
+		case "response.failed", "response.incomplete":
+			if e := gjson.GetBytes(data, "response.error"); e.Exists() {
+				return responsesError(e.Get("code").String(), e.Get("message").String())
+			}
+		}
+	}
+	return responsesError("api_error", "upstream Responses stream ended without a terminal response event")
+}
+
+// responsesError builds an Anthropic error envelope from a Responses-style
+// type/message pair, routed through ResponsesToAnthropicError so the wire shape
+// stays single-sourced.
+func responsesError(errType, msg string) []byte {
+	if errType == "" {
+		errType = "api_error"
+	}
+	if msg == "" {
+		msg = "upstream Responses request failed"
+	}
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("error")
+	jw.Obj()
+	jw.Key("type")
+	jw.Str(errType)
+	jw.Key("message")
+	jw.Str(msg)
+	jw.EndObj()
+	jw.EndObj()
+	return ResponsesToAnthropicError(jw.Bytes())
 }
 
 // extractFinalResponseObject scans a buffered Responses SSE stream for the last
