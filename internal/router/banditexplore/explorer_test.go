@@ -147,6 +147,44 @@ func TestRoute_UnknownProviderFallsBackToArgmax(t *testing.T) {
 	}
 }
 
+func TestRoute_PrefersPerRequestProviderBinding(t *testing.T) {
+	// Under BYOK the scorer resolves opus to openrouter; the boot-time default
+	// resolver says bedrock. The explorer must serve the per-request binding.
+	scores := map[string]float32{"haiku": 0.90, "opus": 0.88}
+	inner := clusterDecision(scores, "haiku", "anthropic")
+	inner.Metadata.CandidateProviders = map[string]string{
+		"haiku": "anthropic",
+		"opus":  "openrouter",
+	}
+	e := New(&fakeRouter{dec: inner}, staticProvider(map[string]string{"opus": "bedrock"}), 0.1)
+	withIntn(e, 1) // [haiku, opus] -> opus
+	dec, err := e.Route(context.Background(), router.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Model != "opus" {
+		t.Fatalf("expected switch to opus, got %q", dec.Model)
+	}
+	if dec.Provider != "openrouter" {
+		t.Fatalf("must use per-request binding openrouter, got %q", dec.Provider)
+	}
+}
+
+func TestRoute_MetadataProviderUsedWhenResolverNil(t *testing.T) {
+	scores := map[string]float32{"haiku": 0.90, "opus": 0.88}
+	inner := clusterDecision(scores, "haiku", "anthropic")
+	inner.Metadata.CandidateProviders = map[string]string{"opus": "anthropic"}
+	e := New(&fakeRouter{dec: inner}, nil, 0.1) // nil boot-time resolver
+	withIntn(e, 1)
+	dec, err := e.Route(context.Background(), router.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Model != "opus" || dec.Provider != "anthropic" {
+		t.Fatalf("metadata binding must drive the switch, got model=%q provider=%q", dec.Model, dec.Provider)
+	}
+}
+
 func TestRoute_DrawingArgmaxRecordsTruePropensity(t *testing.T) {
 	scores := map[string]float32{"haiku": 0.90, "opus": 0.88}
 	inner := clusterDecision(scores, "haiku", "anthropic")

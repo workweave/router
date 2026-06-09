@@ -29,10 +29,16 @@ import (
 	"workweave/router/internal/router"
 )
 
-// ProviderForModel resolves the upstream provider for a candidate model name.
-// ok is false when the model has no known deployment binding, in which case
-// the explorer declines to switch to it (falling back to the argmax pick).
+// ProviderForModel is a boot-time fallback resolver for a model's provider,
+// used only when the decision metadata carries no per-request binding. ok is
+// false when the model has no known deployment binding.
 type ProviderForModel func(model string) (provider string, ok bool)
+
+// bandEntry is an in-band model paired with the provider that serves it.
+type bandEntry struct {
+	model    string
+	provider string
+}
 
 // Explorer wraps an inner Router and randomizes within the quality-tie band.
 type Explorer struct {
@@ -48,8 +54,9 @@ type Explorer struct {
 
 var _ router.Router = (*Explorer)(nil)
 
-// New constructs an Explorer. providerFor must be non-nil; a nil resolver or a
-// non-positive bandWidth makes the explorer a pure pass-through.
+// New constructs an Explorer. A non-positive bandWidth makes the explorer a
+// pure pass-through. providerFor is an optional boot-time fallback: when nil,
+// the explorer relies solely on the per-request bindings in decision metadata.
 func New(inner router.Router, providerFor ProviderForModel, bandWidth float32) *Explorer {
 	return &Explorer{
 		inner:       inner,
@@ -72,67 +79,91 @@ func (e *Explorer) Route(ctx context.Context, req router.Request) (router.Decisi
 		return dec, nil
 	}
 
-	band := e.tieBand(dec.Metadata.CandidateScores)
-	// A singleton band means the argmax has no near-equivalent peer; there is
-	// nothing to explore, so the deterministic pick stands (propensity 1.0).
+	// Restrict the band to servable peers before sampling so the logged
+	// propensity (1/|band|) is exact and a peer is only ever served via a
+	// request-valid provider binding. A singleton band has no peer to explore.
+	band := e.servableBand(dec)
 	if len(band) < 2 {
 		return dec, nil
 	}
 
-	chosen := band[e.intn(len(band))]
-	if chosen == dec.Model {
-		// Drew the argmax model itself: still record the true propensity
-		// (1/|band|) so the logged decision is honest about the policy that
-		// produced it, but no model/provider substitution is needed.
-		e.annotate(&dec, dec.Model, dec.Provider, len(band))
-		return dec, nil
-	}
-
-	provider, ok := e.providerFor(chosen)
-	if !ok {
-		// Unknown deployment binding — declining to switch keeps us from
-		// routing to a provider the request may not have enabled.
-		observability.Get().Debug(
-			"banditexplore: no provider for in-band model; keeping argmax",
-			"model", chosen,
-		)
-		return dec, nil
-	}
-
-	e.annotate(&dec, chosen, provider, len(band))
+	pick := band[e.intn(len(band))]
+	e.annotate(&dec, pick.model, pick.provider, len(band))
 	return dec, nil
 }
 
-// shouldExplore gates exploration on a positive band width, a usable provider
-// resolver, and a decision carrying a multi-model score vector.
+// shouldExplore gates on a positive band width and a multi-model score vector;
+// provider resolvability is enforced later in servableBand.
 func (e *Explorer) shouldExplore(dec router.Decision) bool {
-	if e.bandWidth <= 0 || e.providerFor == nil {
+	if e.bandWidth <= 0 {
 		return false
 	}
 	md := dec.Metadata
 	return md != nil && len(md.CandidateScores) >= 2
 }
 
-// tieBand returns the in-band models (score >= max - bandWidth), sorted by name
-// so sampling is reproducible given a fixed intn.
-func (e *Explorer) tieBand(scores map[string]float32) []string {
-	maxScore := float32(0)
-	first := true
-	for _, v := range scores {
-		if first || v > maxScore {
-			maxScore = v
-			first = false
-		}
+// servableBand returns in-band models (score >= max - bandWidth) paired with a
+// request-valid provider, sorted by name for reproducible sampling. The argmax
+// is always included; peers only when their provider resolves.
+func (e *Explorer) servableBand(dec router.Decision) []bandEntry {
+	scores := dec.Metadata.CandidateScores
+	maxScore, ok := maxScore(scores)
+	if !ok {
+		return nil
 	}
 	threshold := maxScore - e.bandWidth
-	band := make([]string, 0, len(scores))
+	models := make([]string, 0, len(scores))
 	for m, v := range scores {
 		if v >= threshold {
-			band = append(band, m)
+			models = append(models, m)
 		}
 	}
-	sort.Strings(band)
+	sort.Strings(models)
+
+	band := make([]bandEntry, 0, len(models))
+	for _, m := range models {
+		if m == dec.Model {
+			band = append(band, bandEntry{model: m, provider: dec.Provider})
+			continue
+		}
+		provider, ok := e.providerForRequest(dec, m)
+		if !ok {
+			observability.Get().Debug(
+				"banditexplore: no provider for in-band model; excluding from band",
+				"model", m,
+			)
+			continue
+		}
+		band = append(band, bandEntry{model: m, provider: provider})
+	}
 	return band
+}
+
+// providerForRequest prefers the per-request binding on the decision metadata
+// (correct under BYOK), falling back to the boot-time providerFor resolver.
+func (e *Explorer) providerForRequest(dec router.Decision, model string) (string, bool) {
+	if md := dec.Metadata; md != nil {
+		if p, ok := md.CandidateProviders[model]; ok && p != "" {
+			return p, true
+		}
+	}
+	if e.providerFor == nil {
+		return "", false
+	}
+	return e.providerFor(model)
+}
+
+// maxScore returns the largest score and whether the map was non-empty.
+func maxScore(scores map[string]float32) (float32, bool) {
+	max := float32(0)
+	found := false
+	for _, v := range scores {
+		if !found || v > max {
+			max = v
+			found = true
+		}
+	}
+	return max, found
 }
 
 // annotate rewrites the served model/provider and records the exploration

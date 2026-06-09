@@ -54,11 +54,12 @@ func buildObservationContext(ctx context.Context, decision router.Decision) obse
 		score := float64(md.ChosenScore)
 		obs.ChosenScore = &score
 		obs.ClusterRouterVersion = md.ClusterRouterVersion
-		// Propensity is meaningful only for a score-producing router; the
-		// pointer keeps a deterministic 1.0 distinct from the non-cluster nil.
-		prop := float64(md.Propensity)
-		obs.Propensity = &prop
+		// Propensity is meaningful only alongside a score vector (the scorer
+		// sets both together); gate on CandidateScores so a non-scoring router
+		// leaves the column NULL instead of logging the Go zero 0.0.
 		if len(md.CandidateScores) > 0 {
+			prop := float64(md.Propensity)
+			obs.Propensity = &prop
 			if b, err := json.Marshal(md.CandidateScores); err == nil {
 				obs.CandidateScores = b
 			} else {

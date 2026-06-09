@@ -49,6 +49,11 @@ type RoutingMetadata struct {
 	// Surfaced for off-policy analysis (the substrate a contextual bandit needs);
 	// nil for routers that don't compute a score vector. Does not affect routing.
 	CandidateScores map[string]float32
+	// CandidateProviders is the per-request resolved provider for each eligible
+	// model, so an exploration policy can switch to an in-band peer using this
+	// request's binding (correct under BYOK) instead of a boot-time default.
+	// nil for routers that don't resolve providers. Does not affect routing.
+	CandidateProviders map[string]string
 	// Propensity is the probability the chosen model was selected under the
 	// acting policy. 1.0 for a deterministic argmax; <1.0 only when an
 	// exploration policy randomizes. Logged so logged decisions carry the
