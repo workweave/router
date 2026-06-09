@@ -92,12 +92,6 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 		return nil, stats, fmt.Errorf("strip claude-code-only tools: %w", err)
 	}
 	stats.CCOnlyToolsStripped = removed
-	if opts.ModelSwitched {
-		body, err = stripThinkingBlocksBytes(body)
-		if err != nil {
-			return nil, stats, fmt.Errorf("strip switched-model thinking blocks: %w", err)
-		}
-	}
 
 	jw := newJSONWriter()
 	jw.Obj()

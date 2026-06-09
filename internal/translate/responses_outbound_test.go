@@ -157,6 +157,42 @@ func TestPrepareOpenAIResponses_ReplaysSignedReasoning(t *testing.T) {
 	assert.Equal(t, "toolu_1", toolCall["call_id"])
 }
 
+func TestPrepareOpenAIResponses_ReplaysSignedReasoningAfterModelSwitch(t *testing.T) {
+	sig := openAIReasoningTestSignature(t, "rs_prev", "enc_prev")
+	body := []byte(`{
+		"model":"claude-opus-4-8","max_tokens":1024,
+		"thinking":{"type":"enabled","budget_tokens":8192},
+		"messages":[
+			{"role":"user","content":"continue"},
+			{"role":"assistant","content":[
+				{"type":"text","text":"I'll inspect it."},
+				{"type":"thinking","thinking":"stale anthropic reasoning","signature":"sig-from-other-model"},
+				{"type":"thinking","thinking":"summary","signature":` + strconv.Quote(sig) + `},
+				{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"main.go"}}
+			]}
+		]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{
+		TargetModel:   "gpt-5.5",
+		Capabilities:  router.Lookup("gpt-5.5"),
+		ModelSwitched: true,
+	})
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+	input, _ := out["input"].([]any)
+	require.Len(t, input, 4)
+	reasoning, _ := input[2].(map[string]any)
+	assert.Equal(t, "reasoning", reasoning["type"])
+	assert.Equal(t, "rs_prev", reasoning["id"])
+	assert.Equal(t, "enc_prev", reasoning["encrypted_content"])
+	toolCall, _ := input[3].(map[string]any)
+	assert.Equal(t, "toolu_1", toolCall["call_id"])
+}
+
 // budget→effort ladder.
 func TestPrepareOpenAIResponses_EffortLadder(t *testing.T) {
 	// gpt-5.x has a measured "medium" dead-zone on hard agentic coding (Pro:
