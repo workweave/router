@@ -427,7 +427,18 @@ func (s *Service) resolveBindingsForDispatch(ctx context.Context, decision route
 	}
 	_, primaryExcluded := excluded[decision.Provider]
 	bindings := catalog.AvailableBindings(decision.Model, available)
-	if len(bindings) == 0 || (len(bindings) == 1 && !primaryExcluded) {
+	if len(bindings) == 0 {
+		if primaryExcluded {
+			// Every binding for the model is excluded AND the decision names
+			// an excluded provider (a bug upstream — routing filters these).
+			// Returning the primary would dispatch to the forbidden provider;
+			// an empty walk makes dispatchWithFallback fail with a clean 502
+			// instead.
+			return nil
+		}
+		return []catalog.ProviderBinding{primary}
+	}
+	if len(bindings) == 1 && !primaryExcluded {
 		return []catalog.ProviderBinding{primary}
 	}
 	// Defensive: the scorer picks bindings[0] at boot time; if for any

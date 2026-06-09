@@ -597,6 +597,24 @@ func TestResolveBindingsForDispatch(t *testing.T) {
 		require.Len(t, bs, 1, "openrouter fallback binding must be filtered out by the provider exclusion")
 		assert.Equal(t, "fireworks", bs[0].Provider)
 	})
+	t.Run("all bindings excluded with excluded primary returns empty walk", func(t *testing.T) {
+		// When exclusion filters out every binding AND the decision names an
+		// excluded provider, the walk must be empty so dispatchWithFallback
+		// 502s instead of serving the forbidden provider.
+		s := &Service{deploymentKeyedProviders: map[string]struct{}{"fireworks": {}, "openrouter": {}}}
+		ctx := context.WithValue(context.Background(), InstallationExcludedProvidersContextKey{}, []string{"fireworks", "openrouter"})
+		bs := s.resolveBindingsForDispatch(ctx, router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "fireworks"})
+		assert.Empty(t, bs, "no eligible binding may remain when the primary itself is excluded")
+	})
+	t.Run("catalog-miss model keeps legacy single-attempt primary", func(t *testing.T) {
+		// A model with no catalog bindings (zero before any filtering) must
+		// keep the legacy [primary] walk when the primary is not excluded.
+		s := &Service{deploymentKeyedProviders: map[string]struct{}{"anthropic": {}}}
+		ctx := context.WithValue(context.Background(), InstallationExcludedProvidersContextKey{}, []string{"openrouter"})
+		bs := s.resolveBindingsForDispatch(ctx, router.Decision{Model: "not-in-catalog", Provider: "anthropic"})
+		require.Len(t, bs, 1)
+		assert.Equal(t, "anthropic", bs[0].Provider)
+	})
 	t.Run("excluded primary is never re-added as the first attempt", func(t *testing.T) {
 		// Defense in depth: routing already filters excluded providers, so a
 		// decision naming one is an upstream bug — dispatch must serve only
