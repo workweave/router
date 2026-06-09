@@ -286,6 +286,17 @@ func (e *RequestEnvelope) HasTools() bool {
 	return r.Int() > 0
 }
 
+// ToolRequiredParams returns a per-tool set of required parameter names parsed
+// from the inbound Anthropic tool definitions, used by the Responses→Anthropic
+// writer to strip empty-string optional args from gpt-5.x tool calls. Returns
+// nil for non-Anthropic source formats or when the request carries no tools.
+func (e *RequestEnvelope) ToolRequiredParams() map[string]map[string]struct{} {
+	if e.format != FormatAnthropic {
+		return nil
+	}
+	return parseToolRequiredParams(e.body)
+}
+
 // HasImages reports whether any message carries image (or other inline media)
 // content. Used to keep image-bearing turns off text-only models, which reject
 // image parts with a 4xx (e.g. DeepInfra's "does not accept image input" on

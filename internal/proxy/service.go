@@ -1220,7 +1220,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				translator = translate.NewResponsesToAnthropicWriter(sink, d.Model, usage).
 					WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
 					WithEstimatedInputTokens(feats.Tokens).
-					WithRequestHadTools(feats.HasTools)
+					WithRequestHadTools(feats.HasTools).
+					WithToolRequiredParams(env.ToolRequiredParams())
 			} else {
 				translator = translate.NewAnthropicSSETranslator(sink, d.Model, usage).
 					WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).

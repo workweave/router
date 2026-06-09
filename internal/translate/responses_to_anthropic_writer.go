@@ -63,6 +63,14 @@ type ResponsesToAnthropicWriter struct {
 	// later arg deltas / done event.
 	suppressed map[int]struct{}
 
+	// toolName records the function_call name per output_index so its arguments
+	// can be matched against that tool's required-parameter set at emit time.
+	toolName map[int]string
+	// toolRequiredParams maps tool name → required parameter names, parsed from
+	// the inbound request's tool definitions. Drives empty-optional-arg stripping
+	// for gpt-5.x reasoning models. nil when the request carried no tools.
+	toolRequiredParams map[string]map[string]struct{}
+
 	// Captured from the terminal response.completed/.failed/.incomplete event.
 	finalStopReason string
 	hasUsage        bool
@@ -90,7 +98,16 @@ func NewResponsesToAnthropicWriter(w http.ResponseWriter, requestModel string, s
 		itemKind:     make(map[int]string),
 		toolArgs:     make(map[int]*strings.Builder),
 		suppressed:   make(map[int]struct{}),
+		toolName:     make(map[int]string),
 	}
+}
+
+// WithToolRequiredParams installs the per-tool required-parameter sets parsed
+// from the inbound request's tool definitions, enabling empty-optional-arg
+// stripping on emitted tool calls. Pass nil to disable (no tools in request).
+func (t *ResponsesToAnthropicWriter) WithToolRequiredParams(m map[string]map[string]struct{}) *ResponsesToAnthropicWriter {
+	t.toolRequiredParams = m
+	return t
 }
 
 func (t *ResponsesToAnthropicWriter) WithRoutingMarker(marker string) *ResponsesToAnthropicWriter {
@@ -270,6 +287,7 @@ func (t *ResponsesToAnthropicWriter) handleOutputItemAdded(data []byte) error {
 	idx := t.blockIdx
 	t.itemBlocks[oi] = idx
 	t.itemKind[oi] = "tool_use"
+	t.toolName[oi] = name
 	t.toolUseCount++
 	t.blockIdx++
 	// Anthropic tool_use.id maps from call_id (not the fc_ item id).
@@ -359,6 +377,7 @@ func (t *ResponsesToAnthropicWriter) emitDoneOnlyItem(oi int, item gjson.Result)
 		idx := t.blockIdx
 		t.blockIdx++
 		t.toolUseCount++
+		t.toolName[oi] = name
 		if err := t.emitContentBlockStartTool(idx, item.Get("call_id").String(), name); err != nil {
 			return err
 		}
@@ -772,6 +791,12 @@ func (t *ResponsesToAnthropicWriter) emitValidatedToolArgsDelta(oi, index int, f
 			"args_preview", preview,
 		)
 	}
+	// Drop empty-string optional args (e.g. gpt-5.x emitting Read.pages="").
+	// Required params are preserved so a genuinely-missing one still errors.
+	if name := t.toolName[oi]; name != "" && t.toolRequiredParams != nil {
+		args = stripEmptyOptionalArgs(args, t.toolRequiredParams[name])
+	}
+	delete(t.toolName, oi)
 	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":")

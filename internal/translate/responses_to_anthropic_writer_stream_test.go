@@ -171,6 +171,60 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","ou
 	assert.Contains(t, body, `"stop_reason":"tool_use"`)
 }
 
+// gpt-5.x reasoning models emit optional string params (e.g. Read.pages) as ""
+// rather than omitting them, which fails the client's tool validation and loops
+// the model. With the tool's required-param set installed, the writer strips the
+// empty optional arg so the client receives a valid call; the required file_path
+// is preserved.
+func TestResponsesToAnthropicWriter_StripsEmptyOptionalArg(t *testing.T) {
+	const fixture = `event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"","status":"in_progress"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"{\"file_path\":\"x.go\",\"pages\":\"\"}","status":"completed"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"r","status":"completed","output":[{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"{\"file_path\":\"x.go\",\"pages\":\"\"}"}],"usage":{"input_tokens":10,"output_tokens":5}}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil).
+		WithToolRequiredParams(map[string]map[string]struct{}{
+			"Read": {"file_path": {}},
+		})
+	require.NoError(t, w.Prelude(true))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"partial_json":"{\"file_path\":\"x.go\"}"`,
+		"empty optional pages must be stripped so the client tool doesn't error")
+	assert.NotContains(t, body, `pages`,
+		"the empty optional arg must not reach the client at all")
+}
+
+// Without a required-param map (no tools / non-Anthropic inbound) the writer
+// passes args through verbatim — the strip is opt-in and never guesses.
+func TestResponsesToAnthropicWriter_NoStripWithoutSchema(t *testing.T) {
+	const fixture = `event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"","status":"in_progress"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"{\"file_path\":\"x.go\",\"pages\":\"\"}","status":"completed"}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(true))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	assert.Contains(t, rec.Body.String(), `\"pages\":\"\"`,
+		"without a schema the writer must not strip anything")
+}
+
 // A stream truncated before response.completed still reconciles to
 // stop_reason=tool_use (a tool block was emitted) and flushes the partial
 // tool args, rather than defaulting to end_turn with a dropped input_json_delta.
