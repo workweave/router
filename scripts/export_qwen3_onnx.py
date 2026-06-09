@@ -48,7 +48,7 @@ from pathlib import Path
 MODEL_ID = "Qwen/Qwen3-Embedding-0.6B"
 EMBED_DIM = 1024
 EMBEDDER_NAME = "qwen3-embedding-0.6b-int8"
-OPSET = 17
+OPSET = 18
 
 # Mirrors the prompts in scripts/dump_cluster_test_vector.py so the Go
 # parity suite exercises the same multilingual/code coverage.
@@ -99,6 +99,7 @@ def export_fp32(out_path: Path):
     model = AutoModel.from_pretrained(MODEL_ID, torch_dtype=torch.float32)
     model.eval()
     wrapper = build_wrapper(model)
+    wrapper.eval()
 
     sample = tokenizer(
         ["export sample one", "a slightly longer export sample two"],
@@ -124,13 +125,31 @@ def export_fp32(out_path: Path):
 
 
 def quantize_int8(fp32_path: Path, int8_path: Path):
+    import onnx
     from onnxruntime.quantization import QuantType, quantize_dynamic
 
-    print(f"Quantizing INT8 -> {int8_path}")
+    # Keep down_proj (3072x1024) and o_proj (2048x1024) MatMuls in fp32:
+    # both consume outlier-heavy activations (SwiGLU product / attention
+    # output) and quantizing them drops worst-case parity below 0.98.
+    # The dynamo exporter anonymizes node names, so the sensitive layers
+    # are identified by weight shape instead.
+    model = onnx.load(str(fp32_path), load_external_data=False)
+    init_dims = {i.name: tuple(i.dims) for i in model.graph.initializer}
+    sensitive = {(3072, 1024), (2048, 1024)}
+    exclude = [
+        n.name
+        for n in model.graph.node
+        if n.op_type == "MatMul"
+        and any(init_dims.get(inp) in sensitive for inp in n.input)
+    ]
+
+    print(f"Quantizing INT8 -> {int8_path} (excluding {len(exclude)} outlier-sensitive MatMuls)")
     quantize_dynamic(
         model_input=str(fp32_path),
         model_output=str(int8_path),
         weight_type=QuantType.QInt8,
+        per_channel=True,
+        nodes_to_exclude=exclude,
     )
 
 
@@ -166,7 +185,11 @@ def reference_embed(texts: list[str]):
 def cosine(a, b) -> float:
     import numpy as np
 
-    return float(np.dot(np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)))
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    a = a / max(float(np.linalg.norm(a)), 1e-12)
+    b = b / max(float(np.linalg.norm(b)), 1e-12)
+    return float(np.dot(a, b))
 
 
 def parity_check(onnx_path: Path, tokenizer, threshold: float, label: str):
@@ -203,7 +226,7 @@ def upload(out_dir: Path, repo: str):
 
     api = HfApi()
     print(f"Uploading {out_dir} -> {repo}")
-    api.create_repo(repo, exist_ok=True)
+    api.create_repo(repo, exist_ok=True, private=True)
     info = api.upload_folder(
         folder_path=str(out_dir),
         repo_id=repo,
