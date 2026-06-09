@@ -144,6 +144,24 @@ func TestResponsesToAnthropicWriter_NonStreamingClient(t *testing.T) {
 	assert.Equal(t, "NYC", input["location"])
 }
 
+func TestResponsesToAnthropicWriter_NonStreamingSummaryCarriesUsageCounts(t *testing.T) {
+	const fixture = `event: response.completed
+data: {"type":"response.completed","response":{"id":"r","status":"completed","model":"gpt-5.5","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}],"usage":{"input_tokens":1200,"input_tokens_details":{"cached_tokens":800},"output_tokens":340}}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(false))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	got := w.Summary()
+	assert.Equal(t, 1200, got.InputTokens)
+	assert.Equal(t, 340, got.OutputTokens)
+	assert.Equal(t, 800, got.CacheReadTokens)
+}
+
 // A function_call that streams no argument deltas still delivers its real
 // arguments: the translator falls back to the authoritative item.arguments on
 // the terminal output_item.done rather than emitting {}.

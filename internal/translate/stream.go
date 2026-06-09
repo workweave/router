@@ -542,6 +542,11 @@ type ResponseSummary struct {
 	ToolCallIssues []toolcheck.Issue
 	// OutputTokens is the upstream completion_tokens count, when reported.
 	OutputTokens int
+	// InputTokens is the upstream prompt_tokens count, when reported.
+	InputTokens int
+	// CacheReadTokens is the cache_read_input_tokens count from Anthropic or
+	// cached_tokens count from OpenAI, when reported.
+	CacheReadTokens int
 }
 
 // Summary returns the response summary for observability. Call after Finalize;
@@ -558,6 +563,8 @@ func (t *AnthropicSSETranslator) Summary() ResponseSummary {
 		SuppressedToolCalls:   len(t.suppressedTools),
 		ToolCallIssues:        t.toolCallIssues,
 		OutputTokens:          t.usageOutputTokens,
+		InputTokens:           t.usageInputTokens,
+		CacheReadTokens:       t.usageCacheReadTokens,
 	}
 }
 

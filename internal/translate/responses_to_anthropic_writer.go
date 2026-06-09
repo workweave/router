@@ -196,10 +196,12 @@ func (t *ResponsesToAnthropicWriter) Finalize() error {
 
 func (t *ResponsesToAnthropicWriter) Summary() ResponseSummary {
 	return ResponseSummary{
-		StopReason:     t.emittedStopReason,
-		ToolUseBlocks:  t.toolUseCount,
-		ToolCallIssues: t.toolCallIssues,
-		OutputTokens:   t.usageOutput,
+		StopReason:      t.emittedStopReason,
+		ToolUseBlocks:   t.toolUseCount,
+		ToolCallIssues:  t.toolCallIssues,
+		OutputTokens:    t.usageOutput,
+		InputTokens:     t.usageInput,
+		CacheReadTokens: t.usageCacheRead,
 	}
 }
 
@@ -556,7 +558,7 @@ func (t *ResponsesToAnthropicWriter) finalizeBuffered() error {
 	root := gjson.ParseBytes(anthropic)
 	t.recordBufferedUsage(root.Get("usage"))
 	t.emittedStopReason = root.Get("stop_reason").String()
-	t.usageOutput = int(root.Get("usage.output_tokens").Int())
+	t.captureBufferedUsage(root.Get("usage"))
 	root.Get("content").ForEach(func(_, block gjson.Result) bool {
 		if block.Get("type").String() == "tool_use" {
 			t.toolUseCount++
@@ -569,6 +571,16 @@ func (t *ResponsesToAnthropicWriter) finalizeBuffered() error {
 	t.inner.WriteHeader(http.StatusOK)
 	_, err = t.inner.Write(anthropic)
 	return err
+}
+
+func (t *ResponsesToAnthropicWriter) captureBufferedUsage(usage gjson.Result) {
+	if !usage.Exists() {
+		return
+	}
+	t.hasUsage = true
+	t.usageInput = int(usage.Get("input_tokens").Int())
+	t.usageOutput = int(usage.Get("output_tokens").Int())
+	t.usageCacheRead = int(usage.Get("cache_read_input_tokens").Int())
 }
 
 func (t *ResponsesToAnthropicWriter) recordBufferedUsage(usage gjson.Result) {
