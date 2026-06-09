@@ -11,6 +11,7 @@ import (
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/sse"
+	"workweave/router/internal/translate/toolcheck"
 
 	"github.com/tidwall/gjson"
 )
@@ -368,6 +369,16 @@ type AnthropicSSETranslator struct {
 	// parse as JSON at content_block_stop. Surfaced via Summary so the
 	// proxy can count malformed-tool turns from logs alone.
 	toolArgsInvalid map[int]struct{}
+	// toolNames records each tool block's function name so the buffered args
+	// can be validated against the right tool schema at content_block_stop.
+	toolNames map[int]string
+	// toolValidator validates and repairs buffered tool args against the
+	// inbound request's tool schemas (see toolcheck). Nil means
+	// syntax-check-only.
+	toolValidator *toolcheck.Validator
+	// toolCallIssues collects every validation/repair finding so the proxy
+	// can emit per-block router.tool_call_invalid telemetry from Summary.
+	toolCallIssues []toolcheck.Issue
 	// toolUseEmitted latches true the first time a tool_use content block is
 	// opened. finishStream clears toolBlocks before emitMessageDelta, so we
 	// can't read len(toolBlocks) at delta time; the latch outlives the map.
@@ -448,8 +459,17 @@ func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink 
 		suppressedTools: make(map[int]struct{}),
 		toolArgsBuffer:  make(map[int]*strings.Builder),
 		toolArgsInvalid: make(map[int]struct{}),
+		toolNames:       make(map[int]string),
 		usageSink:       sink,
 	}
+}
+
+// WithToolValidator installs the request's compiled tool-schema validator so
+// buffered tool args are validated (and safely repaired) before emission.
+// Pass nil to disable schema checking (no tools in the request).
+func (t *AnthropicSSETranslator) WithToolValidator(v *toolcheck.Validator) *AnthropicSSETranslator {
+	t.toolValidator = v
+	return t
 }
 
 // WithRoutingMarker installs a text snippet emitted as a standalone content
@@ -515,6 +535,11 @@ type ResponseSummary struct {
 	// nameless-call case; zero alongside it points at the call-emitted-as-text
 	// case — enough to tell the two apart from logs without dumping bodies.
 	SuppressedToolCalls int
+	// ToolCallIssues lists every tool_use block that failed toolcheck
+	// validation (invalid JSON, unknown tool, schema mismatch), including
+	// ones deterministic repair recovered. The proxy logs one
+	// router.tool_call_invalid event per entry.
+	ToolCallIssues []toolcheck.Issue
 	// OutputTokens is the upstream completion_tokens count, when reported.
 	OutputTokens int
 }
@@ -531,6 +556,7 @@ func (t *AnthropicSSETranslator) Summary() ResponseSummary {
 		TextOnlyTurnNudged:    t.nudgeEmitted,
 		StopReasonDemoted:     t.stopReasonDemoted,
 		SuppressedToolCalls:   len(t.suppressedTools),
+		ToolCallIssues:        t.toolCallIssues,
 		OutputTokens:          t.usageOutputTokens,
 	}
 }
@@ -649,7 +675,8 @@ func (t *AnthropicSSETranslator) Finalize() error {
 		}
 	}
 
-	translated, err := OpenAIToAnthropicResponse(body, t.requestModel)
+	translated, issues, err := openAIToAnthropicResponse(body, t.requestModel, t.toolValidator)
+	t.toolCallIssues = append(t.toolCallIssues, issues...)
 	if err != nil {
 		t.inner.Header().Set("Content-Type", "application/json")
 		t.inner.WriteHeader(http.StatusBadGateway)
@@ -869,6 +896,7 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 			}
 			blockIdx = t.blockIdx
 			t.toolBlocks[idx] = blockIdx
+			t.toolNames[blockIdx] = name
 			t.toolUseEmitted = true
 			t.toolUseCount++
 			t.blockIdx++
@@ -902,53 +930,42 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 	return emitErr
 }
 
-// validateBufferedToolArgs checks the accumulated input_json_delta payload for
-// a tool_use block at content_block_stop time. Latches t.toolArgsInvalid + logs
-// at error level when the payload fails to parse as JSON, so the proxy can
-// count malformed-tool turns from logs and emitValidatedToolArgsDelta can
-// substitute `{}` rather than forward the bad bytes to a strict client parser.
-func (t *AnthropicSSETranslator) validateBufferedToolArgs(blockIdx int) {
-	buf, ok := t.toolArgsBuffer[blockIdx]
-	if !ok {
-		return
-	}
-	args := buf.String()
-	if args == "" || gjson.Valid(args) {
-		return
-	}
-	t.toolArgsInvalid[blockIdx] = struct{}{}
-	preview := args
-	const previewMax = 200
-	if len(preview) > previewMax {
-		preview = preview[:previewMax]
-	}
-	observability.Get().Error(
-		"AnthropicSSE tool_use args failed JSON validation — substituting empty args",
-		"block_index", blockIdx,
-		"upstream_model", t.modelFromUpstream,
-		"args_len", len(args),
-		"args_preview", preview,
-	)
-}
-
 // emitValidatedToolArgsDelta emits exactly one input_json_delta event for the
-// given tool block, carrying the validated buffered arguments — or `{}` if
-// validation flagged them invalid. Called once per tool block at
-// content_block_stop time. A no-op for blocks with no buffered args (tools
-// that take no input). The substitute `{}` converts a stream-parser-fatal
-// turn into a tool-call that the client can dispatch (the tool then errors
-// on missing required params, which the client retries via a user message
-// — re-routing through the scorer to a different model).
+// given tool block, carrying the buffered arguments after toolcheck
+// validation and repair. Called once per tool block at content_block_stop
+// time. A no-op for blocks with no buffered args (tools that take no input).
+// Unparseable args still degrade to `{}`, which converts a
+// stream-parser-fatal turn into a tool-call that the client can dispatch
+// (the tool then errors on missing required params, which the client retries
+// via a user message — re-routing through the scorer to a different model);
+// schema mismatches that repair can't fix forward as-emitted so the client's
+// own tool error surfaces (forward + telemetry policy).
 func (t *AnthropicSSETranslator) emitValidatedToolArgsDelta(blockIdx int) error {
 	buf, ok := t.toolArgsBuffer[blockIdx]
 	if !ok || buf.Len() == 0 {
 		return nil
 	}
 	payload := buf.String()
-	if _, invalid := t.toolArgsInvalid[blockIdx]; invalid {
-		payload = "{}"
+	verdict := t.toolValidator.Check(t.toolNames[blockIdx], payload)
+	if verdict.Issue != nil {
+		t.toolCallIssues = append(t.toolCallIssues, *verdict.Issue)
+		if verdict.Issue.Bucket == toolcheck.BucketInvalidJSON && !verdict.Issue.Repaired {
+			t.toolArgsInvalid[blockIdx] = struct{}{}
+			preview := payload
+			const previewMax = 200
+			if len(preview) > previewMax {
+				preview = preview[:previewMax]
+			}
+			observability.Get().Error(
+				"AnthropicSSE tool_use args failed JSON validation — substituting empty args",
+				"block_index", blockIdx,
+				"upstream_model", t.modelFromUpstream,
+				"args_len", len(payload),
+				"args_preview", preview,
+			)
+		}
 	}
-	return t.emitContentBlockDeltaJSON(blockIdx, payload)
+	return t.emitContentBlockDeltaJSON(blockIdx, verdict.Args)
 }
 
 // routerNudgeCommand is the Bash payload synthesized when the upstream
@@ -1137,7 +1154,6 @@ func (t *AnthropicSSETranslator) finishStream() error {
 		t.thinkingOpen = false
 	}
 	for _, blockIdx := range t.toolBlocks {
-		t.validateBufferedToolArgs(blockIdx)
 		if err := t.emitValidatedToolArgsDelta(blockIdx); err != nil {
 			return err
 		}

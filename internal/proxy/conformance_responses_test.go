@@ -73,6 +73,47 @@ func TestConformance_OpenAIResponses(t *testing.T) {
 					"a medium-effort budget must promote to high for gpt-5.x (router #328 dead-zone)")
 			},
 		},
+		{
+			// Strict-decode prevention layer: every strictifiable tool schema
+			// must go out with strict:true + the strictified parameters
+			// (additionalProperties:false, all-required, optionals nullable),
+			// so gpt-5.x grammar-constrains tool arguments at decode time.
+			name:            "responses/strict_tools",
+			provider:        providers.ProviderOpenAI,
+			model:           "gpt-5.5",
+			newClient:       openAIClient,
+			inbound:         `{"model":"gpt-5.5","stream":true,"max_tokens":2048,"thinking":{"type":"enabled","budget_tokens":24576},"tools":` + readTool + `,"messages":[{"role":"user","content":"Read a.go"}]}`,
+			stream:          true,
+			upstreamFixture: "responses/toolcall.upstream.sse",
+			wantUpstream: func(t *testing.T, _ string, body []byte, _ http.Header) {
+				tool := gjson.GetBytes(body, "tools.0")
+				assert.True(t, tool.Get("strict").Bool(), "strictifiable schema must opt into strict mode")
+				params := tool.Get("parameters")
+				assert.False(t, params.Get("additionalProperties").Bool(), "strict requires additionalProperties:false")
+				required := []string{}
+				params.Get("required").ForEach(func(_, r gjson.Result) bool {
+					required = append(required, r.String())
+					return true
+				})
+				assert.ElementsMatch(t, []string{"file_path", "pages", "limit"}, required,
+					"strict requires every property listed in required")
+				assert.Equal(t, `["string","null"]`, params.Get("properties.pages.type").Raw,
+					"originally-optional params must become null unions, not stay omittable")
+			},
+		},
+		{
+			// toolcheck on the Responses path: a truncated function_call
+			// arguments payload (missing closing brace in both the deltas and
+			// the terminal item) is deterministically repaired before reaching
+			// the client. The golden pins the closed, valid input.
+			name:            "responses/invalid_toolcall",
+			provider:        providers.ProviderOpenAI,
+			model:           "gpt-5.5",
+			newClient:       openAIClient,
+			inbound:         `{"model":"gpt-5.5","stream":true,"max_tokens":2048,"thinking":{"type":"enabled","budget_tokens":24576},"tools":` + readTool + `,"messages":[{"role":"user","content":"Read a.go"}]}`,
+			stream:          true,
+			upstreamFixture: "responses/invalid_toolcall.upstream.sse",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { runConformanceCase(t, c) })

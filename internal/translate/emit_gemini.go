@@ -705,7 +705,7 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 	emitGeminiContents(jw, collapseConsecutiveRoles(entries))
 
 	writeGeminiToolsFromAnthropic(jw, body)
-	writeGeminiToolChoiceFromAnthropic(jw, body)
+	writeGeminiToolChoiceFromAnthropic(jw, body, opts.TargetModel)
 	writeGeminiGenerationConfigFromAnthropic(jw, body, opts.TargetModel, opts.ForceReasoningEffort)
 }
 
@@ -1032,12 +1032,31 @@ func writeGeminiToolsFromAnthropic(jw *jsonWriter, body []byte) {
 }
 
 // writeGeminiToolChoiceFromAnthropic writes toolConfig into jw from an Anthropic body.
-func writeGeminiToolChoiceFromAnthropic(jw *jsonWriter, body []byte) {
+//
+// When the request carries tools and the client didn't force a mode (absent
+// or "auto" tool_choice), Gemini-3.x targets get mode=VALIDATED: like AUTO
+// the model may answer with text or call a function, but emitted calls are
+// schema-constrained at decode time — the only Gemini mode that enforces
+// argument schemas without forcing a tool call. Explicit any/none/tool
+// choices are passed through untouched.
+func writeGeminiToolChoiceFromAnthropic(jw *jsonWriter, body []byte, model string) {
 	r := gjson.GetBytes(body, "tool_choice")
-	if !r.Exists() || !r.IsObject() {
+	choice := ""
+	if r.Exists() && r.IsObject() {
+		choice = r.Get("type").String()
+	}
+	if (choice == "" || choice == "auto") && hasNonEmptyTools(body) && isGemini3xModel(model) {
+		jw.Key("toolConfig")
+		jw.Obj()
+		jw.Key("functionCallingConfig")
+		jw.Obj()
+		jw.Key("mode")
+		jw.Str("VALIDATED")
+		jw.EndObj()
+		jw.EndObj()
 		return
 	}
-	switch r.Get("type").String() {
+	switch choice {
 	case "auto":
 		jw.Key("toolConfig")
 		jw.Obj()

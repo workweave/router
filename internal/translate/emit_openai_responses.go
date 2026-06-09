@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 
@@ -258,6 +259,16 @@ func flattenAnthropicToolResultContent(content gjson.Result) string {
 
 // writeResponsesToolsFromAnthropic emits the Responses flat function-tool shape
 // (`{type:"function", name, description, parameters}` — no nested wrapper).
+//
+// Each tool whose schema survives strictifyOpenAISchema is emitted with
+// `strict:true` + the strictified parameters, turning on grammar-constrained
+// decoding so gpt-5.x cannot emit out-of-schema arguments at all (the
+// prevention layer in front of toolcheck's detect/repair). Tools whose
+// schemas can't be faithfully strictified fall back to non-strict emission of
+// the original schema — never fail the request over strictness. Note the
+// proxy-side validator (toolcheck) still checks against the ORIGINAL schema:
+// strict mode makes optionals nullable, and the explicit nulls gpt-5.x then
+// emits are dropped by toolcheck's normalize pass before reaching the client.
 func writeResponsesToolsFromAnthropic(jw *jsonWriter, body []byte) {
 	tools := gjson.GetBytes(body, "tools")
 	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {
@@ -272,10 +283,18 @@ func writeResponsesToolsFromAnthropic(jw *jsonWriter, body []byte) {
 		}
 		count++
 		var params any
+		strict := false
 		if schema := tool.Get("input_schema"); schema.Exists() {
 			_ = json.Unmarshal([]byte(schema.Raw), &params)
 			params = inlineSchemaDefs(params)
 			sanitizeOpenAIToolSchema(params)
+			if strictParams, ok := strictifyOpenAISchema(params); ok {
+				params = strictParams
+				strict = true
+			} else {
+				observability.Get().Info("Responses strictify fallback — emitting non-strict tool",
+					"tool_name", tool.Get("name").String())
+			}
 		}
 		jw.Obj()
 		jw.Key("type")
@@ -290,6 +309,8 @@ func writeResponsesToolsFromAnthropic(jw *jsonWriter, body []byte) {
 			if paramBytes, err := json.Marshal(params); err == nil {
 				jw.Key("parameters")
 				jw.RawBytes(paramBytes)
+				jw.Key("strict")
+				jw.Bool(strict)
 			}
 		}
 		jw.EndObj()

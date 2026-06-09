@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"workweave/router/internal/translate"
+	"workweave/router/internal/translate/toolcheck"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -171,9 +172,27 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","ou
 	assert.Contains(t, body, `"stop_reason":"tool_use"`)
 }
 
+// readToolValidator compiles a Claude-Code-like Read tool schema: file_path
+// required, pages optional.
+func readToolValidator(t *testing.T) *toolcheck.Validator {
+	t.Helper()
+	v := toolcheck.Compile([]byte(`[{"name":"Read","input_schema":{"type":"object","properties":{"file_path":{"type":"string"},"pages":{"type":"string"}},"required":["file_path"]}}]`))
+	require.NotNil(t, v)
+	return v
+}
+
+// writeToolValidator compiles a schema set that does NOT contain Read, for the
+// unknown-tool passthrough cases.
+func writeToolValidator(t *testing.T) *toolcheck.Validator {
+	t.Helper()
+	v := toolcheck.Compile([]byte(`[{"name":"Write","input_schema":{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"]}}]`))
+	require.NotNil(t, v)
+	return v
+}
+
 // gpt-5.x reasoning models emit optional string params (e.g. Read.pages) as ""
 // rather than omitting them, which fails the client's tool validation and loops
-// the model. With the tool's required-param set installed, the writer strips the
+// the model. With the tool's schema validator installed, the writer strips the
 // empty optional arg so the client receives a valid call; the required file_path
 // is preserved.
 func TestResponsesToAnthropicWriter_StripsEmptyOptionalArg(t *testing.T) {
@@ -189,9 +208,7 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","ou
 `
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil).
-		WithToolRequiredParams(map[string]map[string]struct{}{
-			"Read": {"file_path": {}},
-		})
+		WithToolValidator(readToolValidator(t))
 	require.NoError(t, w.Prelude(true))
 	_, err := w.Write([]byte(fixture))
 	require.NoError(t, err)
@@ -217,9 +234,7 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","ou
 `
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil).
-		WithToolRequiredParams(map[string]map[string]struct{}{
-			"Read": {"file_path": {}},
-		})
+		WithToolValidator(readToolValidator(t))
 	require.NoError(t, w.Prelude(false))
 	_, err := w.Write([]byte(fixture))
 	require.NoError(t, err)
@@ -249,9 +264,7 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","ou
 `
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil).
-		WithToolRequiredParams(map[string]map[string]struct{}{
-			"Write": {"file_path": {}},
-		})
+		WithToolValidator(writeToolValidator(t))
 	require.NoError(t, w.Prelude(false))
 	_, err := w.Write([]byte(fixture))
 	require.NoError(t, err)
@@ -298,9 +311,7 @@ data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","
 `
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil).
-		WithToolRequiredParams(map[string]map[string]struct{}{
-			"Write": {"file_path": {}},
-		})
+		WithToolValidator(writeToolValidator(t))
 	require.NoError(t, w.Prelude(true))
 	_, err := w.Write([]byte(fixture))
 	require.NoError(t, err)

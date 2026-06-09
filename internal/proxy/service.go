@@ -1152,6 +1152,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	var reqStats providers.RequestMutationStats
 
 	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
+	// toolValidator compiles the request's tool schemas once for all attempts
+	// (LRU-cached across turns); response translators validate and repair
+	// model-emitted tool calls against it. Nil when the request has no tools.
+	toolValidator := env.ToolValidator()
 	// markerSink wraps sink with an AnthropicRoutingMarkerWriter per attempt.
 	// Unlike translator-backed paths, the Anthropic-native writer must wait
 	// for upstream headers so non-2xx responses can stay buffered/retryable.
@@ -1234,12 +1238,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 					WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
 					WithEstimatedInputTokens(feats.Tokens).
 					WithRequestHadTools(feats.HasTools).
-					WithToolRequiredParams(env.ToolRequiredParams())
+					WithToolValidator(toolValidator)
 			} else {
 				translator = translate.NewAnthropicSSETranslator(sink, d.Model, usage).
 					WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
 					WithEstimatedInputTokens(feats.Tokens).
-					WithRequestHadTools(feats.HasTools)
+					WithRequestHadTools(feats.HasTools).
+					WithToolValidator(toolValidator)
 			}
 			if err := translator.Prelude(env.Stream()); err != nil {
 				log.Error("Anthropic SSE prelude failed (OpenAI upstream)", "err", err)
@@ -1282,7 +1287,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			anthropicTr := translate.NewAnthropicSSETranslator(sink, d.Model, usage).
 				WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
 				WithEstimatedInputTokens(feats.Tokens).
-				WithRequestHadTools(feats.HasTools)
+				WithRequestHadTools(feats.HasTools).
+				WithToolValidator(toolValidator)
 			if err := anthropicTr.Prelude(env.Stream()); err != nil {
 				log.Error("Anthropic SSE prelude failed (Gemini upstream)", "err", err)
 			}
@@ -1462,7 +1468,24 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Successful turns reset the counter.
 	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, routeRes.PinRole)
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
+	// One event per tool_use block that failed toolcheck validation —
+	// including blocks deterministic repair recovered. Queryable per
+	// model×provider, so beyond debugging it doubles as a per-upstream
+	// tool-calling-quality signal for future routing decisions.
+	for _, iss := range respSummary.ToolCallIssues {
+		log.Info("router.tool_call_invalid",
+			"tool_name", iss.ToolName,
+			"failure_bucket", string(iss.Bucket),
+			"detail", iss.Detail,
+			"repaired", iss.Repaired,
+			"repair_actions", iss.Actions,
+			"model", decision.Model,
+			"provider", finalProvider,
+			"session_key_prefix", shortSessionKey(routeRes.SessionKey),
+		)
+	}
+
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
 	return proxyErr
 }
 

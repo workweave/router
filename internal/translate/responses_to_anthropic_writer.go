@@ -9,6 +9,7 @@ import (
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/sse"
+	"workweave/router/internal/translate/toolcheck"
 
 	"github.com/tidwall/gjson"
 )
@@ -64,12 +65,15 @@ type ResponsesToAnthropicWriter struct {
 	suppressed map[int]struct{}
 
 	// toolName records the function_call name per output_index so its arguments
-	// can be matched against that tool's required-parameter set at emit time.
+	// can be validated against that tool's schema at emit time.
 	toolName map[int]string
-	// toolRequiredParams maps tool name → required parameter names, parsed from
-	// the inbound request's tool definitions. Drives empty-optional-arg stripping
-	// for gpt-5.x reasoning models. nil when the request carried no tools.
-	toolRequiredParams map[string]map[string]struct{}
+	// toolValidator validates and repairs emitted tool args against the
+	// inbound request's tool schemas (see toolcheck). Nil means
+	// syntax-check-only (no tools in the request).
+	toolValidator *toolcheck.Validator
+	// toolCallIssues collects every validation/repair finding so the proxy
+	// can emit per-block router.tool_call_invalid telemetry from Summary.
+	toolCallIssues []toolcheck.Issue
 
 	// Captured from the terminal response.completed/.failed/.incomplete event.
 	finalStopReason string
@@ -102,11 +106,11 @@ func NewResponsesToAnthropicWriter(w http.ResponseWriter, requestModel string, s
 	}
 }
 
-// WithToolRequiredParams installs the per-tool required-parameter sets parsed
-// from the inbound request's tool definitions, enabling empty-optional-arg
-// stripping on emitted tool calls. Pass nil to disable (no tools in request).
-func (t *ResponsesToAnthropicWriter) WithToolRequiredParams(m map[string]map[string]struct{}) *ResponsesToAnthropicWriter {
-	t.toolRequiredParams = m
+// WithToolValidator installs the request's compiled tool-schema validator so
+// emitted tool args are validated (and safely repaired) before they reach the
+// client. Pass nil to disable schema checking (no tools in the request).
+func (t *ResponsesToAnthropicWriter) WithToolValidator(v *toolcheck.Validator) *ResponsesToAnthropicWriter {
+	t.toolValidator = v
 	return t
 }
 
@@ -192,9 +196,10 @@ func (t *ResponsesToAnthropicWriter) Finalize() error {
 
 func (t *ResponsesToAnthropicWriter) Summary() ResponseSummary {
 	return ResponseSummary{
-		StopReason:    t.emittedStopReason,
-		ToolUseBlocks: t.toolUseCount,
-		OutputTokens:  t.usageOutput,
+		StopReason:     t.emittedStopReason,
+		ToolUseBlocks:  t.toolUseCount,
+		ToolCallIssues: t.toolCallIssues,
+		OutputTokens:   t.usageOutput,
 	}
 }
 
@@ -542,7 +547,8 @@ func (t *ResponsesToAnthropicWriter) finalizeBuffered() error {
 		observability.Get().Error("ResponsesToAnthropic: upstream response failed", "request_model", t.requestModel)
 		return t.finalizeError()
 	}
-	anthropic, err := responsesToAnthropicResponse(finalResp, t.requestModel, t.toolRequiredParams)
+	anthropic, issues, err := responsesToAnthropicResponse(finalResp, t.requestModel, t.toolValidator)
+	t.toolCallIssues = append(t.toolCallIssues, issues...)
 	if err != nil {
 		observability.Get().Error("ResponsesToAnthropic: translate failed", "err", err)
 		return t.finalizeError()
@@ -755,10 +761,13 @@ func (t *ResponsesToAnthropicWriter) emitContentBlockDeltaThinking(index int, te
 }
 
 // emitValidatedToolArgsDelta emits a single input_json_delta for a tool block,
-// carrying the buffered arguments. When those are empty or fail to parse it
-// falls back to fallback (the authoritative `arguments` from the terminal
-// item), and only as a last resort `{}` — so a malformed concatenation or a
-// lost delta stream can't break the client's tool-args parser.
+// carrying the buffered arguments after toolcheck validation and repair. When
+// the buffered concatenation is empty or unparseable it falls back to
+// fallback (the authoritative `arguments` from the terminal item) before the
+// validator runs — so a malformed concatenation or a lost delta stream can't
+// break the client's tool-args parser. Unparseable args still degrade to
+// `{}`; schema mismatches repair can't fix forward as-emitted so the client's
+// own tool error surfaces (forward + telemetry policy).
 func (t *ResponsesToAnthropicWriter) emitValidatedToolArgsDelta(oi, index int, fallback string) error {
 	buf, ok := t.toolArgs[oi]
 	delete(t.toolArgs, oi)
@@ -766,38 +775,30 @@ func (t *ResponsesToAnthropicWriter) emitValidatedToolArgsDelta(oi, index int, f
 	if ok {
 		buffered = buf.String()
 	}
-	args := "{}"
-	switch {
-	case buffered != "" && gjson.Valid(buffered):
-		args = buffered
-	case fallback != "" && gjson.Valid(fallback):
-		args = fallback
-	case buffered != "" || fallback != "":
-		bad := buffered
-		if bad == "" {
-			bad = fallback
-		}
-		const previewMax = 200
-		preview := bad
-		if len(preview) > previewMax {
-			preview = preview[:previewMax]
-		}
-		observability.Get().Error(
-			"ResponsesToAnthropic tool_use args failed JSON validation — substituting empty args",
-			"block_index", index,
-			"request_model", t.requestModel,
-			"buffered_len", len(buffered),
-			"fallback_len", len(fallback),
-			"args_preview", preview,
-		)
+	raw := buffered
+	if raw == "" || (!gjson.Valid(raw) && fallback != "" && gjson.Valid(fallback)) {
+		raw = fallback
 	}
-	// Drop empty-string optional args (e.g. gpt-5.x emitting Read.pages="").
-	// Required params are preserved so a genuinely-missing one still errors.
-	if name := t.toolName[oi]; name != "" && t.toolRequiredParams != nil {
-		if required, ok := t.toolRequiredParams[name]; ok {
-			args = stripEmptyOptionalArgs(args, required)
+	verdict := t.toolValidator.Check(t.toolName[oi], raw)
+	if verdict.Issue != nil {
+		t.toolCallIssues = append(t.toolCallIssues, *verdict.Issue)
+		if verdict.Issue.Bucket == toolcheck.BucketInvalidJSON && !verdict.Issue.Repaired {
+			const previewMax = 200
+			preview := raw
+			if len(preview) > previewMax {
+				preview = preview[:previewMax]
+			}
+			observability.Get().Error(
+				"ResponsesToAnthropic tool_use args failed JSON validation — substituting empty args",
+				"block_index", index,
+				"request_model", t.requestModel,
+				"buffered_len", len(buffered),
+				"fallback_len", len(fallback),
+				"args_preview", preview,
+			)
 		}
 	}
+	args := verdict.Args
 	delete(t.toolName, oi)
 	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))

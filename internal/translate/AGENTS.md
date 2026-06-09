@@ -26,6 +26,12 @@ Anthropic-only fields (`thinking`, `cache_control`, `metadata`, Anthropic beta h
 
 The router translator must **round-trip `thoughtSignature` on text / thinking blocks as well as `functionCall` blocks**. Dropping it on text parts breaks the next turn against Gemini 3.x preview models with a 400. The native Generative Language REST client in [`../providers/google`](../providers/google) is mandatory for those flows; the OpenAI-compat surface at `/v1beta/openai` does **not** preserve `thoughtSignature`.
 
+## Tool-call validation + strict decoding (load-bearing)
+
+Model-emitted tool_use arguments are validated against the inbound request's `tools[].input_schema` by [`toolcheck`](toolcheck/) at every response-translation point (OpenAI-compat and Gemini chains, streaming + non-streaming, and both Responses paths). The pipeline: normalize (drop empty-string/null OPTIONAL params) -> minimal JSON repair -> Draft-7 validation -> safe deterministic repair (drop unknown keys, lossless coercions), re-validated. Unrepairable schema mismatches forward as-emitted (the client's own tool error is the feedback loop); only unparseable JSON degrades to `{}`. Every finding surfaces via `ResponseSummary.ToolCallIssues`, which the proxy logs as `router.tool_call_invalid`. **Everything is fail-open** — a schema that won't compile must never fail a request.
+
+On the emit side the failure class is prevented at decode time where the upstream exposes a knob: OpenAI Responses tools go out with `strict:true` + a strictified schema ([`strictify_openai.go`](strictify_openai.go) — additionalProperties:false, all-required, optionals as null unions; non-strictifiable schemas fall back to non-strict). Gemini 3.x gets `functionCallingConfig.mode=VALIDATED` when the client didn't force a tool_choice. Proxy-side validation always checks against the ORIGINAL schema — the explicit nulls strict mode induces are dropped by toolcheck's normalize pass.
+
 ## Invariants
 
 - **No I/O.** No HTTP, no DB, no filesystem.

@@ -99,6 +99,39 @@ func TestConformance_GeminiNative(t *testing.T) {
 					"prior assistant tool_use signature must round-trip onto the Gemini functionCall part")
 			},
 		},
+		{
+			// Strict-decode prevention layer: tools present with no forced
+			// tool_choice must emit functionCallingConfig.mode=VALIDATED on
+			// Gemini 3.x — schema-constrained tool args at decode time without
+			// forcing a function call.
+			name:            "gemini_native/validated_mode",
+			provider:        providers.ProviderGoogle,
+			model:           "gemini-3.1-pro-preview",
+			newClient:       geminiClient,
+			inbound:         `{"model":"gemini-3.1-pro-preview","stream":true,"max_tokens":1024,"tools":` + weatherTool + `,"messages":[{"role":"user","content":"Weather in NYC?"}]}`,
+			stream:          true,
+			upstreamFixture: "gemini_native/toolcall.upstream.sse",
+			wantUpstream: func(t *testing.T, _ string, body []byte, _ http.Header) {
+				assert.Equal(t, "VALIDATED", gjson.GetBytes(body, "toolConfig.functionCallingConfig.mode").String(),
+					"tools + unforced tool_choice on Gemini 3.x must request VALIDATED decoding")
+			},
+		},
+		{
+			// An explicit client tool_choice must never be clobbered by the
+			// VALIDATED upgrade: forced single-tool stays ANY + allowlist.
+			name:            "gemini_native/validated_mode_forced_tool_preserved",
+			provider:        providers.ProviderGoogle,
+			model:           "gemini-3.1-pro-preview",
+			newClient:       geminiClient,
+			inbound:         `{"model":"gemini-3.1-pro-preview","stream":true,"max_tokens":1024,"tools":` + weatherTool + `,"tool_choice":{"type":"tool","name":"get_weather"},"messages":[{"role":"user","content":"Weather in NYC?"}]}`,
+			stream:          true,
+			upstreamFixture: "gemini_native/toolcall.upstream.sse",
+			wantUpstream: func(t *testing.T, _ string, body []byte, _ http.Header) {
+				fcc := gjson.GetBytes(body, "toolConfig.functionCallingConfig")
+				assert.Equal(t, "ANY", fcc.Get("mode").String(), "a forced tool keeps mode=ANY")
+				assert.Equal(t, "get_weather", fcc.Get("allowedFunctionNames.0").String())
+			},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { runConformanceCase(t, c) })

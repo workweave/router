@@ -1,0 +1,17 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_bad","status":"in_progress","model":"gpt-5.5","output":[]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_trunc","name":"Read","arguments":"","status":"in_progress"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"file_path\":"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"\"a.go\""}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_trunc","name":"Read","arguments":"{\"file_path\":\"a.go\"","status":"completed"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_bad","status":"completed","model":"gpt-5.5","incomplete_details":null,"output":[{"id":"fc_1","type":"function_call","call_id":"call_trunc","name":"Read","arguments":"{\"file_path\":\"a.go\""}],"usage":{"input_tokens":120,"input_tokens_details":{"cached_tokens":0},"output_tokens":20}}}

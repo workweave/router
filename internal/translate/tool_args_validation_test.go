@@ -14,12 +14,14 @@ import (
 // OpenAI-compat upstreams on vLLM/SGLang sometimes emit malformed JSON in
 // tool_call.function.arguments — partial keys, unbalanced braces, mid-string
 // truncation. The translator buffers args per tool block, validates at
-// content_block_stop, and emits exactly one input_json_delta carrying either
-// the valid buffered payload OR `{}` when validation failed. The `{}`
-// substitute converts a stream-parser-fatal turn (Claude Code's strict
-// Anthropic parser refuses malformed input_json_delta) into a tool-call the
-// client can dispatch — which then errors on missing required params and
-// triggers a normal CC retry that re-routes through the scorer.
+// content_block_stop via toolcheck, and emits exactly one input_json_delta
+// carrying the valid buffered payload, a minimal deterministic repair of it
+// (truncation closed, trailing comma dropped), or `{}` as the last resort
+// when no repair applies. Repair-or-`{}` converts a stream-parser-fatal turn
+// (Claude Code's strict Anthropic parser refuses malformed input_json_delta)
+// into a tool-call the client can dispatch — which then errors on whatever is
+// genuinely wrong and triggers a normal CC retry that re-routes through the
+// scorer.
 
 // driveAnthropicSSEWithSummary feeds events through a translator and returns
 // the final response summary alongside the translated body, so tests can
@@ -42,10 +44,12 @@ func driveAnthropicSSEWithSummary(
 	return rec.Body.String(), translator.Summary()
 }
 
-func TestAnthropicSSETranslator_FlagsInvalidToolArgs(t *testing.T) {
+func TestAnthropicSSETranslator_RepairsTruncatedToolArgs(t *testing.T) {
 	// Truncated JSON: opening brace, key, colon, opening string — then EOF.
 	// This is the most common malformed shape seen from GLM/Kimi on vLLM
-	// when the model hits the max_tokens cap mid-tool-call.
+	// when the model hits the max_tokens cap mid-tool-call. toolcheck's
+	// minimal repair closes the string + brace, preserving the intact args
+	// (path) instead of degrading the whole payload to `{}`.
 	body, summary := driveAnthropicSSEWithSummary(t, "z-ai/glm-5.1", []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"Edit","arguments":"{\"path\":\"a.go\",\"old_string\":\"hel"}}]},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}` + "\n\n",
@@ -55,18 +59,38 @@ func TestAnthropicSSETranslator_FlagsInvalidToolArgs(t *testing.T) {
 	// Tool_use block still emits so stop_reason="tool_use" is honored.
 	assert.Contains(t, body, `"type":"tool_use"`)
 	assert.Contains(t, body, `"name":"Edit"`)
-	assert.Equal(t, 1, summary.InvalidToolArgsBlocks,
-		"truncated JSON args must be flagged in Summary so the proxy can log the malformed turn")
+	assert.Equal(t, 0, summary.InvalidToolArgsBlocks,
+		"a repaired payload is dispatchable — the unrecoverable-args latch must not fire")
+	require.Len(t, summary.ToolCallIssues, 1,
+		"the repair must still be reported so the proxy logs the malformed turn")
+	assert.Equal(t, "invalid_json", string(summary.ToolCallIssues[0].Bucket))
+	assert.True(t, summary.ToolCallIssues[0].Repaired)
 
-	// The translator MUST NOT forward the malformed bytes to the client.
-	// Instead it emits a single input_json_delta carrying `{}`, which CC's
-	// parser accepts. The downstream tool call then errors on missing
-	// required params, which CC handles with its standard tool-result retry
-	// instead of dying mid-stream on "tool call could not be parsed."
-	assert.NotContains(t, body, `\"old_string\":\"hel`,
+	// The raw malformed bytes must not reach the client — only the closed,
+	// valid repair does (one consolidated input_json_delta).
+	assert.Contains(t, body, `"partial_json":"{\"path\":\"a.go\",\"old_string\":\"hel\"}"`,
+		"repair closes the truncated string/brace and keeps the intact args")
+}
+
+func TestAnthropicSSETranslator_SubstitutesEmptyArgsWhenUnrepairable(t *testing.T) {
+	// A mismatched closer can't be fixed by the minimal repair pass. The
+	// translator falls back to `{}`, which CC's parser accepts; the tool then
+	// errors on missing required params and CC retries via a normal
+	// tool_result instead of dying mid-stream on "tool call could not be
+	// parsed."
+	body, summary := driveAnthropicSSEWithSummary(t, "z-ai/glm-5.1", []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"Edit","arguments":"{\"path\":\"a.go\"]"}}]},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.Contains(t, body, `"type":"tool_use"`)
+	assert.Equal(t, 1, summary.InvalidToolArgsBlocks,
+		"unrepairable args must be flagged in Summary so the proxy can log the malformed turn")
+	assert.NotContains(t, body, `\"path\":\"a.go\"]`,
 		"the malformed args fragment must not reach the client")
 	assert.Contains(t, body, `"partial_json":"{}"`,
-		"invalid args must be substituted with empty `{}` payload so CC's parser succeeds")
+		"unrepairable args must be substituted with empty `{}` payload so CC's parser succeeds")
 }
 
 func TestAnthropicSSETranslator_AcceptsValidToolArgs(t *testing.T) {
@@ -87,19 +111,21 @@ func TestAnthropicSSETranslator_AcceptsValidToolArgs(t *testing.T) {
 }
 
 func TestAnthropicSSETranslator_FlagsEachInvalidBlockIndependently(t *testing.T) {
-	// Two tool_calls: one with valid args, one truncated. Each block is
-	// buffered + validated under its own Anthropic content-block index, so
-	// the count tracks blocks not turns.
+	// Two tool_calls: one with valid args, one with an unrepairable
+	// mismatched closer. Each block is buffered + validated under its own
+	// Anthropic content-block index, so the count tracks blocks not turns.
 	_, summary := driveAnthropicSSEWithSummary(t, "z-ai/glm-5.1", []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"Read","arguments":"{\"path\":\"a.go\"}"}}]},"finish_reason":null}]}` + "\n\n",
-		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"Edit","arguments":"{\"path\":\"b.go"}}]},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"Edit","arguments":"{\"path\":\"b.go\"]"}}]},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n",
 		"data: [DONE]\n\n",
 	})
 
 	assert.Equal(t, 2, summary.ToolUseBlocks)
 	assert.Equal(t, 1, summary.InvalidToolArgsBlocks,
-		"only the truncated block must be flagged; the valid sibling is unaffected")
+		"only the malformed block must be flagged; the valid sibling is unaffected")
+	require.Len(t, summary.ToolCallIssues, 1)
+	assert.Equal(t, "Edit", summary.ToolCallIssues[0].ToolName)
 }
 
 // driveAnthropicSSEWithTools is driveAnthropicSSEWithSummary plus an

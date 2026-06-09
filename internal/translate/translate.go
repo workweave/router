@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"workweave/router/internal/translate/toolcheck"
+
 	"github.com/tidwall/gjson"
 )
 
@@ -160,8 +162,17 @@ func AnthropicToOpenAIError(body []byte) []byte {
 // OpenAIToAnthropicResponse converts a non-streaming OpenAI response to
 // Anthropic Messages format.
 func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
+	out, _, err := openAIToAnthropicResponse(body, requestModel, nil)
+	return out, err
+}
+
+// openAIToAnthropicResponse is the validator-aware variant: tool_use inputs
+// are checked (and safely repaired) against the request's tool schemas via
+// toolValidator, with one toolcheck.Issue returned per offending block. A nil
+// validator degrades to syntax-check-only.
+func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *toolcheck.Validator) ([]byte, []toolcheck.Issue, error) {
 	if !gjson.ValidBytes(body) {
-		return nil, fmt.Errorf("unmarshal openai response: invalid JSON")
+		return nil, nil, fmt.Errorf("unmarshal openai response: invalid JSON")
 	}
 	id := gjson.GetBytes(body, "id").String()
 	if id == "" {
@@ -202,7 +213,7 @@ func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error)
 	jw.Key("model")
 	jw.Str(model)
 	jw.Key("content")
-	writeAnthropicContentFromOpenAI(jw, message)
+	issues := writeAnthropicContentFromOpenAI(jw, message, toolValidator)
 	jw.Key("stop_reason")
 	jw.Str(openAIFinishToAnthropicStopReason(finishReason))
 	jw.Key("stop_sequence")
@@ -210,10 +221,10 @@ func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error)
 	jw.Key("usage")
 	writeAnthropicUsageFromOpenAI(jw, gjson.GetBytes(body, "usage"))
 	jw.EndObj()
-	return jw.Bytes(), nil
+	return jw.Bytes(), issues, nil
 }
 
-func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result) {
+func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolValidator *toolcheck.Validator) (issues []toolcheck.Issue) {
 	jw.Arr()
 	reasoning := message.Get("reasoning_content").String()
 	if reasoning == "" {
@@ -245,25 +256,23 @@ func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result) {
 		}
 		argsStr := tc.Get("function.arguments").String()
 
-		var inputRaw string
 		if EnableEditEscapeNormalize && isEditToolName(name) {
 			var inputMap map[string]any
 			if json.Unmarshal([]byte(argsStr), &inputMap) == nil {
 				normalizeEditEscapes(name, inputMap)
 				if b, err := json.Marshal(inputMap); err == nil {
-					inputRaw = string(b)
+					argsStr = string(b)
 				}
 			}
-			if inputRaw == "" {
-				inputRaw = "{}"
-			}
-		} else {
-			if gjson.Valid(argsStr) {
-				inputRaw = argsStr
-			} else {
-				inputRaw = "{}"
-			}
 		}
+		// Validate (and safely repair) the args against the request's tool
+		// schema; with a nil validator this degrades to the historic
+		// syntax-check + `{}` substitution.
+		verdict := toolValidator.Check(name, argsStr)
+		if verdict.Issue != nil {
+			issues = append(issues, *verdict.Issue)
+		}
+		inputRaw := verdict.Args
 
 		jw.Obj()
 		jw.Key("type")
@@ -278,6 +287,7 @@ func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result) {
 		return true
 	})
 	jw.EndArr()
+	return issues
 }
 
 // anyNamedToolCall reports whether the OpenAI tool_calls array contains at

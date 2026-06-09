@@ -3,6 +3,8 @@ package translate
 import (
 	"fmt"
 
+	"workweave/router/internal/translate/toolcheck"
+
 	"github.com/tidwall/gjson"
 )
 
@@ -11,12 +13,17 @@ import (
 // Responses `output` array carries reasoning / message / function_call items,
 // which map to Anthropic thinking / text / tool_use content blocks.
 func ResponsesToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
-	return responsesToAnthropicResponse(body, requestModel, nil)
+	out, _, err := responsesToAnthropicResponse(body, requestModel, nil)
+	return out, err
 }
 
-func responsesToAnthropicResponse(body []byte, requestModel string, toolRequiredParams map[string]map[string]struct{}) ([]byte, error) {
+// responsesToAnthropicResponse is the validator-aware variant: tool_use
+// inputs are checked (and safely repaired) against the request's tool schemas
+// via toolValidator, with one toolcheck.Issue returned per offending block. A
+// nil validator degrades to syntax-check-only.
+func responsesToAnthropicResponse(body []byte, requestModel string, toolValidator *toolcheck.Validator) ([]byte, []toolcheck.Issue, error) {
 	if !gjson.ValidBytes(body) {
-		return nil, fmt.Errorf("unmarshal responses response: invalid JSON")
+		return nil, nil, fmt.Errorf("unmarshal responses response: invalid JSON")
 	}
 	root := gjson.ParseBytes(body)
 
@@ -59,6 +66,7 @@ func responsesToAnthropicResponse(body []byte, requestModel string, toolRequired
 
 	jw.Key("content")
 	jw.Arr()
+	var issues []toolcheck.Issue
 	root.Get("output").ForEach(func(_, item gjson.Result) bool {
 		switch item.Get("type").String() {
 		case "reasoning":
@@ -100,17 +108,14 @@ func responsesToAnthropicResponse(body []byte, requestModel string, toolRequired
 			name := item.Get("name").String()
 			jw.Str(name)
 			jw.Key("input")
-			args := item.Get("arguments").String()
-			if args == "" || !gjson.Valid(args) {
-				jw.Raw("{}")
-			} else {
-				if name != "" && toolRequiredParams != nil {
-					if required, ok := toolRequiredParams[name]; ok {
-						args = stripEmptyOptionalArgs(args, required)
-					}
-				}
-				jw.Raw(args)
+			// Validate (and safely repair) the args against the request's
+			// tool schema; with a nil validator this degrades to the historic
+			// syntax-check + `{}` substitution.
+			verdict := toolValidator.Check(name, item.Get("arguments").String())
+			if verdict.Issue != nil {
+				issues = append(issues, *verdict.Issue)
 			}
+			jw.Raw(verdict.Args)
 			jw.EndObj()
 		}
 		return true
@@ -136,7 +141,7 @@ func responsesToAnthropicResponse(body []byte, requestModel string, toolRequired
 	jw.EndObj()
 
 	jw.EndObj()
-	return jw.Bytes(), nil
+	return jw.Bytes(), issues, nil
 }
 
 // joinReasoningSummary flattens a Responses reasoning `summary` array (items of

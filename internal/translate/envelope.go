@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"workweave/router/internal/router"
+	"workweave/router/internal/translate/toolcheck"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -286,15 +287,22 @@ func (e *RequestEnvelope) HasTools() bool {
 	return r.Int() > 0
 }
 
-// ToolRequiredParams returns a per-tool set of required parameter names parsed
-// from the inbound Anthropic tool definitions, used by the Responses→Anthropic
-// writer to strip empty-string optional args from gpt-5.x tool calls. Returns
-// nil for non-Anthropic source formats or when the request carries no tools.
-func (e *RequestEnvelope) ToolRequiredParams() map[string]map[string]struct{} {
+// ToolValidator compiles the inbound Anthropic tool definitions
+// (tools[].input_schema) into a toolcheck.Validator, used by the response
+// translators to validate and repair model-emitted tool calls. Returns nil
+// for non-Anthropic source formats or when the request carries no tools —
+// translators treat a nil validator as syntax-check-only. Compilation is
+// amortized across turns via toolcheck's LRU (agent sessions resend a
+// byte-identical tools block every turn).
+func (e *RequestEnvelope) ToolValidator() *toolcheck.Validator {
 	if e.format != FormatAnthropic {
 		return nil
 	}
-	return parseToolRequiredParams(e.body)
+	tools := gjson.GetBytes(e.body, "tools")
+	if !tools.IsArray() {
+		return nil
+	}
+	return toolcheck.CompileCached([]byte(tools.Raw))
 }
 
 // HasImages reports whether any message carries image (or other inline media)

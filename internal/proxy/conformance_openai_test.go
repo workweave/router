@@ -22,6 +22,11 @@ func openRouterClient(baseURL string) providers.Client {
 
 const weatherTool = `[{"name":"get_weather","description":"Get the weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]`
 
+// readTool mirrors the Claude Code Read tool shape: a required param, an
+// optional string, an integer, and a closed schema — enough surface for the
+// toolcheck validate/repair conformance cases.
+const readTool = `[{"name":"Read","description":"Read a file","input_schema":{"type":"object","properties":{"file_path":{"type":"string"},"pages":{"type":"string"},"limit":{"type":"integer"}},"required":["file_path"],"additionalProperties":false}}]`
+
 func TestConformance_OpenAIChat(t *testing.T) {
 	cases := []conformanceCase{
 		{
@@ -103,6 +108,32 @@ func TestConformance_OpenAIChat(t *testing.T) {
 				assert.Equal(t, "system", gjson.GetBytes(body, "messages.0.role").String(), "top-level Anthropic system must become a leading system message")
 				assert.Contains(t, gjson.GetBytes(body, "messages.0.content").String(), "helpful assistant")
 			},
+		},
+		{
+			// toolcheck unrepairable tier: a mismatched closer can't be fixed
+			// deterministically, so the args degrade to `{}` (never the raw
+			// malformed bytes) and the tool_use block stays dispatchable. The
+			// golden pins the `{}` substitution.
+			name:            "openai_chat/invalid_toolcall_args",
+			provider:        providers.ProviderOpenRouter,
+			model:           "deepseek/deepseek-v4-pro",
+			newClient:       openRouterClient,
+			inbound:         `{"model":"deepseek/deepseek-v4-pro","stream":true,"max_tokens":1024,"tools":` + readTool + `,"messages":[{"role":"user","content":"Read a.go"}]}`,
+			stream:          true,
+			upstreamFixture: "openai_chat/invalid_toolcall_args.upstream.sse",
+		},
+		{
+			// toolcheck normalize+repair tier on one call: empty-string optional
+			// dropped (#339 semantics), hallucinated param dropped (schema closes
+			// additionalProperties), "5"-for-integer losslessly coerced. The
+			// golden pins the cleaned input reaching the client.
+			name:            "openai_chat/toolcall_repaired_args",
+			provider:        providers.ProviderOpenRouter,
+			model:           "deepseek/deepseek-v4-pro",
+			newClient:       openRouterClient,
+			inbound:         `{"model":"deepseek/deepseek-v4-pro","stream":true,"max_tokens":1024,"tools":` + readTool + `,"messages":[{"role":"user","content":"Read a.go"}]}`,
+			stream:          true,
+			upstreamFixture: "openai_chat/toolcall_repaired_args.upstream.sse",
 		},
 	}
 	for _, c := range cases {
