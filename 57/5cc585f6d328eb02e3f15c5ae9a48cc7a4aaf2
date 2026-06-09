@@ -1,0 +1,21 @@
+internal/observability/apm/apm.go
+  s_ebfa96f9db32d9::t_b2af1328d3012e 86-92
+cmd/router/main.go
+  s_ebfa96f9db32d9::t_1e97c1a4cb0246 648-654
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "575cc585f6d328eb02e3f15c5ae9a48cc7a4aaf2",
+  "prompts": {},
+  "sessions": {
+    "s_ebfa96f9db32d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82f09df5-4976-4e25-8c8a-84dea4f84240",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

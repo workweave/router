@@ -1,0 +1,19 @@
+internal/api/openai/responses.go
+  s_bbd46d33accca4::t_831eeea864a505 74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "3e0ccd2b8a743f9f51dba4c3c6c676649e81bff0",
+  "prompts": {},
+  "sessions": {
+    "s_bbd46d33accca4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ff3904c-b359-423e-97be-4a870494ad91",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
