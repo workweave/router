@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 
+	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/router"
 )
@@ -22,6 +24,14 @@ type observationContext struct {
 	// TTFTMs is the upstream-request-to-first-byte delta in ms. Pointer because
 	// zero is a legitimate sub-millisecond measurement.
 	TTFTMs *int64
+	// CandidateScores is the pre-argmax score vector marshaled to JSON for the
+	// jsonb column. nil when the router exposes no score vector. Off-policy
+	// substrate only — never read back on the request path.
+	CandidateScores []byte
+	// Propensity is the probability the chosen model was selected under the
+	// acting policy. Pointer so 0.0 stays distinct from "not a cluster
+	// decision". 1.0 for deterministic argmax.
+	Propensity *float64
 }
 
 // buildObservationContext derives the observation bundle from the routing
@@ -44,6 +54,19 @@ func buildObservationContext(ctx context.Context, decision router.Decision) obse
 		score := float64(md.ChosenScore)
 		obs.ChosenScore = &score
 		obs.ClusterRouterVersion = md.ClusterRouterVersion
+		// Propensity is meaningful only for a score-producing router; the
+		// pointer keeps a deterministic 1.0 distinct from the non-cluster nil.
+		prop := float64(md.Propensity)
+		obs.Propensity = &prop
+		if len(md.CandidateScores) > 0 {
+			if b, err := json.Marshal(md.CandidateScores); err == nil {
+				obs.CandidateScores = b
+			} else {
+				// Telemetry loss is acceptable; a marshal failure must never
+				// fail the request, so log and leave the column NULL.
+				observability.Get().Debug("Failed to marshal candidate_scores for telemetry", "err", err)
+			}
+		}
 	}
 	if t := otel.TimingFrom(ctx); t != nil {
 		if ms := t.Ms(&t.UpstreamRequestNanos, &t.UpstreamFirstByteNanos); ms > 0 {
@@ -65,6 +88,12 @@ func (o observationContext) applySpanAttrs(b *otel.AttrBuilder) {
 	}
 	if o.ChosenScore != nil {
 		b.Float64("routing.chosen_score", *o.ChosenScore)
+	}
+	if o.Propensity != nil {
+		b.Float64("routing.propensity", *o.Propensity)
+	}
+	if len(o.CandidateScores) > 0 {
+		b.String("routing.candidate_scores", string(o.CandidateScores))
 	}
 	if o.ClusterRouterVersion != "" {
 		b.String("routing.cluster_version", o.ClusterRouterVersion)

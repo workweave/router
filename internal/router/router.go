@@ -45,6 +45,15 @@ type RoutingMetadata struct {
 	ChosenScore          float32
 	ClusterRouterVersion string
 	EffectiveKnobsHash   uint64 // NEW: canonical knobs hash for response-cache isolation
+	// CandidateScores is the full pre-argmax blended score per eligible model.
+	// Surfaced for off-policy analysis (the substrate a contextual bandit needs);
+	// nil for routers that don't compute a score vector. Does not affect routing.
+	CandidateScores map[string]float32
+	// Propensity is the probability the chosen model was selected under the
+	// acting policy. 1.0 for a deterministic argmax; <1.0 only when an
+	// exploration policy randomizes. Logged so logged decisions carry the
+	// importance weight an off-policy estimator requires.
+	Propensity float32
 }
 
 type Router interface {

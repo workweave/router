@@ -2,6 +2,7 @@ package proxy_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -92,6 +93,8 @@ func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 			CandidateModels:      []string{"claude-opus-4-7", "claude-haiku-4-5"},
 			ChosenScore:          0.85,
 			ClusterRouterVersion: "v-test",
+			CandidateScores:      map[string]float32{"claude-opus-4-7": 0.85, "claude-haiku-4-5": 0.42},
+			Propensity:           1.0,
 		},
 	}
 	telem := newCaptureTelemetry()
@@ -121,6 +124,16 @@ func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 	require.NotNil(t, row.ChosenScore)
 	assert.InDelta(t, 0.85, *row.ChosenScore, 1e-6)
 	assert.Equal(t, "v-test", row.ClusterRouterVersion)
+	// Propensity is &1.0 for the deterministic argmax scorer; candidate_scores
+	// carries the full pre-argmax vector as jsonb. These are the off-policy
+	// logging substrate — a nil here means the writer dropped them.
+	require.NotNil(t, row.Propensity)
+	assert.InDelta(t, 1.0, *row.Propensity, 1e-6)
+	require.NotNil(t, row.CandidateScores)
+	var gotScores map[string]float32
+	require.NoError(t, json.Unmarshal(row.CandidateScores, &gotScores))
+	assert.InDelta(t, 0.85, gotScores["claude-opus-4-7"], 1e-6)
+	assert.InDelta(t, 0.42, gotScores["claude-haiku-4-5"], 1e-6)
 	// AlphaBreakdown is a W-1335 forward-compat slot; nil here.
 	// Cache* are nil because the fake provider returns no body, so the
 	// usage extractor reports 0 and cacheTokenPtr returns nil.
@@ -241,4 +254,7 @@ func TestProxyMessages_NoMetadataOmitsClusterFields(t *testing.T) {
 	assert.Nil(t, row.CandidateModels)
 	assert.Nil(t, row.ChosenScore)
 	assert.Empty(t, row.ClusterRouterVersion)
+	// Non-cluster decisions carry no score vector or propensity.
+	assert.Nil(t, row.CandidateScores)
+	assert.Nil(t, row.Propensity)
 }

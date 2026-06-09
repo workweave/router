@@ -49,6 +49,8 @@ type InsertTelemetryParams struct {
 	CandidateModels      []string
 	ChosenScore          *float64
 	AlphaBreakdown       []byte // pre-marshaled JSON for W-1335; nil until then
+	CandidateScores      []byte // pre-marshaled JSON model->score; nil for non-score routers
+	Propensity           *float64
 	ClusterRouterVersion string
 	TTFTMs               *int64
 	CacheCreationTokens  *int32

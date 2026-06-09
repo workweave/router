@@ -1,8 +1,8 @@
 -- Records a completed proxied request for the dashboard UI and routing
 -- observability. Routing-brain fields (cluster_ids, candidate_models,
--- chosen_score, alpha_breakdown, cluster_router_version, ttft_ms,
--- cache_*_tokens, device_id, session_id) are nullable; non-cluster
--- decisions and pinned-route turns leave them NULL.
+-- chosen_score, candidate_scores, propensity, alpha_breakdown,
+-- cluster_router_version, ttft_ms, cache_*_tokens, device_id, session_id) are
+-- nullable; non-cluster decisions and pinned-route turns leave them NULL.
 -- name: InsertRequestTelemetry :exec
 INSERT INTO router.model_router_request_telemetry (
     installation_id,
@@ -31,6 +31,8 @@ INSERT INTO router.model_router_request_telemetry (
     cluster_ids,
     candidate_models,
     chosen_score,
+    candidate_scores,
+    propensity,
     alpha_breakdown,
     cluster_router_version,
     ttft_ms,
@@ -65,6 +67,8 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('cluster_ids')::int[],
     sqlc.narg('candidate_models')::text[],
     sqlc.narg('chosen_score')::double precision,
+    sqlc.narg('candidate_scores')::jsonb,
+    sqlc.narg('propensity')::double precision,
     sqlc.narg('alpha_breakdown')::jsonb,
     sqlc.narg('cluster_router_version')::varchar,
     sqlc.narg('ttft_ms')::bigint,

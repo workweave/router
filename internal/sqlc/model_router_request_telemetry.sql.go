@@ -732,6 +732,8 @@ INSERT INTO router.model_router_request_telemetry (
     cluster_ids,
     candidate_models,
     chosen_score,
+    candidate_scores,
+    propensity,
     alpha_breakdown,
     cluster_router_version,
     ttft_ms,
@@ -767,12 +769,14 @@ INSERT INTO router.model_router_request_telemetry (
     $25::text[],
     $26::double precision,
     $27::jsonb,
-    $28::varchar,
-    $29::bigint,
-    $30::int,
-    $31::int,
-    $32::varchar,
-    $33::varchar
+    $28::double precision,
+    $29::jsonb,
+    $30::varchar,
+    $31::bigint,
+    $32::int,
+    $33::int,
+    $34::varchar,
+    $35::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -804,6 +808,8 @@ type InsertRequestTelemetryParams struct {
 	ClusterIds             []int32
 	CandidateModels        []string
 	ChosenScore            *float64
+	CandidateScores        []byte
+	Propensity             *float64
 	AlphaBreakdown         []byte
 	ClusterRouterVersion   *string
 	TtftMs                 *int64
@@ -815,9 +821,9 @@ type InsertRequestTelemetryParams struct {
 
 // Records a completed proxied request for the dashboard UI and routing
 // observability. Routing-brain fields (cluster_ids, candidate_models,
-// chosen_score, alpha_breakdown, cluster_router_version, ttft_ms,
-// cache_*_tokens, device_id, session_id) are nullable; non-cluster
-// decisions and pinned-route turns leave them NULL.
+// chosen_score, candidate_scores, propensity, alpha_breakdown,
+// cluster_router_version, ttft_ms, cache_*_tokens, device_id, session_id) are
+// nullable; non-cluster decisions and pinned-route turns leave them NULL.
 //
 //	INSERT INTO router.model_router_request_telemetry (
 //	    installation_id,
@@ -846,6 +852,8 @@ type InsertRequestTelemetryParams struct {
 //	    cluster_ids,
 //	    candidate_models,
 //	    chosen_score,
+//	    candidate_scores,
+//	    propensity,
 //	    alpha_breakdown,
 //	    cluster_router_version,
 //	    ttft_ms,
@@ -881,12 +889,14 @@ type InsertRequestTelemetryParams struct {
 //	    $25::text[],
 //	    $26::double precision,
 //	    $27::jsonb,
-//	    $28::varchar,
-//	    $29::bigint,
-//	    $30::int,
-//	    $31::int,
-//	    $32::varchar,
-//	    $33::varchar
+//	    $28::double precision,
+//	    $29::jsonb,
+//	    $30::varchar,
+//	    $31::bigint,
+//	    $32::int,
+//	    $33::int,
+//	    $34::varchar,
+//	    $35::varchar
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -917,6 +927,8 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.ClusterIds,
 		arg.CandidateModels,
 		arg.ChosenScore,
+		arg.CandidateScores,
+		arg.Propensity,
 		arg.AlphaBreakdown,
 		arg.ClusterRouterVersion,
 		arg.TtftMs,

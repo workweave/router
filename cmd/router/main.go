@@ -33,6 +33,7 @@ import (
 	"workweave/router/internal/proxy"
 	routerpubsub "workweave/router/internal/pubsub"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/banditexplore"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/cluster"
@@ -554,7 +555,14 @@ func main() {
 	// it nil (planner then treats every pin as still routable).
 	availableModels := resolveAvailableModels(availableProviders, logger)
 
-	proxySvc := proxy.NewService(rtr, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
+	// Optional, OFF by default: wrap the router in the quality-tie-band
+	// explorer to collect propensity-logged trajectories (Phase 1 of the
+	// bandit foundation). rtr stays the *cluster.Multiversion the admin cast
+	// and semantic cache reference; only the proxy's routing entrypoint is
+	// wrapped. Prod leaves ROUTER_EXPLORE_ENABLED unset → deterministic argmax.
+	routeEntry := buildExploringRouter(rtr, logger)
+
+	proxySvc := proxy.NewService(routeEntry, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithByokOnly(byokOnly).
 		WithDeploymentKeyedProviders(deploymentEligible).
 		WithPassthroughEligibleProviders(passthroughEligible).
@@ -683,6 +691,47 @@ func main() {
 	apmCtx, apmCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer apmCancel()
 	apm.ShutdownWithContext(apmCtx)
+}
+
+// buildExploringRouter optionally wraps rtr in the quality-tie-band explorer.
+// OFF unless ROUTER_EXPLORE_ENABLED=true; returns rtr unchanged otherwise so
+// prod keeps serving the deterministic argmax. The band half-width comes from
+// ROUTER_EXPLORE_EPSILON (default 0.05, score units). The model->provider
+// resolver is sourced from the default bundle's deployed models, so the
+// explorer can only ever switch to a known, deployed peer.
+//
+// Intended for staging / a small traffic slice while real propensities and
+// exploration support accrue — never flip it on fleet-wide without a bake-off.
+func buildExploringRouter(rtr router.Router, logger *slog.Logger) router.Router {
+	if !strings.EqualFold(config.GetOr("ROUTER_EXPLORE_ENABLED", "false"), "true") {
+		return rtr
+	}
+	multi, ok := rtr.(*cluster.Multiversion)
+	if !ok {
+		logger.Warn("ROUTER_EXPLORE_ENABLED set but router is not a cluster.Multiversion; exploration disabled")
+		return rtr
+	}
+
+	providers := make(map[string]string)
+	for _, e := range multi.DefaultDeployedModels() {
+		// First binding wins; the default bundle lists a model's primary
+		// provider first, which matches the scorer's default resolution.
+		if _, seen := providers[e.Model]; !seen {
+			providers[e.Model] = e.Provider
+		}
+	}
+	providerFor := func(model string) (string, bool) {
+		p, ok := providers[model]
+		return p, ok
+	}
+
+	epsilon := float32(parseEnvFloat("ROUTER_EXPLORE_EPSILON", 0.05))
+	logger.Info(
+		"Quality-tie-band exploration ENABLED (non-prod / shadow expected)",
+		"band_width", epsilon,
+		"deployed_models", len(providers),
+	)
+	return banditexplore.New(rtr, providerFor, epsilon)
 }
 
 // parseOtelHeaders parses a comma-separated key=value string into a map.

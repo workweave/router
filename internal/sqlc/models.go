@@ -94,6 +94,8 @@ type RouterModelRouterRequestTelemetry struct {
 	CacheReadTokens        *int32
 	DeviceID               *string
 	SessionID              *string
+	CandidateScores        []byte
+	Propensity             *float64
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.
