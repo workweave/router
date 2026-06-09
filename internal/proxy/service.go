@@ -68,6 +68,10 @@ type Service struct {
 	// excludedModelsOverride, when non-nil, replaces the per-installation
 	// exclusion list on every request. Set from ROUTER_EXCLUDED_MODELS at boot.
 	excludedModelsOverride map[string]struct{}
+	// excludedProvidersOverride, when non-nil, replaces the per-installation
+	// provider exclusion list on every request. Set from
+	// ROUTER_EXCLUDED_PROVIDERS at boot.
+	excludedProvidersOverride map[string]struct{}
 	// deploymentKeyedProviders is the subset of registered providers whose
 	// upstream API key is configured at the deployment level. When nil, all
 	// registered providers are treated as deployment-keyed (legacy behavior).
@@ -135,6 +139,10 @@ type CredentialsContextKey struct{}
 // InstallationExcludedModelsContextKey is the context key for the authed
 // installation's model exclusion list. Carried as []string.
 type InstallationExcludedModelsContextKey struct{}
+
+// InstallationExcludedProvidersContextKey is the context key for the authed
+// installation's provider exclusion list. Carried as []string.
+type InstallationExcludedProvidersContextKey struct{}
 
 // installationExcludedModelsFromContext returns the per-installation exclusion
 // list stashed on ctx by the auth middleware, or nil when none is present.
@@ -258,6 +266,32 @@ func (s *Service) excludedModelsForRequest(ctx context.Context) map[string]struc
 	out := make(map[string]struct{}, len(excluded))
 	for _, m := range excluded {
 		out[m] = struct{}{}
+	}
+	return out
+}
+
+func installationExcludedProvidersFromContext(ctx context.Context) []string {
+	v := ctx.Value(InstallationExcludedProvidersContextKey{})
+	if v == nil {
+		return nil
+	}
+	out, _ := v.([]string)
+	return out
+}
+
+// excludedProvidersForRequest returns the request's provider exclusion set.
+// Env override wins; otherwise the installation list is converted to a set.
+func (s *Service) excludedProvidersForRequest(ctx context.Context) map[string]struct{} {
+	if s.excludedProvidersOverride != nil {
+		return s.excludedProvidersOverride
+	}
+	excluded := installationExcludedProvidersFromContext(ctx)
+	if len(excluded) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(excluded))
+	for _, p := range excluded {
+		out[p] = struct{}{}
 	}
 	return out
 }
@@ -523,6 +557,39 @@ func (s *Service) ExcludedModelsOverride() []string {
 	out := make([]string, 0, len(s.excludedModelsOverride))
 	for m := range s.excludedModelsOverride {
 		out = append(out, m)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// WithExcludedProvidersOverride pins the per-request provider exclusion list
+// to a deployment-wide set. Pass nil or empty slice to clear the override.
+func (s *Service) WithExcludedProvidersOverride(providerNames []string) *Service {
+	if len(providerNames) == 0 {
+		s.excludedProvidersOverride = nil
+		return s
+	}
+	set := make(map[string]struct{}, len(providerNames))
+	for _, p := range providerNames {
+		set[p] = struct{}{}
+	}
+	s.excludedProvidersOverride = set
+	return s
+}
+
+// HasExcludedProvidersOverride reports whether an excluded-providers override is active.
+func (s *Service) HasExcludedProvidersOverride() bool {
+	return s.excludedProvidersOverride != nil
+}
+
+// ExcludedProvidersOverride returns a sorted copy of the override list.
+func (s *Service) ExcludedProvidersOverride() []string {
+	if s.excludedProvidersOverride == nil {
+		return nil
+	}
+	out := make([]string, 0, len(s.excludedProvidersOverride))
+	for p := range s.excludedProvidersOverride {
+		out = append(out, p)
 	}
 	sort.Strings(out)
 	return out
@@ -1721,6 +1788,14 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 				out[surfaceProvider] = struct{}{}
 			}
 		}
+	}
+	// Provider exclusions trump every enrollment path above: an excluded
+	// provider must not be served even when credentials exist for it. The
+	// scorer, hard-pin resolver, session pins, and tier clamp all consume
+	// this set, so subtracting here enforces the exclusion everywhere a
+	// routing decision is made.
+	for p := range s.excludedProvidersForRequest(ctx) {
+		delete(out, p)
 	}
 	return out
 }

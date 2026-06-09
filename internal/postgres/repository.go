@@ -104,6 +104,22 @@ func (r *installationRepo) UpdateExcludedModels(ctx context.Context, externalID,
 	})
 }
 
+func (r *installationRepo) UpdateExcludedProviders(ctx context.Context, externalID, id string, providerNames []string) error {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return err
+	}
+	if providerNames == nil {
+		providerNames = []string{}
+	}
+	q := sqlc.New(r.tx)
+	return q.UpdateModelRouterInstallationExcludedProviders(ctx, sqlc.UpdateModelRouterInstallationExcludedProvidersParams{
+		ID:                parsed,
+		ExternalID:        externalID,
+		ExcludedProviders: providerNames,
+	})
+}
+
 type apiKeyRepo struct {
 	tx sqlc.DBTX
 }

@@ -52,6 +52,53 @@ func TestEnabledProvidersForRequest_PassthroughIsSurfaceScoped(t *testing.T) {
 	})
 }
 
+// TestEnabledProvidersForRequest_ExcludedProvidersSubtracted confirms the
+// per-installation provider exclusion list removes providers from the
+// eligible set even when their credentials are wired — the single seam
+// through which the scorer, hard pins, session pins, and tier clamp all
+// inherit the exclusion.
+func TestEnabledProvidersForRequest_ExcludedProvidersSubtracted(t *testing.T) {
+	makeService := func() *Service {
+		return &Service{
+			providers: map[string]providers.Client{
+				providers.ProviderAnthropic: nil,
+				providers.ProviderOpenAI:    nil,
+			},
+			deploymentKeyedProviders: map[string]struct{}{
+				providers.ProviderAnthropic: {},
+				providers.ProviderOpenAI:    {},
+			},
+			passthroughEligibleProviders: map[string]struct{}{},
+		}
+	}
+
+	t.Run("installation exclusion removes a deployment-keyed provider", func(t *testing.T) {
+		s := makeService()
+		ctx := context.WithValue(context.Background(), InstallationExcludedProvidersContextKey{}, []string{providers.ProviderOpenAI})
+		got := s.enabledProvidersForRequest(ctx, providers.ProviderAnthropic, http.Header{})
+		assert.Contains(t, got, providers.ProviderAnthropic)
+		assert.NotContains(t, got, providers.ProviderOpenAI,
+			"an excluded provider must be dropped even though its deployment key is wired")
+	})
+
+	t.Run("env override replaces the installation list", func(t *testing.T) {
+		s := makeService().WithExcludedProvidersOverride([]string{providers.ProviderAnthropic})
+		ctx := context.WithValue(context.Background(), InstallationExcludedProvidersContextKey{}, []string{providers.ProviderOpenAI})
+		got := s.enabledProvidersForRequest(ctx, providers.ProviderAnthropic, http.Header{})
+		assert.NotContains(t, got, providers.ProviderAnthropic,
+			"the deployment-wide override list must be enforced")
+		assert.Contains(t, got, providers.ProviderOpenAI,
+			"the override REPLACES the installation list rather than merging with it")
+	})
+
+	t.Run("no exclusions leaves the set untouched", func(t *testing.T) {
+		s := makeService()
+		got := s.enabledProvidersForRequest(context.Background(), providers.ProviderAnthropic, http.Header{})
+		assert.Contains(t, got, providers.ProviderAnthropic)
+		assert.Contains(t, got, providers.ProviderOpenAI)
+	})
+}
+
 // TestEnabledProvidersForRequest_DeploymentKeyedStillCrossSurface confirms
 // that env-keyed providers stay eligible regardless of surface (their keys
 // are trusted and don't depend on inbound headers).

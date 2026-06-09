@@ -14,15 +14,20 @@ func toAuthInstallation(row sqlc.RouterModelRouterInstallation) *auth.Installati
 	if excluded == nil {
 		excluded = []string{}
 	}
+	excludedProviders := row.ExcludedProviders
+	if excludedProviders == nil {
+		excludedProviders = []string{}
+	}
 	return &auth.Installation{
-		ID:             row.ID.String(),
-		ExternalID:     row.ExternalID,
-		Name:           row.Name,
-		CreatedAt:      timestampOrZero(row.CreatedAt),
-		UpdatedAt:      timestampOrZero(row.UpdatedAt),
-		DeletedAt:      timestampPtr(row.DeletedAt),
-		CreatedBy:      row.CreatedBy,
-		ExcludedModels: excluded,
+		ID:                row.ID.String(),
+		ExternalID:        row.ExternalID,
+		Name:              row.Name,
+		CreatedAt:         timestampOrZero(row.CreatedAt),
+		UpdatedAt:         timestampOrZero(row.UpdatedAt),
+		DeletedAt:         timestampPtr(row.DeletedAt),
+		CreatedBy:         row.CreatedBy,
+		ExcludedModels:    excluded,
+		ExcludedProviders: excludedProviders,
 	}
 }
 

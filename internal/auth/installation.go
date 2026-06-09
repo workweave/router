@@ -18,6 +18,9 @@ type Installation struct {
 	// ExcludedModels is the per-installation model exclusion list.
 	// Empty means no exclusion.
 	ExcludedModels []string
+	// ExcludedProviders is the per-installation provider exclusion list.
+	// Empty means no exclusion.
+	ExcludedProviders []string
 }
 
 type CreateInstallationParams struct {
@@ -34,4 +37,7 @@ type InstallationRepository interface {
 	// UpdateExcludedModels replaces the per-installation exclusion list.
 	// An empty (or nil) slice clears the list.
 	UpdateExcludedModels(ctx context.Context, externalID, id string, models []string) error
+	// UpdateExcludedProviders replaces the per-installation provider
+	// exclusion list. An empty (or nil) slice clears the list.
+	UpdateExcludedProviders(ctx context.Context, externalID, id string, providerNames []string) error
 }

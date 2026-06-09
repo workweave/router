@@ -16,6 +16,9 @@ import (
 // ErrUnknownModel is returned when a requested model ID is not in the caller-supplied allowed set.
 var ErrUnknownModel = errors.New("auth: unknown model id")
 
+// ErrUnknownProvider is returned when a requested provider name is not in the caller-supplied allowed set.
+var ErrUnknownProvider = errors.New("auth: unknown provider")
+
 type Clock func() time.Time
 
 // InstallationChangeNotifier fans out installation-change events to peer replicas.
@@ -232,6 +235,36 @@ func (s *Service) SetInstallationExcludedModels(ctx context.Context, externalID,
 		out = append(out, m)
 	}
 	if err := s.installations.UpdateExcludedModels(ctx, externalID, installationID, out); err != nil {
+		return nil, err
+	}
+	s.invalidateInstallation(installationID)
+	return out, nil
+}
+
+// SetInstallationExcludedProviders replaces the per-installation provider exclusion list.
+// allowed is the set of valid provider names; passing nil skips validation.
+func (s *Service) SetInstallationExcludedProviders(ctx context.Context, externalID, installationID string, providerNames []string, allowed map[string]struct{}) ([]string, error) {
+	if providerNames == nil {
+		providerNames = []string{}
+	}
+	if allowed != nil {
+		for _, p := range providerNames {
+			if _, ok := allowed[p]; !ok {
+				return nil, fmt.Errorf("%w: %q", ErrUnknownProvider, p)
+			}
+		}
+	}
+	// De-dupe while preserving order so the persisted list is stable.
+	seen := make(map[string]struct{}, len(providerNames))
+	out := make([]string, 0, len(providerNames))
+	for _, p := range providerNames {
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if err := s.installations.UpdateExcludedProviders(ctx, externalID, installationID, out); err != nil {
 		return nil, err
 	}
 	s.invalidateInstallation(installationID)

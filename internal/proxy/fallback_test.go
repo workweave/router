@@ -590,6 +590,13 @@ func TestResolveBindingsForDispatch(t *testing.T) {
 		require.Len(t, bs, 1)
 		assert.Equal(t, "anthropic", bs[0].Provider)
 	})
+	t.Run("excluded provider cannot be resurrected as a fallback binding", func(t *testing.T) {
+		s := &Service{deploymentKeyedProviders: map[string]struct{}{"fireworks": {}, "openrouter": {}}}
+		ctx := context.WithValue(context.Background(), InstallationExcludedProvidersContextKey{}, []string{"openrouter"})
+		bs := s.resolveBindingsForDispatch(ctx, router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "fireworks"})
+		require.Len(t, bs, 1, "openrouter fallback binding must be filtered out by the provider exclusion")
+		assert.Equal(t, "fireworks", bs[0].Provider)
+	})
 }
 
 // TestProvidersIsRetryable round-trips the dispatcher's classifier

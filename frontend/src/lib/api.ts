@@ -124,6 +124,12 @@ export interface ExcludedModelsResponse {
   env_override_active: boolean;
 }
 
+export interface ExcludedProvidersResponse {
+  available: string[];
+  excluded: string[];
+  env_override_active: boolean;
+}
+
 export const api = {
   auth: {
     me: () => request<MeResponse>("/auth/me"),
@@ -183,6 +189,14 @@ export const api = {
     get: () => request<ExcludedModelsResponse>("/excluded-models"),
     update: (excluded: string[]) =>
       request<ExcludedModelsResponse>("/excluded-models", {
+        method: "PUT",
+        body: JSON.stringify({ excluded }),
+      }),
+  },
+  excludedProviders: {
+    get: () => request<ExcludedProvidersResponse>("/excluded-providers"),
+    update: (excluded: string[]) =>
+      request<ExcludedProvidersResponse>("/excluded-providers", {
         method: "PUT",
         body: JSON.stringify({ excluded }),
       }),

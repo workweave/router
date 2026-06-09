@@ -605,6 +605,20 @@ func main() {
 		logger.Info("Model exclusion override active", "excluded_models", cleaned)
 	}
 
+	// ROUTER_EXCLUDED_PROVIDERS pins a deployment-wide provider exclusion
+	// list, overriding per-installation DB state. Empty / unset → DB takes over.
+	if excludedRaw := strings.TrimSpace(config.GetOr("ROUTER_EXCLUDED_PROVIDERS", "")); excludedRaw != "" {
+		parts := strings.Split(excludedRaw, ",")
+		cleaned := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				cleaned = append(cleaned, trimmed)
+			}
+		}
+		proxySvc = proxySvc.WithExcludedProvidersOverride(cleaned)
+		logger.Info("Provider exclusion override active", "excluded_providers", cleaned)
+	}
+
 	// APM (SigNoz) — adds standard HTTP server spans and Go runtime metrics
 	// to the same OTel resource shape as the rest of the Weave services.
 	// No-op when WV_APM_OTLP_ENDPOINT is unset. Flushed explicitly in the

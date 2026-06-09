@@ -94,8 +94,10 @@ func (f *fakeExternalAPIKeyRepo) MarkUsed(ctx context.Context, id string) error 
 }
 
 type fakeInstallationRepository struct {
-	excludedModelsByID         map[string][]string
-	excludedModelsExternalByID map[string]string
+	excludedModelsByID            map[string][]string
+	excludedModelsExternalByID    map[string]string
+	excludedProvidersByID         map[string][]string
+	excludedProvidersExternalByID map[string]string
 }
 
 func (fakeInstallationRepository) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
@@ -119,6 +121,17 @@ func (f *fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, e
 	}
 	f.excludedModelsByID[id] = append([]string{}, models...)
 	f.excludedModelsExternalByID[id] = externalID
+	return nil
+}
+func (f *fakeInstallationRepository) UpdateExcludedProviders(ctx context.Context, externalID, id string, providerNames []string) error {
+	if f.excludedProvidersByID == nil {
+		f.excludedProvidersByID = map[string][]string{}
+	}
+	if f.excludedProvidersExternalByID == nil {
+		f.excludedProvidersExternalByID = map[string]string{}
+	}
+	f.excludedProvidersByID[id] = append([]string{}, providerNames...)
+	f.excludedProvidersExternalByID[id] = externalID
 	return nil
 }
 
@@ -620,6 +633,41 @@ func TestService_SetInstallationExcludedModels(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{}, out)
 		assert.Equal(t, []string{}, installRepo.excludedModelsByID["inst-3"])
+	})
+}
+
+func TestService_SetInstallationExcludedProviders(t *testing.T) {
+	installRepo := &fakeInstallationRepository{}
+	svc := auth.NewService(installRepo, &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}, nil, nil, auth.NoOpAPIKeyCache{}, nil, frozenClock())
+
+	allowed := map[string]struct{}{"anthropic": {}, "fireworks": {}}
+
+	t.Run("persists deduped list scoped by external_id", func(t *testing.T) {
+		out, err := svc.SetInstallationExcludedProviders(context.Background(), "ext-1", "inst-1", []string{"fireworks", "fireworks", "anthropic"}, allowed)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"fireworks", "anthropic"}, out, "duplicates collapsed; order preserved")
+		assert.Equal(t, []string{"fireworks", "anthropic"}, installRepo.excludedProvidersByID["inst-1"])
+		assert.Equal(t, "ext-1", installRepo.excludedProvidersExternalByID["inst-1"],
+			"external_id must be propagated to the repo for cross-tenant scoping")
+	})
+
+	t.Run("rejects unknown provider with ErrUnknownProvider", func(t *testing.T) {
+		_, err := svc.SetInstallationExcludedProviders(context.Background(), "ext-1", "inst-1", []string{"acme-cloud"}, allowed)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, auth.ErrUnknownProvider))
+	})
+
+	t.Run("nil allowed skips validation", func(t *testing.T) {
+		out, err := svc.SetInstallationExcludedProviders(context.Background(), "ext-2", "inst-2", []string{"anything-goes"}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"anything-goes"}, out)
+	})
+
+	t.Run("nil providers persists empty slice", func(t *testing.T) {
+		out, err := svc.SetInstallationExcludedProviders(context.Background(), "ext-3", "inst-3", nil, allowed)
+		require.NoError(t, err)
+		assert.Equal(t, []string{}, out)
+		assert.Equal(t, []string{}, installRepo.excludedProvidersByID["inst-3"])
 	})
 }
 

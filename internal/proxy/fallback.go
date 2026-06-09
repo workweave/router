@@ -412,6 +412,18 @@ func (s *Service) resolveBindingsForDispatch(ctx context.Context, decision route
 		// avoid retrying on providers whose keys aren't actually wired.
 		return []catalog.ProviderBinding{primary}
 	}
+	// Provider exclusions must hold during failover too — otherwise a
+	// fallback binding could resurrect a provider the scorer already
+	// filtered out via enabledProvidersForRequest.
+	if excluded := s.excludedProvidersForRequest(ctx); len(excluded) > 0 {
+		filtered := make(map[string]struct{}, len(available))
+		for p := range available {
+			if _, drop := excluded[p]; !drop {
+				filtered[p] = struct{}{}
+			}
+		}
+		available = filtered
+	}
 	bindings := catalog.AvailableBindings(decision.Model, available)
 	if len(bindings) <= 1 {
 		return []catalog.ProviderBinding{primary}
