@@ -68,6 +68,9 @@ export interface MetricsDetailRow {
   actual_cost_usd: number;
   total_latency_ms: number;
   upstream_status_code: number;
+  router_user_id: string;
+  client_app: string;
+  user_email: string;
 }
 
 export interface MetricsDetails {

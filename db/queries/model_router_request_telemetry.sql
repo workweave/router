@@ -39,7 +39,9 @@ INSERT INTO router.model_router_request_telemetry (
     cache_creation_tokens,
     cache_read_tokens,
     device_id,
-    session_id
+    session_id,
+    router_user_id,
+    client_app
 ) VALUES (
     @installation_id::uuid,
     @request_id::varchar,
@@ -75,7 +77,9 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('cache_creation_tokens')::int,
     sqlc.narg('cache_read_tokens')::int,
     sqlc.narg('device_id')::varchar,
-    sqlc.narg('session_id')::varchar
+    sqlc.narg('session_id')::varchar,
+    sqlc.narg('router_user_id')::uuid,
+    sqlc.narg('client_app')::text
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 
@@ -200,50 +204,62 @@ ORDER BY bucket ASC;
 -- chart bucket. Admin scope: spans every installation.
 -- name: GetTelemetryRowsAll :many
 SELECT
-    timestamp,
-    request_id,
-    requested_model,
-    decision_model,
-    decision_provider,
-    decision_reason,
-    sticky_hit,
-    input_tokens,
-    output_tokens,
-    cache_creation_tokens,
-    cache_read_tokens,
-    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
-    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
-    total_latency_ms,
-    upstream_status_code
-FROM router.model_router_request_telemetry
-WHERE span_type = 'router.upstream'
-  AND timestamp >= @from_time::timestamptz
-  AND timestamp < @to_time::timestamptz
-ORDER BY timestamp DESC
+    t.timestamp,
+    t.request_id,
+    t.requested_model,
+    t.decision_model,
+    t.decision_provider,
+    t.decision_reason,
+    t.sticky_hit,
+    t.input_tokens,
+    t.output_tokens,
+    t.cache_creation_tokens,
+    t.cache_read_tokens,
+    COALESCE(t.requested_input_cost_usd + t.requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+    COALESCE(t.actual_input_cost_usd + t.actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
+    t.total_latency_ms,
+    t.upstream_status_code,
+    t.router_user_id,
+    t.client_app,
+    u.email AS user_email
+FROM router.model_router_request_telemetry t
+LEFT JOIN router.model_router_users u
+    ON u.id = t.router_user_id
+    AND u.deleted_at IS NULL
+WHERE t.span_type = 'router.upstream'
+  AND t.timestamp >= @from_time::timestamptz
+  AND t.timestamp < @to_time::timestamptz
+ORDER BY t.timestamp DESC
 LIMIT @row_limit::int;
 
 -- Returns individual telemetry rows scoped to a single installation.
 -- name: GetTelemetryRows :many
 SELECT
-    timestamp,
-    request_id,
-    requested_model,
-    decision_model,
-    decision_provider,
-    decision_reason,
-    sticky_hit,
-    input_tokens,
-    output_tokens,
-    cache_creation_tokens,
-    cache_read_tokens,
-    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
-    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
-    total_latency_ms,
-    upstream_status_code
-FROM router.model_router_request_telemetry
-WHERE installation_id = @installation_id::uuid
-  AND span_type = 'router.upstream'
-  AND timestamp >= @from_time::timestamptz
-  AND timestamp < @to_time::timestamptz
-ORDER BY timestamp DESC
+    t.timestamp,
+    t.request_id,
+    t.requested_model,
+    t.decision_model,
+    t.decision_provider,
+    t.decision_reason,
+    t.sticky_hit,
+    t.input_tokens,
+    t.output_tokens,
+    t.cache_creation_tokens,
+    t.cache_read_tokens,
+    COALESCE(t.requested_input_cost_usd + t.requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+    COALESCE(t.actual_input_cost_usd + t.actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
+    t.total_latency_ms,
+    t.upstream_status_code,
+    t.router_user_id,
+    t.client_app,
+    u.email AS user_email
+FROM router.model_router_request_telemetry t
+LEFT JOIN router.model_router_users u
+    ON u.id = t.router_user_id
+    AND u.deleted_at IS NULL
+WHERE t.installation_id = @installation_id::uuid
+  AND t.span_type = 'router.upstream'
+  AND t.timestamp >= @from_time::timestamptz
+  AND t.timestamp < @to_time::timestamptz
+ORDER BY t.timestamp DESC
 LIMIT @row_limit::int;

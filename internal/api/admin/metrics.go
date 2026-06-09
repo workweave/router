@@ -117,6 +117,9 @@ type metricsDetailRow struct {
 	ActualCostUSD       float64 `json:"actual_cost_usd"`
 	TotalLatencyMs      int64   `json:"total_latency_ms"`
 	UpstreamStatusCode  int32   `json:"upstream_status_code"`
+	RouterUserID        string  `json:"router_user_id"`
+	ClientApp           string  `json:"client_app"`
+	UserEmail           string  `json:"user_email"`
 }
 
 type metricsDetailsResponse struct {
@@ -175,6 +178,9 @@ func MetricsDetailsHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 				ActualCostUSD:       r.ActualCostUSD,
 				TotalLatencyMs:      r.TotalLatencyMs,
 				UpstreamStatusCode:  r.UpstreamStatusCode,
+				RouterUserID:        r.RouterUserID,
+				ClientApp:           r.ClientApp,
+				UserEmail:           r.UserEmail,
 			})
 		}
 		c.JSON(http.StatusOK, metricsDetailsResponse{Rows: out})

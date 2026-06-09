@@ -6,6 +6,7 @@ import (
 	"workweave/router/internal/auth"
 	"workweave/router/internal/sqlc"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -68,4 +69,25 @@ func stringPtrOrNil(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// uuidOrNil parses s into a pgtype.UUID, returning an invalid (NULL) value for
+// empty or malformed input so SQLC's nullable uuid column receives NULL.
+func uuidOrNil(s string) pgtype.UUID {
+	if s == "" {
+		return pgtype.UUID{}
+	}
+	parsed, err := uuid.Parse(s)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: parsed, Valid: true}
+}
+
+// uuidString returns the canonical string form of a pgtype.UUID, or "" when NULL.
+func uuidString(u pgtype.UUID) string {
+	if !u.Valid {
+		return ""
+	}
+	return uuid.UUID(u.Bytes).String()
 }

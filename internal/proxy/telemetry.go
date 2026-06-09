@@ -57,6 +57,8 @@ type InsertTelemetryParams struct {
 	CacheReadTokens      *int32
 	DeviceID             string
 	SessionID            string
+	RouterUserID         string
+	ClientApp            string
 }
 
 // TelemetrySummary holds aggregated totals for the dashboard cards.
@@ -92,4 +94,7 @@ type TelemetryRow struct {
 	ActualCostUSD       float64
 	TotalLatencyMs      int64
 	UpstreamStatusCode  int32
+	RouterUserID        string
+	ClientApp           string
+	UserEmail           string
 }

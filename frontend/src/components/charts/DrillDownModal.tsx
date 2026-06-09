@@ -84,6 +84,27 @@ function ProviderBadge({ provider }: { provider: string }) {
   );
 }
 
+/** Client-app value → display label. Mirrors `NormalizeClientApp` on the Go
+ *  side: claude-code, codex, cursor, gemini-cli. Unknown values render as-is. */
+const CLIENT_APP_LABEL: Record<string, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  cursor: "Cursor",
+  "gemini-cli": "Gemini CLI",
+};
+
+function ClientAppLabel({ clientApp }: { clientApp: string }) {
+  if (clientApp === "") return <>—</>;
+  return <>{CLIENT_APP_LABEL[clientApp] ?? clientApp}</>;
+}
+
+/** Renders the user identity for a drill-down row: the linked email when the
+ *  router resolved one, otherwise an em dash. */
+function UserLabel({ email }: { email: string }) {
+  if (email === "") return <>—</>;
+  return <span className="font-medium">{email}</span>;
+}
+
 interface ColumnDef {
   key: string;
   label: string;
@@ -93,6 +114,8 @@ interface ColumnDef {
 
 const COLUMNS: ColumnDef[] = [
   { key: "time", label: "Time", className: "w-[160px]" },
+  { key: "user", label: "User" },
+  { key: "tool", label: "AI tool" },
   { key: "requested", label: "Requested model" },
   { key: "decision", label: "Decision model" },
   { key: "provider", label: "Provider" },
@@ -195,6 +218,12 @@ export function DrillDownModal({
                     >
                       <td className="whitespace-nowrap px-4 py-3">
                         {formatTimestamp(r.timestamp)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <UserLabel email={r.user_email} />
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <ClientAppLabel clientApp={r.client_app} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">{r.requested_model || "—"}</td>
                       <td

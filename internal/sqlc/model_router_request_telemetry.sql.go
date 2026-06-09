@@ -14,27 +14,33 @@ import (
 
 const getTelemetryRows = `-- name: GetTelemetryRows :many
 SELECT
-    timestamp,
-    request_id,
-    requested_model,
-    decision_model,
-    decision_provider,
-    decision_reason,
-    sticky_hit,
-    input_tokens,
-    output_tokens,
-    cache_creation_tokens,
-    cache_read_tokens,
-    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
-    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
-    total_latency_ms,
-    upstream_status_code
-FROM router.model_router_request_telemetry
-WHERE installation_id = $1::uuid
-  AND span_type = 'router.upstream'
-  AND timestamp >= $2::timestamptz
-  AND timestamp < $3::timestamptz
-ORDER BY timestamp DESC
+    t.timestamp,
+    t.request_id,
+    t.requested_model,
+    t.decision_model,
+    t.decision_provider,
+    t.decision_reason,
+    t.sticky_hit,
+    t.input_tokens,
+    t.output_tokens,
+    t.cache_creation_tokens,
+    t.cache_read_tokens,
+    COALESCE(t.requested_input_cost_usd + t.requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+    COALESCE(t.actual_input_cost_usd + t.actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
+    t.total_latency_ms,
+    t.upstream_status_code,
+    t.router_user_id,
+    t.client_app,
+    u.email AS user_email
+FROM router.model_router_request_telemetry t
+LEFT JOIN router.model_router_users u
+    ON u.id = t.router_user_id
+    AND u.deleted_at IS NULL
+WHERE t.installation_id = $1::uuid
+  AND t.span_type = 'router.upstream'
+  AND t.timestamp >= $2::timestamptz
+  AND t.timestamp < $3::timestamptz
+ORDER BY t.timestamp DESC
 LIMIT $4::int
 `
 
@@ -61,32 +67,41 @@ type GetTelemetryRowsRow struct {
 	ActualCostUsd       int64
 	TotalLatencyMs      *int64
 	UpstreamStatusCode  *int32
+	RouterUserID        pgtype.UUID
+	ClientApp           *string
+	UserEmail           *string
 }
 
 // Returns individual telemetry rows scoped to a single installation.
 //
 //	SELECT
-//	    timestamp,
-//	    request_id,
-//	    requested_model,
-//	    decision_model,
-//	    decision_provider,
-//	    decision_reason,
-//	    sticky_hit,
-//	    input_tokens,
-//	    output_tokens,
-//	    cache_creation_tokens,
-//	    cache_read_tokens,
-//	    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
-//	    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
-//	    total_latency_ms,
-//	    upstream_status_code
-//	FROM router.model_router_request_telemetry
-//	WHERE installation_id = $1::uuid
-//	  AND span_type = 'router.upstream'
-//	  AND timestamp >= $2::timestamptz
-//	  AND timestamp < $3::timestamptz
-//	ORDER BY timestamp DESC
+//	    t.timestamp,
+//	    t.request_id,
+//	    t.requested_model,
+//	    t.decision_model,
+//	    t.decision_provider,
+//	    t.decision_reason,
+//	    t.sticky_hit,
+//	    t.input_tokens,
+//	    t.output_tokens,
+//	    t.cache_creation_tokens,
+//	    t.cache_read_tokens,
+//	    COALESCE(t.requested_input_cost_usd + t.requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+//	    COALESCE(t.actual_input_cost_usd + t.actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
+//	    t.total_latency_ms,
+//	    t.upstream_status_code,
+//	    t.router_user_id,
+//	    t.client_app,
+//	    u.email AS user_email
+//	FROM router.model_router_request_telemetry t
+//	LEFT JOIN router.model_router_users u
+//	    ON u.id = t.router_user_id
+//	    AND u.deleted_at IS NULL
+//	WHERE t.installation_id = $1::uuid
+//	  AND t.span_type = 'router.upstream'
+//	  AND t.timestamp >= $2::timestamptz
+//	  AND t.timestamp < $3::timestamptz
+//	ORDER BY t.timestamp DESC
 //	LIMIT $4::int
 func (q *Queries) GetTelemetryRows(ctx context.Context, arg GetTelemetryRowsParams) ([]GetTelemetryRowsRow, error) {
 	rows, err := q.db.Query(ctx, getTelemetryRows,
@@ -118,6 +133,9 @@ func (q *Queries) GetTelemetryRows(ctx context.Context, arg GetTelemetryRowsPara
 			&i.ActualCostUsd,
 			&i.TotalLatencyMs,
 			&i.UpstreamStatusCode,
+			&i.RouterUserID,
+			&i.ClientApp,
+			&i.UserEmail,
 		); err != nil {
 			return nil, err
 		}
@@ -131,26 +149,32 @@ func (q *Queries) GetTelemetryRows(ctx context.Context, arg GetTelemetryRowsPara
 
 const getTelemetryRowsAll = `-- name: GetTelemetryRowsAll :many
 SELECT
-    timestamp,
-    request_id,
-    requested_model,
-    decision_model,
-    decision_provider,
-    decision_reason,
-    sticky_hit,
-    input_tokens,
-    output_tokens,
-    cache_creation_tokens,
-    cache_read_tokens,
-    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
-    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
-    total_latency_ms,
-    upstream_status_code
-FROM router.model_router_request_telemetry
-WHERE span_type = 'router.upstream'
-  AND timestamp >= $1::timestamptz
-  AND timestamp < $2::timestamptz
-ORDER BY timestamp DESC
+    t.timestamp,
+    t.request_id,
+    t.requested_model,
+    t.decision_model,
+    t.decision_provider,
+    t.decision_reason,
+    t.sticky_hit,
+    t.input_tokens,
+    t.output_tokens,
+    t.cache_creation_tokens,
+    t.cache_read_tokens,
+    COALESCE(t.requested_input_cost_usd + t.requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+    COALESCE(t.actual_input_cost_usd + t.actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
+    t.total_latency_ms,
+    t.upstream_status_code,
+    t.router_user_id,
+    t.client_app,
+    u.email AS user_email
+FROM router.model_router_request_telemetry t
+LEFT JOIN router.model_router_users u
+    ON u.id = t.router_user_id
+    AND u.deleted_at IS NULL
+WHERE t.span_type = 'router.upstream'
+  AND t.timestamp >= $1::timestamptz
+  AND t.timestamp < $2::timestamptz
+ORDER BY t.timestamp DESC
 LIMIT $3::int
 `
 
@@ -176,6 +200,9 @@ type GetTelemetryRowsAllRow struct {
 	ActualCostUsd       int64
 	TotalLatencyMs      *int64
 	UpstreamStatusCode  *int32
+	RouterUserID        pgtype.UUID
+	ClientApp           *string
+	UserEmail           *string
 }
 
 // Returns individual telemetry rows for a time window. Used by the
@@ -183,26 +210,32 @@ type GetTelemetryRowsAllRow struct {
 // chart bucket. Admin scope: spans every installation.
 //
 //	SELECT
-//	    timestamp,
-//	    request_id,
-//	    requested_model,
-//	    decision_model,
-//	    decision_provider,
-//	    decision_reason,
-//	    sticky_hit,
-//	    input_tokens,
-//	    output_tokens,
-//	    cache_creation_tokens,
-//	    cache_read_tokens,
-//	    COALESCE(requested_input_cost_usd + requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
-//	    COALESCE(actual_input_cost_usd + actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
-//	    total_latency_ms,
-//	    upstream_status_code
-//	FROM router.model_router_request_telemetry
-//	WHERE span_type = 'router.upstream'
-//	  AND timestamp >= $1::timestamptz
-//	  AND timestamp < $2::timestamptz
-//	ORDER BY timestamp DESC
+//	    t.timestamp,
+//	    t.request_id,
+//	    t.requested_model,
+//	    t.decision_model,
+//	    t.decision_provider,
+//	    t.decision_reason,
+//	    t.sticky_hit,
+//	    t.input_tokens,
+//	    t.output_tokens,
+//	    t.cache_creation_tokens,
+//	    t.cache_read_tokens,
+//	    COALESCE(t.requested_input_cost_usd + t.requested_output_cost_usd, 0)::bigint AS requested_cost_usd,
+//	    COALESCE(t.actual_input_cost_usd + t.actual_output_cost_usd, 0)::bigint       AS actual_cost_usd,
+//	    t.total_latency_ms,
+//	    t.upstream_status_code,
+//	    t.router_user_id,
+//	    t.client_app,
+//	    u.email AS user_email
+//	FROM router.model_router_request_telemetry t
+//	LEFT JOIN router.model_router_users u
+//	    ON u.id = t.router_user_id
+//	    AND u.deleted_at IS NULL
+//	WHERE t.span_type = 'router.upstream'
+//	  AND t.timestamp >= $1::timestamptz
+//	  AND t.timestamp < $2::timestamptz
+//	ORDER BY t.timestamp DESC
 //	LIMIT $3::int
 func (q *Queries) GetTelemetryRowsAll(ctx context.Context, arg GetTelemetryRowsAllParams) ([]GetTelemetryRowsAllRow, error) {
 	rows, err := q.db.Query(ctx, getTelemetryRowsAll, arg.FromTime, arg.ToTime, arg.RowLimit)
@@ -229,6 +262,9 @@ func (q *Queries) GetTelemetryRowsAll(ctx context.Context, arg GetTelemetryRowsA
 			&i.ActualCostUsd,
 			&i.TotalLatencyMs,
 			&i.UpstreamStatusCode,
+			&i.RouterUserID,
+			&i.ClientApp,
+			&i.UserEmail,
 		); err != nil {
 			return nil, err
 		}
@@ -740,7 +776,9 @@ INSERT INTO router.model_router_request_telemetry (
     cache_creation_tokens,
     cache_read_tokens,
     device_id,
-    session_id
+    session_id,
+    router_user_id,
+    client_app
 ) VALUES (
     $1::uuid,
     $2::varchar,
@@ -776,7 +814,9 @@ INSERT INTO router.model_router_request_telemetry (
     $32::int,
     $33::int,
     $34::varchar,
-    $35::varchar
+    $35::varchar,
+    $36::uuid,
+    $37::text
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -817,6 +857,8 @@ type InsertRequestTelemetryParams struct {
 	CacheReadTokens        *int32
 	DeviceID               *string
 	SessionID              *string
+	RouterUserID           pgtype.UUID
+	ClientApp              *string
 }
 
 // Records a completed proxied request for the dashboard UI and routing
@@ -860,7 +902,9 @@ type InsertRequestTelemetryParams struct {
 //	    cache_creation_tokens,
 //	    cache_read_tokens,
 //	    device_id,
-//	    session_id
+//	    session_id,
+//	    router_user_id,
+//	    client_app
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::varchar,
@@ -896,7 +940,9 @@ type InsertRequestTelemetryParams struct {
 //	    $32::int,
 //	    $33::int,
 //	    $34::varchar,
-//	    $35::varchar
+//	    $35::varchar,
+//	    $36::uuid,
+//	    $37::text
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -936,6 +982,8 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.CacheReadTokens,
 		arg.DeviceID,
 		arg.SessionID,
+		arg.RouterUserID,
+		arg.ClientApp,
 	)
 	return err
 }

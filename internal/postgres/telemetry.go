@@ -86,6 +86,8 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		CacheReadTokens:        p.CacheReadTokens,
 		DeviceID:               stringPtrOrNil(p.DeviceID),
 		SessionID:              stringPtrOrNil(p.SessionID),
+		RouterUserID:           uuidOrNil(p.RouterUserID),
+		ClientApp:              stringPtrOrNil(p.ClientApp),
 	})
 }
 
@@ -289,6 +291,9 @@ func (r *TelemetryRepo) GetTelemetryRows(ctx context.Context, installationID str
 			row.ActualCostUsd,
 			row.TotalLatencyMs,
 			row.UpstreamStatusCode,
+			uuidString(row.RouterUserID),
+			row.ClientApp,
+			row.UserEmail,
 		))
 	}
 	return out, nil
@@ -323,6 +328,9 @@ func (r *TelemetryRepo) GetTelemetryRowsAll(ctx context.Context, from, to time.T
 			row.ActualCostUsd,
 			row.TotalLatencyMs,
 			row.UpstreamStatusCode,
+			uuidString(row.RouterUserID),
+			row.ClientApp,
+			row.UserEmail,
 		))
 	}
 	return out, nil
@@ -346,6 +354,9 @@ func telemetryRowFromRow(
 	actualCostUsdMicros int64,
 	totalLatencyMs *int64,
 	upstreamStatusCode *int32,
+	routerUserID string,
+	clientApp *string,
+	userEmail *string,
 ) proxy.TelemetryRow {
 	deref := func(s *string) string {
 		if s == nil {
@@ -382,5 +393,8 @@ func telemetryRowFromRow(
 		ActualCostUSD:       microsToUSD(actualCostUsdMicros),
 		TotalLatencyMs:      derefInt64(totalLatencyMs),
 		UpstreamStatusCode:  derefInt32(upstreamStatusCode),
+		RouterUserID:        routerUserID,
+		ClientApp:           deref(clientApp),
+		UserEmail:           deref(userEmail),
 	}
 }

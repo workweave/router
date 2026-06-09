@@ -97,6 +97,8 @@ type RouterModelRouterRequestTelemetry struct {
 	SessionID              *string
 	CandidateScores        []byte
 	Propensity             *float64
+	RouterUserID           pgtype.UUID
+	ClientApp              *string
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.

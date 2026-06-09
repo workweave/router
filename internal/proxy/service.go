@@ -1500,6 +1500,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			CacheReadTokens:        cacheTokenPtr(cacheRead),
 			DeviceID:               clientID.DeviceID,
 			SessionID:              clientID.SessionID,
+			RouterUserID:           auth.UserIDFrom(ctx),
+			ClientApp:              clientID.ClientApp,
 		})
 	}
 
@@ -2488,6 +2490,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			CacheReadTokens:        cacheTokenPtr(cacheRead),
 			DeviceID:               clientID.DeviceID,
 			SessionID:              clientID.SessionID,
+			RouterUserID:           auth.UserIDFrom(ctx),
+			ClientApp:              clientID.ClientApp,
 		})
 	}
 
