@@ -1,0 +1,34 @@
+install/npm/bin.js
+  s_2ca575863b93ba::t_467d5ff4865594 1-9,16-31,33-54
+  s_2ca575863b93ba::t_83e56023da8b15 10-15
+  s_2ca575863b93ba::t_f9e4c88c6bbe90 32
+install/README.md
+  s_2ca575863b93ba::t_d57790b12e0b8f 13,16-22
+install/npm/package.json
+  s_2ca575863b93ba::t_f5ac01537a3029 1-36
+install/npm/scripts/copy-installer.js
+  s_2ca575863b93ba::t_7dc5e697755322 1-20
+install/npm/README.md
+  s_2ca575863b93ba::t_d8c9a07c4dbe3d 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "079220618fdd9e8af8c09bc4e8446088772fb222",
+  "prompts": {},
+  "humans": {
+    "h_16c9377d4ebc00": {
+      "author": "steventohme <steven@workweave.ai>"
+    }
+  },
+  "sessions": {
+    "s_2ca575863b93ba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af44a648-2b59-4fd9-b14e-bf134894c74f",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
