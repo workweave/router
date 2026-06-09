@@ -189,6 +189,25 @@ type Bundle struct {
 	MedianVerbosity float64 // Precomputed median verbosity for V2 bundles
 }
 
+// EmbedderID returns the embedder model recorded in metadata.yaml,
+// defaulting to the Jina v2 embedder for legacy bundles without an
+// embedder block.
+func (b *Bundle) EmbedderID() string {
+	if b.Metadata != nil && b.Metadata.Embedder.Model != "" {
+		return b.Metadata.Embedder.Model
+	}
+	return EmbedderJinaV2
+}
+
+// EmbedDim returns the embedding dimensionality declared in
+// metadata.yaml, defaulting to the Jina v2 dim for legacy bundles.
+func (b *Bundle) EmbedDim() int {
+	if b.Metadata != nil && b.Metadata.Embedder.EmbedDim > 0 {
+		return b.Metadata.Embedder.EmbedDim
+	}
+	return EmbedDim
+}
+
 // ListVersions returns sorted version directories under artifacts/.
 func ListVersions() ([]string, error) {
 	entries, err := fs.ReadDir(embeddedArtifacts, "artifacts")
@@ -302,6 +321,10 @@ func loadBundleFromPath(fsys fs.FS, version, dir string) (*Bundle, error) {
 			return nil, fmt.Errorf("artifacts %s: parse metadata.yaml: %w", version, err)
 		}
 		meta = &m
+	}
+
+	if err := validateDeclaredDim(version, centroids, meta); err != nil {
+		return nil, err
 	}
 
 	var isV2 bool
@@ -433,6 +456,9 @@ func loadBundleV1Only(fsys fs.FS, version, dir string) (*Bundle, error) {
 		}
 		meta = &m
 	}
+	if err := validateDeclaredDim(version, centroids, meta); err != nil {
+		return nil, err
+	}
 	return &Bundle{
 		Version:   version,
 		Centroids: centroids,
@@ -441,6 +467,22 @@ func loadBundleV1Only(fsys fs.FS, version, dir string) (*Bundle, error) {
 		Metadata:  meta,
 		IsV2:      false,
 	}, nil
+}
+
+// validateDeclaredDim cross-checks the dim recorded in metadata.yaml's
+// embedder block against the centroids.bin header. Legacy bundles
+// without a metadata embedder block must match the Jina default.
+func validateDeclaredDim(version string, centroids *Centroids, meta *ArtifactMetadata) error {
+	declared := EmbedDim
+	source := "legacy default"
+	if meta != nil && meta.Embedder.EmbedDim > 0 {
+		declared = meta.Embedder.EmbedDim
+		source = "metadata.yaml embedder.embed_dim"
+	}
+	if centroids.Dim != declared {
+		return fmt.Errorf("artifacts %s: centroids.bin dim %d != declared %d (%s); embedder mismatch", version, centroids.Dim, declared, source)
+	}
+	return nil
 }
 
 // LoadBundleV1Only reads a bundle from disk forcing v1 (rankings.json)
@@ -462,8 +504,8 @@ func loadCentroids(raw []byte) (*Centroids, error) {
 	}
 	k := binary.LittleEndian.Uint32(raw[8:12])
 	dim := binary.LittleEndian.Uint32(raw[12:16])
-	if dim != EmbedDim {
-		return nil, fmt.Errorf("centroids.bin dim %d, expected %d (embedder mismatch)", dim, EmbedDim)
+	if dim == 0 {
+		return nil, fmt.Errorf("centroids.bin has dim=0")
 	}
 	if k == 0 {
 		return nil, fmt.Errorf("centroids.bin has K=0; run router/scripts/train_cluster_router.py")

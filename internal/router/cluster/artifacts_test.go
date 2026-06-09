@@ -31,7 +31,6 @@ func buildCentroidsBlob(t *testing.T, k, dim int, data []float32) []byte {
 
 func TestLoadCentroids_Roundtrip(t *testing.T) {
 	data := []float32{1, 2, 3, 4, 5, 6, 7, 8}
-	// Loader rejects dim != EmbedDim; build at real dim and zero-pad.
 	dim := EmbedDim
 	k := 2
 	full := make([]float32, k*dim)
@@ -58,13 +57,51 @@ func TestLoadCentroids_TooShort(t *testing.T) {
 	assert.Contains(t, err.Error(), "too short")
 }
 
-func TestLoadCentroids_DimMismatch(t *testing.T) {
-	// dim=128 must be rejected; EmbedDim is 768.
-	dim := 128
+func TestLoadCentroids_ArbitraryDimAccepted(t *testing.T) {
+	// Dim is per-bundle now; loadCentroids accepts any non-zero dim and
+	// validateDeclaredDim cross-checks it against metadata.
+	dim := 1024
 	blob := buildCentroidsBlob(t, 1, dim, make([]float32, dim))
-	_, err := loadCentroids(blob)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "embedder mismatch")
+	got, err := loadCentroids(blob)
+	require.NoError(t, err)
+	assert.Equal(t, dim, got.Dim)
+}
+
+func TestValidateDeclaredDim(t *testing.T) {
+	t.Run("legacy bundle without metadata must match Jina default", func(t *testing.T) {
+		c := &Centroids{K: 1, Dim: EmbedDim}
+		require.NoError(t, validateDeclaredDim("v-test", c, nil))
+
+		bad := &Centroids{K: 1, Dim: 1024}
+		err := validateDeclaredDim("v-test", bad, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "embedder mismatch")
+	})
+
+	t.Run("declared dim must match centroids header", func(t *testing.T) {
+		meta := &ArtifactMetadata{Embedder: ArtifactEmbedder{Model: EmbedderQwen3, EmbedDim: 1024}}
+		require.NoError(t, validateDeclaredDim("v-test", &Centroids{K: 1, Dim: 1024}, meta))
+
+		err := validateDeclaredDim("v-test", &Centroids{K: 1, Dim: EmbedDim}, meta)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "embedder mismatch")
+	})
+}
+
+func TestBundleEmbedderDefaults(t *testing.T) {
+	t.Run("nil metadata defaults to Jina", func(t *testing.T) {
+		b := &Bundle{}
+		assert.Equal(t, EmbedderJinaV2, b.EmbedderID())
+		assert.Equal(t, EmbedDim, b.EmbedDim())
+	})
+
+	t.Run("metadata embedder block wins", func(t *testing.T) {
+		b := &Bundle{Metadata: &ArtifactMetadata{
+			Embedder: ArtifactEmbedder{Model: EmbedderQwen3, EmbedDim: 1024},
+		}}
+		assert.Equal(t, EmbedderQwen3, b.EmbedderID())
+		assert.Equal(t, 1024, b.EmbedDim())
+	})
 }
 
 func TestLoadCentroids_ZeroK(t *testing.T) {

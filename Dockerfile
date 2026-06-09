@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 #
 # The router uses hugot + onnxruntime_go (CGO; dynamic-links against
-# libonnxruntime.so) to run the cluster scorer's Jina v2 embedder
-# in-process. That requires a glibc base — Alpine/musl can't load the
-# library out of the box. Builder is bookworm-glibc; runtime is
-# distroless/cc-debian12 so we get the C runtime without the rest of
-# Debian's userland.
+# libonnxruntime.so) to run the cluster scorer's embedders (Jina v2,
+# Qwen3-0.6B) in-process. That requires a glibc base — Alpine/musl
+# can't load the library out of the box. Builder is bookworm-glibc;
+# runtime is distroless/cc-debian12 so we get the C runtime without
+# the rest of Debian's userland.
 #
 # The mini UI is a Next.js static export built by a Node.js stage and
 # copied into assets/ui/ before the Go binary is assembled.
@@ -23,6 +23,14 @@ ARG HF_MODEL_REPO=jinaai/jina-embeddings-v2-base-code
 # Apr 2024 so drift risk is low, but pinning eliminates "the build
 # silently picked up new weights" surprises. Bump deliberately.
 ARG HF_MODEL_REVISION=516f4baf13dec4ddddda8631e019b5737c8bc250
+# Second embedder: Qwen3-Embedding-0.6B exported with last-token
+# pooling baked into the graph (scripts/export_qwen3_onnx.py). Empty
+# HF_QWEN_REPO skips the pull — the runtime constructs embedders
+# lazily, so deploys serving only Jina bundles don't need the asset.
+# Once the export is uploaded, set the repo default here and pin
+# HF_QWEN_REVISION to the upload commit SHA printed by the script.
+ARG HF_QWEN_REPO=
+ARG HF_QWEN_REVISION=main
 
 # --- Stage 1: build the Next.js mini UI ---
 FROM node:22-alpine AS ui-builder
@@ -41,6 +49,8 @@ ARG ONNXRUNTIME_VERSION
 ARG TOKENIZERS_VERSION
 ARG HF_MODEL_REPO
 ARG HF_MODEL_REVISION
+ARG HF_QWEN_REPO
+ARG HF_QWEN_REVISION
 # TARGETARCH is set automatically by buildx (`amd64` or `arm64`) so we
 # can pull the matching native ONNX Runtime + libtokenizers tarball.
 # Without this, building on Apple Silicon / Graviton picks up x86_64
@@ -70,54 +80,91 @@ RUN set -eux; \
     tar -xzf /tmp/libtokenizers.tar.gz -C /opt/libtokenizers; \
     rm /tmp/libtokenizers.tar.gz
 
-# Pull the embedder artifacts from Jina's official HuggingFace repo.
-# It's public — self-hosters and CI build with no token. The
+# Pull the embedder artifacts from HuggingFace. Each embedder lives in
+# its own subdir of /opt/router/assets/ keyed by its EmbedderSpec ID
+# (see internal/router/cluster/embedder.go); the runtime constructs
+# embedders lazily per artifact bundle, so a deploy whose bundles only
+# use one embedder never touches the other's files.
+#
+# Jina's repo is public — self-hosters and CI build with no token. The
 # hf_token build secret is *optional*: if provided (e.g. inside our
 # CI to avoid public-rate-limits), curl uses it.
 #
 # Required files (model + tokenizer) fail the build on miss; the
-# small transformers companion JSONs are best-effort. The runtime
-# stage copies the whole assets dir into /opt/router/assets/,
-# matching defaultAssetsDir in internal/router/cluster/embedder_onnx.go.
+# small transformers companion JSONs are best-effort.
 #
-# File-path mapping (must stay in sync with scripts/hf_files.py):
+# Jina file-path mapping (must stay in sync with scripts/hf_files.py):
 #   model.onnx              <- onnx/model_quantized.onnx (162 MB INT8)
 #   tokenizer.json          <- tokenizer.json
 #   {config,tokenizer_config,special_tokens_map}.json -> identity
+#
+# Qwen3 repo is the scripts/export_qwen3_onnx.py output (pooling baked
+# into the graph): model.onnx + tokenizer.json at the repo root. Empty
+# HF_QWEN_REPO skips the pull.
 RUN --mount=type=secret,id=hf_token,required=false \
     set -eux; \
-    mkdir -p /opt/router/assets; \
     if [ -s /run/secrets/hf_token ]; then \
       auth_header="Authorization: Bearer $(cat /run/secrets/hf_token)"; \
     else \
       auth_header=""; \
     fi; \
+    jina_dir=/opt/router/assets/jina-v2-base-code-int8; \
+    mkdir -p "$jina_dir"; \
     base="https://huggingface.co/${HF_MODEL_REPO}/resolve/${HF_MODEL_REVISION}"; \
     curl --fail --silent --show-error --location \
       ${auth_header:+--header "$auth_header"} \
-      "${base}/onnx/model_quantized.onnx" -o /opt/router/assets/model.onnx; \
+      "${base}/onnx/model_quantized.onnx" -o "$jina_dir/model.onnx"; \
     curl --fail --silent --show-error --location \
       ${auth_header:+--header "$auth_header"} \
-      "${base}/tokenizer.json" -o /opt/router/assets/tokenizer.json; \
+      "${base}/tokenizer.json" -o "$jina_dir/tokenizer.json"; \
     for f in config.json tokenizer_config.json special_tokens_map.json; do \
       curl --silent --show-error --location \
         ${auth_header:+--header "$auth_header"} \
         --write-out "%{http_code}" \
-        "${base}/${f}" -o "/opt/router/assets/${f}" \
+        "${base}/${f}" -o "$jina_dir/${f}" \
         > /tmp/code; \
       code=$(cat /tmp/code); \
       case "$code" in \
         200) ;; \
-        404) rm -f "/opt/router/assets/${f}" ;; \
+        404) rm -f "$jina_dir/${f}" ;; \
         *) echo "ERROR: unexpected HTTP $code for $f"; exit 1 ;; \
       esac; \
     done; \
-    sz=$(stat -c '%s' /opt/router/assets/model.onnx); \
+    sz=$(stat -c '%s' "$jina_dir/model.onnx"); \
     if [ "$sz" -lt 1048576 ]; then \
-      echo "ERROR: model.onnx is only $sz bytes (HF download likely returned a pointer or auth issue)"; \
+      echo "ERROR: jina model.onnx is only $sz bytes (HF download likely returned a pointer or auth issue)"; \
       exit 1; \
     fi; \
-    ls -la /opt/router/assets/
+    if [ -n "${HF_QWEN_REPO}" ]; then \
+      qwen_dir=/opt/router/assets/qwen3-embedding-0.6b-int8; \
+      mkdir -p "$qwen_dir"; \
+      qbase="https://huggingface.co/${HF_QWEN_REPO}/resolve/${HF_QWEN_REVISION}"; \
+      curl --fail --silent --show-error --location \
+        ${auth_header:+--header "$auth_header"} \
+        "${qbase}/model.onnx" -o "$qwen_dir/model.onnx"; \
+      curl --fail --silent --show-error --location \
+        ${auth_header:+--header "$auth_header"} \
+        "${qbase}/tokenizer.json" -o "$qwen_dir/tokenizer.json"; \
+      for f in tokenizer_config.json special_tokens_map.json; do \
+        curl --silent --show-error --location \
+          ${auth_header:+--header "$auth_header"} \
+          --write-out "%{http_code}" \
+          "${qbase}/${f}" -o "$qwen_dir/${f}" \
+          > /tmp/code; \
+        code=$(cat /tmp/code); \
+        case "$code" in \
+          200) ;; \
+          404) rm -f "$qwen_dir/${f}" ;; \
+          *) echo "ERROR: unexpected HTTP $code for $f"; exit 1 ;; \
+        esac; \
+      done; \
+      qsz=$(stat -c '%s' "$qwen_dir/model.onnx"); \
+      if [ "$qsz" -lt 1048576 ]; then \
+        echo "ERROR: qwen model.onnx is only $qsz bytes (HF download likely returned a pointer or auth issue)"; \
+        exit 1; \
+      fi; \
+    fi; \
+    ls -laR /opt/router/assets/
 
 WORKDIR /app
 
@@ -155,9 +202,10 @@ FROM gcr.io/distroless/cc-debian12 AS build-release-stage
 # canonical home and is already on the search path on debian12.
 COPY --from=build-stage /opt/onnxruntime/lib/libonnxruntime.so* /usr/lib/
 
-# Cluster-scorer assets fetched from HF in the build stage. The Go
-# embedder (internal/router/cluster/embedder_onnx.go) reads from this
-# directory by default; ROUTER_ONNX_ASSETS_DIR overrides if needed.
+# Cluster-scorer assets fetched from HF in the build stage, one subdir
+# per embedder ID. The Go embedders
+# (internal/router/cluster/embedder_onnx.go) read from this root by
+# default; ROUTER_ONNX_ASSETS_DIR overrides if needed.
 COPY --from=build-stage /opt/router/assets/ /opt/router/assets/
 
 WORKDIR /

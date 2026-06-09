@@ -103,6 +103,16 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 		return nil, fmt.Errorf("cluster: availableProviders must not be empty")
 	}
 
+	// Embedder-identity guard: a bundle trained in one embedding space
+	// must never be scored with a different embedder. Dim alone is not
+	// enough (two models can share a dim), so both ID and dim are checked.
+	if embed.ID() != bundle.EmbedderID() {
+		return nil, fmt.Errorf("cluster %s: bundle declares embedder %q but runtime embedder is %q", bundle.Version, bundle.EmbedderID(), embed.ID())
+	}
+	if embed.Dim() != bundle.Centroids.Dim {
+		return nil, fmt.Errorf("cluster %s: embedder dim %d != centroids dim %d", bundle.Version, embed.Dim(), bundle.Centroids.Dim)
+	}
+
 	if bundle.Centroids.K < cfg.TopP {
 		return nil, fmt.Errorf("cluster %s: K=%d < TopP=%d", bundle.Version, bundle.Centroids.K, cfg.TopP)
 	}

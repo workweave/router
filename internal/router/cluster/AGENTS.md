@@ -41,15 +41,29 @@ Go runtime builds **only the served default version** by default (`cmd/router/ma
 
 Informational at runtime — carries version changelog, training params, deployed models, α-blend cost values. Go runtime parses it for `/health`-style provenance; eval harness reads it offline. Keep it accurate but it does not affect routing decisions.
 
-### `assets/model.onnx`
+### Embedders (per-bundle, pluggable)
 
-**NOT in git.** Use Jina's own INT8 export at `jinaai/jina-embeddings-v2-base-code`, file path `onnx/model_quantized.onnx`.
+Embedder is a **per-bundle property**: each bundle's `metadata.yaml` `embedder.model` + `embedder.embed_dim` name the embedding space its centroids live in. `NewScorer` refuses an embedder whose `ID()`/`Dim()` don't match the bundle (silent misrouting protection — dim alone is not enough since two models can share a dim). Bundles without an embedder block default to Jina/768.
+
+Registered specs (`embedder.go` `embedderSpecs`):
+
+- `jina-v2-base-code-int8` — 768d BERT encoder, mean-pooled by hugot. Legacy default; all bundles ≤ v0.66.
+- `qwen3-embedding-0.6b-int8` — 1024d Qwen3-Embedding-0.6B, **last-token pooling baked into the ONNX graph** (export emits 2D `[batch, dim]`, which hugot returns as-is; hugot only mean-pools 3D outputs). Produced by `scripts/export_qwen3_onnx.py`.
+
+`cluster.EmbedderSet` (composition root) owns one shared ORT session and lazily constructs one pipeline per embedder ID actually required by built bundles — prod (single default version) loads exactly one model into memory.
+
+### Embedder assets
+
+**NOT in git.** One subdir per embedder ID under the assets root:
+
+- `<root>/jina-v2-base-code-int8/{model.onnx,tokenizer.json}` — Jina's own INT8 export at `jinaai/jina-embeddings-v2-base-code`, file path `onnx/model_quantized.onnx`. Flat legacy layout (`<root>/model.onnx`) still resolves for Jina in local dev.
+- `<root>/qwen3-embedding-0.6b-int8/{model.onnx,tokenizer.json}` — `scripts/export_qwen3_onnx.py` output uploaded to a Weave HF repo; Dockerfile pulls it only when `HF_QWEN_REPO` is set.
 
 - Dockerfile pulls anonymously during build (Jina repo public — self-hosters don't need creds); local dev pulls via `scripts/download_from_hf.py`.
 - `HF_TOKEN` build secret is *optional* (raises rate limits in CI) + `required=false` in Dockerfile.
-- Go embedder reads from `/opt/router/assets/model.onnx` (override via `ROUTER_ONNX_ASSETS_DIR`).
-- If missing or <1 MiB, `cluster.NewEmbedder` errors at boot + `main.go` panics — router refuses to start rather than silently degrading.
-- `HF_MODEL_REVISION` pinned to Jina SHA by default; bump deliberately to pick up new upstream exports.
+- Go embedders read from `/opt/router/assets/<id>/` (override root via `ROUTER_ONNX_ASSETS_DIR`).
+- If missing or <1 MiB, the embedder constructor errors at boot + `main.go` panics — router refuses to start rather than silently degrading.
+- `HF_MODEL_REVISION` pinned to Jina SHA by default; `HF_QWEN_REVISION` must be pinned to the upload commit SHA. Bump deliberately to pick up new upstream exports.
 
 ### Cost values
 
@@ -59,6 +73,8 @@ Used in α-blend, live in `train_cluster_router.py`'s `DEFAULT_COST_PER_1K_INPUT
 
 - **Don't add per-request cost lookup or runtime α knob.** α is baked at training time; changing it requires retraining. Per-request override (`x-weave-routing-alpha`) is P1, not P0 — wait for a customer ask before shipping.
 - **Don't loosen `MaxPromptChars = 1024` cap** without re-running the latency test. BERT inference is O(n²) attention; the cap is load-bearing.
+- **Don't promote a Qwen-embedder bundle without a latency gate.** Measure Qwen3-0.6B INT8 embed p95 on the target CPU against the 1500 ms `EmbedTimeout` before pointing `latest` at a `qwen3-embedding-0.6b-int8` bundle — embed timeouts surface as `ErrClusterUnavailable` → 503, not as degraded routing.
+- **Don't score a bundle with a different embedder than it was trained with.** `NewScorer` enforces ID + dim; never weaken that check. Trainer-side embedding (model, pooling, L2 norm, no instruction prefix, tail truncation) must match the runtime exactly.
 - **Don't add fail-open fallbacks.** Cluster scorer returns `ErrClusterUnavailable` on every failure path (embed timeout, embed error, dim mismatch, prompt too short, empty argmax). API handlers map it to HTTP 503. The previous `heuristic` fallback was removed because it silently degraded routing — every request that should have hit the cluster scorer instead got `claude-haiku-4-5`, masking real regressions in eval + prod. New failure modes return the sentinel; no default-model shortcut "for safety".
 - **Don't change the centroid format without bumping the magic string.** `loadCentroids` uses magic + version header to refuse mismatched binaries; if the layout changes, bump `centroidsMagic` from `CRT1` to `CRT2` so the next deploy refuses old binaries instead of silently misrouting.
 - **Don't overwrite a previously committed artifact version.** Versions are frozen for comparison — once `v0.37` is committed, train to `v0.38` rather than re-running `train_cluster_router.py` against `v0.37`. Training script auto-bumps; only override with `--version v0.X` for in-place fixes intended to land as a separate commit.

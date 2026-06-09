@@ -121,29 +121,44 @@ The first five follow the [OTel SDK env spec](https://opentelemetry.io/docs/spec
 
 ## Cluster-routing artifacts
 
-The cluster scorer needs two files at runtime: `model.onnx` (the INT8-quantized
-embedder) and `tokenizer.json`. Neither is committed to git — both come from
-the public [`jinaai/jina-embeddings-v2-base-code`](https://huggingface.co/jinaai/jina-embeddings-v2-base-code)
-HuggingFace repo. We use Jina's own INT8 export; we don't maintain our own
-quantization.
+Each embedder the cluster scorer can use needs two files at runtime —
+`model.onnx` (INT8-quantized) and `tokenizer.json` — in its own subdirectory
+of the assets root, keyed by embedder ID:
 
-**Docker (default):** the Dockerfile downloads both files at image build time
-into `/opt/router/assets/`. Nothing for you to do.
+- `jina-v2-base-code-int8/` — from the public
+  [`jinaai/jina-embeddings-v2-base-code`](https://huggingface.co/jinaai/jina-embeddings-v2-base-code)
+  HuggingFace repo (Jina's own INT8 export; we don't maintain our own
+  quantization). Default for every bundle through v0.66; the flat legacy
+  layout (`<root>/model.onnx`) still resolves for this embedder.
+- `qwen3-embedding-0.6b-int8/` — produced by `scripts/export_qwen3_onnx.py`
+  (Qwen3-Embedding-0.6B with last-token pooling baked into the graph) and
+  uploaded to a Weave HF repo. Only needed when serving a bundle whose
+  `metadata.yaml` declares this embedder; the runtime loads embedders lazily.
 
-**`make dev` (host-mode hot reload):** fetch them once into a local directory
-and point `ROUTER_ONNX_ASSETS_DIR` at it:
+Neither is committed to git.
+
+**Docker (default):** the Dockerfile downloads the files at image build time
+into `/opt/router/assets/<embedder-id>/`. The Qwen pull runs only when the
+`HF_QWEN_REPO` build arg is set. Nothing for you to do.
+
+**`make dev` (host-mode hot reload):** fetch the Jina files once into a local
+directory and point `ROUTER_ONNX_ASSETS_DIR` at it:
 
 ```bash
-mkdir -p assets
+mkdir -p assets/jina-v2-base-code-int8
 BASE="https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/516f4baf13dec4ddddda8631e019b5737c8bc250"
-curl -L "$BASE/onnx/model_quantized.onnx" -o assets/model.onnx
-curl -L "$BASE/tokenizer.json" -o assets/tokenizer.json
+curl -L "$BASE/onnx/model_quantized.onnx" -o assets/jina-v2-base-code-int8/model.onnx
+curl -L "$BASE/tokenizer.json" -o assets/jina-v2-base-code-int8/tokenizer.json
 echo "ROUTER_ONNX_ASSETS_DIR=$(pwd)/assets" >> .env.local
 ```
 
-The pinned revision matches `HF_MODEL_REVISION` in the Dockerfile, so local
-dev and the container build use the same weights. Bump both together if you
-want a newer upstream export.
+To also serve Qwen bundles locally, run `scripts/export_qwen3_onnx.py
+--out-dir assets/qwen3-embedding-0.6b-int8` (or download the uploaded export
+into that directory).
+
+The pinned revisions (`HF_MODEL_REVISION`, `HF_QWEN_REVISION`) in the
+Dockerfile keep local dev and the container build on the same weights. Bump
+deliberately if you want a newer export.
 
 The committed cluster artifacts (centroids, rankings, model registry,
 metadata) live under `internal/router/cluster/artifacts/v<X.Y>/`. The

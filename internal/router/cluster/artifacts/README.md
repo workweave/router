@@ -41,6 +41,53 @@ The loader probes for `quality_means.json` to detect v2; falls back to
 `rankings.json` for v1. A v2 directory may co-host both files during
 the trainer's dual-write window.
 
+## Embedder
+
+Each bundle's `metadata.yaml` `embedder` block names the embedding
+space its `centroids.bin` lives in:
+
+```yaml
+embedder:
+  model: jina-v2-base-code-int8   # or qwen3-embedding-0.6b-int8
+  embed_dim: 768                  # 1024 for qwen3
+  max_tokens: 256
+```
+
+The loader cross-checks `embed_dim` against the centroids.bin header,
+and `NewScorer` refuses to pair a bundle with an embedder whose ID or
+dim differs — a bundle trained in one embedding space can never be
+scored in another. Bundles without an embedder block default to
+`jina-v2-base-code-int8` / 768. The runtime constructs only the
+embedders its built bundles require, so Jina and Qwen3 bundles can
+coexist in one deploy (staging `ROUTER_CLUSTER_BUILD_ALL_VERSIONS=true`)
+while prod loads exactly one model.
+
+### Trainer contract (must match runtime exactly)
+
+`train_cluster_router.py` (sibling `router-internal/eval/`) must embed
+training prompts identically to how the Go runtime embeds requests, or
+the bundle silently misroutes — there is no runtime error for a
+training/serving embedding mismatch beyond the ID/dim guard.
+
+For a `qwen3-embedding-0.6b-int8` bundle (e.g. v0.67):
+
+| Aspect | Required value |
+|---|---|
+| Model | `Qwen/Qwen3-Embedding-0.6B` (the exact export served at runtime; prefer embedding through the same INT8 ONNX produced by `scripts/export_qwen3_onnx.py`) |
+| Pooling | Last-token (attention-mask-aware; baked into the ONNX graph) |
+| Normalization | L2 (runtime applies hugot `WithNormalization`) |
+| Instruction prefix | **None** — raw prompt text, document-style (matches Jina behavior) |
+| Truncation | Tail-truncate to 1024 chars (`MaxPromptChars`), UTF-8 boundary snapped |
+| metadata.yaml | `embedder: {model: qwen3-embedding-0.6b-int8, embed_dim: 1024, max_tokens: 256}` |
+
+For `jina-v2-base-code-int8` bundles the existing trainer path is
+unchanged (mean pooling, L2 norm, no prefix, same truncation).
+
+Before promoting any Qwen bundle (pointing `latest` at it), run the
+latency gate: Qwen3-0.6B INT8 embed p95 on the target prod CPU must
+clear the 1500 ms `EmbedTimeout` with margin; timeouts surface as
+HTTP 503, not degraded routing.
+
 ## Working with bundles
 
 - Use `train_cluster_router.py` to write a new version; the script

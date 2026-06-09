@@ -14,10 +14,13 @@ import (
 )
 
 // fakeEmbedder returns a fixed vector or error; captures last text so
-// tests can assert tail-truncation happened upstream.
+// tests can assert tail-truncation happened upstream. Zero-value id/dim
+// default to the Jina identity so legacy-shaped fixtures keep working.
 type fakeEmbedder struct {
 	vec      []float32
 	err      error
+	id       string
+	dim      int
 	lastText string
 	calls    int
 }
@@ -26,6 +29,20 @@ func (f *fakeEmbedder) Embed(_ context.Context, text string) ([]float32, error) 
 	f.calls++
 	f.lastText = text
 	return f.vec, f.err
+}
+
+func (f *fakeEmbedder) ID() string {
+	if f.id == "" {
+		return EmbedderJinaV2
+	}
+	return f.id
+}
+
+func (f *fakeEmbedder) Dim() int {
+	if f.dim == 0 {
+		return EmbedDim
+	}
+	return f.dim
 }
 
 // l2norm normalizes v in place; test fixtures honor the L2-normed
@@ -357,6 +374,65 @@ func TestNewScorer_RejectsEmptyAvailableProviders(t *testing.T) {
 	assert.Contains(t, err.Error(), "availableProviders")
 }
 
+// The identity guard: a bundle trained in one embedding space must never
+// be scored with a different embedder, even at a matching dim.
+func TestNewScorer_RejectsEmbedderIDMismatch(t *testing.T) {
+	cb, rb, regb := twoClusterArtifacts(t)
+	bundle := bundleFromBlobs(t, "v-test", cb, rb, regb)
+	// Legacy bundle (no metadata) declares Jina; a Qwen embedder at the
+	// same dim must be refused.
+	_, err := NewScorer(bundle, cfgForTest(), &fakeEmbedder{id: EmbedderQwen3, dim: EmbedDim}, allProviders())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "declares embedder")
+}
+
+func TestNewScorer_RejectsEmbedderDimMismatch(t *testing.T) {
+	cb, rb, regb := twoClusterArtifacts(t)
+	bundle := bundleFromBlobs(t, "v-test", cb, rb, regb)
+	_, err := NewScorer(bundle, cfgForTest(), &fakeEmbedder{dim: 1024}, allProviders())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "centroids dim")
+}
+
+// A 1024d Qwen bundle loads and routes end-to-end with a matching
+// embedder — the dual-embedder path is not Jina-special-cased.
+func TestScorer_QwenBundleRoutes(t *testing.T) {
+	dim := 1024
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	c1 := make([]float32, dim)
+	c1[1] = 1
+	full := append(append([]float32{}, c0...), c1...)
+	cb := buildCentroidsBlob(t, 2, dim, full)
+	rb := []byte(`{
+		"rankings": {
+			"0": {"claude-opus-4-7": 0.9, "claude-haiku-4-5": 0.1},
+			"1": {"claude-opus-4-7": 0.1, "claude-haiku-4-5": 0.9}
+		}
+	}`)
+	regb := []byte(`{
+		"deployed_models": [
+			{"model": "claude-opus-4-7", "provider": "anthropic", "bench_column": "gpt-5", "proxy": true},
+			{"model": "claude-haiku-4-5", "provider": "anthropic", "bench_column": "gemini-2.5-flash", "proxy": true}
+		]
+	}`)
+	bundle := bundleFromBlobs(t, "v-qwen-test", cb, rb, regb)
+	bundle.Metadata = &ArtifactMetadata{
+		Embedder: ArtifactEmbedder{Model: EmbedderQwen3, EmbedDim: dim},
+	}
+
+	vec := make([]float32, dim)
+	vec[0] = 1 // aligned with cluster 0 (Opus)
+	emb := &fakeEmbedder{id: EmbedderQwen3, dim: dim, vec: vec}
+	s, err := NewScorer(bundle, cfgForTest(), emb, allProviders())
+	require.NoError(t, err)
+
+	d, err := s.Route(context.Background(), router.Request{PromptText: "design a distributed system"})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", d.Model)
+	assert.Equal(t, "anthropic", d.Provider)
+}
+
 func TestNewScorer_RejectsRankingsMissingDeployedModel(t *testing.T) {
 	dim := EmbedDim
 	c0 := make([]float32, dim)
@@ -584,6 +660,10 @@ func (s *slowEmbedder) Embed(ctx context.Context, _ string) ([]float32, error) {
 		return nil, ctx.Err()
 	}
 }
+
+func (s *slowEmbedder) ID() string { return EmbedderJinaV2 }
+
+func (s *slowEmbedder) Dim() int { return EmbedDim }
 
 func TestTailTruncate(t *testing.T) {
 	got := tailTruncate("abcdef", 3)

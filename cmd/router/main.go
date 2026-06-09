@@ -779,7 +779,7 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 		versions = []string{defaultVersion}
 	}
 
-	embedder, err := cluster.NewEmbedder()
+	embedders, err := cluster.NewEmbedderSet()
 	if err != nil {
 		return nil, err
 	}
@@ -795,10 +795,11 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 		}
 	}
 	scorers := make(map[string]*cluster.Scorer, len(versions))
+	warmed := make(map[string]cluster.Embedder)
 	for _, v := range versions {
 		bundle, err := cluster.LoadBundle(v)
 		if err != nil {
-			_ = embedder.Close()
+			_ = embedders.Close()
 			return nil, fmt.Errorf("load bundle %s: %w", v, err)
 		}
 
@@ -818,57 +819,75 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 			)
 		}
 
+		// Lazily construct only the embedders the built versions need:
+		// prod (single default version) loads exactly one model.
+		embedder, err := embedders.Get(bundle.EmbedderID())
+		if err != nil {
+			// The default version's embedder must construct; sibling
+			// versions degrade like any other per-version build failure.
+			if v == defaultVersion {
+				_ = embedders.Close()
+				return nil, fmt.Errorf("construct embedder %q for default cluster version %s: %w", bundle.EmbedderID(), v, err)
+			}
+			logger.Warn("Cluster scorer version skipped; embedder unavailable", "cluster_version", v, "embedder", bundle.EmbedderID(), "err", err)
+			continue
+		}
+		warmed[embedder.ID()] = embedder
+
 		scorer, err := cluster.NewScorer(bundle, cfg, embedder, availableProviders)
 		if err != nil {
 			logger.Warn("Cluster scorer version skipped", "cluster_version", v, "err", err)
 			continue
 		}
 		scorers[v] = scorer
-		logger.Info("Cluster scorer version built", "cluster_version", v, "models", bundle.Registry.Models())
+		logger.Info("Cluster scorer version built", "cluster_version", v, "embedder", bundle.EmbedderID(), "models", bundle.Registry.Models())
 	}
 
 	if _, ok := scorers[defaultVersion]; !ok {
-		_ = embedder.Close()
+		_ = embedders.Close()
 		return nil, fmt.Errorf("default cluster version %q failed to build (likely no registered provider covers its deployed_models); set ROUTER_CLUSTER_VERSION to a version that does, or register the missing provider key", defaultVersion)
 	}
 
 	multi, err := cluster.NewMultiversion(defaultVersion, scorers)
 	if err != nil {
-		_ = embedder.Close()
+		_ = embedders.Close()
 		return nil, fmt.Errorf("build multiversion router: %w", err)
 	}
 	logger.Info(
 		"Cluster multiversion router ready",
 		"default_version", defaultVersion,
 		"built_versions", multi.Built(),
+		"built_embedders", embedders.Built(),
 		"requested_version", requestedVersion,
 		"build_all_versions", buildAll,
 	)
 
-	// Warmup: burn the lazy ONNX graph-optimization cost at boot.
-	type warmupResult struct {
-		err error
-	}
-	warmupDone := make(chan warmupResult, 1)
-	go func() {
-		_, err := embedder.Embed(context.Background(), "warmup")
-		warmupDone <- warmupResult{err: err}
-	}()
-	select {
-	case res := <-warmupDone:
-		if res.err != nil {
-			_ = embedder.Close()
-			return nil, res.err
+	// Warmup: burn each embedder's lazy ONNX graph-optimization cost at boot.
+	for id, embedder := range warmed {
+		type warmupResult struct {
+			err error
 		}
-	case <-time.After(5 * time.Second):
-		// Drain the goroutine before closing to avoid use-after-free.
-		go func() {
-			<-warmupDone
-			_ = embedder.Close()
-		}()
-		return nil, fmt.Errorf("cluster embedder warmup timed out after 5s")
+		warmupDone := make(chan warmupResult, 1)
+		go func(e cluster.Embedder) {
+			_, err := e.Embed(context.Background(), "warmup")
+			warmupDone <- warmupResult{err: err}
+		}(embedder)
+		select {
+		case res := <-warmupDone:
+			if res.err != nil {
+				_ = embedders.Close()
+				return nil, fmt.Errorf("warm embedder %q: %w", id, res.err)
+			}
+		case <-time.After(15 * time.Second):
+			// Drain the goroutine before closing to avoid use-after-free.
+			go func() {
+				<-warmupDone
+				_ = embedders.Close()
+			}()
+			return nil, fmt.Errorf("cluster embedder %q warmup timed out after 15s", id)
+		}
+		logger.Info("Cluster embedder warmed", "embedder", id, "embed_dim", embedder.Dim())
 	}
-	logger.Info("Cluster embedder warmed", "embedder", "jina-v2-base-code-int8", "embed_dim", cluster.EmbedDim)
 
 	return multi, nil
 }
