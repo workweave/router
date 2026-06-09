@@ -1,0 +1,152 @@
+{
+  "meta": {
+    "comment": "v0.60 \u2014 fork of v0.59 deployed-model set. Goal: fix v0.59 routing hard agentic coding to weak models (SWE-bench Pro 8.9% / SWE-Atlas QnA 4.4% vs direct opus 21-22%). Two changes vs v0.59: (1) merge 5,820 Tier 3 SWE-bench Verified Easy solve labels into training so coding clusters get real solve-rate signal; (2) proxy claude-opus-4-8's RouterArena profile from claude-opus-4-7 so opus-4-8 has a balanced easy-prompt baseline instead of a flat global-prior backfill that otherwise makes it win every cluster. score_normalization switched minmax->zscore so opus's absolute coding margin survives instead of collapsing to per-prompt 0/1 ties.",
+    "last_refreshed": "2026-06-03",
+    "parent": "v0.59",
+    "training_recipe": "k=16, alpha=0.80, shrinkage_k0=10, score_normalization=zscore, output_cost_ratio=0.25, speed_weight=0.08, per_model_verbosity=true, include_aa_labels (v0.56-keyed), aa_evidence_scale=3.0. Direct labels: routerarena_labels_combined.jsonl (236k rows) + Tier 3 SWE-bench Easy shards (tier3-full-20260527 + tier3-opus48-20260529, 5820 shards). measured_speed/verbosity from tier1_20260530.json. opus-4-8 proxies opus-4-7 RouterArena column + own swebench column."
+  },
+  "deployed_models": [
+    {
+      "model": "claude-haiku-4-5",
+      "provider": "anthropic",
+      "bench_column": "routerarena_claude-haiku-4-5",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_anthropic/claude-haiku-4-5"
+      ]
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "bench_column": "routerarena_claude-sonnet-4-6",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_anthropic/claude-sonnet-4-6"
+      ]
+    },
+    {
+      "model": "claude-opus-4-7",
+      "provider": "anthropic",
+      "bench_column": "routerarena_claude-opus-4-7",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_anthropic/claude-opus-4-7"
+      ]
+    },
+    {
+      "model": "gemini-3.1-flash-lite-preview",
+      "provider": "google",
+      "bench_column": "routerarena_gemini-3.1-flash-lite-preview",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_gemini/gemini-3.1-flash-lite"
+      ]
+    },
+    {
+      "model": "gemini-3.1-pro-preview",
+      "provider": "google",
+      "bench_column": "routerarena_gemini-3.1-pro-preview",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_gemini/gemini-3.1-pro-preview"
+      ]
+    },
+    {
+      "model": "gemini-3.5-flash",
+      "provider": "google",
+      "bench_column": "routerarena_gemini-3.5-flash",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_gemini/gemini-3.5-flash"
+      ]
+    },
+    {
+      "model": "gpt-5.4-mini",
+      "provider": "openai",
+      "bench_column": "routerarena_gpt-5.4-mini",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_openai/gpt-5.4-mini"
+      ]
+    },
+    {
+      "model": "gpt-5.5",
+      "provider": "openai",
+      "bench_column": "routerarena_gpt-5.5",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_openai/gpt-5.5"
+      ]
+    },
+    {
+      "model": "qwen/qwen3-coder-next",
+      "provider": "bedrock",
+      "bench_column": "routerarena_qwen/qwen3-coder-next",
+      "direct_label": "routerarena"
+    },
+    {
+      "model": "qwen/qwen3-next-80b-a3b-instruct",
+      "provider": "bedrock",
+      "bench_column": "routerarena_qwen/qwen3-next-80b-a3b-instruct",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_deepinfra/Qwen/Qwen3-Next-80B-A3B-Instruct"
+      ]
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "provider": "deepinfra",
+      "bench_column": "routerarena_deepseek/deepseek-v4-flash",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_deepinfra/deepseek-ai/DeepSeek-V4-Flash"
+      ]
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "provider": "fireworks",
+      "bench_column": "routerarena_deepseek/deepseek-v4-pro",
+      "direct_label": "routerarena"
+    },
+    {
+      "model": "moonshotai/kimi-k2.6",
+      "provider": "fireworks",
+      "bench_column": "routerarena_moonshotai/kimi-k2.6",
+      "direct_label": "routerarena",
+      "extra_bench_columns": [
+        "swebench_fireworks_ai/accounts/fireworks/models/kimi-k2p6"
+      ]
+    },
+    {
+      "model": "xiaomi/mimo-v2.5-pro",
+      "provider": "deepinfra",
+      "bench_column": "routerarena_xiaomi/mimo-v2.5-pro",
+      "direct_label": "aa",
+      "extra_bench_columns": [
+        "swebench_deepinfra/XiaomiMiMo/MiMo-V2.5-Pro"
+      ]
+    },
+    {
+      "model": "claude-opus-4-8",
+      "provider": "anthropic",
+      "bench_column": "routerarena_claude-opus-4-7",
+      "direct_label": "routerarena",
+      "proxy": true,
+      "proxy_note": "Opus 4.8 has no RouterArena/AA labels of its own; reuse Opus 4.7's RouterArena column for the easy-prompt baseline (near-identical predecessor on general prompts), while its own swebench_anthropic/claude-opus-4-8 column supplies the coding solve signal. Mirrors the glm-5.1<-glm-5 proxy pattern. Without this, opus-4-8's RouterArena column is empty and it gets a flat global-prior backfill that wins every cluster.",
+      "extra_bench_columns": [
+        "swebench_anthropic/claude-opus-4-8"
+      ]
+    },
+    {
+      "model": "claude-fable-5",
+      "provider": "anthropic",
+      "bench_column": "routerarena_claude-opus-4-7",
+      "direct_label": "routerarena",
+      "proxy": true,
+      "proxy_note": "Fable 5 (GA 2026-06-09) has no RouterArena/AA labels of its own; quality_means column appended by append_quality_column.py from probe run add-claude-fable-5 (194x3 Tier-3 Easy, 95.2% solve) on pinned v0.65 geometry \u2014 per-cluster cell~solve fit + monotone floor on measured clusters, opus-4-8 cells imputed elsewhere. Re-fit via the registry path (opus-4-7 RouterArena proxy + own swebench column) at the next full retrain.",
+      "extra_bench_columns": [
+        "swebench_anthropic/claude-fable-5"
+      ]
+    }
+  ]
+}
