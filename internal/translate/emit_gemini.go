@@ -289,7 +289,7 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 	emitGeminiContents(jw, collapseConsecutiveRoles(entries))
 
 	writeGeminiToolsFromOpenAI(jw, body)
-	writeGeminiToolChoiceFromOpenAI(jw, body)
+	writeGeminiToolChoiceFromOpenAI(jw, body, opts.TargetModel)
 	writeGeminiGenerationConfigFromOpenAI(jw, body, opts.TargetModel, opts.ForceReasoningEffort)
 	return nil
 }
@@ -473,14 +473,35 @@ func writeGeminiToolsFromOpenAI(jw *jsonWriter, body []byte) {
 }
 
 // writeGeminiToolChoiceFromOpenAI writes toolConfig into jw from an OpenAI body.
-func writeGeminiToolChoiceFromOpenAI(jw *jsonWriter, body []byte) {
+//
+// Mirrors writeGeminiToolChoiceFromAnthropic: when the request carries tools
+// and the client didn't force a mode (absent or "auto" tool_choice),
+// Gemini-3.x targets get mode=VALIDATED so emitted calls are
+// schema-constrained at decode time. Explicit none/required/function choices
+// are passed through untouched.
+func writeGeminiToolChoiceFromOpenAI(jw *jsonWriter, body []byte, model string) {
 	r := gjson.GetBytes(body, "tool_choice")
+	choice := ""
+	if r.Type == gjson.String {
+		choice = r.String()
+	}
+	if (!r.Exists() || choice == "auto") && hasNonEmptyTools(body) && isGemini3xModel(model) {
+		jw.Key("toolConfig")
+		jw.Obj()
+		jw.Key("functionCallingConfig")
+		jw.Obj()
+		jw.Key("mode")
+		jw.Str("VALIDATED")
+		jw.EndObj()
+		jw.EndObj()
+		return
+	}
 	if !r.Exists() {
 		return
 	}
 	if r.Type == gjson.String {
 		var mode string
-		switch r.String() {
+		switch choice {
 		case "auto":
 			mode = "AUTO"
 		case "none":

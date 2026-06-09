@@ -136,6 +136,41 @@ func TestPrepareGemini_ForcedToolChoicePreserved(t *testing.T) {
 	assert.Equal(t, []any{"Read"}, fcc["allowedFunctionNames"].([]any))
 }
 
+func TestPrepareGemini_ValidatedModeFromOpenAIIngress(t *testing.T) {
+	// The OpenAI→Gemini cross-format path must request VALIDATED under the
+	// same conditions as the Anthropic path (PR #343 review).
+	body := `{
+	  "model":"gpt-4o","max_tokens":1024,
+	  "tools":[{"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"]}}}],
+	  "messages":[{"role":"user","content":"read main.go"}]
+	}`
+	env, err := translate.ParseOpenAI([]byte(body))
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	fcc := getMap(t, doc, "toolConfig")["functionCallingConfig"].(map[string]any)
+	assert.Equal(t, "VALIDATED", fcc["mode"])
+}
+
+func TestPrepareGemini_OpenAIIngressForcedChoicePreserved(t *testing.T) {
+	body := `{
+	  "model":"gpt-4o","max_tokens":1024,
+	  "tools":[{"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"]}}}],
+	  "tool_choice":"required",
+	  "messages":[{"role":"user","content":"read main.go"}]
+	}`
+	env, err := translate.ParseOpenAI([]byte(body))
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	fcc := getMap(t, doc, "toolConfig")["functionCallingConfig"].(map[string]any)
+	assert.Equal(t, "ANY", fcc["mode"], "an explicit tool_choice must never be clobbered by the VALIDATED upgrade")
+}
+
 func TestPrepareGemini_NoToolsNoValidated(t *testing.T) {
 	body := `{
 	  "model":"claude-opus-4-8","max_tokens":4096,
