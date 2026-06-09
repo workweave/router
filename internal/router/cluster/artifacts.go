@@ -338,6 +338,28 @@ func loadBundleFromPath(fsys fs.FS, version, dir string) (*Bundle, error) {
 			}
 		}
 
+		// model_features.json is best-effort and, when present, becomes the
+		// authoritative source for the quality + axes tables (the no-op
+		// onboarding surface: a new model is one appended column). It is a
+		// faithful repackaging of quality_means.json + model_axes.json, so
+		// routing is unchanged on the current roster (asserted by
+		// TestFeaturesMatchQualityMeans). A model added here without a
+		// matching quality_means.json entry still routes; a deployed model
+		// absent here, or a column of the wrong length, fails fast.
+		if rawFeatures, ferr := fs.ReadFile(fsys, path.Join(dir, "model_features.json")); ferr == nil {
+			featureQualityMeans, featureAxes, err := loadModelFeatures(rawFeatures, centroids.K)
+			if err != nil {
+				return nil, fmt.Errorf("artifacts %s: %w", version, err)
+			}
+			for _, mName := range registry.Models() {
+				if _, ok := featureAxes[mName]; !ok {
+					return nil, fmt.Errorf("artifacts %s: load-time validation failed: deployed model %q missing from model_features.json", version, mName)
+				}
+			}
+			qualityMeans = featureQualityMeans
+			modelAxes = featureAxes
+		}
+
 		// Precompute median of verbosity tokens over all deployed models that have data
 		var verbosityVals []float64
 		for _, mName := range registry.Models() {
@@ -534,6 +556,54 @@ func loadModelAxes(raw []byte) (map[string]ModelAxis, error) {
 		return nil, fmt.Errorf("model_axes.json parse: %w", err)
 	}
 	return f.Axes, nil
+}
+
+// modelFeaturesFile is the on-disk form of model_features.json: a
+// model-centric repackaging of the quality_means + model_axes tables. Each
+// model carries its per-cluster quality column (psi_probe, length K) and its
+// operational block (the same fields as ModelAxis). Routing from this artifact
+// is identical to routing from quality_means.json + model_axes.json on a given
+// roster; its purpose is to make onboarding a model a no-op (append one column,
+// no retrain).
+type modelFeaturesFile struct {
+	Meta   interface{} `json:"meta,omitempty"`
+	Models map[string]struct {
+		PsiProbe    []float32 `json:"psi_probe"`
+		Operational ModelAxis `json:"operational"`
+	} `json:"models"`
+}
+
+// loadModelFeatures parses model_features.json into the runtime's existing
+// shapes: a per-cluster quality table (Rankings) and the per-model axes map.
+// k is the cluster count from centroids.bin; every psi_probe column must match
+// it exactly (a mismatched column means the file was built against a different
+// artifact version and must be rebuilt).
+func loadModelFeatures(raw []byte, k int) (Rankings, map[string]ModelAxis, error) {
+	if len(raw) == 0 {
+		return nil, nil, fmt.Errorf("model_features.json is empty")
+	}
+	var f modelFeaturesFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return nil, nil, fmt.Errorf("model_features.json parse: %w", err)
+	}
+	if len(f.Models) == 0 {
+		return nil, nil, fmt.Errorf("model_features.json has no models")
+	}
+	qualityMeans := make(Rankings, k)
+	for ki := 0; ki < k; ki++ {
+		qualityMeans[ki] = make(map[string]float32, len(f.Models))
+	}
+	axes := make(map[string]ModelAxis, len(f.Models))
+	for name, rec := range f.Models {
+		if len(rec.PsiProbe) != k {
+			return nil, nil, fmt.Errorf("model_features.json: model %q psi_probe length %d, want K=%d (rebuild against this artifact version)", name, len(rec.PsiProbe), k)
+		}
+		for ki := 0; ki < k; ki++ {
+			qualityMeans[ki][name] = rec.PsiProbe[ki]
+		}
+		axes[name] = rec.Operational
+	}
+	return qualityMeans, axes, nil
 }
 
 // CheapestModel returns the lowest cost-per-1k-input entry among
