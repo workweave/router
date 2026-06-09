@@ -415,7 +415,8 @@ func (s *Service) resolveBindingsForDispatch(ctx context.Context, decision route
 	// Provider exclusions must hold during failover too — otherwise a
 	// fallback binding could resurrect a provider the scorer already
 	// filtered out via enabledProvidersForRequest.
-	if excluded := s.excludedProvidersForRequest(ctx); len(excluded) > 0 {
+	excluded := s.excludedProvidersForRequest(ctx)
+	if len(excluded) > 0 {
 		filtered := make(map[string]struct{}, len(available))
 		for p := range available {
 			if _, drop := excluded[p]; !drop {
@@ -424,15 +425,22 @@ func (s *Service) resolveBindingsForDispatch(ctx context.Context, decision route
 		}
 		available = filtered
 	}
+	_, primaryExcluded := excluded[decision.Provider]
 	bindings := catalog.AvailableBindings(decision.Model, available)
-	if len(bindings) <= 1 {
+	if len(bindings) == 0 || (len(bindings) == 1 && !primaryExcluded) {
 		return []catalog.ProviderBinding{primary}
 	}
 	// Defensive: the scorer picks bindings[0] at boot time; if for any
 	// reason the runtime decision lists a different provider, keep that
 	// as the primary attempt and treat the rest as ordered fallbacks
-	// minus duplicates.
+	// minus duplicates. Exception: an excluded primary is never re-added —
+	// routing already filters excluded providers, so a decision naming one
+	// is a bug upstream, and dispatching to it would break the exclusion
+	// contract. Serve only the eligible bindings in that case.
 	if bindings[0].Provider != decision.Provider {
+		if primaryExcluded {
+			return bindings
+		}
 		out := []catalog.ProviderBinding{primary}
 		for _, b := range bindings {
 			if b.Provider != decision.Provider {

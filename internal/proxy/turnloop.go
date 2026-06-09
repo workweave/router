@@ -342,6 +342,25 @@ func (s *Service) runTurnLoop(
 		}
 	}
 
+	// Provider-eligibility guard: when the pinned provider is no longer in
+	// this request's enabled set (installation/env provider exclusion, or a
+	// BYOK request without that provider's creds), treat the pin as missing
+	// so the sticky branches below (ToolResult, OutcomeStay, !plannerEnabled)
+	// cannot keep serving through a provider the request must not use.
+	// Mirrors the providerEligible check on the user-forced pin path above —
+	// without it, a session pinned before the exclusion was saved would keep
+	// hitting the excluded provider until the pin expired.
+	if pinFound && req.EnabledProviders != nil {
+		if _, ok := req.EnabledProviders[pin.Provider]; !ok {
+			log.Info("Session pin provider not in enabled set; falling through to scorer",
+				"pin_model", pin.Model,
+				"pin_provider", pin.Provider,
+			)
+			pinFound = false
+			pin = sessionpin.Pin{}
+		}
+	}
+
 	// Image-input guard: when this turn carries image content but the pinned
 	// model is text-only, drop the pin and fall through to the scorer so an
 	// image-capable model is chosen. The scorer's own image-input filter then

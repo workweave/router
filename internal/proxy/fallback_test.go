@@ -597,6 +597,20 @@ func TestResolveBindingsForDispatch(t *testing.T) {
 		require.Len(t, bs, 1, "openrouter fallback binding must be filtered out by the provider exclusion")
 		assert.Equal(t, "fireworks", bs[0].Provider)
 	})
+	t.Run("excluded primary is never re-added as the first attempt", func(t *testing.T) {
+		// Defense in depth: routing already filters excluded providers, so a
+		// decision naming one is an upstream bug — dispatch must serve only
+		// the eligible bindings rather than re-prepending the excluded
+		// primary.
+		s := &Service{deploymentKeyedProviders: map[string]struct{}{"fireworks": {}, "openrouter": {}}}
+		ctx := context.WithValue(context.Background(), InstallationExcludedProvidersContextKey{}, []string{"fireworks"})
+		bs := s.resolveBindingsForDispatch(ctx, router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "fireworks"})
+		require.NotEmpty(t, bs)
+		for _, b := range bs {
+			assert.NotEqual(t, "fireworks", b.Provider,
+				"an excluded provider must not appear anywhere in the dispatch walk")
+		}
+	})
 }
 
 // TestProvidersIsRetryable round-trips the dispatcher's classifier

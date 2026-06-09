@@ -185,6 +185,64 @@ func TestTurnLoop_ToolResultWithPinSkipsScorerAndPlanner(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
+// TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer guards the
+// provider-eligibility pin guard: a session pinned to a provider that has
+// since been excluded (installation list, env override, or BYOK narrowing)
+// must NOT be served through the sticky branches — the turn falls through to
+// the scorer, which routes within the remaining enabled set. Without the
+// guard, ordinary stickies (unlike user-forced pins) kept hitting the
+// excluded provider until the pin expired.
+func TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer(t *testing.T) {
+	const toolResultBody = `{
+		"model":"claude-opus-4-7",
+		"system":"sys",
+		"messages":[
+			{"role":"user","content":"plan"},
+			{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"R","input":{}}]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}
+		]
+	}`
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderOpenAI,
+		Model:       "gpt-5.5",
+		Reason:      "cluster:v0.2",
+		PinnedUntil: time.Now().Add(time.Hour),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "cluster:v0.2",
+	}}
+	svc := proxy.NewService(
+		fr,
+		map[string]providers.Client{
+			providers.ProviderAnthropic: &fakeProvider{},
+			providers.ProviderOpenAI:    &fakeProvider{},
+		},
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		providers.ProviderAnthropic,
+		"claude-haiku-4-5",
+		nil,
+	)
+
+	ctx := context.WithValue(authedCtx(uuid.New().String()),
+		proxy.InstallationExcludedProvidersContextKey{}, []string{providers.ProviderOpenAI})
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls,
+		"pin on an excluded provider must fall through to the scorer instead of being served sticky")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"the turn must be served on the scorer's fresh decision, not the excluded pin")
+}
+
 // TestTurnLoop_PlannerStaysWhenScorerAgrees verifies the same-model
 // trivial-stay branch: scorer recommends the pin's model, planner
 // returns reason=same_model, pin wins.
