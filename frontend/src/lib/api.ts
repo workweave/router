@@ -124,6 +124,13 @@ export interface ExcludedModelsResponse {
   env_override_active: boolean;
 }
 
+export interface RoutingPreferencesResponse {
+  quality: number;
+  speed: number;
+  price: number;
+  is_default: boolean;
+}
+
 export const api = {
   auth: {
     me: () => request<MeResponse>("/auth/me"),
@@ -185,6 +192,19 @@ export const api = {
       request<ExcludedModelsResponse>("/excluded-models", {
         method: "PUT",
         body: JSON.stringify({ excluded }),
+      }),
+  },
+  routingPreferences: {
+    get: () => request<RoutingPreferencesResponse>("/routing-preferences"),
+    update: (body: { quality: number; speed: number; price: number }) =>
+      request<RoutingPreferencesResponse>("/routing-preferences", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    reset: () =>
+      request<RoutingPreferencesResponse>("/routing-preferences", {
+        method: "PUT",
+        body: JSON.stringify({ reset: true }),
       }),
   },
 };

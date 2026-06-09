@@ -16,7 +16,7 @@ import {
   type ExternalKey,
   type RouterConfig,
 } from "@/lib/api";
-import { ChevronDown, Copy, Filter, KeyRound, Plug, RotateCw, Settings as SettingsIcon, Trash2 } from "lucide-react";
+import { ChevronDown, Copy, Filter, KeyRound, Plug, RotateCw, Settings as SettingsIcon, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export default function SettingsPage() {
@@ -87,6 +87,25 @@ export default function SettingsPage() {
             installation. Unchecked models are skipped at request time.
           </Text>
           <ModelSelectionPanel />
+        </Page.Section>
+
+        <Page.Section
+          className="py-3"
+          header={
+            <Page.SectionHeader>
+              <SlidersHorizontal className="size-4" />
+              <Text variant="h4" as="h3">
+                Routing priorities
+              </Text>
+            </Page.SectionHeader>
+          }
+        >
+          <Text className="text-xs text-muted-foreground">
+            Bias routing toward quality, speed, or price. The values are
+            relative — every request is balanced across them. Leave as default
+            to let the router decide.
+          </Text>
+          <RoutingPrioritiesPanel />
         </Page.Section>
 
         <Page.Section
@@ -799,6 +818,176 @@ function ModelSelectionPanel() {
           >
             {saving ? "Saving…" : "Save"}
           </Button>
+        </Card.Footer>
+      </Card>
+    </>
+  );
+}
+
+
+const DIALS = [
+  { key: "quality", label: "Quality", help: "Favor stronger models", segment: "bg-primary" },
+  { key: "speed", label: "Speed", help: "Favor faster responses", segment: "bg-success" },
+  { key: "price", label: "Price", help: "Favor cheaper models", segment: "bg-warning" },
+] as const;
+
+type DialKey = (typeof DIALS)[number]["key"];
+type Weights = Record<DialKey, number>;
+
+const DEFAULT_WEIGHTS: Weights = { quality: 50, speed: 25, price: 25 };
+
+function normalizeWeights(w: Weights): Weights {
+  const total = w.quality + w.speed + w.price;
+  if (total <= 0) return { quality: 0, speed: 0, price: 0 };
+  return {
+    quality: (w.quality / total) * 100,
+    speed: (w.speed / total) * 100,
+    price: (w.price / total) * 100,
+  };
+}
+
+function RoutingPrioritiesPanel() {
+  const [draft, setDraft] = useState<Weights>(DEFAULT_WEIGHTS);
+  const [saved, setSaved] = useState<Weights>(DEFAULT_WEIGHTS);
+  const [isDefault, setIsDefault] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function apply(res: { quality: number; speed: number; price: number; is_default: boolean }) {
+    const next: Weights = {
+      quality: Math.round(res.quality),
+      speed: Math.round(res.speed),
+      price: Math.round(res.price),
+    };
+    setDraft(next);
+    setSaved(next);
+    setIsDefault(res.is_default);
+  }
+
+  useEffect(() => {
+    api.routingPreferences
+      .get()
+      .then(res => {
+        apply(res);
+        setLoaded(true);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Failed to load routing priorities");
+        setLoaded(true);
+      });
+  }, []);
+
+  const dirty =
+    draft.quality !== saved.quality || draft.speed !== saved.speed || draft.price !== saved.price;
+
+  function setDial(key: DialKey, value: number) {
+    setDraft(prev => ({ ...prev, [key]: value }));
+  }
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      apply(await api.routingPreferences.update(draft));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function reset() {
+    setSaving(true);
+    setError(null);
+    try {
+      apply(await api.routingPreferences.reset());
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to reset");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!loaded) {
+    return (
+      <Card className="p-0">
+        <Card.Content>
+          <div className="px-5 py-8 text-center text-2xs text-muted-foreground">
+            {error != null ? "Failed to load" : "Loading…"}
+          </div>
+        </Card.Content>
+      </Card>
+    );
+  }
+
+  const normalized = normalizeWeights(draft);
+
+  return (
+    <>
+      {error && <ErrorBanner>{error}</ErrorBanner>}
+      <Card className="p-0">
+        <Card.Content className="flex flex-col gap-4 p-5">
+          {isDefault && (
+            <div className="rounded-md border border-border bg-muted/30 p-3 text-2xs text-muted-foreground">
+              Using the router&apos;s default routing. Adjust a dial and save to set a preference.
+            </div>
+          )}
+
+          <div className="flex h-2 overflow-hidden rounded-full bg-muted">
+            {DIALS.map(d => (
+              <div
+                key={d.key}
+                className={`${d.segment} transition-all duration-200`}
+                style={{ width: `${normalized[d.key]}%` }}
+              />
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-3">
+            {DIALS.map(d => (
+              <div key={d.key} className="flex items-center gap-3">
+                <div className="flex w-32 shrink-0 items-center gap-1.5">
+                  <div className={`size-2 rounded-full ${d.segment}`} />
+                  <div className="flex flex-col">
+                    <span className="text-sm leading-tight text-foreground">{d.label}</span>
+                    <span className="text-2xs leading-tight text-muted-foreground">{d.help}</span>
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={draft[d.key]}
+                  disabled={saving}
+                  onChange={e => setDial(d.key, Number(e.target.value))}
+                  className="h-1.5 flex-1 cursor-pointer accent-brand disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                <span className="w-8 text-right text-sm tabular-nums text-foreground">
+                  {draft[d.key]}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card.Content>
+        <Card.Footer className="flex items-center justify-between border-t border-border px-5 py-3">
+          <span className="text-2xs text-muted-foreground">Normalized on save</span>
+          <div className="flex items-center gap-2">
+            {!isDefault && (
+              <Button appearance={Appearance.Outlined} onClick={reset} disabled={saving}>
+                Reset to default
+              </Button>
+            )}
+            <Button
+              onClick={save}
+              disabled={!dirty || saving}
+              intent={Intent.Primary}
+              appearance={Appearance.Filled}
+            >
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </div>
         </Card.Footer>
       </Card>
     </>

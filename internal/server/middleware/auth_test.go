@@ -102,6 +102,9 @@ func (fakeInstallationRepository) SoftDelete(ctx context.Context, externalID, id
 func (fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, externalID, id string, models []string) error {
 	return errors.New("not used")
 }
+func (fakeInstallationRepository) UpdateRoutingPreferences(ctx context.Context, externalID, id string, qualityWeight, speedWeight *float64) error {
+	return errors.New("not used")
+}
 
 func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 	gin.SetMode(gin.TestMode)

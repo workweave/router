@@ -18,6 +18,14 @@ type Installation struct {
 	// ExcludedModels is the per-installation model exclusion list.
 	// Empty means no exclusion.
 	ExcludedModels []string
+	// RoutingQualityWeight and RoutingSpeedWeight are the per-installation
+	// routing preference ("speed / price / quality" dials), stored as
+	// normalized fractions in [0, 1]. Quality overrides the scorer's
+	// per-cluster Alpha and speed maps to SpeedWeight; price is the implied
+	// remainder. nil means no preference -- the scorer keeps its tuned
+	// per-cluster defaults. The two are written and cleared as a pair.
+	RoutingQualityWeight *float64
+	RoutingSpeedWeight   *float64
 }
 
 type CreateInstallationParams struct {
@@ -34,4 +42,8 @@ type InstallationRepository interface {
 	// UpdateExcludedModels replaces the per-installation exclusion list.
 	// An empty (or nil) slice clears the list.
 	UpdateExcludedModels(ctx context.Context, externalID, id string, models []string) error
+	// UpdateRoutingPreferences sets the routing dial weights (normalized
+	// fractions in [0, 1]). Passing nil, nil clears the preference so the
+	// scorer reverts to its tuned defaults.
+	UpdateRoutingPreferences(ctx context.Context, externalID, id string, qualityWeight, speedWeight *float64) error
 }
