@@ -152,6 +152,7 @@ func (s *Service) handleLoopEscalation(
 	log := observability.FromContext(ctx)
 
 	loopingModel := routedModel
+	userForced := false
 	if s.pinStore != nil && installationID != uuid.Nil {
 		existing, found, err := s.pinStore.Get(ctx, sessionKey, role)
 		if err != nil {
@@ -160,13 +161,19 @@ func (s *Service) handleLoopEscalation(
 			if existing.Reason == translate.ReasonLoopEscalation {
 				return // already rescued this session; don't re-pin or double-log
 			}
+			// A user's explicit /force-model (or x-weave-force-model) choice
+			// outranks auto-escalation — never silently overwrite it. Record the
+			// loop for telemetry, but leave the forced pin in place.
+			if existing.Reason == translate.ReasonUserForceModel {
+				userForced = true
+			}
 			if existing.Model != "" {
 				loopingModel = existing.Model
 			}
 		}
 	}
 
-	willEscalate := loopingModel != escalateModel
+	willEscalate := !userForced && loopingModel != escalateModel
 
 	// First-class telemetry. This (session, looping_model) → looped event is the
 	// exact misroute the embedder cannot predict up front, so it is a training
@@ -177,6 +184,7 @@ func (s *Service) handleLoopEscalation(
 	log.Info("router.loop_escalation",
 		"looping_model", loopingModel,
 		"escalated", willEscalate,
+		"user_forced", userForced,
 		"escalation_target", escalateModel,
 		"loop_tool", top.Name,
 		"loop_input_hash", top.InputHash,
