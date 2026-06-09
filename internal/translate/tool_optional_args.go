@@ -29,6 +29,9 @@ func parseToolRequiredParams(anthropicBody []byte) map[string]map[string]struct{
 		out[name] = reqSet
 		return true
 	})
+	if len(out) == 0 {
+		return nil
+	}
 	return out
 }
 
@@ -44,6 +47,9 @@ func parseToolRequiredParams(anthropicBody []byte) map[string]map[string]struct{
 // client turns the otherwise-doomed call into a valid one. Required params are
 // never stripped: a genuinely-missing required arg must still surface its error.
 func stripEmptyOptionalArgs(args string, required map[string]struct{}) string {
+	if required == nil {
+		return args
+	}
 	parsed := gjson.Parse(args)
 	if !parsed.IsObject() {
 		return args

@@ -542,7 +542,7 @@ func (t *ResponsesToAnthropicWriter) finalizeBuffered() error {
 		observability.Get().Error("ResponsesToAnthropic: upstream response failed", "request_model", t.requestModel)
 		return t.finalizeError()
 	}
-	anthropic, err := ResponsesToAnthropicResponse(finalResp, t.requestModel)
+	anthropic, err := responsesToAnthropicResponse(finalResp, t.requestModel, t.toolRequiredParams)
 	if err != nil {
 		observability.Get().Error("ResponsesToAnthropic: translate failed", "err", err)
 		return t.finalizeError()
@@ -794,7 +794,9 @@ func (t *ResponsesToAnthropicWriter) emitValidatedToolArgsDelta(oi, index int, f
 	// Drop empty-string optional args (e.g. gpt-5.x emitting Read.pages="").
 	// Required params are preserved so a genuinely-missing one still errors.
 	if name := t.toolName[oi]; name != "" && t.toolRequiredParams != nil {
-		args = stripEmptyOptionalArgs(args, t.toolRequiredParams[name])
+		if required, ok := t.toolRequiredParams[name]; ok {
+			args = stripEmptyOptionalArgs(args, required)
+		}
 	}
 	delete(t.toolName, oi)
 	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")

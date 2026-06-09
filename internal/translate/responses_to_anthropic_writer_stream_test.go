@@ -204,6 +204,69 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","ou
 		"the empty optional arg must not reach the client at all")
 }
 
+func TestResponsesToAnthropicWriter_NonStreamingStripsEmptyOptionalArg(t *testing.T) {
+	const fixture = `event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"","status":"in_progress"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"{\"file_path\":\"x.go\",\"pages\":\"\"}","status":"completed"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"r","status":"completed","output":[{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"{\"file_path\":\"x.go\",\"pages\":\"\"}"}],"usage":{"input_tokens":10,"output_tokens":5}}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil).
+		WithToolRequiredParams(map[string]map[string]struct{}{
+			"Read": {"file_path": {}},
+		})
+	require.NoError(t, w.Prelude(false))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	var msg map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &msg))
+	content, _ := msg["content"].([]any)
+	require.Len(t, content, 1)
+	tool, _ := content[0].(map[string]any)
+	input, _ := tool["input"].(map[string]any)
+	assert.Equal(t, "x.go", input["file_path"])
+	assert.NotContains(t, input, "pages",
+		"non-streaming conversion must apply the same empty optional strip")
+}
+
+func TestResponsesToAnthropicWriter_NonStreamingNoStripForUnknownToolSchema(t *testing.T) {
+	const fixture = `event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"","status":"in_progress"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"{\"file_path\":\"x.go\",\"pages\":\"\"}","status":"completed"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"r","status":"completed","output":[{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"{\"file_path\":\"x.go\",\"pages\":\"\"}"}],"usage":{"input_tokens":10,"output_tokens":5}}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil).
+		WithToolRequiredParams(map[string]map[string]struct{}{
+			"Write": {"file_path": {}},
+		})
+	require.NoError(t, w.Prelude(false))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	var msg map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &msg))
+	content, _ := msg["content"].([]any)
+	require.Len(t, content, 1)
+	tool, _ := content[0].(map[string]any)
+	input, _ := tool["input"].(map[string]any)
+	assert.Equal(t, "", input["pages"],
+		"schema for a different tool must not authorize stripping this tool's args")
+}
+
 // Without a required-param map (no tools / non-Anthropic inbound) the writer
 // passes args through verbatim — the strip is opt-in and never guesses.
 func TestResponsesToAnthropicWriter_NoStripWithoutSchema(t *testing.T) {
@@ -223,6 +286,28 @@ data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","
 
 	assert.Contains(t, rec.Body.String(), `\"pages\":\"\"`,
 		"without a schema the writer must not strip anything")
+}
+
+func TestResponsesToAnthropicWriter_NoStripForUnknownToolSchema(t *testing.T) {
+	const fixture = `event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"","status":"in_progress"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"{\"file_path\":\"x.go\",\"pages\":\"\"}","status":"completed"}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil).
+		WithToolRequiredParams(map[string]map[string]struct{}{
+			"Write": {"file_path": {}},
+		})
+	require.NoError(t, w.Prelude(true))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	assert.Contains(t, rec.Body.String(), `\"pages\":\"\"`,
+		"schema for a different tool must not authorize stripping this tool's args")
 }
 
 // A stream truncated before response.completed still reconciles to

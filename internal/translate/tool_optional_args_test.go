@@ -27,6 +27,8 @@ func TestParseToolRequiredParams(t *testing.T) {
 
 func TestParseToolRequiredParams_NoTools(t *testing.T) {
 	assert.Nil(t, parseToolRequiredParams([]byte(`{"messages":[]}`)))
+	assert.Nil(t, parseToolRequiredParams([]byte(`{"tools":[]}`)))
+	assert.Nil(t, parseToolRequiredParams([]byte(`{"tools":[{"input_schema":{"required":["path"]}}]}`)))
 }
 
 func TestStripEmptyOptionalArgs_DropsEmptyOptional(t *testing.T) {
@@ -56,4 +58,8 @@ func TestStripEmptyOptionalArgs_KeepsNonEmptyAndNonString(t *testing.T) {
 func TestStripEmptyOptionalArgs_NonObjectUnchanged(t *testing.T) {
 	assert.Equal(t, `{}`, stripEmptyOptionalArgs(`{}`, nil))
 	assert.Equal(t, `[]`, stripEmptyOptionalArgs(`[]`, nil))
+}
+
+func TestStripEmptyOptionalArgs_NilRequiredSetUnchanged(t *testing.T) {
+	assert.JSONEq(t, `{"name":""}`, stripEmptyOptionalArgs(`{"name":""}`, nil))
 }

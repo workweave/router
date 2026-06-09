@@ -11,6 +11,10 @@ import (
 // Responses `output` array carries reasoning / message / function_call items,
 // which map to Anthropic thinking / text / tool_use content blocks.
 func ResponsesToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
+	return responsesToAnthropicResponse(body, requestModel, nil)
+}
+
+func responsesToAnthropicResponse(body []byte, requestModel string, toolRequiredParams map[string]map[string]struct{}) ([]byte, error) {
 	if !gjson.ValidBytes(body) {
 		return nil, fmt.Errorf("unmarshal responses response: invalid JSON")
 	}
@@ -93,12 +97,18 @@ func ResponsesToAnthropicResponse(body []byte, requestModel string) ([]byte, err
 			jw.Key("id")
 			jw.Str(item.Get("call_id").String())
 			jw.Key("name")
-			jw.Str(item.Get("name").String())
+			name := item.Get("name").String()
+			jw.Str(name)
 			jw.Key("input")
 			args := item.Get("arguments").String()
 			if args == "" || !gjson.Valid(args) {
 				jw.Raw("{}")
 			} else {
+				if name != "" && toolRequiredParams != nil {
+					if required, ok := toolRequiredParams[name]; ok {
+						args = stripEmptyOptionalArgs(args, required)
+					}
+				}
 				jw.Raw(args)
 			}
 			jw.EndObj()
