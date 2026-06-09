@@ -67,11 +67,15 @@ func responsesToAnthropicResponse(body []byte, requestModel string, toolValidato
 	jw.Key("content")
 	jw.Arr()
 	var issues []toolcheck.Issue
+	pendingReasoningSignature := ""
 	root.Get("output").ForEach(func(_, item gjson.Result) bool {
 		switch item.Get("type").String() {
 		case "reasoning":
 			text := joinReasoningSummary(item.Get("summary"))
 			sig := encodeOpenAIReasoningSignature(item.Get("id").String(), item.Get("encrypted_content").String())
+			if sig != "" {
+				pendingReasoningSignature = sig
+			}
 			if text == "" && sig == "" {
 				return true
 			}
@@ -104,7 +108,12 @@ func responsesToAnthropicResponse(body []byte, requestModel string, toolValidato
 			jw.Key("type")
 			jw.Str("tool_use")
 			jw.Key("id")
-			jw.Str(item.Get("call_id").String())
+			id := item.Get("call_id").String()
+			if pendingReasoningSignature != "" {
+				id = embedOpenAIReasoningSignatureInID(id, pendingReasoningSignature)
+				pendingReasoningSignature = ""
+			}
+			jw.Str(id)
 			jw.Key("name")
 			name := item.Get("name").String()
 			jw.Str(name)

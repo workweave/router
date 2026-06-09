@@ -174,6 +174,7 @@ func writeResponsesInputFromAnthropic(jw *jsonWriter, body []byte) {
 			return true
 		}
 		var textParts []string
+		emittedReasoningSignatures := map[string]struct{}{}
 		content.ForEach(func(_, block gjson.Result) bool {
 			switch block.Get("type").String() {
 			case "text":
@@ -181,36 +182,38 @@ func writeResponsesInputFromAnthropic(jw *jsonWriter, body []byte) {
 					textParts = append(textParts, t)
 				}
 			case "thinking":
-				id, enc, ok := decodeOpenAIReasoningSignature(block.Get("signature").String())
-				if !ok {
+				// Flush buffered assistant text before the reasoning item so
+				// turn order (text → reasoning → tool_use) is preserved.
+				sig := block.Get("signature").String()
+				if _, emitted := emittedReasoningSignatures[sig]; emitted || !decodeOpenAIReasoningSignatureValid(sig) {
 					return true
 				}
 				if len(textParts) > 0 {
 					writeResponsesTextMessage(jw, role, joinNonEmpty(textParts))
 					textParts = nil
 				}
-				jw.Obj()
-				jw.Key("type")
-				jw.Str("reasoning")
-				jw.Key("id")
-				jw.Str(id)
-				jw.Key("encrypted_content")
-				jw.Str(enc)
-				jw.Key("summary")
-				jw.Arr()
-				jw.EndArr()
-				jw.EndObj()
+				emitResponsesReasoningItem(jw, sig)
+				emittedReasoningSignatures[sig] = struct{}{}
 			case "tool_use":
 				// Emit any buffered text first so ordering is preserved.
+				callID, sig := extractOpenAIReasoningSignatureFromID(block.Get("id").String())
 				if len(textParts) > 0 {
 					writeResponsesTextMessage(jw, role, joinNonEmpty(textParts))
 					textParts = nil
+				}
+				// Replay the reasoning item carried on the tool id (the
+				// Claude Code round-trip drops the thinking block but keeps the
+				// tool_use id) when it wasn't already emitted from a thinking block.
+				if sig != "" {
+					if _, emitted := emittedReasoningSignatures[sig]; !emitted && emitResponsesReasoningItem(jw, sig) {
+						emittedReasoningSignatures[sig] = struct{}{}
+					}
 				}
 				jw.Obj()
 				jw.Key("type")
 				jw.Str("function_call")
 				jw.Key("call_id")
-				jw.Str(block.Get("id").String())
+				jw.Str(callID)
 				jw.Key("name")
 				jw.Str(block.Get("name").String())
 				inputRaw := block.Get("input").Raw
@@ -229,7 +232,8 @@ func writeResponsesInputFromAnthropic(jw *jsonWriter, body []byte) {
 				jw.Key("type")
 				jw.Str("function_call_output")
 				jw.Key("call_id")
-				jw.Str(block.Get("tool_use_id").String())
+				callID, _ := extractOpenAIReasoningSignatureFromID(block.Get("tool_use_id").String())
+				jw.Str(callID)
 				jw.Key("output")
 				jw.Str(flattenAnthropicToolResultContent(block.Get("content")))
 				jw.EndObj()
@@ -242,6 +246,30 @@ func writeResponsesInputFromAnthropic(jw *jsonWriter, body []byte) {
 		return true
 	})
 	jw.EndArr()
+}
+
+func decodeOpenAIReasoningSignatureValid(sig string) bool {
+	_, _, ok := decodeOpenAIReasoningSignature(sig)
+	return ok
+}
+
+func emitResponsesReasoningItem(jw *jsonWriter, sig string) bool {
+	id, enc, ok := decodeOpenAIReasoningSignature(sig)
+	if !ok {
+		return false
+	}
+	jw.Obj()
+	jw.Key("type")
+	jw.Str("reasoning")
+	jw.Key("id")
+	jw.Str(id)
+	jw.Key("encrypted_content")
+	jw.Str(enc)
+	jw.Key("summary")
+	jw.Arr()
+	jw.EndArr()
+	jw.EndObj()
+	return true
 }
 
 // writeResponsesTextMessage emits one Responses input message with a single

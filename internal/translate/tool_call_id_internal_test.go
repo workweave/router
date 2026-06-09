@@ -39,6 +39,36 @@ func TestOpenAIReasoningSignatureRejectsUnknownEnvelope(t *testing.T) {
 	assert.Empty(t, encodeOpenAIReasoningSignature("rs_123", ""))
 }
 
+func TestEmbedOpenAIReasoningSignatureInID_RoundTrip(t *testing.T) {
+	// The reasoning envelope rides on the following tool_use id because the
+	// Claude Code round-trip drops the thinking block but preserves the id.
+	sig := encodeOpenAIReasoningSignature("rs_1", "enc_1")
+	id := embedOpenAIReasoningSignatureInID("call_abc", sig)
+	require.NotEqual(t, "call_abc", id)
+	assert.True(t, strings.HasPrefix(id, "call_abc"))
+
+	clean, got := extractOpenAIReasoningSignatureFromID(id)
+	assert.Equal(t, "call_abc", clean, "the upstream call_id must be recovered verbatim")
+	assert.Equal(t, sig, got)
+
+	rid, enc, ok := decodeOpenAIReasoningSignature(got)
+	require.True(t, ok)
+	assert.Equal(t, "rs_1", rid)
+	assert.Equal(t, "enc_1", enc)
+}
+
+func TestExtractOpenAIReasoningSignatureFromID_NoSuffix(t *testing.T) {
+	// An id with no embedded envelope comes back unchanged and signature-less.
+	clean, sig := extractOpenAIReasoningSignatureFromID("call_plain")
+	assert.Equal(t, "call_plain", clean)
+	assert.Empty(t, sig)
+}
+
+func TestEmbedOpenAIReasoningSignatureInID_NoOpOnEmpty(t *testing.T) {
+	assert.Equal(t, "call_abc", embedOpenAIReasoningSignatureInID("call_abc", ""))
+	assert.Empty(t, embedOpenAIReasoningSignatureInID("", "sig"))
+}
+
 func TestClampOpenAIToolCallID(t *testing.T) {
 	// Short id: unchanged.
 	assert.Equal(t, "toolu_abc", clampOpenAIToolCallID("toolu_abc"))

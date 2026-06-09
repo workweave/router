@@ -11,7 +11,7 @@
         "type": "text"
       },
       {
-        "id": "call_xyz",
+        "id": "call_xyz__openai_reasoning__ZXlKMklqb3hMQ0p3Y205MmFXUmxjaUk2SW05d1pXNWhhU0lzSW1sa0lqb2ljbk5mTVNJc0ltVnVZeUk2SW1WdVkxOHhJbjA9",
         "input": {
           "city": "NYC"
         },

@@ -3,6 +3,7 @@ package translate
 import (
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 )
 
 type openAIReasoningSignatureEnvelope struct {
@@ -44,4 +45,26 @@ func decodeOpenAIReasoningSignature(sig string) (id, enc string, ok bool) {
 		return "", "", false
 	}
 	return env.ID, env.Enc, true
+}
+
+const openAIReasoningSignatureIDDelimiter = "__openai_reasoning__"
+
+func embedOpenAIReasoningSignatureInID(id, sig string) string {
+	if id == "" || sig == "" || strings.Contains(id, openAIReasoningSignatureIDDelimiter) {
+		return id
+	}
+	return id + openAIReasoningSignatureIDDelimiter + base64.RawURLEncoding.EncodeToString([]byte(sig))
+}
+
+func extractOpenAIReasoningSignatureFromID(id string) (cleanID, sig string) {
+	i := strings.Index(id, openAIReasoningSignatureIDDelimiter)
+	if i < 0 {
+		return id, ""
+	}
+	encoded := id[i+len(openAIReasoningSignatureIDDelimiter):]
+	b, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return id[:i], ""
+	}
+	return id[:i], string(b)
 }

@@ -105,7 +105,9 @@ func TestResponsesToAnthropicWriter_StreamingClient(t *testing.T) {
 	// Text arrives as separate live deltas, not one concatenated string.
 	assert.Contains(t, body, `"text_delta","text":"Let me check"`)
 	assert.Contains(t, body, `"text_delta","text":" the weather."`)
-	assert.Contains(t, body, `"type":"tool_use","id":"call_xyz","name":"get_weather"`)
+	// The reasoning item's signature is carried on the tool_use id so it survives
+	// the Claude Code round-trip; the id is the call_id plus an opaque suffix.
+	assert.Contains(t, body, `"type":"tool_use","id":"call_xyz__openai_reasoning__`)
 	assert.Contains(t, body, `"partial_json":"{\"location\":\"NYC\"}"`,
 		"tool args concatenated from both deltas and emitted as one validated input_json_delta")
 	assert.Contains(t, body, `"stop_reason":"tool_use"`)
@@ -120,7 +122,7 @@ func TestResponsesToAnthropicWriter_StreamingClient(t *testing.T) {
 		`"content_block":{"type":"thinking"`,
 		`"type":"signature_delta"`,
 		`"content_block":{"type":"text"`,
-		`"type":"tool_use","id":"call_xyz"`,
+		`"type":"tool_use","id":"call_xyz__openai_reasoning__`,
 		"event: message_delta",
 		"event: message_stop",
 	}
@@ -161,7 +163,9 @@ func TestResponsesToAnthropicWriter_NonStreamingClient(t *testing.T) {
 	require.Len(t, content, 3)
 	b2, _ := content[2].(map[string]any)
 	assert.Equal(t, "tool_use", b2["type"])
-	assert.Equal(t, "call_xyz", b2["id"])
+	toolID, _ := b2["id"].(string)
+	assert.True(t, strings.HasPrefix(toolID, "call_xyz"), "tool id keeps call_id prefix, got %q", toolID)
+	assert.Contains(t, toolID, "__openai_reasoning__", "tool id carries the reasoning signature for replay")
 	input, _ := b2["input"].(map[string]any)
 	assert.Equal(t, "NYC", input["location"])
 }

@@ -57,8 +57,9 @@ type ResponsesToAnthropicWriter struct {
 	// at item close — mirroring AnthropicSSETranslator, a payload that fails to
 	// parse becomes `{}` rather than killing the client's strict tool-args
 	// parser mid-turn.
-	toolArgs            map[int]*strings.Builder
-	reasoningSignatures map[int]string
+	toolArgs                  map[int]*strings.Builder
+	reasoningSignatures       map[int]string
+	pendingReasoningSignature string
 	// suppressed holds output_indexes of function_call items dropped for carrying
 	// no name. A nameless tool_use makes the client invoke tool "" in a loop, so
 	// (mirroring AnthropicSSETranslator) we never open a block for it and drop its
@@ -767,7 +768,17 @@ func (t *ResponsesToAnthropicWriter) emitContentBlockStartThinking(index int) er
 	return t.flushEvent()
 }
 
+func (t *ResponsesToAnthropicWriter) toolIDWithReasoningSignature(id string) string {
+	if t.pendingReasoningSignature == "" {
+		return id
+	}
+	sig := t.pendingReasoningSignature
+	t.pendingReasoningSignature = ""
+	return embedOpenAIReasoningSignatureInID(id, sig)
+}
+
 func (t *ResponsesToAnthropicWriter) emitContentBlockStartTool(index int, id, name string) error {
+	id = t.toolIDWithReasoningSignature(id)
 	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"content_block\":{\"type\":\"tool_use\",\"id\":")
@@ -808,6 +819,7 @@ func (t *ResponsesToAnthropicWriter) emitReasoningSignatureDelta(oi, index int) 
 	if sig == "" {
 		return nil
 	}
+	t.pendingReasoningSignature = sig
 	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"delta\":{\"type\":\"signature_delta\",\"signature\":")

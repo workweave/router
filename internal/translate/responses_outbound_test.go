@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"workweave/router/internal/providers"
@@ -211,7 +212,12 @@ func TestResponsesToAnthropicResponse(t *testing.T) {
 	assert.Equal(t, "here is the fix", b1["text"])
 	b2, _ := content[2].(map[string]any)
 	assert.Equal(t, "tool_use", b2["type"])
-	assert.Equal(t, "call_9", b2["id"])
+	// The preceding reasoning item's signature is also carried on the tool_use id
+	// (the Claude Code round-trip drops the thinking block but preserves the id),
+	// so the id is the call_id plus an opaque reasoning-signature suffix.
+	toolID, _ := b2["id"].(string)
+	assert.True(t, strings.HasPrefix(toolID, "call_9"), "tool id keeps the call_id prefix, got %q", toolID)
+	assert.Contains(t, toolID, "__openai_reasoning__", "tool id carries the reasoning signature for replay")
 	assert.Equal(t, "bash", b2["name"])
 	input, _ := b2["input"].(map[string]any)
 	assert.Equal(t, "go test", input["command"], "arguments string parsed back to an input object")
