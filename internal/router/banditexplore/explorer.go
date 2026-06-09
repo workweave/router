@@ -22,6 +22,7 @@ package banditexplore
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"math/rand/v2"
 	"sort"
 
@@ -87,9 +88,29 @@ func (e *Explorer) Route(ctx context.Context, req router.Request) (router.Decisi
 		return dec, nil
 	}
 
+	argmaxModel := dec.Model
 	pick := band[e.intn(len(band))]
 	e.annotate(&dec, pick.model, pick.provider, len(band))
+	// When exploration changes the served model, isolate the semantic-cache
+	// key so a hit can't return another model's cached body. The cache keys on
+	// EffectiveKnobsHash (among embedding/cluster/version); mixing the model in
+	// only on a real switch keeps argmax-cache reuse intact when we draw it.
+	if pick.model != argmaxModel && dec.Metadata != nil {
+		dec.Metadata.EffectiveKnobsHash = mixModel(dec.Metadata.EffectiveKnobsHash, pick.model)
+	}
 	return dec, nil
+}
+
+// mixModel folds a model name into the cache-isolation hash.
+func mixModel(h uint64, model string) uint64 {
+	f := fnv.New64a()
+	var b [8]byte
+	for i := 0; i < 8; i++ {
+		b[i] = byte(h >> (8 * i))
+	}
+	_, _ = f.Write(b[:])
+	_, _ = f.Write([]byte(model))
+	return f.Sum64()
 }
 
 // shouldExplore gates on a positive band width and a multi-model score vector;

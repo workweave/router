@@ -185,6 +185,39 @@ func TestRoute_MetadataProviderUsedWhenResolverNil(t *testing.T) {
 	}
 }
 
+func TestRoute_SwitchIsolatesCacheKey(t *testing.T) {
+	scores := map[string]float32{"haiku": 0.90, "opus": 0.88}
+	inner := clusterDecision(scores, "haiku", "anthropic")
+	inner.Metadata.EffectiveKnobsHash = 42
+	e := New(&fakeRouter{dec: inner}, staticProvider(map[string]string{"opus": "anthropic"}), 0.1)
+	withIntn(e, 1) // -> opus (a switch)
+	dec, err := e.Route(context.Background(), router.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Model != "opus" {
+		t.Fatalf("expected switch to opus, got %q", dec.Model)
+	}
+	if dec.Metadata.EffectiveKnobsHash == 42 {
+		t.Fatal("switching models must perturb EffectiveKnobsHash to isolate the cache key")
+	}
+}
+
+func TestRoute_ArgmaxDrawKeepsCacheKey(t *testing.T) {
+	scores := map[string]float32{"haiku": 0.90, "opus": 0.88}
+	inner := clusterDecision(scores, "haiku", "anthropic")
+	inner.Metadata.EffectiveKnobsHash = 42
+	e := New(&fakeRouter{dec: inner}, staticProvider(map[string]string{"opus": "anthropic"}), 0.1)
+	withIntn(e, 0) // -> haiku (the argmax; no switch)
+	dec, err := e.Route(context.Background(), router.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Metadata.EffectiveKnobsHash != 42 {
+		t.Fatalf("drawing the argmax must preserve the cache key, got %d", dec.Metadata.EffectiveKnobsHash)
+	}
+}
+
 func TestRoute_DrawingArgmaxRecordsTruePropensity(t *testing.T) {
 	scores := map[string]float32{"haiku": 0.90, "opus": 0.88}
 	inner := clusterDecision(scores, "haiku", "anthropic")
