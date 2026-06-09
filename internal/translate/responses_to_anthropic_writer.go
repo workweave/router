@@ -57,7 +57,8 @@ type ResponsesToAnthropicWriter struct {
 	// at item close — mirroring AnthropicSSETranslator, a payload that fails to
 	// parse becomes `{}` rather than killing the client's strict tool-args
 	// parser mid-turn.
-	toolArgs map[int]*strings.Builder
+	toolArgs            map[int]*strings.Builder
+	reasoningSignatures map[int]string
 	// suppressed holds output_indexes of function_call items dropped for carrying
 	// no name. A nameless tool_use makes the client invoke tool "" in a loop, so
 	// (mirroring AnthropicSSETranslator) we never open a block for it and drop its
@@ -92,17 +93,18 @@ type ResponsesToAnthropicWriter struct {
 func NewResponsesToAnthropicWriter(w http.ResponseWriter, requestModel string, sink otel.UsageSink) *ResponsesToAnthropicWriter {
 	flusher, _ := w.(http.Flusher)
 	return &ResponsesToAnthropicWriter{
-		inner:        w,
-		flusher:      flusher,
-		bw:           bufio.NewWriterSize(w, 8192),
-		requestModel: requestModel,
-		usageSink:    sink,
-		statusCode:   http.StatusOK,
-		itemBlocks:   make(map[int]int),
-		itemKind:     make(map[int]string),
-		toolArgs:     make(map[int]*strings.Builder),
-		suppressed:   make(map[int]struct{}),
-		toolName:     make(map[int]string),
+		inner:               w,
+		flusher:             flusher,
+		bw:                  bufio.NewWriterSize(w, 8192),
+		requestModel:        requestModel,
+		usageSink:           sink,
+		statusCode:          http.StatusOK,
+		itemBlocks:          make(map[int]int),
+		itemKind:            make(map[int]string),
+		toolArgs:            make(map[int]*strings.Builder),
+		reasoningSignatures: make(map[int]string),
+		suppressed:          make(map[int]struct{}),
+		toolName:            make(map[int]string),
 	}
 }
 
@@ -272,9 +274,9 @@ func (t *ResponsesToAnthropicWriter) handleOutputItemAdded(data []byte) error {
 	oi := int(gjson.GetBytes(data, "output_index").Int())
 	item := gjson.GetBytes(data, "item")
 	if item.Get("type").String() != "function_call" {
-		// message / reasoning blocks open lazily on their first delta so a
-		// reasoning item that surfaces no summary text never opens an empty
-		// thinking block.
+		if item.Get("type").String() == "reasoning" {
+			t.captureReasoningSignature(oi, item)
+		}
 		return nil
 	}
 	name := item.Get("name").String()
@@ -348,6 +350,9 @@ func (t *ResponsesToAnthropicWriter) handleOutputItemDone(data []byte) error {
 		return nil
 	}
 	item := gjson.GetBytes(data, "item")
+	if item.Get("type").String() == "reasoning" {
+		t.captureReasoningSignature(oi, item)
+	}
 	idx, ok := t.itemBlocks[oi]
 	if !ok {
 		// No delta opened a block for this item. Some upstreams send an item's
@@ -357,10 +362,15 @@ func (t *ResponsesToAnthropicWriter) handleOutputItemDone(data []byte) error {
 		// response.completed). Synthesize the block from the terminal item.
 		return t.emitDoneOnlyItem(oi, item)
 	}
-	if t.itemKind[oi] == "tool_use" {
+	switch t.itemKind[oi] {
+	case "tool_use":
 		// item.arguments on the terminal event is the authoritative complete
 		// args; use it when the streamed deltas were absent or malformed.
 		if err := t.emitValidatedToolArgsDelta(oi, idx, item.Get("arguments").String()); err != nil {
+			return err
+		}
+	case "thinking":
+		if err := t.emitReasoningSignatureDelta(oi, idx); err != nil {
 			return err
 		}
 	}
@@ -413,8 +423,9 @@ func (t *ResponsesToAnthropicWriter) emitDoneOnlyItem(oi int, item gjson.Result)
 		}
 		return t.emitContentBlockStop(idx)
 	case "reasoning":
+		t.captureReasoningSignature(oi, item)
 		text := joinReasoningSummary(item.Get("summary"))
-		if text == "" {
+		if text == "" && t.reasoningSignatures[oi] == "" {
 			return nil
 		}
 		idx := t.blockIdx
@@ -425,9 +436,18 @@ func (t *ResponsesToAnthropicWriter) emitDoneOnlyItem(oi int, item gjson.Result)
 		if err := t.emitContentBlockDeltaThinking(idx, text); err != nil {
 			return err
 		}
+		if err := t.emitReasoningSignatureDelta(oi, idx); err != nil {
+			return err
+		}
 		return t.emitContentBlockStop(idx)
 	}
 	return nil
+}
+
+func (t *ResponsesToAnthropicWriter) captureReasoningSignature(oi int, item gjson.Result) {
+	if sig := encodeOpenAIReasoningSignature(item.Get("id").String(), item.Get("encrypted_content").String()); sig != "" {
+		t.reasoningSignatures[oi] = sig
+	}
 }
 
 // openBlock returns the Anthropic block index for output_index oi, opening a
@@ -454,11 +474,16 @@ func (t *ResponsesToAnthropicWriter) captureFinalResponse(data []byte) {
 		return
 	}
 	hasToolCall := false
+	outputIndex := 0
 	resp.Get("output").ForEach(func(_, item gjson.Result) bool {
+		if item.Get("type").String() == "reasoning" {
+			t.captureReasoningSignature(outputIndex, item)
+		}
 		if item.Get("type").String() == "function_call" {
 			hasToolCall = true
 			return false
 		}
+		outputIndex++
 		return true
 	})
 	switch {
@@ -487,8 +512,13 @@ func (t *ResponsesToAnthropicWriter) finishStream() error {
 	// ended before its output_item.done (truncation); flush any buffered tool
 	// args first so a partial tool call still delivers its input_json_delta.
 	for oi, idx := range t.itemBlocks {
-		if t.itemKind[oi] == "tool_use" {
+		switch t.itemKind[oi] {
+		case "tool_use":
 			if err := t.emitValidatedToolArgsDelta(oi, idx, ""); err != nil {
+				return err
+			}
+		case "thinking":
+			if err := t.emitReasoningSignatureDelta(oi, idx); err != nil {
 				return err
 			}
 		}
@@ -768,6 +798,20 @@ func (t *ResponsesToAnthropicWriter) emitContentBlockDeltaThinking(index int, te
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"delta\":{\"type\":\"thinking_delta\",\"thinking\":")
 	sse.WriteJSONString(t.bw, text)
+	t.bw.WriteString("}}\n\n")
+	return t.flushEvent()
+}
+
+func (t *ResponsesToAnthropicWriter) emitReasoningSignatureDelta(oi, index int) error {
+	sig := t.reasoningSignatures[oi]
+	delete(t.reasoningSignatures, oi)
+	if sig == "" {
+		return nil
+	}
+	t.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":")
+	sse.WriteJSONInt(t.bw, int64(index))
+	t.bw.WriteString(",\"delta\":{\"type\":\"signature_delta\",\"signature\":")
+	sse.WriteJSONString(t.bw, sig)
 	t.bw.WriteString("}}\n\n")
 	return t.flushEvent()
 }

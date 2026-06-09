@@ -21,6 +21,24 @@ func TestSanitizeToolUseID_PreservesLongThoughtSignatureID(t *testing.T) {
 	assert.NotEmpty(t, sig, "thoughtSignature still recoverable after sanitize")
 }
 
+func TestOpenAIReasoningSignatureRoundTrip(t *testing.T) {
+	sig := encodeOpenAIReasoningSignature("rs_123", "enc_opaque")
+	require.NotEmpty(t, sig)
+
+	id, enc, ok := decodeOpenAIReasoningSignature(sig)
+	require.True(t, ok)
+	assert.Equal(t, "rs_123", id)
+	assert.Equal(t, "enc_opaque", enc)
+}
+
+func TestOpenAIReasoningSignatureRejectsUnknownEnvelope(t *testing.T) {
+	_, _, ok := decodeOpenAIReasoningSignature("not-base64")
+	assert.False(t, ok)
+
+	assert.Empty(t, encodeOpenAIReasoningSignature("", "enc"))
+	assert.Empty(t, encodeOpenAIReasoningSignature("rs_123", ""))
+}
+
 func TestClampOpenAIToolCallID(t *testing.T) {
 	// Short id: unchanged.
 	assert.Equal(t, "toolu_abc", clampOpenAIToolCallID("toolu_abc"))

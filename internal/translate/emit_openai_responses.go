@@ -92,6 +92,12 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 		return nil, stats, fmt.Errorf("strip claude-code-only tools: %w", err)
 	}
 	stats.CCOnlyToolsStripped = removed
+	if opts.ModelSwitched {
+		body, err = stripThinkingBlocksBytes(body)
+		if err != nil {
+			return nil, stats, fmt.Errorf("strip switched-model thinking blocks: %w", err)
+		}
+	}
 
 	jw := newJSONWriter()
 	jw.Obj()
@@ -100,8 +106,9 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 	jw.Key("stream")
 	jw.Bool(true)
 	// Stateless: we send the full history each turn and don't rely on
-	// server-side state. (We also omit echoing prior reasoning items; the model
-	// reasons fresh from the message history.)
+	// server-side state. Prior OpenAI reasoning items are round-tripped through
+	// signed Anthropic thinking blocks and replayed below when the client echoes
+	// them back.
 	jw.Key("store")
 	jw.Bool(false)
 
@@ -110,18 +117,28 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 		jw.Str(sys)
 	}
 
+	reasoningEnabled := false
 	if opts.Capabilities.Supports(router.CapReasoning) {
 		eff := reasoningEffortFromAnthropic(body)
 		if opts.ForceReasoningEffort != "" {
 			eff = opts.ForceReasoningEffort
 		}
 		if eff := responsesReasoningEffort(eff, opts.TargetModel); eff != "" {
+			reasoningEnabled = true
 			jw.Key("reasoning")
 			jw.Obj()
 			jw.Key("effort")
 			jw.Str(eff)
+			jw.Key("summary")
+			jw.Str("auto")
 			jw.EndObj()
 		}
+	}
+	if reasoningEnabled {
+		jw.Key("include")
+		jw.Arr()
+		jw.Str("reasoning.encrypted_content")
+		jw.EndArr()
 	}
 
 	writeResponsesInputFromAnthropic(jw, body)
@@ -141,8 +158,8 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 
 // writeResponsesInputFromAnthropic emits the `input` array: Anthropic messages
 // become Responses input items — user/assistant text as typed messages,
-// tool_use as function_call, tool_result as function_call_output. Anthropic
-// `thinking` blocks are dropped (Phase 1: no reasoning echo).
+// signed OpenAI thinking as reasoning, tool_use as function_call, tool_result as
+// function_call_output.
 func writeResponsesInputFromAnthropic(jw *jsonWriter, body []byte) {
 	jw.Key("input")
 	jw.Arr()
@@ -163,6 +180,26 @@ func writeResponsesInputFromAnthropic(jw *jsonWriter, body []byte) {
 				if t := block.Get("text").String(); t != "" {
 					textParts = append(textParts, t)
 				}
+			case "thinking":
+				id, enc, ok := decodeOpenAIReasoningSignature(block.Get("signature").String())
+				if !ok {
+					return true
+				}
+				if len(textParts) > 0 {
+					writeResponsesTextMessage(jw, role, joinNonEmpty(textParts))
+					textParts = nil
+				}
+				jw.Obj()
+				jw.Key("type")
+				jw.Str("reasoning")
+				jw.Key("id")
+				jw.Str(id)
+				jw.Key("encrypted_content")
+				jw.Str(enc)
+				jw.Key("summary")
+				jw.Arr()
+				jw.EndArr()
+				jw.EndObj()
 			case "tool_use":
 				// Emit any buffered text first so ordering is preserved.
 				if len(textParts) > 0 {

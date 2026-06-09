@@ -1,6 +1,7 @@
 package translate_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -21,6 +22,22 @@ func gjsonStopReason(b []byte) string {
 	_ = json.Unmarshal(b, &m)
 	s, _ := m["stop_reason"].(string)
 	return s
+}
+
+func openAIReasoningTestSignature(t *testing.T, id, enc string) string {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{"v": 1, "provider": "openai", "id": id, "enc": enc})
+	require.NoError(t, err)
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+func decodeOpenAIReasoningTestSignature(t *testing.T, sig string) map[string]any {
+	t.Helper()
+	b, err := base64.StdEncoding.DecodeString(sig)
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(b, &out))
+	return out
 }
 
 // Anthropic (Claude Code) → OpenAI Responses request: the thinking budget must
@@ -104,6 +121,41 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	assert.Equal(t, providers.EndpointResponses, prep.Endpoint)
 }
 
+func TestPrepareOpenAIResponses_ReplaysSignedReasoning(t *testing.T) {
+	sig := openAIReasoningTestSignature(t, "rs_prev", "enc_prev")
+	body := []byte(`{
+		"model":"claude-opus-4-8","max_tokens":1024,
+		"thinking":{"type":"enabled","budget_tokens":8192},
+		"messages":[
+			{"role":"user","content":"continue"},
+			{"role":"assistant","content":[
+				{"type":"text","text":"I'll inspect it."},
+				{"type":"thinking","thinking":"summary","signature":` + strconv.Quote(sig) + `},
+				{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"main.go"}}
+			]}
+		]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{TargetModel: "gpt-5.5", Capabilities: router.Lookup("gpt-5.5")})
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+	assert.Equal(t, []any{"reasoning.encrypted_content"}, out["include"])
+
+	input, _ := out["input"].([]any)
+	require.Len(t, input, 4)
+	reasoning, _ := input[2].(map[string]any)
+	assert.Equal(t, "reasoning", reasoning["type"])
+	assert.Equal(t, "rs_prev", reasoning["id"])
+	assert.Equal(t, "enc_prev", reasoning["encrypted_content"])
+	assert.Equal(t, []any{}, reasoning["summary"])
+	toolCall, _ := input[3].(map[string]any)
+	assert.Equal(t, "function_call", toolCall["type"])
+	assert.Equal(t, "toolu_1", toolCall["call_id"])
+}
+
 // budget→effort ladder.
 func TestPrepareOpenAIResponses_EffortLadder(t *testing.T) {
 	// gpt-5.x has a measured "medium" dead-zone on hard agentic coding (Pro:
@@ -131,7 +183,7 @@ func TestResponsesToAnthropicResponse(t *testing.T) {
 	body := []byte(`{
       "id":"resp_abc","status":"completed","model":"gpt-5.5",
       "output":[
-        {"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"thinking about it"}]},
+        {"type":"reasoning","id":"rs_1","encrypted_content":"enc_1","summary":[{"type":"summary_text","text":"thinking about it"}]},
         {"type":"message","id":"m1","role":"assistant","content":[{"type":"output_text","text":"here is the fix"}]},
         {"type":"function_call","id":"fc1","call_id":"call_9","name":"bash","arguments":"{\"command\":\"go test\"}"}
       ],
@@ -149,6 +201,11 @@ func TestResponsesToAnthropicResponse(t *testing.T) {
 	b0, _ := content[0].(map[string]any)
 	assert.Equal(t, "thinking", b0["type"])
 	assert.Equal(t, "thinking about it", b0["thinking"])
+	sigEnv := decodeOpenAIReasoningTestSignature(t, b0["signature"].(string))
+	assert.Equal(t, float64(1), sigEnv["v"])
+	assert.Equal(t, "openai", sigEnv["provider"])
+	assert.Equal(t, "rs_1", sigEnv["id"])
+	assert.Equal(t, "enc_1", sigEnv["enc"])
 	b1, _ := content[1].(map[string]any)
 	assert.Equal(t, "text", b1["type"])
 	assert.Equal(t, "here is the fix", b1["text"])

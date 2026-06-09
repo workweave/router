@@ -52,6 +52,17 @@
     }
   },
   {
+    "event": "content_block_delta",
+    "data": {
+      "delta": {
+        "signature": "eyJ2IjoxLCJwcm92aWRlciI6Im9wZW5haSIsImlkIjoicnNfMSIsImVuYyI6ImVuY18xIn0=",
+        "type": "signature_delta"
+      },
+      "index": 0,
+      "type": "content_block_delta"
+    }
+  },
+  {
     "event": "content_block_stop",
     "data": {
       "index": 0,
