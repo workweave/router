@@ -14,6 +14,13 @@ import (
 // lifetime until /unforce-model clears it.
 const ReasonUserForceModel = "user_forced"
 
+// ReasonLoopEscalation is the decision_reason stored in the session pin when the
+// router detects a cyclic tool-call loop on a cheap/mid model and escalates the
+// session to opus. The turn loop treats it as an immutable sticky (same as
+// ReasonUserForceModel) so the rescued session stays on the strong model for the
+// rest of its life rather than re-routing back into the loop.
+const ReasonLoopEscalation = "loop_escalation"
+
 // ForceModelResult holds the parsed outcome of a force-model command.
 type ForceModelResult struct {
 	// Model is the target model name; empty when Clear is true.

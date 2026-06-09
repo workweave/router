@@ -265,24 +265,25 @@ func (s *Service) runTurnLoop(
 	//      may downgrade the decision for this turn (and appends "+tier_clamp" to
 	//      the reason), but the pin is refreshed with the ORIGINAL pin decision so
 	//      a transient ceiling never permanently overwrites the user's directive.
-	if pinFound && pin.Reason == translate.ReasonUserForceModel {
+	if pinFound && (pin.Reason == translate.ReasonUserForceModel || pin.Reason == translate.ReasonLoopEscalation) {
 		_, excluded := req.ExcludedModels[pin.Model]
 		_, providerEnabled := req.EnabledProviders[pin.Provider]
 		providerEligible := req.EnabledProviders == nil || providerEnabled
 		if !excluded && providerEligible {
 			decision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.HasImages, req.EnabledProviders, req.ExcludedModels, &res)
 			if res.TierClamped {
-				// The forced model exceeds this turn's tier ceiling and was
-				// downgraded. Keep clampToCeiling's "user_forced+tier_clamp"
-				// reason rather than overwriting it back to plain "user_forced":
-				// otherwise the decision log and routing badge misreport the turn
-				// as served on the user's forced model when it was not. The pin
-				// itself is still refreshed with the original forced decision
-				// below, so the directive survives the transient clamp.
-				res.PinTier = "user_forced+tier_clamp"
+				// The pinned model exceeds this turn's tier ceiling and was
+				// downgraded. Keep clampToCeiling's "<reason>+tier_clamp" reason
+				// rather than overwriting it back to the plain reason: otherwise
+				// the decision log and routing badge misreport the turn as served
+				// on the pinned model when it was not. The pin itself is still
+				// refreshed with the original decision below, so the directive
+				// survives the transient clamp. (A loop_escalation pin is opus,
+				// which is unlikely to clamp, but the path is shared.)
+				res.PinTier = pin.Reason + "+tier_clamp"
 			} else {
-				decision.Reason = translate.ReasonUserForceModel
-				res.PinTier = "user_forced"
+				decision.Reason = pin.Reason
+				res.PinTier = pin.Reason
 			}
 			res.Decision = decision
 			res.StickyHit = true

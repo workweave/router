@@ -899,6 +899,31 @@ func TestService_ForcedPin_UnclampedReasonStaysUserForced(t *testing.T) {
 	assert.Equal(t, translate.ReasonUserForceModel, rec.Header().Get(proxy.HeaderRouterDecision), "in-ceiling forced pin keeps the plain user_forced reason")
 }
 
+// TestService_LoopEscalationPin_HonoredAsImmutableSticky verifies a
+// loop_escalation pin is treated like a /force-model pin: the scorer's (cheap)
+// decision is bypassed and the session stays on the escalated opus model.
+func TestService_LoopEscalationPin_HonoredAsImmutableSticky(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderAnthropic,
+		Model:       "claude-opus-4-8",
+		Reason:      translate.ReasonLoopEscalation,
+		PinnedUntil: time.Now().Add(30 * time.Minute),
+	}
+	// Scorer would pick a cheap model; the escalation pin must win.
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.65"}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, "claude-opus-4-8", rec.Header().Get(proxy.HeaderRouterModel), "escalation pin must keep the session on opus")
+	assert.Equal(t, translate.ReasonLoopEscalation, rec.Header().Get(proxy.HeaderRouterDecision), "escalation pin must report loop_escalation, not the scorer reason")
+}
+
 // TestService_TierClamp_UnknownRequestedModelDisablesClamp regression-
 // guards the PR #100 finding: RequestedTier must be derived from
 // catalog.TierFor(feats.Model) directly, not via

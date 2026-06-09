@@ -143,3 +143,52 @@ func itoa(n int) string {
 	}
 	return digits
 }
+
+// ---- cyclic (wide re-read) loop detector ----
+
+func cyclicReads(nFiles, total int) []toolCall {
+	calls := make([]toolCall, 0, total)
+	for i := 0; i < total; i++ {
+		calls = append(calls, toolCall{name: "Read", input: map[string]any{"file_path": "/app/f" + itoa(i%nFiles) + ".go"}})
+	}
+	return calls
+}
+
+func TestDetectCyclicToolCallLoop_TripsOnLowDiversityCycle(t *testing.T) {
+	// 30 Reads cycling over 5 files (each 6x) → distinct ratio 5/30 ≈ 0.17 < 0.4.
+	env, err := translate.ParseAnthropic(buildBodyWithToolCalls(t, cyclicReads(5, 30)))
+	require.NoError(t, err)
+	looped, top, count, ratio, total := detectCyclicToolCallLoop(env)
+	assert.True(t, looped, "low-diversity re-read cycle must trip")
+	assert.Equal(t, "Read", top.Name)
+	assert.GreaterOrEqual(t, count, 2)
+	assert.Less(t, ratio, cyclicLoopMaxDistinctRatio)
+	assert.Equal(t, cyclicLoopWindowSize, total)
+}
+
+func TestDetectCyclicToolCallLoop_BroadDistinctReadsDoNotTrip(t *testing.T) {
+	// A healthy Explore reads MANY DISTINCT files → high diversity → no trip.
+	env, err := translate.ParseAnthropic(buildBodyWithToolCalls(t, cyclicReads(30, 30)))
+	require.NoError(t, err)
+	looped, _, _, ratio, _ := detectCyclicToolCallLoop(env)
+	assert.False(t, looped, "broad distinct exploration must not trip (the #271 guard)")
+	assert.GreaterOrEqual(t, ratio, cyclicLoopMaxDistinctRatio)
+}
+
+func TestDetectCyclicToolCallLoop_EditInWindowIsProgress(t *testing.T) {
+	// Same low-diversity cycle but with a real Edit in the window → progress, no trip.
+	calls := cyclicReads(5, 29)
+	calls = append(calls, toolCall{name: "Edit", input: map[string]any{"file_path": "/app/f0.go", "old_string": "a", "new_string": "b"}})
+	env, err := translate.ParseAnthropic(buildBodyWithToolCalls(t, calls))
+	require.NoError(t, err)
+	looped, _, _, _, _ := detectCyclicToolCallLoop(env)
+	assert.False(t, looped, "an edit in the window means the agent is progressing, not stuck")
+}
+
+func TestDetectCyclicToolCallLoop_BelowMinCallsDoesNotTrip(t *testing.T) {
+	// Fewer than cyclicLoopMinCalls tool calls → too early to call it a loop.
+	env, err := translate.ParseAnthropic(buildBodyWithToolCalls(t, cyclicReads(3, 20)))
+	require.NoError(t, err)
+	looped, _, _, _, _ := detectCyclicToolCallLoop(env)
+	assert.False(t, looped, "below the min-calls floor must not trip")
+}

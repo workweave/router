@@ -898,10 +898,23 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// runaway OSS-model tool-call cycles (qwen3, in particular) that the
 	// previous-turn-maxed-out guard misses because each individual tool call
 	// returns quickly and well under the output cap.
-	if loop, sig, count := detectToolCallLoop(env); loop {
+	// Wide cyclic re-read loop on a cheap/mid model (re-reading the same few
+	// files for dozens of turns, no edits) → escalate the session to opus and
+	// fall through to normal routing. The escalation pin (an immutable sticky)
+	// takes effect from the next turn, like /force-model. This takes precedence
+	// over the tight-loop break below: rescuing the session beats stopping it.
+	escalatedLoop := false
+	if cyc, csig, ccount, cratio, cwin := detectCyclicToolCallLoop(env); cyc {
 		loopRole := roleForTier(catalog.TierFor(feats.Model))
-		log.Info("ProxyMessages tool-call loop detected", "tool_sig", sig, "repeat_count", count, "role", loopRole)
-		return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderAnthropic)
+		s.handleLoopEscalation(ctx, csig, ccount, cratio, cwin, installationID, sessionKey, loopRole, feats.Model)
+		escalatedLoop = true
+	}
+	if !escalatedLoop {
+		if loop, sig, count := detectToolCallLoop(env); loop {
+			loopRole := roleForTier(catalog.TierFor(feats.Model))
+			log.Info("ProxyMessages tool-call loop detected", "tool_sig", sig, "repeat_count", count, "role", loopRole)
+			return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderAnthropic)
+		}
 	}
 
 	// Surface inbound tool_use / tool_result blocks the model is about to see.
@@ -1964,12 +1977,22 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// the pin up and serves the requested model on this same turn.
 	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
 
+	// Wide cyclic re-read loop → escalate to opus (same path as the Anthropic
+	// ingress). See detectCyclicToolCallLoop / handleLoopEscalation.
+	escalatedLoop := false
+	if cyc, csig, ccount, cratio, cwin := detectCyclicToolCallLoop(env); cyc {
+		loopRole := roleForTier(catalog.TierFor(feats.Model))
+		s.handleLoopEscalation(ctx, csig, ccount, cratio, cwin, installationID, sessionKey, loopRole, feats.Model)
+		escalatedLoop = true
+	}
 	// Tool-call loop break: same path as the Anthropic ingress. See the
 	// detectToolCallLoop / handleToolCallLoopBreak doc comments for rationale.
-	if loop, sig, count := detectToolCallLoop(env); loop {
-		loopRole := roleForTier(catalog.TierFor(feats.Model))
-		log.Info("ProxyOpenAIChatCompletion tool-call loop detected", "tool_sig", sig, "repeat_count", count, "role", loopRole)
-		return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderOpenAI)
+	if !escalatedLoop {
+		if loop, sig, count := detectToolCallLoop(env); loop {
+			loopRole := roleForTier(catalog.TierFor(feats.Model))
+			log.Info("ProxyOpenAIChatCompletion tool-call loop detected", "tool_sig", sig, "repeat_count", count, "role", loopRole)
+			return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderOpenAI)
+		}
 	}
 
 	logInboundRequestDiagnostics(log, env)
