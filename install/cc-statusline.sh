@@ -129,6 +129,7 @@ normalize_model() {
 # BEGIN_GENERATED_PRICES
 prices='{
   "input": {
+    "claude-fable-5":                   0.01,
     "claude-haiku-4-5":                 0.0008,
     "claude-opus-4-6":                  0.005,
     "claude-opus-4-7":                  0.005,
@@ -180,6 +181,7 @@ prices='{
     "z-ai/glm-5.1":                     0.00105
   },
   "output": {
+    "claude-fable-5":                   0.05,
     "claude-haiku-4-5":                 0.004,
     "claude-opus-4-6":                  0.025,
     "claude-opus-4-7":                  0.025,

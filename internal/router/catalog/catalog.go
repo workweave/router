@@ -183,6 +183,13 @@ var Models = []Model{
 	{ID: "claude-opus-4-8", Tier: TierHigh, ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
+	// Fable 5 (Mythos-class, GA 2026-06-09) ships a 1M context window by
+	// default — no context-1m beta header required — so the catalog carries
+	// the full window, unlike Opus 4.6+ above. Its safety classifiers can
+	// return stop_reason "refusal" (HTTP 200); see mapStopReason in translate.
+	{ID: "claude-fable-5", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
+		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 10.00, OutputUSDPer1M: 50.00, CacheReadMultiplier: 0.10}},
+	}},
 
 	// --- OpenAI GPT-4.x (legacy) ---
 	{ID: "gpt-4.1-nano", Tier: TierLow, ContextWindow: 1_047_576, Providers: []ProviderBinding{

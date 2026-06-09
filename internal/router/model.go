@@ -71,6 +71,10 @@ var googleBase = NewSpec()
 var openAICompatBase = NewSpec()
 
 var registry = map[string]ModelSpec{
+	// claude-fable-5: adaptive thinking is always on (thinking.type=disabled
+	// is rejected); 1M context is native, so CapExtendedContext only makes the
+	// context-1m beta header a harmless no-op.
+	"claude-fable-5":    anthropicAdaptive,
 	"claude-opus-4-8":   anthropicAdaptive,
 	"claude-opus-4-7":   anthropicAdaptive,
 	"claude-sonnet-4-6": anthropicAdaptive,
