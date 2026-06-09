@@ -128,6 +128,10 @@ func mapStopReason(reason any) string {
 		return "stop"
 	case "tool_use":
 		return "tool_calls"
+	case "refusal":
+		// claude-fable-5 safety classifiers decline with stop_reason
+		// "refusal" on HTTP 200; content_filter is the OpenAI equivalent.
+		return "content_filter"
 	default:
 		return "stop"
 	}

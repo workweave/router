@@ -592,6 +592,7 @@ write_opencode_config() {
       name: "Weave Router",
       options: { apiKey: $key, baseURL: $url, headers: $headers },
       models: {
+        "claude-fable-5":    { name: "Claude Fable 5 (via Weave Router)" },
         "claude-opus-4-8":   { name: "Claude Opus 4.8 (via Weave Router)" },
         "claude-opus-4-7":   { name: "Claude Opus 4.7 (via Weave Router)" },
         "claude-sonnet-4-6": { name: "Claude Sonnet 4.6 (via Weave Router)" },
@@ -684,6 +685,7 @@ write_pi_models_config() {
       authHeader: false,
       headers: $headers,
       models: [
+        { id: "claude-fable-5",    name: "Claude Fable 5 (via Weave Router)",    reasoning: true, input: ["text","image"], contextWindow: 1000000, maxTokens: 128000 },
         { id: "claude-opus-4-8",   name: "Claude Opus 4.8 (via Weave Router)",   reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 64000 },
         { id: "claude-opus-4-7",   name: "Claude Opus 4.7 (via Weave Router)",   reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 64000 },
         { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (via Weave Router)", reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 64000 },
@@ -1959,6 +1961,7 @@ normalize_model() {
 # BEGIN_GENERATED_PRICES
 prices='{
   "input": {
+    "claude-fable-5":                   0.01,
     "claude-haiku-4-5":                 0.0008,
     "claude-opus-4-6":                  0.005,
     "claude-opus-4-7":                  0.005,
@@ -2010,6 +2013,7 @@ prices='{
     "z-ai/glm-5.1":                     0.00105
   },
   "output": {
+    "claude-fable-5":                   0.05,
     "claude-haiku-4-5":                 0.004,
     "claude-opus-4-6":                  0.025,
     "claude-opus-4-7":                  0.025,
