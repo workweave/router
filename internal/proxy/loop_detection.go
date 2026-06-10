@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net/http"
 	"time"
@@ -16,6 +17,63 @@ import (
 
 // escalateModel is the strong model a looping cheap/mid session is rescued onto.
 const escalateModel = "claude-opus-4-8"
+
+// LoopEscalationStore persists cyclic-loop detections durably (the
+// router.loop_escalation_events table). One row per (session, role) detection;
+// the count query enforces the once-per-session budget across pin TTL expiry.
+type LoopEscalationStore interface {
+	InsertLoopEscalationEvent(ctx context.Context, p LoopEscalationEvent) error
+	CountLoopEscalationEvents(ctx context.Context, sessionKey []byte, role string) (count int64, err error)
+}
+
+// LoopEscalationEvent mirrors one router.loop_escalation_events row.
+type LoopEscalationEvent struct {
+	InstallationID   string
+	SessionKey       []byte
+	Role             string
+	LoopingModel     string
+	Action           string
+	EscalationTarget string
+	LoopTool         string
+	LoopInputHash    string
+	RepeatCount      int32
+	DistinctRatio    float64
+	WindowSize       int32
+}
+
+// Loop-escalation action taxonomy, recorded per event. Exactly one applies.
+const (
+	// loopActionEscalated: the session was pinned to escalateModel.
+	loopActionEscalated = "escalated"
+	// loopActionHoldout: log-not-act measurement bucket — the loop was
+	// detected but deliberately NOT escalated, so the self-recovery rate
+	// (sessions that un-stick on their own; measured at 43% in the agent-flow
+	// session-dynamics analysis) can be subtracted from any rescue claim.
+	loopActionHoldout = "holdout"
+	// loopActionAlreadyStrong: the looping model IS the escalation target — a
+	// genuinely hard task, not a misroute. Record-only training signal.
+	loopActionAlreadyStrong = "already_strong"
+	// loopActionUserForced: a /force-model (or x-weave-force-model) pin
+	// outranks auto-escalation; the forced pin is left in place.
+	loopActionUserForced = "user_forced"
+	// loopActionDisabled: the ROUTER_LOOP_ESCALATION_ENABLED kill switch is
+	// off. Detection and telemetry continue; the pin write does not.
+	loopActionDisabled = "disabled"
+)
+
+// inLoopEscalationHoldout deterministically buckets a session into the
+// log-not-act holdout. Keyed on the session key (already a sha256-derived
+// digest, so uniformly distributed) rather than a random draw, so the same
+// session always lands in the same bucket across replicas and retries.
+func inLoopEscalationHoldout(sessionKey [sessionpin.SessionKeyLen]byte, pct int) bool {
+	if pct <= 0 {
+		return false
+	}
+	if pct >= 100 {
+		return true
+	}
+	return int(binary.BigEndian.Uint32(sessionKey[0:4])%100) < pct
+}
 
 // Loop-detection knobs. Window is the number of recent tool calls inspected;
 // MaxRepeats is the count of identical (name+args) calls within the window
@@ -134,10 +192,14 @@ func detectCyclicToolCallLoop(env *translate.RequestEnvelope) (looped bool, top 
 // through to normal routing, which loads the just-written escalation pin (an
 // immutable sticky, like /force-model) and dispatches this turn to opus.
 //
-// Idempotent: a session already on a loop_escalation pin is left alone, so the
-// telemetry fires once per session. When the looping model is ALREADY opus the
-// event is recorded but no pin is written (a genuinely hard task, not a
-// misroute) — still a useful training signal.
+// Idempotent: a session already on a loop_escalation pin is left alone, and a
+// durable once-per-session budget (CountLoopEscalationEvents) backstops the pin
+// check across TTL expiry, so the telemetry fires once per session. The pin
+// write is further gated by the kill switch (loopEscalationEnabled), the
+// log-not-act holdout (loopEscalationHoldoutPct), a user-forced pin, and the
+// looping model already being the escalation target — in every one of those
+// cases the event is still recorded (action column says which), only the
+// rescue is withheld.
 func (s *Service) handleLoopEscalation(
 	ctx context.Context,
 	top translate.ToolCallSig,
@@ -173,16 +235,46 @@ func (s *Service) handleLoopEscalation(
 		}
 	}
 
-	willEscalate := !userForced && loopingModel != escalateModel
+	// Once-per-session budget, durable across pin TTL expiry. The
+	// ReasonLoopEscalation pin check above covers the common case, but a
+	// session outliving its pin (1h sliding TTL) would otherwise re-fire — and
+	// the non-escalating actions (holdout/disabled/already-strong) never write
+	// a pin at all, so without this check they would emit one event per turn.
+	// Best-effort: a lookup failure proceeds rather than suppressing a rescue.
+	if s.loopEscalationStore != nil && installationID != uuid.Nil {
+		count, err := s.loopEscalationStore.CountLoopEscalationEvents(ctx, sessionKey[:], role)
+		if err != nil {
+			log.Error("loop-escalation: budget lookup failed", "err", err)
+		} else if count > 0 {
+			return // this session already fired its one escalation event
+		}
+	}
+
+	// Holdout only applies when the event can be recorded — withholding the
+	// rescue without a durable row would be pure loss, not a measurement.
+	holdout := s.loopEscalationStore != nil && inLoopEscalationHoldout(sessionKey, s.loopEscalationHoldoutPct)
+
+	action := loopActionEscalated
+	switch {
+	case !s.loopEscalationEnabled:
+		action = loopActionDisabled
+	case userForced:
+		action = loopActionUserForced
+	case loopingModel == escalateModel:
+		action = loopActionAlreadyStrong
+	case holdout:
+		action = loopActionHoldout
+	}
+	willEscalate := action == loopActionEscalated
 
 	// First-class telemetry. This (session, looping_model) → looped event is the
 	// exact misroute the embedder cannot predict up front, so it is a training
 	// label for the difficulty/routing model. Emit for prod AND eval traffic; the
 	// post-escalation outcome is joined offline by session_key against the final
-	// shard result. (Durable router.loop_escalation_events table: see
-	// docs/plans/SPEC_loop_detect_escalate.md — fast-follow.)
+	// shard result.
 	log.Info("router.loop_escalation",
 		"looping_model", loopingModel,
+		"action", action,
 		"escalated", willEscalate,
 		"user_forced", userForced,
 		"escalation_target", escalateModel,
@@ -195,8 +287,31 @@ func (s *Service) handleLoopEscalation(
 		"role", role,
 	)
 
+	// Durable row in router.loop_escalation_events — the queryable fire-rate /
+	// opus-share / rescue-rate source and the training corpus.
+	// context.Background(): the request ctx may already be canceled; losing the
+	// row would both skew the corpus and break the once-per-session budget.
+	if s.loopEscalationStore != nil && installationID != uuid.Nil {
+		event := LoopEscalationEvent{
+			InstallationID:   installationID.String(),
+			SessionKey:       sessionKey[:],
+			Role:             role,
+			LoopingModel:     loopingModel,
+			Action:           action,
+			EscalationTarget: escalateModel,
+			LoopTool:         top.Name,
+			LoopInputHash:    top.InputHash,
+			RepeatCount:      int32(topCount),
+			DistinctRatio:    distinctRatio,
+			WindowSize:       int32(window),
+		}
+		if err := s.loopEscalationStore.InsertLoopEscalationEvent(context.Background(), event); err != nil {
+			log.Error("loop-escalation: event insert failed", "err", err)
+		}
+	}
+
 	if !willEscalate {
-		return // already on opus — record-only
+		return // disabled / user-forced / already-strong / holdout — record-only
 	}
 
 	// Pin opus for the rest of the session (immutable sticky via ReasonLoopEscalation).

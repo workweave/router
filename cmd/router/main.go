@@ -529,6 +529,23 @@ func main() {
 	// falls back to handover.TrimLastN on switch turns.
 	plannerEnabled := config.GetOr("ROUTER_PLANNER_ENABLED", "true") == "true"
 	effortEscalation := config.GetOr("ROUTER_EFFORT_ESCALATION", "false") == "true"
+	// Cyclic-loop escalate-to-opus kill switch + log-not-act holdout. Enabled
+	// by default (the lever shipped enabled); flipping the switch off detaches
+	// the escalation ACTION without losing detection telemetry. The holdout
+	// assigns that percentage of loop-detected sessions to record-only, so the
+	// self-recovery baseline can be subtracted from rescue-rate claims. Parsed
+	// inline rather than via parseEnvInt because 0 (holdout off) is a
+	// legitimate value that parseEnvInt would reject.
+	loopEscalationEnabled := config.GetOr("ROUTER_LOOP_ESCALATION_ENABLED", "true") == "true"
+	loopEscalationHoldoutPct := 10
+	if raw := config.GetOr("ROUTER_LOOP_ESCALATION_HOLDOUT_PCT", ""); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > 100 {
+			logger.Warn("Invalid env var; using default", "key", "ROUTER_LOOP_ESCALATION_HOLDOUT_PCT", "value", raw, "default", loopEscalationHoldoutPct)
+		} else {
+			loopEscalationHoldoutPct = n
+		}
+	}
 	plannerCfg := planner.EVConfig{
 		ThresholdUSD:           parseEnvFloat("ROUTER_SWITCH_EV_THRESHOLD_USD", proxy.DefaultPlannerThresholdUSD),
 		ExpectedRemainingTurns: parseEnvInt("ROUTER_SWITCH_EXPECTED_REMAINING_TURNS", proxy.DefaultPlannerExpectedRemainingTurns),
@@ -570,12 +587,15 @@ func main() {
 		WithTierClampResolver(tierClampResolver).
 		WithPlannerEnabled(plannerEnabled).
 		WithEffortEscalation(effortEscalation).
+		WithLoopEscalationConfig(loopEscalationEnabled, loopEscalationHoldoutPct).
+		WithLoopEscalationStore(repo.Telemetry).
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels).
 		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
 		WithBillingService(billingSvc)
 	logger.Info("Effort escalation configured", "enabled", effortEscalation)
+	logger.Info("Loop escalation configured", "enabled", loopEscalationEnabled, "holdout_pct", loopEscalationHoldoutPct)
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
 	// Fail loud if a deployed model is missing from the tier table;

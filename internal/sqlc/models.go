@@ -9,6 +9,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// Cyclic tool-call loop detections: ops signal and (session, looping_model) -> looped training labels
+type RouterLoopEscalationEvent struct {
+	ID             uuid.UUID
+	CreatedAt      pgtype.Timestamptz
+	InstallationID uuid.UUID
+	// 16-byte digest matching router.session_pins.session_key; join key for post-escalation outcome
+	SessionKey       []byte
+	Role             string
+	LoopingModel     string
+	Action           string
+	EscalationTarget string
+	LoopTool         string
+	LoopInputHash    string
+	RepeatCount      int32
+	DistinctRatio    float64
+	WindowSize       int32
+}
+
 // Rotatable bearer keys (rk_ prefix). An installation may hold multiple active keys; identity is carried by router.model_router_users.
 type RouterModelRouterAPIKey struct {
 	ID             uuid.UUID

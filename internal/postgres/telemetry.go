@@ -91,6 +91,37 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 	})
 }
 
+var _ proxy.LoopEscalationStore = (*TelemetryRepo)(nil)
+
+func (r *TelemetryRepo) InsertLoopEscalationEvent(ctx context.Context, p proxy.LoopEscalationEvent) error {
+	id, err := uuid.Parse(p.InstallationID)
+	if err != nil {
+		return err
+	}
+	q := sqlc.New(r.tx)
+	return q.InsertLoopEscalationEvent(ctx, sqlc.InsertLoopEscalationEventParams{
+		InstallationID:   id,
+		SessionKey:       p.SessionKey,
+		Role:             p.Role,
+		LoopingModel:     p.LoopingModel,
+		Action:           p.Action,
+		EscalationTarget: p.EscalationTarget,
+		LoopTool:         p.LoopTool,
+		LoopInputHash:    p.LoopInputHash,
+		RepeatCount:      p.RepeatCount,
+		DistinctRatio:    p.DistinctRatio,
+		WindowSize:       p.WindowSize,
+	})
+}
+
+func (r *TelemetryRepo) CountLoopEscalationEvents(ctx context.Context, sessionKey []byte, role string) (count int64, err error) {
+	q := sqlc.New(r.tx)
+	return q.CountLoopEscalationEvents(ctx, sqlc.CountLoopEscalationEventsParams{
+		SessionKey: sessionKey,
+		Role:       role,
+	})
+}
+
 func (r *TelemetryRepo) GetTelemetrySummary(ctx context.Context, installationID string, from, to time.Time) (proxy.TelemetrySummary, error) {
 	id, err := uuid.Parse(installationID)
 	if err != nil {

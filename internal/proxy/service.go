@@ -95,6 +95,23 @@ type Service struct {
 	// failed/no-progress turn; gemini is pinned low. Off by default (set from
 	// ROUTER_EFFORT_ESCALATION) so it can be baked off before enabling.
 	effortEscalation bool
+	// loopEscalationEnabled is the kill switch for the cyclic-loop
+	// escalate-to-opus ACTION. When false, detection and telemetry keep
+	// running (events recorded with action=disabled) but no escalation pin is
+	// written. Defaults to true (the lever shipped enabled); set from
+	// ROUTER_LOOP_ESCALATION_ENABLED.
+	loopEscalationEnabled bool
+	// loopEscalationHoldoutPct is the percentage of loop-detected sessions
+	// deterministically assigned to the log-not-act holdout: the event is
+	// recorded but the rescue withheld, so the self-recovery baseline can be
+	// subtracted from rescue-rate claims. 0 disables the holdout. Set from
+	// ROUTER_LOOP_ESCALATION_HOLDOUT_PCT.
+	loopEscalationHoldoutPct int
+	// loopEscalationStore persists loop detections durably
+	// (router.loop_escalation_events) and enforces the once-per-session
+	// budget. Nil disables persistence — and with it the holdout, which is
+	// only meaningful when the withheld rescue leaves a row behind.
+	loopEscalationStore LoopEscalationStore
 	// summarizer produces a bounded-cost handover summary on switch turns.
 	// nil passes the full prior history through unchanged.
 	summarizer handover.Summarizer
@@ -411,7 +428,8 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 			ExpectedRemainingTurns: DefaultPlannerExpectedRemainingTurns,
 			TierUpgradeEnabled:     DefaultPlannerTierUpgradeEnabled,
 		},
-		plannerEnabled: true,
+		plannerEnabled:        true,
+		loopEscalationEnabled: true,
 	}
 }
 
@@ -438,6 +456,31 @@ func (s *Service) WithPlannerEnabled(enabled bool) *Service {
 // When false (default) the router leaves request-derived effort untouched.
 func (s *Service) WithEffortEscalation(enabled bool) *Service {
 	s.effortEscalation = enabled
+	return s
+}
+
+// WithLoopEscalationConfig sets the cyclic-loop escalation kill switch and the
+// log-not-act holdout percentage. enabled=false keeps detection and telemetry
+// running but never writes the escalation pin. holdoutPct is clamped to
+// [0, 100]; it only takes effect when a LoopEscalationStore is wired, because
+// a withheld rescue with no durable row is pure loss, not a measurement.
+func (s *Service) WithLoopEscalationConfig(enabled bool, holdoutPct int) *Service {
+	s.loopEscalationEnabled = enabled
+	if holdoutPct < 0 {
+		holdoutPct = 0
+	}
+	if holdoutPct > 100 {
+		holdoutPct = 100
+	}
+	s.loopEscalationHoldoutPct = holdoutPct
+	return s
+}
+
+// WithLoopEscalationStore wires the durable sink for loop-escalation events
+// (router.loop_escalation_events). Nil disables persistence, the holdout, and
+// the cross-TTL once-per-session budget (the pin-reason check still applies).
+func (s *Service) WithLoopEscalationStore(store LoopEscalationStore) *Service {
+	s.loopEscalationStore = store
 	return s
 }
 
