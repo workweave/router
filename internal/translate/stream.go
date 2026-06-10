@@ -727,7 +727,8 @@ func (t *AnthropicSSETranslator) translateOpenAIEvent(raw []byte) error {
 	// in early SSE frames before settling on a real id. gjson treats that
 	// as Exists()=true, Str="", which would latch the empty string and
 	// prevent later non-empty ids from overwriting — leaving message_start
-	// to fall back to the "msg_translated" placeholder. Same for model.
+	// to fall back to a generated "msg_translated_*" placeholder. Same for
+	// model.
 	if id := gjson.GetBytes(data, "id"); id.Str != "" && t.messageID == "" {
 		t.messageID = strings.Clone(id.Str)
 	}
@@ -1197,9 +1198,16 @@ func (t *AnthropicSSETranslator) emitMessageStart() error {
 	if model == "" {
 		model = t.requestModel
 	}
+	// message_start usually fires eagerly from Prelude, before any upstream
+	// chunk carries an id, so a generated fallback is the common case. It MUST
+	// be unique per response: clients (notably ccusage) dedupe usage records
+	// by message id, so a constant placeholder collapses every turn of a
+	// session into one record and massively undercounts tokens/cost. The
+	// "msg_translated_" prefix is kept as a route marker for debugging.
 	id := t.messageID
 	if id == "" {
-		id = "msg_translated"
+		id = "msg_translated_" + randomHex(8)
+		t.messageID = id
 	}
 	observability.Get().Debug("AnthropicSSE emit", "event", "message_start")
 	t.bw.WriteString("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":")

@@ -29,6 +29,15 @@ type ResponsesToAnthropicWriter struct {
 	bw           *bufio.Writer
 	requestModel string
 	usageSink    otel.UsageSink
+	// messageID is the Anthropic message id emitted in message_start. It is
+	// generated fresh per response: message_start fires eagerly from Prelude,
+	// before the upstream Responses connection produces a `resp_...` id, so a
+	// passthrough is impossible — but the id MUST be unique per response
+	// because clients (notably ccusage) dedupe usage records by message id. A
+	// constant id collapses every turn of a session into one record and
+	// massively undercounts tokens/cost. The "msg_responses_" prefix is kept
+	// as a route marker for transcript debugging.
+	messageID string
 
 	routingMarker        string
 	estimatedInputTokens int
@@ -99,6 +108,7 @@ func NewResponsesToAnthropicWriter(w http.ResponseWriter, requestModel string, s
 		bw:                  bufio.NewWriterSize(w, 8192),
 		requestModel:        requestModel,
 		usageSink:           sink,
+		messageID:           "msg_responses_" + randomHex(8),
 		statusCode:          http.StatusOK,
 		itemBlocks:          make(map[int]int),
 		itemKind:            make(map[int]string),
@@ -727,7 +737,7 @@ func extractFinalResponseObject(sseBytes []byte) []byte {
 func (t *ResponsesToAnthropicWriter) emitMessageStart() error {
 	model := t.requestModel
 	t.bw.WriteString("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":")
-	sse.WriteJSONString(t.bw, "msg_responses")
+	sse.WriteJSONString(t.bw, t.messageID)
 	t.bw.WriteString(",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":")
 	sse.WriteJSONString(t.bw, model)
 	t.bw.WriteString(",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":")

@@ -180,7 +180,9 @@ func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *
 	}
 	id := gjson.GetBytes(body, "id").String()
 	if id == "" {
-		id = "msg_translated"
+		// Unique per response: clients (notably ccusage) dedupe usage records
+		// by message id, so a constant placeholder undercounts tokens/cost.
+		id = "msg_translated_" + randomHex(8)
 	}
 	model := gjson.GetBytes(body, "model").String()
 	if model == "" {

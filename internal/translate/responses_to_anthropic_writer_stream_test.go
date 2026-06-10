@@ -140,6 +140,39 @@ func TestResponsesToAnthropicWriter_StreamingClient(t *testing.T) {
 	assert.Contains(t, body, `"content_block_start","index":2`)
 }
 
+// message_start ids must be unique per response. Clients (notably ccusage)
+// dedupe usage records by message id, so the old constant "msg_responses" id
+// collapsed every turn of a session into one record and massively undercounted
+// tokens/cost. The "msg_responses_" prefix is kept as a route marker.
+func TestResponsesToAnthropicWriter_MessageStartIDUniquePerResponse(t *testing.T) {
+	startID := func() string {
+		rec := httptest.NewRecorder()
+		w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+		require.NoError(t, w.Prelude(true))
+		_, err := w.Write([]byte(responsesStreamFixture))
+		require.NoError(t, err)
+		require.NoError(t, w.Finalize())
+		for _, line := range strings.Split(rec.Body.String(), "\n") {
+			data, ok := strings.CutPrefix(line, "data: ")
+			if !ok || gjson.Get(data, "type").String() != "message_start" {
+				continue
+			}
+			id := gjson.Get(data, "message.id").String()
+			require.NotEmpty(t, id)
+			return id
+		}
+		t.Fatal("missing message_start event")
+		return ""
+	}
+
+	first := startID()
+	second := startID()
+	assert.True(t, strings.HasPrefix(first, "msg_responses_"),
+		"generated id keeps the route-marker prefix, got %q", first)
+	assert.NotEqual(t, "msg_responses", first, "constant placeholder id")
+	assert.NotEqual(t, first, second, "message ids must differ across responses")
+}
+
 // A non-streaming client gets a one-shot Anthropic JSON body reconstructed from
 // the terminal response.completed event in the (still-streamed) upstream.
 func TestResponsesToAnthropicWriter_NonStreamingClient(t *testing.T) {

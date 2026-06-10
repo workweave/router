@@ -232,6 +232,7 @@ func TestResponsesToAnthropicResponse(t *testing.T) {
 	require.NoError(t, json.Unmarshal(out, &msg))
 
 	assert.Equal(t, "message", msg["type"])
+	assert.Equal(t, "resp_abc", msg["id"], "upstream response id passes through as the message id")
 	assert.Equal(t, "tool_use", msg["stop_reason"], "a function_call output → stop_reason tool_use")
 	content, _ := msg["content"].([]any)
 	require.Len(t, content, 3)

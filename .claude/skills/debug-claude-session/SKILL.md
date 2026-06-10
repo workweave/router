@@ -132,10 +132,10 @@ From the `message.model` field (step 2), note the served model. This tells you:
 - **Which upstream** (e.g. `gpt-*` → OpenAI, `claude-*` → Anthropic, `gemini-*` → Google).
 - **Which translation code** handles it (e.g. `gpt-*` Responses → `internal/translate/responses_to_anthropic_writer.go`).
 
-Also note `message.id`:
-- `msg_responses` → OpenAI Responses API path.
-- `msg_anthropic` → Anthropic Messages path (passthrough).
-- `msg_gemini` → Google Generative Language API path.
+Also note `message.id` (ids are unique per response; the prefix marks the path):
+- `msg_responses_*` → OpenAI Responses API path (streaming).
+- `msg_translated_*` → OpenAI chat-completions path (router-generated id; upstream-provided ids pass through unchanged).
+- `msg_01...` (Anthropic-native id) → Anthropic Messages path (passthrough).
 
 ### 5. Fetch cloud logs for the matching UTC window
 

@@ -469,6 +469,60 @@ func TestAnthropicSSETranslator_StreamingTextResponse(t *testing.T) {
 	assert.Contains(t, body, "event: message_stop")
 }
 
+// messageStartID extracts message.id from the first message_start event in an
+// Anthropic SSE body.
+func messageStartID(t *testing.T, body string) string {
+	t.Helper()
+	for _, line := range strings.Split(body, "\n") {
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
+			continue
+		}
+		var frame struct {
+			Type    string `json:"type"`
+			Message struct {
+				ID string `json:"id"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(data), &frame); err != nil || frame.Type != "message_start" {
+			continue
+		}
+		return frame.Message.ID
+	}
+	t.Fatal("missing message_start event")
+	return ""
+}
+
+// On the eager-Prelude path (the normal streaming dispatch), message_start
+// fires before any upstream chunk carries an id, so the translator generates
+// the message id itself. It must be unique per response — clients (notably
+// ccusage) dedupe usage records by message id, so a constant placeholder
+// collapses every turn of a session into one record and undercounts cost.
+func TestAnthropicSSETranslator_EagerPreludeMessageIDUniquePerResponse(t *testing.T) {
+	startID := func() string {
+		rec := httptest.NewRecorder()
+		translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil)
+		require.NoError(t, translator.Prelude(true))
+		events := []string{
+			"data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n",
+			"data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+			"data: [DONE]\n\n",
+		}
+		for _, event := range events {
+			_, err := translator.Write([]byte(event))
+			require.NoError(t, err)
+		}
+		return messageStartID(t, rec.Body.String())
+	}
+
+	first := startID()
+	second := startID()
+	assert.True(t, strings.HasPrefix(first, "msg_translated_"),
+		"generated id keeps the route-marker prefix, got %q", first)
+	assert.NotEqual(t, "msg_translated", first, "constant placeholder id")
+	assert.NotEqual(t, first, second, "message ids must differ across responses")
+}
+
 func TestAnthropicSSETranslator_StreamingToolUse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil)
