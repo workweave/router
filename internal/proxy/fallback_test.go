@@ -60,6 +60,27 @@ func newServiceWithProviders(t *testing.T, providerMap map[string]providers.Clie
 	return s
 }
 
+func responseHeaderTimeoutErr(t *testing.T) error {
+	t.Helper()
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer upstream.Close()
+	defer close(release)
+
+	client := &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: 10 * time.Millisecond}}
+	_, err := client.Get(upstream.URL)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Contains(t, err.Error(), "timeout awaiting response headers")
+	return err
+}
+
 func TestDispatchWithFallback_PrimarySucceedsNoRetry(t *testing.T) {
 	primary := &fakeClient{name: "fireworks", outcomes: []fakeOutcome{{writeBytes: []byte("ok")}}}
 	fallback := &fakeClient{name: "openrouter"} // should never be called
@@ -181,6 +202,47 @@ func TestDispatchWithFallback_RetriesOnTransportError(t *testing.T) {
 	assert.Equal(t, 1, winnerIdx)
 	assert.Equal(t, 1, primary.calls)
 	assert.Equal(t, 1, fallback.calls)
+}
+
+func TestDispatchWithFallback_RetriesOnResponseHeaderTimeout(t *testing.T) {
+	primary := &fakeClient{
+		name:     "deepinfra",
+		outcomes: []fakeOutcome{{err: responseHeaderTimeoutErr(t)}},
+	}
+	fallback := &fakeClient{
+		name:     "openrouter",
+		outcomes: []fakeOutcome{{writeBytes: []byte("rescued")}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderDeepInfra:  primary,
+		providers.ProviderOpenRouter: fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "deepseek/deepseek-v4-flash"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderDeepInfra},
+			{Provider: providers.ProviderOpenRouter},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, winnerIdx)
+	assert.Equal(t, 1, primary.calls)
+	assert.Equal(t, 1, fallback.calls)
+	assert.Equal(t, "rescued", rec.Body.String())
+	assert.Equal(t, providers.ProviderDeepInfra, rec.Header().Get(HeaderRouterFallbackFrom))
 }
 
 func TestDispatchWithFallback_NoRetryOnNonRetryableStatus(t *testing.T) {

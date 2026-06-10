@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -162,6 +163,9 @@ func IsRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
+	if isResponseHeaderTimeout(err) {
+		return true
+	}
 	// Client-side cancellation and per-request deadlines are owned by the
 	// caller, not the upstream. Retrying on a different binding would
 	// either fire after the client is gone or use a budget that has
@@ -181,6 +185,14 @@ func IsRetryable(err error) bool {
 	// the per-attempt guard in proxy.dispatchWithFallback confirms no bytes
 	// were written before letting the retry happen.
 	return true
+}
+
+func isResponseHeaderTimeout(err error) bool {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) || urlErr.Err == nil {
+		return false
+	}
+	return strings.Contains(urlErr.Err.Error(), "timeout awaiting response headers")
 }
 
 // IsUpstreamModelNotFound reports whether err is a buffered upstream 404.
