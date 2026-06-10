@@ -1093,6 +1093,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// itself is the one that shortened the message window.
 	inboundToolCallCount := len(env.AssistantToolCallSignatures())
 
+	// Snapshot spiral signals from the inbound body for the same reason: a
+	// model-switch handover replaces the history with a summary, which would
+	// wipe error streaks / thrash / repetition on exactly the turns they
+	// cross thresholds. The signals must reflect what the client actually
+	// sent; the fire decision happens after routing, where the decision and
+	// turn type are known.
+	var inboundSpiralSignals spiralSignals
+	if s.spiralShadowEnabled {
+		inboundSpiralSignals = computeSpiralSignals(env, feats.MessageCount)
+	}
+
 	routeStart := time.Now()
 	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, router.Request{
 		RequestedModel:       feats.Model,
@@ -1138,14 +1149,15 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Shadow-mode spiral detector: log-only death-march signals (error grind,
 	// same-file thrash, fuzzy repetition, monologue) recorded once per
 	// (session, reason) so live fire rates and precision can be measured
-	// before any escalation action is armed. Main-loop/tool-result turns only —
-	// hard-pinned turn types (Probe, TitleGen, Compaction, sub-agent dispatch)
-	// carry history shapes that mimic the signals.
+	// before any escalation action is armed. Signals were snapshotted from
+	// the inbound body above, before any handover rewrite. Main-loop /
+	// tool-result turns only — hard-pinned turn types (Probe, TitleGen,
+	// Compaction, sub-agent dispatch) carry history shapes that mimic the
+	// signals.
 	if s.spiralShadowEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
-		sig := computeSpiralSignals(env, feats.MessageCount)
-		if reasons := spiralReasons(sig); len(reasons) > 0 {
+		if reasons := spiralReasons(inboundSpiralSignals); len(reasons) > 0 {
 			role := roleForTier(catalog.TierFor(feats.Model))
-			s.handleSpiralShadow(ctx, sig, reasons, installationID, routeRes.SessionKey, role, decision.Model, string(tt))
+			s.handleSpiralShadow(ctx, inboundSpiralSignals, reasons, installationID, routeRes.SessionKey, role, decision.Model, string(tt))
 		}
 	}
 
