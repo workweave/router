@@ -15,7 +15,10 @@ const (
 
 // strictifyBailKeywords are JSON Schema constructs OpenAI strict mode cannot
 // express; their presence anywhere makes the schema non-strictifiable.
-var strictifyBailKeywords = []string{"oneOf", "allOf", "not", "if", "then", "else", "patternProperties", "$ref"}
+var strictifyBailKeywords = []string{
+	"oneOf", "allOf", "not", "if", "then", "else", "patternProperties", "$ref",
+	"dependentSchemas", "unevaluatedProperties", "unevaluatedItems", "prefixItems",
+}
 
 // strictifyDropKeywords are constraint keywords strict mode rejects; they are
 // stripped from the node and appended to its description so the model still
@@ -25,6 +28,11 @@ var strictifyDropKeywords = []string{
 	"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
 	"minLength", "maxLength", "minItems", "maxItems", "uniqueItems",
 	"minProperties", "maxProperties",
+	// Key/membership constraints strict mode rejects outright. propertyNames
+	// in particular rode through untouched and 400'd the whole request
+	// ("'propertyNames' is not permitted") for any session carrying the
+	// playwright MCP tools (browser_drop) on the gpt-5.x Responses path.
+	"propertyNames", "contains", "minContains", "maxContains", "dependentRequired",
 }
 
 // strictifyOpenAISchema converts a tool input_schema (already $ref-inlined by
