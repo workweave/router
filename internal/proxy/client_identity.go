@@ -130,6 +130,14 @@ const (
 	ClientAppGeminiCLI  = "gemini-cli"
 )
 
+// clientAppAliases maps the raw X-App values some clients send to their
+// canonical client_app. Claude Code sends "cli", which would otherwise store
+// verbatim and miss the dashboard's label map.
+var clientAppAliases = map[string]string{
+	"cli":    ClientAppClaudeCode,
+	"cli-bg": ClientAppClaudeCode,
+}
+
 // MaxClientAppLen bounds the X-App header. Canonical values are short
 // (claude-code, codex, cursor); longer values are header smuggling attempts.
 const MaxClientAppLen = 32
@@ -142,6 +150,9 @@ const MaxClientAppLen = 32
 func NormalizeClientApp(xApp, userAgent string) string {
 	xApp = strings.ToLower(strings.TrimSpace(xApp))
 	if xApp != "" && len(xApp) <= MaxClientAppLen {
+		if canonical, ok := clientAppAliases[xApp]; ok {
+			return canonical
+		}
 		return xApp
 	}
 	ua := strings.ToLower(userAgent)

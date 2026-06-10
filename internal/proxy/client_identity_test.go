@@ -171,6 +171,8 @@ func TestNormalizeClientApp(t *testing.T) {
 	}{
 		{"explicit header wins", "codex", "claude-cli/2.0.1", proxy.ClientAppCodex},
 		{"explicit header lowercased", "Claude-Code", "", proxy.ClientAppClaudeCode},
+		{"cli alias canonicalizes to claude-code", "cli", "", proxy.ClientAppClaudeCode},
+		{"cli-bg alias canonicalizes to claude-code", "cli-bg", "", proxy.ClientAppClaudeCode},
 		{"explicit header trimmed", "  cursor  ", "", proxy.ClientAppCursor},
 		{"oversized header falls through to UA", strings.Repeat("a", proxy.MaxClientAppLen+1), "claude-cli/2.0.1", proxy.ClientAppClaudeCode},
 		{"UA claude-cli", "", "claude-cli/2.0.1 (cli, win32)", proxy.ClientAppClaudeCode},
