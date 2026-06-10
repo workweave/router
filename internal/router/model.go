@@ -10,6 +10,12 @@ const (
 	CapExtendedThinking ModelCapability = "extended_thinking"
 	CapReasoning        ModelCapability = "reasoning"
 	CapExtendedContext  ModelCapability = "extended_context"
+	// CapXhighEffort marks Anthropic adaptive models whose output_config.effort
+	// menu includes "xhigh". All adaptive models accept low/medium/high/max;
+	// xhigh is opus-4-7+ only — claude-sonnet-4-6 rejects it with 400 "This
+	// model does not support effort level 'xhigh'". Emit clamps xhigh to "max"
+	// when the target lacks this capability.
+	CapXhighEffort ModelCapability = "xhigh_effort"
 )
 
 // ModelSpec describes what a model supports. Zero value is safe: provider
@@ -56,7 +62,10 @@ var (
 	// Opus 4.6+, Opus 4.7+, Opus 4.8, and Sonnet 4.6 support 1M context via
 	// context-1m-2025-08-07 beta; Haiku 4.5 and Sonnet 4.5 are limited to 200K.
 	anthropicAdaptive = NewSpec(CapAdaptiveThinking, CapExtendedContext)
-	anthropicExtended = NewSpec(CapExtendedThinking)
+	// Opus 4.7+ (and fable) additionally accept effort level "xhigh"; the
+	// older adaptive models (opus-4-6, sonnet-4-6) top out at "max".
+	anthropicAdaptiveXhigh = NewSpec(CapAdaptiveThinking, CapExtendedContext, CapXhighEffort)
+	anthropicExtended      = NewSpec(CapExtendedThinking)
 )
 
 var (
@@ -74,9 +83,9 @@ var registry = map[string]ModelSpec{
 	// claude-fable-5: adaptive thinking is always on (thinking.type=disabled
 	// is rejected); 1M context is native, so CapExtendedContext only makes the
 	// context-1m beta header a harmless no-op.
-	"claude-fable-5":    anthropicAdaptive,
-	"claude-opus-4-8":   anthropicAdaptive,
-	"claude-opus-4-7":   anthropicAdaptive,
+	"claude-fable-5":    anthropicAdaptiveXhigh,
+	"claude-opus-4-8":   anthropicAdaptiveXhigh,
+	"claude-opus-4-7":   anthropicAdaptiveXhigh,
 	"claude-sonnet-4-6": anthropicAdaptive,
 	"claude-opus-4-6":   anthropicAdaptive,
 

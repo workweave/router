@@ -615,3 +615,60 @@ func TestAnthropicSameFormat_BodyIsImmutable(t *testing.T) {
 
 	assert.Equal(t, original, body, "original body bytes must not be modified")
 }
+
+// Prod repro (2026-06-09 customer benchmark): a session running with
+// output_config.effort="xhigh" (valid for the requested opus) was re-routed
+// mid-session to claude-sonnet-4-6, whose effort menu tops out at "max".
+// The body went through with only the model swapped and Anthropic rejected it
+// with a non-retryable 400 ("This model does not support effort level
+// 'xhigh'"), killing the session. The emit layer must clamp xhigh to max for
+// adaptive targets without CapXhighEffort.
+func TestAnthropicSameFormat_XhighEffortClampedOnReroute(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"}}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-sonnet-4-6",
+		Capabilities: router.Lookup("claude-sonnet-4-6"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	outputConfig, _ := out["output_config"].(map[string]any)
+	require.NotNil(t, outputConfig)
+	assert.Equal(t, "max", outputConfig["effort"], "xhigh must clamp to max for models without CapXhighEffort")
+}
+
+// Top-level `effort` follows the same menu as output_config.effort.
+func TestAnthropicSameFormat_XhighTopLevelEffortClampedOnReroute(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"adaptive"},"effort":"xhigh"}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-sonnet-4-6",
+		Capabilities: router.Lookup("claude-sonnet-4-6"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	assert.Equal(t, "max", out["effort"], "top-level xhigh must clamp to max for models without CapXhighEffort")
+}
+
+// xhigh stays untouched when the target supports it (opus-4-7+).
+func TestAnthropicSameFormat_XhighEffortPreservedForCapableModel(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"}}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-8",
+		Capabilities: router.Lookup("claude-opus-4-8"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	outputConfig, _ := out["output_config"].(map[string]any)
+	require.NotNil(t, outputConfig)
+	assert.Equal(t, "xhigh", outputConfig["effort"], "xhigh must pass through to models with CapXhighEffort")
+}
+
+// Levels below xhigh are on every adaptive model's menu; the clamp must not
+// touch them even when the target lacks CapXhighEffort.
+func TestAnthropicSameFormat_NonXhighEffortUntouchedByClamp(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-sonnet-4-6",
+		Capabilities: router.Lookup("claude-sonnet-4-6"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	outputConfig, _ := out["output_config"].(map[string]any)
+	require.NotNil(t, outputConfig)
+	assert.Equal(t, "high", outputConfig["effort"], "supported effort levels must pass through unchanged")
+}

@@ -368,6 +368,13 @@ type EmitOverrides struct {
 	// model only accepts adaptive thinking (claude-opus-4-6+ / sonnet-4-6+).
 	RewriteThinkingAdaptive bool
 	OutputConfigEffort      string
+	// ClampEffortXhighTo downgrades a caller-supplied effort level of "xhigh"
+	// (top-level `effort` and `output_config.effort`) to this value. Set when
+	// the target model's effort menu lacks xhigh (router.CapXhighEffort): a
+	// mid-session re-route from opus to sonnet otherwise forwards the client's
+	// xhigh verbatim and Anthropic rejects the request with a non-retryable
+	// 400, killing the session.
+	ClampEffortXhighTo string
 }
 
 func (e *RequestEnvelope) emitSameFormat(ov EmitOverrides) ([]byte, error) {
@@ -441,6 +448,18 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 				if err != nil {
 					return nil, fmt.Errorf("set output_config.effort: %w", err)
 				}
+			}
+		}
+	}
+
+	if ov.ClampEffortXhighTo != "" {
+		for _, key := range []string{"effort", "output_config.effort"} {
+			if gjson.GetBytes(out, key).String() != effortXhigh {
+				continue
+			}
+			out, err = sjson.SetBytes(out, key, ov.ClampEffortXhighTo)
+			if err != nil {
+				return nil, fmt.Errorf("clamp %s: %w", key, err)
 			}
 		}
 	}
@@ -807,6 +826,13 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	return ov
 }
 
+// Anthropic adaptive effort levels referenced by emit logic. Every adaptive
+// model accepts low/medium/high/max; xhigh requires router.CapXhighEffort.
+const (
+	effortMax   = "max"
+	effortXhigh = "xhigh"
+)
+
 // effortForBudget maps the legacy thinking.budget_tokens value onto the
 // adaptive output_config.effort tier. The thresholds match Anthropic's
 // published guidance: ≤4k tokens is "low" headroom, ≤16k is "medium", and
@@ -861,6 +887,14 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 				ov.DeleteKeys = append(ov.DeleteKeys, key)
 			}
 		}
+	}
+
+	// Adaptive targets keep caller-supplied effort, but the menu differs per
+	// model: "xhigh" is opus-4-7+ only. Clamp to the highest level every
+	// adaptive model accepts so a re-route never manufactures an invalid
+	// request out of a valid one.
+	if opts.Capabilities.Supports(router.CapAdaptiveThinking) && !opts.Capabilities.Supports(router.CapXhighEffort) {
+		ov.ClampEffortXhighTo = effortMax
 	}
 
 	if !opts.Capabilities.Supports(router.CapAdaptiveThinking) && !opts.Capabilities.Supports(router.CapExtendedThinking) {

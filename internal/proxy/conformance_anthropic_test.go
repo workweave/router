@@ -50,6 +50,24 @@ func TestConformance_Anthropic(t *testing.T) {
 				assert.NotEqual(t, "system", gjson.GetBytes(body, "messages.0.role").String(), "no system role may remain in the messages array")
 			},
 		},
+		{
+			// Guards the 2026-06-09 re-route 400: a session running with
+			// output_config.effort="xhigh" (valid for the requested opus-4-7+)
+			// re-routed onto claude-sonnet-4-6 must have the effort clamped to
+			// "max" — sonnet's menu has no xhigh and the resulting 400 is
+			// non-retryable, killing the session.
+			name:            "anthropic/xhigh_effort_clamped_on_reroute",
+			provider:        providers.ProviderAnthropic,
+			model:           "claude-sonnet-4-6",
+			newClient:       anthropicClient,
+			inbound:         `{"model":"claude-opus-4-7","stream":true,"max_tokens":1024,"thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"},"messages":[{"role":"user","content":"hi"}]}`,
+			stream:          true,
+			upstreamFixture: "anthropic/basic_text.upstream.sse",
+			wantUpstream: func(t *testing.T, _ string, body []byte, _ http.Header) {
+				assert.Equal(t, "claude-sonnet-4-6", gjson.GetBytes(body, "model").String())
+				assert.Equal(t, "max", gjson.GetBytes(body, "output_config.effort").String(), "xhigh must clamp to max for models without CapXhighEffort")
+			},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { runConformanceCase(t, c) })
