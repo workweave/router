@@ -1,0 +1,185 @@
+format_version: 2
+version: v0.70
+parent: v0.69
+status: candidate
+embedder:
+  model: jina-v2-base-code-int8
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 16
+  top_p: 4
+  alpha: 0.96
+  shrinkage_k0: 10.0
+  score_normalization: per_prompt_zscore_across_bench_columns
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 1775
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  output_cost_ratio: 0.0
+  speed_weight: 0.0
+  expected_output_tokens: 2000
+  per_model_verbosity: true
+  include_routerarena_labels: routerarena_labels_combined.jsonl
+  routerarena_only: false
+  bench_coding_only: false
+  include_benchmark_corpus: true
+  benchmark_corpus_loaders: aider-polyglot-go,aider-polyglot-rust-cpp-java,livecodebench-ts-and-aider-polyglot-ts,bfcl-v4-simple,bfcl-v4-parallel-multi
+  source_fractions:
+    routerarena: 0.1
+  exclude_prompts: null
+  n_excluded_prompts: 0
+  include_aa_labels: aa_quality_priors_v0.62.json
+  aa_evidence_scale: 3.0
+  cold_model_aa_boost: 1.0
+  aa_label_tier_weights:
+    AIDER_POLYGLOT_GO: 1.0
+    AIDER_POLYGLOT_RUST_CPP_JAVA: 1.0
+    BFCL_V4_PARALLEL_MULTI: 0.8
+    BFCL_V4_SIMPLE: 0.3
+    GPQA_DIAMOND: 0.3
+    IFBENCH: 0.3
+    LIVECODEBENCH: 1.0
+    LIVECODEBENCH_TS: 1.0
+    MATH_500: 0.3
+    MMLU_PRO: 0.3
+    SCICODE: 1.0
+    SWE_BENCH_VERIFIED: 1.0
+    TAU2_BENCH_TELECOM: 1.0
+    TERMINAL_BENCH_HARD: 1.0
+  aa_label_residuals:
+    fraction_under_threshold: 0.65748031496063
+    max: 0.24314294387784519
+    mean: 0.04631449456562252
+    median: 0.020760225861677223
+    n_cells: 254
+    p90: 0.14018703443043984
+  default_routing_knobs:
+    alpha:
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    speed_weight: 0.0
+    output_cost_ratio: 0.0
+    expected_output_tokens: 2000
+    per_model_verbosity: true
+  recommended_ui_defaults:
+    quality_pareto:
+      alpha: 0.96
+      output_cost_ratio: 0.0
+      speed_weight: 0.0
+      note: "macro 66.2 @ $1.65 \u2014 fable 95% of coding; offline Pareto sweep 2026-06-10"
+    balanced:
+      alpha: 0.9
+      output_cost_ratio: 0.0
+      speed_weight: 0.0
+      note: "macro 64.0 @ $1.39 \u2014 fable 75%"
+    cost_pareto:
+      alpha: 0.82
+      output_cost_ratio: 0.0
+      speed_weight: 0.0
+      note: "macro 58.1 @ $0.86 \u2014 opus-coding floor (= v0.68); frontier collapses\
+        \ below 0.82"
+deployed_providers:
+- anthropic
+- bedrock
+- deepinfra
+- fireworks
+- google
+- openai
+deployed_models:
+- claude-haiku-4-5
+- claude-opus-4-7
+- claude-opus-4-8
+- claude-sonnet-4-6
+- deepseek/deepseek-v4-flash
+- deepseek/deepseek-v4-pro
+- gemini-3.1-flash-lite-preview
+- gemini-3.1-pro-preview
+- gemini-3.5-flash
+- gpt-5.4-mini
+- gpt-5.5
+- moonshotai/kimi-k2.6
+- qwen/qwen3-coder-next
+- qwen/qwen3-next-80b-a3b-instruct
+- xiaomi/mimo-v2.5-pro
+cost_per_1k_input_usd:
+  claude-haiku-4-5: 0.0008
+  claude-opus-4-7: 0.005
+  claude-opus-4-8: 0.005
+  claude-sonnet-4-6: 0.003
+  deepseek/deepseek-v4-flash: 0.00014
+  deepseek/deepseek-v4-pro: 0.00174
+  gemini-3.1-flash-lite-preview: 0.0001
+  gemini-3.1-pro-preview: 0.002
+  gemini-3.5-flash: 0.0015
+  gpt-5.4-mini: 0.0004
+  gpt-5.5: 0.005
+  moonshotai/kimi-k2.6: 0.00095
+  qwen/qwen3-coder-next: 0.0005
+  qwen/qwen3-next-80b-a3b-instruct: 0.00015
+  xiaomi/mimo-v2.5-pro: 0.001
+changelog: 'v0.65 = v0.64 (metadata-only, no retrain) with two changes that attack
+  the cost-driven coding/QnA misroutes found in the v0.64 live shards (cheap tail
+  0/13 dominant on Atlas, 0/8 on Pro): (1) cap claude-opus-4-7 quality_means at claude-opus-4-8
+  (same $0.005/1k price, 4-8 >= 4-7 everywhere) so 4-8 is always preferred -- reclaims
+  c8/c11/c14/c15 from 4-7 (Atlas opus-4-7 was 144 turns / 0/4); (2) uniform routing
+  alpha 0.9 -> 0.96, shrinking the 0.1 cost term that promoted equal-quality cheap
+  models over opus-4-8 -- reclaims c0 (Pro 47% / Atlas 93% of top-4) mimo->opus-4-8
+  and c12 opus-4-7->gpt-5.5 (the live Pro MVP, 5/7), while leaving quality-driven
+  cheap wins (c1/c4/c6/c7/c9 haiku/qwen/gemini-flash, c5 deepseek, c13 gemini-flash)
+  untouched so the v0.64 TB strong-cheap routing is preserved. rankings.json regenerated
+  by the exact v2 blend at alpha=0.96 (TestV2MatchesV1 holds). TB-safety (c0 is 92%
+  of TB top-4) is the one thing only the live bake-off can settle.'
+column_append:
+  model: claude-fable-5
+  tool: append_quality_column.py
+  impute_from: claude-opus-4-8
+  labels: /tmp/tier3-oracle-labels
+pareto_demote:
+  clusters:
+  - 1
+  - 7
+  - 9
+  - 11
+  - 12
+  kept:
+  - claude-fable-5
+  - claude-opus-4-8
+  why: agentic per-task cost is effectiveness-driven; haiku/deepseek/gpt-5.5 picks
+    on these clusters were strictly dominated by opus (worse solve, equal-or-higher
+    realized $/task). See RESULTS_fable5_screen.md.
+measured_cells:
+  clusters:
+  - 5
+  - 8
+  - 13
+  - 14
+  source: Tier-3 Easy solve oracle (per-cluster mean), hard-traffic guard on c5/c8/c13
+    (mimo 13.6%/9.5% Pro/Atlas solo)
+  hard_safe:
+  - claude-fable-5
+  - claude-opus-4-7
+  - claude-opus-4-8
+  - claude-sonnet-4-6
+  - gpt-5.5
+claim: 'Certified config for ''opus-level quality at <= opus price'': identical to
+  pure opus-4-8 on the coding/agentic oracle (41.3/47.6/85.4 at equal realized $/task),
+  cheaper on the short-turn tail; quality/balanced presets (0.90/0.96) remain available
+  via recommended_ui_defaults for the fable premium tier.'
