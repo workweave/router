@@ -136,6 +136,17 @@
       "extra_bench_columns": [
         "swebench_anthropic/claude-opus-4-8"
       ]
+    },
+    {
+      "model": "claude-fable-5",
+      "provider": "anthropic",
+      "bench_column": "routerarena_claude-opus-4-7",
+      "direct_label": "routerarena",
+      "proxy": true,
+      "proxy_note": "Fable 5 (GA 2026-06-09) has no RouterArena/AA labels of its own; quality_means column appended by append_quality_column.py from probe run add-claude-fable-5 (194x3 Tier-3 Easy, 95.2% solve) on pinned v0.65 geometry \u2014 per-cluster cell~solve fit + monotone floor on measured clusters, opus-4-8 cells imputed elsewhere. Re-fit via the registry path (opus-4-7 RouterArena proxy + own swebench column) at the next full retrain.",
+      "extra_bench_columns": [
+        "swebench_anthropic/claude-fable-5"
+      ]
     }
   ]
 }

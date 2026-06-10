@@ -1,5 +1,12 @@
 {
   "axes": {
+    "claude-fable-5": {
+      "input_per_1k_usd": 0.01,
+      "output_per_1k_usd": 0.05,
+      "tps": null,
+      "ttft_s": null,
+      "verbosity_tokens": null
+    },
     "claude-haiku-4-5": {
       "input_per_1k_usd": 0.0008,
       "output_per_1k_usd": 0.004,

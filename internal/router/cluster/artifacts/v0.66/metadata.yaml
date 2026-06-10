@@ -2,7 +2,6 @@ format_version: 2
 version: v0.66
 parent: v0.65
 status: candidate
-promoted_date: '2026-06-05'
 embedder:
   model: jina-v2-base-code-int8
   embed_dim: 768
@@ -60,39 +59,43 @@ training:
     p90: 0.14018703443043984
   default_routing_knobs:
     alpha:
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
-    - 0.96
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
+    - 0.82
     speed_weight: 0.0
     output_cost_ratio: 0.0
     expected_output_tokens: 2000
     per_model_verbosity: true
   recommended_ui_defaults:
     quality_pareto:
-      alpha: 0.6
-      speed_weight: 0.1
-      output_cost_ratio: 0.25
-    cost_pareto:
-      alpha: 0.4
-      speed_weight: 0.05
-      output_cost_ratio: 0.4
+      alpha: 0.96
+      output_cost_ratio: 0.0
+      speed_weight: 0.0
+      note: "macro 66.2 @ $1.65 \u2014 fable 95% of coding; offline Pareto sweep 2026-06-10"
     balanced:
-      alpha: 0.5
-      speed_weight: 0.12
-      output_cost_ratio: 0.25
+      alpha: 0.9
+      output_cost_ratio: 0.0
+      speed_weight: 0.0
+      note: "macro 64.0 @ $1.39 \u2014 fable 75%"
+    cost_pareto:
+      alpha: 0.82
+      output_cost_ratio: 0.0
+      speed_weight: 0.0
+      note: "macro 58.1 @ $0.86 \u2014 opus-coding floor (= v0.68); frontier collapses\
+        \ below 0.82"
 deployed_providers:
 - anthropic
 - bedrock
@@ -132,7 +135,56 @@ cost_per_1k_input_usd:
   qwen/qwen3-coder-next: 0.0005
   qwen/qwen3-next-80b-a3b-instruct: 0.00015
   xiaomi/mimo-v2.5-pro: 0.001
-changelog: 'v0.66 = v0.65 (metadata-only) demoting haiku-4-5 + gemini-3.1-flash-lite
-  below the non-cheap floor in Pro/QnA-heavy clusters [1, 6, 7] (c1/c6/c7: haiku won
-  0.96/0.65/0.81 and diluted top-p=4 onto haiku for agentic coding, where it solves
-  ~4% of Pro vs opus ~50%). TB clusters + mimo/kimi/qwen untouched.'
+changelog: 'v0.65 = v0.64 (metadata-only, no retrain) with two changes that attack
+  the cost-driven coding/QnA misroutes found in the v0.64 live shards (cheap tail
+  0/13 dominant on Atlas, 0/8 on Pro): (1) cap claude-opus-4-7 quality_means at claude-opus-4-8
+  (same $0.005/1k price, 4-8 >= 4-7 everywhere) so 4-8 is always preferred -- reclaims
+  c8/c11/c14/c15 from 4-7 (Atlas opus-4-7 was 144 turns / 0/4); (2) uniform routing
+  alpha 0.9 -> 0.96, shrinking the 0.1 cost term that promoted equal-quality cheap
+  models over opus-4-8 -- reclaims c0 (Pro 47% / Atlas 93% of top-4) mimo->opus-4-8
+  and c12 opus-4-7->gpt-5.5 (the live Pro MVP, 5/7), while leaving quality-driven
+  cheap wins (c1/c4/c6/c7/c9 haiku/qwen/gemini-flash, c5 deepseek, c13 gemini-flash)
+  untouched so the v0.64 TB strong-cheap routing is preserved. rankings.json regenerated
+  by the exact v2 blend at alpha=0.96 (TestV2MatchesV1 holds). TB-safety (c0 is 92%
+  of TB top-4) is the one thing only the live bake-off can settle.'
+column_append:
+  model: claude-fable-5
+  tool: append_quality_column.py
+  impute_from: claude-opus-4-8
+  labels: /tmp/tier3-oracle-labels
+pareto_demote:
+  clusters:
+  - 1
+  - 7
+  - 9
+  - 11
+  - 12
+  kept:
+  - claude-fable-5
+  - claude-opus-4-8
+  why: agentic per-task cost is effectiveness-driven; haiku/deepseek/gpt-5.5 picks
+    on these clusters were strictly dominated by opus (worse solve, equal-or-higher
+    realized $/task). See RESULTS_fable5_screen.md.
+measured_cells:
+  clusters:
+  - 5
+  - 8
+  - 13
+  - 14
+  source: Tier-3 Easy solve oracle (per-cluster mean), hard-traffic guard on c5/c8/c13
+    (mimo 13.6%/9.5% Pro/Atlas solo)
+  hard_safe:
+  - claude-fable-5
+  - claude-opus-4-7
+  - claude-opus-4-8
+  - claude-sonnet-4-6
+  - gpt-5.5
+claim: 'Certified config for ''opus-level quality at <= opus price'': identical to
+  pure opus-4-8 on the coding/agentic oracle (41.3/47.6/85.4 at equal realized $/task),
+  cheaper on the short-turn tail; quality/balanced presets (0.90/0.96) remain available
+  via recommended_ui_defaults for the fable premium tier.'
+supersedes_note: 'This v0.66 REPLACES the 2026-06-05 haiku-demote candidate of the
+  same name (router#322), which failed its live bake-off and was never promoted; its
+  GCS runs are renamed *-v066hd-* for lineage hygiene. This artifact consolidates
+  the fable-5 onboarding candidates (formerly v0.67-v0.70 working names): graduated
+  Pareto roster + alpha=0.82 default (''opus quality at <= opus price'').'

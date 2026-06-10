@@ -2,7 +2,7 @@
   "meta": {
     "k": 16,
     "n_models": 16,
-    "roster_version": "v0.69",
+    "roster_version": "v0.66",
     "source": "quality_means.json + model_axes.json"
   },
   "models": {
