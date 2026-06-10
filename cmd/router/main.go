@@ -828,6 +828,15 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 			logger.Info("Cluster embed timeout overridden", "embed_timeout_ms", ms.Milliseconds())
 		}
 	}
+	if v := config.GetOr("ROUTER_CLUSTER_TOP_P", ""); v != "" {
+		n, parseErr := strconv.Atoi(v)
+		if parseErr != nil || n <= 0 {
+			logger.Warn("Invalid ROUTER_CLUSTER_TOP_P; using default", "value", v, "default", cfg.TopP)
+		} else {
+			cfg.TopP = n
+			logger.Info("Cluster top_p overridden", "top_p", n)
+		}
+	}
 	scorers := make(map[string]*cluster.Scorer, len(versions))
 	warmed := make(map[string]cluster.Embedder)
 	for _, v := range versions {
