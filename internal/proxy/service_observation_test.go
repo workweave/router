@@ -308,3 +308,43 @@ func TestProxyMessages_PersistsTurnType(t *testing.T) {
 		})
 	}
 }
+
+// TestProxyMessages_PersistsRolloutID asserts the eval/training-harness
+// rollout correlation id flows from ClientIdentity to the telemetry row —
+// the join key for bandit-loop reward attribution. Empty stays empty (NULL
+// column) for normal traffic.
+func TestProxyMessages_PersistsRolloutID(t *testing.T) {
+	const installID = "66666666-6666-6666-6666-666666666666"
+	const rolloutID = "swerebench-cc-r1/router-v0.65/0/owner__repo-123"
+	decision := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "pin",
+	}
+	telem := newCaptureTelemetry()
+	svc := proxy.NewService(
+		&fakeRouter{decision: decision},
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil, false, nil, nil, false,
+		providers.ProviderAnthropic, "claude-haiku-4-5",
+		telem,
+	)
+
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
+	ctx = context.WithValue(ctx, proxy.ClientIdentityContextKey{}, proxy.ClientIdentity{RolloutID: rolloutID})
+	rec := httptest.NewRecorder()
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`)
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+
+	row := telem.firstRow(t)
+	assert.Equal(t, rolloutID, row.RolloutID)
+}
+
+// TestNormalizeRolloutID covers the bound: oversized ids are rejected (not
+// truncated) so a stored id always joins back to a real rollout.
+func TestNormalizeRolloutID(t *testing.T) {
+	assert.Equal(t, "run/cond/0/iid", proxy.NormalizeRolloutID("  run/cond/0/iid "))
+	assert.Equal(t, "", proxy.NormalizeRolloutID(strings.Repeat("x", 257)))
+	assert.Equal(t, strings.Repeat("x", 256), proxy.NormalizeRolloutID(strings.Repeat("x", 256)))
+}

@@ -1546,6 +1546,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			RouterUserID:           auth.UserIDFrom(ctx),
 			ClientApp:              clientID.ClientApp,
 			TurnType:               string(routeRes.TurnType),
+			RolloutID:              clientID.RolloutID,
 		})
 	}
 
@@ -2537,6 +2538,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			RouterUserID:           auth.UserIDFrom(ctx),
 			ClientApp:              clientID.ClientApp,
 			TurnType:               string(routeRes.TurnType),
+			RolloutID:              clientID.RolloutID,
 		})
 	}
 

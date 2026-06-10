@@ -60,6 +60,9 @@ type InsertTelemetryParams struct {
 	RouterUserID         string
 	ClientApp            string
 	TurnType             string
+	// RolloutID joins eval/training-harness rollout rewards onto decisions
+	// (x-weave-rollout-id header). Empty for normal traffic → NULL column.
+	RolloutID string
 }
 
 // TelemetrySummary holds aggregated totals for the dashboard cards.

@@ -118,6 +118,7 @@ type RouterModelRouterRequestTelemetry struct {
 	RouterUserID           pgtype.UUID
 	ClientApp              *string
 	TurnType               *string
+	RolloutID              *string
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.

@@ -88,6 +88,7 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		SessionID:              stringPtrOrNil(p.SessionID),
 		RouterUserID:           uuidOrNil(p.RouterUserID),
 		ClientApp:              stringPtrOrNil(p.ClientApp),
+		RolloutID:              stringPtrOrNil(p.RolloutID),
 		TurnType:               p.TurnType,
 	})
 }

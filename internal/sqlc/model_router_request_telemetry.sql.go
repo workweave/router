@@ -787,7 +787,8 @@ INSERT INTO router.model_router_request_telemetry (
     session_id,
     router_user_id,
     client_app,
-    turn_type
+    turn_type,
+    rollout_id
 ) VALUES (
     $1::uuid,
     $2::varchar,
@@ -826,7 +827,8 @@ INSERT INTO router.model_router_request_telemetry (
     $35::varchar,
     $36::uuid,
     $37::text,
-    $38::varchar
+    $38::varchar,
+    $39::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -870,6 +872,7 @@ type InsertRequestTelemetryParams struct {
 	RouterUserID           pgtype.UUID
 	ClientApp              *string
 	TurnType               string
+	RolloutID              *string
 }
 
 // Records a completed proxied request for the dashboard UI and routing
@@ -880,6 +883,9 @@ type InsertRequestTelemetryParams struct {
 // turn_type is the turntype classification (main_loop, tool_result, probe,
 // title_gen, compaction, classifier, sub_agent_dispatch); NULL only on rows
 // written before the column existed.
+// rollout_id is the client-supplied x-weave-rollout-id correlation id used by
+// eval/training harnesses to join graded rollout rewards onto decisions; NULL
+// for all non-harness traffic.
 //
 //	INSERT INTO router.model_router_request_telemetry (
 //	    installation_id,
@@ -919,7 +925,8 @@ type InsertRequestTelemetryParams struct {
 //	    session_id,
 //	    router_user_id,
 //	    client_app,
-//	    turn_type
+//	    turn_type,
+//	    rollout_id
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::varchar,
@@ -958,7 +965,8 @@ type InsertRequestTelemetryParams struct {
 //	    $35::varchar,
 //	    $36::uuid,
 //	    $37::text,
-//	    $38::varchar
+//	    $38::varchar,
+//	    $39::varchar
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -1001,6 +1009,7 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.RouterUserID,
 		arg.ClientApp,
 		arg.TurnType,
+		arg.RolloutID,
 	)
 	return err
 }

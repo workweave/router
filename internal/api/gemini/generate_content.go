@@ -152,6 +152,7 @@ func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
 		DisplayName: proxy.NormalizeDisplayName(h.Get("X-Weave-User-Name")),
 		UserAgent:   h.Get("User-Agent"),
 		ClientApp:   proxy.NormalizeClientApp(h.Get("X-App"), h.Get("User-Agent")),
+		RolloutID:   proxy.NormalizeRolloutID(h.Get(proxy.RolloutIDHeader)),
 	}
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
 }

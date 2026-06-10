@@ -6,6 +6,9 @@
 -- turn_type is the turntype classification (main_loop, tool_result, probe,
 -- title_gen, compaction, classifier, sub_agent_dispatch); NULL only on rows
 -- written before the column existed.
+-- rollout_id is the client-supplied x-weave-rollout-id correlation id used by
+-- eval/training harnesses to join graded rollout rewards onto decisions; NULL
+-- for all non-harness traffic.
 -- name: InsertRequestTelemetry :exec
 INSERT INTO router.model_router_request_telemetry (
     installation_id,
@@ -45,7 +48,8 @@ INSERT INTO router.model_router_request_telemetry (
     session_id,
     router_user_id,
     client_app,
-    turn_type
+    turn_type,
+    rollout_id
 ) VALUES (
     @installation_id::uuid,
     @request_id::varchar,
@@ -84,7 +88,8 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('session_id')::varchar,
     sqlc.narg('router_user_id')::uuid,
     sqlc.narg('client_app')::text,
-    @turn_type::varchar
+    @turn_type::varchar,
+    sqlc.narg('rollout_id')::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 

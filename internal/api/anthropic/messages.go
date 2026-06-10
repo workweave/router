@@ -141,6 +141,7 @@ func stashClientIdentity(ctx context.Context, h http.Header, body []byte) contex
 		DisplayName: displayName,
 		UserAgent:   h.Get("User-Agent"),
 		ClientApp:   proxy.NormalizeClientApp(h.Get("X-App"), h.Get("User-Agent")),
+		RolloutID:   proxy.NormalizeRolloutID(h.Get(proxy.RolloutIDHeader)),
 	}
 	observability.Get().Debug("anthropic stashClientIdentity",
 		"meta_raw_len", len(metaRaw),

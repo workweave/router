@@ -20,6 +20,10 @@ type ClientIdentity struct {
 	DisplayName string
 	UserAgent   string
 	ClientApp   string
+	// RolloutID is the eval/training-harness correlation id from the
+	// x-weave-rollout-id header. Joins a sandbox rollout's graded reward
+	// onto every routing decision made inside it. Empty for normal traffic.
+	RolloutID string
 }
 
 // ClientIdentityContextKey is the request-context key for client identity.
@@ -96,6 +100,25 @@ const MaxClientIdentifierLen = 128
 // valid but no longer correlates.
 func NormalizeClientIdentifier(s string) string {
 	if len(s) > MaxClientIdentifierLen {
+		return ""
+	}
+	return s
+}
+
+// RolloutIDHeader carries the eval/training-harness rollout correlation id.
+const RolloutIDHeader = "X-Weave-Rollout-Id"
+
+// MaxRolloutIDLen bounds the rollout correlation id. Harness ids compose
+// run_id/condition/seed/instance_id and can exceed the 128-byte client
+// identifier cap; 256 covers them with flood-protection headroom.
+const MaxRolloutIDLen = 256
+
+// NormalizeRolloutID trims and bounds a rollout id. Rejection (not
+// truncation) for the same reason as NormalizeClientIdentifier: a truncated
+// id looks valid but no longer joins.
+func NormalizeRolloutID(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > MaxRolloutIDLen {
 		return ""
 	}
 	return s
