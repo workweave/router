@@ -1,0 +1,7 @@
+{
+  "cloud_provider": "gcp",
+  "project_id": "your-production-project-id",
+  "region": "us-central1",
+  "service_name": "router",
+  "log_command_template": "gcloud logging read ... --project {project_id} --format=json"
+}

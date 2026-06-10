@@ -70,3 +70,4 @@ results/
 .claude/settings.local.json
 .claude/.credentials.json
 .claude/cc-statusline.sh
+.claude/skills/debug-claude-session/.deployment.json

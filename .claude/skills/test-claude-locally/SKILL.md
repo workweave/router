@@ -1,5 +1,5 @@
 ---
-name: testing-router-locally
+name: test-claude-locally
 description: Run the Weave router locally in docker compose and drive it with `claude -p` to reproduce and verify routing/translation behavior for a specific upstream model (e.g. GLM-5.1, DeepSeek, Qwen). Use when verifying a router fix end-to-end, reproducing a prod routing bug, confirming a model's streaming behavior (nudges, tool-call suppression, loop/no-progress breaks), or testing a `/force-model` route — without touching the user's global Claude Code config.
 ---
 
