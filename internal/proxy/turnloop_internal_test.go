@@ -23,6 +23,7 @@ type stubPinStore struct {
 	getPin    sessionpin.Pin
 	getFound  bool
 	upserts   []sessionpin.Pin
+	upsertErr error
 }
 
 func newStubPinStore() *stubPinStore {
@@ -38,6 +39,9 @@ func (s *stubPinStore) Get(context.Context, [sessionpin.SessionKeyLen]byte, stri
 func (s *stubPinStore) Upsert(_ context.Context, p sessionpin.Pin) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.upsertErr != nil {
+		return s.upsertErr
+	}
 	s.upserts = append(s.upserts, p)
 	return nil
 }

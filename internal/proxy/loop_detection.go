@@ -250,9 +250,12 @@ func (s *Service) handleLoopEscalation(
 		}
 	}
 
-	// Holdout only applies when the event can be recorded — withholding the
-	// rescue without a durable row would be pure loss, not a measurement.
-	holdout := s.loopEscalationStore != nil && inLoopEscalationHoldout(sessionKey, s.loopEscalationHoldoutPct)
+	// Holdout only applies when the event can actually be recorded —
+	// withholding the rescue without a durable row would be pure loss, not a
+	// measurement. That requires both a wired store AND a real installation id
+	// (the insert is skipped for unauthenticated requests).
+	holdout := s.loopEscalationStore != nil && installationID != uuid.Nil &&
+		inLoopEscalationHoldout(sessionKey, s.loopEscalationHoldoutPct)
 
 	action := loopActionEscalated
 	switch {
@@ -287,10 +290,48 @@ func (s *Service) handleLoopEscalation(
 		"role", role,
 	)
 
+	// Rescue first, record second. The durable row is what the
+	// once-per-session budget counts, so for the escalating action it must not
+	// land unless the opus pin actually did — recording a failed rescue would
+	// permanently block this session's retry (the next detection would see
+	// count > 0 and bail) while leaving it un-rescued. On upsert failure we
+	// return WITHOUT a row: the loop is still live, so the next turn
+	// re-detects and retries the whole rescue.
+	if willEscalate {
+		// Pin opus for the rest of the session (immutable sticky via
+		// ReasonLoopEscalation).
+		if s.pinStore == nil || installationID == uuid.Nil {
+			return
+		}
+		var lastServed string
+		if existing, found, err := s.pinStore.Get(ctx, sessionKey, role); err == nil && found {
+			lastServed = existing.LastServedModel
+		}
+		pin := sessionpin.Pin{
+			SessionKey:      sessionKey,
+			Role:            role,
+			InstallationID:  installationID,
+			Provider:        providers.ProviderAnthropic,
+			Model:           escalateModel,
+			Reason:          translate.ReasonLoopEscalation,
+			TurnCount:       1,
+			PinnedUntil:     time.Now().Add(pinSessionTTL),
+			LastServedModel: lastServed,
+		}
+		// context.Background(): the request ctx may already be canceled by the
+		// time this runs; the pin write must still land or the next turn re-loops.
+		if err := s.pinStore.Upsert(context.Background(), pin); err != nil {
+			log.Error("loop-escalation: pin upsert failed", "err", err)
+			return
+		}
+	}
+
 	// Durable row in router.loop_escalation_events — the queryable fire-rate /
 	// opus-share / rescue-rate source and the training corpus.
 	// context.Background(): the request ctx may already be canceled; losing the
 	// row would both skew the corpus and break the once-per-session budget.
+	// (If THIS write fails after a successful pin, the pin's
+	// ReasonLoopEscalation check still dedupes re-fires for the pin's TTL.)
 	if s.loopEscalationStore != nil && installationID != uuid.Nil {
 		event := LoopEscalationEvent{
 			InstallationID:   installationID.String(),
@@ -308,35 +349,6 @@ func (s *Service) handleLoopEscalation(
 		if err := s.loopEscalationStore.InsertLoopEscalationEvent(context.Background(), event); err != nil {
 			log.Error("loop-escalation: event insert failed", "err", err)
 		}
-	}
-
-	if !willEscalate {
-		return // disabled / user-forced / already-strong / holdout — record-only
-	}
-
-	// Pin opus for the rest of the session (immutable sticky via ReasonLoopEscalation).
-	// context.Background(): the request ctx may already be canceled by the time
-	// this runs; the pin write must still land or the next turn re-loops.
-	if s.pinStore == nil || installationID == uuid.Nil {
-		return
-	}
-	var lastServed string
-	if existing, found, err := s.pinStore.Get(ctx, sessionKey, role); err == nil && found {
-		lastServed = existing.LastServedModel
-	}
-	pin := sessionpin.Pin{
-		SessionKey:      sessionKey,
-		Role:            role,
-		InstallationID:  installationID,
-		Provider:        providers.ProviderAnthropic,
-		Model:           escalateModel,
-		Reason:          translate.ReasonLoopEscalation,
-		TurnCount:       1,
-		PinnedUntil:     time.Now().Add(pinSessionTTL),
-		LastServedModel: lastServed,
-	}
-	if err := s.pinStore.Upsert(context.Background(), pin); err != nil {
-		log.Error("loop-escalation: pin upsert failed", "err", err)
 	}
 }
 

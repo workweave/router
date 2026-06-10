@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 
@@ -369,4 +370,34 @@ func TestInLoopEscalationHoldout_DeterministicAndProportional(t *testing.T) {
 		}
 	}
 	assert.InDelta(t, 0.10, float64(held)/float64(n), 0.03, "holdout share must track the configured percentage")
+}
+
+func TestHandleLoopEscalation_PinFailureLeavesNoEventRow(t *testing.T) {
+	// Bugbot (PR #357): if the event row lands but the pin upsert fails, the
+	// once-per-session budget sees count > 0 on the next detection and bails,
+	// permanently blocking the rescue for a session that never got one. A
+	// failed pin must leave NO row so the next turn retries the whole rescue.
+	pins := newStubPinStore()
+	pins.upsertErr = errors.New("postgres down")
+	events := &recordingLoopStore{}
+	svc := newLoopEscalationSvc(pins, events)
+
+	svc.handleLoopEscalation(context.Background(), loopTestSig, 12, 0.2, 30, uuid.New(), loopTestKey(10), "default", "claude-haiku-4-5")
+
+	assert.Empty(t, events.events, "a failed rescue must not consume the session's escalation budget")
+	assert.Empty(t, pins.upserts)
+}
+
+func TestHandleLoopEscalation_NilInstallationSkipsHoldout(t *testing.T) {
+	// Bugbot (PR #357): the holdout requires a recordable event row, and the
+	// insert is skipped for unauthenticated requests — a nil installation in
+	// the holdout bucket would withhold the rescue with no measurement record.
+	pins := newStubPinStore()
+	events := &recordingLoopStore{}
+	svc := newLoopEscalationSvc(pins, events).WithLoopEscalationConfig(true, 100)
+
+	svc.handleLoopEscalation(context.Background(), loopTestSig, 12, 0.2, 30, uuid.Nil, loopTestKey(11), "default", "claude-haiku-4-5")
+
+	assert.Empty(t, events.events, "nil installation cannot record an event row")
+	assert.Empty(t, pins.upserts, "nil installation cannot pin either — but it must not be counted as holdout")
 }
