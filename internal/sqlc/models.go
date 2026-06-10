@@ -186,3 +186,25 @@ type RouterSessionPin struct {
 	LastServedModel           string
 	HasEverSwitched           bool
 }
+
+// Shadow-mode spiral (death-march) detections: log-only fire-rate corpus measured on live traffic before escalation is armed
+type RouterSpiralShadowEvent struct {
+	ID             uuid.UUID
+	CreatedAt      pgtype.Timestamptz
+	InstallationID uuid.UUID
+	// 16-byte digest matching router.session_pins.session_key; join key for session outcome
+	SessionKey       []byte
+	Role             string
+	RoutedModel      string
+	TurnType         string
+	Reason           string
+	ErrStreak        int32
+	ErroredResults   int32
+	ToolResults      int32
+	MaxSameFileEdits int32
+	SameFilePathHash string
+	RepeatFrac       float64
+	MonologueLen     int32
+	ToolCallCount    int32
+	MessageCount     int32
+}

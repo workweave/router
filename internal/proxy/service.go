@@ -22,6 +22,7 @@ import (
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
 	"workweave/router/internal/router/sessionpin"
+	"workweave/router/internal/router/turntype"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -112,6 +113,18 @@ type Service struct {
 	// budget. Nil disables persistence — and with it the holdout, which is
 	// only meaningful when the withheld rescue leaves a row behind.
 	loopEscalationStore LoopEscalationStore
+	// spiralShadowEnabled gates the shadow-mode spiral detector (log-only
+	// death-march signals; see spiral_detection.go). Defaults to true — shadow
+	// mode changes no routing behavior — with ROUTER_SPIRAL_SHADOW_ENABLED as
+	// the kill switch.
+	spiralShadowEnabled bool
+	// spiralTracker de-duplicates shadow fires per (session, role, reason) on
+	// this replica.
+	spiralTracker *spiralTracker
+	// spiralShadowStore persists shadow spiral detections durably
+	// (router.spiral_shadow_events) and enforces the once-per-(session,
+	// reason) budget. Nil degrades to log-only fires.
+	spiralShadowStore SpiralShadowStore
 	// summarizer produces a bounded-cost handover summary on switch turns.
 	// nil passes the full prior history through unchanged.
 	summarizer handover.Summarizer
@@ -419,6 +432,8 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		pinStore:             pinStore,
 		noProgress:           newNoProgressTracker(),
 		compaction:           newCompactionTracker(),
+		spiralTracker:        newSpiralTracker(),
+		spiralShadowEnabled:  true,
 		hardPinExplore:       hardPinExplore,
 		hardPinProvider:      hardPinProvider,
 		hardPinModel:         hardPinModel,
@@ -481,6 +496,23 @@ func (s *Service) WithLoopEscalationConfig(enabled bool, holdoutPct int) *Servic
 // the cross-TTL once-per-session budget (the pin-reason check still applies).
 func (s *Service) WithLoopEscalationStore(store LoopEscalationStore) *Service {
 	s.loopEscalationStore = store
+	return s
+}
+
+// WithSpiralShadowConfig sets the shadow-mode spiral detector kill switch.
+// enabled=false skips signal computation entirely. Shadow mode takes no
+// routing action either way; the switch exists to shed the per-turn scan
+// cost if it ever misbehaves.
+func (s *Service) WithSpiralShadowConfig(enabled bool) *Service {
+	s.spiralShadowEnabled = enabled
+	return s
+}
+
+// WithSpiralShadowStore wires the durable sink for shadow spiral events
+// (router.spiral_shadow_events). Nil degrades to log-only fires with
+// replica-local de-duplication.
+func (s *Service) WithSpiralShadowStore(store SpiralShadowStore) *Service {
+	s.spiralShadowStore = store
 	return s
 }
 
@@ -1100,6 +1132,20 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
 			return s.handleNoProgressBreak(ctx, w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider)
+		}
+	}
+
+	// Shadow-mode spiral detector: log-only death-march signals (error grind,
+	// same-file thrash, fuzzy repetition, monologue) recorded once per
+	// (session, reason) so live fire rates and precision can be measured
+	// before any escalation action is armed. Main-loop/tool-result turns only —
+	// hard-pinned turn types (Probe, TitleGen, Compaction, sub-agent dispatch)
+	// carry history shapes that mimic the signals.
+	if s.spiralShadowEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
+		sig := computeSpiralSignals(env, feats.MessageCount)
+		if reasons := spiralReasons(sig); len(reasons) > 0 {
+			role := roleForTier(catalog.TierFor(feats.Model))
+			s.handleSpiralShadow(ctx, sig, reasons, installationID, routeRes.SessionKey, role, decision.Model, string(tt))
 		}
 	}
 

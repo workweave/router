@@ -123,6 +123,42 @@ func (r *TelemetryRepo) CountLoopEscalationEvents(ctx context.Context, sessionKe
 	})
 }
 
+var _ proxy.SpiralShadowStore = (*TelemetryRepo)(nil)
+
+func (r *TelemetryRepo) InsertSpiralShadowEvent(ctx context.Context, p proxy.SpiralShadowEvent) error {
+	id, err := uuid.Parse(p.InstallationID)
+	if err != nil {
+		return err
+	}
+	q := sqlc.New(r.tx)
+	return q.InsertSpiralShadowEvent(ctx, sqlc.InsertSpiralShadowEventParams{
+		InstallationID:   id,
+		SessionKey:       p.SessionKey,
+		Role:             p.Role,
+		RoutedModel:      p.RoutedModel,
+		TurnType:         p.TurnType,
+		Reason:           p.Reason,
+		ErrStreak:        p.ErrStreak,
+		ErroredResults:   p.ErroredResults,
+		ToolResults:      p.ToolResults,
+		MaxSameFileEdits: p.MaxSameFileEdits,
+		SameFilePathHash: p.SameFilePathHash,
+		RepeatFrac:       p.RepeatFrac,
+		MonologueLen:     p.MonologueLen,
+		ToolCallCount:    p.ToolCallCount,
+		MessageCount:     p.MessageCount,
+	})
+}
+
+func (r *TelemetryRepo) CountSpiralShadowEvents(ctx context.Context, sessionKey []byte, role, reason string) (count int64, err error) {
+	q := sqlc.New(r.tx)
+	return q.CountSpiralShadowEvents(ctx, sqlc.CountSpiralShadowEventsParams{
+		SessionKey: sessionKey,
+		Role:       role,
+		Reason:     reason,
+	})
+}
+
 func (r *TelemetryRepo) GetTelemetrySummary(ctx context.Context, installationID string, from, to time.Time) (proxy.TelemetrySummary, error) {
 	id, err := uuid.Parse(installationID)
 	if err != nil {

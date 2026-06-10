@@ -546,6 +546,10 @@ func main() {
 			loopEscalationHoldoutPct = n
 		}
 	}
+	// Shadow-mode spiral detector kill switch. Shadow mode is log-only (no
+	// routing action), so it ships enabled; the switch sheds the per-turn
+	// signal-scan cost if it ever misbehaves.
+	spiralShadowEnabled := config.GetOr("ROUTER_SPIRAL_SHADOW_ENABLED", "true") == "true"
 	plannerCfg := planner.EVConfig{
 		ThresholdUSD:           parseEnvFloat("ROUTER_SWITCH_EV_THRESHOLD_USD", proxy.DefaultPlannerThresholdUSD),
 		ExpectedRemainingTurns: parseEnvInt("ROUTER_SWITCH_EXPECTED_REMAINING_TURNS", proxy.DefaultPlannerExpectedRemainingTurns),
@@ -589,6 +593,8 @@ func main() {
 		WithEffortEscalation(effortEscalation).
 		WithLoopEscalationConfig(loopEscalationEnabled, loopEscalationHoldoutPct).
 		WithLoopEscalationStore(repo.Telemetry).
+		WithSpiralShadowConfig(spiralShadowEnabled).
+		WithSpiralShadowStore(repo.Telemetry).
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels).
@@ -596,6 +602,7 @@ func main() {
 		WithBillingService(billingSvc)
 	logger.Info("Effort escalation configured", "enabled", effortEscalation)
 	logger.Info("Loop escalation configured", "enabled", loopEscalationEnabled, "holdout_pct", loopEscalationHoldoutPct)
+	logger.Info("Spiral shadow detector configured", "enabled", spiralShadowEnabled)
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "available_models_count", len(availableModels))
 
 	// Fail loud if a deployed model is missing from the tier table;
