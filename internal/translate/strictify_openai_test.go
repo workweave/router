@@ -152,3 +152,42 @@ func TestStrictify_DoesNotMutateInput(t *testing.T) {
 	assert.JSONEq(t, raw, string(reMarshaled),
 		"the caller may emit the original schema on other paths — strictify must not mutate it")
 }
+
+// Prod repro (2026-06-10, Lucanet benchmark re-run): the playwright MCP
+// server's browser_drop tool nests propertyNames inside a property schema.
+// Pre-fix it rode through strictification untouched and OpenAI rejected the
+// whole request with 400 "In context=('properties', 'data'), 'propertyNames'
+// is not permitted" — killing the session on the first call.
+func TestStrictify_PropertyNamesDroppedToDescription(t *testing.T) {
+	out, ok := strictifyFromJSON(t, `{
+		"type":"object",
+		"properties":{
+			"data":{
+				"type":"object",
+				"properties":{},
+				"propertyNames":{"pattern":"^[a-z]+$"}
+			}
+		},
+		"required":["data"]
+	}`)
+	require.True(t, ok, "propertyNames must not make the schema non-strictifiable")
+
+	props := out["properties"].(map[string]any)
+	data := props["data"].(map[string]any)
+	_, present := data["propertyNames"]
+	assert.False(t, present, "propertyNames must be stripped for strict mode")
+	desc, _ := data["description"].(string)
+	assert.Contains(t, desc, "propertyNames", "dropped constraint must survive as description guidance")
+}
+
+// Schema-defining keywords strict mode cannot express must bail to the
+// non-strict fallback rather than emit a lossy strict schema.
+func TestStrictify_UnevaluatedPropertiesBails(t *testing.T) {
+	_, ok := strictifyFromJSON(t, `{
+		"type":"object",
+		"properties":{"x":{"type":"string"}},
+		"unevaluatedProperties":false,
+		"required":["x"]
+	}`)
+	require.False(t, ok, "unevaluatedProperties is not expressible in strict mode; must bail")
+}
