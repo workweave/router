@@ -25,7 +25,11 @@ const FlushChunk = 4 * 1024
 // errors.Is(err, httputil.ErrUpstreamIdleTimeout) (or context.Cause(ctx)) to
 // distinguish a real upstream stall from caller-initiated cancellation, and
 // the proxy's failover logic keys on this to retry against the next binding.
-var ErrUpstreamIdleTimeout = errors.New("upstream sse idle timeout")
+//
+// Aliases providers.ErrUpstreamIdleTimeout — the sentinel lives there so
+// providers.IsRetryable can classify it explicitly without an import cycle
+// (this package imports providers). errors.Is matches against either name.
+var ErrUpstreamIdleTimeout = providers.ErrUpstreamIdleTimeout
 
 // DefaultSSEIdleTimeout is the per-read inactivity threshold for streaming
 // upstream responses. AWS NAT Gateway / NLB / VPC-endpoint reapers silently
@@ -35,16 +39,31 @@ var ErrUpstreamIdleTimeout = errors.New("upstream sse idle timeout")
 //
 // Tunable via ROUTER_SSE_IDLE_TIMEOUT_SECONDS. Healthy generations stream a
 // chunk at least every few seconds, so 45s of silence is unambiguously a stall.
-var DefaultSSEIdleTimeout = sseIdleTimeoutFromEnv()
+var DefaultSSEIdleTimeout = idleTimeoutFromEnv("ROUTER_SSE_IDLE_TIMEOUT_SECONDS", 45*time.Second)
 
-func sseIdleTimeoutFromEnv() time.Duration {
-	v := os.Getenv("ROUTER_SSE_IDLE_TIMEOUT_SECONDS")
+// DefaultResponsesSSEIdleTimeout is the idle-progress threshold for OpenAI
+// Responses API (/v1/responses) streams. More generous than
+// DefaultSSEIdleTimeout because a gpt-5.x reasoning turn can go tens of
+// seconds between SSE frames while the model thinks (reasoning-summary deltas
+// lag the actual reasoning). ANY received bytes count as progress — event
+// frames, reasoning deltas, keepalives — so only a zero-progress gap trips
+// it. The real stalls observed in prod (2026-06-09: two /v1/responses streams
+// at zero output tokens until the 600s request cap) produced no bytes at all,
+// so 90s separates them cleanly from healthy long-thinking turns.
+//
+// Tunable via ROUTER_RESPONSES_SSE_IDLE_TIMEOUT_SECONDS.
+var DefaultResponsesSSEIdleTimeout = idleTimeoutFromEnv("ROUTER_RESPONSES_SSE_IDLE_TIMEOUT_SECONDS", 90*time.Second)
+
+// idleTimeoutFromEnv reads a whole-seconds override from envVar, falling back
+// to fallback when unset, unparsable, or non-positive.
+func idleTimeoutFromEnv(envVar string, fallback time.Duration) time.Duration {
+	v := os.Getenv(envVar)
 	if v == "" {
-		return 45 * time.Second
+		return fallback
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
-		return 45 * time.Second
+		return fallback
 	}
 	return time.Duration(n) * time.Second
 }

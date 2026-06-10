@@ -2,6 +2,7 @@ package providers_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,16 @@ import (
 
 	"workweave/router/internal/providers"
 )
+
+// TestIsRetryable_UpstreamIdleTimeout pins the classification of the SSE
+// idle-watchdog sentinel: a mid-stream zero-progress stall is the upstream's
+// fault and must be retryable so dispatchWithFallback can rescue the turn on
+// the next attempt. Both the bare sentinel and a wrapped chain must classify,
+// since adapters may annotate the error on the way out.
+func TestIsRetryable_UpstreamIdleTimeout(t *testing.T) {
+	assert.True(t, providers.IsRetryable(providers.ErrUpstreamIdleTimeout))
+	assert.True(t, providers.IsRetryable(fmt.Errorf("stream upstream response: %w", providers.ErrUpstreamIdleTimeout)))
+}
 
 func TestIsRetryable_ResponseHeaderTimeout(t *testing.T) {
 	release := make(chan struct{})

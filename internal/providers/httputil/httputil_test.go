@@ -179,17 +179,30 @@ func TestStartIdleWatchdog_DoesNotFireWhenMarked(t *testing.T) {
 
 func TestSSEIdleTimeoutFromEnv_DefaultsTo45s(t *testing.T) {
 	t.Setenv("ROUTER_SSE_IDLE_TIMEOUT_SECONDS", "")
-	assert.Equal(t, 45*time.Second, sseIdleTimeoutFromEnv())
+	assert.Equal(t, 45*time.Second, idleTimeoutFromEnv("ROUTER_SSE_IDLE_TIMEOUT_SECONDS", 45*time.Second))
 }
 
 func TestSSEIdleTimeoutFromEnv_OverrideRespected(t *testing.T) {
 	t.Setenv("ROUTER_SSE_IDLE_TIMEOUT_SECONDS", "10")
-	assert.Equal(t, 10*time.Second, sseIdleTimeoutFromEnv())
+	assert.Equal(t, 10*time.Second, idleTimeoutFromEnv("ROUTER_SSE_IDLE_TIMEOUT_SECONDS", 45*time.Second))
 }
 
 func TestSSEIdleTimeoutFromEnv_BadValueFallsBack(t *testing.T) {
 	t.Setenv("ROUTER_SSE_IDLE_TIMEOUT_SECONDS", "garbage")
-	assert.Equal(t, 45*time.Second, sseIdleTimeoutFromEnv())
+	assert.Equal(t, 45*time.Second, idleTimeoutFromEnv("ROUTER_SSE_IDLE_TIMEOUT_SECONDS", 45*time.Second))
+}
+
+func TestResponsesSSEIdleTimeoutFromEnv_OverrideRespected(t *testing.T) {
+	t.Setenv("ROUTER_RESPONSES_SSE_IDLE_TIMEOUT_SECONDS", "120")
+	assert.Equal(t, 120*time.Second, idleTimeoutFromEnv("ROUTER_RESPONSES_SSE_IDLE_TIMEOUT_SECONDS", 90*time.Second))
+}
+
+// IsRetryable must see idle-timeout stalls as retryable through the alias —
+// this is what lets dispatchWithFallback rescue a mid-stream stall on the
+// next binding (prod incident 2026-06-09).
+func TestErrUpstreamIdleTimeout_AliasIsRetryable(t *testing.T) {
+	assert.True(t, errors.Is(ErrUpstreamIdleTimeout, providers.ErrUpstreamIdleTimeout))
+	assert.True(t, providers.IsRetryable(ErrUpstreamIdleTimeout))
 }
 
 // Sanity guard: ensure the exported sentinel is actually used.

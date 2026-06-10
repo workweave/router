@@ -245,6 +245,53 @@ func TestDispatchWithFallback_RetriesOnResponseHeaderTimeout(t *testing.T) {
 	assert.Equal(t, providers.ProviderDeepInfra, rec.Header().Get(HeaderRouterFallbackFrom))
 }
 
+// TestDispatchWithFallback_RetriesOnUpstreamIdleTimeout covers the mid-stream
+// stall watchdog (prod incident 2026-06-09: /v1/responses streams went silent
+// after headers, zero output tokens until the 600s cap). The adapter aborts
+// the stalled stream and returns providers.ErrUpstreamIdleTimeout without
+// having written anything through the prelude buffer, so the dispatch loop
+// must rescue the turn on the next binding.
+func TestDispatchWithFallback_RetriesOnUpstreamIdleTimeout(t *testing.T) {
+	primary := &fakeClient{
+		name:     "openai",
+		outcomes: []fakeOutcome{{err: providers.ErrUpstreamIdleTimeout}},
+	}
+	fallback := &fakeClient{
+		name:     "openrouter",
+		outcomes: []fakeOutcome{{writeBytes: []byte("rescued")}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderOpenAI:     primary,
+		providers.ProviderOpenRouter: fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "gpt-5.5"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderOpenAI},
+			{Provider: providers.ProviderOpenRouter},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, winnerIdx)
+	assert.Equal(t, 1, primary.calls)
+	assert.Equal(t, 1, fallback.calls)
+	assert.Equal(t, "rescued", rec.Body.String())
+	assert.Equal(t, providers.ProviderOpenAI, rec.Header().Get(HeaderRouterFallbackFrom))
+}
+
 func TestDispatchWithFallback_NoRetryOnNonRetryableStatus(t *testing.T) {
 	primary := &fakeClient{
 		name:     "fireworks",

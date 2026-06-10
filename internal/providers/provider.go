@@ -141,6 +141,16 @@ func (e *UpstreamErrorResponse) Error() string {
 // of the upstream stream is drained without retention.
 const MaxBufferedErrorBytes = 64 * 1024
 
+// ErrUpstreamIdleTimeout is the sentinel cause set on a request context when
+// a provider adapter's SSE inactivity watchdog fires: the upstream accepted
+// the request and returned headers, then stopped producing bytes for the full
+// idle budget. It marks the stall as upstream-owned, as opposed to
+// caller-initiated cancellation. Defined here (rather than in httputil, which
+// owns the watchdog) so IsRetryable can classify it explicitly without an
+// import cycle — httputil imports providers and re-exports this value as
+// httputil.ErrUpstreamIdleTimeout.
+var ErrUpstreamIdleTimeout = errors.New("upstream sse idle timeout")
+
 // IsRetryableStatus reports whether an upstream HTTP status is worth
 // retrying on a different provider. Covers transient upstream-side faults
 // (5xx + 408 timeout + 429 rate-limit). 4xx ≠ 408/429 are the client's
@@ -164,6 +174,16 @@ func IsRetryable(err error) bool {
 		return false
 	}
 	if isResponseHeaderTimeout(err) {
+		return true
+	}
+	// An SSE idle-timeout stall is upstream-owned even though the watchdog
+	// surfaces it by canceling the request context: the upstream returned
+	// headers and then went silent. A retry on the same or a different
+	// binding can still serve the turn, so this must be classified before
+	// the caller-cancellation guard below (the underlying transport error
+	// in the chain may also carry context.Canceled from the watchdog's
+	// cancel call).
+	if errors.Is(err, ErrUpstreamIdleTimeout) {
 		return true
 	}
 	// Client-side cancellation and per-request deadlines are owned by the

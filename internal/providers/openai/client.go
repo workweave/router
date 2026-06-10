@@ -36,6 +36,13 @@ type Client struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
+	// sseIdleTimeout, when > 0, overrides the per-endpoint idle-progress
+	// threshold (httputil.DefaultSSEIdleTimeout for chat/completions,
+	// httputil.DefaultResponsesSSEIdleTimeout for /v1/responses). Production
+	// always uses the defaults via NewClient; tests inject a small value to
+	// exercise the mid-stream stall watchdog without waiting out the real
+	// threshold (mirrors the header-timeout injection below).
+	sseIdleTimeout time.Duration
 }
 
 func NewClient(apiKey, baseURL string) *Client {
@@ -56,6 +63,27 @@ func NewClientWithResponseHeaderTimeout(apiKey, baseURL string, headerTimeout ti
 		baseURL: baseURL,
 		http:    &http.Client{Transport: httputil.NewTransportWithResponseHeaderTimeout(5*time.Second, 5*time.Second, headerTimeout)},
 	}
+}
+
+// NewClientWithTimeouts is NewClientWithResponseHeaderTimeout with an
+// additional injected SSE idle-progress threshold; see Client.sseIdleTimeout.
+func NewClientWithTimeouts(apiKey, baseURL string, headerTimeout, sseIdleTimeout time.Duration) *Client {
+	c := NewClientWithResponseHeaderTimeout(apiKey, baseURL, headerTimeout)
+	c.sseIdleTimeout = sseIdleTimeout
+	return c
+}
+
+// idleTimeoutFor picks the idle-progress watchdog threshold for the upstream
+// endpoint. /v1/responses gets the more generous reasoning budget — see
+// httputil.DefaultResponsesSSEIdleTimeout.
+func (c *Client) idleTimeoutFor(endpoint providers.Endpoint) time.Duration {
+	if c.sseIdleTimeout > 0 {
+		return c.sseIdleTimeout
+	}
+	if endpoint == providers.EndpointResponses {
+		return httputil.DefaultResponsesSSEIdleTimeout
+	}
+	return httputil.DefaultSSEIdleTimeout
 }
 
 // setAuth applies authentication to the upstream request. Precedence:
@@ -126,6 +154,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
 
+	idleTimeout := c.idleTimeoutFor(prep.Endpoint)
 	log := observability.Get()
 	log.Debug("OpenAI upstream response",
 		"status", resp.StatusCode,
@@ -143,7 +172,18 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	// to the prelude buffer, and silently drops the upstream error body —
 	// neither debugging signal nor failover survive.
 	if resp.StatusCode >= 400 {
-		bufBody, totalRead, drainErr := readCapped(resp.Body, providers.MaxBufferedErrorBytes)
+		// Guard the error-body read with the same idle watchdog as the
+		// streaming path below: readCapped's blocking reads would otherwise
+		// hang indefinitely on an upstream that returns error headers and
+		// then stalls the body — the response-header timeout no longer
+		// applies once headers have arrived.
+		mark, stop := httputil.StartIdleWatchdog(ctx, cancel, idleTimeout)
+		body := &progressReader{r: resp.Body, mark: mark}
+		bufBody, totalRead, drainErr := readCapped(body, providers.MaxBufferedErrorBytes)
+		stop()
+		if errors.Is(context.Cause(ctx), httputil.ErrUpstreamIdleTimeout) {
+			logStreamStall(decision.Model, path, idleTimeout, totalRead)
+		}
 		if len(bufBody) > 0 {
 			t.StampUpstreamFirstByte()
 		}
@@ -173,10 +213,15 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 
 	// Manual stream loop for per-chunk diagnostics; non-debug takes the fast path.
 	if !log.Enabled(ctx, slog.LevelDebug) {
-		return httputil.StreamBody(ctx, cancel, httputil.DefaultSSEIdleTimeout, resp.Body, status, w, t)
+		body := &progressReader{r: resp.Body}
+		streamErr := httputil.StreamBody(ctx, cancel, idleTimeout, body, status, w, t)
+		if errors.Is(streamErr, httputil.ErrUpstreamIdleTimeout) {
+			logStreamStall(decision.Model, path, idleTimeout, body.n)
+		}
+		return streamErr
 	}
 
-	mark, stop := httputil.StartIdleWatchdog(ctx, cancel, httputil.DefaultSSEIdleTimeout)
+	mark, stop := httputil.StartIdleWatchdog(ctx, cancel, idleTimeout)
 	defer stop()
 
 	flusher, _ := w.(http.Flusher)
@@ -212,13 +257,53 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		}
 		if readErr != nil {
 			if cause := context.Cause(ctx); errors.Is(cause, httputil.ErrUpstreamIdleTimeout) {
-				log.Debug("OpenAI upstream sse idle", "bytes_read", bytesRead)
+				logStreamStall(decision.Model, path, idleTimeout, int64(bytesRead))
 				return httputil.ErrUpstreamIdleTimeout
 			}
 			log.Debug("OpenAI upstream read failed", "err", readErr, "bytes_read", bytesRead)
 			return readErr
 		}
 	}
+}
+
+// progressReader counts upstream bytes and reports each successful read as
+// watchdog progress. The byte count feeds the stall log's bytes_received
+// field; mark (optional, nil-safe) feeds StartIdleWatchdog on paths that do
+// not go through StreamBody's built-in marking. Single-goroutine use only —
+// the count is read by the same goroutine after the stream loop returns.
+type progressReader struct {
+	r    io.Reader
+	mark func()
+	n    int64
+}
+
+func (p *progressReader) Read(buf []byte) (n int, err error) {
+	n, err = p.r.Read(buf)
+	if n > 0 {
+		p.n += int64(n)
+		if p.mark != nil {
+			p.mark()
+		}
+	}
+	return n, err
+}
+
+// logStreamStall reports an SSE idle-watchdog trip at ERROR: the upstream
+// accepted the request and returned headers, then produced zero bytes for the
+// full idle budget (prod incident 2026-06-09: two /v1/responses streams sat
+// at zero output tokens until the 600s request cap, burning 10 minutes of the
+// customer's agent budget each). The returned ErrUpstreamIdleTimeout is
+// classified retryable, so dispatchWithFallback re-attempts when nothing has
+// been committed to the client; this log is the paper trail for how often
+// that happens per model.
+func logStreamStall(model, path string, idleTimeout time.Duration, bytesReceived int64) {
+	observability.Get().Error("OpenAI upstream stream stalled mid-response; aborting for retry",
+		"model", model,
+		"provider", providers.ProviderOpenAI,
+		"path", path,
+		"idle_ms", idleTimeout.Milliseconds(),
+		"bytes_received", bytesReceived,
+	)
 }
 
 func truncateBytes(b []byte, n int) string {
