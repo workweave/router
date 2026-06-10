@@ -24,12 +24,12 @@ ARG HF_MODEL_REPO=jinaai/jina-embeddings-v2-base-code
 # silently picked up new weights" surprises. Bump deliberately.
 ARG HF_MODEL_REVISION=516f4baf13dec4ddddda8631e019b5737c8bc250
 # Second embedder: Qwen3-Embedding-0.6B exported with last-token
-# pooling baked into the graph (scripts/export_qwen3_onnx.py). The
-# repo is private — builds must pass `--secret id=hf_token,...`.
-# Set HF_QWEN_REPO= (empty) to skip the pull; the runtime constructs
-# embedders lazily, so deploys serving only Jina bundles don't need
-# the asset. Pin HF_QWEN_REVISION to the upload commit SHA printed by
-# the export script. Bump deliberately.
+# pooling baked into the graph (scripts/export_qwen3_onnx.py),
+# uploaded to a public Weave-owned repo (Apache-2.0 derivative, same
+# public-pull model as Jina). Set HF_QWEN_REPO= (empty) to skip the
+# pull; the runtime constructs embedders lazily, so deploys serving
+# only Jina bundles don't need the asset. Pin HF_QWEN_REVISION to the
+# upload commit SHA printed by the export script. Bump deliberately.
 ARG HF_QWEN_REPO=weave-eng/qwen3-embedding-0.6b-onnx-router
 ARG HF_QWEN_REVISION=a43740ed1bb6436deaa4b79c9a132a3d98756ace
 

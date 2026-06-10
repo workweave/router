@@ -132,7 +132,7 @@ of the assets root, keyed by embedder ID:
   layout (`<root>/model.onnx`) still resolves for this embedder.
 - `qwen3-embedding-0.6b-int8/` — produced by `scripts/export_qwen3_onnx.py`
   (Qwen3-Embedding-0.6B with last-token pooling baked into the graph) and
-  uploaded to the private
+  uploaded to the public
   [`weave-eng/qwen3-embedding-0.6b-onnx-router`](https://huggingface.co/weave-eng/qwen3-embedding-0.6b-onnx-router)
   HF repo. Only needed when serving a bundle whose `metadata.yaml` declares
   this embedder; the runtime loads embedders lazily.
@@ -140,9 +140,9 @@ of the assets root, keyed by embedder ID:
 Neither is committed to git.
 
 **Docker (default):** the Dockerfile downloads the files at image build time
-into `/opt/router/assets/<embedder-id>/`. The Qwen repo is private, so builds
-must pass an HF token (`docker build --secret id=hf_token,src=...`); set
-`HF_QWEN_REPO=` (empty) to skip the Qwen pull for Jina-only deploys.
+into `/opt/router/assets/<embedder-id>/`. Both repos are public — no token
+needed (the optional `hf_token` secret still works for rate-limit headroom);
+set `HF_QWEN_REPO=` (empty) to skip the Qwen pull for Jina-only deploys.
 
 **`make dev` (host-mode hot reload):** fetch the Jina files once into a local
 directory and point `ROUTER_ONNX_ASSETS_DIR` at it:
