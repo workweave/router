@@ -59,6 +59,7 @@ type InsertTelemetryParams struct {
 	SessionID            string
 	RouterUserID         string
 	ClientApp            string
+	TurnType             string
 }
 
 // TelemetrySummary holds aggregated totals for the dashboard cards.
@@ -96,5 +97,6 @@ type TelemetryRow struct {
 	UpstreamStatusCode  int32
 	RouterUserID        string
 	ClientApp           string
+	TurnType            string
 	UserEmail           string
 }

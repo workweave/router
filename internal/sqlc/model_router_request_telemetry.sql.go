@@ -31,6 +31,7 @@ SELECT
     t.upstream_status_code,
     t.router_user_id,
     t.client_app,
+    COALESCE(t.turn_type, '')::varchar AS turn_type,
     u.email AS user_email
 FROM router.model_router_request_telemetry t
 LEFT JOIN router.model_router_users u
@@ -69,6 +70,7 @@ type GetTelemetryRowsRow struct {
 	UpstreamStatusCode  *int32
 	RouterUserID        pgtype.UUID
 	ClientApp           *string
+	TurnType            string
 	UserEmail           *string
 }
 
@@ -92,6 +94,7 @@ type GetTelemetryRowsRow struct {
 //	    t.upstream_status_code,
 //	    t.router_user_id,
 //	    t.client_app,
+//	    COALESCE(t.turn_type, '')::varchar AS turn_type,
 //	    u.email AS user_email
 //	FROM router.model_router_request_telemetry t
 //	LEFT JOIN router.model_router_users u
@@ -135,6 +138,7 @@ func (q *Queries) GetTelemetryRows(ctx context.Context, arg GetTelemetryRowsPara
 			&i.UpstreamStatusCode,
 			&i.RouterUserID,
 			&i.ClientApp,
+			&i.TurnType,
 			&i.UserEmail,
 		); err != nil {
 			return nil, err
@@ -166,6 +170,7 @@ SELECT
     t.upstream_status_code,
     t.router_user_id,
     t.client_app,
+    COALESCE(t.turn_type, '')::varchar AS turn_type,
     u.email AS user_email
 FROM router.model_router_request_telemetry t
 LEFT JOIN router.model_router_users u
@@ -202,6 +207,7 @@ type GetTelemetryRowsAllRow struct {
 	UpstreamStatusCode  *int32
 	RouterUserID        pgtype.UUID
 	ClientApp           *string
+	TurnType            string
 	UserEmail           *string
 }
 
@@ -227,6 +233,7 @@ type GetTelemetryRowsAllRow struct {
 //	    t.upstream_status_code,
 //	    t.router_user_id,
 //	    t.client_app,
+//	    COALESCE(t.turn_type, '')::varchar AS turn_type,
 //	    u.email AS user_email
 //	FROM router.model_router_request_telemetry t
 //	LEFT JOIN router.model_router_users u
@@ -264,6 +271,7 @@ func (q *Queries) GetTelemetryRowsAll(ctx context.Context, arg GetTelemetryRowsA
 			&i.UpstreamStatusCode,
 			&i.RouterUserID,
 			&i.ClientApp,
+			&i.TurnType,
 			&i.UserEmail,
 		); err != nil {
 			return nil, err
@@ -778,7 +786,8 @@ INSERT INTO router.model_router_request_telemetry (
     device_id,
     session_id,
     router_user_id,
-    client_app
+    client_app,
+    turn_type
 ) VALUES (
     $1::uuid,
     $2::varchar,
@@ -816,7 +825,8 @@ INSERT INTO router.model_router_request_telemetry (
     $34::varchar,
     $35::varchar,
     $36::uuid,
-    $37::text
+    $37::text,
+    $38::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -859,6 +869,7 @@ type InsertRequestTelemetryParams struct {
 	SessionID              *string
 	RouterUserID           pgtype.UUID
 	ClientApp              *string
+	TurnType               string
 }
 
 // Records a completed proxied request for the dashboard UI and routing
@@ -866,6 +877,9 @@ type InsertRequestTelemetryParams struct {
 // chosen_score, candidate_scores, propensity, alpha_breakdown,
 // cluster_router_version, ttft_ms, cache_*_tokens, device_id, session_id) are
 // nullable; non-cluster decisions and pinned-route turns leave them NULL.
+// turn_type is the turntype classification (main_loop, tool_result, probe,
+// title_gen, compaction, classifier, sub_agent_dispatch); NULL only on rows
+// written before the column existed.
 //
 //	INSERT INTO router.model_router_request_telemetry (
 //	    installation_id,
@@ -904,7 +918,8 @@ type InsertRequestTelemetryParams struct {
 //	    device_id,
 //	    session_id,
 //	    router_user_id,
-//	    client_app
+//	    client_app,
+//	    turn_type
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::varchar,
@@ -942,7 +957,8 @@ type InsertRequestTelemetryParams struct {
 //	    $34::varchar,
 //	    $35::varchar,
 //	    $36::uuid,
-//	    $37::text
+//	    $37::text,
+//	    $38::varchar
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -984,6 +1000,7 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.SessionID,
 		arg.RouterUserID,
 		arg.ClientApp,
+		arg.TurnType,
 	)
 	return err
 }

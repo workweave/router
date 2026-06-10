@@ -70,6 +70,7 @@ export interface MetricsDetailRow {
   upstream_status_code: number;
   router_user_id: string;
   client_app: string;
+  turn_type: string;
   user_email: string;
 }
 

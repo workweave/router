@@ -88,6 +88,7 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		SessionID:              stringPtrOrNil(p.SessionID),
 		RouterUserID:           uuidOrNil(p.RouterUserID),
 		ClientApp:              stringPtrOrNil(p.ClientApp),
+		TurnType:               p.TurnType,
 	})
 }
 
@@ -324,6 +325,7 @@ func (r *TelemetryRepo) GetTelemetryRows(ctx context.Context, installationID str
 			row.UpstreamStatusCode,
 			uuidString(row.RouterUserID),
 			row.ClientApp,
+			row.TurnType,
 			row.UserEmail,
 		))
 	}
@@ -361,6 +363,7 @@ func (r *TelemetryRepo) GetTelemetryRowsAll(ctx context.Context, from, to time.T
 			row.UpstreamStatusCode,
 			uuidString(row.RouterUserID),
 			row.ClientApp,
+			row.TurnType,
 			row.UserEmail,
 		))
 	}
@@ -387,6 +390,7 @@ func telemetryRowFromRow(
 	upstreamStatusCode *int32,
 	routerUserID string,
 	clientApp *string,
+	turnType string,
 	userEmail *string,
 ) proxy.TelemetryRow {
 	deref := func(s *string) string {
@@ -426,6 +430,7 @@ func telemetryRowFromRow(
 		UpstreamStatusCode:  derefInt32(upstreamStatusCode),
 		RouterUserID:        routerUserID,
 		ClientApp:           deref(clientApp),
+		TurnType:            turnType,
 		UserEmail:           deref(userEmail),
 	}
 }

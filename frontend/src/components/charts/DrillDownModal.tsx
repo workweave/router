@@ -98,6 +98,30 @@ function ClientAppLabel({ clientApp }: { clientApp: string }) {
   return <>{CLIENT_APP_LABEL[clientApp] ?? clientApp}</>;
 }
 
+/** Turn-type value → display label. Mirrors `internal/router/turntype` on the
+ *  Go side. System turn types (probe, title_gen, compaction, classifier) are
+ *  automated traffic — render them muted so user turns stand out. */
+const TURN_TYPE_LABEL: Record<string, string> = {
+  main_loop: "Main loop",
+  tool_result: "Tool result",
+  sub_agent_dispatch: "Subagent",
+  compaction: "Compaction",
+  probe: "Probe",
+  title_gen: "Title gen",
+  classifier: "Classifier",
+};
+
+const SYSTEM_TURN_TYPES = new Set(["probe", "title_gen", "compaction", "classifier"]);
+
+function TurnTypeLabel({ turnType }: { turnType: string }) {
+  if (turnType === "") return <>—</>;
+  const label = TURN_TYPE_LABEL[turnType] ?? turnType;
+  if (SYSTEM_TURN_TYPES.has(turnType)) {
+    return <span className="text-muted-foreground">{label}</span>;
+  }
+  return <>{label}</>;
+}
+
 /** Renders the user identity for a drill-down row: the linked email when the
  *  router resolved one, otherwise an em dash. */
 function UserLabel({ email }: { email: string }) {
@@ -116,6 +140,7 @@ const COLUMNS: ColumnDef[] = [
   { key: "time", label: "Time", className: "w-[160px]" },
   { key: "user", label: "User" },
   { key: "tool", label: "AI tool" },
+  { key: "turn_type", label: "Turn type" },
   { key: "requested", label: "Requested model" },
   { key: "decision", label: "Decision model" },
   { key: "provider", label: "Provider" },
@@ -224,6 +249,9 @@ export function DrillDownModal({
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <ClientAppLabel clientApp={r.client_app} />
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <TurnTypeLabel turnType={r.turn_type} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">{r.requested_model || "—"}</td>
                       <td

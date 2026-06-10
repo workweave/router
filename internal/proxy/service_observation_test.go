@@ -258,3 +258,53 @@ func TestProxyMessages_NoMetadataOmitsClusterFields(t *testing.T) {
 	assert.Nil(t, row.CandidateScores)
 	assert.Nil(t, row.Propensity)
 }
+
+// TestProxyMessages_PersistsTurnType asserts the turntype classification
+// lands on the telemetry row, so dashboard/analytics queries can separate
+// automated turns (probe, title_gen, compaction, classifier) from user
+// traffic when computing per-model shares.
+func TestProxyMessages_PersistsTurnType(t *testing.T) {
+	const installID = "55555555-5555-5555-5555-555555555555"
+	decision := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "pin",
+	}
+
+	cases := []struct {
+		name     string
+		body     string
+		turnType string
+	}{
+		{
+			name:     "main loop",
+			body:     `{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`,
+			turnType: "main_loop",
+		},
+		{
+			name:     "probe",
+			body:     `{"model":"claude-opus-4-7","max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`,
+			turnType: "probe",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			telem := newCaptureTelemetry()
+			svc := proxy.NewService(
+				&fakeRouter{decision: decision},
+				map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+				nil, false, nil, nil, false,
+				providers.ProviderAnthropic, "claude-haiku-4-5",
+				telem,
+			)
+
+			ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
+			rec := httptest.NewRecorder()
+			httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+			require.NoError(t, svc.ProxyMessages(ctx, []byte(tc.body), rec, httpReq))
+
+			row := telem.firstRow(t)
+			assert.Equal(t, tc.turnType, row.TurnType)
+		})
+	}
+}

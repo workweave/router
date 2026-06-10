@@ -119,6 +119,7 @@ type metricsDetailRow struct {
 	UpstreamStatusCode  int32   `json:"upstream_status_code"`
 	RouterUserID        string  `json:"router_user_id"`
 	ClientApp           string  `json:"client_app"`
+	TurnType            string  `json:"turn_type"`
 	UserEmail           string  `json:"user_email"`
 }
 
@@ -180,6 +181,7 @@ func MetricsDetailsHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 				UpstreamStatusCode:  r.UpstreamStatusCode,
 				RouterUserID:        r.RouterUserID,
 				ClientApp:           r.ClientApp,
+				TurnType:            r.TurnType,
 				UserEmail:           r.UserEmail,
 			})
 		}

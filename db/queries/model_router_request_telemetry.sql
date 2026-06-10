@@ -3,6 +3,9 @@
 -- chosen_score, candidate_scores, propensity, alpha_breakdown,
 -- cluster_router_version, ttft_ms, cache_*_tokens, device_id, session_id) are
 -- nullable; non-cluster decisions and pinned-route turns leave them NULL.
+-- turn_type is the turntype classification (main_loop, tool_result, probe,
+-- title_gen, compaction, classifier, sub_agent_dispatch); NULL only on rows
+-- written before the column existed.
 -- name: InsertRequestTelemetry :exec
 INSERT INTO router.model_router_request_telemetry (
     installation_id,
@@ -41,7 +44,8 @@ INSERT INTO router.model_router_request_telemetry (
     device_id,
     session_id,
     router_user_id,
-    client_app
+    client_app,
+    turn_type
 ) VALUES (
     @installation_id::uuid,
     @request_id::varchar,
@@ -79,7 +83,8 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('device_id')::varchar,
     sqlc.narg('session_id')::varchar,
     sqlc.narg('router_user_id')::uuid,
-    sqlc.narg('client_app')::text
+    sqlc.narg('client_app')::text,
+    @turn_type::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 
@@ -221,6 +226,7 @@ SELECT
     t.upstream_status_code,
     t.router_user_id,
     t.client_app,
+    COALESCE(t.turn_type, '')::varchar AS turn_type,
     u.email AS user_email
 FROM router.model_router_request_telemetry t
 LEFT JOIN router.model_router_users u
@@ -252,6 +258,7 @@ SELECT
     t.upstream_status_code,
     t.router_user_id,
     t.client_app,
+    COALESCE(t.turn_type, '')::varchar AS turn_type,
     u.email AS user_email
 FROM router.model_router_request_telemetry t
 LEFT JOIN router.model_router_users u
