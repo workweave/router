@@ -124,7 +124,7 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 			jw.Key("effort")
 			jw.Str(eff)
 			jw.Key("summary")
-			jw.Str("auto")
+			jw.Str("detailed")
 			jw.EndObj()
 		}
 	}
