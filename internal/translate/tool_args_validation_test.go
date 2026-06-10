@@ -152,14 +152,13 @@ func driveAnthropicSSEWithTools(
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SynthesizesBash(t *testing.T) {
-	// OpenAI-compat failure mode (e.g. Mimo-v2.5): upstream emits prose +
-	// <think> XML as plain text deltas, no tool_calls. Request HAD tools
-	// available. finishStream must synthesize a Bash tool_use so Claude
+	// OpenAI-compat failure mode (e.g. Mimo-v2.5): upstream serializes a tool
+	// call as XML in the content channel, no structured tool_calls. Request HAD
+	// tools available. finishStream must synthesize a Bash tool_use so Claude
 	// Code's loop doesn't die on "tool call could not be parsed". (Gemini-3.x
 	// is deliberately excluded — see the _SuppressedOnGemini3x test below.)
 	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
-		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<think>Let me look at the file…</think>"},"finish_reason":null}]}` + "\n\n",
-		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":" I will read the relevant code first."},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\":\"Read\",\"path\":\"a.go\"}</tool_call>"},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
 		"data: [DONE]\n\n",
 	})
@@ -177,16 +176,40 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_SynthesizesBash(t *testing.T) 
 		"synthetic id is prefixed so log auditors can match it in stream transcripts")
 }
 
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedOnVisibleThinkingThenAnswer(t *testing.T) {
+	// Production regression (session 1f2ce8be): Mimo-v2.5 streams visible
+	// chain-of-thought as <think>…</think> text and then a real prose answer,
+	// finishing with finish_reason="stop". That is a complete, valid turn —
+	// Claude Code renders the text fine; there is no parse failure to rescue.
+	// The old marker set treated a leading <think> as the failure mode, stapled
+	// a synthetic Bash call onto the answer, promoted it to stop_reason=tool_use,
+	// and looped the session (client runs the echo → re-pins Mimo → another
+	// <think>+answer → repeat) until the user interrupted. The nudge must NOT
+	// fire: <think> is reasoning text, not leaked tool-call markup.
+	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<think>Let me look at the file…</think>"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Good catch — the sqlc.yml override does map uuid to google/uuid."},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+
+	assert.False(t, summary.TextOnlyTurnNudged,
+		"a <think> lead followed by a real answer is a valid turn — nudge must not fire")
+	assert.Equal(t, 0, summary.ToolUseBlocks, "no synthetic tool_use on a legitimate answer")
+	assert.Equal(t, "end_turn", summary.StopReason, "turn ends naturally, not promoted to tool_use")
+	assert.NotContains(t, body, "toolu_router_nudge_")
+	assert.Contains(t, body, "Good catch", "the model's real answer survives")
+}
+
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SuppressedOnGemini3x(t *testing.T) {
 	// Regression: the synthetic Bash block has no thoughtSignature. On
 	// Gemini-3.x the next turn drops the ENTIRE tool_use/tool_result history
 	// (anyToolUseMissingSig → dropToolBlocks in emit_gemini.go), wiping the
 	// agent's working context and looping it to the turn ceiling. So even
-	// though the request had tools and the upstream emitted only text, the
-	// nudge MUST be suppressed when the routed model is Gemini-3.x.
+	// though the request had tools and the upstream leaked a tool call as text,
+	// the nudge MUST be suppressed when the routed model is Gemini-3.x.
 	body, summary := driveAnthropicSSEWithTools(t, "gemini-3.1-pro-preview", true, []string{
-		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<think>Let me look at the file…</think>"},"finish_reason":null}]}` + "\n\n",
-		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":" I will read the relevant code first."},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\":\"Read\",\"path\":\"a.go\"}</tool_call>"},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
 		"data: [DONE]\n\n",
 	})
@@ -267,20 +290,21 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresWhenLeadingWithToolishMar
 	assert.Contains(t, body, `"id":"toolu_router_nudge_`)
 }
 
-func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresWhenLeadingWithRedactedThinking(t *testing.T) {
-	// Redacted thinking can leak into the content channel as XML-ish text
-	// rather than structured reasoning. Even with finish_reason="stop", that is
-	// the same parser-dead-end as <think>, not a clean final answer.
+func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedWhenLeadingWithRedactedThinking(t *testing.T) {
+	// <redacted_thinking>, like <think>, is reasoning text — not a tool call the
+	// parser dead-ends on. A turn leading with it and finishing on stop is a
+	// valid turn; nudging it manufactured the production loop (session 1f2ce8be).
 	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<redacted_thinking>opaque</redacted_thinking>"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":" Here is the answer."},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
 		"data: [DONE]\n\n",
 	})
 
-	assert.True(t, summary.TextOnlyTurnNudged,
-		"a turn leading with redacted thinking markup is the failure mode — nudge must fire despite finish_reason=stop")
-	assert.Equal(t, 1, summary.ToolUseBlocks)
-	assert.Contains(t, body, `"id":"toolu_router_nudge_`)
+	assert.False(t, summary.TextOnlyTurnNudged,
+		"redacted thinking is reasoning text, not leaked tool-call markup — nudge must not fire")
+	assert.Equal(t, 0, summary.ToolUseBlocks)
+	assert.NotContains(t, body, `"id":"toolu_router_nudge_`)
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedWhenProseMentionsMarkup(t *testing.T) {

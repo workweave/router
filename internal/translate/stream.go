@@ -987,17 +987,24 @@ const routerNudgeCommand = "echo '[router] previous turn produced no tool_use; p
 // any marker plus a little leading whitespace; small enough to stay cheap.
 const leadingContentCap = 64
 
-// toolishMarkupMarkers are the opening tokens of tool-call / raw-reasoning
-// markup a model leaks into the content channel instead of emitting a
-// structured tool_use block: <think> / <redacted_thinking> reasoning that
-// wasn't routed to reasoning_content, or a tool call serialized as XML the
-// upstream never structured into tool_calls. Claude Code's strict parser
-// rejects these ("tool call could not be parsed"), dead-ending the turn —
-// which is exactly what the nudge rescues. Matched only at the START of the
-// turn (see
-// leadsWithToolishMarkup): the leak opens the turn with the markup, whereas a
-// legitimate answer that discusses these tags has them mid-prose.
-var toolishMarkupMarkers = []string{"<think", "<redacted_thinking", "<tool_call", "<function", "<invoke"}
+// toolishMarkupMarkers are the opening tokens of a tool call a model leaked
+// into the content channel as XML instead of emitting a structured tool_use
+// block. Claude Code's strict parser rejects these ("tool call could not be
+// parsed"), dead-ending the turn — which is exactly what the nudge rescues.
+// Matched only at the START of the turn (see leadsWithToolishMarkup): the leak
+// opens the turn with the markup, whereas a legitimate answer that discusses
+// these tags has them mid-prose.
+//
+// Reasoning markup (<think>, <redacted_thinking>) is deliberately NOT here.
+// Models like Mimo-v2.5 stream visible chain-of-thought as <think>…</think>
+// text and then continue with a real answer, finishing with
+// finish_reason="stop". That is a complete, valid turn — Claude Code renders
+// the text fine; there is no parse failure to rescue. Treating a leading
+// <think> as a failure stapled a synthetic Bash call onto every such answer,
+// promoted the turn to stop_reason="tool_use", and looped the session (the
+// client ran the echo, re-pinned the same model, got another <think>+answer,
+// repeat). Only genuine tool-call markup is parse-fatal, so only it nudges.
+var toolishMarkupMarkers = []string{"<tool_call", "<function", "<invoke"}
 
 // leadsWithToolishMarkup reports whether the turn's content opens with
 // tool-call/raw-reasoning markup, ignoring leading whitespace. Anchoring to the
@@ -1072,9 +1079,10 @@ func (t *AnthropicSSETranslator) synthesizeTextOnlyTurnNudge() error {
 		return nil
 	case "stop", "":
 		// Ambiguous bucket: a clean prose answer (model genuinely done) and a
-		// turn that led with leaked <think>/tool-call markup both land here.
+		// turn that led with a leaked tool call serialized as XML both land here.
 		// Only nudge the latter; a turn that produced prose not opening with
-		// markup is a real final answer.
+		// tool-call markup is a real final answer — including one that opens with
+		// visible <think> reasoning, which is text, not a parse failure.
 		if t.sawText && !leadsWithToolishMarkup(t.leadingContent.String()) {
 			return nil
 		}
