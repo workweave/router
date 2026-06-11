@@ -1567,7 +1567,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	if installationID != uuid.Nil {
 		failoverUsed := finalProvider != primaryProvider
-		degShadow := isDegenerateResponse(out, respSummary.ToolUseBlocks, respSummary.StopReason, respSummary.StopReasonDemoted)
+		degShadow := proxyErr == nil && isDegenerateResponse(out, respSummary.ToolUseBlocks, respSummary.StopReason, respSummary.StopReasonDemoted)
 		if degShadow {
 			log.Info("router.degenerate_shadow",
 				"model", decision.Model,
