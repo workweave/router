@@ -1,0 +1,19 @@
+db/migrations/0010_session_pin_last_served_model.up.sql
+  s_7d75e7af2dfbdf::t_ac6d48614e2da9 9-12,14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d849f4a66eae7cb3756f0544d63ce7e7e13e6e8d",
+  "prompts": {},
+  "sessions": {
+    "s_7d75e7af2dfbdf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a310237b-5d07-4d1c-9ddd-505d97d95d58",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

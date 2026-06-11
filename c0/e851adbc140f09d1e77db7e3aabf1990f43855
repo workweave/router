@@ -1,0 +1,22 @@
+internal/translate/emit_gemini.go
+  s_be66dcd9ca26e3::t_05e1af0fcf8956 292
+  s_be66dcd9ca26e3::t_3523725f2c6917 476-482,484-498,504
+internal/translate/strict_decode_emit_test.go
+  s_be66dcd9ca26e3::t_38808d1cd415ac 139-173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c0e851adbc140f09d1e77db7e3aabf1990f43855",
+  "prompts": {},
+  "sessions": {
+    "s_be66dcd9ca26e3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8bfae3b8-002f-4272-96d1-de4abff3889d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
