@@ -161,11 +161,11 @@ type RecommendedKnobs struct {
 }
 
 type ArtifactTraining struct {
-	K                     int                          `yaml:"k"`
-	TopP                  int                          `yaml:"top_p"`
-	Alpha                 float64                      `yaml:"alpha"`
-	Seed                  int                          `yaml:"seed"`
-	NPrompts              int                          `yaml:"n_prompts"`
+	K        int     `yaml:"k"`
+	TopP     int     `yaml:"top_p"`
+	Alpha    float64 `yaml:"alpha"`
+	Seed     int     `yaml:"seed"`
+	NPrompts int     `yaml:"n_prompts"`
 	// Objective selects the runtime scoring function. "lambda_cost" uses
 	// absolute quality_means with score = q - lambda_cost * dollar_cost.
 	Objective             string                       `yaml:"objective,omitempty"`

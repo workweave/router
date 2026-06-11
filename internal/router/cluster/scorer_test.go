@@ -1067,8 +1067,8 @@ func TestScorer_LambdaCostObjective(t *testing.T) {
 	haikuInput := 0.00025
 	haikuOutput := 0.00125
 	modelAxes := map[string]ModelAxis{
-		"claude-opus-4-7":   {InputPer1KUSD: &opusInput, OutputPer1KUSD: &opusOutput},
-		"claude-haiku-4-5":  {InputPer1KUSD: &haikuInput, OutputPer1KUSD: &haikuOutput},
+		"claude-opus-4-7":  {InputPer1KUSD: &opusInput, OutputPer1KUSD: &opusOutput},
+		"claude-haiku-4-5": {InputPer1KUSD: &haikuInput, OutputPer1KUSD: &haikuOutput},
 	}
 
 	lambda := 0.0
