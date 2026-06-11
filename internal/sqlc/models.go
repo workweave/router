@@ -119,6 +119,12 @@ type RouterModelRouterRequestTelemetry struct {
 	ClientApp              *string
 	TurnType               *string
 	RolloutID              *string
+	UpstreamFinishReason   *string
+	StopReason             *string
+	ToolUseBlocks          *int32
+	InvalidToolArgsBlocks  *int32
+	FailoverUsed           *bool
+	DegenerateShadow       *bool
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.
@@ -162,6 +168,56 @@ type RouterOrganizationCreditLedger struct {
 	RouterModel           *string
 	CreatedAt             pgtype.Timestamptz
 	Memo                  *string
+}
+
+type RouterProductionRequestTelemetry struct {
+	ID                     uuid.UUID
+	InstallationID         uuid.UUID
+	RequestID              string
+	SpanType               string
+	TraceID                string
+	Timestamp              pgtype.Timestamptz
+	RequestedModel         *string
+	DecisionModel          *string
+	DecisionProvider       *string
+	DecisionReason         *string
+	EstimatedInputTokens   *int32
+	StickyHit              *bool
+	EmbedInput             *string
+	InputTokens            *int32
+	OutputTokens           *int32
+	RequestedInputCostUsd  *int64
+	RequestedOutputCostUsd *int64
+	ActualInputCostUsd     *int64
+	ActualOutputCostUsd    *int64
+	RouteLatencyMs         *int64
+	UpstreamLatencyMs      *int64
+	TotalLatencyMs         *int64
+	CrossFormat            *bool
+	UpstreamStatusCode     *int32
+	CreatedAt              pgtype.Timestamptz
+	ClusterIds             []int32
+	CandidateModels        []string
+	ChosenScore            *float64
+	AlphaBreakdown         []byte
+	ClusterRouterVersion   *string
+	TtftMs                 *int64
+	CacheCreationTokens    *int32
+	CacheReadTokens        *int32
+	DeviceID               *string
+	SessionID              *string
+	CandidateScores        []byte
+	Propensity             *float64
+	RouterUserID           pgtype.UUID
+	ClientApp              *string
+	TurnType               *string
+	RolloutID              *string
+	UpstreamFinishReason   *string
+	StopReason             *string
+	ToolUseBlocks          *int32
+	InvalidToolArgsBlocks  *int32
+	FailoverUsed           *bool
+	DegenerateShadow       *bool
 }
 
 // Session-sticky routing pins; sliding 1h TTL matching Anthropic prompt cache

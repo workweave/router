@@ -49,7 +49,13 @@ INSERT INTO router.model_router_request_telemetry (
     router_user_id,
     client_app,
     turn_type,
-    rollout_id
+    rollout_id,
+    upstream_finish_reason,
+    stop_reason,
+    tool_use_blocks,
+    invalid_tool_args_blocks,
+    failover_used,
+    degenerate_shadow
 ) VALUES (
     @installation_id::uuid,
     @request_id::varchar,
@@ -89,7 +95,13 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('router_user_id')::uuid,
     sqlc.narg('client_app')::text,
     @turn_type::varchar,
-    sqlc.narg('rollout_id')::varchar
+    sqlc.narg('rollout_id')::varchar,
+    sqlc.narg('upstream_finish_reason')::text,
+    sqlc.narg('stop_reason')::text,
+    sqlc.narg('tool_use_blocks')::int,
+    sqlc.narg('invalid_tool_args_blocks')::int,
+    sqlc.narg('failover_used')::boolean,
+    sqlc.narg('degenerate_shadow')::boolean
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 

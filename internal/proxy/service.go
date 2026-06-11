@@ -1566,6 +1566,19 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
 
 	if installationID != uuid.Nil {
+		failoverUsed := finalProvider != primaryProvider
+		degShadow := isDegenerateResponse(out, respSummary.ToolUseBlocks, respSummary.StopReason)
+		if degShadow {
+			log.Info("router.degenerate_shadow",
+				"model", decision.Model,
+				"provider", finalProvider,
+				"output_tokens", out,
+				"tool_use_blocks", respSummary.ToolUseBlocks,
+				"stop_reason", respSummary.StopReason,
+				"upstream_finish_reason", respSummary.UpstreamFinishReason,
+				"would_failover", true,
+			)
+		}
 		s.fireTelemetry(InsertTelemetryParams{
 			InstallationID:         installationID.String(),
 			RequestID:              requestID,
@@ -1605,6 +1618,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			ClientApp:              clientID.ClientApp,
 			TurnType:               string(routeRes.TurnType),
 			RolloutID:              clientID.RolloutID,
+			UpstreamFinishReason:   stringPtrOrEmpty(respSummary.UpstreamFinishReason),
+			StopReason:             stringPtrOrEmpty(respSummary.StopReason),
+			ToolUseBlocks:          int32Ptr(int32(respSummary.ToolUseBlocks)),
+			InvalidToolArgsBlocks:  int32Ptr(int32(respSummary.InvalidToolArgsBlocks)),
+			FailoverUsed:           boolPtrTrue(failoverUsed),
+			DegenerateShadow:       boolPtrOrNil(degShadow),
 		})
 	}
 
@@ -1956,6 +1975,49 @@ func cacheTokenPtr(n int) *int32 {
 	}
 	v := int32(n)
 	return &v
+}
+
+// int32Ptr returns a pointer to v. Used to record nullable integer telemetry
+// columns where 0 is a valid value (e.g. tool_use_blocks = 0 means zero tools).
+func int32Ptr(v int32) *int32 {
+	return &v
+}
+
+// boolPtrOrNil returns a pointer to v only when v is true. False is treated as
+// "not set" so routine non-events don't fill nullable boolean columns.
+func boolPtrOrNil(v bool) *bool {
+	if !v {
+		return nil
+	}
+	return &v
+}
+
+// boolPtrTrue always returns a non-nil pointer to v. Used for failover_used
+// where both true and false are meaningful values to record.
+func boolPtrTrue(v bool) *bool {
+	return &v
+}
+
+// stringPtrOrEmpty returns a pointer to s when it is non-empty, else nil.
+func stringPtrOrEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// degenerateOutputThreshold is the output-token count below which a
+// normal-completion response with no tool calls is flagged as degenerate.
+const degenerateOutputThreshold = 10
+
+// isDegenerateResponse returns true when the upstream produced a suspiciously
+// short response: fewer than degenerateOutputThreshold output tokens, no tool
+// calls emitted, and a normal end_turn stop reason. A valid tool-only turn or
+// a brief legitimate end_turn must not trip this.
+func isDegenerateResponse(outputTokens int, toolUseBlocks int, stopReason string) bool {
+	return outputTokens < degenerateOutputThreshold &&
+		toolUseBlocks == 0 &&
+		stopReason == "end_turn"
 }
 
 // fireTelemetry persists a telemetry row asynchronously. Telemetry loss is acceptable.
@@ -2597,6 +2659,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			ClientApp:              clientID.ClientApp,
 			TurnType:               string(routeRes.TurnType),
 			RolloutID:              clientID.RolloutID,
+			FailoverUsed:           boolPtrTrue(finalProvider != primaryProvider),
 		})
 	}
 

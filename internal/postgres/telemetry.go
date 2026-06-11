@@ -90,6 +90,12 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		ClientApp:              stringPtrOrNil(p.ClientApp),
 		RolloutID:              stringPtrOrNil(p.RolloutID),
 		TurnType:               p.TurnType,
+		UpstreamFinishReason:   p.UpstreamFinishReason,
+		StopReason:             p.StopReason,
+		ToolUseBlocks:          p.ToolUseBlocks,
+		InvalidToolArgsBlocks:  p.InvalidToolArgsBlocks,
+		FailoverUsed:           p.FailoverUsed,
+		DegenerateShadow:       p.DegenerateShadow,
 	})
 }
 

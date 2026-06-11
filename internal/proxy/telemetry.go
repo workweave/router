@@ -63,6 +63,13 @@ type InsertTelemetryParams struct {
 	// RolloutID joins eval/training-harness rollout rewards onto decisions
 	// (x-weave-rollout-id header). Empty for normal traffic → NULL column.
 	RolloutID string
+
+	UpstreamFinishReason  *string
+	StopReason            *string
+	ToolUseBlocks         *int32
+	InvalidToolArgsBlocks *int32
+	FailoverUsed          *bool
+	DegenerateShadow      *bool
 }
 
 // TelemetrySummary holds aggregated totals for the dashboard cards.

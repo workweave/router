@@ -788,7 +788,13 @@ INSERT INTO router.model_router_request_telemetry (
     router_user_id,
     client_app,
     turn_type,
-    rollout_id
+    rollout_id,
+    upstream_finish_reason,
+    stop_reason,
+    tool_use_blocks,
+    invalid_tool_args_blocks,
+    failover_used,
+    degenerate_shadow
 ) VALUES (
     $1::uuid,
     $2::varchar,
@@ -828,7 +834,13 @@ INSERT INTO router.model_router_request_telemetry (
     $36::uuid,
     $37::text,
     $38::varchar,
-    $39::varchar
+    $39::varchar,
+    $40::text,
+    $41::text,
+    $42::int,
+    $43::int,
+    $44::boolean,
+    $45::boolean
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -873,6 +885,12 @@ type InsertRequestTelemetryParams struct {
 	ClientApp              *string
 	TurnType               string
 	RolloutID              *string
+	UpstreamFinishReason   *string
+	StopReason             *string
+	ToolUseBlocks          *int32
+	InvalidToolArgsBlocks  *int32
+	FailoverUsed           *bool
+	DegenerateShadow       *bool
 }
 
 // Records a completed proxied request for the dashboard UI and routing
@@ -926,7 +944,13 @@ type InsertRequestTelemetryParams struct {
 //	    router_user_id,
 //	    client_app,
 //	    turn_type,
-//	    rollout_id
+//	    rollout_id,
+//	    upstream_finish_reason,
+//	    stop_reason,
+//	    tool_use_blocks,
+//	    invalid_tool_args_blocks,
+//	    failover_used,
+//	    degenerate_shadow
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::varchar,
@@ -966,7 +990,13 @@ type InsertRequestTelemetryParams struct {
 //	    $36::uuid,
 //	    $37::text,
 //	    $38::varchar,
-//	    $39::varchar
+//	    $39::varchar,
+//	    $40::text,
+//	    $41::text,
+//	    $42::int,
+//	    $43::int,
+//	    $44::boolean,
+//	    $45::boolean
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -1010,6 +1040,12 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.ClientApp,
 		arg.TurnType,
 		arg.RolloutID,
+		arg.UpstreamFinishReason,
+		arg.StopReason,
+		arg.ToolUseBlocks,
+		arg.InvalidToolArgsBlocks,
+		arg.FailoverUsed,
+		arg.DegenerateShadow,
 	)
 	return err
 }
