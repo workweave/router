@@ -148,12 +148,16 @@ type DefaultRoutingKnobs struct {
 	OutputCostRatio      float64   `yaml:"output_cost_ratio"`
 	ExpectedOutputTokens int       `yaml:"expected_output_tokens"`
 	PerModelVerbosity    bool      `yaml:"per_model_verbosity"`
+	// LambdaCost weights the dollar-cost term when objective=lambda_cost:
+	// score = q - lambda_cost * estimated_query_cost_usd.
+	LambdaCost float64 `yaml:"lambda_cost,omitempty"`
 }
 
 type RecommendedKnobs struct {
 	Alpha           float64 `yaml:"alpha"`
 	SpeedWeight     float64 `yaml:"speed_weight"`
 	OutputCostRatio float64 `yaml:"output_cost_ratio"`
+	LambdaCost      float64 `yaml:"lambda_cost,omitempty"`
 }
 
 type ArtifactTraining struct {
@@ -162,6 +166,9 @@ type ArtifactTraining struct {
 	Alpha                 float64                      `yaml:"alpha"`
 	Seed                  int                          `yaml:"seed"`
 	NPrompts              int                          `yaml:"n_prompts"`
+	// Objective selects the runtime scoring function. "lambda_cost" uses
+	// absolute quality_means with score = q - lambda_cost * dollar_cost.
+	Objective             string                       `yaml:"objective,omitempty"`
 	TrainingDataMix       map[string]float64           `yaml:"training_data_mix,omitempty"`
 	DefaultRoutingKnobs   *DefaultRoutingKnobs         `yaml:"default_routing_knobs,omitempty"`
 	RecommendedUIDefaults map[string]*RecommendedKnobs `yaml:"recommended_ui_defaults,omitempty"`

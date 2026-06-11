@@ -459,6 +459,9 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			if req.RoutingKnobs.PerModelVerbosity != nil {
 				activeKnobs.PerModelVerbosity = *req.RoutingKnobs.PerModelVerbosity
 			}
+			if req.RoutingKnobs.LambdaCost != nil {
+				activeKnobs.LambdaCost = *req.RoutingKnobs.LambdaCost
+			}
 		}
 
 		// Validate effective knobs. Alpha length is sanity-checked here as a
@@ -497,6 +500,18 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			return router.Decision{}, fmt.Errorf("%w: expected_output_tokens (%d) must be in [0, 100000]", ErrInvalidRoutingKnobs, activeKnobs.ExpectedOutputTokens)
 		}
 
+		useLambdaCost := s.metadata != nil &&
+			s.metadata.Training.Objective == "lambda_cost"
+		if useLambdaCost {
+			lambda := activeKnobs.LambdaCost
+			if req.RoutingKnobs != nil && req.RoutingKnobs.LambdaCost != nil {
+				lambda = *req.RoutingKnobs.LambdaCost
+			}
+			if lambda < 0 {
+				return router.Decision{}, fmt.Errorf("%w: lambda_cost (%f) must be >= 0", ErrInvalidRoutingKnobs, lambda)
+			}
+		}
+
 		effectiveKnobsHash = ComputeKnobsHash(
 			activeKnobs.Alpha,
 			activeKnobs.SpeedWeight,
@@ -504,6 +519,33 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			activeKnobs.ExpectedOutputTokens,
 			activeKnobs.PerModelVerbosity,
 		)
+
+		if useLambdaCost {
+			lambda := activeKnobs.LambdaCost
+			inputTokens := req.EstimatedInputTokens
+			if inputTokens <= 0 {
+				inputTokens = len(text) / 4
+				if inputTokens <= 0 {
+					inputTokens = 1
+				}
+			}
+			scores = make(map[string]float32, len(eligibleModels))
+			for _, k := range topClusters {
+				row := s.qualityMeans[k]
+				for _, m := range eligibleModels {
+					qVal := row[m]
+					dollars := estimateQueryCostUSD(
+						s.modelAxes[m],
+						inputTokens,
+						activeKnobs.ExpectedOutputTokens,
+						activeKnobs.OutputCostRatio,
+						activeKnobs.PerModelVerbosity,
+						s.medianVerbosity,
+					)
+					scores[m] += float32(qVal) - float32(lambda*dollars)
+				}
+			}
+		} else {
 
 		// 2. Effective per-model cost (knob-dependent)
 		costs := make(map[string]float64, len(s.models))
@@ -661,6 +703,7 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 					}
 				}
 			}
+		}
 		}
 	} else {
 		// Legacy v1 flow
@@ -849,6 +892,32 @@ func tailTruncate(s string, maxChars int) string {
 		cut++
 	}
 	return s[cut:]
+}
+
+// estimateQueryCostUSD returns a rough per-query dollar estimate from model_axes.
+func estimateQueryCostUSD(
+	axis ModelAxis,
+	inputTokens int,
+	expectedOutputTokens int,
+	outputCostRatio float64,
+	perModelVerbosity bool,
+	medianVerbosity float64,
+) float64 {
+	inputPer1K := 0.0
+	if axis.InputPer1KUSD != nil {
+		inputPer1K = *axis.InputPer1KUSD
+	}
+	outputPer1K := 0.0
+	if axis.OutputPer1KUSD != nil {
+		outputPer1K = *axis.OutputPer1KUSD
+	}
+	vFactor := 1.0
+	if perModelVerbosity && axis.VerbosityTokens != nil && medianVerbosity > 0 {
+		vFactor = *axis.VerbosityTokens / medianVerbosity
+	}
+	inputUSD := (float64(inputTokens) / 1000.0) * inputPer1K
+	outputUSD := (float64(expectedOutputTokens) / 1000.0) * outputPer1K * outputCostRatio * vFactor
+	return inputUSD + outputUSD
 }
 
 func clusterIDsString(ks []int) string {
