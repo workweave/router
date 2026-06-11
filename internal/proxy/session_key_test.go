@@ -166,3 +166,35 @@ func TestDeriveSessionKey_NilEnvelopeStillKeyedByAPIKey(t *testing.T) {
 	kB := proxy.DeriveSessionKey(nil, "api-key-B")
 	assert.NotEqual(t, kA, kB)
 }
+
+func openAIEnv(t *testing.T, body string) *translate.RequestEnvelope {
+	t.Helper()
+	env, err := translate.ParseOpenAI([]byte(body))
+	require.NoError(t, err)
+	return env
+}
+
+func TestDeriveSessionKey_OpenAILeadingSystemDoesNotCollapse(t *testing.T) {
+	// OpenAI-format bodies carry `system` inside messages[], so messages.0 is a
+	// system role and FirstUserMessageText is empty. Without metadata.user_id,
+	// distinct conversations must still get distinct pins — DeriveSessionKey
+	// falls back to system text rather than collapsing every OpenAI session on
+	// one API key onto a single pin.
+	convoA := openAIEnv(t, `{
+		"messages": [
+			{"role": "system", "content": "You are assistant A."},
+			{"role": "user", "content": "task one"}
+		]
+	}`)
+	convoB := openAIEnv(t, `{
+		"messages": [
+			{"role": "system", "content": "You are assistant B."},
+			{"role": "user", "content": "task two"}
+		]
+	}`)
+
+	kA := proxy.DeriveSessionKey(convoA, "api-key")
+	kB := proxy.DeriveSessionKey(convoB, "api-key")
+
+	assert.NotEqual(t, kA, kB, "distinct OpenAI conversations must not share a pin when the first user message is empty")
+}

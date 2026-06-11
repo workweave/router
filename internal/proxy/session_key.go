@@ -80,9 +80,13 @@ func bindRequestLogger(
 // it separates the threads while keeping each one's pin (and prompt cache)
 // stable.
 //
-// System text is deliberately excluded: Claude Code mutates the system prompt
-// every turn (verified in repro — a fresh hash each request), so folding it in
-// would re-key every turn and evict the prompt cache it exists to preserve.
+// System text is deliberately excluded for the common (Anthropic) path: Claude
+// Code mutates the system prompt every turn (verified in repro — a fresh hash
+// each request), so folding it in would re-key every turn and evict the prompt
+// cache it exists to preserve. It is used only as a fallback for OpenAI-format
+// bodies, whose system lives inside messages[] and leaves the first user
+// message empty — without the fallback such conversations would collapse onto
+// one pin.
 func DeriveSessionKey(env *translate.RequestEnvelope, apiKeyID string) [sessionpin.SessionKeyLen]byte {
 	h := sha256.New()
 	h.Write([]byte(apiKeyID))
@@ -95,8 +99,18 @@ func DeriveSessionKey(env *translate.RequestEnvelope, apiKeyID string) [sessionp
 			h.Write([]byte(uid))
 			h.Write([]byte{0x00})
 		}
+		// OpenAI-format bodies carry `system` inside messages[], so their first
+		// message is often a system role and FirstUserMessageText is empty.
+		// Fall back to system text there so unrelated conversations that share
+		// an API key (and lack metadata.user_id) don't collapse onto one pin.
+		// Anthropic (Claude Code) keeps system out of messages[], so the first
+		// user message is populated and the volatile system prompt stays out.
+		disc := env.FirstUserMessageText()
+		if disc == "" {
+			disc = env.SystemText()
+		}
 		h.Write([]byte("first_msg:"))
-		h.Write([]byte(env.FirstUserMessageText()))
+		h.Write([]byte(disc))
 	}
 
 	sum := h.Sum(nil)
