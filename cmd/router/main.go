@@ -595,6 +595,7 @@ func main() {
 		WithLoopEscalationStore(repo.Telemetry).
 		WithSpiralShadowConfig(spiralShadowEnabled).
 		WithSpiralShadowStore(repo.Telemetry).
+		WithRouterFeedbackStore(repo.Telemetry).
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
 		WithAvailableModels(availableModels).

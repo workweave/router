@@ -34,18 +34,31 @@ type ForceModelResult struct {
 // command line from env.body and returns the parsed result.
 // Returns (zero, false) when no command is present.
 func (env *RequestEnvelope) ExtractForceModelCommand() (ForceModelResult, bool) {
-	switch env.format {
-	case FormatAnthropic, FormatOpenAI:
-		return env.extractForceModelFromMessages()
-	default:
-		return ForceModelResult{}, false
-	}
+	var res ForceModelResult
+	found := env.extractLeadingCommand(func(text string) (bool, string) {
+		r, ok, stripped := parseForceModelCommand(text)
+		if ok {
+			res = r
+		}
+		return ok, stripped
+	})
+	return res, found
 }
 
-func (env *RequestEnvelope) extractForceModelFromMessages() (ForceModelResult, bool) {
+// extractLeadingCommand scans the last user-role message for a router
+// directive recognized by parse, which receives each candidate text and
+// returns (found, strippedText). On a match the matched content (string body
+// or text block) is replaced in env.body with the stripped remainder. Only
+// Anthropic / OpenAI message shapes are scanned.
+func (env *RequestEnvelope) extractLeadingCommand(parse func(text string) (found bool, stripped string)) bool {
+	switch env.format {
+	case FormatAnthropic, FormatOpenAI:
+	default:
+		return false
+	}
 	msgs := gjson.GetBytes(env.body, "messages")
 	if !msgs.IsArray() {
-		return ForceModelResult{}, false
+		return false
 	}
 
 	lastIdx := -1
@@ -58,28 +71,28 @@ func (env *RequestEnvelope) extractForceModelFromMessages() (ForceModelResult, b
 		return true
 	})
 	if lastIdx < 0 {
-		return ForceModelResult{}, false
+		return false
 	}
 
 	idxStr := strconv.Itoa(lastIdx)
 
 	switch {
 	case lastContent.Type == gjson.String:
-		res, found, stripped := parseForceModelCommand(lastContent.String())
+		found, stripped := parse(lastContent.String())
 		if !found {
-			return ForceModelResult{}, false
+			return false
 		}
 		if newBody, err := sjson.SetBytes(env.body, "messages."+idxStr+".content", stripped); err == nil {
 			env.body = newBody
 		}
-		return res, true
+		return true
 
 	case lastContent.Type == gjson.JSON && lastContent.IsArray():
 		// Scan every text block in order. Claude Code clients sometimes split
 		// the user turn into multiple text parts (one carrying injected
 		// <command-name>/<command-args> tags, another carrying the typed
 		// directive), so inspecting only the first block silently lets
-		// /force-model fall through to upstream routing.
+		// the directive fall through to upstream routing.
 		type textBlock struct {
 			idx  int
 			text string
@@ -91,11 +104,8 @@ func (env *RequestEnvelope) extractForceModelFromMessages() (ForceModelResult, b
 			}
 			return true
 		})
-		if len(blocks) == 0 {
-			return ForceModelResult{}, false
-		}
 		for _, b := range blocks {
-			res, found, stripped := parseForceModelCommand(b.text)
+			found, stripped := parse(b.text)
 			if !found {
 				continue
 			}
@@ -103,20 +113,24 @@ func (env *RequestEnvelope) extractForceModelFromMessages() (ForceModelResult, b
 			if newBody, err := sjson.SetBytes(env.body, blockPath, stripped); err == nil {
 				env.body = newBody
 			}
-			return res, true
+			return true
 		}
-		return ForceModelResult{}, false
+		return false
 
 	default:
-		return ForceModelResult{}, false
+		return false
 	}
 }
 
-// parseForceModelCommand scans text for a /force-model or /unforce-model
-// directive on the first non-empty line. Restricting to the leading line is a
-// deliberate guard: pasted content (snippets, transcripts) frequently contains
-// strings starting with "/" that would otherwise silently rewrite session
-// routing without explicit user intent.
+// parseForceModelCommand scans text for a /force-model (alias /fm) or
+// /unforce-model (alias /ufm) directive on the first non-empty line.
+// Restricting to the leading line is a deliberate guard: pasted content
+// (snippets, transcripts) frequently contains strings starting with "/" that
+// would otherwise silently rewrite session routing without explicit user
+// intent. The short aliases exist for clients without local slash-command
+// expansion (pi, opencode, raw API callers) — Claude Code and Codex installs
+// ship alias .md files that expand to the canonical form client-side, so the
+// router-side aliases are the fallback path, not the primary one.
 //
 // Complete leading <tag>...</tag> blocks (Claude Code injects <system-reminder>,
 // <command-name>, <local-command-stdout>, etc. ahead of the user's typed text)
@@ -135,7 +149,7 @@ func parseForceModelCommand(text string) (res ForceModelResult, found bool, stri
 		if trimmed == "" {
 			continue
 		}
-		if after, ok := strings.CutPrefix(trimmed, "/force-model "); ok {
+		if after, ok := cutAnyPrefix(trimmed, "/force-model ", "/fm "); ok {
 			parts := strings.Fields(strings.TrimSpace(after))
 			if len(parts) > 0 {
 				res = ForceModelResult{Model: parts[0]}
@@ -145,7 +159,7 @@ func parseForceModelCommand(text string) (res ForceModelResult, found bool, stri
 				found = true
 				cmdIdx = i
 			}
-		} else if trimmed == "/unforce-model" {
+		} else if trimmed == "/unforce-model" || trimmed == "/ufm" {
 			res = ForceModelResult{Clear: true}
 			found = true
 			cmdIdx = i
@@ -164,6 +178,18 @@ func parseForceModelCommand(text string) (res ForceModelResult, found bool, stri
 	bodyStripped := strings.Join(remaining, "\n")
 	stripped = strings.TrimSpace(prefix + bodyStripped)
 	return res, true, stripped
+}
+
+// cutAnyPrefix returns text with the first matching prefix removed. Prefix
+// order matters only for overlapping prefixes; the command forms used here
+// are disjoint.
+func cutAnyPrefix(text string, prefixes ...string) (after string, ok bool) {
+	for _, p := range prefixes {
+		if after, ok = strings.CutPrefix(text, p); ok {
+			return after, true
+		}
+	}
+	return text, false
 }
 
 // leadingInjectedPrefixEnd returns the byte offset in text after any leading

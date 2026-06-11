@@ -130,6 +130,27 @@ func (r *TelemetryRepo) CountLoopEscalationEvents(ctx context.Context, sessionKe
 	})
 }
 
+var _ proxy.RouterFeedbackStore = (*TelemetryRepo)(nil)
+
+func (r *TelemetryRepo) InsertRouterFeedback(ctx context.Context, p proxy.RouterFeedbackEvent) error {
+	id, err := uuid.Parse(p.InstallationID)
+	if err != nil {
+		return err
+	}
+	q := sqlc.New(r.tx)
+	return q.InsertRouterFeedback(ctx, sqlc.InsertRouterFeedbackParams{
+		InstallationID: id,
+		SessionKey:     p.SessionKey,
+		Role:           p.Role,
+		RouterUserID:   uuidOrNil(p.RouterUserID),
+		ClientApp:      stringPtrOrNil(p.ClientApp),
+		SessionID:      stringPtrOrNil(p.SessionID),
+		RequestedModel: p.RequestedModel,
+		ServedModel:    p.ServedModel,
+		Feedback:       p.Feedback,
+	})
+}
+
 var _ proxy.SpiralShadowStore = (*TelemetryRepo)(nil)
 
 func (r *TelemetryRepo) InsertSpiralShadowEvent(ctx context.Context, p proxy.SpiralShadowEvent) error {

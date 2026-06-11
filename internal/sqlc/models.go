@@ -220,6 +220,22 @@ type RouterProductionRequestTelemetry struct {
 	DegenerateShadow       *bool
 }
 
+// User-submitted /router-feedback about routing decisions or model performance
+type RouterRouterFeedback struct {
+	ID             uuid.UUID
+	CreatedAt      pgtype.Timestamptz
+	InstallationID uuid.UUID
+	// 16-byte digest matching router.session_pins.session_key
+	SessionKey     []byte
+	Role           string
+	RouterUserID   pgtype.UUID
+	ClientApp      *string
+	SessionID      *string
+	RequestedModel string
+	ServedModel    string
+	Feedback       string
+}
+
 // Session-sticky routing pins; sliding 1h TTL matching Anthropic prompt cache
 type RouterSessionPin struct {
 	// 16-byte digest derived from api_key_id + (metadata.user_id | system+first-user hashes)

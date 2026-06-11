@@ -1618,8 +1618,8 @@ install_slash_commands() {
   # installer to flip the *local* config, so they're Claude Code-only and need
   # the install scope baked into the command (the .md can't discover it at
   # invocation time). {{SCOPE}} is substituted accordingly.
-  installed="force-model, unforce-model"
-  cmds="force-model unforce-model"
+  installed="force-model, unforce-model, router-feedback, fm, ufm, rf"
+  cmds="force-model unforce-model router-feedback fm ufm rf"
   if [ "$target" = "claude" ]; then
     cmds="$cmds router-off router-on router-status"
     installed="$installed, router-off, router-on, router-status"

@@ -40,6 +40,21 @@ func TestParseForceModelCommand_ForceModel(t *testing.T) {
 			wantStripped: "help me debug this",
 		},
 		{
+			// /fm is the router-side alias for clients without local
+			// slash-command expansion (pi, opencode, raw API callers).
+			name:         "fm alias",
+			input:        "/fm haiku",
+			wantModel:    "haiku",
+			wantFound:    true,
+			wantStripped: "",
+		},
+		{
+			// /fmt (or any /fm<x>) must not match the alias prefix.
+			name:      "fm alias without space boundary is ignored",
+			input:     "/fmt this file",
+			wantFound: false,
+		},
+		{
 			// Security guard: a /force-model anywhere other than the leading
 			// non-empty line is ignored. Pasted content (snippets, transcripts,
 			// log dumps) frequently contains lines starting with "/" and must
@@ -134,13 +149,17 @@ func TestParseForceModelCommand_ForceModel(t *testing.T) {
 }
 
 func TestParseForceModelCommand_UnforceModel(t *testing.T) {
-	env, err := translate.ParseAnthropic(buildAnthropicBody(t, "/unforce-model"))
-	require.NoError(t, err)
+	for _, input := range []string{"/unforce-model", "/ufm"} {
+		t.Run(input, func(t *testing.T) {
+			env, err := translate.ParseAnthropic(buildAnthropicBody(t, input))
+			require.NoError(t, err)
 
-	res, found := env.ExtractForceModelCommand()
-	require.True(t, found)
-	assert.True(t, res.Clear)
-	assert.Empty(t, res.Model)
+			res, found := env.ExtractForceModelCommand()
+			require.True(t, found)
+			assert.True(t, res.Clear)
+			assert.Empty(t, res.Model)
+		})
+	}
 }
 
 func TestExtractForceModelCommand_OpenAIFormat(t *testing.T) {

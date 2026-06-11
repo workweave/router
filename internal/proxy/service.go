@@ -125,6 +125,9 @@ type Service struct {
 	// (router.spiral_shadow_events) and enforces the once-per-(session,
 	// reason) budget. Nil degrades to log-only fires.
 	spiralShadowStore SpiralShadowStore
+	// feedbackStore persists /router-feedback submissions durably
+	// (router.router_feedback). Nil degrades to span + log only.
+	feedbackStore RouterFeedbackStore
 	// summarizer produces a bounded-cost handover summary on switch turns.
 	// nil passes the full prior history through unchanged.
 	summarizer handover.Summarizer
@@ -513,6 +516,13 @@ func (s *Service) WithSpiralShadowConfig(enabled bool) *Service {
 // replica-local de-duplication.
 func (s *Service) WithSpiralShadowStore(store SpiralShadowStore) *Service {
 	s.spiralShadowStore = store
+	return s
+}
+
+// WithRouterFeedbackStore wires the durable sink for /router-feedback
+// submissions (router.router_feedback). Nil degrades to span + log only.
+func (s *Service) WithRouterFeedbackStore(store RouterFeedbackStore) *Service {
+	s.feedbackStore = store
 	return s
 }
 
@@ -1027,6 +1037,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			log.Info("ProxyMessages force-model command", "force_model_cmd", cmd)
 			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey)
 		}
+	}
+	if cmd, hasCmd := env.ExtractRouterFeedbackCommand(); hasCmd {
+		log.Info("ProxyMessages router-feedback command")
+		return s.handleRouterFeedbackCommand(ctx, w, env, cmd, installationID, sessionKey)
 	}
 
 	// Honor the x-weave-force-model header (headless equivalent of /force-model).
@@ -2253,6 +2267,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			log.Info("ProxyOpenAIChatCompletion force-model command", "force_model_cmd", cmd)
 			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey)
 		}
+	}
+	if cmd, hasCmd := env.ExtractRouterFeedbackCommand(); hasCmd {
+		log.Info("ProxyOpenAIChatCompletion router-feedback command")
+		return s.handleRouterFeedbackCommand(ctx, w, env, cmd, installationID, sessionKey)
 	}
 
 	// Honor the x-weave-force-model header (headless equivalent of /force-model).
