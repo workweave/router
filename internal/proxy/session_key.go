@@ -65,24 +65,37 @@ func bindRequestLogger(
 	return observability.WithLogger(ctx, log), log, key
 }
 
-// DeriveSessionKey produces a 16-byte session digest. Tries metadata.user_id
-// (session-distinct from Claude Code's device+account+session bundle), then
-// system prompt + first user message (prompt-cache shape fallback). apiKeyID
-// is mixed into every tier to prevent cross-key collisions.
+// DeriveSessionKey produces a 16-byte session digest from metadata.user_id
+// (when present) AND the first user message, plus apiKeyID to prevent
+// cross-key collisions.
+//
+// The first user message is load-bearing, not decoration: Claude Code packs
+// only its device+account+session bundle into metadata.user_id — NOT sub-agent
+// identity — so the main loop and every Task/Explore sub-agent of one session
+// share an identical user_id. Keying on user_id alone collapsed them onto a
+// single pin slot that concurrent threads then thrashed (one writes haiku, a
+// sibling reuses it, a third overwrites qwen…), producing the cross-model
+// bouncing operators saw. A thread's first user message is stable across its
+// turns and distinct per sub-agent (each carries its own dispatch prompt), so
+// it separates the threads while keeping each one's pin (and prompt cache)
+// stable.
+//
+// System text is deliberately excluded: Claude Code mutates the system prompt
+// every turn (verified in repro — a fresh hash each request), so folding it in
+// would re-key every turn and evict the prompt cache it exists to preserve.
 func DeriveSessionKey(env *translate.RequestEnvelope, apiKeyID string) [sessionpin.SessionKeyLen]byte {
 	h := sha256.New()
 	h.Write([]byte(apiKeyID))
 	// Domain separator prevents cross-tier collisions from caller-controlled strings.
 	h.Write([]byte{0x00})
 
-	switch {
-	case env != nil && env.MetadataUserID() != "":
-		h.Write([]byte("user_id:"))
-		h.Write([]byte(env.MetadataUserID()))
-	case env != nil:
-		h.Write([]byte("prompt_prefix:"))
-		h.Write([]byte(env.SystemText()))
-		h.Write([]byte{0x00})
+	if env != nil {
+		if uid := env.MetadataUserID(); uid != "" {
+			h.Write([]byte("user_id:"))
+			h.Write([]byte(uid))
+			h.Write([]byte{0x00})
+		}
+		h.Write([]byte("first_msg:"))
 		h.Write([]byte(env.FirstUserMessageText()))
 	}
 

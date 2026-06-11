@@ -19,16 +19,19 @@ func anthropicEnv(t *testing.T, body string) *translate.RequestEnvelope {
 }
 
 func TestDeriveSessionKey_StableAcrossTurns(t *testing.T) {
+	// Claude Code mutates the system prompt every turn, so turn2 carries a
+	// different system block. The key must still be stable: it keys on the
+	// (unchanging) first user message, not the volatile system text.
 	turn1 := anthropicEnv(t, `{
 		"model": "claude-sonnet-4-6",
-		"system": "You are a careful coding assistant.",
+		"system": "You are a careful coding assistant. <reminder>cwd=/a</reminder>",
 		"messages": [
 			{"role": "user", "content": "Help me refactor server.go"}
 		]
 	}`)
 	turn2 := anthropicEnv(t, `{
 		"model": "claude-sonnet-4-6",
-		"system": "You are a careful coding assistant.",
+		"system": "You are a careful coding assistant. <reminder>cwd=/a/b time=12:01</reminder>",
 		"messages": [
 			{"role": "user", "content": "Help me refactor server.go"},
 			{"role": "assistant", "content": "Sure, what's broken?"},
@@ -39,7 +42,7 @@ func TestDeriveSessionKey_StableAcrossTurns(t *testing.T) {
 	k1 := proxy.DeriveSessionKey(turn1, "api-key-A")
 	k2 := proxy.DeriveSessionKey(turn2, "api-key-A")
 
-	assert.Equal(t, k1, k2, "key stable across turns: system + first user message don't change")
+	assert.Equal(t, k1, k2, "key stable across turns: first user message unchanged, volatile system ignored")
 	assert.Len(t, k1, sessionpin.SessionKeyLen)
 }
 
@@ -55,7 +58,10 @@ func TestDeriveSessionKey_DiffersAcrossAPIKeys(t *testing.T) {
 	assert.NotEqual(t, k1, k2, "distinct callers must not collide on identical prompts")
 }
 
-func TestDeriveSessionKey_DiffersAcrossSystemPrompts(t *testing.T) {
+func TestDeriveSessionKey_IgnoresSystemPrompt(t *testing.T) {
+	// System text is volatile (Claude Code rewrites it every turn), so it must
+	// NOT move the key. Two requests that differ only in system prompt — same
+	// first user message — collide.
 	envA := anthropicEnv(t, `{
 		"system": "You are agent A.",
 		"messages": [{"role": "user", "content": "go"}]
@@ -68,26 +74,53 @@ func TestDeriveSessionKey_DiffersAcrossSystemPrompts(t *testing.T) {
 	kA := proxy.DeriveSessionKey(envA, "api-key")
 	kB := proxy.DeriveSessionKey(envB, "api-key")
 
-	assert.NotEqual(t, kA, kB)
+	assert.Equal(t, kA, kB, "system prompt is volatile and must not affect the key")
 }
 
-func TestDeriveSessionKey_PrefersMetadataUserID(t *testing.T) {
-	// Same metadata.user_id, different prompt prefixes → must collide.
-	env1 := anthropicEnv(t, `{
+func TestDeriveSessionKey_SeparatesSubAgentsSharingUserID(t *testing.T) {
+	// The fix: Claude Code sends ONE metadata.user_id for the main loop and all
+	// of a session's sub-agents. Keying on user_id alone funneled them onto a
+	// single pin that concurrent threads thrashed. The first user message (each
+	// sub-agent's distinct dispatch prompt) must split them into separate pins.
+	mainLoop := anthropicEnv(t, `{
+		"metadata": {"user_id": "device=abc;account=u1;session=42"},
+		"system": "main loop system",
+		"messages": [{"role": "user", "content": "Refactor the dispatch loop in server.go"}]
+	}`)
+	subAgent := anthropicEnv(t, `{
+		"metadata": {"user_id": "device=abc;account=u1;session=42"},
+		"system": "explore sub-agent system",
+		"messages": [{"role": "user", "content": "Find every .go file under internal/"}]
+	}`)
+
+	kMain := proxy.DeriveSessionKey(mainLoop, "api-key")
+	kSub := proxy.DeriveSessionKey(subAgent, "api-key")
+
+	assert.NotEqual(t, kMain, kSub, "same user_id but different first message (sub-agent) must get a distinct pin")
+}
+
+func TestDeriveSessionKey_SameUserIDAndFirstMessageCollide(t *testing.T) {
+	// Stability counterpart: same user_id AND same first user message — across
+	// a thread's turns, even as the system prompt mutates — stay on one pin.
+	turn1 := anthropicEnv(t, `{
 		"metadata": {"user_id": "device=abc;session=42"},
-		"system": "irrelevant 1",
+		"system": "system v1",
 		"messages": [{"role": "user", "content": "first turn"}]
 	}`)
-	env2 := anthropicEnv(t, `{
+	turn2 := anthropicEnv(t, `{
 		"metadata": {"user_id": "device=abc;session=42"},
-		"system": "irrelevant 2 — different now",
-		"messages": [{"role": "user", "content": "third turn"}]
+		"system": "system v2 — mutated",
+		"messages": [
+			{"role": "user", "content": "first turn"},
+			{"role": "assistant", "content": "ok"},
+			{"role": "user", "content": "keep going"}
+		]
 	}`)
 
-	k1 := proxy.DeriveSessionKey(env1, "api-key")
-	k2 := proxy.DeriveSessionKey(env2, "api-key")
+	k1 := proxy.DeriveSessionKey(turn1, "api-key")
+	k2 := proxy.DeriveSessionKey(turn2, "api-key")
 
-	assert.Equal(t, k1, k2, "metadata.user_id takes precedence over prompt-prefix fallback")
+	assert.Equal(t, k1, k2, "same user_id + same first message → one stable pin across turns")
 }
 
 func TestDeriveSessionKey_DistinctMetadataUserIDsDoNotCollide(t *testing.T) {
