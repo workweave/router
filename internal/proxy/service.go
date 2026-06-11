@@ -1567,7 +1567,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	if installationID != uuid.Nil {
 		failoverUsed := finalProvider != primaryProvider
-		degShadow := isDegenerateResponse(out, respSummary.ToolUseBlocks, respSummary.StopReason)
+		degShadow := isDegenerateResponse(out, respSummary.ToolUseBlocks, respSummary.StopReason, respSummary.StopReasonDemoted)
 		if degShadow {
 			log.Info("router.degenerate_shadow",
 				"model", decision.Model,
@@ -2023,10 +2023,16 @@ const degenerateOutputThreshold = 10
 // short response: fewer than degenerateOutputThreshold output tokens, no tool
 // calls emitted, and a normal end_turn stop reason. A valid tool-only turn or
 // a brief legitimate end_turn must not trip this.
-func isDegenerateResponse(outputTokens int, toolUseBlocks int, stopReason string) bool {
+//
+// stopReasonDemoted guards against false positives from cross-format demotions:
+// broken finish_reason="tool_calls" turns that the translator demotes to end_turn
+// (zero surviving tool blocks) must not fire the degenerate shadow — they are
+// handled translation failures, not genuinely empty completions.
+func isDegenerateResponse(outputTokens, toolUseBlocks int, stopReason string, stopReasonDemoted bool) bool {
 	return outputTokens < degenerateOutputThreshold &&
 		toolUseBlocks == 0 &&
-		stopReason == "end_turn"
+		stopReason == "end_turn" &&
+		!stopReasonDemoted
 }
 
 // fireTelemetry persists a telemetry row asynchronously. Telemetry loss is acceptable.
