@@ -1626,8 +1626,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			// look like a measured zero-tool turn rather than missing data.
 			ToolUseBlocks:         int32PtrIfKnown(int32(respSummary.ToolUseBlocks), respSummary.StopReason != ""),
 			InvalidToolArgsBlocks: int32PtrIfKnown(int32(respSummary.InvalidToolArgsBlocks), respSummary.StopReason != ""),
-			FailoverUsed:           boolPtrTrue(failoverUsed),
-			DegenerateShadow:       boolPtrOrNil(degShadow),
+			FailoverUsed:          boolPtrTrue(failoverUsed),
+			DegenerateShadow:      boolPtrOrNil(degShadow),
 		})
 	}
 
