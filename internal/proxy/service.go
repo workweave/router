@@ -1620,8 +1620,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			RolloutID:              clientID.RolloutID,
 			UpstreamFinishReason:   stringPtrOrEmpty(respSummary.UpstreamFinishReason),
 			StopReason:             stringPtrOrEmpty(respSummary.StopReason),
-			ToolUseBlocks:          int32Ptr(int32(respSummary.ToolUseBlocks)),
-			InvalidToolArgsBlocks:  int32Ptr(int32(respSummary.InvalidToolArgsBlocks)),
+			// ToolUseBlocks and InvalidToolArgsBlocks are only valid when a
+			// translator ran (StopReason is populated). The Anthropic-native
+			// passthrough path leaves respSummary zero; storing 0 there would
+			// look like a measured zero-tool turn rather than missing data.
+			ToolUseBlocks:         int32PtrIfKnown(int32(respSummary.ToolUseBlocks), respSummary.StopReason != ""),
+			InvalidToolArgsBlocks: int32PtrIfKnown(int32(respSummary.InvalidToolArgsBlocks), respSummary.StopReason != ""),
 			FailoverUsed:           boolPtrTrue(failoverUsed),
 			DegenerateShadow:       boolPtrOrNil(degShadow),
 		})
@@ -1977,9 +1981,14 @@ func cacheTokenPtr(n int) *int32 {
 	return &v
 }
 
-// int32Ptr returns a pointer to v. Used to record nullable integer telemetry
-// columns where 0 is a valid value (e.g. tool_use_blocks = 0 means zero tools).
-func int32Ptr(v int32) *int32 {
+// int32PtrIfKnown returns a pointer to v when known is true, else nil.
+// Used for nullable integer telemetry columns where 0 is a valid value
+// (e.g. tool_use_blocks = 0 means zero tools) but the value may be absent
+// when the translator did not run (Anthropic-native passthrough path).
+func int32PtrIfKnown(v int32, known bool) *int32 {
+	if !known {
+		return nil
+	}
 	return &v
 }
 
