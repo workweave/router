@@ -187,9 +187,14 @@ func TestContextWindowFor_KnownModels(t *testing.T) {
 	assert.Equal(t, 1_047_576, ContextWindowFor("gpt-4.1"))
 	// Gemini models have 1M context.
 	assert.Equal(t, 1_048_576, ContextWindowFor("gemini-3.5-flash"))
-	// OSS models have 128K-131K context.
-	assert.Equal(t, 131_072, ContextWindowFor("deepseek/deepseek-v4-pro"))
-	assert.Equal(t, 131_072, ContextWindowFor("moonshotai/kimi-k2.5"))
+	// DeepSeek V4 (Flash + Pro) serves the full 1,048,576-token window.
+	assert.Equal(t, 1_048_576, ContextWindowFor("deepseek/deepseek-v4-pro"))
+	assert.Equal(t, 1_048_576, ContextWindowFor("deepseek/deepseek-v4-flash"))
+	// Most OSS models serve a 256K window (Qwen3 / Kimi families).
+	assert.Equal(t, 262_144, ContextWindowFor("moonshotai/kimi-k2.5"))
+	// GLM-5 serves ~200K (max_position_embeddings 202752); MiniMax M2.7 is 204800.
+	assert.Equal(t, 202_752, ContextWindowFor("z-ai/glm-5"))
+	assert.Equal(t, 204_800, ContextWindowFor("minimax/minimax-m2.7"))
 	// Unknown model falls back to DefaultContextWindow.
 	assert.Equal(t, DefaultContextWindow, ContextWindowFor("not-a-real-model"))
 }
