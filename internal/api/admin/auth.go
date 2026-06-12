@@ -44,7 +44,7 @@ func LoginHandler(authSvc *auth.Service) gin.HandlerFunc {
 		if !authSvc.AdminLoginEnabled() {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
 				"error": "admin_login_disabled",
-				"hint":  "set ROUTER_ADMIN_PASSWORD on the router to enable dashboard login",
+				"hint":  "Set ROUTER_ADMIN_PASSWORD on the router to enable dashboard login.",
 			})
 			return
 		}
@@ -61,7 +61,7 @@ func LoginHandler(authSvc *auth.Service) gin.HandlerFunc {
 				observability.FromGin(c).Info("Admin login rejected: rate limited", "remote_ip", peerIP)
 				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 					"error": "too_many_attempts",
-					"hint":  "wait a few minutes before trying again",
+					"hint":  "Wait a few minutes before trying again.",
 				})
 				return
 			}

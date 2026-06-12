@@ -22,7 +22,7 @@ func resolveInstallation(c *gin.Context, authSvc *auth.Service) (*auth.Installat
 		installation, err := authSvc.EnsureAdminInstallation(c.Request.Context())
 		if err != nil {
 			observability.FromGin(c).Error("Failed to ensure admin installation", "err", err)
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve admin installation"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve admin installation."})
 			return nil, false
 		}
 		return installation, true
