@@ -1,0 +1,53 @@
+internal/postgres/session_pin_repo.go
+  304a1fdb547d0e74 1-79
+cmd/router/main.go
+  304a1fdb547d0e74 36,62-68,167-175,548-570
+db/migrations/0003_session_pins.down.sql
+  304a1fdb547d0e74 1-5
+internal/proxy/session_key.go
+  304a1fdb547d0e74 1-58
+internal/server/middleware/auth.go
+  304a1fdb547d0e74 40-42
+db/migrations/0003_session_pins.up.sql
+  304a1fdb547d0e74 1-24
+internal/translate/envelope.go
+  304a1fdb547d0e74 120-155
+internal/sqlc/session_pins.sql.go
+  304a1fdb547d0e74 1-133
+db/queries/session_pins.sql
+  304a1fdb547d0e74 1-39
+internal/proxy/service_cache_test.go
+  304a1fdb547d0e74 92,123,147,170,195
+internal/sqlc/models.go
+  304a1fdb547d0e74 41-56
+internal/proxy/service.go
+  304a1fdb547d0e74 5,16,35-45,48-53,60-68,73-76,85-86,260,263-272,274-280,282-313,317,320,337-366,422-424,554-587
+internal/proxy/service_session_pin_test.go
+  304a1fdb547d0e74 1-199
+internal/router/sessionpin/store.go
+  304a1fdb547d0e74 1-51
+internal/proxy/session_key_test.go
+  304a1fdb547d0e74 1-136
+internal/proxy/service_test.go
+  304a1fdb547d0e74 65,121,178,202,266,312
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "b3f0afb4640471fb61676696714ab8b9d54cccf6",
+  "prompts": {
+    "304a1fdb547d0e74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c393fe31-9f98-473e-940f-898f180f7de8",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 999,
+      "total_deletions": 33,
+      "accepted_lines": 983,
+      "overriden_lines": 0
+    }
+  }
+}

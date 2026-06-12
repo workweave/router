@@ -1,0 +1,21 @@
+.env.example
+  s_0ac1abdedf47d0::t_3c9d69cdc0d526 97
+cmd/router/main.go
+  s_0ac1abdedf47d0::t_2c3c8a1f936a29 300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "82dbecfbf7c02e65d4a31ed1c3b46c2e8ca7f842",
+  "prompts": {},
+  "sessions": {
+    "s_0ac1abdedf47d0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4555dc00-dcca-4e93-9af7-b0a0af00d4d9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

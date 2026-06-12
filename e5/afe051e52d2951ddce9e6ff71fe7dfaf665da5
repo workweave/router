@@ -1,0 +1,21 @@
+internal/router/cluster/scorer_test.go
+  s_5009b1e9ae1308::t_89f01a3544cc70 826-891
+internal/router/cluster/scorer.go
+  s_5009b1e9ae1308::t_a9b27b22046c71 351-370,407-414
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e5afe051e52d2951ddce9e6ff71fe7dfaf665da5",
+  "prompts": {},
+  "sessions": {
+    "s_5009b1e9ae1308": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aab652f1-c261-4101-bb65-5f0a83b1a661",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,44 @@
+internal/router/pricing/AGENTS.md
+  s_26343b7a14df66::t_3d33c5a6b5bbb3 1,3,9-15,19-20,26
+internal/router/catalog/CLAUDE.md
+  s_26343b7a14df66::t_8b20c04e61908c 1-42
+internal/router/CLAUDE.md
+  s_26343b7a14df66::t_e62d9820889542 11,17-18
+internal/router/AGENTS.md
+  s_26343b7a14df66::t_a2aef173640f30 1,3,11,17-18
+internal/router/capability/CLAUDE.md
+  s_26343b7a14df66::t_74cbb9192df55d 11-14,18,23
+internal/router/pricing/CLAUDE.md
+  s_26343b7a14df66::t_185e10228a15c0 9-15,19-20,26
+internal/router/capability/AGENTS.md
+  s_26343b7a14df66::t_4e273f9f7cbd7a 1,3,11-14,18,23
+internal/router/catalog/catalog_test.go
+  s_26343b7a14df66::t_aa0fa9541775f1 116-117,119
+  s_26343b7a14df66::t_6048512293343f 1-115,118,120
+internal/router/catalog/AGENTS.md
+  s_26343b7a14df66::t_ac9244eec4bdf8 1-42
+internal/router/catalog/catalog.go
+  s_26343b7a14df66::t_a8c69c08945ed8 1-252
+internal/router/capability/tier.go
+  s_26343b7a14df66::t_04cd37489588ae 1-5,8,10-12,15-18,22,24,28,30,34,36,40-41,43
+internal/router/catalog/lookup.go
+  s_26343b7a14df66::t_f489cce2f3fc7f 1-160
+internal/router/pricing/pricing.go
+  s_26343b7a14df66::t_ff378fe078eb75 2-5,10,13-16,18-20,22-23,25,28-34,36,40-43,60-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "a8c0e19f944e40d192c36d719efe4ce35ce38e1f",
+  "prompts": {},
+  "sessions": {
+    "s_26343b7a14df66": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2aa13dfc-2c78-48ac-858e-b5f4e8be7eef",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
