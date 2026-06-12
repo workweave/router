@@ -53,11 +53,11 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 				return
 			}
 			if errors.Is(err, providers.ErrNotImplemented) {
-				writeOpenAIError(c, http.StatusNotImplemented, "api_error", err.Error())
+				writeOpenAIError(c, http.StatusNotImplemented, "api_error", "Provider not implemented.")
 				return
 			}
 			if errors.Is(err, proxy.ErrProviderNotConfigured) {
-				writeOpenAIError(c, http.StatusBadGateway, "api_error", err.Error())
+				writeOpenAIError(c, http.StatusBadGateway, "api_error", "Provider not configured.")
 				return
 			}
 			if errors.Is(err, translate.ErrNotJSONObject) {
@@ -71,7 +71,7 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 			}
 			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
 				log.Warn("Invalid routing knobs supplied", "err", err)
-				writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+				writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "Invalid routing knobs supplied.")
 				return
 			}
 			if errors.Is(err, cluster.ErrClusterUnavailable) {
