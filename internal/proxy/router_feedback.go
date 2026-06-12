@@ -80,6 +80,7 @@ func (s *Service) handleRouterFeedbackCommand(
 
 	clientID := ClientIdentityFrom(ctx)
 	routerUserID := auth.UserIDFrom(ctx)
+	externalID, _ := ctx.Value(ExternalIDContextKey{}).(string)
 
 	if s.feedbackStore != nil && installationID != uuid.Nil {
 		event := RouterFeedbackEvent{
@@ -107,7 +108,8 @@ func (s *Service) handleRouterFeedbackCommand(
 		Name:  "router.feedback",
 		Start: now,
 		End:   now,
-		Attrs: otel.NewAttrBuilder(9).
+		Attrs: otel.NewAttrBuilder(10).
+			String("external_id", externalID).
 			String("router_user_id", routerUserID).
 			String("client.device_id", clientID.DeviceID).
 			String("client.session_id", clientID.SessionID).
