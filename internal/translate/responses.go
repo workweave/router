@@ -333,6 +333,18 @@ func NewResponsesWriter(w http.ResponseWriter, model string) *ResponsesWriter {
 	}
 }
 
+// WrapInner inserts fn between this writer and the underlying client writer,
+// rebinding both the raw inner and the buffered writer so every emitted byte —
+// eager prelude, SSE events, and the final JSON envelope — flows through fn.
+// Used to splice in a content-capture writer at the true client boundary for
+// high-fidelity telemetry. Must be called before any bytes are written.
+func (t *ResponsesWriter) WrapInner(fn func(http.ResponseWriter) http.ResponseWriter) {
+	wrapped := fn(t.inner)
+	t.inner = wrapped
+	t.flusher, _ = wrapped.(http.Flusher)
+	t.bw = bufio.NewWriterSize(wrapped, 8192)
+}
+
 func (t *ResponsesWriter) Header() http.Header { return t.inner.Header() }
 
 func (t *ResponsesWriter) WriteHeader(code int) {

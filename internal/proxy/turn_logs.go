@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"workweave/router/internal/observability/otel"
+	"workweave/router/internal/translate"
 
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 )
@@ -73,9 +74,24 @@ func (m ContentCaptureMode) String() string {
 // enabled. The returned captureWriter (nil when off) mirrors the exact bytes
 // delivered to the client, so the captured response is in the client's native
 // wire format regardless of which upstream served it.
+//
+// The /v1/responses surface hands us a *translate.ResponsesWriter that performs
+// its own surface translation and emits an eager prelude straight to its inner
+// writer. Wrapping it externally would capture the pre-translation event stream
+// and miss the prelude, so for that case we splice the capture writer in at the
+// ResponsesWriter's true client boundary instead — yielding the exact Responses
+// wire, prelude included — and return the ResponsesWriter unchanged as the sink.
 func (s *Service) maybeCaptureResponse(w http.ResponseWriter) (http.ResponseWriter, *captureWriter) {
 	if s.captureMode == CaptureOff {
 		return w, nil
+	}
+	if rw, ok := w.(*translate.ResponsesWriter); ok {
+		var cw *captureWriter
+		rw.WrapInner(func(inner http.ResponseWriter) http.ResponseWriter {
+			cw = newCaptureWriter(inner, s.captureMaxBytes)
+			return cw
+		})
+		return w, cw
 	}
 	cw := newCaptureWriter(w, s.captureMaxBytes)
 	return cw, cw
