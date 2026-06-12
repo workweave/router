@@ -25,7 +25,7 @@
       "TAU2_BENCH_TELECOM": 1.0,
       "TERMINAL_BENCH_HARD": 1.0
     },
-    "alpha": 0.9,
+    "alpha": 0.96,
     "bench_coding_only": false,
     "benchmark_corpus_loaders": "aider-polyglot-go,aider-polyglot-rust-cpp-java,livecodebench-ts-and-aider-polyglot-ts,bfcl-v4-simple,bfcl-v4-parallel-multi",
     "cold_model_aa_boost": 1.0,
