@@ -411,6 +411,50 @@ func excludeContextOverflowModels(est, outputReserve int, excluded, available ma
 	return out, added
 }
 
+// restrictToTier returns a copy of excluded augmented with every routable model
+// whose tier differs from the target. It is the scorer-side counterpart to a
+// dropped user-forced pin: when the forced model can no longer serve a turn
+// (most often the session outgrew its context window and the pre-filter evicted
+// it), the user still asked for a model of that tier, so the fresh decision
+// should pick the next-best model in the same tier rather than collapsing to the
+// cheap tier-default. ok is false (and the original map returned unchanged) when
+// no in-tier model would survive the constraint, so the caller can leave routing
+// unconstrained instead of handing the scorer an empty pool.
+func (s *Service) restrictToTier(excluded map[string]struct{}, tier catalog.Tier) (map[string]struct{}, bool) {
+	if tier == catalog.TierUnknown {
+		return excluded, false
+	}
+	out := make(map[string]struct{}, len(excluded))
+	for k := range excluded {
+		out[k] = struct{}{}
+	}
+	inTierEligible := 0
+	consider := func(model string) {
+		if catalog.TierFor(model) == tier {
+			if _, alreadyExcluded := excluded[model]; !alreadyExcluded {
+				inTierEligible++
+			}
+			return
+		}
+		out[model] = struct{}{}
+	}
+	// nil availableModels means "every model routable" (see WithAvailableModels);
+	// enumerate the catalog in that case so the constraint still has a universe.
+	if s.availableModels != nil {
+		for model := range s.availableModels {
+			consider(model)
+		}
+	} else {
+		for _, m := range catalog.Models {
+			consider(m.ID)
+		}
+	}
+	if inTierEligible == 0 {
+		return excluded, false
+	}
+	return out, true
+}
+
 // CredentialsFromContext returns the resolved credentials stashed on ctx.
 func CredentialsFromContext(ctx context.Context) *Credentials {
 	v := ctx.Value(CredentialsContextKey{})

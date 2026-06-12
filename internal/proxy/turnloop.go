@@ -265,6 +265,13 @@ func (s *Service) runTurnLoop(
 	//      may downgrade the decision for this turn (and appends "+tier_clamp" to
 	//      the reason), but the pin is refreshed with the ORIGINAL pin decision so
 	//      a transient ceiling never permanently overwrites the user's directive.
+	// forcedTierFloor preserves the user's tier intent when a user-forced pin
+	// is dropped below because its model can no longer serve this turn (most
+	// often the session outgrew the model's context window and the pre-filter
+	// evicted it). The scorer call further down constrains the fresh decision
+	// to this tier so we pick the next-best model in it rather than collapsing
+	// to the cheap tier-default. TierUnknown means "no constraint".
+	forcedTierFloor := catalog.TierUnknown
 	if pinFound && (pin.Reason == translate.ReasonUserForceModel || pin.Reason == translate.ReasonLoopEscalation) {
 		_, excluded := req.ExcludedModels[pin.Model]
 		_, providerEnabled := req.EnabledProviders[pin.Provider]
@@ -289,6 +296,13 @@ func (s *Service) runTurnLoop(
 			res.StickyHit = true
 			s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, pinDecision(pin))
 			return res, nil
+		}
+		if excluded {
+			// The forced model can't serve this turn — typically the session
+			// outgrew its context window and the pre-filter evicted it. The
+			// user still asked for a model of this tier, so remember it and
+			// constrain the fresh decision to the same tier below.
+			forcedTierFloor = catalog.TierFor(pin.Model)
 		}
 		// Forced pin is no longer servable on this request (excluded by policy
 		// or pinned provider not in EnabledProviders/BYOK). Treat it as missing
@@ -405,11 +419,40 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
-	// Always run the scorer when no pin, or on MainLoop with a pin.
-	fresh, err := s.router.Route(ctx, req)
-	if err != nil {
-		log.Error("turnloop scorer failed", "err", err, "requested_model", req.RequestedModel)
-		return res, err
+	// Always run the scorer when no pin, or on MainLoop with a pin. When a
+	// user-forced pin was just evicted (typically the session outgrew the
+	// model's context window), the user still asked for a model of that tier:
+	// route the scorer constrained to the forced model's tier and pick the
+	// next-best in it. Collapsing straight to the cheap tier-default would
+	// silently downgrade the user's directive. Fall back to the unconstrained
+	// scorer when no in-tier model survives the request's other filters, so the
+	// constraint never turns a routable turn into a failure.
+	var fresh router.Decision
+	routed := false
+	if forcedTierFloor != catalog.TierUnknown {
+		if constrained, ok := s.restrictToTier(req.ExcludedModels, forcedTierFloor); ok {
+			tierReq := req
+			tierReq.ExcludedModels = constrained
+			if dec, derr := s.router.Route(ctx, tierReq); derr == nil {
+				fresh, routed = dec, true
+				log.Info("user-forced model evicted; rerouted to next-best in same tier",
+					"forced_tier", forcedTierFloor.String(),
+					"fresh_model", dec.Model,
+					"fresh_provider", dec.Provider,
+				)
+			} else {
+				log.Info("tier-constrained reroute found no candidate; using unconstrained scorer",
+					"forced_tier", forcedTierFloor.String(), "err", derr)
+			}
+		}
+	}
+	if !routed {
+		dec, err := s.router.Route(ctx, req)
+		if err != nil {
+			log.Error("turnloop scorer failed", "err", err, "requested_model", req.RequestedModel)
+			return res, err
+		}
+		fresh = dec
 	}
 	log.Info("turnloop scorer decision",
 		"fresh_model", fresh.Model,
