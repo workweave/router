@@ -19,11 +19,11 @@ func PassthroughHandler(svc *proxy.Service) gin.HandlerFunc {
 		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes+1))
 		if err != nil {
 			log.Debug("Failed to read passthrough request body", "err", err)
-			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "failed to read request body")
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body.")
 			return
 		}
 		if len(body) > maxBodyBytes {
-			writeAnthropicError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body too large")
+			writeAnthropicError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "Request body too large.")
 			return
 		}
 
@@ -33,7 +33,7 @@ func PassthroughHandler(svc *proxy.Service) gin.HandlerFunc {
 				if c.Writer.Written() {
 					return
 				}
-				writeAnthropicError(c, statusErr.Status, "api_error", "upstream call failed")
+				writeAnthropicError(c, statusErr.Status, "api_error", "Upstream call failed.")
 				return
 			}
 			if c.Writer.Written() {
@@ -41,11 +41,11 @@ func PassthroughHandler(svc *proxy.Service) gin.HandlerFunc {
 				return
 			}
 			if errors.Is(err, providers.ErrNotImplemented) {
-				writeAnthropicError(c, http.StatusNotImplemented, "api_error", "provider not configured")
+				writeAnthropicError(c, http.StatusNotImplemented, "api_error", "Provider not implemented.")
 				return
 			}
 			log.Error("Passthrough failed", "err", err, "path", c.Request.URL.Path)
-			writeAnthropicError(c, http.StatusBadGateway, "api_error", "upstream call failed")
+			writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream call failed.")
 			return
 		}
 	}

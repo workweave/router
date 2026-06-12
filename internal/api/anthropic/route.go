@@ -21,17 +21,17 @@ func RouteHandler(svc *proxy.Service) gin.HandlerFunc {
 		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes+1))
 		if err != nil {
 			log.Debug("Failed to read request body", "err", err)
-			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "failed to read request body")
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body.")
 			return
 		}
 		if len(body) > maxBodyBytes {
-			writeAnthropicError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body too large")
+			writeAnthropicError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "Request body too large.")
 			return
 		}
 
 		env, parseErr := translate.ParseAnthropic(body)
 		if parseErr != nil {
-			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "request body must be a JSON object")
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Request body must be a JSON object.")
 			return
 		}
 
@@ -56,7 +56,7 @@ func RouteHandler(svc *proxy.Service) gin.HandlerFunc {
 				return
 			}
 			log.Error("Routing failed", "err", routeErr)
-			writeAnthropicError(c, http.StatusBadGateway, "api_error", "routing failed")
+			writeAnthropicError(c, http.StatusBadGateway, "api_error", "Routing failed.")
 			return
 		}
 

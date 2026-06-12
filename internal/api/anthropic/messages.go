@@ -53,11 +53,11 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes+1))
 		if err != nil {
 			log.Debug("Failed to read request body", "err", err)
-			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "failed to read request body")
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body.")
 			return
 		}
 		if len(body) > maxBodyBytes {
-			writeAnthropicError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body too large")
+			writeAnthropicError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "Request body too large.")
 			return
 		}
 
@@ -83,7 +83,7 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 				if c.Writer.Written() {
 					return
 				}
-				writeAnthropicError(c, statusErr.Status, "api_error", "upstream call failed")
+				writeAnthropicError(c, statusErr.Status, "api_error", "Upstream call failed.")
 				return
 			}
 			if c.Writer.Written() {
@@ -91,16 +91,16 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 				return
 			}
 			if errors.Is(err, providers.ErrNotImplemented) {
-				writeAnthropicError(c, http.StatusNotImplemented, "api_error", "provider not configured")
+				writeAnthropicError(c, http.StatusNotImplemented, "api_error", "Provider not implemented.")
 				return
 			}
 			if errors.Is(err, translate.ErrNotJSONObject) {
-				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "request body must be a JSON object")
+				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Request body must be a JSON object.")
 				return
 			}
 			if errors.Is(err, cluster.ErrNoEligibleProvider) {
 				log.Warn("No eligible provider for request", "err", err)
-				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "no provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header")
+				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "No provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header.")
 				return
 			}
 			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
@@ -111,11 +111,11 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 			if errors.Is(err, cluster.ErrClusterUnavailable) {
 				log.Error("Cluster routing unavailable", "err", err)
 				c.Header("Retry-After", "1")
-				writeAnthropicError(c, http.StatusServiceUnavailable, "api_error", "router unavailable: cluster scorer failed and no fallback is configured")
+				writeAnthropicError(c, http.StatusServiceUnavailable, "api_error", "Router unavailable: cluster scorer failed and no fallback is configured.")
 				return
 			}
 			log.Error("Proxy failed", "err", err)
-			writeAnthropicError(c, http.StatusBadGateway, "api_error", "upstream call failed")
+			writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream call failed.")
 			return
 		}
 	}
