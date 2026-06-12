@@ -1,9 +1,9 @@
 {
   "meta": {
-    "comment": "Runtime model-feature matrix for v0.68. psi_probe = quality_means.json transposed (per-cluster quality the scorer reads); operational = model_axes.json. Faithful repackaging that lets a new model be onboarded as one appended column with no retrain. Regenerate from this version quality_means.json + model_axes.json.",
+    "comment": "Runtime model-feature matrix for v0.67. psi_probe = quality_means.json transposed (per-cluster quality the scorer reads); operational = model_axes.json. Faithful repackaging that lets a new model be onboarded as one appended column with no retrain. Regenerate from this version quality_means.json + model_axes.json.",
     "k": 16,
     "n_models": 15,
-    "roster_version": "v0.68",
+    "roster_version": "v0.67",
     "source": "quality_means.json + model_axes.json"
   },
   "models": {

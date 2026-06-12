@@ -1,5 +1,5 @@
 format_version: 2
-version: v0.68
+version: v0.67
 parent: v0.64
 status: candidate
 promoted_date: null
@@ -132,7 +132,7 @@ cost_per_1k_input_usd:
   qwen/qwen3-coder-next: 0.0005
   qwen/qwen3-next-80b-a3b-instruct: 0.00015
   xiaomi/mimo-v2.5-pro: 0.001
-changelog: 'v0.68 = retrain of v0.64''s quality_means with the corrected AA-prior chain; centroids.bin
+changelog: 'v0.67 = retrain of v0.64''s quality_means with the corrected AA-prior chain; centroids.bin
   is BYTE-IDENTICAL to v0.64/v0.65 (sha256 57b06f95..), so all cluster semantics carry over. Fixes two
   label-pipeline bugs in the served v0.65 (see WW#8562): (1) aa_quality_priors_v0.62.json was generated
   against v0.61 cluster geometry and injected into the re-clustered v0.64 by raw cluster id (only 4/16
