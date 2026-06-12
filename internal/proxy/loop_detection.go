@@ -371,6 +371,7 @@ func (s *Service) handleToolCallLoopBreak(
 	role string,
 	decisionModel string,
 	decisionProvider string,
+	inputTokens int,
 ) error {
 	log := observability.FromContext(ctx)
 
@@ -420,8 +421,8 @@ func (s *Service) handleToolCallLoopBreak(
 
 	switch env.SourceFormat() {
 	case translate.FormatOpenAI:
-		return writeSyntheticOpenAIResponse(w, env, msg)
+		return writeSyntheticOpenAIResponse(w, env, msg, inputTokens)
 	default:
-		return writeSyntheticAnthropicResponse(w, env, msg)
+		return writeSyntheticAnthropicResponse(w, env, msg, inputTokens)
 	}
 }

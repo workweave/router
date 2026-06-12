@@ -222,6 +222,8 @@ func (s *Service) applyForceModelHeader(
 // handleForceModelCommand processes a /force-model or /unforce-model directive.
 // It writes (or expires) the session pin and returns a synthetic Anthropic-format
 // acknowledgment response without dispatching to any upstream.
+// inputTokens should reflect the request's RoutingFeatures.Tokens to include the
+// actual turn input in the token counter (not just the synthetic response text).
 func (s *Service) handleForceModelCommand(
 	ctx context.Context,
 	w http.ResponseWriter,
@@ -229,6 +231,7 @@ func (s *Service) handleForceModelCommand(
 	cmd translate.ForceModelResult,
 	installationID uuid.UUID,
 	sessionKey [sessionpin.SessionKeyLen]byte,
+	inputTokens int,
 ) error {
 	log := observability.FromContext(ctx)
 	role := roleForTier(catalog.TierFor(env.Model()))
@@ -307,24 +310,25 @@ func (s *Service) handleForceModelCommand(
 
 	switch env.SourceFormat() {
 	case translate.FormatOpenAI:
-		return writeSyntheticOpenAIResponse(w, env, msg)
+		return writeSyntheticOpenAIResponse(w, env, msg, inputTokens)
 	default:
-		return writeSyntheticAnthropicResponse(w, env, msg)
+		return writeSyntheticAnthropicResponse(w, env, msg, inputTokens)
 	}
 }
 
 // writeSyntheticAnthropicResponse writes a minimal Anthropic Messages API
 // response without hitting an upstream. Handles both streaming and
-// non-streaming request shapes.
-func writeSyntheticAnthropicResponse(w http.ResponseWriter, env *translate.RequestEnvelope, text string) error {
+// non-streaming request shapes. inputTokens is the request's RoutingFeatures.Tokens
+// so the client's token counter reflects the actual turn input.
+func writeSyntheticAnthropicResponse(w http.ResponseWriter, env *translate.RequestEnvelope, text string, inputTokens int) error {
 	msgID := fmt.Sprintf("msg_router_cmd_%x", time.Now().UnixNano())
 	if env.Stream() {
-		return writeSyntheticAnthropicSSE(w, msgID, text)
+		return writeSyntheticAnthropicSSE(w, msgID, text, inputTokens)
 	}
-	return writeSyntheticAnthropicJSON(w, msgID, text)
+	return writeSyntheticAnthropicJSON(w, msgID, text, inputTokens)
 }
 
-func writeSyntheticAnthropicJSON(w http.ResponseWriter, msgID, text string) error {
+func writeSyntheticAnthropicJSON(w http.ResponseWriter, msgID, text string, inputTokens int) error {
 	resp := map[string]any{
 		"id":            msgID,
 		"type":          "message",
@@ -336,7 +340,7 @@ func writeSyntheticAnthropicJSON(w http.ResponseWriter, msgID, text string) erro
 			map[string]any{"type": "text", "text": text},
 		},
 		"usage": map[string]any{
-			"input_tokens":  0,
+			"input_tokens":  inputTokens,
 			"output_tokens": len(text) / 4,
 		},
 	}
@@ -349,7 +353,7 @@ func writeSyntheticAnthropicJSON(w http.ResponseWriter, msgID, text string) erro
 	return writeErr
 }
 
-func writeSyntheticAnthropicSSE(w http.ResponseWriter, msgID, text string) error {
+func writeSyntheticAnthropicSSE(w http.ResponseWriter, msgID, text string, inputTokens int) error {
 	w.Header().Set("Content-Type", "text/event-stream")
 	flusher, _ := w.(http.Flusher)
 	bw := bufio.NewWriterSize(w, 4096)
@@ -363,7 +367,7 @@ func writeSyntheticAnthropicSSE(w http.ResponseWriter, msgID, text string) error
 				"id": msgID, "type": "message", "role": "assistant",
 				"content": []any{}, "model": "weave-router",
 				"stop_reason": nil, "stop_sequence": nil,
-				"usage": map[string]any{"input_tokens": 0, "output_tokens": 0},
+				"usage": map[string]any{"input_tokens": inputTokens, "output_tokens": 0},
 			},
 		})),
 		sseEvent("content_block_start", mustMarshalJSON(map[string]any{
@@ -398,16 +402,17 @@ func writeSyntheticAnthropicSSE(w http.ResponseWriter, msgID, text string) error
 
 // writeSyntheticOpenAIResponse writes a minimal OpenAI Chat Completions
 // response without hitting an upstream. Handles both streaming and
-// non-streaming request shapes.
-func writeSyntheticOpenAIResponse(w http.ResponseWriter, env *translate.RequestEnvelope, text string) error {
+// non-streaming request shapes. inputTokens is the request's RoutingFeatures.Tokens
+// so the client's token counter reflects the actual turn input.
+func writeSyntheticOpenAIResponse(w http.ResponseWriter, env *translate.RequestEnvelope, text string, inputTokens int) error {
 	respID := fmt.Sprintf("chatcmpl_router_cmd_%x", time.Now().UnixNano())
 	if env.Stream() {
-		return writeSyntheticOpenAISSE(w, respID, text)
+		return writeSyntheticOpenAISSE(w, respID, text, inputTokens)
 	}
-	return writeSyntheticOpenAIJSON(w, respID, text)
+	return writeSyntheticOpenAIJSON(w, respID, text, inputTokens)
 }
 
-func writeSyntheticOpenAIJSON(w http.ResponseWriter, respID, text string) error {
+func writeSyntheticOpenAIJSON(w http.ResponseWriter, respID, text string, inputTokens int) error {
 	outTokens := len(text) / 4
 	resp := map[string]any{
 		"id":      respID,
@@ -425,9 +430,9 @@ func writeSyntheticOpenAIJSON(w http.ResponseWriter, respID, text string) error 
 			},
 		},
 		"usage": map[string]any{
-			"prompt_tokens":     0,
+			"prompt_tokens":     inputTokens,
 			"completion_tokens": outTokens,
-			"total_tokens":      outTokens,
+			"total_tokens":      inputTokens + outTokens,
 		},
 	}
 	body, err := json.Marshal(resp)
@@ -439,11 +444,12 @@ func writeSyntheticOpenAIJSON(w http.ResponseWriter, respID, text string) error 
 	return writeErr
 }
 
-func writeSyntheticOpenAISSE(w http.ResponseWriter, respID, text string) error {
+func writeSyntheticOpenAISSE(w http.ResponseWriter, respID, text string, inputTokens int) error {
 	w.Header().Set("Content-Type", "text/event-stream")
 	flusher, _ := w.(http.Flusher)
 	bw := bufio.NewWriterSize(w, 4096)
 	created := time.Now().Unix()
+	outTokens := len(text) / 4
 	chunkStart := mustMarshalJSON(map[string]any{
 		"id":      respID,
 		"object":  "chat.completion.chunk",
@@ -471,6 +477,11 @@ func writeSyntheticOpenAISSE(w http.ResponseWriter, respID, text string) error {
 				"delta":         map[string]any{},
 				"finish_reason": "stop",
 			},
+		},
+		"usage": map[string]any{
+			"prompt_tokens":     inputTokens,
+			"completion_tokens": outTokens,
+			"total_tokens":      inputTokens + outTokens,
 		},
 	})
 	events := []string{

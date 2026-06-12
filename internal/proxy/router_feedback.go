@@ -47,6 +47,7 @@ func (s *Service) handleRouterFeedbackCommand(
 	cmd translate.RouterFeedbackResult,
 	installationID uuid.UUID,
 	sessionKey [sessionpin.SessionKeyLen]byte,
+	inputTokens int,
 ) error {
 	log := observability.FromContext(ctx)
 	role := roleForTier(catalog.TierFor(env.Model()))
@@ -60,7 +61,7 @@ func (s *Service) handleRouterFeedbackCommand(
 		if env.SourceFormat() == translate.FormatOpenAI {
 			msg = "Weave Router: router-feedback needs a message, e.g. /router-feedback got stuck on Haiku for too long"
 		}
-		return writeSyntheticCommandResponse(w, env, msg)
+		return writeSyntheticCommandResponse(w, env, msg, inputTokens)
 	}
 
 	// The model the user is most likely commenting on: what the session pin
@@ -131,16 +132,18 @@ func (s *Service) handleRouterFeedbackCommand(
 	if env.SourceFormat() == translate.FormatOpenAI {
 		msg = "Weave Router: feedback recorded, thank you."
 	}
-	return writeSyntheticCommandResponse(w, env, msg)
+	return writeSyntheticCommandResponse(w, env, msg, inputTokens)
 }
 
 // writeSyntheticCommandResponse writes a router-command acknowledgment in the
-// inbound wire format without dispatching upstream.
-func writeSyntheticCommandResponse(w http.ResponseWriter, env *translate.RequestEnvelope, msg string) error {
+// inbound wire format without dispatching upstream. inputTokens is the
+// request's RoutingFeatures.Tokens so the client's token counter reflects the
+// actual turn input.
+func writeSyntheticCommandResponse(w http.ResponseWriter, env *translate.RequestEnvelope, msg string, inputTokens int) error {
 	switch env.SourceFormat() {
 	case translate.FormatOpenAI:
-		return writeSyntheticOpenAIResponse(w, env, msg)
+		return writeSyntheticOpenAIResponse(w, env, msg, inputTokens)
 	default:
-		return writeSyntheticAnthropicResponse(w, env, msg)
+		return writeSyntheticAnthropicResponse(w, env, msg, inputTokens)
 	}
 }

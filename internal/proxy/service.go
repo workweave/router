@@ -1057,12 +1057,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if s.pinStore != nil {
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
 			log.Info("ProxyMessages force-model command", "force_model_cmd", cmd)
-			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey)
+			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens)
 		}
 	}
 	if cmd, hasCmd := env.ExtractRouterFeedbackCommand(); hasCmd {
 		log.Info("ProxyMessages router-feedback command")
-		return s.handleRouterFeedbackCommand(ctx, w, env, cmd, installationID, sessionKey)
+		return s.handleRouterFeedbackCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens)
 	}
 
 	// Honor the x-weave-force-model header (headless equivalent of /force-model).
@@ -1091,7 +1091,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		if loop, sig, count := detectToolCallLoop(env); loop {
 			loopRole := roleForTier(catalog.TierFor(feats.Model))
 			log.Info("ProxyMessages tool-call loop detected", "tool_sig", sig, "repeat_count", count, "role", loopRole)
-			return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderAnthropic)
+			return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderAnthropic, feats.Tokens)
 		}
 	}
 
@@ -1178,7 +1178,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env)); s.noProgress != nil {
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
-			return s.handleNoProgressBreak(ctx, w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider)
+			return s.handleNoProgressBreak(ctx, w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider, feats.Tokens)
 		}
 	}
 
@@ -2297,12 +2297,12 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	if s.pinStore != nil {
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
 			log.Info("ProxyOpenAIChatCompletion force-model command", "force_model_cmd", cmd)
-			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey)
+			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens)
 		}
 	}
 	if cmd, hasCmd := env.ExtractRouterFeedbackCommand(); hasCmd {
 		log.Info("ProxyOpenAIChatCompletion router-feedback command")
-		return s.handleRouterFeedbackCommand(ctx, w, env, cmd, installationID, sessionKey)
+		return s.handleRouterFeedbackCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens)
 	}
 
 	// Honor the x-weave-force-model header (headless equivalent of /force-model).
@@ -2324,7 +2324,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		if loop, sig, count := detectToolCallLoop(env); loop {
 			loopRole := roleForTier(catalog.TierFor(feats.Model))
 			log.Info("ProxyOpenAIChatCompletion tool-call loop detected", "tool_sig", sig, "repeat_count", count, "role", loopRole)
-			return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderOpenAI)
+			return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderOpenAI, feats.Tokens)
 		}
 	}
 
