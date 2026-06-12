@@ -63,6 +63,15 @@ type Service struct {
 	tierClampResolver func(enabled, excluded map[string]struct{}, ceiling catalog.Tier) (provider, model string, ok bool)
 	// telemetry is an optional repository for persisting per-request telemetry.
 	telemetry TelemetryRepository
+	// captureMode controls whether high-fidelity `router.call` OTLP log
+	// records carry full request/response bodies, content hashes, or are
+	// suppressed entirely. Default CaptureOff (no log records emitted).
+	captureMode ContentCaptureMode
+	// captureMaxBytes caps the buffered response body when capture is on;
+	// larger bodies are dropped and flagged io.truncated.
+	captureMaxBytes int
+	// redactor scrubs captured content before export. Nil passes through.
+	redactor Redactor
 	// byokOnly disables deployment-level credential fallback so customer
 	// requests never silently consume the platform's API key budget.
 	byokOnly bool
@@ -523,6 +532,19 @@ func (s *Service) WithSpiralShadowStore(store SpiralShadowStore) *Service {
 // submissions (router.router_feedback). Nil degrades to span + log only.
 func (s *Service) WithRouterFeedbackStore(store RouterFeedbackStore) *Service {
 	s.feedbackStore = store
+	return s
+}
+
+// WithContentCapture configures high-fidelity `router.call` OTLP log emission.
+// mode selects off/hashed/full; maxBytes caps the buffered response body;
+// redactor (optional) scrubs content before export. No-op effect when the
+// emitter is disabled. Default (unset) is CaptureOff.
+func (s *Service) WithContentCapture(mode ContentCaptureMode, maxBytes int, redactor Redactor) *Service {
+	s.captureMode = mode
+	if maxBytes > 0 {
+		s.captureMaxBytes = maxBytes
+	}
+	s.redactor = redactor
 	return s
 }
 
@@ -1309,7 +1331,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// The TTFB cost is a single round-trip's worth of buffered SSE bytes
 	// (~200B) released the moment the upstream's first byte arrives.
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
-	preludeBuf := newPreludeBuffer(w)
+	contentSink, contentCap := s.maybeCaptureResponse(w)
+	preludeBuf := newPreludeBuffer(contentSink)
 	var rootSink http.ResponseWriter = preludeBuf
 	var captureW *captureWriter
 	var sink http.ResponseWriter = rootSink
@@ -1575,6 +1598,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		End:   time.Now(),
 		Attrs: upstreamBuilder.Build(),
 	})
+	respBody, respTrunc := capturedResponse(contentCap)
+	s.recordCallLog(ctx, upstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
 	otel.Flush(ctx)
 
 	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
@@ -2429,7 +2454,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// so single-binding upstream errors don't strand the routing-marker chunk
 	// on the wire when the upstream never produces a first byte.
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
-	preludeBuf := newPreludeBuffer(w)
+	contentSink, contentCap := s.maybeCaptureResponse(w)
+	preludeBuf := newPreludeBuffer(contentSink)
 	var rootSink http.ResponseWriter = preludeBuf
 
 	// Responses entry point delegates the eager response.created emit to
@@ -2640,6 +2666,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		End:   time.Now(),
 		Attrs: openaiUpstreamBuilder.Build(),
 	})
+	respBody, respTrunc := capturedResponse(contentCap)
+	s.recordCallLog(ctx, openaiUpstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
 	otel.Flush(ctx)
 
 	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)

@@ -405,7 +405,7 @@ func main() {
 		translate.EnableEditEscapeNormalize = true
 		logger.Info("Edit-tool escape-sequence repair enabled (ROUTER_DEEPSEEK_ESCAPE_NORMALIZE=true)")
 	}
-	emitter, err := buildOtelEmitter()
+	emitter, err := buildOtelEmitter(string(deploymentMode))
 	if err != nil {
 		logger.Error("Failed to create OTel emitter", "err", err)
 		panic(err)
@@ -583,7 +583,15 @@ func main() {
 	// wrapped. Prod leaves ROUTER_EXPLORE_ENABLED unset → deterministic argmax.
 	routeEntry := buildExploringRouter(rtr, logger)
 
+	// High-fidelity OTLP content capture. Off unless WV_CAPTURE_CONTENT is set
+	// (opt-in for self-hosted/OSS); Weave-managed deploys set it to "full" in
+	// their deploy config. Redactor is nil here (no-op); managed wires one.
+	captureMode := proxy.ParseCaptureMode(config.GetOr("WV_CAPTURE_CONTENT", ""))
+	captureMaxBytes := parseEnvInt("WV_CAPTURE_MAX_BYTES", 1<<20)
+	logger.Info("Router content capture configured", "mode", captureMode.String(), "max_bytes", captureMaxBytes)
+
 	proxySvc := proxy.NewService(routeEntry, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
+		WithContentCapture(captureMode, captureMaxBytes, nil).
 		WithByokOnly(byokOnly).
 		WithDeploymentKeyedProviders(deploymentEligible).
 		WithPassthroughEligibleProviders(passthroughEligible).
@@ -945,7 +953,7 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 
 // buildOtelEmitter constructs the OTel span emitter from environment
 // variables. Returns (nil, nil) when OTEL_EXPORTER_OTLP_ENDPOINT is unset.
-func buildOtelEmitter() (*otel.Emitter, error) {
+func buildOtelEmitter(deploymentMode string) (*otel.Emitter, error) {
 	logger := observability.Get()
 
 	endpoint := config.GetOr("OTEL_EXPORTER_OTLP_ENDPOINT", "")
@@ -953,11 +961,19 @@ func buildOtelEmitter() (*otel.Emitter, error) {
 		return nil, nil
 	}
 
+	// router.deployment_mode lets the collector branch ingest behavior
+	// (e.g. redaction / content-opt-out) without inspecting per-record attrs.
+	resourceAttrs := parseOtelHeaders(config.GetOr("OTEL_RESOURCE_ATTRIBUTES", ""))
+	if resourceAttrs == nil {
+		resourceAttrs = map[string]string{}
+	}
+	resourceAttrs["router.deployment_mode"] = deploymentMode
+
 	cfg := otel.EmitterConfig{
 		Endpoint:      endpoint,
 		Headers:       parseOtelHeaders(config.GetOr("OTEL_EXPORTER_OTLP_HEADERS", "")),
 		ServiceName:   config.GetOr("OTEL_SERVICE_NAME", "router"),
-		ResourceAttrs: parseOtelHeaders(config.GetOr("OTEL_RESOURCE_ATTRIBUTES", "")),
+		ResourceAttrs: resourceAttrs,
 		Workers:       parseEnvInt("OTEL_EXPORT_WORKERS", 2),
 		QueueSize:     parseEnvInt("OTEL_BSP_MAX_QUEUE_SIZE", 1000),
 		BatchSize:     parseEnvInt("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", 50),

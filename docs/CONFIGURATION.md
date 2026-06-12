@@ -101,7 +101,29 @@ The router exports per-request trace spans to any OTLP-compatible collector.
 Each proxied request emits two spans (`router.decision` and `router.upstream`)
 with routing decisions, token usage, cost estimates, and latency. Export is
 async/non-blocking; when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, OTel is
-fully disabled at zero runtime cost.
+fully disabled at zero runtime cost. Everything the router records leaves the
+process over OTLP only — there is no hardcoded analytics endpoint.
+
+### High-fidelity content capture (`router.call` log records)
+
+When `WV_CAPTURE_CONTENT` is set, the router additionally emits a `router.call`
+OTLP **log record** per upstream call to `${OTEL_EXPORTER_OTLP_ENDPOINT}/v1/logs`.
+Each record carries the same routing/decision metadata as the spans plus the
+call outcome, and — depending on the mode — the request/response bodies. This
+is the ML-ready event stream (one record per LLM call, full inputs and
+outputs). It is **opt-in**: with `WV_CAPTURE_CONTENT` unset (the default) no
+log records are emitted and behavior is unchanged.
+
+| Variable             | Default | Purpose |
+| -------------------- | ------- | ------- |
+| `WV_CAPTURE_CONTENT` | `off`   | `off` = no log records; `hashed` = metadata + SHA-256 content hashes (no raw text); `full` = metadata + raw request/response bodies. |
+| `WV_CAPTURE_MAX_BYTES` | `1048576` | Max buffered response bytes; larger responses are dropped and flagged `io.truncated=true` (the client still receives the full stream). |
+
+Captured bodies are in the client's native wire format (Anthropic / OpenAI /
+Gemini, matching the inbound surface). The `router.deployment_mode` resource
+attribute (`selfhosted` / `managed`) is stamped on every export so a collector
+can branch redaction or content-opt-out by deployment.
+
 
 | Variable                         | Default      | Purpose |
 | -------------------------------- | ------------ | ------- |
@@ -113,7 +135,7 @@ fully disabled at zero runtime cost.
 | `OTEL_BSP_MAX_QUEUE_SIZE`        | `1000`       | Span queue capacity. Spans drop when full. |
 | `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` | `50`         | Max spans per OTLP POST. |
 | `OTEL_BSP_SCHEDULE_DELAY`        | `500`        | Partial-batch flush interval in ms. |
-| `OTEL_EXPORT_WORKERS`            | `2`          | Export-goroutine count. |
+| `OTEL_EXPORT_WORKERS`            | `2`          | Export-goroutine count (spans and logs each get this many workers). |
 
 The first five follow the [OTel SDK env spec](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/);
 `OTEL_BSP_*` follows the [Batch Span Processor spec](https://opentelemetry.io/docs/specs/otel/trace/sdk/#batch-span-processor).

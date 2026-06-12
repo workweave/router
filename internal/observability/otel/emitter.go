@@ -12,8 +12,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
+	logsv1 "go.opentelemetry.io/proto/otlp/logs/v1"
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
 )
@@ -34,15 +36,17 @@ type EmitterConfig struct {
 // Emitter batches OTLP spans and exports them via HTTP POST. Safe for concurrent
 // use. A nil *Emitter means OTel is disabled; all methods no-op.
 type Emitter struct {
-	queue    chan *tracev1.Span
-	client   *http.Client
-	endpoint string
-	headers  map[string]string
-	resource *resourcev1.Resource
-	batchSz  int
-	flushInt time.Duration
-	dropped  atomic.Int64
-	wg       sync.WaitGroup
+	queue       chan *tracev1.Span
+	logQueue    chan *logsv1.LogRecord
+	client      *http.Client
+	endpoint    string
+	logEndpoint string
+	headers     map[string]string
+	resource    *resourcev1.Resource
+	batchSz     int
+	flushInt    time.Duration
+	dropped     atomic.Int64
+	wg          sync.WaitGroup
 	// closeMu coordinates Shutdown's queue close against in-flight Enqueue
 	// calls so a late Enqueue cannot panic with "send on closed channel".
 	// Enqueue acquires RLock for the lifetime of the send; Shutdown takes
@@ -78,18 +82,21 @@ func NewEmitter(cfg EmitterConfig) (*Emitter, error) {
 	}
 
 	e := &Emitter{
-		queue:    make(chan *tracev1.Span, cfg.QueueSize),
-		client:   &http.Client{Timeout: cfg.ExportTimeout},
-		endpoint: strings.TrimRight(cfg.Endpoint, "/") + "/v1/traces",
-		headers:  cfg.Headers,
-		resource: buildResource(cfg.ServiceName, cfg.ResourceAttrs),
-		batchSz:  cfg.BatchSize,
-		flushInt: cfg.FlushInterval,
+		queue:       make(chan *tracev1.Span, cfg.QueueSize),
+		logQueue:    make(chan *logsv1.LogRecord, cfg.QueueSize),
+		client:      &http.Client{Timeout: cfg.ExportTimeout},
+		endpoint:    strings.TrimRight(cfg.Endpoint, "/") + "/v1/traces",
+		logEndpoint: strings.TrimRight(cfg.Endpoint, "/") + "/v1/logs",
+		headers:     cfg.Headers,
+		resource:    buildResource(cfg.ServiceName, cfg.ResourceAttrs),
+		batchSz:     cfg.BatchSize,
+		flushInt:    cfg.FlushInterval,
 	}
 
-	e.wg.Add(cfg.Workers)
+	e.wg.Add(cfg.Workers * 2)
 	for range cfg.Workers {
 		go e.worker()
+		go e.logWorker()
 	}
 
 	return e, nil
@@ -114,6 +121,25 @@ func (e *Emitter) Enqueue(s *tracev1.Span) {
 	}
 }
 
+// EnqueueLog submits a log record to the export queue. Non-blocking: drops on
+// queue-full or post-shutdown. Nil receiver is a no-op.
+func (e *Emitter) EnqueueLog(r *logsv1.LogRecord) {
+	if e == nil {
+		return
+	}
+	e.closeMu.RLock()
+	defer e.closeMu.RUnlock()
+	if e.closed.Load() {
+		e.dropped.Add(1)
+		return
+	}
+	select {
+	case e.logQueue <- r:
+	default:
+		e.dropped.Add(1)
+	}
+}
+
 // Shutdown closes the queue and waits for workers to drain. Blocks until all
 // workers finish or ctx expires. Idempotent; nil receiver is a no-op.
 func (e *Emitter) Shutdown(c context.Context) error {
@@ -127,6 +153,7 @@ func (e *Emitter) Shutdown(c context.Context) error {
 		return nil
 	}
 	close(e.queue)
+	close(e.logQueue)
 	e.closeMu.Unlock()
 
 	done := make(chan struct{})
@@ -183,6 +210,40 @@ func (e *Emitter) worker() {
 	}
 }
 
+// logWorker mirrors worker for the log-record export pipeline.
+func (e *Emitter) logWorker() {
+	defer e.wg.Done()
+
+	batch := make([]*logsv1.LogRecord, 0, e.batchSz)
+	timer := time.NewTimer(e.flushInt)
+	defer timer.Stop()
+
+	for {
+		select {
+		case rec, ok := <-e.logQueue:
+			if !ok {
+				if len(batch) > 0 {
+					e.exportLogBatch(batch)
+				}
+				return
+			}
+			batch = append(batch, rec)
+			if len(batch) >= e.batchSz {
+				e.exportLogBatch(batch)
+				batch = batch[:0]
+				timer.Reset(e.flushInt)
+			}
+
+		case <-timer.C:
+			if len(batch) > 0 {
+				e.exportLogBatch(batch)
+				batch = batch[:0]
+			}
+			timer.Reset(e.flushInt)
+		}
+	}
+}
+
 func (e *Emitter) exportBatch(spans []*tracev1.Span) {
 	req := &coltracepb.ExportTraceServiceRequest{
 		ResourceSpans: []*tracev1.ResourceSpans{{
@@ -199,8 +260,32 @@ func (e *Emitter) exportBatch(spans []*tracev1.Span) {
 		slog.Warn("Failed to marshal OTLP export request", "err", err)
 		return
 	}
+	e.post(e.endpoint, body)
+}
 
-	httpReq, err := http.NewRequest(http.MethodPost, e.endpoint, bytes.NewReader(body))
+func (e *Emitter) exportLogBatch(records []*logsv1.LogRecord) {
+	req := &collogspb.ExportLogsServiceRequest{
+		ResourceLogs: []*logsv1.ResourceLogs{{
+			Resource: e.resource,
+			ScopeLogs: []*logsv1.ScopeLogs{{
+				Scope:      &commonv1.InstrumentationScope{Name: "workweave-router"},
+				LogRecords: records,
+			}},
+		}},
+	}
+
+	body, err := proto.Marshal(req)
+	if err != nil {
+		slog.Warn("Failed to marshal OTLP log export request", "err", err)
+		return
+	}
+	e.post(e.logEndpoint, body)
+}
+
+// post sends a marshaled OTLP protobuf body to endpoint. Failures are logged,
+// not returned: telemetry export is best-effort and never blocks the request.
+func (e *Emitter) post(endpoint string, body []byte) {
+	httpReq, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		slog.Warn("Failed to create OTLP export HTTP request", "err", err)
 		return
