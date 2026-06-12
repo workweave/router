@@ -224,7 +224,7 @@ func TestDeferredCallLog_ReadsBodyAtRunTime(t *testing.T) {
 func TestDeferredCallLog_SafeWhenAbsent(t *testing.T) {
 	assert.Nil(t, deferredCallLogFrom(context.Background()))
 	var d *deferredCallLog
-	assert.NotPanics(t, func() { d.run() })           // nil receiver
+	assert.NotPanics(t, func() { d.run() })                    // nil receiver
 	assert.NotPanics(t, func() { (&deferredCallLog{}).run() }) // no fn registered
 }
 

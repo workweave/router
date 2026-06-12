@@ -1520,7 +1520,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	primaryProvider := decision.Provider
 	var winnerIdx int
 	winnerIdx, proxyErr = s.dispatchWithFallback(ctx, failoverInputs{
-		w:               w,
+		// contentSink routes the failover-exhaustion error envelope through the
+		// content-capture writer; it is the raw w when capture is off.
+		w:               contentSink,
 		buf:             preludeBuf,
 		initialDecision: decision,
 		bindings:        bindings,
@@ -2593,7 +2595,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	primaryProvider := decision.Provider
 	var winnerIdx int
 	winnerIdx, proxyErr = s.dispatchWithFallback(ctx, failoverInputs{
-		w:               w,
+		// contentSink routes the failover-exhaustion error envelope through the
+		// content-capture writer; it is the raw w when capture is off.
+		w:               contentSink,
 		buf:             preludeBuf,
 		initialDecision: decision,
 		bindings:        bindings,
