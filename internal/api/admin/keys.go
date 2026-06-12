@@ -47,7 +47,7 @@ func ListAPIKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
 		}
 		keys, err := authSvc.ListAPIKeys(c.Request.Context(), installation.ID)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to list api keys"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to list API keys."})
 			return
 		}
 		out := make([]apiKeyResponse, 0, len(keys))
@@ -75,7 +75,7 @@ func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 		}
 		key, rawToken, err := authSvc.IssueAPIKey(c.Request.Context(), installation.ID, name, nil)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to issue api key"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to issue API key."})
 			return
 		}
 		c.JSON(http.StatusCreated, issueAPIKeyResponse{
@@ -96,16 +96,16 @@ func RotateAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 		}
 		id := c.Param("id")
 		if id == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing id"})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Missing ID."})
 			return
 		}
 		key, rawToken, err := authSvc.RotateAPIKey(c.Request.Context(), installation.ID, id, nil)
 		if err != nil {
 			if errors.Is(err, auth.ErrAPIKeyNotFound) {
-				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "api key not found"})
+				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "API key not found."})
 				return
 			}
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to rotate api key"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to rotate API key."})
 			return
 		}
 		c.JSON(http.StatusCreated, issueAPIKeyResponse{
@@ -126,12 +126,12 @@ func DeleteAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 		}
 		id := c.Param("id")
 		if id == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing id"})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Missing ID."})
 			return
 		}
 		keys, err := authSvc.ListAPIKeys(c.Request.Context(), installation.ID)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to look up api key"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to look up API key."})
 			return
 		}
 		owned := false
@@ -142,11 +142,11 @@ func DeleteAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 			}
 		}
 		if !owned {
-			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "api key not found"})
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "API key not found."})
 			return
 		}
 		if err := authSvc.DeleteAPIKey(c.Request.Context(), id); err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to delete api key"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete API key."})
 			return
 		}
 		c.Status(http.StatusNoContent)
@@ -189,7 +189,7 @@ func ListExternalKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
 		}
 		keys, err := authSvc.ListExternalAPIKeys(c.Request.Context(), installation.ID)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to list provider keys"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to list provider keys."})
 			return
 		}
 		out := make([]externalKeyResponse, 0, len(keys))
@@ -208,12 +208,12 @@ func UpsertExternalKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 		}
 		var req upsertExternalKeyRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "provider and key are required"})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Provider and key are required."})
 			return
 		}
 		key, err := authSvc.UpsertExternalAPIKey(c.Request.Context(), installation.ID, req.Provider, req.Key, req.Name, nil)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to save provider key"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to save provider key."})
 			return
 		}
 		c.JSON(http.StatusCreated, toExternalKeyResponse(key))
@@ -228,11 +228,11 @@ func DeleteExternalKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 		}
 		id := c.Param("id")
 		if id == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing id"})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Missing ID."})
 			return
 		}
 		if err := authSvc.DeleteExternalAPIKey(c.Request.Context(), installation.ID, id); err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to delete provider key"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete provider key."})
 			return
 		}
 		c.Status(http.StatusNoContent)
