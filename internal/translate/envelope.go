@@ -358,6 +358,10 @@ type EmitOverrides struct {
 	DefaultMaxTokensValue   int64
 	InjectStreamUsage       bool
 	StripThinkingBlocks     bool
+	// StripUnsignedThinkingBlocks removes only thinking blocks that have no
+	// Anthropic-issued signature, leaving signed thinking blocks intact.
+	// Used when OSS-generated unsigned blocks are detected in history.
+	StripUnsignedThinkingBlocks bool
 	// SanitizeToolUseIDs rewrites tool_use.id / tool_use_id values that contain
 	// characters outside ^[a-zA-Z0-9_-]+$. Always set when targeting Anthropic:
 	// non-Anthropic upstreams (e.g. Kimi-k2.6) emit IDs like "functions.Read:0"
@@ -408,6 +412,12 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 		out, err = stripToolUseThoughtSignatureBytes(out)
 		if err != nil {
 			return nil, fmt.Errorf("strip tool_use thought_signature: %w", err)
+		}
+	}
+	if ov.StripUnsignedThinkingBlocks {
+		out, err = stripUnsignedThinkingBlocksBytes(out)
+		if err != nil {
+			return nil, fmt.Errorf("strip unsigned thinking blocks: %w", err)
 		}
 	}
 
@@ -1003,16 +1013,11 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		ov.StripThinkingBlocks = true
 	}
 
-	if opts.ModelSwitched {
-		ov.StripThinkingBlocks = true
-	}
-
-	// ADD THIS:
 	// If history contains thinking blocks without Anthropic-issued signatures
-	// (synthesised from OSS reasoning_content), strip them — unsigned blocks
-	// cause Anthropic to reject the request with a 400.
+	// (synthesised from OSS reasoning_content), note it so applyOverrides can
+	// strip only the unsigned blocks — leaving valid signed blocks intact.
 	if !ov.StripThinkingBlocks && historyHasUnsignedThinkingBlock(body) {
-		ov.StripThinkingBlocks = true
+		ov.StripUnsignedThinkingBlocks = true
 	}
 
 	if !gjson.GetBytes(body, "max_tokens").Exists() {
@@ -1042,6 +1047,77 @@ func historyHasUnsignedThinkingBlock(body []byte) bool {
 		return !found
 	})
 	return found
+}
+
+// stripUnsignedThinkingBlocksBytes removes thinking blocks that have no
+// Anthropic-issued signature while preserving signed thinking blocks and all
+// other content blocks. This is more surgical than stripThinkingBlocksBytes:
+// it only removes the OSS-synthesised blocks that would cause a 400, leaving
+// valid Claude-issued thinking blocks intact.
+func stripUnsignedThinkingBlocksBytes(body []byte) ([]byte, error) {
+	messages := gjson.GetBytes(body, "messages")
+	if !messages.Exists() || !messages.IsArray() {
+		return body, nil
+	}
+
+	anyChanged := false
+	var msgRaws []string
+	var walkErr error
+
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.Exists() || !content.IsArray() {
+			msgRaws = append(msgRaws, msg.Raw)
+			return true
+		}
+
+		hasUnsigned := false
+		content.ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() == "thinking" &&
+				block.Get("signature").String() == "" {
+				hasUnsigned = true
+				return false
+			}
+			return true
+		})
+
+		if !hasUnsigned {
+			msgRaws = append(msgRaws, msg.Raw)
+			return true
+		}
+
+		anyChanged = true
+		var kept []string
+		content.ForEach(func(_, block gjson.Result) bool {
+			// Drop unsigned thinking blocks; keep everything else
+			// including signed thinking blocks.
+			if block.Get("type").String() == "thinking" &&
+				block.Get("signature").String() == "" {
+				return true
+			}
+			kept = append(kept, block.Raw)
+			return true
+		})
+
+		filteredContent := "[" + strings.Join(kept, ",") + "]"
+		newMsg, err := sjson.SetRaw(msg.Raw, "content", filteredContent)
+		if err != nil {
+			walkErr = fmt.Errorf("replace content in message: %w", err)
+			return false
+		}
+		msgRaws = append(msgRaws, newMsg)
+		return true
+	})
+
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	if !anyChanged {
+		return body, nil
+	}
+
+	newMessagesArray := "[" + strings.Join(msgRaws, ",") + "]"
+	return sjson.SetRawBytes(body, "messages", []byte(newMessagesArray))
 }
 
 // resolvePassthroughOverrides strips inference-time fields that non-routing
