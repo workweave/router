@@ -90,14 +90,14 @@ func UpdateExcludedProvidersHandler(authSvc *auth.Service, models DeployedModels
 		}
 		if override != nil && override.HasExcludedProvidersOverride() {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "exclusion list is pinned by ROUTER_EXCLUDED_PROVIDERS; clear the env var to edit",
+				"error": "Exclusion list is pinned by ROUTER_EXCLUDED_PROVIDERS; clear the env var to edit.",
 			})
 			return
 		}
 
 		var req updateExcludedProvidersRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid request body."})
 			return
 		}
 
@@ -114,7 +114,7 @@ func UpdateExcludedProvidersHandler(authSvc *auth.Service, models DeployedModels
 				return
 			}
 			log.Error("Failed to update excluded providers", "err", err, "installation_id", installation.ID)
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to update excluded providers"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to update excluded providers."})
 			return
 		}
 
