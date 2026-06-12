@@ -299,7 +299,7 @@ func TestAnthropicSameFormat_RedactedThinkingBlocksFiltered(t *testing.T) {
 }
 
 func TestAnthropicSameFormat_ThinkingBlocksKeptForCapableModel(t *testing.T) {
-	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"thought"},{"type":"text","text":"reply"}]}],"max_tokens":1024,"thinking":{"type":"adaptive"}}`)
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"thought","signature":"ValidAnthropicSig"},{"type":"text","text":"reply"}]}],"max_tokens":1024,"thinking":{"type":"adaptive"}}`)
 	opts := translate.EmitOptions{
 		TargetModel:  "claude-opus-4-7",
 		Capabilities: router.Lookup("claude-opus-4-7"),
@@ -671,4 +671,43 @@ func TestAnthropicSameFormat_NonXhighEffortUntouchedByClamp(t *testing.T) {
 	outputConfig, _ := out["output_config"].(map[string]any)
 	require.NotNil(t, outputConfig)
 	assert.Equal(t, "high", outputConfig["effort"], "supported effort levels must pass through unchanged")
+}
+
+func TestAnthropicSameFormat_UnsignedThinkingStrippedForThinkingCapableModel(t *testing.T) {
+	// OSS models (DeepSeek, Qwen) return reasoning_content which the router
+	// translates into thinking blocks without Anthropic-issued signatures.
+	// Even for thinking-capable targets, these unsigned blocks must be stripped
+	// or Anthropic rejects the request with 400 "thinking blocks in messages
+	// must have a signature".
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"oss reasoning"},{"type":"text","text":"reply"}]}],"max_tokens":1024,"thinking":{"type":"adaptive"}}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-7",
+		Capabilities: router.Lookup("claude-opus-4-7"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	msgs, _ := out["messages"].([]any)
+	require.Len(t, msgs, 2)
+	assistantMsg, _ := msgs[1].(map[string]any)
+	content, _ := assistantMsg["content"].([]any)
+	require.Len(t, content, 1, "unsigned thinking block must be stripped even for capable models")
+	block, _ := content[0].(map[string]any)
+	assert.Equal(t, "text", block["type"], "only the text block should survive")
+}
+
+func TestAnthropicSameFormat_SignedThinkingPreservedForThinkingCapableModel(t *testing.T) {
+	// Thinking blocks with a valid Anthropic-issued signature must be
+	// preserved — stripping them would discard legitimate reasoning context.
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"real reasoning","signature":"AnthropicSig123"},{"type":"text","text":"reply"}]}],"max_tokens":1024,"thinking":{"type":"adaptive"}}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-7",
+		Capabilities: router.Lookup("claude-opus-4-7"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	msgs, _ := out["messages"].([]any)
+	require.Len(t, msgs, 2)
+	assistantMsg, _ := msgs[1].(map[string]any)
+	content, _ := assistantMsg["content"].([]any)
+	require.Len(t, content, 2, "signed thinking block must be preserved for capable models")
+	block, _ := content[0].(map[string]any)
+	assert.Equal(t, "thinking", block["type"], "signed thinking block should survive")
 }
