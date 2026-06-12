@@ -13,7 +13,7 @@ import (
 )
 
 const getSessionPin = `-- name: GetSessionPin :one
-SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model, has_ever_switched
+SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model, has_ever_switched, trajectory_id, parent_trajectory_id, cache_ledger, cumulative_spend_microusd, switch_count
 FROM router.session_pins
 WHERE session_key = $1::bytea
   AND role        = $2::varchar
@@ -31,7 +31,7 @@ type GetSessionPinParams struct {
 // last_turn_ended_at carry the previous turn's upstream usage; the
 // planner reads them to weigh switch EV against eviction cost.
 //
-//	SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model, has_ever_switched
+//	SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model, has_ever_switched, trajectory_id, parent_trajectory_id, cache_ledger, cumulative_spend_microusd, switch_count
 //	FROM router.session_pins
 //	WHERE session_key = $1::bytea
 //	  AND role        = $2::varchar
@@ -57,6 +57,11 @@ func (q *Queries) GetSessionPin(ctx context.Context, arg GetSessionPinParams) (R
 		&i.ConsecutiveUpstreamErrors,
 		&i.LastServedModel,
 		&i.HasEverSwitched,
+		&i.TrajectoryID,
+		&i.ParentTrajectoryID,
+		&i.CacheLedger,
+		&i.CumulativeSpendMicrousd,
+		&i.SwitchCount,
 	)
 	return i, err
 }
@@ -146,9 +151,35 @@ SET last_input_tokens        = $1::int,
     last_turn_ended_at       = $5::timestamptz,
     has_ever_switched        = has_ever_switched
       OR (last_served_model <> '' AND last_served_model <> $6::varchar),
+    switch_count             = switch_count
+      + CASE WHEN last_served_model <> '' AND last_served_model <> $6::varchar
+          THEN 1 ELSE 0 END,
+    cumulative_spend_microusd = cumulative_spend_microusd + $7::bigint,
+    cache_ledger             = jsonb_set(
+      cache_ledger,
+      ARRAY[$8::text],
+      jsonb_build_object(
+        'last_turn_at',               to_jsonb($5::timestamptz),
+        'last_input_tokens',          $1::int,
+        'last_cache_read_tokens',     $2::int,
+        'last_cache_creation_tokens', $3::int,
+        'last_output_tokens',         $4::int,
+        'consecutive_turns', CASE
+          WHEN last_served_model = $6::varchar
+            THEN COALESCE((cache_ledger->($8::text)->>'consecutive_turns')::int, 0) + 1
+          ELSE 1
+        END,
+        'last_reconcile_error_tokens', CASE
+          WHEN jsonb_exists(cache_ledger, $8::text)
+            THEN to_jsonb(($2::int)
+              - COALESCE((cache_ledger->($8::text)->>'last_input_tokens')::int, 0))
+          ELSE 'null'::jsonb
+        END
+      )
+    ),
     last_served_model        = $6::varchar
-WHERE session_key = $7::bytea
-  AND role        = $8::varchar
+WHERE session_key = $9::bytea
+  AND role        = $10::varchar
 `
 
 type UpdateSessionPinUsageParams struct {
@@ -158,6 +189,8 @@ type UpdateSessionPinUsageParams struct {
 	LastOutputTokens      int32
 	LastTurnEndedAt       pgtype.Timestamptz
 	LastServedModel       string
+	TurnSpendMicrousd     int64
+	LedgerKey             string
 	SessionKey            []byte
 	Role                  string
 }
@@ -180,6 +213,14 @@ type UpdateSessionPinUsageParams struct {
 // keeps the emit path stripping on every subsequent same-model turn for the
 // session's life — the only window in which those poisoned blocks would
 // otherwise reach Anthropic and 400.
+// The cache_ledger merge upserts this turn's (provider, model) entry in the
+// same atomic UPDATE: consecutive_turns increments while the served model is
+// unchanged and resets to 1 on a switch; last_reconcile_error_tokens records,
+// on revisit of an existing entry, the signed gap between the cache reuse the
+// entry predicted (its previous last_input_tokens) and the cache_read the
+// provider actually reported — a learnable provider-cache-reliability signal.
+// switch_count and cumulative_spend_microusd are session aggregates for the
+// step record. Entry count is bounded by roster size + pin TTL; no LRU trim.
 //
 //	UPDATE router.session_pins
 //	SET last_input_tokens        = $1::int,
@@ -189,9 +230,35 @@ type UpdateSessionPinUsageParams struct {
 //	    last_turn_ended_at       = $5::timestamptz,
 //	    has_ever_switched        = has_ever_switched
 //	      OR (last_served_model <> '' AND last_served_model <> $6::varchar),
+//	    switch_count             = switch_count
+//	      + CASE WHEN last_served_model <> '' AND last_served_model <> $6::varchar
+//	          THEN 1 ELSE 0 END,
+//	    cumulative_spend_microusd = cumulative_spend_microusd + $7::bigint,
+//	    cache_ledger             = jsonb_set(
+//	      cache_ledger,
+//	      ARRAY[$8::text],
+//	      jsonb_build_object(
+//	        'last_turn_at',               to_jsonb($5::timestamptz),
+//	        'last_input_tokens',          $1::int,
+//	        'last_cache_read_tokens',     $2::int,
+//	        'last_cache_creation_tokens', $3::int,
+//	        'last_output_tokens',         $4::int,
+//	        'consecutive_turns', CASE
+//	          WHEN last_served_model = $6::varchar
+//	            THEN COALESCE((cache_ledger->($8::text)->>'consecutive_turns')::int, 0) + 1
+//	          ELSE 1
+//	        END,
+//	        'last_reconcile_error_tokens', CASE
+//	          WHEN jsonb_exists(cache_ledger, $8::text)
+//	            THEN to_jsonb(($2::int)
+//	              - COALESCE((cache_ledger->($8::text)->>'last_input_tokens')::int, 0))
+//	          ELSE 'null'::jsonb
+//	        END
+//	      )
+//	    ),
 //	    last_served_model        = $6::varchar
-//	WHERE session_key = $7::bytea
-//	  AND role        = $8::varchar
+//	WHERE session_key = $9::bytea
+//	  AND role        = $10::varchar
 func (q *Queries) UpdateSessionPinUsage(ctx context.Context, arg UpdateSessionPinUsageParams) error {
 	_, err := q.db.Exec(ctx, updateSessionPinUsage,
 		arg.LastInputTokens,
@@ -200,6 +267,8 @@ func (q *Queries) UpdateSessionPinUsage(ctx context.Context, arg UpdateSessionPi
 		arg.LastOutputTokens,
 		arg.LastTurnEndedAt,
 		arg.LastServedModel,
+		arg.TurnSpendMicrousd,
+		arg.LedgerKey,
 		arg.SessionKey,
 		arg.Role,
 	)

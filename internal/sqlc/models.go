@@ -119,6 +119,20 @@ type RouterModelRouterRequestTelemetry struct {
 	ClientApp              *string
 	TurnType               *string
 	RolloutID              *string
+	// Copied from session_pins.trajectory_id at decision time; the offline trajectory join key
+	TrajectoryID pgtype.UUID
+	// Atomic per-trajectory turn counter (pins row), not timestamp ordering
+	TurnIdx *int32
+	// Versioned observation record computed in the Go hot path; trainers consume it verbatim and never reconstruct features
+	StepRecord []byte
+	// Schema version of step_record; trainers refuse mixed versions without a migration map
+	StepRecordVersion *int32
+	// Behavior policy distribution over eligible models {model: probability}; NULL on non-policy spans
+	ActionDistribution []byte
+	// Eligible set after provider/exclusion/capability/context filters, at decision time
+	EligibleModels []string
+	// Set when a safety override (hard pin, force-model, error failover) bypassed the policy; row excluded from policy training
+	OverrideReason *string
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.
@@ -186,6 +200,16 @@ type RouterSessionPin struct {
 	ConsecutiveUpstreamErrors int32
 	LastServedModel           string
 	HasEverSwitched           bool
+	// Stable trajectory UUID minted on first pin; survives session-key drift, copied onto telemetry rows
+	TrajectoryID uuid.UUID
+	// Trajectory of the dispatching parent session for sub-agent threads; NULL for main loops
+	ParentTrajectoryID pgtype.UUID
+	// LRU map keyed "provider/model" -> {last_turn_at, last_input_tokens, last_cache_read_tokens, last_cache_creation_tokens, last_output_tokens, consecutive_turns, last_reconcile_error_tokens}
+	CacheLedger []byte
+	// Running actual upstream spend for the session in micro-USD, accumulated on usage writeback
+	CumulativeSpendMicrousd int64
+	// Number of served-model switches observed on usage writeback (complements has_ever_switched latch)
+	SwitchCount int32
 }
 
 // Shadow-mode spiral (death-march) detections: log-only fire-rate corpus measured on live traffic before escalation is armed

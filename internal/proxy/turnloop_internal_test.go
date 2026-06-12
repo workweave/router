@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/sessionpin"
 )
 
@@ -92,7 +93,9 @@ func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 		SessionKey: sessionKey,
 		PinRole:    sessionpin.DefaultRole,
 	}
-	svc.recordTurnUsage(res, 1200, 80, 200, 900)
+	pricing, ok := catalog.PrimaryPriceFor("claude-opus-4-7")
+	require.True(t, ok)
+	svc.recordTurnUsage(res, pricing, 1200, 80, 200, 900)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -102,6 +105,8 @@ func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	assert.Equal(t, 200, store.lastUsage.CachedWriteTokens)
 	assert.Equal(t, 80, store.lastUsage.OutputTokens)
 	assert.Equal(t, "claude-opus-4-7", store.lastUsage.ServedModel)
+	assert.Equal(t, "anthropic", store.lastUsage.ServedProvider, "ServedProvider keys the cache-ledger entry")
+	assert.Positive(t, store.lastUsage.TurnSpendMicroUSD, "turn spend must accumulate onto the session's cumulative spend")
 	assert.False(t, store.lastUsage.EndedAt.IsZero(), "EndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
 

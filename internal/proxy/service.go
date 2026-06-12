@@ -1563,7 +1563,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	})
 	otel.Flush(ctx)
 
-	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
+	s.recordTurnUsage(routeRes, actPricing, in, out, cacheCreation, cacheRead)
 
 	if installationID != uuid.Nil {
 		s.fireTelemetry(InsertTelemetryParams{
@@ -1728,7 +1728,7 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 	)
 }
 
-func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, cacheRead int) {
+func (s *Service) recordTurnUsage(res turnLoopResult, actPricing catalog.Pricing, in, out, cacheCreation, cacheRead int) {
 	if s.pinStore == nil || res.HardPinned {
 		return
 	}
@@ -1739,6 +1739,8 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 	if in == 0 && out == 0 && cacheCreation == 0 && cacheRead == 0 {
 		return
 	}
+	turnCostUSD := catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, res.Decision.Provider) +
+		catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)
 	usage := sessionpin.Usage{
 		InputTokens:       in,
 		CachedReadTokens:  cacheRead,
@@ -1746,6 +1748,8 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 		OutputTokens:      out,
 		EndedAt:           time.Now(),
 		ServedModel:       res.Decision.Model,
+		ServedProvider:    res.Decision.Provider,
+		TurnSpendMicroUSD: int64(turnCostUSD * 1e6),
 	}
 	role := res.PinRole
 	if role == "" {
@@ -2547,7 +2551,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	})
 	otel.Flush(ctx)
 
-	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
+	s.recordTurnUsage(routeRes, actPricing, in, out, cacheCreation, cacheRead)
 
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)

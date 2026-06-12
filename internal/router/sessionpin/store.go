@@ -64,6 +64,23 @@ type Pin struct {
 	// earlier cross-model excursion left in the client transcript are stripped
 	// on every subsequent turn, not just the single switch-back turn.
 	HasEverSwitched bool
+	// TrajectoryID is the stable per-session trajectory UUID, minted by the
+	// database on first insert. It survives session-key drift (compaction can
+	// rewrite the first user message the key derives from) and is copied
+	// onto telemetry rows as the offline trajectory join key.
+	TrajectoryID uuid.UUID
+	// ParentTrajectoryID links a sub-agent session to the dispatching parent
+	// trajectory. Zero UUID for main loops.
+	ParentTrajectoryID uuid.UUID
+	// Ledger is the per-(provider, model) cache ledger, maintained atomically
+	// in SQL by Store.UpdateUsage and read here to derive cache-warmth
+	// features at decision time.
+	Ledger CacheLedger
+	// CumulativeSpendMicroUSD accumulates the session's actual upstream
+	// spend across turns, written by Store.UpdateUsage.
+	CumulativeSpendMicroUSD int64
+	// SwitchCount counts served-model switches observed on usage writeback.
+	SwitchCount int
 }
 
 // Usage captures the previous turn's upstream token accounting.
@@ -75,6 +92,12 @@ type Usage struct {
 	EndedAt           time.Time
 	// ServedModel is the model that served the turn this usage came from.
 	ServedModel string
+	// ServedProvider is the provider binding that actually served the turn
+	// (post-failover). Keys the cache-ledger entry together with ServedModel.
+	ServedProvider string
+	// TurnSpendMicroUSD is the turn's actual upstream cost in micro-USD,
+	// accumulated onto the pin row's cumulative session spend.
+	TurnSpendMicroUSD int64
 }
 
 // Store is the I/O surface for session pins. Get returns (zero, false, nil)

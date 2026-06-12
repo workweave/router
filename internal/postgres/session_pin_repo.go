@@ -3,12 +3,14 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/sqlc"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -75,6 +77,8 @@ func (r *SessionPinRepo) UpdateUsage(ctx context.Context, sessionKey [sessionpin
 		LastOutputTokens:      int32(usage.OutputTokens),
 		LastTurnEndedAt:       pgtype.Timestamptz{Time: endedAt.UTC(), Valid: true},
 		LastServedModel:       usage.ServedModel,
+		TurnSpendMicrousd:     usage.TurnSpendMicroUSD,
+		LedgerKey:             sessionpin.LedgerKey(usage.ServedProvider, usage.ServedModel),
 	})
 }
 
@@ -133,10 +137,41 @@ func toSessionPin(row sqlc.RouterSessionPin) sessionpin.Pin {
 		LastServedModel:           row.LastServedModel,
 		HasEverSwitched:           row.HasEverSwitched,
 		ConsecutiveUpstreamErrors: int(row.ConsecutiveUpstreamErrors),
+		TrajectoryID:              row.TrajectoryID,
+		ParentTrajectoryID:        uuidOrZero(row.ParentTrajectoryID),
+		Ledger:                    toCacheLedger(row.CacheLedger),
+		CumulativeSpendMicroUSD:   row.CumulativeSpendMicrousd,
+		SwitchCount:               int(row.SwitchCount),
 	}
 	// Bounded copy guards against a corrupt row panicking the request handler.
 	copy(pin.SessionKey[:], row.SessionKey)
 	return pin
+}
+
+// toCacheLedger decodes the cache_ledger JSONB column. A corrupt or empty
+// blob degrades to a nil ledger (cache features read as cold) rather than
+// failing the pin read — routing must not 503 on ledger damage.
+func toCacheLedger(raw []byte) sessionpin.CacheLedger {
+	if len(raw) == 0 {
+		return nil
+	}
+	var ledger sessionpin.CacheLedger
+	if err := json.Unmarshal(raw, &ledger); err != nil {
+		return nil
+	}
+	if len(ledger) == 0 {
+		return nil
+	}
+	return ledger
+}
+
+// uuidOrZero surfaces a NULL uuid column as the zero uuid.UUID so domain
+// types stay free of pgtype concerns.
+func uuidOrZero(u pgtype.UUID) uuid.UUID {
+	if !u.Valid {
+		return uuid.UUID{}
+	}
+	return u.Bytes
 }
 
 // timestamptzOrZero mirrors timestampOrZero for TIMESTAMPTZ columns;

@@ -65,6 +65,14 @@ ON CONFLICT (session_key, role) DO UPDATE SET
 -- keeps the emit path stripping on every subsequent same-model turn for the
 -- session's life — the only window in which those poisoned blocks would
 -- otherwise reach Anthropic and 400.
+-- The cache_ledger merge upserts this turn's (provider, model) entry in the
+-- same atomic UPDATE: consecutive_turns increments while the served model is
+-- unchanged and resets to 1 on a switch; last_reconcile_error_tokens records,
+-- on revisit of an existing entry, the signed gap between the cache reuse the
+-- entry predicted (its previous last_input_tokens) and the cache_read the
+-- provider actually reported — a learnable provider-cache-reliability signal.
+-- switch_count and cumulative_spend_microusd are session aggregates for the
+-- step record. Entry count is bounded by roster size + pin TTL; no LRU trim.
 -- name: UpdateSessionPinUsage :exec
 UPDATE router.session_pins
 SET last_input_tokens        = @last_input_tokens::int,
@@ -74,6 +82,32 @@ SET last_input_tokens        = @last_input_tokens::int,
     last_turn_ended_at       = @last_turn_ended_at::timestamptz,
     has_ever_switched        = has_ever_switched
       OR (last_served_model <> '' AND last_served_model <> @last_served_model::varchar),
+    switch_count             = switch_count
+      + CASE WHEN last_served_model <> '' AND last_served_model <> @last_served_model::varchar
+          THEN 1 ELSE 0 END,
+    cumulative_spend_microusd = cumulative_spend_microusd + @turn_spend_microusd::bigint,
+    cache_ledger             = jsonb_set(
+      cache_ledger,
+      ARRAY[@ledger_key::text],
+      jsonb_build_object(
+        'last_turn_at',               to_jsonb(@last_turn_ended_at::timestamptz),
+        'last_input_tokens',          @last_input_tokens::int,
+        'last_cache_read_tokens',     @last_cached_read_tokens::int,
+        'last_cache_creation_tokens', @last_cached_write_tokens::int,
+        'last_output_tokens',         @last_output_tokens::int,
+        'consecutive_turns', CASE
+          WHEN last_served_model = @last_served_model::varchar
+            THEN COALESCE((cache_ledger->(@ledger_key::text)->>'consecutive_turns')::int, 0) + 1
+          ELSE 1
+        END,
+        'last_reconcile_error_tokens', CASE
+          WHEN jsonb_exists(cache_ledger, @ledger_key::text)
+            THEN to_jsonb((@last_cached_read_tokens::int)
+              - COALESCE((cache_ledger->(@ledger_key::text)->>'last_input_tokens')::int, 0))
+          ELSE 'null'::jsonb
+        END
+      )
+    ),
     last_served_model        = @last_served_model::varchar
 WHERE session_key = @session_key::bytea
   AND role        = @role::varchar;
