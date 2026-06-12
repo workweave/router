@@ -2107,28 +2107,34 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
     routed="$(normalize_model "$routed")"
   fi
 
-  # Detect an active /force-model pin. When the user runs /force-model the
-  # router writes a synthetic acknowledgment turn into the transcript
-  # ("✦ Weave Router → force-model applied: <model> (<provider>) …"), and
-  # /unforce-model writes a matching "force-model cleared" turn. Neither is
-  # stripped from the on-disk transcript — the ingress stripper only scrubs
-  # these markers from requests forwarded upstream — so the latest of the two
-  # tells us whether the session is currently pinned. We surface that as a
-  # [forced] tag and prefer the pinned model id parsed from the marker: once a
-  # pin is live the routed model id is indistinguishable from automatic
-  # routing, so the marker is the only signal that the choice was forced.
-  #
-  # Match only the router's own synthetic ack turns (message.model ==
-  # "weave-router"), never normal assistant replies — otherwise a model
-  # response that merely quotes "force-model applied:" / "force-model cleared"
-  # (e.g. explaining the feature) could outrank the real latest ack and flip
-  # the tag on or off incorrectly.
-  force_marker="$("${reverse[@]}" "$transcript_path" 2>/dev/null \
-    | jq -r 'select(.type=="assistant" and .message.model=="weave-router") | .message.content[]? | select(.type? == "text") | .text // empty' 2>/dev/null \
-    | grep -m1 -E 'force-model (applied|cleared)' || true)"
-  if [[ "$force_marker" == *"force-model applied:"* ]]; then
+  # Detect an active /force-model pin from the router's synthetic ack turns —
+  # the only turns stamped message.model == "weave-router". The router emits
+  # one whenever a pin changes state:
+  #   * /force-model              → "force-model applied: <model> (<provider>) …"
+  #   * /unforce-model            → "force-model cleared …"
+  #   * loop / no-progress break  → "… clearing the session pin …" (expires the
+  #                                  pin, including a user-forced one)
+  #   * unrecognized model        → "… isn't a recognized model · keeping
+  #                                  automatic routing" — a NO-OP: the prior
+  #                                  pin, if any, is left untouched
+  # These persist on disk (the ingress stripper only scrubs them from upstream
+  # requests). Classify each weave-router turn newest-first, skip the no-op
+  # "rejected" acks, and let the latest real state change decide: an "applied"
+  # marker means the session is pinned (and names the model); anything else
+  # (cleared / loop-break / no-progress) means automatic routing has resumed.
+  # Restricting to weave-router turns keeps a normal reply that merely quotes
+  # these phrases from flipping the tag. (A silent server-side TTL expiry emits
+  # no turn and so can't be reflected here — the pin TTL outlives a session.)
+  force_state="$("${reverse[@]}" "$transcript_path" 2>/dev/null \
+    | jq -r 'select(.type=="assistant" and .message.model=="weave-router")
+        | ([.message.content[]? | select(.type? == "text") | .text] | join(" ") | gsub("[\n\r]"; " ")) as $t
+        | if ($t | test("force-model applied:")) then "APPLIED " + ($t | capture("force-model applied: (?<m>[^ ]+)").m)
+          elif ($t | test("isn.t a recognized model")) then "REJECTED"
+          else "CLEARED" end' 2>/dev/null \
+    | grep -m1 -v '^REJECTED$' || true)"
+  if [[ "$force_state" == APPLIED\ * ]]; then
     forced="true"
-    forced_model="$(printf '%s' "$force_marker" | sed -E 's/.*force-model applied: ([^ ]+).*/\1/')"
+    forced_model="${force_state#APPLIED }"
   fi
 
   # Compute a session running total: savings across every assistant turn
