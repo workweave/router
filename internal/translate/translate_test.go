@@ -776,6 +776,67 @@ func TestAnthropicSSETranslator_StreamingReasoningContentField(t *testing.T) {
 	assert.Contains(t, body, `"text":"answer"`)
 }
 
+// DeepSeek-v4 on Fireworks emits a whitespace-only "\n\n" content delta
+// between its reasoning_content and its tool_calls. Opening a text block for it
+// renders as an empty assistant block wedged between the thinking block and the
+// tool_use. The translator must buffer whitespace-only leading content and drop
+// it when the turn ends on a tool_use rather than real text.
+func TestAnthropicSSETranslator_WhitespaceOnlyContentBeforeToolCallSuppressed(t *testing.T) {
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "deepseek/deepseek-v4-pro", nil)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"reasoning_content":"think about it"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"\n\n"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"Read","arguments":"{\"path\":\"a.go\"}"}}]},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"thinking":"think about it"`)
+	assert.Contains(t, body, `"type":"tool_use"`)
+	// The whitespace-only content must never open a text block.
+	assert.NotContains(t, body, `"content_block":{"type":"text"`)
+	assert.NotContains(t, body, `"type":"text_delta"`)
+}
+
+// When real text follows the whitespace-only delta, the buffered whitespace is
+// flushed as the text block's leading content so the model's formatting is
+// preserved (only the trailing-before-tool_use case is dropped).
+func TestAnthropicSSETranslator_WhitespaceFlushedWhenRealTextFollows(t *testing.T) {
+	rec := httptest.NewRecorder()
+	translator := translate.NewAnthropicSSETranslator(rec, "deepseek/deepseek-v4-pro", nil)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"reasoning_content":"hmm"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"\n\n"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"the answer"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+	require.NoError(t, translator.Finalize())
+
+	// Leading whitespace is preserved as the text block's leading content. The
+	// custom SSE writer escapes newlines as \u000a (not \n).
+	assert.Contains(t, rec.Body.String(), `"text_delta","text":"\u000a\u000athe answer"`)
+}
+
 func TestAnthropicSSETranslator_NonStreamingReasoningEmitsThinkingBlock(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "qwen/qwen3-coder-next", nil)

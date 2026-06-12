@@ -350,7 +350,16 @@ type AnthropicSSETranslator struct {
 	// text channel; clients see "Let me check..." narration mixed with the
 	// real answer.
 	thinkingOpen bool
-	toolBlocks   map[int]int
+	// pendingText holds whitespace-only content deltas that arrived before any
+	// non-whitespace text. DeepSeek-v4 (and other reasoning upstreams on
+	// Fireworks/OpenRouter) emit a "\n\n" content delta between
+	// reasoning_content and tool_calls; opening a text block for it renders as
+	// an empty assistant block between the thinking block and the tool_use. We
+	// hold whitespace until real text justifies a block, then flush it as the
+	// block's leading content so the model's formatting survives. If only
+	// whitespace ever arrives, no text block opens and the buffer is dropped.
+	pendingText strings.Builder
+	toolBlocks  map[int]int
 	// suppressedTools holds tool_call indices we refused to open because the
 	// first delta carried no function name (see emitDelta). Later argument
 	// fragments reuse the same index, so we must remember to drop them too.
@@ -820,29 +829,45 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 	}
 
 	if content := delta.Get("content").Str; content != "" {
-		if t.thinkingOpen {
-			if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+		// Defer opening a text block until non-whitespace arrives. A
+		// whitespace-only delta with no text block open yet would otherwise
+		// surface as an empty text block wedged between a thinking block and a
+		// tool_use (DeepSeek-v4 emits "\n\n" there). Buffer it instead; it is
+		// flushed once real text justifies a block, or dropped if the turn ends
+		// on tool_use. Whitespace inside an already-open text block is
+		// legitimate formatting and emits normally. Falls through to tool_calls
+		// since a single delta can carry both.
+		if !t.textOpen && strings.TrimSpace(content) == "" {
+			t.pendingText.WriteString(content)
+		} else {
+			if t.thinkingOpen {
+				if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+					return err
+				}
+				t.thinkingOpen = false
+			}
+			if !t.textOpen {
+				if err := t.emitContentBlockStartText(t.blockIdx); err != nil {
+					return err
+				}
+				t.textOpen = true
+				t.blockIdx++
+			}
+			if t.pendingText.Len() > 0 {
+				content = t.pendingText.String() + content
+				t.pendingText.Reset()
+			}
+			t.sawText = true
+			if n := t.leadingContent.Len(); n < leadingContentCap {
+				if room := leadingContentCap - n; len(content) > room {
+					t.leadingContent.WriteString(content[:room])
+				} else {
+					t.leadingContent.WriteString(content)
+				}
+			}
+			if err := t.emitContentBlockDeltaText(t.blockIdx-1, content); err != nil {
 				return err
 			}
-			t.thinkingOpen = false
-		}
-		if !t.textOpen {
-			if err := t.emitContentBlockStartText(t.blockIdx); err != nil {
-				return err
-			}
-			t.textOpen = true
-			t.blockIdx++
-		}
-		t.sawText = true
-		if n := t.leadingContent.Len(); n < leadingContentCap {
-			if room := leadingContentCap - n; len(content) > room {
-				t.leadingContent.WriteString(content[:room])
-			} else {
-				t.leadingContent.WriteString(content)
-			}
-		}
-		if err := t.emitContentBlockDeltaText(t.blockIdx-1, content); err != nil {
-			return err
 		}
 	}
 
