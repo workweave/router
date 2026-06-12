@@ -92,10 +92,8 @@ var forceModelAliases = map[string]string{
 //  4. Naming heuristic for IDs not in the catalog (provider guess only).
 //
 // The returned `known` flag is true only for catalog matches (1, 2, and 3). A
-// false `known` means the input has no catalog entry and therefore no known
-// tier: the requested-model tier ceiling would rewrite a pin to it on every
-// turn (clampToCeiling treats unknown tiers as above-ceiling), so the user
-// would never actually be served the model. Callers must reject the command
+// false `known` means the input has no catalog entry, so the router can't
+// confirm it names a real, servable model. Callers must reject the command
 // rather than pin an unservable directive. The heuristic provider is still
 // returned for logging.
 func resolveForceModel(model string) (canonicalID, provider string, known bool) {
@@ -274,13 +272,10 @@ func (s *Service) handleForceModelCommand(
 			"role", role,
 		)
 	} else if canonicalModel, provider, known := resolveForceModel(cmd.Model); !known {
-		// The model isn't in the catalog, so it has no known tier. A pin to an
-		// unknown-tier model is rewritten by the requested-model tier ceiling on
-		// every turn (clampToCeiling treats unknown tiers as above-ceiling), so
-		// the user would silently be served a tier-default model instead of the
-		// one they asked for — e.g. a truncated "/force-model gpt-" routing to an
-		// OSS fallback. Reject the directive rather than pin something we can't
-		// honor; the previous pin (if any) is left untouched.
+		// The model isn't in the catalog, so we can't confirm it names a real,
+		// servable model — e.g. a truncated "/force-model gpt-". Reject the
+		// directive rather than pin something we can't honor; the previous pin
+		// (if any) is left untouched.
 		log.Info("/force-model: rejected unknown model",
 			"input_model", cmd.Model,
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),

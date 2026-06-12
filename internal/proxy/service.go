@@ -58,9 +58,6 @@ type Service struct {
 	// model is unsafe — the installation may only BYOK a subset of providers.
 	// Returns (provider, model, ok); ok=false signals no eligible provider.
 	hardPinResolver func(enabled map[string]struct{}) (provider, model string, ok bool)
-	// tierClampResolver enforces the requested-model tier ceiling. Nil disables
-	// the clamp.
-	tierClampResolver func(enabled, excluded map[string]struct{}, ceiling catalog.Tier) (provider, model string, ok bool)
 	// telemetry is an optional repository for persisting per-request telemetry.
 	telemetry TelemetryRepository
 	// captureMode controls whether high-fidelity `router.call` OTLP log
@@ -224,25 +221,14 @@ func routingMarkerFor(res turnLoopResult) string {
 	// model changed, even if the reason code is unknown (recovery codes return
 	// empty from humanReasonFromPlanner).
 	modelChanged := res.PriorServedModel != "" && res.PriorServedModel != res.Decision.Model
-	if res.PlannerDecision.Reason == "" && !res.HardPinned && !res.TierClamped && res.StickyHit && !modelChanged {
+	if res.PlannerDecision.Reason == "" && !res.HardPinned && res.StickyHit && !modelChanged {
 		return ""
 	}
 	parts := []string{"✦ **Weave Router** → " + decision.Model}
 	if reason := routingReasonShort(res); reason != "" {
 		parts = append(parts, reason)
 	}
-	if note := clampNote(res); note != "" {
-		parts = append(parts, note)
-	}
 	return strings.Join(parts, " · ") + "\n\n"
-}
-
-// clampNote surfaces the tier-ceiling clamp; empty when no clamp occurred.
-func clampNote(res turnLoopResult) string {
-	if !res.TierClamped || res.PreClampModel == "" {
-		return ""
-	}
-	return fmt.Sprintf("second-choice pick at %s tier (would have used %s)", res.RequestedTier.String(), res.PreClampModel)
 }
 
 // User-facing routing-marker prose. These are the single source of truth for
@@ -655,12 +641,6 @@ func (s *Service) WithHardPinResolver(resolver func(enabled map[string]struct{})
 // the inbound RequestedModel has no pricing entry. Empty disables.
 func (s *Service) WithDefaultBaselineModel(model string) *Service {
 	s.defaultBaselineModel = model
-	return s
-}
-
-// WithTierClampResolver installs the tier-ceiling clamp resolver. Nil disables.
-func (s *Service) WithTierClampResolver(resolver func(enabled, excluded map[string]struct{}, ceiling catalog.Tier) (provider, model string, ok bool)) *Service {
-	s.tierClampResolver = resolver
 	return s
 }
 
@@ -1773,7 +1753,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		)
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
 	return proxyErr
 }
 
@@ -2800,7 +2780,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "tier_clamped", routeRes.TierClamped, "pre_clamp_model", routeRes.PreClampModel, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
 	return proxyErr
 }
 

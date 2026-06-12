@@ -472,32 +472,6 @@ func main() {
 		}
 	}
 
-	// Tier-clamp resolver enforces the requested-model ceiling. Loads the
-	// default cluster bundle once and, on each call, returns the fastest
-	// (by measured tok/s) deployed model whose capability tier is at or below
-	// the ceiling and whose provider is in the request's enabled set, falling
-	// back to cheapest when the bundle lacks speed annotations. Nil when the
-	// bundle can't load — the proxy then leaves all decisions un-clamped
-	// (preserves pre-tier-ceiling behavior).
-	var tierClampResolver func(map[string]struct{}, map[string]struct{}, catalog.Tier) (string, string, bool)
-	{
-		reqVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
-		if version, vErr := cluster.ResolveVersion(reqVersion); vErr == nil {
-			if bundle, bErr := cluster.LoadBundle(version); bErr == nil {
-				meta, registry := bundle.Metadata, bundle.Registry
-				tierClampResolver = func(enabled, excluded map[string]struct{}, ceiling catalog.Tier) (string, string, bool) {
-					allowed := catalog.AllowedAtOrBelow(ceiling)
-					return cluster.FastestModelInSet(meta, registry, enabled, excluded, allowed)
-				}
-				logger.Info("Tier-clamp resolver wired", "version", version)
-			} else {
-				logger.Warn("Tier-clamp resolver disabled: cluster bundle failed to load", "err", bErr, "version", version)
-			}
-		} else {
-			logger.Warn("Tier-clamp resolver disabled: could not resolve cluster version", "err", vErr)
-		}
-	}
-
 	// Default-eligible set for proxy.Service: env-keyed providers only.
 	// BYOK and client-supplied credentials add to this set per-request
 	// inside enabledProvidersForRequest.
@@ -596,7 +570,6 @@ func main() {
 		WithDeploymentKeyedProviders(deploymentEligible).
 		WithPassthroughEligibleProviders(passthroughEligible).
 		WithHardPinResolver(hardPinResolver).
-		WithTierClampResolver(tierClampResolver).
 		WithPlannerEnabled(plannerEnabled).
 		WithEffortEscalation(effortEscalation).
 		WithLoopEscalationConfig(loopEscalationEnabled, loopEscalationHoldoutPct).

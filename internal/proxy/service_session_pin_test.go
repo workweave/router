@@ -16,7 +16,6 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
-	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
@@ -726,8 +725,8 @@ func TestService_HardPin_BypassesTierCeiling(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	// Hard-pin set to opus (High); inbound model haiku → ceiling Low.
-	// Pre-fix, clampToCeiling would rewrite opus → the resolver's pick.
+	// Hard-pin set to opus (High); inbound model haiku. The hard pin is served
+	// regardless of the requested tier.
 	svc := proxy.NewService(
 		fr,
 		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
@@ -739,10 +738,7 @@ func TestService_HardPin_BypassesTierCeiling(t *testing.T) {
 		providers.ProviderAnthropic,
 		"claude-opus-4-7",
 		nil,
-	).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
-		// If this fires for a hard-pin decision, the bypass is broken.
-		return providers.ProviderAnthropic, "claude-haiku-4-5", true
-	})
+	)
 
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
@@ -755,67 +751,55 @@ func TestService_HardPin_BypassesTierCeiling(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "operator hard-pin must win over the tier ceiling")
 }
 
-// haikuClampBody requests a Low-tier model (haiku); the scorer is
-// stubbed to return an Opus (High) pick, which violates the ceiling and
-// must be clamped down to a Low-tier alternative.
+// haikuClampBody requests a Low-tier model (haiku); the scorer is stubbed to
+// return an Opus (High) pick. The router now honors that upgrade rather than
+// downgrading it to a cheap in-tier model.
 const haikuClampBody = `{
 	"model":"claude-haiku-4-5",
 	"system":"sys",
 	"messages":[{"role":"user","content":"summarize this"}]
 }`
 
-// TestService_TierClamp_HaikuRequestedClampsHighScore covers the
-// haiku-tier leak that motivated this change: a background haiku call
-// whose scorer recommended an Opus/DeepSeek-pro/Gemini-pro pick must be
-// clamped to a Low-tier alternative.
-func TestService_TierClamp_HaikuRequestedClampsHighScore(t *testing.T) {
+// TestService_TierClamp_HaikuRequestedHonorsHighScore covers the policy that
+// replaced the haiku-tier downgrade: a haiku-requested turn whose scorer
+// recommended an Opus (High) pick is served on Opus. The requested tier is a
+// floor for the router's judgement, not a ceiling — previously this clamped
+// down to the fastest in-ceiling model (gemini-flash-lite).
+func TestService_TierClamp_HaikuRequestedHonorsHighScore(t *testing.T) {
 	store := newFakePinStore()
-	// Scorer returns High-tier model: must be rewritten.
-	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, ceiling catalog.Tier) (string, string, bool) {
-		require.Equal(t, catalog.TierLow, ceiling, "haiku requested → Low ceiling")
-		return providers.ProviderAnthropic, "claude-haiku-4-5", true
-	})
+	svc := newPinSvc(fr, store)
 
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
 
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "decision must be clamped to in-ceiling model")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "haiku-requested hard turn must honor the scorer's Opus upgrade, not clamp down")
 }
 
-// TestService_TierClamp_OpusRequestedNoClamp confirms High-tier
-// requests (opus) leave any decision unchanged — there's no ceiling
-// to enforce above High.
-func TestService_TierClamp_OpusRequestedNoClamp(t *testing.T) {
+// TestService_TierClamp_OpusRequestedDecisionPassesThrough confirms an
+// opus-requested turn serves the scorer's High pick unchanged.
+func TestService_TierClamp_OpusRequestedDecisionPassesThrough(t *testing.T) {
 	store := newFakePinStore()
-	// Scorer returns a High model; opus ceiling allows it.
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	resolverCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
-		resolverCalls++
-		return "", "", false
-	})
+	svc := newPinSvc(fr, store)
 
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "opus ceiling allows High picks unchanged")
-	assert.Equal(t, 0, resolverCalls, "resolver must not be called when decision is at or below ceiling")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "scorer's pick must pass through unchanged")
 }
 
-// TestService_TierClamp_PinAboveCeilingIsClamped covers the original
-// leak directly: a session pin from a previous opus turn points at
-// deepseek-v4-pro (High); the next turn requests haiku (Low ceiling) —
-// the pin's stored model must be clamped on read, not blindly served.
-// (Pin keying by tier role prevents this in practice; this test guards
-// the defense-in-depth clamp on the pin-hit path in case roles collide.)
-func TestService_TierClamp_PinAboveCeilingIsClamped(t *testing.T) {
+// TestService_TierClamp_PinAboveRequestedTierHonored covers the pin-hit path:
+// a session pin from a previous opus turn points at opus (High); the next turn
+// requests haiku (Low). The pin's stronger model is served unchanged — the
+// requested tier no longer downgrades it.
+func TestService_TierClamp_PinAboveRequestedTierHonored(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -827,52 +811,21 @@ func TestService_TierClamp_PinAboveCeilingIsClamped(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
-		return providers.ProviderAnthropic, "claude-haiku-4-5", true
-	})
+	svc := newPinSvc(fr, store)
 
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
 
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "pin above the requested tier must be honored, not clamped down")
 }
 
-// TestService_ForcedPin_ClampedReasonSurfacesTierClamp guards the reporting
-// half of the force-model fix: when a user-forced model exceeds the turn's
-// tier ceiling and is downgraded, the decision reason must carry the
-// "+tier_clamp" suffix instead of being overwritten back to plain
-// "user_forced". Otherwise the decision log and x-router-decision badge claim
-// the turn was served on the forced model when it was actually clamped away.
-func TestService_ForcedPin_ClampedReasonSurfacesTierClamp(t *testing.T) {
-	store := newFakePinStore()
-	store.hasPin = true
-	store.pin = sessionpin.Pin{
-		Provider:    providers.ProviderAnthropic,
-		Model:       "claude-opus-4-7", // High-tier forced model
-		Reason:      translate.ReasonUserForceModel,
-		PinnedUntil: time.Now().Add(30 * time.Minute),
-	}
-	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
-
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
-		return providers.ProviderAnthropic, "claude-haiku-4-5", true
-	})
-
-	ctx := authedCtx(uuid.New().String())
-	rec := httptest.NewRecorder()
-	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	// Requesting haiku (Low ceiling) forces the High forced pin to clamp.
-	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
-
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "clamped forced pin must serve the in-ceiling model")
-	assert.Equal(t, translate.ReasonUserForceModel+"+tier_clamp", rec.Header().Get(proxy.HeaderRouterDecision), "clamped forced pin must report the tier_clamp suffix, not plain user_forced")
-}
-
-// TestService_ForcedPin_UnclampedReasonStaysUserForced is the companion: an
-// in-ceiling forced pin keeps the plain "user_forced" reason.
-func TestService_ForcedPin_UnclampedReasonStaysUserForced(t *testing.T) {
+// TestService_ForcedPin_ReasonStaysUserForced verifies a user-forced pin is
+// served unchanged with the plain "user_forced" reason (it is never downgraded).
+//
+// (formerly two tests, clamped + unclamped; the tier clamp no longer downgrades.)
+func TestService_ForcedPin_ReasonStaysUserForced(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -883,21 +836,15 @@ func TestService_ForcedPin_UnclampedReasonStaysUserForced(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	clampCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
-		clampCalls++
-		return providers.ProviderAnthropic, "claude-haiku-4-5", true
-	})
+	svc := newPinSvc(fr, store)
 
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	// Requesting opus (High ceiling) leaves the High forced pin in-ceiling.
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	assert.Equal(t, 0, clampCalls, "in-ceiling forced pin must not invoke the clamp resolver")
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel))
-	assert.Equal(t, translate.ReasonUserForceModel, rec.Header().Get(proxy.HeaderRouterDecision), "in-ceiling forced pin keeps the plain user_forced reason")
+	assert.Equal(t, translate.ReasonUserForceModel, rec.Header().Get(proxy.HeaderRouterDecision), "forced pin keeps the plain user_forced reason")
 }
 
 // TestService_LoopEscalationPin_HonoredAsImmutableSticky verifies a
@@ -972,200 +919,6 @@ func TestService_LoopEscalation_DoesNotOverwriteUserForcedPin(t *testing.T) {
 		assert.NotEqual(t, translate.ReasonLoopEscalation, p.Reason, "escalation must not overwrite a user_forced pin")
 	}
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "session stays on the user's forced model, not opus")
-}
-
-// TestService_TierClamp_UnknownRequestedModelDisablesClamp regression-
-// guards the PR #100 finding: RequestedTier must be derived from
-// catalog.TierFor(feats.Model) directly, not via
-// baselineFor(feats.Model). Substituting unknown model names through
-// baselineFor (which falls back to the default mid-tier baseline)
-// would force custom/proxy model names like "weave-router" into a
-// TierMid ceiling and silently clamp high-tier scorer picks. The
-// documented behavior is "unknown requested model ⇒ TierUnknown ⇒
-// clamping disabled".
-func TestService_TierClamp_UnknownRequestedModelDisablesClamp(t *testing.T) {
-	store := newFakePinStore()
-	// Scorer returns a High-tier pick that a TierMid clamp would
-	// rewrite; we want to prove the clamp is disabled entirely.
-	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
-
-	resolverCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
-		resolverCalls++
-		return providers.ProviderAnthropic, "claude-sonnet-4-5", true
-	})
-
-	ctx := authedCtx(uuid.New().String())
-	rec := httptest.NewRecorder()
-	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	// Custom/proxy model name with no capability entry → TierUnknown.
-	body := `{"model":"weave-router","system":"sys","messages":[{"role":"user","content":"hi"}]}`
-	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
-
-	assert.Equal(t, 0, resolverCalls, "unknown requested model must yield TierUnknown ceiling, disabling the clamp")
-	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "scorer pick must pass through unclamped for unknown requested models")
-}
-
-// TestService_TierClamp_ExcludedModelsThreadedToResolver regression-
-// guards the PR #100 security finding: tier clamping must respect the
-// request's ExcludedModels denylist so the clamp path cannot route to
-// a model the installation/request has explicitly blocked. Without
-// threading req.ExcludedModels through, the resolver would happily
-// pick a denylisted model whenever the scorer's choice violated the
-// ceiling — silently bypassing model access policy.
-func TestService_TierClamp_ExcludedModelsThreadedToResolver(t *testing.T) {
-	store := newFakePinStore()
-	// Scorer returns an over-ceiling pick; clamp will fire.
-	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
-
-	var capturedExcluded map[string]struct{}
-	svc := newPinSvc(fr, store).
-		WithExcludedModelsOverride([]string{"claude-haiku-4-5"}).
-		WithTierClampResolver(func(_, excluded map[string]struct{}, _ catalog.Tier) (string, string, bool) {
-			capturedExcluded = excluded
-			return providers.ProviderAnthropic, "claude-sonnet-4-5", true
-		})
-
-	ctx := authedCtx(uuid.New().String())
-	rec := httptest.NewRecorder()
-	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
-
-	require.NotNil(t, capturedExcluded, "resolver must receive the request's ExcludedModels")
-	_, denied := capturedExcluded["claude-haiku-4-5"]
-	assert.True(t, denied, "ExcludedModels must propagate to the tier-clamp resolver")
-}
-
-// haikuImageClampBody is an image-bearing haiku-tier request: the scorer's
-// over-ceiling vision pick must be clamped, but the clamp resolver must not be
-// allowed to pick a text-only in-ceiling model.
-const haikuImageClampBody = `{
-	"model":"claude-haiku-4-5",
-	"system":"sys",
-	"messages":[{"role":"user","content":[
-		{"type":"text","text":"what is in this screenshot"},
-		{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAA"}}
-	]}]
-}`
-
-// TestService_TierClamp_ImageTurnDeniesTextOnlyModels guards the Cursor
-// finding that the tier clamp can re-introduce a text-only model after the
-// scorer's image-input filter ran: clampToCeiling picks on cost/speed alone,
-// so an image-bearing turn whose scorer pick exceeds the ceiling could be
-// rewritten to a cheaper in-ceiling model flagged ImageInputUnsupported,
-// 4xx-ing upstream. The clamp must add the ImageInputUnsupported set to the
-// resolver denylist on image turns.
-func TestService_TierClamp_ImageTurnDeniesTextOnlyModels(t *testing.T) {
-	store := newFakePinStore()
-	// Scorer returns an over-ceiling (High-tier) vision pick; clamp will fire.
-	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.57"}}
-
-	var capturedExcluded map[string]struct{}
-	svc := newPinSvc(fr, store).
-		WithTierClampResolver(func(_, excluded map[string]struct{}, _ catalog.Tier) (string, string, bool) {
-			capturedExcluded = excluded
-			return providers.ProviderAnthropic, "claude-haiku-4-5", true
-		})
-
-	ctx := authedCtx(uuid.New().String())
-	rec := httptest.NewRecorder()
-	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuImageClampBody), rec, httpReq))
-
-	require.NotNil(t, capturedExcluded, "clamp resolver must run on the over-ceiling image-turn pick")
-	for _, id := range []string{"z-ai/glm-5.1", "deepseek/deepseek-v4-pro", "moonshotai/kimi-k2.6"} {
-		_, denied := capturedExcluded[id]
-		assert.Truef(t, denied, "image turn must deny text-only model %s from the tier-clamp resolver", id)
-	}
-}
-
-// TestService_TierClamp_StaleFlagClearedOnUnclampedFinal regression-
-// guards the case Cursor flagged on PR #100: when the orchestrator
-// clamps an early-stage decision (e.g. the fresh scorer output) and a
-// later stage picks an in-ceiling pin without needing to clamp, the
-// TierClamped/PreClampModel fields must reflect the *final* decision —
-// otherwise the structured log falsely reports a clamp that didn't
-// actually affect the served model.
-func TestService_TierClamp_StaleFlagClearedOnUnclampedFinal(t *testing.T) {
-	store := newFakePinStore()
-	// Pin is in-ceiling for an opus request (TierHigh) — no clamp at the
-	// pin-hit step.
-	store.hasPin = true
-	store.pin = sessionpin.Pin{
-		Provider:      providers.ProviderAnthropic,
-		Model:         "claude-opus-4-7",
-		Reason:        "cluster:v0.37",
-		PinnedUntil:   time.Now().Add(30 * time.Minute),
-		FirstPinnedAt: time.Now().Add(-5 * time.Minute),
-		// Prior-turn usage so the planner has eviction-cost evidence to
-		// weigh against the fresh decision; with this set the planner
-		// returns OutcomeStay (cache-warm beats switch).
-		LastInputTokens: 50000,
-	}
-	// Fresh scorer returns a violating model (haiku ceiling would have
-	// clamped); irrelevant here because we go through the High path.
-	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
-
-	clampCalls := 0
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, _ catalog.Tier) (string, string, bool) {
-		clampCalls++
-		// Resolver should never need to fire because all decisions are
-		// at or below the High ceiling.
-		return providers.ProviderAnthropic, "claude-haiku-4-5", true
-	})
-
-	ctx := authedCtx(uuid.New().String())
-	rec := httptest.NewRecorder()
-	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
-
-	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel))
-	assert.Equal(t, 0, clampCalls, "no clamp should fire under a High ceiling with in-ceiling models")
-	// Implicit: by passing through without clamp, the log would record
-	// tier_clamped=false / pre_clamp_model="" — the regression would
-	// have left a stale true here from a prior-stage clamp.
-}
-
-// TestService_UserForcedPin_TierClampDoesNotOverwritePin guards a regression
-// where clampToCeiling on a user-forced pin caused refreshPin to persist the
-// clamped (cheaper) model back into the pin, permanently losing the user's
-// /force-model choice after a single turn. The current turn's dispatch may
-// downgrade, but the stored pin must retain the original directive so a
-// subsequent higher-tier request resumes the forced model.
-func TestService_UserForcedPin_TierClampDoesNotOverwritePin(t *testing.T) {
-	store := newFakePinStore()
-	store.hasPin = true
-	store.pin = sessionpin.Pin{
-		Provider:    providers.ProviderAnthropic,
-		Model:       "claude-opus-4-7", // High tier; user forced
-		Reason:      translate.ReasonUserForceModel,
-		PinnedUntil: time.Now().Add(30 * time.Minute),
-	}
-	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
-
-	svc := newPinSvc(fr, store).WithTierClampResolver(func(_, _ map[string]struct{}, ceiling catalog.Tier) (string, string, bool) {
-		require.Equal(t, catalog.TierLow, ceiling, "haiku-request → Low ceiling")
-		return providers.ProviderAnthropic, "claude-haiku-4-5", true
-	})
-
-	ctx := authedCtx(uuid.New().String())
-	rec := httptest.NewRecorder()
-	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
-
-	// This turn is clamped down to the in-ceiling model.
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
-	assert.Equal(t, 0, fr.routeCalls, "user_forced pin must skip the scorer")
-
-	// The refreshed pin must keep the ORIGINAL forced model — not the clamp.
-	waitForUpsert(t, store)
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	require.NotEmpty(t, store.upserts)
-	upserted := store.upserts[len(store.upserts)-1]
-	assert.Equal(t, "claude-opus-4-7", upserted.Model, "tier clamp must not overwrite the user's forced model in the pin")
-	assert.Equal(t, providers.ProviderAnthropic, upserted.Provider)
-	assert.Equal(t, translate.ReasonUserForceModel, upserted.Reason, "reason must remain user_forced for the next-turn exact-match")
 }
 
 // TestService_UserForcedPin_IneligibleProviderFallsThrough covers the BYOK
