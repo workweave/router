@@ -1309,6 +1309,21 @@ var geminiSchemaAllowedKeys = map[string]struct{}{
 	"propertyOrdering": {},
 }
 
+// geminiSupportedFormats is the set of JSON Schema "format" values Gemini's
+// function-calling API accepts: STRING allows enum + date-time, numeric types
+// allow float/double/int32/int64. Any other value (uri, email, uuid, hostname,
+// …) makes Google reject the whole request with a generic INVALID_ARGUMENT, so
+// sanitizeSchemaFiltered drops formats outside this set rather than forwarding
+// the key with its value intact.
+var geminiSupportedFormats = map[string]struct{}{
+	"enum":      {},
+	"date-time": {},
+	"float":     {},
+	"double":    {},
+	"int32":     {},
+	"int64":     {},
+}
+
 // sanitizeSchemaForGemini returns a deep copy of v containing only the JSON
 // Schema fields that Gemini's function-calling API accepts. Uses an allow-list
 // derived from the googleapis/go-genai Schema struct. Always returns a copy so
@@ -1338,6 +1353,17 @@ func sanitizeSchemaFiltered(v any, filterKeys bool) any {
 					continue
 				}
 				out[k] = cleaned
+				continue
+			}
+			// Gemini only accepts a narrow set of "format" values; forwarding
+			// anything else (e.g. "uri", "email") makes Google reject the whole
+			// request with INVALID_ARGUMENT. Keep supported values, drop the rest.
+			if k == "format" && filterKeys {
+				if s, ok := child.(string); ok {
+					if _, supported := geminiSupportedFormats[s]; supported {
+						out[k] = s
+					}
+				}
 				continue
 			}
 			// User-defined property names inside "properties" must not be

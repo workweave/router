@@ -679,7 +679,7 @@ func TestSanitizeSchemaForGemini_PreservesSupportedFields(t *testing.T) {
 				"type":"object",
 				"description":"Edit a file",
 				"properties":{
-					"path":{"type":"string","format":"uri"},
+					"path":{"type":"string","format":"date-time"},
 					"mode":{"type":"string","enum":["replace","append"]},
 					"line":{"type":"integer","nullable":true}
 				},
@@ -698,10 +698,52 @@ func TestSanitizeSchemaForGemini_PreservesSupportedFields(t *testing.T) {
 	assert.Equal(t, "object", params["type"])
 	assert.Equal(t, "Edit a file", params["description"])
 	props := params["properties"].(map[string]any)
-	assert.Equal(t, "uri", props["path"].(map[string]any)["format"], "format must survive")
+	assert.Equal(t, "date-time", props["path"].(map[string]any)["format"], "supported format must survive")
 	assert.Equal(t, []any{"replace", "append"}, props["mode"].(map[string]any)["enum"], "enum must survive")
 	assert.Equal(t, true, props["line"].(map[string]any)["nullable"], "nullable must survive")
 	assert.Equal(t, []any{"path", "mode"}, params["required"], "required must survive")
+}
+
+func TestPrepareGemini_DropsUnsupportedFormatValues(t *testing.T) {
+	// Regression: Gemini's function-calling Schema accepts "format" only with a
+	// narrow value set (strings: enum, date-time; numbers: float/double/int32/
+	// int64). Tool schemas from MCP servers and SDKs routinely carry "uri",
+	// "email", "uuid" etc., which Google rejects with a generic 400
+	// INVALID_ARGUMENT — observed on every tools-bearing Gemini request from
+	// tool-heavy clients. The sanitizer must drop unsupported format values
+	// while keeping supported ones and the rest of the property schema intact.
+	body := []byte(`{
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [{
+			"name":"submit",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"homepage":{"type":"string","format":"uri","description":"site"},
+					"contact":{"type":"string","format":"email"},
+					"when":{"type":"string","format":"date-time"},
+					"score":{"type":"number","format":"double"}
+				},
+				"required":["homepage"]
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	params := mustUnmarshal(t, prep.Body)["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
+	props := params["properties"].(map[string]any)
+
+	homepage := props["homepage"].(map[string]any)
+	assert.NotContains(t, homepage, "format", "unsupported format \"uri\" must be dropped")
+	assert.Equal(t, "string", homepage["type"], "the rest of the property schema must survive")
+	assert.Equal(t, "site", homepage["description"], "sibling keys must survive format drop")
+	assert.NotContains(t, props["contact"].(map[string]any), "format", "unsupported format \"email\" must be dropped")
+
+	assert.Equal(t, "date-time", props["when"].(map[string]any)["format"], "supported string format must survive")
+	assert.Equal(t, "double", props["score"].(map[string]any)["format"], "supported numeric format must survive")
 }
 
 func TestPrepareGemini_CollapsesItemsBool(t *testing.T) {
