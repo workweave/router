@@ -38,25 +38,25 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 		model, stream, ok := splitModelAction(modelAction)
 		if !ok {
 			writeGeminiError(c, http.StatusNotFound, "INVALID_ARGUMENT",
-				fmt.Sprintf("unknown action %q: expected :generateContent or :streamGenerateContent", modelAction))
+				fmt.Sprintf("Unknown action %q: expected :generateContent or :streamGenerateContent.", modelAction))
 			return
 		}
 
 		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes+1))
 		if err != nil {
 			log.Debug("Failed to read request body", "err", err)
-			writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "failed to read request body")
+			writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "Failed to read request body.")
 			return
 		}
 		if len(body) > maxBodyBytes {
-			writeGeminiError(c, http.StatusRequestEntityTooLarge, "INVALID_ARGUMENT", "request body too large")
+			writeGeminiError(c, http.StatusRequestEntityTooLarge, "INVALID_ARGUMENT", "Request body too large.")
 			return
 		}
 
 		body, err = injectModelAndStream(body, model, stream)
 		if err != nil {
 			log.Debug("Failed to inject Gemini synthetic fields", "err", err)
-			writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "request body must be a JSON object")
+			writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "Request body must be a JSON object.")
 			return
 		}
 
@@ -70,7 +70,7 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 				if c.Writer.Written() {
 					return
 				}
-				writeGeminiError(c, statusErr.Status, "UPSTREAM_ERROR", "upstream call failed")
+				writeGeminiError(c, statusErr.Status, "UPSTREAM_ERROR", "Upstream call failed.")
 				return
 			}
 			if c.Writer.Written() {
@@ -90,13 +90,13 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 				return
 			}
 			if errors.Is(err, translate.ErrNotJSONObject) {
-				writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "request body must be a JSON object")
+				writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "Request body must be a JSON object.")
 				return
 			}
 			if errors.Is(err, cluster.ErrNoEligibleProvider) {
 				log.Warn("No eligible provider for Gemini request", "err", err)
 				writeGeminiError(c, http.StatusBadRequest, "FAILED_PRECONDITION",
-					"no provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header")
+					"No provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header.")
 				return
 			}
 			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
@@ -108,11 +108,11 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 				log.Error("Cluster routing unavailable", "err", err)
 				c.Header("Retry-After", "1")
 				writeGeminiError(c, http.StatusServiceUnavailable, "UNAVAILABLE",
-					"router unavailable: cluster scorer failed and no fallback is configured")
+					"Router unavailable: cluster scorer failed and no fallback is configured.")
 				return
 			}
 			log.Error("Gemini proxy failed", "err", err)
-			writeGeminiError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "upstream call failed")
+			writeGeminiError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "Upstream call failed.")
 		}
 	}
 }
