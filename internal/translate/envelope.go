@@ -363,6 +363,15 @@ type EmitOverrides struct {
 	// non-Anthropic upstreams (e.g. Kimi-k2.6) emit IDs like "functions.Read:0"
 	// that Anthropic rejects when the history is forwarded back to it.
 	SanitizeToolUseIDs bool
+	// StripThoughtSignature drops the off-spec thought_signature field from
+	// content blocks. Set when targeting Anthropic: the router smuggles a Gemini
+	// thoughtSignature to passthrough clients on text blocks (and, for in-flight
+	// pre-id-embed sessions, tool_use blocks), and Claude Code echoes it back;
+	// forwarding it to Anthropic 400s ("Extra inputs are not permitted"). For
+	// tool_use the signature still round-trips via the tool id; for text blocks
+	// it is simply dropped, since Anthropic can't use a Gemini signature anyway
+	// and the alternative is a hard 400.
+	StripThoughtSignature bool
 	// RewriteThinkingAdaptive replaces the inbound thinking block with
 	// {"type":"adaptive"} and sets output_config.effort. Used when the target
 	// model only accepts adaptive thinking (claude-opus-4-6+ / sonnet-4-6+).
@@ -397,6 +406,13 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 		out, err = sanitizeToolUseIDsBytes(out)
 		if err != nil {
 			return nil, fmt.Errorf("sanitize tool_use ids: %w", err)
+		}
+	}
+
+	if ov.StripThoughtSignature {
+		out, err = stripThoughtSignatureBytes(out)
+		if err != nil {
+			return nil, fmt.Errorf("strip thought_signature: %w", err)
 		}
 	}
 
@@ -647,6 +663,80 @@ func sanitizeToolUseIDsBytes(body []byte) ([]byte, error) {
 	return sjson.SetRawBytes(body, "messages", []byte("["+strings.Join(msgRaws, ",")+"]"))
 }
 
+// stripThoughtSignatureBytes removes the off-spec thought_signature field from
+// every content block in messages[*].content[*]. The router emits it to
+// passthrough clients so a Gemini thoughtSignature survives the round-trip, but
+// Anthropic rejects the unknown field with a 400. On tool_use blocks the same
+// signature is also carried in the tool id (embedSignatureInID), so dropping it
+// there is lossless; on text blocks it is simply discarded.
+func stripThoughtSignatureBytes(body []byte) ([]byte, error) {
+	messages := gjson.GetBytes(body, "messages")
+	if !messages.Exists() || !messages.IsArray() {
+		return body, nil
+	}
+
+	anyChanged := false
+	var msgRaws []string
+	var walkErr error
+
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.Exists() || !content.IsArray() {
+			msgRaws = append(msgRaws, msg.Raw)
+			return true
+		}
+
+		needsRewrite := false
+		content.ForEach(func(_, block gjson.Result) bool {
+			if block.Get("thought_signature").Exists() {
+				needsRewrite = true
+				return false
+			}
+			return true
+		})
+
+		if !needsRewrite {
+			msgRaws = append(msgRaws, msg.Raw)
+			return true
+		}
+
+		anyChanged = true
+		var rewritten []string
+		content.ForEach(func(_, block gjson.Result) bool {
+			raw := block.Raw
+			if block.Get("thought_signature").Exists() {
+				var err error
+				raw, err = sjson.Delete(raw, "thought_signature")
+				if err != nil {
+					walkErr = fmt.Errorf("delete thought_signature: %w", err)
+					return false
+				}
+			}
+			rewritten = append(rewritten, raw)
+			return true
+		})
+		if walkErr != nil {
+			return false
+		}
+
+		newMsg, err := sjson.SetRaw(msg.Raw, "content", "["+strings.Join(rewritten, ",")+"]")
+		if err != nil {
+			walkErr = fmt.Errorf("replace content in message: %w", err)
+			return false
+		}
+		msgRaws = append(msgRaws, newMsg)
+		return true
+	})
+
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	if !anyChanged {
+		return body, nil
+	}
+	return sjson.SetRawBytes(body, "messages", []byte("["+strings.Join(msgRaws, ",")+"]"))
+}
+
 // encodeJSONStringNoHTMLEscape marshals s without HTML-escaping <, >, or &.
 // Preserves the client's original escaping for upstream prompt-cache keys.
 func encodeJSONStringNoHTMLEscape(s string) ([]byte, error) {
@@ -853,8 +943,9 @@ func effortForBudget(budgetTokens int64) string {
 
 func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	ov := EmitOverrides{
-		Model:              opts.TargetModel,
-		SanitizeToolUseIDs: true,
+		Model:                 opts.TargetModel,
+		SanitizeToolUseIDs:    true,
+		StripThoughtSignature: true,
 	}
 
 	thinkingResult := gjson.GetBytes(body, "thinking")

@@ -15,8 +15,9 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// maxToolCallIDLen is OpenAI's limit on tool_calls[].id; it rejects longer ids
-// with a 400 ("string too long").
+// maxToolCallIDLen is OpenAI's limit on a tool-call id — tool_calls[].id on
+// Chat Completions and call_id on Responses; both reject longer ids with a 400
+// ("string too long").
 const maxToolCallIDLen = 64
 
 // clampOpenAIToolCallID makes a tool-call id safe for the OpenAI wire format.

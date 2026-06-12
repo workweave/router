@@ -14,9 +14,12 @@ import (
 // Prior art: BerriAI/litellm PR #16895.
 const thoughtSignatureIDDelimiter = "__thought__"
 
-// embedSignatureInID returns id with sig base64-encoded and appended.
+// embedSignatureInID returns id with sig base64-encoded and appended. It is
+// idempotent: an id that already carries a signature is returned unchanged, so
+// a translation merge point (a pre-embedded id arriving with a redundant sig)
+// never stacks two delimiters.
 func embedSignatureInID(id, sig string) string {
-	if sig == "" {
+	if sig == "" || strings.Contains(id, thoughtSignatureIDDelimiter) {
 		return id
 	}
 	return id + thoughtSignatureIDDelimiter + base64.RawURLEncoding.EncodeToString([]byte(sig))

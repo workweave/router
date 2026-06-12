@@ -1,6 +1,7 @@
 package translate_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -653,11 +654,12 @@ func TestAnthropicSSETranslator_SummaryNoPromotionOnPlainStop(t *testing.T) {
 	assert.Equal(t, 0, got.ToolUseBlocks)
 }
 
-// Load-bearing: Gemini 3.x requires the opaque thought_signature round-tripped
-// on the next turn's functionCall part. The Gemini→OpenAI translator smuggles
-// it as function.thought_signature on the tool_call chunk; AnthropicSSE must
-// surface it on the tool_use content_block_start so passthrough clients echo
-// it back on the next request.
+// Load-bearing: Gemini 3.x requires the opaque thoughtSignature round-tripped
+// on the next turn's functionCall part. When an upstream emits it as
+// function.thought_signature with a plain tool-call id (a Gemini model behind an
+// OpenAI-compatible gateway), AnthropicSSE must smuggle it into the tool_use id
+// — the single SDK-safe carrier — so every client echoes it back, instead of an
+// off-spec block field that typed SDKs drop and Anthropic upstreams reject.
 func TestAnthropicSSETranslator_StreamingToolUsePreservesThoughtSignature(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "gemini-x", nil)
@@ -678,7 +680,9 @@ func TestAnthropicSSETranslator_StreamingToolUsePreservesThoughtSignature(t *tes
 
 	body := rec.Body.String()
 	assert.Contains(t, body, `"type":"tool_use"`)
-	assert.Contains(t, body, `"thought_signature":"OPAQUE_SIG"`)
+	assert.NotContains(t, body, `"thought_signature"`, "off-spec field must not be emitted")
+	encoded := base64.RawURLEncoding.EncodeToString([]byte("OPAQUE_SIG"))
+	assert.Contains(t, body, "call_x__thought__"+encoded, "plain upstream id is embedded with the signature")
 }
 
 func TestAnthropicSSETranslator_NonStreamingResponse(t *testing.T) {
