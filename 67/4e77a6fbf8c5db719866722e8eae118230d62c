@@ -1,0 +1,22 @@
+internal/router/turntype/detect.go
+  s_0ac1abdedf47d0::t_c9bc2abd5852e6 63
+  s_0ac1abdedf47d0::t_368d73e20f7fa5 90,92-112,116-131
+internal/router/turntype/detect_test.go
+  s_0ac1abdedf47d0::t_2f4736de5cf0ec 94-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "674e77a6fbf8c5db719866722e8eae118230d62c",
+  "prompts": {},
+  "sessions": {
+    "s_0ac1abdedf47d0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4555dc00-dcca-4e93-9af7-b0a0af00d4d9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

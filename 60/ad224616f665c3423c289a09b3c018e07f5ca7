@@ -1,0 +1,29 @@
+internal/router/handover/summarizer.go
+  s_649702f47ea151::t_f5f6efb35818bb 39-44,47
+internal/proxy/turnloop.go
+  s_649702f47ea151::t_f5f6efb35818bb 295,298-304,306-316,323,327,329-332,334,523-540
+  s_649702f47ea151::t_6860ceb62cf4c5 541-542
+internal/proxy/credentials.go
+  s_649702f47ea151::t_f5f6efb35818bb 58-68,73-76
+internal/proxy/handover.go
+  s_649702f47ea151::t_f5f6efb35818bb 30-32,80-82
+  s_649702f47ea151::t_c10cd79bece359 83-84
+internal/proxy/turnloop_test.go
+  s_649702f47ea151::t_f5f6efb35818bb 43-44,256-264,276,285-316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "60ad224616f665c3423c289a09b3c018e07f5ca7",
+  "prompts": {},
+  "sessions": {
+    "s_649702f47ea151": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a529127-70db-4cfb-9bc1-ba2e8e0e2981",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,409 @@
+db/pubsub/entrypoint.sh
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-32
+internal/router/cluster/artifacts/v0.54/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/router/cluster/artifacts/legacy/v0.26/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-267
+internal/router/cluster/artifacts/legacy/v0.49/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-95
+internal/translate/provider_hint_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 132-161,172,260-275
+internal/sqlc/model_router_users.sql.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 167-172,233-242,252-257
+internal/router/cluster/artifacts/legacy/v0.22/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-61
+internal/router/cluster/artifacts/legacy/v0.22/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-23
+internal/translate/translate.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 11-12,17-18,20-21,25,27-51,54-57,60,62-63,65-66,69,71-72,74,76,78,80-100,102-116,138-140,143-157,163-164,166,170,175-177,179-199,201-226,228-260,263-266,269-270,283-288,293-298,300-301,304-305,307,312-314,317-329
+internal/router/cluster/knobs.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-38
+internal/proxy/handover.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 30-32,80-82
+internal/proxy/credentials.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 55-60,63-73,78-81
+internal/proxy/force_model.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-368
+install/cc-statusline.sh
+  s_b82fdafa2fd896::t_c2d5f71c53a406 136,148,166-167,169-172,174-178,185,197,215-216,218-221,223-227,283-295,297-300
+internal/router/cache/cache.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 3-4,15,29-43,49-54,59-65,67-74,86-91,98-102,104-106,122-123,133,148,152,154,165-168,180,187,197,202-211,214,219-236
+internal/router/cluster/artifacts/legacy/v0.27/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-267
+internal/router/cluster/artifacts/legacy/v0.39/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-24
+internal/router/cluster/artifacts/legacy/v0.40/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-302
+internal/router/cluster/diff_v2_integration_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-216
+internal/translate/openai_marker.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-127
+internal/router/cluster/artifacts/README.md
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-57
+internal/api/anthropic/messages.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 106-110,143
+internal/api/openai/responses.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-89
+internal/proxy/client_identity_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 165-190
+internal/router/cluster/artifacts/legacy/v0.23/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-61
+db/migrations/0008_ledger_memo.down.sql
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-3
+go.mod
+  s_b82fdafa2fd896::t_c2d5f71c53a406 8,26-30,33,39,44,55-57,78-87,92-93,98-102
+internal/router/cluster/artifacts/legacy/v0.32/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-267
+internal/providers/openai/setauth_internal_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-66
+cmd/seed/main.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 157-163
+internal/proxy/marker_internal_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 16,24-26,29,37-39,71,74-75,86,89-90,95-108,114,117-118,122-158,163,166-167,177,180-181,218,220,226,228,231-233,235
+internal/router/cluster/artifacts/legacy/v0.33/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/router/cluster/artifacts/legacy/v0.34/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-399
+internal/router/cluster/artifacts/legacy/v0.38/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-27
+internal/router/cluster/artifacts/legacy/v0.39/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-281
+internal/router/cluster/artifacts/legacy/v0.44/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-92
+internal/router/cluster/artifacts/legacy/v0.23/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-23
+internal/router/cluster/artifacts/legacy/v0.50/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-390
+internal/router/cluster/artifacts/v0.53/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-31
+cmd/router/main.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 33,46,136-139,212-215,340-356,361,363-376,498-501,505-514,516-519,557
+internal/server/server.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 67-77,126,142,146-148,175
+internal/router/cluster/artifacts/legacy/v0.51/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-95
+internal/router/cluster/artifacts/legacy/v0.48/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+install/npm/package.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 3,13
+internal/router/cluster/artifacts/legacy/v0.32/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/router/cluster/artifacts/legacy/v0.26/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/router/cluster/artifacts/legacy/v0.34/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/router/cluster/artifacts/legacy/v0.21/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-50
+internal/router/cluster/artifacts/legacy/v0.35/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-73
+internal/router/cluster/artifacts/legacy/v0.50/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/translate/translate_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 558-649
+internal/router/cluster/testdata/diff_v2_prompts.jsonl
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-1000
+internal/router/cluster/artifacts/legacy/v0.42/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-24
+internal/router/cache/cache_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 58,60,81,83,96,98,113-114,117-118,127,129,137,139,149,151,155,164,166,182,184,192,195,200,202-203,206-279
+internal/translate/force_model_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-326
+internal/translate/inline_defs_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-192
+internal/proxy/turnloop.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 173-236,295,298-304,306-316,323,327,329-332,334,523-540
+internal/router/cluster/artifacts/legacy/v0.23/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-201
+internal/translate/gemini_marker_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-65
+internal/router/cluster/artifacts/legacy/v0.46/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-390
+internal/router/cluster/artifacts/legacy/v0.43/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-387
+internal/router/cluster/artifacts/legacy/v0.50/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-95
+internal/translate/handover.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 80-86,132,139,238-239,241,248,319-433
+docker-compose.yml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 42-62,91-92,125-132
+internal/router/catalog/catalog.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 128-130,228-230,240-242,244-245,247-254,256-257,285-349
+internal/proxy/loop_detection.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-143
+internal/router/cluster/artifacts/legacy/v0.37/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/router/cluster/artifacts/legacy/v0.38/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-69
+install/commands/unforce-model.md
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-5
+internal/router/cluster/artifacts/legacy/v0.45/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-95
+internal/router/cluster/artifacts/legacy/v0.49/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-390
+internal/router/cluster/artifacts/legacy/README.md
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-31
+internal/router/cluster/artifacts/v0.53/model_axes.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-187
+internal/router/cluster/artifacts/v0.54/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-98
+internal/router/cluster/artifacts/legacy/v0.33/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-73
+internal/router/cluster/diff_v2_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-49
+internal/router/handover/summarizer.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 39-44,47
+internal/api/admin/catalog_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-70
+internal/router/cluster/artifacts/legacy/v0.43/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-92
+internal/proxy/enabled_providers_internal_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-75
+internal/translate/force_model.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-217
+internal/translate/gemini_marker.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-113
+internal/api/admin/catalog.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-27
+internal/router/cluster/artifacts/legacy/v0.47/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/pubsub/invalidation.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-161
+internal/router/cluster/artifacts/legacy/v0.46/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/router/cluster/artifacts/legacy/v0.52/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-31
+internal/router/cluster/artifacts/legacy/v0.24/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-201
+internal/router/cluster/artifacts/legacy/v0.52/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-407
+internal/router/cluster/artifacts/legacy/v0.40/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-82
+install/npm/scripts/copy-installer.js
+  s_b82fdafa2fd896::t_c2d5f71c53a406 7,23-42
+internal/router/handover/summarizer_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 4,12,207-409
+internal/router/turntype/detect_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 63-66,68,205,329-333,338,408-410,415
+internal/translate/gemini_response.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 9-10,15-43,46-50,54-69,71-86,88,91,96-100,104-110,112-138,140-144,146-148,151-157,159-179,181-216,218-224,226-228,230-238,240-241,243-245,247-255,257,259-262,265-281,283-297
+internal/translate/gemini_stream.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 175,181-186
+internal/translate/loop_detection.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-358
+internal/translate/jsonw_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-116
+internal/translate/responses_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-408
+internal/router/cluster/artifacts/legacy/v0.25/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-267
+internal/router/cluster/artifacts/legacy/v0.36/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-73
+internal/router/cluster/artifacts/legacy/v0.51/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-390
+internal/router/cluster/artifacts_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 175-179,202-224
+internal/providers/openaicompat/client.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 13-14,83,88
+.env.example
+  s_b82fdafa2fd896::t_c2d5f71c53a406 169-181
+internal/router/cluster/artifacts/v0.53/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-894
+internal/router/cluster/artifacts/legacy/v0.45/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/server/middleware/routing_knobs_override.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-123
+internal/api/gemini/generate_content.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 102-106,154
+internal/translate/jsonw.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-122
+internal/router/cluster/artifacts/v0.53/quality_means.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-894
+internal/translate/provider_hint.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 30-36,38-41,55-67
+install/npm/.gitignore
+  s_b82fdafa2fd896::t_c2d5f71c53a406 3,7
+internal/router/cluster/artifacts/latest
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1
+internal/proxy/client_identity.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 124-162
+internal/router/cluster/artifacts/legacy/v0.25/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-73
+internal/router/cluster/artifacts/legacy/v0.41/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/router/cluster/artifacts/legacy/v0.26/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-73
+internal/router/cluster/artifacts/legacy/v0.27/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+install/commands/force-model.md
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-6
+internal/translate/openai_marker_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-151
+internal/router/cluster/artifacts/legacy/v0.41/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-92
+scripts/pre-commit
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-25
+internal/translate/loop_detection_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-202
+internal/router/cluster/artifacts/legacy/v0.25/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/router/cluster/artifacts/legacy/v0.35/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/router/cluster/artifacts/legacy/v0.51/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+install/install.sh
+  s_b82fdafa2fd896::t_c2d5f71c53a406 3,5-15,17-18,20-21,25-26,29-32,37,56-66,108-113,118,243-248,311,332-335,364-572,574,672-683,699-721,724-725,734-759,761-762,794,796-801,804-823,856-863,865-880,882-890,892-936,970-982,997-1146,1285,1297,1315-1316,1318-1321,1323-1327,1334,1346,1364-1365,1367-1370,1372-1376,1432-1444,1446-1449,1574,1607-1608
+internal/router/cluster/artifacts/legacy/v0.38/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-332
+internal/router/cluster/artifacts/legacy/v0.41/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-387
+internal/translate/strip_marker_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 18-19,21-27,151,158-176
+internal/providers/openai/client.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 11,14,42-79,86,178
+internal/router/cluster/artifacts/legacy/v0.32/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-73
+internal/router/cluster/artifacts/legacy/v0.36/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/router/cluster/artifacts/legacy/v0.44/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-387
+internal/router/cluster/artifacts/legacy/v0.45/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-390
+internal/translate/crossformat_request_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-1589
+internal/router/cluster/artifacts/legacy/v0.48/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-95
+internal/router/cluster/artifacts/legacy/v0.37/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-74
+internal/proxy/service_session_pin_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 5,21,468-563,615-623,640-641,890-957
+internal/sqlc/billing.sql.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 10-12,211-223,242,248,250
+internal/translate/crossformat.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-65
+internal/translate/emit_openai.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 16-20,58,65,72-80,100-104,106-109,112-118,121-127,129-136,138-139,141-143,147-152,155-164,167,170-173,176-179,181-191,193-196,201-202,204-210,212-224,227-235,238-240,246-248,250,254-259,261-272,274-277,279,283,285-287,289-290,292-301,304-305,307-308,311-352,354-377,380-401,404-414,417-429,432-446,448,452-454,456,458,460,462-464,466-468,471-478,480-516,519-555,557-576,578-601,603-606,609-610,613-670
+internal/router/cluster/artifacts/legacy/v0.22/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-201
+internal/router/cluster/artifacts/legacy/v0.37/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-400
+internal/translate/gemini_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 220-270,932-963
+internal/router/cluster/artifacts/legacy/v0.36/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-399
+Makefile
+  s_b82fdafa2fd896::t_c2d5f71c53a406 12,60,91,152,157-177
+internal/translate/emit_anthropic.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 20,26-28,86-91,93-94,97-99,101-108,110-111,114-119,123-126,129-131,133-135,137-145,147-151,154-156,160-189,191-196,198-199,201-203,205-207,209-213,215,218-222,224,228-262,264-270,272-275,277-279,282-284,286-288,291-306,308-336,338-344,347-357,360-366,368-373,375-379,381-386,388-390,393-429,431-434,436-437,440-443,445-490,492-501,503-515,518-524
+internal/translate/responses.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-919
+internal/router/cluster/artifacts/legacy/v0.21/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-46
+db/migrations/0008_ledger_memo.up.sql
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-3
+internal/proxy/gemini.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 71,150-159,161-162,164
+internal/api/anthropic/route.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 4,11,50,53-57
+install/uninstall.sh
+  s_b82fdafa2fd896::t_c2d5f71c53a406 3,5-12,15-17,27,56-68,80-81,85-268,372-388
+internal/router/cluster/artifacts/legacy/v0.21/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-146
+internal/router/cluster/artifacts/legacy/v0.24/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-61
+internal/router/cluster/artifacts/legacy/v0.42/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-82
+internal/router/cluster/artifacts/legacy/v0.42/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-302
+install/npm/README.md
+  s_b82fdafa2fd896::t_c2d5f71c53a406 3,6-10,13,19,25-29,37-58,67-68
+internal/router/cluster/artifacts/legacy/v0.48/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-390
+internal/router/cluster/artifacts/v0.53/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-142
+internal/router/cluster/artifacts/v0.54/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-391
+internal/server/server_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 35,38,81-84,93-98
+internal/sqlc/models.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 139
+README.md
+  s_b82fdafa2fd896::t_c2d5f71c53a406 26,32-33,43,58-59,65-67,70-73,79-80,122-137,177-180
+internal/router/cluster/scorer.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 24-26,45-57,137,139-160,162-171,177-189,343-598,601,651
+internal/api/openai/completions.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 72-76,96
+internal/router/cluster/artifacts/legacy/v0.27/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-73
+internal/router/cluster/artifacts/legacy/v0.47/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-95
+internal/router/cluster/scorer_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 698-1196
+install/README.md
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1,3-4,11,14-22,29-30,37-41,44-48,50-51,61,65-67,70-71,86-88,95,109-153,158-160,163-164,170-173,176,183,193-210,214-219,222-223
+internal/proxy/force_model_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-78
+internal/router/cluster/artifacts/legacy/v0.34/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-73
+internal/router/turntype/detect.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 60-64,121
+internal/router/cluster/artifacts/legacy/v0.40/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-24
+internal/router/router.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 6-13,24,43,49-63
+internal/router/cluster/artifacts/legacy/v0.49/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/translate/crossformat_response_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-866
+db/queries/model_router_users.sql
+  s_b82fdafa2fd896::t_c2d5f71c53a406 16-25,36-41
+internal/translate/envelope.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 18,395-424
+internal/router/cluster/artifacts/legacy/v0.46/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-95
+internal/router/cluster/artifacts/legacy/v0.43/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/translate/emit_gemini.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 45-46,49,53,57-58,118,141-144,146-170,172,174-176,178-181,184-222,224-226,228,230-233,235-245,247,249-257,259-265,268-271,273,275-277,281,283-287,290-294,296-297,300-303,305-321,323-324,330-336,339-352,354-361,363-370,372-374,376-379,381-390,393-400,402-406,408-413,415-417,419-425,427-442,444,446-456,459-460,466,469,471,473,475-485,493-504,508-516,518-520,523-525,527,529-535,538-540,544,548-549,553-554,556-560,562,567-576,578-581,583,587-588,590-600,603,605-617,619-644,647-655,657-658,660,662-670,672-673,675-718,721-729,731-763,766-788,791-802,805,810-816,818-822,824-825,828-829,831-849,851,853-870,872-874,876,879-885,887-897,899-903,905-907,909-915,917-923,925-937,939,942-943,945-946,948-950,952,955-959,961-985,987-1043,1045,1047-1087,1089-1132,1135-1136,1138-1162,1165-1168
+internal/router/cluster/artifacts/legacy/v0.35/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-399
+internal/router/cluster/artifacts/legacy/v0.44/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-30
+internal/translate/stream.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 332-335,344-351,409-411,422,431-456,555-562,565,625-651,653-658,688-694,755-760,825-839
+internal/proxy/loop_detection_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-145
+internal/proxy/turnloop_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 43-44,256-264,276,285-316,385-443
+internal/router/cluster/artifacts.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 10,109,137-150,152-167,173-181,195-208,218-225,244-245,252-253,255-271,275,277,279-280,284,288-378,382-385,390-397,399,412,416-421,484-528
+internal/translate/system_reminder.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 4,38-48,50-79,81-97
+internal/router/cluster/artifacts/legacy/v0.39/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-63
+internal/router/cluster/artifacts/legacy/v0.52/metadata.yaml
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-97
+internal/router/cluster/artifacts/legacy/v0.47/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-390
+internal/translate/qwen3_sampling_test.go
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-84
+internal/router/cluster/artifacts/legacy/v0.24/model_registry.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-23
+internal/router/cluster/artifacts/legacy/v0.33/rankings.json
+  s_b82fdafa2fd896::t_c2d5f71c53a406 1-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "91be8431ffa67bb0a56da87dbcd8302baa13af81",
+  "prompts": {},
+  "sessions": {
+    "s_b82fdafa2fd896": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c67ac055-440a-48d7-a835-8588ea20d9cb",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

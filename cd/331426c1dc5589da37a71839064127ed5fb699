@@ -1,0 +1,41 @@
+frontend/next.config.ts
+  s_fa4a442294e030::t_a8537565bf5eb9 47
+internal/server/server.go
+  s_fa4a442294e030::t_a8537565bf5eb9 6-8,56-57,120-184
+internal/api/admin/config.go
+  s_fa4a442294e030::t_a8537565bf5eb9 13-32,42-48,55
+cmd/seed/main.go
+  s_fa4a442294e030::t_a8537565bf5eb9 25-31
+internal/postgres/telemetry.go
+  s_fa4a442294e030::t_a8537565bf5eb9 5-6,360-364,366-377
+internal/proxy/service.go
+  s_fa4a442294e030::t_a8537565bf5eb9 56-61,127-158,461,488,501,518,694-704,919,945,958,975
+frontend/src/components/Sidebar.tsx
+  s_fa4a442294e030::t_a8537565bf5eb9 6,74-84,86-97,102-107
+internal/proxy/gemini.go
+  s_fa4a442294e030::t_a8537565bf5eb9 124,137
+frontend/src/lib/api.ts
+  s_fa4a442294e030::t_a8537565bf5eb9 108
+cmd/router/main.go
+  s_fa4a442294e030::t_a8537565bf5eb9 117-123,144,147-150,154,156-159,161-169,172,174-177,179-187,190,192-195,197-205,208,214-217,219-227,299-306,312-314
+frontend/src/app/(app)/settings/page.tsx
+  s_fa4a442294e030::t_a8537565bf5eb9 317-323,330,332,349-375,378,404,409-431,433-435,439-441,443-457,459,466-494,534,538,561
+README.md
+  s_fa4a442294e030::t_a8537565bf5eb9 16-19,21-25,28-33,35-37,39-43,45-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "cd331426c1dc5589da37a71839064127ed5fb699",
+  "prompts": {},
+  "sessions": {
+    "s_fa4a442294e030": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f58c034-3915-4752-9df1-c191b196a6c3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

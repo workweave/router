@@ -1,0 +1,39 @@
+internal/proxy/turnloop_internal_test.go
+  s_f1c78cd077965e::t_d221869b3b3835 25,38-43
+internal/postgres/telemetry.go
+  s_f1c78cd077965e::t_4fb262d1e871b8 94-124
+db/migrations/0015_loop-escalation-events.up.sql
+  s_f1c78cd077965e::t_04e65d3b0b7de5 1-43
+internal/proxy/loop_detection.go
+  s_f1c78cd077965e::t_8fd28926fc76f5 195-202
+  s_f1c78cd077965e::t_1a6c6bbee016e3 238-268,274,277,290-312,314
+  s_f1c78cd077965e::t_8c3c287ede9667 5,21-76
+cmd/router/main.go
+  s_f1c78cd077965e::t_e368cd03938830 532-548
+  s_f1c78cd077965e::t_ad56c8d58f88cb 598
+  s_f1c78cd077965e::t_0bee437a96c54f 590-591
+db/migrations/0015_loop-escalation-events.down.sql
+  s_f1c78cd077965e::t_32d8bf9e889a15 1-5
+db/queries/loop_escalation_events.sql
+  s_f1c78cd077965e::t_0be0a2e9c619be 1-39
+internal/proxy/service.go
+  s_f1c78cd077965e::t_bc5e90f5b13a85 98-114
+  s_f1c78cd077965e::t_778e7d332bd1f8 431-432
+  s_f1c78cd077965e::t_52fa088edc7d42 462-486
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7c1f4bcf3861ac789f9490fab9a3b491c4d9f31e",
+  "prompts": {},
+  "sessions": {
+    "s_f1c78cd077965e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4071f91c-1ccf-476b-a5ac-376c38e38da5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

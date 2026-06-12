@@ -1,0 +1,32 @@
+db/migrations/0006_expand_external_api_key_providers.down.sql
+  s_8a1bdfeeb8828c::t_6cf2c1000f1cb9 1-10
+internal/proxy/credentials.go
+  s_8a1bdfeeb8828c::t_ad597d6852abf1 55
+db/migrations/0006_expand_external_api_key_providers.up.sql
+  s_8a1bdfeeb8828c::t_cbd98e3d108ab3 1-10
+cmd/router/main.go
+  s_8a1bdfeeb8828c::t_ba63a4bd53e5ca 627-628
+  s_8a1bdfeeb8828c::t_7c4f6fc8ff9e5c 130-135
+internal/providers/openaicompat/client.go
+  s_8a1bdfeeb8828c::t_065f049e4b5fe3 46-59,66
+  s_8a1bdfeeb8828c::t_967c2b4d97cbfd 106
+  s_8a1bdfeeb8828c::t_6cb4d4db3221dd 22
+internal/providers/provider.go
+  s_8a1bdfeeb8828c::t_76085afab1e065 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "931b361ae01be90cf27135acaf2d5c4679cd52e2",
+  "prompts": {},
+  "sessions": {
+    "s_8a1bdfeeb8828c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fc93d281-aa6f-441c-af8a-e90aba788106",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

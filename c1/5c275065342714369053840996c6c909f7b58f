@@ -1,0 +1,40 @@
+internal/router/catalog/catalog.go
+  s_05a43a97fbb793::t_d6e836035c1b1c 322
+  s_05a43a97fbb793::t_fe212ddf411a30 395
+  s_05a43a97fbb793::t_fd42b22095f7b6 332-336
+  s_05a43a97fbb793::t_fba9e0cec085b5 387-390
+  s_05a43a97fbb793::t_e086deb9071f8d 327
+  s_05a43a97fbb793::t_8b594d599b64cf 425
+  s_05a43a97fbb793::t_4a00bb2a154e67 412
+  s_05a43a97fbb793::t_a814a2ed1026b0 346
+  s_05a43a97fbb793::t_abbe4288f50938 341
+  s_05a43a97fbb793::t_134d9d4ac70955 317
+  s_05a43a97fbb793::t_ede1f44ee05c94 351
+  s_05a43a97fbb793::t_156a5b76041678 370
+  s_05a43a97fbb793::t_990ae4eca0a6a5 379
+  s_05a43a97fbb793::t_8ca6337f8024b1 420
+  s_05a43a97fbb793::t_8c18e94b6677cf 415
+  s_05a43a97fbb793::t_e9deadc1a0f26d 403
+internal/router/catalog/catalog_test.go
+  s_05a43a97fbb793::t_d1dac03601fbdb 190-197
+internal/proxy/service.go
+  s_05a43a97fbb793::t_b03267c2631a97 379-380,384-385,387,391,407,409-410,412-413
+  s_05a43a97fbb793::t_ab354116b6fe2d 1162-1163,1167-1168
+  s_05a43a97fbb793::t_e3f65e7370b250 2391-2392,2396-2397
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "c15c275065342714369053840996c6c909f7b58f",
+  "prompts": {},
+  "sessions": {
+    "s_05a43a97fbb793": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9650a78c-c857-452b-8646-bbd61db2b94e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
