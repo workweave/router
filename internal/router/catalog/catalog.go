@@ -392,6 +392,17 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.279, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
 	}},
+	// minimax-m3 is the MiniMax Sparse Attention (MSA) successor to m2.7 — a
+	// ~225B-param native-multimodal model. Same Fireworks serverless price as
+	// m2.7 ($0.30/$1.20, cached $0.06 = 0.20x). Fireworks serves a 512k context
+	// window (the model's headline 1M is not what the Fireworks endpoint
+	// exposes). Unlike m2.7 it accepts image parts, so ImageInput is left at the
+	// default (image-capable).
+	{ID: "minimax/minimax-m3", Tier: TierHigh, ContextWindow: 512_000, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/minimax-m3",
+			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.20}},
+		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
+	}},
 	{ID: "z-ai/glm-5", Tier: TierHigh, ContextWindow: 202_752, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5",
 			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 2.080}},
