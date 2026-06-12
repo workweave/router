@@ -27,11 +27,11 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes+1))
 		if err != nil {
 			log.Debug("Failed to read request body", "err", err)
-			writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "failed to read request body")
+			writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body.")
 			return
 		}
 		if len(body) > maxBodyBytes {
-			writeOpenAIError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body too large")
+			writeOpenAIError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "Request body too large.")
 			return
 		}
 
@@ -45,7 +45,7 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 				if c.Writer.Written() {
 					return
 				}
-				writeOpenAIError(c, statusErr.Status, "api_error", "upstream call failed")
+				writeOpenAIError(c, statusErr.Status, "api_error", "Upstream call failed.")
 				return
 			}
 			if c.Writer.Written() {
@@ -66,7 +66,7 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 			}
 			if errors.Is(err, cluster.ErrNoEligibleProvider) {
 				log.Warn("No eligible provider for request", "err", err)
-				writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "no provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header")
+				writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "No provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header.")
 				return
 			}
 			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
@@ -77,11 +77,11 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 			if errors.Is(err, cluster.ErrClusterUnavailable) {
 				log.Error("Cluster routing unavailable", "err", err)
 				c.Header("Retry-After", "1")
-				writeOpenAIError(c, http.StatusServiceUnavailable, "api_error", "router unavailable: cluster scorer failed and no fallback is configured")
+				writeOpenAIError(c, http.StatusServiceUnavailable, "api_error", "Router unavailable: cluster scorer failed and no fallback is configured.")
 				return
 			}
 			log.Error("Proxy failed", "err", err)
-			writeOpenAIError(c, http.StatusBadGateway, "api_error", "upstream call failed")
+			writeOpenAIError(c, http.StatusBadGateway, "api_error", "Upstream call failed.")
 			return
 		}
 	}
