@@ -1,0 +1,24 @@
+internal/api/admin/auth.go
+  s_b19420d3dd2686::t_59d1e7b8c051f5 5,16-26
+  s_b19420d3dd2686::t_569305a565157f 60-66,68,75
+internal/server/middleware/auth.go
+  s_b19420d3dd2686::t_c78a9e7b704153 38-41,46-51,64-81
+internal/server/server.go
+  s_b19420d3dd2686::t_64ff8fe79bc4d3 76-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "c44f9f1fd28f0a62097b3e9fab55d3d4f106d2dc",
+  "prompts": {},
+  "sessions": {
+    "s_b19420d3dd2686": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "24be8415-a425-4b0d-916e-5c4cbe1ca9f9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

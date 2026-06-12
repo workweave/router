@@ -1,0 +1,98 @@
+scripts/record_provider_fixtures/main.go
+  s_b36b97f279629a::t_2c9c7040ce1b06 1-207
+scripts/record_provider_fixtures/README.md
+  s_b36b97f279629a::t_cbf58114735752 1-38
+internal/proxy/conformance_mock_test.go
+  s_b36b97f279629a::t_72f174e868abbc 1-69,71-95
+  s_b36b97f279629a::t_14e9177e2c7972 70
+internal/proxy/conformance_openai_test.go
+  s_b36b97f279629a::t_b732b875b4381e 1-8,10-22,25-35,37-39,105-111
+  s_b36b97f279629a::t_a6408670d5a0dc 9
+  s_b36b97f279629a::t_a88360937ccddf 36
+  s_b36b97f279629a::t_4aa492ce66e005 23-24,40-104
+internal/proxy/conformance_anthropic_test.go
+  s_b36b97f279629a::t_8b03b2a79172f3 1-57
+internal/proxy/testdata/conformance/responses/toolcall_nonstream_client.golden
+  s_b36b97f279629a::t_5b6497e592c1db 1-34
+internal/proxy/testdata/conformance/gemini_native/basic_text.upstream.sse
+  s_b36b97f279629a::t_896ac2ed8e0f27 1-4
+internal/proxy/testdata/conformance/openai_chat/toolcall.golden
+  s_b36b97f279629a::t_6bc57cda6279e7 1-72
+internal/proxy/testdata/conformance/openai_chat/system_prompt.golden
+  s_b36b97f279629a::t_6bc57cda6279e7 1-70
+internal/proxy/testdata/conformance/anthropic/passthrough_text.golden
+  s_b36b97f279629a::t_5b6497e592c1db 1-66
+internal/proxy/testdata/conformance/responses/toolcall_stream.golden
+  s_b36b97f279629a::t_5b6497e592c1db 1-152
+internal/proxy/testdata/conformance/openai_chat/basic_text.upstream.sse
+  s_b36b97f279629a::t_19f1ad07379be0 1-6
+internal/proxy/testdata/conformance/gemini_native/toolcall.upstream.sse
+  s_b36b97f279629a::t_431f2d6f10d701 1-2
+internal/proxy/testdata/conformance/anthropic/basic_text.upstream.sse
+  s_b36b97f279629a::t_271d80a25a7ab2 1-18
+internal/proxy/testdata/conformance/openai_chat/degenerate_toolcall_demotes.golden
+  s_b36b97f279629a::t_6bc57cda6279e7 1-70
+internal/proxy/testdata/conformance/gemini_native/thought_signature_roundtrip.golden
+  s_b36b97f279629a::t_4ac61260ede384 1-81
+internal/proxy/testdata/conformance/responses/effort_medium_promotes_high.golden
+  s_b36b97f279629a::t_5b6497e592c1db 1-152
+internal/proxy/conformance_responses_test.go
+  s_b36b97f279629a::t_35d4440e6e67fd 1-80
+internal/proxy/testdata/conformance/gemini_native/basic_text.golden
+  s_b36b97f279629a::t_4ac61260ede384 1-81
+internal/proxy/testdata/conformance/openai_chat/basic_text.golden
+  s_b36b97f279629a::t_f9b315ff03a5e1 7
+  s_b36b97f279629a::t_43c5e2cbc59d38 1-6,8-70
+internal/proxy/testdata/conformance/openai_chat/openrouter_gates.golden
+  s_b36b97f279629a::t_6bc57cda6279e7 1-70
+internal/proxy/testdata/conformance/responses/toolcall.upstream.sse
+  s_b36b97f279629a::t_5d94187388c4fb 1-42
+internal/proxy/testdata/conformance/gemini_native/toolcall.golden
+  s_b36b97f279629a::t_4ac61260ede384 1-72
+internal/proxy/conformance_golden_test.go
+  s_b36b97f279629a::t_3e9e76ccc8e5ce 136-158,160-170
+  s_b36b97f279629a::t_227d52427a53a3 1-17,19-100,102-105,120-135,159,171-173
+  s_b36b97f279629a::t_d254392be1c1c8 18
+  s_b36b97f279629a::t_a4ff7c3587e1e4 101,106-119
+internal/proxy/testdata/conformance/gemini_native/thinking_budget_gemini25.golden
+  s_b36b97f279629a::t_4ac61260ede384 1-81
+internal/providers/openai/client_timeout_test.go
+  s_b36b97f279629a::t_63b6de89f9e7d6 1-27,35,40-41,43-67
+  s_b36b97f279629a::t_622728f649e6de 28-34,36-39,42
+internal/proxy/testdata/conformance/openai_chat/basic_text.upstream.json
+  s_b36b97f279629a::t_3a652b3e1e4160 1
+internal/proxy/conformance_test.go
+  s_b36b97f279629a::t_7a24f219e3eb4b 61-66
+  s_b36b97f279629a::t_d117edbc0d3f93 1-60,67-85
+internal/proxy/testdata/conformance/openai_chat/toolcall.upstream.sse
+  s_b36b97f279629a::t_92c49870b5083c 1-10
+internal/proxy/testdata/conformance/openai_chat/degenerate_toolcall.upstream.sse
+  s_b36b97f279629a::t_d291f6e12d9dec 1-8
+internal/proxy/conformance_gemini_test.go
+  s_b36b97f279629a::t_2dd9a117aa2276 86-89
+  s_b36b97f279629a::t_21fde992894afd 1-85,90-106
+internal/proxy/testdata/conformance/anthropic/system_role_hoisted.golden
+  s_b36b97f279629a::t_5b6497e592c1db 1-66
+internal/proxy/testdata/conformance/openai_chat/basic_text_nonstream.golden
+  s_b36b97f279629a::t_6bc57cda6279e7 1-20
+internal/proxy/testdata/conformance/gemini_native/thinking_level_gemini3.golden
+  s_b36b97f279629a::t_4ac61260ede384 1-81
+internal/providers/openai/client.go
+  s_b36b97f279629a::t_a9fe0da5a00497 42-50,57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "17d305ccf2c68a8ca0407b17307304dc5e107006",
+  "prompts": {},
+  "sessions": {
+    "s_b36b97f279629a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fd95d435-2a08-4d67-ab56-6c970c9b1c7a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

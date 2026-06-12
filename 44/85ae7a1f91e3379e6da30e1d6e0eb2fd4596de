@@ -1,0 +1,59 @@
+db/migrations/0012_telemetry_candidate_scores_propensity.down.sql
+  s_79d8cf89bf917c::t_539424d5639680 1-7
+internal/router/router.go
+  s_79d8cf89bf917c::t_dec0dd0e019e9d 48-56
+internal/router/banditexplore/explorer.go
+  s_79d8cf89bf917c::t_53db2489669c9f 1-92,94-151
+  s_79d8cf89bf917c::t_339554c7d06d6c 93
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_79d8cf89bf917c::t_c2e0cb32c52f11 735-736,772-779,811-812,824-826,855-856,892-899,930-931
+db/queries/model_router_request_telemetry.sql
+  s_79d8cf89bf917c::t_2ec28d4fbe80f8 70-71
+  s_79d8cf89bf917c::t_b2c212e4a29364 3-5,34-35
+internal/proxy/observation.go
+  s_79d8cf89bf917c::t_a95c2864ffd9c1 27-34
+  s_79d8cf89bf917c::t_535cd53fa6ff16 57-69
+  s_79d8cf89bf917c::t_72ab2412ab66b6 5,7
+  s_79d8cf89bf917c::t_6ed0c5e09e6c86 92-97
+internal/proxy/telemetry.go
+  s_79d8cf89bf917c::t_7a60d0cd1bcd60 52-53
+db/migrations/0012_telemetry_candidate_scores_propensity.up.sql
+  s_79d8cf89bf917c::t_89aa64a981525d 1-13
+internal/router/cluster/scorer.go
+  s_79d8cf89bf917c::t_230c4b1b4c24c7 694-702
+  s_79d8cf89bf917c::t_d427e4f20e3173 725-729
+internal/postgres/telemetry.go
+  s_79d8cf89bf917c::t_a7a84a30bdaf04 80-81
+cmd/router/main.go
+  s_79d8cf89bf917c::t_6ed766f88635af 36
+  s_79d8cf89bf917c::t_a6e3e2b7c8c473 696-736
+  s_79d8cf89bf917c::t_3267a45f6823b2 558-565
+internal/router/banditexplore/explorer_test.go
+  s_79d8cf89bf917c::t_67b052e601781e 1-165
+internal/proxy/service.go
+  s_79d8cf89bf917c::t_d9ef610e299729 1406-1407
+  s_79d8cf89bf917c::t_58084b611e8536 2357-2358
+internal/proxy/service_observation_test.go
+  s_79d8cf89bf917c::t_7b4f5213f7414c 96-97
+  s_79d8cf89bf917c::t_f8858136b4c3cb 5
+  s_79d8cf89bf917c::t_1e648974bc04a0 257-259
+  s_79d8cf89bf917c::t_5b54bad17493ee 127-136
+internal/sqlc/models.go
+  s_79d8cf89bf917c::t_c2e0cb32c52f11 97-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "4485ae7a1f91e3379e6da30e1d6e0eb2fd4596de",
+  "prompts": {},
+  "sessions": {
+    "s_79d8cf89bf917c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f3e62dad-ab47-450c-99a2-08fd8ae87120",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

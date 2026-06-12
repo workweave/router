@@ -1,0 +1,23 @@
+internal/proxy/handover.go
+  s_36d21b9aa6b9e5::t_fb17a8fffd3b35 266-267,269-270,287,291,298-300,304,308,312-313,317
+internal/proxy/service.go
+  s_36d21b9aa6b9e5::t_1239eaf87764af 1300-1317
+  s_36d21b9aa6b9e5::t_cf8b77f839f23f 25
+  s_36d21b9aa6b9e5::t_e9351f6466a2e4 920-927,936
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2009ac3f2714ee5ec81c9d520fd195edcad68280",
+  "prompts": {},
+  "sessions": {
+    "s_36d21b9aa6b9e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "97d865a7-211f-44b6-8036-1768b14b4bac",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
