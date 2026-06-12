@@ -1038,6 +1038,89 @@ func TestScorer_V2DynamicScoring(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidRoutingKnobs)
 }
 
+func TestScorer_LambdaCostObjective(t *testing.T) {
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	c1 := make([]float32, dim)
+	c1[1] = 1
+	full := append(append([]float32{}, c0...), c1...)
+	centroidsBlob := buildCentroidsBlob(t, 2, dim, full)
+	centroids, err := loadCentroids(centroidsBlob)
+	require.NoError(t, err)
+	regBlob := []byte(`{
+		"deployed_models": [
+			{"model": "claude-opus-4-7", "provider": "anthropic", "bench_column": "gpt-5", "proxy": true},
+			{"model": "claude-haiku-4-5", "provider": "anthropic", "bench_column": "gemini-2.5-flash", "proxy": true}
+		]
+	}`)
+	registry, err := loadRegistry(regBlob)
+	require.NoError(t, err)
+
+	qualityMeans := Rankings{
+		0: map[string]float32{"claude-opus-4-7": 0.95, "claude-haiku-4-5": 0.20},
+		1: map[string]float32{"claude-opus-4-7": 0.10, "claude-haiku-4-5": 0.90},
+	}
+
+	opusInput := 0.015
+	opusOutput := 0.075
+	haikuInput := 0.00025
+	haikuOutput := 0.00125
+	modelAxes := map[string]ModelAxis{
+		"claude-opus-4-7":  {InputPer1KUSD: &opusInput, OutputPer1KUSD: &opusOutput},
+		"claude-haiku-4-5": {InputPer1KUSD: &haikuInput, OutputPer1KUSD: &haikuOutput},
+	}
+
+	lambda := 0.0
+	meta := &ArtifactMetadata{
+		FormatVersion: 2,
+		Training: ArtifactTraining{
+			K:         2,
+			TopP:      2,
+			Objective: "lambda_cost",
+			DefaultRoutingKnobs: &DefaultRoutingKnobs{
+				Alpha:                []float64{0.5, 0.5},
+				LambdaCost:           lambda,
+				OutputCostRatio:      1.0,
+				ExpectedOutputTokens: 2000,
+			},
+		},
+	}
+
+	bundle := &Bundle{
+		Version:      "v2-lambda-test",
+		Centroids:    centroids,
+		Registry:     registry,
+		Metadata:     meta,
+		IsV2:         true,
+		QualityMeans: qualityMeans,
+		ModelAxes:    modelAxes,
+	}
+
+	cfg := DefaultConfig()
+	cfg.TopP = 1
+	scorer, err := NewScorer(bundle, cfg, &fakeEmbedder{vec: makeOpusVec()}, allProviders())
+	require.NoError(t, err)
+
+	decQuality, err := scorer.Route(context.Background(), router.Request{
+		RequestedModel: "auto",
+		PromptText:     "test",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", decQuality.Model)
+
+	lambdaHigh := 50.0
+	decCost, err := scorer.Route(context.Background(), router.Request{
+		RequestedModel: "auto",
+		PromptText:     "test",
+		RoutingKnobs: &router.Overrides{
+			LambdaCost: &lambdaHigh,
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-haiku-4-5", decCost.Model)
+}
+
 // v2BundleOpts is the optional knob configuration for newV2BundleForTest.
 type v2BundleOpts struct {
 	qualityMeans    Rankings // overrides the default opus/haiku table

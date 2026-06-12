@@ -9,6 +9,7 @@ type Overrides struct {
 	OutputCostRatio      *float64
 	ExpectedOutputTokens *int
 	PerModelVerbosity    *bool
+	LambdaCost           *float64
 }
 
 type Request struct {

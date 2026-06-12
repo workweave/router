@@ -459,6 +459,9 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			if req.RoutingKnobs.PerModelVerbosity != nil {
 				activeKnobs.PerModelVerbosity = *req.RoutingKnobs.PerModelVerbosity
 			}
+			if req.RoutingKnobs.LambdaCost != nil {
+				activeKnobs.LambdaCost = *req.RoutingKnobs.LambdaCost
+			}
 		}
 
 		// Validate effective knobs. Alpha length is sanity-checked here as a
@@ -497,6 +500,18 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			return router.Decision{}, fmt.Errorf("%w: expected_output_tokens (%d) must be in [0, 100000]", ErrInvalidRoutingKnobs, activeKnobs.ExpectedOutputTokens)
 		}
 
+		useLambdaCost := s.metadata != nil &&
+			s.metadata.Training.Objective == "lambda_cost"
+		if useLambdaCost {
+			lambda := activeKnobs.LambdaCost
+			if req.RoutingKnobs != nil && req.RoutingKnobs.LambdaCost != nil {
+				lambda = *req.RoutingKnobs.LambdaCost
+			}
+			if lambda < 0 {
+				return router.Decision{}, fmt.Errorf("%w: lambda_cost (%f) must be >= 0", ErrInvalidRoutingKnobs, lambda)
+			}
+		}
+
 		effectiveKnobsHash = ComputeKnobsHash(
 			activeKnobs.Alpha,
 			activeKnobs.SpeedWeight,
@@ -505,159 +520,187 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			activeKnobs.PerModelVerbosity,
 		)
 
-		// 2. Effective per-model cost (knob-dependent)
-		costs := make(map[string]float64, len(s.models))
-		for _, m := range s.models {
-			axis := s.modelAxes[m]
-			vFactor := 1.0
-			if activeKnobs.PerModelVerbosity && axis.VerbosityTokens != nil && s.medianVerbosity > 0 {
-				vFactor = *axis.VerbosityTokens / s.medianVerbosity
+		if useLambdaCost {
+			lambda := activeKnobs.LambdaCost
+			inputTokens := req.EstimatedInputTokens
+			if inputTokens <= 0 {
+				inputTokens = len(text) / 4
+				if inputTokens <= 0 {
+					inputTokens = 1
+				}
 			}
-			inputPer1K := 0.0
-			if axis.InputPer1KUSD != nil {
-				inputPer1K = *axis.InputPer1KUSD
+			scores = make(map[string]float32, len(eligibleModels))
+			for _, k := range topClusters {
+				row := s.qualityMeans[k]
+				for _, m := range eligibleModels {
+					qVal := row[m]
+					dollars := estimateQueryCostUSD(
+						s.modelAxes[m],
+						inputTokens,
+						activeKnobs.ExpectedOutputTokens,
+						activeKnobs.OutputCostRatio,
+						activeKnobs.PerModelVerbosity,
+						s.medianVerbosity,
+					)
+					scores[m] += float32(qVal) - float32(lambda*dollars)
+				}
 			}
-			outputPer1K := 0.0
-			if axis.OutputPer1KUSD != nil {
-				outputPer1K = *axis.OutputPer1KUSD
-			}
-			costs[m] = inputPer1K + activeKnobs.OutputCostRatio*outputPer1K*vFactor
-		}
+		} else {
 
-		// 3. Effective per-model speed
-		speeds := make(map[string]*float64, len(s.models))
-		for _, m := range s.models {
-			axis := s.modelAxes[m]
-			if axis.TTFTSeconds != nil && axis.TPS != nil && *axis.TPS > 0 {
-				val := *axis.TTFTSeconds + float64(activeKnobs.ExpectedOutputTokens) / *axis.TPS
-				speeds[m] = &val
-			} else {
-				speeds[m] = nil
-			}
-		}
-
-		// 4. Normalize over DEPLOYED model set
-		qMin := make(map[int]float32)
-		qMax := make(map[int]float32)
-		for _, k := range topClusters {
-			row := s.qualityMeans[k]
-			first := true
+			// 2. Effective per-model cost (knob-dependent)
+			costs := make(map[string]float64, len(s.models))
 			for _, m := range s.models {
-				qVal := row[m]
-				if first {
-					qMin[k] = qVal
-					qMax[k] = qVal
-					first = false
+				axis := s.modelAxes[m]
+				vFactor := 1.0
+				if activeKnobs.PerModelVerbosity && axis.VerbosityTokens != nil && s.medianVerbosity > 0 {
+					vFactor = *axis.VerbosityTokens / s.medianVerbosity
+				}
+				inputPer1K := 0.0
+				if axis.InputPer1KUSD != nil {
+					inputPer1K = *axis.InputPer1KUSD
+				}
+				outputPer1K := 0.0
+				if axis.OutputPer1KUSD != nil {
+					outputPer1K = *axis.OutputPer1KUSD
+				}
+				costs[m] = inputPer1K + activeKnobs.OutputCostRatio*outputPer1K*vFactor
+			}
+
+			// 3. Effective per-model speed
+			speeds := make(map[string]*float64, len(s.models))
+			for _, m := range s.models {
+				axis := s.modelAxes[m]
+				if axis.TTFTSeconds != nil && axis.TPS != nil && *axis.TPS > 0 {
+					val := *axis.TTFTSeconds + float64(activeKnobs.ExpectedOutputTokens) / *axis.TPS
+					speeds[m] = &val
 				} else {
-					if qVal < qMin[k] {
+					speeds[m] = nil
+				}
+			}
+
+			// 4. Normalize over DEPLOYED model set
+			qMin := make(map[int]float32)
+			qMax := make(map[int]float32)
+			for _, k := range topClusters {
+				row := s.qualityMeans[k]
+				first := true
+				for _, m := range s.models {
+					qVal := row[m]
+					if first {
 						qMin[k] = qVal
-					}
-					if qVal > qMax[k] {
 						qMax[k] = qVal
+						first = false
+					} else {
+						if qVal < qMin[k] {
+							qMin[k] = qVal
+						}
+						if qVal > qMax[k] {
+							qMax[k] = qVal
+						}
 					}
 				}
 			}
-		}
 
-		var cMin, cMax float64
-		firstC := true
-		for _, m := range s.models {
-			cVal := costs[m]
-			if firstC {
-				cMin = cVal
-				cMax = cVal
-				firstC = false
-			} else {
-				if cVal < cMin {
-					cMin = cVal
-				}
-				if cVal > cMax {
-					cMax = cVal
-				}
-			}
-		}
-		cRange := cMax - cMin
-
-		useSpeed := activeKnobs.SpeedWeight > 0
-		var sMin, sMax float64
-		firstS := true
-		for _, m := range s.models {
-			if !useSpeed {
-				break
-			}
-			sPtr := speeds[m]
-			if sPtr == nil {
-				continue
-			}
-			sVal := *sPtr
-			if firstS {
-				sMin = sVal
-				sMax = sVal
-				firstS = false
-			} else {
-				if sVal < sMin {
-					sMin = sVal
-				}
-				if sVal > sMax {
-					sMax = sVal
-				}
-			}
-		}
-		sRange := 0.0
-		if useSpeed && !firstS {
-			sRange = sMax - sMin
-		}
-
-		// 6. Blend per top-P cluster
-		scores = make(map[string]float32, len(eligibleModels))
-		for _, k := range topClusters {
-			row := s.qualityMeans[k]
-			wQ := float32(activeKnobs.Alpha[k])
-			wS := float32(0.0)
-			if useSpeed {
-				wS = float32(activeKnobs.SpeedWeight)
-			}
-			wC := float32(1.0) - wQ - wS
-
-			qRange := qMax[k] - qMin[k]
-
-			for _, m := range eligibleModels {
-				qVal := row[m]
-				qNorm := float32(0.0)
-				if qRange > 0 {
-					qNorm = (qVal - qMin[k]) / qRange
-				}
-
+			var cMin, cMax float64
+			firstC := true
+			for _, m := range s.models {
 				cVal := costs[m]
-				cNorm := float32(0.0)
-				if cRange > 0 {
-					cNorm = float32((cVal - cMin) / cRange)
-				}
-
-				sPtr := speeds[m]
-				if sRange > 0 {
-					// Mixed-timing pool: untimed peers are treated as
-					// worst-case speed (sNorm=1, no wS bonus). This keeps
-					// wQ/wC weighting consistent across timed and untimed
-					// models — without this, the redistribution branch
-					// would silently drop the cost axis when wC=0.
-					var sNorm float32 = 1.0
-					if sPtr != nil {
-						sNorm = float32((*sPtr - sMin) / sRange)
-					}
-					blend := wQ*qNorm + wC*(1.0-cNorm) + wS*(1.0-sNorm)
-					scores[m] += blend
+				if firstC {
+					cMin = cVal
+					cMax = cVal
+					firstC = false
 				} else {
-					// No timing differentiation across the entire pool
-					// (all models lack AA timing, or all share the same
-					// speed). Redistribute wS into wQ and wC so the
-					// remaining weights still sum to 1.
-					total := wQ + wC
-					if total > 0 {
-						blend := (wQ/total)*qNorm + (wC/total)*(1.0-cNorm)
+					if cVal < cMin {
+						cMin = cVal
+					}
+					if cVal > cMax {
+						cMax = cVal
+					}
+				}
+			}
+			cRange := cMax - cMin
+
+			useSpeed := activeKnobs.SpeedWeight > 0
+			var sMin, sMax float64
+			firstS := true
+			for _, m := range s.models {
+				if !useSpeed {
+					break
+				}
+				sPtr := speeds[m]
+				if sPtr == nil {
+					continue
+				}
+				sVal := *sPtr
+				if firstS {
+					sMin = sVal
+					sMax = sVal
+					firstS = false
+				} else {
+					if sVal < sMin {
+						sMin = sVal
+					}
+					if sVal > sMax {
+						sMax = sVal
+					}
+				}
+			}
+			sRange := 0.0
+			if useSpeed && !firstS {
+				sRange = sMax - sMin
+			}
+
+			// 6. Blend per top-P cluster
+			scores = make(map[string]float32, len(eligibleModels))
+			for _, k := range topClusters {
+				row := s.qualityMeans[k]
+				wQ := float32(activeKnobs.Alpha[k])
+				wS := float32(0.0)
+				if useSpeed {
+					wS = float32(activeKnobs.SpeedWeight)
+				}
+				wC := float32(1.0) - wQ - wS
+
+				qRange := qMax[k] - qMin[k]
+
+				for _, m := range eligibleModels {
+					qVal := row[m]
+					qNorm := float32(0.0)
+					if qRange > 0 {
+						qNorm = (qVal - qMin[k]) / qRange
+					}
+
+					cVal := costs[m]
+					cNorm := float32(0.0)
+					if cRange > 0 {
+						cNorm = float32((cVal - cMin) / cRange)
+					}
+
+					sPtr := speeds[m]
+					if sRange > 0 {
+						// Mixed-timing pool: untimed peers are treated as
+						// worst-case speed (sNorm=1, no wS bonus). This keeps
+						// wQ/wC weighting consistent across timed and untimed
+						// models — without this, the redistribution branch
+						// would silently drop the cost axis when wC=0.
+						var sNorm float32 = 1.0
+						if sPtr != nil {
+							sNorm = float32((*sPtr - sMin) / sRange)
+						}
+						blend := wQ*qNorm + wC*(1.0-cNorm) + wS*(1.0-sNorm)
 						scores[m] += blend
 					} else {
-						scores[m] += qNorm
+						// No timing differentiation across the entire pool
+						// (all models lack AA timing, or all share the same
+						// speed). Redistribute wS into wQ and wC so the
+						// remaining weights still sum to 1.
+						total := wQ + wC
+						if total > 0 {
+							blend := (wQ/total)*qNorm + (wC/total)*(1.0-cNorm)
+							scores[m] += blend
+						} else {
+							scores[m] += qNorm
+						}
 					}
 				}
 			}
@@ -849,6 +892,32 @@ func tailTruncate(s string, maxChars int) string {
 		cut++
 	}
 	return s[cut:]
+}
+
+// estimateQueryCostUSD returns a rough per-query dollar estimate from model_axes.
+func estimateQueryCostUSD(
+	axis ModelAxis,
+	inputTokens int,
+	expectedOutputTokens int,
+	outputCostRatio float64,
+	perModelVerbosity bool,
+	medianVerbosity float64,
+) float64 {
+	inputPer1K := 0.0
+	if axis.InputPer1KUSD != nil {
+		inputPer1K = *axis.InputPer1KUSD
+	}
+	outputPer1K := 0.0
+	if axis.OutputPer1KUSD != nil {
+		outputPer1K = *axis.OutputPer1KUSD
+	}
+	vFactor := 1.0
+	if perModelVerbosity && axis.VerbosityTokens != nil && medianVerbosity > 0 {
+		vFactor = *axis.VerbosityTokens / medianVerbosity
+	}
+	inputUSD := (float64(inputTokens) / 1000.0) * inputPer1K
+	outputUSD := (float64(expectedOutputTokens) / 1000.0) * outputPer1K * outputCostRatio * vFactor
+	return inputUSD + outputUSD
 }
 
 func clusterIDsString(ks []int) string {
