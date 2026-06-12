@@ -72,7 +72,9 @@ var forceModelAliases = map[string]string{
 	"glm":            "z-ai/glm-5.1",
 	"zai":            "z-ai/glm-5.1",
 	"z-ai":           "z-ai/glm-5.1",
-	"minimax":        "minimax/minimax-m2.7",
+	"minimax":        "minimax/minimax-m3",
+	"minimax-m3":     "minimax/minimax-m3",
+	"minimax-m2.7":   "minimax/minimax-m2.7",
 	"mistral":        "mistralai/mistral-small-2603",
 }
 
