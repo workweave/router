@@ -2117,8 +2117,14 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
   # [forced] tag and prefer the pinned model id parsed from the marker: once a
   # pin is live the routed model id is indistinguishable from automatic
   # routing, so the marker is the only signal that the choice was forced.
+  #
+  # Match only the router's own synthetic ack turns (message.model ==
+  # "weave-router"), never normal assistant replies — otherwise a model
+  # response that merely quotes "force-model applied:" / "force-model cleared"
+  # (e.g. explaining the feature) could outrank the real latest ack and flip
+  # the tag on or off incorrectly.
   force_marker="$("${reverse[@]}" "$transcript_path" 2>/dev/null \
-    | jq -r 'select(.type=="assistant") | .message.content[]? | select(.type? == "text") | .text // empty' 2>/dev/null \
+    | jq -r 'select(.type=="assistant" and .message.model=="weave-router") | .message.content[]? | select(.type? == "text") | .text // empty' 2>/dev/null \
     | grep -m1 -E 'force-model (applied|cleared)' || true)"
   if [[ "$force_marker" == *"force-model applied:"* ]]; then
     forced="true"
