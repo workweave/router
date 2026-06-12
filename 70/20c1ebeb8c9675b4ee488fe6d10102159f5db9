@@ -1,8 +1,3 @@
-internal/proxy/service_session_pin_test.go
-  304a1fdb547d0e74 1-84,86-192,194-200
-  s_18e3f40203cbfc::t_59f3f798149a72 85
-  s_f9607ec6d0e27d::t_ca9b20a72adb11 193
-  s_18e3f40203cbfc::t_a7d0bd72354223 201-290
 internal/proxy/service_test.go
   s_18e3f40203cbfc::t_658f71e187d11d 56
   304a1fdb547d0e74 105,130,195,241
@@ -10,10 +5,11 @@ internal/proxy/service_test.go
   s_18e3f40203cbfc::t_a9eb977c28fa05 131
   s_18e3f40203cbfc::t_4b79a0a572149f 196
   s_18e3f40203cbfc::t_16c92c6afa4de8 242
+cmd/router/main.go
+  304a1fdb547d0e74 35,61-67,186-193,537-559
+  s_18e3f40203cbfc::t_3078bdd8c83447 194-199
 internal/router/turntype/detect.go
   s_18e3f40203cbfc::t_e47435a90f6da4 1-122
-internal/router/turntype/detect_test.go
-  s_18e3f40203cbfc::t_92aa6dd75e36c6 1-116
 internal/proxy/service.go
   304a1fdb547d0e74 5,17,37-47,58-59,81-89,94,96-97,106-107,275,278-288,295-303,326-347,351,354,368,372-381,389-406,457,470-471,607-640
   s_18e3f40203cbfc::t_d06da3811a2f28 18
@@ -33,13 +29,17 @@ internal/proxy/service.go
 internal/proxy/service_cache_test.go
   s_18e3f40203cbfc::t_0101cd30b14d14 92,123,147,170
   s_18e3f40203cbfc::t_3614647bf16c8f 195
-cmd/router/main.go
-  304a1fdb547d0e74 35,61-67,186-193,537-559
-  s_18e3f40203cbfc::t_3078bdd8c83447 194-199
+internal/proxy/service_session_pin_test.go
+  304a1fdb547d0e74 1-84,86-192,194-200
+  s_18e3f40203cbfc::t_59f3f798149a72 85
+  s_f9607ec6d0e27d::t_ca9b20a72adb11 193
+  s_18e3f40203cbfc::t_a7d0bd72354223 201-290
+internal/router/turntype/detect_test.go
+  s_18e3f40203cbfc::t_92aa6dd75e36c6 1-116
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.4.11",
+  "git_ai_version": "1.5.2",
   "base_commit_sha": "7020c1ebeb8c9675b4ee488fe6d10102159f5db9",
   "prompts": {
     "304a1fdb547d0e74": {
