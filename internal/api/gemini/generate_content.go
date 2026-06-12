@@ -78,15 +78,15 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 				return
 			}
 			if errors.Is(err, proxy.ErrGeminiCrossFormatUnsupported) {
-				writeGeminiError(c, http.StatusNotImplemented, "UNIMPLEMENTED", err.Error())
+				writeGeminiError(c, http.StatusNotImplemented, "UNIMPLEMENTED", "Cross-format request not supported by the upstream Gemini provider.")
 				return
 			}
 			if errors.Is(err, providers.ErrNotImplemented) {
-				writeGeminiError(c, http.StatusNotImplemented, "UNIMPLEMENTED", err.Error())
+				writeGeminiError(c, http.StatusNotImplemented, "UNIMPLEMENTED", "Provider not implemented.")
 				return
 			}
 			if errors.Is(err, proxy.ErrProviderNotConfigured) {
-				writeGeminiError(c, http.StatusBadGateway, "FAILED_PRECONDITION", err.Error())
+				writeGeminiError(c, http.StatusBadGateway, "FAILED_PRECONDITION", "Provider not configured.")
 				return
 			}
 			if errors.Is(err, translate.ErrNotJSONObject) {
