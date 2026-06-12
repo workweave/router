@@ -190,6 +190,44 @@ func TestRecordCallLog_HashedOmitsRawText(t *testing.T) {
 	assert.NotContains(t, a["io.request_sha256"], "secret")
 }
 
+func TestDeferredCallLog_ReadsBodyAtRunTime(t *testing.T) {
+	coll := newLogCollector(t)
+	s, em := newServiceWithEmitter(t, CaptureFull, nil, coll.server.URL)
+
+	ctx, h := withDeferredCallLog(context.Background())
+	require.NotNil(t, deferredCallLogFrom(ctx), "holder must be retrievable from ctx")
+
+	buf := otel.NewBuffer(em)
+	ctx = buf.WithContext(ctx)
+
+	// Simulate the ProxyOpenAIChatCompletion tail: capture writer is wired, but
+	// the (buffered) ResponsesWriter hasn't written the body yet — the emit is
+	// deferred rather than run inline.
+	rec := httptest.NewRecorder()
+	_, cw := s.maybeCaptureResponse(rec)
+	base := otel.NewAttrBuilder(1).String("decision.model", "m").Build()
+	h.fn = func() {
+		body, trunc := capturedResponse(cw)
+		s.recordCallLog(ctx, base, false, []byte("req"), body, trunc)
+		otel.Flush(ctx)
+	}
+
+	// Body arrives during "Finalize", after the deferral was registered.
+	_, _ = cw.Write([]byte(`{"final":"body"}`))
+	h.run()
+
+	require.NoError(t, em.Shutdown(context.Background()))
+	a := coll.attrs(t)
+	assert.Equal(t, `{"final":"body"}`, a["io.response_body"], "deferred emit must read the post-Finalize body")
+}
+
+func TestDeferredCallLog_SafeWhenAbsent(t *testing.T) {
+	assert.Nil(t, deferredCallLogFrom(context.Background()))
+	var d *deferredCallLog
+	assert.NotPanics(t, func() { d.run() })           // nil receiver
+	assert.NotPanics(t, func() { (&deferredCallLog{}).run() }) // no fn registered
+}
+
 func TestRecordCallLog_RedactorApplied(t *testing.T) {
 	coll := newLogCollector(t)
 	redactor := func(content string, kind ContentKind) string {

@@ -110,6 +110,35 @@ func capturedResponse(c *captureWriter) (body []byte, truncated bool) {
 	return b, false
 }
 
+// deferredCallLog lets a wrapping handler run the call-log emission after the
+// response body is fully written. The /v1/responses surface wraps the client
+// in a translate.ResponsesWriter and calls Finalize only after
+// ProxyOpenAIChatCompletion returns; reading the captured body before Finalize
+// would yield empty/partial content. When a holder is present on the context,
+// ProxyOpenAIChatCompletion stores its emit closure here instead of running it
+// inline, and the wrapper invokes run() post-Finalize.
+type deferredCallLog struct{ fn func() }
+
+type deferredCallLogKey struct{}
+
+func withDeferredCallLog(ctx context.Context) (context.Context, *deferredCallLog) {
+	h := &deferredCallLog{}
+	return context.WithValue(ctx, deferredCallLogKey{}, h), h
+}
+
+func deferredCallLogFrom(ctx context.Context) *deferredCallLog {
+	h, _ := ctx.Value(deferredCallLogKey{}).(*deferredCallLog)
+	return h
+}
+
+// run invokes the deferred emit if one was registered. Safe on nil receiver
+// and when no emit was stored (e.g. the request errored before any call).
+func (d *deferredCallLog) run() {
+	if d != nil && d.fn != nil {
+		d.fn()
+	}
+}
+
 func (s *Service) redact(content []byte, kind ContentKind) string {
 	if s.redactor == nil {
 		return string(content)

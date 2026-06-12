@@ -2666,9 +2666,21 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		End:   time.Now(),
 		Attrs: openaiUpstreamBuilder.Build(),
 	})
-	respBody, respTrunc := capturedResponse(contentCap)
-	s.recordCallLog(ctx, openaiUpstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
-	otel.Flush(ctx)
+	callLogBase := openaiUpstreamBuilder.Build()
+	emitCallLog := func() {
+		respBody, respTrunc := capturedResponse(contentCap)
+		s.recordCallLog(ctx, callLogBase, proxyErr != nil, body, respBody, respTrunc)
+		otel.Flush(ctx)
+	}
+	// The /v1/responses surface (ProxyOpenAIResponses) finalizes its
+	// ResponsesWriter only after this function returns, so the captured body
+	// isn't complete yet — defer the read+emit to run post-Finalize. All other
+	// callers emit inline.
+	if h := deferredCallLogFrom(ctx); h != nil {
+		h.fn = emitCallLog
+	} else {
+		emitCallLog()
+	}
 
 	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
 
@@ -2739,6 +2751,10 @@ func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.
 		return fmt.Errorf("translate responses request: %w", err)
 	}
 	wrapper := translate.NewResponsesWriter(w, model)
+	// Defer the high-fidelity call-log emission until after Finalize: the
+	// ResponsesWriter buffers (non-streaming) and emits tail events only in
+	// Finalize, so the captured io.response_body is incomplete until then.
+	ctx, deferredLog := withDeferredCallLog(ctx)
 	// Prelude (response.created emit) deferred to ProxyOpenAIChatCompletion.
 	// It knows the post-routing decision and the binding count; only fires
 	// eagerly when the request is single-binding (no failover possible).
@@ -2752,7 +2768,10 @@ func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.
 		// On error, let the handler write the error envelope unless we've
 		// already committed to streaming — in which case the chat-completions
 		// path will have surfaced a status error and we just propagate.
+		deferredLog.run()
 		return proxyErr
 	}
-	return wrapper.Finalize()
+	finErr := wrapper.Finalize()
+	deferredLog.run()
+	return finErr
 }
