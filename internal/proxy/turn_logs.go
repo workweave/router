@@ -117,7 +117,14 @@ func capturedResponse(c *captureWriter) (body []byte, truncated bool) {
 // would yield empty/partial content. When a holder is present on the context,
 // ProxyOpenAIChatCompletion stores its emit closure here instead of running it
 // inline, and the wrapper invokes run() post-Finalize.
-type deferredCallLog struct{ fn func() }
+type deferredCallLog struct {
+	fn func()
+	// requestBody, when set, overrides the captured request body for the call
+	// log. ProxyOpenAIResponses sets it to the client's original Responses JSON
+	// so io.request_body matches the Responses-format response body, rather than
+	// the translated Chat Completions payload ProxyOpenAIChatCompletion sees.
+	requestBody []byte
+}
 
 type deferredCallLogKey struct{}
 

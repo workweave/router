@@ -2680,8 +2680,12 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	})
 	callLogBase := openaiUpstreamBuilder.Build()
 	emitCallLog := func() {
+		reqBody := body
+		if h := deferredCallLogFrom(ctx); h != nil && h.requestBody != nil {
+			reqBody = h.requestBody
+		}
 		respBody, respTrunc := capturedResponse(contentCap)
-		s.recordCallLog(ctx, callLogBase, proxyErr != nil, body, respBody, respTrunc)
+		s.recordCallLog(ctx, callLogBase, proxyErr != nil, reqBody, respBody, respTrunc)
 		otel.Flush(ctx)
 	}
 	// The /v1/responses surface (ProxyOpenAIResponses) finalizes its
@@ -2767,6 +2771,10 @@ func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.
 	// ResponsesWriter buffers (non-streaming) and emits tail events only in
 	// Finalize, so the captured io.response_body is incomplete until then.
 	ctx, deferredLog := withDeferredCallLog(ctx)
+	// Capture the client's original Responses JSON as the request body so the
+	// call log's io.request_body matches the Responses-format response body
+	// (ProxyOpenAIChatCompletion otherwise sees the translated chatBody).
+	deferredLog.requestBody = body
 	// Prelude (response.created emit) deferred to ProxyOpenAIChatCompletion.
 	// It knows the post-routing decision and the binding count; only fires
 	// eagerly when the request is single-binding (no failover possible).
