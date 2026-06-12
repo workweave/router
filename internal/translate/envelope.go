@@ -1003,12 +1003,45 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		ov.StripThinkingBlocks = true
 	}
 
+	if opts.ModelSwitched {
+		ov.StripThinkingBlocks = true
+	}
+
+	// ADD THIS:
+	// If history contains thinking blocks without Anthropic-issued signatures
+	// (synthesised from OSS reasoning_content), strip them — unsigned blocks
+	// cause Anthropic to reject the request with a 400.
+	if !ov.StripThinkingBlocks && historyHasUnsignedThinkingBlock(body) {
+		ov.StripThinkingBlocks = true
+	}
+
 	if !gjson.GetBytes(body, "max_tokens").Exists() {
 		ov.DefaultMaxTokensKey = "max_tokens"
 		ov.DefaultMaxTokensValue = defaultOutputTokens(opts.TargetModel)
 	}
 
 	return ov
+}
+
+// historyHasUnsignedThinkingBlock returns true if any message in the
+// conversation history contains a thinking block without a signature field.
+// This occurs when OSS models (DeepSeek, Qwen) return reasoning_content which
+// the router translates into thinking blocks — but without Anthropic-issued
+// signatures. Sending these to Anthropic causes a 400 error.
+func historyHasUnsignedThinkingBlock(body []byte) bool {
+	found := false
+	gjson.GetBytes(body, "messages").ForEach(func(_, msg gjson.Result) bool {
+		msg.Get("content").ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() == "thinking" &&
+				block.Get("signature").String() == "" {
+				found = true
+				return false
+			}
+			return true
+		})
+		return !found
+	})
+	return found
 }
 
 // resolvePassthroughOverrides strips inference-time fields that non-routing
