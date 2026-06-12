@@ -48,7 +48,7 @@ func MetricsSummaryHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 			summary, err = proxySvc.MetricsSummary(c.Request.Context(), installation.ID, from, to)
 		}
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch metrics"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch metrics."})
 			return
 		}
 
@@ -85,7 +85,7 @@ func MetricsTimeseriesHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 			buckets, err = proxySvc.MetricsTimeseries(c.Request.Context(), installation.ID, from, to, granularity)
 		}
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch timeseries"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch timeseries."})
 			return
 		}
 
@@ -157,7 +157,7 @@ func MetricsDetailsHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 			rows, err = proxySvc.MetricsRows(c.Request.Context(), installation.ID, from, to, limit)
 		}
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch details"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch details."})
 			return
 		}
 
