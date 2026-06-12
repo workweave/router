@@ -2068,6 +2068,8 @@ prices='{
 # END_GENERATED_PRICES
 
 routed=""
+forced="false"
+forced_model=""
 session_savings=""
 tot_in=0
 tot_out=0
@@ -2103,6 +2105,24 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
     routed="failure"
   else
     routed="$(normalize_model "$routed")"
+  fi
+
+  # Detect an active /force-model pin. When the user runs /force-model the
+  # router writes a synthetic acknowledgment turn into the transcript
+  # ("✦ Weave Router → force-model applied: <model> (<provider>) …"), and
+  # /unforce-model writes a matching "force-model cleared" turn. Neither is
+  # stripped from the on-disk transcript — the ingress stripper only scrubs
+  # these markers from requests forwarded upstream — so the latest of the two
+  # tells us whether the session is currently pinned. We surface that as a
+  # [forced] tag and prefer the pinned model id parsed from the marker: once a
+  # pin is live the routed model id is indistinguishable from automatic
+  # routing, so the marker is the only signal that the choice was forced.
+  force_marker="$("${reverse[@]}" "$transcript_path" 2>/dev/null \
+    | jq -r 'select(.type=="assistant") | .message.content[]? | select(.type? == "text") | .text // empty' 2>/dev/null \
+    | grep -m1 -E 'force-model (applied|cleared)' || true)"
+  if [[ "$force_marker" == *"force-model applied:"* ]]; then
+    forced="true"
+    forced_model="$(printf '%s' "$force_marker" | sed -E 's/.*force-model applied: ([^ ]+).*/\1/')"
   fi
 
   # Compute a session running total: savings across every assistant turn
@@ -2207,7 +2227,14 @@ if [[ "$tot_in" -gt 0 || "$tot_out" -gt 0 || "$tot_cache_read" -gt 0 || "$tot_ca
   fi
 fi
 
-if [[ "$routed" == "failure" ]]; then
+if [[ "$forced" == "true" ]]; then
+  # Session is pinned via /force-model. The "← selection · saved $X" clause
+  # describes automatic routing and would be misleading on a manual pin, so
+  # show the pinned model with a [forced] tag instead. forced_model comes from
+  # the marker; fall back to the routed/selected id if parsing came up empty.
+  forced_display="${forced_model:-${routed:-$selected_display}}"
+  printf '%s — %s [forced]%s' "$brand" "$forced_display" "$tokens_clause"
+elif [[ "$routed" == "failure" ]]; then
   # Latest turn was a CC-synthesized error stub — don't claim a routing
   # swap or compute savings against a non-model.
   printf '%s — %s%s' "$brand" "$routed" "$tokens_clause"
