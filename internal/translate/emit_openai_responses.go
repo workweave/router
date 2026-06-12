@@ -207,7 +207,7 @@ func writeResponsesInputFromAnthropic(jw *jsonWriter, body []byte) {
 				jw.Key("type")
 				jw.Str("function_call")
 				jw.Key("call_id")
-				jw.Str(callID)
+				jw.Str(clampOpenAIToolCallID(callID))
 				jw.Key("name")
 				jw.Str(block.Get("name").String())
 				inputRaw := block.Get("input").Raw
@@ -227,7 +227,7 @@ func writeResponsesInputFromAnthropic(jw *jsonWriter, body []byte) {
 				jw.Str("function_call_output")
 				jw.Key("call_id")
 				callID, _ := extractOpenAIReasoningSignatureFromID(block.Get("tool_use_id").String())
-				jw.Str(callID)
+				jw.Str(clampOpenAIToolCallID(callID))
 				jw.Key("output")
 				jw.Str(flattenAnthropicToolResultContent(block.Get("content")))
 				jw.EndObj()

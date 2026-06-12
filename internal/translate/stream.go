@@ -1360,20 +1360,20 @@ func (t *AnthropicSSETranslator) emitContentBlockStartText(index int) error {
 }
 
 // emitContentBlockStartTool emits a tool_use content_block_start. sig, when
-// non-empty, is an opaque thought_signature for Gemini 3.x round-trips,
-// smuggled as a non-standard field so passthrough clients preserve it.
+// non-empty, is an opaque Gemini 3.x thoughtSignature; it is smuggled into the
+// tool id (embedSignatureInID) — a typed string every client SDK round-trips —
+// rather than emitted as an off-spec block field, which Anthropic upstreams
+// reject with a 400 ("Extra inputs are not permitted") when the history routes
+// back to them. embedSignatureInID is idempotent, so a Gemini-native id that
+// already carries the signature is left untouched.
 func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name, sig string) error {
 	observability.Get().Debug("AnthropicSSE emit", "event", "content_block_start", "type", "tool_use", "name", name)
 	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"content_block\":{\"type\":\"tool_use\",\"id\":")
-	sse.WriteJSONString(t.bw, id)
+	sse.WriteJSONString(t.bw, embedSignatureInID(id, sig))
 	t.bw.WriteString(",\"name\":")
 	sse.WriteJSONString(t.bw, name)
-	if sig != "" {
-		t.bw.WriteString(",\"thought_signature\":")
-		sse.WriteJSONString(t.bw, sig)
-	}
 	t.bw.WriteString(",\"input\":{}}}\n\n")
 	return t.flushEvent()
 }

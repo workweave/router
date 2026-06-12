@@ -68,6 +68,40 @@ func TestOpenAISameFormat_UnknownFieldsPreserved(t *testing.T) {
 	assert.Equal(t, "val", meta["key"])
 }
 
+// A Gemini turn earlier in the session left an off-spec thought_signature field
+// on content blocks (the router smuggles it to passthrough clients on text
+// blocks, and pre-id-embed sessions also carried it on tool_use blocks, which
+// Claude Code echoes back). Forwarding that field to an Anthropic upstream 400s
+// ("...tool_use.thought_signature: Extra inputs are not permitted"), so the
+// same-format Anthropic emit must drop it from every block. On tool_use the
+// signature still round-trips via the id; on text it is simply dropped.
+func TestAnthropicSameFormat_StripsThoughtSignature(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[
+		{"role":"assistant","content":[
+			{"type":"text","text":"thinking out loud","thought_signature":"TEXT_SIG"},
+			{"type":"tool_use","id":"call_x__thought__QUFB","name":"Read","input":{"file_path":"main.go"},"thought_signature":"OPAQUE_SIG"}
+		]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_x__thought__QUFB","content":"ok"}]}
+	]}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-8",
+		Capabilities: router.Lookup("claude-opus-4-8"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	msgs, _ := out["messages"].([]any)
+	require.NotEmpty(t, msgs)
+	asst, _ := msgs[0].(map[string]any)
+	content, _ := asst["content"].([]any)
+	require.Len(t, content, 2)
+	text, _ := content[0].(map[string]any)
+	assert.NotContains(t, text, "thought_signature", "Anthropic rejects the off-spec field on text blocks")
+	assert.Equal(t, "thinking out loud", text["text"], "the rest of the text block is untouched")
+	tool, _ := content[1].(map[string]any)
+	assert.NotContains(t, tool, "thought_signature", "Anthropic rejects the off-spec field on tool_use blocks")
+	assert.Equal(t, "Read", tool["name"], "the rest of the tool_use block is untouched")
+	assert.Equal(t, "call_x__thought__QUFB", tool["id"], "id (signature carrier) survives")
+}
+
 func TestOpenAISameFormat_ThinkingDeleted(t *testing.T) {
 	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":1000}}`)
 	opts := translate.EmitOptions{
