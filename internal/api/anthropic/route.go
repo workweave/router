@@ -52,7 +52,7 @@ func RouteHandler(svc *proxy.Service) gin.HandlerFunc {
 		if routeErr != nil {
 			if errors.Is(routeErr, cluster.ErrInvalidRoutingKnobs) {
 				log.Warn("Invalid routing knobs supplied on route", "err", routeErr)
-				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", routeErr.Error())
+				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Invalid routing knobs supplied.")
 				return
 			}
 			log.Error("Routing failed", "err", routeErr)

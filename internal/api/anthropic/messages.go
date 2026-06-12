@@ -105,7 +105,7 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 			}
 			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
 				log.Warn("Invalid routing knobs supplied", "err", err)
-				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Invalid routing knobs supplied.")
 				return
 			}
 			if errors.Is(err, cluster.ErrClusterUnavailable) {
