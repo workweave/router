@@ -1697,3 +1697,38 @@ func TestSanitizeToolUseIDs_AnthropicToAnthropic(t *testing.T) {
 	result := user["content"].([]any)[0].(map[string]any)
 	assert.Equal(t, "functions_Grep_11", result["tool_use_id"], "tool_use_id must be sanitized in same-format path")
 }
+
+// TestStripToolUseThoughtSignature_AnthropicToAnthropic checks that a Gemini
+// thought_signature carried on a tool_use block in Anthropic-format history is
+// stripped before forwarding to Anthropic, which rejects the unknown field with
+// a 400 ("tool_use.thought_signature: Extra inputs are not permitted"). The
+// rest of the block — including the id that smuggles the signature for a later
+// switch back to Gemini — must survive untouched.
+func TestStripToolUseThoughtSignature_AnthropicToAnthropic(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-opus-4-8",
+		"messages": [
+			{"role": "assistant", "content": [
+				{"type": "tool_use", "id": "toolu_01__thought__c2ln", "name": "Read", "input": {"path": "x"}, "thought_signature": "c2lnbWE"}
+			]},
+			{"role": "user", "content": [
+				{"type": "tool_result", "tool_use_id": "toolu_01__thought__c2ln", "content": "ok"}
+			]}
+		]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-opus-4-8"})
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+	msgs := out["messages"].([]any)
+
+	block := msgs[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	_, hasSig := block["thought_signature"]
+	assert.False(t, hasSig, "thought_signature must be stripped from tool_use before forwarding to Anthropic")
+	assert.Equal(t, "toolu_01__thought__c2ln", block["id"], "tool_use.id (signature round-trip channel) must be preserved")
+	assert.Equal(t, "Read", block["name"], "tool_use.name must be preserved")
+	assert.Equal(t, map[string]any{"path": "x"}, block["input"], "tool_use.input must be preserved")
+}
