@@ -1,5 +1,5 @@
 ---
-description: Pin this session to a specific model via the Weave Router
+description: Pin this session to a specific model via the Weave Router.
 argument-hint: <model-id>
 ---
 
