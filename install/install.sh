@@ -34,7 +34,7 @@
 # Usage:
 #   npx @workweave/router                                  # interactive picker (Claude Code, Codex, opencode)
 #   npx @workweave/router --claude                         # skip the picker, target Claude Code
-#   npx @workweave/router --codex                          # skip the picker, target the OpenAI Codex CLI
+#   npx @workweave/router --codex                          # skip the picker, target Codex
 #   npx @workweave/router --opencode                       # skip the picker, target opencode
 #   npx @workweave/router --pi                              # skip the picker, target pi
 #   npx @workweave/router --scope project                  # commit-with-team install
