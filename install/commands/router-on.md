@@ -1,5 +1,5 @@
 ---
-description: Route Claude Code through the Weave Router again (turn it back on)
+description: Route Claude Code through the Weave Router again (turn it back on).
 allowed-tools: Bash(npx:*)
 ---
 
