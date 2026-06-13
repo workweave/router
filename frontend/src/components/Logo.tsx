@@ -13,7 +13,7 @@ export function Logo({ href = "/" }: LogoProps) {
   return (
     <Link href={href} className="inline-flex shrink-0" aria-label="Weave Router">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={LOGO_SRC} alt="Weave" width={32} height={32} className="size-8 shrink-0 grow-0 rounded-lg" />
+      <img src={LOGO_SRC} alt="Weave Router" width={32} height={32} className="size-8 shrink-0 grow-0 rounded-lg" />
     </Link>
   );
 }

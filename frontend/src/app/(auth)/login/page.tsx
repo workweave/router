@@ -64,7 +64,7 @@ function LoginInner() {
     <div className="w-full max-w-sm rounded-lg border border-border-darker bg-background p-6 shadow-sm">
       <div className="mb-6 flex items-center gap-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/ui/weave.svg" alt="Weave" width={32} height={32} className="size-8 rounded-lg" />
+        <img src="/ui/weave.svg" alt="Weave Router" width={32} height={32} className="size-8 rounded-lg" />
         <div>
           <h1 className="font-display text-base font-semibold text-foreground">Weave Router</h1>
           <p className="text-2xs text-muted-foreground">Sign in to the dashboard</p>
