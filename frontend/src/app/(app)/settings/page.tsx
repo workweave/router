@@ -312,7 +312,7 @@ function RouterKeysPanel() {
                       size="icon"
                       onClick={() => handleDelete(k.id)}
                       disabled={deleting === k.id || rotating != null}
-                      title="Revoke key"
+                      title="Revoke key."
                     >
                       <Trash2 className="size-3.5" />
                     </Button>
@@ -508,7 +508,7 @@ function ProviderKeysPanel() {
                     intent={Intent.Danger}
                     size="icon"
                     disabled
-                    title="Unset the env var and restart the router to remove"
+                    title="Unset the env var and restart the router to remove."
                   >
                     <Trash2 className="size-3.5" />
                   </Button>
@@ -535,6 +535,7 @@ function ProviderKeysPanel() {
                     size="icon"
                     onClick={() => handleDelete(k.id)}
                     disabled={deleting === k.id}
+                    title="Revoke key."
                   >
                     <Trash2 className="size-3.5" />
                   </Button>

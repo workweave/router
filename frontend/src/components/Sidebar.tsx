@@ -77,7 +77,6 @@ export function Sidebar() {
             href="/settings"
             appearance={Appearance.Hollow}
             className={sidebarFooterButton}
-            title="Settings"
           >
             <Settings className="size-4" />
           </Button>
@@ -87,7 +86,6 @@ export function Sidebar() {
           <Button
             appearance={Appearance.Hollow}
             className={sidebarFooterButton}
-            title="Sign out"
             onClick={() => {
               void handleSignOut();
             }}
