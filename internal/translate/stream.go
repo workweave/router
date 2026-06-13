@@ -1006,7 +1006,7 @@ func (t *AnthropicSSETranslator) emitValidatedToolArgsDelta(blockIdx int) error 
 // surfaces as a tool_result in the next turn's context, nudging the model
 // to use a real tool. Bash is chosen because every Claude Code request
 // includes it in tools, making the fabricated call dispatchable.
-const routerNudgeCommand = "echo '[router] previous turn produced no tool_use; please use Edit/Write/Read/Bash/Grep — do not respond with prose or thinking tags only.'"
+const routerNudgeCommand = "echo '[router] previous turn produced no tool_use; use Edit/Write/Read/Bash/Grep — do not respond with prose or thinking tags only.'"
 
 // leadingContentCap bounds how much of the content channel's opening text the
 // translator retains for the leadsWithToolishMarkup check. Large enough to hold

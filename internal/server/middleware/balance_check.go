@@ -65,7 +65,7 @@ func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerF
 			log.Error("Balance check failed; refusing request", "err", err, "organization_id", orgID)
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
 				"error":   "billing_unavailable",
-				"message": "Billing system is temporarily unavailable. Please retry in a few moments.",
+				"message": "Billing system is temporarily unavailable. Retry in a few moments.",
 			})
 			return
 		}
