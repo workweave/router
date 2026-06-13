@@ -311,9 +311,13 @@ func buildAnthropicAssistantMessage(msg gjson.Result) string {
 	}
 
 	// Has tool calls: build content array with optional text prefix + tool_use blocks.
+	// Content may be a plain string or an OpenAI parts array ([{"type":"text",...}]);
+	// openAIContentTextGJSON flattens both. Using gjson's .String() here would
+	// serialize a parts array into the text field verbatim, wrapping it in a
+	// stringified {"type":"text",...} block that compounds on every agentic turn.
 	jw.Key("content")
 	jw.Arr()
-	if text := msg.Get("content").String(); text != "" {
+	if text := openAIContentTextGJSON(msg.Get("content")); text != "" {
 		jw.Obj()
 		jw.Key("type")
 		jw.Str("text")

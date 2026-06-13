@@ -83,6 +83,26 @@ var openAIAssistantTextAndToolCalls = []byte(`{
 	"max_tokens": 1024
 }`)
 
+// openAIAssistantArrayContentAndToolCalls mirrors openAIAssistantTextAndToolCalls
+// but carries assistant content as an OpenAI parts array (the shape Cursor sends)
+// rather than a plain string. The array form must flatten to the inner text, not
+// be serialized verbatim into the Anthropic text block.
+var openAIAssistantArrayContentAndToolCalls = []byte(`{
+	"model": "gpt-4",
+	"messages": [
+		{"role": "user", "content": "Search for recent PRs"},
+		{"role": "assistant", "content": [{"type": "text", "text": "Let me search for that."}], "tool_calls": [
+			{"id": "call_search", "type": "function", "function": {"name": "search_prs", "arguments": "{\"query\":\"recent\"}"}}
+		]},
+		{"role": "tool", "tool_call_id": "call_search", "content": "Found 3 PRs"},
+		{"role": "user", "content": "Tell me about PR #1"}
+	],
+	"tools": [
+		{"type": "function", "function": {"name": "search_prs", "description": "Search PRs", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+	],
+	"max_tokens": 1024
+}`)
+
 var openAIEmptyToolArgs = []byte(`{
 	"model": "gpt-4",
 	"messages": [
@@ -375,6 +395,37 @@ func TestCrossFormat_OpenAIToAnthropic_AssistantTextAndToolCalls(t *testing.T) {
 	textBlock := blocks[0].(map[string]any)
 	assert.Equal(t, "text", textBlock["type"])
 	assert.Equal(t, "Let me search for that.", textBlock["text"])
+	toolBlock := blocks[1].(map[string]any)
+	assert.Equal(t, "tool_use", toolBlock["type"])
+	assert.Equal(t, "search_prs", toolBlock["name"])
+}
+
+// TestCrossFormat_OpenAIToAnthropic_AssistantArrayContentAndToolCalls guards the
+// regression where an assistant message carrying tool_calls plus parts-array
+// content (the shape Cursor sends) had its content array serialized verbatim into
+// the Anthropic text block via gjson .String(). That produced a stringified
+// {"type":"text",...} block that the model echoed and compounded one level per
+// agentic turn, yielding deeply nested garbage on the client.
+func TestCrossFormat_OpenAIToAnthropic_AssistantArrayContentAndToolCalls(t *testing.T) {
+	env, err := translate.ParseOpenAI(openAIAssistantArrayContentAndToolCalls)
+	require.NoError(t, err)
+
+	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-sonnet-4-20250514"})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	msgs := getArray(t, doc, "messages")
+
+	assistantMsg := msgAt(t, msgs, 1)
+	assert.Equal(t, "assistant", assistantMsg["role"])
+	blocks := assistantMsg["content"].([]any)
+	require.Len(t, blocks, 2, "text block + tool_use block")
+	textBlock := blocks[0].(map[string]any)
+	assert.Equal(t, "text", textBlock["type"])
+	// Must flatten to the inner text, not the serialized parts array.
+	assert.Equal(t, "Let me search for that.", textBlock["text"])
+	assert.NotContains(t, textBlock["text"].(string), `"type":"text"`,
+		"parts array must not be serialized verbatim into the text block")
 	toolBlock := blocks[1].(map[string]any)
 	assert.Equal(t, "tool_use", toolBlock["type"])
 	assert.Equal(t, "search_prs", toolBlock["name"])
