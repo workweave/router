@@ -376,7 +376,7 @@ func (s *Service) handleToolCallLoopBreak(
 	log := observability.FromContext(ctx)
 
 	msg := fmt.Sprintf(
-		"✦ **Weave Router** → tool-call loop detected: `%s` was called %d times in the last %d turns with identical arguments. Stopping this turn and clearing the session pin so the next message re-routes to a fresh model.\n\nIf the task is genuinely incomplete, send a follow-up message describing what's still needed; the router will pick a different model.\n\n",
+		"✦ **Weave Router** → Tool-call loop detected: `%s` was called %d times in the last %d turns with identical arguments. Stopping this turn and clearing the session pin so the next message re-routes to a fresh model.\n\nIf the task is genuinely incomplete, send a follow-up message describing what's still needed; the router will pick a different model.\n\n",
 		sig.Name, count, loopDetectionWindowSize,
 	)
 	if env.SourceFormat() == translate.FormatOpenAI {
