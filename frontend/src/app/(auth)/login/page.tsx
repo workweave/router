@@ -47,9 +47,9 @@ function LoginInner() {
       await api.auth.login(password);
       router.replace(next);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Login failed";
+      const message = err instanceof Error ? err.message : "Sign-in failed.";
       if (message.includes("503")) {
-        setError("Admin login is disabled. Set ROUTER_ADMIN_PASSWORD on the router and restart.");
+        setError("Admin sign-in is disabled. Set ROUTER_ADMIN_PASSWORD on the router and restart.");
       } else if (message.includes("401")) {
         setError("Wrong password.");
       } else {
