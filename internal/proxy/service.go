@@ -1651,6 +1651,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				"upstream_finish_reason", respSummary.UpstreamFinishReason,
 				"would_failover", true,
 			)
+			// Evict the session pin so the next turn re-scores instead of
+			// continuing to serve the same misbehaving model. The current
+			// turn has already been streamed (cannot retry), but eviction
+			// is the best available recovery for the session's next turn.
+			s.evictPinAfterDegenerateResponse(ctx, stickyHit, decision.Reason, installationID, routeRes.SessionKey, routeRes.PinRole)
 		}
 		s.fireTelemetry(InsertTelemetryParams{
 			InstallationID:         installationID.String(),
