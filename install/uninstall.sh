@@ -78,7 +78,7 @@ while [ $# -gt 0 ]; do
       exit 0
       ;;
     *)
-      err "unknown flag: $1"; exit 2
+      err "Unknown flag: $1. Run --help for usage."; exit 2
       ;;
   esac
 done

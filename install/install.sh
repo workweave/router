@@ -863,7 +863,7 @@ while [ $# -gt 0 ]; do
       usage 0
       ;;
     *)
-      err "unknown flag: $1"; usage 2
+      err "Unknown flag: $1."; usage 2
       ;;
   esac
 done
