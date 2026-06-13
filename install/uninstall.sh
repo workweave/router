@@ -54,7 +54,7 @@ while [ $# -gt 0 ]; do
       ;;
     --dir)
       install_dir="${2:-}"; shift 2
-      [ -n "$install_dir" ] || { err "--dir requires a path"; exit 2; }
+      [ -n "$install_dir" ] || { err "--dir requires a path."; exit 2; }
       ;;
     --codex)
       target="codex"; shift
@@ -136,7 +136,7 @@ if [ "$target" = "opencode" ]; then
         "~/"*)  project_dir="$HOME/${project_dir#~/}" ;;
       esac
       if [ ! -d "$project_dir" ]; then
-        err "directory does not exist: $project_dir"
+        err "Directory does not exist: $project_dir."
         exit 1
       fi
       project_dir="$(cd "$project_dir" && pwd)"
@@ -219,7 +219,7 @@ if [ "$target" = "pi" ]; then
         "~/"*)  project_dir="$HOME/${project_dir#~/}" ;;
       esac
       if [ ! -d "$project_dir" ]; then
-        err "directory does not exist: $project_dir"
+        err "Directory does not exist: $project_dir."
         exit 1
       fi
       project_dir="$(cd "$project_dir" && pwd)"
@@ -325,7 +325,7 @@ if [ "$target" = "codex" ]; then
         "~/"*)  project_dir="$HOME/${project_dir#~/}" ;;
       esac
       if [ ! -d "$project_dir" ]; then
-        err "directory does not exist: $project_dir"
+        err "Directory does not exist: $project_dir."
         exit 1
       fi
       project_dir="$(cd "$project_dir" && pwd)"
@@ -422,7 +422,7 @@ else
       "~/"*)  project_dir="$HOME/${project_dir#~/}" ;;
     esac
     if [ ! -d "$project_dir" ]; then
-      err "directory does not exist: $project_dir"
+      err "Directory does not exist: $project_dir."
       exit 1
     fi
     project_dir="$(cd "$project_dir" && pwd)"

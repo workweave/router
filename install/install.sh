@@ -800,11 +800,11 @@ for arg in "$@"; do
     # also gives us a chance to fail closed on 404 HTML pages before
     # handing the content to bash.
     if ! uninstall_body="$(curl -fsSL --max-time 30 "$url" 2>/dev/null)"; then
-      err "failed to fetch uninstall.sh from $url"
+      err "Failed to fetch uninstall.sh from $url."
       exit 1
     fi
     if [ -z "$uninstall_body" ] || [ "${uninstall_body:0:2}" != "#!" ]; then
-      err "fetched content from $url doesn't look like a bash script"
+      err "Fetched content from $url doesn't look like a bash script."
       exit 1
     fi
     exec bash -c "$uninstall_body" weave-uninstall "${cleaned_args[@]+"${cleaned_args[@]}"}"
@@ -817,12 +817,12 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --scope)
       scope="${2:-}"; shift 2
-      [ "$scope" = "user" ] || [ "$scope" = "project" ] || { err "--scope must be 'user' or 'project'"; exit 2; }
+      [ "$scope" = "user" ] || [ "$scope" = "project" ] || { err "--scope must be 'user' or 'project'."; exit 2; }
       scope_explicit="true"
       ;;
     --base-url)
       base_url="${2:-}"; shift 2
-      [ -n "$base_url" ] || { err "--base-url requires a value"; exit 2; }
+      [ -n "$base_url" ] || { err "--base-url requires a value."; exit 2; }
       ;;
     --local)
       # Shorthand for local dev: localhost:8080 (matches `wv mr` / `make dev` default PORT).
@@ -837,7 +837,7 @@ while [ $# -gt 0 ]; do
       ;;
     --dir)
       install_dir="${2:-}"; shift 2
-      [ -n "$install_dir" ] || { err "--dir requires a path"; exit 2; }
+      [ -n "$install_dir" ] || { err "--dir requires a path."; exit 2; }
       ;;
     --codex)
       target="codex"; target_explicit="true"; shift
@@ -874,7 +874,7 @@ done
 if [ "$mode" != "install" ]; then
   non_interactive="true"
   if [ "$target_explicit" != "true" ]; then
-    err "'$mode' requires an explicit client: --claude, --codex, or --opencode"
+    err "'$mode' requires an explicit client: --claude, --codex, or --opencode."
     exit 2
   fi
 fi
@@ -883,7 +883,7 @@ fi
 # structural models.json/settings.json merge, reversed by the uninstaller
 # rather than a single env/key line we can park and restore.
 if [ "$mode" != "install" ] && [ "$target" = "pi" ]; then
-  err "toggle verbs (off/on/status) aren't supported for --pi. Use 'npx @workweave/router --uninstall --pi' to remove, or re-run the installer to refresh."
+  err "Toggle verbs (off/on/status) aren't supported for --pi. Use 'npx @workweave/router --uninstall --pi' to remove, or re-run the installer to refresh."
   exit 2
 fi
 
@@ -914,7 +914,7 @@ if [ "$target_explicit" = "false" ] && [ "$non_interactive" = "false" ] && [ -r 
     2|codex|x|X)      target="codex" ;;
     3|opencode|o|O)   target="opencode" ;;
     4|pi|p|P)         target="pi" ;;
-    *) err "invalid choice: $target_choice"; exit 2 ;;
+    *) err "Invalid choice: $target_choice."; exit 2 ;;
   esac
 fi
 
@@ -970,7 +970,7 @@ if [ -z "$install_dir" ] && [ "$scope_explicit" = "false" ] && [ "$non_interacti
   case "${scope_choice:-1}" in
     1|""|user|u|U)    scope="user" ;;
     2|project|p|P)    scope="project" ;;
-    *) err "invalid choice: $scope_choice"; exit 2 ;;
+    *) err "Invalid choice: $scope_choice."; exit 2 ;;
   esac
 
   # For project scope, ask which directory rather than silently assuming CWD.
@@ -987,7 +987,7 @@ if [ -z "$install_dir" ] && [ "$scope_explicit" = "false" ] && [ "$non_interacti
       "~/"*)  project_dir="$HOME/${project_dir#~/}" ;;
     esac
     if [ ! -d "$project_dir" ]; then
-      err "directory does not exist: $project_dir"
+      err "Directory does not exist: $project_dir."
       exit 1
     fi
     project_dir="$(cd "$project_dir" && pwd)"
@@ -1535,7 +1535,7 @@ if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
     # `set -e` would abort on read returning 1). If /dev/tty isn't available
     # (e.g. CI without a controlling terminal) the user must use --non-interactive.
     if [ ! -r /dev/tty ]; then
-      err "no controlling terminal — set WEAVE_ROUTER_KEY and re-run with --non-interactive."
+      err "No controlling terminal — set WEAVE_ROUTER_KEY and re-run with --non-interactive."
       exit 1
     fi
     # _spin_cleanup (installed globally above) already restores stty echo on
@@ -1547,7 +1547,7 @@ if [ -n "${WEAVE_ROUTER_KEY:-}" ]; then
     read -r api_key </dev/tty
     stty echo </dev/tty 2>/dev/null || true
     printf "\n"
-    [ -n "$api_key" ] || { err "no key provided"; exit 1; }
+    [ -n "$api_key" ] || { err "No key provided."; exit 1; }
   fi
 
 # ---------- identity (user email + name) ----------
