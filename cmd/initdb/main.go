@@ -84,6 +84,6 @@ func ensureSchema(ctx context.Context, dsn string) {
 }
 
 func fatal(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "error: "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
 	os.Exit(1)
 }

@@ -39,13 +39,13 @@ func main() {
 
 	conn, err := pgx.Connect(ctx, config.PostgresDSN())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot connect to postgres: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: cannot connect to postgres: %v\n", err)
 		os.Exit(1)
 	}
 	defer conn.Close(ctx)
 
 	if _, err := conn.Exec(ctx, "SET search_path TO router, public"); err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot set search_path: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: cannot set search_path: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -54,7 +54,7 @@ func main() {
 
 	tx, err := conn.Begin(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot begin transaction: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: cannot begin transaction: %v\n", err)
 		os.Exit(1)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
@@ -85,7 +85,7 @@ func main() {
 		).Scan(&installationID)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot create installation: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: cannot create installation: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -99,7 +99,7 @@ func main() {
 		  AND deleted_at IS NULL`,
 		pgx.NamedArgs{"installation_id": installationID},
 	); err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot soft-delete existing api keys: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: cannot soft-delete existing API keys: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -122,17 +122,17 @@ func main() {
 		},
 	).Scan(&apiKeyID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot create api key: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: cannot create API key: %v\n", err)
 		os.Exit(1)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot commit transaction: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: cannot commit transaction: %v\n", err)
 		os.Exit(1)
 	}
 
 	fmt.Printf("Created installation %s (external_id: %s)\n", installationID, externalID)
-	fmt.Printf("Created api key      %s (suffix: ...%s)\n\n", apiKeyID, keySuffix)
+	fmt.Printf("Created API key      %s (suffix: ...%s)\n\n", apiKeyID, keySuffix)
 	fmt.Printf("Weave Router key (shown once — store it now):\n")
 	fmt.Printf("  %s\n\n", rawToken)
 	fmt.Printf("This is a Weave Router auth token (rk_...) — it gates traffic to your\n")
@@ -145,7 +145,7 @@ func main() {
 	fmt.Printf("=== Claude Code (recommended) ===\n")
 	fmt.Printf("  export WEAVE_ROUTER_KEY=%s\n", rawToken)
 	fmt.Printf("  ./install/install.sh --base-url %s\n", baseURL)
-	fmt.Printf("  claude  # the installer wires settings.json — no shell exports needed afterwards\n\n")
+	fmt.Printf("  claude  # The installer wires settings.json — no shell exports needed afterwards\n\n")
 
 	fmt.Printf("=== Claude Code (manual fallback) ===\n")
 	fmt.Printf("  Keep Claude Code's Anthropic auth unchanged; send the router key\n")
