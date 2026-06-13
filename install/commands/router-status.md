@@ -1,5 +1,5 @@
 ---
-description: Show whether Claude Code is routing through the Weave Router or directly to Anthropic
+description: Show whether Claude Code is routing through the Weave Router or directly to Anthropic.
 allowed-tools: Bash(npx:*)
 ---
 

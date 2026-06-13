@@ -1,5 +1,5 @@
 ---
-description: Route Claude Code directly to Anthropic again (turn the Weave Router off)
+description: Route Claude Code directly to Anthropic again (turn the Weave Router off).
 allowed-tools: Bash(npx:*)
 ---
 
