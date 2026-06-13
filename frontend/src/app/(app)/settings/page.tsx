@@ -151,7 +151,7 @@ function RouterKeysPanel() {
         setLoaded(true);
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "Failed to load keys");
+        setError(err instanceof Error ? err.message : "Failed to load keys.");
         setLoaded(true);
       });
   }
@@ -167,7 +167,7 @@ function RouterKeysPanel() {
       setName("");
       load();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to create key");
+      setError(err instanceof Error ? err.message : "Failed to create key.");
     } finally {
       setCreating(false);
     }
@@ -184,7 +184,7 @@ function RouterKeysPanel() {
       setNewToken(res.token);
       load();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to rotate key");
+      setError(err instanceof Error ? err.message : "Failed to rotate key.");
     } finally {
       setRotating(null);
     }
@@ -200,7 +200,7 @@ function RouterKeysPanel() {
       await api.keys.delete(id);
       load();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to delete key");
+      setError(err instanceof Error ? err.message : "Failed to delete key.");
     } finally {
       setDeleting(null);
     }
@@ -366,7 +366,7 @@ function ProviderKeysPanel() {
       .list()
       .then(r => setKeys(r.keys ?? []))
       .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "Failed to load keys"),
+        setError(err instanceof Error ? err.message : "Failed to load keys."),
       );
   }
 
@@ -417,7 +417,7 @@ function ProviderKeysPanel() {
       await api.providerKeys.delete(id);
       load();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to delete key");
+      setError(err instanceof Error ? err.message : "Failed to delete key.");
     } finally {
       setDeleting(null);
     }
@@ -650,7 +650,7 @@ function ConfigPanel() {
       .get()
       .then(setConfig)
       .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "Failed to load config"),
+        setError(err instanceof Error ? err.message : "Failed to load config."),
       );
   }, []);
 
@@ -709,7 +709,7 @@ function ModelSelectionPanel() {
         setEnvOverrideActive(res.env_override_active);
       })
       .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "Failed to load models"),
+        setError(err instanceof Error ? err.message : "Failed to load models."),
       );
   }, []);
 
@@ -844,7 +844,7 @@ function ProviderSelectionPanel() {
         setEnvOverrideActive(res.env_override_active);
       })
       .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "Failed to load providers"),
+        setError(err instanceof Error ? err.message : "Failed to load providers."),
       );
   }, []);
 

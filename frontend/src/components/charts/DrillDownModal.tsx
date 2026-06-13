@@ -180,7 +180,7 @@ export function DrillDownModal({
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load details");
+        setError(err instanceof Error ? err.message : "Failed to load details.");
       })
       .finally(() => {
         if (cancelled) return;

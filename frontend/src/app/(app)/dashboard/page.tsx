@@ -54,7 +54,7 @@ export default function DashboardPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load metrics");
+        setError(err instanceof Error ? err.message : "Failed to load metrics.");
       });
     return () => {
       cancelled = true;
