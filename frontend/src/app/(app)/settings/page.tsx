@@ -445,7 +445,7 @@ function ProviderKeysPanel() {
                   data-1p-ignore
                   data-lpignore="true"
                   data-form-type="other"
-                  placeholder="sk-..."
+                  placeholder="sk-…"
                   value={keyValue}
                   onChange={e => setKeyValue(e.target.value)}
                   required

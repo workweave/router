@@ -10,7 +10,7 @@ const LEGEND_TEXT_MAX_LENGTH = 40;
 
 function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength - 3) + "...";
+  return text.slice(0, maxLength - 1) + "…";
 }
 
 export interface ChartLegendProps extends React.HTMLAttributes<HTMLDivElement> {
