@@ -83,7 +83,7 @@ function LoginInner() {
           autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="ROUTER_ADMIN_PASSWORD"
+          placeholder="Value of ROUTER_ADMIN_PASSWORD"
           required
         />
         {error && (
