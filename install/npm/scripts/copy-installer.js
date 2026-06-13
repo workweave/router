@@ -17,7 +17,7 @@ for (const f of files) {
   const dst = path.join(root, f);
   copyFileSync(src, dst);
   chmodSync(dst, 0o755);
-  console.log(`copied ${f}`);
+  console.log(`Copied ${f}.`);
 }
 
 // Mirror install/commands/ into the package root. install.sh resolves the
@@ -32,14 +32,14 @@ for (const f of readdirSync(commandsSrc)) {
   const src = path.join(commandsSrc, f);
   const stat = lstatSync(src);
   if (stat.isSymbolicLink()) {
-    throw new Error(`refusing to package symlinked command file: ${src}`);
+    throw new Error(`Refusing to package symlinked command file: ${src}`);
   }
   const srcReal = realpathSync(src);
   if (!srcReal.startsWith(commandsSrcReal + path.sep)) {
-    throw new Error(`refusing to package command outside commands dir: ${src}`);
+    throw new Error(`Refusing to package command outside commands dir: ${src}`);
   }
   copyFileSync(srcReal, path.join(commandsDst, f));
-  console.log(`copied commands/${f}`);
+  console.log(`Copied commands/${f}.`);
 }
 
 // Bundle the pi extension so the single @workweave/router package is BOTH the
@@ -54,9 +54,9 @@ cpSync(piSrc, piDst, { recursive: true });
 for (const f of ["package.json", "README.md"]) {
   copyFileSync(path.join(installDir, "pi-router", f), path.join(root, "pi-router", f));
 }
-console.log("copied pi-router/ (extension)");
+console.log("Copied pi-router/ (extension).");
 
 // LICENSE lives at the repo root and applies to the whole project. npm
 // surfaces it on the package page when bundled alongside package.json.
 copyFileSync(path.join(repoRoot, "LICENSE"), path.join(root, "LICENSE"));
-console.log("copied LICENSE");
+console.log("Copied LICENSE.");
