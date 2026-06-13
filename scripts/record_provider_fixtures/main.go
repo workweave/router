@@ -74,7 +74,7 @@ const weatherTool = `[{"name":"get_weather","description":"Get the weather","inp
 
 func main() {
 	if os.Getenv("RECORD") != "1" {
-		fmt.Println("refusing to hit live providers without RECORD=1 (see file header for usage)")
+		fmt.Println("Refusing to hit live providers without RECORD=1 (see file header for usage)")
 		return
 	}
 	client := &http.Client{Timeout: 180 * time.Second}
