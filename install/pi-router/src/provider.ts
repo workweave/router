@@ -28,7 +28,7 @@ export function registerWeave(pi: ExtensionAPI): void {
 		// key there is fatal rather than silently routing on quality knobs.
 		if (isSubagent()) {
 			throw new Error(
-				"Weave: no router key found (set WEAVE_ROUTER_KEY or write ~/.pi/agent/.weave_router_key).",
+				"Weave Router: no router key found (set WEAVE_ROUTER_KEY or write ~/.pi/agent/.weave_router_key).",
 			);
 		}
 		return;

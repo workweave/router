@@ -23,7 +23,7 @@ export function registerRoutedModel(pi: ExtensionAPI): void {
 
 		if (ctx.hasUI) {
 			ctx.ui.setStatus(STATUS_KEY, `routed: ${model}`);
-			ctx.ui.notify(`Weave routed to ${model}`, "info");
+			ctx.ui.notify(`Weave Router routed to ${model}`, "info");
 		} else {
 			process.stderr.write(`${ROUTED_MODEL_STDERR_PREFIX} ${model}\n`);
 		}

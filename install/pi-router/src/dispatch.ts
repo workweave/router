@@ -301,7 +301,7 @@ export function registerDispatch(pi: ExtensionAPI, selfPath: string): void {
 			if (!key) {
 				return {
 					content: [
-						{ type: "text", text: "Weave dispatch unavailable: no router key (set WEAVE_ROUTER_KEY or run the --pi installer)." },
+						{ type: "text", text: "Weave Router dispatch unavailable: no router key (set WEAVE_ROUTER_KEY or run the --pi installer)." },
 					],
 					details: { results: [] as ChildResult[] },
 					isError: true,
