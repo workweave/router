@@ -337,7 +337,7 @@ export function registerDispatch(pi: ExtensionAPI, selfPath: string): void {
 				const preview = t.prompt.length > 60 ? `${t.prompt.slice(0, 60)}...` : t.prompt;
 				text += `\n  ${theme.fg("dim", preview)}`;
 			}
-			if (tasks.length > 3) text += `\n  ${theme.fg("muted", `... +${tasks.length - 3} more`)}`;
+			if (tasks.length > 3) text += `\n  ${theme.fg("muted", `… +${tasks.length - 3} more`)}`;
 			return new Text(text, 0, 0);
 		},
 	});
