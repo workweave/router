@@ -22,6 +22,61 @@ import (
 // notice and manually /force-model out.
 const pinEvictionStrikeThreshold = 2
 
+// evictPinAfterDegenerateResponse expires the session pin immediately
+// after a degenerate response (end_turn with no tool calls and fewer
+// than degenerateOutputThreshold output tokens). The current turn has
+// already been streamed to the client and cannot be retried, but
+// evicting the pin ensures the NEXT turn re-scores rather than
+// continuing to serve the same misbehaving model.
+//
+// Skipped paths:
+//   - !stickyHit: the pin row was just written this turn; no decision
+//     history to evict yet.
+//   - Zero session_key / installation_id: no addressable pin row.
+//   - User-forced pins: the user explicitly chose this model; auto-eviction
+//     would silently override an explicit command.
+//
+// Errors from the upsert path are logged and swallowed — eviction is a
+// recovery optimization; failing it must not change the client outcome.
+func (s *Service) evictPinAfterDegenerateResponse(
+	ctx context.Context,
+	stickyHit bool,
+	decisionReason string,
+	installationID uuid.UUID,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+	role string,
+) {
+	if !stickyHit || s.pinStore == nil || installationID == uuid.Nil {
+		return
+	}
+	if sessionKey == ([sessionpin.SessionKeyLen]byte{}) {
+		return
+	}
+	if strings.HasPrefix(decisionReason, translate.ReasonUserForceModel) {
+		return
+	}
+
+	log := observability.FromContext(ctx)
+
+	expired := sessionpin.Pin{
+		SessionKey:     sessionKey,
+		Role:           role,
+		InstallationID: installationID,
+		Provider:       "",
+		Model:          "",
+		Reason:         "degenerate_response",
+		TurnCount:      1,
+		PinnedUntil:    time.Now().Add(-time.Second),
+	}
+	if err := s.pinStore.Upsert(context.Background(), expired); err != nil {
+		log.Error("pin eviction after degenerate response failed", "err", err, "role", role)
+		return
+	}
+	log.Info("session pin evicted after degenerate response",
+		"role", role,
+	)
+}
+
 // maybeEvictPinAfterUpstreamErr applies the two-strike pin-eviction
 // policy on every turn that ran against a sticky session pin:
 //
