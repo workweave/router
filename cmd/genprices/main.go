@@ -32,10 +32,10 @@ func main() {
 	block := buildBlock(otel.AllPricing())
 	for _, path := range scriptPaths {
 		if err := spliceFile(path, block); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("wrote %s\n", path)
+		fmt.Printf("Wrote %s\n", path)
 	}
 }
 
