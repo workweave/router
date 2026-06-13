@@ -3,7 +3,7 @@ description: Show whether Claude Code is routing through the Weave Router or dir
 allowed-tools: Bash(npx:*)
 ---
 
-Report whether Claude Code is currently using the Weave Router by running:
+Report whether Claude Code is using the Weave Router by running:
 
 `npx @workweave/router status --claude{{SCOPE}}`
 
