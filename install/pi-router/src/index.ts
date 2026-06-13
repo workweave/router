@@ -1,5 +1,5 @@
 /**
- * @workweave/router — route the pi coding agent through the WorkWeave Router.
+ * @workweave/router — route the pi coding agent through the Weave Router.
  *
  * Wiring (all on the existing router surface — no router source change beyond
  * the installer):
