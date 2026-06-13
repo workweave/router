@@ -17,7 +17,7 @@ const script = path.join(__dirname, scriptName);
 
 if (!existsSync(script)) {
   console.error(
-    `weave-router: ${scriptName} missing from package — report it at https://github.com/workweave/router/issues`,
+    `Weave Router: ${scriptName} missing from package — report it at https://github.com/workweave/router/issues`,
   );
   process.exit(1);
 }
@@ -25,7 +25,7 @@ if (!existsSync(script)) {
 const bash = pickBash();
 if (!bash) {
   console.error(
-    "weave-router: bash is required. On Windows install Git Bash or run inside WSL.",
+    "Weave Router: bash is required. On Windows install Git Bash or run inside WSL.",
   );
   process.exit(1);
 }
@@ -36,7 +36,7 @@ const result = spawnSync(bash, [script, ...args], {
 });
 
 if (result.error) {
-  console.error("weave-router:", result.error.message);
+  console.error("Weave Router:", result.error.message);
   process.exit(1);
 }
 process.exit(result.status ?? 1);
