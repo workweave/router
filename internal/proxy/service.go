@@ -1103,6 +1103,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Anthropic packs sub-agent identity into metadata.user_id; the
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
 	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderAnthropic, r.Header)
+	// Claude Code sessions: remove Google from the eligible provider set.
+	// Gemini models consistently underperform on long agentic CC coding
+	// sessions — producing micro tool-call responses (16–43 tokens/turn)
+	// and degenerate empty completions. CC is identified by the x-app or
+	// user-agent header resolving to ClientAppClaudeCode via NormalizeClientApp.
+	if clientID.ClientApp == ClientAppClaudeCode {
+		delete(enabledProviders, providers.ProviderGoogle)
+	}
 
 	// Pre-filter models whose context window cannot fit this request.
 	// FullTokenEstimate uses raw body bytes (÷5) to capture tool definitions,
@@ -2334,6 +2342,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
 	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header)
+	if clientID.ClientApp == ClientAppClaudeCode {
+		delete(enabledProviders, providers.ProviderGoogle)
+	}
 
 	// Pre-filter models whose context window cannot fit this request.
 	outputReserveOAI := contextWindowOutputReserve
