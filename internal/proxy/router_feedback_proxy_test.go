@@ -69,7 +69,7 @@ func TestService_RouterFeedbackCommand_PersistsAndAcks(t *testing.T) {
 	require.NotEmpty(t, blocks)
 	first, _ := blocks[0].(map[string]any)
 	text, _ := first["text"].(string)
-	assert.Contains(t, text, "feedback recorded")
+	assert.Contains(t, text, "Feedback recorded")
 }
 
 func TestService_RouterFeedbackCommand_OpenAIIngress(t *testing.T) {
@@ -102,7 +102,7 @@ func TestService_RouterFeedbackCommand_OpenAIIngress(t *testing.T) {
 	first, _ := choices[0].(map[string]any)
 	msg, _ := first["message"].(map[string]any)
 	content, _ := msg["content"].(string)
-	assert.Contains(t, content, "feedback recorded")
+	assert.Contains(t, content, "Feedback recorded")
 }
 
 func TestService_RouterFeedbackCommand_EmptyFeedbackAsksForText(t *testing.T) {
