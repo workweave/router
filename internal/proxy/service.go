@@ -399,6 +399,51 @@ func excludeContextOverflowModels(est, outputReserve int, excluded, available ma
 	return out, overflowed
 }
 
+// gemini3xRequiresSignedHistory reports whether model is a Gemini 3.x model,
+// which 400s (INVALID_ARGUMENT) when the request history carries function-call
+// parts lacking the thoughtSignature Gemini issued. Scoped by family name; if
+// the catalog later grows a per-model capability flag this should move there.
+func gemini3xRequiresSignedHistory(model string) bool {
+	return strings.HasPrefix(model, "gemini-3")
+}
+
+// excludeGemini3xOnUnsignedHistory augments excluded with every Gemini 3.x model
+// in available when the request history carries an assistant tool call lacking a
+// Gemini thoughtSignature. Routing such a turn into Gemini 3.x is a guaranteed
+// 400 (foreign/cross-model history — planner switch or tier clamp into Gemini),
+// so the models are made ineligible and the scorer/clamp pick a non-Gemini
+// candidate instead. Returns the original map unchanged (and nil) when nothing
+// is added. Native Gemini continuations round-trip their own signature and are
+// not affected.
+func excludeGemini3xOnUnsignedHistory(env *translate.RequestEnvelope, excluded, available map[string]struct{}) (map[string]struct{}, []string) {
+	if env == nil || !env.HasUnsignedToolCallHistory() {
+		return excluded, nil
+	}
+	var out map[string]struct{}
+	var added []string
+	for model := range available {
+		if !gemini3xRequiresSignedHistory(model) {
+			continue
+		}
+		if _, already := excluded[model]; already {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]struct{}, len(excluded)+1)
+			for k := range excluded {
+				out[k] = struct{}{}
+			}
+		}
+		out[model] = struct{}{}
+		added = append(added, model)
+	}
+	if len(added) == 0 {
+		return excluded, nil
+	}
+	sort.Strings(added)
+	return out, added
+}
+
 // restrictToTier returns a copy of excluded augmented with every routable model
 // whose tier differs from the target. It is the scorer-side counterpart to a
 // dropped user-forced pin: when the forced model can no longer serve a turn
@@ -1146,6 +1191,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			"output_reserve", outputReserve,
 			"excluded_count", len(ctxOverflowed),
 			"excluded_models", strings.Join(ctxOverflowed, ","),
+		)
+	}
+	excluded, geminiUnsigned := excludeGemini3xOnUnsignedHistory(env, excluded, s.availableModels)
+	if len(geminiUnsigned) > 0 {
+		log.Info("gemini pre-filter: excluded gemini-3.x for unsigned tool-call history",
+			"excluded_models", strings.Join(geminiUnsigned, ","),
 		)
 	}
 
@@ -2375,6 +2426,12 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			"output_reserve", outputReserveOAI,
 			"excluded_count", len(ctxOverflowedOAI),
 			"excluded_models", strings.Join(ctxOverflowedOAI, ","),
+		)
+	}
+	excludedOAI, geminiUnsignedOAI := excludeGemini3xOnUnsignedHistory(env, excludedOAI, s.availableModels)
+	if len(geminiUnsignedOAI) > 0 {
+		log.Info("gemini pre-filter: excluded gemini-3.x for unsigned tool-call history",
+			"excluded_models", strings.Join(geminiUnsignedOAI, ","),
 		)
 	}
 
