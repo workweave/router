@@ -122,3 +122,179 @@ func TestNativeClient_DefaultBaseURL(t *testing.T) {
 	assert.Equal(t, "https://generativelanguage.googleapis.com", google.NativeBaseURL)
 	_ = c
 }
+
+// TestNativeClient_Proxy_ErrorBufferedNotFlushed verifies the core fix: on a
+// non-2xx upstream response the NativeClient must NOT write anything to the
+// client ResponseWriter. The preludeBuffer in the proxy gates all retries on
+// preludeBuf.Committed(); writing the status before returning would permanently
+// prevent failover on transient Google errors.
+func TestNativeClient_Proxy_ErrorBufferedNotFlushed(t *testing.T) {
+	tests := []struct {
+		name           string
+		upstreamStatus int
+		upstreamBody   string
+		wantRetryable  bool
+	}{
+		{
+			name:           "429 rate limited is buffered and retryable",
+			upstreamStatus: http.StatusTooManyRequests,
+			upstreamBody:   `{"error":{"code":429,"message":"Resource has been exhausted"}}`,
+			wantRetryable:  true,
+		},
+		{
+			name:           "503 service unavailable is buffered and retryable",
+			upstreamStatus: http.StatusServiceUnavailable,
+			upstreamBody:   `{"error":{"code":503,"message":"The model is overloaded"}}`,
+			wantRetryable:  true,
+		},
+		{
+			name:           "500 internal error is buffered and retryable",
+			upstreamStatus: http.StatusInternalServerError,
+			upstreamBody:   `{"error":{"code":500,"message":"Internal error"}}`,
+			wantRetryable:  true,
+		},
+		{
+			name:           "400 bad request is buffered but not retryable",
+			upstreamStatus: http.StatusBadRequest,
+			upstreamBody:   `{"error":{"code":400,"message":"Invalid argument"}}`,
+			wantRetryable:  false,
+		},
+		{
+			name:           "401 unauthorized is buffered but not retryable",
+			upstreamStatus: http.StatusUnauthorized,
+			upstreamBody:   `{"error":{"code":401,"message":"API key not valid"}}`,
+			wantRetryable:  false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Goog-Safety-Feedback", "safety-value") // arbitrary upstream header
+				w.WriteHeader(tc.upstreamStatus)
+				_, _ = w.Write([]byte(tc.upstreamBody))
+			}))
+			defer upstream.Close()
+
+			c := google.NewNativeClient("test-key", upstream.URL)
+			rec := httptest.NewRecorder()
+			prep := providers.PreparedRequest{Body: []byte(`{"contents":[]}`), Headers: make(http.Header)}
+
+			err := c.Proxy(context.Background(), router.Decision{Model: "gemini-x"}, prep, rec,
+				httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("")))
+
+			// Must return *UpstreamErrorResponse (buffered), never *UpstreamStatusError (flushed).
+			var buffered *providers.UpstreamErrorResponse
+			require.ErrorAs(t, err, &buffered, "Proxy must return UpstreamErrorResponse on %d", tc.upstreamStatus)
+			assert.Equal(t, tc.upstreamStatus, buffered.Status)
+			assert.Contains(t, string(buffered.Body), tc.upstreamBody[:20])
+
+			// The client ResponseWriter must be completely untouched.
+			assert.Equal(t, http.StatusOK, rec.Code,
+				"WriteHeader must not be called on the error path (preludeBuffer commit prevention)")
+			assert.Empty(t, rec.Body.String(),
+				"no bytes must be written to the client on the error path")
+
+			assert.Equal(t, tc.wantRetryable, providers.IsRetryable(err),
+				"IsRetryable mismatch for status %d", tc.upstreamStatus)
+		})
+	}
+}
+
+// TestNativeClient_Proxy_ErrorHeadersCaptured verifies that upstream response
+// headers on an error are captured in UpstreamErrorResponse.Headers rather
+// than written to the client.
+func TestNativeClient_Proxy_ErrorHeadersCaptured(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.Header().Set("X-Ratelimit-Limit", "1000")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"rate limited"}`))
+	}))
+	defer upstream.Close()
+
+	c := google.NewNativeClient("k", upstream.URL)
+	rec := httptest.NewRecorder()
+	prep := providers.PreparedRequest{Body: []byte(`{}`), Headers: make(http.Header)}
+
+	err := c.Proxy(context.Background(), router.Decision{Model: "g"}, prep, rec,
+		httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("")))
+
+	var buffered *providers.UpstreamErrorResponse
+	require.ErrorAs(t, err, &buffered)
+	assert.Equal(t, "30", buffered.Headers.Get("Retry-After"),
+		"upstream Retry-After must be captured in UpstreamErrorResponse.Headers")
+	assert.Empty(t, rec.Header().Get("Retry-After"),
+		"upstream error headers must not reach the client ResponseWriter")
+}
+
+// TestNativeClient_Proxy_2xxWritesDirectly verifies the success path is
+// unchanged: 2xx responses are still written to w normally.
+func TestNativeClient_Proxy_2xxWritesDirectly(t *testing.T) {
+	const responseBody = `{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	defer upstream.Close()
+
+	c := google.NewNativeClient("k", upstream.URL)
+	rec := httptest.NewRecorder()
+	prep := providers.PreparedRequest{Body: []byte(`{"contents":[]}`), Headers: make(http.Header)}
+
+	err := c.Proxy(context.Background(), router.Decision{Model: "gemini-x"}, prep, rec,
+		httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("")))
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, responseBody, rec.Body.String())
+}
+
+// TestNativeClient_Passthrough_ErrorWritesToClientAfterHeaders verifies that
+// the Passthrough error path sets the status before writing the error body
+// (not after, which would cause a double-WriteHeader panic in strict writers).
+func TestNativeClient_Passthrough_ErrorWritesToClientAfterHeaders(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad request"}`))
+	}))
+	defer upstream.Close()
+
+	c := google.NewNativeClient("k", upstream.URL)
+	rec := httptest.NewRecorder()
+	prep := providers.PreparedRequest{Body: []byte(`{}`), Headers: make(http.Header)}
+
+	err := c.Passthrough(context.Background(), prep, rec,
+		httptest.NewRequest(http.MethodPost, "/v1beta/models/g:generateContent", strings.NewReader("")))
+
+	var statusErr *providers.UpstreamStatusError
+	require.ErrorAs(t, err, &statusErr)
+	assert.Equal(t, http.StatusBadRequest, statusErr.Status)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "bad request")
+}
+
+// TestNativeClient_Passthrough_2xxWritesDirectly verifies the Passthrough
+// success path is unchanged after the error-path restructure.
+func TestNativeClient_Passthrough_2xxWritesDirectly(t *testing.T) {
+	const responseBody = `{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	defer upstream.Close()
+
+	c := google.NewNativeClient("k", upstream.URL)
+	rec := httptest.NewRecorder()
+	prep := providers.PreparedRequest{Body: []byte(`{}`), Headers: make(http.Header)}
+
+	err := c.Passthrough(context.Background(), prep, rec,
+		httptest.NewRequest(http.MethodPost, "/v1beta/models/g:generateContent", strings.NewReader("")))
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, responseBody, rec.Body.String())
+}

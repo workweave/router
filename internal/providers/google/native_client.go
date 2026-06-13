@@ -117,18 +117,16 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
 
-	providers.CopyUpstreamHeaders(w, resp)
-	w.WriteHeader(resp.StatusCode)
-
 	if resp.StatusCode >= 400 {
-		var snip [1024]byte
-		n, _ := io.ReadFull(resp.Body, snip[:])
-		if n > 0 {
+		// Buffer the upstream error — do NOT touch w. The proxy's failover loop
+		// decides whether to retry on another binding or flush this buffer to
+		// the client. Calling w.WriteHeader here would commit the preludeBuffer
+		// and make retries impossible (preludeBuf.Committed() gates all retries).
+		bufBody, totalRead, drainErr := readCapped(resp.Body, providers.MaxBufferedErrorBytes)
+		if len(bufBody) > 0 {
 			t.StampUpstreamFirstByte()
 		}
-		_, snipWriteErr := w.Write(snip[:n])
-		rest, copyErr := io.Copy(w, resp.Body)
-		if copyErr == nil {
+		if drainErr == nil {
 			t.StampUpstreamEOF()
 		}
 		logUpstreamStatus(
@@ -136,16 +134,16 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 			resp.StatusCode,
 			"routed_model", decision.Model,
 			"streaming", stream,
-			"body_preview", string(snip[:n]),
-			"body_total_bytes", int64(n)+rest,
+			"body_preview", previewBytes(bufBody),
+			"body_total_bytes", totalRead,
 		)
-		if snipWriteErr != nil {
-			return snipWriteErr
+		errHeaders := http.Header{}
+		providers.CopyUpstreamHeaders(headerCapture{errHeaders}, resp)
+		return &providers.UpstreamErrorResponse{
+			Status:  resp.StatusCode,
+			Headers: errHeaders,
+			Body:    bufBody,
 		}
-		if copyErr != nil {
-			return copyErr
-		}
-		return &providers.UpstreamStatusError{Status: resp.StatusCode}
 	}
 
 	// Output-progress watchdog: StreamBody's byte-idle watchdog resets on ANY
@@ -204,9 +202,9 @@ func (c *NativeClient) Passthrough(ctx context.Context, prep providers.PreparedR
 	}
 	defer resp.Body.Close()
 
-	providers.CopyUpstreamHeaders(w, resp)
-	w.WriteHeader(resp.StatusCode)
 	if resp.StatusCode >= 400 {
+		providers.CopyUpstreamHeaders(w, resp)
+		w.WriteHeader(resp.StatusCode)
 		var snip [1024]byte
 		n, _ := io.ReadFull(resp.Body, snip[:])
 		_, snipWriteErr := w.Write(snip[:n])
@@ -226,6 +224,8 @@ func (c *NativeClient) Passthrough(ctx context.Context, prep providers.PreparedR
 		}
 		return &providers.UpstreamStatusError{Status: resp.StatusCode}
 	}
+	providers.CopyUpstreamHeaders(w, resp)
+	w.WriteHeader(resp.StatusCode)
 	_, err = io.Copy(w, resp.Body)
 	return err
 }
@@ -250,5 +250,39 @@ func (c *NativeClient) applyAPIKey(ctx context.Context, req *http.Request) {
 		req.Header.Set("x-goog-api-key", c.apiKey)
 	}
 }
+
+// readCapped reads up to limit bytes from r, then drains up to 1 MiB without
+// retention so the upstream connection is released promptly. Returns the
+// buffered prefix, total bytes read across both reads, and any error (io.EOF
+// mapped to nil).
+func readCapped(r io.Reader, limit int) ([]byte, int64, error) {
+	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
+	totalRead := int64(len(prefix))
+	if err != nil {
+		return prefix, totalRead, err
+	}
+	const maxDrain = 1 << 20 // 1 MiB
+	rest, drainErr := io.Copy(io.Discard, io.LimitReader(r, maxDrain))
+	totalRead += rest
+	return prefix, totalRead, drainErr
+}
+
+// previewBytes returns up to the first 1 KiB of body as a string for logging.
+func previewBytes(body []byte) string {
+	const previewLimit = 1024
+	if len(body) > previewLimit {
+		return string(body[:previewLimit])
+	}
+	return string(body)
+}
+
+// headerCapture is a minimal http.ResponseWriter that captures headers only.
+// Used to reuse providers.CopyUpstreamHeaders against an http.Header we own.
+// Write and WriteHeader are no-ops.
+type headerCapture struct{ h http.Header }
+
+func (c headerCapture) Header() http.Header       { return c.h }
+func (c headerCapture) Write([]byte) (int, error) { return 0, nil }
+func (c headerCapture) WriteHeader(int)           {}
 
 var _ providers.Client = (*NativeClient)(nil)
