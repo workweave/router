@@ -1,0 +1,19 @@
+frontend/src/app/(auth)/login/page.tsx
+  s_d3fc1c517ba243::t_b10eaf417c1262 86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "ad6d1cd2feb623cfbdc860765abf8de7121a952c",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
