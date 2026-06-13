@@ -495,6 +495,13 @@ func (s *Service) runTurnLoop(
 	//   (c) the prior model is still routable (in availableModels)
 	//   (d) the prior model is not excluded (e.g. context-window overflow)
 	//   (e) the prior provider is still in the request's enabled set
+	//   (f) the prior turn did NOT saturate the output cap (maxed-out guard
+	//       mirrors the live-pin check above — re-anchoring a broken model
+	//       that already generated to the cap would restart the degenerate
+	//       auto-continue loop)
+	//   (g) this turn does NOT carry images if the prior model is text-only
+	//       (image guard mirrors the live-pin check above — re-anchoring a
+	//       text-only model on an image-bearing turn would immediately 4xx)
 	// When re-anchoring, write a new pin so the next turn is a sticky hit.
 	if !pinFound && pin.Model != "" {
 		pinTier := catalog.TierFor(pin.Model)
@@ -504,20 +511,33 @@ func (s *Service) runTurnLoop(
 				if _, available := s.availableModels[pin.Model]; available {
 					_, providerOK := req.EnabledProviders[pin.Provider]
 					if req.EnabledProviders == nil || providerOK {
-						priorDecision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.HasImages, req.EnabledProviders, req.ExcludedModels, &res)
-						res.Decision = priorDecision
-						res.StickyHit = true
-						res.PinTier = "postgres_reanchor"
-						s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, priorDecision)
-						log.Info("router re-anchored expired session pin",
-							"prior_model", pin.Model,
-							"prior_provider", pin.Provider,
-							"fresh_model", fresh.Model,
-							"fresh_provider", fresh.Provider,
-							"prior_tier", pinTier.String(),
-							"fresh_tier", freshTier.String(),
-						)
-						return res, nil
+						if pin.LastOutputTokens >= prevTurnMaxedOutThreshold {
+							log.Info("Expired session pin maxed out on previous turn; skipping re-anchor",
+								"pin_model", pin.Model,
+								"pin_provider", pin.Provider,
+								"last_output_tokens", pin.LastOutputTokens,
+							)
+						} else if req.HasImages && !catalog.AcceptsImages(pin.Model) {
+							log.Info("Expired session pin is text-only for image-bearing turn; skipping re-anchor",
+								"pin_model", pin.Model,
+								"pin_provider", pin.Provider,
+							)
+						} else {
+							priorDecision := pinDecision(pin)
+							res.Decision = priorDecision
+							res.StickyHit = true
+							res.PinTier = "postgres_reanchor"
+							s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, priorDecision)
+							log.Info("router re-anchored expired session pin",
+								"prior_model", pin.Model,
+								"prior_provider", pin.Provider,
+								"fresh_model", fresh.Model,
+								"fresh_provider", fresh.Provider,
+								"prior_tier", pinTier.String(),
+								"fresh_tier", freshTier.String(),
+							)
+							return res, nil
+						}
 					}
 				}
 			}
