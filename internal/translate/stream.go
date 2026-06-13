@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -454,7 +455,22 @@ type AnthropicSSETranslator struct {
 	// survived. Surfaced via Summary so the proxy can count the degenerate
 	// tool-call turns that previously dead-ended agent clients.
 	stopReasonDemoted bool
+
+	// upstreamErrorStatus is set when WriteHeader receives a >=400 status AFTER
+	// the eager Prelude already committed the SSE headers + message_start. In
+	// that window the wire status can no longer change, so without special
+	// handling the upstream error body is parsed as SSE (yielding nothing) and
+	// finishStream emits a clean message_delta/end_turn — masking the failure
+	// as an empty successful turn that silently drops the agent's turn. When
+	// set, Write diverts the upstream error body into upstreamErrorBody and
+	// finishStream emits an Anthropic `error` event instead.
+	upstreamErrorStatus int
+	upstreamErrorBody   strings.Builder
 }
+
+// upstreamErrorBodyCap bounds how much of an upstream error body is retained
+// for the surfaced error message, so a pathological body can't grow unbounded.
+const upstreamErrorBodyCap = 8 << 10
 
 // NewAnthropicSSETranslator wraps w. Call Finalize after upstream returns.
 func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink otel.UsageSink) *AnthropicSSETranslator {
@@ -583,6 +599,13 @@ func (t *AnthropicSSETranslator) Header() http.Header {
 
 // WriteHeader routes streaming success responses through SSE.
 func (t *AnthropicSSETranslator) WriteHeader(code int) {
+	// Capture an upstream error status even when the eager Prelude has already
+	// emitted headers: in that case the status is dropped from the wire, but
+	// finishStream still needs to know the turn failed so it can surface an
+	// `error` event instead of synthesizing a clean end_turn.
+	if code >= 400 {
+		t.upstreamErrorStatus = code
+	}
 	if t.headersEmitted {
 		return
 	}
@@ -633,6 +656,20 @@ func (t *AnthropicSSETranslator) Prelude(streaming bool) error {
 
 func (t *AnthropicSSETranslator) Write(data []byte) (int, error) {
 	n := len(data)
+	// Once an upstream error status has been seen, the bytes that follow are
+	// the upstream error body, not SSE content. Divert them (bounded) so
+	// finishStream can surface them as an `error` event rather than feeding a
+	// non-SSE error envelope to the SSE parser (which silently yields nothing).
+	if t.upstreamErrorStatus != 0 {
+		if remaining := upstreamErrorBodyCap - t.upstreamErrorBody.Len(); remaining > 0 {
+			capped := data
+			if len(capped) > remaining {
+				capped = capped[:remaining]
+			}
+			t.upstreamErrorBody.Write(capped)
+		}
+		return n, nil
+	}
 	t.buf.Write(data)
 	if !t.streaming {
 		return n, nil
@@ -1204,6 +1241,21 @@ func (t *AnthropicSSETranslator) finishStream() error {
 	}
 	t.toolBlocks = map[int]int{}
 
+	// An upstream non-2xx seen after the Prelude committed: surface it as an
+	// Anthropic `error` event instead of message_delta/end_turn. Emitting a
+	// clean end_turn here would tell the client the model produced an empty
+	// turn, which agent harnesses accept and silently drop the turn.
+	if t.upstreamErrorStatus != 0 {
+		if err := t.emitErrorEvent(); err != nil {
+			return err
+		}
+		if err := t.emitMessageStop(); err != nil {
+			return err
+		}
+		t.closed = true
+		return nil
+	}
+
 	if err := t.synthesizeTextOnlyTurnNudge(); err != nil {
 		return err
 	}
@@ -1216,6 +1268,57 @@ func (t *AnthropicSSETranslator) finishStream() error {
 	}
 	t.closed = true
 	return nil
+}
+
+// emitErrorEvent emits an Anthropic streaming `error` event derived from the
+// captured upstream status and body. Anthropic clients surface this as a turn
+// error (and can retry) instead of treating the turn as an empty success.
+func (t *AnthropicSSETranslator) emitErrorEvent() error {
+	errType := anthropicErrorTypeForStatus(t.upstreamErrorStatus)
+	msg := upstreamErrorMessage(t.upstreamErrorBody.String(), t.upstreamErrorStatus)
+	observability.Get().Debug("AnthropicSSE emit",
+		"event", "error",
+		"upstream_status", t.upstreamErrorStatus,
+		"error_type", errType,
+	)
+	t.bw.WriteString("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":")
+	sse.WriteJSONString(t.bw, errType)
+	t.bw.WriteString(",\"message\":")
+	sse.WriteJSONString(t.bw, msg)
+	t.bw.WriteString("}}\n\n")
+	return t.flushEvent()
+}
+
+// anthropicErrorTypeForStatus maps an upstream HTTP status to the closest
+// Anthropic error type so clients apply the right retry/backoff semantics.
+func anthropicErrorTypeForStatus(status int) string {
+	switch {
+	case status == http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case status == http.StatusServiceUnavailable:
+		return "overloaded_error"
+	case status >= 500:
+		return "api_error"
+	case status == http.StatusBadRequest:
+		return "invalid_request_error"
+	default:
+		return "api_error"
+	}
+}
+
+// upstreamErrorMessage extracts a human-readable message from a captured
+// upstream error body (OpenAI- or Anthropic-shaped error envelope), falling
+// back to a generic status line when the body carries no message.
+func upstreamErrorMessage(body string, status int) string {
+	if body != "" {
+		if m := gjson.Get(body, "error.message"); m.Exists() && m.String() != "" {
+			return m.String()
+		}
+		if m := gjson.Get(body, "message"); m.Exists() && m.String() != "" {
+			return m.String()
+		}
+	}
+	return fmt.Sprintf("upstream provider returned HTTP %d", status)
 }
 
 func (t *AnthropicSSETranslator) emitMessageStart() error {
