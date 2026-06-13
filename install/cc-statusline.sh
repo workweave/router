@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Claude Code statusline for the Weave router. CC pipes a JSON blob on stdin
+# Claude Code statusline for the Weave Router. CC pipes a JSON blob on stdin
 # whose `transcript_path` points at the JSONL log of the current session and
 # whose `model.display_name` is the user's CC-side model selection. The
 # router rewrites each request's `model` field before forwarding, so
