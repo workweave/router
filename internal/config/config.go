@@ -9,7 +9,7 @@ import (
 func MustGet(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
-		panic(fmt.Sprintf("missing required env var: %s", key))
+		panic(fmt.Sprintf("Missing required env var: %s", key))
 	}
 	return v
 }
