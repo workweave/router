@@ -221,7 +221,7 @@ function RouterKeysPanel() {
       {newToken != null && (
         <div className="rounded-lg border border-success/30 bg-success/5 p-4">
           <Text className="mb-2 text-xs font-medium text-success">
-            Key created. Copy it now, it won&apos;t be shown again.
+            Key created. Copy it; it won&apos;t be shown again.
           </Text>
           <div className="flex items-center gap-2">
             <code className="flex-1 rounded bg-muted px-3 py-1.5 font-mono text-2xs text-foreground">
