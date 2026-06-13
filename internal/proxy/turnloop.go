@@ -481,6 +481,49 @@ func (s *Service) runTurnLoop(
 	)
 	res.Fresh = fresh
 
+	// Expired-pin re-anchor: when the session pin has lapsed mid-session
+	// (!pinFound but pin.Model != "" — an expired row, not a first-turn
+	// miss), prefer staying on the prior model instead of taking whatever
+	// lateral switch the scorer happened to pick on the one expiry turn.
+	// A model-switch on a single expiry turn is frequently noise: the
+	// scorer may land in a different cluster on that turn and return a
+	// different model that the session then stays on for the rest of its
+	// life, even if subsequent turns would have scored the prior model
+	// equally well. Re-anchor when all of the following hold:
+	//   (a) both model tiers are known (TierUnknown falls through to scorer)
+	//   (b) the fresh recommendation is NOT a tier upgrade
+	//   (c) the prior model is still routable (in availableModels)
+	//   (d) the prior model is not excluded (e.g. context-window overflow)
+	//   (e) the prior provider is still in the request's enabled set
+	// When re-anchoring, write a new pin so the next turn is a sticky hit.
+	if !pinFound && pin.Model != "" {
+		pinTier := catalog.TierFor(pin.Model)
+		freshTier := catalog.TierFor(fresh.Model)
+		if pinTier != catalog.TierUnknown && freshTier != catalog.TierUnknown && freshTier <= pinTier {
+			if _, excluded := req.ExcludedModels[pin.Model]; !excluded {
+				if _, available := s.availableModels[pin.Model]; available {
+					_, providerOK := req.EnabledProviders[pin.Provider]
+					if req.EnabledProviders == nil || providerOK {
+						priorDecision := s.clampToCeiling(pinDecision(pin), res.RequestedTier, req.HasImages, req.EnabledProviders, req.ExcludedModels, &res)
+						res.Decision = priorDecision
+						res.StickyHit = true
+						res.PinTier = "postgres_reanchor"
+						s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, priorDecision)
+						log.Info("router re-anchored expired session pin",
+							"prior_model", pin.Model,
+							"prior_provider", pin.Provider,
+							"fresh_model", fresh.Model,
+							"fresh_provider", fresh.Provider,
+							"prior_tier", pinTier.String(),
+							"fresh_tier", freshTier.String(),
+						)
+						return res, nil
+					}
+				}
+			}
+		}
+	}
+
 	if !s.plannerEnabled {
 		res.Decision = fresh
 		s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, fresh)
