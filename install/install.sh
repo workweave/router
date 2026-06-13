@@ -1324,7 +1324,7 @@ toggle_claude() {
                       | (if (.env // {} | length) == 0 then del(.env) else . end)' "$settings_file")"
         printf '%s\n' "$merged" >"$settings_file"
       fi
-      ok "Claude Code is now ${C_BOLD}off${C_RESET} (direct to Anthropic). Restart Claude Code for it to take effect."
+      ok "Claude Code is ${C_BOLD}off${C_RESET} (direct to Anthropic). Restart Claude Code for it to take effect."
       ;;
     on)
       if [ "$parked_present" != "true" ]; then
@@ -1348,7 +1348,7 @@ toggle_claude() {
                             | (if (.env // {} | length) == 0 then del(.env) else . end)' "$local_settings_file")"
               printf '%s\n' "$merged" >"$local_settings_file"
               chmod 600 "$local_settings_file"
-              ok "Claude Code is now ${C_BOLD}on${C_RESET} (routing through the Weave Router). Restart Claude Code for it to take effect."
+              ok "Claude Code is ${C_BOLD}on${C_RESET} (routing through the Weave Router). Restart Claude Code for it to take effect."
             else
               warn "Claude Code is off and the parked router key is missing (its sidecar was deleted). Re-run the installer to restore the router key — leaving the current direct-to-Anthropic setup in place so requests don't fail auth."
             fi
@@ -1387,7 +1387,7 @@ toggle_claude() {
       printf '%s\n' "$merged" >"$active"
       [ "$proj" = "true" ] && chmod 600 "$active"
       rm -f "$parked"
-      ok "Claude Code is now ${C_BOLD}on${C_RESET} (routing through the Weave Router). Restart Claude Code for it to take effect."
+      ok "Claude Code is ${C_BOLD}on${C_RESET} (routing through the Weave Router). Restart Claude Code for it to take effect."
       ;;
   esac
 }
@@ -1425,7 +1425,7 @@ toggle_codex() {
         {print}
       ' "$f" >"$tmp" && mv "$tmp" "$f"
       chmod 600 "$f"
-      ok "Codex is now ${C_BOLD}off${C_RESET} (default provider). Takes effect on your next 'codex' run."
+      ok "Codex is ${C_BOLD}off${C_RESET} (default provider). Takes effect on your next 'codex' run."
       ;;
     on)
       if [ "$state" = "absent" ]; then warn "No managed Weave block in $f. Run the installer to set up Codex."; return 0; fi
@@ -1440,7 +1440,7 @@ toggle_codex() {
         {print}
       ' "$f" >"$tmp" && mv "$tmp" "$f"
       chmod 600 "$f"
-      ok "Codex is now ${C_BOLD}on${C_RESET} (routing through the Weave Router). Takes effect on your next 'codex' run."
+      ok "Codex is ${C_BOLD}on${C_RESET} (routing through the Weave Router). Takes effect on your next 'codex' run."
       ;;
   esac
 }
@@ -1482,7 +1482,7 @@ toggle_opencode() {
       printf '%s\n' "$merged" >"$f"
       chmod 600 "$f"
       gitignore_add ".weave-parked.json"
-      ok "opencode is now ${C_BOLD}off${C_RESET} — pick a non-Weave model with /models. Takes effect on your next opencode run."
+      ok "opencode is ${C_BOLD}off${C_RESET} — pick a non-Weave model with /models. Takes effect on your next opencode run."
       ;;
     on)
       if [ "$on" = "true" ]; then ok "opencode is already on — nothing to do."; return 0; fi
@@ -1506,7 +1506,7 @@ toggle_opencode() {
       printf '%s\n' "$merged" >"$f"
       chmod 600 "$f"
       rm -f "$parked"
-      ok "opencode is now ${C_BOLD}on${C_RESET} (default model $restore_model via the Weave Router). Takes effect on your next opencode run."
+      ok "opencode is ${C_BOLD}on${C_RESET} (default model $restore_model via the Weave Router). Takes effect on your next opencode run."
       ;;
   esac
 }
@@ -1819,7 +1819,7 @@ if [ "$target" = "pi" ]; then
   # Billing note: pi normally draws on a Claude subscription (OAuth); routing
   # through the router switches to per-token billing on the router deployment
   # key (or BYOK). Surface it at install so the change isn't a surprise.
-  info "pi now bills per token on the Weave Router key, not your Claude subscription."
+  info "pi bills per token on the Weave Router key, not your Claude subscription."
   if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
     info "Run pi with PI_CODING_AGENT_DIR=$pi_dir pi so it picks up this config."
   fi
