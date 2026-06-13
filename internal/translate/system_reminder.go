@@ -30,9 +30,18 @@ func openRouterSystemReminder(model string) string {
 // Gemini 3.x in agentic-coding traces (SWE-bench Verified) reads source files
 // extensively, then ends turns describing the proposed edit in markdown
 // instead of calling Edit/Write. The behavior persists even when the request
-// carries Edit/Write tool schemas. This addendum is the Gemini analogue to
-// deepseekToolUseReminder: it tells the model the exploration-only turn is
-// the failure mode, not the success mode.
+// carries Edit/Write tool schemas. This addendum nudges it to apply edits via
+// the tools when the user asked for a change.
+//
+// The nudge is deliberately CONDITIONAL. An earlier unconditional phrasing
+// ("always call Edit/Write; a turn that only explores counts as giving up")
+// framed every explore-only turn as failure, which tipped advisory/read-only
+// requests ("what should I fix?") into unsolicited edits, commits, and PRs.
+// The conditional form preserves the under-calling fix on genuine edit turns
+// while leaving analysis/review requests in prose — mirroring the industry
+// norm of mode-scoped guidance (Cline plan/act, Aider ask/code) over a blunt
+// global imperative, which research shows over-pushes and is an unreliable
+// governor of model action.
 func geminiSystemReminder(model string) string {
 	if isGemini3xModel(model) {
 		return geminiToolUseReminder
@@ -42,7 +51,7 @@ func geminiSystemReminder(model string) string {
 
 const deepseekToolUseReminder = "When using file-edit tools, copy `old_string` byte-for-byte from the most recent file read — preserve tabs, leading and trailing whitespace, and unicode characters (em-dash —, smart quotes, non-breaking spaces) exactly. If an Edit call fails, re-read the file before retrying. Never fall back to shell commands (sed, awk, python) to modify files."
 
-const geminiToolUseReminder = "When asked to fix code, always call the Edit or Write tool to apply changes — do not describe the edit in prose or markdown and stop. A turn that explores files without producing an Edit/Write call counts as the model giving up. After you have read enough to know what to change, the next step is the tool call, not a summary."
+const geminiToolUseReminder = "When the user has asked you to apply a change, prefer calling the Edit or Write tool over describing the edit in prose or markdown; once you have read enough to know what to change, the next step is the Edit/Write call, not a summary. If the user only asked for analysis, a review, or what could be fixed, answer in prose — do not edit, commit, or push unless they asked you to."
 
 // applySystemReminderToBody injects the reminder into a serialized OpenAI body's
 // `messages` array. Best-effort: returns the input unchanged on parse failure

@@ -173,7 +173,7 @@ func TestSystemReminder_OpenAISource_SkipsWithoutTools(t *testing.T) {
 	assert.NotContains(t, systemContent(emittedMessages(t, out.Body)), reminderSnippet)
 }
 
-const geminiReminderSnippet = "always call the Edit or Write tool"
+const geminiReminderSnippet = "prefer calling the Edit or Write tool"
 
 // geminiSystemInstructionText extracts the concatenated systemInstruction.parts[*].text
 // from a serialized Gemini request body, or "" when no systemInstruction is set.
