@@ -207,7 +207,7 @@ func responsesInputItemToMessages(item gjson.Result) ([]map[string]any, error) {
 // don't accumulate per-turn variable badge text (which would defeat
 // prompt-cache reuse and waste tokens), and so the upstream provider never
 // sees router-injected content as part of the model's history.
-var responsesBadgePattern = regexp.MustCompile(`(?m)\A\*\*WEAVE ROUTER\*\* — [^\n]*\n\n`)
+var responsesBadgePattern = regexp.MustCompile(`(?im)\A\*\*WEAVE ROUTER\*\* — [^\n]*\n\n`)
 
 // responsesContentToChatContent flattens a content array. For assistant
 // messages we may also extract tool-call shells if a client embeds them.
@@ -615,8 +615,8 @@ func (t *ResponsesWriter) nextOutputIndex() int {
 // computeBadgeText builds the routing badge that's prepended to the
 // assistant's first text delta. Format mirrors the Claude Code statusline:
 //
-//	**WEAVE ROUTER** — <routed>
-//	**WEAVE ROUTER** — <routed> ← <requested>   (when the router swapped)
+//	**Weave Router** — <routed>
+//	**Weave Router** — <routed> ← <requested>   (when the router swapped)
 //
 // Returns the badge line including trailing blank line, or empty when there
 // is no routed model to surface yet.
@@ -624,7 +624,7 @@ func (t *ResponsesWriter) computeBadgeText() string {
 	if t.model == "" {
 		return ""
 	}
-	badge := "**WEAVE ROUTER** — " + t.model
+	badge := "**Weave Router** — " + t.model
 	if t.requestedModel != "" && t.requestedModel != t.model {
 		badge += " ← " + t.requestedModel
 	}

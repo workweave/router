@@ -210,7 +210,7 @@ func TestResponsesWriter_StreamingText(t *testing.T) {
 			continue
 		}
 		d := e["delta"].(string)
-		if strings.HasPrefix(d, "**WEAVE ROUTER**") {
+		if strings.HasPrefix(d, "**Weave Router**") {
 			continue
 		}
 		combined.WriteString(d)
@@ -252,8 +252,8 @@ func TestResponsesWriter_PrependsBadgeOnSwap(t *testing.T) {
 		}
 	}
 	require.Len(t, deltas, 3)
-	// Format: **WEAVE ROUTER** — claude-opus-4-7 ← gpt-5.5\n\n
-	assert.Contains(t, deltas[0], "**WEAVE ROUTER**")
+	// Format: **Weave Router** — claude-opus-4-7 ← gpt-5.5\n\n
+	assert.Contains(t, deltas[0], "**Weave Router**")
 	assert.Contains(t, deltas[0], "claude-opus-4-7")
 	assert.Contains(t, deltas[0], "← gpt-5.5")
 	assert.True(t, strings.HasSuffix(deltas[0], "\n\n"))
@@ -291,7 +291,7 @@ func TestResponsesWriter_BadgeWithoutSwapShowsModelOnly(t *testing.T) {
 			break
 		}
 	}
-	assert.Contains(t, firstDelta, "**WEAVE ROUTER**")
+	assert.Contains(t, firstDelta, "**Weave Router**")
 	assert.Contains(t, firstDelta, "claude-opus-4-7")
 	assert.NotContains(t, firstDelta, "←")
 }
