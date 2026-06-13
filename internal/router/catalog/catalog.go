@@ -353,6 +353,14 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.1684}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.10}},
 	}},
+	// kimi-k2.7 (the "Code" agentic variant) launched day-0 on Fireworks
+	// serverless. Same Moonshot public rates as k2.6 ($0.95/$4.00, cached $0.19
+	// = 0.20x) but ~30% less thinking-token usage. 262k context. Fireworks-only
+	// for now — not yet on OpenRouter, so no trailing fallback binding.
+	{ID: "moonshotai/kimi-k2.7", Tier: TierHigh, ContextWindow: 262_144, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/kimi-k2p7-code",
+			Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.20}},
+	}},
 	// AA top-performer additions (2026-05-18).
 	//
 	// Selection ranked OSS models on the artificialanalysis.ai API by a
@@ -424,5 +432,15 @@ var Models = []Model{
 	}},
 	{ID: "qwen/qwen3.5-flash-02-23", Tier: TierLow, ContextWindow: 1_000_000, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.050, OutputUSDPer1M: 0.150, CacheReadMultiplier: 0.10}},
+	}},
+	// qwen3.7-plus is Alibaba's cost-effective agentic tier, now served day-0
+	// and exclusively on Fireworks serverless (the closed Alibaba API surface is
+	// deliberately avoided — Fireworks is SOC-2 and keeps prompts off Alibaba).
+	// $0.40/$1.60, cached $0.08 (0.20x), 262k context. Native multimodal, so
+	// ImageInput stays at the default (image-capable). Fireworks-only binding —
+	// the OpenRouter route for this model forwards to Alibaba, which we skip.
+	{ID: "qwen/qwen3.7-plus", Tier: TierHigh, ContextWindow: 262_144, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/qwen3p7-plus",
+			Price: Pricing{InputUSDPer1M: 0.400, OutputUSDPer1M: 1.600, CacheReadMultiplier: 0.20}},
 	}},
 }
