@@ -1,0 +1,19 @@
+internal/router/cluster/artifacts/latest
+  s_448b44b7254469::t_b9d0a2641a56b1 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "c5b3939dcb5da493722777e49b6ec9a1334c0db0",
+  "prompts": {},
+  "sessions": {
+    "s_448b44b7254469": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "955edd7a-eeee-49f0-a2b4-a55b95e92a0e",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

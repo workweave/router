@@ -1,0 +1,21 @@
+cmd/router/main.go
+  s_d08e616f5f83c7::t_a449219ace2b09 343-346,354-356,364-376
+internal/pubsub/invalidation.go
+  s_d08e616f5f83c7::t_3b1b21ed2b4069 5-6,13-15,22-31,63-69,108-161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "d39b823f57c07de96cfc493459a70f193ed21d14",
+  "prompts": {},
+  "sessions": {
+    "s_d08e616f5f83c7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1eb63ff6-087d-4def-9911-1c1e14bc08a9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

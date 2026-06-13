@@ -1,0 +1,38 @@
+internal/router/planner/policy_test.go
+  s_d4f903c1af6e94::t_2774d428bda1f8 267-268
+  s_d4f903c1af6e94::t_6ee8373dcc94b5 39
+  s_d4f903c1af6e94::t_a6b32586dc483b 251-252
+  s_d4f903c1af6e94::t_0e2fa005e55737 283-284
+internal/router/planner/policy.go
+  s_d4f903c1af6e94::t_ad034ec2790e74 171-173
+  s_d4f903c1af6e94::t_0d692d9c329d88 16-20
+  s_d4f903c1af6e94::t_aecc089b2e909f 72-75
+  s_d4f903c1af6e94::t_efe00c865941c0 161
+internal/router/capability/tier.go
+  s_d4f903c1af6e94::t_a03eda0e1daea4 83,88-89
+  s_d4f903c1af6e94::t_b6233f88c9914a 42-43
+  s_d4f903c1af6e94::t_827bb44f05c74f 1-5
+  s_d4f903c1af6e94::t_5e278ec3492f86 14-15,19-21
+  s_d4f903c1af6e94::t_b0c7624e163e7a 28
+internal/proxy/service.go
+  s_d4f903c1af6e94::t_6d3ab7a180f648 157-159
+cmd/router/main.go
+  s_d4f903c1af6e94::t_33789020887709 368-369
+  s_d4f903c1af6e94::t_46576e46f57128 676
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "62b7044da081300db4469fa91a03e864c09220d4",
+  "prompts": {},
+  "sessions": {
+    "s_d4f903c1af6e94": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "738c3c14-fc6d-4e7f-8238-fae5f3144fd6",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

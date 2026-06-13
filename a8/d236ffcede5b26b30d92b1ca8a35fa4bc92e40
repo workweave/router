@@ -1,0 +1,59 @@
+cmd/router/main.go
+  s_dd787dadd8f549::t_aba307d6ee9b07 266-270
+  s_dd787dadd8f549::t_de3a20088e11ba 334
+internal/server/middleware/embed_override_test.go
+  s_dd787dadd8f549::t_4806399cd917d4 27,32,40
+internal/proxy/service.go
+  s_dd787dadd8f549::t_52edbf847919d5 91
+  s_dd787dadd8f549::t_85502a45e97c28 29
+  s_dd787dadd8f549::t_02b83c93b0a515 263-264,266-268
+  s_dd787dadd8f549::t_c3766619eef53b 341-342,348-350
+  s_dd787dadd8f549::t_0f9ddccda5968b 666
+  s_dd787dadd8f549::t_04871a4bd71fd6 833-841,854
+  s_dd787dadd8f549::t_4941089907e485 106
+internal/proxy/gemini.go
+  s_dd787dadd8f549::t_fe5f0c309d897b 48-56,68
+CLAUDE.md
+  s_dd787dadd8f549::t_fb9ad877a377d3 620-624
+internal/api/admin/config.go
+  s_dd787dadd8f549::t_4031cfdfc9b472 51
+  s_dd787dadd8f549::t_8b07937d485af8 15
+frontend/src/lib/api.ts
+  s_dd787dadd8f549::t_40c7223c067107 103
+internal/server/middleware/embed_override.go
+  s_dd787dadd8f549::t_cef5f6105e9eab 13-14,16-17,19,40,43
+README.md
+  s_dd787dadd8f549::t_a06a0b7b37ead2 249
+internal/server/server.go
+  s_dd787dadd8f549::t_503fa272e8e574 88,97,115
+internal/proxy/service_test.go
+  s_dd787dadd8f549::t_8ac6eb9f714432 268
+  s_dd787dadd8f549::t_921e684434f696 118-124,129,131-132,157,160,180-181
+  s_dd787dadd8f549::t_88b246c7fdd043 241
+  s_dd787dadd8f549::t_09da4e73090359 185
+internal/translate/features_gemini.go
+  s_dd787dadd8f549::t_a95e205711cf79 15,22-24,30-34,52-53
+internal/translate/features.go
+  s_dd787dadd8f549::t_b434fa4f04ffc3 50-52
+  s_dd787dadd8f549::t_339ea18b198e12 22-25,28-31,34,36,38,44,58,60,80-81,87,92-94,100-104,122-123
+AGENTS.md
+  s_dd787dadd8f549::t_c67347e25a9c66 620-624
+frontend/src/app/(app)/settings/page.tsx
+  s_dd787dadd8f549::t_62845f38673e2b 594-596
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "a8d236ffcede5b26b30d92b1ca8a35fa4bc92e40",
+  "prompts": {},
+  "sessions": {
+    "s_dd787dadd8f549": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "62937860-4e3c-41ce-ab11-b41b115d486c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

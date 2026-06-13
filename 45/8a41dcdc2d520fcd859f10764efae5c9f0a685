@@ -1,0 +1,20 @@
+internal/proxy/force_model.go
+  s_d194893f3c9bb0::t_04fcc2893b4d14 5
+  s_d194893f3c9bb0::t_a1c3413184be2c 62-68,71-80,82-87,90-94,106-115,117-119,121-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "458a41dcdc2d520fcd859f10764efae5c9f0a685",
+  "prompts": {},
+  "sessions": {
+    "s_d194893f3c9bb0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "badae19b-6c59-4cb2-b815-7fcdc7dfce6f",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

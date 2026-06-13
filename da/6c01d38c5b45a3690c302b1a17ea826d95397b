@@ -1,0 +1,29 @@
+internal/router/cluster/artifacts/v0.70/model_features.json
+  s_e0d782d7352f9d::t_7f0ef1c3e5d1ad 1-442
+internal/router/cluster/artifacts/v0.70/quality_means.json
+  s_e0d782d7352f9d::t_7f0ef1c3e5d1ad 1-406
+internal/router/cluster/artifacts/v0.70/model_registry.json
+  s_e0d782d7352f9d::t_7f0ef1c3e5d1ad 1-152
+internal/router/cluster/artifacts/v0.70/metadata.yaml
+  s_e0d782d7352f9d::t_7f0ef1c3e5d1ad 1-185
+internal/router/cluster/artifacts/v0.70/model_axes.json
+  s_e0d782d7352f9d::t_7f0ef1c3e5d1ad 1-193
+internal/router/cluster/artifacts/v0.70/rankings.json
+  s_e0d782d7352f9d::t_7f0ef1c3e5d1ad 1-370
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "da6c01d38c5b45a3690c302b1a17ea826d95397b",
+  "prompts": {},
+  "sessions": {
+    "s_e0d782d7352f9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47439573-f58f-49ec-bee2-52c2c8311ac6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

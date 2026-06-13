@@ -1,0 +1,31 @@
+internal/router/pricing/pricing_test.go
+  s_124bf81c6b9738::t_af63517eff0752 68
+internal/router/cluster/artifacts/v0.38/model_registry.json
+  s_124bf81c6b9738::t_d15f7653b65656 25
+  s_124bf81c6b9738::t_02b367ac010461 3
+install/install.sh
+  s_124bf81c6b9738::t_965d1d93d600c1 595,634
+internal/router/cluster/artifacts/v0.38/metadata.yaml
+  s_124bf81c6b9738::t_007235210b5311 29
+  s_124bf81c6b9738::t_2d0ad011bbfd49 69
+internal/router/pricing/pricing.go
+  s_124bf81c6b9738::t_154e06ab09cd25 96
+install/cc-statusline.sh
+  s_124bf81c6b9738::t_965d1d93d600c1 137,176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "f3c310ed552e1b7508491b96183d7b33e3845583",
+  "prompts": {},
+  "sessions": {
+    "s_124bf81c6b9738": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cb00ebc8-a82a-401e-abce-4d93c5d22120",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
