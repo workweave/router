@@ -57,9 +57,9 @@ func (s *Service) handleRouterFeedbackCommand(
 		// Acknowledgment text is formatted as a routing marker so the existing
 		// StripRoutingMarkerFromMessages ingress stripper removes it from
 		// subsequent inbound requests (see handleForceModelCommand).
-		msg := "✦ **Weave Router** → router-feedback needs a message, e.g. /router-feedback got stuck on Haiku for too long\n\n"
+		msg := "✦ **Weave Router** → Router-feedback needs a message, e.g. /router-feedback got stuck on Haiku for too long.\n\n"
 		if env.SourceFormat() == translate.FormatOpenAI {
-			msg = "Weave Router: router-feedback needs a message, e.g. /router-feedback got stuck on Haiku for too long"
+			msg = "Weave Router: router-feedback needs a message, e.g. /router-feedback got stuck on Haiku for too long."
 		}
 		return writeSyntheticCommandResponse(w, env, msg, inputTokens)
 	}
@@ -130,9 +130,9 @@ func (s *Service) handleRouterFeedbackCommand(
 		"role", role,
 	)
 
-	msg := "✦ **Weave Router** → feedback recorded, thank you\n\n"
+	msg := "✦ **Weave Router** → Feedback recorded. Thank you.\n\n"
 	if env.SourceFormat() == translate.FormatOpenAI {
-		msg = "Weave Router: feedback recorded, thank you."
+		msg = "Weave Router: Feedback recorded. Thank you."
 	}
 	return writeSyntheticCommandResponse(w, env, msg, inputTokens)
 }
