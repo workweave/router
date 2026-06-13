@@ -656,11 +656,14 @@ func (t *AnthropicSSETranslator) Prelude(streaming bool) error {
 
 func (t *AnthropicSSETranslator) Write(data []byte) (int, error) {
 	n := len(data)
-	// Once an upstream error status has been seen, the bytes that follow are
-	// the upstream error body, not SSE content. Divert them (bounded) so
+	// Streaming-only: once the Prelude has committed (t.streaming) and an
+	// upstream error status has been seen, the bytes that follow are the
+	// upstream error body, not SSE content. Divert them (bounded) so
 	// finishStream can surface them as an `error` event rather than feeding a
 	// non-SSE error envelope to the SSE parser (which silently yields nothing).
-	if t.upstreamErrorStatus != 0 {
+	// In the non-streaming case the body must stay in t.buf so Finalize can
+	// translate it into the Anthropic error envelope as before.
+	if t.upstreamErrorStatus != 0 && t.streaming {
 		if remaining := upstreamErrorBodyCap - t.upstreamErrorBody.Len(); remaining > 0 {
 			capped := data
 			if len(capped) > remaining {
