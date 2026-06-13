@@ -20,7 +20,7 @@ type Span struct {
 func generateTraceID() [16]byte {
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
-		panic("otel: crypto/rand failed: " + err.Error())
+		panic("OTel: crypto/rand failed: " + err.Error())
 	}
 	return id
 }
@@ -28,7 +28,7 @@ func generateTraceID() [16]byte {
 func generateSpanID() [8]byte {
 	var id [8]byte
 	if _, err := rand.Read(id[:]); err != nil {
-		panic("otel: crypto/rand failed: " + err.Error())
+		panic("OTel: crypto/rand failed: " + err.Error())
 	}
 	return id
 }
