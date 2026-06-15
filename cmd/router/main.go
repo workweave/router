@@ -1031,9 +1031,24 @@ func parseEnvFloat(key string, fallback float64) float64 {
 // from ROUTER_FEEDBACK_LINK_TTL_SEC (default 30 days). The link is a low-stakes
 // rating affordance, so a long expiry trades little risk for the convenience of
 // a user rating a routing decision they noticed hours later.
+// feedbackLinkTTL resolves the feedback-link token lifetime from
+// ROUTER_FEEDBACK_LINK_TTL_SEC. Unset, negative, or unparseable falls back to
+// 30 days; an explicit 0 means "never expire" — matching feedback.NewSigner's
+// non-positive-TTL contract. Parsed inline rather than via parseEnvInt, which
+// rejects 0 and so would silently turn an operator's "never expire" into the
+// 30-day default.
 func feedbackLinkTTL() time.Duration {
 	const defaultSec = 30 * 24 * 60 * 60
-	return time.Duration(parseEnvInt("ROUTER_FEEDBACK_LINK_TTL_SEC", defaultSec)) * time.Second
+	raw := config.GetOr("ROUTER_FEEDBACK_LINK_TTL_SEC", "")
+	if raw == "" {
+		return defaultSec * time.Second
+	}
+	sec, err := strconv.Atoi(raw)
+	if err != nil || sec < 0 {
+		observability.Get().Warn("Invalid env var; using default", "key", "ROUTER_FEEDBACK_LINK_TTL_SEC", "value", raw, "default", defaultSec)
+		return defaultSec * time.Second
+	}
+	return time.Duration(sec) * time.Second
 }
 
 // boolDefault renders a bool default for config.GetOr on bool envs.
