@@ -894,9 +894,9 @@ const semanticCacheMaxBodyBytes = 1 << 20
 // headersToSkipOnHit lists response headers the cache must NOT replay.
 // request-id ties to a specific upstream call; x-router-* are set fresh from
 // the live decision so the client sees current routing, not stale. The
-// feedback link encodes the original request's signed token, so replaying it
-// would attribute a new client's rating to the cached request — it is reminted
-// per hit in writeCachedResponse instead.
+// feedback link encodes the original request's signed token; cache hits write
+// no telemetry row to back a feedback page, so the link is omitted on hits
+// entirely — the skip here guards against ever replaying the cached one.
 var headersToSkipOnHit = map[string]struct{}{
 	"Request-Id":            {},
 	"X-Request-Id":          {},
@@ -922,11 +922,11 @@ func cloneCacheHeaders(h http.Header) http.Header {
 	return out
 }
 
-// writeCachedResponse emits a stored CachedResponse. x-router-* headers (incl.
-// the feedback link) come from the live request so the client sees an accurate
-// routing trace and a feedback link bound to this request, not the one whose
-// response body was cached.
-func (s *Service) writeCachedResponse(w http.ResponseWriter, resp cache.CachedResponse, decision router.Decision, installationID uuid.UUID, externalID, requestID, routerUserID string) {
+// writeCachedResponse emits a stored CachedResponse. x-router-* headers come
+// from the live decision so the client sees an accurate routing trace. No
+// feedback link is set: a cache hit writes no telemetry row, so its feedback
+// page would have no routing context to show.
+func (s *Service) writeCachedResponse(w http.ResponseWriter, resp cache.CachedResponse, decision router.Decision) {
 	for k, vs := range resp.Headers {
 		for _, v := range vs {
 			w.Header().Add(k, v)
@@ -936,7 +936,6 @@ func (s *Service) writeCachedResponse(w http.ResponseWriter, resp cache.CachedRe
 	w.Header().Set(HeaderRouterProvider, decision.Provider)
 	w.Header().Set(HeaderRouterModel, decision.Model)
 	w.Header().Set(HeaderRouterCache, RouterCacheHit)
-	s.setFeedbackLinkHeader(w, installationID, externalID, requestID, routerUserID)
 	if resp.StatusCode != 0 && resp.StatusCode != http.StatusOK {
 		w.WriteHeader(resp.StatusCode)
 	}
@@ -1347,7 +1346,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !compactionHandoverRan
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
-			s.writeCachedResponse(w, resp, decision, installationID, externalID, requestID, auth.UserIDFrom(ctx))
+			s.writeCachedResponse(w, resp, decision)
 			otel.Record(ctx, otel.Span{
 				Name:  "router.cache_hit",
 				Start: requestStart,
@@ -2558,7 +2557,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
-			s.writeCachedResponse(w, resp, decision, installationID, externalID, requestID, auth.UserIDFrom(ctx))
+			s.writeCachedResponse(w, resp, decision)
 			otel.Record(ctx, otel.Span{
 				Name:  "router.cache_hit",
 				Start: requestStart,

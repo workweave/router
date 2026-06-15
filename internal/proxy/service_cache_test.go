@@ -179,25 +179,18 @@ func TestService_Cache_MissingExternalIDBypasses(t *testing.T) {
 	assert.Len(t, provider.proxyBodies, 2, "without externalID the cache must not store or replay")
 }
 
-// requestIDFromLink extracts and verifies the token from an x-router-feedback-url
-// header value and returns the request id it encodes.
-func requestIDFromLink(t *testing.T, signer *feedback.Signer, link string) string {
-	t.Helper()
-	idx := strings.LastIndex(link, "/f/")
-	require.GreaterOrEqual(t, idx, 0, "feedback link must contain /f/<token>")
-	claims, err := signer.Verify(link[idx+len("/f/"):])
-	require.NoError(t, err)
-	return claims.RequestID
-}
-
-// TestService_Cache_HitMintsFreshFeedbackLink guards the semantic-cache replay
-// bug: a cache hit must mint a feedback link bound to the current request, not
-// replay the link minted for the request whose body was cached (which would
-// attribute a new client's rating to the wrong request_id).
-func TestService_Cache_HitMintsFreshFeedbackLink(t *testing.T) {
+// TestService_Cache_HitOmitsFeedbackLink guards two properties of the
+// semantic-cache hit path: (1) the miss response carries a feedback link, and
+// (2) the cache hit carries none — a cache hit writes no telemetry row, so its
+// feedback page would have no routing context, and replaying the cached
+// request's link would attribute a new client's rating to the wrong request_id.
+func TestService_Cache_HitOmitsFeedbackLink(t *testing.T) {
 	emb := embeddingFixture(7)
 	provider := &fakeProvider{
 		proxyResponse: func(w http.ResponseWriter) {
+			// Echo a feedback header into the stored body to prove it is not
+			// replayed from cache on the hit.
+			w.Header().Set(proxy.HeaderRouterFeedbackURL, "https://router.example.com/f/STALE")
 			_, _ = w.Write([]byte(`{"id":"cached","content":"hi"}`))
 		},
 	}
@@ -212,19 +205,13 @@ func TestService_Cache_HitMintsFreshFeedbackLink(t *testing.T) {
 
 	rec1 := httptest.NewRecorder()
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec1, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))))
-	link1 := rec1.Header().Get(proxy.HeaderRouterFeedbackURL)
-	require.NotEmpty(t, link1, "miss path must emit a feedback link")
-	req1 := requestIDFromLink(t, signer, link1)
+	require.NotEmpty(t, rec1.Header().Get(proxy.HeaderRouterFeedbackURL), "miss path must emit a feedback link")
 
 	rec2 := httptest.NewRecorder()
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec2, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))))
 	require.Len(t, provider.proxyBodies, 1, "second call must be a cache hit")
 	require.Equal(t, proxy.RouterCacheHit, rec2.Header().Get(proxy.HeaderRouterCache))
-	link2 := rec2.Header().Get(proxy.HeaderRouterFeedbackURL)
-	require.NotEmpty(t, link2, "cache hit must still emit a feedback link")
-	req2 := requestIDFromLink(t, signer, link2)
-
-	assert.NotEqual(t, req1, req2, "cache hit must mint a link for the current request, not replay the cached one")
+	assert.Empty(t, rec2.Header().Get(proxy.HeaderRouterFeedbackURL), "cache hit must not emit a feedback link (no telemetry to back it, and never replay the cached one)")
 }
 
 func TestService_Cache_DisabledByNilCache(t *testing.T) {
