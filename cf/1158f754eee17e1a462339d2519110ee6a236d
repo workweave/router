@@ -1,0 +1,29 @@
+cmd/initdb/main.go
+  s_d3fc1c517ba243::t_df44c3344bb99b 87
+cmd/seed/main.go
+  s_d3fc1c517ba243::t_2ab715b21f90e9 42
+  s_d3fc1c517ba243::t_88cf8ba233546c 48
+  s_d3fc1c517ba243::t_7dbdac4d321ffa 130
+  s_d3fc1c517ba243::t_0120ec7b27b9eb 88
+  s_d3fc1c517ba243::t_24c92256dec8ca 135
+  s_d3fc1c517ba243::t_aadd5535364e4c 102
+  s_d3fc1c517ba243::t_5b448605d7745a 57
+  s_d3fc1c517ba243::t_c9f47d94e830a7 125
+  s_d3fc1c517ba243::t_978d415287b50c 148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "cf1158f754eee17e1a462339d2519110ee6a236d",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

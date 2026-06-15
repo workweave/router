@@ -1,0 +1,21 @@
+internal/translate/stream.go
+  s_d3fc1c517ba243::t_94f390c492b876 1009
+internal/server/middleware/balance_check.go
+  s_d3fc1c517ba243::t_8b3022afb86f1d 68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "02dbbe6e28c684128d3697648115f490aa3d9d28",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

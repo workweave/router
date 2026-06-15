@@ -1,0 +1,20 @@
+frontend/src/app/(app)/settings/page.tsx
+  s_d3fc1c517ba243::t_97586105955bec 739
+  s_d3fc1c517ba243::t_7f959d3c841545 874
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "f9ae5d87b126f67a336cd0771686f6445b4a7c20",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
