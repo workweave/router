@@ -70,6 +70,12 @@ type InsertTelemetryParams struct {
 	InvalidToolArgsBlocks *int32
 	FailoverUsed          *bool
 	DegenerateShadow      *bool
+
+	// SessionKey + Role are the offline join key to spiral_shadow_events and
+	// session_pins (16-byte digest + roleForTier of the requested model). Nil /
+	// empty leaves the columns NULL.
+	SessionKey []byte
+	Role       string
 }
 
 // TelemetrySummary holds aggregated totals for the dashboard cards.

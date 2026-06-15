@@ -794,7 +794,9 @@ INSERT INTO router.model_router_request_telemetry (
     tool_use_blocks,
     invalid_tool_args_blocks,
     failover_used,
-    degenerate_shadow
+    degenerate_shadow,
+    session_key,
+    role
 ) VALUES (
     $1::uuid,
     $2::varchar,
@@ -840,7 +842,9 @@ INSERT INTO router.model_router_request_telemetry (
     $42::int,
     $43::int,
     $44::boolean,
-    $45::boolean
+    $45::boolean,
+    $46::bytea,
+    $47::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -891,6 +895,8 @@ type InsertRequestTelemetryParams struct {
 	InvalidToolArgsBlocks  *int32
 	FailoverUsed           *bool
 	DegenerateShadow       *bool
+	SessionKey             []byte
+	Role                   *string
 }
 
 // Records a completed proxied request for the dashboard UI and routing
@@ -904,6 +910,8 @@ type InsertRequestTelemetryParams struct {
 // rollout_id is the client-supplied x-weave-rollout-id correlation id used by
 // eval/training harnesses to join graded rollout rewards onto decisions; NULL
 // for all non-harness traffic.
+// session_key + role are the offline join key to router.spiral_shadow_events
+// and session_pins; NULL on rows written before the columns existed.
 //
 //	INSERT INTO router.model_router_request_telemetry (
 //	    installation_id,
@@ -950,7 +958,9 @@ type InsertRequestTelemetryParams struct {
 //	    tool_use_blocks,
 //	    invalid_tool_args_blocks,
 //	    failover_used,
-//	    degenerate_shadow
+//	    degenerate_shadow,
+//	    session_key,
+//	    role
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::varchar,
@@ -996,7 +1006,9 @@ type InsertRequestTelemetryParams struct {
 //	    $42::int,
 //	    $43::int,
 //	    $44::boolean,
-//	    $45::boolean
+//	    $45::boolean,
+//	    $46::bytea,
+//	    $47::varchar
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -1046,6 +1058,8 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.InvalidToolArgsBlocks,
 		arg.FailoverUsed,
 		arg.DegenerateShadow,
+		arg.SessionKey,
+		arg.Role,
 	)
 	return err
 }

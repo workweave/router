@@ -9,6 +9,8 @@
 -- rollout_id is the client-supplied x-weave-rollout-id correlation id used by
 -- eval/training harnesses to join graded rollout rewards onto decisions; NULL
 -- for all non-harness traffic.
+-- session_key + role are the offline join key to router.spiral_shadow_events
+-- and session_pins; NULL on rows written before the columns existed.
 -- name: InsertRequestTelemetry :exec
 INSERT INTO router.model_router_request_telemetry (
     installation_id,
@@ -55,7 +57,9 @@ INSERT INTO router.model_router_request_telemetry (
     tool_use_blocks,
     invalid_tool_args_blocks,
     failover_used,
-    degenerate_shadow
+    degenerate_shadow,
+    session_key,
+    role
 ) VALUES (
     @installation_id::uuid,
     @request_id::varchar,
@@ -101,7 +105,9 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('tool_use_blocks')::int,
     sqlc.narg('invalid_tool_args_blocks')::int,
     sqlc.narg('failover_used')::boolean,
-    sqlc.narg('degenerate_shadow')::boolean
+    sqlc.narg('degenerate_shadow')::boolean,
+    sqlc.narg('session_key')::bytea,
+    sqlc.narg('role')::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 

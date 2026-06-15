@@ -125,6 +125,10 @@ type RouterModelRouterRequestTelemetry struct {
 	InvalidToolArgsBlocks  *int32
 	FailoverUsed           *bool
 	DegenerateShadow       *bool
+	// 16-byte session digest (matches session_pins / spiral_shadow_events). NULL on rows written before this column existed. Join key to spiral_shadow_events on (installation_id, session_key, role).
+	SessionKey []byte
+	// Session-pin role used for the turn (roleForTier of the requested model). Pairs with session_key to identify the turn thread; matches spiral_shadow_events.role.
+	Role *string
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.
@@ -218,6 +222,8 @@ type RouterProductionRequestTelemetry struct {
 	InvalidToolArgsBlocks  *int32
 	FailoverUsed           *bool
 	DegenerateShadow       *bool
+	SessionKey             []byte
+	Role                   *string
 }
 
 // User-submitted /router-feedback about routing decisions or model performance

@@ -1757,6 +1757,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			InvalidToolArgsBlocks: int32PtrIfKnown(int32(respSummary.InvalidToolArgsBlocks), respSummary.StopReason != ""),
 			FailoverUsed:          boolPtrTrue(failoverUsed),
 			DegenerateShadow:      boolPtrOrNil(degShadow),
+			// (session_key, role) are the offline join key to spiral_shadow_events
+			// and session_pins. sessionKey is the bindRequestLogger digest — the
+			// SAME DeriveSessionKey(env, apiKeyID) the turn loop and spiral use, but
+			// computed unconditionally, so it is populated even on hard-pin turns
+			// and no-pin-store paths where routeRes.SessionKey stays zero. On the
+			// main_loop/tool_result turns spiral actually writes, the two are equal
+			// byte-for-byte. role mirrors routeRes.PinRole (set unconditionally) =
+			// roleForTier(catalog.TierFor(feats.Model)), the spiral join value.
+			SessionKey: sessionKey[:],
+			Role:       routeRes.PinRole,
 		})
 	}
 
@@ -2839,6 +2849,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			TurnType:               string(routeRes.TurnType),
 			RolloutID:              clientID.RolloutID,
 			FailoverUsed:           boolPtrTrue(finalProvider != primaryProvider),
+			// (session_key, role) join key — see the Anthropic-path write site.
+			SessionKey: sessionKey[:],
+			Role:       routeRes.PinRole,
 		})
 	}
 

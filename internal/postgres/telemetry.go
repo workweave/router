@@ -96,6 +96,8 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		InvalidToolArgsBlocks:  p.InvalidToolArgsBlocks,
 		FailoverUsed:           p.FailoverUsed,
 		DegenerateShadow:       p.DegenerateShadow,
+		SessionKey:             p.SessionKey,
+		Role:                   stringPtrOrNil(p.Role),
 	})
 }
 

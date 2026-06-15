@@ -341,6 +341,41 @@ func TestProxyMessages_PersistsRolloutID(t *testing.T) {
 	assert.Equal(t, rolloutID, row.RolloutID)
 }
 
+// TestProxyMessages_PersistsSessionKeyAndRole asserts the offline join key to
+// router.spiral_shadow_events / session_pins lands on the telemetry row.
+// session_key must be the 16-byte digest (never empty for a real request), and
+// role must be roleForTier(TierFor(requestedModel)) — the exact value spiral
+// shadow events are keyed on, so the join matches byte-for-byte. The requested
+// model here is claude-opus-4-7 (TierHigh) → "default_high", regardless of the
+// cheaper decision model the router picked.
+func TestProxyMessages_PersistsSessionKeyAndRole(t *testing.T) {
+	const installID = "77777777-7777-7777-7777-777777777777"
+	decision := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "pin",
+	}
+	telem := newCaptureTelemetry()
+	svc := proxy.NewService(
+		&fakeRouter{decision: decision},
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil, false, nil, nil, false,
+		providers.ProviderAnthropic, "claude-haiku-4-5",
+		telem,
+	)
+
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
+	rec := httptest.NewRecorder()
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`)
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+
+	row := telem.firstRow(t)
+	require.Len(t, row.SessionKey, 16, "session_key must be the 16-byte digest, not empty")
+	assert.NotEqual(t, make([]byte, 16), row.SessionKey, "session_key must be a real (non-zero) digest")
+	assert.Equal(t, "default_high", row.Role, "role must be the requested model's pin role (opus-4-7 = TierHigh)")
+}
+
 // TestNormalizeRolloutID covers the bound: oversized ids are rejected (not
 // truncated) so a stored id always joins back to a real rollout.
 func TestNormalizeRolloutID(t *testing.T) {
