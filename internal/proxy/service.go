@@ -1779,7 +1779,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			// measurable offline. No routing action is taken on these.
 			FreshDecisionModel:   obs.FreshDecisionModel,
 			FreshCandidateScores: obs.FreshCandidateScores,
-			PinAgeSec:            int64PtrIf(stickyHit, pinAgeSec),
+			PinAgeSec:            int64PtrIf(stickyHit && pinAgeSec > 0, pinAgeSec),
 		})
 	}
 
@@ -2160,8 +2160,10 @@ func boolPtrTrue(v bool) *bool {
 }
 
 // int64PtrIf returns a pointer to v when known is true, else nil. Used for
-// pin_age_sec, which is meaningful only when a session pin was actually loaded
-// (sticky_hit); a 0 on a no-pin turn would read as "freshly pinned this turn".
+// pin_age_sec: callers gate on sticky_hit AND a positive age, so hard-pin turns
+// and no-pin turns (which carry sticky_hit but never compute a real age, leaving
+// it 0) stay NULL instead of recording a spurious measured zero that would skew
+// min-dwell analysis.
 func int64PtrIf(known bool, v int64) *int64 {
 	if !known {
 		return nil
@@ -2878,7 +2880,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			// Shadow-mode hysteresis instrumentation — see the Anthropic-path site.
 			FreshDecisionModel:   openaiObs.FreshDecisionModel,
 			FreshCandidateScores: openaiObs.FreshCandidateScores,
-			PinAgeSec:            int64PtrIf(stickyHit, pinAgeSec),
+			PinAgeSec:            int64PtrIf(stickyHit && pinAgeSec > 0, pinAgeSec),
 		})
 	}
 
