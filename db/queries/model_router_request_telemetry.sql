@@ -124,6 +124,25 @@ INSERT INTO router.model_router_request_telemetry (
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 
+-- Returns the routing context for a single request, used to render the
+-- no-login feedback page (`/f/<token>`): which model/provider served the turn,
+-- the client app, when it was routed, and the router user. Only router.upstream
+-- rows are persisted, so the filter pins to that span type. Returns
+-- sql.ErrNoRows when the request id is unknown for the installation.
+-- name: GetRequestForFeedback :one
+SELECT
+    t.decision_model,
+    t.decision_provider,
+    t.client_app,
+    t.timestamp,
+    t.router_user_id
+FROM router.model_router_request_telemetry t
+WHERE t.installation_id = @installation_id::uuid
+  AND t.request_id = @request_id::varchar
+  AND t.span_type = 'router.upstream'
+ORDER BY t.timestamp DESC
+LIMIT 1;
+
 -- Returns aggregated cost and token totals across every installation.
 -- Used by admin-cookie sessions on the dashboard, which are not scoped to
 -- a single rk_ key.

@@ -13,6 +13,7 @@ import (
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
+	"workweave/router/internal/feedback"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
@@ -152,6 +153,17 @@ type Service struct {
 	// dispatchWithFallback. Tests inject a no-op to avoid real delays; prod
 	// leaves it nil and falls back to sleepWithContext.
 	retrySleep func(context.Context, time.Duration) error
+	// feedbackRepo persists per-request human feedback (router.request_feedback)
+	// and reads it back for the no-login feedback page. Nil leaves the feedback
+	// endpoints' DB access disabled (Get/Submit return ErrFeedbackUnavailable).
+	feedbackRepo FeedbackRepository
+	// feedbackSigner mints + verifies the signed feedback-link token. Nil when
+	// ROUTER_FEEDBACK_LINK_SECRET is unset; minting and verification then no-op.
+	feedbackSigner *feedback.Signer
+	// feedbackBaseURL is the public origin of the feedback page (e.g.
+	// https://router.workweave.ai), trailing slash trimmed. Empty disables
+	// feedback-link header emission on proxied responses.
+	feedbackBaseURL string
 }
 
 // pinSessionTTL mirrors Anthropic's prompt-cache TTL on Sonnet/Haiku/Opus 4.5+
@@ -1352,6 +1364,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	w.Header().Set(HeaderRouterDecision, decision.Reason)
 	w.Header().Set(HeaderRouterProvider, decision.Provider)
 	w.Header().Set(HeaderRouterModel, decision.Model)
+	s.setFeedbackLinkHeader(w, installationID, externalID, requestID, auth.UserIDFrom(ctx))
 
 	if _, err := s.provider(decision.Provider); err != nil {
 		return err
@@ -2566,6 +2579,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	w.Header().Set(HeaderRouterDecision, decision.Reason)
 	w.Header().Set(HeaderRouterProvider, decision.Provider)
 	w.Header().Set(HeaderRouterModel, decision.Model)
+	s.setFeedbackLinkHeader(w, installationID, externalID, requestID, auth.UserIDFrom(ctx))
 
 	reqPricing := otel.Lookup(s.baselineFor(feats.Model))
 	actPricing := otel.Lookup(decision.Model)

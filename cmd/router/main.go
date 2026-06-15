@@ -21,6 +21,7 @@ import (
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
 	"workweave/router/internal/config"
+	"workweave/router/internal/feedback"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/apm"
 	"workweave/router/internal/observability/otel"
@@ -564,8 +565,23 @@ func main() {
 	captureMaxBytes := parseEnvInt("WV_CAPTURE_MAX_BYTES", 1<<20)
 	logger.Info("Router content capture configured", "mode", captureMode.String(), "max_bytes", captureMaxBytes)
 
+	// Signed no-login feedback link. The signer mints per-request tokens and
+	// verifies them on the feedback endpoints; both the signer and the public
+	// base URL must be set for the link header to be emitted on responses.
+	feedbackSigner := feedback.NewSigner(config.GetOr("ROUTER_FEEDBACK_LINK_SECRET", ""), feedbackLinkTTL())
+	feedbackBaseURL := config.GetOr("ROUTER_FEEDBACK_BASE_URL", "")
+	switch {
+	case feedbackSigner != nil && feedbackBaseURL != "":
+		logger.Info("Feedback link enabled", "base_url", feedbackBaseURL)
+	case feedbackSigner != nil:
+		logger.Warn("Feedback link endpoints mounted but ROUTER_FEEDBACK_BASE_URL is unset; responses will not carry a feedback link header")
+	default:
+		logger.Info("Feedback link disabled (set ROUTER_FEEDBACK_LINK_SECRET and ROUTER_FEEDBACK_BASE_URL to enable)")
+	}
+
 	proxySvc := proxy.NewService(routeEntry, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithContentCapture(captureMode, captureMaxBytes, nil).
+		WithFeedback(repo.Feedback, feedbackSigner, feedbackBaseURL).
 		WithByokOnly(byokOnly).
 		WithDeploymentKeyedProviders(deploymentEligible).
 		WithPassthroughEligibleProviders(passthroughEligible).
@@ -1009,6 +1025,15 @@ func parseEnvFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	return v
+}
+
+// feedbackLinkTTL returns the lifetime of a minted feedback-link token,
+// from ROUTER_FEEDBACK_LINK_TTL_SEC (default 30 days). The link is a low-stakes
+// rating affordance, so a long expiry trades little risk for the convenience of
+// a user rating a routing decision they noticed hours later.
+func feedbackLinkTTL() time.Duration {
+	const defaultSec = 30 * 24 * 60 * 60
+	return time.Duration(parseEnvInt("ROUTER_FEEDBACK_LINK_TTL_SEC", defaultSec)) * time.Second
 }
 
 // boolDefault renders a bool default for config.GetOr on bool envs.

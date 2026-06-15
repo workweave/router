@@ -12,6 +12,65 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getRequestForFeedback = `-- name: GetRequestForFeedback :one
+SELECT
+    t.decision_model,
+    t.decision_provider,
+    t.client_app,
+    t.timestamp,
+    t.router_user_id
+FROM router.model_router_request_telemetry t
+WHERE t.installation_id = $1::uuid
+  AND t.request_id = $2::varchar
+  AND t.span_type = 'router.upstream'
+ORDER BY t.timestamp DESC
+LIMIT 1
+`
+
+type GetRequestForFeedbackParams struct {
+	InstallationID uuid.UUID
+	RequestID      string
+}
+
+type GetRequestForFeedbackRow struct {
+	DecisionModel    *string
+	DecisionProvider *string
+	ClientApp        *string
+	Timestamp        pgtype.Timestamptz
+	RouterUserID     pgtype.UUID
+}
+
+// Returns the routing context for a single request, used to render the
+// no-login feedback page (`/f/<token>`): which model/provider served the turn,
+// the client app, when it was routed, and the router user. Only router.upstream
+// rows are persisted, so the filter pins to that span type. Returns
+// sql.ErrNoRows when the request id is unknown for the installation.
+//
+//	SELECT
+//	    t.decision_model,
+//	    t.decision_provider,
+//	    t.client_app,
+//	    t.timestamp,
+//	    t.router_user_id
+//	FROM router.model_router_request_telemetry t
+//	WHERE t.installation_id = $1::uuid
+//	  AND t.request_id = $2::varchar
+//	  AND t.span_type = 'router.upstream'
+//	ORDER BY t.timestamp DESC
+//	LIMIT 1
+func (q *Queries) GetRequestForFeedback(ctx context.Context, arg GetRequestForFeedbackParams) (GetRequestForFeedbackRow, error) {
+	row := q.db.QueryRow(ctx, getRequestForFeedback, arg.InstallationID, arg.RequestID)
+	var i GetRequestForFeedbackRow
+	err := row.Scan(
+		&i.DecisionModel,
+		&i.DecisionProvider,
+		&i.ClientApp,
+		&i.Timestamp,
+		&i.RouterUserID,
+	)
+	return i, err
+}
+
 const getTelemetryRows = `-- name: GetTelemetryRows :many
 SELECT
     t.timestamp,

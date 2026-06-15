@@ -238,6 +238,20 @@ type RouterProductionRequestTelemetry struct {
 	ToolResultBytes        *int32
 }
 
+// Router-owned per-request human feedback captured via the no-login feedback link; mirrored into Weave via the router.feedback OTLP span
+type RouterRequestFeedback struct {
+	ID             uuid.UUID
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	InstallationID uuid.UUID
+	ExternalID     string
+	RequestID      string
+	Rating         string
+	Comment        *string
+	Source         string
+	RouterUserID   pgtype.UUID
+}
+
 // User-submitted /router-feedback about routing decisions or model performance
 type RouterRouterFeedback struct {
 	ID             uuid.UUID

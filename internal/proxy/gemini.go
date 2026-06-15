@@ -104,6 +104,9 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	w.Header().Set(HeaderRouterDecision, decision.Reason)
 	w.Header().Set(HeaderRouterProvider, decision.Provider)
 	w.Header().Set(HeaderRouterModel, decision.Model)
+	// Gemini path does not resolve a router user, matching the decision span
+	// below which omits router_user_id.
+	s.setFeedbackLinkHeader(w, installationID, externalID, requestID, "")
 
 	reqPricing := otel.Lookup(s.baselineFor(feats.Model))
 	actPricing := otel.Lookup(decision.Model)

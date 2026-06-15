@@ -10,6 +10,7 @@ import (
 
 	"workweave/router/internal/api/admin"
 	anthropicapi "workweave/router/internal/api/anthropic"
+	feedbackapi "workweave/router/internal/api/feedback"
 	geminiapi "workweave/router/internal/api/gemini"
 	openaiapi "workweave/router/internal/api/openai"
 	"workweave/router/internal/auth"
@@ -29,6 +30,9 @@ const (
 	passthroughTimeout    = 10 * time.Second
 	routeTimeout          = 5 * time.Second
 	adminTimeout          = 10 * time.Second
+	// feedbackTimeout bounds the no-login feedback link reads/writes. Both are
+	// single-row Postgres ops plus an async span emit, so 5s is generous.
+	feedbackTimeout = 5 * time.Second
 )
 
 // DeploymentMode gates whether the self-hoster admin dashboard and its
@@ -178,6 +182,16 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	)
 	routeGroup := engine.Group("", routeMiddleware...)
 	routeGroup.POST("/v1/route", anthropicapi.RouteHandler(proxySvc))
+
+	// No-login feedback link (product surface, both modes). The signed HMAC
+	// token in the URL / body is the sole credential, so these routes carry no
+	// auth middleware. Mounted only when a feedback signer is configured
+	// (ROUTER_FEEDBACK_LINK_SECRET set); otherwise the surface stays absent.
+	if proxySvc.FeedbackEnabled() {
+		feedbackGroup := engine.Group("/v1/feedback", middleware.WithTimeout(feedbackTimeout))
+		feedbackGroup.GET("/link/:token", feedbackapi.GetContextHandler(proxySvc))
+		feedbackGroup.POST("/link", feedbackapi.SubmitHandler(proxySvc))
+	}
 }
 
 // registerUIStatic mounts the exported Next.js dashboard at /ui with
