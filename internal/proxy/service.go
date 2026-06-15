@@ -1218,6 +1218,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		inboundSpiralSignals = computeSpiralSignals(env, feats.MessageCount)
 	}
 
+	// Snapshot the inbound tool-output size before runTurnLoop, for the same
+	// reason: a model-switch / compaction handover RewriteForHandover strips
+	// tool_result blocks from env, which would zero out tool_result_bytes on a
+	// genuine tool_result turn read at telemetry time.
+	inboundLastUser := env.LastUserMessage()
+
 	routeStart := time.Now()
 	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, router.Request{
 		RequestedModel:       feats.Model,
@@ -1783,7 +1789,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			// Shadow-mode tier-cap instrumentation: incoming tool-output size on
 			// tool_result turns (the structural triviality signal). NULL on turns
 			// with no trailing tool_result. No routing action is taken on it.
-			ToolResultBytes: toolResultBytesPtr(env, tt),
+			ToolResultBytes: toolResultBytesPtr(inboundLastUser, tt),
 		})
 	}
 
@@ -2176,23 +2182,24 @@ func int64PtrIf(known bool, v int64) *int64 {
 }
 
 // toolResultBytesPtr returns the incoming tool-output size for telemetry on a
-// tool_result turn, else nil. Gated on the classified turn type, not just
-// LastUserMessage().HasToolResult: the Anthropic/Gemini walkers report the last
-// *user* message in the whole history, so a request ending in a trailing
-// assistant reply after a prior tool_result would otherwise write a stale
-// non-NULL value on a non-tool_result turn. turntype.ToolResult is itself
+// tool_result turn, else nil. It takes an inbound LastUserMessage snapshot, NOT
+// the live env: a model-switch or compaction handover may call RewriteForHandover
+// and strip tool_result blocks from env before the telemetry write, which would
+// otherwise read 0 bytes on a genuine tool_result turn. The snapshot is taken
+// before runTurnLoop, alongside inboundToolCallCount / inboundSpiralSignals.
+//
+// Gated on the classified turn type, not just info.HasToolResult: the
+// Anthropic/Gemini walkers report the last *user* message in the whole history,
+// so a request ending in a trailing assistant reply after a prior tool_result
+// would otherwise write a stale non-NULL value. turntype.ToolResult is itself
 // derived from LastKind=="tool_result" (the trailing message), so this ties the
 // column exactly to its meaning. NULL elsewhere so a 0 stays distinct from "no
 // tool output this turn".
-func toolResultBytesPtr(env *translate.RequestEnvelope, tt turntype.TurnType) *int32 {
-	if tt != turntype.ToolResult {
+func toolResultBytesPtr(inbound translate.LastUserMessageInfo, tt turntype.TurnType) *int32 {
+	if tt != turntype.ToolResult || !inbound.HasToolResult {
 		return nil
 	}
-	info := env.LastUserMessage()
-	if !info.HasToolResult {
-		return nil
-	}
-	v := int32(info.ToolResultBytes)
+	v := int32(inbound.ToolResultBytes)
 	return &v
 }
 
@@ -2499,6 +2506,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			"excluded_models", strings.Join(geminiUnsignedOAI, ","),
 		)
 	}
+
+	// Snapshot the inbound tool-output size before runTurnLoop (which may rewrite
+	// env via switch handover); see toolResultBytesPtr.
+	inboundLastUser := env.LastUserMessage()
 
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
@@ -2909,7 +2920,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			// Shadow-mode tier-cap instrumentation: incoming tool-output size on
 			// tool_result turns (the structural triviality signal). NULL on turns
 			// with no trailing tool_result. No routing action is taken on it.
-			ToolResultBytes: toolResultBytesPtr(env, tt),
+			ToolResultBytes: toolResultBytesPtr(inboundLastUser, tt),
 		})
 	}
 
