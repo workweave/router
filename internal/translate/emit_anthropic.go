@@ -213,7 +213,12 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 	if len(systemBlocks) > 0 {
 		jw.Key("system")
 		jw.Arr()
-		for _, b := range systemBlocks {
+		for i, b := range systemBlocks {
+			// Cache the system + tools prefix (the large stable floor) by
+			// marking the last system block.
+			if i == len(systemBlocks)-1 {
+				b = appendCacheControl(b)
+			}
 			jw.Raw(b)
 		}
 		jw.EndArr()
@@ -222,11 +227,92 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 	if len(msgParts) > 0 {
 		jw.Key("messages")
 		jw.Arr()
-		for _, m := range msgParts {
+		for i, m := range msgParts {
+			// Cache the conversation prefix up to this turn by marking the
+			// last block of the final message; on the next turn that block is
+			// a stable prefix and reads from cache.
+			if i == len(msgParts)-1 {
+				m = cacheControlOnLastBlock(m)
+			}
 			jw.Raw(m)
 		}
 		jw.EndArr()
 	}
+}
+
+// cacheControlMember is the Anthropic prompt-cache breakpoint, serialized as a
+// JSON object member. OpenAI and Gemini clients never send cache_control, so on
+// the OpenAI->Anthropic path the router injects it: without breakpoints, clients
+// like Cursor re-bill the entire stable prefix (tools + system + prior turns) on
+// every turn at 0% cache hit, because Anthropic has no implicit prompt caching.
+// Below the model's minimum cacheable prefix the marker is a silent no-op, so it
+// is always safe to add.
+const cacheControlMember = `"cache_control":{"type":"ephemeral"}`
+
+// appendCacheControl inserts the cache_control marker into a raw JSON content
+// block. The block is one we constructed, so its final byte is the closing brace
+// of the outer object; the guard keeps it fail-open on anything unexpected.
+func appendCacheControl(block string) string {
+	if len(block) < 2 || block[len(block)-1] != '}' || !strings.Contains(block, ":") {
+		return block
+	}
+	return block[:len(block)-1] + "," + cacheControlMember + "}"
+}
+
+// cacheControlOnLastBlock returns a raw Anthropic message object with a
+// cache_control breakpoint on its final content block. String content is
+// promoted to a single text block to carry the marker (Anthropic treats "x" and
+// [{"type":"text","text":"x"}] identically). Messages built on this path only
+// ever carry "role" and "content", so rebuilding from those two is lossless.
+func cacheControlOnLastBlock(msg string) string {
+	content := gjson.Get(msg, "content")
+	role := gjson.Get(msg, "role").String()
+
+	if content.IsArray() {
+		blocks := content.Array()
+		if len(blocks) == 0 {
+			return msg
+		}
+		jw := newJSONWriter()
+		jw.Obj()
+		jw.Key("role")
+		jw.Str(role)
+		jw.Key("content")
+		jw.Arr()
+		for i, b := range blocks {
+			if i == len(blocks)-1 {
+				jw.Raw(appendCacheControl(b.Raw))
+			} else {
+				jw.Raw(b.Raw)
+			}
+		}
+		jw.EndArr()
+		jw.EndObj()
+		return string(jw.Bytes())
+	}
+
+	if content.Type == gjson.String {
+		jw := newJSONWriter()
+		jw.Obj()
+		jw.Key("role")
+		jw.Str(role)
+		jw.Key("content")
+		jw.Arr()
+		jw.Obj()
+		jw.Key("type")
+		jw.Str("text")
+		jw.Key("text")
+		jw.Str(content.String())
+		jw.Key("cache_control")
+		jw.Raw(`{"type":"ephemeral"}`)
+		jw.EndObj()
+		jw.EndArr()
+		jw.EndObj()
+		return string(jw.Bytes())
+	}
+
+	// null / scalar content: no block to attach a breakpoint to.
+	return msg
 }
 
 // buildToolResultBlock constructs a single Anthropic tool_result JSON object.

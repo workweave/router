@@ -254,7 +254,11 @@ func TestCrossFormat_OpenAIToAnthropic_SimpleText(t *testing.T) {
 
 	u2 := msgAt(t, msgs, 2)
 	assert.Equal(t, "user", u2["role"])
-	assert.Equal(t, "Now what about 3+3?", u2["content"])
+	// The final message's string content is promoted to a text block so it can
+	// carry the injected prompt-cache breakpoint (see the cache-injection test).
+	u2blocks := u2["content"].([]any)
+	require.Len(t, u2blocks, 1)
+	assert.Equal(t, "Now what about 3+3?", u2blocks[0].(map[string]any)["text"])
 
 	assert.Equal(t, float64(0.7), doc["temperature"])
 	assert.Equal(t, float64(1024), doc["max_tokens"])
@@ -310,7 +314,95 @@ func TestCrossFormat_OpenAIToAnthropic_ToolConversation(t *testing.T) {
 
 	finalUser := msgAt(t, msgs, 4)
 	assert.Equal(t, "user", finalUser["role"])
-	assert.Equal(t, "Now edit it to add a hello world print", finalUser["content"])
+	// Final message string content is promoted to a text block carrying the
+	// injected prompt-cache breakpoint (see the cache-injection test).
+	finalBlocks := finalUser["content"].([]any)
+	require.Len(t, finalBlocks, 1)
+	assert.Equal(t, "Now edit it to add a hello world print", finalBlocks[0].(map[string]any)["text"])
+}
+
+var openAICacheInjectionConversation = []byte(`{
+	"model": "gpt-4",
+	"messages": [
+		{"role": "system", "content": "First system."},
+		{"role": "system", "content": "Second system."},
+		{"role": "user", "content": "First question."},
+		{"role": "assistant", "content": "First answer."},
+		{"role": "user", "content": "Second question."}
+	],
+	"max_tokens": 1024
+}`)
+
+var ephemeral = map[string]any{"type": "ephemeral"}
+
+// TestCrossFormat_OpenAIToAnthropic_CacheControlInjection pins the prompt-cache
+// breakpoint injection on the OpenAI->Anthropic path: clients like Cursor send
+// no cache_control, so the router marks the last system block (caches the
+// tools+system floor) and the last block of the final message (caches the
+// conversation prefix) — and nothing else.
+func TestCrossFormat_OpenAIToAnthropic_CacheControlInjection(t *testing.T) {
+	env, err := translate.ParseOpenAI(openAICacheInjectionConversation)
+	require.NoError(t, err)
+
+	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-sonnet-4-20250514"})
+	require.NoError(t, err)
+	doc := unmarshalBody(t, prep.Body)
+
+	// Only the LAST system block carries the breakpoint.
+	sys := getArray(t, doc, "system")
+	require.Len(t, sys, 2)
+	assert.Nil(t, sys[0].(map[string]any)["cache_control"], "non-last system block must not be marked")
+	assert.Equal(t, ephemeral, sys[1].(map[string]any)["cache_control"], "last system block must be marked")
+
+	msgs := getArray(t, doc, "messages")
+	require.Len(t, msgs, 3)
+
+	// Non-last messages keep plain string content, unmarked.
+	first := msgAt(t, msgs, 0)
+	assert.Equal(t, "First question.", first["content"])
+
+	// The final message's string content is promoted to a single text block
+	// carrying the breakpoint.
+	last := msgAt(t, msgs, 2)
+	lastBlocks := last["content"].([]any)
+	require.Len(t, lastBlocks, 1)
+	lastBlock := lastBlocks[0].(map[string]any)
+	assert.Equal(t, "text", lastBlock["type"])
+	assert.Equal(t, "Second question.", lastBlock["text"])
+	assert.Equal(t, ephemeral, lastBlock["cache_control"])
+}
+
+var openAICacheInjectionToolResultLast = []byte(`{
+	"model": "gpt-4",
+	"messages": [
+		{"role": "user", "content": "Read it"},
+		{"role": "assistant", "content": null, "tool_calls": [
+			{"id": "call_1", "type": "function", "function": {"name": "Read", "arguments": "{}"}}
+		]},
+		{"role": "tool", "tool_call_id": "call_1", "content": "file contents"}
+	],
+	"max_tokens": 1024
+}`)
+
+// TestCrossFormat_OpenAIToAnthropic_CacheControlArrayLastBlock covers the case
+// where the final message already has array content (a tool_result batch): the
+// breakpoint attaches to the last block in place, without promotion.
+func TestCrossFormat_OpenAIToAnthropic_CacheControlArrayLastBlock(t *testing.T) {
+	env, err := translate.ParseOpenAI(openAICacheInjectionToolResultLast)
+	require.NoError(t, err)
+
+	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-sonnet-4-20250514"})
+	require.NoError(t, err)
+	doc := unmarshalBody(t, prep.Body)
+
+	msgs := getArray(t, doc, "messages")
+	last := msgAt(t, msgs, len(msgs)-1)
+	blocks := last["content"].([]any)
+	require.NotEmpty(t, blocks)
+	lastBlock := blocks[len(blocks)-1].(map[string]any)
+	assert.Equal(t, "tool_result", lastBlock["type"], "last block stays a tool_result")
+	assert.Equal(t, "file contents", lastBlock["content"])
+	assert.Equal(t, ephemeral, lastBlock["cache_control"], "breakpoint attaches to the existing last block")
 }
 
 func TestCrossFormat_OpenAIToAnthropic_Image(t *testing.T) {
