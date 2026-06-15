@@ -1783,7 +1783,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			// Shadow-mode tier-cap instrumentation: incoming tool-output size on
 			// tool_result turns (the structural triviality signal). NULL on turns
 			// with no trailing tool_result. No routing action is taken on it.
-			ToolResultBytes: toolResultBytesPtr(env),
+			ToolResultBytes: toolResultBytesPtr(env, tt),
 		})
 	}
 
@@ -2175,11 +2175,19 @@ func int64PtrIf(known bool, v int64) *int64 {
 	return &v
 }
 
-// toolResultBytesPtr returns the incoming tool-output size for telemetry when
-// the trailing turn carries a tool_result, else nil. Structural triviality
-// signal for the tier-cap shadow; NULL on turns with no tool_result so a 0
-// stays distinct from "no tool output this turn".
-func toolResultBytesPtr(env *translate.RequestEnvelope) *int32 {
+// toolResultBytesPtr returns the incoming tool-output size for telemetry on a
+// tool_result turn, else nil. Gated on the classified turn type, not just
+// LastUserMessage().HasToolResult: the Anthropic/Gemini walkers report the last
+// *user* message in the whole history, so a request ending in a trailing
+// assistant reply after a prior tool_result would otherwise write a stale
+// non-NULL value on a non-tool_result turn. turntype.ToolResult is itself
+// derived from LastKind=="tool_result" (the trailing message), so this ties the
+// column exactly to its meaning. NULL elsewhere so a 0 stays distinct from "no
+// tool output this turn".
+func toolResultBytesPtr(env *translate.RequestEnvelope, tt turntype.TurnType) *int32 {
+	if tt != turntype.ToolResult {
+		return nil
+	}
 	info := env.LastUserMessage()
 	if !info.HasToolResult {
 		return nil
@@ -2901,7 +2909,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			// Shadow-mode tier-cap instrumentation: incoming tool-output size on
 			// tool_result turns (the structural triviality signal). NULL on turns
 			// with no trailing tool_result. No routing action is taken on it.
-			ToolResultBytes: toolResultBytesPtr(env),
+			ToolResultBytes: toolResultBytesPtr(env, tt),
 		})
 	}
 
