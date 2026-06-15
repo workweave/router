@@ -1271,7 +1271,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if s.spiralShadowEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
 		if reasons := spiralReasons(inboundSpiralSignals); len(reasons) > 0 {
 			role := roleForTier(catalog.TierFor(feats.Model))
-			s.handleSpiralShadow(ctx, inboundSpiralSignals, reasons, installationID, routeRes.SessionKey, role, decision.Model, string(tt))
+			// Use the bindRequestLogger digest (same DeriveSessionKey, computed
+			// unconditionally) rather than routeRes.SessionKey, which is zero
+			// when no pin store is configured. This keeps the spiral event's
+			// session_key equal to the telemetry row's in every mode so the
+			// offline join holds; in the pinned production path the two are
+			// already identical, so this is a no-op there.
+			s.handleSpiralShadow(ctx, inboundSpiralSignals, reasons, installationID, sessionKey, role, decision.Model, string(tt))
 		}
 	}
 
