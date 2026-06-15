@@ -1,0 +1,25 @@
+internal/api/admin/excluded_models.go
+  s_d3fc1c517ba243::t_a51f10b5eb35f0 115
+  s_d3fc1c517ba243::t_c702f15d3cf2a7 131
+  s_d3fc1c517ba243::t_fe73df85a0ff14 108
+internal/api/admin/excluded_providers.go
+  s_d3fc1c517ba243::t_7c04783ef80792 100
+  s_d3fc1c517ba243::t_e9d7ecf2689526 93
+  s_d3fc1c517ba243::t_6537ff9084180c 117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "7f1dafbb93600077f148a223fc8d65567ba3c1dc",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

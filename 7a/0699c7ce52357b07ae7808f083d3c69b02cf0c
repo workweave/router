@@ -1,0 +1,23 @@
+internal/translate/gemini_test.go
+  s_f405e796d3cdba::t_44b6f42d5868bc 701,707-746
+  s_f405e796d3cdba::t_18ca6a445c009c 682
+internal/translate/emit_gemini.go
+  s_f405e796d3cdba::t_66772a215bbf1c 1358-1368
+  s_f405e796d3cdba::t_827e35dddf94d5 1312-1326
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "7a0699c7ce52357b07ae7808f083d3c69b02cf0c",
+  "prompts": {},
+  "sessions": {
+    "s_f405e796d3cdba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4859b849-9177-4b87-9c8f-2fd7186cd2fe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
