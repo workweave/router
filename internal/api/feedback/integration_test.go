@@ -120,3 +120,58 @@ func TestFeedbackLink_EndToEnd(t *testing.T) {
 	assert.Equal(t, "up", rating)
 	assert.Nil(t, comment, "blank comment should collapse to NULL")
 }
+
+// TestFeedbackLink_FeedbackWithoutTelemetry guards the regression where a saved
+// rating was hidden when no router.upstream telemetry row exists (telemetry
+// disabled/pruned, or still in flight via async fireTelemetry). GET must still
+// return the persisted rating, just with empty routing context.
+func TestFeedbackLink_FeedbackWithoutTelemetry(t *testing.T) {
+	dsn := os.Getenv("ROUTER_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("ROUTER_TEST_DATABASE_URL not set; skipping live-DB integration test")
+	}
+	gin.SetMode(gin.TestMode)
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	externalID := "org_nt_" + uuid.NewString()[:8]
+	requestID := "req_nt_" + uuid.NewString()[:8]
+	var installID string
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO router.model_router_installations (external_id, name)
+		 VALUES ($1, 'E2E feedback no-telemetry') RETURNING id`, externalID,
+	).Scan(&installID))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM router.model_router_installations WHERE id = $1`, installID)
+	})
+
+	// A saved rating with NO telemetry row for the request.
+	_, err = pool.Exec(ctx,
+		`INSERT INTO router.request_feedback (installation_id, external_id, request_id, rating, comment, source)
+		 VALUES ($1, $2, $3, 'down', 'no telemetry yet', 'link')`,
+		installID, externalID, requestID)
+	require.NoError(t, err)
+
+	signer := token.NewSigner("nt-secret", time.Hour)
+	svc := proxy.NewService(nil, nil, nil, false, nil, nil, false, "", "", nil).
+		WithFeedback(postgres.NewFeedbackRepo(pool), signer, "https://router.example.com")
+	engine := gin.New()
+	engine.GET("/v1/feedback/link/:token", feedbackapi.GetContextHandler(svc))
+
+	tok := signer.Mint(installID, externalID, requestID, "")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/feedback/link/"+tok, nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, requestID, resp["request_id"])
+	assert.Nil(t, resp["chosen_model"], "no telemetry => empty routing context")
+	fb, ok := resp["feedback"].(map[string]any)
+	require.True(t, ok, "saved rating must be returned even without telemetry")
+	assert.Equal(t, "down", fb["rating"])
+	assert.Equal(t, "no telemetry yet", fb["comment"])
+}

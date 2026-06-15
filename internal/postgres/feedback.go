@@ -48,8 +48,10 @@ func (r *FeedbackRepo) Upsert(ctx context.Context, p proxy.UpsertFeedbackParams)
 }
 
 // GetContext returns the routing context plus any existing feedback for a
-// request. Returns pgx.ErrNoRows when the request id is unknown for the
-// installation (no telemetry row); an absent feedback row is not an error.
+// request. Both reads are best-effort: an absent telemetry row (telemetry
+// disabled/pruned, or still in flight via async fireTelemetry) and an absent
+// feedback row are not errors, so a saved rating is still returned even when
+// the routing context is missing, and vice versa.
 func (r *FeedbackRepo) GetContext(ctx context.Context, installationID, requestID string) (proxy.FeedbackContext, error) {
 	id, err := uuid.Parse(installationID)
 	if err != nil {
@@ -57,20 +59,22 @@ func (r *FeedbackRepo) GetContext(ctx context.Context, installationID, requestID
 	}
 	q := sqlc.New(r.tx)
 
+	out := proxy.FeedbackContext{RequestID: requestID}
+
+	// Routing context is best-effort: its absence must not hide a saved rating,
+	// so ErrNoRows here is not fatal — we just leave the context fields empty.
 	tele, err := q.GetRequestForFeedback(ctx, sqlc.GetRequestForFeedbackParams{
 		InstallationID: id,
 		RequestID:      requestID,
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return proxy.FeedbackContext{}, err
 	}
-
-	out := proxy.FeedbackContext{
-		RequestID:      requestID,
-		ChosenModel:    derefString(tele.DecisionModel),
-		ChosenProvider: derefString(tele.DecisionProvider),
-		ClientApp:      derefString(tele.ClientApp),
-		RoutedAt:       tele.Timestamp.Time,
+	if err == nil {
+		out.ChosenModel = derefString(tele.DecisionModel)
+		out.ChosenProvider = derefString(tele.DecisionProvider)
+		out.ClientApp = derefString(tele.ClientApp)
+		out.RoutedAt = tele.Timestamp.Time
 	}
 
 	fb, err := q.GetRequestFeedback(ctx, sqlc.GetRequestFeedbackParams{
