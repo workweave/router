@@ -32,13 +32,39 @@ type observationContext struct {
 	// acting policy. Pointer so 0.0 stays distinct from "not a cluster
 	// decision". 1.0 for deterministic argmax.
 	Propensity *float64
+	// FreshDecisionModel is the scorer's fresh pick this turn, captured even
+	// when the planner returned STAY (decision_model then names the pinned model
+	// served). Empty when the scorer did not run. Shadow-mode instrumentation
+	// for the hysteresis downgrade lever.
+	FreshDecisionModel string
+	// FreshCandidateScores is the fresh scorer's pre-argmax score vector
+	// marshaled to JSON, captured even on STAY. Distinct from CandidateScores,
+	// which mirrors the FINAL decision and is NULL on STAY. nil when the scorer
+	// did not run / exposed no vector.
+	FreshCandidateScores []byte
 }
 
 // buildObservationContext derives the observation bundle from the routing
 // decision and request context. Nil-safe: returns a zero value when sources
-// are absent.
-func buildObservationContext(ctx context.Context, decision router.Decision) observationContext {
+// are absent. fresh is the scorer's recommendation this turn (which equals
+// decision on a SWITCH/fresh-pin write, but differs on a STAY where decision
+// rehydrates from the pin); its score vector is captured separately so the
+// hysteresis downgrade opportunity is measurable on STAY turns.
+func buildObservationContext(ctx context.Context, decision, fresh router.Decision) observationContext {
 	obs := observationContext{}
+	// Fresh scorer recommendation, captured independently of the final decision
+	// so STAY turns (decision == pin, no metadata) still record what a re-score
+	// would have picked.
+	if fresh.Model != "" {
+		obs.FreshDecisionModel = fresh.Model
+	}
+	if md := fresh.Metadata; md != nil && len(md.CandidateScores) > 0 {
+		if b, err := json.Marshal(md.CandidateScores); err == nil {
+			obs.FreshCandidateScores = b
+		} else {
+			observability.Get().Debug("Failed to marshal fresh_candidate_scores for telemetry", "err", err)
+		}
+	}
 	if md := decision.Metadata; md != nil {
 		if len(md.ClusterIDs) > 0 {
 			obs.ClusterIDs = make([]int32, len(md.ClusterIDs))

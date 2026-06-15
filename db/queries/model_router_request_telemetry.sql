@@ -11,6 +11,11 @@
 -- for all non-harness traffic.
 -- session_key + role are the offline join key to router.spiral_shadow_events
 -- and session_pins; NULL on rows written before the columns existed.
+-- fresh_decision_model + fresh_candidate_scores capture the scorer's fresh
+-- recommendation even on STAY turns (where decision_model names the pinned
+-- model served); pin_age_sec supports min-dwell analysis. Shadow-mode
+-- instrumentation for the hysteresis downgrade lever; NULL when the scorer did
+-- not run / no pin was loaded.
 -- name: InsertRequestTelemetry :exec
 INSERT INTO router.model_router_request_telemetry (
     installation_id,
@@ -59,7 +64,10 @@ INSERT INTO router.model_router_request_telemetry (
     failover_used,
     degenerate_shadow,
     session_key,
-    role
+    role,
+    fresh_decision_model,
+    fresh_candidate_scores,
+    pin_age_sec
 ) VALUES (
     @installation_id::uuid,
     @request_id::varchar,
@@ -107,7 +115,10 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('failover_used')::boolean,
     sqlc.narg('degenerate_shadow')::boolean,
     sqlc.narg('session_key')::bytea,
-    sqlc.narg('role')::varchar
+    sqlc.narg('role')::varchar,
+    sqlc.narg('fresh_decision_model')::varchar,
+    sqlc.narg('fresh_candidate_scores')::jsonb,
+    sqlc.narg('pin_age_sec')::bigint
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 

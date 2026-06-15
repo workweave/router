@@ -1680,7 +1680,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	applyPlannerAttrs(upstreamBuilder, routeRes)
 	addTimingAttrs(ctx, upstreamBuilder)
 
-	obs := buildObservationContext(ctx, decision)
+	obs := buildObservationContext(ctx, decision, routeRes.Fresh)
 	obs.applySpanAttrs(upstreamBuilder)
 
 	otel.Record(ctx, otel.Span{
@@ -1773,6 +1773,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			// roleForTier(catalog.TierFor(feats.Model)), the spiral join value.
 			SessionKey: sessionKey[:],
 			Role:       routeRes.PinRole,
+			// Shadow-mode hysteresis instrumentation: the fresh scorer's pick +
+			// score vector (captured even on STAY, where obs.CandidateScores is
+			// NULL) and the loaded pin's age, so the downgrade opportunity is
+			// measurable offline. No routing action is taken on these.
+			FreshDecisionModel:   obs.FreshDecisionModel,
+			FreshCandidateScores: obs.FreshCandidateScores,
+			PinAgeSec:            int64PtrIf(stickyHit, pinAgeSec),
 		})
 	}
 
@@ -2149,6 +2156,16 @@ func boolPtrOrNil(v bool) *bool {
 // boolPtrTrue always returns a non-nil pointer to v. Used for failover_used
 // where both true and false are meaningful values to record.
 func boolPtrTrue(v bool) *bool {
+	return &v
+}
+
+// int64PtrIf returns a pointer to v when known is true, else nil. Used for
+// pin_age_sec, which is meaningful only when a session pin was actually loaded
+// (sticky_hit); a 0 on a no-pin turn would read as "freshly pinned this turn".
+func int64PtrIf(known bool, v int64) *int64 {
+	if !known {
+		return nil
+	}
 	return &v
 }
 
@@ -2775,7 +2792,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	applyPlannerAttrs(openaiUpstreamBuilder, routeRes)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
 
-	openaiObs := buildObservationContext(ctx, decision)
+	openaiObs := buildObservationContext(ctx, decision, routeRes.Fresh)
 	openaiObs.applySpanAttrs(openaiUpstreamBuilder)
 
 	otel.Record(ctx, otel.Span{
@@ -2858,6 +2875,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			// (session_key, role) join key — see the Anthropic-path write site.
 			SessionKey: sessionKey[:],
 			Role:       routeRes.PinRole,
+			// Shadow-mode hysteresis instrumentation — see the Anthropic-path site.
+			FreshDecisionModel:   openaiObs.FreshDecisionModel,
+			FreshCandidateScores: openaiObs.FreshCandidateScores,
+			PinAgeSec:            int64PtrIf(stickyHit, pinAgeSec),
 		})
 	}
 

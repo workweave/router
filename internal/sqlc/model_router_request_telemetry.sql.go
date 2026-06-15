@@ -796,7 +796,10 @@ INSERT INTO router.model_router_request_telemetry (
     failover_used,
     degenerate_shadow,
     session_key,
-    role
+    role,
+    fresh_decision_model,
+    fresh_candidate_scores,
+    pin_age_sec
 ) VALUES (
     $1::uuid,
     $2::varchar,
@@ -844,7 +847,10 @@ INSERT INTO router.model_router_request_telemetry (
     $44::boolean,
     $45::boolean,
     $46::bytea,
-    $47::varchar
+    $47::varchar,
+    $48::varchar,
+    $49::jsonb,
+    $50::bigint
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -897,6 +903,9 @@ type InsertRequestTelemetryParams struct {
 	DegenerateShadow       *bool
 	SessionKey             []byte
 	Role                   *string
+	FreshDecisionModel     *string
+	FreshCandidateScores   []byte
+	PinAgeSec              *int64
 }
 
 // Records a completed proxied request for the dashboard UI and routing
@@ -912,6 +921,11 @@ type InsertRequestTelemetryParams struct {
 // for all non-harness traffic.
 // session_key + role are the offline join key to router.spiral_shadow_events
 // and session_pins; NULL on rows written before the columns existed.
+// fresh_decision_model + fresh_candidate_scores capture the scorer's fresh
+// recommendation even on STAY turns (where decision_model names the pinned
+// model served); pin_age_sec supports min-dwell analysis. Shadow-mode
+// instrumentation for the hysteresis downgrade lever; NULL when the scorer did
+// not run / no pin was loaded.
 //
 //	INSERT INTO router.model_router_request_telemetry (
 //	    installation_id,
@@ -960,7 +974,10 @@ type InsertRequestTelemetryParams struct {
 //	    failover_used,
 //	    degenerate_shadow,
 //	    session_key,
-//	    role
+//	    role,
+//	    fresh_decision_model,
+//	    fresh_candidate_scores,
+//	    pin_age_sec
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::varchar,
@@ -1008,7 +1025,10 @@ type InsertRequestTelemetryParams struct {
 //	    $44::boolean,
 //	    $45::boolean,
 //	    $46::bytea,
-//	    $47::varchar
+//	    $47::varchar,
+//	    $48::varchar,
+//	    $49::jsonb,
+//	    $50::bigint
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -1060,6 +1080,9 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.DegenerateShadow,
 		arg.SessionKey,
 		arg.Role,
+		arg.FreshDecisionModel,
+		arg.FreshCandidateScores,
+		arg.PinAgeSec,
 	)
 	return err
 }

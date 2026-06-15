@@ -98,6 +98,9 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		DegenerateShadow:       p.DegenerateShadow,
 		SessionKey:             p.SessionKey,
 		Role:                   stringPtrOrNil(p.Role),
+		FreshDecisionModel:     stringPtrOrNil(p.FreshDecisionModel),
+		FreshCandidateScores:   p.FreshCandidateScores,
+		PinAgeSec:              p.PinAgeSec,
 	})
 }
 

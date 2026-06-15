@@ -129,6 +129,12 @@ type RouterModelRouterRequestTelemetry struct {
 	SessionKey []byte
 	// Session-pin role used for the turn (roleForTier of the requested model). Pairs with session_key to identify the turn thread; matches spiral_shadow_events.role.
 	Role *string
+	// The cluster scorer's fresh pick for this turn, recorded even when the planner returned STAY (decision_model then names the pinned model served). NULL when the scorer did not run.
+	FreshDecisionModel *string
+	// The fresh pre-argmax score vector (model -> blended score) from this turn's scorer run, recorded even on STAY. Sweep tau against served decision_model + catalog tier to measure the hysteresis downgrade opportunity. NULL when the scorer did not run.
+	FreshCandidateScores []byte
+	// Age of the loaded session pin in seconds at decision time; supports min-dwell analysis for the hysteresis policy. NULL when no pin was loaded.
+	PinAgeSec *int64
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.
@@ -224,6 +230,9 @@ type RouterProductionRequestTelemetry struct {
 	DegenerateShadow       *bool
 	SessionKey             []byte
 	Role                   *string
+	FreshDecisionModel     *string
+	FreshCandidateScores   []byte
+	PinAgeSec              *int64
 }
 
 // User-submitted /router-feedback about routing decisions or model performance

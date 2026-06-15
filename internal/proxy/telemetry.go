@@ -76,6 +76,14 @@ type InsertTelemetryParams struct {
 	// empty leaves the columns NULL.
 	SessionKey []byte
 	Role       string
+
+	// FreshDecisionModel + FreshCandidateScores capture the scorer's fresh
+	// recommendation even on STAY turns (shadow-mode instrumentation for the
+	// hysteresis downgrade lever). PinAgeSec supports min-dwell analysis. Empty
+	// / nil leaves the columns NULL.
+	FreshDecisionModel   string
+	FreshCandidateScores []byte
+	PinAgeSec            *int64
 }
 
 // TelemetrySummary holds aggregated totals for the dashboard cards.
