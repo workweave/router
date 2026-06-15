@@ -799,7 +799,8 @@ INSERT INTO router.model_router_request_telemetry (
     role,
     fresh_decision_model,
     fresh_candidate_scores,
-    pin_age_sec
+    pin_age_sec,
+    tool_result_bytes
 ) VALUES (
     $1::uuid,
     $2::varchar,
@@ -850,7 +851,8 @@ INSERT INTO router.model_router_request_telemetry (
     $47::varchar,
     $48::varchar,
     $49::jsonb,
-    $50::bigint
+    $50::bigint,
+    $51::int
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -906,6 +908,7 @@ type InsertRequestTelemetryParams struct {
 	FreshDecisionModel     *string
 	FreshCandidateScores   []byte
 	PinAgeSec              *int64
+	ToolResultBytes        *int32
 }
 
 // Records a completed proxied request for the dashboard UI and routing
@@ -977,7 +980,8 @@ type InsertRequestTelemetryParams struct {
 //	    role,
 //	    fresh_decision_model,
 //	    fresh_candidate_scores,
-//	    pin_age_sec
+//	    pin_age_sec,
+//	    tool_result_bytes
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::varchar,
@@ -1028,7 +1032,8 @@ type InsertRequestTelemetryParams struct {
 //	    $47::varchar,
 //	    $48::varchar,
 //	    $49::jsonb,
-//	    $50::bigint
+//	    $50::bigint,
+//	    $51::int
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -1083,6 +1088,7 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.FreshDecisionModel,
 		arg.FreshCandidateScores,
 		arg.PinAgeSec,
+		arg.ToolResultBytes,
 	)
 	return err
 }

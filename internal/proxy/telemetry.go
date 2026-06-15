@@ -84,6 +84,11 @@ type InsertTelemetryParams struct {
 	FreshDecisionModel   string
 	FreshCandidateScores []byte
 	PinAgeSec            *int64
+
+	// ToolResultBytes is the incoming tool-output size on a tool_result turn
+	// (shadow-mode instrumentation for the tier-cap lever). nil when the turn
+	// carries no trailing tool_result.
+	ToolResultBytes *int32
 }
 
 // TelemetrySummary holds aggregated totals for the dashboard cards.

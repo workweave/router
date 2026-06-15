@@ -241,6 +241,11 @@ type LastUserMessageInfo struct {
 	HasToolResult   bool
 	ToolResultCount int
 	Text            string
+	// ToolResultBytes is the summed raw-JSON byte size of the trailing turn's
+	// tool_result payload(s) — the incoming tool-output size. A cheap structural
+	// triviality proxy for the right-sizing tier-cap shadow (tiny tool_result →
+	// likely-trivial continuation). 0 when no tool_result is present.
+	ToolResultBytes int
 }
 
 // LastUserMessage returns format-neutral information about the last user input.

@@ -1780,6 +1780,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			FreshDecisionModel:   obs.FreshDecisionModel,
 			FreshCandidateScores: obs.FreshCandidateScores,
 			PinAgeSec:            int64PtrIf(stickyHit && pinAgeSec > 0, pinAgeSec),
+			// Shadow-mode tier-cap instrumentation: incoming tool-output size on
+			// tool_result turns (the structural triviality signal). NULL on turns
+			// with no trailing tool_result. No routing action is taken on it.
+			ToolResultBytes: toolResultBytesPtr(env),
 		})
 	}
 
@@ -2168,6 +2172,19 @@ func int64PtrIf(known bool, v int64) *int64 {
 	if !known {
 		return nil
 	}
+	return &v
+}
+
+// toolResultBytesPtr returns the incoming tool-output size for telemetry when
+// the trailing turn carries a tool_result, else nil. Structural triviality
+// signal for the tier-cap shadow; NULL on turns with no tool_result so a 0
+// stays distinct from "no tool output this turn".
+func toolResultBytesPtr(env *translate.RequestEnvelope) *int32 {
+	info := env.LastUserMessage()
+	if !info.HasToolResult {
+		return nil
+	}
+	v := int32(info.ToolResultBytes)
 	return &v
 }
 
@@ -2881,6 +2898,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			FreshDecisionModel:   openaiObs.FreshDecisionModel,
 			FreshCandidateScores: openaiObs.FreshCandidateScores,
 			PinAgeSec:            int64PtrIf(stickyHit && pinAgeSec > 0, pinAgeSec),
+			// Shadow-mode tier-cap instrumentation: incoming tool-output size on
+			// tool_result turns (the structural triviality signal). NULL on turns
+			// with no trailing tool_result. No routing action is taken on it.
+			ToolResultBytes: toolResultBytesPtr(env),
 		})
 	}
 

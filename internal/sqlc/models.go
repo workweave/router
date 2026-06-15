@@ -135,6 +135,8 @@ type RouterModelRouterRequestTelemetry struct {
 	FreshCandidateScores []byte
 	// Age of the loaded session pin in seconds at decision time; supports min-dwell analysis for the hysteresis policy. NULL when no pin was loaded.
 	PinAgeSec *int64
+	// Summed raw-JSON byte size of the trailing turn's tool_result payload(s) -- the incoming tool-output size. Structural triviality proxy for the tier-cap shadow. NULL when the turn carries no trailing tool_result.
+	ToolResultBytes *int32
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.
@@ -233,6 +235,7 @@ type RouterProductionRequestTelemetry struct {
 	FreshDecisionModel     *string
 	FreshCandidateScores   []byte
 	PinAgeSec              *int64
+	ToolResultBytes        *int32
 }
 
 // User-submitted /router-feedback about routing decisions or model performance

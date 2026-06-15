@@ -67,7 +67,8 @@ INSERT INTO router.model_router_request_telemetry (
     role,
     fresh_decision_model,
     fresh_candidate_scores,
-    pin_age_sec
+    pin_age_sec,
+    tool_result_bytes
 ) VALUES (
     @installation_id::uuid,
     @request_id::varchar,
@@ -118,7 +119,8 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('role')::varchar,
     sqlc.narg('fresh_decision_model')::varchar,
     sqlc.narg('fresh_candidate_scores')::jsonb,
-    sqlc.narg('pin_age_sec')::bigint
+    sqlc.narg('pin_age_sec')::bigint,
+    sqlc.narg('tool_result_bytes')::int
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 

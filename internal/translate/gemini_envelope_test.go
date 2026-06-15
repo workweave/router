@@ -70,7 +70,7 @@ func TestRequestEnvelope_LastUserMessage_Gemini(t *testing.T) {
 				{"role":"model","parts":[{"functionCall":{"name":"Bash","args":{}}}]},
 				{"role":"user","parts":[{"functionResponse":{"name":"Bash","response":{"out":"x"}}}]}
 			]}`,
-			want: translate.LastUserMessageInfo{HasToolResult: true, ToolResultCount: 1},
+			want: translate.LastUserMessageInfo{HasToolResult: true, ToolResultCount: 1, ToolResultBytes: 38},
 		},
 		{
 			name: "mixed text + functionResponse",
@@ -80,7 +80,7 @@ func TestRequestEnvelope_LastUserMessage_Gemini(t *testing.T) {
 					{"text":"more please"}
 				]}
 			]}`,
-			want: translate.LastUserMessageInfo{HasText: true, Text: "more please", HasToolResult: true, ToolResultCount: 1},
+			want: translate.LastUserMessageInfo{HasText: true, Text: "more please", HasToolResult: true, ToolResultCount: 1, ToolResultBytes: 38},
 		},
 		{
 			name: "trailing model message ignored",

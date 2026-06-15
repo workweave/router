@@ -175,6 +175,7 @@ func geminiLastUserMessage(body []byte) LastUserMessageInfo {
 		if part.Get("functionResponse").Exists() {
 			info.HasToolResult = true
 			info.ToolResultCount++
+			info.ToolResultBytes += len(part.Get("functionResponse").Raw)
 			return true
 		}
 		text := part.Get("text").String()

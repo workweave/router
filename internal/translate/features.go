@@ -219,6 +219,7 @@ func anthropicLastUserMessage(body []byte) LastUserMessageInfo {
 		case "tool_result":
 			info.HasToolResult = true
 			info.ToolResultCount++
+			info.ToolResultBytes += len(block.Get("content").Raw)
 		case "text":
 			text := block.Get("text").String()
 			if text == "" {
@@ -256,6 +257,7 @@ func openAILastUserMessage(body []byte) LastUserMessageInfo {
 		case "tool":
 			info.HasToolResult = true
 			info.ToolResultCount++
+			info.ToolResultBytes += len(all[i].Get("content").Raw)
 			continue
 		case "user":
 			text := openAIContentTextGJSON(all[i].Get("content"))

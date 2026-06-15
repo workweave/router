@@ -92,7 +92,7 @@ func TestRequestEnvelope_LastUserMessage_Anthropic(t *testing.T) {
 			body: `{"messages":[
 				{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"out"}]}
 			]}`,
-			want: translate.LastUserMessageInfo{HasToolResult: true, ToolResultCount: 1},
+			want: translate.LastUserMessageInfo{HasToolResult: true, ToolResultCount: 1, ToolResultBytes: 5},
 		},
 		{
 			name: "mixed text + tool_result",
@@ -103,7 +103,7 @@ func TestRequestEnvelope_LastUserMessage_Anthropic(t *testing.T) {
 				]}
 			]}`,
 			want: translate.LastUserMessageInfo{
-				HasText: true, Text: "more please", HasToolResult: true, ToolResultCount: 1,
+				HasText: true, Text: "more please", HasToolResult: true, ToolResultCount: 1, ToolResultBytes: 5,
 			},
 		},
 		{
@@ -114,7 +114,7 @@ func TestRequestEnvelope_LastUserMessage_Anthropic(t *testing.T) {
 					{"type":"tool_result","tool_use_id":"t2","content":"b"}
 				]}
 			]}`,
-			want: translate.LastUserMessageInfo{HasToolResult: true, ToolResultCount: 2},
+			want: translate.LastUserMessageInfo{HasToolResult: true, ToolResultCount: 2, ToolResultBytes: 6},
 		},
 		{
 			name: "no user message",
@@ -157,7 +157,7 @@ func TestRequestEnvelope_LastUserMessage_OpenAI(t *testing.T) {
 				{"role":"assistant","content":null,"tool_calls":[{"id":"t1","type":"function","function":{"name":"Bash","arguments":"{}"}}]},
 				{"role":"tool","tool_call_id":"t1","content":"out"}
 			]}`,
-			want: translate.LastUserMessageInfo{HasToolResult: true, ToolResultCount: 1},
+			want: translate.LastUserMessageInfo{HasToolResult: true, ToolResultCount: 1, ToolResultBytes: 5},
 		},
 		{
 			name: "two trailing tool messages",
@@ -166,7 +166,7 @@ func TestRequestEnvelope_LastUserMessage_OpenAI(t *testing.T) {
 				{"role":"tool","tool_call_id":"t1","content":"a"},
 				{"role":"tool","tool_call_id":"t2","content":"b"}
 			]}`,
-			want: translate.LastUserMessageInfo{HasToolResult: true, ToolResultCount: 2},
+			want: translate.LastUserMessageInfo{HasToolResult: true, ToolResultCount: 2, ToolResultBytes: 6},
 		},
 		{
 			name: "tool then user",
