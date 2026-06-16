@@ -2161,10 +2161,25 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 // to a different upstream provider. The deployment-level env key on the
 // provider client is the correct fallback in that case.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
+	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
 	if provider == providers.ProviderAnthropic {
+		// Subscription-first (precedence: subscription -> BYOK -> deployment). A
+		// caller's Claude subscription pays for their Claude turns ahead of any
+		// BYOK or deployment key. It arrives via the dedicated header on
+		// router-keyed requests, or — when not router-keyed — as the inbound
+		// Authorization bearer. Resolving it before the BYOK lookup keeps the
+		// precedence explicit here rather than relying on BYOK being absent off
+		// the router-key path (it is today, but a future BYOK-loading path must
+		// not silently outrank the subscription).
 		if sub := subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)); sub != nil {
 			observability.FromContext(ctx).Debug("Resolved Claude subscription credential for Anthropic turn", "credential_source", sub.Source)
 			return context.WithValue(ctx, CredentialsContextKey{}, sub)
+		}
+		if !routerKeyed {
+			if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
+				observability.FromContext(ctx).Debug("Resolved Claude subscription credential for Anthropic turn", "credential_source", inbound.Source)
+				return context.WithValue(ctx, CredentialsContextKey{}, inbound)
+			}
 		}
 	}
 	byok := BuildCredentialsMap(externalKeysFromContext(ctx))
@@ -2172,7 +2187,7 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	if byok != nil {
 		creds = byok[provider]
 	}
-	if creds == nil && installationIDFromContext(ctx) == (uuid.UUID{}) {
+	if creds == nil && !routerKeyed {
 		creds = ExtractClientCredentials(provider, headers)
 	}
 	if creds != nil {

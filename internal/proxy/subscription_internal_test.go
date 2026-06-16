@@ -78,6 +78,23 @@ func TestResolveAndInjectCredentials_SubscriptionHeaderIgnoredForNonAnthropic(t 
 		"a non-Anthropic route must use its own BYOK key, never the Anthropic subscription token")
 }
 
+func TestResolveAndInjectCredentials_InboundSubscriptionBeatsBYOK(t *testing.T) {
+	// Self-hosted (no router key): an inbound Authorization subscription bearer
+	// must beat a present BYOK key so the turn bills at the 5% subscription fee,
+	// honoring the subscription -> BYOK -> deployment precedence explicitly
+	// rather than by coincidence of BYOK being absent off the router-key path.
+	ctx := context.WithValue(context.Background(), ExternalAPIKeysContextKey{}, []*auth.ExternalAPIKey{
+		{Provider: providers.ProviderAnthropic, Plaintext: []byte("sk-ant-api-byok")},
+	})
+	headers := http.Header{"Authorization": []string{"Bearer sk-ant-oat01-subscription-token"}}
+	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
+	creds := CredentialsFromContext(out)
+	require.NotNil(t, creds)
+	assert.True(t, creds.OAuth, "the inbound subscription bearer must win over BYOK")
+	assert.Equal(t, credSourceSubscription, creds.Source)
+	assert.Equal(t, []byte("sk-ant-oat01-subscription-token"), creds.APIKey)
+}
+
 func TestResolveAndInjectCredentials_SelfHostedInboundSubscription(t *testing.T) {
 	// No router key (nil installation): the caller's own Authorization bearer
 	// carries the subscription token and is resolved via client extraction.
