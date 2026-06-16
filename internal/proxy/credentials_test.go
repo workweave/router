@@ -222,3 +222,45 @@ func TestCredentialsFromContext_ReturnsStashedCredentials(t *testing.T) {
 	assert.Equal(t, want.Source, got.Source)
 	assert.Equal(t, want.APIKey, got.APIKey)
 }
+
+func TestExtractClientCredentials_AnthropicSubscriptionBearer(t *testing.T) {
+	// Claude Code subscription tokens are sk-ant-oat01-… and must be forwarded
+	// as OAuth credentials so the caller's subscription pays for Claude turns.
+	headers := http.Header{"Authorization": []string{"Bearer sk-ant-oat01-subscription-token"}}
+	creds := proxy.ExtractClientCredentials("anthropic", headers)
+	require.NotNil(t, creds, "a Claude subscription bearer must be accepted for Anthropic")
+	assert.Equal(t, []byte("sk-ant-oat01-subscription-token"), creds.APIKey)
+	assert.True(t, creds.OAuth, "subscription tokens must be flagged OAuth so the client uses Authorization: Bearer + the oauth beta header, not x-api-key")
+	assert.Equal(t, "subscription", creds.Source)
+}
+
+func TestExtractClientCredentials_AnthropicAPIKeyBearerIsNotOAuth(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer sk-ant-api-real-key"}}
+	creds := proxy.ExtractClientCredentials("anthropic", headers)
+	require.NotNil(t, creds)
+	assert.False(t, creds.OAuth, "a real Anthropic API key (sk-ant-api-) authenticates via x-api-key, not OAuth")
+	assert.Equal(t, "client", creds.Source)
+}
+
+func TestExtractClientCredentials_RejectsSubscriptionForNonAnthropic(t *testing.T) {
+	// A subscription token can only pay for Claude models; it must never be
+	// forwarded to another vendor's upstream.
+	for _, provider := range []string{"openai", "google", "openrouter", "fireworks"} {
+		headers := http.Header{"Authorization": []string{"Bearer sk-ant-oat01-subscription-token"}}
+		creds := proxy.ExtractClientCredentials(provider, headers)
+		assert.Nilf(t, creds, "a Claude subscription bearer must never be forwarded to %s", provider)
+	}
+}
+
+func TestResolveCredentials_SubscriptionBeatsBYOK(t *testing.T) {
+	byok := map[string]*proxy.Credentials{
+		"anthropic": {APIKey: []byte("sk-ant-api-byok"), Source: "byok"},
+	}
+	headers := http.Header{"Authorization": []string{"Bearer sk-ant-oat01-subscription-token"}}
+	creds := proxy.ResolveCredentials("anthropic", byok, headers)
+	require.NotNil(t, creds)
+	assert.Equal(t, "subscription", creds.Source,
+		"a caller's subscription token must take precedence over an installation BYOK key for Anthropic")
+	assert.True(t, creds.OAuth)
+	assert.Equal(t, []byte("sk-ant-oat01-subscription-token"), creds.APIKey)
+}

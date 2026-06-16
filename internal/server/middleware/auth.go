@@ -22,6 +22,12 @@ const (
 // RouterKeyHeader carries the Weave Router key when clients need to preserve Authorization / x-api-key for the upstream provider.
 const RouterKeyHeader = "X-Weave-Router-Key"
 
+// AnthropicSubscriptionHeader carries a caller's Claude subscription OAuth token
+// (sk-ant-oat-) on router-keyed requests, where Authorization already holds the
+// rk_ router key. The proxy forwards it to Anthropic for Claude-model turns so
+// the caller's own subscription pays, instead of the deployment API key.
+const AnthropicSubscriptionHeader = "X-Weave-Anthropic-Subscription"
+
 // WithAuth validates the inbound request via a bearer rk_ token only. Used on data-plane routes (`/v1/*`). On failure, short-circuits 401.
 //
 // byokDisabled drops any BYOK (customer-owned provider) keys at the middleware
@@ -109,6 +115,11 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 		}
 		if installation != nil && installation.ID != "" {
 			ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, installation.ID)
+		}
+		// Stash the dedicated subscription header (router-keyed path) raw; the
+		// proxy validates its shape and decides precedence. Never logged.
+		if sub := strings.TrimSpace(c.GetHeader(AnthropicSubscriptionHeader)); sub != "" {
+			ctx = context.WithValue(ctx, proxy.AnthropicSubscriptionContextKey{}, sub)
 		}
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()

@@ -294,6 +294,11 @@ func (s *Service) runCompactionHandover(ctx context.Context, env *translate.Requ
 		summCtx := ctx
 		if sumCreds != nil {
 			summCtx = context.WithValue(ctx, CredentialsContextKey{}, sumCreds)
+		} else {
+			// Run on the deployment key: strip any request credential (notably a
+			// subscription OAuth token) the turn resolved, so this synthetic
+			// call doesn't inherit it from ctx and 401 / cross a tenant boundary.
+			summCtx = clearCredentials(ctx)
 		}
 		start := time.Now()
 		summary, summaryUsage, sumErr := s.summarizer.Summarize(summCtx, env)

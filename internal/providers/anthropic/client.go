@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"workweave/router/internal/observability"
@@ -36,9 +37,24 @@ func NewClient(apiKey, baseURL string) *Client {
 	}
 }
 
-// setAuth resolves credentials in precedence order: BYOK, deployment key, then client-sent auth headers.
+// oauthBetaToken is the anthropic-beta flag Anthropic requires for Claude
+// subscription (Claude.ai OAuth) tokens on /v1/messages.
+const oauthBetaToken = "oauth-2025-04-20"
+
+// subscriptionTokenPrefix marks a Claude subscription bearer (sk-ant-oat… /
+// sk-ant-oat01…) used to gate the oauth beta header on the pure-passthrough path.
+const subscriptionTokenPrefix = "sk-ant-oat"
+
+// setAuth resolves credentials in precedence order: resolved per-request
+// credential (subscription/BYOK/client), deployment key, then client-sent auth
+// headers. A subscription OAuth credential authenticates via Authorization:
+// Bearer and must NOT send x-api-key; everything else uses x-api-key.
 func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
+		if creds.OAuth {
+			upstream.Header.Set("authorization", "Bearer "+string(creds.APIKey))
+			return
+		}
 		upstream.Header.Set("x-api-key", string(creds.APIKey))
 		return
 	}
@@ -54,6 +70,45 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *h
 	}
 }
 
+// applyOAuthBeta merges the oauth beta flag into anthropic-beta when the
+// request authenticates with a Claude subscription token — either a resolved
+// OAuth credential, or (pure passthrough, no deployment key) a raw inbound
+// sk-ant-oat Authorization bearer. Must run AFTER prep.Headers is copied onto
+// the upstream request so it merges with, rather than is clobbered by, the
+// model-capability-filtered anthropic-beta that translate produced.
+func applyOAuthBeta(ctx context.Context, upstream, inbound *http.Request) {
+	if !subscriptionAuth(ctx, inbound) {
+		return
+	}
+	upstream.Header.Set("anthropic-beta", mergeBeta(upstream.Header.Get("anthropic-beta"), oauthBetaToken))
+}
+
+// subscriptionAuth reports whether this request will authenticate with a Claude
+// subscription OAuth token.
+func subscriptionAuth(ctx context.Context, inbound *http.Request) bool {
+	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
+		return creds.OAuth
+	}
+	if raw, found := strings.CutPrefix(inbound.Header.Get("authorization"), "Bearer "); found {
+		return strings.HasPrefix(strings.TrimSpace(raw), subscriptionTokenPrefix)
+	}
+	return false
+}
+
+// mergeBeta appends token to a comma-separated anthropic-beta value if absent,
+// preserving any existing (model-capability-filtered) tokens.
+func mergeBeta(existing, token string) string {
+	if existing == "" {
+		return token
+	}
+	for _, p := range strings.Split(existing, ",") {
+		if strings.TrimSpace(p) == token {
+			return existing
+		}
+	}
+	return existing + "," + token
+}
+
 func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
@@ -67,6 +122,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
+	applyOAuthBeta(ctx, upstream, r)
 	if v := r.Header.Get("accept"); v != "" {
 		upstream.Header.Set("accept", v)
 	}
@@ -126,6 +182,7 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
+	applyOAuthBeta(ctx, upstream, r)
 	if v := r.Header.Get("accept"); v != "" {
 		upstream.Header.Set("accept", v)
 	}

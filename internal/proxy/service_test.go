@@ -564,29 +564,30 @@ func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 			"client header on the Anthropic surface must not leak credentials into OpenAI-compat upstreams")
 	})
 
-	t.Run("byok-on Anthropic surface with inbound Bearer (e.g. Claude Code OAuth) enables nothing", func(t *testing.T) {
-		// Regression for the 2026-05-13 prod incident: Claude Code passes an
-		// Anthropic OAuth bearer (Authorization: Bearer sk-ant-oat-…) on every
-		// request. The old code treated that header as creds for every
-		// OpenAI-compat provider (OpenRouter/Fireworks/OpenAI/Google),
-		// enabling argmax to pick OpenRouter and 401'ing at dispatch when no
-		// OpenRouter key was attached. On the Anthropic surface a bearer is
-		// never legitimate client creds (Anthropic uses x-api-key), so the
-		// enabled set must remain empty.
+	t.Run("byok-on Anthropic surface with inbound subscription Bearer enables Anthropic only", func(t *testing.T) {
+		// Claude Code passes a Claude subscription OAuth bearer (Authorization:
+		// Bearer sk-ant-oat…) on every request. It is legitimate Anthropic auth
+		// (forwarded as Bearer + the oauth beta header), so it enables Anthropic
+		// — the caller's subscription pays for their Claude turns.
+		//
+		// It must still NEVER enable OpenRouter or any other OpenAI-compat
+		// upstream. That cross-provider leak (treating the bearer as creds for
+		// every Bearer-using provider) was the 2026-05-13 prod incident:
+		// argmax picked OpenRouter and 401'd at dispatch with no OpenRouter key.
 		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
 		svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
 			WithByokOnly(true)
 
 		rec := httptest.NewRecorder()
 		httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-		httpReq.Header.Set("Authorization", "Bearer sk-ant-oat-claude-code-token")
+		httpReq.Header.Set("Authorization", "Bearer sk-ant-oat01-claude-code-token")
 		_ = svc.ProxyMessages(context.Background(), body, rec, httpReq)
 
 		require.NotNil(t, fr.capturedReq)
+		assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic,
+			"a Claude subscription bearer is valid Anthropic auth and enables Anthropic")
 		assert.NotContains(t, fr.capturedReq.EnabledProviders, providers.ProviderOpenRouter,
-			"inbound Bearer on the Anthropic surface must never enable OpenRouter")
-		assert.NotContains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic,
-			"a Bearer is not Anthropic auth — surface uses x-api-key")
+			"inbound Bearer on the Anthropic surface must never leak into OpenRouter (2026-05-13 incident)")
 	})
 }
 

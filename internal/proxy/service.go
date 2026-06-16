@@ -187,6 +187,11 @@ type ExternalIDContextKey struct{}
 // CredentialsContextKey is the request-context key for resolved per-request credentials.
 type CredentialsContextKey struct{}
 
+// AnthropicSubscriptionContextKey is the request-context key for a caller's raw
+// Claude subscription OAuth token, stashed by the auth middleware from the
+// X-Weave-Anthropic-Subscription header on router-keyed requests.
+type AnthropicSubscriptionContextKey struct{}
+
 // InstallationExcludedModelsContextKey is the context key for the authed
 // installation's model exclusion list. Carried as []string.
 type InstallationExcludedModelsContextKey struct{}
@@ -508,6 +513,13 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 	}
 	creds, _ := v.(*Credentials)
 	return creds
+}
+
+// anthropicSubscriptionFromContext returns the raw Claude subscription token
+// stashed by the auth middleware (router-keyed path), or "" when none.
+func anthropicSubscriptionFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(AnthropicSubscriptionContextKey{}).(string)
+	return v
 }
 
 // DefaultPlannerThresholdUSD is the minimum positive EV over remaining-turn
@@ -2110,11 +2122,27 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 }
 
 // resolveAndInjectCredentials resolves credentials for provider and stashes
-// them on ctx. When authed via a router key, client-header extraction is
-// skipped — prevents the client's inbound Anthropic key from being
-// forwarded to a different upstream provider. Deployment-level env key on
-// the provider client is the correct fallback in that case.
+// them on ctx, in precedence order: a caller's Claude subscription token
+// (Anthropic only) first, then BYOK, then a client-supplied header credential.
+//
+// Subscription-first lets a caller's own Claude subscription pay for their
+// Claude turns. It arrives one of two ways: the dedicated
+// X-Weave-Anthropic-Subscription header on router-keyed requests (read past the
+// router-key guard below, since that header unambiguously carries only a
+// subscription token), or — when not authed via a router key — the inbound
+// Authorization bearer via ExtractClientCredentials.
+//
+// When authed via a router key, inbound client-header extraction is otherwise
+// skipped: it prevents the client's inbound Anthropic key from being forwarded
+// to a different upstream provider. The deployment-level env key on the
+// provider client is the correct fallback in that case.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
+	if provider == providers.ProviderAnthropic {
+		if sub := subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)); sub != nil {
+			observability.FromContext(ctx).Debug("Resolved Claude subscription credential for Anthropic turn", "credential_source", sub.Source)
+			return context.WithValue(ctx, CredentialsContextKey{}, sub)
+		}
+	}
 	byok := BuildCredentialsMap(externalKeysFromContext(ctx))
 	var creds *Credentials
 	if byok != nil {

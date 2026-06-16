@@ -611,6 +611,12 @@ func (s *Service) runTurnLoop(
 			summCtx := ctx
 			if sumCreds != nil {
 				summCtx = context.WithValue(ctx, CredentialsContextKey{}, sumCreds)
+			} else {
+				// Run on the deployment key: strip any request credential
+				// (notably a subscription OAuth token) the turn resolved, so
+				// this synthetic call doesn't inherit it from ctx and 401 /
+				// cross a tenant boundary.
+				summCtx = clearCredentials(ctx)
 			}
 			start := time.Now()
 			summary, summaryUsage, sumErr := s.summarizer.Summarize(summCtx, env)
@@ -762,7 +768,15 @@ func resolveSummarizerCreds(ctx context.Context, provider string, headers http.H
 			return creds
 		}
 	}
-	return ExtractClientCredentials(provider, headers)
+	creds := ExtractClientCredentials(provider, headers)
+	if creds != nil && creds.OAuth {
+		// A Claude subscription token can't authenticate the router's synthetic
+		// summarizer call: that body has no Claude Code identity block, which
+		// subscription auth requires, so it would 401. Decline it here; the
+		// caller then either runs on the deployment key or skips summarization.
+		return nil
+	}
+	return creds
 }
 
 // sortedEnabledKeys returns a deterministic slice of the keys in m for
