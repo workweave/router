@@ -99,6 +99,53 @@ func TestEnabledProvidersForRequest_ExcludedProvidersSubtracted(t *testing.T) {
 	})
 }
 
+// TestEnabledProvidersForRequest_SubscriptionEnrollsAnthropic guards the
+// managed-mode primary path: a router-keyed (installation set) byokOnly request
+// carrying only the dedicated subscription header — no BYOK, no deployment key —
+// must enroll Anthropic so the scorer can pick a Claude model. Without it the
+// enabled set is empty and the scorer fails with ErrNoEligibleProvider before
+// any Claude turn runs.
+func TestEnabledProvidersForRequest_SubscriptionEnrollsAnthropic(t *testing.T) {
+	makeService := func() *Service {
+		return &Service{
+			byokOnly: true,
+			providers: map[string]providers.Client{
+				providers.ProviderAnthropic: nil,
+				providers.ProviderOpenAI:    nil,
+			},
+			deploymentKeyedProviders:     map[string]struct{}{},
+			passthroughEligibleProviders: map[string]struct{}{},
+		}
+	}
+	routerKeyed := func() context.Context {
+		return context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
+	}
+
+	t.Run("subscription header enrolls anthropic on a router-keyed byok-only request", func(t *testing.T) {
+		ctx := context.WithValue(routerKeyed(), AnthropicSubscriptionContextKey{}, "sk-ant-oat01-subscription-token")
+		got := makeService().enabledProvidersForRequest(ctx, providers.ProviderAnthropic, http.Header{})
+		assert.Contains(t, got, providers.ProviderAnthropic,
+			"a subscription token must make Anthropic eligible so the scorer can route a Claude turn to it")
+		assert.NotContains(t, got, providers.ProviderOpenAI,
+			"the subscription token is Anthropic-only and must never enroll another upstream")
+	})
+
+	t.Run("no header leaves the set empty, proving the enrollment is load-bearing", func(t *testing.T) {
+		got := makeService().enabledProvidersForRequest(routerKeyed(), providers.ProviderAnthropic, http.Header{})
+		assert.NotContains(t, got, providers.ProviderAnthropic,
+			"without a subscription token a byok-only router-keyed request with no BYOK enrolls nothing")
+		assert.Empty(t, got)
+	})
+
+	t.Run("an excluded Anthropic still trumps the subscription enrollment", func(t *testing.T) {
+		ctx := context.WithValue(routerKeyed(), AnthropicSubscriptionContextKey{}, "sk-ant-oat01-subscription-token")
+		ctx = context.WithValue(ctx, InstallationExcludedProvidersContextKey{}, []string{providers.ProviderAnthropic})
+		got := makeService().enabledProvidersForRequest(ctx, providers.ProviderAnthropic, http.Header{})
+		assert.NotContains(t, got, providers.ProviderAnthropic,
+			"a provider exclusion must subtract Anthropic even when a subscription token is present")
+	})
+}
+
 // TestEnabledProvidersForRequest_DeploymentKeyedStillCrossSurface confirms
 // that env-keyed providers stay eligible regardless of surface (their keys
 // are trusted and don't depend on inbound headers).

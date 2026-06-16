@@ -2088,6 +2088,20 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 		}
 		out[k.Provider] = struct{}{}
 	}
+	// A caller's Claude subscription enrolls Anthropic for routing
+	// eligibility, mirroring resolveAndInjectCredentials so the scorer can
+	// actually pick a Claude model. The dedicated X-Weave-Anthropic-Subscription
+	// header unambiguously carries only a subscription token, so — like
+	// credential injection — it is honored even on router-keyed requests, past
+	// the installation guard below. Without this a managed request carrying
+	// only a subscription token (no BYOK) leaves Anthropic out of the enabled
+	// set and the scorer fails with ErrNoEligibleProvider before any Claude
+	// turn runs. Anthropic-only: the token can't authenticate any other
+	// upstream. (The self-hosted inbound-bearer path is already covered by the
+	// ExtractClientCredentials block below.)
+	if subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)) != nil {
+		out[providers.ProviderAnthropic] = struct{}{}
+	}
 	// Passthrough-eligible providers are surface-scoped: a provider
 	// registered without a deployment key joins the eligible set only when
 	// the inbound surface matches. Otherwise an Anthropic-surface request's
