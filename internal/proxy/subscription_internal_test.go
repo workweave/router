@@ -108,6 +108,23 @@ func TestResolveSummarizerCreds_DropsSubscriptionToken(t *testing.T) {
 		"resolveSummarizerCreds must decline a subscription OAuth token so the synthetic summary call doesn't 401")
 }
 
+func TestServedOnSubscription(t *testing.T) {
+	t.Run("true for an OAuth credential", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), CredentialsContextKey{},
+			&Credentials{APIKey: []byte("sk-ant-oat01-token"), Source: credSourceSubscription, OAuth: true})
+		assert.True(t, servedOnSubscription(ctx), "billing must treat an OAuth-credentialed turn as subscription-served")
+	})
+	t.Run("false for a non-OAuth credential", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), CredentialsContextKey{},
+			&Credentials{APIKey: []byte("sk-ant-api-byok"), Source: credSourceBYOK})
+		assert.False(t, servedOnSubscription(ctx))
+	})
+	t.Run("false when no credential resolved (deployment key)", func(t *testing.T) {
+		assert.False(t, servedOnSubscription(context.Background()),
+			"a deployment-key turn is Weave-fronted and must bill at full cost")
+	})
+}
+
 func TestResolveSummarizerCreds_ReturnsBYOK(t *testing.T) {
 	ctx := context.WithValue(context.Background(), ExternalAPIKeysContextKey{}, []*auth.ExternalAPIKey{
 		{Provider: providers.ProviderAnthropic, Plaintext: []byte("sk-ant-api-byok")},

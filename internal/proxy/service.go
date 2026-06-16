@@ -522,6 +522,16 @@ func anthropicSubscriptionFromContext(ctx context.Context) string {
 	return v
 }
 
+// servedOnSubscription reports whether the turn's resolved credential is a
+// Claude subscription OAuth token — i.e. the customer's own plan paid for it,
+// so billing applies only the subscription fee rather than full cost. The
+// credential is read from the same ctx that resolveAndInjectCredentials
+// stamped and dispatch used.
+func servedOnSubscription(ctx context.Context) bool {
+	creds := CredentialsFromContext(ctx)
+	return creds != nil && creds.OAuth
+}
+
 // DefaultPlannerThresholdUSD is the minimum positive EV over remaining-turn
 // horizon to switch off a pinned model. Small enough for arbitrage; large
 // enough to avoid near-tie noise.
@@ -2309,18 +2319,22 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 	}
 	hasOverride := billing.HasOverrideFromContext(ctx)
 	s.fireBilling(ctx, billing.DebitInferenceParams{
-		OrganizationID:  externalID,
-		RouterRequestID: requestID,
-		Model:           decision.Model,
-		Provider:        decision.Provider,
-		InputTokens:     in,
-		OutputTokens:    out,
-		CacheCreation:   cacheCreation,
-		CacheRead:       cacheRead,
-		Pricing:         actPricing,
-		HasOverride:     hasOverride,
+		OrganizationID:     externalID,
+		RouterRequestID:    requestID,
+		Model:              decision.Model,
+		Provider:           decision.Provider,
+		InputTokens:        in,
+		OutputTokens:       out,
+		CacheCreation:      cacheCreation,
+		CacheRead:          cacheRead,
+		Pricing:            actPricing,
+		HasOverride:        hasOverride,
+		SubscriptionServed: servedOnSubscription(ctx),
 	})
 
+	// The handover summary runs on the deployment/BYOK key (never the
+	// subscription token — see resolveSummarizerCreds), so it bills at full
+	// cost regardless of whether the main turn was subscription-served.
 	if routeRes.Handover.Invoked && !routeRes.Handover.FallbackToFullHistory {
 		sumUsage := routeRes.Handover.SummaryUsage
 		if sumUsage.Model != "" && (sumUsage.InputTokens > 0 || sumUsage.OutputTokens > 0) {
