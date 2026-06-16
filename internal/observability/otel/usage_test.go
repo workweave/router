@@ -76,6 +76,44 @@ func TestUsageExtractor_OpenAIStreaming(t *testing.T) {
 	assert.Equal(t, 12, out)
 }
 
+func TestUsageExtractor_OpenAIResponsesStreaming(t *testing.T) {
+	// The Codex (ChatGPT) subscription backend streams the Responses API: usage
+	// lands on the terminal response.completed event, nested under response.usage
+	// with input_tokens/output_tokens (+ input_tokens_details.cached_tokens),
+	// not the chat-completions prompt_tokens shape. Billing the 5% subscription
+	// fee depends on this parse.
+	rec := httptest.NewRecorder()
+	ext := otel.NewUsageExtractor(rec, "openai")
+
+	events := []string{
+		"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":120,\"output_tokens\":34,\"input_tokens_details\":{\"cached_tokens\":40}}}}\n\n",
+	}
+	for _, e := range events {
+		_, err := ext.Write([]byte(e))
+		require.NoError(t, err)
+	}
+
+	in, out := ext.Tokens()
+	assert.Equal(t, 120, in)
+	assert.Equal(t, 34, out)
+	_, cacheRead := ext.CacheTokens()
+	assert.Equal(t, 40, cacheRead, "Responses cached_tokens must map to cache-read for accurate subscription billing")
+}
+
+func TestUsageExtractor_OpenAIResponsesNonStreaming(t *testing.T) {
+	rec := httptest.NewRecorder()
+	ext := otel.NewUsageExtractor(rec, "openai")
+
+	body := `{"id":"resp_2","object":"response","usage":{"input_tokens":50,"output_tokens":9,"input_tokens_details":{"cached_tokens":0}}}`
+	_, err := ext.Write([]byte(body))
+	require.NoError(t, err)
+
+	in, out := ext.Tokens()
+	assert.Equal(t, 50, in)
+	assert.Equal(t, 9, out)
+}
+
 func TestUsageExtractor_GoogleStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ext := otel.NewUsageExtractor(rec, "google")

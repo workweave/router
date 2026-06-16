@@ -28,6 +28,18 @@ const RouterKeyHeader = "X-Weave-Router-Key"
 // the caller's own subscription pays, instead of the deployment API key.
 const AnthropicSubscriptionHeader = "X-Weave-Anthropic-Subscription"
 
+// OpenAISubscriptionHeader and OpenAIAccountIDHeader carry a caller's Codex
+// (ChatGPT) subscription on router-keyed requests, where Authorization already
+// holds the rk_ router key. The subscription header holds the ChatGPT OAuth JWT
+// and the account-id header holds the paired ChatGPT-Account-ID; both are
+// required because the Codex backend 401/403s on a token without its account id.
+// The proxy forwards them to OpenAI's Codex backend for OpenAI-model turns so
+// the caller's own ChatGPT plan pays, instead of the deployment API key.
+const (
+	OpenAISubscriptionHeader = "X-Weave-OpenAI-Subscription"
+	OpenAIAccountIDHeader    = "X-Weave-OpenAI-Account-ID"
+)
+
 // WithAuth validates the inbound request via a bearer rk_ token only. Used on data-plane routes (`/v1/*`). On failure, short-circuits 401.
 //
 // byokDisabled drops any BYOK (customer-owned provider) keys at the middleware
@@ -120,6 +132,15 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 		// proxy validates its shape and decides precedence. Never logged.
 		if sub := strings.TrimSpace(c.GetHeader(AnthropicSubscriptionHeader)); sub != "" {
 			ctx = context.WithValue(ctx, proxy.AnthropicSubscriptionContextKey{}, sub)
+		}
+		// Codex (ChatGPT) subscription, router-keyed path: stash the OAuth JWT
+		// and its paired ChatGPT-Account-ID raw; the proxy validates shape and
+		// decides precedence. Never logged.
+		if sub := strings.TrimSpace(c.GetHeader(OpenAISubscriptionHeader)); sub != "" {
+			ctx = context.WithValue(ctx, proxy.OpenAISubscriptionContextKey{}, sub)
+		}
+		if acct := strings.TrimSpace(c.GetHeader(OpenAIAccountIDHeader)); acct != "" {
+			ctx = context.WithValue(ctx, proxy.OpenAIAccountIDContextKey{}, acct)
 		}
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()

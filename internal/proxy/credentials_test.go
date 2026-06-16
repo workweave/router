@@ -264,3 +264,73 @@ func TestResolveCredentials_SubscriptionBeatsBYOK(t *testing.T) {
 	assert.True(t, creds.OAuth)
 	assert.Equal(t, []byte("sk-ant-oat01-subscription-token"), creds.APIKey)
 }
+
+const codexJWT = "eyJhbGciOiJSUzI1NiJ9.codex-access-token.signature"
+
+func TestExtractClientCredentials_CodexSubscription(t *testing.T) {
+	// A Codex (ChatGPT) subscription arrives on the OpenAI surface as an OAuth
+	// JWT bearer paired with a ChatGPT-Account-ID header. The pairing is what
+	// distinguishes it from a plain client API key, and both pieces are carried
+	// so the OpenAI client can reach the Codex backend.
+	headers := http.Header{
+		"Authorization":      []string{"Bearer " + codexJWT},
+		"Chatgpt-Account-Id": []string{"acct-12345"},
+	}
+	creds := proxy.ExtractClientCredentials("openai", headers)
+	require.NotNil(t, creds, "a Codex subscription JWT + account-id must be accepted for OpenAI")
+	assert.True(t, creds.OAuth, "a Codex subscription bearer must be flagged OAuth")
+	assert.Equal(t, "codex_subscription", creds.Source)
+	assert.Equal(t, []byte(codexJWT), creds.APIKey)
+	assert.Equal(t, []byte("acct-12345"), creds.AccountID)
+}
+
+func TestExtractClientCredentials_CodexJWTWithoutAccountIDIsNotSubscription(t *testing.T) {
+	// Without the account-id the Codex backend would 401, so the pair is not a
+	// usable subscription. The bearer falls through to the plain client-key path.
+	headers := http.Header{"Authorization": []string{"Bearer " + codexJWT}}
+	creds := proxy.ExtractClientCredentials("openai", headers)
+	require.NotNil(t, creds)
+	assert.False(t, creds.OAuth, "a JWT with no ChatGPT-Account-ID must not be treated as a Codex subscription")
+	assert.Empty(t, creds.AccountID)
+	assert.Equal(t, "client", creds.Source)
+}
+
+func TestExtractClientCredentials_OpenAIKeyWithAccountIDIsNotSubscription(t *testing.T) {
+	// An sk- key is an API key, not a ChatGPT OAuth JWT, even if an account-id
+	// header is (spuriously) present.
+	headers := http.Header{
+		"Authorization":      []string{"Bearer sk-oai-real-key"},
+		"Chatgpt-Account-Id": []string{"acct-12345"},
+	}
+	creds := proxy.ExtractClientCredentials("openai", headers)
+	require.NotNil(t, creds)
+	assert.False(t, creds.OAuth, "an sk- API key must never be classified as a Codex subscription")
+	assert.Equal(t, "client", creds.Source)
+}
+
+func TestExtractClientCredentials_CodexSubscriptionIsOpenAIOnly(t *testing.T) {
+	// The Codex JWT authenticates only the OpenAI Codex backend; a ChatGPT
+	// account-id header on another vendor's surface must not produce an OAuth
+	// credential for that vendor.
+	headers := http.Header{
+		"Authorization":      []string{"Bearer " + codexJWT},
+		"Chatgpt-Account-Id": []string{"acct-12345"},
+	}
+	for _, provider := range []string{"google", "openrouter", "fireworks"} {
+		creds := proxy.ExtractClientCredentials(provider, headers)
+		if creds != nil {
+			assert.Falsef(t, creds.OAuth, "a Codex subscription must never be resolved for %s", provider)
+			assert.Emptyf(t, creds.AccountID, "no Codex account-id must attach to %s creds", provider)
+		}
+	}
+}
+
+func TestExtractClientCredentials_RejectsRouterBearerEvenWithAccountID(t *testing.T) {
+	headers := http.Header{
+		"Authorization":      []string{"Bearer rk_router_key"},
+		"Chatgpt-Account-Id": []string{"acct-12345"},
+	}
+	creds := proxy.ExtractClientCredentials("openai", headers)
+	assert.Nil(t, creds,
+		"a router key must never be classified as a Codex subscription, account-id present or not")
+}

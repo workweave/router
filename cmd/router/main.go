@@ -204,6 +204,10 @@ func main() {
 		if !byokOnly {
 			openaiKey = config.GetOr("OPENAI_API_KEY", "")
 		}
+		// A caller's Codex (ChatGPT) subscription reroutes OpenAI turns to the
+		// Codex backend (chatgpt.com/backend-api/codex) over the Responses API;
+		// that switch lives in the OpenAI client, keyed off the resolved
+		// subscription credential — no separate wiring here.
 		providerMap[providers.ProviderOpenAI] = openaiProvider.NewClient(openaiKey, openaiBaseURL)
 		switch {
 		case byokOnly:

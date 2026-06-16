@@ -14,22 +14,34 @@ import (
 // the real-world sk-ant-oat01-… Claude Code subscription/access-token shapes.
 const subscriptionTokenPrefix = "sk-ant-oat"
 
+// chatGPTAccountIDHeader is the inbound header Codex sends alongside a ChatGPT
+// subscription bearer (self-hosted/passthrough path). Its presence disambiguates
+// a Codex subscription JWT from a plain OpenAI client API key. http.Header.Get
+// canonicalizes the key, so casing variants resolve to the same value.
+const chatGPTAccountIDHeader = "ChatGPT-Account-ID"
+
 // Credential sources, for logging and precedence reasoning. Never log the key
 // itself — only the source.
 const (
-	credSourceBYOK         = "byok"
-	credSourceClient       = "client"
-	credSourceSubscription = "subscription"
+	credSourceBYOK              = "byok"
+	credSourceClient            = "client"
+	credSourceSubscription      = "subscription"
+	credSourceCodexSubscription = "codex_subscription"
 )
 
 // Credentials holds the API key to use for an upstream request.
 type Credentials struct {
 	APIKey []byte // never logged
-	Source string // credSourceBYOK | credSourceClient | credSourceSubscription
-	// OAuth marks a Claude subscription bearer (sk-ant-oat-): it authenticates
-	// via Authorization: Bearer + the oauth beta header, never x-api-key, and is
-	// only ever resolved for Anthropic. Zero value (false) = a normal API key.
+	Source string // credSourceBYOK | credSourceClient | credSourceSubscription | credSourceCodexSubscription
+	// OAuth marks a subscription bearer — a Claude subscription token
+	// (sk-ant-oat-, resolved only for Anthropic) or a Codex ChatGPT JWT
+	// (resolved only for OpenAI). It authenticates via Authorization: Bearer
+	// and never x-api-key. Zero value (false) = a normal API key.
 	OAuth bool
+	// AccountID is the ChatGPT-Account-ID paired with a Codex subscription
+	// bearer; the Codex backend 401/403s without it. Set only for Codex
+	// subscription credentials, never logged, empty otherwise.
+	AccountID []byte
 }
 
 // ExternalAPIKeysContextKey is the request-context key for external API keys
@@ -99,6 +111,18 @@ func ExtractClientCredentials(provider string, headers http.Header) *Credentials
 		authHeader := headers.Get("Authorization")
 		if raw, found := strings.CutPrefix(authHeader, "Bearer "); found {
 			key := strings.TrimSpace(raw)
+			// A Codex ChatGPT subscription bearer arrives on the OpenAI surface
+			// with a ChatGPT-Account-ID header; that pairing is the signal that
+			// distinguishes the subscription JWT from a plain client API key, so
+			// we resolve it before the client-key branch. OpenAI-only — the JWT
+			// can't authenticate any other Bearer-using upstream, and a caller's
+			// stray ChatGPT-Account-ID on a non-OpenAI route must not reclassify
+			// that route's bearer.
+			if provider == providers.ProviderOpenAI {
+				if sub := codexSubscriptionCreds(key, headers.Get(chatGPTAccountIDHeader)); sub != nil {
+					return sub
+				}
+			}
 			// Reject Anthropic-shaped tokens (API keys AND OAuth bearers)
 			// here so one Bearer header doesn't get misidentified as creds
 			// for every Bearer-using provider.
@@ -135,6 +159,30 @@ func subscriptionCredsFromToken(token string) *Credentials {
 		return nil
 	}
 	return &Credentials{APIKey: []byte(token), Source: credSourceSubscription, OAuth: true}
+}
+
+// codexSubscriptionCreds returns Codex (ChatGPT) subscription credentials for a
+// bare OAuth access token paired with its ChatGPT account id, or nil if the
+// pair isn't a usable Codex subscription. The token is a ChatGPT-login JWT
+// (eyJ…); we reject router keys (rk_) and OpenAI API keys (sk-…), and require a
+// non-empty account id because the Codex backend (chatgpt.com/backend-api/codex)
+// 401/403s without the ChatGPT-Account-ID header. OpenAI-only: the JWT can't
+// authenticate any other upstream.
+func codexSubscriptionCreds(token, accountID string) *Credentials {
+	token = strings.TrimSpace(token)
+	accountID = strings.TrimSpace(accountID)
+	if token == "" || accountID == "" {
+		return nil
+	}
+	if auth.HasAPIKeyPrefix(token) || strings.HasPrefix(token, "sk-") {
+		return nil
+	}
+	return &Credentials{
+		APIKey:    []byte(token),
+		AccountID: []byte(accountID),
+		Source:    credSourceCodexSubscription,
+		OAuth:     true,
+	}
 }
 
 // subscriptionCredsFromHeaderValue resolves the dedicated

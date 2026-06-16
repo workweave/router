@@ -23,6 +23,34 @@ import (
 
 const DefaultBaseURL = "https://api.openai.com"
 
+// Codex (ChatGPT) subscription backend. A caller's ChatGPT plan authenticates
+// only against this base URL over the Responses API — never api.openai.com —
+// and requires the ChatGPT-Account-ID header paired with the OAuth bearer
+// (401/403 without it). These mirror what the Codex CLI sends (codex_cli_rs).
+const (
+	chatGPTCodexBaseURL   = "https://chatgpt.com/backend-api/codex"
+	codexResponsesPath    = "/responses"
+	codexAccountIDHeader  = "ChatGPT-Account-ID"
+	codexOpenAIBetaHeader = "OpenAI-Beta"
+	codexOpenAIBetaValue  = "responses=experimental"
+	codexOriginatorHeader = "originator"
+	codexOriginatorValue  = "codex_cli_rs"
+	codexUserAgentHeader  = "User-Agent"
+	codexUserAgentValue   = "codex_cli_rs"
+)
+
+// codexSubscriptionCreds returns the resolved per-request credential when it is
+// a Codex (ChatGPT) subscription bearer — an OAuth token carrying a paired
+// ChatGPT account id — and nil otherwise. Such a turn must dispatch to the
+// Codex backend over the Responses API instead of api.openai.com.
+func codexSubscriptionCreds(ctx context.Context) *proxy.Credentials {
+	creds := proxy.CredentialsFromContext(ctx)
+	if creds != nil && creds.OAuth && len(creds.AccountID) > 0 {
+		return creds
+	}
+	return nil
+}
+
 // responseHeaderTimeout guards time-to-first-byte for OpenAI upstreams. It is
 // raised above the 30s default because the Responses API (gpt-5.x reasoning)
 // can take well over 30s to emit its first streamed event under high effort;
@@ -48,6 +76,10 @@ type Client struct {
 	// default via NewClient; tests inject a small value to exercise the
 	// output-stall trip without waiting out the real threshold.
 	outputStall time.Duration
+	// codexBaseURL is the base URL for the Codex (ChatGPT) subscription backend.
+	// Production uses chatGPTCodexBaseURL; tests override it to point a Codex
+	// dispatch at an httptest server.
+	codexBaseURL string
 }
 
 func NewClient(apiKey, baseURL string) *Client {
@@ -64,9 +96,10 @@ func NewClientWithResponseHeaderTimeout(apiKey, baseURL string, headerTimeout ti
 		baseURL = DefaultBaseURL
 	}
 	return &Client{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		http:    &http.Client{Transport: httputil.NewTransportWithResponseHeaderTimeout(5*time.Second, 5*time.Second, headerTimeout)},
+		apiKey:       apiKey,
+		baseURL:      baseURL,
+		codexBaseURL: chatGPTCodexBaseURL,
+		http:         &http.Client{Transport: httputil.NewTransportWithResponseHeaderTimeout(5*time.Second, 5*time.Second, headerTimeout)},
 	}
 }
 
@@ -161,11 +194,20 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
+	// A Codex (ChatGPT) subscription turn dispatches to the Codex backend over
+	// the Responses API; everything else uses the configured base URL + the
+	// endpoint-appropriate path.
+	codexCreds := codexSubscriptionCreds(ctx)
+	baseURL := c.baseURL
 	path := "/v1/chat/completions"
 	if prep.Endpoint == providers.EndpointResponses {
 		path = "/v1/responses"
 	}
-	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(prep.Body))
+	if codexCreds != nil {
+		baseURL = c.codexBaseURL
+		path = codexResponsesPath
+	}
+	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(prep.Body))
 	if err != nil {
 		return fmt.Errorf("build upstream request: %w", err)
 	}
@@ -176,6 +218,15 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	}
 	if v := r.Header.Get("Accept"); v != "" {
 		upstream.Header.Set("Accept", v)
+	}
+	// Codex backend required headers, set AFTER the prep.Headers copy so they
+	// are never clobbered. setAuth has already written Authorization: Bearer
+	// <jwt> from the resolved OAuth credential.
+	if codexCreds != nil {
+		upstream.Header.Set(codexAccountIDHeader, string(codexCreds.AccountID))
+		upstream.Header.Set(codexOpenAIBetaHeader, codexOpenAIBetaValue)
+		upstream.Header.Set(codexOriginatorHeader, codexOriginatorValue)
+		upstream.Header.Set(codexUserAgentHeader, codexUserAgentValue)
 	}
 
 	t := otel.TimingFrom(ctx)
@@ -379,7 +430,14 @@ func truncateBytes(b []byte, n int) string {
 }
 
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
+	// A Codex (ChatGPT) subscription authenticates only against the Codex
+	// backend's Responses endpoint; otherwise pass the inbound path through to
+	// the configured base URL.
+	codexCreds := codexSubscriptionCreds(ctx)
 	url := c.baseURL + r.URL.Path
+	if codexCreds != nil {
+		url = c.codexBaseURL + codexResponsesPath
+	}
 	if r.URL.RawQuery != "" {
 		url += "?" + r.URL.RawQuery
 	}
@@ -397,6 +455,12 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	}
 	if v := r.Header.Get("Accept"); v != "" {
 		upstream.Header.Set("Accept", v)
+	}
+	if codexCreds != nil {
+		upstream.Header.Set(codexAccountIDHeader, string(codexCreds.AccountID))
+		upstream.Header.Set(codexOpenAIBetaHeader, codexOpenAIBetaValue)
+		upstream.Header.Set(codexOriginatorHeader, codexOriginatorValue)
+		upstream.Header.Set(codexUserAgentHeader, codexUserAgentValue)
 	}
 
 	resp, err := c.http.Do(upstream)

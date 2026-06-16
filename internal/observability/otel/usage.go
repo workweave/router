@@ -252,6 +252,11 @@ func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreati
 	if !usage.Exists() && provider == providerAnthropic {
 		usage = gjson.GetBytes(data, "message.usage")
 	}
+	// OpenAI Responses streaming nests usage under the terminal response event
+	// (response.completed); the non-streaming body carries it at the top level.
+	if !usage.Exists() && provider == providerOpenAI {
+		usage = gjson.GetBytes(data, "response.usage")
+	}
 	if !usage.Exists() {
 		return 0, 0, 0, 0, false
 	}
@@ -263,9 +268,19 @@ func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreati
 		cacheCreation = int(usage.Get("cache_creation_input_tokens").Int())
 		cacheRead = int(usage.Get("cache_read_input_tokens").Int())
 	case providerOpenAI, providerGoogle:
-		input = int(usage.Get("prompt_tokens").Int())
-		output = int(usage.Get("completion_tokens").Int())
-		cacheRead = int(usage.Get("prompt_tokens_details.cached_tokens").Int())
+		// Chat Completions uses prompt_tokens/completion_tokens; the Responses
+		// API (Codex backend passthrough) uses input_tokens/output_tokens with
+		// input_tokens_details.cached_tokens. Probe both so one extractor serves
+		// both OpenAI surfaces.
+		if pt := usage.Get("prompt_tokens"); pt.Exists() {
+			input = int(pt.Int())
+			output = int(usage.Get("completion_tokens").Int())
+			cacheRead = int(usage.Get("prompt_tokens_details.cached_tokens").Int())
+		} else {
+			input = int(usage.Get("input_tokens").Int())
+			output = int(usage.Get("output_tokens").Int())
+			cacheRead = int(usage.Get("input_tokens_details.cached_tokens").Int())
+		}
 	default:
 		return 0, 0, 0, 0, false
 	}
