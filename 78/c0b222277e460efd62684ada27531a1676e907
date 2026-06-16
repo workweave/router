@@ -1,0 +1,24 @@
+internal/proxy/service.go
+  s_74c1d8358797be::t_409c978018dc54 897-899
+  s_74c1d8358797be::t_14622cf44e3747 925-929
+  s_74c1d8358797be::t_56567ea70d6ac4 1349
+  s_74c1d8358797be::t_139e2dab41d6e2 2560
+internal/proxy/service_cache_test.go
+  s_74c1d8358797be::t_3bdeaee3c009b5 182-187,191-193,208,214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "78c0b222277e460efd62684ada27531a1676e907",
+  "prompts": {},
+  "sessions": {
+    "s_74c1d8358797be": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3922321c-192c-48af-aa2f-c6638fdf350c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

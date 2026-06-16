@@ -1,0 +1,24 @@
+install/npm/scripts/copy-installer.js
+  s_d3fc1c517ba243::t_32eaad965daf5c 42
+  s_d3fc1c517ba243::t_9ce4376b1fc00c 20
+  s_d3fc1c517ba243::t_28e8c282165cce 39
+  s_d3fc1c517ba243::t_e1efd11e1c6233 62
+  s_d3fc1c517ba243::t_6e4337dc3d1b86 35
+  s_d3fc1c517ba243::t_6ae74cb9c29c9b 57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "8ce8755ccaff0a59a1b1738e1fd380114d801cf8",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
