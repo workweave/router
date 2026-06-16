@@ -20,9 +20,12 @@
 name: Cluster Routing Review
 
 on:
+  # Runs on every PR (no paths filter) so the required status check
+  # `cluster-routing/acknowledged` is reported on every PR — a PR that doesn't
+  # touch artifacts short-circuits to a passing status (gate=skip). With a
+  # paths filter the workflow wouldn't run on non-artifact PRs, and a required
+  # check that never reports blocks merge forever.
   pull_request:
-    paths:
-      - "internal/router/cluster/artifacts/**"
   issue_comment:
     types: [created, edited]
 
