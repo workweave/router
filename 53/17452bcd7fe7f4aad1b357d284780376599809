@@ -1,0 +1,19 @@
+cmd/routing-report/main_test.go
+  s_c5c3a4e3dd2fe4::t_ca954ec568e341 59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "5317452bcd7fe7f4aad1b357d284780376599809",
+  "prompts": {},
+  "sessions": {
+    "s_c5c3a4e3dd2fe4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8d2654f-a38b-4c45-aa60-fdc811fcf202",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
