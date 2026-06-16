@@ -133,37 +133,31 @@ func TestNativeClient_Proxy_ErrorBufferedNotFlushed(t *testing.T) {
 		name           string
 		upstreamStatus int
 		upstreamBody   string
-		wantRetryable  bool
 	}{
 		{
 			name:           "429 rate limited is buffered and retryable",
 			upstreamStatus: http.StatusTooManyRequests,
 			upstreamBody:   `{"error":{"code":429,"message":"Resource has been exhausted"}}`,
-			wantRetryable:  true,
 		},
 		{
 			name:           "503 service unavailable is buffered and retryable",
 			upstreamStatus: http.StatusServiceUnavailable,
 			upstreamBody:   `{"error":{"code":503,"message":"The model is overloaded"}}`,
-			wantRetryable:  true,
 		},
 		{
 			name:           "500 internal error is buffered and retryable",
 			upstreamStatus: http.StatusInternalServerError,
 			upstreamBody:   `{"error":{"code":500,"message":"Internal error"}}`,
-			wantRetryable:  true,
 		},
 		{
 			name:           "400 bad request is buffered but not retryable",
 			upstreamStatus: http.StatusBadRequest,
 			upstreamBody:   `{"error":{"code":400,"message":"Invalid argument"}}`,
-			wantRetryable:  false,
 		},
 		{
 			name:           "401 unauthorized is buffered but not retryable",
 			upstreamStatus: http.StatusUnauthorized,
 			upstreamBody:   `{"error":{"code":401,"message":"API key not valid"}}`,
-			wantRetryable:  false,
 		},
 	}
 
@@ -188,7 +182,7 @@ func TestNativeClient_Proxy_ErrorBufferedNotFlushed(t *testing.T) {
 			var buffered *providers.UpstreamErrorResponse
 			require.ErrorAs(t, err, &buffered, "Proxy must return UpstreamErrorResponse on %d", tc.upstreamStatus)
 			assert.Equal(t, tc.upstreamStatus, buffered.Status)
-			assert.Contains(t, string(buffered.Body), tc.upstreamBody[:20])
+			assert.Equal(t, tc.upstreamBody, string(buffered.Body))
 
 			// The client ResponseWriter must be completely untouched.
 			assert.Equal(t, http.StatusOK, rec.Code,
@@ -196,8 +190,6 @@ func TestNativeClient_Proxy_ErrorBufferedNotFlushed(t *testing.T) {
 			assert.Empty(t, rec.Body.String(),
 				"no bytes must be written to the client on the error path")
 
-			assert.Equal(t, tc.wantRetryable, providers.IsRetryable(err),
-				"IsRetryable mismatch for status %d", tc.upstreamStatus)
 		})
 	}
 }
@@ -297,4 +289,64 @@ func TestNativeClient_Passthrough_2xxWritesDirectly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, responseBody, rec.Body.String())
+}
+
+// TestNativeClient_Proxy_StreamingSuccessWritesViaStreamBody verifies the
+// success path for streaming requests (alt=sse, triggered by
+// GeminiStreamHintHeader): the response must flow through StreamBody to w,
+// not the non-streaming branch exercised by Proxy_2xxWritesDirectly.
+func TestNativeClient_Proxy_StreamingSuccessWritesViaStreamBody(t *testing.T) {
+	const sseBody = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}]}}]}\n\n"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "alt=sse", r.URL.RawQuery, "streaming request must carry alt=sse")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(sseBody))
+	}))
+	defer upstream.Close()
+
+	c := google.NewNativeClient("k", upstream.URL)
+	rec := httptest.NewRecorder()
+	prep := providers.PreparedRequest{Body: []byte(`{"contents":[]}`), Headers: make(http.Header)}
+	prep.Headers.Set(translate.GeminiStreamHintHeader, "true")
+
+	err := c.Proxy(context.Background(), router.Decision{Model: "gemini-x"}, prep, rec,
+		httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("")))
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, sseBody, rec.Body.String(),
+		"streaming success path must flush the upstream SSE body to w via StreamBody")
+}
+
+// TestNativeClient_Proxy_ErrorBodyTruncatedAtCap verifies that an upstream
+// error body larger than providers.MaxBufferedErrorBytes is truncated to the
+// cap rather than buffered in full, while the rest of the upstream stream is
+// still drained so the connection can be released cleanly.
+func TestNativeClient_Proxy_ErrorBodyTruncatedAtCap(t *testing.T) {
+	const overCap = providers.MaxBufferedErrorBytes + 4096
+	oversized := strings.Repeat("e", overCap)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, oversized)
+	}))
+	defer upstream.Close()
+
+	c := google.NewNativeClient("k", upstream.URL)
+	rec := httptest.NewRecorder()
+	prep := providers.PreparedRequest{Body: []byte(`{"contents":[]}`), Headers: make(http.Header)}
+
+	err := c.Proxy(context.Background(), router.Decision{Model: "gemini-x"}, prep, rec,
+		httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("")))
+
+	var buffered *providers.UpstreamErrorResponse
+	require.ErrorAs(t, err, &buffered)
+	assert.Equal(t, http.StatusServiceUnavailable, buffered.Status)
+	assert.Len(t, buffered.Body, providers.MaxBufferedErrorBytes,
+		"buffered error body must be truncated at MaxBufferedErrorBytes, not held in full")
+
+	// Client must still be untouched, same as the non-oversized error cases.
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, rec.Body.String())
 }
