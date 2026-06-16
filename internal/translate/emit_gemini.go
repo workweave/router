@@ -1415,7 +1415,15 @@ func sanitizeSchemaFiltered(v any, filterKeys bool) any {
 		// whole request with INVALID_ARGUMENT. The keyword allow-list above
 		// keeps these keys but never reconciles them, so prune "required"
 		// down to the properties that actually survived translation.
-		out = pruneDanglingRequired(out)
+		//
+		// Only do this in schema-node context (filterKeys). Inside a
+		// "properties" map (filterKeys == false) the keys are user-defined
+		// parameter names, so a parameter literally named "required" is a
+		// property schema — not the "required" keyword — and must be left
+		// untouched.
+		if filterKeys {
+			out = pruneDanglingRequired(out)
+		}
 		return out
 	case []any:
 		out := make([]any, len(node))
