@@ -1,0 +1,67 @@
+internal/translate/features.go
+  s_3f8d95a685b537::t_1e6996f37a5fbe 222
+  s_3f8d95a685b537::t_bc1db188b42ee1 260
+db/queries/model_router_request_telemetry.sql
+  s_3f8d95a685b537::t_958fe0d88d5069 12-13
+  s_3f8d95a685b537::t_8b848c37d782da 14-18
+  s_3f8d95a685b537::t_3814f3b0d5c570 60-62
+  s_3f8d95a685b537::t_131b19db1d51f0 67-69
+  s_3f8d95a685b537::t_12d7cd64d409cb 70-71
+  s_3f8d95a685b537::t_f8b629363b474a 109-111
+  s_3f8d95a685b537::t_9d923aa16f18a0 119-121
+  s_3f8d95a685b537::t_38fdbf94376b7c 122-123
+internal/postgres/telemetry.go
+  s_3f8d95a685b537::t_e66e90bd6959fc 99-100
+  s_3f8d95a685b537::t_be8c828c18489a 101-103
+  s_3f8d95a685b537::t_c1af2fa75fd749 104
+internal/proxy/telemetry.go
+  s_3f8d95a685b537::t_e9fbf047e487c2 73-78
+  s_3f8d95a685b537::t_230164dac7575d 79-86
+  s_3f8d95a685b537::t_78e7edc2415d60 87-91
+internal/translate/gemini_envelope_test.go
+  s_3f8d95a685b537::t_7b07d3141c7513 73
+  s_3f8d95a685b537::t_b2df7899d159d2 83
+internal/translate/envelope_extras_test.go
+  s_3f8d95a685b537::t_acbe9f6f1c01ba 95,106,117
+  s_3f8d95a685b537::t_742446c18574d7 160
+  s_3f8d95a685b537::t_f095060cdd8d3a 169
+internal/translate/envelope.go
+  s_3f8d95a685b537::t_8365197c79a2be 244-248
+internal/translate/features_gemini.go
+  s_3f8d95a685b537::t_116f795f71ddd1 178
+db/migrations/0023_telemetry-tool-result-bytes.up.sql
+  s_3f8d95a685b537::t_90dd8afa05697f 1-31
+db/migrations/0023_telemetry-tool-result-bytes.down.sql
+  s_3f8d95a685b537::t_9869f516c98e6f 1-15
+internal/proxy/service.go
+  s_3f8d95a685b537::t_f336c08961e1b9 1274-1280
+  s_3f8d95a685b537::t_d330ffdd9ea6d4 1683
+  s_3f8d95a685b537::t_2ee68b8efdeccd 1760,1769
+  s_3f8d95a685b537::t_4e163502d5eadb 1761-1768
+  s_3f8d95a685b537::t_2a065869069edd 1776-1781
+  s_3f8d95a685b537::t_33bc8fd5488217 1782,2900
+  s_3f8d95a685b537::t_5bfcddc87bc099 1783-1786,2901-2904
+  s_3f8d95a685b537::t_afad12a7ba47a1 2166,2171-2177
+  s_3f8d95a685b537::t_a3beafe7a6c364 2167-2170
+  s_3f8d95a685b537::t_9684d30efedee5 2178-2190
+  s_3f8d95a685b537::t_9f59863b065fcc 2812,2814
+  s_3f8d95a685b537::t_f8706cc7502f90 2869,2871
+  s_3f8d95a685b537::t_0b1f49a05d5a6e 2870
+  s_3f8d95a685b537::t_2b76b202e99285 2895-2899
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "f2ef71ca4b8a8e4d472aad00a5b528620bd4f55f",
+  "prompts": {},
+  "sessions": {
+    "s_3f8d95a685b537": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "86141471-a1a5-4e3a-bdf9-190038e3d42d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
