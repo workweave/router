@@ -56,11 +56,7 @@ func TestReportRunsOnLatest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load emb: %v", err)
 	}
-	byText := make(map[string][]float32, len(probes))
-	for i, p := range probes {
-		byText[p.Text] = vecs[i]
-	}
-	emb := &staticEmbedder{id: hdr.EmbedderID, dim: hdr.EmbedDim, byText: byText}
+	emb := buildEmbedder(hdr, probes, vecs)
 
 	res, err := routeCorpus(testArtifacts, latest, probes, emb, 2)
 	if err != nil {
