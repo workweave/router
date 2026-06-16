@@ -1409,6 +1409,13 @@ func sanitizeSchemaFiltered(v any, filterKeys bool) any {
 				out["items"] = map[string]any{"type": "string"}
 			}
 		}
+		// Gemini's function-calling validator requires every entry in
+		// "required" to name a key present in "properties"; a dangling entry
+		// (common in hand-written MCP tool schemas) makes Google reject the
+		// whole request with INVALID_ARGUMENT. The keyword allow-list above
+		// keeps these keys but never reconciles them, so prune "required"
+		// down to the properties that actually survived translation.
+		out = pruneDanglingRequired(out)
 		return out
 	case []any:
 		out := make([]any, len(node))
@@ -1419,6 +1426,36 @@ func sanitizeSchemaFiltered(v any, filterKeys bool) any {
 	default:
 		return v
 	}
+}
+
+// pruneDanglingRequired drops any name in out["required"] that is not a key in
+// out["properties"], and removes "required" entirely when nothing valid remains
+// (or there are no properties at all). Gemini's strict function-calling schema
+// validator 400s ("Request contains an invalid argument") when "required"
+// references a property that does not exist — well-formed JSON Schema permits
+// it, so the inbound tool schema may carry one even after keyword filtering.
+func pruneDanglingRequired(out map[string]any) map[string]any {
+	req, ok := out["required"].([]any)
+	if !ok {
+		return out
+	}
+	props, _ := out["properties"].(map[string]any)
+	kept := make([]any, 0, len(req))
+	for _, name := range req {
+		s, isStr := name.(string)
+		if !isStr {
+			continue
+		}
+		if _, present := props[s]; present {
+			kept = append(kept, s)
+		}
+	}
+	if len(kept) == 0 {
+		delete(out, "required")
+		return out
+	}
+	out["required"] = kept
+	return out
 }
 
 // collapseTypeArray collapses JSON Schema ["array", "null"] into Gemini's
