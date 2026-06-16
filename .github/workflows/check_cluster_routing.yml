@@ -3,28 +3,23 @@
 # Cluster routing review gate.
 #
 # When a PR changes the deployed clustering model (the `latest` pointer under
-# internal/router/cluster/artifacts/), the `report` job routes a labeled probe
-# corpus through the real Scorer and posts a sticky PR comment showing where
-# each register (conversational / trivial / coding / agentic) now routes, plus
-# a diff vs the currently-deployed artifact. Merge is blocked by the required
+# internal/router/cluster/artifacts/), this routes a labeled probe corpus
+# through the real Scorer and posts a sticky PR comment showing where each
+# register (conversational / trivial / coding / agentic) now routes, plus a
+# diff vs the currently-deployed artifact. Merge is blocked by the required
 # status `cluster-routing/acknowledged` until a maintainer ticks the checkbox
 # in that comment. Any later change to `latest` rewrites the report (new hash)
 # and unticks the box, re-blocking — so a stale sign-off can't ship.
 #
-# Two jobs by design:
-#   * report      — runs ONLY on pull_request. Checks out + runs PR code to
-#                   render the report. pull_request gives fork PRs a read-only
-#                   token, so executing PR code here is not privileged.
-#   * acknowledge — runs ONLY on issue_comment, with NO checkout and NO code
-#                   execution. It just reads the tick state of the bot's own
-#                   sticky comment and sets the status. This keeps untrusted
-#                   PR code out of the privileged (write-token) issue_comment
-#                   context (CodeQL: "checkout of untrusted code in a
-#                   privileged context").
+# Privilege separation (CodeQL "checkout of untrusted code in a privileged
+# context"): the only job that checks out and runs PR code (`report`) has
+# read-only permissions and emits its result as an artifact. The jobs that
+# hold write permissions (`publish`, `acknowledge`) never check out or execute
+# PR code — they only call the API. So untrusted code never runs with a
+# write-scoped token.
 #
-# Only a tick on the BOT's sticky comment counts — and only repo writers can
-# edit another user's comment, so a third party can't forge an ack by posting
-# their own ticked comment.
+# Only a tick on the BOT's own sticky comment counts, and only repo writers
+# can edit another user's comment, so a third party can't forge an ack.
 #
 # The report runs with `-tags no_onnx`: probe embeddings are precomputed and
 # committed, so no ONNX runtime is needed (regenerate with
@@ -38,11 +33,9 @@ on:
   issue_comment:
     types: [created, edited]
 
+# Default to read-only; the publish/acknowledge jobs opt into write.
 permissions:
   contents: read
-  pull-requests: write
-  issues: write
-  statuses: write
 
 concurrency:
   group: cluster-routing-${{ github.event.pull_request.number || github.event.issue.number }}
@@ -54,10 +47,14 @@ env:
   BOT_LOGIN: "github-actions[bot]"
 
 jobs:
+  # Checks out + runs PR code, but with READ-ONLY permissions. Emits the
+  # rendered report + metadata as an artifact for the privileged publish job.
   report:
     name: Routing review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout PR head
         uses: actions/checkout@v4
@@ -71,84 +68,102 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Determine target + baseline artifact
-        id: vers
+      - name: Render report + metadata
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           ART=internal/router/cluster/artifacts
+          mkdir -p /tmp/out
           head_latest="$(tr -d '[:space:]' < "$ART/latest")"
           base_latest="$(git show "$BASE_SHA:$ART/latest" 2>/dev/null | tr -d '[:space:]' || echo '')"
+          gate=skip; target=''; baseline=''
           if [ "$head_latest" != "$base_latest" ]; then
-            echo "gate=true" >> "$GITHUB_OUTPUT"
-            echo "target=$head_latest" >> "$GITHUB_OUTPUT"
-            echo "baseline=$base_latest" >> "$GITHUB_OUTPUT"
+            gate=true; target="$head_latest"; baseline="$base_latest"
           else
             changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- "$ART/" \
               | grep -oE 'artifacts/v[0-9]+\.[0-9]+/' | sed -E 's#artifacts/##; s#/##' \
               | sort -uV | tail -1 || true)"
-            if [ -z "$changed" ]; then
-              echo "gate=skip" >> "$GITHUB_OUTPUT"
-            else
-              echo "gate=false" >> "$GITHUB_OUTPUT"
-              echo "target=$changed" >> "$GITHUB_OUTPUT"
-              echo "baseline=$head_latest" >> "$GITHUB_OUTPUT"
-            fi
+            if [ -n "$changed" ]; then gate=false; target="$changed"; baseline="$head_latest"; fi
           fi
+          if [ "$gate" != "skip" ]; then
+            args=(--target "$target")
+            if [ -n "$baseline" ]; then args+=(--baseline "$baseline"); fi
+            go run -tags no_onnx ./cmd/routing-report "${args[@]}" --out /tmp/out/report.md
+            cat /tmp/out/report.md
+          fi
+          # Metadata for the privileged publish job (which never checks out code).
+          printf '{"gate":"%s","head_sha":"%s","pr_number":%s}\n' \
+            "$gate" "$HEAD_SHA" "$PR_NUMBER" > /tmp/out/meta.json
+          cat /tmp/out/meta.json
 
-      - name: Render routing report
-        if: steps.vers.outputs.gate != 'skip'
-        env:
-          TARGET: ${{ steps.vers.outputs.target }}
-          BASELINE: ${{ steps.vers.outputs.baseline }}
-        run: |
-          set -euo pipefail
-          args=(--target "$TARGET")
-          if [ -n "$BASELINE" ]; then args+=(--baseline "$BASELINE"); fi
-          go run -tags no_onnx ./cmd/routing-report "${args[@]}" --out /tmp/routing_report.md
-          cat /tmp/routing_report.md
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: routing-report
+          path: /tmp/out
+          retention-days: 1
+
+  # Holds write permissions but never checks out or runs PR code: it only
+  # consumes the artifact and calls the API.
+  publish:
+    name: Routing review publish
+    needs: report
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+      statuses: write
+    steps:
+      - name: Download report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: routing-report
+          path: /tmp/out
 
       - name: Upsert comment and set status
-        if: steps.vers.outputs.gate != 'skip'
         uses: actions/github-script@v7
-        env:
-          GATE: ${{ steps.vers.outputs.gate }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         with:
           script: |
             const fs = require('fs');
             const crypto = require('crypto');
-            const pr = Number(process.env.PR_NUMBER);
-            const headSha = process.env.HEAD_SHA;
-            const gate = process.env.GATE === 'true';
+            const meta = JSON.parse(fs.readFileSync('/tmp/out/meta.json', 'utf8'));
+            const pr = Number(meta.pr_number);
+            const headSha = meta.head_sha;
+            const gate = meta.gate; // 'true' | 'false' | 'skip'
             const CHECK = process.env.CHECK_CONTEXT;
+
+            if (gate === 'skip') {
+              await github.rest.repos.createCommitStatus({
+                ...context.repo, sha: headSha, context: CHECK,
+                state: 'success', description: 'No deployed-model change',
+              });
+              return;
+            }
+
             const PREFIX = process.env.COMMENT_MARKER_PREFIX;
             const BOT = process.env.BOT_LOGIN;
             const ACK_RE = /- \[[xX]\] I have reviewed/;
-
-            const report = fs.readFileSync('/tmp/routing_report.md', 'utf8').trim();
+            const gating = gate === 'true';
+            const report = fs.readFileSync('/tmp/out/report.md', 'utf8').trim();
             const hash = crypto.createHash('sha256').update(report).digest('hex').slice(0, 12);
             const marker = `${PREFIX}${hash} -->`;
 
-            // Only the bot's own sticky comment can carry an acknowledgment.
+            // Acknowledgment lives only on the bot's own sticky comment.
             const comments = await github.paginate(github.rest.issues.listComments, {
               ...context.repo, issue_number: pr, per_page: 100,
             });
-            const existing = comments.find(c =>
-              c.user.login === BOT && c.body.includes(PREFIX));
-
-            // Acknowledged only if the box is ticked on a bot comment carrying
-            // the CURRENT report hash; a report change invalidates it.
+            const existing = comments.find(c => c.user.login === BOT && c.body.includes(PREFIX));
             const ticked = !!existing && existing.body.includes(marker) && ACK_RE.test(existing.body);
 
             const box = ticked ? '[x]' : '[ ]';
-            const note = gate
+            const note = gating
               ? '> ⚠️ **This PR changes the deployed router (`latest`).** Review where conversational / trivial turns now land, then tick the box below to unblock merge.'
               : '> ℹ️ Informational — candidate artifact (`latest` unchanged); no sign-off required.';
-            const ackBlock = gate
+            const ackBlock = gating
               ? `\n\n---\n- ${box} I have reviewed the routing distribution above and accept it.\n\n_Ticking this unblocks merge. Any further change to \`latest\` resets it._`
               : '';
             const body = `${marker}\n### 🧭 Cluster routing review\n${note}\n\n${report}${ackBlock}`;
@@ -159,31 +174,17 @@ jobs:
               await github.rest.issues.createComment({ ...context.repo, issue_number: pr, body });
             }
 
-            const state = (!gate || ticked) ? 'success' : 'failure';
-            const description = !gate
+            const state = (!gating || ticked) ? 'success' : 'failure';
+            const description = !gating
               ? 'Candidate artifact — no deployed-model change'
               : (ticked ? 'Routing distribution acknowledged' : 'Review the routing report and tick the box to unblock');
             await github.rest.repos.createCommitStatus({ ...context.repo, sha: headSha, context: CHECK, state, description });
 
-      - name: Pass check when no artifact-version change
-        if: steps.vers.outputs.gate == 'skip'
-        uses: actions/github-script@v7
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        with:
-          script: |
-            await github.rest.repos.createCommitStatus({
-              ...context.repo, sha: process.env.HEAD_SHA,
-              context: process.env.CHECK_CONTEXT, state: 'success',
-              description: 'No deployed-model change',
-            });
-
+  # Fires when a human edits/creates the BOT's own sticky comment. No checkout,
+  # no code execution — only repo writers can edit another user's comment, so a
+  # third party cannot forge an acknowledgment.
   acknowledge:
-    name: Routing review
-    # Fires only when a human edits/creates the BOT's own sticky comment.
-    # No checkout, no code execution -> no untrusted code in this write-token
-    # context. Only repo writers can edit another user's comment, so a third
-    # party cannot forge an acknowledgment.
+    name: Routing review acknowledge
     if: >-
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request != null &&
@@ -191,6 +192,9 @@ jobs:
       github.event.comment.user.login == 'github-actions[bot]' &&
       contains(github.event.comment.body, '<!-- cluster-routing-report:')
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+      statuses: write
     steps:
       - name: Set status from checkbox state
         uses: actions/github-script@v7
@@ -200,23 +204,16 @@ jobs:
           script: |
             const pr = Number(process.env.PR_NUMBER);
             const CHECK = process.env.CHECK_CONTEXT;
-            const PREFIX = process.env.COMMENT_MARKER_PREFIX;
             const ACK_RE = /- \[[xX]\] I have reviewed/;
-
             const body = context.payload.comment.body;
-            // Only gating reports carry the checkbox; a candidate (informational)
-            // comment has no ack line, so there's nothing to toggle.
-            if (!ACK_RE.test(body) && !body.includes('I have reviewed')) {
-              core.info('No acknowledgment checkbox in this comment; nothing to do.');
+            if (!body.includes('I have reviewed')) {
+              core.info('Informational comment (no checkbox); nothing to do.');
               return;
             }
             const ticked = ACK_RE.test(body);
-
             const { data: prData } = await github.rest.pulls.get({ ...context.repo, pull_number: pr });
-            const headSha = prData.head.sha;
-
             await github.rest.repos.createCommitStatus({
-              ...context.repo, sha: headSha, context: CHECK,
+              ...context.repo, sha: prData.head.sha, context: CHECK,
               state: ticked ? 'success' : 'failure',
               description: ticked ? 'Routing distribution acknowledged' : 'Review the routing report and tick the box to unblock',
             });
