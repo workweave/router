@@ -1,0 +1,59 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# Acknowledgment side of the cluster routing gate (see check_cluster_routing.yml
+# for the report side). Kept in its own file, triggered ONLY by issue_comment,
+# so the issue_comment trigger never shares a file with a checkout of PR code —
+# this job has no checkout and runs no PR code, so the write-scoped token is
+# never exposed to untrusted code.
+#
+# Fires when a human edits/creates the BOT's own sticky routing comment. Only
+# repo writers can edit another user's comment, so a third party cannot forge
+# an acknowledgment by posting their own ticked comment.
+name: Cluster Routing Ack
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cluster-routing-ack-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  acknowledge:
+    name: Routing review acknowledge
+    if: >-
+      github.event.issue.pull_request != null &&
+      github.event.sender.type != 'Bot' &&
+      github.event.comment.user.login == 'github-actions[bot]' &&
+      contains(github.event.comment.body, '<!-- cluster-routing-report:')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Set status from checkbox state
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ github.event.issue.number }}
+          CHECK_CONTEXT: cluster-routing/acknowledged
+        with:
+          script: |
+            const pr = Number(process.env.PR_NUMBER);
+            const CHECK = process.env.CHECK_CONTEXT;
+            const ACK_RE = /- \[[xX]\] I have reviewed/;
+            const body = context.payload.comment.body;
+            if (!body.includes('I have reviewed')) {
+              core.info('Informational comment (no checkbox); nothing to do.');
+              return;
+            }
+            const ticked = ACK_RE.test(body);
+            const { data: prData } = await github.rest.pulls.get({ ...context.repo, pull_number: pr });
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: prData.head.sha, context: CHECK,
+              state: ticked ? 'success' : 'failure',
+              description: ticked ? 'Routing distribution acknowledged' : 'Review the routing report and tick the box to unblock',
+            });

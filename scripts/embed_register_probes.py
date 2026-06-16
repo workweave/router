@@ -12,10 +12,10 @@ Run this whenever you edit register_probes.jsonl or change the embedder. The
 Go check fails loudly (corpus sha mismatch) if the corpus moves without a
 regenerate, so a stale cache can't ship silently.
 
-Embedding matches the Go runtime jina path exactly: left-truncate to 256
-tokens, mean-pool over the attention mask, L2-normalize. Prompt text is
-tail-truncated to 1024 chars first (the Scorer's MaxPromptChars), though every
-probe is well under that.
+Embedding matches the Go runtime jina path exactly: tail-truncate the prompt
+to 1024 bytes (the Scorer's MaxPromptChars, byte-based with UTF-8 boundary
+snapping), left-truncate to 256 tokens, mean-pool over the attention mask,
+L2-normalize. Every probe is well under 1024 bytes today.
 
 Output format (little-endian), read by loadEmb in cmd/routing-report/main.go:
   magic   [4]byte  = "PEM1"
@@ -53,8 +53,22 @@ DEFAULT_ASSETS = REPO_ROOT / "assets"  # jina-v2-base-code-int8
 
 MAGIC = b"PEM1"
 MAX_TOKENS = 256
-MAX_PROMPT_CHARS = 1024  # Scorer MaxPromptChars (tail-truncate)
+MAX_PROMPT_BYTES = 1024  # Scorer MaxPromptChars (tail-truncate, byte-based)
 BATCH = 32
+
+
+def tail_truncate(s: str, max_bytes: int) -> str:
+    """Keep the last max_bytes bytes of s, advancing off any partial UTF-8
+    continuation byte. Byte-for-byte identical to the Go Scorer's tailTruncate
+    (and cmd/routing-report), so the cached vector matches the string the
+    Scorer embeds even for multibyte prompts."""
+    b = s.encode("utf-8")
+    if len(b) <= max_bytes:
+        return s
+    cut = len(b) - max_bytes
+    while cut < len(b) and (b[cut] & 0xC0) == 0x80:
+        cut += 1
+    return b[cut:].decode("utf-8")
 COMMENT = (
     "Precomputed register-probe embeddings so cmd/routing-report needs no ONNX "
     "runtime in CI. Regenerate with scripts/embed_register_probes.py when "
@@ -75,7 +89,7 @@ def embed(texts: list[str], assets_dir: Path) -> np.ndarray:
     out_name = sess.get_outputs()[0].name
     out: list[np.ndarray] = []
     for i in range(0, len(texts), BATCH):
-        batch = [t[-MAX_PROMPT_CHARS:] for t in texts[i : i + BATCH]]
+        batch = [tail_truncate(t, MAX_PROMPT_BYTES) for t in texts[i : i + BATCH]]
         enc = tok.encode_batch(batch)
         ids = np.array([e.ids for e in enc], dtype=np.int64)
         mask = np.array([e.attention_mask for e in enc], dtype=np.int64)

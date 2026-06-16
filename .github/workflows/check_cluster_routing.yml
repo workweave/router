@@ -13,13 +13,11 @@
 #
 # Privilege separation (CodeQL "checkout of untrusted code in a privileged
 # context"): the only job that checks out and runs PR code (`report`) has
-# read-only permissions and emits its result as an artifact. The jobs that
-# hold write permissions (`publish`, `acknowledge`) never check out or execute
-# PR code — they only call the API. So untrusted code never runs with a
-# write-scoped token.
-#
-# Only a tick on the BOT's own sticky comment counts, and only repo writers
-# can edit another user's comment, so a third party can't forge an ack.
+# read-only permissions and emits its result as an artifact. The `publish`
+# job holds write permissions but never checks out or executes PR code — it
+# only calls the API. This file is `pull_request`-only; the checkbox
+# acknowledgment (issue_comment) lives in cluster_routing_ack.yml so that no
+# checkout ever shares a file with the issue_comment trigger.
 #
 # The report runs with `-tags no_onnx`: probe embeddings are precomputed and
 # committed, so no ONNX runtime is needed (regenerate with
@@ -30,15 +28,13 @@ on:
   # No paths filter: the required status must be reported on every PR, so a PR
   # that doesn't touch artifacts short-circuits to a passing status.
   pull_request:
-  issue_comment:
-    types: [created, edited]
 
-# Default to read-only; the publish/acknowledge jobs opt into write.
+# Default to read-only; the publish job opts into write.
 permissions:
   contents: read
 
 concurrency:
-  group: cluster-routing-${{ github.event.pull_request.number || github.event.issue.number }}
+  group: cluster-routing-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 env:
@@ -179,41 +175,3 @@ jobs:
               ? 'Candidate artifact — no deployed-model change'
               : (ticked ? 'Routing distribution acknowledged' : 'Review the routing report and tick the box to unblock');
             await github.rest.repos.createCommitStatus({ ...context.repo, sha: headSha, context: CHECK, state, description });
-
-  # Fires when a human edits/creates the BOT's own sticky comment. No checkout,
-  # no code execution — only repo writers can edit another user's comment, so a
-  # third party cannot forge an acknowledgment.
-  acknowledge:
-    name: Routing review acknowledge
-    if: >-
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request != null &&
-      github.event.sender.type != 'Bot' &&
-      github.event.comment.user.login == 'github-actions[bot]' &&
-      contains(github.event.comment.body, '<!-- cluster-routing-report:')
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-      statuses: write
-    steps:
-      - name: Set status from checkbox state
-        uses: actions/github-script@v7
-        env:
-          PR_NUMBER: ${{ github.event.issue.number }}
-        with:
-          script: |
-            const pr = Number(process.env.PR_NUMBER);
-            const CHECK = process.env.CHECK_CONTEXT;
-            const ACK_RE = /- \[[xX]\] I have reviewed/;
-            const body = context.payload.comment.body;
-            if (!body.includes('I have reviewed')) {
-              core.info('Informational comment (no checkbox); nothing to do.');
-              return;
-            }
-            const ticked = ACK_RE.test(body);
-            const { data: prData } = await github.rest.pulls.get({ ...context.repo, pull_number: pr });
-            await github.rest.repos.createCommitStatus({
-              ...context.repo, sha: prData.head.sha, context: CHECK,
-              state: ticked ? 'success' : 'failure',
-              description: ticked ? 'Routing distribution acknowledged' : 'Review the routing report and tick the box to unblock',
-            });
