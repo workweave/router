@@ -74,13 +74,27 @@ type embHeader struct {
 	Comment      string `json:"comment"`
 }
 
+// maxPromptChars mirrors the Scorer's Config.MaxPromptChars: the Scorer
+// tail-truncates the prompt to this many bytes before calling Embed, so the
+// cache must be keyed by the same truncation.
+const maxPromptChars = 1024
+
 // staticEmbedder satisfies cluster.Embedder from precomputed vectors keyed by
-// probe text. Probes are <1024 bytes so the Scorer's tail-truncation is a
-// no-op and the full text is a valid key.
+// the tail-truncated probe text — the exact string the Scorer passes to
+// Embed — so a probe longer than maxPromptChars still resolves.
 type staticEmbedder struct {
 	id     string
 	dim    int
 	byText map[string][]float32
+}
+
+// buildEmbedder keys vectors by the truncated text the Scorer will request.
+func buildEmbedder(hdr embHeader, probes []probe, vecs [][]float32) *staticEmbedder {
+	byText := make(map[string][]float32, len(probes))
+	for i, p := range probes {
+		byText[tailTruncate(p.Text, maxPromptChars)] = vecs[i]
+	}
+	return &staticEmbedder{id: hdr.EmbedderID, dim: hdr.EmbedDim, byText: byText}
 }
 
 func (s *staticEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
@@ -92,6 +106,20 @@ func (s *staticEmbedder) Embed(_ context.Context, text string) ([]float32, error
 }
 func (s *staticEmbedder) ID() string { return s.id }
 func (s *staticEmbedder) Dim() int   { return s.dim }
+
+// tailTruncate keeps the last maxChars bytes of s, advancing off any partial
+// UTF-8 continuation byte. Byte-for-byte identical to the Scorer's helper, so
+// the cache key matches the string the Scorer embeds.
+func tailTruncate(s string, maxChars int) string {
+	if len(s) <= maxChars {
+		return s
+	}
+	cut := len(s) - maxChars
+	for cut < len(s) && (s[cut]&0xC0) == 0x80 {
+		cut++
+	}
+	return s[cut:]
+}
 
 func truncForErr(s string) string {
 	if len(s) > 60 {
@@ -144,11 +172,7 @@ func main() {
 	if hdr.N != len(probes) {
 		fatal("embedding cache has %d rows but corpus has %d", hdr.N, len(probes))
 	}
-	byText := make(map[string][]float32, len(probes))
-	for i, p := range probes {
-		byText[p.Text] = vecs[i]
-	}
-	embedder := &staticEmbedder{id: hdr.EmbedderID, dim: hdr.EmbedDim, byText: byText}
+	embedder := buildEmbedder(hdr, probes, vecs)
 
 	tgt, err := routeCorpus(*artifactsDir, *target, probes, embedder, *topP)
 	if err != nil {
@@ -162,7 +186,10 @@ func main() {
 		}
 	}
 
-	md := render(*target, *baseline, *topP, hdr.EmbedderID, probes, tgt, base)
+	// A change is deploy-affecting only when the target IS the deployed
+	// `latest`; a candidate diff (target != latest) is informational.
+	deployChange := base != nil && *target == latest
+	md := render(*target, *baseline, *topP, hdr.EmbedderID, deployChange, probes, tgt, base)
 	if *outPath != "" {
 		if err := os.WriteFile(*outPath, []byte(md), 0o644); err != nil {
 			fatal("write out: %v", err)
@@ -250,11 +277,14 @@ func availableProviders(b *cluster.Bundle) map[string]struct{} {
 
 // ---- rendering ----
 
-func render(target, baseline string, topP int, embedderID string, probes []probe, tgt, base *routeResult) string {
+func render(target, baseline string, topP int, embedderID string, deployChange bool, probes []probe, tgt, base *routeResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Cluster routing report — `%s`\n\n", target)
-	if base != nil {
-		fmt.Fprintf(&b, "Deployed model changes **`%s` → `%s`**. ", baseline, target)
+	switch {
+	case deployChange:
+		fmt.Fprintf(&b, "⚠️ Deployed model changes **`%s` → `%s`**. ", baseline, target)
+	case base != nil:
+		fmt.Fprintf(&b, "Candidate **`%s`** vs deployed **`%s`** (`latest` unchanged — not deploying). ", target, baseline)
 	}
 	fmt.Fprintf(&b, "Routed %d labeled probes through the real Scorer at `top_p=%d`, embedder `%s`. "+
 		"Premium = opus-4-7/4-8, gpt-5.5, gemini-3.1-pro, sonnet-4-6.\n\n", len(probes), topP, embedderID)
