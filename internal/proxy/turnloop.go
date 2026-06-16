@@ -244,8 +244,10 @@ func (s *Service) runTurnLoop(
 	}
 
 	// User-forced pins are immutable stickies — skip scorer and planner entirely.
-	// The pin was written by /force-model and stays active until /unforce-model
-	// clears it, at which point the pin is expired and this branch is not taken.
+	// The pin was written by /force-model with a never-expires PinnedUntil, so it
+	// survives arbitrarily long idle gaps and stays active until /unforce-model
+	// clears it (rewriting the row with a past PinnedUntil), at which point the
+	// pin is expired and this branch is not taken.
 	//
 	// Invariants maintained here:
 	//   1. Excluded-model policy is still enforced: if the forced model has been
@@ -690,7 +692,7 @@ func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sess
 		Model:                 chosen.Model,
 		Reason:                chosen.Reason,
 		TurnCount:             1,
-		PinnedUntil:           time.Now().Add(pinSessionTTL),
+		PinnedUntil:           pinExpiry(chosen.Reason),
 		LastInputTokens:       existing.LastInputTokens,
 		LastCachedReadTokens:  existing.LastCachedReadTokens,
 		LastCachedWriteTokens: existing.LastCachedWriteTokens,
@@ -718,7 +720,7 @@ func (s *Service) writeNewPin(ctx context.Context, installationID uuid.UUID, ses
 		Model:          chosen.Model,
 		Reason:         chosen.Reason,
 		TurnCount:      1,
-		PinnedUntil:    time.Now().Add(pinSessionTTL),
+		PinnedUntil:    pinExpiry(chosen.Reason),
 	}
 	s.upsertPin(ctx, p)
 }

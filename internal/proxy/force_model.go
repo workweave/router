@@ -165,7 +165,7 @@ func (s *Service) setForceModelPin(
 		Model:           canonicalModel,
 		Reason:          translate.ReasonUserForceModel,
 		TurnCount:       1,
-		PinnedUntil:     time.Now().Add(pinSessionTTL),
+		PinnedUntil:     pinNeverExpires,
 		LastServedModel: lastServedModel,
 	}
 	// context.Background(): the request ctx may already be canceled by the time

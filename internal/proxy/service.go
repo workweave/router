@@ -170,6 +170,25 @@ type Service struct {
 // so the pin lifecycle tracks the cache it's keeping warm.
 const pinSessionTTL = time.Hour
 
+// pinNeverExpires is the sentinel PinnedUntil for user-forced pins. A
+// /force-model is an explicit, durable user directive — it must persist across
+// arbitrarily long idle gaps and only clear on /unforce-model, never lapse on
+// the cache-driven session TTL. Far enough out to never be reached, well within
+// Postgres's timestamp range; loadPin's PinnedUntil.After(now) check and the
+// pinned_until-based sweep both read it as live indefinitely. /unforce-model
+// rewrites the row with a past PinnedUntil, so the escape hatch still works.
+var pinNeverExpires = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// pinExpiry returns the PinnedUntil to record for a pin with the given decision
+// reason. User-forced pins get the never-expires sentinel; every other pin keeps
+// the sliding one-hour session TTL.
+func pinExpiry(reason string) time.Time {
+	if strings.HasPrefix(reason, translate.ReasonUserForceModel) {
+		return pinNeverExpires
+	}
+	return time.Now().Add(pinSessionTTL)
+}
+
 // prevTurnMaxedOutThreshold is the LastOutputTokens count above which we treat
 // the previous turn as having saturated the output cap. Set just under the
 // 8192 defaultMaxOutputTokenCap; legitimate end_turn completions almost never
