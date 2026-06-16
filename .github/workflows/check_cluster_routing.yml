@@ -1,0 +1,196 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# Cluster routing review gate.
+#
+# When a PR changes the deployed clustering model (the `latest` pointer under
+# internal/router/cluster/artifacts/), this routes a labeled probe corpus
+# through the real Scorer and posts a sticky PR comment showing where each
+# register (conversational / trivial / coding / agentic) now routes, plus a
+# diff vs the currently-deployed artifact. Merge is blocked by the required
+# status check `cluster-routing/acknowledged` until a maintainer ticks the
+# checkbox in that comment. Any later change to `latest` rewrites the report
+# (new hash), unticks the box, and re-blocks — so a stale sign-off can't ship.
+#
+# Artifact changes that DON'T move `latest` (e.g. adding a candidate dir) get
+# an informational comment and an automatically-passing check.
+#
+# The check runs with `-tags no_onnx`: probe embeddings are precomputed and
+# committed, so no ONNX runtime is needed. Regenerate them with
+# scripts/embed_register_probes.py (the Test workflow fails on a stale cache).
+name: Cluster Routing Review
+
+on:
+  pull_request:
+    paths:
+      - "internal/router/cluster/artifacts/**"
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  statuses: write
+
+concurrency:
+  group: cluster-routing-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  routing-review:
+    name: Routing review
+    runs-on: ubuntu-latest
+    # Run on artifact PRs, or when a human (not the bot) edits/creates our
+    # sticky comment on a PR. The Bot-sender guard prevents an update loop.
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       github.event.sender.type != 'Bot' &&
+       contains(github.event.comment.body, '<!-- cluster-routing-report:'))
+    steps:
+      - name: Resolve PR head + base
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let n, headSha, baseSha, baseRef;
+            if (context.eventName === 'pull_request') {
+              const p = context.payload.pull_request;
+              n = p.number; headSha = p.head.sha; baseSha = p.base.sha; baseRef = p.base.ref;
+            } else {
+              n = context.payload.issue.number;
+              const { data: p } = await github.rest.pulls.get({ ...context.repo, pull_number: n });
+              headSha = p.head.sha; baseSha = p.base.sha; baseRef = p.base.ref;
+            }
+            core.setOutput('number', n);
+            core.setOutput('head_sha', headSha);
+            core.setOutput('base_sha', baseSha);
+            core.setOutput('base_ref', baseRef);
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head_sha }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Determine target + baseline artifact
+        id: vers
+        env:
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          ART=internal/router/cluster/artifacts
+          head_latest="$(tr -d '[:space:]' < "$ART/latest")"
+          base_latest="$(git show "$BASE_SHA:$ART/latest" 2>/dev/null | tr -d '[:space:]' || echo '')"
+          echo "head_latest=$head_latest" >> "$GITHUB_OUTPUT"
+          if [ "$head_latest" != "$base_latest" ]; then
+            # Deployed model changes -> gate.
+            echo "gate=true" >> "$GITHUB_OUTPUT"
+            echo "target=$head_latest" >> "$GITHUB_OUTPUT"
+            echo "baseline=$base_latest" >> "$GITHUB_OUTPUT"
+          else
+            # latest unchanged: report the highest changed candidate dir, if any.
+            changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- "$ART/" \
+              | grep -oE 'artifacts/v[0-9]+\.[0-9]+/' | sed -E 's#artifacts/##; s#/##' \
+              | sort -uV | tail -1 || true)"
+            if [ -z "$changed" ]; then
+              echo "gate=skip" >> "$GITHUB_OUTPUT"
+            else
+              echo "gate=false" >> "$GITHUB_OUTPUT"
+              echo "target=$changed" >> "$GITHUB_OUTPUT"
+              echo "baseline=$head_latest" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Render routing report
+        if: steps.vers.outputs.gate != 'skip'
+        env:
+          TARGET: ${{ steps.vers.outputs.target }}
+          BASELINE: ${{ steps.vers.outputs.baseline }}
+        run: |
+          set -euo pipefail
+          args=(--target "$TARGET")
+          if [ -n "$BASELINE" ]; then args+=(--baseline "$BASELINE"); fi
+          go run -tags no_onnx ./cmd/routing-report "${args[@]}" --out /tmp/routing_report.md
+          cat /tmp/routing_report.md
+
+      - name: Upsert comment and set status
+        if: steps.vers.outputs.gate != 'skip'
+        uses: actions/github-script@v7
+        env:
+          GATE: ${{ steps.vers.outputs.gate }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const pr = Number(process.env.PR_NUMBER);
+            const headSha = process.env.HEAD_SHA;
+            const gate = process.env.GATE === 'true';
+            const CHECK = 'cluster-routing/acknowledged';
+            const PREFIX = '<!-- cluster-routing-report:';
+            const ACK_RE = /- \[[xX]\] I have reviewed/;
+
+            const report = fs.readFileSync('/tmp/routing_report.md', 'utf8').trim();
+            const hash = crypto.createHash('sha256').update(report).digest('hex').slice(0, 12);
+            const marker = `${PREFIX}${hash} -->`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number: pr, per_page: 100,
+            });
+            const existing = comments.find(c => c.body.includes(PREFIX));
+
+            // Acknowledged only if the box is ticked on a comment carrying the
+            // CURRENT report hash. A report change (new hash) invalidates it.
+            let ticked = false;
+            if (context.eventName === 'issue_comment' &&
+                context.payload.comment.body.includes(marker)) {
+              ticked = ACK_RE.test(context.payload.comment.body);
+            } else if (existing && existing.body.includes(marker)) {
+              ticked = ACK_RE.test(existing.body);
+            }
+
+            const box = ticked ? '[x]' : '[ ]';
+            const note = gate
+              ? '> ⚠️ **This PR changes the deployed router (`latest`).** Review where conversational / trivial turns now land, then tick the box below to unblock merge.'
+              : '> ℹ️ Informational — candidate artifact (`latest` unchanged); no sign-off required.';
+            const ackBlock = gate
+              ? `\n\n---\n- ${box} I have reviewed the routing distribution above and accept it.\n\n_Ticking this unblocks merge. Any further change to \`latest\` resets it._`
+              : '';
+            const body = `${marker}\n### 🧭 Cluster routing review\n${note}\n\n${report}${ackBlock}`;
+
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: pr, body });
+            }
+
+            const state = (!gate || ticked) ? 'success' : 'failure';
+            const description = !gate
+              ? 'Candidate artifact — no deployed-model change'
+              : (ticked ? 'Routing distribution acknowledged' : 'Review the routing report and tick the box to unblock');
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: headSha, context: CHECK, state, description,
+            });
+
+      - name: Pass check when no artifact-version change
+        if: steps.vers.outputs.gate == 'skip'
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: process.env.HEAD_SHA,
+              context: 'cluster-routing/acknowledged', state: 'success',
+              description: 'No deployed-model change',
+            });

@@ -1,0 +1,180 @@
+{"id": "conversational-001", "text": "hey what's up", "register": "conversational", "note": "casual greeting"}
+{"id": "conversational-002", "text": "morning! how's it going today", "register": "conversational", "note": "morning greeting"}
+{"id": "conversational-003", "text": "what do you think about remote work?", "register": "conversational", "note": "opinion question"}
+{"id": "conversational-004", "text": "tell me a joke", "register": "conversational", "note": "joke request"}
+{"id": "conversational-005", "text": "i'm feeling kinda stuck today, any advice?", "register": "conversational", "note": "personal advice"}
+{"id": "conversational-006", "text": "what should i make for dinner tonight", "register": "conversational", "note": "dinner ideas"}
+{"id": "conversational-007", "text": "do you ever get bored lol", "register": "conversational", "note": "playful banter"}
+{"id": "conversational-008", "text": "ugh mondays am i right", "register": "conversational", "note": "venting"}
+{"id": "conversational-009", "text": "whats your favorite movie", "register": "conversational", "note": "favorites question"}
+{"id": "conversational-010", "text": "i had the weirdest dream last night about flying buses", "register": "conversational", "note": "sharing a story"}
+{"id": "conversational-011", "text": "thanks for the help earlier, really appreciate it", "register": "conversational", "note": "gratitude"}
+{"id": "conversational-012", "text": "is it weird that i still listen to cds", "register": "conversational", "note": "lighthearted question"}
+{"id": "conversational-013", "text": "good night, talk tomorrow", "register": "conversational", "note": "sign off"}
+{"id": "conversational-014", "text": "do you think aliens exist", "register": "conversational", "note": "musing question"}
+{"id": "conversational-015", "text": "my cat just knocked a glass off the table again smh", "register": "conversational", "note": "anecdote"}
+{"id": "conversational-016", "text": "what's a good weekend trip from seattle", "register": "conversational", "note": "travel chat"}
+{"id": "conversational-017", "text": "feeling a bit down honestly", "register": "conversational", "note": "emotional check in"}
+{"id": "conversational-018", "text": "yo", "register": "conversational", "note": "minimal greeting"}
+{"id": "conversational-019", "text": "any fun plans this weekend?", "register": "conversational", "note": "small talk"}
+{"id": "conversational-020", "text": "do you prefer tea or coffee", "register": "conversational", "note": "preference banter"}
+{"id": "conversational-021", "text": "i can't decide if i should get a dog", "register": "conversational", "note": "life decision chat"}
+{"id": "conversational-022", "text": "happy friday!!", "register": "conversational", "note": "cheerful greeting"}
+{"id": "conversational-023", "text": "whats the meaning of life haha", "register": "conversational", "note": "philosophical banter"}
+{"id": "conversational-024", "text": "i just got back from a run and i feel great", "register": "conversational", "note": "sharing mood"}
+{"id": "conversational-025", "text": "what music are you into", "register": "conversational", "note": "casual interest"}
+{"id": "conversational-026", "text": "long day. how do you stay motivated", "register": "conversational", "note": "motivation chat"}
+{"id": "conversational-027", "text": "lol that was random but ok", "register": "conversational", "note": "reaction banter"}
+{"id": "conversational-028", "text": "should i repaint my living room blue or green", "register": "conversational", "note": "opinion seeking"}
+{"id": "conversational-029", "text": "hope you're having a good one", "register": "conversational", "note": "friendly check in"}
+{"id": "conversational-030", "text": "ok real talk, is pineapple on pizza acceptable", "register": "conversational", "note": "fun debate"}
+{"id": "trivial_nl-001", "text": "write a tweet announcing our new app launch", "register": "trivial_nl", "note": "tweet copy"}
+{"id": "trivial_nl-002", "text": "rephrase this to sound friendlier: your request was denied", "register": "trivial_nl", "note": "tone rewrite"}
+{"id": "trivial_nl-003", "text": "give me 5 names for a coffee shop", "register": "trivial_nl", "note": "name brainstorm"}
+{"id": "trivial_nl-004", "text": "summarize this in one line: the meeting covered Q3 budget cuts and a hiring freeze starting next month", "register": "trivial_nl", "note": "one line summary"}
+{"id": "trivial_nl-005", "text": "fix the grammar: me and him goes to the store yesterday", "register": "trivial_nl", "note": "grammar fix"}
+{"id": "trivial_nl-006", "text": "write a short bio for my linkedin, im a product designer with 6 yrs exp", "register": "trivial_nl", "note": "bio copy"}
+{"id": "trivial_nl-007", "text": "make this subject line catchier: monthly newsletter update", "register": "trivial_nl", "note": "subject line"}
+{"id": "trivial_nl-008", "text": "turn these bullet points into a paragraph: hired 3 engineers, shipped v2, cut latency 40%", "register": "trivial_nl", "note": "bullets to prose"}
+{"id": "trivial_nl-009", "text": "suggest a tagline for an eco friendly water bottle", "register": "trivial_nl", "note": "tagline brainstorm"}
+{"id": "trivial_nl-010", "text": "shorten this to under 50 words: we are excited to announce that after months of hard work our team has finally released the long awaited update that we believe will significantly improve your experience", "register": "trivial_nl", "note": "condense text"}
+{"id": "trivial_nl-011", "text": "write a thank you note to a coworker who covered my shift", "register": "trivial_nl", "note": "thank you note"}
+{"id": "trivial_nl-012", "text": "give me 3 instagram caption ideas for a sunset beach photo", "register": "trivial_nl", "note": "caption ideas"}
+{"id": "trivial_nl-013", "text": "proofread this: their going to they're house tommorow", "register": "trivial_nl", "note": "proofread"}
+{"id": "trivial_nl-014", "text": "make this more formal: hey just wanted to check if we're still on for friday", "register": "trivial_nl", "note": "formalize tone"}
+{"id": "trivial_nl-015", "text": "write a one sentence elevator pitch for a dog walking app", "register": "trivial_nl", "note": "elevator pitch"}
+{"id": "trivial_nl-016", "text": "come up with a fun team name for our trivia night", "register": "trivial_nl", "note": "team name idea"}
+{"id": "trivial_nl-017", "text": "translate this to spanish: where is the nearest train station", "register": "trivial_nl", "note": "short translation"}
+{"id": "trivial_nl-018", "text": "rewrite this so it's less wordy: at this point in time we are currently in the process of evaluating", "register": "trivial_nl", "note": "tighten wording"}
+{"id": "trivial_nl-019", "text": "give me a catchy headline for a blog about morning routines", "register": "trivial_nl", "note": "blog headline"}
+{"id": "trivial_nl-020", "text": "write a polite out of office reply for when im on vacation next week", "register": "trivial_nl", "note": "ooo message"}
+{"id": "trivial_nl-021", "text": "list 5 gift ideas for a coworker who loves gardening", "register": "trivial_nl", "note": "gift ideas"}
+{"id": "trivial_nl-022", "text": "make this sound more confident: i think maybe we could possibly try this approach", "register": "trivial_nl", "note": "confidence rewrite"}
+{"id": "trivial_nl-023", "text": "write a 2 line apology text for being late to lunch", "register": "trivial_nl", "note": "apology text"}
+{"id": "trivial_nl-024", "text": "suggest a name for my new podcast about indie video games", "register": "trivial_nl", "note": "podcast name"}
+{"id": "trivial_nl-025", "text": "summarize the plot of romeo and juliet in two sentences", "register": "trivial_nl", "note": "short summary"}
+{"id": "trivial_nl-026", "text": "give me a friendly reminder message for an unpaid invoice", "register": "trivial_nl", "note": "reminder copy"}
+{"id": "trivial_nl-027", "text": "rewrite this as a haiku: the rain fell all day and the streets were empty", "register": "trivial_nl", "note": "haiku rewrite"}
+{"id": "trivial_nl-028", "text": "draft a quick birthday message for my boss, keep it professional", "register": "trivial_nl", "note": "birthday message"}
+{"id": "trivial_nl-029", "text": "give me 4 alternative words for 'innovative'", "register": "trivial_nl", "note": "synonyms"}
+{"id": "trivial_nl-030", "text": "punch up this slogan: we deliver food fast", "register": "trivial_nl", "note": "slogan polish"}
+{"id": "knowledge_qa-001", "text": "what's the difference between TCP and UDP?", "register": "knowledge_qa", "note": "networking concept"}
+{"id": "knowledge_qa-002", "text": "explain how a hash map works under the hood", "register": "knowledge_qa", "note": "data structure"}
+{"id": "knowledge_qa-003", "text": "what is a monad in simple terms", "register": "knowledge_qa", "note": "fp concept"}
+{"id": "knowledge_qa-004", "text": "why is the sky blue", "register": "knowledge_qa", "note": "science question"}
+{"id": "knowledge_qa-005", "text": "pros and cons of microservices vs monolith", "register": "knowledge_qa", "note": "architecture tradeoffs"}
+{"id": "knowledge_qa-006", "text": "how does https actually encrypt traffic", "register": "knowledge_qa", "note": "security concept"}
+{"id": "knowledge_qa-007", "text": "whats the difference between authentication and authorization", "register": "knowledge_qa", "note": "security terms"}
+{"id": "knowledge_qa-008", "text": "explain the cap theorem like im five", "register": "knowledge_qa", "note": "distributed systems"}
+{"id": "knowledge_qa-009", "text": "what causes inflation in an economy", "register": "knowledge_qa", "note": "economics question"}
+{"id": "knowledge_qa-010", "text": "how do vaccines actually work", "register": "knowledge_qa", "note": "biology question"}
+{"id": "knowledge_qa-011", "text": "whats the difference between machine learning and deep learning", "register": "knowledge_qa", "note": "ml concepts"}
+{"id": "knowledge_qa-012", "text": "why do we need garbage collection in some languages", "register": "knowledge_qa", "note": "language concept"}
+{"id": "knowledge_qa-013", "text": "explain what a database index is and why it speeds things up", "register": "knowledge_qa", "note": "db concept"}
+{"id": "knowledge_qa-014", "text": "what is the difference between a process and a thread", "register": "knowledge_qa", "note": "os concept"}
+{"id": "knowledge_qa-015", "text": "how does dns resolution work step by step", "register": "knowledge_qa", "note": "networking"}
+{"id": "knowledge_qa-016", "text": "what does eventual consistency actually mean", "register": "knowledge_qa", "note": "distributed systems"}
+{"id": "knowledge_qa-017", "text": "explain big o notation with a couple examples", "register": "knowledge_qa", "note": "complexity concept"}
+{"id": "knowledge_qa-018", "text": "why are quantum computers faster for some problems", "register": "knowledge_qa", "note": "physics question"}
+{"id": "knowledge_qa-019", "text": "whats the point of a load balancer", "register": "knowledge_qa", "note": "infra concept"}
+{"id": "knowledge_qa-020", "text": "how does git store history internally", "register": "knowledge_qa", "note": "tooling concept"}
+{"id": "knowledge_qa-021", "text": "what is the difference between rest and graphql", "register": "knowledge_qa", "note": "api paradigms"}
+{"id": "knowledge_qa-022", "text": "explain acid properties in databases", "register": "knowledge_qa", "note": "db theory"}
+{"id": "knowledge_qa-023", "text": "why is recursion sometimes worse than iteration", "register": "knowledge_qa", "note": "algorithms concept"}
+{"id": "knowledge_qa-024", "text": "whats a race condition and why is it hard to debug", "register": "knowledge_qa", "note": "concurrency concept"}
+{"id": "knowledge_qa-025", "text": "how do solar panels convert sunlight to electricity", "register": "knowledge_qa", "note": "science question"}
+{"id": "knowledge_qa-026", "text": "what is the difference between symmetric and asymmetric encryption", "register": "knowledge_qa", "note": "crypto concept"}
+{"id": "knowledge_qa-027", "text": "explain how a CPU cache hierarchy works", "register": "knowledge_qa", "note": "hardware concept"}
+{"id": "knowledge_qa-028", "text": "why do compilers exist instead of just running source directly", "register": "knowledge_qa", "note": "compiler concept"}
+{"id": "knowledge_qa-029", "text": "what makes a function pure in functional programming", "register": "knowledge_qa", "note": "fp concept"}
+{"id": "knowledge_qa-030", "text": "how does tcp handle packet loss and retransmission", "register": "knowledge_qa", "note": "networking detail"}
+{"id": "easy_code-001", "text": "write a python function to reverse a string", "register": "easy_code", "note": "string reverse"}
+{"id": "easy_code-002", "text": "how do i center a div", "register": "easy_code", "note": "css centering"}
+{"id": "easy_code-003", "text": "add a console.log inside this function: function add(a,b){return a+b}", "register": "easy_code", "note": "add logging"}
+{"id": "easy_code-004", "text": "fix this off by one: for i in range(len(a)+1): print(a[i])", "register": "easy_code", "note": "off by one fix"}
+{"id": "easy_code-005", "text": "write a regex for email validation", "register": "easy_code", "note": "email regex"}
+{"id": "easy_code-006", "text": "convert this for loop to a list comprehension: out=[]\nfor x in nums:\n  out.append(x*2)", "register": "easy_code", "note": "list comprehension"}
+{"id": "easy_code-007", "text": "how do i check if a key exists in a python dict", "register": "easy_code", "note": "dict key check"}
+{"id": "easy_code-008", "text": "write a js function to capitalize the first letter of a string", "register": "easy_code", "note": "capitalize string"}
+{"id": "easy_code-009", "text": "whats the syntax for a ternary in python", "register": "easy_code", "note": "ternary syntax"}
+{"id": "easy_code-010", "text": "write a function that returns true if a number is even", "register": "easy_code", "note": "even check"}
+{"id": "easy_code-011", "text": "how do i remove duplicates from a list in python", "register": "easy_code", "note": "dedupe list"}
+{"id": "easy_code-012", "text": "convert a string to an int in javascript", "register": "easy_code", "note": "string to int"}
+{"id": "easy_code-013", "text": "write a sql query to get all users where age > 30", "register": "easy_code", "note": "simple select"}
+{"id": "easy_code-014", "text": "how do i loop over a dictionary's key value pairs in python", "register": "easy_code", "note": "dict iteration"}
+{"id": "easy_code-015", "text": "write a bash one liner to count lines in a file", "register": "easy_code", "note": "line count"}
+{"id": "easy_code-016", "text": "make this button red with css", "register": "easy_code", "note": "css color"}
+{"id": "easy_code-017", "text": "write a function to find the max value in an array", "register": "easy_code", "note": "array max"}
+{"id": "easy_code-018", "text": "how do i format a date as YYYY-MM-DD in python", "register": "easy_code", "note": "date format"}
+{"id": "easy_code-019", "text": "write a function to check if a string is a palindrome", "register": "easy_code", "note": "palindrome check"}
+{"id": "easy_code-020", "text": "how do i read a file line by line in python", "register": "easy_code", "note": "file read"}
+{"id": "easy_code-021", "text": "convert this var to const and let where appropriate: var x = 1; var y = 2; y = 3;", "register": "easy_code", "note": "var to const"}
+{"id": "easy_code-022", "text": "write a function that sums all numbers in a list", "register": "easy_code", "note": "sum list"}
+{"id": "easy_code-023", "text": "how do i make an http get request in python with requests", "register": "easy_code", "note": "http get"}
+{"id": "easy_code-024", "text": "write a regex to match a us phone number", "register": "easy_code", "note": "phone regex"}
+{"id": "easy_code-025", "text": "how do i sort a list of dicts by a key in python", "register": "easy_code", "note": "sort dicts"}
+{"id": "easy_code-026", "text": "write a function to count word frequency in a sentence", "register": "easy_code", "note": "word count"}
+{"id": "easy_code-027", "text": "fix this typo: prnt('hello world')", "register": "easy_code", "note": "fix typo"}
+{"id": "easy_code-028", "text": "how do i add a class to an element with vanilla js", "register": "easy_code", "note": "add class"}
+{"id": "easy_code-029", "text": "write a function to convert celsius to fahrenheit", "register": "easy_code", "note": "temp convert"}
+{"id": "easy_code-030", "text": "how do i join a list of strings with commas in python", "register": "easy_code", "note": "join strings"}
+{"id": "hard_code-001", "text": "refactor the auth middleware to support OAuth2 and migrate existing session-cookie users without logging everyone out", "register": "hard_code", "note": "oauth2 migration"}
+{"id": "hard_code-002", "text": "we have an intermittent race condition in our connection pool that only shows up under load, help me track it down", "register": "hard_code", "note": "race condition debug"}
+{"id": "hard_code-003", "text": "design a distributed rate limiter that works correctly across multiple app instances behind a load balancer", "register": "hard_code", "note": "distributed rate limiter"}
+{"id": "hard_code-004", "text": "our GraphQL resolver has an N+1 problem across three nested types (org -> teams -> members), can you fix it with dataloaders", "register": "hard_code", "note": "n+1 dataloader"}
+{"id": "hard_code-005", "text": "implement optimistic concurrency control in the order service so two concurrent updates don't clobber each other", "register": "hard_code", "note": "optimistic concurrency"}
+{"id": "hard_code-006", "text": "we're seeing memory grow unbounded in the websocket gateway over a few hours, find and fix the leak", "register": "hard_code", "note": "memory leak"}
+{"id": "hard_code-007", "text": "migrate our postgres jsonb columns to proper relational tables without downtime, write the backfill and dual-write plan", "register": "hard_code", "note": "zero downtime migration"}
+{"id": "hard_code-008", "text": "the checkout flow occasionally double-charges customers, trace the idempotency gap in the payment handler", "register": "hard_code", "note": "idempotency bug"}
+{"id": "hard_code-009", "text": "redesign our event ingestion pipeline to handle 10x throughput with backpressure and at-least-once delivery", "register": "hard_code", "note": "pipeline redesign"}
+{"id": "hard_code-010", "text": "refactor this 800 line god class in the billing module into smaller cohesive services without breaking the public api", "register": "hard_code", "note": "god class refactor"}
+{"id": "hard_code-011", "text": "our kafka consumers keep rebalancing and dropping messages, diagnose the offset commit logic", "register": "hard_code", "note": "kafka rebalance"}
+{"id": "hard_code-012", "text": "implement a custom React hook that debounces a search input and cancels in-flight requests on unmount", "register": "hard_code", "note": "debounce hook"}
+{"id": "hard_code-013", "text": "add multi-tenancy with row level security to our existing single-tenant postgres schema", "register": "hard_code", "note": "multi tenant rls"}
+{"id": "hard_code-014", "text": "our build times jumped from 4 to 18 minutes after the monorepo migration, profile and fix it", "register": "hard_code", "note": "build perf"}
+{"id": "hard_code-015", "text": "design a retry-with-exponential-backoff and circuit breaker layer for our flaky third party payment api", "register": "hard_code", "note": "circuit breaker"}
+{"id": "hard_code-016", "text": "we have a deadlock between two transactions touching the inventory and reservation tables, fix the lock ordering", "register": "hard_code", "note": "deadlock fix"}
+{"id": "hard_code-017", "text": "implement server side cursor pagination over a 50M row table that stays fast on deep pages", "register": "hard_code", "note": "cursor pagination"}
+{"id": "hard_code-018", "text": "our feature flag rollout caused a thundering herd on cache miss, redesign the cache warming strategy", "register": "hard_code", "note": "thundering herd"}
+{"id": "hard_code-019", "text": "refactor the sync engine to be resumable from a checkpoint after a crash without reprocessing everything", "register": "hard_code", "note": "resumable sync"}
+{"id": "hard_code-020", "text": "we need exactly-once semantics for outbound webhooks, design the outbox pattern with dedup", "register": "hard_code", "note": "outbox pattern"}
+{"id": "hard_code-021", "text": "the search relevance dropped after we switched analyzers, debug the elasticsearch mapping and reindex safely", "register": "hard_code", "note": "es reindex debug"}
+{"id": "hard_code-022", "text": "implement graceful shutdown for our grpc server that drains in-flight requests within a deadline", "register": "hard_code", "note": "graceful shutdown"}
+{"id": "hard_code-023", "text": "our denorm pipeline produces stale metrics for some orgs, trace where the trigger fan-out drops events", "register": "hard_code", "note": "pipeline staleness"}
+{"id": "hard_code-024", "text": "design a schema migration strategy to split the users table into users and profiles with zero read downtime", "register": "hard_code", "note": "table split"}
+{"id": "hard_code-025", "text": "we're hitting connection exhaustion under spiky traffic, tune the pgx pool and add proper context timeouts everywhere", "register": "hard_code", "note": "conn exhaustion"}
+{"id": "hard_code-026", "text": "refactor our auth so tokens are short-lived with silent refresh and revocation that propagates within seconds", "register": "hard_code", "note": "token refresh revocation"}
+{"id": "hard_code-027", "text": "implement a priority queue worker that respects per-tenant fairness so one noisy org can't starve others", "register": "hard_code", "note": "fair queue"}
+{"id": "hard_code-028", "text": "our react app re-renders the whole tree on every keystroke, profile and fix the unnecessary renders", "register": "hard_code", "note": "react rerender"}
+{"id": "hard_code-029", "text": "design an idempotent data backfill that can run incrementally over weeks without locking production tables", "register": "hard_code", "note": "incremental backfill"}
+{"id": "hard_code-030", "text": "we have a subtle timezone bug where DST transitions shift scheduled jobs by an hour, fix it across the scheduler", "register": "hard_code", "note": "dst timezone bug"}
+{"id": "agentic_tool-001", "text": "run the test suite and fix whatever's failing", "register": "agentic_tool", "note": "run and fix tests"}
+{"id": "agentic_tool-002", "text": "search the codebase for all usages of the deprecated getUser api and update them to getUserById", "register": "agentic_tool", "note": "codebase wide update"}
+{"id": "agentic_tool-003", "text": "the build is broken, figure out why and fix it", "register": "agentic_tool", "note": "fix broken build"}
+{"id": "agentic_tool-004", "text": "add a new /webhooks/stripe endpoint following the pattern in the existing handlers", "register": "agentic_tool", "note": "add endpoint by pattern"}
+{"id": "agentic_tool-005", "text": "investigate why the deploy failed and open a PR with the fix", "register": "agentic_tool", "note": "investigate deploy + pr"}
+{"id": "agentic_tool-006", "text": "find where we read the OPENAI_API_KEY env var and add a fallback to a config file", "register": "agentic_tool", "note": "find usage + edit"}
+{"id": "agentic_tool-007", "text": "run the linter across the repo and fix all the auto-fixable issues then commit", "register": "agentic_tool", "note": "lint fix commit"}
+{"id": "agentic_tool-008", "text": "grep for TODO comments in the payments module and turn them into github issues", "register": "agentic_tool", "note": "grep todos to issues"}
+{"id": "agentic_tool-009", "text": "the integration tests are flaky, run them a few times and figure out which one is nondeterministic", "register": "agentic_tool", "note": "diagnose flaky test"}
+{"id": "agentic_tool-010", "text": "look at how UserCard is implemented and create a similar TeamCard component", "register": "agentic_tool", "note": "create by example"}
+{"id": "agentic_tool-011", "text": "find all the places we call the old logging helper and migrate them to the structured logger", "register": "agentic_tool", "note": "migrate logging calls"}
+{"id": "agentic_tool-012", "text": "run npm audit and patch any high severity vulnerabilities", "register": "agentic_tool", "note": "audit and patch"}
+{"id": "agentic_tool-013", "text": "trace through the request flow for POST /orders and add tracing spans at each layer", "register": "agentic_tool", "note": "add tracing spans"}
+{"id": "agentic_tool-014", "text": "the migration didn't apply on staging, check the logs and figure out what's stuck", "register": "agentic_tool", "note": "debug stuck migration"}
+{"id": "agentic_tool-015", "text": "find the failing assertion in the e2e checkout test and fix the underlying bug", "register": "agentic_tool", "note": "fix e2e failure"}
+{"id": "agentic_tool-016", "text": "scan the repo for hardcoded secrets and move them into env vars", "register": "agentic_tool", "note": "find secrets refactor"}
+{"id": "agentic_tool-017", "text": "add a feature flag for the new dashboard and wire it through the existing flag system", "register": "agentic_tool", "note": "wire feature flag"}
+{"id": "agentic_tool-018", "text": "run the benchmark suite and tell me which functions regressed since last commit", "register": "agentic_tool", "note": "run benchmarks"}
+{"id": "agentic_tool-019", "text": "look through the open files and rename the variable userData to currentUser everywhere consistently", "register": "agentic_tool", "note": "consistent rename"}
+{"id": "agentic_tool-020", "text": "figure out why our docker image is 2gb and slim it down, then verify it still builds", "register": "agentic_tool", "note": "slim docker image"}
+{"id": "agentic_tool-021", "text": "the cron job stopped running, check the logs and the schedule config and fix it", "register": "agentic_tool", "note": "debug cron"}
+{"id": "agentic_tool-022", "text": "add unit tests for the new pricing module to get coverage above 80% then run them", "register": "agentic_tool", "note": "add tests for coverage"}
+{"id": "agentic_tool-023", "text": "find all the api routes missing auth middleware and add it", "register": "agentic_tool", "note": "find missing auth"}
+{"id": "agentic_tool-024", "text": "bump the react version, run the build, and fix any breaking changes", "register": "agentic_tool", "note": "dep upgrade + fix"}
+{"id": "agentic_tool-025", "text": "search for the function that computes shipping cost and add support for international rates", "register": "agentic_tool", "note": "find func extend"}
+{"id": "agentic_tool-026", "text": "the prod logs show a 500 on /api/export, reproduce it locally and fix the root cause", "register": "agentic_tool", "note": "repro prod 500"}
+{"id": "agentic_tool-027", "text": "go through the failing CI checks on my branch and fix them one by one", "register": "agentic_tool", "note": "fix ci checks"}
+{"id": "agentic_tool-028", "text": "find the database query that's timing out and add the missing index migration", "register": "agentic_tool", "note": "find slow query + index"}
+{"id": "agentic_tool-029", "text": "refactor the config loading to read from a single source and update every import site", "register": "agentic_tool", "note": "config refactor"}
+{"id": "agentic_tool-030", "text": "look at the existing graphql resolvers and add a new one for fetching audit logs following the same style", "register": "agentic_tool", "note": "add resolver by style"}
