@@ -66,6 +66,37 @@ func TestProxy_CodexSubscriptionDispatch(t *testing.T) {
 	assert.Equal(t, body, gotBody, "the prepared Responses body must reach the Codex backend unchanged")
 }
 
+// TestProxy_CodexCredOnChatEndpointDoesNotMisroute guards the Bugbot finding:
+// the Codex backend only accepts the Responses schema, so a chat-completions
+// prep that happens to resolve a Codex credential must NOT be posted to the
+// Codex /responses endpoint. The switch is gated on EndpointResponses.
+func TestProxy_CodexCredOnChatEndpointDoesNotMisroute(t *testing.T) {
+	var gotPath, gotAccount string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAccount = r.Header.Get("ChatGPT-Account-ID")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	c := NewClient("deployment-key", upstream.URL)
+	c.codexBaseURL = "https://chatgpt.example.invalid" // must NOT be used for a chat body
+
+	// EndpointChatCompletions (zero value) — a chat-shaped body.
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"gpt-5.5","messages":[]}`), Headers: make(http.Header)}
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+
+	ctx := codexCtx("eyJhbGciOiJ-codex-jwt", "acct-12345")
+	err := c.Proxy(ctx, router.Decision{Model: "gpt-5.5", Provider: providers.ProviderOpenAI}, prep, rec, clientReq)
+	require.NoError(t, err)
+
+	assert.Equal(t, "/v1/chat/completions", gotPath,
+		"a chat-completions body must never be posted to the Codex /responses endpoint, even with a Codex credential")
+	assert.Empty(t, gotAccount, "the Codex account-id header must not be set on a non-Responses dispatch")
+}
+
 // TestProxy_NoCodexCredHitsOpenAI confirms the Codex switch is gated on the
 // subscription credential: a normal (deployment-key) request still targets
 // api.openai.com and sends no ChatGPT-Account-ID header.

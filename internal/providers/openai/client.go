@@ -196,14 +196,18 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 
 	// A Codex (ChatGPT) subscription turn dispatches to the Codex backend over
 	// the Responses API; everything else uses the configured base URL + the
-	// endpoint-appropriate path.
+	// endpoint-appropriate path. Gate on EndpointResponses so a chat-completions
+	// body that happens to resolve a Codex credential is never posted to the
+	// Codex /responses endpoint (which only accepts the Responses schema) — the
+	// routed Codex passthrough always builds a Responses-shaped request.
 	codexCreds := codexSubscriptionCreds(ctx)
+	useCodex := codexCreds != nil && prep.Endpoint == providers.EndpointResponses
 	baseURL := c.baseURL
 	path := "/v1/chat/completions"
 	if prep.Endpoint == providers.EndpointResponses {
 		path = "/v1/responses"
 	}
-	if codexCreds != nil {
+	if useCodex {
 		baseURL = c.codexBaseURL
 		path = codexResponsesPath
 	}
@@ -222,7 +226,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	// Codex backend required headers, set AFTER the prep.Headers copy so they
 	// are never clobbered. setAuth has already written Authorization: Bearer
 	// <jwt> from the resolved OAuth credential.
-	if codexCreds != nil {
+	if useCodex {
 		upstream.Header.Set(codexAccountIDHeader, string(codexCreds.AccountID))
 		upstream.Header.Set(codexOpenAIBetaHeader, codexOpenAIBetaValue)
 		upstream.Header.Set(codexOriginatorHeader, codexOriginatorValue)
@@ -430,14 +434,10 @@ func truncateBytes(b []byte, n int) string {
 }
 
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
-	// A Codex (ChatGPT) subscription authenticates only against the Codex
-	// backend's Responses endpoint; otherwise pass the inbound path through to
-	// the configured base URL.
-	codexCreds := codexSubscriptionCreds(ctx)
+	// Codex (ChatGPT) subscriptions are served only on the routed Responses
+	// dispatch (Proxy), never this non-routed passthrough path, so no Codex
+	// backend switch is applied here.
 	url := c.baseURL + r.URL.Path
-	if codexCreds != nil {
-		url = c.codexBaseURL + codexResponsesPath
-	}
 	if r.URL.RawQuery != "" {
 		url += "?" + r.URL.RawQuery
 	}
@@ -455,12 +455,6 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	}
 	if v := r.Header.Get("Accept"); v != "" {
 		upstream.Header.Set("Accept", v)
-	}
-	if codexCreds != nil {
-		upstream.Header.Set(codexAccountIDHeader, string(codexCreds.AccountID))
-		upstream.Header.Set(codexOpenAIBetaHeader, codexOpenAIBetaValue)
-		upstream.Header.Set(codexOriginatorHeader, codexOriginatorValue)
-		upstream.Header.Set(codexUserAgentHeader, codexUserAgentValue)
 	}
 
 	resp, err := c.http.Do(upstream)
