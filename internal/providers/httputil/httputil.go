@@ -31,6 +31,11 @@ const FlushChunk = 4 * 1024
 // (this package imports providers). errors.Is matches against either name.
 var ErrUpstreamIdleTimeout = providers.ErrUpstreamIdleTimeout
 
+// ErrUpstreamOutputStall re-exports providers.ErrUpstreamOutputStall — the
+// cause set when the output-progress watchdog (StartIdleWatchdogCause) trips
+// because the stream stayed byte-alive but produced no output-bearing content.
+var ErrUpstreamOutputStall = providers.ErrUpstreamOutputStall
+
 // DefaultSSEIdleTimeout is the per-read inactivity threshold for streaming
 // upstream responses. AWS NAT Gateway / NLB / VPC-endpoint reapers silently
 // drop idle TCP connections at 350s; a watchdog below that surfaces stalls
@@ -46,13 +51,33 @@ var DefaultSSEIdleTimeout = idleTimeoutFromEnv("ROUTER_SSE_IDLE_TIMEOUT_SECONDS"
 // DefaultSSEIdleTimeout because a gpt-5.x reasoning turn can go tens of
 // seconds between SSE frames while the model thinks (reasoning-summary deltas
 // lag the actual reasoning). ANY received bytes count as progress — event
-// frames, reasoning deltas, keepalives — so only a zero-progress gap trips
-// it. The real stalls observed in prod (2026-06-09: two /v1/responses streams
-// at zero output tokens until the 600s request cap) produced no bytes at all,
-// so 90s separates them cleanly from healthy long-thinking turns.
+// frames, reasoning deltas, keepalives — so only a zero-BYTE gap trips it.
+//
+// This catches the byte-silent stall (2026-06-09: two /v1/responses streams
+// produced no bytes at all until the 600s request cap). It does NOT catch a
+// byte-alive/output-silent stall — a stream that keeps dribbling non-output
+// frames (reasoning deltas, keepalives) while producing zero output tokens
+// (2026-06-16: gpt-5.5 sat at zero output for the full 600s, bytes flowing the
+// whole time). DefaultResponsesOutputStallTimeout guards that mode.
 //
 // Tunable via ROUTER_RESPONSES_SSE_IDLE_TIMEOUT_SECONDS.
 var DefaultResponsesSSEIdleTimeout = idleTimeoutFromEnv("ROUTER_RESPONSES_SSE_IDLE_TIMEOUT_SECONDS", 90*time.Second)
+
+// DefaultResponsesOutputStallTimeout is the OUTPUT-progress threshold for
+// OpenAI Responses streams: the maximum time the upstream may stay byte-alive
+// (resetting DefaultResponsesSSEIdleTimeout) while producing zero
+// output-bearing content (assistant text, tool-call arguments, or a terminal
+// response envelope). It is deliberately far larger than the idle timeout so a
+// genuinely long reasoning phase that eventually emits output is never clipped
+// — only a turn that thinks/keepalives for minutes without ever producing
+// output is aborted. Set below the 600s request cap so the watchdog (not the
+// cap) surfaces the stall as a retryable error, while staying generous enough
+// to clear realistic worst-case reasoning. The OUTPUT-progress mark is fed by
+// the Responses→Anthropic translator, which alone can tell output frames from
+// reasoning/keepalive frames.
+//
+// Tunable via ROUTER_RESPONSES_OUTPUT_STALL_TIMEOUT_SECONDS.
+var DefaultResponsesOutputStallTimeout = idleTimeoutFromEnv("ROUTER_RESPONSES_OUTPUT_STALL_TIMEOUT_SECONDS", 240*time.Second)
 
 // idleTimeoutFromEnv reads a whole-seconds override from envVar, falling back
 // to fallback when unset, unparsable, or non-positive.
@@ -117,6 +142,19 @@ func NewTransportWithResponseHeaderTimeout(dialTimeout, tlsTimeout, responseHead
 //
 // idleTimeout <= 0 or cancel == nil disables the watchdog (no-op mark/stop).
 func StartIdleWatchdog(ctx context.Context, cancel context.CancelCauseFunc, idleTimeout time.Duration) (mark func(), stop func()) {
+	return StartIdleWatchdogCause(ctx, cancel, idleTimeout, ErrUpstreamIdleTimeout)
+}
+
+// StartIdleWatchdogCause is StartIdleWatchdog with a caller-chosen cancel
+// cause. Use it to run a second, independent watchdog on the same request
+// context that measures a different progress signal — e.g. an output-progress
+// watchdog whose mark is fed only on output-bearing events (cause
+// ErrUpstreamOutputStall), running alongside the byte-idle watchdog (cause
+// ErrUpstreamIdleTimeout). Whichever watchdog trips first wins: context cancel
+// causes are set once, so a later cancel from the other watchdog is a no-op.
+//
+// idleTimeout <= 0 or cancel == nil disables the watchdog (no-op mark/stop).
+func StartIdleWatchdogCause(ctx context.Context, cancel context.CancelCauseFunc, idleTimeout time.Duration, cause error) (mark func(), stop func()) {
 	if idleTimeout <= 0 || cancel == nil {
 		return func() {}, func() {}
 	}
@@ -135,7 +173,7 @@ func StartIdleWatchdog(ctx context.Context, cancel context.CancelCauseFunc, idle
 				return
 			case <-ticker.C:
 				if time.Since(time.Unix(0, lastNS.Load())) > idleTimeout {
-					cancel(ErrUpstreamIdleTimeout)
+					cancel(cause)
 					return
 				}
 			}
@@ -179,8 +217,12 @@ func StreamBody(ctx context.Context, cancel context.CancelCauseFunc, idleTimeout
 			return nil
 		}
 		if readErr != nil {
-			if cause := context.Cause(ctx); errors.Is(cause, ErrUpstreamIdleTimeout) {
-				return ErrUpstreamIdleTimeout
+			// A second watchdog (e.g. the OpenAI output-progress watchdog) may
+			// share this ctx and cancel with a different cause; surface whichever
+			// sentinel tripped so the caller classifies it retryable instead of
+			// seeing a bare context.Canceled.
+			if cause := context.Cause(ctx); errors.Is(cause, ErrUpstreamIdleTimeout) || errors.Is(cause, ErrUpstreamOutputStall) {
+				return cause
 			}
 			return readErr
 		}

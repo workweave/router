@@ -43,6 +43,11 @@ type Client struct {
 	// exercise the mid-stream stall watchdog without waiting out the real
 	// threshold (mirrors the header-timeout injection below).
 	sseIdleTimeout time.Duration
+	// outputStall, when > 0, overrides httputil.DefaultResponsesOutputStallTimeout
+	// for the /v1/responses output-progress watchdog. Production uses the
+	// default via NewClient; tests inject a small value to exercise the
+	// output-stall trip without waiting out the real threshold.
+	outputStall time.Duration
 }
 
 func NewClient(apiKey, baseURL string) *Client {
@@ -73,6 +78,15 @@ func NewClientWithTimeouts(apiKey, baseURL string, headerTimeout, sseIdleTimeout
 	return c
 }
 
+// NewClientWithStallTimeouts is NewClientWithTimeouts with an additional
+// injected /v1/responses output-stall threshold; see Client.outputStall. Exists
+// so a test can drive the output-progress watchdog with a small budget.
+func NewClientWithStallTimeouts(apiKey, baseURL string, headerTimeout, sseIdleTimeout, outputStall time.Duration) *Client {
+	c := NewClientWithTimeouts(apiKey, baseURL, headerTimeout, sseIdleTimeout)
+	c.outputStall = outputStall
+	return c
+}
+
 // idleTimeoutFor picks the idle-progress watchdog threshold for the upstream
 // endpoint. /v1/responses gets the more generous reasoning budget — see
 // httputil.DefaultResponsesSSEIdleTimeout.
@@ -84,6 +98,25 @@ func (c *Client) idleTimeoutFor(endpoint providers.Endpoint) time.Duration {
 		return httputil.DefaultResponsesSSEIdleTimeout
 	}
 	return httputil.DefaultSSEIdleTimeout
+}
+
+// outputStallTimeout picks the /v1/responses output-progress watchdog budget:
+// the injected test override when set, else httputil.DefaultResponsesOutputStallTimeout.
+func (c *Client) outputStallTimeout() time.Duration {
+	if c.outputStall > 0 {
+		return c.outputStall
+	}
+	return httputil.DefaultResponsesOutputStallTimeout
+}
+
+// stallBudgetFor returns the budget that the watchdog identified by cause was
+// configured with, so logStreamStall reports the threshold that actually fired
+// (output-stall, not the byte-idle threshold the same call site also handles).
+func (c *Client) stallBudgetFor(endpoint providers.Endpoint, cause error) time.Duration {
+	if errors.Is(cause, httputil.ErrUpstreamOutputStall) {
+		return c.outputStallTimeout()
+	}
+	return c.idleTimeoutFor(endpoint)
 }
 
 // setAuth applies authentication to the upstream request. Precedence:
@@ -182,7 +215,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		bufBody, totalRead, drainErr := readCapped(body, providers.MaxBufferedErrorBytes)
 		stop()
 		if errors.Is(context.Cause(ctx), httputil.ErrUpstreamIdleTimeout) {
-			logStreamStall(decision.Model, path, idleTimeout, totalRead)
+			logStreamStall(decision.Model, path, idleTimeout, totalRead, httputil.ErrUpstreamIdleTimeout)
 		}
 		if len(bufBody) > 0 {
 			t.StampUpstreamFirstByte()
@@ -211,12 +244,33 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	w.WriteHeader(resp.StatusCode)
 	status := resp.StatusCode
 
+	// Output-progress watchdog (Responses streaming only). The byte-idle
+	// watchdog below resets on ANY upstream byte, so a stream that stays alive
+	// with non-output frames (reasoning deltas, keepalives) while producing zero
+	// output tokens rides to the 600s request cap (2026-06-16 incident). This
+	// second watchdog measures time-since-last-OUTPUT: its mark is fed by the
+	// Responses→Anthropic translator only on output-bearing events. On trip it
+	// cancels ctx with ErrUpstreamOutputStall (retryable; fails over while the
+	// preludeBuffer is still uncommitted). Only the translator can tell output
+	// frames from reasoning/keepalive frames, so it is wired via ArmOutputProgress;
+	// a non-streaming client parses events at Finalize and returns armed=false.
+	if prep.Endpoint == providers.EndpointResponses {
+		if arm, ok := w.(interface{ ArmOutputProgress(func()) bool }); ok {
+			outMark, outStop := httputil.StartIdleWatchdogCause(ctx, cancel, c.outputStallTimeout(), httputil.ErrUpstreamOutputStall)
+			if arm.ArmOutputProgress(outMark) {
+				defer outStop()
+			} else {
+				outStop()
+			}
+		}
+	}
+
 	// Manual stream loop for per-chunk diagnostics; non-debug takes the fast path.
 	if !log.Enabled(ctx, slog.LevelDebug) {
 		body := &progressReader{r: resp.Body}
 		streamErr := httputil.StreamBody(ctx, cancel, idleTimeout, body, status, w, t)
-		if errors.Is(streamErr, httputil.ErrUpstreamIdleTimeout) {
-			logStreamStall(decision.Model, path, idleTimeout, body.n)
+		if errors.Is(streamErr, httputil.ErrUpstreamIdleTimeout) || errors.Is(streamErr, httputil.ErrUpstreamOutputStall) {
+			logStreamStall(decision.Model, path, c.stallBudgetFor(prep.Endpoint, streamErr), body.n, streamErr)
 		}
 		return streamErr
 	}
@@ -256,9 +310,9 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 			return nil
 		}
 		if readErr != nil {
-			if cause := context.Cause(ctx); errors.Is(cause, httputil.ErrUpstreamIdleTimeout) {
-				logStreamStall(decision.Model, path, idleTimeout, int64(bytesRead))
-				return httputil.ErrUpstreamIdleTimeout
+			if cause := context.Cause(ctx); errors.Is(cause, httputil.ErrUpstreamIdleTimeout) || errors.Is(cause, httputil.ErrUpstreamOutputStall) {
+				logStreamStall(decision.Model, path, c.stallBudgetFor(prep.Endpoint, cause), int64(bytesRead), cause)
+				return cause
 			}
 			log.Debug("OpenAI upstream read failed", "err", readErr, "bytes_read", bytesRead)
 			return readErr
@@ -288,20 +342,31 @@ func (p *progressReader) Read(buf []byte) (n int, err error) {
 	return n, err
 }
 
-// logStreamStall reports an SSE idle-watchdog trip at ERROR: the upstream
-// accepted the request and returned headers, then produced zero bytes for the
-// full idle budget (prod incident 2026-06-09: two /v1/responses streams sat
-// at zero output tokens until the 600s request cap, burning 10 minutes of the
-// customer's agent budget each). The returned ErrUpstreamIdleTimeout is
-// classified retryable, so dispatchWithFallback re-attempts when nothing has
-// been committed to the client; this log is the paper trail for how often
-// that happens per model.
-func logStreamStall(model, path string, idleTimeout time.Duration, bytesReceived int64) {
+// logStreamStall reports a watchdog trip at ERROR: the upstream accepted the
+// request and returned headers, then stalled for the full budget. Two stall
+// modes, distinguished by cause:
+//   - ErrUpstreamIdleTimeout (byte-idle): zero bytes for the idle budget (prod
+//     incident 2026-06-09: two /v1/responses streams produced no bytes until
+//     the 600s request cap).
+//   - ErrUpstreamOutputStall (output-idle): stream stayed byte-alive on
+//     reasoning/keepalive frames but produced zero output for the output-stall
+//     budget (prod incident 2026-06-16: gpt-5.5 at zero output tokens for the
+//     full 600s, bytes flowing the whole time).
+//
+// Both are classified retryable, so dispatchWithFallback re-attempts when
+// nothing has been committed to the client; this log is the per-model paper
+// trail for how often each mode happens. stall_kind tags which.
+func logStreamStall(model, path string, budget time.Duration, bytesReceived int64, cause error) {
+	stallKind := "byte_idle"
+	if errors.Is(cause, httputil.ErrUpstreamOutputStall) {
+		stallKind = "output_idle"
+	}
 	observability.Get().Error("OpenAI upstream stream stalled mid-response; aborting for retry",
 		"model", model,
 		"provider", providers.ProviderOpenAI,
 		"path", path,
-		"idle_ms", idleTimeout.Milliseconds(),
+		"stall_kind", stallKind,
+		"budget_ms", budget.Milliseconds(),
 		"bytes_received", bytesReceived,
 	)
 }

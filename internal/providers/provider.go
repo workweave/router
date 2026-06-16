@@ -151,6 +151,19 @@ const MaxBufferedErrorBytes = 64 * 1024
 // httputil.ErrUpstreamIdleTimeout.
 var ErrUpstreamIdleTimeout = errors.New("upstream sse idle timeout")
 
+// ErrUpstreamOutputStall is the sentinel cause set on a request context when a
+// provider adapter's OUTPUT-progress watchdog fires: the upstream returned
+// headers and keeps the stream alive (event frames, reasoning-summary deltas,
+// keepalives — so ErrUpstreamIdleTimeout never trips) yet produces no
+// output-bearing content (assistant text / tool-call args / a terminal
+// envelope) for the full output-stall budget. This is the gpt-5.x failure mode
+// behind the 2026-06-16 incident: a /v1/responses stream sat at zero output
+// tokens, dribbling non-output bytes, until the 600s request cap. Like
+// ErrUpstreamIdleTimeout it is upstream-owned and retryable. Defined here (not
+// in httputil) so IsRetryable can classify it without the import cycle;
+// httputil re-exports it as httputil.ErrUpstreamOutputStall.
+var ErrUpstreamOutputStall = errors.New("upstream sse output stall")
+
 // IsRetryableStatus reports whether an upstream HTTP status is worth
 // retrying on a different provider. Covers transient upstream-side faults
 // (5xx + 408 timeout + 429 rate-limit). 4xx ≠ 408/429 are the client's
@@ -184,6 +197,13 @@ func IsRetryable(err error) bool {
 	// in the chain may also carry context.Canceled from the watchdog's
 	// cancel call).
 	if errors.Is(err, ErrUpstreamIdleTimeout) {
+		return true
+	}
+	// An output-progress stall is likewise upstream-owned: the stream stayed
+	// byte-alive but produced no output for the full budget. Classified before
+	// the caller-cancellation guard for the same reason as ErrUpstreamIdleTimeout
+	// — the watchdog surfaces it via the request context's cancel cause.
+	if errors.Is(err, ErrUpstreamOutputStall) {
 		return true
 	}
 	// Client-side cancellation and per-request deadlines are owned by the

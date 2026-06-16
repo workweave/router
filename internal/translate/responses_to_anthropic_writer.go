@@ -51,6 +51,14 @@ type ResponsesToAnthropicWriter struct {
 	// closed guards against a second close after Finalize emits the trailer.
 	closed bool
 
+	// onOutputProgress, when set via ArmOutputProgress, is invoked on every
+	// parsed output-bearing Responses event (assistant text, tool-call args, a
+	// non-reasoning output item, or a terminal envelope) and never on reasoning
+	// deltas or keepalives. It feeds the OpenAI client's output-progress
+	// watchdog so a stream that stays byte-alive while producing zero output is
+	// aborted (see httputil.DefaultResponsesOutputStallTimeout). nil disables it.
+	onOutputProgress func()
+
 	// blockIdx is the next Anthropic content-block index to assign.
 	blockIdx int
 	// itemBlocks maps an OpenAI Responses output_index to the Anthropic content
@@ -142,6 +150,29 @@ func (t *ResponsesToAnthropicWriter) WithEstimatedInputTokens(n int) *ResponsesT
 func (t *ResponsesToAnthropicWriter) WithRequestHadTools(hadTools bool) *ResponsesToAnthropicWriter {
 	t.requestHadTools = hadTools
 	return t
+}
+
+// ArmOutputProgress installs the output-progress watchdog mark. The translator
+// invokes mark whenever it parses an output-bearing Responses event — assistant
+// text, tool-call arguments, a non-reasoning output item, or a terminal
+// envelope — and never on reasoning deltas or keepalives, so the watchdog
+// measures time-since-last-output rather than time-since-last-byte. It returns
+// false (and installs nothing) when the client is not streaming: the buffered
+// path parses events only at Finalize, so an output-progress watchdog would
+// have nothing to mark and would false-trip. Call after Prelude, which sets the
+// streaming flag.
+func (t *ResponsesToAnthropicWriter) ArmOutputProgress(mark func()) (armed bool) {
+	if !t.streaming {
+		return false
+	}
+	t.onOutputProgress = mark
+	return true
+}
+
+func (t *ResponsesToAnthropicWriter) markOutputProgress() {
+	if t.onOutputProgress != nil {
+		t.onOutputProgress()
+	}
 }
 
 func (t *ResponsesToAnthropicWriter) Header() http.Header { return t.inner.Header() }
@@ -246,23 +277,39 @@ func (t *ResponsesToAnthropicWriter) translateResponsesEvent(raw []byte) error {
 	// sometimes dropped by intermediaries). Unknown response.* events are
 	// ignored; the ones below cover reasoning, text, tool calls, the terminal
 	// envelope, and stream-level failures.
+	// markOutputProgress feeds the output-progress watchdog: it is called on the
+	// branches below that represent the model producing OUTPUT (text, tool-call
+	// args, a non-reasoning output item, or a terminal envelope), and is
+	// deliberately NOT called on reasoning deltas/items or unknown frames — a
+	// stream that only ever reasons or keepalives must be allowed to trip the
+	// watchdog. output_item.added/done fire for reasoning items too, so those
+	// branches gate on item.type.
 	switch gjson.GetBytes(data, "type").String() {
 	case "response.output_item.added":
+		if gjson.GetBytes(data, "item.type").String() != "reasoning" {
+			t.markOutputProgress()
+		}
 		return t.handleOutputItemAdded(data)
 	case "response.output_text.delta":
+		t.markOutputProgress()
 		return t.handleTextDelta(data)
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		return t.handleReasoningDelta(data)
 	case "response.function_call_arguments.delta":
+		t.markOutputProgress()
 		t.bufferToolArgs(data, "delta", true)
 		return nil
 	case "response.function_call_arguments.done":
 		// The terminal arg event carries the complete `arguments` string. Adopt
 		// it as authoritative so a tool call whose deltas were absent or lost
 		// still emits the real parameters rather than `{}`.
+		t.markOutputProgress()
 		t.bufferToolArgs(data, "arguments", false)
 		return nil
 	case "response.output_item.done":
+		if gjson.GetBytes(data, "item.type").String() != "reasoning" {
+			t.markOutputProgress()
+		}
 		return t.handleOutputItemDone(data)
 	case "error":
 		// Stream-level failure over HTTP 200 — surface it as an Anthropic error
@@ -275,6 +322,9 @@ func (t *ResponsesToAnthropicWriter) translateResponsesEvent(raw []byte) error {
 		e := gjson.GetBytes(data, "response.error")
 		return t.emitStreamErrorEvent(e.Get("code").String(), e.Get("message").String())
 	case "response.completed", "response.incomplete":
+		// Terminal envelope: the turn is finishing, so this is progress (and a
+		// post-trip cancel would be moot anyway).
+		t.markOutputProgress()
 		t.captureFinalResponse(data)
 		return nil
 	}
