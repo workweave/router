@@ -1,0 +1,155 @@
+format_version: 2
+version: v0.68
+parent: v0.67
+status: candidate
+promoted_date: null
+embedder:
+  model: jina-v2-base-code-int8
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 16
+  top_p: 4
+  alpha: 0.96
+  shrinkage_k0: 10.0
+  score_normalization: per_prompt_zscore_across_bench_columns
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 1775
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  output_cost_ratio: 0.0
+  speed_weight: 0.0
+  expected_output_tokens: 2000
+  per_model_verbosity: true
+  include_routerarena_labels: routerarena_labels_combined.jsonl
+  routerarena_only: false
+  bench_coding_only: false
+  include_benchmark_corpus: true
+  benchmark_corpus_loaders: aider-polyglot-go,aider-polyglot-rust-cpp-java,livecodebench-ts-and-aider-polyglot-ts,bfcl-v4-simple,bfcl-v4-parallel-multi
+  source_fractions:
+    routerarena: 0.1
+  exclude_prompts: null
+  n_excluded_prompts: 0
+  include_aa_labels: aa_quality_priors_v0.64.json
+  aa_evidence_scale: 3.0
+  cold_model_aa_boost: 1.0
+  aa_label_tier_weights:
+    AIDER_POLYGLOT_GO: 1.0
+    AIDER_POLYGLOT_RUST_CPP_JAVA: 1.0
+    BFCL_V4_PARALLEL_MULTI: 0.8
+    BFCL_V4_SIMPLE: 0.3
+    GPQA_DIAMOND: 0.3
+    IFBENCH: 0.3
+    LIVECODEBENCH: 1.0
+    LIVECODEBENCH_TS: 1.0
+    MATH_500: 0.3
+    MMLU_PRO: 0.3
+    SCICODE: 1.0
+    SWE_BENCH_VERIFIED: 1.0
+    TAU2_BENCH_TELECOM: 1.0
+    TERMINAL_BENCH_HARD: 1.0
+  aa_label_residuals:
+    fraction_under_threshold: 0.8876404494382022
+    max: 0.2636900631579798
+    mean: 0.05666298416741266
+    median: 0.03600941472238445
+    n_cells: 178
+    p90: 0.15338418701568313
+  default_routing_knobs:
+    # Per-cluster quality weight. v0.68 demotes the conversational/NL-dominant
+    # clusters (2, 9, 10, 11, 15 — identified via the labeled register-probe
+    # corpus, testdata/register_probes.jsonl) from 0.96 -> 0.80 so chit-chat /
+    # trivial-NL turns stop routing to Opus. Coding/agentic clusters stay 0.96
+    # so Opus is retained where it earns it. Metadata-only delta vs v0.67;
+    # quality_means / centroids byte-identical.
+    alpha:
+    - 0.96  # c0  agentic/coding catch-all
+    - 0.96  # c1
+    - 0.80  # c2  conversational
+    - 0.96  # c3
+    - 0.96  # c4
+    - 0.96  # c5  coding/agentic
+    - 0.96  # c6
+    - 0.96  # c7
+    - 0.96  # c8
+    - 0.80  # c9  conversational/NL
+    - 0.80  # c10 conversational/NL (primary)
+    - 0.80  # c11 trivial-NL
+    - 0.96  # c12
+    - 0.96  # c13 hard-code
+    - 0.96  # c14
+    - 0.80  # c15 trivial-NL
+    speed_weight: 0.0
+    output_cost_ratio: 0.0
+    expected_output_tokens: 2000
+    per_model_verbosity: true
+  recommended_ui_defaults:
+    quality_pareto:
+      alpha: 0.6
+      speed_weight: 0.1
+      output_cost_ratio: 0.25
+    cost_pareto:
+      alpha: 0.4
+      speed_weight: 0.05
+      output_cost_ratio: 0.4
+    balanced:
+      alpha: 0.5
+      speed_weight: 0.12
+      output_cost_ratio: 0.25
+deployed_providers:
+- anthropic
+- bedrock
+- deepinfra
+- fireworks
+- google
+- openai
+deployed_models:
+- claude-haiku-4-5
+- claude-opus-4-7
+- claude-opus-4-8
+- claude-sonnet-4-6
+- deepseek/deepseek-v4-flash
+- deepseek/deepseek-v4-pro
+- gemini-3.1-flash-lite-preview
+- gemini-3.1-pro-preview
+- gemini-3.5-flash
+- gpt-5.4-mini
+- gpt-5.5
+- moonshotai/kimi-k2.6
+- qwen/qwen3-coder-next
+- qwen/qwen3-next-80b-a3b-instruct
+- xiaomi/mimo-v2.5-pro
+cost_per_1k_input_usd:
+  claude-haiku-4-5: 0.0008
+  claude-opus-4-7: 0.005
+  claude-opus-4-8: 0.005
+  claude-sonnet-4-6: 0.003
+  deepseek/deepseek-v4-flash: 0.00014
+  deepseek/deepseek-v4-pro: 0.00174
+  gemini-3.1-flash-lite-preview: 0.0001
+  gemini-3.1-pro-preview: 0.002
+  gemini-3.5-flash: 0.0015
+  gpt-5.4-mini: 0.0004
+  gpt-5.5: 0.005
+  moonshotai/kimi-k2.6: 0.00095
+  qwen/qwen3-coder-next: 0.0005
+  qwen/qwen3-next-80b-a3b-instruct: 0.00015
+  xiaomi/mimo-v2.5-pro: 0.001
+changelog: 'v0.68 = v0.67 with a per-cluster alpha demote on the conversational/NL clusters.
+  Pure metadata delta: centroids.bin, quality_means.json, model_features.json, model_axes.json,
+  model_registry.json and rankings.json are all BYTE-IDENTICAL to v0.67 (no retrain, no re-cluster).
+  The only change is default_routing_knobs.alpha: clusters 2, 9, 10, 11, 15 drop 0.96 -> 0.80; all
+  other clusters stay 0.96. Motivation: at the deployed uniform alpha=0.96 the cost term carries only
+  4% of the blend, so conversational / trivial-NL turns route to Opus ~70-80% of the time even though
+  every model handles them comparably (low per-cluster quality dispersion, Opus margin <0.02 z). The
+  five demoted clusters are the NL/trivial-dominant clusters identified by the labeled register-probe
+  corpus (testdata/register_probes.jsonl, 180 prompts x 6 registers); coding/agentic clusters (0, 5,
+  13, ...) are left at 0.96 so Opus is retained where it earns a real margin. Offline replay over the
+  corpus (cmd/routing-report) at top_p=2: conversational premium share 80% -> 43%, trivial-NL 90% -> 53%,
+  with hard-code (80%/100%) and agentic-tool (93%/100%) UNCHANGED. NL traffic lands mostly on
+  deepseek-v4-pro. The offline quality axis is the router''s own quality_means, not ground-truth solve
+  rate -- the model mix is exact, the quality estimate is a proxy. Candidate only; promote gated on a
+  live bake-off and the cmd/routing-report sign-off on the latest-bump PR.'
