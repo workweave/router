@@ -1,0 +1,23 @@
+.github/workflows/check_cluster_routing.yml
+  s_c5c3a4e3dd2fe4::t_6806a5bdca9d78 6-12,14-23,25-31,35-36,51-55,57,59,65,77-78,118-119,127-129,136,140-145,166,172,177,180-221
+cmd/routing-report/main.go
+  s_c5c3a4e3dd2fe4::t_3c9758b2e9e1bc 280,283-287
+  s_c5c3a4e3dd2fe4::t_2e3df406cb75f8 175,189-192
+  s_c5c3a4e3dd2fe4::t_38fafaa83294e0 77-81,83-84,91-99,110-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "de37792cd7c4679d464debdc1a5e2bac355b98e1",
+  "prompts": {},
+  "sessions": {
+    "s_c5c3a4e3dd2fe4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8d2654f-a38b-4c45-aa60-fdc811fcf202",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
