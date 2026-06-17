@@ -141,7 +141,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	providers.ObserveUpstreamHeaders(ctx, resp.Header)
 
 	if resp.StatusCode >= 400 {
-		bufBody, totalRead, drainErr := readCapped(resp.Body, providers.MaxBufferedErrorBytes)
+		bufBody, totalRead, drainErr := providers.ReadCapped(resp.Body, providers.MaxBufferedErrorBytes)
 		if len(bufBody) > 0 {
 			t.StampUpstreamFirstByte()
 		}
@@ -152,14 +152,12 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 			"Upstream Anthropic returned error status",
 			resp.StatusCode,
 			"routed_model", decision.Model,
-			"body_preview", previewBytes(bufBody),
+			"body_preview", providers.PreviewBytes(bufBody),
 			"body_total_bytes", totalRead,
 		)
-		errHeaders := http.Header{}
-		providers.CopyUpstreamHeaders(headerCapture{errHeaders}, resp)
 		return &providers.UpstreamErrorResponse{
 			Status:  resp.StatusCode,
-			Headers: errHeaders,
+			Headers: providers.CaptureUpstreamHeaders(resp),
 			Body:    bufBody,
 		}
 	}
@@ -231,31 +229,5 @@ func logUpstreamStatus(msg string, status int, attrs ...any) {
 	}
 	observability.Get().Warn(msg, merged...)
 }
-
-func readCapped(r io.Reader, limit int) ([]byte, int64, error) {
-	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
-	totalRead := int64(len(prefix))
-	if err != nil {
-		return prefix, totalRead, err
-	}
-	const maxDrain = 1 << 20 // 1 MiB
-	rest, drainErr := io.Copy(io.Discard, io.LimitReader(r, maxDrain))
-	totalRead += rest
-	return prefix, totalRead, drainErr
-}
-
-func previewBytes(body []byte) string {
-	const previewLimit = 1024
-	if len(body) > previewLimit {
-		return string(body[:previewLimit])
-	}
-	return string(body)
-}
-
-type headerCapture struct{ h http.Header }
-
-func (c headerCapture) Header() http.Header       { return c.h }
-func (c headerCapture) Write([]byte) (int, error) { return 0, nil }
-func (c headerCapture) WriteHeader(int)           {}
 
 var _ providers.Client = (*Client)(nil)
