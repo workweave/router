@@ -41,6 +41,16 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 
+	// Strip the one-click thumbs footer that prior streamed answers appended as a
+	// trailing model text part. Clients echo it back in contents[] on the next
+	// turn, so without this it (and its signed rate URLs) accumulates in upstream
+	// context (see ProxyMessages for the symmetric Anthropic/OpenAI path).
+	body, stripErr := translate.StripFeedbackFooterFromGeminiContents(body)
+	if stripErr != nil {
+		log.Error("Failed to strip feedback footer from Gemini contents", "err", stripErr)
+		return fmt.Errorf("strip feedback footer: %w", stripErr)
+	}
+
 	env, parseErr := translate.ParseGemini(body)
 	if parseErr != nil {
 		log.Error("Failed to parse Gemini request", "err", parseErr)

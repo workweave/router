@@ -1098,6 +1098,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return fmt.Errorf("strip routing marker: %w", stripErr)
 	}
 
+	// Strip the one-click thumbs footer that prior streamed answers appended as
+	// trailing assistant text. Like the routing marker, clients echo it back
+	// verbatim, so without this it (and its signed rate URLs) accumulates in
+	// upstream context and shifts assistant prefixes off the prompt cache.
+	body, stripErr = translate.StripFeedbackFooterFromMessages(body)
+	if stripErr != nil {
+		log.Error("Failed to strip feedback footer from inbound messages", "err", stripErr)
+		return fmt.Errorf("strip feedback footer: %w", stripErr)
+	}
+
 	env, parseErr := translate.ParseAnthropic(body)
 	if parseErr != nil {
 		log.Error("Failed to parse Anthropic request", "err", parseErr)
@@ -2434,6 +2444,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	body, stripErr := translate.StripRoutingMarkerFromMessages(body)
 	if stripErr != nil {
 		log.Error("Failed to strip routing marker from OpenAI messages", "err", stripErr)
+	}
+	body, stripErr = translate.StripFeedbackFooterFromMessages(body)
+	if stripErr != nil {
+		log.Error("Failed to strip feedback footer from OpenAI messages", "err", stripErr)
 	}
 	env, parseErr := translate.ParseOpenAI(body)
 	if parseErr != nil {
