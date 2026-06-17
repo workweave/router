@@ -134,9 +134,11 @@ func (w *OpenAIRoutingFooterWriter) shouldInject(payload []byte) bool {
 }
 
 // chunkHasToolCall reports whether an OpenAI chunk streams any tool-call delta
-// on its first choice (an agent tool step).
+// on its first choice (an agent tool step). An empty tool_calls array doesn't
+// count — some upstreams emit "tool_calls":[] on plain content chunks, and
+// latching on it would suppress the footer for the rest of an answer-only turn.
 func chunkHasToolCall(payload []byte) bool {
-	return gjson.GetBytes(payload, "choices.0.delta.tool_calls").IsArray()
+	return gjson.GetBytes(payload, "choices.0.delta.tool_calls.#").Int() > 0
 }
 
 // emitCoalescedWithFooter splits a terminal chunk that carries both answer

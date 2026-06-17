@@ -118,6 +118,27 @@ func TestOpenAIRoutingFooterWriter_CoalescedFooterAfterText(t *testing.T) {
 	assert.Less(t, footerIdx, finishIdx, "footer must precede the finish chunk")
 }
 
+// openAIEmptyToolCallsStream emits an answer chunk that carries an empty
+// "tool_calls":[] alongside content, then a natural finish. The empty array
+// must not be treated as a tool step.
+func openAIEmptyToolCallsStream() string {
+	return `data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"gpt","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi","tool_calls":[]},"finish_reason":null}]}` + "\n\n" +
+		`data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"gpt","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n" +
+		`data: [DONE]` + "\n\n"
+}
+
+func TestOpenAIRoutingFooterWriter_EmptyToolCallsStillInjects(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewOpenAIRoutingFooterWriter(rec, testFooter)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+
+	_, err := w.Write([]byte(openAIEmptyToolCallsStream()))
+	require.NoError(t, err)
+	assert.Contains(t, rec.Body.String(), "Was this routing right?",
+		"an empty tool_calls array must not suppress the footer on an answer-only turn")
+}
+
 func TestOpenAIRoutingFooterWriter_EmptyFooterPassthrough(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewOpenAIRoutingFooterWriter(rec, "")
