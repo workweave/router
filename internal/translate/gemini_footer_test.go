@@ -62,6 +62,43 @@ func TestGeminiRoutingFooterWriter_SkipsToolCallTurn(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), "Was this routing right?", "functionCall turns must not get a footer")
 }
 
+// geminiCoalescedStream packs the answer text and finishReason "STOP" into a
+// single chunk, which is the common Gemini terminal-chunk shape.
+func geminiCoalescedStream() string {
+	return `data: {"candidates":[{"content":{"parts":[{"text":"The answer is 42."}],"role":"model"},"finishReason":"STOP","index":0}]}` + "\n\n"
+}
+
+func TestGeminiRoutingFooterWriter_CoalescedFooterAfterText(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewGeminiRoutingFooterWriter(rec, testFooter)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+
+	_, err := w.Write([]byte(geminiCoalescedStream()))
+	require.NoError(t, err)
+
+	events := splitSSEEvents(rec.Body.String())
+	textIdx, footerIdx, finishIdx := -1, -1, -1
+	for i, e := range events {
+		data := extractDataField(e)
+		text := gjson.Get(data, "candidates.0.content.parts.0.text").String()
+		if text == "The answer is 42." {
+			textIdx = i
+		}
+		if strings.Contains(text, "Was this routing right?") {
+			footerIdx = i
+		}
+		if gjson.Get(data, "candidates.0.finishReason").String() == "STOP" {
+			finishIdx = i
+		}
+	}
+	require.NotEqual(t, -1, textIdx, "answer text chunk must be present")
+	require.NotEqual(t, -1, footerIdx, "footer chunk must be present")
+	require.NotEqual(t, -1, finishIdx, "finish chunk must be present")
+	assert.Less(t, textIdx, footerIdx, "answer text must precede the footer")
+	assert.Less(t, footerIdx, finishIdx, "footer must precede the finish chunk")
+}
+
 func TestGeminiRoutingFooterWriter_EmptyFooterPassthrough(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewGeminiRoutingFooterWriter(rec, "")

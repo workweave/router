@@ -80,6 +80,44 @@ func TestOpenAIRoutingFooterWriter_SkipsToolCallsClosedWithStop(t *testing.T) {
 		"a turn that streamed tool_calls must not get a footer even when it ends with finish_reason stop")
 }
 
+// openAICoalescedStream packs the last answer token and finish_reason "stop"
+// into a single chunk, as some OpenAI-compat upstreams do.
+func openAICoalescedStream() string {
+	return `data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"gpt","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}]}` + "\n\n" +
+		`data: [DONE]` + "\n\n"
+}
+
+func TestOpenAIRoutingFooterWriter_CoalescedFooterAfterText(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewOpenAIRoutingFooterWriter(rec, testFooter)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+
+	_, err := w.Write([]byte(openAICoalescedStream()))
+	require.NoError(t, err)
+
+	events := splitSSEEvents(rec.Body.String())
+	textIdx, footerIdx, finishIdx := -1, -1, -1
+	for i, e := range events {
+		data := extractDataField(e)
+		content := gjson.Get(data, "choices.0.delta.content").String()
+		if content == "Hi" {
+			textIdx = i
+		}
+		if strings.Contains(content, "Was this routing right?") {
+			footerIdx = i
+		}
+		if gjson.Get(data, "choices.0.finish_reason").String() == "stop" {
+			finishIdx = i
+		}
+	}
+	require.NotEqual(t, -1, textIdx, "answer text chunk must be present")
+	require.NotEqual(t, -1, footerIdx, "footer chunk must be present")
+	require.NotEqual(t, -1, finishIdx, "finish chunk must be present")
+	assert.Less(t, textIdx, footerIdx, "answer text must precede the footer")
+	assert.Less(t, footerIdx, finishIdx, "footer must precede the finish chunk")
+}
+
 func TestOpenAIRoutingFooterWriter_EmptyFooterPassthrough(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewOpenAIRoutingFooterWriter(rec, "")

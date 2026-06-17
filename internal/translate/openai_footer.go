@@ -10,6 +10,7 @@ import (
 	"workweave/router/internal/sse"
 
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // OpenAIRoutingFooterWriter wraps an http.ResponseWriter and appends a footer
@@ -93,8 +94,16 @@ func (w *OpenAIRoutingFooterWriter) processUpstream(data []byte) (int, error) {
 			w.sawToolCall = true
 		}
 		if !w.footerEmitted && w.shouldInject(payload) {
-			w.emitFooterChunk(payload)
 			w.footerEmitted = true
+			// When the terminal chunk also carries answer text, split it so the
+			// footer lands after the text but before the finish_reason; otherwise
+			// the footer precedes the original (text-free) finish chunk.
+			if gjson.GetBytes(payload, "choices.0.delta.content").String() != "" {
+				w.emitCoalescedWithFooter(payload)
+				w.buf.Next(n)
+				continue
+			}
+			w.emitFooterChunk(payload)
 		}
 		w.bw.Write(event[:n])
 		w.buf.Next(n)
@@ -128,6 +137,36 @@ func (w *OpenAIRoutingFooterWriter) shouldInject(payload []byte) bool {
 // on its first choice (an agent tool step).
 func chunkHasToolCall(payload []byte) bool {
 	return gjson.GetBytes(payload, "choices.0.delta.tool_calls").IsArray()
+}
+
+// emitCoalescedWithFooter splits a terminal chunk that carries both answer
+// content and a finish_reason into: a content chunk (finish_reason nulled), the
+// footer chunk, then a finish chunk (empty delta) — so the footer always lands
+// after the last answer text and before the turn terminates. Falls back to the
+// original chunk on the rare sjson rewrite failure.
+func (w *OpenAIRoutingFooterWriter) emitCoalescedWithFooter(finishChunk []byte) {
+	contentChunk, err := sjson.SetRawBytes(append([]byte(nil), finishChunk...), "choices.0.finish_reason", []byte("null"))
+	if err != nil {
+		w.emitFooterChunk(finishChunk)
+		w.writeData(finishChunk)
+		return
+	}
+	finishOnly, err := sjson.SetRawBytes(append([]byte(nil), finishChunk...), "choices.0.delta", []byte("{}"))
+	if err != nil {
+		w.emitFooterChunk(finishChunk)
+		w.writeData(finishChunk)
+		return
+	}
+	w.writeData(contentChunk)
+	w.emitFooterChunk(finishChunk)
+	w.writeData(finishOnly)
+}
+
+// writeData frames a JSON payload as a single SSE data event.
+func (w *OpenAIRoutingFooterWriter) writeData(payload []byte) {
+	w.bw.WriteString("data: ")
+	w.bw.Write(payload)
+	w.bw.WriteString("\n\n")
 }
 
 // emitFooterChunk writes a chat.completion.chunk carrying the footer as

@@ -9,6 +9,7 @@ import (
 	"workweave/router/internal/sse"
 
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // GeminiRoutingFooterWriter wraps an http.ResponseWriter and appends a footer
@@ -93,8 +94,16 @@ func (w *GeminiRoutingFooterWriter) processUpstream(data []byte) (int, error) {
 			w.sawFunctionCall = true
 		}
 		if !w.footerEmitted && w.shouldInject(payload) {
-			w.emitFooterChunk()
 			w.footerEmitted = true
+			// When the terminal chunk also carries answer text (Gemini commonly
+			// coalesces the last text part with finishReason), split it so the
+			// footer lands after the text but before finishReason.
+			if geminiChunkHasText(payload) {
+				w.emitCoalescedWithFooter(payload)
+				w.buf.Next(n)
+				continue
+			}
+			w.emitFooterChunk()
 		}
 		w.bw.Write(event[:n])
 		w.buf.Next(n)
@@ -122,6 +131,50 @@ func (w *GeminiRoutingFooterWriter) emitFooterChunk() {
 	w.bw.WriteString(`data: {"candidates":[{"content":{"parts":[{"text":`)
 	sse.WriteJSONString(w.bw, w.footer)
 	w.bw.WriteString(`}],"role":"model"},"index":0}]}`)
+	w.bw.WriteString("\n\n")
+}
+
+// geminiChunkHasText reports whether the first candidate carries any text part
+// (i.e. answer content coalesced into the terminal chunk).
+func geminiChunkHasText(payload []byte) bool {
+	found := false
+	gjson.GetBytes(payload, "candidates.0.content.parts").ForEach(func(_, part gjson.Result) bool {
+		if part.Get("text").Exists() {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// emitCoalescedWithFooter splits a terminal chunk that carries both answer text
+// and finishReason into: a content chunk (finishReason removed), the footer
+// chunk, then a finish chunk (content removed) — so the footer always lands
+// after the last answer text and before the turn terminates. Falls back to the
+// original chunk on the rare sjson rewrite failure.
+func (w *GeminiRoutingFooterWriter) emitCoalescedWithFooter(finishChunk []byte) {
+	contentChunk, err := sjson.DeleteBytes(append([]byte(nil), finishChunk...), "candidates.0.finishReason")
+	if err != nil {
+		w.emitFooterChunk()
+		w.writeData(finishChunk)
+		return
+	}
+	finishOnly, err := sjson.DeleteBytes(append([]byte(nil), finishChunk...), "candidates.0.content")
+	if err != nil {
+		w.emitFooterChunk()
+		w.writeData(finishChunk)
+		return
+	}
+	w.writeData(contentChunk)
+	w.emitFooterChunk()
+	w.writeData(finishOnly)
+}
+
+// writeData frames a JSON payload as a single SSE data event.
+func (w *GeminiRoutingFooterWriter) writeData(payload []byte) {
+	w.bw.WriteString("data: ")
+	w.bw.Write(payload)
 	w.bw.WriteString("\n\n")
 }
 
