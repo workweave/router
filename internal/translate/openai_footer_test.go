@@ -59,6 +59,27 @@ func TestOpenAIRoutingFooterWriter_SkipsToolCalls(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), "Was this routing right?", "tool_calls turns must not get a footer")
 }
 
+// openAIToolCallStopStream streams a tool_calls delta and then closes the turn
+// with finish_reason "stop" — the shape some OpenAI-compat upstreams emit for a
+// tool-emitting turn. The footer must stay off this turn.
+func openAIToolCallStopStream() string {
+	return `data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"gpt","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"ls","arguments":"{}"}}]},"finish_reason":null}]}` + "\n\n" +
+		`data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"gpt","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n" +
+		`data: [DONE]` + "\n\n"
+}
+
+func TestOpenAIRoutingFooterWriter_SkipsToolCallsClosedWithStop(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewOpenAIRoutingFooterWriter(rec, testFooter)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+
+	_, err := w.Write([]byte(openAIToolCallStopStream()))
+	require.NoError(t, err)
+	assert.NotContains(t, rec.Body.String(), "Was this routing right?",
+		"a turn that streamed tool_calls must not get a footer even when it ends with finish_reason stop")
+}
+
 func TestOpenAIRoutingFooterWriter_EmptyFooterPassthrough(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewOpenAIRoutingFooterWriter(rec, "")

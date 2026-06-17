@@ -2441,13 +2441,20 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 
-	body, stripErr := translate.StripRoutingMarkerFromMessages(body)
+	// Keep the original bytes on strip failure: the strippers return a nil body
+	// alongside the error, and this path logs-and-continues rather than aborting,
+	// so overwriting body unconditionally would drop the request and break parse.
+	strippedBody, stripErr := translate.StripRoutingMarkerFromMessages(body)
 	if stripErr != nil {
 		log.Error("Failed to strip routing marker from OpenAI messages", "err", stripErr)
+	} else {
+		body = strippedBody
 	}
-	body, stripErr = translate.StripFeedbackFooterFromMessages(body)
+	strippedBody, stripErr = translate.StripFeedbackFooterFromMessages(body)
 	if stripErr != nil {
 		log.Error("Failed to strip feedback footer from OpenAI messages", "err", stripErr)
+	} else {
+		body = strippedBody
 	}
 	env, parseErr := translate.ParseOpenAI(body)
 	if parseErr != nil {

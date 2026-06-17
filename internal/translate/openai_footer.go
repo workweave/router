@@ -34,6 +34,7 @@ type OpenAIRoutingFooterWriter struct {
 	streaming      bool
 	headersEmitted bool
 	footerEmitted  bool
+	sawToolCall    bool
 }
 
 // NewOpenAIRoutingFooterWriter wraps w so footer is appended as a trailing
@@ -88,6 +89,9 @@ func (w *OpenAIRoutingFooterWriter) processUpstream(data []byte) (int, error) {
 		}
 		_, payload := sse.ParseEvent(event)
 
+		if chunkHasToolCall(payload) {
+			w.sawToolCall = true
+		}
 		if !w.footerEmitted && w.shouldInject(payload) {
 			w.emitFooterChunk(payload)
 			w.footerEmitted = true
@@ -105,12 +109,25 @@ func (w *OpenAIRoutingFooterWriter) processUpstream(data []byte) (int, error) {
 }
 
 // shouldInject reports whether payload is the terminating chunk of a naturally
-// finished turn ("[DONE]" carries no JSON, so it never matches).
+// finished, tool-free turn ("[DONE]" carries no JSON, so it never matches).
+// Some OpenAI-compat upstreams close tool-emitting turns with finish_reason
+// "stop" while still streaming delta.tool_calls, so the tool-call guard — not
+// the finish_reason alone — is what keeps the footer off intermediate agent
+// steps.
 func (w *OpenAIRoutingFooterWriter) shouldInject(payload []byte) bool {
+	if w.sawToolCall {
+		return false
+	}
 	if bytes.Equal(bytes.TrimSpace(payload), []byte("[DONE]")) {
 		return false
 	}
 	return gjson.GetBytes(payload, "choices.0.finish_reason").String() == "stop"
+}
+
+// chunkHasToolCall reports whether an OpenAI chunk streams any tool-call delta
+// on its first choice (an agent tool step).
+func chunkHasToolCall(payload []byte) bool {
+	return gjson.GetBytes(payload, "choices.0.delta.tool_calls").IsArray()
 }
 
 // emitFooterChunk writes a chat.completion.chunk carrying the footer as
