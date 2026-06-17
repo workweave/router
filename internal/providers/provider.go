@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -169,6 +170,53 @@ func (e *UpstreamErrorResponse) Error() string {
 // that support failover. Beyond this the body is truncated and the rest
 // of the upstream stream is drained without retention.
 const MaxBufferedErrorBytes = 64 * 1024
+
+// ReadCapped reads up to limit bytes from r into a buffer, then drains the
+// rest without retention up to a 1 MiB cap so the upstream connection is
+// released promptly and failover latency on a slow upstream stays bounded.
+// Returns the buffered prefix, total bytes read across both reads, and any
+// error (io.EOF mapped to nil).
+func ReadCapped(r io.Reader, limit int) ([]byte, int64, error) {
+	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
+	totalRead := int64(len(prefix))
+	if err != nil {
+		return prefix, totalRead, err
+	}
+	const maxDrain = 1 << 20 // 1 MiB
+	rest, drainErr := io.Copy(io.Discard, io.LimitReader(r, maxDrain))
+	totalRead += rest
+	return prefix, totalRead, drainErr
+}
+
+// PreviewBytes returns up to the first 1 KiB of body as a string, for
+// logging an upstream error body without retaining the whole thing.
+func PreviewBytes(body []byte) string {
+	const previewLimit = 1024
+	if len(body) > previewLimit {
+		return string(body[:previewLimit])
+	}
+	return string(body)
+}
+
+// headerCapture is a minimal http.ResponseWriter that captures headers
+// only, used internally by CaptureUpstreamHeaders to reuse
+// CopyUpstreamHeaders against an http.Header adapters own. Write and
+// WriteHeader are no-ops.
+type headerCapture struct{ h http.Header }
+
+func (c headerCapture) Header() http.Header       { return c.h }
+func (c headerCapture) Write([]byte) (int, error) { return 0, nil }
+func (c headerCapture) WriteHeader(int)           {}
+
+// CaptureUpstreamHeaders copies resp's non-hop-by-hop headers into a new
+// http.Header, without writing to any real client connection. Used by
+// adapters that buffer an upstream error response (returning
+// *UpstreamErrorResponse) instead of streaming it through.
+func CaptureUpstreamHeaders(resp *http.Response) http.Header {
+	h := http.Header{}
+	CopyUpstreamHeaders(headerCapture{h}, resp)
+	return h
+}
 
 // ErrUpstreamIdleTimeout is the sentinel cause set on a request context when
 // a provider adapter's SSE inactivity watchdog fires: the upstream accepted
