@@ -7,6 +7,7 @@ package feedback
 import (
 	"encoding/json"
 	"errors"
+	"html"
 	"io"
 	"net/http"
 	"strings"
@@ -117,6 +118,66 @@ func SubmitHandler(svc *proxy.Service) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	}
+}
+
+// RateHandler serves GET /v1/feedback/rate?t=<token>&r=up|down: the one-click
+// thumb link embedded in a response footer. It records the rating straight from
+// the GET (no form page) and returns a tiny HTML confirmation. The signed token
+// is the sole credential, so these links carry no auth middleware. Note: a GET
+// that mutates can be triggered by link prefetchers, but the token is
+// unguessable and per-request, so the blast radius is one request's own rating.
+func RateHandler(svc *proxy.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		log := observability.FromGin(c)
+
+		rating := c.Query("r")
+		if rating != "up" && rating != "down" {
+			c.Data(http.StatusBadRequest, "text/html; charset=utf-8", ratePage("That rating link looks malformed."))
+			return
+		}
+
+		claims, err := svc.VerifyFeedbackToken(c.Query("t"))
+		if err != nil {
+			status, msg := http.StatusNotFound, "This feedback link is invalid."
+			if errors.Is(err, token.ErrExpiredToken) {
+				status, msg = http.StatusGone, "This feedback link has expired."
+			}
+			c.Data(status, "text/html; charset=utf-8", ratePage(msg))
+			return
+		}
+
+		err = svc.SubmitFeedback(c.Request.Context(), proxy.SubmitFeedbackParams{
+			InstallationID: claims.InstallationID,
+			ExternalID:     claims.ExternalID,
+			RequestID:      claims.RequestID,
+			RouterUserID:   claims.RouterUserID,
+			Rating:         rating,
+		})
+		if err != nil {
+			log.Error("Failed to record one-click feedback", "err", err, "request_id", claims.RequestID, "rating", rating)
+			c.Data(http.StatusInternalServerError, "text/html; charset=utf-8", ratePage("Sorry — we couldn't record that. Please try again."))
+			return
+		}
+
+		emoji := "👍"
+		if rating == "down" {
+			emoji = "👎"
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", ratePage("Thanks! Recorded "+emoji+" — you can close this tab."))
+	}
+}
+
+// ratePage renders the minimal standalone confirmation shown after a one-click
+// rating. No external assets, no JS — it's a dead-end "you're done" page.
+func ratePage(message string) []byte {
+	return []byte(`<!doctype html><html lang="en"><head><meta charset="utf-8">` +
+		`<meta name="viewport" content="width=device-width,initial-scale=1">` +
+		`<meta name="robots" content="noindex">` +
+		`<title>Router feedback</title>` +
+		`<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;` +
+		`font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;` +
+		`background:#0b0b0f;color:#e7e7ea}main{max-width:28rem;padding:2rem;text-align:center}</style>` +
+		`</head><body><main>` + html.EscapeString(message) + `</main></body></html>`)
 }
 
 func toContextResponse(f proxy.FeedbackContext) contextResponse {

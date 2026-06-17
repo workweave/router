@@ -164,7 +164,16 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 
 	proxyStart := time.Now()
 	var extractor *otel.UsageExtractor
-	contentSink, contentCap := s.maybeCaptureResponse(w)
+	// Append the one-click feedback thumbs as a trailing part on streaming
+	// answers (see ProxyMessages for the rationale). The Gemini path resolves no
+	// router user, matching the decision span and feedback header above.
+	clientSink := w
+	if env.Stream() {
+		if footer := s.feedbackFooter(installationID, externalID, requestID, ""); footer != "" {
+			clientSink = translate.NewGeminiRoutingFooterWriter(w, footer)
+		}
+	}
+	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
 	var sink http.ResponseWriter = contentSink
 	if marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes)); marker != "" {
 		mw := translate.NewGeminiRoutingMarkerWriter(sink, marker)

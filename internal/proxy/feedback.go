@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -17,6 +18,12 @@ import (
 // the response served, so clients can surface a "rate this routing decision"
 // affordance. Omitted when the feedback-link feature is unwired.
 const HeaderRouterFeedbackURL = "x-router-feedback-url"
+
+// feedbackRatePath is the router endpoint backing the one-click thumb links in
+// the response footer. It lives on the same origin as feedbackBaseURL (the
+// router host, which already serves /v1/feedback/*), so footer links are simply
+// feedbackBaseURL + this + query.
+const feedbackRatePath = "/v1/feedback/rate"
 
 // routerFeedbackSpanName is the OTLP span the router emits on each submission so
 // the Weave backend mirrors feedback into its own router_request_feedback table.
@@ -151,19 +158,40 @@ func (s *Service) emitFeedbackSpan(p SubmitFeedbackParams) {
 	buf.Flush()
 }
 
+// mintFeedbackToken signs a feedback-link token for one request, or returns ""
+// when the feature is unwired or any required id is missing (e.g. anonymous /
+// no-external-id deployments). Callers treat "" as "feedback disabled".
+func (s *Service) mintFeedbackToken(installationID uuid.UUID, externalID, requestID, routerUserID string) string {
+	if s.feedbackSigner == nil || s.feedbackBaseURL == "" {
+		return ""
+	}
+	if installationID == uuid.Nil || externalID == "" || requestID == "" {
+		return ""
+	}
+	return s.feedbackSigner.Mint(installationID.String(), externalID, requestID, routerUserID)
+}
+
 // setFeedbackLinkHeader mints a signed feedback link for the request and sets
 // it on the response. No-op when the feature is unwired or any required id is
 // missing (e.g. anonymous / no-external-id deployments).
 func (s *Service) setFeedbackLinkHeader(w http.ResponseWriter, installationID uuid.UUID, externalID, requestID, routerUserID string) {
-	if s.feedbackSigner == nil || s.feedbackBaseURL == "" {
-		return
-	}
-	if installationID == uuid.Nil || externalID == "" || requestID == "" {
-		return
-	}
-	token := s.feedbackSigner.Mint(installationID.String(), externalID, requestID, routerUserID)
+	token := s.mintFeedbackToken(installationID, externalID, requestID, routerUserID)
 	if token == "" {
 		return
 	}
 	w.Header().Set(HeaderRouterFeedbackURL, s.feedbackBaseURL+"/f/"+token)
+}
+
+// feedbackFooter builds the markdown thumbs footer appended to the end of a
+// streamed response, so any client that renders the answer also renders a
+// one-click "rate this routing" affordance. The thumb links are GET requests to
+// the router's rate endpoint; the signed token is the sole credential. Returns
+// "" when feedback is unwired, so the response writers stay fully transparent.
+func (s *Service) feedbackFooter(installationID uuid.UUID, externalID, requestID, routerUserID string) string {
+	token := s.mintFeedbackToken(installationID, externalID, requestID, routerUserID)
+	if token == "" {
+		return ""
+	}
+	base := s.feedbackBaseURL + feedbackRatePath + "?t=" + url.QueryEscape(token) + "&r="
+	return "\n\n_Was this routing right?_ [👍](" + base + "up) · [👎](" + base + "down)"
 }

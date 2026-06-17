@@ -1440,7 +1440,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// The TTFB cost is a single round-trip's worth of buffered SSE bytes
 	// (~200B) released the moment the upstream's first byte arrives.
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
-	contentSink, contentCap := s.maybeCaptureResponse(w)
+	// Append the one-click feedback thumbs as a trailing content block on
+	// streaming answers. Wraps the client writer below the capture layer so the
+	// footer never lands in cached/logged bodies; transparent for non-streaming
+	// responses and when feedback is unwired.
+	clientSink := w
+	if env.Stream() {
+		if footer := s.feedbackFooter(installationID, externalID, requestID, auth.UserIDFrom(ctx)); footer != "" {
+			clientSink = translate.NewAnthropicRoutingFooterWriter(w, footer)
+		}
+	}
+	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
 	preludeBuf := newPreludeBuffer(contentSink)
 	var rootSink http.ResponseWriter = preludeBuf
 	var captureW *captureWriter
@@ -2642,7 +2652,19 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// so single-binding upstream errors don't strand the routing-marker chunk
 	// on the wire when the upstream never produces a first byte.
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
-	contentSink, contentCap := s.maybeCaptureResponse(w)
+	// Append the one-click feedback thumbs as a trailing chunk on streaming
+	// answers (see ProxyMessages for the rationale). Transparent for
+	// non-streaming responses and when feedback is unwired. Skipped on the
+	// Responses-API path (w is a *ResponsesWriter): wrapping it would defeat
+	// maybeCaptureResponse's ResponsesWriter special-casing, so /v1/responses
+	// footers are a follow-up.
+	clientSink := w
+	if _, isResponses := w.(*translate.ResponsesWriter); env.Stream() && !isResponses {
+		if footer := s.feedbackFooter(installationID, externalID, requestID, auth.UserIDFrom(ctx)); footer != "" {
+			clientSink = translate.NewOpenAIRoutingFooterWriter(w, footer)
+		}
+	}
+	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
 	preludeBuf := newPreludeBuffer(contentSink)
 	var rootSink http.ResponseWriter = preludeBuf
 
