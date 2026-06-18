@@ -110,6 +110,8 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		mgmt.POST("/provider-keys", admin.UpsertExternalKeyHandler(authSvc))
 		mgmt.DELETE("/provider-keys/:id", admin.DeleteExternalKeyHandler(authSvc))
 		mgmt.GET("/config", admin.ConfigHandler)
+		mgmt.GET("/routing-preferences", admin.GetRoutingPreferencesHandler(authSvc))
+		mgmt.PUT("/routing-preferences", admin.UpdateRoutingPreferencesHandler(authSvc))
 		if deployedModels != nil {
 			mgmt.GET("/excluded-models", admin.GetExcludedModelsHandler(authSvc, deployedModels, proxySvc))
 			mgmt.PUT("/excluded-models", admin.UpdateExcludedModelsHandler(authSvc, deployedModels, proxySvc))
