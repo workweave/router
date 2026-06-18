@@ -2127,6 +2127,16 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 	if subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)) != nil {
 		out[providers.ProviderAnthropic] = struct{}{}
 	}
+	// Likewise, a Claude subscription bearer (sk-ant-oat-) in the inbound
+	// Authorization enrolls Anthropic even on router-keyed requests — the
+	// managed Claude Code path keeps its OAuth token there while the router key
+	// rides in X-Weave-Router-Key. Mirrors resolveAndInjectCredentials so the
+	// scorer can pick a Claude model the subscription will pay for. OAuth-subset
+	// only (ExtractClientCredentials gates OAuth to sk-ant-oat-): a general
+	// inbound API key still cannot enroll a provider on the router-key path.
+	if c := ExtractClientCredentials(providers.ProviderAnthropic, headers); c != nil && c.OAuth {
+		out[providers.ProviderAnthropic] = struct{}{}
+	}
 	// Passthrough-eligible providers are surface-scoped: a provider
 	// registered without a deployment key joins the eligible set only when
 	// the inbound surface matches. Otherwise an Anthropic-surface request's
@@ -2175,16 +2185,17 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 // (Anthropic only) first, then BYOK, then a client-supplied header credential.
 //
 // Subscription-first lets a caller's own Claude subscription pay for their
-// Claude turns. It arrives one of two ways: the dedicated
-// X-Weave-Anthropic-Subscription header on router-keyed requests (read past the
-// router-key guard below, since that header unambiguously carries only a
-// subscription token), or — when not authed via a router key — the inbound
-// Authorization bearer via ExtractClientCredentials.
+// Claude turns. It arrives one of two ways, both honored even on router-keyed
+// requests: the dedicated X-Weave-Anthropic-Subscription header, or a
+// subscription OAuth bearer (sk-ant-oat-) in the inbound Authorization — the
+// shape Claude Code sends when routed through the Weave Router (router key in
+// X-Weave-Router-Key, its own subscription token left in Authorization).
 //
-// When authed via a router key, inbound client-header extraction is otherwise
-// skipped: it prevents the client's inbound Anthropic key from being forwarded
-// to a different upstream provider. The deployment-level env key on the
-// provider client is the correct fallback in that case.
+// The inbound-bearer path is restricted to the OAuth subset: a general client
+// API key is still NOT extracted on the router-key path, since that would let
+// the client's inbound Anthropic key be forwarded to a different upstream
+// provider. The deployment-level env key on the provider client is the correct
+// fallback in that case.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
 	if provider == providers.ProviderAnthropic {
@@ -2200,11 +2211,18 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 			observability.FromContext(ctx).Debug("Resolved Claude subscription credential for Anthropic turn", "credential_source", sub.Source)
 			return context.WithValue(ctx, CredentialsContextKey{}, sub)
 		}
-		if !routerKeyed {
-			if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
-				observability.FromContext(ctx).Debug("Resolved Claude subscription credential for Anthropic turn", "credential_source", inbound.Source)
-				return context.WithValue(ctx, CredentialsContextKey{}, inbound)
-			}
+		// A Claude subscription bearer (sk-ant-oat-) in the inbound Authorization
+		// is honored even on router-keyed requests. Claude Code routed through
+		// the Weave Router keeps its own subscription OAuth token in
+		// Authorization while the router key rides in X-Weave-Router-Key, so a
+		// managed CC turn pays from the caller's own plan without needing the
+		// dedicated header. Restricted to the OAuth subset: ExtractClientCredentials
+		// only sets OAuth for sk-ant-oat-, so a general inbound API key is still
+		// NOT forwarded on the router-key path (the cross-provider-leak guard
+		// below still applies to it).
+		if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
+			observability.FromContext(ctx).Debug("Resolved Claude subscription credential for Anthropic turn", "credential_source", inbound.Source)
+			return context.WithValue(ctx, CredentialsContextKey{}, inbound)
 		}
 	}
 	byok := BuildCredentialsMap(externalKeysFromContext(ctx))

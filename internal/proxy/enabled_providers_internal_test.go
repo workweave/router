@@ -130,6 +130,29 @@ func TestEnabledProvidersForRequest_SubscriptionEnrollsAnthropic(t *testing.T) {
 			"the subscription token is Anthropic-only and must never enroll another upstream")
 	})
 
+	t.Run("inbound Authorization subscription bearer enrolls anthropic on a router-keyed request", func(t *testing.T) {
+		// The managed Claude Code path: router key in X-Weave-Router-Key
+		// (installation set), the subscription OAuth token left in Authorization.
+		// Anthropic must be enrolled off the inbound bearer so the scorer can
+		// route a Claude turn the subscription will pay for.
+		headers := http.Header{"Authorization": []string{"Bearer sk-ant-oat01-subscription-token"}}
+		got := makeService().enabledProvidersForRequest(routerKeyed(), providers.ProviderAnthropic, headers)
+		assert.Contains(t, got, providers.ProviderAnthropic,
+			"the inbound subscription bearer (CC-through-router) must enroll Anthropic even when router-keyed")
+		assert.NotContains(t, got, providers.ProviderOpenAI,
+			"the subscription token is Anthropic-only and must never enroll another upstream")
+	})
+
+	t.Run("inbound API-key bearer does NOT enroll anthropic on a router-keyed request", func(t *testing.T) {
+		// Only the sk-ant-oat OAuth subset enrolls off the inbound bearer; a real
+		// client API key must not, mirroring resolveAndInjectCredentials and
+		// preserving the cross-provider-leak guard.
+		headers := http.Header{"Authorization": []string{"Bearer sk-ant-api-real-client-key"}}
+		got := makeService().enabledProvidersForRequest(routerKeyed(), providers.ProviderAnthropic, headers)
+		assert.NotContains(t, got, providers.ProviderAnthropic,
+			"a general inbound API key must not enroll Anthropic on the router-key path")
+	})
+
 	t.Run("no header leaves the set empty, proving the enrollment is load-bearing", func(t *testing.T) {
 		got := makeService().enabledProvidersForRequest(routerKeyed(), providers.ProviderAnthropic, http.Header{})
 		assert.NotContains(t, got, providers.ProviderAnthropic,

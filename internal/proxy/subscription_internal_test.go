@@ -106,6 +106,36 @@ func TestResolveAndInjectCredentials_SelfHostedInboundSubscription(t *testing.T)
 	assert.Equal(t, credSourceSubscription, creds.Source)
 }
 
+func TestResolveAndInjectCredentials_RouterKeyedInboundSubscription(t *testing.T) {
+	// Claude Code routed through the Weave Router: the router key authenticates
+	// via X-Weave-Router-Key (installation set), while CC leaves its own
+	// subscription OAuth token in Authorization. No dedicated header, no BYOK.
+	// The inbound bearer must resolve as the subscription credential so the turn
+	// bills at the 5% fee — the managed-CC case this path exists for.
+	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
+	headers := http.Header{"Authorization": []string{"Bearer sk-ant-oat01-subscription-token"}}
+	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
+	creds := CredentialsFromContext(out)
+	require.NotNil(t, creds)
+	assert.True(t, creds.OAuth,
+		"a managed CC turn must resolve its inbound subscription bearer even when router-keyed")
+	assert.Equal(t, credSourceSubscription, creds.Source)
+	assert.Equal(t, []byte("sk-ant-oat01-subscription-token"), creds.APIKey)
+}
+
+func TestResolveAndInjectCredentials_RouterKeyedInboundApiKeyNotForwarded(t *testing.T) {
+	// The router-key path still must NOT forward a general inbound API key: only
+	// the sk-ant-oat OAuth subset is honored. A real client API key in
+	// Authorization must resolve to no credential, so the deployment key (not the
+	// client's key) is the upstream fallback — preserving the cross-provider-leak
+	// guard the OAuth carve-out is careful not to widen.
+	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
+	headers := http.Header{"Authorization": []string{"Bearer sk-ant-api-real-client-key"}}
+	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
+	assert.Nil(t, CredentialsFromContext(out),
+		"a non-OAuth inbound API key must not be forwarded on the router-key path; the deployment key is the correct fallback")
+}
+
 func TestClearCredentials(t *testing.T) {
 	ctx := context.WithValue(context.Background(), CredentialsContextKey{},
 		&Credentials{APIKey: []byte("sk-ant-oat01-token"), Source: credSourceSubscription, OAuth: true})
