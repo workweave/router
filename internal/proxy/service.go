@@ -365,28 +365,35 @@ func (s *Service) excludedProvidersForRequest(ctx context.Context) map[string]st
 // response when comparing the request estimate against the context window.
 const contextWindowOutputReserve = 8_000
 
-// hasContext1MBeta reports whether the anthropic-beta header contains context-1m-2025-08-07.
-func hasContext1MBeta(header http.Header) bool {
-	beta := header.Get("anthropic-beta")
-	if beta == "" {
-		return false
-	}
-	parts := strings.Split(beta, ",")
-	for _, p := range parts {
-		if strings.TrimSpace(p) == "context-1m-2025-08-07" {
-			return true
-		}
-	}
-	return false
+// extendedContextTriggerTokens is the estimated request size (input estimate +
+// output reserve) at which the proxy turns on a CapExtendedContext model's 1M
+// window by injecting the context-1m-2025-08-07 beta. It sits well below the
+// 200K standard window on purpose: FullTokenEstimate (body bytes ÷5)
+// undercounts real tokens by ~20-30% on dense Claude Code bodies, so 140K
+// estimated is roughly 175-200K real tokens — the beta is in place before a
+// request that's truly near 200K reaches the upstream and 400s on the default
+// window. Below this the beta is omitted so ordinary sub-200K turns stay on the
+// standard window (no needless opt-in to long-context behavior/pricing).
+const extendedContextTriggerTokens = 140_000
+
+// shouldEnableExtendedContext reports whether a request is large enough to
+// warrant turning on a CapExtendedContext model's 1M window. Gating on the
+// estimate (rather than always-on) keeps ordinary turns on the standard
+// window; the trigger sits low enough that the ÷5 estimate's undercount can't
+// let a genuinely-near-200K request slip onto the 200K default.
+func shouldEnableExtendedContext(est, outputReserve int) bool {
+	return est+outputReserve > extendedContextTriggerTokens
 }
 
 // contextWindowForRequest returns the effective context window for a model.
-// For models with CapExtendedContext (Opus 4.6+, Sonnet 4.6), returns 1M if the
-// client sent context-1m-2025-08-07 beta; otherwise returns the catalog default (200K).
-// For other models, returns the catalog context window unchanged.
-func contextWindowForRequest(modelID string, extendedContextRequested bool) int {
-	spec := router.Lookup(modelID)
-	if extendedContextRequested && spec.Supports(router.CapExtendedContext) {
+// CapExtendedContext models (Opus 4.6+, Sonnet 4.6) always report 1M: the proxy
+// unconditionally injects the context-1m-2025-08-07 beta when it dispatches to
+// them (EmitOptions.EnableExtendedContext), so the filter must not exclude them
+// for requests that fit 1M. Gating this on the client's beta header — or on the
+// body-byte token estimate — would let a large request slip onto a 200K window
+// it overflows on the first turn. All other models report their catalog window.
+func contextWindowForRequest(modelID string) int {
+	if router.Lookup(modelID).Supports(router.CapExtendedContext) {
 		return 1_000_000
 	}
 	return catalog.ContextWindowFor(modelID)
@@ -397,9 +404,8 @@ func contextWindowForRequest(modelID string, extendedContextRequested bool) int 
 // plus the sorted IDs of the models it newly excluded (for logging).
 // est is the full-body token estimate (translate.RequestEnvelope.FullTokenEstimate).
 // outputReserve is the expected output budget (feats.MaxTokens or the const above).
-// extendedContextRequested indicates whether the client sent context-1m-2025-08-07 beta.
 // Returns the original excluded map unchanged and a nil slice when no models are added.
-func excludeContextOverflowModels(est, outputReserve int, excluded, available map[string]struct{}, extendedContextRequested bool) (map[string]struct{}, []string) {
+func excludeContextOverflowModels(est, outputReserve int, excluded, available map[string]struct{}) (map[string]struct{}, []string) {
 	if est <= 0 {
 		return excluded, nil
 	}
@@ -410,7 +416,7 @@ func excludeContextOverflowModels(est, outputReserve int, excluded, available ma
 		if _, alreadyExcluded := excluded[model]; alreadyExcluded {
 			continue
 		}
-		cw := contextWindowForRequest(model, extendedContextRequested)
+		cw := contextWindowForRequest(model)
 		if needed <= cw {
 			continue
 		}
@@ -1220,8 +1226,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		outputReserve = feats.MaxTokens
 	}
 	baseExcluded := s.excludedModelsForRequest(ctx)
-	extendedContext := hasContext1MBeta(r.Header)
-	excluded, ctxOverflowed := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserve, baseExcluded, s.availableModels, extendedContext)
+	excluded, ctxOverflowed := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserve, baseExcluded, s.availableModels)
 	if len(ctxOverflowed) > 0 {
 		log.Info("context window pre-filter: excluded over-capacity models",
 			"full_token_estimate", env.FullTokenEstimate(),
@@ -1433,12 +1438,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	otel.Flush(ctx)
 
 	opts := translate.EmitOptions{
-		TargetModel:        decision.Model,
-		TargetProvider:     decision.Provider,
-		Capabilities:       router.Lookup(decision.Model),
-		IncludeStreamUsage: s.usageRequired(),
-		SessionAffinity:    sessionAffinityHint(routeRes.SessionKey),
-		ModelSwitched:      routeRes.modelSwitched(),
+		TargetModel:           decision.Model,
+		TargetProvider:        decision.Provider,
+		Capabilities:          router.Lookup(decision.Model),
+		IncludeStreamUsage:    s.usageRequired(),
+		SessionAffinity:       sessionAffinityHint(routeRes.SessionKey),
+		ModelSwitched:         routeRes.modelSwitched(),
+		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserve),
 	}
 	if s.effortEscalation {
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
@@ -2529,7 +2535,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		outputReserveOAI = feats.MaxTokens
 	}
 	baseExcludedOAI := s.excludedModelsForRequest(ctx)
-	excludedOAI, ctxOverflowedOAI := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserveOAI, baseExcludedOAI, s.availableModels, false)
+	excludedOAI, ctxOverflowedOAI := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserveOAI, baseExcludedOAI, s.availableModels)
 	if len(ctxOverflowedOAI) > 0 {
 		log.Info("context window pre-filter: excluded over-capacity models",
 			"full_token_estimate", env.FullTokenEstimate(),
@@ -2644,12 +2650,13 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	otel.Flush(ctx)
 
 	opts := translate.EmitOptions{
-		TargetModel:        decision.Model,
-		TargetProvider:     decision.Provider,
-		Capabilities:       router.Lookup(decision.Model),
-		IncludeStreamUsage: s.usageRequired(),
-		SessionAffinity:    sessionAffinityHint(routeRes.SessionKey),
-		ModelSwitched:      routeRes.modelSwitched(),
+		TargetModel:           decision.Model,
+		TargetProvider:        decision.Provider,
+		Capabilities:          router.Lookup(decision.Model),
+		IncludeStreamUsage:    s.usageRequired(),
+		SessionAffinity:       sessionAffinityHint(routeRes.SessionKey),
+		ModelSwitched:         routeRes.modelSwitched(),
+		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserveOAI),
 	}
 	if s.effortEscalation {
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)

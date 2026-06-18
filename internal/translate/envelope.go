@@ -68,6 +68,15 @@ type EmitOptions struct {
 	// hard tasks). Empty leaves the request-derived effort untouched, so the
 	// feature is a no-op unless the policy is enabled.
 	ForceReasoningEffort string
+	// EnableExtendedContext injects the context-1m-2025-08-07 Anthropic beta on
+	// the upstream request so CapExtendedContext targets (Opus 4.6+, Sonnet 4.6)
+	// serve at their 1M window instead of the 200K default. The proxy sets this
+	// for every extended-context-capable Anthropic dispatch so a large request is
+	// never sent to a model whose default window it would immediately overflow
+	// (Anthropic 400 "prompt is too long"). Below 200K input it is a no-op:
+	// standard pricing, no behavior change. deriveAnthropicHeaders gates the
+	// actual injection on the target's CapExtendedContext support.
+	EnableExtendedContext bool
 }
 
 // RequestEnvelope wraps a parsed request body regardless of wire format.

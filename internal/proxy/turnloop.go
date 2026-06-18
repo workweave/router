@@ -337,7 +337,7 @@ func (s *Service) runTurnLoop(
 				outputReserveForPin = feats.MaxTokens
 			}
 			needed := env.FullTokenEstimate() + outputReserveForPin
-			modelCW := contextWindowForRequest(pin.Model, false)
+			modelCW := contextWindowForRequest(pin.Model)
 			if needed > modelCW {
 				log.Info("Session pin excluded by context-window pre-filter; falling through to scorer",
 					"pin_model", pin.Model,
