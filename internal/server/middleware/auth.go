@@ -9,6 +9,7 @@ import (
 	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/router"
 
 	"github.com/gin-gonic/gin"
 )
@@ -108,6 +109,11 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 			}
 			if len(installation.ExcludedProviders) > 0 {
 				ctx = context.WithValue(ctx, proxy.InstallationExcludedProvidersContextKey{}, installation.ExcludedProviders)
+			}
+			if installation.RoutingQualityWeight != nil {
+				ctx = context.WithValue(ctx, proxy.InstallationRoutingKnobsContextKey{}, &router.Overrides{
+					Alpha: installation.RoutingQualityWeight,
+				})
 			}
 		}
 		if externalKeys != nil && !byokDisabled {

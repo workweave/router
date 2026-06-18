@@ -98,6 +98,7 @@ type fakeInstallationRepository struct {
 	excludedModelsExternalByID    map[string]string
 	excludedProvidersByID         map[string][]string
 	excludedProvidersExternalByID map[string]string
+	routingQualityByID            map[string]*float64
 }
 
 func (fakeInstallationRepository) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
@@ -132,6 +133,13 @@ func (f *fakeInstallationRepository) UpdateExcludedProviders(ctx context.Context
 	}
 	f.excludedProvidersByID[id] = append([]string{}, providerNames...)
 	f.excludedProvidersExternalByID[id] = externalID
+	return nil
+}
+func (f *fakeInstallationRepository) UpdateRoutingPreference(ctx context.Context, externalID, id string, qualityWeight *float64) error {
+	if f.routingQualityByID == nil {
+		f.routingQualityByID = map[string]*float64{}
+	}
+	f.routingQualityByID[id] = qualityWeight
 	return nil
 }
 
@@ -671,6 +679,25 @@ func TestService_SetInstallationExcludedProviders(t *testing.T) {
 	})
 }
 
+func TestService_SetInstallationRoutingPreference(t *testing.T) {
+	installRepo := &fakeInstallationRepository{}
+	svc := auth.NewService(installRepo, &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}, nil, nil, auth.NoOpAPIKeyCache{}, nil, frozenClock())
+
+	t.Run("persists quality weight scoped by external_id", func(t *testing.T) {
+		quality := 0.6
+		err := svc.SetInstallationRoutingPreference(context.Background(), "ext-1", "inst-1", &quality)
+		require.NoError(t, err)
+		require.NotNil(t, installRepo.routingQualityByID["inst-1"])
+		assert.Equal(t, 0.6, *installRepo.routingQualityByID["inst-1"])
+	})
+
+	t.Run("nil clears the preference", func(t *testing.T) {
+		err := svc.SetInstallationRoutingPreference(context.Background(), "ext-1", "inst-1", nil)
+		require.NoError(t, err)
+		assert.Nil(t, installRepo.routingQualityByID["inst-1"])
+	})
+}
+
 type recordingNotifier struct {
 	mu  sync.Mutex
 	ids []string
@@ -721,6 +748,17 @@ func TestService_WriteHooksInvalidateAndNotify(t *testing.T) {
 			"excluded-model writes must call cache.InvalidateInstallation so the next request sees the new list")
 		assert.Equal(t, []string{installID}, nf.snapshot(),
 			"excluded-model writes must publish NOTIFY so peer replicas drop their cache too")
+	})
+
+	t.Run("SetInstallationRoutingPreference", func(t *testing.T) {
+		svc, cache, nf := makeSvc()
+		quality := 0.6
+		err := svc.SetInstallationRoutingPreference(context.Background(), "ext-1", installID, &quality)
+		require.NoError(t, err)
+		assert.Equal(t, []string{installID}, cache.invalidationSnapshot(),
+			"routing-preference writes must drop the cached installation so the next request sees the new dial")
+		assert.Equal(t, []string{installID}, nf.snapshot(),
+			"routing-preference writes must publish NOTIFY so peer replicas drop their cache too")
 	})
 
 	t.Run("UpsertExternalAPIKey", func(t *testing.T) {

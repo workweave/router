@@ -122,6 +122,19 @@ func (r *installationRepo) UpdateExcludedProviders(ctx context.Context, external
 	})
 }
 
+func (r *installationRepo) UpdateRoutingPreference(ctx context.Context, externalID, id string, qualityWeight *float64) error {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return err
+	}
+	q := sqlc.New(r.tx)
+	return q.UpdateModelRouterInstallationRoutingPreference(ctx, sqlc.UpdateModelRouterInstallationRoutingPreferenceParams{
+		ID:                   parsed,
+		ExternalID:           externalID,
+		RoutingQualityWeight: qualityWeight,
+	})
+}
+
 type apiKeyRepo struct {
 	tx sqlc.DBTX
 }

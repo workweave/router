@@ -21,6 +21,13 @@ type Installation struct {
 	// ExcludedProviders is the per-installation provider exclusion list.
 	// Empty means no exclusion.
 	ExcludedProviders []string
+	// RoutingQualityWeight is the per-installation routing preference (the
+	// "quality vs price" dial), stored as the scorer's quality weight (Alpha)
+	// -- a normalized fraction in [0, 1] where 1.0 biases routing fully toward
+	// quality and 0.0 fully toward price. The implied price weight is the
+	// remainder. nil means no preference -- the scorer keeps its tuned
+	// per-cluster defaults.
+	RoutingQualityWeight *float64
 }
 
 type CreateInstallationParams struct {
@@ -40,4 +47,8 @@ type InstallationRepository interface {
 	// UpdateExcludedProviders replaces the per-installation provider
 	// exclusion list. An empty (or nil) slice clears the list.
 	UpdateExcludedProviders(ctx context.Context, externalID, id string, providerNames []string) error
+	// UpdateRoutingPreference sets the routing quality weight (a normalized
+	// fraction in [0, 1]). Passing nil clears the preference so the scorer
+	// reverts to its tuned per-cluster defaults.
+	UpdateRoutingPreference(ctx context.Context, externalID, id string, qualityWeight *float64) error
 }

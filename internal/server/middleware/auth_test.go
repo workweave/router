@@ -107,6 +107,10 @@ func (fakeInstallationRepository) UpdateExcludedProviders(ctx context.Context, e
 	return errors.New("not used")
 }
 
+func (fakeInstallationRepository) UpdateRoutingPreference(ctx context.Context, externalID, id string, qualityWeight *float64) error {
+	return errors.New("not used")
+}
+
 func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const routerToken = "rk_router"
