@@ -7,6 +7,7 @@ import (
 
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/planner"
+	"workweave/router/internal/translate"
 )
 
 func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
@@ -137,6 +138,19 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 			wantNotContain: []string{
 				"hard pin",
 				"reason:",
+			},
+		},
+		{
+			name: "user-forced pin: mark the explicit directive",
+			res: turnLoopResult{
+				Decision: router.Decision{Model: "claude-opus-4-8", Provider: "anthropic"},
+				PinTier:  translate.ReasonUserForceModel,
+			},
+			wantContains: []string{
+				"· " + markerReasonForced,
+			},
+			wantNotContain: []string{
+				markerReasonBestPick,
 			},
 		},
 		{

@@ -258,8 +258,10 @@ func (s *Service) runTurnLoop(
 	//      forced gpt-5 but the current request only carries Anthropic BYOK creds).
 	//      Falling through to normal routing avoids a guaranteed 401/unauthenticated
 	//      upstream call.
-	//   3. The user's forced model is served as-is and the pin is refreshed with
-	//      the original decision, so the directive survives across turns.
+	//   3. User-forced and loop-escalation pins bypass the requested-model tier
+	//      ceiling (same as operator hard-pins): the forced model is served as-is
+	//      and the pin is refreshed with the original decision so the directive
+	//      survives across turns.
 	// forcedTierFloor preserves the user's tier intent when a user-forced pin
 	// is dropped below because its model can no longer serve this turn (most
 	// often the session outgrew the model's context window and the pre-filter

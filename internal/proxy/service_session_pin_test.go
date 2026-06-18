@@ -847,6 +847,56 @@ func TestService_ForcedPin_ReasonStaysUserForced(t *testing.T) {
 	assert.Equal(t, translate.ReasonUserForceModel, rec.Header().Get(proxy.HeaderRouterDecision), "forced pin keeps the plain user_forced reason")
 }
 
+// TestService_ForcedPin_BypassesTierCeiling verifies /force-model pins are served
+// unchanged even when the client sends a lower-tier model id (e.g. haiku on a
+// mid-tier session). This is the regression that produced the "would have used
+// claude-opus" badge while silently serving gemini flash-lite.
+func TestService_ForcedPin_BypassesTierCeiling(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderAnthropic,
+		Model:       "claude-opus-4-7",
+		Reason:      translate.ReasonUserForceModel,
+		PinnedUntil: time.Now().Add(30 * time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.37"}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls, "forced pin must bypass the scorer")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "forced pin must win over the requested tier")
+	assert.Equal(t, translate.ReasonUserForceModel, rec.Header().Get(proxy.HeaderRouterDecision))
+}
+
+// TestService_LoopEscalationPin_BypassesTierCeiling verifies loop_escalation pins
+// are served unchanged on lower-tier requests, same as /force-model pins.
+func TestService_LoopEscalationPin_BypassesTierCeiling(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderAnthropic,
+		Model:       "claude-opus-4-8",
+		Reason:      translate.ReasonLoopEscalation,
+		PinnedUntil: time.Now().Add(30 * time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.65"}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(haikuClampBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls, "escalation pin must bypass the scorer")
+	assert.Equal(t, "claude-opus-4-8", rec.Header().Get(proxy.HeaderRouterModel))
+	assert.Equal(t, translate.ReasonLoopEscalation, rec.Header().Get(proxy.HeaderRouterDecision))
+}
+
 // TestService_LoopEscalationPin_HonoredAsImmutableSticky verifies a
 // loop_escalation pin is treated like a /force-model pin: the scorer's (cheap)
 // decision is bypassed and the session stays on the escalated opus model.

@@ -272,6 +272,7 @@ func routingMarkerFor(res turnLoopResult) string {
 // than re-spelling the literals.
 const (
 	markerReasonHardPinned  = "pinned for compaction / sub-agent"
+	markerReasonForced      = "forced — /unforce-model to clear"
 	markerReasonSwitched    = "switched for positive EV after cache eviction"
 	markerReasonStayed      = "stayed on your last pick"
 	markerReasonTierUpgrade = "upgraded to a stronger tier"
@@ -283,6 +284,9 @@ const (
 func routingReasonShort(res turnLoopResult) string {
 	if res.HardPinned {
 		return markerReasonHardPinned
+	}
+	if res.PinTier == translate.ReasonUserForceModel {
+		return markerReasonForced
 	}
 	if res.PlannerDecision.Reason != "" {
 		return humanReasonFromPlanner(res.PlannerDecision.Reason)
