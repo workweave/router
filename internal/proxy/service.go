@@ -2203,6 +2203,16 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 	if codexSubscriptionFromContext(ctx) != nil {
 		out[providers.ProviderOpenAI] = struct{}{}
 	}
+	// And, mirroring the Anthropic inbound-bearer block, a Codex subscription
+	// bearer in the inbound Authorization (paired with ChatGPT-Account-ID)
+	// enrolls OpenAI even on router-keyed requests — the managed Codex CLI path
+	// keeps its ChatGPT JWT in Authorization while the router key rides in
+	// X-Weave-Router-Key. OAuth-subset only (ExtractClientCredentials flags
+	// OAuth only for a JWT + account-id pairing): a plain client API key still
+	// cannot enroll OpenAI on the router-key path.
+	if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
+		out[providers.ProviderOpenAI] = struct{}{}
+	}
 	// Passthrough-eligible providers are surface-scoped: a provider
 	// registered without a deployment key joins the eligible set only when
 	// the inbound surface matches. Otherwise an Anthropic-surface request's
@@ -2294,19 +2304,23 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	if provider == providers.ProviderOpenAI {
 		// Codex (ChatGPT) subscription-first (precedence: subscription -> BYOK ->
 		// deployment), mirroring the Anthropic block above. The dedicated headers
-		// carry token + account-id on router-keyed requests; otherwise the inbound
-		// Authorization bearer + ChatGPT-Account-ID resolve via
-		// ExtractClientCredentials. The Codex backend base-URL switch + required
-		// headers are applied in the OpenAI provider client off this credential.
+		// carry token + account-id on router-keyed requests.
 		if sub := codexSubscriptionFromContext(ctx); sub != nil {
 			observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", sub.Source)
 			return context.WithValue(ctx, CredentialsContextKey{}, sub)
 		}
-		if !routerKeyed {
-			if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
-				observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", inbound.Source)
-				return context.WithValue(ctx, CredentialsContextKey{}, inbound)
-			}
+		// A Codex subscription bearer (ChatGPT OAuth JWT paired with a
+		// ChatGPT-Account-ID) in the inbound Authorization is honored even on
+		// router-keyed requests. Codex CLI routed through the Weave Router keeps
+		// its own ChatGPT auth in Authorization while the router key rides in
+		// X-Weave-Router-Key, so a managed Codex turn pays from the caller's own
+		// plan without needing the dedicated header. Restricted to the OAuth
+		// subset: ExtractClientCredentials flags OAuth only for a JWT + account-id
+		// pairing, so a general inbound OpenAI API key is still NOT forwarded on
+		// the router-key path (the cross-provider-leak guard below still applies).
+		if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
+			observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", inbound.Source)
+			return context.WithValue(ctx, CredentialsContextKey{}, inbound)
 		}
 	}
 	byok := BuildCredentialsMap(externalKeysFromContext(ctx))

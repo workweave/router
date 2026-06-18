@@ -176,6 +176,38 @@ func TestResolveAndInjectCredentials_CodexInboundBeatsBYOK(t *testing.T) {
 	assert.Equal(t, []byte("acct-999"), creds.AccountID)
 }
 
+func TestResolveAndInjectCredentials_RouterKeyedInboundCodexSubscription(t *testing.T) {
+	// Codex CLI routed through the Weave Router: the router key authenticates via
+	// X-Weave-Router-Key (installation set), while Codex leaves its own ChatGPT
+	// auth in Authorization + ChatGPT-Account-ID. No dedicated header, no BYOK.
+	// The inbound bearer must resolve as the Codex subscription credential so the
+	// turn bills at the 5% fee — the managed-Codex case mirroring #460.
+	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
+	headers := http.Header{
+		"Authorization":      []string{"Bearer " + codexTestJWT},
+		"Chatgpt-Account-Id": []string{"acct-999"},
+	}
+	out := resolveAndInjectCredentials(ctx, providers.ProviderOpenAI, headers)
+	creds := CredentialsFromContext(out)
+	require.NotNil(t, creds)
+	assert.True(t, creds.OAuth,
+		"a managed Codex turn must resolve its inbound subscription bearer even when router-keyed")
+	assert.Equal(t, credSourceCodexSubscription, creds.Source)
+	assert.Equal(t, []byte("acct-999"), creds.AccountID)
+}
+
+func TestResolveAndInjectCredentials_RouterKeyedInboundOpenAIApiKeyNotForwarded(t *testing.T) {
+	// The router-key path still must NOT forward a general inbound OpenAI API key:
+	// only the Codex OAuth subset (JWT + ChatGPT-Account-ID) is honored. A plain
+	// client key in Authorization, with no account-id, must resolve to no
+	// credential so the deployment key is the upstream fallback.
+	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
+	headers := http.Header{"Authorization": []string{"Bearer sk-proj-real-client-key"}}
+	out := resolveAndInjectCredentials(ctx, providers.ProviderOpenAI, headers)
+	assert.Nil(t, CredentialsFromContext(out),
+		"a non-OAuth inbound OpenAI key must not be forwarded on the router-key path; the deployment key is the correct fallback")
+}
+
 func TestResolveAndInjectCredentials_CodexHeadersIgnoredForNonOpenAI(t *testing.T) {
 	// The Codex token can only pay for OpenAI; a non-OpenAI route must not
 	// resolve it.
