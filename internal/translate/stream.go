@@ -35,7 +35,8 @@ type SSETranslator struct {
 	toolIdx       int
 	currentIsTool bool
 
-	usageSink otel.UsageSink
+	usageSink   otel.UsageSink
+	inputTokens int // persists input token count from message_start for use in handleMessageDelta
 }
 
 // NewSSETranslator wraps w. Call Finalize after upstream returns.
@@ -184,6 +185,7 @@ func (t *SSETranslator) handleMessageStart(data []byte) error {
 	usageResult := gjson.GetBytes(data, "message.usage")
 	if usageResult.Exists() {
 		inputTokens := usageResult.Get("input_tokens").Int()
+		t.inputTokens = int(inputTokens)
 		outputTokens := usageResult.Get("output_tokens").Int()
 		t.bw.WriteString(`,"usage":{"prompt_tokens":`)
 		sse.WriteJSONInt(t.bw, inputTokens)
@@ -279,14 +281,13 @@ func (t *SSETranslator) handleMessageDelta(data []byte) error {
 
 	usageResult := gjson.GetBytes(data, "usage")
 	if usageResult.Exists() {
-		inputTokens := usageResult.Get("input_tokens").Int()
 		outputTokens := usageResult.Get("output_tokens").Int()
 		t.bw.WriteString(`,"usage":{"prompt_tokens":`)
-		sse.WriteJSONInt(t.bw, inputTokens)
+		sse.WriteJSONInt(t.bw, int64(t.inputTokens))
 		t.bw.WriteString(`,"completion_tokens":`)
 		sse.WriteJSONInt(t.bw, outputTokens)
 		t.bw.WriteString(`,"total_tokens":`)
-		sse.WriteJSONInt(t.bw, inputTokens+outputTokens)
+		sse.WriteJSONInt(t.bw, int64(t.inputTokens)+outputTokens)
 		t.bw.WriteByte('}')
 		if t.usageSink != nil {
 			t.usageSink.RecordUsage(0, int(outputTokens))
