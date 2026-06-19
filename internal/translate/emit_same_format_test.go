@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"testing"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/translate"
 
 	"github.com/stretchr/testify/assert"
@@ -657,6 +659,50 @@ func TestAnthropicSameFormat_XhighEffortPreservedForCapableModel(t *testing.T) {
 	outputConfig, _ := out["output_config"].(map[string]any)
 	require.NotNil(t, outputConfig)
 	assert.Equal(t, "xhigh", outputConfig["effort"], "xhigh must pass through to models with CapXhighEffort")
+}
+
+// Exhaustive backstop for the 2026-06-09 production incident (see
+// TestAnthropicSameFormat_XhighEffortClampedOnReroute). The per-model clamp keys
+// on router.CapXhighEffort, so a newly added or re-tagged Anthropic model could
+// silently reintroduce the non-retryable 400. Rather than trust two hardcoded
+// pairs, walk every Anthropic model in the catalog and assert the wire-level
+// guarantee directly: effort "xhigh" survives emit only when the target advertises
+// CapXhighEffort. A model that lacks the capability but isn't clamped fails here
+// before it can reach a customer session.
+func TestAnthropicSameFormat_XhighEffortNeverReachesIncapableModel(t *testing.T) {
+	var anthropicModels, capableModels int
+	for _, m := range catalog.Models {
+		if m.PrimaryProvider() != providers.ProviderAnthropic {
+			continue
+		}
+		anthropicModels++
+		capable := router.Lookup(m.ID).Supports(router.CapXhighEffort)
+		if capable {
+			capableModels++
+		}
+		t.Run(m.ID, func(t *testing.T) {
+			body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"adaptive"},"effort":"xhigh","output_config":{"effort":"xhigh"}}`)
+			out := parseAndEmit(t, body, "anthropic", translate.EmitOptions{
+				TargetModel:  m.ID,
+				Capabilities: router.Lookup(m.ID),
+			})
+
+			topLevel, _ := out["effort"].(string)
+			var nested string
+			if oc, ok := out["output_config"].(map[string]any); ok {
+				nested, _ = oc["effort"].(string)
+			}
+			if capable {
+				assert.Equal(t, "xhigh", nested, "xhigh must pass through to a CapXhighEffort model")
+				return
+			}
+			assert.NotEqual(t, "xhigh", topLevel, "top-level effort xhigh must never reach a model without CapXhighEffort")
+			assert.NotEqual(t, "xhigh", nested, "output_config.effort xhigh must never reach a model without CapXhighEffort")
+		})
+	}
+	// Guard against a vacuous pass if the catalog filter ever stops matching.
+	require.Positive(t, anthropicModels, "expected Anthropic models in the catalog")
+	require.Positive(t, capableModels, "expected at least one CapXhighEffort model so the preserve branch is exercised")
 }
 
 // Levels below xhigh are on every adaptive model's menu; the clamp must not
