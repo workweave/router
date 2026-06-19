@@ -188,6 +188,14 @@ type failoverInputs struct {
 	// nil means do nothing on exhaustion (the upstream error error value
 	// is still returned to the caller).
 	flushErr func(w http.ResponseWriter, err error)
+	// deferFlushOnExhaustion suppresses the flushErr call on exhaustion while
+	// still discarding the buffered prelude and returning the error. The caller
+	// owns the decision to either flush the error itself or run a higher-level
+	// fallback (e.g. ProxyMessages' in-turn baseline failover, which re-dispatches
+	// the requested Anthropic model when a routed OSS model's bindings all fail).
+	// The buffer is still safe to write to after exhaustion because Discard()
+	// already ran — flushErr writes straight to w, bypassing buf.
+	deferFlushOnExhaustion bool
 }
 
 // dispatchWithFallback runs the per-attempt closure against each binding
@@ -321,7 +329,7 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 			if in.buf != nil {
 				in.buf.Discard()
 			}
-			if in.flushErr != nil {
+			if in.flushErr != nil && !in.deferFlushOnExhaustion {
 				in.flushErr(in.w, attemptErr)
 			}
 			return i, attemptErr
