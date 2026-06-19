@@ -693,7 +693,8 @@ func TestAnthropicSameFormat_XhighEffortNeverReachesIncapableModel(t *testing.T)
 				nested, _ = oc["effort"].(string)
 			}
 			if capable {
-				assert.Equal(t, "xhigh", nested, "xhigh must pass through to a CapXhighEffort model")
+				assert.Equal(t, "xhigh", topLevel, "top-level effort xhigh must pass through to a CapXhighEffort model")
+				assert.Equal(t, "xhigh", nested, "output_config.effort xhigh must pass through to a CapXhighEffort model")
 				return
 			}
 			assert.NotEqual(t, "xhigh", topLevel, "top-level effort xhigh must never reach a model without CapXhighEffort")
