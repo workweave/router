@@ -1065,6 +1065,18 @@ func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName s
 		return err
 	}
 
+	// Claude Code sends its 1M-context model variant tag (e.g.
+	// "claude-opus-4-8[1m]") in the body. It is a client display convention,
+	// not a real Anthropic model id, so a verbatim count_tokens / model-list
+	// passthrough to the native Anthropic API 404s ("the selected model may not
+	// exist"). Strip it to the canonical id; passthrough never rewrites the
+	// model otherwise.
+	if providerName == providers.ProviderAnthropic && len(body) > 0 {
+		if canon, had, cerr := translate.CanonicalizeModelInBody(body); cerr == nil && had {
+			body = canon
+		}
+	}
+
 	var prep providers.PreparedRequest
 	if providerName == providers.ProviderAnthropic && len(body) > 0 {
 		env, parseErr := translate.ParseAnthropic(body)
@@ -1164,6 +1176,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if stripErr != nil {
 		log.Error("Failed to strip routing marker from inbound messages", "err", stripErr)
 		return fmt.Errorf("strip routing marker: %w", stripErr)
+	}
+
+	// Strip Claude Code's 1M-context model variant tag (e.g.
+	// "claude-opus-4-8[1m]") to the canonical catalog id before parsing, so
+	// routing, session pins, and telemetry key off the real model — and so the
+	// tag never reaches a native Anthropic upstream, which 404s on it. The 1M
+	// window is enabled separately, size-triggered via the context-1m beta.
+	if canon, _, modelErr := translate.CanonicalizeModelInBody(body); modelErr != nil {
+		log.Error("Failed to canonicalize inbound model", "err", modelErr)
+	} else {
+		body = canon
 	}
 
 	env, parseErr := translate.ParseAnthropic(body)
