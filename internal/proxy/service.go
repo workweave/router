@@ -1785,6 +1785,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
 		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
 		Float64("cost.actual_output_usd", catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
+		Bool("cost.subscription_served", servedOnSubscription(ctx)).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
@@ -2252,7 +2253,8 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 		// the router-key path (it is today, but a future BYOK-loading path must
 		// not silently outrank the subscription).
 		if sub := subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)); sub != nil {
-			observability.FromContext(ctx).Debug("Resolved Claude subscription credential for Anthropic turn", "credential_source", sub.Source)
+			observability.FromContext(ctx).Info("Resolved Claude subscription credential",
+				"credential_source", sub.Source)
 			return context.WithValue(ctx, CredentialsContextKey{}, sub)
 		}
 		// A Claude subscription bearer (sk-ant-oat-) in the inbound Authorization
@@ -2265,7 +2267,8 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 		// NOT forwarded on the router-key path (the cross-provider-leak guard
 		// below still applies to it).
 		if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
-			observability.FromContext(ctx).Debug("Resolved Claude subscription credential for Anthropic turn", "credential_source", inbound.Source)
+			observability.FromContext(ctx).Info("Resolved Claude subscription credential",
+				"credential_source", inbound.Source)
 			return context.WithValue(ctx, CredentialsContextKey{}, inbound)
 		}
 	}
@@ -2506,6 +2509,7 @@ func (s *Service) fireBilling(ctx context.Context, p billing.DebitInferenceParam
 			"model", p.Model,
 			"balance_usd_micros", balance,
 			"override", p.HasOverride,
+			"subscription_served", p.SubscriptionServed,
 		)
 		return
 	}
@@ -2528,6 +2532,7 @@ func logBillingDebitFailure(ctx context.Context, p billing.DebitInferenceParams,
 		"cache_creation_tokens", p.CacheCreation,
 		"cache_read_tokens", p.CacheRead,
 		"has_override", p.HasOverride,
+		"subscription_served", p.SubscriptionServed,
 	)
 }
 
@@ -2998,6 +3003,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
 		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
 		Float64("cost.actual_output_usd", catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
+		Bool("cost.subscription_served", servedOnSubscription(ctx)).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
