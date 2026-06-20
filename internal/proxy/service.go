@@ -278,13 +278,13 @@ func routingMarkerFor(res turnLoopResult) string {
 // the marker wording; tests assert the mapping against these constants rather
 // than re-spelling the literals.
 const (
-	markerReasonHardPinned   = "pinned for compaction / sub-agent"
-	markerReasonUserForced   = "pinned by force-model"
+	markerReasonHardPinned    = "pinned for compaction / sub-agent"
+	markerReasonUserForced    = "pinned by force-model"
 	markerReasonLoopEscalated = "escalated due to loop"
-	markerReasonSwitched     = "switched for positive EV after cache eviction"
-	markerReasonStayed       = "stayed on your last pick"
-	markerReasonTierUpgrade  = "upgraded to a stronger tier"
-	markerReasonBestPick     = "best pick for this turn"
+	markerReasonSwitched      = "switched for positive EV after cache eviction"
+	markerReasonStayed        = "stayed on your last pick"
+	markerReasonTierUpgrade   = "upgraded to a stronger tier"
+	markerReasonBestPick      = "best pick for this turn"
 )
 
 // routingReasonShort returns a short user-facing reason for the routing
