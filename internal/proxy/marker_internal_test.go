@@ -7,6 +7,7 @@ import (
 
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/planner"
+	"workweave/router/internal/translate"
 )
 
 func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
@@ -176,6 +177,36 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 			wantNotContain: []string{
 				"(anthropic)",
 				"pin_model_missing",
+				markerReasonBestPick,
+			},
+		},
+		{
+			name: "user-forced model: distinct marker, not best-pick",
+			res: turnLoopResult{
+				Decision:         router.Decision{Model: "gpt-5.5", Provider: "openai", Reason: translate.ReasonUserForceModel},
+				StickyHit:        true,
+				PriorServedModel: "deepseek/deepseek-v4-flash",
+			},
+			wantContains: []string{
+				"✦ **Weave Router** → gpt-5.5",
+				"· " + markerReasonUserForced,
+			},
+			wantNotContain: []string{
+				markerReasonBestPick,
+			},
+		},
+		{
+			name: "loop escalation: distinct marker, not best-pick",
+			res: turnLoopResult{
+				Decision:         router.Decision{Model: "claude-opus-4-8", Provider: "anthropic", Reason: translate.ReasonLoopEscalation},
+				StickyHit:        true,
+				PriorServedModel: "deepseek/deepseek-v4-flash",
+			},
+			wantContains: []string{
+				"✦ **Weave Router** → claude-opus-4-8",
+				"· " + markerReasonLoopEscalated,
+			},
+			wantNotContain: []string{
 				markerReasonBestPick,
 			},
 		},
