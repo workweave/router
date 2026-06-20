@@ -210,6 +210,29 @@ func TestRoutingMarkerFor_PlannerPaths(t *testing.T) {
 				markerReasonBestPick,
 			},
 		},
+		{
+			// A forced session re-pins the same model on every turn, so once the
+			// pin's LastServedModel catches up to the forced model the badge must
+			// stay suppressed on subsequent sticky turns — otherwise the marker
+			// re-emits on every tool-result follow-up. The user already saw the
+			// "force-model applied" acknowledgment when the directive was issued.
+			name: "user-forced same model on a sticky follow-up: marker suppressed",
+			res: turnLoopResult{
+				Decision:         router.Decision{Model: "gpt-5.5", Provider: "openai", Reason: translate.ReasonUserForceModel},
+				StickyHit:        true,
+				PriorServedModel: "gpt-5.5", // pin already serving the forced model
+			},
+			wantEmpty: true,
+		},
+		{
+			name: "loop-escalated same model on a sticky follow-up: marker suppressed",
+			res: turnLoopResult{
+				Decision:         router.Decision{Model: "claude-opus-4-8", Provider: "anthropic", Reason: translate.ReasonLoopEscalation},
+				StickyHit:        true,
+				PriorServedModel: "claude-opus-4-8", // pin already serving the escalated model
+			},
+			wantEmpty: true,
+		},
 	}
 
 	for _, tc := range cases {
