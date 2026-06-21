@@ -109,6 +109,11 @@ func TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 	assert.Contains(t, respBody, "event: message_start", "client sees the Anthropic stream start")
 	assert.Contains(t, respBody, "event: message_stop", "client sees the Anthropic stream end")
 	assert.Equal(t, "anthropic", rec.Header().Get(proxy.HeaderRouterProvider), "served provider header reflects the baseline failover")
+	// The routing marker text and x-router-model header must name the baseline
+	// model that served, not the cost-routed OSS slug that went dark.
+	assert.Equal(t, "claude-opus-4-8", rec.Header().Get(proxy.HeaderRouterModel), "x-router-model reflects the baseline model that served")
+	assert.Contains(t, respBody, "claude-opus-4-8", "routing marker names the served baseline model")
+	assert.NotContains(t, respBody, "deepseek/deepseek-v4-pro", "marker must not name the OSS model that never completed")
 }
 
 // TestProxyMessages_OSSOutageNoBaselineWhenRequestedModelIsOSS asserts the

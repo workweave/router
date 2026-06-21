@@ -283,7 +283,19 @@ const (
 	markerReasonStayed      = "stayed on your last pick"
 	markerReasonTierUpgrade = "upgraded to a stronger tier"
 	markerReasonBestPick    = "best pick for this turn"
+	markerReasonBaseline    = "fell back to baseline after provider outage"
 )
+
+// baselineRoutingMarkerFor renders the routing badge for an in-turn baseline
+// failover. The requested model now serves on Anthropic, so the badge names the
+// baseline model rather than the cost-routed OSS slug that went dark. Honors
+// suggestion mode like routingMarkerFor; the caller applies the opt-out header.
+func baselineRoutingMarkerFor(res turnLoopResult, baselineModel string) string {
+	if res.SuggestionMode || baselineModel == "" {
+		return ""
+	}
+	return "✦ **Weave Router** → " + baselineModel + " · " + markerReasonBaseline + "\n\n"
+}
 
 // routingReasonShort returns a short user-facing reason for the routing
 // decision, or empty when the underlying code is internal recovery noise.
@@ -1778,7 +1790,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				"err", proxyErr)
 			baselineCtx := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, r.Header)
 			baselineBindings := s.resolveBindingsForDispatch(baselineCtx, baselineDecision)
-			baselineAttempt := s.anthropicNativeAttempt(env, r, baselinePrep, sink, preludeBuf, marker, setExtractor)
+			baselineMarker := suppressMarkerIfRequested(r.Header, baselineRoutingMarkerFor(routeRes, baselineModel))
+			baselineAttempt := s.anthropicNativeAttempt(env, r, baselinePrep, sink, preludeBuf, baselineMarker, setExtractor)
 			crossFormat = false
 			respSummary = translate.ResponseSummary{}
 			reqStats = providers.RequestMutationStats{}

@@ -257,6 +257,12 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 			// value is overwritten via Discard's header restore + this Set.
 			if !committed(in.buf) {
 				in.w.Header().Set(HeaderRouterProvider, b.Provider)
+				// decision.Model is constant across normal cross-binding
+				// fallback (same model, different provider) but changes on a
+				// baseline failover whose initialDecision carries the baseline
+				// model — refresh so x-router-model never names a model that
+				// didn't serve.
+				in.w.Header().Set(HeaderRouterModel, decision.Model)
 				if i > 0 {
 					in.w.Header().Set(HeaderRouterFallbackFrom, in.bindings[0].Provider)
 					in.w.Header().Set(HeaderRouterFallbackAttempt, attemptIdxLabel(i))
