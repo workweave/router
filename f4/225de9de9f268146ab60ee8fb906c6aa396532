@@ -1,0 +1,49 @@
+internal/server/middleware/auth.go
+  s_7dcc4382d45cab::t_e474764b219ed9 12
+  s_7dcc4382d45cab::t_4362d3aaac2182 113-117
+internal/postgres/converters_test.go
+  s_7dcc4382d45cab::t_d55eec558d95a4 1-32
+internal/postgres/converters.go
+  s_7dcc4382d45cab::t_1e2049d0ce4dbd 23-32
+internal/auth/service_test.go
+  s_7dcc4382d45cab::t_8271fbf840fc3f 682-700
+  s_7dcc4382d45cab::t_70c723ba9f6930 138-144
+  s_7dcc4382d45cab::t_3032525935d6b0 101
+  s_7dcc4382d45cab::t_2f1d198c85dcd0 753-763
+internal/server/middleware/auth_test.go
+  s_7dcc4382d45cab::t_df2d8c6ca26d6e 110-113
+internal/proxy/routing_knobs_internal_test.go
+  s_7dcc4382d45cab::t_3a30af12b6e48b 1-40
+internal/proxy/service.go
+  s_7dcc4382d45cab::t_9df7be10424bf0 327-340
+  s_7dcc4382d45cab::t_14e55cd88396db 222-228
+db/migrations/0025_installation-routing-preference.down.sql
+  s_7dcc4382d45cab::t_0e2b157e30f025 1-6
+db/queries/model_router_installations.sql
+  s_7dcc4382d45cab::t_8153c0ae80468d 58-68
+internal/auth/service.go
+  s_7dcc4382d45cab::t_a9f9552392d9fd 274-286
+internal/auth/installation.go
+  s_7dcc4382d45cab::t_2765453501e63b 24-30
+  s_7dcc4382d45cab::t_25f6d352fd15be 50-53
+internal/postgres/repository.go
+  s_7dcc4382d45cab::t_e06d1472899f97 125-137
+db/migrations/0025_installation-routing-preference.up.sql
+  s_7dcc4382d45cab::t_253e25d41b0338 1-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "f4225de9de9f268146ab60ee8fb906c6aa396532",
+  "prompts": {},
+  "sessions": {
+    "s_7dcc4382d45cab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "615fab61-4aa0-4803-8606-3af679117a96",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
