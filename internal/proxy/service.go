@@ -1775,6 +1775,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		baselineOpts.TargetModel = baselineModel
 		baselineOpts.TargetProvider = providers.ProviderAnthropic
 		baselineOpts.Capabilities = router.Lookup(baselineModel)
+		// Recompute the switch flag against the baseline model that actually
+		// serves (not the cost-routed OSS id). Otherwise PrepareAnthropic may
+		// leave stale signed thinking blocks the baseline model rejects → 400.
+		baselineOpts.ModelSwitched = routeRes.PriorServedModel != baselineModel || routeRes.SessionEverSwitched
 		if s.effortEscalation {
 			baselineOpts.ForceReasoningEffort = forcedReasoningEffort(baselineModel, routeRes.EscalateEffort)
 		}
@@ -1906,7 +1910,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	s.recordCallLog(ctx, upstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
 	otel.Flush(ctx)
 
-	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
+	s.recordTurnUsage(routeRes, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if installationID != uuid.Nil {
 		failoverUsed := finalProvider != primaryProvider
@@ -2120,7 +2124,7 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 	)
 }
 
-func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, cacheRead int) {
+func (s *Service) recordTurnUsage(res turnLoopResult, servedModel string, in, out, cacheCreation, cacheRead int) {
 	if s.pinStore == nil || res.HardPinned {
 		return
 	}
@@ -2137,7 +2141,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 		CachedWriteTokens: cacheCreation,
 		OutputTokens:      out,
 		EndedAt:           time.Now(),
-		ServedModel:       res.Decision.Model,
+		ServedModel:       servedModel,
 	}
 	role := res.PinRole
 	if role == "" {
@@ -3135,7 +3139,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		emitCallLog()
 	}
 
-	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
+	s.recordTurnUsage(routeRes, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)

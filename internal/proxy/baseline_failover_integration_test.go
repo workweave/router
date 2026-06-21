@@ -74,6 +74,10 @@ func TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 	}))
 	defer anthropicUpstream.Close()
 
+	store := newFakePinStore()
+	// A telemetry sink makes usageRequired() true so the usage extractor runs
+	// and recordTurnUsage fires with the served-turn token counts.
+	tel := newCaptureTelemetry()
 	svc := proxy.NewService(
 		// Router cost-routes the opus request to deepseek on Fireworks.
 		&fakeRouter{decision: router.Decision{Provider: "fireworks", Model: "deepseek/deepseek-v4-pro"}},
@@ -82,7 +86,7 @@ func TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 			"openrouter": openaicompat.NewClient("test-or-key", openrouter.URL),
 			"anthropic":  anthropic.NewClient("test-anthropic-key", anthropicUpstream.URL),
 		},
-		nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil,
+		nil, false, nil, store, false, providers.ProviderAnthropic, "claude-haiku-4-5", tel,
 	).WithDeploymentKeyedProviders(map[string]struct{}{
 		"fireworks":  {},
 		"openrouter": {},
@@ -95,7 +99,7 @@ func TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 	// to deepseek. The baseline-failover target is the requested model.
 	body := []byte(`{"model":"claude-opus-4-8","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
 
-	err := svc.ProxyMessages(context.Background(), body, rec, req)
+	err := svc.ProxyMessages(authedCtx("11111111-1111-1111-1111-111111111111"), body, rec, req)
 	require.NoError(t, err, "ProxyMessages should succeed via baseline failover to Anthropic")
 
 	mu.Lock()
@@ -114,6 +118,11 @@ func TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-8", rec.Header().Get(proxy.HeaderRouterModel), "x-router-model reflects the baseline model that served")
 	assert.Contains(t, respBody, "claude-opus-4-8", "routing marker names the served baseline model")
 	assert.NotContains(t, respBody, "deepseek/deepseek-v4-pro", "marker must not name the OSS model that never completed")
+
+	// The session pin must record the baseline model that actually served, not
+	// the cost-routed OSS id — otherwise next-turn switch detection is wrong.
+	require.NotEmpty(t, store.usages, "baseline failover must write pin usage")
+	assert.Equal(t, "claude-opus-4-8", store.usages[len(store.usages)-1].ServedModel, "pin usage records the served baseline model")
 }
 
 // TestProxyMessages_OSSOutageNoBaselineWhenRequestedModelIsOSS asserts the
