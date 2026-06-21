@@ -153,3 +153,90 @@ func TestProxyMessages_OSSOutageNoBaselineWhenRequestedModelIsOSS(t *testing.T) 
 	_ = svc.ProxyMessages(context.Background(), body, rec, req)
 	assert.Equal(t, 0, anthropicCount, "baseline failover must not fire when the caller requested the OSS model")
 }
+
+// TestProxyMessages_OSSOutageNoBaselineWhenAnthropicExcluded asserts the
+// provider-exclusion contract: when the installation excludes Anthropic,
+// baseline failover must NOT defer the OSS error to an Anthropic retry it can
+// never run — the original upstream error surfaces and Anthropic is never hit.
+func TestProxyMessages_OSSOutageNoBaselineWhenAnthropicExcluded(t *testing.T) {
+	var anthropicCount int
+	anthropicUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		anthropicCount++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer anthropicUpstream.Close()
+
+	fail := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"provider unavailable"}}`))
+	}
+	fireworks := httptest.NewServer(http.HandlerFunc(fail))
+	defer fireworks.Close()
+	openrouter := httptest.NewServer(http.HandlerFunc(fail))
+	defer openrouter.Close()
+
+	svc := proxy.NewService(
+		&fakeRouter{decision: router.Decision{Provider: "fireworks", Model: "deepseek/deepseek-v4-pro"}},
+		map[string]providers.Client{
+			"fireworks":  openaicompat.NewClient("k", fireworks.URL),
+			"openrouter": openaicompat.NewClient("k", openrouter.URL),
+			"anthropic":  anthropic.NewClient("k", anthropicUpstream.URL),
+		},
+		nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil,
+	).WithDeploymentKeyedProviders(map[string]struct{}{
+		"fireworks": {}, "openrouter": {}, "anthropic": {},
+	}).WithExcludedProvidersOverride([]string{providers.ProviderAnthropic})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"claude-opus-4-8","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+
+	_ = svc.ProxyMessages(context.Background(), body, rec, req)
+	assert.Equal(t, 0, anthropicCount, "baseline failover must not hit Anthropic when it is excluded")
+	assert.NotEqual(t, providers.ProviderAnthropic, rec.Header().Get(proxy.HeaderRouterProvider), "served provider must not be the excluded Anthropic")
+}
+
+// TestProxyMessages_FailedBaselineReportsAnthropicProvider asserts that when
+// both the OSS bindings AND the Anthropic baseline retry fail, the telemetry
+// row pairs the baseline (Anthropic) model with the Anthropic provider — not
+// the OSS primary that never served that model.
+func TestProxyMessages_FailedBaselineReportsAnthropicProvider(t *testing.T) {
+	fail := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"down"}}`))
+	}
+	fireworks := httptest.NewServer(http.HandlerFunc(fail))
+	defer fireworks.Close()
+	openrouter := httptest.NewServer(http.HandlerFunc(fail))
+	defer openrouter.Close()
+	// The Anthropic baseline retry also fails (503), so winnerIdx stays -1.
+	anthropicUpstream := httptest.NewServer(http.HandlerFunc(fail))
+	defer anthropicUpstream.Close()
+
+	tel := newCaptureTelemetry()
+	svc := proxy.NewService(
+		&fakeRouter{decision: router.Decision{Provider: "fireworks", Model: "deepseek/deepseek-v4-pro"}},
+		map[string]providers.Client{
+			"fireworks":  openaicompat.NewClient("k", fireworks.URL),
+			"openrouter": openaicompat.NewClient("k", openrouter.URL),
+			"anthropic":  anthropic.NewClient("k", anthropicUpstream.URL),
+		},
+		nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", tel,
+	).WithDeploymentKeyedProviders(map[string]struct{}{
+		"fireworks": {}, "openrouter": {}, "anthropic": {},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"claude-opus-4-8","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+
+	// A non-nil installation ID gates the telemetry write.
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, "11111111-1111-1111-1111-111111111111")
+	_ = svc.ProxyMessages(ctx, body, rec, req)
+
+	row := tel.firstRow(t)
+	assert.Equal(t, "claude-opus-4-8", row.DecisionModel, "telemetry records the baseline model after failover")
+	assert.Equal(t, providers.ProviderAnthropic, row.DecisionProvider, "failed-baseline provider must match the baseline model, not the OSS primary")
+}

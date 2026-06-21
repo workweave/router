@@ -1716,13 +1716,19 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// model fails (provider outage or model-not-found), the turn should fall
 	// back to the requested model on Anthropic rather than hard-fail with
 	// "the selected model may not exist". Eligible only when: the request isn't
-	// BYOK/inbound-credential bound (those resolve to a single provider), the
-	// routed model isn't already Anthropic, and the baseline is a known
-	// Anthropic-served catalog model distinct from the routed one. Computed
-	// pre-dispatch so the primary dispatch defers its exhaustion flush to us.
+	// BYOK/inbound-credential bound (those resolve to a single provider),
+	// Anthropic isn't excluded for the installation (otherwise failing over to
+	// Anthropic would violate the exclusion contract — and deferring the OSS
+	// error to a baseline that then can't dispatch would surface a generic
+	// gateway failure instead of the real upstream error), the routed model
+	// isn't already Anthropic, and the baseline is a known Anthropic-served
+	// catalog model distinct from the routed one. Computed pre-dispatch so the
+	// primary dispatch defers its exhaustion flush to us.
 	baselineModel := s.baselineFor(feats.Model)
 	baselineCatalog, baselineKnown := catalog.ByID(baselineModel)
+	_, anthropicExcluded := s.excludedProvidersForRequest(ctx)[providers.ProviderAnthropic]
 	baselineEligible := s.shouldFailover(ctx) &&
+		!anthropicExcluded &&
 		decision.Provider != providers.ProviderAnthropic &&
 		baselineModel != decision.Model &&
 		baselineKnown && baselineCatalog.PrimaryProvider() == providers.ProviderAnthropic
@@ -1747,6 +1753,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// to their Anthropic-native (no-translator) values so completion telemetry
 	// reflects the binding that actually served.
 	baselineFailoverUsed := false
+	baselineAttempted := false
 	if baselineEligible && proxyErr != nil && !preludeBuf.Committed() &&
 		(providers.IsRetryable(proxyErr) || providers.IsUpstreamModelNotFound(proxyErr)) {
 		baselineDecision := decision
@@ -1786,7 +1793,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			})
 			decision = baselineDecision
 			bindings = baselineBindings
-			baselineFailoverUsed = true
+			baselineAttempted = true
+			// Reflect whether the baseline actually served the turn — a failed
+			// Anthropic retry must not report baseline_failover=true and skew
+			// bake-off / incident analysis.
+			baselineFailoverUsed = proxyErr == nil
 		}
 	} else if baselineEligible && proxyErr != nil {
 		// We deferred the primary's exhaustion flush but didn't run the baseline
@@ -1798,6 +1809,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	finalProvider := primaryProvider
 	if winnerIdx >= 0 && winnerIdx < len(bindings) {
 		finalProvider = bindings[winnerIdx].Provider
+	} else if baselineAttempted {
+		// Baseline failover ran but no binding served (winnerIdx == -1). The
+		// last provider attempted was Anthropic with the baseline model, so
+		// finalProvider must match decision.Model rather than reverting to the
+		// OSS primary that never served the requested baseline model.
+		finalProvider = providers.ProviderAnthropic
 	}
 	decision.Provider = finalProvider
 
