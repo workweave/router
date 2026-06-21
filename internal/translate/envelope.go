@@ -377,17 +377,11 @@ type EmitOverrides struct {
 	// non-Anthropic upstreams (e.g. Kimi-k2.6) emit IDs like "functions.Read:0"
 	// that Anthropic rejects when the history is forwarded back to it.
 	SanitizeToolUseIDs bool
-	// StripToolUseThoughtSignature removes the `thought_signature` field from
-	// tool_use blocks in messages[*].content[*]. Set when targeting Anthropic:
-	// Gemini 3.x emits a thoughtSignature that the response translator surfaces
-	// as a `thought_signature` field on the tool_use block so it round-trips via
-	// the client. When the session is re-routed to an Anthropic model, that field
-	// is forwarded verbatim and Anthropic rejects it with a non-retryable 400
-	// ("tool_use.thought_signature: Extra inputs are not permitted"), killing the
-	// session. The opaque signature still round-trips through the tool_use.id
-	// channel (embedSignatureInID), so stripping the field here is lossless for a
-	// later switch back to Gemini.
-	StripToolUseThoughtSignature bool
+	// StripThoughtSignature removes the `thought_signature` field from every
+	// messages[*].content[*] block. Set when targeting Anthropic: Gemini 3.x
+	// signatures are foreign to Anthropic, and Anthropic rejects unknown block
+	// fields with a non-retryable 400.
+	StripThoughtSignature bool
 	// RewriteThinkingAdaptive replaces the inbound thinking block with
 	// {"type":"adaptive"} and sets output_config.effort. Used when the target
 	// model only accepts adaptive thinking (claude-opus-4-6+ / sonnet-4-6+).
@@ -418,10 +412,10 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 		}
 	}
 
-	if ov.StripToolUseThoughtSignature {
-		out, err = stripToolUseThoughtSignatureBytes(out)
+	if ov.StripThoughtSignature {
+		out, err = stripThoughtSignatureBytes(out)
 		if err != nil {
-			return nil, fmt.Errorf("strip tool_use thought_signature: %w", err)
+			return nil, fmt.Errorf("strip thought_signature: %w", err)
 		}
 	}
 
@@ -679,13 +673,10 @@ func sanitizeToolUseIDsBytes(body []byte) ([]byte, error) {
 	return sjson.SetRawBytes(body, "messages", []byte("["+strings.Join(msgRaws, ",")+"]"))
 }
 
-// stripToolUseThoughtSignatureBytes removes the `thought_signature` field from
-// tool_use blocks in messages[*].content[*]. Gemini 3.x emits a thoughtSignature
-// that the response translator surfaces as this field so it round-trips via the
-// client; Anthropic rejects the unknown field with a 400 when the history is
-// forwarded back to it. The signature is also smuggled in tool_use.id, so the
-// round-trip survives a later switch back to Gemini.
-func stripToolUseThoughtSignatureBytes(body []byte) ([]byte, error) {
+// stripThoughtSignatureBytes removes the `thought_signature` field from every
+// messages[*].content[*] block. Anthropic rejects this Gemini-only field; tool
+// signatures still survive through the id carrier.
+func stripThoughtSignatureBytes(body []byte) ([]byte, error) {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.Exists() || !messages.IsArray() {
 		return body, nil
@@ -704,7 +695,7 @@ func stripToolUseThoughtSignatureBytes(body []byte) ([]byte, error) {
 
 		needsStrip := false
 		content.ForEach(func(_, block gjson.Result) bool {
-			if block.Get("type").String() == "tool_use" && block.Get("thought_signature").Exists() {
+			if block.Get("thought_signature").Exists() {
 				needsStrip = true
 				return false
 			}
@@ -720,11 +711,11 @@ func stripToolUseThoughtSignatureBytes(body []byte) ([]byte, error) {
 		var rewritten []string
 		content.ForEach(func(_, block gjson.Result) bool {
 			raw := block.Raw
-			if block.Get("type").String() == "tool_use" && block.Get("thought_signature").Exists() {
+			if block.Get("thought_signature").Exists() {
 				var err error
 				raw, err = sjson.Delete(raw, "thought_signature")
 				if err != nil {
-					walkErr = fmt.Errorf("delete tool_use thought_signature: %w", err)
+					walkErr = fmt.Errorf("delete thought_signature: %w", err)
 					return false
 				}
 			}
@@ -959,9 +950,9 @@ func effortForBudget(budgetTokens int64) string {
 
 func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	ov := EmitOverrides{
-		Model:                        opts.TargetModel,
-		SanitizeToolUseIDs:           true,
-		StripToolUseThoughtSignature: true,
+		Model:                 opts.TargetModel,
+		SanitizeToolUseIDs:    true,
+		StripThoughtSignature: true,
 	}
 
 	thinkingResult := gjson.GetBytes(body, "thinking")

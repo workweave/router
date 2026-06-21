@@ -1,6 +1,7 @@
 package translate_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -312,7 +313,8 @@ func TestGeminiToOpenAIResponse_TextOnly(t *testing.T) {
 }
 
 func TestGeminiToOpenAIResponse_ToolCallPreservesThoughtSignature(t *testing.T) {
-	// Load-bearing: response-side signature surfaces on tool_call.function.
+	// Load-bearing: the response-side signature is smuggled into the tool-call
+	// id (the single SDK-safe carrier), not emitted as an off-spec field.
 	body := []byte(`{
 		"candidates":[{"content":{"role":"model","parts":[
 			{"functionCall":{"name":"bash","args":{"command":"ls /tmp"}},
@@ -328,8 +330,10 @@ func TestGeminiToOpenAIResponse_ToolCallPreservesThoughtSignature(t *testing.T) 
 	fn := tc["function"].(map[string]any)
 	assert.Equal(t, "bash", fn["name"])
 	assert.Equal(t, `{"command":"ls /tmp"}`, fn["arguments"])
-	assert.Equal(t, "GEMINI_SIG", fn["thought_signature"])
-	assert.Equal(t, "GEMINI_SIG", tc["thought_signature"])
+	assert.NotContains(t, fn, "thought_signature", "off-spec field must not be emitted")
+	assert.NotContains(t, tc, "thought_signature", "off-spec field must not be emitted")
+	encoded := base64.RawURLEncoding.EncodeToString([]byte("GEMINI_SIG"))
+	assert.Contains(t, tc["id"].(string), encoded, "signature rides in the tool-call id")
 }
 
 func TestGeminiToOpenAIResponse_FinishReasonMapping(t *testing.T) {
@@ -365,10 +369,10 @@ func TestGeminiToAnthropicResponse_ToolUsePreservesThoughtSignature(t *testing.T
 	blocks := resp["content"].([]any)
 	tu := blocks[0].(map[string]any)
 	assert.Equal(t, "tool_use", tu["type"])
-	assert.Equal(t, "GS", tu["thought_signature"])
+	assert.NotContains(t, tu, "thought_signature", "off-spec field must not be emitted")
 	assert.Equal(t, "bash", tu["name"])
-	// The id must also carry the signature so typed-SDK clients (Claude Code)
-	// that drop unknown content-block fields still round-trip it.
+	// The id is the sole carrier: a typed string that every client SDK (incl.
+	// Claude Code, which drops unknown content-block fields) round-trips.
 	assert.Contains(t, tu["id"].(string), "__thought__")
 }
 
@@ -519,7 +523,9 @@ func TestGeminiStream_FunctionCallChunkPreservesThoughtSignature(t *testing.T) {
 	body := rec.Body.String()
 	assert.Contains(t, body, `"tool_calls"`)
 	assert.Contains(t, body, `"name":"bash"`)
-	assert.Contains(t, body, `"thought_signature":"SIG"`)
+	assert.NotContains(t, body, `"thought_signature"`, "off-spec field must not be emitted")
+	encoded := base64.RawURLEncoding.EncodeToString([]byte("SIG"))
+	assert.Contains(t, body, encoded, "signature rides in the tool-call id")
 	assert.Contains(t, body, `"finish_reason":"tool_calls"`)
 	assert.Contains(t, body, "data: [DONE]")
 }

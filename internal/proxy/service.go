@@ -278,12 +278,14 @@ func routingMarkerFor(res turnLoopResult) string {
 // the marker wording; tests assert the mapping against these constants rather
 // than re-spelling the literals.
 const (
-	markerReasonHardPinned  = "pinned for compaction / sub-agent"
-	markerReasonSwitched    = "switched for positive EV after cache eviction"
-	markerReasonStayed      = "stayed on your last pick"
-	markerReasonTierUpgrade = "upgraded to a stronger tier"
-	markerReasonBestPick    = "best pick for this turn"
-	markerReasonBaseline    = "fell back to baseline after provider outage"
+	markerReasonHardPinned    = "pinned for compaction / sub-agent"
+	markerReasonUserForced    = "pinned by force-model"
+	markerReasonLoopEscalated = "escalated due to loop"
+	markerReasonSwitched      = "switched for positive EV after cache eviction"
+	markerReasonStayed        = "stayed on your last pick"
+	markerReasonTierUpgrade   = "upgraded to a stronger tier"
+	markerReasonBestPick      = "best pick for this turn"
+	markerReasonBaseline      = "fell back to baseline after provider outage"
 )
 
 // baselineRoutingMarkerFor renders the routing badge for an in-turn baseline
@@ -305,6 +307,12 @@ func routingReasonShort(res turnLoopResult) string {
 	}
 	if res.PlannerDecision.Reason != "" {
 		return humanReasonFromPlanner(res.PlannerDecision.Reason)
+	}
+	switch res.Decision.Reason {
+	case translate.ReasonUserForceModel:
+		return markerReasonUserForced
+	case translate.ReasonLoopEscalation:
+		return markerReasonLoopEscalated
 	}
 	return markerReasonBestPick
 }
@@ -1077,6 +1085,18 @@ func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName s
 		return err
 	}
 
+	// Claude Code sends its 1M-context model variant tag (e.g.
+	// "claude-opus-4-8[1m]") in the body. It is a client display convention,
+	// not a real Anthropic model id, so a verbatim count_tokens / model-list
+	// passthrough to the native Anthropic API 404s ("the selected model may not
+	// exist"). Strip it to the canonical id; passthrough never rewrites the
+	// model otherwise.
+	if providerName == providers.ProviderAnthropic && len(body) > 0 {
+		if canon, had, cerr := translate.CanonicalizeModelInBody(body); cerr == nil && had {
+			body = canon
+		}
+	}
+
 	var prep providers.PreparedRequest
 	if providerName == providers.ProviderAnthropic && len(body) > 0 {
 		env, parseErr := translate.ParseAnthropic(body)
@@ -1219,6 +1239,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if stripErr != nil {
 		log.Error("Failed to strip routing marker from inbound messages", "err", stripErr)
 		return fmt.Errorf("strip routing marker: %w", stripErr)
+	}
+
+	// Strip Claude Code's 1M-context model variant tag (e.g.
+	// "claude-opus-4-8[1m]") to the canonical catalog id before parsing, so
+	// routing, session pins, and telemetry key off the real model — and so the
+	// tag never reaches a native Anthropic upstream, which 404s on it. The 1M
+	// window is enabled separately, size-triggered via the context-1m beta.
+	if canon, _, modelErr := translate.CanonicalizeModelInBody(body); modelErr != nil {
+		log.Error("Failed to canonicalize inbound model", "err", modelErr)
+	} else {
+		body = canon
 	}
 
 	env, parseErr := translate.ParseAnthropic(body)
@@ -1885,6 +1916,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
 		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
 		Float64("cost.actual_output_usd", catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
+		Bool("cost.subscription_served", servedOnSubscription(ctx)).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
@@ -2353,7 +2385,8 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 		// the router-key path (it is today, but a future BYOK-loading path must
 		// not silently outrank the subscription).
 		if sub := subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)); sub != nil {
-			observability.FromContext(ctx).Debug("Resolved Claude subscription credential for Anthropic turn", "credential_source", sub.Source)
+			observability.FromContext(ctx).Info("Resolved Claude subscription credential",
+				"credential_source", sub.Source)
 			return context.WithValue(ctx, CredentialsContextKey{}, sub)
 		}
 		// A Claude subscription bearer (sk-ant-oat-) in the inbound Authorization
@@ -2366,7 +2399,8 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 		// NOT forwarded on the router-key path (the cross-provider-leak guard
 		// below still applies to it).
 		if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
-			observability.FromContext(ctx).Debug("Resolved Claude subscription credential for Anthropic turn", "credential_source", inbound.Source)
+			observability.FromContext(ctx).Info("Resolved Claude subscription credential",
+				"credential_source", inbound.Source)
 			return context.WithValue(ctx, CredentialsContextKey{}, inbound)
 		}
 	}
@@ -2607,6 +2641,7 @@ func (s *Service) fireBilling(ctx context.Context, p billing.DebitInferenceParam
 			"model", p.Model,
 			"balance_usd_micros", balance,
 			"override", p.HasOverride,
+			"subscription_served", p.SubscriptionServed,
 		)
 		return
 	}
@@ -2629,6 +2664,7 @@ func logBillingDebitFailure(ctx context.Context, p billing.DebitInferenceParams,
 		"cache_creation_tokens", p.CacheCreation,
 		"cache_read_tokens", p.CacheRead,
 		"has_override", p.HasOverride,
+		"subscription_served", p.SubscriptionServed,
 	)
 }
 
@@ -3099,6 +3135,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
 		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
 		Float64("cost.actual_output_usd", catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
+		Bool("cost.subscription_served", servedOnSubscription(ctx)).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).

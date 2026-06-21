@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"testing"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/translate"
 
 	"github.com/stretchr/testify/assert"
@@ -64,6 +66,40 @@ func TestOpenAISameFormat_UnknownFieldsPreserved(t *testing.T) {
 	assert.Equal(t, "preserved", out["custom_field"])
 	meta, _ := out["metadata"].(map[string]any)
 	assert.Equal(t, "val", meta["key"])
+}
+
+// A Gemini turn earlier in the session left an off-spec thought_signature field
+// on content blocks (the router smuggles it to passthrough clients on text
+// blocks, and pre-id-embed sessions also carried it on tool_use blocks, which
+// Claude Code echoes back). Forwarding that field to an Anthropic upstream 400s
+// ("...tool_use.thought_signature: Extra inputs are not permitted"), so the
+// same-format Anthropic emit must drop it from every block. On tool_use the
+// signature still round-trips via the id; on text it is simply dropped.
+func TestAnthropicSameFormat_StripsThoughtSignature(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[
+		{"role":"assistant","content":[
+			{"type":"text","text":"thinking out loud","thought_signature":"TEXT_SIG"},
+			{"type":"tool_use","id":"call_x__thought__QUFB","name":"Read","input":{"file_path":"main.go"},"thought_signature":"OPAQUE_SIG"}
+		]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_x__thought__QUFB","content":"ok"}]}
+	]}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-8",
+		Capabilities: router.Lookup("claude-opus-4-8"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	msgs, _ := out["messages"].([]any)
+	require.NotEmpty(t, msgs)
+	asst, _ := msgs[0].(map[string]any)
+	content, _ := asst["content"].([]any)
+	require.Len(t, content, 2)
+	text, _ := content[0].(map[string]any)
+	assert.NotContains(t, text, "thought_signature", "Anthropic rejects the off-spec field on text blocks")
+	assert.Equal(t, "thinking out loud", text["text"], "the rest of the text block is untouched")
+	tool, _ := content[1].(map[string]any)
+	assert.NotContains(t, tool, "thought_signature", "Anthropic rejects the off-spec field on tool_use blocks")
+	assert.Equal(t, "Read", tool["name"], "the rest of the tool_use block is untouched")
+	assert.Equal(t, "call_x__thought__QUFB", tool["id"], "id (signature carrier) survives")
 }
 
 func TestOpenAISameFormat_ThinkingDeleted(t *testing.T) {
@@ -657,6 +693,51 @@ func TestAnthropicSameFormat_XhighEffortPreservedForCapableModel(t *testing.T) {
 	outputConfig, _ := out["output_config"].(map[string]any)
 	require.NotNil(t, outputConfig)
 	assert.Equal(t, "xhigh", outputConfig["effort"], "xhigh must pass through to models with CapXhighEffort")
+}
+
+// Exhaustive backstop for the 2026-06-09 production incident (see
+// TestAnthropicSameFormat_XhighEffortClampedOnReroute). The per-model clamp keys
+// on router.CapXhighEffort, so a newly added or re-tagged Anthropic model could
+// silently reintroduce the non-retryable 400. Rather than trust two hardcoded
+// pairs, walk every Anthropic model in the catalog and assert the wire-level
+// guarantee directly: effort "xhigh" survives emit only when the target advertises
+// CapXhighEffort. A model that lacks the capability but isn't clamped fails here
+// before it can reach a customer session.
+func TestAnthropicSameFormat_XhighEffortNeverReachesIncapableModel(t *testing.T) {
+	var anthropicModels, capableModels int
+	for _, m := range catalog.Models {
+		if m.PrimaryProvider() != providers.ProviderAnthropic {
+			continue
+		}
+		anthropicModels++
+		capable := router.Lookup(m.ID).Supports(router.CapXhighEffort)
+		if capable {
+			capableModels++
+		}
+		t.Run(m.ID, func(t *testing.T) {
+			body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"adaptive"},"effort":"xhigh","output_config":{"effort":"xhigh"}}`)
+			out := parseAndEmit(t, body, "anthropic", translate.EmitOptions{
+				TargetModel:  m.ID,
+				Capabilities: router.Lookup(m.ID),
+			})
+
+			topLevel, _ := out["effort"].(string)
+			var nested string
+			if oc, ok := out["output_config"].(map[string]any); ok {
+				nested, _ = oc["effort"].(string)
+			}
+			if capable {
+				assert.Equal(t, "xhigh", topLevel, "top-level effort xhigh must pass through to a CapXhighEffort model")
+				assert.Equal(t, "xhigh", nested, "output_config.effort xhigh must pass through to a CapXhighEffort model")
+				return
+			}
+			assert.NotEqual(t, "xhigh", topLevel, "top-level effort xhigh must never reach a model without CapXhighEffort")
+			assert.NotEqual(t, "xhigh", nested, "output_config.effort xhigh must never reach a model without CapXhighEffort")
+		})
+	}
+	// Guard against a vacuous pass if the catalog filter ever stops matching.
+	require.Positive(t, anthropicModels, "expected Anthropic models in the catalog")
+	require.Positive(t, capableModels, "expected at least one CapXhighEffort model so the preserve branch is exercised")
 }
 
 // Levels below xhigh are on every adaptive model's menu; the clamp must not
