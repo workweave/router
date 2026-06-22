@@ -72,15 +72,19 @@ var forceModelAliases = map[string]string{
 	"kimi":           "moonshotai/kimi-k2.7",
 	"kimi-k2.7":      "moonshotai/kimi-k2.7",
 	"kimi-k2.6":      "moonshotai/kimi-k2.6",
-	"glm":            "z-ai/glm-5.2",
-	"zai":            "z-ai/glm-5.2",
-	"z-ai":           "z-ai/glm-5.2",
-	"glm-5.2":        "z-ai/glm-5.2",
-	"glm-5.1":        "z-ai/glm-5.1",
-	"minimax":        "minimax/minimax-m3",
-	"minimax-m3":     "minimax/minimax-m3",
-	"minimax-m2.7":   "minimax/minimax-m2.7",
-	"mistral":        "mistralai/mistral-small-2603",
+	// Generic aliases stay on glm-5.1 (DeepInfra + OpenRouter) so they
+	// resolve on managed-prod deploys without a Fireworks key; glm-5.2 is
+	// Fireworks-only day-0. Pin glm-5.2 explicitly to opt into it.
+	"glm":          "z-ai/glm-5.1",
+	"zai":          "z-ai/glm-5.1",
+	"z-ai":         "z-ai/glm-5.1",
+	"glm-5.2":      "z-ai/glm-5.2",
+	"glm-5.1":      "z-ai/glm-5.1",
+	"glm-5":        "z-ai/glm-5",
+	"minimax":      "minimax/minimax-m3",
+	"minimax-m3":   "minimax/minimax-m3",
+	"minimax-m2.7": "minimax/minimax-m2.7",
+	"mistral":      "mistralai/mistral-small-2603",
 }
 
 // resolveForceModel maps a user-typed model identifier to its canonical

@@ -430,7 +430,7 @@ var Models = []Model{
 	// bump once the served window is verified.
 	{ID: "z-ai/glm-5.2", Tier: TierHigh, ContextWindow: 202_752, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/glm-5p2",
-			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400}},
+			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400, CacheReadMultiplier: 0.20}},
 	}},
 	// v0.55 bundle additions (2026-05-20). Fireworks-dedicated rows carry
 	// an OpenRouter trailing binding so managed-prod deploys without a
