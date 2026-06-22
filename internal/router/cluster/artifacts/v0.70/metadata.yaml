@@ -150,6 +150,7 @@ deployed_models:
   - gpt-5.5
   - minimax/minimax-m3
   - moonshotai/kimi-k2.6
+  - moonshotai/kimi-k2.7
   - qwen/qwen3-coder-next
   - qwen/qwen3-next-80b-a3b-instruct
   - qwen/qwen3.7-plus
@@ -169,9 +170,10 @@ cost_per_1k_input_usd:
   gpt-5.5: 0.005
   minimax/minimax-m3: 0.0006
   moonshotai/kimi-k2.6: 0.00095
+  moonshotai/kimi-k2.7: 0.00095
   qwen/qwen3-coder-next: 0.0005
   qwen/qwen3-next-80b-a3b-instruct: 0.00015
   qwen/qwen3.7-plus: 0.0004
   xiaomi/mimo-v2.5-pro: 0.001
   z-ai/glm-5.2: 0.0014
-changelog: "v0.70 = deployed v0.67 recipe + AA priors + DeepSWE priors SCOPED to coding clusters (>=50% coding-geometry prompts). DeepSWE corrects coding-cluster quality (glm-5.2 etc.) without touching general routing. Offline screen candidate."
+changelog: "v0.70 = deployed v0.67 recipe + AA priors + DeepSWE priors SCOPED to coding clusters. Adds glm-5.2, minimax-m3, qwen3.7-plus, kimi-k2.7 (4 models). Offline screen candidate."

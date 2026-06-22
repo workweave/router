@@ -169,6 +169,17 @@
       "extra_bench_columns": [
         "swebench_fireworks_ai/accounts/fireworks/models/qwen3p7-plus"
       ]
+    },
+    {
+      "model": "moonshotai/kimi-k2.7",
+      "provider": "fireworks",
+      "bench_column": "routerarena_moonshotai/kimi-k2.6",
+      "direct_label": "routerarena",
+      "proxy": true,
+      "proxy_note": "kimi-k2.7 (k2p7-code, Fireworks serverless) has no RouterArena labels; reuse kimi-k2.6's RouterArena column (immediate predecessor) for the general-prompt baseline. Real coding signal = DeepSWE prior (30.5% deep-swe solve).",
+      "extra_bench_columns": [
+        "swebench_fireworks_ai/accounts/fireworks/models/kimi-k2p7-code"
+      ]
     }
   ]
 }

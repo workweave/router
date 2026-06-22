@@ -91,6 +91,13 @@
       "ttft_s": 1.235,
       "verbosity_tokens": null
     },
+    "moonshotai/kimi-k2.7": {
+      "input_per_1k_usd": 0.00095,
+      "output_per_1k_usd": 0.004,
+      "tps": null,
+      "ttft_s": null,
+      "verbosity_tokens": null
+    },
     "qwen/qwen3-coder-next": {
       "input_per_1k_usd": 0.0005,
       "output_per_1k_usd": 0.0012,
@@ -172,6 +179,7 @@
       "gpt-5.5": 0.005,
       "minimax/minimax-m3": 0.0006,
       "moonshotai/kimi-k2.6": 0.00095,
+      "moonshotai/kimi-k2.7": 0.00095,
       "qwen/qwen3-coder-next": 0.0005,
       "qwen/qwen3-next-80b-a3b-instruct": 0.00015,
       "qwen/qwen3.7-plus": 0.0004,
