@@ -295,7 +295,10 @@ export const WeaveCodex: Plugin = async (input: PluginInput): Promise<Hooks> => 
                       path: { id: PROVIDER_ID },
                       body: {
                         type: "oauth",
-                        refresh: tokens.refresh_token,
+                        // OAuth 2.0 lets the issuer omit a new refresh_token on
+                        // refresh (the existing one stays valid). Keep the
+                        // stored one in that case rather than clearing it.
+                        refresh: tokens.refresh_token || currentAuth.refresh,
                         access: tokens.access_token,
                         expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
                         ...(accountId && { accountId }),
