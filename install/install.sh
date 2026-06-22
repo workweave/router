@@ -657,18 +657,24 @@ write_opencode_config() {
   fi
 
   # Merge into any existing opencode.json. We always overwrite provider.weave
-  # and provider."weave-codex" so re-install reflects the latest key/identity,
-  # but we leave the rest of the file (other providers, mcp, agent settings)
-  # untouched. Top-level `model` is only set when the user hasn't already
-  # picked one. The plugin path is added to `plugin` (de-duplicated so re-runs
-  # don't append it twice) only when we actually wrote the file above.
+  # so re-install reflects the latest key/identity, but we leave the rest of the
+  # file (other providers, mcp, agent settings) untouched. Top-level `model` is
+  # only set when the user hasn't already picked one.
+  #
+  # The weave-codex provider AND its plugin entry are written together only when
+  # the bundled plugin was present and copied ($plugin non-empty). Codex
+  # subscription auth depends on that plugin, so registering the provider
+  # without it (e.g. the `curl | sh` path, which carries no plugin source)
+  # would leave a non-working provider — instead we omit it (and strip any
+  # stale one from a prior install).
   local merged
   if [ -f "$config_file" ]; then
     merged="$(jq \
       --argjson block "$block" \
       --argjson codex "$codex_block" \
       --arg plugin "$plugin_arg" '
-      .provider = ((.provider // {}) | .weave = $block | ."weave-codex" = $codex)
+      .provider = ((.provider // {}) | .weave = $block)
+      | (if $plugin != "" then .provider["weave-codex"] = $codex else .provider |= del(."weave-codex") end)
       | (if $plugin != "" then .plugin = ((.plugin // []) | if index($plugin) then . else . + [$plugin] end) else . end)
       | (if (.model // "") == "" then .model = "weave/claude-sonnet-4-6" else . end)
       | (.["$schema"] //= "https://opencode.ai/config.json")
@@ -681,9 +687,9 @@ write_opencode_config() {
       {
         "$schema": "https://opencode.ai/config.json",
         model: "weave/claude-sonnet-4-6",
-        provider: { weave: $block, "weave-codex": $codex }
+        provider: { weave: $block }
       }
-      | (if $plugin != "" then .plugin = [$plugin] else . end)
+      | (if $plugin != "" then .provider["weave-codex"] = $codex | .plugin = [$plugin] else . end)
     ')"
   fi
   printf '%s\n' "$merged" >"$config_file"
@@ -1524,7 +1530,9 @@ toggle_opencode() {
     model="$(jq -r '.model // empty' "$f" 2>/dev/null || true)"
     if [ "$(jq -r '((.provider // {}) | has("weave"))' "$f" 2>/dev/null || true)" = "true" ]; then has_weave="true"; fi
   fi
-  case "$model" in weave/*) on="true" ;; esac
+  # Either managed provider counts as router-on: the Anthropic-shaped `weave/…`
+  # default or a caller-selected `weave-codex/…` Codex-subscription model.
+  case "$model" in weave/* | weave-codex/*) on="true" ;; esac
 
   case "$mode" in
     status)
@@ -1817,9 +1825,13 @@ if [ "$target" = "opencode" ]; then
   printf "\n"
   printf "%s✓%s %s%sWeave Router installed for opencode.%s\n" \
     "$C_GREEN" "$C_RESET" "$C_BOLD" "$C_BRAND" "$C_RESET"
-  # Surface the optional Codex-subscription path. The weave-codex provider +
-  # plugin are installed but dormant until the user links their ChatGPT plan.
-  info "To pay for opencode turns with your own ChatGPT (Codex) subscription: run ${C_BOLD}opencode auth login${C_RESET} → ${C_BOLD}ChatGPT Pro/Plus${C_RESET}, then pick a ${C_BOLD}weave-codex${C_RESET} model."
+  # Surface the optional Codex-subscription path only when the plugin was
+  # actually installed (the weave-codex provider is gated on the same
+  # condition). On the curl|sh path the plugin source isn't bundled, so the
+  # provider isn't written and these instructions would be misleading.
+  if [ -f "$opencode_dir/.weave/opencode-weave.ts" ]; then
+    info "To pay for opencode turns with your own ChatGPT (Codex) subscription: run ${C_BOLD}opencode auth login${C_RESET} → ${C_BOLD}ChatGPT Pro/Plus${C_RESET}, then pick a ${C_BOLD}weave-codex${C_RESET} model."
+  fi
   if [ -n "$install_dir" ]; then
     # --dir installs land outside opencode's discovery roots, so the caller
     # has to point opencode at the file explicitly.
