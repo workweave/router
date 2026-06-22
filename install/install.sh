@@ -672,10 +672,19 @@ write_opencode_config() {
     merged="$(jq \
       --argjson block "$block" \
       --argjson codex "$codex_block" \
-      --arg plugin "$plugin_arg" '
+      --arg plugin "$plugin_arg" \
+      --arg pluginspec "$plugin_spec" '
       .provider = ((.provider // {}) | .weave = $block)
       | (if $plugin != "" then .provider["weave-codex"] = $codex else .provider |= del(."weave-codex") end)
-      | (if $plugin != "" then .plugin = ((.plugin // []) | if index($plugin) then . else . + [$plugin] end) else . end)
+      # Register the managed plugin path when we installed it; otherwise strip a
+      # stale entry left by a prior install (the provider was just removed, so a
+      # lingering plugin reference would be dead weight).
+      | (if $plugin != ""
+           then .plugin = ((.plugin // []) | if index($plugin) then . else . + [$plugin] end)
+           else (if (.plugin | type) == "array"
+                   then (.plugin -= [$pluginspec]) | (if (.plugin | length) == 0 then del(.plugin) else . end)
+                   else . end)
+         end)
       | (if (.model // "") == "" then .model = "weave/claude-sonnet-4-6" else . end)
       # If we just stripped weave-codex (plugin-less re-install) but the default
       # model still points at it, reset to the Anthropic weave model so opencode
