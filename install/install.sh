@@ -677,6 +677,10 @@ write_opencode_config() {
       | (if $plugin != "" then .provider["weave-codex"] = $codex else .provider |= del(."weave-codex") end)
       | (if $plugin != "" then .plugin = ((.plugin // []) | if index($plugin) then . else . + [$plugin] end) else . end)
       | (if (.model // "") == "" then .model = "weave/claude-sonnet-4-6" else . end)
+      # If we just stripped weave-codex (plugin-less re-install) but the default
+      # model still points at it, reset to the Anthropic weave model so opencode
+      # does not boot with a model whose provider no longer exists.
+      | (if $plugin == "" and (.model // "" | tostring | startswith("weave-codex/")) then .model = "weave/claude-sonnet-4-6" else . end)
       | (.["$schema"] //= "https://opencode.ai/config.json")
     ' "$config_file")"
   else
