@@ -669,7 +669,7 @@ write_opencode_config() {
       --argjson codex "$codex_block" \
       --arg plugin "$plugin_arg" '
       .provider = ((.provider // {}) | .weave = $block | ."weave-codex" = $codex)
-      | (if $plugin != "" then .plugin = (((.plugin // []) + [$plugin]) | unique) else . end)
+      | (if $plugin != "" then .plugin = ((.plugin // []) | if index($plugin) then . else . + [$plugin] end) else . end)
       | (if (.model // "") == "" then .model = "weave/claude-sonnet-4-6" else . end)
       | (.["$schema"] //= "https://opencode.ai/config.json")
     ' "$config_file")"
