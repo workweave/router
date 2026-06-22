@@ -533,13 +533,20 @@ TOML
   chmod 600 "$config_file"
 }
 
-# write_opencode_config merges a managed `provider.weave` entry into opencode's
-# opencode.json (anthropic-compatible — the router speaks the Anthropic
-# Messages API natively, so opencode's bundled @ai-sdk/anthropic provider
-# works unmodified). Re-running rewrites the block in-place via jq; uninstall
-# strips it the same way. We also set `model` at the top level so a fresh
-# `opencode` invocation picks the router by default; if the user has set
-# their own model already, we leave it alone.
+# write_opencode_config merges TWO managed providers into opencode's
+# opencode.json plus the bundled Codex-subscription plugin:
+#   - provider.weave        : Anthropic-shaped (@ai-sdk/anthropic) — the router
+#                             speaks the Anthropic Messages API natively, so the
+#                             bundled provider works unmodified. The default.
+#   - provider.weave-codex  : OpenAI-shaped (@ai-sdk/openai, Responses wire) —
+#                             lets a caller's own ChatGPT (Codex) subscription
+#                             pay for their opencode turns. Dormant until the
+#                             user runs `opencode auth login` → ChatGPT and the
+#                             weave-codex plugin's loader injects the bearer.
+# The plugin (src bundled at $script_dir/opencode-weave/src/index.ts) is dropped
+# into $opencode_dir/.weave/ and registered via opencode.json's `plugin` array
+# by absolute path — scope-independent (no reliance on an auto-load dir).
+# Re-running rewrites both blocks in-place via jq; uninstall strips them.
 #
 # Usage: write_opencode_config <config_file_path> <base_url> <api_key> [user_email] [user_name]
 write_opencode_config() {
@@ -601,23 +608,63 @@ write_opencode_config() {
     }
   ')"
 
+  # The OpenAI-shaped Codex-subscription provider. Reuses the same X-Weave-*
+  # header triplet (router key + identity) — the plugin's loader adds only the
+  # dynamic subscription Authorization + ChatGPT-Account-Id on top. baseURL
+  # KEEPS /v1: opencode's @ai-sdk/openai provider appends /responses, yielding
+  # the router's /v1/responses Codex passthrough. apiKey is the router key as a
+  # parse-time placeholder (the loader overrides it once a subscription is
+  # linked), mirroring the weave block above.
+  local codex_block
+  codex_block="$(jq -n \
+    --arg url "$block_url/v1" \
+    --arg key "$block_key" \
+    --argjson headers "$headers_json" '
+    {
+      npm: "@ai-sdk/openai",
+      name: "Weave Router (Codex subscription)",
+      options: { apiKey: $key, baseURL: $url, headers: $headers },
+      models: {
+        "gpt-5.5": { name: "GPT-5.5 — Codex subscription (via Weave Router)" },
+        "gpt-5.4": { name: "GPT-5.4 — Codex subscription (via Weave Router)" }
+      }
+    }
+  ')"
+
+  # Absolute path of the plugin we drop below; registered in opencode.json's
+  # `plugin` array so it loads regardless of scope. $config_file's dir is the
+  # already-created opencode_dir, so dirname is safe to resolve.
+  local plugin_dir plugin_spec
+  plugin_dir="$(cd "$(dirname "$config_file")" && pwd)/.weave"
+  plugin_spec="$plugin_dir/opencode-weave.ts"
+
   # Merge into any existing opencode.json. We always overwrite provider.weave
-  # so re-install reflects the latest key/identity, but we leave the rest of
-  # the file (other providers, mcp, agent settings) untouched. Top-level
-  # `model` is only set when the user hasn't already picked one.
+  # and provider."weave-codex" so re-install reflects the latest key/identity,
+  # but we leave the rest of the file (other providers, mcp, agent settings)
+  # untouched. Top-level `model` is only set when the user hasn't already
+  # picked one. The plugin path is added to `plugin` and de-duplicated so
+  # re-runs don't append it twice.
   local merged
   if [ -f "$config_file" ]; then
-    merged="$(jq --argjson block "$block" '
-      .provider = ((.provider // {}) | .weave = $block)
+    merged="$(jq \
+      --argjson block "$block" \
+      --argjson codex "$codex_block" \
+      --arg plugin "$plugin_spec" '
+      .provider = ((.provider // {}) | .weave = $block | ."weave-codex" = $codex)
+      | .plugin = (((.plugin // []) + [$plugin]) | unique)
       | (if (.model // "") == "" then .model = "weave/claude-sonnet-4-6" else . end)
       | (.["$schema"] //= "https://opencode.ai/config.json")
     ' "$config_file")"
   else
-    merged="$(jq -n --argjson block "$block" '
+    merged="$(jq -n \
+      --argjson block "$block" \
+      --argjson codex "$codex_block" \
+      --arg plugin "$plugin_spec" '
       {
         "$schema": "https://opencode.ai/config.json",
         model: "weave/claude-sonnet-4-6",
-        provider: { weave: $block }
+        provider: { weave: $block, "weave-codex": $codex },
+        plugin: [$plugin]
       }
     ')"
   fi
@@ -625,6 +672,19 @@ write_opencode_config() {
   # 0600: the file holds a router key. Even at user scope, mode 644 would
   # leak the key to any local user on a shared box.
   chmod 600 "$config_file"
+
+  # Drop the Codex-subscription plugin next to the config. The plugin holds no
+  # secrets (router key lives in the config; ChatGPT tokens live in opencode's
+  # own auth store), so 644 is fine. Source is bundled alongside install.sh by
+  # the npm prepack (scripts/copy-installer.js), same as commands/ + pi-router/.
+  local plugin_src="$script_dir/opencode-weave/src/index.ts"
+  if [ -f "$plugin_src" ]; then
+    mkdir -p "$plugin_dir"
+    cp "$plugin_src" "$plugin_spec"
+    chmod 644 "$plugin_spec"
+  else
+    warn "opencode Codex plugin source not found at $plugin_src — the weave-codex provider won't load until it's present. (Use a packaged 'npx @workweave/router' install.)"
+  fi
 }
 
 # write_pi_models_config merges a managed `weave` provider into pi's
@@ -1716,18 +1776,20 @@ if [ "$target" = "opencode" ]; then
 
   # Project scope: the per-teammate config carries the router key, so it
   # stays out of git. Same reasoning as the Codex path — base URL is shared,
-  # but the key is per-person.
+  # but the key is per-person. The .weave/ plugin dir is per-person too (the
+  # config references it by absolute path), so ignore it alongside.
   if [ "$scope" = "project" ] && [ -z "$install_dir" ] && [ -n "${git_root:-}" ]; then
     gitignore="$git_root/.gitignore"
     refuse_if_symlink "$gitignore"
     for entry in \
-      "opencode.json"
+      "opencode.json" \
+      ".weave/"
     do
       if [ ! -f "$gitignore" ] || ! grep -qxF "$entry" "$gitignore"; then
         printf '%s\n' "$entry" >>"$gitignore"
       fi
     done
-    ok "Updated $gitignore (ignored opencode.json)"
+    ok "Updated $gitignore (ignored opencode.json, .weave/)"
   fi
 
   # Post-install verification: same probes the Claude/Codex paths run.
@@ -1750,6 +1812,9 @@ if [ "$target" = "opencode" ]; then
   printf "\n"
   printf "%s✓%s %s%sWeave Router installed for opencode.%s\n" \
     "$C_GREEN" "$C_RESET" "$C_BOLD" "$C_BRAND" "$C_RESET"
+  # Surface the optional Codex-subscription path. The weave-codex provider +
+  # plugin are installed but dormant until the user links their ChatGPT plan.
+  info "To pay for opencode turns with your own ChatGPT (Codex) subscription: run ${C_BOLD}opencode auth login${C_RESET} → ${C_BOLD}ChatGPT Pro/Plus${C_RESET}, then pick a ${C_BOLD}weave-codex${C_RESET} model."
   if [ -n "$install_dir" ]; then
     # --dir installs land outside opencode's discovery roots, so the caller
     # has to point opencode at the file explicitly.

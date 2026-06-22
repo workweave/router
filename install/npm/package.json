@@ -17,6 +17,7 @@
     "cc-statusline.sh",
     "commands/",
     "pi-router/",
+    "opencode-weave/",
     "README.md",
     "LICENSE"
   ],
