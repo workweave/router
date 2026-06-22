@@ -631,27 +631,45 @@ write_opencode_config() {
     }
   ')"
 
-  # Absolute path of the plugin we drop below; registered in opencode.json's
-  # `plugin` array so it loads regardless of scope. $config_file's dir is the
-  # already-created opencode_dir, so dirname is safe to resolve.
-  local plugin_dir plugin_spec
+  # Drop the Codex-subscription plugin next to the config and capture the
+  # absolute path we'll register in opencode.json's `plugin` array (so it loads
+  # regardless of scope). $config_file's dir is the already-created
+  # opencode_dir, so the `cd … && pwd` canonicalization is safe — uninstall.sh
+  # must canonicalize identically so the array entry matches on removal.
+  #
+  # Only register the path when the bundled source is actually present and
+  # copied: registering a path with no file on disk makes opencode fail to load
+  # a missing plugin. The plugin holds no secrets (router key lives in the
+  # config; ChatGPT tokens live in opencode's own auth store), so 644 is fine.
+  # Source is bundled alongside install.sh by the npm prepack
+  # (scripts/copy-installer.js), same as commands/ + pi-router/.
+  local plugin_dir plugin_spec plugin_src plugin_arg=""
   plugin_dir="$(cd "$(dirname "$config_file")" && pwd)/.weave"
   plugin_spec="$plugin_dir/opencode-weave.ts"
+  plugin_src="$script_dir/opencode-weave/src/index.ts"
+  if [ -f "$plugin_src" ]; then
+    mkdir -p "$plugin_dir"
+    cp "$plugin_src" "$plugin_spec"
+    chmod 644 "$plugin_spec"
+    plugin_arg="$plugin_spec"
+  else
+    warn "opencode Codex plugin source not found at $plugin_src — skipping the weave-codex plugin registration. (Use a packaged 'npx @workweave/router' install.)"
+  fi
 
   # Merge into any existing opencode.json. We always overwrite provider.weave
   # and provider."weave-codex" so re-install reflects the latest key/identity,
   # but we leave the rest of the file (other providers, mcp, agent settings)
   # untouched. Top-level `model` is only set when the user hasn't already
-  # picked one. The plugin path is added to `plugin` and de-duplicated so
-  # re-runs don't append it twice.
+  # picked one. The plugin path is added to `plugin` (de-duplicated so re-runs
+  # don't append it twice) only when we actually wrote the file above.
   local merged
   if [ -f "$config_file" ]; then
     merged="$(jq \
       --argjson block "$block" \
       --argjson codex "$codex_block" \
-      --arg plugin "$plugin_spec" '
+      --arg plugin "$plugin_arg" '
       .provider = ((.provider // {}) | .weave = $block | ."weave-codex" = $codex)
-      | .plugin = (((.plugin // []) + [$plugin]) | unique)
+      | (if $plugin != "" then .plugin = (((.plugin // []) + [$plugin]) | unique) else . end)
       | (if (.model // "") == "" then .model = "weave/claude-sonnet-4-6" else . end)
       | (.["$schema"] //= "https://opencode.ai/config.json")
     ' "$config_file")"
@@ -659,32 +677,19 @@ write_opencode_config() {
     merged="$(jq -n \
       --argjson block "$block" \
       --argjson codex "$codex_block" \
-      --arg plugin "$plugin_spec" '
+      --arg plugin "$plugin_arg" '
       {
         "$schema": "https://opencode.ai/config.json",
         model: "weave/claude-sonnet-4-6",
-        provider: { weave: $block, "weave-codex": $codex },
-        plugin: [$plugin]
+        provider: { weave: $block, "weave-codex": $codex }
       }
+      | (if $plugin != "" then .plugin = [$plugin] else . end)
     ')"
   fi
   printf '%s\n' "$merged" >"$config_file"
   # 0600: the file holds a router key. Even at user scope, mode 644 would
   # leak the key to any local user on a shared box.
   chmod 600 "$config_file"
-
-  # Drop the Codex-subscription plugin next to the config. The plugin holds no
-  # secrets (router key lives in the config; ChatGPT tokens live in opencode's
-  # own auth store), so 644 is fine. Source is bundled alongside install.sh by
-  # the npm prepack (scripts/copy-installer.js), same as commands/ + pi-router/.
-  local plugin_src="$script_dir/opencode-weave/src/index.ts"
-  if [ -f "$plugin_src" ]; then
-    mkdir -p "$plugin_dir"
-    cp "$plugin_src" "$plugin_spec"
-    chmod 644 "$plugin_spec"
-  else
-    warn "opencode Codex plugin source not found at $plugin_src — the weave-codex provider won't load until it's present. (Use a packaged 'npx @workweave/router' install.)"
-  fi
 }
 
 # write_pi_models_config merges a managed `weave` provider into pi's

@@ -55,10 +55,11 @@ function base64UrlEncode(buffer: ArrayBuffer): string {
 }
 
 async function generatePKCE(): Promise<PkceCodes> {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
-  const verifier = Array.from(crypto.getRandomValues(new Uint8Array(43)))
-    .map((b) => chars[b % chars.length])
-    .join("")
+  // base64url of 32 random bytes → a 43-char verifier drawn uniformly from the
+  // PKCE unreserved set (RFC 7636 §4.1). Encoding the raw bytes avoids the
+  // modulo-on-a-CSPRNG bias that mapping bytes onto a 64-char alphabet would
+  // introduce (and that static analysis flags).
+  const verifier = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)).buffer)
   const challenge = base64UrlEncode(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))
   return { verifier, challenge }
 }
