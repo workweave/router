@@ -145,7 +145,7 @@ func DeleteAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "API key not found."})
 			return
 		}
-		if err := authSvc.DeleteAPIKey(c.Request.Context(), id); err != nil {
+		if err := authSvc.DeleteAPIKey(c.Request.Context(), installation.ID, id); err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete API key."})
 			return
 		}

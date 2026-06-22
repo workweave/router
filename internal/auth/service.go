@@ -162,9 +162,17 @@ func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string
 	return key, raw, nil
 }
 
-// DeleteAPIKey soft-deletes an API key.
-func (s *Service) DeleteAPIKey(ctx context.Context, id string) error {
-	return s.apiKeys.SoftDelete(ctx, id)
+// DeleteAPIKey soft-deletes an API key and immediately invalidates the
+// installation's cache entry on this replica and all peers. Without the
+// invalidation the deleted key would remain usable for up to the positive
+// cache TTL (5 min) — the same window that RotateAPIKey closes via
+// invalidateInstallation.
+func (s *Service) DeleteAPIKey(ctx context.Context, installationID, id string) error {
+	if err := s.apiKeys.SoftDelete(ctx, id); err != nil {
+		return err
+	}
+	s.invalidateInstallation(installationID)
+	return nil
 }
 
 // ListExternalAPIKeys returns all active provider API keys for an installation.
