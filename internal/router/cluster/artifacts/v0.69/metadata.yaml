@@ -1,5 +1,5 @@
 format_version: 2
-version: "v0.70"
+version: "v0.69"
 parent: null
 status: "candidate"
 promoted_date: "2026-06-22"
@@ -176,4 +176,4 @@ cost_per_1k_input_usd:
   qwen/qwen3.7-plus: 0.0004
   xiaomi/mimo-v2.5-pro: 0.001
   z-ai/glm-5.2: 0.0014
-changelog: "v0.70 = deployed v0.67 recipe + AA priors + DeepSWE priors SCOPED to coding clusters. Adds glm-5.2, minimax-m3, qwen3.7-plus, kimi-k2.7 (4 models). Offline screen candidate."
+changelog: "v0.69 = deployed v0.67 recipe + AA priors + NEW DeepSWE coding priors (separate source) scoped to coding clusters. Adds glm-5.2, minimax-m3, qwen3.7-plus, kimi-k2.7 (19-model roster). Supersedes the abandoned full-pool v0.69 (#457). Candidate; latest stays v0.68."
