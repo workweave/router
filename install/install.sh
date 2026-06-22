@@ -1588,6 +1588,17 @@ toggle_opencode() {
           | "weave/" + .
         ' "$f" 2>/dev/null || echo "weave/claude-sonnet-4-6")"
       fi
+      # Never restore a weave-codex model whose provider is no longer
+      # registered (e.g. a plugin-less re-install stripped it after `off`
+      # parked a weave-codex/… model). Fall back to the Anthropic weave default
+      # so `on` can't leave opencode pointing at a missing provider.
+      case "$restore_model" in
+        weave-codex/*)
+          if [ "$(jq -r '((.provider // {}) | has("weave-codex"))' "$f" 2>/dev/null || true)" != "true" ]; then
+            restore_model="weave/claude-sonnet-4-6"
+          fi
+          ;;
+      esac
       merged="$(jq --arg m "$restore_model" '.model = $m' "$f")"
       printf '%s\n' "$merged" >"$f"
       chmod 600 "$f"
