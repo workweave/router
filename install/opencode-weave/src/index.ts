@@ -226,25 +226,36 @@ function stopOAuthServer(): void {
 }
 
 function waitForOAuthCallback(pkce: PkceCodes, state: string): Promise<TokenResponse> {
+  // A new login supersedes any in-flight one: reject the old promise so it
+  // can't hang or later clobber this flow's state.
+  pendingOAuth?.reject(new Error("OAuth flow superseded by a new login"))
   return new Promise((resolve, reject) => {
+    let entry: PendingOAuth | undefined
+    // Each handler clears the shared slot only if it still owns it, so a stale
+    // timer or callback never nulls out a newer flow's pendingOAuth.
+    const clearIfOwner = () => {
+      clearTimeout(timeout)
+      if (pendingOAuth === entry) pendingOAuth = undefined
+    }
     const timeout = setTimeout(() => {
-      if (pendingOAuth) {
+      if (pendingOAuth === entry) {
         pendingOAuth = undefined
         reject(new Error("OAuth callback timeout - authorization took too long"))
       }
     }, 5 * 60 * 1000)
-    pendingOAuth = {
+    entry = {
       pkce,
       state,
       resolve: (tokens) => {
-        clearTimeout(timeout)
+        clearIfOwner()
         resolve(tokens)
       },
       reject: (error) => {
-        clearTimeout(timeout)
+        clearIfOwner()
         reject(error)
       },
     }
+    pendingOAuth = entry
   })
 }
 
