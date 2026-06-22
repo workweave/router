@@ -1,83 +1,65 @@
 package cluster
 
 import (
+	"fmt"
 	"math"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestDeriveClusterAlpha_EndpointsPinForEveryRank(t *testing.T) {
-	for _, rank := range []float64{0, 0.25, 0.5, 0.75, 1} {
-		assert.Equal(t, 0.0, deriveClusterAlpha(0, rank, qualityBiasDispersionSpread),
-			"t=0 must map to alpha 0 (all price) regardless of dispersion rank %v", rank)
-		assert.Equal(t, 1.0, deriveClusterAlpha(1, rank, qualityBiasDispersionSpread),
-			"t=1 must map to alpha 1 (all quality) regardless of dispersion rank %v", rank)
+func TestDialToAlpha_EndpointsPin(t *testing.T) {
+	// The slider's extremes stay honest regardless of calibration: 0 -> all
+	// cheapest, 1 -> best-per-cluster top quality.
+	for _, bp := range [][]float64{nil, {0, 1}, {0, 0.3, 0.55, 0.87, 1}} {
+		s := &Scorer{dialAlphaBreakpoints: bp}
+		assert.Equal(t, 0.0, s.dialToAlpha(0), "t=0 must map to alpha 0 (breakpoints %v)", bp)
+		assert.Equal(t, 1.0, s.dialToAlpha(1), "t=1 must map to alpha 1 (breakpoints %v)", bp)
+		assert.Equal(t, 0.0, s.dialToAlpha(-0.5), "t<0 clamps to 0")
+		assert.Equal(t, 1.0, s.dialToAlpha(1.5), "t>1 clamps to 1")
 	}
 }
 
-func TestDeriveClusterAlpha_MonotonicInDial(t *testing.T) {
-	for _, rank := range []float64{0, 0.5, 1} {
-		prev := -1.0
-		for g := 0; g <= 20; g++ {
-			a := deriveClusterAlpha(float64(g)/20, rank, qualityBiasDispersionSpread)
-			assert.GreaterOrEqual(t, a, prev, "alpha must be non-decreasing in the dial (rank %v)", rank)
-			prev = a
-		}
+func TestDialToAlpha_MonotonicAndInterpolates(t *testing.T) {
+	// Breakpoints placed at equal dial spacing: with 5 of them the dial quarters
+	// land exactly on a breakpoint, and interior positions interpolate linearly.
+	s := &Scorer{dialAlphaBreakpoints: []float64{0, 0.3, 0.55, 0.87, 1}}
+	assert.InDelta(t, 0.3, s.dialToAlpha(0.25), 1e-9, "quarter dial lands on the 2nd breakpoint")
+	assert.InDelta(t, 0.55, s.dialToAlpha(0.5), 1e-9, "mid dial lands on the 3rd breakpoint")
+	assert.InDelta(t, 0.425, s.dialToAlpha(0.375), 1e-9, "between breakpoints 2 and 3 it interpolates")
+
+	prev := -1.0
+	for g := 0; g <= 100; g++ {
+		a := s.dialToAlpha(float64(g) / 100)
+		assert.GreaterOrEqual(t, a, prev, "alpha must be non-decreasing in the dial")
+		prev = a
 	}
 }
 
-func TestDeriveClusterAlpha_HigherDispersionFavorsQualityEarlier(t *testing.T) {
-	// At a fixed mid-dial position, a higher-dispersion cluster (one whose
-	// strong models are much better than its cheap ones) should carry a higher
-	// quality weight than a low-dispersion cluster — that's what spreads the
-	// per-cluster crossovers into a gradient instead of a cliff.
-	for _, dial := range []float64{0.25, 0.5, 0.75} {
-		low := deriveClusterAlpha(dial, 0.0, qualityBiasDispersionSpread)
-		mid := deriveClusterAlpha(dial, 0.5, qualityBiasDispersionSpread)
-		high := deriveClusterAlpha(dial, 1.0, qualityBiasDispersionSpread)
-		assert.Less(t, low, mid, "dial=%v: low-dispersion alpha should trail median", dial)
-		assert.Less(t, mid, high, "dial=%v: median alpha should trail high-dispersion", dial)
+func TestDialToAlpha_NoCalibrationIsIdentity(t *testing.T) {
+	// A bundle with no mix separation (or a v1 bundle) leaves breakpoints nil;
+	// the dial then maps straight through so behavior is unchanged.
+	s := &Scorer{dialAlphaBreakpoints: nil}
+	for _, tt := range []float64{0.1, 0.4, 0.7, 0.9} {
+		assert.InDelta(t, tt, s.dialToAlpha(tt), 1e-9, "identity fallback at t=%v", tt)
 	}
 }
 
-func TestComputeQualityDispersionRank_OrdersBySpread(t *testing.T) {
-	models := []string{"a", "b"}
-	// cluster 0: spread 0 (both equal); cluster 1: spread 1; cluster 2: spread 4.
-	qm := Rankings{
-		0: {"a": 1, "b": 1},
-		1: {"a": 1, "b": 2},
-		2: {"a": 1, "b": 5},
+func TestComputeDialCalibration_AscendingPinnedEndpoints(t *testing.T) {
+	// On the real bundle the calibration must be a strictly ascending sequence
+	// pinned at 0 and 1, with several interior breakpoints (the bundle has many
+	// distinct routed mixes between the cheapest and the saturated end).
+	s := loadV0_67(t)
+	bp := s.dialAlphaBreakpoints
+	require.GreaterOrEqual(t, len(bp), 4, "expected several mix breakpoints on the real bundle")
+	assert.Equal(t, 0.0, bp[0], "first breakpoint pins the price extreme")
+	assert.Equal(t, 1.0, bp[len(bp)-1], "last breakpoint pins the quality extreme")
+	for i := 1; i < len(bp); i++ {
+		assert.Greater(t, bp[i], bp[i-1], "breakpoints must be strictly ascending")
 	}
-	ranks := computeQualityDispersionRank(qm, models, 3)
-	require.Len(t, ranks, 3)
-	assert.Equal(t, 0.0, ranks[0], "lowest-dispersion cluster ranks 0")
-	assert.Equal(t, 0.5, ranks[1], "middle-dispersion cluster ranks 0.5")
-	assert.Equal(t, 1.0, ranks[2], "highest-dispersion cluster ranks 1")
-}
-
-func TestComputeQualityDispersionRank_TiesShareMidRank(t *testing.T) {
-	models := []string{"a", "b"}
-	// clusters 0 and 1 have identical spread (1); cluster 2 has spread 4.
-	// The two tied clusters should get the SAME rank (mid-rank of positions
-	// 0,1 = 0.5 -> 0.25), independent of their order in the bundle.
-	qm := Rankings{
-		0: {"a": 1, "b": 2},
-		1: {"a": 5, "b": 6},
-		2: {"a": 1, "b": 5},
-	}
-	ranks := computeQualityDispersionRank(qm, models, 3)
-	require.Len(t, ranks, 3)
-	assert.Equal(t, ranks[0], ranks[1], "tied-dispersion clusters must share a rank")
-	assert.Equal(t, 0.25, ranks[0], "two tied clusters at positions 0,1 get mid-rank 0.5/(k-1)")
-	assert.Equal(t, 1.0, ranks[2], "the distinct top-dispersion cluster ranks 1")
-}
-
-func TestComputeQualityDispersionRank_SingleClusterNeutral(t *testing.T) {
-	ranks := computeQualityDispersionRank(Rankings{0: {"a": 1, "b": 9}}, []string{"a", "b"}, 1)
-	require.Len(t, ranks, 1)
-	assert.Equal(t, 0.5, ranks[0], "with no other cluster to rank against, rank is neutral 0.5")
 }
 
 // loadV0_67 loads the committed v0.67 bundle through a fake embedder (matching
@@ -142,4 +124,60 @@ func TestRoutingDistribution_DefaultGridAndV1Guard(t *testing.T) {
 	points, err := s.RoutingDistribution(0) // 0 -> default grid
 	require.NoError(t, err)
 	assert.Len(t, points, defaultDistributionGrid)
+}
+
+func TestRoutingDistribution_NoDeadZone(t *testing.T) {
+	// Regression guard for the reported bug: every adjacent pair of dial
+	// positions should differ in either the routed mix or its projected cost.
+	// A dead zone (a run of identical mixes) is exactly what made "50% look like
+	// 20%"; the calibration must keep all but a small number of steps live.
+	s := loadV0_67(t)
+	points, err := s.RoutingDistribution(21)
+	require.NoError(t, err)
+
+	identicalRuns := 0
+	for i := 1; i < len(points); i++ {
+		samMix := mixSignatureOf(points[i].Models) == mixSignatureOf(points[i-1].Models)
+		if samMix {
+			identicalRuns++
+		}
+	}
+	// A few coincidental repeats are fine (21 dial samples vs a finite set of
+	// distinct mixes); a dead zone would repeat across many steps in a row.
+	assert.LessOrEqual(t, identicalRuns, 3,
+		"too many adjacent dial positions route an identical mix (%d) — dial has a dead zone", identicalRuns)
+}
+
+func TestRoutingDistribution_MidDialIsPricierThanLowDial(t *testing.T) {
+	// The reported symptom in user terms: a mid dial (0.5) used to route the
+	// same all-cheapest mix as a low dial (0.2). After calibration the mid dial
+	// must route a meaningfully pricier (higher-quality) mix.
+	s := loadV0_67(t)
+	points, err := s.RoutingDistribution(21)
+	require.NoError(t, err)
+
+	var low, mid DistributionPoint
+	for _, p := range points {
+		if math.Abs(p.QualityBias-0.2) < 1e-9 {
+			low = p
+		}
+		if math.Abs(p.QualityBias-0.5) < 1e-9 {
+			mid = p
+		}
+	}
+	require.NotEmpty(t, mid.Models)
+	assert.Greater(t, mid.ProjectedCostPer1KInputUSD, low.ProjectedCostPer1KInputUSD*1.5,
+		"the 50%% dial must route a meaningfully pricier (higher-quality) mix than the 20%% dial")
+}
+
+// mixSignatureOf renders a DistributionPoint's model shares as a stable key for
+// comparing whether two dial positions route the same mix.
+func mixSignatureOf(models []ModelShare) string {
+	sorted := append([]ModelShare(nil), models...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Model < sorted[j].Model })
+	var b strings.Builder
+	for _, m := range sorted {
+		fmt.Fprintf(&b, "%s:%.4f,", m.Model, m.Share)
+	}
+	return b.String()
 }

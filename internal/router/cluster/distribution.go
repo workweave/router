@@ -54,7 +54,7 @@ const defaultDistributionGrid = 21
 // across a grid of gridN evenly spaced dial positions in [0, 1].
 //
 // Each cluster centroid is treated as one representative request, routed with
-// the SAME scoring path as live traffic (deriveClusterAlpha -> blendScoresV2 ->
+// the SAME scoring path as live traffic (dialToAlpha -> blendScoresV2 ->
 // argmax), and the winners are tallied with equal weight. This makes the
 // preview a faithful read of the routing math; what it is NOT is traffic
 // weighted — every cluster counts once regardless of how much real traffic
@@ -86,12 +86,9 @@ func (s *Scorer) RoutingDistribution(gridN int) ([]DistributionPoint, error) {
 		t := float64(g) / float64(gridN-1)
 
 		knobs := s.defaultActiveKnobs()
+		a := s.dialToAlpha(t)
 		for i := range knobs.Alpha {
-			rank := 0.5
-			if i < len(s.qualityDispersionRank) {
-				rank = s.qualityDispersionRank[i]
-			}
-			knobs.Alpha[i] = deriveClusterAlpha(t, rank, qualityBiasDispersionSpread)
+			knobs.Alpha[i] = a
 		}
 
 		counts := make(map[string]int, len(s.models))

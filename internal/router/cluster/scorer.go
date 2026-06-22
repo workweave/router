@@ -56,16 +56,15 @@ type Scorer struct {
 	qualityMeans    Rankings
 	modelAxes       map[string]ModelAxis
 	medianVerbosity float64
-	// qualityDispersionRank[k] is cluster k's quality dispersion expressed as a
-	// rank in [0, 1] (0 = lowest dispersion across all clusters, 1 = highest).
-	// Dispersion is the spread of raw quality_means across deployed models in
-	// the cluster: a high-dispersion cluster is one where the strong models are
-	// much better than the cheap ones (so it should keep quality models down to
-	// a low dial setting), a low-dispersion cluster is one where every model is
-	// about equally good (so it demotes to cheap early). Precomputed once at
-	// NewScorer over the full deployed set; drives deriveClusterAlpha for the
-	// QualityBias dial. Length K, v2 only (nil for v1 bundles).
-	qualityDispersionRank []float64
+	// dialAlphaBreakpoints calibrates the QualityBias dial against this bundle's
+	// actual routing behavior. It holds the ascending uniform-alpha values at
+	// which the routed model mix changes (one entry per distinct mix, first =
+	// 0, last = 1). dialToAlpha interpolates across them so equal dial travel
+	// produces an equal number of mix changes — which is what removes the dead
+	// zones (wide alpha ranges that route an identical mix) that otherwise make
+	// the slider's lower half feel inert. Computed once at NewScorer; nil for v1
+	// bundles, where dialToAlpha falls back to the identity t -> alpha.
+	dialAlphaBreakpoints []float64
 }
 
 // Version returns the artifact version (e.g. "v0.2").
@@ -194,132 +193,134 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 		}
 	}
 
-	var qualityDispersionRank []float64
+	s := &Scorer{
+		version:         bundle.Version,
+		cfg:             cfg,
+		embed:           embed,
+		centroids:       bundle.Centroids,
+		rankings:        bundle.Rankings,
+		registry:        bundle.Registry,
+		candidates:      candidates,
+		models:          models,
+		metadata:        bundle.Metadata,
+		isV2:            bundle.IsV2,
+		qualityMeans:    bundle.QualityMeans,
+		modelAxes:       bundle.ModelAxes,
+		medianVerbosity: bundle.MedianVerbosity,
+	}
+	// The dial calibration replays the scorer across the alpha range, so it must
+	// be computed after the fields it reads (qualityMeans, modelAxes, models,
+	// centroids) are populated. v1 bundles have no quality_means and keep a nil
+	// calibration (dialToAlpha then falls back to identity).
 	if bundle.IsV2 {
-		qualityDispersionRank = computeQualityDispersionRank(bundle.QualityMeans, models, bundle.Centroids.K)
+		s.dialAlphaBreakpoints = s.computeDialCalibration()
 	}
-
-	return &Scorer{
-		version:               bundle.Version,
-		cfg:                   cfg,
-		embed:                 embed,
-		centroids:             bundle.Centroids,
-		rankings:              bundle.Rankings,
-		registry:              bundle.Registry,
-		candidates:            candidates,
-		models:                models,
-		metadata:              bundle.Metadata,
-		isV2:                  bundle.IsV2,
-		qualityMeans:          bundle.QualityMeans,
-		modelAxes:             bundle.ModelAxes,
-		medianVerbosity:       bundle.MedianVerbosity,
-		qualityDispersionRank: qualityDispersionRank,
-	}, nil
+	return s, nil
 }
 
-// computeQualityDispersionRank measures each cluster's quality dispersion — the
-// population standard deviation of its raw quality_means across the deployed
-// model set — and converts those into ranks in [0, 1] (0 = lowest-dispersion
-// cluster, 1 = highest). Dispersion is read from RAW quality_means, before the
-// per-cluster min-max normalization the scorer applies at request time: that
-// normalization deliberately flattens every cluster to the same [0, 1] range,
-// which is exactly what collapses the per-cluster crossovers into one cliff.
-// Ranking on the raw spread reintroduces the signal the dial needs.
+// qualityBiasCalibrationGrid is the uniform-alpha resolution swept at
+// scorer-build time to discover where the routed model mix changes. 401 points
+// = steps of 0.0025, fine enough to separate adjacent crossovers.
+const qualityBiasCalibrationGrid = 401
+
+// computeDialCalibration walks a uniform alpha from 0 to 1, scoring every
+// cluster centroid through the same blend as live routing, and records the
+// alpha at which the routed model mix (the multiset of per-cluster winners)
+// first changes. Those alphas — ascending, first forced to 0, last forced to 1
+// — are the dial breakpoints.
 //
-// Returns a slice of length K. With fewer than two clusters every rank is 0.5
-// (no spread to rank against), which makes deriveClusterAlpha fall back to a
-// plain t curve.
-func computeQualityDispersionRank(qualityMeans Rankings, models []string, k int) []float64 {
-	disp := make([]float64, k)
+// They exist to defeat the dead-zone problem. The cheapest models are far
+// cheaper than the rest while quality_means are tightly bunched, so the blend
+// routes an identical all-cheapest mix across a wide low-alpha range, an
+// identical saturated mix across a wide high-alpha range, and can sit on a
+// stable mid mix for a wide middle range too. A dial that maps linearly to
+// alpha spends most of its travel in those flat regions — the reported
+// "50% looks the same as 20%" bug. dialToAlpha instead interpolates across
+// these breakpoints, so equal dial travel crosses an equal number of mix
+// changes and every part of the slider does something.
+//
+// Forcing the first breakpoint to 0 keeps the price extreme at the single
+// cheapest model; forcing the last to 1 keeps the quality extreme at the pure
+// best-per-cluster mix. Returns nil when fewer than two distinct mixes exist
+// (no cost/quality separation), so dialToAlpha falls back to the identity.
+func (s *Scorer) computeDialCalibration() []float64 {
+	k := s.centroids.K
+	centroidTopClusters := make([][]int, k)
 	for c := 0; c < k; c++ {
-		row := qualityMeans[c]
-		if len(models) == 0 {
-			continue
-		}
-		var sum float64
-		for _, m := range models {
-			sum += float64(row[m])
-		}
-		mean := sum / float64(len(models))
-		var variance float64
-		for _, m := range models {
-			d := float64(row[m]) - mean
-			variance += d * d
-		}
-		disp[c] = math.Sqrt(variance / float64(len(models)))
+		centroidTopClusters[c] = topPNearest(s.centroids.Row(c), s.centroids, s.cfg.TopP)
 	}
 
-	// Rank by dispersion as a fraction in [0, 1], invariant to the absolute
-	// dispersion scale (which varies by bundle). order holds cluster indices
-	// sorted ascending by dispersion.
-	order := make([]int, k)
-	for i := range order {
-		order[i] = i
+	base := s.defaultActiveKnobs()
+	breakpoints := make([]float64, 0, 32)
+	prevSig := ""
+	for g := 0; g < qualityBiasCalibrationGrid; g++ {
+		a := float64(g) / float64(qualityBiasCalibrationGrid-1)
+		knobs := base
+		knobs.Alpha = make([]float64, k)
+		for i := range knobs.Alpha {
+			knobs.Alpha[i] = a
+		}
+		counts := make(map[string]int, len(s.models))
+		for c := 0; c < k; c++ {
+			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models)
+			winner, _ := argmax(scores, s.models)
+			counts[winner]++
+		}
+		sig := mixSignature(counts)
+		if sig != prevSig {
+			breakpoints = append(breakpoints, a)
+			prevSig = sig
+		}
 	}
-	sort.SliceStable(order, func(a, b int) bool { return disp[order[a]] < disp[order[b]] })
 
-	ranks := make([]float64, k)
-	if k < 2 {
-		for i := range ranks {
-			ranks[i] = 0.5
-		}
-		return ranks
+	if len(breakpoints) < 2 {
+		return nil
 	}
-	// Assign mid-ranks: clusters with equal dispersion share the average of
-	// their positions, so tied clusters get identical alphas regardless of
-	// their arbitrary order in the bundle. Walk the sorted slice in equal-value
-	// groups.
-	for i := 0; i < k; {
-		j := i + 1
-		for j < k && disp[order[j]] == disp[order[i]] {
-			j++
-		}
-		midPos := float64(i+j-1) / 2 // average of positions i..j-1
-		rank := midPos / float64(k-1)
-		for p := i; p < j; p++ {
-			ranks[order[p]] = rank
-		}
-		i = j
-	}
-	return ranks
+	breakpoints[0] = 0
+	breakpoints[len(breakpoints)-1] = 1
+	return breakpoints
 }
 
-// deriveClusterAlpha maps the global QualityBias dial t in [0, 1] to a single
-// cluster's quality weight, bending the curve by that cluster's quality
-// dispersion rank. The mapping is alpha = t^gamma where gamma = spread^(1 -
-// 2*rank):
-//
-//   - high-dispersion clusters (rank -> 1) get gamma < 1, a concave curve that
-//     rises fast — they reach a quality-favoring alpha at a low dial setting
-//     and hold strong models the longest;
-//   - low-dispersion clusters (rank -> 0) get gamma > 1, a convex curve that
-//     stays near zero — they keep routing cheap until the dial is high;
-//   - the median cluster (rank = 0.5) gets gamma = 1, a straight line.
-//
-// Because t^gamma pins to 0 at t=0 and 1 at t=1 for every gamma > 0, the slider
-// endpoints always resolve to all-cheapest / all-top-quality regardless of
-// dispersion; only the midrange spreads. spread > 1 controls how far the
-// per-cluster crossovers fan out (1 collapses back to a uniform t).
-func deriveClusterAlpha(t, rank, spread float64) float64 {
+// mixSignature renders a winner-count map as a stable, order-independent key so
+// two dial positions that route the same model mix compare equal.
+func mixSignature(counts map[string]int) string {
+	models := make([]string, 0, len(counts))
+	for m := range counts {
+		models = append(models, m)
+	}
+	sort.Strings(models)
+	var b strings.Builder
+	for _, m := range models {
+		fmt.Fprintf(&b, "%s:%d,", m, counts[m])
+	}
+	return b.String()
+}
+
+// dialToAlpha maps the QualityBias dial t in [0, 1] to the uniform per-cluster
+// alpha the scorer should run at. It places the bundle's mix breakpoints at
+// equal dial spacing and interpolates between them, so the dial spends equal
+// travel on each distinct routed mix instead of wasting its lower half on a
+// dead zone. With no calibration (v1 bundles, or a bundle with no mix
+// separation) it is the identity. t outside [0, 1] is clamped.
+func (s *Scorer) dialToAlpha(t float64) float64 {
 	if t <= 0 {
 		return 0
 	}
 	if t >= 1 {
 		return 1
 	}
-	// For t in (0, 1) and gamma > 0 (guaranteed: spread > 0 so gamma =
-	// spread^(1-2*rank) is strictly positive), t^gamma is always in (0, 1) —
-	// no clamp needed.
-	gamma := math.Pow(spread, 1-2*rank)
-	return math.Pow(t, gamma)
+	bp := s.dialAlphaBreakpoints
+	if len(bp) < 2 {
+		return t
+	}
+	x := t * float64(len(bp)-1)
+	i := int(x)
+	if i >= len(bp)-1 {
+		return bp[len(bp)-1]
+	}
+	frac := x - float64(i)
+	return bp[i] + frac*(bp[i+1]-bp[i])
 }
-
-// qualityBiasDispersionSpread is the fan-out factor for deriveClusterAlpha. At
-// 3.0 the highest-dispersion cluster's crossover sits at roughly the cube root
-// of the lowest's, which spreads the 16 v0.67 clusters across the dial without
-// any single cluster dominating. Tunable; verified against the live bundle
-// centroids before promotion.
-const qualityBiasDispersionSpread = 3.0
 
 // resolveProviderFor walks the catalog's ordered ProviderBinding list for
 // modelID and returns the first binding whose Provider name is in
@@ -546,21 +547,19 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		if req.RoutingKnobs != nil {
 			switch {
 			case req.RoutingKnobs.QualityBias != nil:
-				// Dial path: derive a per-cluster alpha from the single dial
-				// position, bent by each cluster's quality dispersion. The
-				// endpoints still pin to all-cheapest / all-top-quality; only
-				// the midrange fans out into a real mix. Takes precedence over
-				// a co-set Alpha (the higher-level intent wins).
+				// Dial path: map the single dial position through this bundle's
+				// mix-change calibration to a uniform alpha, so the slider spends
+				// equal travel on each distinct routed mix (no dead zone) while
+				// the endpoints still pin to all-cheapest / best-per-cluster.
+				// Takes precedence over a co-set Alpha (the higher-level intent
+				// wins).
 				t := *req.RoutingKnobs.QualityBias
 				if math.IsNaN(t) || math.IsInf(t, 0) || t < 0 || t > 1 {
 					return router.Decision{}, fmt.Errorf("%w: quality_bias (%f) must be a finite value in [0, 1]", ErrInvalidRoutingKnobs, t)
 				}
+				a := s.dialToAlpha(t)
 				for i := range activeKnobs.Alpha {
-					rank := 0.5
-					if i < len(s.qualityDispersionRank) {
-						rank = s.qualityDispersionRank[i]
-					}
-					activeKnobs.Alpha[i] = deriveClusterAlpha(t, rank, qualityBiasDispersionSpread)
+					activeKnobs.Alpha[i] = a
 				}
 			case req.RoutingKnobs.Alpha != nil:
 				// Sledgehammer behavior: uniformly replace every alpha with the
