@@ -47,6 +47,8 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 	jw.Obj()
 	switch e.format {
 	case FormatOpenAI:
+		stats.GeminiValidatedToolMode = !opts.DowngradeGeminiValidatedToAuto &&
+			geminiEmitsValidatedToolMode(e.body, opts.TargetModel, FormatOpenAI)
 		if err := writeGeminiFromOpenAI(jw, e.body, opts); err != nil {
 			return providers.PreparedRequest{}, err
 		}
@@ -63,6 +65,8 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 		if reminder := geminiSystemReminder(opts.TargetModel); reminder != "" && hasNonEmptyTools(filtered) {
 			stats.GeminiReminderInjected = true
 		}
+		stats.GeminiValidatedToolMode = !opts.DowngradeGeminiValidatedToAuto &&
+			geminiEmitsValidatedToolMode(filtered, opts.TargetModel, FormatAnthropic)
 		writeGeminiFromAnthropic(jw, filtered, opts)
 	default:
 		return providers.PreparedRequest{}, fmt.Errorf("unsupported source format for Gemini emit: %d", e.format)
@@ -289,7 +293,7 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 	emitGeminiContents(jw, collapseConsecutiveRoles(entries))
 
 	writeGeminiToolsFromOpenAI(jw, body)
-	writeGeminiToolChoiceFromOpenAI(jw, body, opts.TargetModel)
+	writeGeminiToolChoiceFromOpenAI(jw, body, opts.TargetModel, opts.DowngradeGeminiValidatedToAuto)
 	writeGeminiGenerationConfigFromOpenAI(jw, body, opts.TargetModel, opts.ForceReasoningEffort)
 	return nil
 }
@@ -479,7 +483,7 @@ func writeGeminiToolsFromOpenAI(jw *jsonWriter, body []byte) {
 // Gemini-3.x targets get mode=VALIDATED so emitted calls are
 // schema-constrained at decode time. Explicit none/required/function choices
 // are passed through untouched.
-func writeGeminiToolChoiceFromOpenAI(jw *jsonWriter, body []byte, model string) {
+func writeGeminiToolChoiceFromOpenAI(jw *jsonWriter, body []byte, model string, downgradeValidated bool) {
 	r := gjson.GetBytes(body, "tool_choice")
 	choice := ""
 	if r.Type == gjson.String {
@@ -491,7 +495,7 @@ func writeGeminiToolChoiceFromOpenAI(jw *jsonWriter, body []byte, model string) 
 		jw.Key("functionCallingConfig")
 		jw.Obj()
 		jw.Key("mode")
-		jw.Str("VALIDATED")
+		jw.Str(geminiToolMode(downgradeValidated))
 		jw.EndObj()
 		jw.EndObj()
 		return
@@ -726,7 +730,7 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 	emitGeminiContents(jw, collapseConsecutiveRoles(entries))
 
 	writeGeminiToolsFromAnthropic(jw, body)
-	writeGeminiToolChoiceFromAnthropic(jw, body, opts.TargetModel)
+	writeGeminiToolChoiceFromAnthropic(jw, body, opts.TargetModel, opts.DowngradeGeminiValidatedToAuto)
 	writeGeminiGenerationConfigFromAnthropic(jw, body, opts.TargetModel, opts.ForceReasoningEffort)
 }
 
@@ -824,6 +828,46 @@ const (
 // accept sig-less calls.
 func isGemini3xModel(model string) bool {
 	return strings.HasPrefix(model, "gemini-3")
+}
+
+// geminiToolMode returns the functionCallingConfig.mode the unforced-tool-choice
+// Gemini 3.x branch emits: VALIDATED normally, AUTO when the proxy has asked for
+// a downgrade after a VALIDATED-mode INVALID_ARGUMENT. AUTO leaves the model
+// free to call a tool or answer in text (same as VALIDATED) but skips decode-time
+// schema-grammar compilation, so tool schemas Gemini can't compile no longer 400.
+func geminiToolMode(downgradeValidated bool) string {
+	if downgradeValidated {
+		return "AUTO"
+	}
+	return "VALIDATED"
+}
+
+// geminiEmitsValidatedToolMode reports whether the cross-format Gemini emit path
+// sets functionCallingConfig.mode=VALIDATED for body+model: tools are present,
+// the client did not force a tool_choice, and the target is a Gemini 3.x model.
+// Mirrors the gate in writeGeminiToolChoiceFrom{Anthropic,OpenAI} so the proxy
+// can predict VALIDATED emission (RequestMutationStats) without re-deriving it.
+func geminiEmitsValidatedToolMode(body []byte, model string, format Format) bool {
+	if !hasNonEmptyTools(body) || !isGemini3xModel(model) {
+		return false
+	}
+	r := gjson.GetBytes(body, "tool_choice")
+	switch format {
+	case FormatAnthropic:
+		choice := ""
+		if r.Exists() && r.IsObject() {
+			choice = r.Get("type").String()
+		}
+		return choice == "" || choice == "auto"
+	case FormatOpenAI:
+		choice := ""
+		if r.Type == gjson.String {
+			choice = r.String()
+		}
+		return !r.Exists() || choice == "auto"
+	default:
+		return false
+	}
 }
 
 // filterOutGeminiFunctionCallParts strips functionCall parts from a slice of
@@ -1060,7 +1104,7 @@ func writeGeminiToolsFromAnthropic(jw *jsonWriter, body []byte) {
 // schema-constrained at decode time — the only Gemini mode that enforces
 // argument schemas without forcing a tool call. Explicit any/none/tool
 // choices are passed through untouched.
-func writeGeminiToolChoiceFromAnthropic(jw *jsonWriter, body []byte, model string) {
+func writeGeminiToolChoiceFromAnthropic(jw *jsonWriter, body []byte, model string, downgradeValidated bool) {
 	r := gjson.GetBytes(body, "tool_choice")
 	choice := ""
 	if r.Exists() && r.IsObject() {
@@ -1072,7 +1116,7 @@ func writeGeminiToolChoiceFromAnthropic(jw *jsonWriter, body []byte, model strin
 		jw.Key("functionCallingConfig")
 		jw.Obj()
 		jw.Key("mode")
-		jw.Str("VALIDATED")
+		jw.Str(geminiToolMode(downgradeValidated))
 		jw.EndObj()
 		jw.EndObj()
 		return

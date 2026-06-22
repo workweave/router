@@ -1718,7 +1718,21 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			return fmt.Errorf("translate anthropic request to gemini: %w", emitErr)
 		}
 		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
-		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+		// geminiUsedValidated marks a request that went out with
+		// functionCallingConfig.mode=VALIDATED (Gemini 3.x, tools, unforced
+		// choice). Gemini compiles each tool's parameter schema into a
+		// decode-time grammar under VALIDATED; one it can't compile makes it
+		// reject the whole request with a generic 400 INVALID_ARGUMENT. The
+		// attempt below retries once with mode=AUTO (no grammar compilation)
+		// when nothing has reached the client yet.
+		geminiUsedValidated := prep.Stats.GeminiValidatedToolMode
+		// dispatchGemini does one Gemini call with pr (fresh translator chain +
+		// seal + proxy) and returns the RAW upstream error plus a finalize thunk.
+		// Splitting dispatch from finalize lets the attempt below inspect a
+		// pre-commit 400 before finalize flushes the translators (which would
+		// commit the prelude buffer and foreclose the retry). Translators are
+		// stateful, so a retry rebuilds the chain by calling this again.
+		dispatchGemini := func(actx context.Context, d router.Decision, p providers.Client, pr providers.PreparedRequest) (error, func(error) error) {
 			respSummary = translate.ResponseSummary{}
 			var usage otel.UsageSink
 			if s.usageRequired() {
@@ -1738,17 +1752,47 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				preludeBuf.Seal()
 			}
 			geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, d.Model, nil)
-			err := p.Proxy(actx, d, prep, geminiTr, r)
-			// Post-commit streaming error: see ProxyMessages OpenAI-compat
-			// case for rationale — render upstream error as in-stream
-			// `event: error` rather than corrupt the SSE stream.
-			if err != nil && env.Stream() && preludeBuf.Committed() {
-				err = emitAnthropicSSEErrorEvent(sink, err)
+			rawErr := p.Proxy(actx, d, pr, geminiTr, r)
+			finalize := func(err error) error {
+				// Post-commit streaming error: see ProxyMessages OpenAI-compat
+				// case for rationale — render upstream error as in-stream
+				// `event: error` rather than corrupt the SSE stream.
+				if err != nil && env.Stream() && preludeBuf.Committed() {
+					err = emitAnthropicSSEErrorEvent(sink, err)
+				}
+				err = finalizeAfterProxy(err, geminiTr.Finalize)
+				finErr := finalizeAfterProxy(err, anthropicTr.Finalize)
+				respSummary = anthropicTr.Summary()
+				return finErr
 			}
-			err = finalizeAfterProxy(err, geminiTr.Finalize)
-			finErr := finalizeAfterProxy(err, anthropicTr.Finalize)
-			respSummary = anthropicTr.Summary()
-			return finErr
+			return rawErr, finalize
+		}
+		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			rawErr, finalize := dispatchGemini(actx, d, p, prep)
+			// VALIDATED-mode schema-grammar 400: retry once with mode=AUTO while
+			// nothing has reached the client yet. AUTO only drops the decode-time
+			// grammar constraint, so it can't make a request worse — a non-schema
+			// 400 simply 400s again and surfaces normally. The first attempt's
+			// translators are abandoned (Discard), so its finalize never runs.
+			if rawErr != nil && geminiUsedValidated && !committed(preludeBuf) && upstreamStatus(rawErr) == http.StatusBadRequest {
+				autoOpts := opts
+				autoOpts.DowngradeGeminiValidatedToAuto = true
+				autoPrep, autoErr := env.PrepareGemini(r.Header, autoOpts)
+				if autoErr != nil {
+					log.Error("Failed to re-translate Gemini request with tool mode AUTO", "err", autoErr)
+					return finalize(rawErr)
+				}
+				log.Warn("Retrying Gemini request with functionCallingConfig.mode=AUTO after VALIDATED-mode 400",
+					"model", d.Model,
+					"request_id", requestID)
+				if preludeBuf != nil {
+					preludeBuf.Discard()
+				}
+				reqStats = autoPrep.Stats
+				logUpstreamBody(log, routeRes.SessionKey, d, feats, autoPrep.Body)
+				rawErr, finalize = dispatchGemini(actx, d, p, autoPrep)
+			}
+			return finalize(rawErr)
 		}
 	default:
 		return fmt.Errorf("%w: %s (no translation path defined for inbound Anthropic Messages)", ErrProviderNotConfigured, decision.Provider)
@@ -3027,7 +3071,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			log.Error("Failed to translate OpenAI request to Gemini format", "err", emitErr)
 			return fmt.Errorf("translate openai request to gemini: %w", emitErr)
 		}
-		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+		// See ProxyMessages' Gemini case: a VALIDATED-mode request can 400 with a
+		// generic INVALID_ARGUMENT when Gemini can't compile a tool schema into
+		// its decode-time grammar. Retry once with mode=AUTO when pre-commit.
+		geminiUsedValidated := prep.Stats.GeminiValidatedToolMode
+		dispatchGemini := func(actx context.Context, d router.Decision, p providers.Client, pr providers.PreparedRequest) (error, func(error) error) {
 			var usage otel.UsageSink
 			if s.usageRequired() {
 				extractor = otel.NewUsageExtractor(nil, d.Provider)
@@ -3038,12 +3086,35 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			if preludeBuf != nil {
 				preludeBuf.Seal()
 			}
-			err := p.Proxy(actx, d, prep, translator, r)
-			// Post-commit streaming error: see same-format OpenAI case above.
-			if err != nil && env.Stream() && preludeBuf.Committed() {
-				err = emitOpenAISSEErrorEvent(sink, err)
+			rawErr := p.Proxy(actx, d, pr, translator, r)
+			finalize := func(err error) error {
+				// Post-commit streaming error: see same-format OpenAI case above.
+				if err != nil && env.Stream() && preludeBuf.Committed() {
+					err = emitOpenAISSEErrorEvent(sink, err)
+				}
+				return finalizeAfterProxy(err, translator.Finalize)
 			}
-			return finalizeAfterProxy(err, translator.Finalize)
+			return rawErr, finalize
+		}
+		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			rawErr, finalize := dispatchGemini(actx, d, p, prep)
+			if rawErr != nil && geminiUsedValidated && !committed(preludeBuf) && upstreamStatus(rawErr) == http.StatusBadRequest {
+				autoOpts := opts
+				autoOpts.DowngradeGeminiValidatedToAuto = true
+				autoPrep, autoErr := env.PrepareGemini(r.Header, autoOpts)
+				if autoErr != nil {
+					log.Error("Failed to re-translate Gemini request with tool mode AUTO", "err", autoErr)
+					return finalize(rawErr)
+				}
+				log.Warn("Retrying Gemini request with functionCallingConfig.mode=AUTO after VALIDATED-mode 400",
+					"model", d.Model,
+					"request_id", requestID)
+				if preludeBuf != nil {
+					preludeBuf.Discard()
+				}
+				rawErr, finalize = dispatchGemini(actx, d, p, autoPrep)
+			}
+			return finalize(rawErr)
 		}
 	case providers.ProviderAnthropic:
 		crossFormat = true

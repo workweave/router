@@ -281,6 +281,7 @@ type PreparedRequest struct {
 // complete log with keys:
 //   - cc_only_tools_stripped
 //   - gemini_reminder_injected
+//   - gemini_validated_tool_mode
 type RequestMutationStats struct {
 	// CCOnlyToolsStripped is the count of Claude-Code-only tools removed
 	// from the request before dispatching to a non-Anthropic upstream. See
@@ -290,6 +291,13 @@ type RequestMutationStats struct {
 	// (geminiToolUseReminder) was appended to systemInstruction for this
 	// request. See translate/system_reminder.go (router PR #276).
 	GeminiReminderInjected bool
+	// GeminiValidatedToolMode is true when the Gemini emit path set
+	// functionCallingConfig.mode=VALIDATED for this request (Gemini 3.x, tools
+	// present, no forced tool_choice). Such a request can 400 with a generic
+	// INVALID_ARGUMENT when Gemini cannot compile a tool schema into its
+	// decode-time grammar; the proxy uses this to decide whether an AUTO-mode
+	// retry is worth attempting. See translate/emit_gemini.go.
+	GeminiValidatedToolMode bool
 }
 
 type Client interface {

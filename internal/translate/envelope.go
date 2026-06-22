@@ -77,6 +77,15 @@ type EmitOptions struct {
 	// standard pricing, no behavior change. deriveAnthropicHeaders gates the
 	// actual injection on the target's CapExtendedContext support.
 	EnableExtendedContext bool
+	// DowngradeGeminiValidatedToAuto, when true, makes the Gemini emit path emit
+	// functionCallingConfig.mode=AUTO in place of the mode=VALIDATED it would
+	// otherwise set for a tools-with-no-forced-choice Gemini 3.x request. Under
+	// VALIDATED, Gemini compiles every tool's parameter schema into a decode-time
+	// grammar; a schema it can't compile makes it reject the whole request with a
+	// generic 400 INVALID_ARGUMENT. The proxy sets this on a one-shot retry after
+	// such a 400 — AUTO skips grammar compilation, so the same tools survive. A
+	// no-op when the request would not have used VALIDATED.
+	DowngradeGeminiValidatedToAuto bool
 }
 
 // RequestEnvelope wraps a parsed request body regardless of wire format.
