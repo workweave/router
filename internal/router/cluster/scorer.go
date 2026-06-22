@@ -264,7 +264,12 @@ func (s *Scorer) computeDialCalibration() []float64 {
 		for c := 0; c < k; c++ {
 			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models)
 			winner, _ := argmax(scores, s.models)
-			counts[winner]++
+			// Mirror RoutingDistribution's accounting exactly: skip an empty
+			// winner so a cluster that flips between "" and a real model can't
+			// inject a phantom breakpoint the dashboard distribution never shows.
+			if winner != "" {
+				counts[winner]++
+			}
 		}
 		sig := mixSignature(counts)
 		if sig != prevSig {

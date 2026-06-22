@@ -165,6 +165,7 @@ func TestRoutingDistribution_MidDialIsPricierThanLowDial(t *testing.T) {
 			mid = p
 		}
 	}
+	require.NotEmpty(t, low.Models, "dial position 0.2 must be present in the 21-point grid")
 	require.NotEmpty(t, mid.Models)
 	assert.Greater(t, mid.ProjectedCostPer1KInputUSD, low.ProjectedCostPer1KInputUSD*1.5,
 		"the 50%% dial must route a meaningfully pricier (higher-quality) mix than the 20%% dial")
