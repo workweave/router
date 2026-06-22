@@ -1,23 +1,29 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 #
-# Cluster routing review gate.
+# Cluster routing review gate (report side).
 #
 # When a PR changes the deployed clustering model (the `latest` pointer under
 # internal/router/cluster/artifacts/), this routes a labeled probe corpus
-# through the real Scorer and posts a sticky PR comment showing where each
-# register (conversational / trivial / coding / agentic) now routes, plus a
-# diff vs the currently-deployed artifact. Merge is blocked by the required
-# status `cluster-routing/acknowledged` until a maintainer ticks the checkbox
-# in that comment. Any later change to `latest` rewrites the report (new hash)
-# and unticks the box, re-blocking — so a stale sign-off can't ship.
+# through the real Scorer and renders a report showing where each register
+# (conversational / trivial / coding / agentic) now routes, plus a diff vs the
+# currently-deployed artifact. The report is emitted as an artifact; the
+# companion publish_cluster_routing.yml workflow posts the sticky PR comment and
+# sets the required status `cluster-routing/acknowledged`. Merge is blocked by
+# that status until a maintainer ticks the checkbox in the comment. Any later
+# change to `latest` rewrites the report (new hash) and unticks the box,
+# re-blocking — so a stale sign-off can't ship.
 #
 # Privilege separation (CodeQL "checkout of untrusted code in a privileged
-# context"): the only job that checks out and runs PR code (`report`) has
-# read-only permissions and emits its result as an artifact. The `publish`
-# job holds write permissions but never checks out or executes PR code — it
-# only calls the API. This file is `pull_request`-only; the checkbox
-# acknowledgment (issue_comment) lives in cluster_routing_ack.yml so that no
-# checkout ever shares a file with the issue_comment trigger.
+# context"): this `report` job is the only one that checks out and runs PR
+# code, and it has read-only permissions — it never writes to the PR. The
+# write-scoped publish lives in publish_cluster_routing.yml, triggered by
+# `workflow_run`, and never checks out or runs PR code. That split also fixes
+# fork PRs: a fork's `pull_request` token is forced read-only by GitHub (an
+# inline publish 403s with "Resource not accessible by integration"), whereas a
+# `workflow_run` job runs in the base-repo context with a writable token that is
+# not downgraded for forks. The checkbox acknowledgment (issue_comment) lives in
+# cluster_routing_ack.yml so that no checkout ever shares a file with the
+# issue_comment trigger.
 #
 # The report runs with `-tags no_onnx`: probe embeddings are precomputed and
 # committed, so no ONNX runtime is needed (regenerate with
@@ -26,10 +32,10 @@ name: Cluster Routing Review
 
 on:
   # No paths filter: the required status must be reported on every PR, so a PR
-  # that doesn't touch artifacts short-circuits to a passing status.
+  # that doesn't touch artifacts short-circuits to a passing status (computed
+  # here as gate=skip and published as success).
   pull_request:
 
-# Default to read-only; the publish job opts into write.
 permissions:
   contents: read
 
@@ -37,14 +43,10 @@ concurrency:
   group: cluster-routing-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
-env:
-  CHECK_CONTEXT: cluster-routing/acknowledged
-  COMMENT_MARKER_PREFIX: "<!-- cluster-routing-report:"
-  BOT_LOGIN: "github-actions[bot]"
-
 jobs:
   # Checks out + runs PR code, but with READ-ONLY permissions. Emits the
-  # rendered report + metadata as an artifact for the privileged publish job.
+  # rendered report + metadata as an artifact for the privileged publish
+  # workflow (publish_cluster_routing.yml, triggered by workflow_run).
   report:
     name: Routing review
     if: github.event_name == 'pull_request'
@@ -101,77 +103,3 @@ jobs:
           name: routing-report
           path: /tmp/out
           retention-days: 1
-
-  # Holds write permissions but never checks out or runs PR code: it only
-  # consumes the artifact and calls the API.
-  publish:
-    name: Routing review publish
-    needs: report
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      issues: write
-      statuses: write
-    steps:
-      - name: Download report artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: routing-report
-          path: /tmp/out
-
-      - name: Upsert comment and set status
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const crypto = require('crypto');
-            const meta = JSON.parse(fs.readFileSync('/tmp/out/meta.json', 'utf8'));
-            const pr = Number(meta.pr_number);
-            const headSha = meta.head_sha;
-            const gate = meta.gate; // 'true' | 'false' | 'skip'
-            const CHECK = process.env.CHECK_CONTEXT;
-
-            if (gate === 'skip') {
-              await github.rest.repos.createCommitStatus({
-                ...context.repo, sha: headSha, context: CHECK,
-                state: 'success', description: 'No deployed-model change',
-              });
-              return;
-            }
-
-            const PREFIX = process.env.COMMENT_MARKER_PREFIX;
-            const BOT = process.env.BOT_LOGIN;
-            const ACK_RE = /- \[[xX]\] I have reviewed/;
-            const gating = gate === 'true';
-            const report = fs.readFileSync('/tmp/out/report.md', 'utf8').trim();
-            const hash = crypto.createHash('sha256').update(report).digest('hex').slice(0, 12);
-            const marker = `${PREFIX}${hash} -->`;
-
-            // Acknowledgment lives only on the bot's own sticky comment.
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              ...context.repo, issue_number: pr, per_page: 100,
-            });
-            const existing = comments.find(c => c.user.login === BOT && c.body.includes(PREFIX));
-            const ticked = !!existing && existing.body.includes(marker) && ACK_RE.test(existing.body);
-
-            const box = ticked ? '[x]' : '[ ]';
-            const note = gating
-              ? '> ⚠️ **This PR changes the deployed router (`latest`).** Review where conversational / trivial turns now land, then tick the box below to unblock merge.'
-              : '> ℹ️ Informational — candidate artifact (`latest` unchanged); no sign-off required.';
-            const ackBlock = gating
-              ? `\n\n---\n- ${box} I have reviewed the routing distribution above and accept it.\n\n_Ticking this unblocks merge. Any further change to \`latest\` resets it._`
-              : '';
-            const body = `${marker}\n### 🧭 Cluster routing review\n${note}\n\n${report}${ackBlock}`;
-
-            if (existing) {
-              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
-            } else {
-              await github.rest.issues.createComment({ ...context.repo, issue_number: pr, body });
-            }
-
-            const state = (!gating || ticked) ? 'success' : 'failure';
-            const description = !gating
-              ? 'Candidate artifact — no deployed-model change'
-              : (ticked ? 'Routing distribution acknowledged' : 'Review the routing report and tick the box to unblock');
-            await github.rest.repos.createCommitStatus({ ...context.repo, sha: headSha, context: CHECK, state, description });
