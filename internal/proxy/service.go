@@ -593,20 +593,20 @@ func codexSubscriptionFromContext(ctx context.Context) *Credentials {
 }
 
 // codexResponsesRequest reports whether this /v1/responses request carries a
-// usable Codex (ChatGPT) subscription — the dedicated header pair on a
-// router-keyed request, or (self-hosted, no router key) an inbound Authorization
-// bearer + ChatGPT-Account-ID. When true, ProxyOpenAIResponses routes the turn
-// to the Codex backend instead of the chat-completions canonical path. Mirrors
-// the resolution precedence in resolveAndInjectCredentials so detection and
-// injection never disagree.
+// usable Codex (ChatGPT) subscription — the dedicated header pair, or an inbound
+// Authorization bearer + ChatGPT-Account-ID. When true, ProxyOpenAIResponses
+// routes the turn to the Codex backend instead of the chat-completions canonical
+// path. Mirrors the resolution precedence in resolveAndInjectCredentials so
+// detection and injection never disagree: the inbound-bearer shape is honored
+// even on a router-keyed request (Codex CLI keeps its ChatGPT auth in
+// Authorization while the router key rides in X-Weave-Router-Key), so it must
+// not be gated on the installation being absent.
 func codexResponsesRequest(ctx context.Context, headers http.Header) bool {
 	if codexSubscriptionFromContext(ctx) != nil {
 		return true
 	}
-	if installationIDFromContext(ctx) == (uuid.UUID{}) {
-		if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
-			return true
-		}
+	if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
+		return true
 	}
 	return false
 }

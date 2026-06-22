@@ -240,6 +240,19 @@ func TestCodexResponsesRequest(t *testing.T) {
 		}
 		assert.True(t, codexResponsesRequest(context.Background(), headers))
 	})
+	t.Run("inbound bearer + account-id on a router-keyed request", func(t *testing.T) {
+		// Managed Codex: the router key authenticates via X-Weave-Router-Key
+		// (installation set) while Codex CLI leaves its ChatGPT auth in
+		// Authorization, with no dedicated header. resolveAndInjectCredentials
+		// resolves this as the Codex subscription, so detection must agree and
+		// route to the Codex backend — not be gated on the installation's absence.
+		ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
+		headers := http.Header{
+			"Authorization":      []string{"Bearer " + codexTestJWT},
+			"Chatgpt-Account-Id": []string{"acct-1"},
+		}
+		assert.True(t, codexResponsesRequest(ctx, headers))
+	})
 	t.Run("dedicated token without account-id is not a Codex request", func(t *testing.T) {
 		ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
 		ctx = context.WithValue(ctx, OpenAISubscriptionContextKey{}, codexTestJWT)
