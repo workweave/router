@@ -1033,12 +1033,14 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 // This occurs when OSS models (DeepSeek, Qwen) return reasoning_content which
 // the router translates into thinking blocks — but without Anthropic-issued
 // signatures. Sending these to Anthropic causes a 400 error.
+// Note: only type=="thinking" is matched intentionally; redacted_thinking blocks
+// use a "data" field instead of "signature" and must not be stripped.
 func historyHasUnsignedThinkingBlock(body []byte) bool {
 	found := false
 	gjson.GetBytes(body, "messages").ForEach(func(_, msg gjson.Result) bool {
 		msg.Get("content").ForEach(func(_, block gjson.Result) bool {
 			if block.Get("type").String() == "thinking" &&
-				block.Get("signature").String() == "" {
+				strings.TrimSpace(block.Get("signature").String()) == "" {
 				found = true
 				return false
 			}
@@ -1074,7 +1076,7 @@ func stripUnsignedThinkingBlocksBytes(body []byte) ([]byte, error) {
 		hasUnsigned := false
 		content.ForEach(func(_, block gjson.Result) bool {
 			if block.Get("type").String() == "thinking" &&
-				block.Get("signature").String() == "" {
+				strings.TrimSpace(block.Get("signature").String()) == "" {
 				hasUnsigned = true
 				return false
 			}
@@ -1092,12 +1094,18 @@ func stripUnsignedThinkingBlocksBytes(body []byte) ([]byte, error) {
 			// Drop unsigned thinking blocks; keep everything else
 			// including signed thinking blocks.
 			if block.Get("type").String() == "thinking" &&
-				block.Get("signature").String() == "" {
+				strings.TrimSpace(block.Get("signature").String()) == "" {
 				return true
 			}
 			kept = append(kept, block.Raw)
 			return true
 		})
+
+		if len(kept) == 0 {
+			// All content was unsigned thinking blocks — drop the whole
+			// message rather than emitting content:[] which Anthropic rejects.
+			return true
+		}
 
 		filteredContent := "[" + strings.Join(kept, ",") + "]"
 		newMsg, err := sjson.SetRaw(msg.Raw, "content", filteredContent)

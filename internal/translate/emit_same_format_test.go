@@ -544,6 +544,21 @@ func TestAnthropicSameFormat_AllThinkingBlocksRemoved(t *testing.T) {
 	assert.Len(t, content, 0, "all blocks are thinking blocks, content should be empty array")
 }
 
+func TestStripUnsignedThinkingBlocks_EmptyContentDropsMessage(t *testing.T) {
+	// An OSS assistant turn whose only block is an unsigned thinking block
+	// should be dropped entirely — emitting content:[] causes a second 400.
+	body := []byte(`{"model":"claude-haiku-4-5","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"internal reasoning"}]},{"role":"user","content":"follow up"}],"max_tokens":1024}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-haiku-4-5",
+		Capabilities: router.Lookup("claude-haiku-4-5"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	msgs, _ := out["messages"].([]any)
+	require.Len(t, msgs, 2, "assistant message with only unsigned thinking block should be dropped")
+	assert.Equal(t, "user", msgs[0].(map[string]any)["role"])
+	assert.Equal(t, "user", msgs[1].(map[string]any)["role"])
+}
+
 func TestAnthropicSameFormat_StringContentPreserved(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"world"},{"role":"user","content":"again"},{"role":"assistant","content":[{"type":"thinking","thinking":"t"},{"type":"text","text":"reply"}]}],"max_tokens":1024}`)
 	opts := translate.EmitOptions{
