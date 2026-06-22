@@ -1,0 +1,40 @@
+internal/router/cluster/distribution_test.go
+  s_5689dedb9a5821::t_97c9a8de87e5a4 1-128
+internal/api/admin/routing_distribution_test.go
+  s_5689dedb9a5821::t_bb3ce44085c1b8 1-87
+internal/api/admin/routing_distribution.go
+  s_5689dedb9a5821::t_ae6fe91fd134b4 1-56
+internal/router/router.go
+  s_5689dedb9a5821::t_64b8c796373186 7-22
+internal/router/cluster/scorer.go
+  s_5689dedb9a5821::t_a1ed707423c27b 7
+  s_5689dedb9a5821::t_18f22f3adc4ef6 535
+  s_5689dedb9a5821::t_2401af0bd3220f 538-545,549-558,878,881,971,985
+  s_5689dedb9a5821::t_b621016c86fe29 197-201,203-216,220-313,839,843,847,849,860-861,883-884,901-902,911,914-915,928-929,933,943,987-988,990
+  s_5689dedb9a5821::t_bc49f0bb412b5f 59-68
+  s_5689dedb9a5821::t_802966e986b7d8 546-548
+internal/router/cluster/distribution.go
+  s_5689dedb9a5821::t_be673b2d5eaedc 1-122
+internal/server/middleware/auth.go
+  s_5689dedb9a5821::t_7b96947131f327 114-116,118
+internal/router/cluster/multiversion.go
+  s_5689dedb9a5821::t_ea99bf5d1947bc 73-81
+internal/server/server.go
+  s_5689dedb9a5821::t_0bbee7c6d9e305 80-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "4626bbe294d73bb300a55ce6929667e9b9a299fa",
+  "prompts": {},
+  "sessions": {
+    "s_5689dedb9a5821": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a3cd192-0f8f-4e28-a4ab-2158686a6567",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
