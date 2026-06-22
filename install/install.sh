@@ -1829,11 +1829,12 @@ if [ "$target" = "opencode" ]; then
   printf "\n"
   printf "%s✓%s %s%sWeave Router installed for opencode.%s\n" \
     "$C_GREEN" "$C_RESET" "$C_BOLD" "$C_BRAND" "$C_RESET"
-  # Surface the optional Codex-subscription path only when the plugin was
-  # actually installed (the weave-codex provider is gated on the same
-  # condition). On the curl|sh path the plugin source isn't bundled, so the
-  # provider isn't written and these instructions would be misleading.
-  if [ -f "$opencode_dir/.weave/opencode-weave.ts" ]; then
+  # Surface the optional Codex-subscription path only when this run actually
+  # registered the weave-codex provider. Gate on the provider's presence in the
+  # written config (authoritative) rather than a plugin file on disk — a
+  # leftover plugin from a prior install can outlive a plugin-less re-install
+  # that stripped the provider, which would make these instructions misleading.
+  if jq -e '(.provider // {}) | has("weave-codex")' "$opencode_config_file" >/dev/null 2>&1; then
     info "To pay for opencode turns with your own ChatGPT (Codex) subscription: run ${C_BOLD}opencode auth login${C_RESET} → ${C_BOLD}ChatGPT Pro/Plus${C_RESET}, then pick a ${C_BOLD}weave-codex${C_RESET} model."
   fi
   if [ -n "$install_dir" ]; then
