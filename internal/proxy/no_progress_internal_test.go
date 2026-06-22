@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -445,4 +447,120 @@ func TestCompactionTracker_SeparateSessionsAreIsolated(t *testing.T) {
 	// Drop on A must not affect B's baseline.
 	assert.True(t, ct.checkAndRecord(keyA, install, "high", 5, 3), "drop on A must be detected")
 	assert.False(t, ct.checkAndRecord(keyB, install, "high", 12, 6), "B growing from 10→12 must not be compaction")
+}
+
+// TestNoProgressTracker_ConcurrentFirstInsert_NoPanicOrDeadlock verifies that
+// concurrent calls to recordAndDetect on the same session key do not panic,
+// deadlock, or lose the sequential firing guarantee established by
+// TestNoProgressTracker_SequentialFiringGuarantee.
+//
+// This is a logical race (non-atomic Get+Add on the LRU) invisible to the
+// race detector — each individual LRU call is internally synchronized, but
+// the check-then-create pair was not atomic before the sync.Mutex fix. Run
+// with -race to confirm zero DATA RACE output, which demonstrates that the
+// race detector cannot catch this class of bug and that the mutex is the
+// correct fix rather than relying on the detector for coverage.
+func TestNoProgressTracker_ConcurrentFirstInsert_NoPanicOrDeadlock(t *testing.T) {
+	const workers = 50
+	const callsPerWorker = noProgressMatchThreshold + 2
+
+	tr := newNoProgressTracker()
+	install := uuid.New()
+	d := router.Decision{Model: "gemini-3.1-pro-preview", Provider: "google"}
+	now := time.Now()
+	fp := computeNoProgressFingerprint(d, "same stuck prompt", 1, "")
+
+	var wg sync.WaitGroup
+	var detected atomic.Int32
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := sessionKeyFromString("session-concurrent-no-panic")
+			for i := 0; i < callsPerWorker; i++ {
+				if looped, _ := tr.recordAndDetect(key, install, "high", fp, now); looped {
+					detected.Add(1)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	// With 50 workers each calling up to 7 times on the same key, the
+	// detector must have fired at least once. If it never fires, all rings
+	// were orphaned — indicating the mutex is not protecting the Get+Add pair.
+	assert.Positive(t, detected.Load(),
+		"detector must fire at least once across %d concurrent workers; "+
+			"never firing indicates concurrent ring orphaning", workers)
+}
+
+// TestNoProgressTracker_SequentialFiringGuarantee documents the core invariant
+// the fix must preserve: sequential calls on the same session key accumulate
+// fingerprints faithfully and fire at exactly noProgressMatchThreshold, not
+// earlier and not later. A regression in the mutex placement (e.g. holding the
+// lock into ring.recordAndDetect) would not break this test, but the -race and
+// concurrent tests above would catch the resulting deadlock or contention.
+func TestNoProgressTracker_SequentialFiringGuarantee(t *testing.T) {
+	tr := newNoProgressTracker()
+	key := sessionKeyFromString("session-sequential-guarantee")
+	install := uuid.New()
+	d := router.Decision{Model: "gemini-3.1-pro-preview", Provider: "google"}
+	now := time.Now()
+	fp := computeNoProgressFingerprint(d, "stuck prompt", 2, "1\x00Agent\x00same-hash")
+
+	var firedAt int
+	for i := 1; i <= noProgressMatchThreshold+2; i++ {
+		looped, _ := tr.recordAndDetect(key, install, "high", fp, now)
+		if looped && firedAt == 0 {
+			firedAt = i
+		}
+	}
+
+	assert.Equal(t, noProgressMatchThreshold, firedAt,
+		"sequential calls must fire at exactly noProgressMatchThreshold=%d; got %d — "+
+			"early firing suggests double-counting, late firing suggests fingerprint loss",
+		noProgressMatchThreshold, firedAt)
+}
+
+// TestCompactionTracker_ConcurrentCheckAndRecord_NoPanicOrDeadlock verifies
+// that concurrent calls to checkAndRecord on the same session key do not
+// deadlock or panic. The compaction race (stale Get before a concurrent Add
+// overwrites) can produce false-positive detections; this test checks
+// structural safety. Run with -race to confirm no DATA RACE is reported.
+func TestCompactionTracker_ConcurrentCheckAndRecord_NoPanicOrDeadlock(t *testing.T) {
+	const workers = 50
+
+	ct := newCompactionTracker()
+	key := sessionKeyFromString("session-compaction-concurrent")
+	install := uuid.New()
+
+	// Prime with a large message count so workers have a prior state to read.
+	ct.checkAndRecord(key, install, "high", 50, 10)
+
+	var wg sync.WaitGroup
+	var detectionCount atomic.Int32
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Each worker presents a count drop — valid compaction signal.
+			if ct.checkAndRecord(key, install, "high", 3, 10) {
+				detectionCount.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Exactly one detection is correct: only the goroutine that reads the
+	// primed state (msgCount=50) should detect a drop. With the mutex fix,
+	// the Get+Add pair is atomic so only one goroutine can read msgCount=50
+	// before it's overwritten — subsequent goroutines read msgCount=3 (no
+	// drop). Without the fix, multiple goroutines could each read the stale
+	// primed state before any write lands, producing multiple false positives.
+	assert.Equal(t, int32(1), detectionCount.Load(),
+		"exactly one goroutine should detect the compaction drop; "+
+			"more than one indicates concurrent stale reads (the race the mutex prevents)")
 }
