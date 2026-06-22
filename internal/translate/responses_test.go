@@ -225,6 +225,34 @@ func TestResponsesWriter_StreamingText(t *testing.T) {
 	assert.EqualValues(t, 2, usage["output_tokens"])
 }
 
+// TestResponsesWriter_PassthroughForwardsVerbatim guards the Codex-backend
+// path: when the upstream already speaks Responses natively, the writer must
+// forward bytes unchanged and must NOT emit its own response.created prelude
+// (which would duplicate the upstream's).
+func TestResponsesWriter_PassthroughForwardsVerbatim(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesWriter(rec, "gpt-5.5")
+	w.SetPassthrough()
+
+	// Prelude is a no-op in passthrough — the upstream emits response.created.
+	require.NoError(t, w.Prelude(true))
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(200)
+
+	// Verbatim Responses SSE, as the Codex backend emits it.
+	native := "event: response.created\ndata: {\"type\":\"response.created\"}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"
+	_, err := w.Write([]byte(native))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	// Output is exactly the upstream bytes: no chat->Responses translation, no
+	// synthesized or duplicated events.
+	assert.Equal(t, native, rec.Body.String())
+}
+
 func TestResponsesWriter_PrependsBadgeOnSwap(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesWriter(rec, "gpt-5.5")

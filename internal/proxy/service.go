@@ -2942,15 +2942,22 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header)
 
 	// Codex (ChatGPT) subscription passthrough: ProxyOpenAIResponses stashed the
-	// caller's original Responses body. Such turns dispatch to the Codex backend
-	// over the Responses API and stream Responses SSE straight back, so they
-	// constrain routing to OpenAI (the only provider the ChatGPT plan can pay
-	// for) and skip the chat-completions routing marker + semantic cache below.
+	// caller's original Responses body. Such turns skip the chat-completions
+	// routing marker + semantic cache below, and — when the routed decision is
+	// an OpenAI model — dispatch the verbatim Responses body to the Codex backend
+	// (see the codexPassthrough branch in the dispatch switch).
+	//
+	// We deliberately do NOT force OpenAI-only routing here. enabledProviders
+	// (from enabledProvidersForRequest) already scopes the request to providers
+	// it can pay for: a lone Codex sub yields {OpenAI} on its own, but a caller
+	// presenting both a Codex and a Claude subscription gets {OpenAI, Anthropic}
+	// and routes freely across them — GPT turns bill the ChatGPT plan via the
+	// Codex backend, Claude turns bill the Claude plan via the translated path.
+	// Subscriptions are credentials scoped to the routed model, not a provider
+	// you pin. (No current client sends multiple subs, so this is behavior-
+	// preserving today; it unlocks the unified-provider client.)
 	codexBody, _ := ctx.Value(codexResponsesBodyContextKey{}).([]byte)
 	codexPassthrough := len(codexBody) > 0
-	if codexPassthrough {
-		enabledProviders = map[string]struct{}{providers.ProviderOpenAI: {}}
-	}
 
 	// Pre-filter models whose context window cannot fit this request.
 	outputReserveOAI := contextWindowOutputReserve
@@ -3100,9 +3107,18 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// when single-binding so multi-binding requests stay failover-safe
 	// (Codex client sees response.created via ResponsesWriter's lazy
 	// emitCreated on the first upstream byte instead).
-	if rw, ok := w.(*translate.ResponsesWriter); ok && len(bindings) <= 1 {
-		if err := rw.Prelude(env.Stream()); err != nil {
-			log.Error("Responses prelude failed", "err", err)
+	if rw, ok := w.(*translate.ResponsesWriter); ok {
+		// A Codex-sub turn that routed to the Codex backend (decision == OpenAI)
+		// streams Responses SSE natively — forward it verbatim. A Codex-sub turn
+		// that routed elsewhere (Claude/OSS) leaves the writer in translate mode
+		// so its chat/Anthropic output is re-emitted as Responses.
+		if codexPassthrough && decision.Provider == providers.ProviderOpenAI {
+			rw.SetPassthrough()
+		}
+		if len(bindings) <= 1 {
+			if err := rw.Prelude(env.Stream()); err != nil {
+				log.Error("Responses prelude failed", "err", err)
+			}
 		}
 	}
 
@@ -3151,11 +3167,15 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		// body must be re-emitted with TargetProvider = openrouter.
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
 			var prep providers.PreparedRequest
-			if codexPassthrough {
+			if codexPassthrough && d.Provider == providers.ProviderOpenAI {
 				// Dispatch the caller's ORIGINAL Responses body (untranslated)
 				// to the Codex backend, rewriting only the model to the routed
 				// pick. The OpenAI client switches to chatgpt.com/backend-api/
-				// codex when it sees the Codex subscription credential.
+				// codex when it sees the Codex subscription credential. Gated on
+				// d.Provider == OpenAI: a Codex-sub turn that routes to an OSS
+				// provider in this case (OpenRouter/Fireworks/…) must NOT ship a
+				// verbatim Responses body there — it gets the translated chat
+				// body below, like any other turn.
 				outBody, setErr := sjson.SetBytes(codexBody, "model", d.Model)
 				if setErr != nil {
 					log.Error("Failed to set routed model on Codex Responses body", "err", setErr, "decision_model", d.Model)
@@ -3458,16 +3478,19 @@ func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.
 	if err != nil {
 		return fmt.Errorf("translate responses request: %w", err)
 	}
-	// Codex (ChatGPT) subscription: serve the turn on the caller's plan via the
-	// Codex backend (chatgpt.com/backend-api/codex), which speaks the Responses
-	// API natively. Stash the caller's ORIGINAL Responses body and write the
-	// upstream Responses SSE straight to w (no ResponsesWriter round-trip), so
-	// reasoning/tool/encrypted content is never lossily re-translated through
-	// chat completions. Routing, billing (5% subscription fee), and telemetry
-	// are reused via ProxyOpenAIChatCompletion (chatBody feeds routing only).
+	// Codex (ChatGPT) subscription: stash the caller's ORIGINAL Responses body.
+	// A turn that resolves a Codex sub AND routes to the Codex backend
+	// (decision == OpenAI) is dispatched verbatim and streamed back with the
+	// ResponsesWriter in passthrough mode (set post-routing in
+	// ProxyOpenAIChatCompletion), so reasoning/tool/encrypted content is never
+	// lossily re-translated. A Codex-sub turn that routes elsewhere
+	// (Claude/OSS — possible once both subs are presented) falls through to the
+	// normal chat->Responses translation, exactly like a non-sub Responses turn.
+	// Either way the writer is a ResponsesWriter; only the per-decision mode
+	// differs. Routing, billing (5% subscription fee), and telemetry are reused
+	// via ProxyOpenAIChatCompletion (chatBody feeds routing only).
 	if codexResponsesRequest(ctx, r.Header) {
 		ctx = context.WithValue(ctx, codexResponsesBodyContextKey{}, body)
-		return s.ProxyOpenAIChatCompletion(ctx, chatBody, w, r)
 	}
 	wrapper := translate.NewResponsesWriter(w, model)
 	// Defer the high-fidelity call-log emission until after Finalize: the

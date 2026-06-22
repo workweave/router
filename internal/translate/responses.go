@@ -272,6 +272,7 @@ type ResponsesWriter struct {
 	statusCode      int
 	streaming       bool
 	httpHeadersSent bool
+	passthrough     bool
 	buf             bytes.Buffer
 
 	seq int64
@@ -347,7 +348,31 @@ func (t *ResponsesWriter) WrapInner(fn func(http.ResponseWriter) http.ResponseWr
 
 func (t *ResponsesWriter) Header() http.Header { return t.inner.Header() }
 
+// SetPassthrough switches the writer to verbatim mode: upstream bytes are
+// forwarded to the client unchanged, the chat->Responses translation is
+// skipped, and the response.created prelude is suppressed. Use it when the
+// upstream already speaks the Responses wire format natively (the Codex
+// backend), so re-translating would corrupt the stream. A turn that resolves a
+// Codex subscription but routes to a non-OpenAI model leaves this off and gets
+// the normal chat->Responses translation. Must be called before the first
+// write (i.e. right after routing, before Prelude).
+func (t *ResponsesWriter) SetPassthrough() { t.passthrough = true }
+
 func (t *ResponsesWriter) WriteHeader(code int) {
+	if t.passthrough {
+		if t.httpHeadersSent {
+			return
+		}
+		t.statusCode = code
+		// Forward the upstream's own headers (the Codex backend already sets
+		// text/event-stream); only drop length/encoding which no longer apply
+		// once the proxy re-frames the stream.
+		t.inner.Header().Del("Content-Length")
+		t.inner.Header().Del("Content-Encoding")
+		t.inner.WriteHeader(code)
+		t.httpHeadersSent = true
+		return
+	}
 	// Always pick up the routed model when upstream calls WriteHeader, even if
 	// Prelude already committed the HTTP status. Prelude fires before routing
 	// completes, so the x-router-model header hasn't been stamped yet; the
@@ -374,6 +399,22 @@ func (t *ResponsesWriter) WriteHeader(code int) {
 }
 
 func (t *ResponsesWriter) Write(data []byte) (int, error) {
+	if t.passthrough {
+		// Forward verbatim. The upstream (Codex backend) emits Responses SSE
+		// natively, so there is nothing to translate.
+		if !t.httpHeadersSent {
+			t.inner.WriteHeader(http.StatusOK)
+			t.httpHeadersSent = true
+		}
+		written, err := t.bw.Write(data)
+		if err == nil {
+			err = t.bw.Flush()
+			if t.flusher != nil {
+				t.flusher.Flush()
+			}
+		}
+		return written, err
+	}
 	n := len(data)
 	t.buf.Write(data)
 	if !t.streaming {
@@ -394,6 +435,11 @@ func (t *ResponsesWriter) Write(data []byte) (int, error) {
 // Safe to call once; the headersEmitted guard prevents duplicate creation
 // when upstream Write later runs.
 func (t *ResponsesWriter) Prelude(streaming bool) error {
+	// In passthrough mode the upstream emits its own response.created; emitting
+	// ours too would duplicate it. Suppress the prelude entirely.
+	if t.passthrough {
+		return nil
+	}
 	if !streaming || t.headersEmitted {
 		return nil
 	}
@@ -420,6 +466,11 @@ func (t *ResponsesWriter) Flush() {
 
 // Finalize handles non-streaming bodies and end-of-stream completion events.
 func (t *ResponsesWriter) Finalize() error {
+	if t.passthrough {
+		// Verbatim mode: nothing to synthesize, just flush whatever's buffered.
+		// Non-streaming Codex-backend bodies were forwarded as-is in Write.
+		return t.bw.Flush()
+	}
 	if t.streaming {
 		// In the rare case the upstream produced no chunks at all, still
 		// emit a completed envelope so the client sees a clean termination.

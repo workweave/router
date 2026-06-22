@@ -506,6 +506,57 @@ func TestService_ProxyOpenAIChatCompletion_DispatchesDeepInfraAndBedrock(t *test
 	}
 }
 
+// TestService_CodexPassthrough_RoutesFreelyWithBothSubs guards the
+// subscription-credential routing flip: a /v1/responses turn that resolves a
+// Codex (ChatGPT) subscription must NOT force OpenAI-only routing when a Claude
+// subscription is also present. Both providers stay eligible so the scorer can
+// route freely and the sub matching the chosen model pays — GPT via the Codex
+// backend, Claude via the translated path. (Single-sub callers are unaffected:
+// enabledProvidersForRequest already yields {OpenAI} on a lone Codex sub.)
+func TestService_CodexPassthrough_RoutesFreelyWithBothSubs(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6"}}
+	// The Anthropic upstream returns a normal Messages response; the proxy
+	// translates it back to the Responses wire format for the /v1/responses
+	// client (NOT the verbatim Codex-backend path, which only applies to an
+	// OpenAI decision).
+	anthropicResp := func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}
+	providerMap := map[string]providers.Client{
+		providers.ProviderOpenAI:    &fakeProvider{},
+		providers.ProviderAnthropic: &fakeProvider{proxyResponse: anthropicResp},
+	}
+	svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-sonnet-4-6", nil).
+		WithByokOnly(true)
+
+	// Both subscriptions presented via the dedicated headers (stashed on ctx by
+	// the auth middleware): a Codex sub (token + account-id) and a Claude sub.
+	ctx := context.WithValue(context.Background(), proxy.OpenAISubscriptionContextKey{}, "eyJhbGciOiJSUzI1NiJ9.codex.sig")
+	ctx = context.WithValue(ctx, proxy.OpenAIAccountIDContextKey{}, "acct-123")
+	ctx = context.WithValue(ctx, proxy.AnthropicSubscriptionContextKey{}, "sk-ant-oat01-subscription-token")
+
+	body := []byte(`{"model":"gpt-5.5","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIResponses(ctx, body, rec, req))
+
+	require.NotNil(t, fr.capturedReq)
+	assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderOpenAI,
+		"the Codex subscription must keep OpenAI eligible")
+	assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic,
+		"Codex passthrough must NOT force OpenAI-only when a Claude subscription is also present")
+
+	// The Claude-routed turn comes back in Responses shape (translated), not
+	// chat-completions — proving a Codex-sub turn routed to Claude isn't sent
+	// through the verbatim Codex-backend path.
+	out := rec.Body.String()
+	assert.Contains(t, out, `"object":"response"`)
+	assert.Contains(t, out, `"output_text"`)
+	assert.NotContains(t, out, "chat.completion")
+}
+
 // TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer: with
 // WithByokOnly(true), registered providers must not appear in EnabledProviders
 // without per-request credentials, or argmax routes to the platform key and 402s.
