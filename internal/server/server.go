@@ -77,6 +77,16 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	// route in tests that don't wire a cluster scorer.
 	if deployedModels != nil {
 		engine.GET("/v1/router/models", middleware.WithTimeout(healthTimeout), admin.CatalogModelsHandler(deployedModels))
+
+		// /v1/router/routing-distribution projects the per-installation "quality
+		// vs price" dial's model mix across a grid of dial positions, so the
+		// dashboard can render the live distribution preview and calibrate the
+		// slider. Same read-only/unauthed rationale as /v1/router/models. The
+		// source is the same *cluster.Multiversion; the assertion skips the
+		// route for a deployedModels source that can't project a distribution.
+		if dist, ok := deployedModels.(admin.RoutingDistributionSource); ok {
+			engine.GET("/v1/router/routing-distribution", middleware.WithTimeout(healthTimeout), admin.RoutingDistributionHandler(dist))
+		}
 	}
 
 	// /validate is a token-validity probe used by clients (not the dashboard), so it stays mounted in both modes.

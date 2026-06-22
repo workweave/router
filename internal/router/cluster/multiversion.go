@@ -70,6 +70,17 @@ func (m *Multiversion) DefaultDeployedModels() []DeployedEntry {
 	return s.DeployedModels()
 }
 
+// DefaultRoutingDistribution projects the QualityBias dial's model mix across a
+// grid of dial positions, using the default version's Scorer (the version live
+// traffic routes through absent a per-request override).
+func (m *Multiversion) DefaultRoutingDistribution(gridN int) ([]DistributionPoint, error) {
+	s, ok := m.Versions[m.Default]
+	if !ok {
+		return nil, fmt.Errorf("cluster multiversion: default version %q not built: %w", m.Default, ErrClusterUnavailable)
+	}
+	return s.RoutingDistribution(gridN)
+}
+
 // Route dispatches to the per-request version override if built, otherwise Default.
 func (m *Multiversion) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	requested := VersionFromContext(ctx)

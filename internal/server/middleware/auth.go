@@ -111,8 +111,11 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 				ctx = context.WithValue(ctx, proxy.InstallationExcludedProvidersContextKey{}, installation.ExcludedProviders)
 			}
 			if installation.RoutingQualityWeight != nil {
+				// The stored weight is the user-facing dial position, so it
+				// flows in as QualityBias (per-cluster, dispersion-aware), not
+				// the uniform Alpha sledgehammer. See router.Overrides.
 				ctx = context.WithValue(ctx, proxy.InstallationRoutingKnobsContextKey{}, &router.Overrides{
-					Alpha: installation.RoutingQualityWeight,
+					QualityBias: installation.RoutingQualityWeight,
 				})
 			}
 		}

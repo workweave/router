@@ -4,7 +4,22 @@ package router
 import "context"
 
 type Overrides struct {
-	Alpha                *float64
+	// Alpha is the raw per-cluster quality weight, applied UNIFORMLY across
+	// every cluster (the "sledgehammer"). This is the eval/debug lever set by
+	// the x-weave-routing-alpha header; it deliberately ignores per-cluster
+	// quality dispersion so a bake-off can probe a single global alpha.
+	Alpha *float64
+	// QualityBias is the user-facing "quality vs price" dial in [0, 1] (0 =
+	// fully price, 1 = fully quality). Unlike Alpha, it is NOT applied
+	// uniformly: the scorer derives a per-cluster alpha from each cluster's
+	// quality dispersion (see deriveClusterAlpha), so the slider's midrange
+	// produces a real model mix instead of a cliff. The endpoints still pin to
+	// all-cheapest (0) and all-top-quality (1). Set by the per-installation
+	// routing-preference dial. routingKnobsForRequest returns either the header
+	// knobs or the installation knobs, never a merge, so Alpha and QualityBias
+	// do not normally coexist; if both are set, QualityBias wins (it is the
+	// higher-level intent).
+	QualityBias          *float64
 	SpeedWeight          *float64
 	OutputCostRatio      *float64
 	ExpectedOutputTokens *int

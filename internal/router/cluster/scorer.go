@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -55,6 +56,16 @@ type Scorer struct {
 	qualityMeans    Rankings
 	modelAxes       map[string]ModelAxis
 	medianVerbosity float64
+	// qualityDispersionRank[k] is cluster k's quality dispersion expressed as a
+	// rank in [0, 1] (0 = lowest dispersion across all clusters, 1 = highest).
+	// Dispersion is the spread of raw quality_means across deployed models in
+	// the cluster: a high-dispersion cluster is one where the strong models are
+	// much better than the cheap ones (so it should keep quality models down to
+	// a low dial setting), a low-dispersion cluster is one where every model is
+	// about equally good (so it demotes to cheap early). Precomputed once at
+	// NewScorer over the full deployed set; drives deriveClusterAlpha for the
+	// QualityBias dial. Length K, v2 only (nil for v1 bundles).
+	qualityDispersionRank []float64
 }
 
 // Version returns the artifact version (e.g. "v0.2").
@@ -183,22 +194,123 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 		}
 	}
 
+	var qualityDispersionRank []float64
+	if bundle.IsV2 {
+		qualityDispersionRank = computeQualityDispersionRank(bundle.QualityMeans, models, bundle.Centroids.K)
+	}
+
 	return &Scorer{
-		version:         bundle.Version,
-		cfg:             cfg,
-		embed:           embed,
-		centroids:       bundle.Centroids,
-		rankings:        bundle.Rankings,
-		registry:        bundle.Registry,
-		candidates:      candidates,
-		models:          models,
-		metadata:        bundle.Metadata,
-		isV2:            bundle.IsV2,
-		qualityMeans:    bundle.QualityMeans,
-		modelAxes:       bundle.ModelAxes,
-		medianVerbosity: bundle.MedianVerbosity,
+		version:               bundle.Version,
+		cfg:                   cfg,
+		embed:                 embed,
+		centroids:             bundle.Centroids,
+		rankings:              bundle.Rankings,
+		registry:              bundle.Registry,
+		candidates:            candidates,
+		models:                models,
+		metadata:              bundle.Metadata,
+		isV2:                  bundle.IsV2,
+		qualityMeans:          bundle.QualityMeans,
+		modelAxes:             bundle.ModelAxes,
+		medianVerbosity:       bundle.MedianVerbosity,
+		qualityDispersionRank: qualityDispersionRank,
 	}, nil
 }
+
+// computeQualityDispersionRank measures each cluster's quality dispersion — the
+// population standard deviation of its raw quality_means across the deployed
+// model set — and converts those into ranks in [0, 1] (0 = lowest-dispersion
+// cluster, 1 = highest). Dispersion is read from RAW quality_means, before the
+// per-cluster min-max normalization the scorer applies at request time: that
+// normalization deliberately flattens every cluster to the same [0, 1] range,
+// which is exactly what collapses the per-cluster crossovers into one cliff.
+// Ranking on the raw spread reintroduces the signal the dial needs.
+//
+// Returns a slice of length K. With fewer than two clusters every rank is 0.5
+// (no spread to rank against), which makes deriveClusterAlpha fall back to a
+// plain t curve.
+func computeQualityDispersionRank(qualityMeans Rankings, models []string, k int) []float64 {
+	disp := make([]float64, k)
+	for c := 0; c < k; c++ {
+		row := qualityMeans[c]
+		if len(models) == 0 {
+			continue
+		}
+		var sum float64
+		for _, m := range models {
+			sum += float64(row[m])
+		}
+		mean := sum / float64(len(models))
+		var variance float64
+		for _, m := range models {
+			d := float64(row[m]) - mean
+			variance += d * d
+		}
+		disp[c] = math.Sqrt(variance / float64(len(models)))
+	}
+
+	// Rank by dispersion via fractional ranks so ties share a position and the
+	// result is invariant to the absolute dispersion scale (which varies by
+	// bundle). order holds cluster indices sorted ascending by dispersion.
+	order := make([]int, k)
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return disp[order[a]] < disp[order[b]] })
+
+	ranks := make([]float64, k)
+	if k < 2 {
+		for i := range ranks {
+			ranks[i] = 0.5
+		}
+		return ranks
+	}
+	for pos, cluster := range order {
+		ranks[cluster] = float64(pos) / float64(k-1)
+	}
+	return ranks
+}
+
+// deriveClusterAlpha maps the global QualityBias dial t in [0, 1] to a single
+// cluster's quality weight, bending the curve by that cluster's quality
+// dispersion rank. The mapping is alpha = t^gamma where gamma = spread^(1 -
+// 2*rank):
+//
+//   - high-dispersion clusters (rank -> 1) get gamma < 1, a concave curve that
+//     rises fast — they reach a quality-favoring alpha at a low dial setting
+//     and hold strong models the longest;
+//   - low-dispersion clusters (rank -> 0) get gamma > 1, a convex curve that
+//     stays near zero — they keep routing cheap until the dial is high;
+//   - the median cluster (rank = 0.5) gets gamma = 1, a straight line.
+//
+// Because t^gamma pins to 0 at t=0 and 1 at t=1 for every gamma > 0, the slider
+// endpoints always resolve to all-cheapest / all-top-quality regardless of
+// dispersion; only the midrange spreads. spread > 1 controls how far the
+// per-cluster crossovers fan out (1 collapses back to a uniform t).
+func deriveClusterAlpha(t, rank, spread float64) float64 {
+	if t <= 0 {
+		return 0
+	}
+	if t >= 1 {
+		return 1
+	}
+	gamma := math.Pow(spread, 1-2*rank)
+	a := math.Pow(t, gamma)
+	if a < 0 {
+		return 0
+	}
+	if a > 1 {
+		return 1
+	}
+	return a
+}
+
+// qualityBiasDispersionSpread is the fan-out factor for deriveClusterAlpha. At
+// 3.0 the highest-dispersion cluster's crossover sits at roughly the cube root
+// of the lowest's, which spreads the 16 v0.67 clusters across the dial without
+// any single cluster dominating. Tunable; verified against the live bundle
+// centroids before promotion.
+const qualityBiasDispersionSpread = 3.0
 
 // resolveProviderFor walks the catalog's ordered ProviderBinding list for
 // modelID and returns the first binding whose Provider name is in
@@ -420,29 +532,30 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 
 	if s.isV2 {
 		// 1. Resolve Knobs and Validate
-		var activeKnobs DefaultRoutingKnobs
-		if s.metadata != nil && s.metadata.Training.DefaultRoutingKnobs != nil {
-			activeKnobs = *s.metadata.Training.DefaultRoutingKnobs
-			// Struct copy shares the Alpha slice's backing array with the
-			// bundle defaults. Clone before any potential mutation so a
-			// per-request override doesn't leak into subsequent requests.
-			activeKnobs.Alpha = append([]float64(nil), activeKnobs.Alpha...)
-		} else {
-			activeKnobs = DefaultRoutingKnobs{
-				Alpha:                make([]float64, s.centroids.K),
-				SpeedWeight:          0.0,
-				OutputCostRatio:      0.0,
-				ExpectedOutputTokens: 2000,
-				PerModelVerbosity:    false,
-			}
-			for i := range activeKnobs.Alpha {
-				activeKnobs.Alpha[i] = 0.53
-			}
-		}
+		activeKnobs := s.defaultActiveKnobs()
 
 		if req.RoutingKnobs != nil {
-			if req.RoutingKnobs.Alpha != nil {
-				// Sledgehammer behavior: uniformly replace every alpha with the scalar
+			switch {
+			case req.RoutingKnobs.QualityBias != nil:
+				// Dial path: derive a per-cluster alpha from the single dial
+				// position, bent by each cluster's quality dispersion. The
+				// endpoints still pin to all-cheapest / all-top-quality; only
+				// the midrange fans out into a real mix. Takes precedence over
+				// a co-set Alpha (the higher-level intent wins).
+				t := *req.RoutingKnobs.QualityBias
+				if math.IsNaN(t) || math.IsInf(t, 0) || t < 0 || t > 1 {
+					return router.Decision{}, fmt.Errorf("%w: quality_bias (%f) must be a finite value in [0, 1]", ErrInvalidRoutingKnobs, t)
+				}
+				for i := range activeKnobs.Alpha {
+					rank := 0.5
+					if i < len(s.qualityDispersionRank) {
+						rank = s.qualityDispersionRank[i]
+					}
+					activeKnobs.Alpha[i] = deriveClusterAlpha(t, rank, qualityBiasDispersionSpread)
+				}
+			case req.RoutingKnobs.Alpha != nil:
+				// Sledgehammer behavior: uniformly replace every alpha with the
+				// scalar (eval/debug lever, ignores per-cluster dispersion).
 				for i := range activeKnobs.Alpha {
 					activeKnobs.Alpha[i] = *req.RoutingKnobs.Alpha
 				}
@@ -505,163 +618,7 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			activeKnobs.PerModelVerbosity,
 		)
 
-		// 2. Effective per-model cost (knob-dependent)
-		costs := make(map[string]float64, len(s.models))
-		for _, m := range s.models {
-			axis := s.modelAxes[m]
-			vFactor := 1.0
-			if activeKnobs.PerModelVerbosity && axis.VerbosityTokens != nil && s.medianVerbosity > 0 {
-				vFactor = *axis.VerbosityTokens / s.medianVerbosity
-			}
-			inputPer1K := 0.0
-			if axis.InputPer1KUSD != nil {
-				inputPer1K = *axis.InputPer1KUSD
-			}
-			outputPer1K := 0.0
-			if axis.OutputPer1KUSD != nil {
-				outputPer1K = *axis.OutputPer1KUSD
-			}
-			costs[m] = inputPer1K + activeKnobs.OutputCostRatio*outputPer1K*vFactor
-		}
-
-		// 3. Effective per-model speed
-		speeds := make(map[string]*float64, len(s.models))
-		for _, m := range s.models {
-			axis := s.modelAxes[m]
-			if axis.TTFTSeconds != nil && axis.TPS != nil && *axis.TPS > 0 {
-				val := *axis.TTFTSeconds + float64(activeKnobs.ExpectedOutputTokens) / *axis.TPS
-				speeds[m] = &val
-			} else {
-				speeds[m] = nil
-			}
-		}
-
-		// 4. Normalize over DEPLOYED model set
-		qMin := make(map[int]float32)
-		qMax := make(map[int]float32)
-		for _, k := range topClusters {
-			row := s.qualityMeans[k]
-			first := true
-			for _, m := range s.models {
-				qVal := row[m]
-				if first {
-					qMin[k] = qVal
-					qMax[k] = qVal
-					first = false
-				} else {
-					if qVal < qMin[k] {
-						qMin[k] = qVal
-					}
-					if qVal > qMax[k] {
-						qMax[k] = qVal
-					}
-				}
-			}
-		}
-
-		var cMin, cMax float64
-		firstC := true
-		for _, m := range s.models {
-			cVal := costs[m]
-			if firstC {
-				cMin = cVal
-				cMax = cVal
-				firstC = false
-			} else {
-				if cVal < cMin {
-					cMin = cVal
-				}
-				if cVal > cMax {
-					cMax = cVal
-				}
-			}
-		}
-		cRange := cMax - cMin
-
-		useSpeed := activeKnobs.SpeedWeight > 0
-		var sMin, sMax float64
-		firstS := true
-		for _, m := range s.models {
-			if !useSpeed {
-				break
-			}
-			sPtr := speeds[m]
-			if sPtr == nil {
-				continue
-			}
-			sVal := *sPtr
-			if firstS {
-				sMin = sVal
-				sMax = sVal
-				firstS = false
-			} else {
-				if sVal < sMin {
-					sMin = sVal
-				}
-				if sVal > sMax {
-					sMax = sVal
-				}
-			}
-		}
-		sRange := 0.0
-		if useSpeed && !firstS {
-			sRange = sMax - sMin
-		}
-
-		// 6. Blend per top-P cluster
-		scores = make(map[string]float32, len(eligibleModels))
-		for _, k := range topClusters {
-			row := s.qualityMeans[k]
-			wQ := float32(activeKnobs.Alpha[k])
-			wS := float32(0.0)
-			if useSpeed {
-				wS = float32(activeKnobs.SpeedWeight)
-			}
-			wC := float32(1.0) - wQ - wS
-
-			qRange := qMax[k] - qMin[k]
-
-			for _, m := range eligibleModels {
-				qVal := row[m]
-				qNorm := float32(0.0)
-				if qRange > 0 {
-					qNorm = (qVal - qMin[k]) / qRange
-				}
-
-				cVal := costs[m]
-				cNorm := float32(0.0)
-				if cRange > 0 {
-					cNorm = float32((cVal - cMin) / cRange)
-				}
-
-				sPtr := speeds[m]
-				if sRange > 0 {
-					// Mixed-timing pool: untimed peers are treated as
-					// worst-case speed (sNorm=1, no wS bonus). This keeps
-					// wQ/wC weighting consistent across timed and untimed
-					// models — without this, the redistribution branch
-					// would silently drop the cost axis when wC=0.
-					var sNorm float32 = 1.0
-					if sPtr != nil {
-						sNorm = float32((*sPtr - sMin) / sRange)
-					}
-					blend := wQ*qNorm + wC*(1.0-cNorm) + wS*(1.0-sNorm)
-					scores[m] += blend
-				} else {
-					// No timing differentiation across the entire pool
-					// (all models lack AA timing, or all share the same
-					// speed). Redistribute wS into wQ and wC so the
-					// remaining weights still sum to 1.
-					total := wQ + wC
-					if total > 0 {
-						blend := (wQ/total)*qNorm + (wC/total)*(1.0-cNorm)
-						scores[m] += blend
-					} else {
-						scores[m] += qNorm
-					}
-				}
-			}
-		}
+		scores = s.blendScoresV2(topClusters, activeKnobs, eligibleModels)
 	} else {
 		// Legacy v1 flow
 		scores = make(map[string]float32, len(eligibleModels))
@@ -865,3 +822,169 @@ func clusterIDsString(ks []int) string {
 }
 
 var _ router.Router = (*Scorer)(nil)
+
+// blendScoresV2 computes the v2 per-model blended scores for the given top-P
+// clusters under the effective knobs. Extracted from Route so the routing
+// distribution preview scores identically to live routing (single source of
+// truth for the cost/quality/speed blend). Caller owns knob validation and the
+// QualityBias->Alpha derivation; this method consumes the resolved alpha vector.
+func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnobs, eligibleModels []string) map[string]float32 {
+	// 2. Effective per-model cost (knob-dependent)
+	costs := make(map[string]float64, len(s.models))
+	for _, m := range s.models {
+		axis := s.modelAxes[m]
+		vFactor := 1.0
+		if activeKnobs.PerModelVerbosity && axis.VerbosityTokens != nil && s.medianVerbosity > 0 {
+			vFactor = *axis.VerbosityTokens / s.medianVerbosity
+		}
+		inputPer1K := 0.0
+		if axis.InputPer1KUSD != nil {
+			inputPer1K = *axis.InputPer1KUSD
+		}
+		outputPer1K := 0.0
+		if axis.OutputPer1KUSD != nil {
+			outputPer1K = *axis.OutputPer1KUSD
+		}
+		costs[m] = inputPer1K + activeKnobs.OutputCostRatio*outputPer1K*vFactor
+	}
+
+	// 3. Effective per-model speed
+	speeds := make(map[string]*float64, len(s.models))
+	for _, m := range s.models {
+		axis := s.modelAxes[m]
+		if axis.TTFTSeconds != nil && axis.TPS != nil && *axis.TPS > 0 {
+			val := *axis.TTFTSeconds + float64(activeKnobs.ExpectedOutputTokens) / *axis.TPS
+			speeds[m] = &val
+		} else {
+			speeds[m] = nil
+		}
+	}
+
+	// 4. Normalize over DEPLOYED model set
+	qMin := make(map[int]float32)
+	qMax := make(map[int]float32)
+	for _, k := range topClusters {
+		row := s.qualityMeans[k]
+		first := true
+		for _, m := range s.models {
+			qVal := row[m]
+			if first {
+				qMin[k] = qVal
+				qMax[k] = qVal
+				first = false
+			} else {
+				if qVal < qMin[k] {
+					qMin[k] = qVal
+				}
+				if qVal > qMax[k] {
+					qMax[k] = qVal
+				}
+			}
+		}
+	}
+
+	var cMin, cMax float64
+	firstC := true
+	for _, m := range s.models {
+		cVal := costs[m]
+		if firstC {
+			cMin = cVal
+			cMax = cVal
+			firstC = false
+		} else {
+			if cVal < cMin {
+				cMin = cVal
+			}
+			if cVal > cMax {
+				cMax = cVal
+			}
+		}
+	}
+	cRange := cMax - cMin
+
+	useSpeed := activeKnobs.SpeedWeight > 0
+	var sMin, sMax float64
+	firstS := true
+	for _, m := range s.models {
+		if !useSpeed {
+			break
+		}
+		sPtr := speeds[m]
+		if sPtr == nil {
+			continue
+		}
+		sVal := *sPtr
+		if firstS {
+			sMin = sVal
+			sMax = sVal
+			firstS = false
+		} else {
+			if sVal < sMin {
+				sMin = sVal
+			}
+			if sVal > sMax {
+				sMax = sVal
+			}
+		}
+	}
+	sRange := 0.0
+	if useSpeed && !firstS {
+		sRange = sMax - sMin
+	}
+
+	// 6. Blend per top-P cluster
+	scores := make(map[string]float32, len(eligibleModels))
+	for _, k := range topClusters {
+		row := s.qualityMeans[k]
+		wQ := float32(activeKnobs.Alpha[k])
+		wS := float32(0.0)
+		if useSpeed {
+			wS = float32(activeKnobs.SpeedWeight)
+		}
+		wC := float32(1.0) - wQ - wS
+
+		qRange := qMax[k] - qMin[k]
+
+		for _, m := range eligibleModels {
+			qVal := row[m]
+			qNorm := float32(0.0)
+			if qRange > 0 {
+				qNorm = (qVal - qMin[k]) / qRange
+			}
+
+			cVal := costs[m]
+			cNorm := float32(0.0)
+			if cRange > 0 {
+				cNorm = float32((cVal - cMin) / cRange)
+			}
+
+			sPtr := speeds[m]
+			if sRange > 0 {
+				// Mixed-timing pool: untimed peers are treated as
+				// worst-case speed (sNorm=1, no wS bonus). This keeps
+				// wQ/wC weighting consistent across timed and untimed
+				// models — without this, the redistribution branch
+				// would silently drop the cost axis when wC=0.
+				var sNorm float32 = 1.0
+				if sPtr != nil {
+					sNorm = float32((*sPtr - sMin) / sRange)
+				}
+				blend := wQ*qNorm + wC*(1.0-cNorm) + wS*(1.0-sNorm)
+				scores[m] += blend
+			} else {
+				// No timing differentiation across the entire pool
+				// (all models lack AA timing, or all share the same
+				// speed). Redistribute wS into wQ and wC so the
+				// remaining weights still sum to 1.
+				total := wQ + wC
+				if total > 0 {
+					blend := (wQ/total)*qNorm + (wC/total)*(1.0-cNorm)
+					scores[m] += blend
+				} else {
+					scores[m] += qNorm
+				}
+			}
+		}
+	}
+	return scores
+}
