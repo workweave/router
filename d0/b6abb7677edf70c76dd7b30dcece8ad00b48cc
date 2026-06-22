@@ -1,0 +1,58 @@
+internal/translate/model_variant.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 1-47
+internal/translate/gemini_test.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 4,316-317,333-336,372,374-375,526-528
+internal/translate/features.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 33,37-39
+internal/translate/emit_openai.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 18-20
+internal/translate/AGENTS.md
+  s_49e4679ebdc2ad::t_77e77be7c00db5 29-30
+internal/proxy/service.go
+  s_49e4679ebdc2ad::t_4e25e804e68acb 288
+  s_49e4679ebdc2ad::t_77e77be7c00db5 281-287,311-316,1088-1099,1244-1254,1919,2388-2389,2402-2403,2644,2667,3138
+internal/translate/gemini_response.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 55-57,84
+internal/translate/thought_signature_id.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 17-20,22
+internal/translate/responses_outbound_test.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 125-171
+internal/translate/emit_openai_responses.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 210,230
+internal/translate/CLAUDE.md
+  s_49e4679ebdc2ad::t_77e77be7c00db5 29-30
+internal/translate/envelope.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 380-384,415-416,418,676-679,698,714,718,953-955
+internal/translate/gemini_stream.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 269-272
+internal/translate/translate_test.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 4,657-662,683-685
+internal/translate/model_variant_test.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 1-63
+internal/proxy/marker_internal_test.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 10,183-235
+internal/translate/crossformat_response_test.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 599-601,603,730-732
+internal/translate/emit_same_format_test.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 9,11,71-104,698-741
+internal/translate/stream.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 1363-1368,1374
+internal/proxy/gemini.go
+  s_49e4679ebdc2ad::t_77e77be7c00db5 208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "d0b6abb7677edf70c76dd7b30dcece8ad00b48cc",
+  "prompts": {},
+  "sessions": {
+    "s_49e4679ebdc2ad": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0b076c2c-23ad-4832-8dc4-1e6a1306ce95",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
