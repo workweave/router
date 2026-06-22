@@ -62,7 +62,7 @@ func (f *fakeAPIKeyRepository) MarkUsed(ctx context.Context, id string) error {
 }
 
 func (f *fakeAPIKeyRepository) SoftDelete(ctx context.Context, id string) error {
-	return errors.New("not used by these tests")
+	return f.override
 }
 
 type fakeExternalAPIKeyRepo struct {
@@ -776,5 +776,16 @@ func TestService_WriteHooksInvalidateAndNotify(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{installID}, cache.invalidationSnapshot())
 		assert.Equal(t, []string{installID}, nf.snapshot())
+	})
+
+	t.Run("DeleteAPIKey", func(t *testing.T) {
+		svc, cache, nf := makeSvc()
+		err := svc.DeleteAPIKey(context.Background(), installID, "k1")
+		require.NoError(t, err)
+		assert.Equal(t, []string{installID}, cache.invalidationSnapshot(),
+			"DeleteAPIKey must call cache.InvalidateInstallation so the deleted key cannot "+
+				"authenticate for up to the 5-min positive cache TTL after revocation")
+		assert.Equal(t, []string{installID}, nf.snapshot(),
+			"DeleteAPIKey must publish NOTIFY so peer replicas also drop the deleted key immediately")
 	})
 }
