@@ -2120,7 +2120,8 @@ prices='{
     "qwen/qwen3.7-plus":                0.0004,
     "xiaomi/mimo-v2.5-pro":             0.001,
     "z-ai/glm-5":                       0.0006,
-    "z-ai/glm-5.1":                     0.00105
+    "z-ai/glm-5.1":                     0.00105,
+    "z-ai/glm-5.2":                     0.0014
   },
   "output": {
     "claude-fable-5":                   0.05,
@@ -2175,7 +2176,8 @@ prices='{
     "qwen/qwen3.7-plus":                0.0016,
     "xiaomi/mimo-v2.5-pro":             0.003,
     "z-ai/glm-5":                       0.00208,
-    "z-ai/glm-5.1":                     0.0035
+    "z-ai/glm-5.1":                     0.0035,
+    "z-ai/glm-5.2":                     0.0044
   }
 }'
 # END_GENERATED_PRICES
