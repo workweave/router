@@ -18,6 +18,11 @@ func TestIsEnvKeyed_TrueWhenEnvVarSet(t *testing.T) {
 	assert.True(t, isEnvKeyed("anthropic"))
 }
 
+func TestIsEnvKeyed_TrueWhenProviderIsMixedCase(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-value")
+	assert.True(t, isEnvKeyed("Anthropic"))
+	assert.True(t, isEnvKeyed("ANTHROPIC"))
+}
 func TestIsEnvKeyed_FalseWhenEnvVarUnset(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	os.Unsetenv("OPENAI_API_KEY")

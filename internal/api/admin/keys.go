@@ -3,6 +3,7 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"workweave/router/internal/auth"
@@ -208,7 +209,7 @@ func ListExternalKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
 // write path can enforce it independently of whether /admin/v1/config ever
 // succeeds.
 func isEnvKeyed(provider string) bool {
-	return config.GetOr(providers.APIKeyEnvVar(provider), "") != ""
+	return config.GetOr(providers.APIKeyEnvVar(strings.ToLower(provider)), "") != ""
 }
 
 func UpsertExternalKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
