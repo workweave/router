@@ -185,3 +185,5 @@ Settings → Models override above. See [install/README.md](install/README.md#sw
 [^2]: Lu, Y., Liu, R., Yuan, J., Cui, X., Zhang, S., Liu, H., & Xing, J.
     *RouterArena: An Open Platform for Comprehensive Comparison of LLM
     Routers.* arXiv:2510.00202, 2025. <https://arxiv.org/abs/2510.00202>
+
+<!-- ci: validate cluster-routing publisher (throwaway) -->
