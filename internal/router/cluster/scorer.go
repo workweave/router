@@ -249,9 +249,9 @@ func computeQualityDispersionRank(qualityMeans Rankings, models []string, k int)
 		disp[c] = math.Sqrt(variance / float64(len(models)))
 	}
 
-	// Rank by dispersion via fractional ranks so ties share a position and the
-	// result is invariant to the absolute dispersion scale (which varies by
-	// bundle). order holds cluster indices sorted ascending by dispersion.
+	// Rank by dispersion as a fraction in [0, 1], invariant to the absolute
+	// dispersion scale (which varies by bundle). order holds cluster indices
+	// sorted ascending by dispersion.
 	order := make([]int, k)
 	for i := range order {
 		order[i] = i
@@ -265,8 +265,21 @@ func computeQualityDispersionRank(qualityMeans Rankings, models []string, k int)
 		}
 		return ranks
 	}
-	for pos, cluster := range order {
-		ranks[cluster] = float64(pos) / float64(k-1)
+	// Assign mid-ranks: clusters with equal dispersion share the average of
+	// their positions, so tied clusters get identical alphas regardless of
+	// their arbitrary order in the bundle. Walk the sorted slice in equal-value
+	// groups.
+	for i := 0; i < k; {
+		j := i + 1
+		for j < k && disp[order[j]] == disp[order[i]] {
+			j++
+		}
+		midPos := float64(i+j-1) / 2 // average of positions i..j-1
+		rank := midPos / float64(k-1)
+		for p := i; p < j; p++ {
+			ranks[order[p]] = rank
+		}
+		i = j
 	}
 	return ranks
 }
@@ -294,15 +307,11 @@ func deriveClusterAlpha(t, rank, spread float64) float64 {
 	if t >= 1 {
 		return 1
 	}
+	// For t in (0, 1) and gamma > 0 (guaranteed: spread > 0 so gamma =
+	// spread^(1-2*rank) is strictly positive), t^gamma is always in (0, 1) —
+	// no clamp needed.
 	gamma := math.Pow(spread, 1-2*rank)
-	a := math.Pow(t, gamma)
-	if a < 0 {
-		return 0
-	}
-	if a > 1 {
-		return 1
-	}
-	return a
+	return math.Pow(t, gamma)
 }
 
 // qualityBiasDispersionSpread is the fan-out factor for deriveClusterAlpha. At

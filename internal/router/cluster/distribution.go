@@ -73,6 +73,14 @@ func (s *Scorer) RoutingDistribution(gridN int) ([]DistributionPoint, error) {
 	}
 
 	k := s.centroids.K
+
+	// Each centroid's top-P clusters depend only on cluster geometry, not on
+	// the dial position, so compute them once instead of per grid step.
+	centroidTopClusters := make([][]int, k)
+	for c := 0; c < k; c++ {
+		centroidTopClusters[c] = topPNearest(s.centroids.Row(c), s.centroids, s.cfg.TopP)
+	}
+
 	points := make([]DistributionPoint, 0, gridN)
 	for g := 0; g < gridN; g++ {
 		t := float64(g) / float64(gridN-1)
@@ -88,8 +96,7 @@ func (s *Scorer) RoutingDistribution(gridN int) ([]DistributionPoint, error) {
 
 		counts := make(map[string]int, len(s.models))
 		for c := 0; c < k; c++ {
-			topClusters := topPNearest(s.centroids.Row(c), s.centroids, s.cfg.TopP)
-			scores := s.blendScoresV2(topClusters, knobs, s.models)
+			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models)
 			winner, _ := argmax(scores, s.models)
 			if winner != "" {
 				counts[winner]++

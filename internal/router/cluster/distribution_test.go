@@ -57,6 +57,23 @@ func TestComputeQualityDispersionRank_OrdersBySpread(t *testing.T) {
 	assert.Equal(t, 1.0, ranks[2], "highest-dispersion cluster ranks 1")
 }
 
+func TestComputeQualityDispersionRank_TiesShareMidRank(t *testing.T) {
+	models := []string{"a", "b"}
+	// clusters 0 and 1 have identical spread (1); cluster 2 has spread 4.
+	// The two tied clusters should get the SAME rank (mid-rank of positions
+	// 0,1 = 0.5 -> 0.25), independent of their order in the bundle.
+	qm := Rankings{
+		0: {"a": 1, "b": 2},
+		1: {"a": 5, "b": 6},
+		2: {"a": 1, "b": 5},
+	}
+	ranks := computeQualityDispersionRank(qm, models, 3)
+	require.Len(t, ranks, 3)
+	assert.Equal(t, ranks[0], ranks[1], "tied-dispersion clusters must share a rank")
+	assert.Equal(t, 0.25, ranks[0], "two tied clusters at positions 0,1 get mid-rank 0.5/(k-1)")
+	assert.Equal(t, 1.0, ranks[2], "the distinct top-dispersion cluster ranks 1")
+}
+
 func TestComputeQualityDispersionRank_SingleClusterNeutral(t *testing.T) {
 	ranks := computeQualityDispersionRank(Rankings{0: {"a": 1, "b": 9}}, []string{"a", "b"}, 1)
 	require.Len(t, ranks, 1)
