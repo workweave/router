@@ -206,6 +206,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		// One-click thumb links embedded in response footers.
 		feedbackGroup.GET("/rate", feedbackapi.RateHandler(proxySvc))
 		feedbackGroup.GET("/assets/wooly-wave.png", feedbackapi.WoolyWaveHandler())
+		feedbackGroup.GET("/assets/weave.svg", feedbackapi.WeaveLogoHandler())
 	}
 }
 

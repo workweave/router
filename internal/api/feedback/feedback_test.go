@@ -191,6 +191,7 @@ func TestRateHandler_OneClickUpPersists(t *testing.T) {
 	assert.Nil(t, up.Comment, "one-click ratings carry no comment")
 	assert.Contains(t, rec.Body.String(), "Thank you for your feedback!")
 	assert.Contains(t, rec.Body.String(), "/v1/feedback/assets/wooly-wave.png")
+	assert.Contains(t, rec.Body.String(), "/v1/feedback/assets/weave.svg")
 	assert.Contains(t, rec.Header().Get("Content-Type"), "text/html")
 }
 
