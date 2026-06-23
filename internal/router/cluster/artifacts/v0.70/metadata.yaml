@@ -1,8 +1,8 @@
 format_version: 2
 version: v0.70
 parent: v0.68
-status: candidate
-promoted_date: null
+status: promoted
+promoted_date: '2026-06-23'
 embedder:
   model: jina-v2-base-code-int8
   embed_dim: 768
