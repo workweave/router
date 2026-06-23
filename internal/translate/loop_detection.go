@@ -41,7 +41,13 @@ func anthropicAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []st
 		return nil
 	}
 	msgs.ForEach(func(_, msg gjson.Result) bool {
-		if msg.Get("role").String() != "assistant" {
+		role := msg.Get("role").String()
+		if role == "user" && anthropicUserMsgHasText(msg) {
+			out = nil
+			idx = 0
+			return true
+		}
+		if role != "assistant" {
 			return true
 		}
 		content := msg.Get("content")
@@ -79,7 +85,13 @@ func openAIAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []strin
 		return nil
 	}
 	msgs.ForEach(func(_, msg gjson.Result) bool {
-		if msg.Get("role").String() != "assistant" {
+		role := msg.Get("role").String()
+		if role == "user" && anthropicUserMsgHasText(msg) {
+			out = nil
+			idx = 0
+			return true
+		}
+		if role != "assistant" {
 			return true
 		}
 		toolCalls := msg.Get("tool_calls")
@@ -138,7 +150,13 @@ func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
 	}
 	var sigs []ToolCallSig
 	msgs.ForEach(func(_, msg gjson.Result) bool {
-		if msg.Get("role").String() != "assistant" {
+		role := msg.Get("role").String()
+		if role == "user" && anthropicUserMsgHasText(msg) {
+			sigs = nil
+
+			return true
+		}
+		if role != "assistant" {
 			return true
 		}
 		content := msg.Get("content")
@@ -188,7 +206,13 @@ func openAIAssistantToolCallSigs(body []byte) []ToolCallSig {
 	}
 	var sigs []ToolCallSig
 	msgs.ForEach(func(_, msg gjson.Result) bool {
-		if msg.Get("role").String() != "assistant" {
+		role := msg.Get("role").String()
+		if role == "user" && anthropicUserMsgHasText(msg) {
+			sigs = nil
+
+			return true
+		}
+		if role != "assistant" {
 			return true
 		}
 		toolCalls := msg.Get("tool_calls")
@@ -364,4 +388,23 @@ func hexDigit(n byte) byte {
 		return '0' + n
 	}
 	return 'a' + n - 10
+}
+
+func anthropicUserMsgHasText(msg gjson.Result) bool {
+	content := msg.Get("content")
+	if content.Type == gjson.String {
+		return content.String() != ""
+	}
+	if !content.IsArray() {
+		return false
+	}
+	hasText := false
+	content.ForEach(func(_, block gjson.Result) bool {
+		if block.Get("type").String() == "text" && block.Get("text").String() != "" {
+			hasText = true
+			return false
+		}
+		return true
+	})
+	return hasText
 }

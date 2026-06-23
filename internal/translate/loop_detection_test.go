@@ -242,3 +242,31 @@ func TestAssistantToolCallSignatures_SkipsRouterNudgeEntries(t *testing.T) {
 // mustMarshalJSON is shared with force_model_test.go; redeclared here would be
 // a compile error so the existing one is reused.
 var _ = json.Marshal
+
+func TestAssistantToolCallSignatures_UserTextResetsLoop(t *testing.T) {
+	// If the user explicitly sends a text message, it breaks the loop detector
+	// by resetting the tool call history.
+	body := mustMarshalJSON(t, map[string]any{
+		"model": "claude-sonnet-4-6",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "do stuff"},
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "1", "name": "ls", "input": map[string]any{"path": "/tmp"}},
+			}},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "1", "content": "a"},
+				map[string]any{"type": "text", "text": "continue please"}, // This resets the loop
+			}},
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "2", "name": "read", "input": map[string]any{"path": "/etc/hosts"}},
+			}},
+		},
+		"max_tokens": 256,
+	})
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 1) // Only "read" is counted, because the "ls" was before the user text
+	assert.Equal(t, "read", sigs[0].Name)
+}
