@@ -42,7 +42,7 @@ func anthropicAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []st
 	}
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
-		if role == "user" && anthropicUserMsgHasText(msg) {
+		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
 			out = nil
 			idx = 0
 			return true
@@ -86,7 +86,7 @@ func openAIAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []strin
 	}
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
-		if role == "user" && anthropicUserMsgHasText(msg) {
+		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
 			out = nil
 			idx = 0
 			return true
@@ -151,9 +151,13 @@ func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
 	var sigs []ToolCallSig
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
-		if role == "user" && anthropicUserMsgHasText(msg) {
+		// A genuine user-typed prompt breaks the loop: the human has
+		// intervened, so the calls before it are no longer part of any
+		// runaway cycle. userPromptTextGJSON returns "" for tool_result-only
+		// turns and for Claude Code's injected <system-reminder> /
+		// <command-*> wrapper blocks, so a normal tool round does NOT reset.
+		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
 			sigs = nil
-
 			return true
 		}
 		if role != "assistant" {
@@ -207,9 +211,10 @@ func openAIAssistantToolCallSigs(body []byte) []ToolCallSig {
 	var sigs []ToolCallSig
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
-		if role == "user" && anthropicUserMsgHasText(msg) {
+		// See anthropicAssistantToolCallSigs: a genuine user-typed prompt
+		// resets the window; injected wrappers and tool_result turns do not.
+		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
 			sigs = nil
-
 			return true
 		}
 		if role != "assistant" {
@@ -388,23 +393,4 @@ func hexDigit(n byte) byte {
 		return '0' + n
 	}
 	return 'a' + n - 10
-}
-
-func anthropicUserMsgHasText(msg gjson.Result) bool {
-	content := msg.Get("content")
-	if content.Type == gjson.String {
-		return content.String() != ""
-	}
-	if !content.IsArray() {
-		return false
-	}
-	hasText := false
-	content.ForEach(func(_, block gjson.Result) bool {
-		if block.Get("type").String() == "text" && block.Get("text").String() != "" {
-			hasText = true
-			return false
-		}
-		return true
-	})
-	return hasText
 }
