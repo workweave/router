@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -18,12 +17,6 @@ import (
 // the response served, so clients can surface a "rate this routing decision"
 // affordance. Omitted when the feedback-link feature is unwired.
 const HeaderRouterFeedbackURL = "x-router-feedback-url"
-
-// feedbackRatePath is the router endpoint backing the one-click thumb links in
-// the response footer. It lives on the same origin as feedbackBaseURL (the
-// router host, which already serves /v1/feedback/*), so footer links are simply
-// feedbackBaseURL + this + query.
-const feedbackRatePath = "/v1/feedback/rate"
 
 // routerFeedbackSpanName is the OTLP span the router emits on each submission so
 // the Weave backend mirrors feedback into its own router_request_feedback table.
@@ -182,16 +175,35 @@ func (s *Service) setFeedbackLinkHeader(w http.ResponseWriter, installationID uu
 	w.Header().Set(HeaderRouterFeedbackURL, s.feedbackBaseURL+"/f/"+token)
 }
 
-// feedbackFooter builds the markdown thumbs footer appended to the end of a
-// streamed response, so any client that renders the answer also renders a
-// one-click "rate this routing" affordance. The thumb links are GET requests to
-// the router's rate endpoint; the signed token is the sole credential. Returns
-// "" when feedback is unwired, so the response writers stay fully transparent.
-func (s *Service) feedbackFooter(installationID uuid.UUID, externalID, requestID, routerUserID string) string {
-	token := s.mintFeedbackToken(installationID, externalID, requestID, routerUserID)
-	if token == "" {
+// terminalFeedbackClients are the coding agents whose entire streamed response
+// is user-facing chat, so a trailing rating hint renders cleanly and the user
+// can reply with /rf+ or /rf-. IDEs (cursor) and unknown clients are excluded:
+// they reuse the same endpoint for inline edits, applied diffs, and commit
+// messages, where an appended footer contaminates non-chat output.
+var terminalFeedbackClients = map[string]struct{}{
+	ClientAppClaudeCode: {},
+	ClientAppCodex:      {},
+	ClientAppOpencode:   {},
+}
+
+// feedbackFooterText is the trailing rating hint appended to streamed answers
+// for terminal coding agents. It advertises the in-terminal /rf+ /rf- rating
+// commands instead of a web link, keeping feedback a single keystroke away.
+// translate.feedbackFooterPattern matches this exact text on ingress to strip
+// it back out of upstream context — keep the two in sync.
+const feedbackFooterText = "\n\n_Was this routing right?_ Reply `/rf+` 👍 or `/rf-` 👎"
+
+// feedbackFooter returns the in-terminal rating hint appended to a streamed
+// response, or "" to stay fully transparent. Gated to terminal coding agents
+// (terminalFeedbackClients) and to deployments with durable feedback storage,
+// so IDEs never get chat text injected into non-chat surfaces and we never
+// advertise a rating command we can't record.
+func (s *Service) feedbackFooter(clientApp string) string {
+	if s.feedbackStore == nil {
 		return ""
 	}
-	base := s.feedbackBaseURL + feedbackRatePath + "?t=" + url.QueryEscape(token) + "&r="
-	return "\n\n_Was this routing right?_ [👍](" + base + "up) · [👎](" + base + "down)"
+	if _, ok := terminalFeedbackClients[clientApp]; !ok {
+		return ""
+	}
+	return feedbackFooterText
 }

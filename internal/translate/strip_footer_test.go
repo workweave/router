@@ -14,12 +14,9 @@ import (
 const footerSentinel = "_Was this routing right?_"
 
 // sampleFooter mirrors proxy.Service.feedbackFooter's output shape: a leading
-// blank-line separator, the prompt, and two markdown thumb links to the signed
-// rate endpoint. The token uses URL-safe base64 chars (-, _) to exercise the
-// "[^)]*" URL match.
+// blank-line separator, the prompt, and the in-terminal /rf+ /rf- rating hint.
 func sampleFooter() string {
-	base := "https://feedback.example/v1/feedback/rate?t=abc-123_XYZ.sig&r="
-	return "\n\n_Was this routing right?_ [👍](" + base + "up) · [👎](" + base + "down)"
+	return "\n\n_Was this routing right?_ Reply `/rf+` 👍 or `/rf-` 👎"
 }
 
 func TestStripFeedbackFooter_AppendedToAssistantBlock(t *testing.T) {

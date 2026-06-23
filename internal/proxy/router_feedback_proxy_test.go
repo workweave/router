@@ -132,5 +132,62 @@ func TestService_RouterFeedbackCommand_EmptyFeedbackAsksForText(t *testing.T) {
 	require.NotEmpty(t, blocks)
 	first, _ := blocks[0].(map[string]any)
 	text, _ := first["text"].(string)
-	assert.Contains(t, text, "needs a message")
+	assert.Contains(t, text, "needs a verdict or a note")
+}
+
+func TestService_RouterFeedbackCommand_ThumbsUpShortcutPersists(t *testing.T) {
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf+"}
+		]
+	}`
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", LastServedModel: "claude-haiku-4-5"}
+	feedback := &fakeFeedbackStore{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	svc := newPinSvc(fr, store).WithRouterFeedbackStore(feedback)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls, "rating shortcut must short-circuit routing")
+	require.Len(t, feedback.events, 1, "a verdict-only rating must still persist")
+	ev := feedback.events[0]
+	assert.Equal(t, "up", ev.Rating)
+	assert.Equal(t, "👍", ev.Feedback, "verdict-only submission stores a compact label")
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	blocks, _ := resp["content"].([]any)
+	require.NotEmpty(t, blocks)
+	first, _ := blocks[0].(map[string]any)
+	text, _ := first["text"].(string)
+	assert.Contains(t, text, "👍", "the ack echoes the recorded verdict")
+}
+
+func TestService_RouterFeedbackCommand_ThumbsDownShortcutWithNote(t *testing.T) {
+	const body = `{
+		"model":"gpt-4o",
+		"messages":[
+			{"role":"user","content":"/rf- wrong model for this refactor"}
+		]
+	}`
+	store := newFakePinStore()
+	feedback := &fakeFeedbackStore{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-4o", Reason: "cluster"}}
+	svc := newOpenAIPinSvc(fr, store).WithRouterFeedbackStore(feedback)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(body), rec, httpReq))
+
+	require.Len(t, feedback.events, 1)
+	assert.Equal(t, "down", feedback.events[0].Rating)
+	assert.Equal(t, "wrong model for this refactor", feedback.events[0].Feedback, "the note is stored verbatim alongside the verdict")
 }

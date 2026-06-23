@@ -771,13 +771,13 @@ func encodeJSONStringNoHTMLEscape(s string) ([]byte, error) {
 // injected in cross-format responses.
 var routingMarkerPattern = regexp.MustCompile(`✦ \*\*Weave Router\*\* → [^\n]*\n\n`)
 
-// feedbackFooterPattern matches the one-click thumbs footer appended at the end
+// feedbackFooterPattern matches the in-terminal rating hint appended at the end
 // of a streamed response (see proxy.Service.feedbackFooter, which owns the
 // canonical text — keep the two in sync). Leading newlines are absorbed so the
 // blank-line separator is removed with the footer. Stripping on ingress keeps
-// the footer (and its signed rate URLs) out of upstream context on later turns,
-// the same failure mode the routing marker had.
-var feedbackFooterPattern = regexp.MustCompile(`\n*_Was this routing right\?_ \[👍\]\([^)]*\) · \[👎\]\([^)]*\)`)
+// the hint out of upstream context on later turns, the same failure mode the
+// routing marker had.
+var feedbackFooterPattern = regexp.MustCompile("\\n*_Was this routing right\\?_ Reply `/rf\\+` 👍 or `/rf-` 👎")
 
 // StripRoutingMarkerFromMessages removes the routing-marker snippet from every
 // text block in messages[*].content[*]. Stripping on ingress keeps it out of

@@ -14,6 +14,7 @@ func TestParseRouterFeedbackCommand(t *testing.T) {
 	tests := []struct {
 		name         string
 		input        string
+		wantRating   string
 		wantFeedback string
 		wantFound    bool
 		wantStripped string
@@ -24,6 +25,45 @@ func TestParseRouterFeedbackCommand(t *testing.T) {
 			wantFeedback: "got stuck on Haiku for too long",
 			wantFound:    true,
 			wantStripped: "",
+		},
+		{
+			name:       "rf plus shortcut is a thumbs up with no note",
+			input:      "/rf+",
+			wantRating: "up",
+			wantFound:  true,
+		},
+		{
+			name:       "rf minus shortcut is a thumbs down with no note",
+			input:      "/rf-",
+			wantRating: "down",
+			wantFound:  true,
+		},
+		{
+			name:         "rf minus shortcut carries a trailing note",
+			input:        "/rf- stuck on haiku for too long",
+			wantRating:   "down",
+			wantFeedback: "stuck on haiku for too long",
+			wantFound:    true,
+		},
+		{
+			name:         "rf with leading thumbs emoji promotes to rating",
+			input:        "/rf 👍 nailed the model choice",
+			wantRating:   "up",
+			wantFeedback: "nailed the model choice",
+			wantFound:    true,
+		},
+		{
+			name:         "rf with leading word down promotes to rating",
+			input:        "/rf down wrong tier for this",
+			wantRating:   "down",
+			wantFeedback: "wrong tier for this",
+			wantFound:    true,
+		},
+		{
+			name:         "note without a verdict keeps empty rating",
+			input:        "/rf the diff was incomplete",
+			wantFeedback: "the diff was incomplete",
+			wantFound:    true,
 		},
 		{
 			name:         "multiline feedback is captured whole",
@@ -103,6 +143,7 @@ func TestParseRouterFeedbackCommand(t *testing.T) {
 			if !tt.wantFound {
 				return
 			}
+			assert.Equal(t, tt.wantRating, res.Rating)
 			assert.Equal(t, tt.wantFeedback, res.Feedback)
 
 			stripped := lastUserMessageText(t, env)
