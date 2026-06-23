@@ -279,3 +279,108 @@ func TestProxyMessages_SingleBindingStreamingPreCommitError(t *testing.T) {
 	assert.Contains(t, respBody, `"type":"error"`, "Anthropic-shape error envelope")
 	assert.Contains(t, respBody, "upstream unavailable", "translated upstream message reaches the client")
 }
+
+// sequencedGeminiClient is a providers.Client that returns a scripted result
+// per call (and captures the prepared body each time) so a test can assert the
+// router re-emitted a different body on retry.
+type sequencedGeminiClient struct {
+	mu        sync.Mutex
+	bodies    [][]byte
+	responses []func(w http.ResponseWriter) error
+}
+
+func (c *sequencedGeminiClient) Proxy(_ context.Context, _ router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, _ *http.Request) error {
+	c.mu.Lock()
+	i := len(c.bodies)
+	c.bodies = append(c.bodies, append([]byte(nil), prep.Body...))
+	c.mu.Unlock()
+	if i < len(c.responses) {
+		return c.responses[i](w)
+	}
+	return nil
+}
+
+func (c *sequencedGeminiClient) Passthrough(_ context.Context, _ providers.PreparedRequest, _ http.ResponseWriter, _ *http.Request) error {
+	return nil
+}
+
+// TestProxyMessages_GeminiValidated400RetriesWithAuto reproduces Jerry's
+// "Request contains an invalid argument" session: a tools-with-no-forced-choice
+// Gemini 3.x turn goes out under functionCallingConfig.mode=VALIDATED, Gemini
+// can't compile a tool schema into its decode grammar and 400s the whole
+// request pre-commit, and the router rescues it by re-emitting the SAME tools
+// under mode=AUTO. Asserts both attempts fire, the second carries AUTO, and the
+// client sees a clean Anthropic stream rather than the upstream 400.
+func TestProxyMessages_GeminiValidated400RetriesWithAuto(t *testing.T) {
+	geminiSSE := `data: {"candidates":[{"content":{"parts":[{"text":"I am an AI assistant."}],"role":"model"},"index":0}]}` + "\n\n" +
+		`data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":4,"totalTokenCount":9}}` + "\n\n"
+
+	client := &sequencedGeminiClient{
+		responses: []func(w http.ResponseWriter) error{
+			// Call 1: VALIDATED-mode INVALID_ARGUMENT, pre-commit (no write).
+			func(http.ResponseWriter) error {
+				return &providers.UpstreamStatusError{Status: http.StatusBadRequest}
+			},
+			// Call 2: AUTO mode compiles fine and streams a valid response.
+			func(w http.ResponseWriter) error {
+				w.WriteHeader(http.StatusOK)
+				_, _ = io.WriteString(w, geminiSSE)
+				return nil
+			},
+		},
+	}
+
+	svc := proxy.NewService(
+		&fakeRouter{decision: router.Decision{Provider: providers.ProviderGoogle, Model: "gemini-3.1-pro-preview"}},
+		map[string]providers.Client{providers.ProviderGoogle: client},
+		nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil,
+	).WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderGoogle: {}})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"gemini-3.1-pro-preview","stream":true,` +
+		`"tools":[{"name":"Read","input_schema":{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"]}}],` +
+		`"messages":[{"role":"user","content":"who are you"}]}`)
+
+	err := svc.ProxyMessages(context.Background(), body, rec, req)
+	require.NoError(t, err, "the AUTO-mode retry must rescue a VALIDATED-mode 400")
+
+	require.Len(t, client.bodies, 2, "first VALIDATED attempt 400s, second AUTO attempt runs")
+	assert.Contains(t, string(client.bodies[0]), `"mode":"VALIDATED"`, "first attempt requested VALIDATED decoding")
+	assert.Contains(t, string(client.bodies[1]), `"mode":"AUTO"`, "the retry downgraded the tool mode to AUTO")
+	assert.NotContains(t, string(client.bodies[1]), `"mode":"VALIDATED"`)
+
+	respBody := rec.Body.String()
+	assert.Contains(t, respBody, "event: message_start", "client sees the rescued Anthropic stream")
+	assert.Contains(t, respBody, "event: message_stop")
+}
+
+// TestProxyMessages_GeminiNon400NotRetried guards the gate: a non-400 Gemini
+// error (e.g. 503) must NOT trigger the AUTO downgrade — that path is reserved
+// for VALIDATED-mode schema-grammar rejections, and re-emitting would waste an
+// upstream call.
+func TestProxyMessages_GeminiNon400NotRetried(t *testing.T) {
+	client := &sequencedGeminiClient{
+		responses: []func(w http.ResponseWriter) error{
+			func(http.ResponseWriter) error {
+				return &providers.UpstreamStatusError{Status: http.StatusServiceUnavailable}
+			},
+		},
+	}
+
+	svc := proxy.NewService(
+		&fakeRouter{decision: router.Decision{Provider: providers.ProviderGoogle, Model: "gemini-3.1-pro-preview"}},
+		map[string]providers.Client{providers.ProviderGoogle: client},
+		nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil,
+	).WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderGoogle: {}})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"gemini-3.1-pro-preview","stream":true,` +
+		`"tools":[{"name":"Read","input_schema":{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"]}}],` +
+		`"messages":[{"role":"user","content":"who are you"}]}`)
+
+	_ = svc.ProxyMessages(context.Background(), body, rec, req)
+
+	assert.Len(t, client.bodies, 1, "a 503 is not a VALIDATED-schema 400 — no AUTO retry")
+}

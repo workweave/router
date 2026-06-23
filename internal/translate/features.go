@@ -30,11 +30,13 @@ type RoutingFeatures struct {
 // FullTokenEstimate returns a conservative token estimate for the entire
 // request body, including tool definitions, tool calls, and tool results
 // that the text-only RoutingFeatures.Tokens estimate misses. Divides raw
-// body bytes by 5 to account for JSON overhead inflating byte count
+// body bytes by 6 to account for JSON overhead and base64 thought-signature
 // relative to actual tokens. Used only for context-window pre-filtering;
 // RoutingFeatures.Tokens remains the routing signal.
 func (e *RequestEnvelope) FullTokenEstimate() int {
-	return len(e.body) / 5
+	// Base64 thought signatures heavily inflate the byte length, often leading
+	// to false context-window evictions for Opus. Divide by 6 to account for this.
+	return len(e.body) / 6
 }
 
 // RoutingFeatures extracts routing inputs from the envelope. When

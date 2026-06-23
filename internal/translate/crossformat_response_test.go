@@ -596,13 +596,11 @@ func TestGeminiToOpenAIResponse_ThoughtSignaturePreserved(t *testing.T) {
 	require.Len(t, tcs, 1)
 	tc, _ := tcs[0].(map[string]any)
 
-	// thoughtSignature round-trips across three locations to bridge Gemini→OpenAI format.
-	sig, _ := tc["thought_signature"].(string)
-	assert.Equal(t, "OPAQUE_SIG_ABC", sig)
-
+	// The signature rides solely in the tool-call id — the one carrier every
+	// client SDK round-trips. No off-spec thought_signature field is emitted.
+	assert.NotContains(t, tc, "thought_signature", "off-spec field must not be emitted")
 	fn, _ := tc["function"].(map[string]any)
-	fnSig, _ := fn["thought_signature"].(string)
-	assert.Equal(t, "OPAQUE_SIG_ABC", fnSig)
+	assert.NotContains(t, fn, "thought_signature", "off-spec field must not be emitted")
 
 	id, _ := tc["id"].(string)
 	encoded := base64.RawURLEncoding.EncodeToString([]byte("OPAQUE_SIG_ABC"))
@@ -729,8 +727,9 @@ func TestGeminiToAnthropicResponse_ThoughtSignaturePreserved(t *testing.T) {
 	blk, _ := blocks[0].(map[string]any)
 	assert.Equal(t, "tool_use", blk["type"])
 
-	sig, _ := blk["thought_signature"].(string)
-	assert.Equal(t, "OPAQUE_SIG_ABC", sig)
+	// The signature rides solely in the tool_use id — the one carrier every
+	// client SDK round-trips. No off-spec thought_signature field is emitted.
+	assert.NotContains(t, blk, "thought_signature", "off-spec field must not be emitted")
 
 	id, _ := blk["id"].(string)
 	encoded := base64.RawURLEncoding.EncodeToString([]byte("OPAQUE_SIG_ABC"))

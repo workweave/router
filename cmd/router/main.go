@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -32,6 +33,7 @@ import (
 	openaiProvider "workweave/router/internal/providers/openai"
 	openaiCompatProvider "workweave/router/internal/providers/openaicompat"
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/proxy/usage"
 	routerpubsub "workweave/router/internal/pubsub"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/banditexplore"
@@ -204,6 +206,10 @@ func main() {
 		if !byokOnly {
 			openaiKey = config.GetOr("OPENAI_API_KEY", "")
 		}
+		// A caller's Codex (ChatGPT) subscription reroutes OpenAI turns to the
+		// Codex backend (chatgpt.com/backend-api/codex) over the Responses API;
+		// that switch lives in the OpenAI client, keyed off the resolved
+		// subscription credential — no separate wiring here.
 		providerMap[providers.ProviderOpenAI] = openaiProvider.NewClient(openaiKey, openaiBaseURL)
 		switch {
 		case byokOnly:
@@ -642,6 +648,46 @@ func main() {
 		}
 		proxySvc = proxySvc.WithExcludedProvidersOverride(cleaned)
 		logger.Info("Provider exclusion override active", "excluded_providers", cleaned)
+	}
+
+	// ROUTER_SUBSCRIPTION_AWARE_ROUTING discounts a covered model's cost term by
+	// the caller's observed subscription rate-limit headroom (see
+	// internal/proxy/usage): ~epsilon when the window has slack, →1 (full price)
+	// as it binds. Off by default — ships dark until validated.
+	// Defaults ON: the discount only affects turns that present a subscription
+	// AND have observed headroom (cold start / non-sub traffic = unchanged), so
+	// the blast radius is narrow. Set ROUTER_SUBSCRIPTION_AWARE_ROUTING=false to
+	// disable without a code change.
+	if config.GetOr("ROUTER_SUBSCRIPTION_AWARE_ROUTING", "true") == "true" {
+		epsilon := 0.05
+		if v, err := strconv.ParseFloat(config.GetOr("ROUTER_SUBSCRIPTION_COST_EPSILON", "0.05"), 64); err == nil {
+			epsilon = v
+		}
+		gamma := 2.0
+		if v, err := strconv.ParseFloat(config.GetOr("ROUTER_SUBSCRIPTION_COST_GAMMA", "2"), 64); err == nil {
+			gamma = v
+		}
+		ttl := 10 * time.Minute
+		if v, err := time.ParseDuration(config.GetOr("ROUTER_SUBSCRIPTION_OBSERVATION_TTL", "10m")); err == nil {
+			ttl = v
+		}
+		salt := make([]byte, 16)
+		if _, err := rand.Read(salt); err != nil {
+			logger.Error("Failed to seed subscription usage observer salt", "err", err)
+			panic(err)
+		}
+		observer := usage.NewObserver(salt, ttl, time.Now)
+		// Bound memory: evict expired observations periodically (the usage package
+		// spawns no goroutines of its own).
+		go func() {
+			t := time.NewTicker(time.Minute)
+			defer t.Stop()
+			for range t.C {
+				observer.Sweep()
+			}
+		}()
+		proxySvc = proxySvc.WithSubscriptionAwareRouting(observer, epsilon, gamma)
+		logger.Info("Subscription-aware routing configured", "epsilon", epsilon, "gamma", gamma, "observation_ttl", ttl)
 	}
 
 	// APM (SigNoz) — adds standard HTTP server spans and Go runtime metrics

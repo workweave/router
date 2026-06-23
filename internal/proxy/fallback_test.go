@@ -670,6 +670,14 @@ func TestShouldFailover(t *testing.T) {
 		ctx := context.WithValue(context.Background(), CredentialsContextKey{}, &Credentials{APIKey: []byte("sk-byok"), Source: "byok"})
 		assert.False(t, s.shouldFailover(ctx))
 	})
+	t.Run("subscription OAuth credential skips failover", func(t *testing.T) {
+		// A subscription token authenticates only against Anthropic; failing
+		// over to another vendor would 401, so it must bind to one provider.
+		s := &Service{}
+		ctx := context.WithValue(context.Background(), CredentialsContextKey{},
+			&Credentials{APIKey: []byte("sk-ant-oat01-token"), Source: "subscription", OAuth: true})
+		assert.False(t, s.shouldFailover(ctx))
+	})
 }
 
 func TestResolveBindingsForDispatch(t *testing.T) {

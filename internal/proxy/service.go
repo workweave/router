@@ -17,6 +17,7 @@ import (
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
+	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/catalog"
@@ -27,6 +28,7 @@ import (
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
+	"github.com/tidwall/sjson"
 )
 
 // Service orchestrates routing decisions and provider dispatch.
@@ -164,11 +166,40 @@ type Service struct {
 	// https://router.workweave.ai), trailing slash trimmed. Empty disables
 	// feedback-link header emission on proxied responses.
 	feedbackBaseURL string
+	// usageObserver records per-credential subscription rate-limit headroom from
+	// upstream response headers; subsidyFactors reads it to discount covered
+	// models' cost term. Nil disables subscription-aware routing entirely (the
+	// header observer is not installed and no factors are computed).
+	usageObserver *usage.Observer
+	// subsidyEpsilon/subsidyGamma parameterize usage.Snapshot.CostFactor: the
+	// floor multiplier for a fully-slack covered model and the curvature that
+	// keeps the factor near epsilon until the window is genuinely near its cap.
+	subsidyEpsilon float64
+	subsidyGamma   float64
 }
 
 // pinSessionTTL mirrors Anthropic's prompt-cache TTL on Sonnet/Haiku/Opus 4.5+
 // so the pin lifecycle tracks the cache it's keeping warm.
 const pinSessionTTL = time.Hour
+
+// pinNeverExpires is the sentinel PinnedUntil for user-forced pins. A
+// /force-model is an explicit, durable user directive — it must persist across
+// arbitrarily long idle gaps and only clear on /unforce-model, never lapse on
+// the cache-driven session TTL. Far enough out to never be reached, well within
+// Postgres's timestamp range; loadPin's PinnedUntil.After(now) check and the
+// pinned_until-based sweep both read it as live indefinitely. /unforce-model
+// rewrites the row with a past PinnedUntil, so the escape hatch still works.
+var pinNeverExpires = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// pinExpiry returns the PinnedUntil to record for a pin with the given decision
+// reason. User-forced pins get the never-expires sentinel; every other pin keeps
+// the sliding one-hour session TTL.
+func pinExpiry(reason string) time.Time {
+	if strings.HasPrefix(reason, translate.ReasonUserForceModel) {
+		return pinNeverExpires
+	}
+	return time.Now().Add(pinSessionTTL)
+}
 
 // prevTurnMaxedOutThreshold is the LastOutputTokens count above which we treat
 // the previous turn as having saturated the output cap. Set just under the
@@ -187,6 +218,25 @@ type ExternalIDContextKey struct{}
 // CredentialsContextKey is the request-context key for resolved per-request credentials.
 type CredentialsContextKey struct{}
 
+// AnthropicSubscriptionContextKey is the request-context key for a caller's raw
+// Claude subscription OAuth token, stashed by the auth middleware from the
+// X-Weave-Anthropic-Subscription header on router-keyed requests.
+type AnthropicSubscriptionContextKey struct{}
+
+// OpenAISubscriptionContextKey and OpenAIAccountIDContextKey are the
+// request-context keys for a caller's raw Codex (ChatGPT) subscription OAuth JWT
+// and its paired ChatGPT-Account-ID, stashed by the auth middleware from the
+// X-Weave-OpenAI-Subscription / X-Weave-OpenAI-Account-ID headers on router-keyed
+// requests.
+type OpenAISubscriptionContextKey struct{}
+type OpenAIAccountIDContextKey struct{}
+
+// codexResponsesBodyContextKey carries the caller's ORIGINAL Responses request
+// body on a Codex (ChatGPT) subscription turn. ProxyOpenAIResponses stashes it
+// so ProxyOpenAIChatCompletion can route normally but dispatch the untranslated
+// Responses body to the Codex backend (its presence marks the passthrough).
+type codexResponsesBodyContextKey struct{}
+
 // InstallationExcludedModelsContextKey is the context key for the authed
 // installation's model exclusion list. Carried as []string.
 type InstallationExcludedModelsContextKey struct{}
@@ -194,6 +244,13 @@ type InstallationExcludedModelsContextKey struct{}
 // InstallationExcludedProvidersContextKey is the context key for the authed
 // installation's provider exclusion list. Carried as []string.
 type InstallationExcludedProvidersContextKey struct{}
+
+// InstallationRoutingKnobsContextKey is the context key for the authed
+// installation's persisted routing preference (the "quality vs price" dial).
+// Carried as *router.Overrides with only Alpha (quality weight) set; the
+// per-request x-weave-routing-* header override takes precedence over it. See
+// routingKnobsForRequest.
+type InstallationRoutingKnobsContextKey struct{}
 
 // installationExcludedModelsFromContext returns the per-installation exclusion
 // list stashed on ctx by the auth middleware, or nil when none is present.
@@ -247,12 +304,26 @@ func routingMarkerFor(res turnLoopResult) string {
 // the marker wording; tests assert the mapping against these constants rather
 // than re-spelling the literals.
 const (
-	markerReasonHardPinned  = "pinned for compaction / sub-agent"
-	markerReasonSwitched    = "switched for positive EV after cache eviction"
-	markerReasonStayed      = "stayed on your last pick"
-	markerReasonTierUpgrade = "upgraded to a stronger tier"
-	markerReasonBestPick    = "best pick for this turn"
+	markerReasonHardPinned    = "pinned for compaction / sub-agent"
+	markerReasonUserForced    = "pinned by force-model"
+	markerReasonLoopEscalated = "escalated due to loop"
+	markerReasonSwitched      = "switched for positive EV after cache eviction"
+	markerReasonStayed        = "stayed on your last pick"
+	markerReasonTierUpgrade   = "upgraded to a stronger tier"
+	markerReasonBestPick      = "best pick for this turn"
+	markerReasonBaseline      = "fell back to baseline after provider outage"
 )
+
+// baselineRoutingMarkerFor renders the routing badge for an in-turn baseline
+// failover. The requested model now serves on Anthropic, so the badge names the
+// baseline model rather than the cost-routed OSS slug that went dark. Honors
+// suggestion mode like routingMarkerFor; the caller applies the opt-out header.
+func baselineRoutingMarkerFor(res turnLoopResult, baselineModel string) string {
+	if res.SuggestionMode || baselineModel == "" {
+		return ""
+	}
+	return "✦ **Weave Router** → " + baselineModel + " · " + markerReasonBaseline + "\n\n"
+}
 
 // routingReasonShort returns a short user-facing reason for the routing
 // decision, or empty when the underlying code is internal recovery noise.
@@ -262,6 +333,12 @@ func routingReasonShort(res turnLoopResult) string {
 	}
 	if res.PlannerDecision.Reason != "" {
 		return humanReasonFromPlanner(res.PlannerDecision.Reason)
+	}
+	switch res.Decision.Reason {
+	case translate.ReasonUserForceModel:
+		return markerReasonUserForced
+	case translate.ReasonLoopEscalation:
+		return markerReasonLoopEscalated
 	}
 	return markerReasonBestPick
 }
@@ -291,6 +368,20 @@ func installationExcludedModelsFromContext(ctx context.Context) []string {
 	}
 	out, _ := v.([]string)
 	return out
+}
+
+// routingKnobsForRequest resolves the routing knobs for a request. The
+// per-request x-weave-routing-* header override (used by the eval harness)
+// wins; otherwise the authed installation's persisted preference applies;
+// otherwise nil leaves the scorer on its tuned bundle defaults.
+func routingKnobsForRequest(ctx context.Context) *router.Overrides {
+	if k := router.RoutingKnobsFromContext(ctx); k != nil {
+		return k
+	}
+	if v, ok := ctx.Value(InstallationRoutingKnobsContextKey{}).(*router.Overrides); ok {
+		return v
+	}
+	return nil
 }
 
 // excludedModelsForRequest returns the request's model exclusion set.
@@ -346,28 +437,35 @@ func (s *Service) excludedProvidersForRequest(ctx context.Context) map[string]st
 // response when comparing the request estimate against the context window.
 const contextWindowOutputReserve = 8_000
 
-// hasContext1MBeta reports whether the anthropic-beta header contains context-1m-2025-08-07.
-func hasContext1MBeta(header http.Header) bool {
-	beta := header.Get("anthropic-beta")
-	if beta == "" {
-		return false
-	}
-	parts := strings.Split(beta, ",")
-	for _, p := range parts {
-		if strings.TrimSpace(p) == "context-1m-2025-08-07" {
-			return true
-		}
-	}
-	return false
+// extendedContextTriggerTokens is the estimated request size (input estimate +
+// output reserve) at which the proxy turns on a CapExtendedContext model's 1M
+// window by injecting the context-1m-2025-08-07 beta. It sits well below the
+// 200K standard window on purpose: FullTokenEstimate (body bytes ÷5)
+// undercounts real tokens by ~20-30% on dense Claude Code bodies, so 140K
+// estimated is roughly 175-200K real tokens — the beta is in place before a
+// request that's truly near 200K reaches the upstream and 400s on the default
+// window. Below this the beta is omitted so ordinary sub-200K turns stay on the
+// standard window (no needless opt-in to long-context behavior/pricing).
+const extendedContextTriggerTokens = 140_000
+
+// shouldEnableExtendedContext reports whether a request is large enough to
+// warrant turning on a CapExtendedContext model's 1M window. Gating on the
+// estimate (rather than always-on) keeps ordinary turns on the standard
+// window; the trigger sits low enough that the ÷5 estimate's undercount can't
+// let a genuinely-near-200K request slip onto the 200K default.
+func shouldEnableExtendedContext(est, outputReserve int) bool {
+	return est+outputReserve > extendedContextTriggerTokens
 }
 
 // contextWindowForRequest returns the effective context window for a model.
-// For models with CapExtendedContext (Opus 4.6+, Sonnet 4.6), returns 1M if the
-// client sent context-1m-2025-08-07 beta; otherwise returns the catalog default (200K).
-// For other models, returns the catalog context window unchanged.
-func contextWindowForRequest(modelID string, extendedContextRequested bool) int {
-	spec := router.Lookup(modelID)
-	if extendedContextRequested && spec.Supports(router.CapExtendedContext) {
+// CapExtendedContext models (Opus 4.6+, Sonnet 4.6) always report 1M: the proxy
+// unconditionally injects the context-1m-2025-08-07 beta when it dispatches to
+// them (EmitOptions.EnableExtendedContext), so the filter must not exclude them
+// for requests that fit 1M. Gating this on the client's beta header — or on the
+// body-byte token estimate — would let a large request slip onto a 200K window
+// it overflows on the first turn. All other models report their catalog window.
+func contextWindowForRequest(modelID string) int {
+	if router.Lookup(modelID).Supports(router.CapExtendedContext) {
 		return 1_000_000
 	}
 	return catalog.ContextWindowFor(modelID)
@@ -378,9 +476,8 @@ func contextWindowForRequest(modelID string, extendedContextRequested bool) int 
 // plus the sorted IDs of the models it newly excluded (for logging).
 // est is the full-body token estimate (translate.RequestEnvelope.FullTokenEstimate).
 // outputReserve is the expected output budget (feats.MaxTokens or the const above).
-// extendedContextRequested indicates whether the client sent context-1m-2025-08-07 beta.
 // Returns the original excluded map unchanged and a nil slice when no models are added.
-func excludeContextOverflowModels(est, outputReserve int, excluded, available map[string]struct{}, extendedContextRequested bool) (map[string]struct{}, []string) {
+func excludeContextOverflowModels(est, outputReserve int, excluded, available map[string]struct{}) (map[string]struct{}, []string) {
 	if est <= 0 {
 		return excluded, nil
 	}
@@ -391,7 +488,7 @@ func excludeContextOverflowModels(est, outputReserve int, excluded, available ma
 		if _, alreadyExcluded := excluded[model]; alreadyExcluded {
 			continue
 		}
-		cw := contextWindowForRequest(model, extendedContextRequested)
+		cw := contextWindowForRequest(model)
 		if needed <= cw {
 			continue
 		}
@@ -508,6 +605,62 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 	}
 	creds, _ := v.(*Credentials)
 	return creds
+}
+
+// anthropicSubscriptionFromContext returns the raw Claude subscription token
+// stashed by the auth middleware (router-keyed path), or "" when none.
+func anthropicSubscriptionFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(AnthropicSubscriptionContextKey{}).(string)
+	return v
+}
+
+// servedOnSubscription reports whether the turn's resolved credential is a
+// subscription OAuth token (Claude or Codex) — i.e. the customer's own plan
+// paid for it, so billing applies only the subscription fee rather than full
+// cost. The credential is read from the same ctx that resolveAndInjectCredentials
+// stamped and dispatch used.
+func servedOnSubscription(ctx context.Context) bool {
+	creds := CredentialsFromContext(ctx)
+	return creds != nil && creds.OAuth
+}
+
+// openaiSubscriptionFromContext / openaiAccountIDFromContext return the raw Codex
+// (ChatGPT) subscription JWT and paired account-id stashed by the auth middleware
+// (router-keyed path), or "" when none.
+func openaiSubscriptionFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(OpenAISubscriptionContextKey{}).(string)
+	return v
+}
+
+func openaiAccountIDFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(OpenAIAccountIDContextKey{}).(string)
+	return v
+}
+
+// codexSubscriptionFromContext resolves a Codex subscription credential from the
+// dedicated router-keyed headers (token + account-id), or nil when either is
+// absent or the pair isn't a usable Codex subscription.
+func codexSubscriptionFromContext(ctx context.Context) *Credentials {
+	return codexSubscriptionCreds(openaiSubscriptionFromContext(ctx), openaiAccountIDFromContext(ctx))
+}
+
+// codexResponsesRequest reports whether this /v1/responses request carries a
+// usable Codex (ChatGPT) subscription — the dedicated header pair, or an inbound
+// Authorization bearer + ChatGPT-Account-ID. When true, ProxyOpenAIResponses
+// routes the turn to the Codex backend instead of the chat-completions canonical
+// path. Mirrors the resolution precedence in resolveAndInjectCredentials so
+// detection and injection never disagree: the inbound-bearer shape is honored
+// even on a router-keyed request (Codex CLI keeps its ChatGPT auth in
+// Authorization while the router key rides in X-Weave-Router-Key), so it must
+// not be gated on the installation being absent.
+func codexResponsesRequest(ctx context.Context, headers http.Header) bool {
+	if codexSubscriptionFromContext(ctx) != nil {
+		return true
+	}
+	if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
+		return true
+	}
+	return false
 }
 
 // DefaultPlannerThresholdUSD is the minimum positive EV over remaining-turn
@@ -997,6 +1150,18 @@ func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName s
 		return err
 	}
 
+	// Claude Code sends its 1M-context model variant tag (e.g.
+	// "claude-opus-4-8[1m]") in the body. It is a client display convention,
+	// not a real Anthropic model id, so a verbatim count_tokens / model-list
+	// passthrough to the native Anthropic API 404s ("the selected model may not
+	// exist"). Strip it to the canonical id; passthrough never rewrites the
+	// model otherwise.
+	if providerName == providers.ProviderAnthropic && len(body) > 0 {
+		if canon, had, cerr := translate.CanonicalizeModelInBody(body); cerr == nil && had {
+			body = canon
+		}
+	}
+
 	var prep providers.PreparedRequest
 	if providerName == providers.ProviderAnthropic && len(body) > 0 {
 		env, parseErr := translate.ParseAnthropic(body)
@@ -1081,7 +1246,51 @@ func truncateBodyForLog(body []byte, head, tail int) (string, bool, int) {
 
 // ProxyMessages routes a raw Anthropic-Messages request body and streams the
 // upstream response back. The routing decision is reflected in x-router-* headers.
+// anthropicNativeAttempt builds the per-binding dispatch closure for an
+// Anthropic-native upstream (no cross-format translation). prep is the
+// emitted body for the attempt's model; the marker sink and usage extractor
+// are rebuilt per attempt off the dispatched decision (d) so a baseline
+// failover that switches the model id renders the routing marker for the
+// model that actually served. setExtractor publishes the attempt's extractor
+// to the caller for post-dispatch token attribution.
+func (s *Service) anthropicNativeAttempt(
+	env *translate.RequestEnvelope,
+	r *http.Request,
+	prep providers.PreparedRequest,
+	sink http.ResponseWriter,
+	preludeBuf *preludeBuffer,
+	marker string,
+	setExtractor func(*otel.UsageExtractor),
+) dispatchAttempt {
+	return func(actx context.Context, d router.Decision, p providers.Client) error {
+		attemptSink := sink
+		if marker != "" {
+			attemptSink = translate.NewAnthropicRoutingMarkerWriter(sink, d.Model, marker)
+		}
+		proxyWriter := attemptSink
+		if s.usageRequired() {
+			ex := otel.NewUsageExtractor(attemptSink, d.Provider)
+			proxyWriter = ex
+			setExtractor(ex)
+		}
+		if preludeBuf != nil {
+			preludeBuf.Seal()
+		}
+		err := p.Proxy(actx, d, prep, proxyWriter, r)
+		// Post-commit streaming error: the routing-marker chunk has already
+		// been flushed past the buffer to the wire; render the upstream error
+		// as an in-stream `data: {...}` frame instead of letting dispatch's
+		// flushErr append a corrupting Anthropic envelope. Pre-commit errors
+		// are handled by dispatchWithFallback (Discard + flushErr).
+		if err != nil && env.Stream() && preludeBuf.Committed() {
+			err = emitAnthropicSSEErrorEvent(sink, err)
+		}
+		return err
+	}
+}
+
 func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
+	ctx = s.withUsageObserver(ctx, r.Header)
 	log := observability.FromContext(ctx)
 	requestStart := time.Now()
 	requestID := uuid.New().String()
@@ -1106,6 +1315,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if stripErr != nil {
 		log.Error("Failed to strip feedback footer from inbound messages", "err", stripErr)
 		return fmt.Errorf("strip feedback footer: %w", stripErr)
+	}
+
+	// Strip Claude Code's 1M-context model variant tag (e.g.
+	// "claude-opus-4-8[1m]") to the canonical catalog id before parsing, so
+	// routing, session pins, and telemetry key off the real model — and so the
+	// tag never reaches a native Anthropic upstream, which 404s on it. The 1M
+	// window is enabled separately, size-triggered via the context-1m beta.
+	if canon, _, modelErr := translate.CanonicalizeModelInBody(body); modelErr != nil {
+		log.Error("Failed to canonicalize inbound model", "err", modelErr)
+	} else {
+		body = canon
 	}
 
 	env, parseErr := translate.ParseAnthropic(body)
@@ -1211,8 +1431,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		outputReserve = feats.MaxTokens
 	}
 	baseExcluded := s.excludedModelsForRequest(ctx)
-	extendedContext := hasContext1MBeta(r.Header)
-	excluded, ctxOverflowed := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserve, baseExcluded, s.availableModels, extendedContext)
+	excluded, ctxOverflowed := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserve, baseExcluded, s.availableModels)
 	if len(ctxOverflowed) > 0 {
 		log.Info("context window pre-filter: excluded over-capacity models",
 			"full_token_estimate", env.FullTokenEstimate(),
@@ -1261,7 +1480,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		PromptText:           promptText,
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excluded,
-		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
+		RoutingKnobs:         routingKnobsForRequest(ctx),
 	})
 	if routeErr != nil {
 		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
@@ -1353,7 +1572,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Skip when a compaction handover rewrote env: the embedding in
 	// decision.Metadata was computed from the pre-handover body, so a cache
 	// hit would return a response built for different upstream context.
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !compactionHandoverRan
+	// Subscription-aware routing makes the chosen model depend on observed quota
+	// headroom, which the semantic-cache key does not capture — so a hit could
+	// return a body from a model chosen under different headroom. Make subsidized
+	// requests cache-ineligible. subsidyFactors early-returns nil when the feature
+	// is off, so OFF deployments pay nothing here.
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !compactionHandoverRan && len(s.subsidyFactors(ctx, r.Header)) == 0
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)
@@ -1424,12 +1648,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	otel.Flush(ctx)
 
 	opts := translate.EmitOptions{
-		TargetModel:        decision.Model,
-		TargetProvider:     decision.Provider,
-		Capabilities:       router.Lookup(decision.Model),
-		IncludeStreamUsage: s.usageRequired(),
-		SessionAffinity:    sessionAffinityHint(routeRes.SessionKey),
-		ModelSwitched:      routeRes.modelSwitched(),
+		TargetModel:           decision.Model,
+		TargetProvider:        decision.Provider,
+		Capabilities:          router.Lookup(decision.Model),
+		IncludeStreamUsage:    s.usageRequired(),
+		SessionAffinity:       sessionAffinityHint(routeRes.SessionKey),
+		ModelSwitched:         routeRes.modelSwitched(),
+		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserve),
 	}
 	if s.effortEscalation {
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
@@ -1493,12 +1718,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// markerSink wraps sink with an AnthropicRoutingMarkerWriter per attempt.
 	// Unlike translator-backed paths, the Anthropic-native writer must wait
 	// for upstream headers so non-2xx responses can stay buffered/retryable.
-	makeMarkerSink := func() http.ResponseWriter {
-		if marker == "" {
-			return sink
-		}
-		return translate.NewAnthropicRoutingMarkerWriter(sink, decision.Model, marker)
-	}
+	setExtractor := func(e *otel.UsageExtractor) { extractor = e }
 	var attempt dispatchAttempt
 	switch decision.Provider {
 	case providers.ProviderAnthropic:
@@ -1508,28 +1728,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			return fmt.Errorf("emit body: %w", emitErr)
 		}
 		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
-		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
-			attemptSink := makeMarkerSink()
-			proxyWriter := attemptSink
-			if s.usageRequired() {
-				extractor = otel.NewUsageExtractor(attemptSink, d.Provider)
-				proxyWriter = extractor
-			}
-			if preludeBuf != nil {
-				preludeBuf.Seal()
-			}
-			err := p.Proxy(actx, d, prep, proxyWriter, r)
-			// Post-commit streaming error: the routing-marker chunk has
-			// already been flushed past the buffer to the wire; render
-			// the upstream error as an in-stream `data: {...}` frame
-			// instead of letting dispatch's flushErr append a corrupting
-			// Anthropic envelope. Pre-commit errors are handled by
-			// dispatchWithFallback (Discard + flushErr).
-			if err != nil && env.Stream() && preludeBuf.Committed() {
-				err = emitAnthropicSSEErrorEvent(sink, err)
-			}
-			return err
-		}
+		attempt = s.anthropicNativeAttempt(env, r, prep, sink, preludeBuf, marker, setExtractor)
 	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
 		crossFormat = true
 		// Prep rebuilt per attempt: targetIsOpenRouter(opts) gates four
@@ -1610,7 +1809,21 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			return fmt.Errorf("translate anthropic request to gemini: %w", emitErr)
 		}
 		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
-		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+		// geminiUsedValidated marks a request that went out with
+		// functionCallingConfig.mode=VALIDATED (Gemini 3.x, tools, unforced
+		// choice). Gemini compiles each tool's parameter schema into a
+		// decode-time grammar under VALIDATED; one it can't compile makes it
+		// reject the whole request with a generic 400 INVALID_ARGUMENT. The
+		// attempt below retries once with mode=AUTO (no grammar compilation)
+		// when nothing has reached the client yet.
+		geminiUsedValidated := prep.Stats.GeminiValidatedToolMode
+		// dispatchGemini does one Gemini call with pr (fresh translator chain +
+		// seal + proxy) and returns the RAW upstream error plus a finalize thunk.
+		// Splitting dispatch from finalize lets the attempt below inspect a
+		// pre-commit 400 before finalize flushes the translators (which would
+		// commit the prelude buffer and foreclose the retry). Translators are
+		// stateful, so a retry rebuilds the chain by calling this again.
+		dispatchGemini := func(actx context.Context, d router.Decision, p providers.Client, pr providers.PreparedRequest) (error, func(error) error) {
 			respSummary = translate.ResponseSummary{}
 			var usage otel.UsageSink
 			if s.usageRequired() {
@@ -1630,37 +1843,161 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				preludeBuf.Seal()
 			}
 			geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, d.Model, nil)
-			err := p.Proxy(actx, d, prep, geminiTr, r)
-			// Post-commit streaming error: see ProxyMessages OpenAI-compat
-			// case for rationale — render upstream error as in-stream
-			// `event: error` rather than corrupt the SSE stream.
-			if err != nil && env.Stream() && preludeBuf.Committed() {
-				err = emitAnthropicSSEErrorEvent(sink, err)
+			rawErr := p.Proxy(actx, d, pr, geminiTr, r)
+			finalize := func(err error) error {
+				// Post-commit streaming error: see ProxyMessages OpenAI-compat
+				// case for rationale — render upstream error as in-stream
+				// `event: error` rather than corrupt the SSE stream.
+				if err != nil && env.Stream() && preludeBuf.Committed() {
+					err = emitAnthropicSSEErrorEvent(sink, err)
+				}
+				err = finalizeAfterProxy(err, geminiTr.Finalize)
+				finErr := finalizeAfterProxy(err, anthropicTr.Finalize)
+				respSummary = anthropicTr.Summary()
+				return finErr
 			}
-			err = finalizeAfterProxy(err, geminiTr.Finalize)
-			finErr := finalizeAfterProxy(err, anthropicTr.Finalize)
-			respSummary = anthropicTr.Summary()
-			return finErr
+			return rawErr, finalize
+		}
+		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			rawErr, finalize := dispatchGemini(actx, d, p, prep)
+			// VALIDATED-mode schema-grammar 400: retry once with mode=AUTO while
+			// nothing has reached the client yet. AUTO only drops the decode-time
+			// grammar constraint, so it can't make a request worse — a non-schema
+			// 400 simply 400s again and surfaces normally. The first attempt's
+			// translators are abandoned (Discard), so its finalize never runs.
+			if rawErr != nil && geminiUsedValidated && !committed(preludeBuf) && upstreamStatus(rawErr) == http.StatusBadRequest {
+				autoOpts := opts
+				autoOpts.DowngradeGeminiValidatedToAuto = true
+				autoPrep, autoErr := env.PrepareGemini(r.Header, autoOpts)
+				if autoErr != nil {
+					log.Error("Failed to re-translate Gemini request with tool mode AUTO", "err", autoErr)
+					return finalize(rawErr)
+				}
+				log.Warn("Retrying Gemini request with functionCallingConfig.mode=AUTO after VALIDATED-mode 400",
+					"model", d.Model,
+					"request_id", requestID)
+				if preludeBuf != nil {
+					preludeBuf.Discard()
+				}
+				reqStats = autoPrep.Stats
+				logUpstreamBody(log, routeRes.SessionKey, d, feats, autoPrep.Body)
+				rawErr, finalize = dispatchGemini(actx, d, p, autoPrep)
+			}
+			return finalize(rawErr)
 		}
 	default:
 		return fmt.Errorf("%w: %s (no translation path defined for inbound Anthropic Messages)", ErrProviderNotConfigured, decision.Provider)
 	}
+
+	// In-turn baseline failover eligibility. When the router cost-routes an
+	// Anthropic-model request to an OSS/Gemini model and every binding for that
+	// model fails (provider outage or model-not-found), the turn should fall
+	// back to the requested model on Anthropic rather than hard-fail with
+	// "the selected model may not exist". Eligible only when: the request isn't
+	// BYOK/inbound-credential bound (those resolve to a single provider),
+	// Anthropic isn't excluded for the installation (otherwise failing over to
+	// Anthropic would violate the exclusion contract — and deferring the OSS
+	// error to a baseline that then can't dispatch would surface a generic
+	// gateway failure instead of the real upstream error), the routed model
+	// isn't already Anthropic, and the baseline is a known Anthropic-served
+	// catalog model distinct from the routed one. Computed pre-dispatch so the
+	// primary dispatch defers its exhaustion flush to us.
+	baselineModel := s.baselineFor(feats.Model)
+	baselineCatalog, baselineKnown := catalog.ByID(baselineModel)
+	_, anthropicExcluded := s.excludedProvidersForRequest(ctx)[providers.ProviderAnthropic]
+	baselineEligible := s.shouldFailover(ctx) &&
+		!anthropicExcluded &&
+		decision.Provider != providers.ProviderAnthropic &&
+		baselineModel != decision.Model &&
+		baselineKnown && baselineCatalog.PrimaryProvider() == providers.ProviderAnthropic
 
 	primaryProvider := decision.Provider
 	var winnerIdx int
 	winnerIdx, proxyErr = s.dispatchWithFallback(ctx, failoverInputs{
 		// contentSink routes the failover-exhaustion error envelope through the
 		// content-capture writer; it is the raw w when capture is off.
-		w:               contentSink,
-		buf:             preludeBuf,
-		initialDecision: decision,
-		bindings:        bindings,
-		attempt:         attempt,
-		flushErr:        flushUpstreamErrorAsAnthropic,
+		w:                      contentSink,
+		buf:                    preludeBuf,
+		initialDecision:        decision,
+		bindings:               bindings,
+		attempt:                attempt,
+		flushErr:               flushUpstreamErrorAsAnthropic,
+		deferFlushOnExhaustion: baselineEligible,
 	})
+
+	// The routed model's bindings all failed with a fault a different model
+	// could satisfy, and nothing reached the client yet — re-dispatch the
+	// requested model on Anthropic. crossFormat/respSummary/reqStats are reset
+	// to their Anthropic-native (no-translator) values so completion telemetry
+	// reflects the binding that actually served.
+	baselineFailoverUsed := false
+	baselineAttempted := false
+	if baselineEligible && proxyErr != nil && !preludeBuf.Committed() &&
+		(providers.IsRetryable(proxyErr) || providers.IsUpstreamModelNotFound(proxyErr)) {
+		baselineDecision := decision
+		baselineDecision.Model = baselineModel
+		baselineDecision.Provider = providers.ProviderAnthropic
+		baselineOpts := opts
+		baselineOpts.TargetModel = baselineModel
+		baselineOpts.TargetProvider = providers.ProviderAnthropic
+		baselineOpts.Capabilities = router.Lookup(baselineModel)
+		// Recompute the switch flag against the baseline model that actually
+		// serves (not the cost-routed OSS id). Otherwise PrepareAnthropic may
+		// leave stale signed thinking blocks the baseline model rejects → 400.
+		baselineOpts.ModelSwitched = routeRes.PriorServedModel != baselineModel || routeRes.SessionEverSwitched
+		if s.effortEscalation {
+			baselineOpts.ForceReasoningEffort = forcedReasoningEffort(baselineModel, routeRes.EscalateEffort)
+		}
+		baselinePrep, baselineEmitErr := env.PrepareAnthropic(r.Header, baselineOpts)
+		if baselineEmitErr != nil {
+			log.Error("Baseline failover: emit Anthropic body failed; surfacing original error", "err", baselineEmitErr, "baseline_model", baselineModel)
+			flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
+		} else {
+			log.Warn("Baseline failover: routed model exhausted, retrying requested model on Anthropic",
+				"failed_model", decision.Model,
+				"failed_provider", primaryProvider,
+				"baseline_model", baselineModel,
+				"err", proxyErr)
+			baselineCtx := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, r.Header)
+			baselineBindings := s.resolveBindingsForDispatch(baselineCtx, baselineDecision)
+			baselineMarker := suppressMarkerIfRequested(r.Header, baselineRoutingMarkerFor(routeRes, baselineModel))
+			baselineAttempt := s.anthropicNativeAttempt(env, r, baselinePrep, sink, preludeBuf, baselineMarker, setExtractor)
+			crossFormat = false
+			respSummary = translate.ResponseSummary{}
+			reqStats = providers.RequestMutationStats{}
+			logUpstreamBody(log, routeRes.SessionKey, baselineDecision, feats, baselinePrep.Body)
+			winnerIdx, proxyErr = s.dispatchWithFallback(baselineCtx, failoverInputs{
+				w:               contentSink,
+				buf:             preludeBuf,
+				initialDecision: baselineDecision,
+				bindings:        baselineBindings,
+				attempt:         baselineAttempt,
+				flushErr:        flushUpstreamErrorAsAnthropic,
+			})
+			decision = baselineDecision
+			bindings = baselineBindings
+			baselineAttempted = true
+			// Reflect whether the baseline actually served the turn — a failed
+			// Anthropic retry must not report baseline_failover=true and skew
+			// bake-off / incident analysis.
+			baselineFailoverUsed = proxyErr == nil
+		}
+	} else if baselineEligible && proxyErr != nil {
+		// We deferred the primary's exhaustion flush but didn't run the baseline
+		// (response committed mid-stream, or a non-failoverable error). Surface
+		// the original upstream error envelope now.
+		flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
+	}
+
 	finalProvider := primaryProvider
 	if winnerIdx >= 0 && winnerIdx < len(bindings) {
 		finalProvider = bindings[winnerIdx].Provider
+	} else if baselineAttempted {
+		// Baseline failover ran but no binding served (winnerIdx == -1). The
+		// last provider attempted was Anthropic with the baseline model, so
+		// finalProvider must match decision.Model rather than reverting to the
+		// OSS primary that never served the requested baseline model.
+		finalProvider = providers.ProviderAnthropic
 	}
 	decision.Provider = finalProvider
 
@@ -1714,6 +2051,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
 		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
 		Float64("cost.actual_output_usd", catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
+		Bool("cost.subscription_served", servedOnSubscription(ctx)).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
@@ -1721,7 +2059,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		String("dispatch.primary_provider", primaryProvider).
 		String("dispatch.final_provider", finalProvider).
 		Int64("dispatch.fallback_attempts", int64(winnerIdx)).
-		Bool("dispatch.failover_used", finalProvider != primaryProvider)
+		Bool("dispatch.failover_used", finalProvider != primaryProvider).
+		Bool("dispatch.baseline_failover", baselineFailoverUsed)
 	applyPlannerAttrs(upstreamBuilder, routeRes)
 	addTimingAttrs(ctx, upstreamBuilder)
 
@@ -1738,7 +2077,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	s.recordCallLog(ctx, upstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
 	otel.Flush(ctx)
 
-	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
+	s.recordTurnUsage(routeRes, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if installationID != uuid.Nil {
 		failoverUsed := finalProvider != primaryProvider
@@ -1881,7 +2220,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		)
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "gemini_validated_tool_mode", reqStats.GeminiValidatedToolMode, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
 	return proxyErr
 }
 
@@ -1952,7 +2291,7 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 	)
 }
 
-func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, cacheRead int) {
+func (s *Service) recordTurnUsage(res turnLoopResult, servedModel string, in, out, cacheCreation, cacheRead int) {
 	if s.pinStore == nil || res.HardPinned {
 		return
 	}
@@ -1969,7 +2308,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, in, out, cacheCreation, ca
 		CachedWriteTokens: cacheCreation,
 		OutputTokens:      out,
 		EndedAt:           time.Now(),
-		ServedModel:       res.Decision.Model,
+		ServedModel:       servedModel,
 	}
 	role := res.PinRole
 	if role == "" {
@@ -2086,6 +2425,52 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 		}
 		out[k.Provider] = struct{}{}
 	}
+	// A caller's Claude subscription enrolls Anthropic for routing
+	// eligibility, mirroring resolveAndInjectCredentials so the scorer can
+	// actually pick a Claude model. The dedicated X-Weave-Anthropic-Subscription
+	// header unambiguously carries only a subscription token, so — like
+	// credential injection — it is honored even on router-keyed requests, past
+	// the installation guard below. Without this a managed request carrying
+	// only a subscription token (no BYOK) leaves Anthropic out of the enabled
+	// set and the scorer fails with ErrNoEligibleProvider before any Claude
+	// turn runs. Anthropic-only: the token can't authenticate any other
+	// upstream. (The self-hosted inbound-bearer path is already covered by the
+	// ExtractClientCredentials block below.)
+	if subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)) != nil {
+		out[providers.ProviderAnthropic] = struct{}{}
+	}
+	// Likewise, a Claude subscription bearer (sk-ant-oat-) in the inbound
+	// Authorization enrolls Anthropic even on router-keyed requests — the
+	// managed Claude Code path keeps its OAuth token there while the router key
+	// rides in X-Weave-Router-Key. Mirrors resolveAndInjectCredentials so the
+	// scorer can pick a Claude model the subscription will pay for. OAuth-subset
+	// only (ExtractClientCredentials gates OAuth to sk-ant-oat-): a general
+	// inbound API key still cannot enroll a provider on the router-key path.
+	if c := ExtractClientCredentials(providers.ProviderAnthropic, headers); c != nil && c.OAuth {
+		out[providers.ProviderAnthropic] = struct{}{}
+	}
+	// A caller's Codex (ChatGPT) subscription enrolls OpenAI for routing
+	// eligibility, mirroring the Anthropic block above so the scorer can pick an
+	// OpenAI model. The dedicated X-Weave-OpenAI-Subscription / -Account-ID
+	// headers unambiguously carry only a subscription, so they are honored even
+	// on router-keyed requests. Enrollment requires BOTH token and account-id
+	// (codexSubscriptionFromContext returns nil without the account-id) so the
+	// scorer can't pick OpenAI for a turn the Codex backend would 401 on for a
+	// missing ChatGPT-Account-ID. OpenAI-only: the JWT can't authenticate any
+	// other upstream.
+	if codexSubscriptionFromContext(ctx) != nil {
+		out[providers.ProviderOpenAI] = struct{}{}
+	}
+	// And, mirroring the Anthropic inbound-bearer block, a Codex subscription
+	// bearer in the inbound Authorization (paired with ChatGPT-Account-ID)
+	// enrolls OpenAI even on router-keyed requests — the managed Codex CLI path
+	// keeps its ChatGPT JWT in Authorization while the router key rides in
+	// X-Weave-Router-Key. OAuth-subset only (ExtractClientCredentials flags
+	// OAuth only for a JWT + account-id pairing): a plain client API key still
+	// cannot enroll OpenAI on the router-key path.
+	if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
+		out[providers.ProviderOpenAI] = struct{}{}
+	}
 	// Passthrough-eligible providers are surface-scoped: a provider
 	// registered without a deployment key joins the eligible set only when
 	// the inbound surface matches. Otherwise an Anthropic-surface request's
@@ -2130,17 +2515,80 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 }
 
 // resolveAndInjectCredentials resolves credentials for provider and stashes
-// them on ctx. When authed via a router key, client-header extraction is
-// skipped — prevents the client's inbound Anthropic key from being
-// forwarded to a different upstream provider. Deployment-level env key on
-// the provider client is the correct fallback in that case.
+// them on ctx, in precedence order: a caller's Claude subscription token
+// (Anthropic only) first, then BYOK, then a client-supplied header credential.
+//
+// Subscription-first lets a caller's own Claude subscription pay for their
+// Claude turns. It arrives one of two ways, both honored even on router-keyed
+// requests: the dedicated X-Weave-Anthropic-Subscription header, or a
+// subscription OAuth bearer (sk-ant-oat-) in the inbound Authorization — the
+// shape Claude Code sends when routed through the Weave Router (router key in
+// X-Weave-Router-Key, its own subscription token left in Authorization).
+//
+// The inbound-bearer path is restricted to the OAuth subset: a general client
+// API key is still NOT extracted on the router-key path, since that would let
+// the client's inbound Anthropic key be forwarded to a different upstream
+// provider. The deployment-level env key on the provider client is the correct
+// fallback in that case.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
+	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
+	if provider == providers.ProviderAnthropic {
+		// Subscription-first (precedence: subscription -> BYOK -> deployment). A
+		// caller's Claude subscription pays for their Claude turns ahead of any
+		// BYOK or deployment key. It arrives via the dedicated header on
+		// router-keyed requests, or — when not router-keyed — as the inbound
+		// Authorization bearer. Resolving it before the BYOK lookup keeps the
+		// precedence explicit here rather than relying on BYOK being absent off
+		// the router-key path (it is today, but a future BYOK-loading path must
+		// not silently outrank the subscription).
+		if sub := subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)); sub != nil {
+			observability.FromContext(ctx).Info("Resolved Claude subscription credential",
+				"credential_source", sub.Source)
+			return context.WithValue(ctx, CredentialsContextKey{}, sub)
+		}
+		// A Claude subscription bearer (sk-ant-oat-) in the inbound Authorization
+		// is honored even on router-keyed requests. Claude Code routed through
+		// the Weave Router keeps its own subscription OAuth token in
+		// Authorization while the router key rides in X-Weave-Router-Key, so a
+		// managed CC turn pays from the caller's own plan without needing the
+		// dedicated header. Restricted to the OAuth subset: ExtractClientCredentials
+		// only sets OAuth for sk-ant-oat-, so a general inbound API key is still
+		// NOT forwarded on the router-key path (the cross-provider-leak guard
+		// below still applies to it).
+		if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
+			observability.FromContext(ctx).Info("Resolved Claude subscription credential",
+				"credential_source", inbound.Source)
+			return context.WithValue(ctx, CredentialsContextKey{}, inbound)
+		}
+	}
+	if provider == providers.ProviderOpenAI {
+		// Codex (ChatGPT) subscription-first (precedence: subscription -> BYOK ->
+		// deployment), mirroring the Anthropic block above. The dedicated headers
+		// carry token + account-id on router-keyed requests.
+		if sub := codexSubscriptionFromContext(ctx); sub != nil {
+			observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", sub.Source)
+			return context.WithValue(ctx, CredentialsContextKey{}, sub)
+		}
+		// A Codex subscription bearer (ChatGPT OAuth JWT paired with a
+		// ChatGPT-Account-ID) in the inbound Authorization is honored even on
+		// router-keyed requests. Codex CLI routed through the Weave Router keeps
+		// its own ChatGPT auth in Authorization while the router key rides in
+		// X-Weave-Router-Key, so a managed Codex turn pays from the caller's own
+		// plan without needing the dedicated header. Restricted to the OAuth
+		// subset: ExtractClientCredentials flags OAuth only for a JWT + account-id
+		// pairing, so a general inbound OpenAI API key is still NOT forwarded on
+		// the router-key path (the cross-provider-leak guard below still applies).
+		if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
+			observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", inbound.Source)
+			return context.WithValue(ctx, CredentialsContextKey{}, inbound)
+		}
+	}
 	byok := BuildCredentialsMap(externalKeysFromContext(ctx))
 	var creds *Credentials
 	if byok != nil {
 		creds = byok[provider]
 	}
-	if creds == nil && installationIDFromContext(ctx) == (uuid.UUID{}) {
+	if creds == nil && !routerKeyed {
 		creds = ExtractClientCredentials(provider, headers)
 	}
 	if creds != nil {
@@ -2301,18 +2749,22 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 	}
 	hasOverride := billing.HasOverrideFromContext(ctx)
 	s.fireBilling(ctx, billing.DebitInferenceParams{
-		OrganizationID:  externalID,
-		RouterRequestID: requestID,
-		Model:           decision.Model,
-		Provider:        decision.Provider,
-		InputTokens:     in,
-		OutputTokens:    out,
-		CacheCreation:   cacheCreation,
-		CacheRead:       cacheRead,
-		Pricing:         actPricing,
-		HasOverride:     hasOverride,
+		OrganizationID:     externalID,
+		RouterRequestID:    requestID,
+		Model:              decision.Model,
+		Provider:           decision.Provider,
+		InputTokens:        in,
+		OutputTokens:       out,
+		CacheCreation:      cacheCreation,
+		CacheRead:          cacheRead,
+		Pricing:            actPricing,
+		HasOverride:        hasOverride,
+		SubscriptionServed: servedOnSubscription(ctx),
 	})
 
+	// The handover summary runs on the deployment/BYOK key (never the
+	// subscription token — see resolveSummarizerCreds), so it bills at full
+	// cost regardless of whether the main turn was subscription-served.
 	if routeRes.Handover.Invoked && !routeRes.Handover.FallbackToFullHistory {
 		sumUsage := routeRes.Handover.SummaryUsage
 		if sumUsage.Model != "" && (sumUsage.InputTokens > 0 || sumUsage.OutputTokens > 0) {
@@ -2368,6 +2820,7 @@ func (s *Service) fireBilling(ctx context.Context, p billing.DebitInferenceParam
 			"model", p.Model,
 			"balance_usd_micros", balance,
 			"override", p.HasOverride,
+			"subscription_served", p.SubscriptionServed,
 		)
 		return
 	}
@@ -2390,6 +2843,7 @@ func logBillingDebitFailure(ctx context.Context, p billing.DebitInferenceParams,
 		"cache_creation_tokens", p.CacheCreation,
 		"cache_read_tokens", p.CacheRead,
 		"has_override", p.HasOverride,
+		"subscription_served", p.SubscriptionServed,
 	)
 }
 
@@ -2430,6 +2884,7 @@ func finalizeAfterProxy(proxyErr error, fn func() error) error {
 // ProxyOpenAIChatCompletion routes an OpenAI Chat Completion request,
 // translating cross-format when the decision picks a non-OpenAI provider.
 func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
+	ctx = s.withUsageObserver(ctx, r.Header)
 	log := observability.FromContext(ctx)
 	requestStart := time.Now()
 	requestID := uuid.New().String()
@@ -2535,13 +2990,31 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header)
 
+	// Codex (ChatGPT) subscription passthrough: ProxyOpenAIResponses stashed the
+	// caller's original Responses body. Such turns skip the chat-completions
+	// routing marker + semantic cache below, and — when the routed decision is
+	// an OpenAI model — dispatch the verbatim Responses body to the Codex backend
+	// (see the codexPassthrough branch in the dispatch switch).
+	//
+	// We deliberately do NOT force OpenAI-only routing here. enabledProviders
+	// (from enabledProvidersForRequest) already scopes the request to providers
+	// it can pay for: a lone Codex sub yields {OpenAI} on its own, but a caller
+	// presenting both a Codex and a Claude subscription gets {OpenAI, Anthropic}
+	// and routes freely across them — GPT turns bill the ChatGPT plan via the
+	// Codex backend, Claude turns bill the Claude plan via the translated path.
+	// Subscriptions are credentials scoped to the routed model, not a provider
+	// you pin. (No current client sends multiple subs, so this is behavior-
+	// preserving today; it unlocks the unified-provider client.)
+	codexBody, _ := ctx.Value(codexResponsesBodyContextKey{}).([]byte)
+	codexPassthrough := len(codexBody) > 0
+
 	// Pre-filter models whose context window cannot fit this request.
 	outputReserveOAI := contextWindowOutputReserve
 	if feats.MaxTokens > outputReserveOAI {
 		outputReserveOAI = feats.MaxTokens
 	}
 	baseExcludedOAI := s.excludedModelsForRequest(ctx)
-	excludedOAI, ctxOverflowedOAI := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserveOAI, baseExcludedOAI, s.availableModels, false)
+	excludedOAI, ctxOverflowedOAI := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserveOAI, baseExcludedOAI, s.availableModels)
 	if len(ctxOverflowedOAI) > 0 {
 		log.Info("context window pre-filter: excluded over-capacity models",
 			"full_token_estimate", env.FullTokenEstimate(),
@@ -2570,7 +3043,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		PromptText:           promptText,
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excludedOAI,
-		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
+		RoutingKnobs:         routingKnobsForRequest(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {
@@ -2585,7 +3058,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	pinAgeSec := routeRes.PinAgeSec
 	s.logPlannerOutcome(ctx, routeRes)
 
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval
+	// See the ProxyMessages cache-eligibility note: subsidized requests bypass the
+	// semantic cache (the key doesn't capture headroom-dependent model choice).
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !codexPassthrough && len(s.subsidyFactors(ctx, r.Header)) == 0
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)
@@ -2656,12 +3131,13 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	otel.Flush(ctx)
 
 	opts := translate.EmitOptions{
-		TargetModel:        decision.Model,
-		TargetProvider:     decision.Provider,
-		Capabilities:       router.Lookup(decision.Model),
-		IncludeStreamUsage: s.usageRequired(),
-		SessionAffinity:    sessionAffinityHint(routeRes.SessionKey),
-		ModelSwitched:      routeRes.modelSwitched(),
+		TargetModel:           decision.Model,
+		TargetProvider:        decision.Provider,
+		Capabilities:          router.Lookup(decision.Model),
+		IncludeStreamUsage:    s.usageRequired(),
+		SessionAffinity:       sessionAffinityHint(routeRes.SessionKey),
+		ModelSwitched:         routeRes.modelSwitched(),
+		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserveOAI),
 	}
 	if s.effortEscalation {
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
@@ -2694,9 +3170,27 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// when single-binding so multi-binding requests stay failover-safe
 	// (Codex client sees response.created via ResponsesWriter's lazy
 	// emitCreated on the first upstream byte instead).
-	if rw, ok := w.(*translate.ResponsesWriter); ok && len(bindings) <= 1 {
-		if err := rw.Prelude(env.Stream()); err != nil {
-			log.Error("Responses prelude failed", "err", err)
+	if rw, ok := w.(*translate.ResponsesWriter); ok {
+		// A Codex-sub turn that routed to the Codex backend (decision == OpenAI)
+		// streams Responses SSE natively — forward it verbatim. A Codex-sub turn
+		// that routed elsewhere (Claude/OSS) leaves the writer in translate mode
+		// so its chat/Anthropic output is re-emitted as Responses.
+		//
+		// Set once here (before Prelude) rather than per-attempt because Prelude's
+		// response.created suppression depends on passthrough being engaged before
+		// the first write. Safe across the dispatch loop: passthrough engages only
+		// when decision.Provider == OpenAI, which in the catalog is always a
+		// single-binding GPT model — there is no cross-format fallback binding to
+		// fail over to, and single-binding retry re-hits OpenAI (still verbatim).
+		// The per-attempt body below is independently gated on d.Provider == OpenAI.
+		// If a GPT model ever gains a cross-format fallback, gate this per-attempt.
+		if codexPassthrough && decision.Provider == providers.ProviderOpenAI {
+			rw.SetPassthrough()
+		}
+		if len(bindings) <= 1 {
+			if err := rw.Prelude(env.Stream()); err != nil {
+				log.Error("Responses prelude failed", "err", err)
+			}
 		}
 	}
 
@@ -2708,6 +3202,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
+	if codexPassthrough {
+		// The client receives raw Responses SSE from the Codex backend; a
+		// chat-completions routing-marker chunk would corrupt that stream.
+		marker = ""
+	}
 	_, isResponses := w.(*translate.ResponsesWriter)
 	// markerSink wraps sink with an OpenAIRoutingMarkerWriter that emits
 	// the routing-marker chunk + HTTP 200 eagerly (Prelude). Skipped when
@@ -2739,12 +3238,31 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		// Bedrock primary should not see. On failover to OpenRouter the
 		// body must be re-emitted with TargetProvider = openrouter.
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
-			attemptOpts := opts
-			attemptOpts.TargetProvider = d.Provider
-			prep, emitErr := env.PrepareOpenAI(r.Header, attemptOpts)
-			if emitErr != nil {
-				log.Error("Failed to emit OpenAI body", "err", emitErr, "decision_provider", d.Provider)
-				return fmt.Errorf("emit body: %w", emitErr)
+			var prep providers.PreparedRequest
+			if codexPassthrough && d.Provider == providers.ProviderOpenAI {
+				// Dispatch the caller's ORIGINAL Responses body (untranslated)
+				// to the Codex backend, rewriting only the model to the routed
+				// pick. The OpenAI client switches to chatgpt.com/backend-api/
+				// codex when it sees the Codex subscription credential. Gated on
+				// d.Provider == OpenAI: a Codex-sub turn that routes to an OSS
+				// provider in this case (OpenRouter/Fireworks/…) must NOT ship a
+				// verbatim Responses body there — it gets the translated chat
+				// body below, like any other turn.
+				outBody, setErr := sjson.SetBytes(codexBody, "model", d.Model)
+				if setErr != nil {
+					log.Error("Failed to set routed model on Codex Responses body", "err", setErr, "decision_model", d.Model)
+					return fmt.Errorf("set codex model: %w", setErr)
+				}
+				prep = providers.PreparedRequest{Body: outBody, Endpoint: providers.EndpointResponses, Headers: make(http.Header)}
+			} else {
+				attemptOpts := opts
+				attemptOpts.TargetProvider = d.Provider
+				var emitErr error
+				prep, emitErr = env.PrepareOpenAI(r.Header, attemptOpts)
+				if emitErr != nil {
+					log.Error("Failed to emit OpenAI body", "err", emitErr, "decision_provider", d.Provider)
+					return fmt.Errorf("emit body: %w", emitErr)
+				}
 			}
 			attemptSink := makeMarkerSink()
 			proxyWriter := attemptSink
@@ -2762,7 +3280,15 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			// instead of letting dispatch's flushErr append a corrupting
 			// JSON envelope. Pre-commit errors are handled by
 			// dispatchWithFallback (Discard + flushErr).
-			if err != nil && env.Stream() && preludeBuf.Committed() {
+			// Gate on THIS attempt being the verbatim Codex backend, not on
+			// codexPassthrough alone: post-Phase-1 that flag only means a Codex
+			// body was stashed, and a Codex-sub turn can route to Claude/OSS,
+			// which streams through the translating ResponsesWriter and still
+			// needs an error frame just like any non-sub Responses turn. Only the
+			// verbatim Codex attempt already delivered the upstream's own
+			// Responses error event, so only it skips the chat-completions frame.
+			verbatimCodex := codexPassthrough && d.Provider == providers.ProviderOpenAI
+			if err != nil && !verbatimCodex && env.Stream() && preludeBuf.Committed() {
 				err = emitOpenAISSEErrorEvent(sink, err)
 			}
 			return err
@@ -2774,7 +3300,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			log.Error("Failed to translate OpenAI request to Gemini format", "err", emitErr)
 			return fmt.Errorf("translate openai request to gemini: %w", emitErr)
 		}
-		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+		// See ProxyMessages' Gemini case: a VALIDATED-mode request can 400 with a
+		// generic INVALID_ARGUMENT when Gemini can't compile a tool schema into
+		// its decode-time grammar. Retry once with mode=AUTO when pre-commit.
+		geminiUsedValidated := prep.Stats.GeminiValidatedToolMode
+		dispatchGemini := func(actx context.Context, d router.Decision, p providers.Client, pr providers.PreparedRequest) (error, func(error) error) {
 			var usage otel.UsageSink
 			if s.usageRequired() {
 				extractor = otel.NewUsageExtractor(nil, d.Provider)
@@ -2785,12 +3315,35 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			if preludeBuf != nil {
 				preludeBuf.Seal()
 			}
-			err := p.Proxy(actx, d, prep, translator, r)
-			// Post-commit streaming error: see same-format OpenAI case above.
-			if err != nil && env.Stream() && preludeBuf.Committed() {
-				err = emitOpenAISSEErrorEvent(sink, err)
+			rawErr := p.Proxy(actx, d, pr, translator, r)
+			finalize := func(err error) error {
+				// Post-commit streaming error: see same-format OpenAI case above.
+				if err != nil && env.Stream() && preludeBuf.Committed() {
+					err = emitOpenAISSEErrorEvent(sink, err)
+				}
+				return finalizeAfterProxy(err, translator.Finalize)
 			}
-			return finalizeAfterProxy(err, translator.Finalize)
+			return rawErr, finalize
+		}
+		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
+			rawErr, finalize := dispatchGemini(actx, d, p, prep)
+			if rawErr != nil && geminiUsedValidated && !committed(preludeBuf) && upstreamStatus(rawErr) == http.StatusBadRequest {
+				autoOpts := opts
+				autoOpts.DowngradeGeminiValidatedToAuto = true
+				autoPrep, autoErr := env.PrepareGemini(r.Header, autoOpts)
+				if autoErr != nil {
+					log.Error("Failed to re-translate Gemini request with tool mode AUTO", "err", autoErr)
+					return finalize(rawErr)
+				}
+				log.Warn("Retrying Gemini request with functionCallingConfig.mode=AUTO after VALIDATED-mode 400",
+					"model", d.Model,
+					"request_id", requestID)
+				if preludeBuf != nil {
+					preludeBuf.Discard()
+				}
+				rawErr, finalize = dispatchGemini(actx, d, p, autoPrep)
+			}
+			return finalize(rawErr)
 		}
 	case providers.ProviderAnthropic:
 		crossFormat = true
@@ -2882,6 +3435,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
 		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
 		Float64("cost.actual_output_usd", catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M)).
+		Bool("cost.subscription_served", servedOnSubscription(ctx)).
 		Int64("latency.upstream_ms", proxyMs).
 		Int64("latency.total_ms", time.Since(requestStart).Milliseconds()).
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
@@ -2922,7 +3476,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		emitCallLog()
 	}
 
-	s.recordTurnUsage(routeRes, in, out, cacheCreation, cacheRead)
+	s.recordTurnUsage(routeRes, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
@@ -2997,9 +3551,24 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 // re-emitted as Responses-shaped SSE / JSON. This keeps the turn loop, cache,
 // pricing, and translation matrix unchanged.
 func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
+	ctx = s.withUsageObserver(ctx, r.Header)
 	chatBody, _, model, err := translate.ResponsesToChatCompletions(body)
 	if err != nil {
 		return fmt.Errorf("translate responses request: %w", err)
+	}
+	// Codex (ChatGPT) subscription: stash the caller's ORIGINAL Responses body.
+	// A turn that resolves a Codex sub AND routes to the Codex backend
+	// (decision == OpenAI) is dispatched verbatim and streamed back with the
+	// ResponsesWriter in passthrough mode (set post-routing in
+	// ProxyOpenAIChatCompletion), so reasoning/tool/encrypted content is never
+	// lossily re-translated. A Codex-sub turn that routes elsewhere
+	// (Claude/OSS — possible once both subs are presented) falls through to the
+	// normal chat->Responses translation, exactly like a non-sub Responses turn.
+	// Either way the writer is a ResponsesWriter; only the per-decision mode
+	// differs. Routing, billing (5% subscription fee), and telemetry are reused
+	// via ProxyOpenAIChatCompletion (chatBody feeds routing only).
+	if codexResponsesRequest(ctx, r.Header) {
+		ctx = context.WithValue(ctx, codexResponsesBodyContextKey{}, body)
 	}
 	wrapper := translate.NewResponsesWriter(w, model)
 	// Defer the high-fidelity call-log emission until after Finalize: the
@@ -3020,9 +3589,15 @@ func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.
 	// commits.
 	proxyErr := s.ProxyOpenAIChatCompletion(ctx, chatBody, wrapper, r)
 	if proxyErr != nil {
-		// On error, let the handler write the error envelope unless we've
-		// already committed to streaming — in which case the chat-completions
-		// path will have surfaced a status error and we just propagate.
+		// If the Responses stream already committed (response.created is on the
+		// wire), the upstream error can no longer be rendered as a JSON error
+		// envelope — terminate the SSE stream with response.failed so the client
+		// (Codex) sees a clean failure instead of "stream closed before
+		// response.completed". A no-op before anything is streamed, so the
+		// handler still writes the JSON error envelope in that case.
+		if finErr := wrapper.FinalizeError(proxyErr); finErr != nil {
+			observability.FromContext(ctx).Error("Failed to finalize Responses error stream", "err", finErr)
+		}
 		deferredLog.run()
 		return proxyErr
 	}

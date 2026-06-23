@@ -183,4 +183,76 @@ func TestPrepareGemini_NoToolsNoValidated(t *testing.T) {
 
 	doc := unmarshalBody(t, prep.Body)
 	assert.NotContains(t, doc, "toolConfig", "no tools → nothing to constrain")
+	assert.False(t, prep.Stats.GeminiValidatedToolMode, "no tools → VALIDATED was not emitted")
+}
+
+func TestPrepareGemini_ValidatedModeReportedInStats(t *testing.T) {
+	env, err := translate.ParseAnthropic([]byte(anthropicToolsRequest))
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+	require.NoError(t, err)
+
+	assert.True(t, prep.Stats.GeminiValidatedToolMode,
+		"a VALIDATED-mode emission must be reported so the proxy can decide on an AUTO retry")
+}
+
+func TestPrepareGemini_DowngradeValidatedToAuto(t *testing.T) {
+	// The proxy sets DowngradeGeminiValidatedToAuto on a retry after a
+	// VALIDATED-mode INVALID_ARGUMENT 400. The same tools-with-no-forced-choice
+	// request must now emit mode=AUTO so Gemini skips schema-grammar compilation.
+	env, err := translate.ParseAnthropic([]byte(anthropicToolsRequest))
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{
+		TargetModel:                    "gemini-3.1-pro-preview",
+		DowngradeGeminiValidatedToAuto: true,
+	})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	fcc := getMap(t, doc, "toolConfig")["functionCallingConfig"].(map[string]any)
+	assert.Equal(t, "AUTO", fcc["mode"], "the downgrade replaces VALIDATED with AUTO")
+	assert.False(t, prep.Stats.GeminiValidatedToolMode,
+		"once downgraded the request no longer uses VALIDATED, so a second retry must not fire")
+}
+
+func TestPrepareGemini_DowngradeValidatedToAutoFromOpenAIIngress(t *testing.T) {
+	body := `{
+	  "model":"gpt-4o","max_tokens":1024,
+	  "tools":[{"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"]}}}],
+	  "messages":[{"role":"user","content":"read main.go"}]
+	}`
+	env, err := translate.ParseOpenAI([]byte(body))
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{
+		TargetModel:                    "gemini-3.1-pro-preview",
+		DowngradeGeminiValidatedToAuto: true,
+	})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	fcc := getMap(t, doc, "toolConfig")["functionCallingConfig"].(map[string]any)
+	assert.Equal(t, "AUTO", fcc["mode"])
+}
+
+func TestPrepareGemini_DowngradeNoOpWhenForcedChoice(t *testing.T) {
+	// A forced tool_choice never went out as VALIDATED, so the downgrade flag is
+	// a no-op: the explicit choice is preserved and no retry is signalled.
+	body := `{
+	  "model":"claude-opus-4-8","max_tokens":4096,
+	  "tools":[{"name":"Read","input_schema":{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"]}}],
+	  "tool_choice":{"type":"tool","name":"Read"},
+	  "messages":[{"role":"user","content":"read main.go"}]
+	}`
+	env, err := translate.ParseAnthropic([]byte(body))
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{
+		TargetModel:                    "gemini-3.1-pro-preview",
+		DowngradeGeminiValidatedToAuto: true,
+	})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	fcc := getMap(t, doc, "toolConfig")["functionCallingConfig"].(map[string]any)
+	assert.Equal(t, "ANY", fcc["mode"], "a forced tool_choice is untouched by the downgrade")
+	assert.False(t, prep.Stats.GeminiValidatedToolMode)
 }

@@ -12,6 +12,7 @@ import (
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/providers/anthropic"
+	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 
 	"github.com/stretchr/testify/assert"
@@ -123,6 +124,104 @@ func TestProxy_RouterKeyDoesNotOverrideConfiguredAnthropicKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, gotAuth, "configured router Anthropic key should own upstream auth")
 	assert.Equal(t, "router-anthropic-key", gotAPIKey)
+}
+
+func TestProxy_SubscriptionOAuthCredentialUsesBearerAndBetaHeader(t *testing.T) {
+	var (
+		gotAuth   string
+		gotAPIKey string
+		gotBeta   string
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("x-api-key")
+		gotBeta = r.Header.Get("anthropic-beta")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1"}`))
+	}))
+	defer upstream.Close()
+
+	// Deployment key is configured, but a resolved subscription OAuth credential
+	// must win and authenticate via Bearer — never x-api-key.
+	c := anthropic.NewClient("deployment-key", upstream.URL)
+	ctx := context.WithValue(context.Background(), proxy.CredentialsContextKey{},
+		&proxy.Credentials{APIKey: []byte("sk-ant-oat01-subscription-token"), Source: "subscription", OAuth: true})
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+
+	// Pre-seed a model-capability-filtered beta token to prove it is preserved,
+	// not clobbered, when the oauth flag is merged in.
+	headers := make(http.Header)
+	headers.Set("anthropic-beta", "fine-grained-tool-streaming-2025-05-14")
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"x"}`), Headers: headers}
+
+	err := c.Proxy(ctx, router.Decision{Model: "claude-opus-4-8"}, prep, rec, clientReq)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Bearer sk-ant-oat01-subscription-token", gotAuth)
+	assert.Empty(t, gotAPIKey, "a subscription OAuth credential must NOT send x-api-key (would 401)")
+	assert.Contains(t, gotBeta, "oauth-2025-04-20", "subscription tokens require the oauth beta flag on /v1/messages")
+	assert.Contains(t, gotBeta, "fine-grained-tool-streaming-2025-05-14",
+		"merging the oauth flag must preserve the model-capability-filtered beta tokens")
+}
+
+func TestProxy_NonOAuthCredentialUsesAPIKey(t *testing.T) {
+	var (
+		gotAuth   string
+		gotAPIKey string
+		gotBeta   string
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("x-api-key")
+		gotBeta = r.Header.Get("anthropic-beta")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1"}`))
+	}))
+	defer upstream.Close()
+
+	c := anthropic.NewClient("deployment-key", upstream.URL)
+	ctx := context.WithValue(context.Background(), proxy.CredentialsContextKey{},
+		&proxy.Credentials{APIKey: []byte("sk-ant-api-byok"), Source: "byok"})
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"x"}`), Headers: make(http.Header)}
+
+	err := c.Proxy(ctx, router.Decision{Model: "claude-opus-4-8"}, prep, rec, clientReq)
+	require.NoError(t, err)
+
+	assert.Equal(t, "sk-ant-api-byok", gotAPIKey)
+	assert.Empty(t, gotAuth, "a non-OAuth credential authenticates via x-api-key, not Authorization")
+	assert.NotContains(t, gotBeta, "oauth-2025-04-20", "the oauth beta flag must only be added for subscription tokens")
+}
+
+func TestProxy_PassesThroughInboundSubscriptionWithBetaHeader(t *testing.T) {
+	var (
+		gotAuth string
+		gotBeta string
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotBeta = r.Header.Get("anthropic-beta")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1"}`))
+	}))
+	defer upstream.Close()
+
+	// Self-hosted pure passthrough: no deployment key, no resolved credential —
+	// the caller's own subscription bearer rides the inbound Authorization and
+	// must still get the oauth beta flag.
+	c := anthropic.NewClient("", upstream.URL)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	clientReq.Header.Set("Authorization", "Bearer sk-ant-oat01-subscription-token")
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"x"}`), Headers: make(http.Header)}
+
+	err := c.Proxy(context.Background(), router.Decision{Model: "claude-opus-4-8"}, prep, rec, clientReq)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Bearer sk-ant-oat01-subscription-token", gotAuth, "inbound subscription bearer must pass through verbatim")
+	assert.Contains(t, gotBeta, "oauth-2025-04-20", "a passed-through subscription bearer must still get the oauth beta flag")
 }
 
 func TestProxy_BuffersUpstream4xx(t *testing.T) {

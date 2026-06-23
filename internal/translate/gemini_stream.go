@@ -266,8 +266,10 @@ func (t *GeminiToOpenAISSETranslator) emitTextDelta(text string) error {
 }
 
 // emitToolCallChunk emits an OpenAI tool_calls delta with a full arguments JSON
-// in one chunk. thoughtSignature is smuggled as function.thought_signature so the
-// next request can round-trip it.
+// in one chunk. A Gemini thoughtSignature is smuggled into the tool-call id
+// (embedSignatureInID) — a typed string every client SDK round-trips — so the
+// next request can replay it without relying on an off-spec field that typed
+// SDKs drop and Anthropic upstreams reject.
 func (t *GeminiToOpenAISSETranslator) emitToolCallChunk(idx int, name, argsRaw, sig string) error {
 	id := embedSignatureInID(generateToolCallID(), sig)
 	t.writeChunkHeader()
@@ -280,10 +282,6 @@ func (t *GeminiToOpenAISSETranslator) emitToolCallChunk(idx int, name, argsRaw, 
 	t.bw.WriteString(`,"arguments":`)
 	// arguments must be a JSON-encoded string in OpenAI's wire format.
 	sse.WriteJSONString(t.bw, argsRaw)
-	if sig != "" {
-		t.bw.WriteString(`,"thought_signature":`)
-		sse.WriteJSONString(t.bw, sig)
-	}
 	t.bw.WriteString(`}}]},"finish_reason":null}]}`)
 	t.bw.WriteString("\n\n")
 	return t.flushEvent()

@@ -1,0 +1,179 @@
+format_version: 2
+version: "v0.69"
+parent: null
+status: "candidate"
+promoted_date: "2026-06-22"
+embedder:
+  model: "jina-v2-base-code-int8"
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 16
+  top_p: 4
+  alpha: 0.96
+  shrinkage_k0: 10.0
+  score_normalization: "per_prompt_zscore_across_bench_columns"
+  per_model_zscore: false
+  seed: 42
+  n_prompts: 1492
+  training_data_mix:
+    d1: 1.0
+    d2: 0.0
+    d3: 0.0
+  output_cost_ratio: 0.0
+  speed_weight: 0.0
+  expected_output_tokens: 2000
+  per_model_verbosity: true
+  include_routerarena_labels: "routerarena_labels_combined.jsonl"
+  routerarena_only: false
+  bench_coding_only: false
+  include_benchmark_corpus: true
+  benchmark_corpus_loaders: "aider-polyglot-go,aider-polyglot-rust-cpp-java,livecodebench-ts-and-aider-polyglot-ts,bfcl-v4-simple,bfcl-v4-parallel-multi"
+  source_fractions:
+    routerarena: 0.1
+  exclude_prompts: null
+  n_excluded_prompts: 0
+  include_aa_labels: "aa_quality_priors_v0.77.json"
+  aa_evidence_scale: 3.0
+  cold_model_aa_boost: 1.0
+  aa_label_tier_weights:
+    AIDER_POLYGLOT_GO: 1.0
+    AIDER_POLYGLOT_RUST_CPP_JAVA: 1.0
+    BFCL_V4_PARALLEL_MULTI: 0.8
+    BFCL_V4_SIMPLE: 0.3
+    GPQA_DIAMOND: 0.3
+    IFBENCH: 0.3
+    LIVECODEBENCH: 1.0
+    LIVECODEBENCH_TS: 1.0
+    MATH_500: 0.3
+    MMLU_PRO: 0.3
+    SCICODE: 1.0
+    SWE_BENCH_VERIFIED: 1.0
+    TAU2_BENCH_TELECOM: 1.0
+    TERMINAL_BENCH_HARD: 1.0
+  aa_label_residuals:
+    fraction_under_threshold: 0.5393258426966292
+    max: 0.2946572626892831
+    mean: 0.06566545151599387
+    median: 0.04272107916522916
+    n_cells: 178
+    p90: 0.17896050393878216
+  include_deepswe_labels: "deepswe_quality_priors_v0.77.json"
+  deepswe_evidence_scale: 1.0
+  cold_deepswe_boost: 1.0
+  deepswe_label_meta:
+    source: "datacurve deep-swe (v1 + v1.1)"
+    ingest_date: "2026-06-22"
+    n_tasks: 113
+    k: 16
+    n_cluster_model_cells: 320
+    models:
+      - claude-fable-5
+      - claude-haiku-4-5
+      - claude-opus-4-6
+      - claude-opus-4-7
+      - claude-opus-4-8
+      - claude-sonnet-4-6
+      - deepseek/deepseek-v4-pro
+      - gemini-3-flash-preview
+      - gemini-3.1-pro-preview
+      - gemini-3.5-flash
+      - gpt-5.4
+      - gpt-5.4-mini
+      - gpt-5.5
+      - minimax/minimax-m2.7
+      - minimax/minimax-m3
+      - moonshotai/kimi-k2.6
+      - moonshotai/kimi-k2.7
+      - xiaomi/mimo-v2.5-pro
+      - z-ai/glm-5.1
+      - z-ai/glm-5.2
+    unmapped_slugs:
+      qwen3-6-plus: 452
+      grok-build-0-1: 452
+    skipped_unjoined_tasks: 0
+    cluster_weights_meta:
+      artifact_version: "v0.77"
+  default_routing_knobs:
+    alpha:
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+      - 0.96
+    speed_weight: 0.0
+    output_cost_ratio: 0.0
+    expected_output_tokens: 2000
+    per_model_verbosity: true
+  recommended_ui_defaults:
+    quality_pareto:
+      alpha: 0.6
+      speed_weight: 0.1
+      output_cost_ratio: 0.25
+    cost_pareto:
+      alpha: 0.4
+      speed_weight: 0.05
+      output_cost_ratio: 0.4
+    balanced:
+      alpha: 0.5
+      speed_weight: 0.12
+      output_cost_ratio: 0.25
+deployed_providers:
+  - anthropic
+  - bedrock
+  - deepinfra
+  - fireworks
+  - google
+  - openai
+deployed_models:
+  - claude-haiku-4-5
+  - claude-opus-4-7
+  - claude-opus-4-8
+  - claude-sonnet-4-6
+  - deepseek/deepseek-v4-flash
+  - deepseek/deepseek-v4-pro
+  - gemini-3.1-flash-lite-preview
+  - gemini-3.1-pro-preview
+  - gemini-3.5-flash
+  - gpt-5.4-mini
+  - gpt-5.5
+  - minimax/minimax-m3
+  - moonshotai/kimi-k2.6
+  - moonshotai/kimi-k2.7
+  - qwen/qwen3-coder-next
+  - qwen/qwen3-next-80b-a3b-instruct
+  - qwen/qwen3.7-plus
+  - xiaomi/mimo-v2.5-pro
+  - z-ai/glm-5.2
+cost_per_1k_input_usd:
+  claude-haiku-4-5: 0.0008
+  claude-opus-4-7: 0.005
+  claude-opus-4-8: 0.005
+  claude-sonnet-4-6: 0.003
+  deepseek/deepseek-v4-flash: 0.00014
+  deepseek/deepseek-v4-pro: 0.00174
+  gemini-3.1-flash-lite-preview: 0.0001
+  gemini-3.1-pro-preview: 0.002
+  gemini-3.5-flash: 0.0015
+  gpt-5.4-mini: 0.0004
+  gpt-5.5: 0.005
+  minimax/minimax-m3: 0.0006
+  moonshotai/kimi-k2.6: 0.00095
+  moonshotai/kimi-k2.7: 0.00095
+  qwen/qwen3-coder-next: 0.0005
+  qwen/qwen3-next-80b-a3b-instruct: 0.00015
+  qwen/qwen3.7-plus: 0.0004
+  xiaomi/mimo-v2.5-pro: 0.001
+  z-ai/glm-5.2: 0.0014
+changelog: "v0.69 = deployed v0.67 recipe + AA priors + NEW DeepSWE coding priors (separate source) scoped to coding clusters. Adds glm-5.2, minimax-m3, qwen3.7-plus, kimi-k2.7 (19-model roster). Supersedes the abandoned full-pool v0.69 (#457). Candidate; latest stays v0.68."

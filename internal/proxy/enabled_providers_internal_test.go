@@ -99,6 +99,150 @@ func TestEnabledProvidersForRequest_ExcludedProvidersSubtracted(t *testing.T) {
 	})
 }
 
+// TestEnabledProvidersForRequest_SubscriptionEnrollsAnthropic guards the
+// managed-mode primary path: a router-keyed (installation set) byokOnly request
+// carrying only the dedicated subscription header — no BYOK, no deployment key —
+// must enroll Anthropic so the scorer can pick a Claude model. Without it the
+// enabled set is empty and the scorer fails with ErrNoEligibleProvider before
+// any Claude turn runs.
+func TestEnabledProvidersForRequest_SubscriptionEnrollsAnthropic(t *testing.T) {
+	makeService := func() *Service {
+		return &Service{
+			byokOnly: true,
+			providers: map[string]providers.Client{
+				providers.ProviderAnthropic: nil,
+				providers.ProviderOpenAI:    nil,
+			},
+			deploymentKeyedProviders:     map[string]struct{}{},
+			passthroughEligibleProviders: map[string]struct{}{},
+		}
+	}
+	routerKeyed := func() context.Context {
+		return context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
+	}
+
+	t.Run("subscription header enrolls anthropic on a router-keyed byok-only request", func(t *testing.T) {
+		ctx := context.WithValue(routerKeyed(), AnthropicSubscriptionContextKey{}, "sk-ant-oat01-subscription-token")
+		got := makeService().enabledProvidersForRequest(ctx, providers.ProviderAnthropic, http.Header{})
+		assert.Contains(t, got, providers.ProviderAnthropic,
+			"a subscription token must make Anthropic eligible so the scorer can route a Claude turn to it")
+		assert.NotContains(t, got, providers.ProviderOpenAI,
+			"the subscription token is Anthropic-only and must never enroll another upstream")
+	})
+
+	t.Run("inbound Authorization subscription bearer enrolls anthropic on a router-keyed request", func(t *testing.T) {
+		// The managed Claude Code path: router key in X-Weave-Router-Key
+		// (installation set), the subscription OAuth token left in Authorization.
+		// Anthropic must be enrolled off the inbound bearer so the scorer can
+		// route a Claude turn the subscription will pay for.
+		headers := http.Header{"Authorization": []string{"Bearer sk-ant-oat01-subscription-token"}}
+		got := makeService().enabledProvidersForRequest(routerKeyed(), providers.ProviderAnthropic, headers)
+		assert.Contains(t, got, providers.ProviderAnthropic,
+			"the inbound subscription bearer (CC-through-router) must enroll Anthropic even when router-keyed")
+		assert.NotContains(t, got, providers.ProviderOpenAI,
+			"the subscription token is Anthropic-only and must never enroll another upstream")
+	})
+
+	t.Run("inbound API-key bearer does NOT enroll anthropic on a router-keyed request", func(t *testing.T) {
+		// Only the sk-ant-oat OAuth subset enrolls off the inbound bearer; a real
+		// client API key must not, mirroring resolveAndInjectCredentials and
+		// preserving the cross-provider-leak guard.
+		headers := http.Header{"Authorization": []string{"Bearer sk-ant-api-real-client-key"}}
+		got := makeService().enabledProvidersForRequest(routerKeyed(), providers.ProviderAnthropic, headers)
+		assert.NotContains(t, got, providers.ProviderAnthropic,
+			"a general inbound API key must not enroll Anthropic on the router-key path")
+	})
+
+	t.Run("no header leaves the set empty, proving the enrollment is load-bearing", func(t *testing.T) {
+		got := makeService().enabledProvidersForRequest(routerKeyed(), providers.ProviderAnthropic, http.Header{})
+		assert.NotContains(t, got, providers.ProviderAnthropic,
+			"without a subscription token a byok-only router-keyed request with no BYOK enrolls nothing")
+		assert.Empty(t, got)
+	})
+
+	t.Run("an excluded Anthropic still trumps the subscription enrollment", func(t *testing.T) {
+		ctx := context.WithValue(routerKeyed(), AnthropicSubscriptionContextKey{}, "sk-ant-oat01-subscription-token")
+		ctx = context.WithValue(ctx, InstallationExcludedProvidersContextKey{}, []string{providers.ProviderAnthropic})
+		got := makeService().enabledProvidersForRequest(ctx, providers.ProviderAnthropic, http.Header{})
+		assert.NotContains(t, got, providers.ProviderAnthropic,
+			"a provider exclusion must subtract Anthropic even when a subscription token is present")
+	})
+}
+
+// TestEnabledProvidersForRequest_CodexSubscriptionEnrollsOpenAI mirrors the
+// Anthropic enrollment for the Codex (ChatGPT) subscription: a router-keyed
+// byokOnly request carrying the dedicated Codex header pair — no BYOK, no
+// deployment key — must enroll OpenAI (and only OpenAI) so the scorer can pick
+// a Codex-eligible model. Enrollment requires BOTH token and account-id.
+func TestEnabledProvidersForRequest_CodexSubscriptionEnrollsOpenAI(t *testing.T) {
+	const codexJWT = "eyJhbGciOiJSUzI1NiJ9.codex.sig"
+	makeService := func() *Service {
+		return &Service{
+			byokOnly: true,
+			providers: map[string]providers.Client{
+				providers.ProviderAnthropic: nil,
+				providers.ProviderOpenAI:    nil,
+			},
+			deploymentKeyedProviders:     map[string]struct{}{},
+			passthroughEligibleProviders: map[string]struct{}{},
+		}
+	}
+	routerKeyed := func() context.Context {
+		return context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
+	}
+
+	t.Run("dedicated Codex headers enroll openai only", func(t *testing.T) {
+		ctx := context.WithValue(routerKeyed(), OpenAISubscriptionContextKey{}, codexJWT)
+		ctx = context.WithValue(ctx, OpenAIAccountIDContextKey{}, "acct-123")
+		got := makeService().enabledProvidersForRequest(ctx, providers.ProviderOpenAI, http.Header{})
+		assert.Contains(t, got, providers.ProviderOpenAI,
+			"a Codex subscription must make OpenAI eligible so the scorer can route a Codex turn")
+		assert.NotContains(t, got, providers.ProviderAnthropic,
+			"the Codex token is OpenAI-only and must never enroll another upstream")
+	})
+
+	t.Run("inbound Authorization Codex bearer enrolls openai on a router-keyed request", func(t *testing.T) {
+		// The managed Codex CLI path: router key in X-Weave-Router-Key, the
+		// ChatGPT JWT + account-id left in Authorization. OpenAI must be enrolled
+		// off the inbound bearer so the scorer can route a Codex turn.
+		headers := http.Header{
+			"Authorization":      []string{"Bearer " + codexJWT},
+			"Chatgpt-Account-Id": []string{"acct-123"},
+		}
+		got := makeService().enabledProvidersForRequest(routerKeyed(), providers.ProviderOpenAI, headers)
+		assert.Contains(t, got, providers.ProviderOpenAI,
+			"the inbound Codex subscription bearer (Codex-through-router) must enroll OpenAI even when router-keyed")
+		assert.NotContains(t, got, providers.ProviderAnthropic,
+			"the Codex token is OpenAI-only and must never enroll another upstream")
+	})
+
+	t.Run("inbound OpenAI API-key bearer does NOT enroll openai on a router-keyed request", func(t *testing.T) {
+		// Only the Codex OAuth subset (JWT + account-id) enrolls off the inbound
+		// bearer; a plain client API key with no account-id must not.
+		headers := http.Header{"Authorization": []string{"Bearer sk-proj-real-client-key"}}
+		got := makeService().enabledProvidersForRequest(routerKeyed(), providers.ProviderOpenAI, headers)
+		assert.NotContains(t, got, providers.ProviderOpenAI,
+			"a general inbound OpenAI API key must not enroll OpenAI on the router-key path")
+	})
+
+	t.Run("token without account-id enrolls nothing (load-bearing)", func(t *testing.T) {
+		ctx := context.WithValue(routerKeyed(), OpenAISubscriptionContextKey{}, codexJWT)
+		got := makeService().enabledProvidersForRequest(ctx, providers.ProviderOpenAI, http.Header{})
+		assert.NotContains(t, got, providers.ProviderOpenAI,
+			"without the ChatGPT-Account-ID the subscription is unusable, so OpenAI must not be enrolled")
+		assert.Empty(t, got)
+	})
+
+	t.Run("an excluded OpenAI trumps the Codex enrollment", func(t *testing.T) {
+		ctx := context.WithValue(routerKeyed(), OpenAISubscriptionContextKey{}, codexJWT)
+		ctx = context.WithValue(ctx, OpenAIAccountIDContextKey{}, "acct-123")
+		ctx = context.WithValue(ctx, InstallationExcludedProvidersContextKey{}, []string{providers.ProviderOpenAI})
+		got := makeService().enabledProvidersForRequest(ctx, providers.ProviderOpenAI, http.Header{})
+		assert.NotContains(t, got, providers.ProviderOpenAI,
+			"a provider exclusion must subtract OpenAI even when a Codex subscription is present")
+	})
+}
+
 // TestEnabledProvidersForRequest_DeploymentKeyedStillCrossSurface confirms
 // that env-keyed providers stay eligible regardless of surface (their keys
 // are trusted and don't depend on inbound headers).

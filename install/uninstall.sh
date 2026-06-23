@@ -155,14 +155,30 @@ if [ "$target" = "opencode" ]; then
   opencode_config_file="$opencode_dir/opencode.json"
   refuse_if_symlink "$opencode_config_file"
 
+  # Canonicalize the plugin path exactly as install.sh did (`cd … && pwd`) so
+  # the `plugin` array entry matches on removal — a raw "$opencode_dir/…" string
+  # can differ (symlinks, trailing slash) and leave the entry behind.
+  if [ -d "$opencode_dir" ]; then
+    opencode_plugin="$(cd "$opencode_dir" && pwd)/.weave/opencode-weave.ts"
+  else
+    opencode_plugin="$opencode_dir/.weave/opencode-weave.ts"
+  fi
   if [ -f "$opencode_config_file" ]; then
-    # Strip `provider.weave` and any router-pointing top-level model. Other
-    # providers, user-set models that don't reference the router, and any
+    # Strip every managed provider (`weave`, the login-only `weave-claude`, and
+    # the legacy `weave-codex` from pre-upgrade installs), the managed plugin
+    # entry from the `plugin` array, and any router-pointing top-level model
+    # (the `weave/`, `weave-claude/`, and `weave-codex/` prefixes — otherwise a
+    # default survives and points at a deleted provider). Other providers,
+    # user-set models that don't reference the router, other plugins, and any
     # unrelated keys are preserved.
-    cleaned="$(jq '
+    cleaned="$(jq --arg plugin "$opencode_plugin" '
       (if .provider.weave then del(.provider.weave) else . end)
+      | (if .provider["weave-claude"] then del(.provider["weave-claude"]) else . end)
+      | (if .provider["weave-codex"] then del(.provider["weave-codex"]) else . end)
       | (if (.provider // {}) == {} then del(.provider) else . end)
-      | (if (.model // "" | tostring | startswith("weave/")) then del(.model) else . end)
+      | (if (.plugin | type) == "array" then .plugin -= [$plugin] else . end)
+      | (if (.plugin | type) == "array" and (.plugin | length) == 0 then del(.plugin) else . end)
+      | (if (.model // "" | tostring | (startswith("weave/") or startswith("weave-claude/") or startswith("weave-codex/"))) then del(.model) else . end)
     ' "$opencode_config_file")"
     printf '%s\n' "$cleaned" >"$opencode_config_file"
 
@@ -177,6 +193,16 @@ if [ "$target" = "opencode" ]; then
     fi
   else
     info "No opencode config at $opencode_config_file (already uninstalled?)"
+  fi
+
+  # Drop the bundled subscription plugin (no secrets; the config holds the key,
+  # opencode's own auth store holds the ChatGPT/Claude tokens). Remove the
+  # .weave/ dir only if it's left empty so we don't clobber an unrelated user dir.
+  if [ -f "$opencode_plugin" ]; then
+    refuse_if_symlink "$opencode_plugin"
+    rm -f "$opencode_plugin"
+    rmdir "$opencode_dir/.weave" 2>/dev/null || true
+    ok "Removed $opencode_plugin"
   fi
 
   # Drop the toggle parked sidecar (holds the parked router model when off).

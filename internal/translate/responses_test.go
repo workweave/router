@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -151,7 +152,7 @@ func TestResponsesToChatCompletions_LeavesUserContentAlone(t *testing.T) {
 	assert.Contains(t, messages[0].Get("content").Str, "**WEAVE ROUTER**")
 }
 
-func TestResponsesToChatCompletions_ReasoningAndMaxOutput(t *testing.T) {
+func TestResponsesToChatCompletions_MaxOutputAndDropsReasoning(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-5",
 		"input": "hi",
@@ -163,7 +164,61 @@ func TestResponsesToChatCompletions_ReasoningAndMaxOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(4096), gjson.GetBytes(out, "max_completion_tokens").Int())
-	assert.Equal(t, "high", gjson.GetBytes(out, "reasoning_effort").Str)
+	// reasoning is intentionally dropped pre-routing: forwarding it as
+	// reasoning_effort broke every non-Gemini served model.
+	assert.False(t, gjson.GetBytes(out, "reasoning_effort").Exists(),
+		"reasoning_effort must not be propagated into the chat body")
+	assert.False(t, gjson.GetBytes(out, "reasoning").Exists())
+}
+
+// TestResponsesToChatCompletions_DropsReasoningEffort guards the Codex blocker:
+// Codex ALWAYS sends a `reasoning` field (including effort:"none", which is not
+// a valid Chat Completions reasoning_effort), and reasoning OpenAI models reject
+// reasoning_effort + tools — both 400 after response.created and close the
+// stream. None of these efforts may leak into the translated chat body.
+func TestResponsesToChatCompletions_DropsReasoningEffort(t *testing.T) {
+	for _, effort := range []string{"none", "minimal", "low", "medium", "high"} {
+		body := []byte(`{"model":"gpt-5.5","input":"hi","reasoning":{"effort":"` + effort + `"},"include":["reasoning.encrypted_content"]}`)
+		out, _, _, err := translate.ResponsesToChatCompletions(body)
+		require.NoError(t, err)
+		assert.Falsef(t, gjson.GetBytes(out, "reasoning_effort").Exists(),
+			"effort %q must not propagate", effort)
+	}
+}
+
+// TestResponsesWriter_FinalizeErrorEmitsFailed guards the stream-termination
+// half of the Codex fix: once response.created is on the wire, an upstream
+// error must close the stream with a response.failed terminal, never a bare
+// disconnect (which Codex reports as "stream closed before response.completed").
+func TestResponsesWriter_FinalizeErrorEmitsFailed(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesWriter(rec, "")
+
+	require.NoError(t, w.Prelude(true)) // emits response.created
+	require.NoError(t, w.FinalizeError(errors.New("upstream 400")))
+
+	events := parseSSEEvents(t, rec.Body.Bytes())
+	types := eventTypes(events)
+	assert.Contains(t, types, "response.created")
+	assert.Contains(t, types, "response.failed")
+	assert.NotContains(t, types, "response.completed")
+
+	final := events[len(events)-1]
+	require.Equal(t, "response.failed", final["type"])
+	resp := final["response"].(map[string]any)
+	assert.Equal(t, "failed", resp["status"])
+	assert.NotNil(t, resp["error"])
+}
+
+// TestResponsesWriter_FinalizeErrorNoopBeforeCreated: when nothing has been
+// streamed yet, FinalizeError writes nothing so the handler can still emit a
+// JSON error envelope.
+func TestResponsesWriter_FinalizeErrorNoopBeforeCreated(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesWriter(rec, "")
+
+	require.NoError(t, w.FinalizeError(errors.New("upstream 400")))
+	assert.Empty(t, rec.Body.Bytes())
 }
 
 func TestResponsesWriter_StreamingText(t *testing.T) {
@@ -223,6 +278,34 @@ func TestResponsesWriter_StreamingText(t *testing.T) {
 	usage := final["response"].(map[string]any)["usage"].(map[string]any)
 	assert.EqualValues(t, 3, usage["input_tokens"])
 	assert.EqualValues(t, 2, usage["output_tokens"])
+}
+
+// TestResponsesWriter_PassthroughForwardsVerbatim guards the Codex-backend
+// path: when the upstream already speaks Responses natively, the writer must
+// forward bytes unchanged and must NOT emit its own response.created prelude
+// (which would duplicate the upstream's).
+func TestResponsesWriter_PassthroughForwardsVerbatim(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesWriter(rec, "gpt-5.5")
+	w.SetPassthrough()
+
+	// Prelude is a no-op in passthrough — the upstream emits response.created.
+	require.NoError(t, w.Prelude(true))
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(200)
+
+	// Verbatim Responses SSE, as the Codex backend emits it.
+	native := "event: response.created\ndata: {\"type\":\"response.created\"}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"
+	_, err := w.Write([]byte(native))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	// Output is exactly the upstream bytes: no chat->Responses translation, no
+	// synthesized or duplicated events.
+	assert.Equal(t, native, rec.Body.String())
 }
 
 func TestResponsesWriter_PrependsBadgeOnSwap(t *testing.T) {

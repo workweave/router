@@ -34,6 +34,12 @@ func HasOverrideFromContext(ctx context.Context) bool {
 // constraint on router.organization_credit_ledger.entry_type.
 const EntryTypeInference = "inference"
 
+// SubscriptionFeeRate is the fraction of notional upstream cost debited for a
+// turn served on the customer's own Anthropic subscription. The subscription
+// covers the underlying tokens, so Weave charges only this routing margin
+// rather than the full cost it charges for Weave-fronted (credit) usage.
+const SubscriptionFeeRate = 0.05
+
 // MinBalanceMicros: new requests 402 when balance <= this (USD micros).
 // 0 matches OpenAI/Anthropic prepaid semantics — block at zero, let
 // in-flight debits settle (post-request balance can dip by one req cost).
@@ -102,19 +108,30 @@ type DebitInferenceParams struct {
 	CacheRead       int
 	Pricing         catalog.Pricing
 	HasOverride     bool
+	// SubscriptionServed is true when the turn was served on the customer's own
+	// Anthropic subscription token. Such turns debit only SubscriptionFeeRate of
+	// the notional cost — their plan already covers the tokens.
+	SubscriptionServed bool
 }
 
 // DebitForInference computes the raw upstream cost and writes one ledger
-// row. No markup math — margin is collected at top-up by the backend; the
-// router debits at cost.
+// row. For Weave-fronted usage there is no markup math — margin is collected
+// at top-up by the backend and the router debits at cost. The two exceptions
+// debit less than cost: an override pass-through debits 0, and a turn served
+// on the customer's own Anthropic subscription debits only SubscriptionFeeRate
+// of cost (their plan covers the tokens). NotionalCostMicros always records
+// the full would-be cost regardless.
 //
 // Returns the post-debit balance (0 on override since balance is
 // unchanged but the ledger row was recorded with the current balance).
 func (s *Service) DebitForInference(ctx context.Context, p DebitInferenceParams) (int64, error) {
 	notional := computeNotionalMicros(p)
 	delta := -notional
-	if p.HasOverride {
+	switch {
+	case p.HasOverride:
 		delta = 0
+	case p.SubscriptionServed:
+		delta = -subscriptionFeeMicros(notional)
 	}
 	return s.repo.DebitInference(ctx, DebitParams{
 		OrganizationID:     p.OrganizationID,
@@ -124,6 +141,12 @@ func (s *Service) DebitForInference(ctx context.Context, p DebitInferenceParams)
 		RouterRequestID:    p.RouterRequestID,
 		RouterModel:        p.Model,
 	})
+}
+
+// subscriptionFeeMicros returns SubscriptionFeeRate of the notional cost in USD
+// micros, rounded — the amount debited for a subscription-served turn.
+func subscriptionFeeMicros(notional int64) int64 {
+	return int64(math.Round(float64(notional) * SubscriptionFeeRate))
 }
 
 // computeNotionalMicros returns the would-be charge in USD micros. Always

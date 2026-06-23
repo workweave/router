@@ -157,6 +157,11 @@ func (s *Service) runTurnLoop(
 		"sub_agent_hint", subAgentHint,
 	)
 
+	// Subscription-aware cost discount: discount covered models' cost term by the
+	// observed rate-limit headroom of the caller's present subscription(s). nil
+	// (feature off / no sub / no headroom observed yet) leaves scoring unchanged.
+	req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, reqHeaders)
+
 	// Hard pins bypass pin lookup, pin write, planner, and scorer entirely.
 	// Probes and title-gen MUST NOT create a session pin — the Anthropic SDK
 	// fires probes on init before the first real user turn, and Claude Code
@@ -244,8 +249,10 @@ func (s *Service) runTurnLoop(
 	}
 
 	// User-forced pins are immutable stickies — skip scorer and planner entirely.
-	// The pin was written by /force-model and stays active until /unforce-model
-	// clears it, at which point the pin is expired and this branch is not taken.
+	// The pin was written by /force-model with a never-expires PinnedUntil, so it
+	// survives arbitrarily long idle gaps and stays active until /unforce-model
+	// clears it (rewriting the row with a past PinnedUntil), at which point the
+	// pin is expired and this branch is not taken.
 	//
 	// Invariants maintained here:
 	//   1. Excluded-model policy is still enforced: if the forced model has been
@@ -335,7 +342,7 @@ func (s *Service) runTurnLoop(
 				outputReserveForPin = feats.MaxTokens
 			}
 			needed := env.FullTokenEstimate() + outputReserveForPin
-			modelCW := contextWindowForRequest(pin.Model, false)
+			modelCW := contextWindowForRequest(pin.Model)
 			if needed > modelCW {
 				log.Info("Session pin excluded by context-window pre-filter; falling through to scorer",
 					"pin_model", pin.Model,
@@ -556,6 +563,10 @@ func (s *Service) runTurnLoop(
 		EstimatedInputTokens: feats.Tokens,
 		AvailableModels:      s.availableModels,
 		PinCacheCold:         pinFound && !cacheWarm(pin),
+		// Price covered models at their subsidized marginal cost in the EV math
+		// too, so the discount takes effect on sticky (pinned) sessions, not just
+		// the fresh decision. nil when subscription-aware routing is off.
+		SubsidizedCostFactor: req.SubsidizedModelCostFactor,
 	}
 	if !pinFound {
 		plannerIn.Pin = sessionpin.Pin{}
@@ -611,6 +622,12 @@ func (s *Service) runTurnLoop(
 			summCtx := ctx
 			if sumCreds != nil {
 				summCtx = context.WithValue(ctx, CredentialsContextKey{}, sumCreds)
+			} else {
+				// Run on the deployment key: strip any request credential
+				// (notably a subscription OAuth token) the turn resolved, so
+				// this synthetic call doesn't inherit it from ctx and 401 /
+				// cross a tenant boundary.
+				summCtx = clearCredentials(ctx)
 			}
 			start := time.Now()
 			summary, summaryUsage, sumErr := s.summarizer.Summarize(summCtx, env)
@@ -690,7 +707,7 @@ func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sess
 		Model:                 chosen.Model,
 		Reason:                chosen.Reason,
 		TurnCount:             1,
-		PinnedUntil:           time.Now().Add(pinSessionTTL),
+		PinnedUntil:           pinExpiry(chosen.Reason),
 		LastInputTokens:       existing.LastInputTokens,
 		LastCachedReadTokens:  existing.LastCachedReadTokens,
 		LastCachedWriteTokens: existing.LastCachedWriteTokens,
@@ -718,7 +735,7 @@ func (s *Service) writeNewPin(ctx context.Context, installationID uuid.UUID, ses
 		Model:          chosen.Model,
 		Reason:         chosen.Reason,
 		TurnCount:      1,
-		PinnedUntil:    time.Now().Add(pinSessionTTL),
+		PinnedUntil:    pinExpiry(chosen.Reason),
 	}
 	s.upsertPin(ctx, p)
 }
@@ -762,7 +779,15 @@ func resolveSummarizerCreds(ctx context.Context, provider string, headers http.H
 			return creds
 		}
 	}
-	return ExtractClientCredentials(provider, headers)
+	creds := ExtractClientCredentials(provider, headers)
+	if creds != nil && creds.OAuth {
+		// A Claude subscription token can't authenticate the router's synthetic
+		// summarizer call: that body has no Claude Code identity block, which
+		// subscription auth requires, so it would 401. Decline it here; the
+		// caller then either runs on the deployment key or skips summarization.
+		return nil
+	}
+	return creds
 }
 
 // sortedEnabledKeys returns a deterministic slice of the keys in m for

@@ -40,10 +40,33 @@ func deriveAnthropicHeaders(in http.Header, opts EmitOptions) http.Header {
 	} else {
 		h.Set("anthropic-version", "2023-06-01")
 	}
-	if v := filterBetaHeader(in.Get("anthropic-beta"), opts.TargetModel); v != "" {
-		h.Set("anthropic-beta", v)
+	beta := filterBetaHeader(in.Get("anthropic-beta"), opts.TargetModel)
+	if opts.EnableExtendedContext && router.Lookup(opts.TargetModel).Supports(router.CapExtendedContext) {
+		beta = ensureBetaToken(beta, context1MBeta)
+	}
+	if beta != "" {
+		h.Set("anthropic-beta", beta)
 	}
 	return h
+}
+
+// context1MBeta is the Anthropic beta that unlocks the 1M-token context window
+// for CapExtendedContext models (Opus 4.6+, Sonnet 4.6). Native-1M models
+// (Fable 5) accept it as a harmless no-op.
+const context1MBeta = "context-1m-2025-08-07"
+
+// ensureBetaToken appends token to a comma-separated anthropic-beta list when
+// absent, preserving any tokens the client already sent.
+func ensureBetaToken(beta, token string) string {
+	if beta == "" {
+		return token
+	}
+	for _, p := range strings.Split(beta, ",") {
+		if strings.TrimSpace(p) == token {
+			return beta
+		}
+	}
+	return beta + "," + token
 }
 
 func filterBetaHeader(beta, targetModel string) string {

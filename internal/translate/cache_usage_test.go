@@ -158,3 +158,73 @@ func TestGeminiSSETranslator_NonStreamingForwardsCachedContentTokenCount(t *test
 	assert.Equal(t, 3, sink.output)
 	assert.Equal(t, 1200, sink.cacheRead)
 }
+
+// Catches the missing inputTokens field on SSETranslator: Anthropic splits
+// token counts across two events — message_start carries input_tokens,
+// message_delta carries output_tokens with no input_tokens field. Without
+// persisting the value from message_start, handleMessageDelta re-reads
+// input_tokens from the event body via gjson and gets 0, so the final
+// OpenAI chunk emitted to the client always has prompt_tokens:0.
+func TestSSETranslator_FinalChunkCarriesPromptTokensFromMessageStart(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sink := &fakeUsageSink{}
+	translator := translate.NewSSETranslator(rec, "claude-haiku-4-5", sink)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-haiku-4-5\",\"usage\":{\"input_tokens\":42,\"output_tokens\":0}}}\n\n",
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n",
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":17}}\n\n",
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+	}
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+
+	body := rec.Body.String()
+
+	// Locate the final chunk — emitted by handleMessageDelta, identified by
+	// finish_reason. This is what OpenAI SDK clients read for cost attribution.
+	chunks := strings.Split(body, "\n\n")
+	var finalChunk string
+	for _, chunk := range chunks {
+		if strings.Contains(chunk, `"finish_reason":"stop"`) && strings.Contains(chunk, `"usage"`) {
+			finalChunk = chunk
+		}
+	}
+	require.NotEmpty(t, finalChunk, "expected a final chunk with finish_reason:stop and usage")
+
+	assert.Contains(t, finalChunk, `"prompt_tokens":42`, "final chunk must carry input tokens from message_start")
+	assert.Contains(t, finalChunk, `"completion_tokens":17`)
+	assert.Contains(t, finalChunk, `"total_tokens":59`)
+}
+
+// Catches the sink accumulation across the full message_start → message_delta
+// sequence. The UsageExtractor guards RecordUsage with if value > 0, so
+// input tokens recorded in handleMessageStart must not be overwritten by the
+// zero value re-read in handleMessageDelta.
+func TestSSETranslator_SinkAccumulatesInputAndOutputAcrossStream(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sink := &fakeUsageSink{}
+	translator := translate.NewSSETranslator(rec, "claude-haiku-4-5", sink)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-haiku-4-5\",\"usage\":{\"input_tokens\":42,\"output_tokens\":0}}}\n\n",
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":17}}\n\n",
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+	}
+	for _, e := range events {
+		_, err := translator.Write([]byte(e))
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, 17, sink.output, "sink must record output tokens from message_delta")
+}

@@ -3,6 +3,7 @@ package billing_test
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -141,6 +142,56 @@ func TestDebitForInference_OverrideWritesZeroDeltaWithNotional(t *testing.T) {
 	require.Len(t, repo.ledgerCalls, 1)
 	assert.Equal(t, int64(0), repo.ledgerCalls[0].DeltaUsdMicros, "override delta must be zero")
 	assert.Equal(t, int64(6_750_000), repo.ledgerCalls[0].NotionalCostMicros, "notional records would-be charge")
+}
+
+func TestDebitForInference_SubscriptionDebitsOnlyTheFee(t *testing.T) {
+	// Served on the customer's own Anthropic subscription: the plan covers the
+	// tokens, so the ledger debits only SubscriptionFeeRate of cost while the
+	// notional row still records the full would-be cost.
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
+	svc := billing.NewService(repo)
+	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
+	balance, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID:     "org_sub",
+		RouterRequestID:    "req_sub",
+		Model:              "claude-opus-4-8",
+		Provider:           providers.ProviderAnthropic,
+		InputTokens:        1_000_000,
+		OutputTokens:       250_000,
+		Pricing:            p,
+		SubscriptionServed: true,
+	})
+	require.NoError(t, err)
+
+	notional := int64(6_750_000)                                              // 3.00 + 3.75
+	fee := int64(math.Round(float64(notional) * billing.SubscriptionFeeRate)) // 337_500
+	assert.Equal(t, 10_000_000-fee, balance, "subscription turns debit only the fee")
+	require.Len(t, repo.ledgerCalls, 1)
+	assert.Equal(t, -fee, repo.ledgerCalls[0].DeltaUsdMicros, "delta is the negative subscription fee, not full cost")
+	assert.Equal(t, notional, repo.ledgerCalls[0].NotionalCostMicros, "notional still records the full would-be cost")
+}
+
+func TestDebitForInference_OverrideBeatsSubscription(t *testing.T) {
+	// A comped/override org pays nothing even when the turn was subscription
+	// served — override wins the precedence.
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 5_000_000}
+	svc := billing.NewService(repo)
+	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
+	balance, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID:     "org_internal",
+		Model:              "claude-opus-4-8",
+		Provider:           providers.ProviderAnthropic,
+		InputTokens:        1_000_000,
+		OutputTokens:       250_000,
+		Pricing:            p,
+		HasOverride:        true,
+		SubscriptionServed: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(5_000_000), balance, "override leaves balance unchanged even on a subscription turn")
+	require.Len(t, repo.ledgerCalls, 1)
+	assert.Equal(t, int64(0), repo.ledgerCalls[0].DeltaUsdMicros, "override delta is zero, beating the subscription fee")
+	assert.Equal(t, int64(6_750_000), repo.ledgerCalls[0].NotionalCostMicros)
 }
 
 func TestDebitForInference_BalanceCanGoNegative(t *testing.T) {

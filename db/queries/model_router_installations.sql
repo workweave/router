@@ -55,3 +55,14 @@ SET excluded_providers = @excluded_providers::text[],
 WHERE id = @id::uuid
   AND external_id = @external_id::varchar
   AND deleted_at IS NULL;
+
+-- Sets the routing preference quality weight (a normalized fraction in [0, 1]),
+-- scoped to an external_id to prevent cross-tenant updates. NULL clears the
+-- preference so the scorer reverts to its tuned defaults.
+-- name: UpdateModelRouterInstallationRoutingPreference :exec
+UPDATE router.model_router_installations
+SET routing_quality_weight = sqlc.narg('routing_quality_weight'),
+    updated_at = NOW()
+WHERE id = @id::uuid
+  AND external_id = @external_id::varchar
+  AND deleted_at IS NULL;

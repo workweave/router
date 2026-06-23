@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -55,6 +56,15 @@ type Scorer struct {
 	qualityMeans    Rankings
 	modelAxes       map[string]ModelAxis
 	medianVerbosity float64
+	// dialAlphaBreakpoints calibrates the QualityBias dial against this bundle's
+	// actual routing behavior. It holds the ascending uniform-alpha values at
+	// which the routed model mix changes (one entry per distinct mix, first =
+	// 0, last = 1). dialToAlpha interpolates across them so equal dial travel
+	// produces an equal number of mix changes — which is what removes the dead
+	// zones (wide alpha ranges that route an identical mix) that otherwise make
+	// the slider's lower half feel inert. Computed once at NewScorer; nil for v1
+	// bundles, where dialToAlpha falls back to the identity t -> alpha.
+	dialAlphaBreakpoints []float64
 }
 
 // Version returns the artifact version (e.g. "v0.2").
@@ -183,7 +193,7 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 		}
 	}
 
-	return &Scorer{
+	s := &Scorer{
 		version:         bundle.Version,
 		cfg:             cfg,
 		embed:           embed,
@@ -197,7 +207,124 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 		qualityMeans:    bundle.QualityMeans,
 		modelAxes:       bundle.ModelAxes,
 		medianVerbosity: bundle.MedianVerbosity,
-	}, nil
+	}
+	// The dial calibration replays the scorer across the alpha range, so it must
+	// be computed after the fields it reads (qualityMeans, modelAxes, models,
+	// centroids) are populated. v1 bundles have no quality_means and keep a nil
+	// calibration (dialToAlpha then falls back to identity).
+	if bundle.IsV2 {
+		s.dialAlphaBreakpoints = s.computeDialCalibration()
+	}
+	return s, nil
+}
+
+// qualityBiasCalibrationGrid is the uniform-alpha resolution swept at
+// scorer-build time to discover where the routed model mix changes. 401 points
+// = steps of 0.0025, fine enough to separate adjacent crossovers.
+const qualityBiasCalibrationGrid = 401
+
+// computeDialCalibration walks a uniform alpha from 0 to 1, scoring every
+// cluster centroid through the same blend as live routing, and records the
+// alpha at which the routed model mix (the multiset of per-cluster winners)
+// first changes. Those alphas — ascending, first forced to 0, last forced to 1
+// — are the dial breakpoints.
+//
+// They exist to defeat the dead-zone problem. The cheapest models are far
+// cheaper than the rest while quality_means are tightly bunched, so the blend
+// routes an identical all-cheapest mix across a wide low-alpha range, an
+// identical saturated mix across a wide high-alpha range, and can sit on a
+// stable mid mix for a wide middle range too. A dial that maps linearly to
+// alpha spends most of its travel in those flat regions — the reported
+// "50% looks the same as 20%" bug. dialToAlpha instead interpolates across
+// these breakpoints, so equal dial travel crosses an equal number of mix
+// changes and every part of the slider does something.
+//
+// Forcing the first breakpoint to 0 keeps the price extreme at the single
+// cheapest model; forcing the last to 1 keeps the quality extreme at the pure
+// best-per-cluster mix. Returns nil when fewer than two distinct mixes exist
+// (no cost/quality separation), so dialToAlpha falls back to the identity.
+func (s *Scorer) computeDialCalibration() []float64 {
+	k := s.centroids.K
+	centroidTopClusters := make([][]int, k)
+	for c := 0; c < k; c++ {
+		centroidTopClusters[c] = topPNearest(s.centroids.Row(c), s.centroids, s.cfg.TopP)
+	}
+
+	base := s.defaultActiveKnobs()
+	breakpoints := make([]float64, 0, 32)
+	prevSig := ""
+	for g := 0; g < qualityBiasCalibrationGrid; g++ {
+		a := float64(g) / float64(qualityBiasCalibrationGrid-1)
+		knobs := base
+		knobs.Alpha = make([]float64, k)
+		for i := range knobs.Alpha {
+			knobs.Alpha[i] = a
+		}
+		counts := make(map[string]int, len(s.models))
+		for c := 0; c < k; c++ {
+			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models, nil)
+			winner, _ := argmax(scores, s.models)
+			// Mirror RoutingDistribution's accounting exactly: skip an empty
+			// winner so a cluster that flips between "" and a real model can't
+			// inject a phantom breakpoint the dashboard distribution never shows.
+			if winner != "" {
+				counts[winner]++
+			}
+		}
+		sig := mixSignature(counts)
+		if sig != prevSig {
+			breakpoints = append(breakpoints, a)
+			prevSig = sig
+		}
+	}
+
+	if len(breakpoints) < 2 {
+		return nil
+	}
+	breakpoints[0] = 0
+	breakpoints[len(breakpoints)-1] = 1
+	return breakpoints
+}
+
+// mixSignature renders a winner-count map as a stable, order-independent key so
+// two dial positions that route the same model mix compare equal.
+func mixSignature(counts map[string]int) string {
+	models := make([]string, 0, len(counts))
+	for m := range counts {
+		models = append(models, m)
+	}
+	sort.Strings(models)
+	var b strings.Builder
+	for _, m := range models {
+		fmt.Fprintf(&b, "%s:%d,", m, counts[m])
+	}
+	return b.String()
+}
+
+// dialToAlpha maps the QualityBias dial t in [0, 1] to the uniform per-cluster
+// alpha the scorer should run at. It places the bundle's mix breakpoints at
+// equal dial spacing and interpolates between them, so the dial spends equal
+// travel on each distinct routed mix instead of wasting its lower half on a
+// dead zone. With no calibration (v1 bundles, or a bundle with no mix
+// separation) it is the identity. t outside [0, 1] is clamped.
+func (s *Scorer) dialToAlpha(t float64) float64 {
+	if t <= 0 {
+		return 0
+	}
+	if t >= 1 {
+		return 1
+	}
+	bp := s.dialAlphaBreakpoints
+	if len(bp) < 2 {
+		return t
+	}
+	x := t * float64(len(bp)-1)
+	i := int(x)
+	if i >= len(bp)-1 {
+		return bp[len(bp)-1]
+	}
+	frac := x - float64(i)
+	return bp[i] + frac*(bp[i+1]-bp[i])
 }
 
 // resolveProviderFor walks the catalog's ordered ProviderBinding list for
@@ -420,29 +547,28 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 
 	if s.isV2 {
 		// 1. Resolve Knobs and Validate
-		var activeKnobs DefaultRoutingKnobs
-		if s.metadata != nil && s.metadata.Training.DefaultRoutingKnobs != nil {
-			activeKnobs = *s.metadata.Training.DefaultRoutingKnobs
-			// Struct copy shares the Alpha slice's backing array with the
-			// bundle defaults. Clone before any potential mutation so a
-			// per-request override doesn't leak into subsequent requests.
-			activeKnobs.Alpha = append([]float64(nil), activeKnobs.Alpha...)
-		} else {
-			activeKnobs = DefaultRoutingKnobs{
-				Alpha:                make([]float64, s.centroids.K),
-				SpeedWeight:          0.0,
-				OutputCostRatio:      0.0,
-				ExpectedOutputTokens: 2000,
-				PerModelVerbosity:    false,
-			}
-			for i := range activeKnobs.Alpha {
-				activeKnobs.Alpha[i] = 0.53
-			}
-		}
+		activeKnobs := s.defaultActiveKnobs()
 
 		if req.RoutingKnobs != nil {
-			if req.RoutingKnobs.Alpha != nil {
-				// Sledgehammer behavior: uniformly replace every alpha with the scalar
+			switch {
+			case req.RoutingKnobs.QualityBias != nil:
+				// Dial path: map the single dial position through this bundle's
+				// mix-change calibration to a uniform alpha, so the slider spends
+				// equal travel on each distinct routed mix (no dead zone) while
+				// the endpoints still pin to all-cheapest / best-per-cluster.
+				// Takes precedence over a co-set Alpha (the higher-level intent
+				// wins).
+				t := *req.RoutingKnobs.QualityBias
+				if math.IsNaN(t) || math.IsInf(t, 0) || t < 0 || t > 1 {
+					return router.Decision{}, fmt.Errorf("%w: quality_bias (%f) must be a finite value in [0, 1]", ErrInvalidRoutingKnobs, t)
+				}
+				a := s.dialToAlpha(t)
+				for i := range activeKnobs.Alpha {
+					activeKnobs.Alpha[i] = a
+				}
+			case req.RoutingKnobs.Alpha != nil:
+				// Sledgehammer behavior: uniformly replace every alpha with the
+				// scalar (eval/debug lever, ignores per-cluster dispersion).
 				for i := range activeKnobs.Alpha {
 					activeKnobs.Alpha[i] = *req.RoutingKnobs.Alpha
 				}
@@ -505,165 +631,12 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			activeKnobs.PerModelVerbosity,
 		)
 
-		// 2. Effective per-model cost (knob-dependent)
-		costs := make(map[string]float64, len(s.models))
-		for _, m := range s.models {
-			axis := s.modelAxes[m]
-			vFactor := 1.0
-			if activeKnobs.PerModelVerbosity && axis.VerbosityTokens != nil && s.medianVerbosity > 0 {
-				vFactor = *axis.VerbosityTokens / s.medianVerbosity
-			}
-			inputPer1K := 0.0
-			if axis.InputPer1KUSD != nil {
-				inputPer1K = *axis.InputPer1KUSD
-			}
-			outputPer1K := 0.0
-			if axis.OutputPer1KUSD != nil {
-				outputPer1K = *axis.OutputPer1KUSD
-			}
-			costs[m] = inputPer1K + activeKnobs.OutputCostRatio*outputPer1K*vFactor
-		}
-
-		// 3. Effective per-model speed
-		speeds := make(map[string]*float64, len(s.models))
-		for _, m := range s.models {
-			axis := s.modelAxes[m]
-			if axis.TTFTSeconds != nil && axis.TPS != nil && *axis.TPS > 0 {
-				val := *axis.TTFTSeconds + float64(activeKnobs.ExpectedOutputTokens) / *axis.TPS
-				speeds[m] = &val
-			} else {
-				speeds[m] = nil
-			}
-		}
-
-		// 4. Normalize over DEPLOYED model set
-		qMin := make(map[int]float32)
-		qMax := make(map[int]float32)
-		for _, k := range topClusters {
-			row := s.qualityMeans[k]
-			first := true
-			for _, m := range s.models {
-				qVal := row[m]
-				if first {
-					qMin[k] = qVal
-					qMax[k] = qVal
-					first = false
-				} else {
-					if qVal < qMin[k] {
-						qMin[k] = qVal
-					}
-					if qVal > qMax[k] {
-						qMax[k] = qVal
-					}
-				}
-			}
-		}
-
-		var cMin, cMax float64
-		firstC := true
-		for _, m := range s.models {
-			cVal := costs[m]
-			if firstC {
-				cMin = cVal
-				cMax = cVal
-				firstC = false
-			} else {
-				if cVal < cMin {
-					cMin = cVal
-				}
-				if cVal > cMax {
-					cMax = cVal
-				}
-			}
-		}
-		cRange := cMax - cMin
-
-		useSpeed := activeKnobs.SpeedWeight > 0
-		var sMin, sMax float64
-		firstS := true
-		for _, m := range s.models {
-			if !useSpeed {
-				break
-			}
-			sPtr := speeds[m]
-			if sPtr == nil {
-				continue
-			}
-			sVal := *sPtr
-			if firstS {
-				sMin = sVal
-				sMax = sVal
-				firstS = false
-			} else {
-				if sVal < sMin {
-					sMin = sVal
-				}
-				if sVal > sMax {
-					sMax = sVal
-				}
-			}
-		}
-		sRange := 0.0
-		if useSpeed && !firstS {
-			sRange = sMax - sMin
-		}
-
-		// 6. Blend per top-P cluster
-		scores = make(map[string]float32, len(eligibleModels))
-		for _, k := range topClusters {
-			row := s.qualityMeans[k]
-			wQ := float32(activeKnobs.Alpha[k])
-			wS := float32(0.0)
-			if useSpeed {
-				wS = float32(activeKnobs.SpeedWeight)
-			}
-			wC := float32(1.0) - wQ - wS
-
-			qRange := qMax[k] - qMin[k]
-
-			for _, m := range eligibleModels {
-				qVal := row[m]
-				qNorm := float32(0.0)
-				if qRange > 0 {
-					qNorm = (qVal - qMin[k]) / qRange
-				}
-
-				cVal := costs[m]
-				cNorm := float32(0.0)
-				if cRange > 0 {
-					cNorm = float32((cVal - cMin) / cRange)
-				}
-
-				sPtr := speeds[m]
-				if sRange > 0 {
-					// Mixed-timing pool: untimed peers are treated as
-					// worst-case speed (sNorm=1, no wS bonus). This keeps
-					// wQ/wC weighting consistent across timed and untimed
-					// models — without this, the redistribution branch
-					// would silently drop the cost axis when wC=0.
-					var sNorm float32 = 1.0
-					if sPtr != nil {
-						sNorm = float32((*sPtr - sMin) / sRange)
-					}
-					blend := wQ*qNorm + wC*(1.0-cNorm) + wS*(1.0-sNorm)
-					scores[m] += blend
-				} else {
-					// No timing differentiation across the entire pool
-					// (all models lack AA timing, or all share the same
-					// speed). Redistribute wS into wQ and wC so the
-					// remaining weights still sum to 1.
-					total := wQ + wC
-					if total > 0 {
-						blend := (wQ/total)*qNorm + (wC/total)*(1.0-cNorm)
-						scores[m] += blend
-					} else {
-						scores[m] += qNorm
-					}
-				}
-			}
-		}
+		scores = s.blendScoresV2(topClusters, activeKnobs, eligibleModels, req.SubsidizedModelCostFactor)
 	} else {
-		// Legacy v1 flow
+		// Legacy v1 flow: static cluster rankings, no cost axis at all — so there
+		// is no cost term to discount and req.SubsidizedModelCostFactor does not
+		// apply. Subscription-aware routing is V2-only by construction; all
+		// deployed bundles run V2 (the v1 path is a legacy fallback).
 		scores = make(map[string]float32, len(eligibleModels))
 		for _, k := range topClusters {
 			row := s.rankings[k]
@@ -865,3 +838,201 @@ func clusterIDsString(ks []int) string {
 }
 
 var _ router.Router = (*Scorer)(nil)
+
+// subsidyMaxBonus is the maximum per-cluster score lift a subscription-covered
+// model receives when its plan window is fully slack (headroom factor f≈epsilon).
+// It scales by (1−f), fading to 0 as the window binds so cash/OSS re-enter on
+// their merits (soft spill). Set to the per-cluster blend ceiling (1.0): a fully
+// slack plan is preferred over paying cash unless the covered model is near-worst
+// for the task — the prepaid "use-it-or-lose-it" preference — applied as an
+// additive bonus so it disturbs none of the quality/cost/speed blend weights.
+const subsidyMaxBonus float32 = 1.0
+
+// blendScoresV2 computes the v2 per-model blended scores for the given top-P
+// clusters under the effective knobs. Extracted from Route so the routing
+// distribution preview scores identically to live routing (single source of
+// truth for the cost/quality/speed blend). Caller owns knob validation and the
+// QualityBias->Alpha derivation; this method consumes the resolved alpha vector.
+func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnobs, eligibleModels []string, subsidyFactors map[string]float64) map[string]float32 {
+	// 2. Effective per-model cost (knob-dependent). Costs stay at FULL catalog
+	// scale for every model, INCLUDING subscription-covered ones. On a plan the
+	// dollar price is prepaid, but the catalog ratio still tracks how much plan
+	// quota each model burns (Anthropic's unified rate limit weights Opus far
+	// above Haiku), and that is exactly the intra-family signal we want the blend
+	// to weigh. Keeping covered models at full cost preserves the Haiku↔Opus
+	// spread, so the blend below still picks the cheap covered model for easy
+	// turns and the strong one for hard turns. The subscription PREFERENCE (use
+	// the prepaid plan over paying cash) is applied separately, as a uniform
+	// per-family score bonus in the blend loop — never by compressing the cost
+	// axis, which would wash Haiku and Opus together.
+	costs := make(map[string]float64, len(s.models))
+	for _, m := range s.models {
+		axis := s.modelAxes[m]
+		vFactor := 1.0
+		if activeKnobs.PerModelVerbosity && axis.VerbosityTokens != nil && s.medianVerbosity > 0 {
+			vFactor = *axis.VerbosityTokens / s.medianVerbosity
+		}
+		inputPer1K := 0.0
+		if axis.InputPer1KUSD != nil {
+			inputPer1K = *axis.InputPer1KUSD
+		}
+		outputPer1K := 0.0
+		if axis.OutputPer1KUSD != nil {
+			outputPer1K = *axis.OutputPer1KUSD
+		}
+		costs[m] = inputPer1K + activeKnobs.OutputCostRatio*outputPer1K*vFactor
+	}
+
+	// 3. Effective per-model speed
+	speeds := make(map[string]*float64, len(s.models))
+	for _, m := range s.models {
+		axis := s.modelAxes[m]
+		if axis.TTFTSeconds != nil && axis.TPS != nil && *axis.TPS > 0 {
+			val := *axis.TTFTSeconds + float64(activeKnobs.ExpectedOutputTokens) / *axis.TPS
+			speeds[m] = &val
+		} else {
+			speeds[m] = nil
+		}
+	}
+
+	// 4. Normalize over DEPLOYED model set
+	qMin := make(map[int]float32)
+	qMax := make(map[int]float32)
+	for _, k := range topClusters {
+		row := s.qualityMeans[k]
+		first := true
+		for _, m := range s.models {
+			qVal := row[m]
+			if first {
+				qMin[k] = qVal
+				qMax[k] = qVal
+				first = false
+			} else {
+				if qVal < qMin[k] {
+					qMin[k] = qVal
+				}
+				if qVal > qMax[k] {
+					qMax[k] = qVal
+				}
+			}
+		}
+	}
+
+	var cMin, cMax float64
+	firstC := true
+	for _, m := range s.models {
+		cVal := costs[m]
+		if firstC {
+			cMin = cVal
+			cMax = cVal
+			firstC = false
+		} else {
+			if cVal < cMin {
+				cMin = cVal
+			}
+			if cVal > cMax {
+				cMax = cVal
+			}
+		}
+	}
+	cRange := cMax - cMin
+
+	useSpeed := activeKnobs.SpeedWeight > 0
+	var sMin, sMax float64
+	firstS := true
+	for _, m := range s.models {
+		if !useSpeed {
+			break
+		}
+		sPtr := speeds[m]
+		if sPtr == nil {
+			continue
+		}
+		sVal := *sPtr
+		if firstS {
+			sMin = sVal
+			sMax = sVal
+			firstS = false
+		} else {
+			if sVal < sMin {
+				sMin = sVal
+			}
+			if sVal > sMax {
+				sMax = sVal
+			}
+		}
+	}
+	sRange := 0.0
+	if useSpeed && !firstS {
+		sRange = sMax - sMin
+	}
+
+	// 6. Blend per top-P cluster
+	scores := make(map[string]float32, len(eligibleModels))
+	for _, k := range topClusters {
+		row := s.qualityMeans[k]
+		wQ := float32(activeKnobs.Alpha[k])
+		wS := float32(0.0)
+		if useSpeed {
+			wS = float32(activeKnobs.SpeedWeight)
+		}
+		wC := float32(1.0) - wQ - wS
+
+		qRange := qMax[k] - qMin[k]
+
+		for _, m := range eligibleModels {
+			qVal := row[m]
+			qNorm := float32(0.0)
+			if qRange > 0 {
+				qNorm = (qVal - qMin[k]) / qRange
+			}
+
+			cVal := costs[m]
+			cNorm := float32(0.0)
+			if cRange > 0 {
+				cNorm = float32((cVal - cMin) / cRange)
+			}
+
+			sPtr := speeds[m]
+			if sRange > 0 {
+				// Mixed-timing pool: untimed peers are treated as
+				// worst-case speed (sNorm=1, no wS bonus). This keeps
+				// wQ/wC weighting consistent across timed and untimed
+				// models — without this, the redistribution branch
+				// would silently drop the cost axis when wC=0.
+				var sNorm float32 = 1.0
+				if sPtr != nil {
+					sNorm = float32((*sPtr - sMin) / sRange)
+				}
+				blend := wQ*qNorm + wC*(1.0-cNorm) + wS*(1.0-sNorm)
+				scores[m] += blend
+			} else {
+				// No timing differentiation across the entire pool
+				// (all models lack AA timing, or all share the same
+				// speed). Redistribute wS into wQ and wC so the
+				// remaining weights still sum to 1.
+				total := wQ + wC
+				if total > 0 {
+					blend := (wQ/total)*qNorm + (wC/total)*(1.0-cNorm)
+					scores[m] += blend
+				} else {
+					scores[m] += qNorm
+				}
+			}
+
+			// Subscription preference: lift a covered model by the headroom bonus
+			// subsidyMaxBonus·(1−f) per cluster. f is the per-credential headroom
+			// factor (≈epsilon while the plan window is slack, →1 as it binds), so
+			// the bonus is near its max on a fresh plan and fades to 0 near the cap,
+			// letting cash/OSS re-enter on their own merits (soft spill). The bonus
+			// is UNIFORM across a covered family — every covered model shares its
+			// credential's f — so it only decides plan-vs-cash and never reorders
+			// models within the family; the full-catalog cost axis above still picks
+			// Haiku for easy turns and Opus for hard ones.
+			if f, ok := subsidyFactors[m]; ok {
+				scores[m] += subsidyMaxBonus * float32(1.0-f)
+			}
+		}
+	}
+	return scores
+}

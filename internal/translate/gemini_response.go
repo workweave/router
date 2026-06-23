@@ -52,10 +52,9 @@ func writeOpenAIMessageFromGemini(jw *jsonWriter, candidate gjson.Result) (hasTo
 	var texts []string
 	var firstTextSig string
 	type toolCallEntry struct {
-		id        string
-		name      string
-		args      string
-		signature string
+		id   string
+		name string
+		args string
 	}
 	var toolCalls []toolCallEntry
 
@@ -82,7 +81,7 @@ func writeOpenAIMessageFromGemini(jw *jsonWriter, candidate gjson.Result) (hasTo
 				sig = inheritedSig
 			}
 			id := embedSignatureInID(generateToolCallID(), sig)
-			toolCalls = append(toolCalls, toolCallEntry{id: id, name: name, args: args, signature: sig})
+			toolCalls = append(toolCalls, toolCallEntry{id: id, name: name, args: args})
 			return true
 		}
 		if t := part.Get("text").String(); t != "" {
@@ -126,15 +125,7 @@ func writeOpenAIMessageFromGemini(jw *jsonWriter, candidate gjson.Result) (hasTo
 			jw.Str(tc.name)
 			jw.Key("arguments")
 			jw.Str(tc.args)
-			if tc.signature != "" {
-				jw.Key("thought_signature")
-				jw.Str(tc.signature)
-			}
 			jw.EndObj()
-			if tc.signature != "" {
-				jw.Key("thought_signature")
-				jw.Str(tc.signature)
-			}
 			jw.EndObj()
 		}
 		jw.EndArr()
@@ -236,10 +227,6 @@ func buildAnthropicContent(candidate gjson.Result) (hasToolUse bool, content []b
 			jw.Str(fc.Get("name").String())
 			jw.Key("input")
 			jw.Raw(args)
-			if sig != "" {
-				jw.Key("thought_signature")
-				jw.Str(sig)
-			}
 			jw.EndObj()
 			hasToolUse = true
 			return true

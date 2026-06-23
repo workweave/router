@@ -13,6 +13,35 @@ import (
 	"workweave/router/internal/router"
 )
 
+// UpstreamHeaderObserver receives the call's context and an upstream response's
+// headers so the proxy can record subscription rate-limit headroom (see
+// internal/proxy/usage) without coupling provider adapters to the observer. The
+// context lets the observer check the call's resolved credential, so it records
+// only responses actually served on the caller's subscription (not, e.g., the
+// handover summarizer's deployment-key call on the same request). Provider
+// clients invoke it (when present on the context) right after the upstream
+// responds; it must be cheap and non-blocking.
+type UpstreamHeaderObserver func(context.Context, http.Header)
+
+type upstreamHeaderObserverKey struct{}
+
+// WithUpstreamHeaderObserver returns ctx carrying obs; a nil obs leaves ctx unchanged.
+func WithUpstreamHeaderObserver(ctx context.Context, obs UpstreamHeaderObserver) context.Context {
+	if obs == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, upstreamHeaderObserverKey{}, obs)
+}
+
+// ObserveUpstreamHeaders invokes the context's UpstreamHeaderObserver with ctx
+// and h, if one is set. Provider adapters call this after receiving an upstream
+// response.
+func ObserveUpstreamHeaders(ctx context.Context, h http.Header) {
+	if obs, ok := ctx.Value(upstreamHeaderObserverKey{}).(UpstreamHeaderObserver); ok && obs != nil {
+		obs(ctx, h)
+	}
+}
+
 const (
 	ProviderAnthropic  = "anthropic"
 	ProviderOpenAI     = "openai"
@@ -281,6 +310,7 @@ type PreparedRequest struct {
 // complete log with keys:
 //   - cc_only_tools_stripped
 //   - gemini_reminder_injected
+//   - gemini_validated_tool_mode
 type RequestMutationStats struct {
 	// CCOnlyToolsStripped is the count of Claude-Code-only tools removed
 	// from the request before dispatching to a non-Anthropic upstream. See
@@ -290,6 +320,13 @@ type RequestMutationStats struct {
 	// (geminiToolUseReminder) was appended to systemInstruction for this
 	// request. See translate/system_reminder.go (router PR #276).
 	GeminiReminderInjected bool
+	// GeminiValidatedToolMode is true when the Gemini emit path set
+	// functionCallingConfig.mode=VALIDATED for this request (Gemini 3.x, tools
+	// present, no forced tool_choice). Such a request can 400 with a generic
+	// INVALID_ARGUMENT when Gemini cannot compile a tool schema into its
+	// decode-time grammar; the proxy uses this to decide whether an AUTO-mode
+	// retry is worth attempting. See translate/emit_gemini.go.
+	GeminiValidatedToolMode bool
 }
 
 type Client interface {

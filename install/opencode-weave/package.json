@@ -1,0 +1,9 @@
+{
+  "name": "@workweave/router-opencode-extension",
+  "private": true,
+  "type": "module",
+  "description": "The opencode Codex-subscription auth plugin bundled into @workweave/router. NOT published separately: src/ is copied into the @workweave/router package at prepack and dropped into the user's opencode plugins dir by install.sh (--codex/--opencode). Lets a caller's own ChatGPT (Codex) subscription pay for their opencode turns, routed through the Weave Router. This manifest just marks the sources as ESM and declares the opencode peer dep for local typecheck.",
+  "peerDependencies": {
+    "@opencode-ai/plugin": "*"
+  }
+}

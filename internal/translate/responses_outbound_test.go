@@ -122,6 +122,53 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	assert.Equal(t, providers.EndpointResponses, prep.Endpoint)
 }
 
+// A session that ran on Gemini accumulates tool_use ids with a base64
+// thoughtSignature smuggled in (call_xxx__thought__<sig>, often >1KB). When a
+// later turn re-routes to a gpt-5.x Responses model, the call_id must be
+// stripped of the signature and clamped to OpenAI's 64-char limit, or the
+// upstream 400s ("input[N].call_id: string too long, max 64"). The tool_use
+// and its tool_result must still map to the same clamped call_id so they pair.
+func TestPrepareOpenAIResponses_ClampsGeminiThoughtSignatureCallID(t *testing.T) {
+	longSig := strings.Repeat("A", 1300) // valid base64url, > 64 chars
+	id := "call_abc123__thought__" + longSig
+	require.Greater(t, len(id), 1300)
+	body := []byte(`{
+		"model":"claude-opus-4-8","max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"continue"},
+			{"role":"assistant","content":[
+				{"type":"tool_use","id":` + strconv.Quote(id) + `,"name":"Read","input":{"file_path":"main.go"}}
+			]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":` + strconv.Quote(id) + `,"content":"ok"}
+			]}
+		]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{TargetModel: "gpt-5.5", Capabilities: router.Lookup("gpt-5.5")})
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+	input, _ := out["input"].([]any)
+	var fnCallID, fnOutCallID string
+	for _, item := range input {
+		m, _ := item.(map[string]any)
+		switch m["type"] {
+		case "function_call":
+			fnCallID, _ = m["call_id"].(string)
+		case "function_call_output":
+			fnOutCallID, _ = m["call_id"].(string)
+		}
+	}
+	require.NotEmpty(t, fnCallID)
+	require.NotEmpty(t, fnOutCallID)
+	assert.LessOrEqual(t, len(fnCallID), 64, "call_id must fit OpenAI's 64-char limit")
+	assert.Equal(t, "call_abc123", fnCallID, "the bare id (sans __thought__) is within the limit")
+	assert.Equal(t, fnCallID, fnOutCallID, "tool_use and tool_result must share the clamped call_id")
+}
+
 func TestPrepareOpenAIResponses_ReplaysSignedReasoning(t *testing.T) {
 	sig := openAIReasoningTestSignature(t, "rs_prev", "enc_prev")
 	body := []byte(`{

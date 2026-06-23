@@ -188,6 +188,14 @@ type failoverInputs struct {
 	// nil means do nothing on exhaustion (the upstream error error value
 	// is still returned to the caller).
 	flushErr func(w http.ResponseWriter, err error)
+	// deferFlushOnExhaustion suppresses the flushErr call on exhaustion while
+	// still discarding the buffered prelude and returning the error. The caller
+	// owns the decision to either flush the error itself or run a higher-level
+	// fallback (e.g. ProxyMessages' in-turn baseline failover, which re-dispatches
+	// the requested Anthropic model when a routed OSS model's bindings all fail).
+	// The buffer is still safe to write to after exhaustion because Discard()
+	// already ran — flushErr writes straight to w, bypassing buf.
+	deferFlushOnExhaustion bool
 }
 
 // dispatchWithFallback runs the per-attempt closure against each binding
@@ -249,6 +257,12 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 			// value is overwritten via Discard's header restore + this Set.
 			if !committed(in.buf) {
 				in.w.Header().Set(HeaderRouterProvider, b.Provider)
+				// decision.Model is constant across normal cross-binding
+				// fallback (same model, different provider) but changes on a
+				// baseline failover whose initialDecision carries the baseline
+				// model — refresh so x-router-model never names a model that
+				// didn't serve.
+				in.w.Header().Set(HeaderRouterModel, decision.Model)
 				if i > 0 {
 					in.w.Header().Set(HeaderRouterFallbackFrom, in.bindings[0].Provider)
 					in.w.Header().Set(HeaderRouterFallbackAttempt, attemptIdxLabel(i))
@@ -321,7 +335,7 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 			if in.buf != nil {
 				in.buf.Discard()
 			}
-			if in.flushErr != nil {
+			if in.flushErr != nil && !in.deferFlushOnExhaustion {
 				in.flushErr(in.w, attemptErr)
 			}
 			return i, attemptErr

@@ -1,0 +1,167 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# Cluster routing review gate (publish side).
+#
+# Companion to check_cluster_routing.yml. That workflow ("Cluster Routing
+# Review") checks out and runs PR code with a read-only token and uploads the
+# rendered report as an artifact. This workflow runs afterwards via
+# `workflow_run`, posts/updates the sticky PR comment, and sets the required
+# `cluster-routing/acknowledged` commit status on the PR head sha (the only
+# thing the branch ruleset requires).
+#
+# Why split it out: a fork PR's `pull_request` token is forced read-only by
+# GitHub, so an inline publish step 403s ("Resource not accessible by
+# integration") on external contributors' PRs. A `workflow_run` job runs in the
+# base-repo context with the repo's normal (writable) token, which is NOT
+# downgraded for forks, so the status can be set on every PR. This job never
+# checks out or runs PR code (CodeQL "privileged context").
+#
+# Trust model: the report artifact is produced by a job that runs PR code, so a
+# fork could forge its contents. Nothing security-critical is read from it. The
+# head sha comes from the trusted `workflow_run` event; the PR number and base
+# sha come from the API; and the one gating fact — did the deployed `latest`
+# pointer change between base and head — is recomputed here from the read-only
+# Contents API. The artifact's report.md is used only as display text inside the
+# sticky comment, which can never bypass the maintainer checkbox.
+name: Cluster Routing Review Publish
+
+on:
+  workflow_run:
+    workflows: ["Cluster Routing Review"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    cluster-routing-publish-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+env:
+  CHECK_CONTEXT: cluster-routing/acknowledged
+  COMMENT_MARKER_PREFIX: "<!-- cluster-routing-report:"
+  BOT_LOGIN: "github-actions[bot]"
+  LATEST_PATH: internal/router/cluster/artifacts/latest
+
+jobs:
+  publish:
+    name: Routing review publish
+    # Only PR-triggered report runs that succeeded produced an artifact to
+    # publish. A failed report leaves the required status unset (blocking),
+    # matching the prior `needs: report` behavior.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+      issues: write
+      statuses: write
+    steps:
+      - name: Download report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: routing-report
+          path: /tmp/out
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upsert comment and set status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const { owner, repo } = context.repo;
+            const run = context.payload.workflow_run;
+            const CHECK = process.env.CHECK_CONTEXT;
+            const PREFIX = process.env.COMMENT_MARKER_PREFIX;
+            const BOT = process.env.BOT_LOGIN;
+            const LATEST_PATH = process.env.LATEST_PATH;
+            const ACK_RE = /- \[[xX]\] I have reviewed/;
+
+            // --- Trusted inputs (never from the fork-controlled artifact) ---
+            const headSha = run.head_sha;
+            // Find the open PR for this head sha. pulls.list with a head filter
+            // works for forks (owner:branch); confirm the sha matches so a newer
+            // push doesn't get a status meant for a superseded commit.
+            const headOwner = run.head_repository.owner.login;
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo, state: 'open',
+              head: `${headOwner}:${run.head_branch}`, per_page: 100,
+            });
+            const pr = prs.find(p => p.head.sha === headSha);
+            if (!pr) {
+              core.info(`No open PR with head ${headSha}; nothing to publish (likely superseded).`);
+              return;
+            }
+            const prNumber = pr.number;
+            const baseSha = pr.base.sha;
+
+            // Recompute the only gating fact: did the deployed `latest` pointer
+            // change? Read it at base and head via the read-only Contents API —
+            // no PR code runs here, so a forged artifact can't flip this.
+            async function readLatest(ref) {
+              try {
+                const { data } = await github.rest.repos.getContent({ owner, repo, path: LATEST_PATH, ref });
+                return Buffer.from(data.content, data.encoding).toString('utf8').trim();
+              } catch (e) {
+                if (e.status === 404) return '';
+                throw e;
+              }
+            }
+            const [baseLatest, headLatest] = await Promise.all([readLatest(baseSha), readLatest(headSha)]);
+            const gating = baseLatest !== headLatest;
+
+            // Artifact report.md is DISPLAY-ONLY (may be absent on a skip run).
+            let report = null;
+            try { report = fs.readFileSync('/tmp/out/report.md', 'utf8').trim(); } catch (_) { /* none */ }
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: prNumber, per_page: 100,
+            });
+            const existing = comments.find(c => c.user.login === BOT && c.body.includes(PREFIX));
+            const upsert = async (body) => {
+              if (existing) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
+              }
+            };
+            const setStatus = (state, description) =>
+              github.rest.repos.createCommitStatus({ owner, repo, sha: headSha, context: CHECK, state, description });
+
+            if (gating) {
+              const reportText = report ||
+                '_Routing report artifact missing — re-run the "Cluster Routing Review" workflow._';
+              const hash = crypto.createHash('sha256').update(reportText).digest('hex').slice(0, 12);
+              const marker = `${PREFIX}${hash} -->`;
+              const ticked = !!existing && existing.body.includes(marker) && ACK_RE.test(existing.body);
+              const box = ticked ? '[x]' : '[ ]';
+              const note = '> ⚠️ **This PR changes the deployed router (`latest`).** Review where conversational / trivial turns now land, then tick the box below to unblock merge.';
+              const ackBlock = `\n\n---\n- ${box} I have reviewed the routing distribution above and accept it.\n\n_Ticking this unblocks merge. Any further change to \`latest\` resets it._`;
+              await upsert(`${marker}\n### 🧭 Cluster routing review\n${note}\n\n${reportText}${ackBlock}`);
+              await setStatus(ticked ? 'success' : 'failure',
+                ticked ? 'Routing distribution acknowledged' : 'Review the routing report and tick the box to unblock');
+              return;
+            }
+
+            // Not gating: `latest` is unchanged, so this is always success. If a
+            // candidate artifact was rendered, show it as informational; if a
+            // prior gating comment is stale (PR changed `latest` then reverted),
+            // refresh it so the obsolete checkbox/instructions don't linger.
+            if (report) {
+              const hash = crypto.createHash('sha256').update(report).digest('hex').slice(0, 12);
+              const marker = `${PREFIX}${hash} -->`;
+              const note = '> ℹ️ Informational — candidate artifact (`latest` unchanged); no sign-off required.';
+              await upsert(`${marker}\n### 🧭 Cluster routing review\n${note}\n\n${report}`);
+              await setStatus('success', 'Candidate artifact — no deployed-model change');
+              return;
+            }
+            if (existing) {
+              await upsert(`${PREFIX}cleared -->\n### 🧭 Cluster routing review\n> ℹ️ This PR no longer changes the deployed router (\`latest\`); no sign-off required.`);
+            }
+            await setStatus('success', 'No deployed-model change');
