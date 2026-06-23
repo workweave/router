@@ -193,13 +193,13 @@ var Models = []Model{
 
 	// --- OpenAI GPT-4.x (legacy) ---
 	{ID: "gpt-4.1-nano", Tier: TierLow, ContextWindow: 1_047_576, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.25}},
 	}},
 	{ID: "gpt-4.1-mini", Tier: TierLow, ContextWindow: 1_047_576, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.40, OutputUSDPer1M: 1.60, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.40, OutputUSDPer1M: 1.60, CacheReadMultiplier: 0.25}},
 	}},
 	{ID: "gpt-4.1", Tier: TierMid, ContextWindow: 1_047_576, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00, CacheReadMultiplier: 0.25}},
 	}},
 	// gpt-4o family: priced for passthrough, not a routing target.
 	{ID: "gpt-4o-mini", ContextWindow: 128_000, Providers: []ProviderBinding{
@@ -211,27 +211,27 @@ var Models = []Model{
 
 	// --- OpenAI GPT-5 ---
 	{ID: "gpt-5-nano", ContextWindow: 400_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gpt-5-mini", ContextWindow: 400_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.50, OutputUSDPer1M: 2.00, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.50, OutputUSDPer1M: 2.00, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gpt-5", Tier: TierHigh, ContextWindow: 400_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 2.50, OutputUSDPer1M: 10.00, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 2.50, OutputUSDPer1M: 10.00, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gpt-5-chat", ContextWindow: 400_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 2.50, OutputUSDPer1M: 10.00, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 2.50, OutputUSDPer1M: 10.00, CacheReadMultiplier: 0.10}},
 	}},
 
 	// --- OpenAI GPT-5.4 ---
 	{ID: "gpt-5.4-nano", Tier: TierMid, ContextWindow: 1_000_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gpt-5.4-mini", Tier: TierMid, ContextWindow: 400_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.40, OutputUSDPer1M: 1.60, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.40, OutputUSDPer1M: 1.60, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gpt-5.4", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 12.00, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 12.00, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gpt-5.4-pro", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 20.00, OutputUSDPer1M: 80.00, CacheReadMultiplier: 0.50}},
@@ -239,13 +239,13 @@ var Models = []Model{
 
 	// --- OpenAI GPT-5.5 ---
 	{ID: "gpt-5.5-nano", Tier: TierMid, ContextWindow: 1_000_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.15, OutputUSDPer1M: 0.60, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.15, OutputUSDPer1M: 0.60, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gpt-5.5-mini", Tier: TierMid, ContextWindow: 1_000_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.50, OutputUSDPer1M: 2.50, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 0.50, OutputUSDPer1M: 2.50, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gpt-5.5", Tier: TierHigh, ContextWindow: 1_050_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 40.00, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 40.00, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gpt-5.5-pro", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 30.00, OutputUSDPer1M: 120.00, CacheReadMultiplier: 0.50}},
@@ -259,30 +259,30 @@ var Models = []Model{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.25}},
 	}},
 	{ID: "gemini-2.5-flash-lite", ContextWindow: 1_048_576, Providers: []ProviderBinding{
-		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.25}},
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gemini-2.5-flash", Tier: TierLow, ContextWindow: 1_048_576, Providers: []ProviderBinding{
-		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.30, OutputUSDPer1M: 1.20, CacheReadMultiplier: 0.25}},
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.30, OutputUSDPer1M: 1.20, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gemini-2.5-pro", ContextWindow: 1_048_576, Providers: []ProviderBinding{
-		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 1.25, OutputUSDPer1M: 5.00, CacheReadMultiplier: 0.25}},
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 1.25, OutputUSDPer1M: 5.00, CacheReadMultiplier: 0.10}},
 	}},
 
 	// --- Google Gemini 3.x ---
 	{ID: "gemini-3.1-flash-lite-preview", Tier: TierLow, ContextWindow: 1_048_576, Providers: []ProviderBinding{
-		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.25}},
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gemini-3-flash-preview", Tier: TierMid, ContextWindow: 1_048_576, Providers: []ProviderBinding{
-		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.50, OutputUSDPer1M: 2.00, CacheReadMultiplier: 0.25}},
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.50, OutputUSDPer1M: 2.00, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gemini-3-pro-preview", Tier: TierHigh, ContextWindow: 1_048_576, Providers: []ProviderBinding{
-		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00, CacheReadMultiplier: 0.25}},
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gemini-3.1-pro-preview", Tier: TierHigh, ContextWindow: 1_048_576, Providers: []ProviderBinding{
-		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00, CacheReadMultiplier: 0.25}},
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 8.00, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gemini-3.5-flash", Tier: TierMid, ContextWindow: 1_048_576, Providers: []ProviderBinding{
-		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 1.50, OutputUSDPer1M: 9.00, CacheReadMultiplier: 0.25}},
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 1.50, OutputUSDPer1M: 9.00, CacheReadMultiplier: 0.10}},
 	}},
 
 	// --- OSS pool ---
