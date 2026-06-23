@@ -262,7 +262,7 @@ func (s *Scorer) computeDialCalibration() []float64 {
 		}
 		counts := make(map[string]int, len(s.models))
 		for c := 0; c < k; c++ {
-			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models)
+			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models, nil)
 			winner, _ := argmax(scores, s.models)
 			// Mirror RoutingDistribution's accounting exactly: skip an empty
 			// winner so a cluster that flips between "" and a real model can't
@@ -631,7 +631,7 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			activeKnobs.PerModelVerbosity,
 		)
 
-		scores = s.blendScoresV2(topClusters, activeKnobs, eligibleModels)
+		scores = s.blendScoresV2(topClusters, activeKnobs, eligibleModels, req.SubsidizedModelCostFactor)
 	} else {
 		// Legacy v1 flow
 		scores = make(map[string]float32, len(eligibleModels))
@@ -841,7 +841,7 @@ var _ router.Router = (*Scorer)(nil)
 // distribution preview scores identically to live routing (single source of
 // truth for the cost/quality/speed blend). Caller owns knob validation and the
 // QualityBias->Alpha derivation; this method consumes the resolved alpha vector.
-func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnobs, eligibleModels []string) map[string]float32 {
+func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnobs, eligibleModels []string, subsidyFactors map[string]float64) map[string]float32 {
 	// 2. Effective per-model cost (knob-dependent)
 	costs := make(map[string]float64, len(s.models))
 	for _, m := range s.models {
@@ -859,6 +859,13 @@ func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnob
 			outputPer1K = *axis.OutputPer1KUSD
 		}
 		costs[m] = inputPer1K + activeKnobs.OutputCostRatio*outputPer1K*vFactor
+		// Subscription-aware discount: scale the cost term for models a caller's
+		// presented subscription covers, by the observed rate-limit headroom
+		// factor (~epsilon when slack, →1 as the window binds). Applied here so it
+		// rides the same per-cluster alpha/lambda blend as the base cost.
+		if f, ok := subsidyFactors[m]; ok {
+			costs[m] *= f
+		}
 	}
 
 	// 3. Effective per-model speed

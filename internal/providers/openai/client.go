@@ -241,6 +241,10 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	}
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
+	// Surface Codex subscription rate-limit headroom (x-codex-*) to the proxy's
+	// usage observer. Done for every response, including 429s where the headroom
+	// signal matters most.
+	providers.ObserveUpstreamHeaders(ctx, resp.Header)
 
 	idleTimeout := c.idleTimeoutFor(prep.Endpoint)
 	log := observability.Get()

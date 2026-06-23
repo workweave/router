@@ -93,7 +93,7 @@ func (s *Scorer) RoutingDistribution(gridN int) ([]DistributionPoint, error) {
 
 		counts := make(map[string]int, len(s.models))
 		for c := 0; c < k; c++ {
-			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models)
+			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models, nil)
 			winner, _ := argmax(scores, s.models)
 			if winner != "" {
 				counts[winner]++

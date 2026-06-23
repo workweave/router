@@ -41,6 +41,13 @@ type Request struct {
 	// If filtering empties eligible set, scorer returns ErrNoEligibleProvider.
 	ExcludedModels map[string]struct{}
 	RoutingKnobs   *Overrides // NEW: parsed dynamic knobs
+	// SubsidizedModelCostFactor scales a model's cost term in the scorer, in
+	// [epsilon, 1]. Set per-request for models a caller's presented subscription
+	// covers, derived from observed rate-limit headroom (see internal/proxy/usage):
+	// ~epsilon when the sub's window has slack (covered model ~free), rising to 1
+	// (full catalog price, no subsidy) as the window binds. Absent entry = no
+	// subsidy. nil/empty = today's behavior.
+	SubsidizedModelCostFactor map[string]float64
 }
 
 type Decision struct {

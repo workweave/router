@@ -165,6 +165,31 @@ func TestScorer_PicksClusterAlignedModel(t *testing.T) {
 	assert.Contains(t, got.Reason, "model=claude-opus-4-7")
 }
 
+// TestScorer_SubscriptionCostFactorNoop guards the feature-off path: a 1.0
+// factor (and nil) must leave routing byte-identical to no subsidy. The
+// directional cost effect of factors < 1 is unit-tested where the cost math
+// lives (internal/proxy/usage CostFactor) and validated end-to-end on
+// cost-weighted production traffic via the offline screen — this fixture's
+// default knobs give the cost axis zero weight, so a Route-level flip can't be
+// exercised here.
+func TestScorer_SubscriptionCostFactorNoop(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s := newScorerForTest(t, emb, cfgForTest())
+	req := router.Request{PromptText: strings.Repeat("x", 100)}
+
+	base, err := s.Route(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, base.Metadata)
+
+	noop := req
+	noop.SubsidizedModelCostFactor = map[string]float64{base.Model: 1.0, "claude-haiku-4-5": 1.0}
+	noopRes, err := s.Route(context.Background(), noop)
+	require.NoError(t, err)
+	assert.Equal(t, base.Model, noopRes.Model, "a 1.0 factor must not change the decision")
+	assert.InDelta(t, base.Metadata.ChosenScore, noopRes.Metadata.ChosenScore, 1e-9,
+		"a 1.0 factor must not change the score")
+}
+
 // Removing any populated metadata field breaks routing telemetry rows.
 func TestScorer_PopulatesRoutingMetadata(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}

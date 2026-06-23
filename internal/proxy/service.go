@@ -17,6 +17,7 @@ import (
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
+	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/catalog"
@@ -165,6 +166,16 @@ type Service struct {
 	// https://router.workweave.ai), trailing slash trimmed. Empty disables
 	// feedback-link header emission on proxied responses.
 	feedbackBaseURL string
+	// usageObserver records per-credential subscription rate-limit headroom from
+	// upstream response headers; subsidyFactors reads it to discount covered
+	// models' cost term. Nil disables subscription-aware routing entirely (the
+	// header observer is not installed and no factors are computed).
+	usageObserver *usage.Observer
+	// subsidyEpsilon/subsidyGamma parameterize usage.Snapshot.CostFactor: the
+	// floor multiplier for a fully-slack covered model and the curvature that
+	// keeps the factor near epsilon until the window is genuinely near its cap.
+	subsidyEpsilon float64
+	subsidyGamma   float64
 }
 
 // pinSessionTTL mirrors Anthropic's prompt-cache TTL on Sonnet/Haiku/Opus 4.5+
@@ -1279,6 +1290,7 @@ func (s *Service) anthropicNativeAttempt(
 }
 
 func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
+	ctx = s.withUsageObserver(ctx)
 	log := observability.FromContext(ctx)
 	requestStart := time.Now()
 	requestID := uuid.New().String()
@@ -2847,6 +2859,7 @@ func finalizeAfterProxy(proxyErr error, fn func() error) error {
 // ProxyOpenAIChatCompletion routes an OpenAI Chat Completion request,
 // translating cross-format when the decision picks a non-OpenAI provider.
 func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
+	ctx = s.withUsageObserver(ctx)
 	log := observability.FromContext(ctx)
 	requestStart := time.Now()
 	requestID := uuid.New().String()
@@ -3488,6 +3501,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 // re-emitted as Responses-shaped SSE / JSON. This keeps the turn loop, cache,
 // pricing, and translation matrix unchanged.
 func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
+	ctx = s.withUsageObserver(ctx)
 	chatBody, _, model, err := translate.ResponsesToChatCompletions(body)
 	if err != nil {
 		return fmt.Errorf("translate responses request: %w", err)
