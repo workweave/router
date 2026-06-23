@@ -842,6 +842,17 @@ var _ router.Router = (*Scorer)(nil)
 // truth for the cost/quality/speed blend). Caller owns knob validation and the
 // QualityBias->Alpha derivation; this method consumes the resolved alpha vector.
 func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnobs, eligibleModels []string, subsidyFactors map[string]float64) map[string]float32 {
+	// Confine the subscription discount to eligible models. costs (and the
+	// cMin/cMax cost normalization) range over the full deployed set, so
+	// discounting an EXCLUDED covered model (context overflow, pin max-out,
+	// operator filter) could make it the artificial cost floor and weaken the
+	// cost axis for models that can actually win. An ineligible model can't be
+	// chosen, so subsidizing it serves no purpose.
+	eligibleSet := make(map[string]struct{}, len(eligibleModels))
+	for _, m := range eligibleModels {
+		eligibleSet[m] = struct{}{}
+	}
+
 	// 2. Effective per-model cost (knob-dependent)
 	costs := make(map[string]float64, len(s.models))
 	for _, m := range s.models {
@@ -864,7 +875,9 @@ func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnob
 		// factor (~epsilon when slack, →1 as the window binds). Applied here so it
 		// rides the same per-cluster alpha/lambda blend as the base cost.
 		if f, ok := subsidyFactors[m]; ok {
-			costs[m] *= f
+			if _, eligible := eligibleSet[m]; eligible {
+				costs[m] *= f
+			}
 		}
 	}
 
