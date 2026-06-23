@@ -1,59 +1,78 @@
-# opencode Weave Codex plugin
+# opencode Weave subscription plugin
 
-Lets a caller's own **ChatGPT (Codex) subscription** pay for their **opencode**
-turns, routed through the Weave Router. Bundled into `@workweave/router`; the
-installer (`--codex` / `--opencode`) drops `src/index.ts` into the user's
-opencode plugins dir and writes a matching `weave-codex` provider block into
-`opencode.json`.
+Lets a caller's own **AI subscriptions** pay for their **opencode** turns, routed
+through the Weave Router. A subscription is a **credential scoped to the model
+family it can pay for**, not a provider you pick: you connect your ChatGPT
+(Codex) and/or Claude (Pro/Max) plan once, the router routes every turn to the
+best model, and bills the plan that matches the model it served — ChatGPT pays
+for GPT/Codex turns, Claude pays for Claude turns, your Weave key pays for
+everything else.
+
+Bundled into `@workweave/router`; the installer (`--codex` / `--opencode`) drops
+`src/index.ts` into the user's opencode plugins dir and writes a single
+Responses-format `weave` provider (plus a login-only `weave-claude` provider)
+into `opencode.json`.
 
 ## Why a plugin (config alone can't do it)
 
 opencode removed built-in subscription auth in 1.3.0 and binds OAuth to its own
-first-party providers — its bundled `openai/codex.ts` plugin hardcodes the
-upstream to `chatgpt.com` and binds provider id `openai`, so a custom router
-provider can't reuse it. And a subscription needs the caller's OAuth token in
-`Authorization`, which expires hourly — a static `options.headers` string can't
-refresh it.
-
-This plugin re-implements the same ChatGPT OAuth + refresh against a **custom**
-provider id (`weave-codex`) and, crucially, **leaves the request URL on the
-Weave Router** instead of rewriting it to `chatgpt.com`.
+first-party providers, so a custom router provider can't reuse it. And
+subscription tokens expire hourly — a static `options.headers` string can't
+refresh them, nor carry two subscriptions whose tokens rotate independently.
 
 ## Wire shape it produces
 
-Matches the router's `/v1/responses` Codex passthrough:
+opencode talks to one Responses-format `weave` provider; the plugin's loader
+attaches whichever subscriptions are connected to **every** request via the
+router's dedicated headers:
 
 | | |
 |---|---|
 | `POST {router}/v1/responses` | Responses wire format (opencode's default for an `@ai-sdk/openai` provider) |
-| `Authorization: Bearer <ChatGPT JWT>` | the caller's subscription, refreshed on expiry |
-| `ChatGPT-Account-Id: <id>` | paired account id (required by the Codex backend) |
-| `X-Weave-Router-Key: rk_…` | from `opencode.json` `options.headers` — the router authenticates off this, leaving `Authorization` free for the JWT |
-| `originator`, `session-id` | from the plugin's `chat.headers` hook (Codex backend session continuity) |
+| `X-Weave-OpenAI-Subscription: <ChatGPT JWT>` | pays GPT/Codex turns, refreshed on expiry |
+| `X-Weave-OpenAI-Account-ID: <id>` | paired account id (required by the Codex backend) |
+| `X-Weave-Anthropic-Subscription: <sk-ant-oat token>` | pays Claude turns, refreshed on expiry |
+| `X-Weave-Router-Key: rk_…` | from `opencode.json` `options.headers` — the router authenticates off this |
 
-The router detects the inbound Codex bearer and serves the turn on the caller's
-own plan at the subscription fee.
+The router routes the turn across every model the caller's subs + key can pay
+for and resolves the subscription matching the chosen provider, so a sub is
+never billed for a turn outside its family.
 
-## Division of responsibility
+## Two storage slots, one request provider
 
-- **Installer** writes the router key + identity headers (`X-Weave-Router-Key`,
-  `X-App`, `X-Weave-User-Email`) into `opencode.json` `options.headers`.
-- **This plugin** manages only the dynamic, secret, refreshable subscription
-  credential (the `Authorization` bearer + `ChatGPT-Account-Id`) via the auth
-  `loader`, and the login flow via auth `methods` (browser PKCE + headless
-  device code). Tokens are stored in opencode's own auth store under the
-  `weave-codex` provider id.
+opencode stores one credential per provider id and the loader's `getAuth()` is
+scoped to its own provider, so the two logins live in two slots:
 
-## Env overrides
+- **`weave`** — the request provider. Owns the **ChatGPT** login and the loader
+  that attaches both subscriptions. Connecting ChatGPT activates sub-routing.
+- **`weave-claude`** — login-only (no models, serves no requests). Owns the
+  **Claude** login. Its token is read from opencode's on-disk auth store by the
+  `weave` loader (the SDK exposes no get-by-id).
 
-- `WEAVE_CODEX_OAUTH_ISSUER` — override the OpenAI auth issuer (self-hosted
-  OpenAI auth proxies; also used by the capture tests).
+With neither connected, `weave` is a plain router provider (your Weave key pays)
+— the loader simply doesn't run. Connecting ChatGPT is what turns on
+subscription routing; the Claude sub then rides along when present.
+
+## Login
+
+`opencode auth login` → **Weave Router** → *ChatGPT Pro/Plus* (browser or
+headless device code) and/or **Weave Router — Claude plan** → *Claude Pro/Max*
+(browser; paste the `code#state` shown after authorizing).
+
+## Env overrides (self-host + tests)
+
+- `WEAVE_CODEX_OAUTH_ISSUER` — OpenAI auth issuer.
+- `WEAVE_ANTHROPIC_OAUTH_AUTHORIZE` / `WEAVE_ANTHROPIC_OAUTH_TOKEN` — Anthropic
+  OAuth authorize host / token endpoint.
+- `WEAVE_OPENCODE_AUTH_FILE` — path to opencode's `auth.json` (the `weave`
+  loader reads the `weave-claude` slot from here; defaults to
+  `$XDG_DATA_HOME/opencode/auth.json`).
 
 ## Verification
 
-Capture-tested end-to-end against a local server standing in for the router
-(opencode 1.17.9, real ChatGPT login): the inject path forwards the real JWT +
-account-id in Responses format to `/v1/responses`, and the refresh path detects
-an expired token, refreshes against the issuer, rotates + persists the tokens,
-and injects the refreshed bearer. Typechecks under `strict` against
-`@opencode-ai/plugin`.
+`bun test test/` (run under bun, opencode's own runtime) covers: dual-sub
+injection via the dedicated headers with the router key preserved and
+`Authorization` left clean; ChatGPT-only graceful degradation; expired Claude
+token refresh + persist + rotated injection; the loader staying inert without
+oauth; and the Claude login hook's canonical OAuth flow + `code#state` exchange.
+Typechecks under `strict` against `@opencode-ai/plugin`.

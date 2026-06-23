@@ -1,42 +1,80 @@
 /**
- * @workweave/router — use a caller's ChatGPT (Codex) subscription for their
- * opencode turns, routed through the Weave Router.
+ * @workweave/router — let a caller's own AI subscriptions pay for their opencode
+ * turns, routed through the Weave Router.
  *
- * opencode removed built-in subscription auth in 1.3.0 and binds OAuth to its
- * own first-party providers (the bundled `openai/codex.ts` plugin hardcodes the
- * upstream to chatgpt.com and binds provider "openai"), so a custom router
- * provider can't reuse it. This plugin re-implements the same ChatGPT OAuth +
- * refresh against a CUSTOM provider id (`weave-codex`) and, crucially, leaves
- * the request URL pointed at the Weave Router instead of chatgpt.com.
+ * Model: a subscription is a CREDENTIAL scoped to the model family it can pay
+ * for, not a provider you pick to force a model. You connect your ChatGPT
+ * (Codex) and/or Claude (Pro/Max) plan once; the Weave Router routes every turn
+ * to the best model and bills the plan that matches the model it served — and
+ * only that. ChatGPT plan pays for GPT/Codex turns, Claude plan pays for Claude
+ * turns, your Weave key pays for everything else. No manual provider-picking.
  *
- * Wire shape produced (matches the router's /v1/responses Codex passthrough):
- *   - POST {router}/v1/responses                       (Responses wire format)
- *   - Authorization: Bearer <ChatGPT JWT>              (the caller's subscription)
- *   - ChatGPT-Account-Id: <account id>                 (paired, required by Codex backend)
- *   - X-Weave-Router-Key: rk_...                       (from config options.headers)
+ * opencode talks to one Responses-format `weave` provider; this plugin attaches
+ * BOTH subscriptions to every request via the router's dedicated headers:
+ *   - POST {router}/v1/responses                          (Responses wire format)
+ *   - X-Weave-OpenAI-Subscription: <ChatGPT JWT>          (pays GPT/Codex turns)
+ *   - X-Weave-OpenAI-Account-ID:   <account id>           (paired, Codex backend)
+ *   - X-Weave-Anthropic-Subscription: <sk-ant-oat token>  (pays Claude turns)
+ *   - X-Weave-Router-Key: rk_...                          (from config options.headers)
  *
- * The router authenticates off X-Weave-Router-Key (so Authorization is free for
- * the subscription JWT), detects the inbound Codex bearer, and serves the turn
- * on the caller's own plan at the subscription fee. The router key + identity
- * headers (X-App, X-Weave-User-Email) live in opencode.json `options.headers`
- * written by the installer; this plugin manages only the dynamic, refreshable
- * subscription credential.
+ * The router authenticates off X-Weave-Router-Key, routes the turn across all
+ * models the caller's subs + key can pay for, and resolves the matching
+ * subscription per the chosen provider (so the ChatGPT plan can never be billed
+ * for a Claude/OSS turn, and vice-versa).
+ *
+ * opencode stores one credential per provider id and the loader's getAuth() is
+ * scoped to its own provider, so the two logins live in two slots:
+ *   - provider `weave`        : the request provider; owns the ChatGPT login and
+ *                               the loader that injects both subs.
+ *   - provider `weave-claude`  : login-only; owns the Claude login. Its token is
+ *                               read from opencode's on-disk auth store by the
+ *                               `weave` loader (the SDK has no get-by-id).
+ * Connecting ChatGPT activates sub-routing; the Claude sub then rides along when
+ * present. With neither connected, `weave` is a plain router provider (your
+ * Weave key pays) — the loader simply doesn't run.
  */
 
 import type { Hooks, Plugin, PluginInput } from "@opencode-ai/plugin"
+import { readFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
 
-const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+// ---- ChatGPT (Codex) OAuth -------------------------------------------------
+const CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 // Overridable for self-hosted OpenAI auth proxies and for tests (mirrors the
 // bundled codex plugin's `options.issuer`).
-const ISSUER = process.env.WEAVE_CODEX_OAUTH_ISSUER ?? "https://auth.openai.com"
+const CHATGPT_ISSUER = process.env.WEAVE_CODEX_OAUTH_ISSUER ?? "https://auth.openai.com"
 const OAUTH_PORT = 1455
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3000
-// Provider id this plugin owns. Must match the provider block the installer
-// writes into opencode.json. Deliberately NOT "openai" — that id is claimed by
-// opencode's bundled codex plugin, which rewrites the upstream to chatgpt.com.
-const PROVIDER_ID = "weave-codex"
+
+// ---- Claude (Anthropic) OAuth ----------------------------------------------
+// Canonical Claude Pro/Max OAuth (the same flow Claude Code uses): a manual
+// code-paste browser flow. Authorize on claude.ai, exchange/refresh on the
+// console token endpoint. The access token is an sk-ant-oat… subscription
+// bearer; the router applies the Bearer + oauth beta header on the upstream leg.
+const ANTHROPIC_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+const ANTHROPIC_AUTHORIZE_BASE = process.env.WEAVE_ANTHROPIC_OAUTH_AUTHORIZE ?? "https://claude.ai"
+const ANTHROPIC_TOKEN_URL = process.env.WEAVE_ANTHROPIC_OAUTH_TOKEN ?? "https://console.anthropic.com/v1/oauth/token"
+const ANTHROPIC_REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback"
+const ANTHROPIC_SCOPE = "org:create_api_key user:profile user:inference"
+
+// Provider ids this plugin owns. `weave` is the request provider the installer
+// writes into opencode.json; `weave-claude` is login-only storage for the Claude
+// subscription. Deliberately NOT "openai"/"anthropic" — those ids are claimed by
+// opencode's bundled provider plugins, which rewrite the upstream off the router.
+const PROVIDER_ID = "weave"
+const ANTHROPIC_PROVIDER_ID = "weave-claude"
+
+// Dedicated router subscription headers. Must match the constants in
+// internal/server/middleware/auth.go so the router stashes each sub and resolves
+// it per the routed provider.
+const HEADER_OPENAI_SUB = "X-Weave-OpenAI-Subscription"
+const HEADER_OPENAI_ACCOUNT_ID = "X-Weave-OpenAI-Account-ID"
+const HEADER_ANTHROPIC_SUB = "X-Weave-Anthropic-Subscription"
+
 // Placeholder so the @ai-sdk/openai provider considers auth configured; the
-// loader's fetch overwrites Authorization with the real subscription bearer.
+// loader's fetch carries the real subscriptions in the dedicated headers and the
+// router authenticates off X-Weave-Router-Key, so this value is never used.
 const DUMMY_KEY = "weave-router-oauth"
 const USER_AGENT = "weave-router-opencode"
 
@@ -111,7 +149,7 @@ interface TokenResponse {
 function buildAuthorizeUrl(redirectUri: string, pkce: PkceCodes, state: string): string {
   const params = new URLSearchParams({
     response_type: "code",
-    client_id: CLIENT_ID,
+    client_id: CHATGPT_CLIENT_ID,
     redirect_uri: redirectUri,
     scope: "openid profile email offline_access",
     code_challenge: pkce.challenge,
@@ -121,18 +159,18 @@ function buildAuthorizeUrl(redirectUri: string, pkce: PkceCodes, state: string):
     state,
     originator: "codex_cli_ts",
   })
-  return `${ISSUER}/oauth/authorize?${params.toString()}`
+  return `${CHATGPT_ISSUER}/oauth/authorize?${params.toString()}`
 }
 
 async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: PkceCodes): Promise<TokenResponse> {
-  const response = await fetch(`${ISSUER}/oauth/token`, {
+  const response = await fetch(`${CHATGPT_ISSUER}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
       redirect_uri: redirectUri,
-      client_id: CLIENT_ID,
+      client_id: CHATGPT_CLIENT_ID,
       code_verifier: pkce.verifier,
     }).toString(),
   })
@@ -141,20 +179,115 @@ async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: Pk
 }
 
 async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
-  const response = await fetch(`${ISSUER}/oauth/token`, {
+  const response = await fetch(`${CHATGPT_ISSUER}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
-      client_id: CLIENT_ID,
+      client_id: CHATGPT_CLIENT_ID,
     }).toString(),
   })
   if (!response.ok) throw new Error(`Token refresh failed: ${response.status}`)
   return response.json() as Promise<TokenResponse>
 }
 
-// ---- Browser OAuth loopback server (PKCE) --------------------------------
+// ---- Claude (Anthropic) OAuth helpers --------------------------------------
+
+interface AnthropicTokens {
+  access: string
+  refresh: string
+  expires: number
+}
+
+function buildAnthropicAuthorizeUrl(pkce: PkceCodes): string {
+  const url = new URL(`${ANTHROPIC_AUTHORIZE_BASE}/oauth/authorize`)
+  url.searchParams.set("code", "true")
+  url.searchParams.set("client_id", ANTHROPIC_CLIENT_ID)
+  url.searchParams.set("response_type", "code")
+  url.searchParams.set("redirect_uri", ANTHROPIC_REDIRECT_URI)
+  url.searchParams.set("scope", ANTHROPIC_SCOPE)
+  url.searchParams.set("code_challenge", pkce.challenge)
+  url.searchParams.set("code_challenge_method", "S256")
+  // Claude Code reuses the PKCE verifier as the state value; the manual code is
+  // returned to the user as "<code>#<state>".
+  url.searchParams.set("state", pkce.verifier)
+  return url.toString()
+}
+
+async function exchangeAnthropicCode(code: string, verifier: string): Promise<AnthropicTokens> {
+  const [authCode, state] = code.trim().split("#")
+  const response = await fetch(ANTHROPIC_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "authorization_code",
+      code: authCode,
+      state,
+      client_id: ANTHROPIC_CLIENT_ID,
+      redirect_uri: ANTHROPIC_REDIRECT_URI,
+      code_verifier: verifier,
+    }),
+  })
+  if (!response.ok) throw new Error(`Anthropic token exchange failed: ${response.status}`)
+  const json = (await response.json()) as { access_token: string; refresh_token: string; expires_in?: number }
+  return { access: json.access_token, refresh: json.refresh_token, expires: Date.now() + (json.expires_in ?? 3600) * 1000 }
+}
+
+async function refreshAnthropicToken(refreshToken: string): Promise<AnthropicTokens> {
+  const response = await fetch(ANTHROPIC_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: ANTHROPIC_CLIENT_ID,
+    }),
+  })
+  if (!response.ok) throw new Error(`Anthropic token refresh failed: ${response.status}`)
+  const json = (await response.json()) as { access_token: string; refresh_token?: string; expires_in?: number }
+  return {
+    access: json.access_token,
+    // OAuth 2.0 lets the issuer omit a new refresh_token on refresh; keep the
+    // existing one in that case rather than clearing it.
+    refresh: json.refresh_token ?? refreshToken,
+    expires: Date.now() + (json.expires_in ?? 3600) * 1000,
+  }
+}
+
+// ---- opencode auth-store reader (cross-provider) ---------------------------
+// The `weave` loader's getAuth() is scoped to `weave`, and the SDK exposes no
+// get-by-id, so the Claude credential stored under `weave-claude` is read from
+// opencode's on-disk auth store directly. Path mirrors opencode's Global.Path
+// (XDG data home + /opencode/auth.json); overridable for tests.
+
+interface StoredOAuth {
+  type: string
+  access?: string
+  refresh?: string
+  expires?: number
+  accountId?: string
+}
+
+function opencodeAuthFile(): string {
+  const override = process.env.WEAVE_OPENCODE_AUTH_FILE
+  if (override) return override
+  const dataHome = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share")
+  return join(dataHome, "opencode", "auth.json")
+}
+
+async function readStoredOAuth(providerID: string): Promise<StoredOAuth | undefined> {
+  try {
+    const raw = await readFile(opencodeAuthFile(), "utf8")
+    const entry = (JSON.parse(raw) as Record<string, StoredOAuth>)[providerID]
+    if (entry && entry.type === "oauth") return entry
+  } catch {
+    // No store yet / unreadable / not logged in — no Claude sub to attach.
+  }
+  return undefined
+}
+
+// ---- Browser OAuth loopback server (PKCE, ChatGPT) -------------------------
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -162,12 +295,12 @@ function escapeHtml(s: string): string {
   )
 }
 
-const HTML_SUCCESS = `<!doctype html><html><head><title>Weave Router — Codex authorized</title></head>
+const HTML_SUCCESS = `<!doctype html><html><head><title>Weave Router — authorized</title></head>
 <body style="font-family:system-ui;background:#131010;color:#f1ecec;display:flex;justify-content:center;align-items:center;height:100vh;margin:0">
 <div style="text-align:center"><h1>Authorization successful</h1><p>You can close this window and return to opencode.</p>
 <script>setTimeout(()=>window.close(),2000)</script></div></body></html>`
 
-const renderOAuthError = (error: string) => `<!doctype html><html><head><title>Weave Router — Codex authorization failed</title></head>
+const renderOAuthError = (error: string) => `<!doctype html><html><head><title>Weave Router — authorization failed</title></head>
 <body style="font-family:system-ui;background:#131010;color:#f1ecec;display:flex;justify-content:center;align-items:center;height:100vh;margin:0">
 <div style="text-align:center"><h1 style="color:#fc533a">Authorization failed</h1>
 <div style="color:#ff917b;font-family:monospace;margin-top:1rem;padding:1rem;background:#3c140d;border-radius:.5rem">${escapeHtml(error)}</div></div></body></html>`
@@ -259,7 +392,7 @@ function waitForOAuthCallback(pkce: PkceCodes, state: string): Promise<TokenResp
   })
 }
 
-// ---- Plugin --------------------------------------------------------------
+// ---- Request provider: `weave` (Responses, both subs) ----------------------
 
 export const WeaveCodex: Plugin = async (input: PluginInput): Promise<Hooks> => {
   return {
@@ -269,69 +402,96 @@ export const WeaveCodex: Plugin = async (input: PluginInput): Promise<Hooks> => 
         const auth = await getAuth()
         if (auth.type !== "oauth") return {}
 
-        // Coalesce concurrent refreshes (opencode fires parallel turns).
-        let refreshPromise: Promise<{ access: string; accountId: string | undefined }> | undefined
+        // Coalesce concurrent refreshes (opencode fires parallel turns), one
+        // in-flight promise per subscription.
+        let chatgptRefresh: Promise<{ access: string; accountId: string | undefined }> | undefined
+        let anthropicRefresh: Promise<string | undefined> | undefined
+
+        // Resolve the ChatGPT (Codex) sub from this provider's own slot,
+        // refreshing + persisting the rotated token on (or just before) expiry.
+        async function resolveChatGPT(): Promise<{ access: string; accountId?: string } | undefined> {
+          const current = (await getAuth()) as StoredOAuth
+          if (current.type !== "oauth" || !current.refresh) return undefined
+          if (current.access && (current.expires ?? 0) >= Date.now()) {
+            return { access: current.access, accountId: current.accountId }
+          }
+          if (!chatgptRefresh) {
+            chatgptRefresh = refreshAccessToken(current.refresh)
+              .then(async (tokens) => {
+                const accountId = extractAccountId(tokens) || current.accountId
+                await input.client.auth.set({
+                  path: { id: PROVIDER_ID },
+                  body: {
+                    type: "oauth",
+                    refresh: tokens.refresh_token || current.refresh!,
+                    access: tokens.access_token,
+                    expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+                    ...(accountId && { accountId }),
+                  },
+                })
+                return { access: tokens.access_token, accountId }
+              })
+              .finally(() => {
+                chatgptRefresh = undefined
+              })
+          }
+          return chatgptRefresh
+        }
+
+        // Resolve the Claude sub from the `weave-claude` slot (read off disk),
+        // refreshing + persisting the rotated token via the auth store. Returns
+        // undefined when Claude isn't connected.
+        async function resolveAnthropic(): Promise<string | undefined> {
+          const current = await readStoredOAuth(ANTHROPIC_PROVIDER_ID)
+          if (!current) return undefined
+          if (current.access && (current.expires ?? 0) >= Date.now()) return current.access
+          if (!current.refresh) return current.access
+          if (!anthropicRefresh) {
+            anthropicRefresh = refreshAnthropicToken(current.refresh)
+              .then(async (tokens) => {
+                await input.client.auth.set({
+                  path: { id: ANTHROPIC_PROVIDER_ID },
+                  body: { type: "oauth", refresh: tokens.refresh, access: tokens.access, expires: tokens.expires },
+                })
+                return tokens.access
+              })
+              // A failed Claude refresh must not fail the turn — fall back to the
+              // (possibly stale) token; an expired Claude turn the router can't
+              // bill to the plan falls through to the Weave key on its end.
+              .catch(() => current.access)
+              .finally(() => {
+                anthropicRefresh = undefined
+              })
+          }
+          return anthropicRefresh
+        }
 
         return {
           apiKey: DUMMY_KEY,
           async fetch(requestInput: RequestInfo | URL, init?: RequestInit) {
-            const currentAuth = (await getAuth()) as {
-              type: string
-              access: string
-              refresh: string
-              expires: number
-              accountId?: string
-            }
-            if (currentAuth.type !== "oauth") return fetch(requestInput, init)
-
-            // Refresh the access token on (or just before) expiry and persist
-            // the rotated refresh token back into opencode's auth store.
-            if (!currentAuth.access || currentAuth.expires < Date.now()) {
-              if (!refreshPromise) {
-                refreshPromise = refreshAccessToken(currentAuth.refresh)
-                  .then(async (tokens) => {
-                    const accountId = extractAccountId(tokens) || currentAuth.accountId
-                    await input.client.auth.set({
-                      path: { id: PROVIDER_ID },
-                      body: {
-                        type: "oauth",
-                        // OAuth 2.0 lets the issuer omit a new refresh_token on
-                        // refresh (the existing one stays valid). Keep the
-                        // stored one in that case rather than clearing it.
-                        refresh: tokens.refresh_token || currentAuth.refresh,
-                        access: tokens.access_token,
-                        expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-                        ...(accountId && { accountId }),
-                      },
-                    })
-                    return { access: tokens.access_token, accountId }
-                  })
-                  .finally(() => {
-                    refreshPromise = undefined
-                  })
-              }
-              const refreshed = await refreshPromise
-              currentAuth.access = refreshed.access
-              currentAuth.accountId = refreshed.accountId
-            }
-
-            // Preserve the configured headers (X-Weave-Router-Key, X-App, ...
-            // from opencode.json options.headers), then overwrite Authorization
-            // with the caller's subscription bearer + the paired account id.
+            // Preserve the configured headers (X-Weave-Router-Key, X-App, …) and
+            // attach each connected subscription via its dedicated router header.
+            // Authorization is left as the @ai-sdk placeholder; the router authes
+            // off X-Weave-Router-Key and resolves the matching sub per the routed
+            // model, so neither sub rides in Authorization.
             const headers = new Headers(init?.headers as HeadersInit | undefined)
-            headers.set("authorization", `Bearer ${currentAuth.access}`)
-            if (currentAuth.accountId) headers.set("ChatGPT-Account-Id", currentAuth.accountId)
 
-            // NOTE: unlike opencode's bundled codex plugin we deliberately do
-            // NOT rewrite the URL — the request stays on the Weave Router, which
-            // forwards it to the Codex backend on the caller's plan.
+            const chatgpt = await resolveChatGPT()
+            if (chatgpt?.access) {
+              headers.set(HEADER_OPENAI_SUB, chatgpt.access)
+              if (chatgpt.accountId) headers.set(HEADER_OPENAI_ACCOUNT_ID, chatgpt.accountId)
+            }
+
+            const anthropic = await resolveAnthropic()
+            if (anthropic) headers.set(HEADER_ANTHROPIC_SUB, anthropic)
+
             return fetch(requestInput, { ...init, headers })
           },
         }
       },
       methods: [
         {
-          label: "ChatGPT Pro/Plus (browser)",
+          label: "ChatGPT Pro/Plus — pays for GPT/Codex turns (browser)",
           type: "oauth",
           authorize: async () => {
             const { redirectUri } = await startOAuthServer()
@@ -357,13 +517,13 @@ export const WeaveCodex: Plugin = async (input: PluginInput): Promise<Hooks> => 
           },
         },
         {
-          label: "ChatGPT Pro/Plus (headless device code)",
+          label: "ChatGPT Pro/Plus — pays for GPT/Codex turns (headless device code)",
           type: "oauth",
           authorize: async () => {
-            const deviceResponse = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
+            const deviceResponse = await fetch(`${CHATGPT_ISSUER}/api/accounts/deviceauth/usercode`, {
               method: "POST",
               headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
-              body: JSON.stringify({ client_id: CLIENT_ID }),
+              body: JSON.stringify({ client_id: CHATGPT_CLIENT_ID }),
             })
             if (!deviceResponse.ok) throw new Error("Failed to initiate device authorization")
             const deviceData = (await deviceResponse.json()) as {
@@ -373,13 +533,13 @@ export const WeaveCodex: Plugin = async (input: PluginInput): Promise<Hooks> => 
             }
             const interval = Math.max(parseInt(deviceData.interval) || 5, 1) * 1000
             return {
-              url: `${ISSUER}/codex/device`,
+              url: `${CHATGPT_ISSUER}/codex/device`,
               instructions: `Enter code: ${deviceData.user_code}`,
               method: "auto" as const,
               async callback() {
                 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
                 while (true) {
-                  const response = await fetch(`${ISSUER}/api/accounts/deviceauth/token`, {
+                  const response = await fetch(`${CHATGPT_ISSUER}/api/accounts/deviceauth/token`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
                     body: JSON.stringify({
@@ -389,14 +549,14 @@ export const WeaveCodex: Plugin = async (input: PluginInput): Promise<Hooks> => 
                   })
                   if (response.ok) {
                     const data = (await response.json()) as { authorization_code: string; code_verifier: string }
-                    const tokenResponse = await fetch(`${ISSUER}/oauth/token`, {
+                    const tokenResponse = await fetch(`${CHATGPT_ISSUER}/oauth/token`, {
                       method: "POST",
                       headers: { "Content-Type": "application/x-www-form-urlencoded" },
                       body: new URLSearchParams({
                         grant_type: "authorization_code",
                         code: data.authorization_code,
-                        redirect_uri: `${ISSUER}/deviceauth/callback`,
-                        client_id: CLIENT_ID,
+                        redirect_uri: `${CHATGPT_ISSUER}/deviceauth/callback`,
+                        client_id: CHATGPT_CLIENT_ID,
                         code_verifier: data.code_verifier,
                       }).toString(),
                     })
@@ -419,9 +579,9 @@ export const WeaveCodex: Plugin = async (input: PluginInput): Promise<Hooks> => 
         },
       ],
     },
-    // The Codex backend (which the router forwards to) keys session continuity
-    // off these headers; mirror opencode's bundled codex plugin. Scoped to our
-    // provider so other providers are untouched.
+    // The Codex backend (which the router forwards GPT turns to) keys session
+    // continuity off these headers; mirror opencode's bundled codex plugin.
+    // Scoped to our provider so other providers are untouched.
     "chat.headers": async (hookInput, output) => {
       if (hookInput.model.providerID !== PROVIDER_ID) return
       output.headers["originator"] = "codex_cli_ts"
@@ -431,6 +591,42 @@ export const WeaveCodex: Plugin = async (input: PluginInput): Promise<Hooks> => 
       if (hookInput.model.providerID !== PROVIDER_ID) return
       // Match codex cli: the Codex backend rejects an explicit max output cap.
       output.maxOutputTokens = undefined
+    },
+  }
+}
+
+// ---- Login-only provider: `weave-claude` (Claude Pro/Max) ------------------
+// A second auth hook so the Claude subscription gets its own storage slot
+// (opencode keys credentials by provider id). It serves no requests — the
+// `weave` loader reads this slot and attaches the token — so it needs no loader.
+
+export const WeaveClaude: Plugin = async (_input: PluginInput): Promise<Hooks> => {
+  return {
+    auth: {
+      provider: ANTHROPIC_PROVIDER_ID,
+      methods: [
+        {
+          label: "Claude Pro/Max — pays for Claude turns (browser)",
+          type: "oauth",
+          authorize: async () => {
+            const pkce = await generatePKCE()
+            return {
+              url: buildAnthropicAuthorizeUrl(pkce),
+              instructions: "Sign in with your Claude account, then paste the code shown (looks like `code#state`).",
+              method: "code" as const,
+              callback: async (code: string) => {
+                const tokens = await exchangeAnthropicCode(code, pkce.verifier)
+                return {
+                  type: "success" as const,
+                  refresh: tokens.refresh,
+                  access: tokens.access,
+                  expires: tokens.expires,
+                }
+              },
+            }
+          },
+        },
+      ],
     },
   }
 }
