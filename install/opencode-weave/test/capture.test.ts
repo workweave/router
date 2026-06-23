@@ -82,7 +82,13 @@ async function runLoaderFetch(
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString()
     if (url.includes("/oauth/token")) {
-      return new Response(JSON.stringify(tokenResponder ? tokenResponder(url) : {}), {
+      const body = tokenResponder ? tokenResponder(url) : {}
+      // A responder returning null/undefined for a token URL simulates a failed
+      // refresh (non-2xx), so tests can exercise the resilience paths.
+      if (body === null || body === undefined) {
+        return new Response("refresh failed", { status: 500 })
+      }
+      return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })
@@ -154,6 +160,31 @@ describe("weave loader — dual subscription injection", () => {
 
     expect(req.headers["x-weave-openai-subscription"]).toBe(CHATGPT_ACCESS)
     expect(req.headers["x-weave-anthropic-subscription"]).toBeUndefined()
+    expect(req.headers["x-weave-router-key"]).toBe(ROUTER_KEY)
+  })
+
+  test("a failed ChatGPT refresh still attaches the Claude sub (and doesn't fail the turn)", async () => {
+    await writeFile(
+      authFile,
+      JSON.stringify({
+        "weave-claude": { type: "oauth", access: CLAUDE_ACCESS, refresh: CLAUDE_REFRESH, expires: Date.now() + 3_600_000 },
+      }),
+    )
+    // ChatGPT token is expired → triggers a refresh; the issuer returns 500.
+    const getAuth = async () => ({
+      type: "oauth",
+      access: "stale",
+      refresh: "cg-refresh",
+      expires: Date.now() - 1000,
+      accountId: CHATGPT_ACCOUNT,
+    })
+
+    const req = await runLoaderFetch(getAuth, (url) => (url.startsWith(CHATGPT_ISSUER) ? undefined : {}))
+
+    // ChatGPT refresh failed → no OpenAI headers, but the turn still went out…
+    expect(req.headers["x-weave-openai-subscription"]).toBeUndefined()
+    // …with the (unaffected) Claude sub attached.
+    expect(req.headers["x-weave-anthropic-subscription"]).toBe(CLAUDE_ACCESS)
     expect(req.headers["x-weave-router-key"]).toBe(ROUTER_KEY)
   })
 

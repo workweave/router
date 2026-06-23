@@ -3216,11 +3216,16 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			// the upstream error as an in-stream `data: {...}` frame
 			// instead of letting dispatch's flushErr append a corrupting
 			// JSON envelope. Pre-commit errors are handled by
-			// dispatchWithFallback (Discard + flushErr). Skipped for the Codex
-			// passthrough: the client speaks Responses, so a chat-completions
-			// error frame would corrupt the stream — the upstream's own
-			// Responses error event has already reached the client.
-			if err != nil && !codexPassthrough && env.Stream() && preludeBuf.Committed() {
+			// dispatchWithFallback (Discard + flushErr).
+			// Gate on THIS attempt being the verbatim Codex backend, not on
+			// codexPassthrough alone: post-Phase-1 that flag only means a Codex
+			// body was stashed, and a Codex-sub turn can route to Claude/OSS,
+			// which streams through the translating ResponsesWriter and still
+			// needs an error frame just like any non-sub Responses turn. Only the
+			// verbatim Codex attempt already delivered the upstream's own
+			// Responses error event, so only it skips the chat-completions frame.
+			verbatimCodex := codexPassthrough && d.Provider == providers.ProviderOpenAI
+			if err != nil && !verbatimCodex && env.Stream() && preludeBuf.Committed() {
 				err = emitOpenAISSEErrorEvent(sink, err)
 			}
 			return err

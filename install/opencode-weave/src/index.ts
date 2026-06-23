@@ -487,13 +487,18 @@ export const WeaveCodex: Plugin = async (input: PluginInput): Promise<Hooks> => 
             // model, so neither sub rides in Authorization.
             const headers = new Headers(init?.headers as HeadersInit | undefined)
 
-            const chatgpt = await resolveChatGPT()
+            // Resolve both subs independently and never let one failure (e.g. a
+            // failed ChatGPT token refresh) drop the other or fail the turn — a
+            // Claude-routed turn must still get its sub when the ChatGPT refresh
+            // is down, and vice-versa. Each resolver already persists rotations.
+            const [chatgpt, anthropic] = await Promise.all([
+              resolveChatGPT().catch(() => undefined),
+              resolveAnthropic().catch(() => undefined),
+            ])
             if (chatgpt?.access) {
               headers.set(HEADER_OPENAI_SUB, chatgpt.access)
               if (chatgpt.accountId) headers.set(HEADER_OPENAI_ACCOUNT_ID, chatgpt.accountId)
             }
-
-            const anthropic = await resolveAnthropic()
             if (anthropic) headers.set(HEADER_ANTHROPIC_SUB, anthropic)
 
             return fetch(requestInput, { ...init, headers })
