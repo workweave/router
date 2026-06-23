@@ -95,7 +95,7 @@
    "xiaomi/mimo-v2.5-pro": 0.5199636081860612,
    "z-ai/glm-5.2": 0.5220024358901125,
    "minimax/minimax-m3": 0.5185907184447003,
-   "moonshotai/kimi-k2.7": 0.5137577719512636,
+   "moonshotai/kimi-k2.7": 0.5137577719512637,
    "qwen/qwen3.7-plus": 0.47954774564956776
   },
   "1": {
@@ -134,7 +134,11 @@
    "moonshotai/kimi-k2.6": 0.48938425197657975,
    "qwen/qwen3-coder-next": 0.4734321856954558,
    "qwen/qwen3-next-80b-a3b-instruct": 0.42106194469286906,
-   "xiaomi/mimo-v2.5-pro": 0.5214567538211159
+   "xiaomi/mimo-v2.5-pro": 0.5214567538211159,
+   "z-ai/glm-5.2": 0.3955387732609464,
+   "minimax/minimax-m3": 0.3955387732609464,
+   "moonshotai/kimi-k2.7": 0.3955387732609464,
+   "qwen/qwen3.7-plus": 0.3955387732609464
   },
   "11": {
    "claude-haiku-4-5": 0.48575123276213206,
@@ -151,7 +155,11 @@
    "moonshotai/kimi-k2.6": 0.4951049656502906,
    "qwen/qwen3-coder-next": 0.5009545539480212,
    "qwen/qwen3-next-80b-a3b-instruct": 0.47189193837331267,
-   "xiaomi/mimo-v2.5-pro": 0.5197793122427382
+   "xiaomi/mimo-v2.5-pro": 0.5197793122427382,
+   "z-ai/glm-5.2": 0.47189193837331267,
+   "minimax/minimax-m3": 0.47189193837331267,
+   "moonshotai/kimi-k2.7": 0.47189193837331267,
+   "qwen/qwen3.7-plus": 0.47189193837331267
   },
   "12": {
    "claude-haiku-4-5": 0.4337559294522864,
@@ -192,7 +200,7 @@
    "xiaomi/mimo-v2.5-pro": 0.5458113058374172,
    "z-ai/glm-5.2": 0.6042468566590453,
    "minimax/minimax-m3": 0.5011232231322515,
-   "moonshotai/kimi-k2.7": 0.491272196853909,
+   "moonshotai/kimi-k2.7": 0.49127219685390894,
    "qwen/qwen3.7-plus": 0.47954774564956776
   },
   "14": {
@@ -211,10 +219,10 @@
    "qwen/qwen3-coder-next": 0.47954774564956776,
    "qwen/qwen3-next-80b-a3b-instruct": 0.36495855987661485,
    "xiaomi/mimo-v2.5-pro": 0.586427496735704,
-   "z-ai/glm-5.2": 0.5988837699539602,
+   "z-ai/glm-5.2": 0.5988837699539603,
    "minimax/minimax-m3": 0.586427496735704,
    "moonshotai/kimi-k2.7": 0.5121491784790833,
-   "qwen/qwen3.7-plus": 0.4795477456495677
+   "qwen/qwen3.7-plus": 0.47954774564956776
   },
   "15": {
    "claude-haiku-4-5": 0.4542667180845843,
@@ -231,7 +239,11 @@
    "moonshotai/kimi-k2.6": 0.4722100025067968,
    "qwen/qwen3-coder-next": 0.5238880751805236,
    "qwen/qwen3-next-80b-a3b-instruct": 0.491918413977812,
-   "xiaomi/mimo-v2.5-pro": 0.49738363039493977
+   "xiaomi/mimo-v2.5-pro": 0.49738363039493977,
+   "z-ai/glm-5.2": 0.4529827357442263,
+   "minimax/minimax-m3": 0.4529827357442263,
+   "moonshotai/kimi-k2.7": 0.4529827357442263,
+   "qwen/qwen3.7-plus": 0.4529827357442263
   },
   "2": {
    "claude-haiku-4-5": 0.47720159579330557,
@@ -248,7 +260,11 @@
    "moonshotai/kimi-k2.6": 0.4993819025719193,
    "qwen/qwen3-coder-next": 0.4688389590339577,
    "qwen/qwen3-next-80b-a3b-instruct": 0.48343955668988886,
-   "xiaomi/mimo-v2.5-pro": 0.5008990795347904
+   "xiaomi/mimo-v2.5-pro": 0.5008990795347904,
+   "z-ai/glm-5.2": 0.4688389590339577,
+   "minimax/minimax-m3": 0.4688389590339577,
+   "moonshotai/kimi-k2.7": 0.4688389590339577,
+   "qwen/qwen3.7-plus": 0.4688389590339577
   },
   "3": {
    "claude-haiku-4-5": 0.45469627870230783,
@@ -309,7 +325,7 @@
    "qwen/qwen3-next-80b-a3b-instruct": 0.3686919847904159,
    "xiaomi/mimo-v2.5-pro": 0.5604225948858963,
    "z-ai/glm-5.2": 0.5901511077052657,
-   "minimax/minimax-m3": 0.5514668272867418,
+   "minimax/minimax-m3": 0.5514668272867419,
    "moonshotai/kimi-k2.7": 0.5203576690864,
    "qwen/qwen3.7-plus": 0.47954774564956776
   },
@@ -371,7 +387,7 @@
    "qwen/qwen3-coder-next": 0.47954774564956776,
    "qwen/qwen3-next-80b-a3b-instruct": 0.36382347085426414,
    "xiaomi/mimo-v2.5-pro": 0.5677570165701918,
-   "z-ai/glm-5.2": 0.5906226281301252,
+   "z-ai/glm-5.2": 0.5906226281301253,
    "minimax/minimax-m3": 0.5370671570072034,
    "moonshotai/kimi-k2.7": 0.557216212592953,
    "qwen/qwen3.7-plus": 0.47954774564956776
@@ -391,7 +407,11 @@
    "moonshotai/kimi-k2.6": 0.45681571992817,
    "qwen/qwen3-coder-next": 0.48455979863779275,
    "qwen/qwen3-next-80b-a3b-instruct": 0.46748747087503834,
-   "xiaomi/mimo-v2.5-pro": 0.5054025715138017
+   "xiaomi/mimo-v2.5-pro": 0.5054025715138017,
+   "z-ai/glm-5.2": 0.45681571992817,
+   "minimax/minimax-m3": 0.45681571992817,
+   "moonshotai/kimi-k2.7": 0.45681571992817,
+   "qwen/qwen3.7-plus": 0.45681571992817
   }
  }
 }

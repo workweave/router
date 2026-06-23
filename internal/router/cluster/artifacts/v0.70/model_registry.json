@@ -176,7 +176,7 @@
       "bench_column": "routerarena_moonshotai/kimi-k2.6",
       "direct_label": "routerarena",
       "proxy": true,
-      "proxy_note": "kimi-k2.7 day-0; proxy kimi-k2.6 RouterArena column (predecessor). Coding quality from DeepSWE prior.",
+      "proxy_note": "kimi-k2.7 day-0; proxy kimi-k2.6 (predecessor); coding quality from DeepSWE prior.",
       "extra_bench_columns": [
         "swebench_fireworks_ai/accounts/fireworks/models/kimi-k2p7"
       ]
