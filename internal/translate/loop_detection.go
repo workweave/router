@@ -41,7 +41,13 @@ func anthropicAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []st
 		return nil
 	}
 	msgs.ForEach(func(_, msg gjson.Result) bool {
-		if msg.Get("role").String() != "assistant" {
+		role := msg.Get("role").String()
+		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
+			out = nil
+			idx = 0
+			return true
+		}
+		if role != "assistant" {
 			return true
 		}
 		content := msg.Get("content")
@@ -79,7 +85,13 @@ func openAIAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []strin
 		return nil
 	}
 	msgs.ForEach(func(_, msg gjson.Result) bool {
-		if msg.Get("role").String() != "assistant" {
+		role := msg.Get("role").String()
+		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
+			out = nil
+			idx = 0
+			return true
+		}
+		if role != "assistant" {
 			return true
 		}
 		toolCalls := msg.Get("tool_calls")
@@ -138,7 +150,17 @@ func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
 	}
 	var sigs []ToolCallSig
 	msgs.ForEach(func(_, msg gjson.Result) bool {
-		if msg.Get("role").String() != "assistant" {
+		role := msg.Get("role").String()
+		// A genuine user-typed prompt breaks the loop: the human has
+		// intervened, so the calls before it are no longer part of any
+		// runaway cycle. userPromptTextGJSON returns "" for tool_result-only
+		// turns and for Claude Code's injected <system-reminder> /
+		// <command-*> wrapper blocks, so a normal tool round does NOT reset.
+		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
+			sigs = nil
+			return true
+		}
+		if role != "assistant" {
 			return true
 		}
 		content := msg.Get("content")
@@ -188,7 +210,14 @@ func openAIAssistantToolCallSigs(body []byte) []ToolCallSig {
 	}
 	var sigs []ToolCallSig
 	msgs.ForEach(func(_, msg gjson.Result) bool {
-		if msg.Get("role").String() != "assistant" {
+		role := msg.Get("role").String()
+		// See anthropicAssistantToolCallSigs: a genuine user-typed prompt
+		// resets the window; injected wrappers and tool_result turns do not.
+		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
+			sigs = nil
+			return true
+		}
+		if role != "assistant" {
 			return true
 		}
 		toolCalls := msg.Get("tool_calls")

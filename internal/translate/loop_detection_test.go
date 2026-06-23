@@ -242,3 +242,86 @@ func TestAssistantToolCallSignatures_SkipsRouterNudgeEntries(t *testing.T) {
 // mustMarshalJSON is shared with force_model_test.go; redeclared here would be
 // a compile error so the existing one is reused.
 var _ = json.Marshal
+
+func TestAssistantToolCallSignatures_UserTextResetsLoop(t *testing.T) {
+	// If the user explicitly sends a text message, it breaks the loop detector
+	// by resetting the tool call history.
+	body := mustMarshalJSON(t, map[string]any{
+		"model": "claude-sonnet-4-6",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "do stuff"},
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "1", "name": "ls", "input": map[string]any{"path": "/tmp"}},
+			}},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "1", "content": "a"},
+				map[string]any{"type": "text", "text": "continue please"}, // This resets the loop
+			}},
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "2", "name": "read", "input": map[string]any{"path": "/etc/hosts"}},
+			}},
+		},
+		"max_tokens": 256,
+	})
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 1) // Only "read" is counted, because the "ls" was before the user text
+	assert.Equal(t, "read", sigs[0].Name)
+}
+
+func TestAssistantToolCallSignatures_InjectedTextDoesNotResetLoop(t *testing.T) {
+	// A normal tool round carries Claude Code's injected <system-reminder>
+	// text block alongside the tool_result. That is NOT a user intervention and
+	// must NOT reset the window — otherwise the loop detector could never reach
+	// its repeat threshold. Build a 6-deep identical-call loop with an injected
+	// reminder on every tool_result turn and assert all 6 sigs survive.
+	msgs := []any{
+		map[string]any{"role": "user", "content": "do stuff"},
+	}
+	for i := 0; i < 6; i++ {
+		msgs = append(msgs,
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "t", "name": "ls", "input": map[string]any{"path": "/tmp"}},
+			}},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "t", "content": "a"},
+				map[string]any{"type": "text", "text": "<system-reminder>be helpful</system-reminder>"},
+			}},
+		)
+	}
+	body := mustMarshalJSON(t, map[string]any{
+		"model": "claude-sonnet-4-6", "messages": msgs, "max_tokens": 256,
+	})
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 6, "injected reminder blocks must not reset the loop window")
+}
+
+func TestAssistantToolCallSignatures_UserTextResetsLoop_OpenAI(t *testing.T) {
+	// OpenAI-format parallel of the Anthropic reset test: a genuine user text
+	// message clears tool_calls accumulated before it.
+	body := mustMarshalJSON(t, map[string]any{
+		"model": "gpt-5.5",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "do stuff"},
+			map[string]any{"role": "assistant", "tool_calls": []any{
+				map[string]any{"id": "1", "type": "function", "function": map[string]any{"name": "ls", "arguments": `{"path":"/tmp"}`}},
+			}},
+			map[string]any{"role": "tool", "tool_call_id": "1", "content": "a"},
+			map[string]any{"role": "user", "content": "continue please"}, // resets
+			map[string]any{"role": "assistant", "tool_calls": []any{
+				map[string]any{"id": "2", "type": "function", "function": map[string]any{"name": "read", "arguments": `{"path":"/etc/hosts"}`}},
+			}},
+		},
+	})
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 1)
+	assert.Equal(t, "read", sigs[0].Name)
+}
