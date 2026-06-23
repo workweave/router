@@ -176,6 +176,47 @@ func TestObserver_NearCapDoesNotResetToOptimistic(t *testing.T) {
 	assert.False(t, ok, "after the binding window resets, the reading is no longer authoritative")
 }
 
+// TestObserver_LongWindowOutlivesShortBindingWindow guards the case where the 5h
+// primary window is the more-utilized (binding) one but the weekly window is also
+// near cap: the entry must survive past the 5h window so it does not reset to
+// optimistic epsilon while weekly quota is still exhausted.
+func TestObserver_LongWindowOutlivesShortBindingWindow(t *testing.T) {
+	now := time.Unix(3_000_000, 0)
+	clock := func() time.Time { return now }
+	o := usage.NewObserver([]byte("salt"), 10*time.Minute, clock)
+	key := o.Key([]byte("tok"))
+	o.Record(key, usage.Snapshot{
+		Primary:   usage.Window{UsedPercent: 0.99, WindowMinutes: 300},   // binds CostFactor
+		Secondary: usage.Window{UsedPercent: 0.90, WindowMinutes: 10080}, // also near cap
+	})
+
+	// 6h later: past the 5h primary window, but the weekly window still binds.
+	now = now.Add(6 * 60 * time.Minute)
+	_, ok := o.Snapshot(key)
+	assert.True(t, ok, "a near-cap weekly window keeps the entry alive past the 5h primary")
+}
+
+// TestObserver_SlackWindowDoesNotStrand is the converse: a 5h-capped reading whose
+// weekly window is slack must expire at ~5h, not be held at full price for the
+// (much longer) weekly window — otherwise a recovered primary quota would be
+// stranded on cash/OSS for a week.
+func TestObserver_SlackWindowDoesNotStrand(t *testing.T) {
+	now := time.Unix(4_000_000, 0)
+	clock := func() time.Time { return now }
+	o := usage.NewObserver([]byte("salt"), 10*time.Minute, clock)
+	key := o.Key([]byte("tok"))
+	o.Record(key, usage.Snapshot{
+		Primary:   usage.Window{UsedPercent: 0.99, WindowMinutes: 300},   // capped, 5h
+		Secondary: usage.Window{UsedPercent: 0.05, WindowMinutes: 10080}, // slack
+	})
+
+	// Just past the 5h primary window: the slack weekly window must not keep the
+	// stale primary-capped reading alive.
+	now = now.Add(301 * time.Minute)
+	_, ok := o.Snapshot(key)
+	assert.False(t, ok, "a slack long window must not strand a recovered short-window quota")
+}
+
 func TestObserver_RecordMergesWindows(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	o := usage.NewObserver([]byte("salt"), 10*time.Minute, func() time.Time { return now })

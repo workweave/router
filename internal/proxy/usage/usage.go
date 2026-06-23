@@ -111,24 +111,39 @@ func NewObserver(salt []byte, ttl time.Duration, now func() time.Time) *Observer
 	return &Observer{salt: salt, ttl: ttl, now: now, data: make(map[CredentialKey]Snapshot)}
 }
 
+// windowConstrainedFraction is the utilization at/above which a window is a real
+// constraint whose full length must be waited out before its quota resets. Below
+// it a window is effectively slack — its CostFactor contribution is already near
+// epsilon — so it need not extend retention, and re-reading it as cold-start
+// slack costs nothing.
+const windowConstrainedFraction = 0.5
+
 // freshFor reports how long a snapshot stays authoritative. Quota is perishable
-// and refills only when its window resets, so a reading is meaningful until the
-// BINDING (more-utilized) window — the one that governs CostFactor — would reset,
-// NOT for a flat ttl far shorter than any quota window (5h / weekly). Without
-// this a near-cap reading ages out after the short ttl, Snapshot returns false,
-// and the cold-start path re-applies the optimistic epsilon to a credential that
-// is in fact still capped — routing back into it until a fresh response or 429
-// corrects it. Floored at ttl so a reading carrying no window length still
-// expires promptly. Once the binding window elapses the entry is evicted and the
-// credential reads as never-observed again — correct, its quota has by then reset.
+// and refills only when its window resets, so a reading is meaningful until every
+// window that is actually near cap would reset — NOT a flat ttl far shorter than
+// any quota window (5h / weekly). Without this a near-cap reading ages out after
+// the short ttl, Snapshot returns false, and the cold-start path re-applies the
+// optimistic epsilon to a credential that is in fact still capped — routing back
+// into it until a fresh response or 429 corrects it.
+//
+// The horizon is the LONGEST window among those at/above windowConstrainedFraction
+// (not just the binding/most-utilized one): when the 5h primary binds CostFactor
+// but the weekly window is also near cap, the entry must outlive the 5h window so
+// it does not reset to optimistic while weekly quota is still exhausted. A slack
+// window does not extend the horizon, so a 5h-capped + weekly-slack reading still
+// expires at ~5h rather than being stranded at full price for a week. Floored at
+// ttl so a reading carrying no constrained window still expires promptly; once
+// every constrained window has elapsed the entry is evicted and the credential
+// reads as never-observed again — correct, its quota has by then reset.
 func (o *Observer) freshFor(s Snapshot) time.Duration {
-	binding := s.Primary
-	if s.Secondary.UsedPercent >= s.Primary.UsedPercent {
-		binding = s.Secondary
-	}
-	horizon := time.Duration(binding.WindowMinutes) * time.Minute
-	if horizon < o.ttl {
-		return o.ttl
+	horizon := o.ttl
+	for _, w := range [...]Window{s.Primary, s.Secondary} {
+		if w.UsedPercent < windowConstrainedFraction {
+			continue
+		}
+		if d := time.Duration(w.WindowMinutes) * time.Minute; d > horizon {
+			horizon = d
+		}
 	}
 	return horizon
 }
