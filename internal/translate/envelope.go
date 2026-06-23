@@ -771,13 +771,15 @@ func encodeJSONStringNoHTMLEscape(s string) ([]byte, error) {
 // injected in cross-format responses.
 var routingMarkerPattern = regexp.MustCompile(`✦ \*\*Weave Router\*\* → [^\n]*\n\n`)
 
-// feedbackFooterPattern matches the in-terminal rating hint appended at the end
-// of a streamed response (see proxy.Service.feedbackFooter, which owns the
-// canonical text — keep the two in sync). Leading newlines are absorbed so the
-// blank-line separator is removed with the footer. Stripping on ingress keeps
-// the hint out of upstream context on later turns, the same failure mode the
-// routing marker had.
-var feedbackFooterPattern = regexp.MustCompile("\\n*_Was this routing right\\?_ Reply `/rf\\+` 👍 or `/rf-` 👎")
+// feedbackFooterPattern matches the rating footer appended at the end of a
+// streamed response (see proxy.Service.feedbackFooter). It tolerates both
+// rendered forms — the clickable thumb links and the link-free hint — by
+// absorbing everything from the sentinel through the trailing `/rf-` companion,
+// which both forms end with. Leading newlines are absorbed so the blank-line
+// separator is removed with the footer. Stripping on ingress keeps the footer
+// (and its signed rate URLs) out of upstream context on later turns, the same
+// failure mode the routing marker had.
+var feedbackFooterPattern = regexp.MustCompile("\\n*_Was this routing right\\?_ [^\\n]*?`/rf-`")
 
 // StripRoutingMarkerFromMessages removes the routing-marker snippet from every
 // text block in messages[*].content[*]. Stripping on ingress keeps it out of
