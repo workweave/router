@@ -84,3 +84,19 @@ func TestSubsidy_RecordReadKeyAgreement(t *testing.T) {
 	assert.Less(t, f, 1.0, "10%% used → discounted below full price")
 	assert.GreaterOrEqual(t, f, 0.05, "never below epsilon")
 }
+
+// Bootstrap: a present subscription with NO observed headroom yet must still
+// produce the optimistic (epsilon) discount, so the covered model can win the
+// first turn and thereby get a chance to serve and record real headroom.
+// Without this the feature never engages (the sub never serves → never observed).
+func TestSubsidyFactors_OptimisticColdStart(t *testing.T) {
+	s := (&Service{}).WithSubscriptionAwareRouting(
+		usage.NewObserver([]byte("salt"), time.Minute, time.Now), 0.05, 2.0)
+
+	// Claude Code sub in the inbound Authorization; observer is empty (cold).
+	h := http.Header{}
+	h.Set("Authorization", "Bearer sk-ant-oat01-cold")
+	factors := s.subsidyFactors(context.Background(), h)
+	require.NotNil(t, factors, "a present sub must produce factors even with no observed headroom")
+	assert.InDelta(t, 0.05, factors["claude-opus-4-8"], 1e-9, "cold start = optimistic epsilon (max bias)")
+}

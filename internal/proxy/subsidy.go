@@ -102,12 +102,17 @@ func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) co
 }
 
 // subsidyFactors computes the per-covered-model cost multiplier for this
-// request, from the present subscription(s)' observed rate-limit headroom.
-// Returns nil when the feature is off, no subscription is present, or no headroom
-// has been observed yet — in which case routing is unaffected (cold start = full
-// price until the first response populates the observer). Keyed identically to
-// withUsageObserver (via presentSubscriptionTokens) so record and read agree
-// across all three harnesses.
+// request from the present subscription(s). When headroom has been observed it
+// uses the real factor; when a subscription is present but NO headroom has been
+// observed yet, it OPTIMISTICALLY assumes slack (the epsilon floor) so the
+// covered models are favored from the very first turn. This bootstraps the
+// feature: otherwise the subscription would never serve a turn, so its headroom
+// would never be observed, so the discount would never engage — a chicken-and-
+// egg that pins routing to whatever wins at full price. The optimistic factor
+// self-corrects to the real headroom once the first subscription-served response
+// records it (including a 429's near-cap reading). Returns nil only when the
+// feature is off or no subscription is present. Keyed identically to
+// withUsageObserver so record and read agree across all three harnesses.
 func (s *Service) subsidyFactors(ctx context.Context, headers http.Header) map[string]float64 {
 	if s.usageObserver == nil {
 		return nil
@@ -115,23 +120,31 @@ func (s *Service) subsidyFactors(ctx context.Context, headers http.Header) map[s
 	codexTok, anthroTok := s.presentSubscriptionTokens(ctx, headers)
 	factors := make(map[string]float64)
 	if codexTok != "" {
-		if snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(codexTok))); ok {
-			f := snap.CostFactor(s.subsidyEpsilon, s.subsidyGamma)
-			for _, m := range codexCoveredModels {
-				factors[m] = f
-			}
+		f := s.observedOrOptimisticFactor(codexTok)
+		for _, m := range codexCoveredModels {
+			factors[m] = f
 		}
 	}
 	if anthroTok != "" {
-		if snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(anthroTok))); ok {
-			f := snap.CostFactor(s.subsidyEpsilon, s.subsidyGamma)
-			for _, m := range claudeCoveredModels() {
-				factors[m] = f
-			}
+		f := s.observedOrOptimisticFactor(anthroTok)
+		for _, m := range claudeCoveredModels() {
+			factors[m] = f
 		}
 	}
 	if len(factors) == 0 {
 		return nil
 	}
 	return factors
+}
+
+// observedOrOptimisticFactor returns the cost factor for a present subscription:
+// the real factor from observed headroom, or the optimistic slack floor
+// (subsidyEpsilon) when none has been observed yet. The optimistic default is
+// what lets the covered models win the FIRST turn and thereby get a chance to
+// serve and record real headroom; without it the feature never bootstraps.
+func (s *Service) observedOrOptimisticFactor(token string) float64 {
+	if snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(token))); ok {
+		return snap.CostFactor(s.subsidyEpsilon, s.subsidyGamma)
+	}
+	return s.subsidyEpsilon
 }
