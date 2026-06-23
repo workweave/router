@@ -58,7 +58,7 @@ func pinWithUsage(model string) sessionpin.Pin {
 func TestDecide_SubscriptionDiscountFlipsSwitch(t *testing.T) {
 	t.Parallel()
 	base := planner.Inputs{
-		Pin:                  pinWithUsage(modelHaiku), // cheap pin ($0.80 in)
+		Pin:                  pinWithUsage(modelHaiku),          // cheap pin ($0.80 in)
 		Fresh:                router.Decision{Model: modelOpus}, // expensive fresh ($5.00 in)
 		EstimatedInputTokens: 100_000,
 		AvailableModels:      availableAll,

@@ -1562,7 +1562,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Skip when a compaction handover rewrote env: the embedding in
 	// decision.Metadata was computed from the pre-handover body, so a cache
 	// hit would return a response built for different upstream context.
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !compactionHandoverRan
+	// Subscription-aware routing makes the chosen model depend on observed quota
+	// headroom, which the semantic-cache key does not capture — so a hit could
+	// return a body from a model chosen under different headroom. Make subsidized
+	// requests cache-ineligible. subsidyFactors early-returns nil when the feature
+	// is off, so OFF deployments pay nothing here.
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !compactionHandoverRan && len(s.subsidyFactors(ctx)) == 0
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)
@@ -3022,7 +3027,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	pinAgeSec := routeRes.PinAgeSec
 	s.logPlannerOutcome(ctx, routeRes)
 
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !codexPassthrough
+	// See the ProxyMessages cache-eligibility note: subsidized requests bypass the
+	// semantic cache (the key doesn't capture headroom-dependent model choice).
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !codexPassthrough && len(s.subsidyFactors(ctx)) == 0
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)

@@ -63,16 +63,24 @@ func (s *Service) withUsageObserver(ctx context.Context) context.Context {
 	if codexTok == "" && anthroTok == "" {
 		return ctx
 	}
-	obs := func(h http.Header) {
-		// A Codex-backend response carries x-codex-*; an Anthropic response carries
-		// anthropic-ratelimit-unified-*. Try both and record whichever hits under
-		// the matching subscription's key. Record() ignores empty observations.
-		if codexTok != "" {
+	obs := func(callCtx context.Context, h http.Header) {
+		// Only record headers from a response actually served on the caller's
+		// subscription — keyed by the call's RESOLVED credential, not the request's
+		// stashed token. This skips internal calls on the same request that don't
+		// use the sub (e.g. the handover summarizer's deployment-key Anthropic
+		// call after clearCredentials), which would otherwise poison the headroom
+		// snapshot with deployment-key rate-limit headers.
+		creds := CredentialsFromContext(callCtx)
+		if creds == nil || !creds.OAuth {
+			return
+		}
+		tok := string(creds.APIKey)
+		switch {
+		case codexTok != "" && tok == codexTok:
 			if snap, ok := usage.ParseCodexHeaders(h); ok {
 				s.usageObserver.Record(s.usageObserver.Key([]byte(codexTok)), snap)
 			}
-		}
-		if anthroTok != "" {
+		case anthroTok != "" && tok == anthroTok:
 			if snap, ok := usage.ParseAnthropicUnifiedHeaders(h); ok {
 				s.usageObserver.Record(s.usageObserver.Key([]byte(anthroTok)), snap)
 			}
