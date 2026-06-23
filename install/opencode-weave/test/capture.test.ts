@@ -81,7 +81,7 @@ async function runLoaderFetch(
   let captured: CapturedRequest | undefined
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString()
-    if (url.includes("/oauth/token")) {
+    if (new URL(url).pathname.endsWith("/oauth/token")) {
       const body = tokenResponder ? tokenResponder(url) : {}
       // A responder returning null/undefined for a token URL simulates a failed
       // refresh (non-2xx), so tests can exercise the resilience paths.
@@ -179,7 +179,7 @@ describe("weave loader — dual subscription injection", () => {
       accountId: CHATGPT_ACCOUNT,
     })
 
-    const req = await runLoaderFetch(getAuth, (url) => (url.startsWith(CHATGPT_ISSUER) ? undefined : {}))
+    const req = await runLoaderFetch(getAuth, (url) => (url === `${CHATGPT_ISSUER}/oauth/token` ? undefined : {}))
 
     // ChatGPT refresh failed → no OpenAI headers, but the turn still went out…
     expect(req.headers["x-weave-openai-subscription"]).toBeUndefined()
@@ -205,7 +205,7 @@ describe("weave loader — dual subscription injection", () => {
 
     const rotated = "sk-ant-oat01-rotated"
     const req = await runLoaderFetch(getAuth, (url) => {
-      if (url.startsWith(ANTHROPIC_TOKEN_URL)) {
+      if (url === ANTHROPIC_TOKEN_URL) {
         return { access_token: rotated, refresh_token: "claude-refresh-2", expires_in: 3600 }
       }
       return {}
