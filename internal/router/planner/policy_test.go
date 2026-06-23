@@ -52,6 +52,31 @@ func pinWithUsage(model string) sessionpin.Pin {
 	}
 }
 
+// A session pinned to a cheap model must switch to a subscription-covered model
+// once the subsidy makes it near-free — otherwise the discount never takes
+// effect on sticky sessions.
+func TestDecide_SubscriptionDiscountFlipsSwitch(t *testing.T) {
+	t.Parallel()
+	base := planner.Inputs{
+		Pin:                  pinWithUsage(modelHaiku), // cheap pin ($0.80 in)
+		Fresh:                router.Decision{Model: modelOpus}, // expensive fresh ($5.00 in)
+		EstimatedInputTokens: 100_000,
+		AvailableModels:      availableAll,
+	}
+
+	// Full catalog economics: switching cheap→expensive is EV-negative → stay.
+	stay := planner.Decide(base, defaultCfg)
+	assert.Equal(t, planner.OutcomeStay, stay.Outcome, "no subsidy: keep the cheap pin")
+
+	// Subsidize the fresh (covered) model to ~free → switching now saves → switch.
+	sub := base
+	sub.SubsidizedCostFactor = map[string]float64{modelOpus: 0.01}
+	switched := planner.Decide(sub, defaultCfg)
+	assert.Equal(t, planner.OutcomeSwitch, switched.Outcome,
+		"subsidized covered model must win the stay-vs-switch EV")
+	assert.Equal(t, planner.ReasonEVPositive, switched.Reason)
+}
+
 func TestDecide(t *testing.T) {
 	t.Parallel()
 

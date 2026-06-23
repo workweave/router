@@ -563,6 +563,10 @@ func (s *Service) runTurnLoop(
 		EstimatedInputTokens: feats.Tokens,
 		AvailableModels:      s.availableModels,
 		PinCacheCold:         pinFound && !cacheWarm(pin),
+		// Price covered models at their subsidized marginal cost in the EV math
+		// too, so the discount takes effect on sticky (pinned) sessions, not just
+		// the fresh decision. nil when subscription-aware routing is off.
+		SubsidizedCostFactor: req.SubsidizedModelCostFactor,
 	}
 	if !pinFound {
 		plannerIn.Pin = sessionpin.Pin{}

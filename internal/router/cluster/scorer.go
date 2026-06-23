@@ -633,7 +633,10 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 
 		scores = s.blendScoresV2(topClusters, activeKnobs, eligibleModels, req.SubsidizedModelCostFactor)
 	} else {
-		// Legacy v1 flow
+		// Legacy v1 flow: static cluster rankings, no cost axis at all — so there
+		// is no cost term to discount and req.SubsidizedModelCostFactor does not
+		// apply. Subscription-aware routing is V2-only by construction; all
+		// deployed bundles run V2 (the v1 path is a legacy fallback).
 		scores = make(map[string]float32, len(eligibleModels))
 		for _, k := range topClusters {
 			row := s.rankings[k]
