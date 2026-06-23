@@ -208,15 +208,23 @@ func parseAnthropicWindow(h http.Header, which string, windowMinutes int) (Windo
 	return Window{UsedPercent: used, WindowMinutes: windowMinutes}, true
 }
 
+// parsePercent parses a 0-100 percent header (Codex used-percent, Anthropic
+// utilization) into a clamped [0,1] fraction. Always divides by 100 — both
+// backends document these as 0-100 — rather than guessing the scale from the
+// magnitude, which silently misreads the boundary (e.g. "1" = 1% must become
+// 0.01, not 1.0). The remaining/limit path computes its fraction directly and
+// does not call this.
 func parsePercent(s string) (float64, bool) {
 	v, ok := parseFloat(s)
 	if !ok {
 		return 0, false
 	}
-	// Headers report 0-100; normalize to [0,1]. A value already in [0,1] is
-	// passed through (handles either convention defensively).
+	v /= 100
+	if v < 0 {
+		v = 0
+	}
 	if v > 1 {
-		v /= 100
+		v = 1
 	}
 	return v, true
 }

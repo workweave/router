@@ -51,7 +51,14 @@ func (s *Service) withUsageObserver(ctx context.Context) context.Context {
 	if s.usageObserver == nil {
 		return ctx
 	}
-	codexTok := openaiSubscriptionFromContext(ctx)
+	// Gate the Codex path on a usable Codex subscription (token + account-id),
+	// mirroring subsidyFactors exactly — otherwise we'd record observations under
+	// a key subsidyFactors never reads (token without account-id), silently
+	// accumulating until TTL eviction.
+	codexTok := ""
+	if codexSubscriptionFromContext(ctx) != nil {
+		codexTok = openaiSubscriptionFromContext(ctx)
+	}
 	anthroTok := anthropicSubscriptionFromContext(ctx)
 	if codexTok == "" && anthroTok == "" {
 		return ctx

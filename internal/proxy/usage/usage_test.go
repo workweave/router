@@ -26,6 +26,23 @@ func TestParseCodexHeaders(t *testing.T) {
 	assert.Equal(t, 10080, snap.Secondary.WindowMinutes)
 }
 
+func TestParseCodexHeaders_LowUsageNotMisread(t *testing.T) {
+	// "1" means 1% used (max headroom), not 100% — must normalize to 0.01 so the
+	// subsidy isn't silently wiped out at the moment the window is freshest.
+	h := http.Header{}
+	h.Set("x-codex-primary-used-percent", "1")
+	h.Set("x-codex-primary-window-minutes", "300")
+	snap, ok := usage.ParseCodexHeaders(h)
+	require.True(t, ok)
+	assert.InDelta(t, 0.01, snap.Primary.UsedPercent, 1e-9)
+	// And that low usage yields a near-epsilon cost factor (covered model ~free).
+	assert.Less(t, snap.CostFactor(0.05, 2.0), 0.06)
+	// A value above 100 clamps to fully used.
+	h.Set("x-codex-primary-used-percent", "150")
+	snap, _ = usage.ParseCodexHeaders(h)
+	assert.InDelta(t, 1.0, snap.Primary.UsedPercent, 1e-9)
+}
+
 func TestParseCodexHeaders_NoneReportsFalse(t *testing.T) {
 	_, ok := usage.ParseCodexHeaders(http.Header{})
 	assert.False(t, ok)
