@@ -224,6 +224,72 @@ func TestProxy_PassesThroughInboundSubscriptionWithBetaHeader(t *testing.T) {
 	assert.Contains(t, gotBeta, "oauth-2025-04-20", "a passed-through subscription bearer must still get the oauth beta flag")
 }
 
+func TestPassthrough_PrefersValidSubscriptionOverDeploymentKey(t *testing.T) {
+	var (
+		gotAuth   string
+		gotAPIKey string
+		gotBeta   string
+		requests  int
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("x-api-key")
+		gotBeta = r.Header.Get("anthropic-beta")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"input_tokens":7}`))
+	}))
+	defer upstream.Close()
+
+	c := anthropic.NewClient("deployment-key", upstream.URL)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(""))
+	clientReq.Header.Set("Authorization", "Bearer sk-ant-oat01-valid-subscription")
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"claude-haiku-4-5","messages":[{"role":"user","content":"hi"}]}`), Headers: make(http.Header)}
+
+	err := c.Passthrough(context.Background(), prep, rec, clientReq)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 1, requests)
+	assert.Equal(t, "Bearer sk-ant-oat01-valid-subscription", gotAuth)
+	assert.Empty(t, gotAPIKey)
+	assert.Contains(t, gotBeta, "oauth-2025-04-20")
+	assert.Empty(t, rec.Header().Get(providers.SubscriptionAuthFallbackHeader))
+	assert.Contains(t, rec.Body.String(), `"input_tokens":7`)
+}
+
+func TestPassthrough_InvalidSubscriptionFallsBackToDeploymentKey(t *testing.T) {
+	var auths, apiKeys []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auths = append(auths, r.Header.Get("Authorization"))
+		apiKeys = append(apiKeys, r.Header.Get("x-api-key"))
+		if len(auths) == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"input_tokens":11}`))
+	}))
+	defer upstream.Close()
+
+	c := anthropic.NewClient("deployment-key", upstream.URL)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(""))
+	clientReq.Header.Set("Authorization", "Bearer sk-ant-oat01-expired-subscription")
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"claude-haiku-4-5","messages":[{"role":"user","content":"hi"}]}`), Headers: make(http.Header)}
+
+	err := c.Passthrough(context.Background(), prep, rec, clientReq)
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"Bearer sk-ant-oat01-expired-subscription", ""}, auths)
+	require.Equal(t, []string{"", "deployment-key"}, apiKeys)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, providers.SubscriptionAuthFallbackMarker, rec.Header().Get(providers.SubscriptionAuthFallbackHeader))
+	assert.Contains(t, rec.Body.String(), `"input_tokens":11`)
+}
+
 func TestProxy_BuffersUpstream4xx(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

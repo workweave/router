@@ -1252,11 +1252,9 @@ func (s *Service) anthropicNativeAttempt(
 	setExtractor func(*otel.UsageExtractor),
 ) dispatchAttempt {
 	return func(actx context.Context, d router.Decision, p providers.Client) error {
-		attemptSink := sink
-		if marker != "" {
-			attemptSink = translate.NewAnthropicRoutingMarkerWriter(sink, d.Model, marker)
-		}
-		proxyWriter := attemptSink
+		attemptSink := translate.NewAnthropicRoutingMarkerWriter(sink, d.Model, marker).
+			WithAdditionalMarkerHeader(providers.SubscriptionAuthFallbackHeader)
+		var proxyWriter http.ResponseWriter = attemptSink
 		if s.usageRequired() {
 			ex := otel.NewUsageExtractor(attemptSink, d.Provider)
 			proxyWriter = ex

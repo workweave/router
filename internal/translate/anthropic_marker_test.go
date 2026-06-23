@@ -201,6 +201,34 @@ func TestAnthropicRoutingMarkerWriter_ThinkingFidelity(t *testing.T) {
 	assert.Contains(t, gjson.Get(textDelta, "delta.text").String(), "42")
 }
 
+func TestAnthropicRoutingMarkerWriter_AdditionalHeaderMarker(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewAnthropicRoutingMarkerWriter(rec, "claude-opus-4", "").
+		WithAdditionalMarkerHeader("X-Weave-Test-Marker")
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("X-Weave-Test-Marker", "Claude subscription auth failed, falling through to standard API pricing. Log back in with /login")
+	w.WriteHeader(http.StatusOK)
+
+	upstreamData :=
+		buildAnthropicSSE("message_start", `{"type":"message_start","message":{"id":"msg_upstream","type":"message","role":"assistant","content":[],"model":"claude-opus-4","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":0}}}`) +
+			buildAnthropicSSE("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`) +
+			buildAnthropicSSE("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`)
+	_, err := w.Write([]byte(upstreamData))
+	require.NoError(t, err)
+
+	events := splitSSEEvents(rec.Body.String())
+	require.Len(t, events, 6)
+
+	markerData := extractDataField(events[2])
+	assert.Equal(t, "content_block_delta", gjson.Get(markerData, "type").String())
+	assert.EqualValues(t, 0, gjson.Get(markerData, "index").Int())
+	assert.Contains(t, gjson.Get(markerData, "delta.text").String(), "✦ **Weave Router** → Claude subscription auth failed, falling through to standard API pricing. Log back in with /login")
+
+	upstreamStart := extractDataField(events[4])
+	assert.EqualValues(t, 1, gjson.Get(upstreamStart, "index").Int())
+}
+
 func TestAnthropicRoutingMarkerWriter_EmptyMarkerNoInjection(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewAnthropicRoutingMarkerWriter(rec, "claude-opus-4", "")

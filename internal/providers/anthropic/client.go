@@ -45,29 +45,66 @@ const oauthBetaToken = "oauth-2025-04-20"
 // sk-ant-oat01…) used to gate the oauth beta header on the pure-passthrough path.
 const subscriptionTokenPrefix = "sk-ant-oat"
 
+type authMode int
+
+const (
+	authModeNone authMode = iota
+	authModeSubscription
+	authModeDeployment
+	authModeClient
+)
+
 // setAuth resolves credentials in precedence order: resolved per-request
-// credential (subscription/BYOK/client), deployment key, then client-sent auth
-// headers. A subscription OAuth credential authenticates via Authorization:
-// Bearer and must NOT send x-api-key; everything else uses x-api-key.
-func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) {
+// credential (subscription/BYOK/client), raw subscription token, deployment key,
+// then client-sent auth headers. A subscription OAuth credential authenticates
+// via Authorization: Bearer and must NOT send x-api-key; everything else uses
+// x-api-key.
+func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) authMode {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		if creds.OAuth {
 			upstream.Header.Set("authorization", "Bearer "+string(creds.APIKey))
-			return
+			return authModeSubscription
 		}
 		upstream.Header.Set("x-api-key", string(creds.APIKey))
-		return
+		return authModeClient
+	}
+	if token := subscriptionToken(ctx, inbound); token != "" {
+		upstream.Header.Set("authorization", "Bearer "+token)
+		return authModeSubscription
 	}
 	if c.apiKey != "" {
 		upstream.Header.Set("x-api-key", c.apiKey)
-		return
+		return authModeDeployment
 	}
+	mode := authModeNone
 	if v := inbound.Header.Get("authorization"); v != "" {
 		upstream.Header.Set("authorization", v)
+		mode = authModeClient
 	}
 	if v := inbound.Header.Get("x-api-key"); v != "" {
 		upstream.Header.Set("x-api-key", v)
+		mode = authModeClient
 	}
+	return mode
+}
+
+func (c *Client) setDeploymentAuth(upstream *http.Request) {
+	upstream.Header.Del("authorization")
+	upstream.Header.Set("x-api-key", c.apiKey)
+}
+
+func subscriptionToken(ctx context.Context, inbound *http.Request) string {
+	if sub, _ := ctx.Value(proxy.AnthropicSubscriptionContextKey{}).(string); sub != "" {
+		if token := strings.TrimSpace(sub); strings.HasPrefix(token, subscriptionTokenPrefix) {
+			return token
+		}
+	}
+	if raw, found := strings.CutPrefix(inbound.Header.Get("authorization"), "Bearer "); found {
+		if token := strings.TrimSpace(raw); strings.HasPrefix(token, subscriptionTokenPrefix) {
+			return token
+		}
+	}
+	return ""
 }
 
 // applyOAuthBeta merges the oauth beta flag into anthropic-beta when the
@@ -89,10 +126,7 @@ func subscriptionAuth(ctx context.Context, inbound *http.Request) bool {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		return creds.OAuth
 	}
-	if raw, found := strings.CutPrefix(inbound.Header.Get("authorization"), "Bearer "); found {
-		return strings.HasPrefix(strings.TrimSpace(raw), subscriptionTokenPrefix)
-	}
-	return false
+	return subscriptionToken(ctx, inbound) != ""
 }
 
 // mergeBeta appends token to a comma-separated anthropic-beta value if absent,
@@ -113,18 +147,9 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
-	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(prep.Body))
+	upstream, mode, err := c.buildProxyRequest(ctx, prep, r, false)
 	if err != nil {
-		return fmt.Errorf("build upstream request: %w", err)
-	}
-	upstream.Header.Set("content-type", "application/json")
-	c.setAuth(ctx, upstream, r)
-	for k, vs := range prep.Headers {
-		upstream.Header[http.CanonicalHeaderKey(k)] = vs
-	}
-	applyOAuthBeta(ctx, upstream, r)
-	if v := r.Header.Get("accept"); v != "" {
-		upstream.Header.Set("accept", v)
+		return err
 	}
 
 	t := otel.TimingFrom(ctx)
@@ -135,7 +160,29 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	}
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
+	fallbackUsed := false
 
+	if c.shouldFallbackFromSubscription(mode, resp.StatusCode) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, providers.MaxBufferedErrorBytes))
+		resp.Body.Close()
+		observability.Get().Warn(providers.SubscriptionAuthFallbackMarker, "path", "/v1/messages", "status", resp.StatusCode)
+		upstream, _, err = c.buildProxyRequest(ctx, prep, r, true)
+		if err != nil {
+			return err
+		}
+		t.StampUpstreamRequest()
+		resp, err = c.http.Do(upstream)
+		if err != nil {
+			return fmt.Errorf("upstream fallback call: %w", err)
+		}
+		defer resp.Body.Close()
+		t.StampUpstreamHeaders()
+		fallbackUsed = true
+	}
+
+	if fallbackUsed {
+		w.Header().Set(providers.SubscriptionAuthFallbackHeader, providers.SubscriptionAuthFallbackMarker)
+	}
 	if resp.StatusCode >= 400 {
 		bufBody, totalRead, drainErr := readCapped(resp.Body, providers.MaxBufferedErrorBytes)
 		if len(bufBody) > 0 {
@@ -153,6 +200,9 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		)
 		errHeaders := http.Header{}
 		providers.CopyUpstreamHeaders(headerCapture{errHeaders}, resp)
+		if fallbackUsed {
+			errHeaders.Set(providers.SubscriptionAuthFallbackHeader, providers.SubscriptionAuthFallbackMarker)
+		}
 		return &providers.UpstreamErrorResponse{
 			Status:  resp.StatusCode,
 			Headers: errHeaders,
@@ -165,26 +215,38 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	return httputil.StreamBody(ctx, cancel, httputil.DefaultSSEIdleTimeout, resp.Body, resp.StatusCode, w, t)
 }
 
-func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
-	url := c.baseURL + r.URL.Path
-	if r.URL.RawQuery != "" {
-		url += "?" + r.URL.RawQuery
-	}
-
-	upstream, err := http.NewRequestWithContext(ctx, r.Method, url, bytes.NewReader(prep.Body))
+func (c *Client) buildProxyRequest(ctx context.Context, prep providers.PreparedRequest, r *http.Request, deploymentAuth bool) (*http.Request, authMode, error) {
+	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(prep.Body))
 	if err != nil {
-		return fmt.Errorf("build upstream passthrough request: %w", err)
+		return nil, authModeNone, fmt.Errorf("build upstream request: %w", err)
 	}
-	if ct := r.Header.Get("content-type"); ct != "" {
-		upstream.Header.Set("content-type", ct)
+	upstream.Header.Set("content-type", "application/json")
+	mode := authModeDeployment
+	if deploymentAuth {
+		c.setDeploymentAuth(upstream)
+	} else {
+		mode = c.setAuth(ctx, upstream, r)
 	}
-	c.setAuth(ctx, upstream, r)
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
-	applyOAuthBeta(ctx, upstream, r)
+	if !deploymentAuth {
+		applyOAuthBeta(ctx, upstream, r)
+	}
 	if v := r.Header.Get("accept"); v != "" {
 		upstream.Header.Set("accept", v)
+	}
+	return upstream, mode, nil
+}
+
+func (c *Client) shouldFallbackFromSubscription(mode authMode, status int) bool {
+	return mode == authModeSubscription && status == http.StatusUnauthorized && c.apiKey != ""
+}
+
+func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
+	upstream, mode, err := c.buildPassthroughRequest(ctx, prep, r, false)
+	if err != nil {
+		return err
 	}
 
 	resp, err := c.http.Do(upstream)
@@ -192,7 +254,27 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 		return fmt.Errorf("upstream passthrough call: %w", err)
 	}
 	defer resp.Body.Close()
+	fallbackUsed := false
 
+	if c.shouldFallbackFromSubscription(mode, resp.StatusCode) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, providers.MaxBufferedErrorBytes))
+		resp.Body.Close()
+		observability.Get().Warn(providers.SubscriptionAuthFallbackMarker, "path", r.URL.Path, "status", resp.StatusCode)
+		upstream, _, err = c.buildPassthroughRequest(ctx, prep, r, true)
+		if err != nil {
+			return err
+		}
+		resp, err = c.http.Do(upstream)
+		if err != nil {
+			return fmt.Errorf("upstream passthrough fallback call: %w", err)
+		}
+		defer resp.Body.Close()
+		fallbackUsed = true
+	}
+
+	if fallbackUsed {
+		w.Header().Set(providers.SubscriptionAuthFallbackHeader, providers.SubscriptionAuthFallbackMarker)
+	}
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 	if resp.StatusCode >= 400 {
@@ -217,6 +299,37 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	}
 	_, err = io.Copy(w, resp.Body)
 	return err
+}
+
+func (c *Client) buildPassthroughRequest(ctx context.Context, prep providers.PreparedRequest, r *http.Request, deploymentAuth bool) (*http.Request, authMode, error) {
+	url := c.baseURL + r.URL.Path
+	if r.URL.RawQuery != "" {
+		url += "?" + r.URL.RawQuery
+	}
+
+	upstream, err := http.NewRequestWithContext(ctx, r.Method, url, bytes.NewReader(prep.Body))
+	if err != nil {
+		return nil, authModeNone, fmt.Errorf("build upstream passthrough request: %w", err)
+	}
+	if ct := r.Header.Get("content-type"); ct != "" {
+		upstream.Header.Set("content-type", ct)
+	}
+	mode := authModeDeployment
+	if deploymentAuth {
+		c.setDeploymentAuth(upstream)
+	} else {
+		mode = c.setAuth(ctx, upstream, r)
+	}
+	for k, vs := range prep.Headers {
+		upstream.Header[http.CanonicalHeaderKey(k)] = vs
+	}
+	if !deploymentAuth {
+		applyOAuthBeta(ctx, upstream, r)
+	}
+	if v := r.Header.Get("accept"); v != "" {
+		upstream.Header.Set("accept", v)
+	}
+	return upstream, mode, nil
 }
 
 func logUpstreamStatus(msg string, status int, attrs ...any) {

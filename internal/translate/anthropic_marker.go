@@ -21,8 +21,10 @@ type AnthropicRoutingMarkerWriter struct {
 	flusher http.Flusher
 	bw      *bufio.Writer
 
-	marker string
-	model  string
+	marker                 string
+	model                  string
+	additionalMarkerHeader string
+	emittedMarker          string
 
 	buf bytes.Buffer
 
@@ -45,6 +47,28 @@ func NewAnthropicRoutingMarkerWriter(w http.ResponseWriter, model, marker string
 	}
 }
 
+// WithAdditionalMarkerHeader appends a marker from headerName when present before the first streamed content block.
+func (w *AnthropicRoutingMarkerWriter) WithAdditionalMarkerHeader(headerName string) *AnthropicRoutingMarkerWriter {
+	w.additionalMarkerHeader = headerName
+	return w
+}
+
+func (w *AnthropicRoutingMarkerWriter) markerText() string {
+	marker := w.marker
+	if w.additionalMarkerHeader == "" {
+		return marker
+	}
+	extra := strings.TrimSpace(w.inner.Header().Get(w.additionalMarkerHeader))
+	if extra == "" {
+		return marker
+	}
+	fallback := "✦ **Weave Router** → " + extra + "\n\n"
+	if marker == "" {
+		return fallback
+	}
+	return marker + fallback
+}
+
 func (w *AnthropicRoutingMarkerWriter) Header() http.Header {
 	return w.inner.Header()
 }
@@ -62,13 +86,14 @@ func (w *AnthropicRoutingMarkerWriter) WriteHeader(code int) {
 func (w *AnthropicRoutingMarkerWriter) Write(data []byte) (int, error) {
 	if w.streaming && !w.markerEmitted {
 		w.markerEmitted = true
-		if w.marker != "" {
+		w.emittedMarker = w.markerText()
+		if w.emittedMarker != "" {
 			if err := w.emitPreludeEvents(); err != nil {
 				return 0, err
 			}
 		}
 	}
-	if !w.streaming || w.marker == "" {
+	if !w.streaming || w.emittedMarker == "" {
 		// Non-streaming or empty marker: fully transparent passthrough.
 		return w.inner.Write(data)
 	}
@@ -98,7 +123,8 @@ func (w *AnthropicRoutingMarkerWriter) Prelude(streaming bool) error {
 		w.inner.WriteHeader(http.StatusOK)
 	}
 	w.markerEmitted = true
-	if w.marker == "" {
+	w.emittedMarker = w.markerText()
+	if w.emittedMarker == "" {
 		w.bw.WriteString(": routing complete\n\n")
 		if err := w.bw.Flush(); err != nil {
 			return err
@@ -133,7 +159,7 @@ func (w *AnthropicRoutingMarkerWriter) emitPreludeEvents() error {
 
 	// content_block_delta (text_delta) at index 0.
 	w.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":")
-	sse.WriteJSONString(w.bw, w.marker)
+	sse.WriteJSONString(w.bw, w.emittedMarker)
 	w.bw.WriteString("}}\n\n")
 
 	// content_block_stop at index 0.

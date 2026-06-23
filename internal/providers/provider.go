@@ -23,6 +23,12 @@ const (
 	ProviderBedrock    = "bedrock"
 )
 
+// SubscriptionAuthFallbackHeader marks responses that retried with deployment auth after subscription auth failed.
+const SubscriptionAuthFallbackHeader = "X-Weave-Subscription-Auth-Fallback"
+
+// SubscriptionAuthFallbackMarker is the user-facing marker for subscription-auth fallback.
+const SubscriptionAuthFallbackMarker = "Claude subscription auth failed, falling through to standard API pricing. Log back in with /login"
+
 // APIKeyEnvVars maps provider name to the env var providing its deployment-level upstream API key.
 // Bedrock uses AWS-issued long-term Bedrock API keys (static bearer tokens), not SigV4 access keys.
 var APIKeyEnvVars = map[string]string{

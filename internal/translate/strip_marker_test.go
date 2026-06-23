@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/translate"
 
 	"github.com/stretchr/testify/assert"
@@ -25,6 +26,7 @@ var sampleMarkers = []string{
 	"✦ **Weave Router** → gemini-3.1-flash-lite-preview · pinned for compaction / sub-agent\n\n",
 	"✦ **Weave Router** → deepseek/deepseek-v4-pro\n\n",
 	"✦ **Weave Router** → claude-haiku-4-5 · best pick for this turn · second-choice pick at low tier (would have used deepseek/deepseek-v4-pro)\n\n",
+	"✦ **Weave Router** → " + providers.SubscriptionAuthFallbackMarker + "\n\n",
 }
 
 func TestStripRoutingMarker_AssistantBlockExactMatch(t *testing.T) {
