@@ -1272,7 +1272,7 @@ func (s *Service) anthropicNativeAttempt(
 		// flushErr append a corrupting Anthropic envelope. Pre-commit errors
 		// are handled by dispatchWithFallback (Discard + flushErr).
 		if err != nil && env.Stream() && preludeBuf.Committed() {
-			err = emitAnthropicSSEErrorEvent(sink, err)
+			err = emitAnthropicSSEErrorEvent(sink, err, d.Provider)
 		}
 		return err
 	}
@@ -1757,7 +1757,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			// frame instead. Pre-commit errors are handled cleanly by
 			// dispatchWithFallback (Discard + flushErr).
 			if err != nil && env.Stream() && preludeBuf.Committed() {
-				err = emitAnthropicSSEErrorEvent(sink, err)
+				err = emitAnthropicSSEErrorEvent(sink, err, d.Provider)
 			}
 			finErr := finalizeAfterProxy(err, translator.Finalize)
 			respSummary = translator.Summary()
@@ -1812,7 +1812,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				// case for rationale — render upstream error as in-stream
 				// `event: error` rather than corrupt the SSE stream.
 				if err != nil && env.Stream() && preludeBuf.Committed() {
-					err = emitAnthropicSSEErrorEvent(sink, err)
+					err = emitAnthropicSSEErrorEvent(sink, err, d.Provider)
 				}
 				err = finalizeAfterProxy(err, geminiTr.Finalize)
 				finErr := finalizeAfterProxy(err, anthropicTr.Finalize)
@@ -1893,6 +1893,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// requested model on Anthropic. crossFormat/respSummary/reqStats are reset
 	// to their Anthropic-native (no-translator) values so completion telemetry
 	// reflects the binding that actually served.
+	exhaustedProvider := primaryProvider
+	if winnerIdx >= 0 && winnerIdx < len(bindings) {
+		exhaustedProvider = bindings[winnerIdx].Provider
+	}
 	baselineFailoverUsed := false
 	baselineAttempted := false
 	if baselineEligible && proxyErr != nil && !preludeBuf.Committed() &&
@@ -1914,7 +1918,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		baselinePrep, baselineEmitErr := env.PrepareAnthropic(r.Header, baselineOpts)
 		if baselineEmitErr != nil {
 			log.Error("Baseline failover: emit Anthropic body failed; surfacing original error", "err", baselineEmitErr, "baseline_model", baselineModel)
-			flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
+			flushUpstreamErrorAsAnthropic(contentSink, proxyErr, exhaustedProvider)
 		} else {
 			log.Warn("Baseline failover: routed model exhausted, retrying requested model on Anthropic",
 				"failed_model", decision.Model,
@@ -1949,7 +1953,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		// We deferred the primary's exhaustion flush but didn't run the baseline
 		// (response committed mid-stream, or a non-failoverable error). Surface
 		// the original upstream error envelope now.
-		flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
+		flushUpstreamErrorAsAnthropic(contentSink, proxyErr, exhaustedProvider)
 	}
 
 	finalProvider := primaryProvider

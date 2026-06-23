@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/translate/toolcheck"
 
 	"github.com/tidwall/gjson"
@@ -382,4 +383,53 @@ func OpenAIToAnthropicError(body []byte) []byte {
 	jw.EndObj()
 	jw.EndObj()
 	return jw.Bytes()
+}
+
+// geminiStatusToAnthropicType maps Gemini error.status strings to Anthropic
+// error type strings. Unrecognized statuses fall back to "api_error".
+var geminiStatusToAnthropicType = map[string]string{
+	"RESOURCE_EXHAUSTED": "rate_limit_error",
+	"INVALID_ARGUMENT":   "invalid_request_error",
+	"PERMISSION_DENIED":  "authentication_error",
+	"UNAUTHENTICATED":    "authentication_error",
+	"NOT_FOUND":          "not_found_error",
+	"INTERNAL":           "api_error",
+	"UNAVAILABLE":        "overloaded_error",
+	"DEADLINE_EXCEEDED":  "overloaded_error",
+}
+
+// GeminiToAnthropicError re-wraps a Gemini error envelope as Anthropic format,
+// mapping error.status to the closest Anthropic error type.
+func GeminiToAnthropicError(body []byte) []byte {
+	status := gjson.GetBytes(body, "error.status").String()
+	errMsg := gjson.GetBytes(body, "error.message").String()
+	if status == "" && errMsg == "" {
+		return body
+	}
+	errType, ok := geminiStatusToAnthropicType[status]
+	if !ok {
+		errType = "api_error"
+	}
+	jw := newJSONWriter()
+	jw.Obj()
+	jw.Key("type")
+	jw.Str("error")
+	jw.Key("error")
+	jw.Obj()
+	jw.Key("type")
+	jw.Str(errType)
+	jw.Key("message")
+	jw.Str(errMsg)
+	jw.EndObj()
+	jw.EndObj()
+	return jw.Bytes()
+}
+
+// UpstreamToAnthropicError translates a raw upstream error body to Anthropic
+// format, routing to the provider-appropriate conversion.
+func UpstreamToAnthropicError(provider string, body []byte) []byte {
+	if provider == providers.ProviderGoogle {
+		return GeminiToAnthropicError(body)
+	}
+	return OpenAIToAnthropicError(body)
 }

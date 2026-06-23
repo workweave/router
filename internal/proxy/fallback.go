@@ -183,11 +183,12 @@ type failoverInputs struct {
 	attempt dispatchAttempt
 	// flushErr renders the final-attempt upstream error to w in the
 	// entry-point's wire format. For ProxyMessages this translates
-	// OpenAI/Fireworks/etc. JSON to Anthropic-shape; for
-	// ProxyOpenAIChatCompletion it passes through verbatim. Optional —
-	// nil means do nothing on exhaustion (the upstream error error value
-	// is still returned to the caller).
-	flushErr func(w http.ResponseWriter, err error)
+	// the upstream JSON to Anthropic-shape using the last-attempted
+	// provider's conversion; for ProxyOpenAIChatCompletion it passes
+	// through verbatim. Optional — nil means do nothing on exhaustion
+	// (the upstream error value is still returned to the caller).
+	// The provider argument is the last-attempted binding's provider name.
+	flushErr func(w http.ResponseWriter, err error, provider string)
 	// deferFlushOnExhaustion suppresses the flushErr call on exhaustion while
 	// still discarding the buffered prelude and returning the error. The caller
 	// owns the decision to either flush the error itself or run a higher-level
@@ -336,7 +337,7 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 				in.buf.Discard()
 			}
 			if in.flushErr != nil && !in.deferFlushOnExhaustion {
-				in.flushErr(in.w, attemptErr)
+				in.flushErr(in.w, attemptErr, b.Provider)
 			}
 			return i, attemptErr
 		}
@@ -488,7 +489,9 @@ func (s *Service) resolveBindingsForDispatch(ctx context.Context, decision route
 // bytes we actually Write — forwarding it verbatim would either deadlock
 // clients waiting for missing bytes or break HTTP framing. The Go net/http
 // layer recomputes Content-Length from the bytes that pass through Write.
-func flushBufferedIfPresent(w http.ResponseWriter, err error) {
+// provider is intentionally ignored: this path serves OpenAI-surface callers whose
+// upstream error is already in OpenAI format — no translation needed.
+func flushBufferedIfPresent(w http.ResponseWriter, err error, _ string) {
 	var resp *providers.UpstreamErrorResponse
 	if !errors.As(err, &resp) {
 		return
@@ -521,12 +524,12 @@ func flushBufferedIfPresent(w http.ResponseWriter, err error) {
 // terminates cleanly within the format the client is parsing.
 //
 // Returns err unchanged when it is not a *UpstreamErrorResponse.
-func emitAnthropicSSEErrorEvent(sink http.ResponseWriter, err error) error {
+func emitAnthropicSSEErrorEvent(sink http.ResponseWriter, err error, provider string) error {
 	var resp *providers.UpstreamErrorResponse
 	if !errors.As(err, &resp) {
 		return err
 	}
-	anthErrJSON := translate.OpenAIToAnthropicError(resp.Body)
+	anthErrJSON := translate.UpstreamToAnthropicError(provider, resp.Body)
 	_, _ = sink.Write([]byte("event: error\ndata: "))
 	_, _ = sink.Write(anthErrJSON)
 	_, _ = sink.Write([]byte("\n\n"))
@@ -559,13 +562,11 @@ func emitOpenAISSEErrorEvent(sink http.ResponseWriter, err error) error {
 }
 
 // flushUpstreamErrorAsAnthropic is the flushErr callback for ProxyMessages.
-// On failover exhaustion the upstream is an OpenAI-compat provider
-// (Fireworks/DeepInfra/Bedrock/OpenRouter) emitting an OpenAI-shape error
-// envelope; the client is an Anthropic Messages caller expecting
-// `{"type":"error","error":{...}}`. Translates the body via
-// translate.OpenAIToAnthropicError + forces Content-Type to application/json.
+// On failover exhaustion the upstream error envelope is translated to Anthropic
+// format via translate.UpstreamToAnthropicError (which selects the conversion
+// based on the last-attempted provider). Forces Content-Type to application/json.
 // No-op when err is not an *UpstreamErrorResponse.
-func flushUpstreamErrorAsAnthropic(w http.ResponseWriter, err error) {
+func flushUpstreamErrorAsAnthropic(w http.ResponseWriter, err error, provider string) {
 	var resp *providers.UpstreamErrorResponse
 	if !errors.As(err, &resp) {
 		return
@@ -584,7 +585,7 @@ func flushUpstreamErrorAsAnthropic(w http.ResponseWriter, err error) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.Status)
-	_, _ = w.Write(translate.OpenAIToAnthropicError(resp.Body))
+	_, _ = w.Write(translate.UpstreamToAnthropicError(provider, resp.Body))
 }
 
 // attemptIdxLabel formats the fallback attempt index for the
