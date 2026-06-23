@@ -234,7 +234,7 @@ var Models = []Model{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 12.00, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gpt-5.4-pro", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 20.00, OutputUSDPer1M: 80.00, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 20.00, OutputUSDPer1M: 80.00, CacheReadMultiplier: 1.0}},
 	}},
 
 	// --- OpenAI GPT-5.5 ---
@@ -248,7 +248,7 @@ var Models = []Model{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 40.00, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gpt-5.5-pro", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
-		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 30.00, OutputUSDPer1M: 120.00, CacheReadMultiplier: 0.50}},
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 30.00, OutputUSDPer1M: 120.00, CacheReadMultiplier: 1.0}},
 	}},
 
 	// --- Google Gemini 2.x ---

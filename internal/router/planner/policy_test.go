@@ -15,7 +15,7 @@ const (
 	modelOpus    = "claude-opus-4-7"   // $5.00 input / $25.00 output per 1M, cache mult 0.10
 	modelSonnet  = "claude-sonnet-4-5" // $3.00 input / $15.00 output, cache mult 0.10
 	modelHaiku   = "claude-haiku-4-5"  // $0.80 input / $4.00 output, cache mult 0.10
-	modelGPT5    = "gpt-5"             // $2.50 input / $10.00 output, cache mult 0.50 (cross-provider)
+	modelGPT5    = "gpt-5"             // $2.50 input / $10.00 output, cache mult 0.10 (cross-provider)
 	modelUnknown = "fictional-foo-1.0" // intentionally absent from the pricing table
 )
 
@@ -255,20 +255,20 @@ func TestDecide(t *testing.T) {
 		},
 		{
 			// Cross-provider regression: opus (Anthropic, mult 0.10) ->
-			// gpt-5 (OpenAI, mult 0.50) on a 50k prompt at the new $5/$25
+			// gpt-5 (OpenAI, mult 0.10) on a 50k prompt at the new $5/$25
 			// opus pricing.
-			//   savingsPerTurn  = (5.00 * 0.10 - 2.50 * 0.50) * 50000 / 1e6
-			//                   = (0.50 - 1.25) * 0.05 = -$0.0375
-			//   expectedSavings = -0.0375 * 3 = -$0.1125
-			//   evictionCost    = 2.50 * 50000 * (1 - 0.50) / 1e6 = $0.0625
-			//   delta = -0.1125 - 0.0625 = -$0.175 -> Stay.
+			//   savingsPerTurn  = (5.00 * 0.10 - 2.50 * 0.10) * 50000 / 1e6
+			//                   = (0.50 - 0.25) * 0.05 = $0.0125
+			//   expectedSavings = 0.0125 * 3 = $0.0375
+			//   evictionCost    = 2.50 * 50000 * (1 - 0.10) / 1e6 = $0.1125
+			//   delta = 0.0375 - 0.1125 = -$0.075 -> Stay.
 			//
-			// Under the (now-corrected) catalog pricing, opus's per-token
-			// cost matches gpt-5's nominal input price, but gpt-5's 50%
-			// cache-read multiplier (vs opus's 10%) actually makes gpt-5
-			// *more* expensive in cache steady-state — so the planner
-			// stays on opus regardless of any prompt size. The old global-
-			// 0.10 path would have wrongly switched here.
+			// In cache steady-state gpt-5 is actually cheaper per token than
+			// opus (half the nominal input price, same 0.10 cache-read
+			// multiplier), so the per-turn EV is positive. But abandoning
+			// opus's warm cache to refill gpt-5's cold cache costs more than
+			// the modest steady-state savings buy back over the horizon, so
+			// the planner stays on opus.
 			name: "ev_cross_provider: opus -> gpt-5 stays under per-model math",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
@@ -279,8 +279,8 @@ func TestDecide(t *testing.T) {
 			cfg:                    defaultCfg,
 			want:                   planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
 			expectEVMath:           true,
-			wantExpectedSavingsUSD: -0.1125,
-			wantEvictionCostUSD:    0.0625,
+			wantExpectedSavingsUSD: 0.0375,
+			wantEvictionCostUSD:    0.1125,
 		},
 		{
 			// Mirror of ev_negative; pinned here so the next case can show
@@ -358,11 +358,11 @@ func TestDecide(t *testing.T) {
 		},
 		{
 			// Regression guard: the warm twin of this case (ev_cross_provider)
-			// STAYS because gpt-5's 0.50 cache-read multiplier makes it pricier
-			// than opus in cache steady-state. Once the cache is cold that
-			// multiplier no longer applies, so the raw $2.50 vs $5.00 input
-			// price wins and the planner correctly switches instead of clinging
-			// to a stale pin.
+			// STAYS because abandoning opus's warm cache to refill gpt-5's cold
+			// cache costs more than the steady-state savings buy back. Once the
+			// pin's cache is cold there is nothing warm to preserve, so the raw
+			// $2.50 vs $5.00 input price wins and the planner correctly switches
+			// instead of clinging to a stale pin.
 			//   savingsPerTurn  = (5.00 - 2.50) * 50000 / 1e6 = $0.125
 			//   expectedSavings = 0.125 * 3 = $0.375
 			//   evictionCost    = 0
