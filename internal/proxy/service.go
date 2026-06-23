@@ -3243,11 +3243,20 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	_, isResponses := w.(*translate.ResponsesWriter)
 	// markerSink wraps sink with an OpenAIRoutingMarkerWriter that emits
 	// the routing-marker chunk + HTTP 200 eagerly (Prelude). Skipped when
-	// the inbound is /v1/responses (ResponsesWriter handles its own badge)
-	// and when no marker is configured for this route. Called per attempt
-	// so retries re-emit into a fresh preludeBuffer state.
+	// the inbound is /v1/responses (ResponsesWriter handles its own badge).
+	// Called per attempt so retries re-emit into a fresh preludeBuffer state.
+	//
+	// Wrapped even when marker == "": the wrapper is the OpenAI→openaicompat
+	// passthrough's only ArmOutputProgress provider (no translator parses the
+	// same-format stream), and the empty-marker Prelude still flips the writer's
+	// streaming flag so the provider client can arm the output-progress watchdog.
+	// An empty marker emits a harmless ": routing complete" SSE comment, not a
+	// content chunk.
 	makeMarkerSink := func() http.ResponseWriter {
-		if marker == "" || isResponses {
+		// Codex passthrough streams raw Responses SSE; wrapping it in a
+		// chat-completions marker writer would inject a foreign frame (and the
+		// output-progress scan reads choices[].delta, which Responses lacks).
+		if isResponses || codexPassthrough {
 			return sink
 		}
 		mw := translate.NewOpenAIRoutingMarkerWriter(sink, decision.Model, marker)

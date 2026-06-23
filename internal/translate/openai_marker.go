@@ -6,7 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/sse"
+
+	"github.com/tidwall/gjson"
 )
 
 // OpenAIRoutingMarkerWriter wraps an http.ResponseWriter and injects a
@@ -23,6 +26,20 @@ type OpenAIRoutingMarkerWriter struct {
 	streaming      bool
 	headersEmitted bool
 	markerEmitted  bool
+
+	// onOutputProgress, when set via ArmOutputProgress, is invoked whenever a
+	// written upstream chunk carries an output-bearing delta (content,
+	// reasoning/reasoning_content, tool_calls, or a terminal finish_reason) and
+	// never on keepalive comments or empty/role-only frames. This is the
+	// OpenAI→OpenAI passthrough path's only place to tell output from keepalive,
+	// since no translator parses the stream here. It feeds the openaicompat
+	// client's output-progress watchdog (see httputil.DefaultOutputStallTimeout).
+	// nil disables it.
+	onOutputProgress func()
+	// outputLeftover holds the unconsumed tail of the most recent Write so output
+	// detection splits on SSE event boundaries that span Write calls. Complete
+	// events are scanned and discarded immediately.
+	outputLeftover []byte
 }
 
 // NewOpenAIRoutingMarkerWriter creates a writer that emits marker as the first
@@ -62,7 +79,80 @@ func (w *OpenAIRoutingMarkerWriter) Write(data []byte) (int, error) {
 			}
 		}
 	}
+	if w.streaming && w.onOutputProgress != nil {
+		w.scanOutputProgress(data)
+	}
 	return w.inner.Write(data)
+}
+
+// ArmOutputProgress installs the output-progress watchdog mark. The writer
+// invokes mark whenever a written upstream chunk carries an output-bearing
+// delta — assistant content, streamed reasoning, tool-call fragments, or a
+// terminal finish_reason — and never on keepalive comments or empty/role-only
+// frames. It returns false (and installs nothing) when the response is not
+// streaming: a non-streaming passthrough has nothing to mark mid-stream. Call
+// after WriteHeader / Prelude, which set the streaming flag.
+func (w *OpenAIRoutingMarkerWriter) ArmOutputProgress(mark func()) (armed bool) {
+	if !w.streaming {
+		return false
+	}
+	w.onOutputProgress = mark
+	return true
+}
+
+// scanOutputProgress splits buffered passthrough bytes on SSE event boundaries
+// and marks output progress for each complete event that carries an
+// output-bearing delta. Unlike a translator it does not re-encode; it only
+// classifies, so the raw OpenAI Chat Completions chunk is probed directly.
+func (w *OpenAIRoutingMarkerWriter) scanOutputProgress(data []byte) {
+	w.outputLeftover = append(w.outputLeftover, data...)
+	buf := w.outputLeftover
+	for {
+		event, n := sse.SplitNext(buf)
+		if n == 0 {
+			break
+		}
+		_, payload := sse.ParseEvent(event)
+		buf = buf[n:]
+		if len(payload) == 0 {
+			continue
+		}
+		if chunkCarriesOutput(payload) {
+			w.onOutputProgress()
+		}
+	}
+	rest := copy(w.outputLeftover, buf)
+	w.outputLeftover = w.outputLeftover[:rest]
+}
+
+// chunkCarriesOutput reports whether a raw OpenAI Chat Completions SSE chunk
+// payload carries model output: a non-empty content / reasoning delta, a
+// tool_calls array, or a terminal finish_reason. Role-only opening deltas,
+// null-valued deltas (the GLM-5.1 keepalive shape), usage-only chunks, and the
+// [DONE] sentinel return false — matching the AnthropicSSETranslator's
+// classification so the two openaicompat paths trip the watchdog identically.
+func chunkCarriesOutput(payload []byte) bool {
+	choice := gjson.GetBytes(payload, "choices.0")
+	if !choice.Exists() {
+		return false
+	}
+	if fr := choice.Get("finish_reason"); fr.Type == gjson.String && fr.Str != "" {
+		return true
+	}
+	delta := choice.Get("delta")
+	if !delta.Exists() {
+		return false
+	}
+	if delta.Get("content").Str != "" {
+		return true
+	}
+	if delta.Get("reasoning_content").Str != "" || delta.Get("reasoning").Str != "" {
+		return true
+	}
+	if delta.Get("tool_calls").IsArray() {
+		return true
+	}
+	return false
 }
 
 // Prelude commits headers and emits the routing marker immediately, before the
@@ -125,3 +215,4 @@ func (w *OpenAIRoutingMarkerWriter) emitMarkerChunk() error {
 
 var _ http.ResponseWriter = (*OpenAIRoutingMarkerWriter)(nil)
 var _ http.Flusher = (*OpenAIRoutingMarkerWriter)(nil)
+var _ providers.OutputProgressArmer = (*OpenAIRoutingMarkerWriter)(nil)

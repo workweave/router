@@ -84,6 +84,24 @@ func (u *UsageExtractor) Flush() {
 	}
 }
 
+// ArmOutputProgress forwards the output-progress watchdog mark to the inner
+// writer when it supports it. UsageExtractor sniffs usage but cannot itself tell
+// an output-bearing frame from a keepalive; the wrapped marker writer (or
+// translator) can. Without this forward, wrapping the marker writer in a
+// UsageExtractor would hide ArmOutputProgress from the provider client and leave
+// the OpenAI→openaicompat passthrough byte-idle-guarded only. Returns false when
+// inner is nil (sink-only mode) or doesn't implement the hook.
+func (u *UsageExtractor) ArmOutputProgress(mark func()) (armed bool) {
+	if u.inner == nil {
+		return false
+	}
+	arm, ok := u.inner.(interface{ ArmOutputProgress(func()) bool })
+	if !ok {
+		return false
+	}
+	return arm.ArmOutputProgress(mark)
+}
+
 // RecordUsage sets token counts directly, bypassing SSE parsing. Called by
 // translators that have already parsed usage from the upstream event stream.
 func (u *UsageExtractor) RecordUsage(inputTokens, outputTokens int) {

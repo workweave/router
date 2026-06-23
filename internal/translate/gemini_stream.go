@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"workweave/router/internal/observability/otel"
+	"workweave/router/internal/providers"
 	"workweave/router/internal/sse"
 
 	"github.com/tidwall/gjson"
@@ -37,6 +38,13 @@ type GeminiToOpenAISSETranslator struct {
 	pendingSig string
 
 	usageSink otel.UsageSink
+
+	// onOutputProgress, when set via ArmOutputProgress, is invoked on every
+	// parsed output-bearing Gemini event (text delta, tool-call chunk, or
+	// terminal finish) and never on keepalives or empty/role-only frames. It
+	// feeds the openaicompat client's output-progress watchdog through the
+	// Gemini→OpenAI SSE translator chain. nil disables it.
+	onOutputProgress func()
 }
 
 // NewGeminiToOpenAISSETranslator wraps w. Call Finalize after upstream returns.
@@ -50,6 +58,27 @@ func NewGeminiToOpenAISSETranslator(w http.ResponseWriter, model string, sink ot
 		chatID:    generateChatCmplID(),
 		created:   time.Now().Unix(),
 		usageSink: sink,
+	}
+}
+
+// ArmOutputProgress installs the output-progress watchdog mark. The translator
+// invokes mark whenever it writes an output-bearing upstream event — text delta,
+// tool-call chunk, or terminal finish — and never on role-only first chunks,
+// usage-only chunks, or [DONE]. It returns false (and installs nothing) when the
+// client is not streaming: the buffered path translates only at Finalize, so an
+// output-progress watchdog would have nothing to mark and would false-trip.
+// Call after WriteHeader, which sets the streaming flag.
+func (t *GeminiToOpenAISSETranslator) ArmOutputProgress(mark func()) (armed bool) {
+	if !t.streaming {
+		return false
+	}
+	t.onOutputProgress = mark
+	return true
+}
+
+func (t *GeminiToOpenAISSETranslator) markOutputProgress() {
+	if t.onOutputProgress != nil {
+		t.onOutputProgress()
 	}
 }
 
@@ -257,6 +286,7 @@ func (t *GeminiToOpenAISSETranslator) emitFirstChunk() error {
 }
 
 func (t *GeminiToOpenAISSETranslator) emitTextDelta(text string) error {
+	t.markOutputProgress()
 	t.writeChunkHeader()
 	t.bw.WriteString(`"choices":[{"index":0,"delta":{"content":`)
 	sse.WriteJSONString(t.bw, text)
@@ -271,6 +301,7 @@ func (t *GeminiToOpenAISSETranslator) emitTextDelta(text string) error {
 // next request can replay it without relying on an off-spec field that typed
 // SDKs drop and Anthropic upstreams reject.
 func (t *GeminiToOpenAISSETranslator) emitToolCallChunk(idx int, name, argsRaw, sig string) error {
+	t.markOutputProgress()
 	id := embedSignatureInID(generateToolCallID(), sig)
 	t.writeChunkHeader()
 	t.bw.WriteString(`"choices":[{"index":0,"delta":{"tool_calls":[{"index":`)
@@ -288,6 +319,7 @@ func (t *GeminiToOpenAISSETranslator) emitToolCallChunk(idx int, name, argsRaw, 
 }
 
 func (t *GeminiToOpenAISSETranslator) emitFinalChunk(finishReason string, usage map[string]int) error {
+	t.markOutputProgress()
 	t.writeChunkHeader()
 	t.bw.WriteString(`"choices":[{"index":0,"delta":{},"finish_reason":`)
 	sse.WriteJSONString(t.bw, finishReason)
@@ -365,3 +397,4 @@ func (t *GeminiToOpenAISSETranslator) flushEvent() error {
 
 var _ http.ResponseWriter = (*GeminiToOpenAISSETranslator)(nil)
 var _ http.Flusher = (*GeminiToOpenAISSETranslator)(nil)
+var _ providers.OutputProgressArmer = (*GeminiToOpenAISSETranslator)(nil)
