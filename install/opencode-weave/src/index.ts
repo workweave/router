@@ -456,7 +456,12 @@ export const WeaveCodex: Plugin = async (input: PluginInput): Promise<Hooks> => 
           const current = await readStoredOAuth(ANTHROPIC_PROVIDER_ID)
           if (!current) return undefined
           if (current.access && (current.expires ?? 0) >= Date.now()) return current.access
-          if (!current.refresh) return current.access
+          // Access is expired/absent: only a refresh can produce a live token,
+          // so without a refresh token there's no usable credential to inject —
+          // returning the stale token would have the router treat a dead Claude
+          // sub as present instead of falling back to the Weave key. (Mirrors
+          // resolveChatGPT.)
+          if (!current.refresh) return undefined
           if (!anthropicRefresh) {
             anthropicRefresh = refreshAnthropicToken(current.refresh)
               .then(async (tokens) => {

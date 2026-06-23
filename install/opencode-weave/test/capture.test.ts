@@ -188,6 +188,29 @@ describe("weave loader — dual subscription injection", () => {
     expect(req.headers["x-weave-router-key"]).toBe(ROUTER_KEY)
   })
 
+  test("does not inject an expired Claude token that has no refresh token", async () => {
+    await writeFile(
+      authFile,
+      JSON.stringify({
+        "weave-claude": { type: "oauth", access: "expired-claude", expires: Date.now() - 1000 },
+      }),
+    )
+    const getAuth = async () => ({
+      type: "oauth",
+      access: CHATGPT_ACCESS,
+      refresh: "cg-refresh",
+      expires: Date.now() + 3_600_000,
+      accountId: CHATGPT_ACCOUNT,
+    })
+
+    const req = await runLoaderFetch(getAuth)
+
+    // Dead Claude sub (expired, unrefreshable) is dropped so the router bills the
+    // Weave key rather than treating it as present.
+    expect(req.headers["x-weave-anthropic-subscription"]).toBeUndefined()
+    expect(req.headers["x-weave-openai-subscription"]).toBe(CHATGPT_ACCESS)
+  })
+
   test("refreshes an expired Claude token, persists it to weave-claude, and injects the rotated token", async () => {
     await writeFile(
       authFile,
