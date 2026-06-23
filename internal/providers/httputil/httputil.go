@@ -79,6 +79,31 @@ var DefaultResponsesSSEIdleTimeout = idleTimeoutFromEnv("ROUTER_RESPONSES_SSE_ID
 // Tunable via ROUTER_RESPONSES_OUTPUT_STALL_TIMEOUT_SECONDS.
 var DefaultResponsesOutputStallTimeout = idleTimeoutFromEnv("ROUTER_RESPONSES_OUTPUT_STALL_TIMEOUT_SECONDS", 240*time.Second)
 
+// DefaultOutputStallTimeout is the OUTPUT-progress threshold for the generic
+// OpenAI-compatible Chat Completions adapter (OpenRouter / Fireworks /
+// DeepInfra / Bedrock). It is the Chat-Completions analogue of
+// DefaultResponsesOutputStallTimeout: DefaultSSEIdleTimeout resets on ANY
+// upstream byte, so a provider that keeps the connection byte-alive with SSE
+// keepalive comments (": OPENROUTER PROCESSING") or empty/role-only delta
+// frames while producing zero output content rides to the 600s request cap.
+//
+// Prod incident 2026-06-19: a DeepInfra deepseek-v4-flash stream stayed
+// byte-alive but output-silent for ~10min until the request cap; the client
+// then retried and hit a model-not-found 404. The byte-idle watchdog (45s)
+// cannot catch a byte-alive stall — only a time-since-last-OUTPUT watchdog can.
+// The mark is fed by the OpenAI→Anthropic SSE translator on output-bearing
+// deltas (assistant text, streamed reasoning, tool-call arguments, terminal
+// finish) and never on keepalives or empty deltas. Unlike the Responses budget,
+// streamed reasoning_content DOES count here: OSS reasoning models emit it as
+// real tokens (rendered as a thinking block), not a sparse server-side summary.
+//
+// Set below the 600s request cap so the watchdog (not the cap) surfaces the
+// stall as a retryable error, while staying generous enough that a large-context
+// prefill emitting only keepalives before its first token is never clipped.
+//
+// Tunable via ROUTER_OUTPUT_STALL_TIMEOUT_SECONDS.
+var DefaultOutputStallTimeout = idleTimeoutFromEnv("ROUTER_OUTPUT_STALL_TIMEOUT_SECONDS", 240*time.Second)
+
 // idleTimeoutFromEnv reads a whole-seconds override from envVar, falling back
 // to fallback when unset, unparsable, or non-positive.
 func idleTimeoutFromEnv(envVar string, fallback time.Duration) time.Duration {

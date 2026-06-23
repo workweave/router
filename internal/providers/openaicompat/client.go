@@ -4,6 +4,7 @@ package openaicompat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -52,6 +53,16 @@ type Client struct {
 	// slug differs from the upstream's canonical ID (Bedrock dot-form,
 	// DeepInfra HuggingFace-form).
 	modelIDMap map[string]string
+	// sseIdleTimeout, when > 0, overrides httputil.DefaultSSEIdleTimeout for the
+	// byte-idle watchdog. Production uses the default; tests inject a small value
+	// so the output-stall watchdog can be exercised without the byte-idle one
+	// firing first.
+	sseIdleTimeout time.Duration
+	// outputStall, when > 0, overrides httputil.DefaultOutputStallTimeout for the
+	// output-progress watchdog. Production uses the default via NewClient; tests
+	// inject a small value to drive the output-stall trip without waiting out the
+	// real budget.
+	outputStall time.Duration
 }
 
 func NewClient(apiKey, baseURL string) *Client {
@@ -71,6 +82,35 @@ func NewClientWithModelIDMap(apiKey, baseURL string, modelIDMap map[string]strin
 		http:       &http.Client{Transport: httputil.NewTransport(5*time.Second, 5*time.Second)},
 		modelIDMap: modelIDMap,
 	}
+}
+
+// NewClientWithStallTimeouts is NewClient with injected byte-idle and
+// output-stall watchdog budgets. Exists so a test can drive the
+// output-progress watchdog with a small budget while keeping the byte-idle
+// watchdog large enough that it isn't what fires.
+func NewClientWithStallTimeouts(apiKey, baseURL string, sseIdleTimeout, outputStall time.Duration) *Client {
+	c := NewClient(apiKey, baseURL)
+	c.sseIdleTimeout = sseIdleTimeout
+	c.outputStall = outputStall
+	return c
+}
+
+// idleTimeout returns the byte-idle watchdog budget: the injected test override
+// when set, else httputil.DefaultSSEIdleTimeout.
+func (c *Client) idleTimeout() time.Duration {
+	if c.sseIdleTimeout > 0 {
+		return c.sseIdleTimeout
+	}
+	return httputil.DefaultSSEIdleTimeout
+}
+
+// outputStallTimeout returns the output-progress watchdog budget: the injected
+// test override when set, else httputil.DefaultOutputStallTimeout.
+func (c *Client) outputStallTimeout() time.Duration {
+	if c.outputStall > 0 {
+		return c.outputStall
+	}
+	return httputil.DefaultOutputStallTimeout
 }
 
 // rewriteModelField rewrites the body's top-level "model" field according to
@@ -160,7 +200,51 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
-	return httputil.StreamBody(ctx, cancel, httputil.DefaultSSEIdleTimeout, resp.Body, resp.StatusCode, w, t)
+
+	// Output-progress watchdog. StreamBody's byte-idle watchdog below resets on
+	// ANY upstream byte, so a stream that stays byte-alive with SSE keepalive
+	// comments or empty/role-only delta frames while producing zero output rides
+	// to the 600s request cap (2026-06-19 DeepInfra incident). This second
+	// watchdog measures time-since-last-OUTPUT: its mark is fed by the
+	// OpenAI→Anthropic SSE translator only on output-bearing deltas (text,
+	// reasoning, tool-call args, terminal finish). On trip it cancels ctx with
+	// ErrUpstreamOutputStall (retryable; fails over while the preludeBuffer is
+	// still uncommitted). Only the translator can tell output frames from
+	// keepalives, so it is wired via ArmOutputProgress; a non-streaming client
+	// (or a writer without the hook) returns armed=false and is byte-idle-guarded
+	// only.
+	if arm, ok := w.(interface{ ArmOutputProgress(func()) bool }); ok {
+		outMark, outStop := httputil.StartIdleWatchdogCause(ctx, cancel, c.outputStallTimeout(), httputil.ErrUpstreamOutputStall)
+		if arm.ArmOutputProgress(outMark) {
+			defer outStop()
+		} else {
+			outStop()
+		}
+	}
+
+	streamErr := httputil.StreamBody(ctx, cancel, c.idleTimeout(), resp.Body, resp.StatusCode, w, t)
+	if errors.Is(streamErr, httputil.ErrUpstreamIdleTimeout) || errors.Is(streamErr, httputil.ErrUpstreamOutputStall) {
+		logStreamStall(decision.Model, c.baseURL, streamErr)
+	}
+	return streamErr
+}
+
+// logStreamStall reports a watchdog trip at ERROR: the upstream returned 200 +
+// headers, then stalled for the full budget. byte_idle = zero bytes for the
+// idle budget; output_idle = stream stayed byte-alive on keepalive/empty frames
+// but produced zero output content for the output-stall budget (the 2026-06-19
+// DeepInfra mode). Both classify retryable, so dispatchWithFallback re-attempts
+// when nothing reached the client; this log is the per-model paper trail.
+func logStreamStall(model, baseURL string, cause error) {
+	stallKind := "byte_idle"
+	if errors.Is(cause, httputil.ErrUpstreamOutputStall) {
+		stallKind = "output_idle"
+	}
+	observability.Get().Error("Upstream OpenAI-compatible stream stalled mid-response; aborting for retry",
+		"model", model,
+		"base_url", baseURL,
+		"stall_kind", stallKind,
+	)
 }
 
 // readCapped reads up to limit bytes from r into a buffer, then drains the

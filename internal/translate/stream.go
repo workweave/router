@@ -414,6 +414,14 @@ type AnthropicSSETranslator struct {
 
 	usageSink otel.UsageSink
 
+	// onOutputProgress, when set via ArmOutputProgress, is invoked on every
+	// parsed output-bearing upstream delta (assistant text, streamed reasoning,
+	// tool-call arguments, or terminal finish) and never on keepalives or
+	// empty/role-only deltas. It feeds the openaicompat client's output-progress
+	// watchdog so a stream that stays byte-alive while producing zero output is
+	// aborted (see httputil.DefaultOutputStallTimeout). nil disables it.
+	onOutputProgress func()
+
 	// estimatedInputTokens is the pre-inference estimate, used to populate
 	// message_start.usage.input_tokens for cross-format paths where upstream
 	// usage doesn't arrive until message_delta.
@@ -522,6 +530,29 @@ func (t *AnthropicSSETranslator) WithEstimatedInputTokens(n int) *AnthropicSSETr
 func (t *AnthropicSSETranslator) WithRequestHadTools(hadTools bool) *AnthropicSSETranslator {
 	t.requestHadTools = hadTools
 	return t
+}
+
+// ArmOutputProgress installs the output-progress watchdog mark. The translator
+// invokes mark whenever it parses an output-bearing upstream delta — assistant
+// text, streamed reasoning (reasoning_content / reasoning), tool-call
+// arguments, or a terminal finish — and never on keepalives or empty/role-only
+// deltas, so the watchdog measures time-since-last-output rather than
+// time-since-last-byte. It returns false (and installs nothing) when the client
+// is not streaming: the buffered path translates only at Finalize, so an
+// output-progress watchdog would have nothing to mark and would false-trip.
+// Call after Prelude / WriteHeader, which set the streaming flag.
+func (t *AnthropicSSETranslator) ArmOutputProgress(mark func()) (armed bool) {
+	if !t.streaming {
+		return false
+	}
+	t.onOutputProgress = mark
+	return true
+}
+
+func (t *AnthropicSSETranslator) markOutputProgress() {
+	if t.onOutputProgress != nil {
+		t.onOutputProgress()
+	}
 }
 
 // ResponseSummary reports translated-response signals an observer can log
@@ -816,6 +847,8 @@ func (t *AnthropicSSETranslator) translateOpenAIEvent(raw []byte) error {
 
 	if fr := firstChoice.Get("finish_reason").Str; fr != "" {
 		t.finishReason = strings.Clone(fr)
+		// Terminal output: the upstream signaled the turn is ending.
+		t.markOutputProgress()
 	}
 	t.extractAndForwardUsage(data)
 	return nil
@@ -851,6 +884,9 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 		reasoning = delta.Get("reasoning").Str
 	}
 	if reasoning != "" {
+		// Streamed reasoning is real upstream output (rendered as a thinking
+		// block), so it counts as output progress and resets the stall watchdog.
+		t.markOutputProgress()
 		if t.textOpen {
 			if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
 				return err
@@ -870,6 +906,10 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 	}
 
 	if content := delta.Get("content").Str; content != "" {
+		// Any non-empty content delta is real upstream output (even a
+		// whitespace-only fragment), distinct from a keepalive — count it as
+		// output progress.
+		t.markOutputProgress()
 		// Defer opening a text block until non-whitespace arrives. A
 		// whitespace-only delta with no text block open yet would otherwise
 		// surface as an empty text block wedged between a thinking block and a
@@ -924,6 +964,10 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 	if !toolCalls.IsArray() {
 		return nil
 	}
+	// A real tool_calls array (id / name / argument fragments) is upstream
+	// output — count it as progress before the per-call processing below, which
+	// may buffer rather than emit immediately.
+	t.markOutputProgress()
 
 	var emitErr error
 	toolCalls.ForEach(func(_, tc gjson.Result) bool {
