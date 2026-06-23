@@ -76,26 +76,26 @@ func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) co
 		return ctx
 	}
 	obs := func(callCtx context.Context, h http.Header) {
-		// Record only from a response actually served on the caller's subscription,
-		// keyed by the call's RESOLVED credential (not a request-stashed token).
-		// This skips internal calls on the same request that don't use the sub —
+		// Record only when the call's RESOLVED credential is one of THIS request's
+		// detected subscription tokens — not any incidental OAuth credential — and
+		// key by that token so subsidyFactors reads the same key. Gating on the
+		// resolved credential also skips internal calls that don't use the sub,
 		// e.g. the handover summarizer's deployment-key Anthropic call after
-		// clearCredentials — which would otherwise poison the headroom snapshot.
-		// The family is read off the credential itself (a Codex sub carries an
-		// account-id; a Claude sub is an sk-ant-oat token), so this is agnostic to
-		// whether the sub arrived via dedicated header or inbound bearer.
+		// clearCredentials. The parser follows the matched token's family, so this
+		// works whether the sub arrived via a dedicated header or the inbound bearer.
 		creds := CredentialsFromContext(callCtx)
 		if creds == nil || !creds.OAuth {
 			return
 		}
-		if len(creds.AccountID) > 0 {
+		switch string(creds.APIKey) {
+		case codexTok:
 			if snap, ok := usage.ParseCodexHeaders(h); ok {
-				s.usageObserver.Record(s.usageObserver.Key(creds.APIKey), snap)
+				s.usageObserver.Record(s.usageObserver.Key([]byte(codexTok)), snap)
 			}
-			return
-		}
-		if snap, ok := usage.ParseAnthropicUnifiedHeaders(h); ok {
-			s.usageObserver.Record(s.usageObserver.Key(creds.APIKey), snap)
+		case anthroTok:
+			if snap, ok := usage.ParseAnthropicUnifiedHeaders(h); ok {
+				s.usageObserver.Record(s.usageObserver.Key([]byte(anthroTok)), snap)
+			}
 		}
 	}
 	return providers.WithUpstreamHeaderObserver(ctx, obs)

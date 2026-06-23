@@ -4,8 +4,13 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"workweave/router/internal/providers"
+	"workweave/router/internal/proxy/usage"
 )
 
 // The subsidy must recognize a subscription presented via the inbound
@@ -44,4 +49,38 @@ func TestPresentSubscriptionTokens_InboundBearerHarnesses(t *testing.T) {
 		assert.Empty(t, codex)
 		assert.Empty(t, anthro)
 	})
+}
+
+// End-to-end: the key withUsageObserver records under must equal the key
+// subsidyFactors reads, or the discount never materializes. Drives the real
+// observer closure (as a provider would) with a resolved Codex credential and an
+// upstream rate-limit response, then asserts subsidyFactors returns the discount.
+func TestSubsidy_RecordReadKeyAgreement(t *testing.T) {
+	s := (&Service{}).WithSubscriptionAwareRouting(
+		usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now), 0.05, 2.0)
+
+	const jwt = "eyJhbGciOi.codex.jwt"
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+jwt)
+	headers.Set("ChatGPT-Account-ID", "acct-1")
+
+	ctx := context.Background()
+	obsCtx := s.withUsageObserver(ctx, headers)
+
+	// Simulate the resolved Codex credential + an upstream response at 10% used,
+	// invoked the way a provider does after the upstream call.
+	cred := &Credentials{APIKey: []byte(jwt), AccountID: []byte("acct-1"), Source: credSourceCodexSubscription, OAuth: true}
+	callCtx := context.WithValue(obsCtx, CredentialsContextKey{}, cred)
+	resp := http.Header{}
+	resp.Set("x-codex-primary-used-percent", "10")
+	resp.Set("x-codex-primary-window-minutes", "300")
+	providers.ObserveUpstreamHeaders(callCtx, resp)
+
+	// subsidyFactors must read back the SAME key and discount covered GPT models.
+	factors := s.subsidyFactors(ctx, headers)
+	require.NotNil(t, factors, "headroom was observed; factors must be non-nil")
+	f, ok := factors["gpt-5.5"]
+	require.True(t, ok, "covered GPT model must be subsidized")
+	assert.Less(t, f, 1.0, "10%% used → discounted below full price")
+	assert.GreaterOrEqual(t, f, 0.05, "never below epsilon")
 }
