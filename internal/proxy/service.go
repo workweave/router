@@ -3112,6 +3112,15 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		// streams Responses SSE natively — forward it verbatim. A Codex-sub turn
 		// that routed elsewhere (Claude/OSS) leaves the writer in translate mode
 		// so its chat/Anthropic output is re-emitted as Responses.
+		//
+		// Set once here (before Prelude) rather than per-attempt because Prelude's
+		// response.created suppression depends on passthrough being engaged before
+		// the first write. Safe across the dispatch loop: passthrough engages only
+		// when decision.Provider == OpenAI, which in the catalog is always a
+		// single-binding GPT model — there is no cross-format fallback binding to
+		// fail over to, and single-binding retry re-hits OpenAI (still verbatim).
+		// The per-attempt body below is independently gated on d.Provider == OpenAI.
+		// If a GPT model ever gains a cross-format fallback, gate this per-attempt.
 		if codexPassthrough && decision.Provider == providers.ProviderOpenAI {
 			rw.SetPassthrough()
 		}

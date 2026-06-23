@@ -220,6 +220,16 @@ describe("weave-claude login hook", () => {
     expect(result.method).toBe("code")
   })
 
+  test("rejects a pasted code missing the #state separator with a clear error", async () => {
+    const { WeaveClaude } = await import("../src/index.ts")
+    const hooks = await WeaveClaude(fakeInput())
+    const method = hooks.auth!.methods[0] as {
+      authorize: () => Promise<{ callback: (code: string) => Promise<Record<string, unknown>> }>
+    }
+    const flow = await method.authorize()
+    await expect(flow.callback("JUSTACODE")).rejects.toThrow(/code#state/)
+  })
+
   test("exchanges a pasted code#state for tokens", async () => {
     const { WeaveClaude } = await import("../src/index.ts")
     const hooks = await WeaveClaude(fakeInput())
@@ -245,5 +255,37 @@ describe("weave-claude login hook", () => {
     expect(exchangeBody!.code).toBe("THECODE")
     expect(exchangeBody!.state).toBe("THESTATE")
     expect(exchangeBody!.grant_type).toBe("authorization_code")
+  })
+})
+
+describe("opencode plugin-loading contract", () => {
+  // opencode's loader (applyPlugin → readV1Plugin(mod, _, "server", "detect"))
+  // treats a module whose `default` is a plain OBJECT with id/server/tui as a V1
+  // module and loads ONLY `default.server`. Only when `default` is NOT such an
+  // object does it fall back to getLegacyPlugins → Object.values(mod), loading
+  // EVERY exported Plugin function. We rely on that fallback so BOTH WeaveCodex
+  // (provider `weave`) and WeaveClaude (provider `weave-claude`) register from one
+  // file. These assertions fail if someone converts the module to a `{ server }`
+  // default export (which would silently drop the named Claude-login plugin).
+  test("default export is a bare function (takes the all-exports legacy path)", async () => {
+    const mod = await import("../src/index.ts")
+    expect(typeof mod.default).toBe("function")
+    // A function is not a record, so readV1Plugin returns undefined in detect mode.
+    expect(mod.default).not.toBeNull()
+    expect(["id", "server", "tui"].some((k) => k in (mod.default as object))).toBe(false)
+  })
+
+  test("both Plugins are exported functions that opencode's Object.values loop will load", async () => {
+    const mod = (await import("../src/index.ts")) as unknown as Record<string, unknown>
+    const plugins = Object.values(mod).filter((v) => typeof v === "function")
+    // Dedup by reference (default === WeaveCodex), as opencode's loader does.
+    const unique = new Set(plugins)
+    const providers = new Set<string>()
+    for (const p of unique) {
+      const hooks = await (p as (i: unknown) => Promise<{ auth?: { provider: string } }>)(fakeInput())
+      if (hooks.auth) providers.add(hooks.auth.provider)
+    }
+    expect(providers.has("weave")).toBe(true)
+    expect(providers.has("weave-claude")).toBe(true)
   })
 })

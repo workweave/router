@@ -216,6 +216,11 @@ function buildAnthropicAuthorizeUrl(pkce: PkceCodes): string {
 }
 
 async function exchangeAnthropicCode(code: string, verifier: string): Promise<AnthropicTokens> {
+  // The manual flow returns "<code>#<state>"; without the separator the state
+  // would be undefined and the server would 4xx with an opaque error.
+  if (!code.includes("#")) {
+    throw new Error(`Expected the pasted code in "code#state" format; got: ${code.trim().slice(0, 24)}…`)
+  }
   const [authCode, state] = code.trim().split("#")
   const response = await fetch(ANTHROPIC_TOKEN_URL, {
     method: "POST",
@@ -411,10 +416,16 @@ export const WeaveCodex: Plugin = async (input: PluginInput): Promise<Hooks> => 
         // refreshing + persisting the rotated token on (or just before) expiry.
         async function resolveChatGPT(): Promise<{ access: string; accountId?: string } | undefined> {
           const current = (await getAuth()) as StoredOAuth
-          if (current.type !== "oauth" || !current.refresh) return undefined
+          if (current.type !== "oauth") return undefined
+          // Use a still-valid access token regardless of whether a refresh token
+          // is present (a partial store could lack it). Only an expired/absent
+          // access needs a refresh — and that needs the refresh token.
           if (current.access && (current.expires ?? 0) >= Date.now()) {
             return { access: current.access, accountId: current.accountId }
           }
+          // Access is expired/absent: a refresh is the only way forward, so
+          // without a refresh token there's no usable credential.
+          if (!current.refresh) return undefined
           if (!chatgptRefresh) {
             chatgptRefresh = refreshAccessToken(current.refresh)
               .then(async (tokens) => {
