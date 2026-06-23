@@ -41,12 +41,16 @@ type Request struct {
 	// If filtering empties eligible set, scorer returns ErrNoEligibleProvider.
 	ExcludedModels map[string]struct{}
 	RoutingKnobs   *Overrides // NEW: parsed dynamic knobs
-	// SubsidizedModelCostFactor scales a model's cost term in the scorer, in
-	// [epsilon, 1]. Set per-request for models a caller's presented subscription
-	// covers, derived from observed rate-limit headroom (see internal/proxy/usage):
-	// ~epsilon when the sub's window has slack (covered model ~free), rising to 1
-	// (full catalog price, no subsidy) as the window binds. Absent entry = no
-	// subsidy. nil/empty = today's behavior.
+	// SubsidizedModelCostFactor is the per-model rate-limit headroom factor in
+	// [epsilon, 1] for models a caller's presented subscription covers, derived
+	// from observed headroom (see internal/proxy/usage): ~epsilon when the sub's
+	// window has slack, rising to 1 as the window binds. Absent entry = no
+	// subsidy; nil/empty = today's behavior. The cluster scorer reads it as a
+	// PREFERENCE signal — it lifts a covered model's score by a uniform per-family
+	// bonus proportional to (1−factor), leaving the cost axis at full catalog so
+	// the intra-family Haiku↔Opus spread is preserved. (The planner, separately,
+	// still reads it as a literal cost multiplier for its dollar-EV cache-switch
+	// math, where a prepaid model's marginal price really is ~factor×catalog.)
 	SubsidizedModelCostFactor map[string]float64
 }
 

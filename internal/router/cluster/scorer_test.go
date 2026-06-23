@@ -165,13 +165,12 @@ func TestScorer_PicksClusterAlignedModel(t *testing.T) {
 	assert.Contains(t, got.Reason, "model=claude-opus-4-7")
 }
 
-// TestScorer_SubscriptionCostFactorNoop guards the feature-off path: a 1.0
-// factor (and nil) must leave routing byte-identical to no subsidy. The
-// directional cost effect of factors < 1 is unit-tested where the cost math
-// lives (internal/proxy/usage CostFactor) and validated end-to-end on
-// cost-weighted production traffic via the offline screen — this fixture's
-// default knobs give the cost axis zero weight, so a Route-level flip can't be
-// exercised here.
+// TestScorer_SubscriptionCostFactorNoop guards the feature-off path on the V1
+// fallback bundle (no model_axes → no cost axis), where the subscription signal
+// never applies: nil and a 1.0 factor must both leave routing byte-identical to
+// no subsidy. The directional V2 behavior — the headroom bonus flipping the pick
+// and the intra-family choice — is covered by TestScorer_SubscriptionPreference-
+// FlipsAndSpills and TestScorer_SubscriptionPicksCheapestSufficientWithinFamily.
 func TestScorer_SubscriptionCostFactorNoop(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	s := newScorerForTest(t, emb, cfgForTest())
@@ -188,6 +187,75 @@ func TestScorer_SubscriptionCostFactorNoop(t *testing.T) {
 	assert.Equal(t, base.Model, noopRes.Model, "a 1.0 factor must not change the decision")
 	assert.InDelta(t, base.Metadata.ChosenScore, noopRes.Metadata.ChosenScore, 1e-9,
 		"a 1.0 factor must not change the score")
+}
+
+// subscriptionKnobs makes cluster 0 hard (quality-favored, alpha 0.9) and cluster
+// 1 easy (cost-favored, alpha 0.2), so the V2 blend has a real margin to flip.
+func subscriptionKnobs() *DefaultRoutingKnobs {
+	return &DefaultRoutingKnobs{
+		Alpha:                []float64{0.9, 0.2},
+		SpeedWeight:          0.0,
+		OutputCostRatio:      0.0,
+		ExpectedOutputTokens: 2000,
+	}
+}
+
+// TestScorer_SubscriptionPreferenceFlipsAndSpills exercises the plan-vs-cash half
+// of subscription-aware routing. In the hard cluster 0, opus is the quality-
+// favored pick with no subsidy. Treating haiku as the subscription-covered/plan
+// model and opus as the uncovered/cash alternative: a slack plan (f≈epsilon) adds
+// the headroom bonus and flips the pick to the covered model; a bound plan (f=1)
+// zeroes the bonus and the pick spills back to cash. The scorer is family-
+// agnostic — it applies the bonus to whatever subsidyFactors lists.
+func TestScorer_SubscriptionPreferenceFlipsAndSpills(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s := newV2BundleForTest(t, emb, v2BundleOpts{defaultKnobs: subscriptionKnobs()})
+	req := router.Request{PromptText: strings.Repeat("x", 100)}
+
+	base, err := s.Route(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, "claude-opus-4-7", base.Model, "no subsidy: quality-favored model wins the hard cluster")
+
+	slack := req
+	slack.SubsidizedModelCostFactor = map[string]float64{"claude-haiku-4-5": 0.05}
+	slackRes, err := s.Route(context.Background(), slack)
+	require.NoError(t, err)
+	assert.Equal(t, "claude-haiku-4-5", slackRes.Model,
+		"a slack plan (f≈epsilon) lifts the covered model above the otherwise-preferred one")
+
+	bound := req
+	bound.SubsidizedModelCostFactor = map[string]float64{"claude-haiku-4-5": 1.0}
+	boundRes, err := s.Route(context.Background(), bound)
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", boundRes.Model,
+		"a bound plan (f=1) zeroes the bonus; routing spills back to the cash model")
+}
+
+// TestScorer_SubscriptionPicksCheapestSufficientWithinFamily is the headline
+// property: with BOTH covered models subsidized at the same slack factor, the
+// uniform bonus cannot reorder them, so the per-cluster quality/cost blend still
+// decides which covered model wins — the strong one on a hard (quality-favored)
+// cluster, the cheap one on an easy (cost-favored) cluster. This is exactly the
+// intra-family discrimination the old cost-multiply washed out (it compressed
+// Haiku and Opus together and over-picked Opus even for trivial turns).
+func TestScorer_SubscriptionPicksCheapestSufficientWithinFamily(t *testing.T) {
+	covered := map[string]float64{"claude-opus-4-7": 0.05, "claude-haiku-4-5": 0.05}
+
+	hard := newV2BundleForTest(t, &fakeEmbedder{vec: makeOpusVec()}, v2BundleOpts{defaultKnobs: subscriptionKnobs()})
+	hardRes, err := hard.Route(context.Background(), router.Request{
+		PromptText: strings.Repeat("x", 100), SubsidizedModelCostFactor: covered,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", hardRes.Model,
+		"hard cluster: a subscribed family still routes to the strong model")
+
+	easy := newV2BundleForTest(t, &fakeEmbedder{vec: makeHaikuVec()}, v2BundleOpts{defaultKnobs: subscriptionKnobs()})
+	easyRes, err := easy.Route(context.Background(), router.Request{
+		PromptText: strings.Repeat("y", 100), SubsidizedModelCostFactor: covered,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-haiku-4-5", easyRes.Model,
+		"easy cluster: a subscribed family routes to the cheap sufficient model (Haiku, not Opus)")
 }
 
 // Removing any populated metadata field breaks routing telemetry rows.

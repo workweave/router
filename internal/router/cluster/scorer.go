@@ -839,24 +839,32 @@ func clusterIDsString(ks []int) string {
 
 var _ router.Router = (*Scorer)(nil)
 
+// subsidyMaxBonus is the maximum per-cluster score lift a subscription-covered
+// model receives when its plan window is fully slack (headroom factor f≈epsilon).
+// It scales by (1−f), fading to 0 as the window binds so cash/OSS re-enter on
+// their merits (soft spill). Set to the per-cluster blend ceiling (1.0): a fully
+// slack plan is preferred over paying cash unless the covered model is near-worst
+// for the task — the prepaid "use-it-or-lose-it" preference — applied as an
+// additive bonus so it disturbs none of the quality/cost/speed blend weights.
+const subsidyMaxBonus float32 = 1.0
+
 // blendScoresV2 computes the v2 per-model blended scores for the given top-P
 // clusters under the effective knobs. Extracted from Route so the routing
 // distribution preview scores identically to live routing (single source of
 // truth for the cost/quality/speed blend). Caller owns knob validation and the
 // QualityBias->Alpha derivation; this method consumes the resolved alpha vector.
 func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnobs, eligibleModels []string, subsidyFactors map[string]float64) map[string]float32 {
-	// Confine the subscription discount to eligible models. costs (and the
-	// cMin/cMax cost normalization) range over the full deployed set, so
-	// discounting an EXCLUDED covered model (context overflow, pin max-out,
-	// operator filter) could make it the artificial cost floor and weaken the
-	// cost axis for models that can actually win. An ineligible model can't be
-	// chosen, so subsidizing it serves no purpose.
-	eligibleSet := make(map[string]struct{}, len(eligibleModels))
-	for _, m := range eligibleModels {
-		eligibleSet[m] = struct{}{}
-	}
-
-	// 2. Effective per-model cost (knob-dependent)
+	// 2. Effective per-model cost (knob-dependent). Costs stay at FULL catalog
+	// scale for every model, INCLUDING subscription-covered ones. On a plan the
+	// dollar price is prepaid, but the catalog ratio still tracks how much plan
+	// quota each model burns (Anthropic's unified rate limit weights Opus far
+	// above Haiku), and that is exactly the intra-family signal we want the blend
+	// to weigh. Keeping covered models at full cost preserves the Haiku↔Opus
+	// spread, so the blend below still picks the cheap covered model for easy
+	// turns and the strong one for hard turns. The subscription PREFERENCE (use
+	// the prepaid plan over paying cash) is applied separately, as a uniform
+	// per-family score bonus in the blend loop — never by compressing the cost
+	// axis, which would wash Haiku and Opus together.
 	costs := make(map[string]float64, len(s.models))
 	for _, m := range s.models {
 		axis := s.modelAxes[m]
@@ -873,15 +881,6 @@ func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnob
 			outputPer1K = *axis.OutputPer1KUSD
 		}
 		costs[m] = inputPer1K + activeKnobs.OutputCostRatio*outputPer1K*vFactor
-		// Subscription-aware discount: scale the cost term for models a caller's
-		// presented subscription covers, by the observed rate-limit headroom
-		// factor (~epsilon when slack, →1 as the window binds). Applied here so it
-		// rides the same per-cluster alpha/lambda blend as the base cost.
-		if f, ok := subsidyFactors[m]; ok {
-			if _, eligible := eligibleSet[m]; eligible {
-				costs[m] *= f
-			}
-		}
 	}
 
 	// 3. Effective per-model speed
@@ -1019,6 +1018,19 @@ func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnob
 				} else {
 					scores[m] += qNorm
 				}
+			}
+
+			// Subscription preference: lift a covered model by the headroom bonus
+			// subsidyMaxBonus·(1−f) per cluster. f is the per-credential headroom
+			// factor (≈epsilon while the plan window is slack, →1 as it binds), so
+			// the bonus is near its max on a fresh plan and fades to 0 near the cap,
+			// letting cash/OSS re-enter on their own merits (soft spill). The bonus
+			// is UNIFORM across a covered family — every covered model shares its
+			// credential's f — so it only decides plan-vs-cash and never reorders
+			// models within the family; the full-catalog cost axis above still picks
+			// Haiku for easy turns and Opus for hard ones.
+			if f, ok := subsidyFactors[m]; ok {
+				scores[m] += subsidyMaxBonus * float32(1.0-f)
 			}
 		}
 	}
