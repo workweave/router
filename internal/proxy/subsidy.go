@@ -42,76 +42,88 @@ func (s *Service) WithSubscriptionAwareRouting(obs *usage.Observer, epsilon, gam
 	return s
 }
 
+// presentSubscriptionTokens returns the caller's Codex and Claude subscription
+// tokens, "" when absent. It sources each from BOTH the dedicated
+// X-Weave-*-Subscription headers (the opencode dual-sub path) AND the inbound
+// Authorization bearer (Claude Code's sk-ant-oat… / Codex CLI's JWT+account-id
+// on their native harnesses) — mirroring resolveAndInjectCredentials so the
+// subsidy works for all three harnesses, not just opencode. The token doubles as
+// the usage-observer key, and equals the eventually-resolved credential, so
+// record and read agree regardless of source.
+func (s *Service) presentSubscriptionTokens(ctx context.Context, headers http.Header) (codex, anthropic string) {
+	if codexSubscriptionFromContext(ctx) != nil {
+		codex = openaiSubscriptionFromContext(ctx)
+	} else if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
+		codex = string(c.APIKey)
+	}
+	if t := anthropicSubscriptionFromContext(ctx); t != "" {
+		anthropic = t
+	} else if c := ExtractClientCredentials(providers.ProviderAnthropic, headers); c != nil && c.OAuth {
+		anthropic = string(c.APIKey)
+	}
+	return codex, anthropic
+}
+
 // withUsageObserver installs a context header observer that records the present
-// subscription credentials' rate-limit headroom from upstream response headers.
-// Keyed by the dedicated-header subscription tokens (the opencode dual-sub path);
-// the Claude Code inbound-bearer path is a follow-up. No-op (returns ctx) when
-// the feature is off or no subscription is present.
-func (s *Service) withUsageObserver(ctx context.Context) context.Context {
+// subscription's rate-limit headroom from upstream response headers. No-op
+// (returns ctx) when the feature is off or no subscription is present.
+func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) context.Context {
 	if s.usageObserver == nil {
 		return ctx
 	}
-	// Gate the Codex path on a usable Codex subscription (token + account-id),
-	// mirroring subsidyFactors exactly — otherwise we'd record observations under
-	// a key subsidyFactors never reads (token without account-id), silently
-	// accumulating until TTL eviction.
-	codexTok := ""
-	if codexSubscriptionFromContext(ctx) != nil {
-		codexTok = openaiSubscriptionFromContext(ctx)
-	}
-	anthroTok := anthropicSubscriptionFromContext(ctx)
+	codexTok, anthroTok := s.presentSubscriptionTokens(ctx, headers)
 	if codexTok == "" && anthroTok == "" {
 		return ctx
 	}
 	obs := func(callCtx context.Context, h http.Header) {
-		// Only record headers from a response actually served on the caller's
-		// subscription — keyed by the call's RESOLVED credential, not the request's
-		// stashed token. This skips internal calls on the same request that don't
-		// use the sub (e.g. the handover summarizer's deployment-key Anthropic
-		// call after clearCredentials), which would otherwise poison the headroom
-		// snapshot with deployment-key rate-limit headers.
+		// Record only from a response actually served on the caller's subscription,
+		// keyed by the call's RESOLVED credential (not a request-stashed token).
+		// This skips internal calls on the same request that don't use the sub —
+		// e.g. the handover summarizer's deployment-key Anthropic call after
+		// clearCredentials — which would otherwise poison the headroom snapshot.
+		// The family is read off the credential itself (a Codex sub carries an
+		// account-id; a Claude sub is an sk-ant-oat token), so this is agnostic to
+		// whether the sub arrived via dedicated header or inbound bearer.
 		creds := CredentialsFromContext(callCtx)
 		if creds == nil || !creds.OAuth {
 			return
 		}
-		tok := string(creds.APIKey)
-		switch {
-		case codexTok != "" && tok == codexTok:
+		if len(creds.AccountID) > 0 {
 			if snap, ok := usage.ParseCodexHeaders(h); ok {
-				s.usageObserver.Record(s.usageObserver.Key([]byte(codexTok)), snap)
+				s.usageObserver.Record(s.usageObserver.Key(creds.APIKey), snap)
 			}
-		case anthroTok != "" && tok == anthroTok:
-			if snap, ok := usage.ParseAnthropicUnifiedHeaders(h); ok {
-				s.usageObserver.Record(s.usageObserver.Key([]byte(anthroTok)), snap)
-			}
+			return
+		}
+		if snap, ok := usage.ParseAnthropicUnifiedHeaders(h); ok {
+			s.usageObserver.Record(s.usageObserver.Key(creds.APIKey), snap)
 		}
 	}
 	return providers.WithUpstreamHeaderObserver(ctx, obs)
 }
 
 // subsidyFactors computes the per-covered-model cost multiplier for this
-// request, from the present subscriptions' observed rate-limit headroom. Returns
-// nil when the feature is off, no subscription is present, or no headroom has
-// been observed yet for the present subscription(s) — in which case routing is
-// unaffected (cold start = full price until the first response populates the
-// observer). Keyed identically to withUsageObserver so record and read agree.
-func (s *Service) subsidyFactors(ctx context.Context) map[string]float64 {
+// request, from the present subscription(s)' observed rate-limit headroom.
+// Returns nil when the feature is off, no subscription is present, or no headroom
+// has been observed yet — in which case routing is unaffected (cold start = full
+// price until the first response populates the observer). Keyed identically to
+// withUsageObserver (via presentSubscriptionTokens) so record and read agree
+// across all three harnesses.
+func (s *Service) subsidyFactors(ctx context.Context, headers http.Header) map[string]float64 {
 	if s.usageObserver == nil {
 		return nil
 	}
+	codexTok, anthroTok := s.presentSubscriptionTokens(ctx, headers)
 	factors := make(map[string]float64)
-	if codexSubscriptionFromContext(ctx) != nil {
-		if tok := openaiSubscriptionFromContext(ctx); tok != "" {
-			if snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(tok))); ok {
-				f := snap.CostFactor(s.subsidyEpsilon, s.subsidyGamma)
-				for _, m := range codexCoveredModels {
-					factors[m] = f
-				}
+	if codexTok != "" {
+		if snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(codexTok))); ok {
+			f := snap.CostFactor(s.subsidyEpsilon, s.subsidyGamma)
+			for _, m := range codexCoveredModels {
+				factors[m] = f
 			}
 		}
 	}
-	if tok := anthropicSubscriptionFromContext(ctx); tok != "" {
-		if snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(tok))); ok {
+	if anthroTok != "" {
+		if snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(anthroTok))); ok {
 			f := snap.CostFactor(s.subsidyEpsilon, s.subsidyGamma)
 			for _, m := range claudeCoveredModels() {
 				factors[m] = f

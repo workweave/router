@@ -654,7 +654,11 @@ func main() {
 	// the caller's observed subscription rate-limit headroom (see
 	// internal/proxy/usage): ~epsilon when the window has slack, →1 (full price)
 	// as it binds. Off by default — ships dark until validated.
-	if config.GetOr("ROUTER_SUBSCRIPTION_AWARE_ROUTING", "false") == "true" {
+	// Defaults ON: the discount only affects turns that present a subscription
+	// AND have observed headroom (cold start / non-sub traffic = unchanged), so
+	// the blast radius is narrow. Set ROUTER_SUBSCRIPTION_AWARE_ROUTING=false to
+	// disable without a code change.
+	if config.GetOr("ROUTER_SUBSCRIPTION_AWARE_ROUTING", "true") == "true" {
 		epsilon := 0.05
 		if v, err := strconv.ParseFloat(config.GetOr("ROUTER_SUBSCRIPTION_COST_EPSILON", "0.05"), 64); err == nil {
 			epsilon = v

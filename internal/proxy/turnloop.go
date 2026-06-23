@@ -160,7 +160,7 @@ func (s *Service) runTurnLoop(
 	// Subscription-aware cost discount: discount covered models' cost term by the
 	// observed rate-limit headroom of the caller's present subscription(s). nil
 	// (feature off / no sub / no headroom observed yet) leaves scoring unchanged.
-	req.SubsidizedModelCostFactor = s.subsidyFactors(ctx)
+	req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, reqHeaders)
 
 	// Hard pins bypass pin lookup, pin write, planner, and scorer entirely.
 	// Probes and title-gen MUST NOT create a session pin — the Anthropic SDK
