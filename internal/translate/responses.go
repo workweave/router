@@ -24,8 +24,21 @@ import (
 //
 // Only the subset of the Responses spec that Codex actually emits is handled:
 // instructions, input items (message / function_call / function_call_output),
-// tools (flat shape → nested function shape), tool_choice, reasoning.effort,
-// max_output_tokens, temperature, top_p, parallel_tool_calls, metadata.
+// tools (flat shape → nested function shape), tool_choice, max_output_tokens,
+// temperature, top_p, parallel_tool_calls, metadata.
+//
+// Codex's `reasoning` field is intentionally NOT propagated. This translation
+// runs before routing, so it can't know the served provider and can't map the
+// effort onto that provider's native thinking knob. Forwarding it as a Chat
+// Completions `reasoning_effort` broke every non-Gemini served model: Codex
+// always sends `reasoning` (even `effort:"none"`, which is not a valid
+// `reasoning_effort` value), and reasoning OpenAI models (gpt-5.x) reject
+// `reasoning_effort` alongside tools on /v1/chat/completions — both surface as
+// an upstream 400 after response.created, so the stream closes without
+// response.completed. Per-provider reasoning is still driven downstream from
+// the request's own signals (Gemini maps it natively, Anthropic via thinking);
+// dropping Codex's advisory effort here matches the "reasoning removed → works"
+// behavior and keeps every served model completing.
 func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 	if err := validateJSONObject(body); err != nil {
 		return nil, false, "", err
@@ -122,9 +135,6 @@ func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 	}
 	if max := root.Get("max_output_tokens"); max.Exists() {
 		out["max_completion_tokens"] = max.Int()
-	}
-	if effort := root.Get("reasoning.effort").Str; effort != "" {
-		out["reasoning_effort"] = effort
 	}
 	if md := root.Get("metadata"); md.IsObject() {
 		out["metadata"] = json.RawMessage(md.Raw)
@@ -511,6 +521,25 @@ func (t *ResponsesWriter) Finalize() error {
 	return err
 }
 
+// FinalizeError terminates a streaming Responses turn whose upstream failed
+// AFTER response.created was already emitted (the client is mid-stream). It
+// emits a response.failed terminal event so the client (Codex) sees a clean
+// failure instead of "stream closed before response.completed". It is a no-op
+// when nothing has been streamed yet (the caller still writes a JSON error
+// envelope in that case), in passthrough mode, or once a terminal event has
+// already been emitted. Returns nil when there was nothing to do.
+func (t *ResponsesWriter) FinalizeError(_ error) error {
+	if t.passthrough || !t.streaming || !t.headersEmitted || t.completedEmitted {
+		return nil
+	}
+	t.closeOpenItems()
+	if err := t.emitFailed(); err != nil {
+		return err
+	}
+	t.completedEmitted = true
+	return t.bw.Flush()
+}
+
 // processSSEBuffer drains complete chat.completion.chunk events.
 func (t *ResponsesWriter) processSSEBuffer() error {
 	for {
@@ -884,6 +913,22 @@ func (t *ResponsesWriter) emitCompleted() error {
 		}
 	}
 	return t.writeEvent("response.completed", map[string]any{
+		"response": env,
+	})
+}
+
+// emitFailed writes a response.failed terminal event carrying whatever output
+// was assembled before the upstream error, plus a generic error object (no
+// upstream internals leak through). Usage is omitted because a failed turn has
+// no trustworthy token accounting.
+func (t *ResponsesWriter) emitFailed() error {
+	env := t.responseEnvelope("failed")
+	env["output"] = t.assembleOutput()
+	env["error"] = map[string]any{
+		"code":    "upstream_error",
+		"message": "Upstream call failed.",
+	}
+	return t.writeEvent("response.failed", map[string]any{
 		"response": env,
 	})
 }

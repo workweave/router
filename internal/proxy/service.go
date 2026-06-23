@@ -3525,9 +3525,15 @@ func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.
 	// commits.
 	proxyErr := s.ProxyOpenAIChatCompletion(ctx, chatBody, wrapper, r)
 	if proxyErr != nil {
-		// On error, let the handler write the error envelope unless we've
-		// already committed to streaming — in which case the chat-completions
-		// path will have surfaced a status error and we just propagate.
+		// If the Responses stream already committed (response.created is on the
+		// wire), the upstream error can no longer be rendered as a JSON error
+		// envelope — terminate the SSE stream with response.failed so the client
+		// (Codex) sees a clean failure instead of "stream closed before
+		// response.completed". A no-op before anything is streamed, so the
+		// handler still writes the JSON error envelope in that case.
+		if finErr := wrapper.FinalizeError(proxyErr); finErr != nil {
+			observability.FromContext(ctx).Error("Failed to finalize Responses error stream", "err", finErr)
+		}
 		deferredLog.run()
 		return proxyErr
 	}
