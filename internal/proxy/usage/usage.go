@@ -89,7 +89,9 @@ func (s Snapshot) CostFactor(epsilon, gamma float64) float64 {
 }
 
 // Observer stores the most recent Snapshot per credential. Concurrency-safe;
-// entries expire after TTL (stale headroom must not pin the cost signal).
+// each entry stays authoritative for the life of its binding quota window (see
+// freshFor) — stale headroom must not pin the cost signal, but a reading must not
+// age out faster than the window it describes.
 type Observer struct {
 	mu   sync.RWMutex
 	salt []byte
@@ -98,13 +100,37 @@ type Observer struct {
 	data map[CredentialKey]Snapshot
 }
 
-// NewObserver builds an Observer. salt keys credentials; ttl bounds staleness;
-// now is the injected clock (real time in prod, fake in tests).
+// NewObserver builds an Observer. salt keys credentials; ttl is the MINIMUM
+// freshness floor (for readings that carry no window length) — a reading that
+// does report a window stays fresh for that window, not just ttl; now is the
+// injected clock (real time in prod, fake in tests).
 func NewObserver(salt []byte, ttl time.Duration, now func() time.Time) *Observer {
 	if now == nil {
 		now = time.Now
 	}
 	return &Observer{salt: salt, ttl: ttl, now: now, data: make(map[CredentialKey]Snapshot)}
+}
+
+// freshFor reports how long a snapshot stays authoritative. Quota is perishable
+// and refills only when its window resets, so a reading is meaningful until the
+// BINDING (more-utilized) window — the one that governs CostFactor — would reset,
+// NOT for a flat ttl far shorter than any quota window (5h / weekly). Without
+// this a near-cap reading ages out after the short ttl, Snapshot returns false,
+// and the cold-start path re-applies the optimistic epsilon to a credential that
+// is in fact still capped — routing back into it until a fresh response or 429
+// corrects it. Floored at ttl so a reading carrying no window length still
+// expires promptly. Once the binding window elapses the entry is evicted and the
+// credential reads as never-observed again — correct, its quota has by then reset.
+func (o *Observer) freshFor(s Snapshot) time.Duration {
+	binding := s.Primary
+	if s.Secondary.UsedPercent >= s.Primary.UsedPercent {
+		binding = s.Secondary
+	}
+	horizon := time.Duration(binding.WindowMinutes) * time.Minute
+	if horizon < o.ttl {
+		return o.ttl
+	}
+	return horizon
 }
 
 // Key derives the CredentialKey for a token under this observer's salt.
@@ -125,7 +151,7 @@ func (o *Observer) Record(key CredentialKey, snap Snapshot) {
 	// and over-discounting until TTL. A genuinely reset window reports used≈0
 	// (still present), so it correctly overwrites; only an OMITTED window is
 	// preserved from the prior snapshot.
-	if prev, ok := o.data[key]; ok && o.now().Sub(prev.ObservedAt) <= o.ttl {
+	if prev, ok := o.data[key]; ok && o.now().Sub(prev.ObservedAt) <= o.freshFor(prev) {
 		if !snap.Primary.present() {
 			snap.Primary = prev.Primary
 		}
@@ -146,9 +172,9 @@ func (o *Observer) Snapshot(key CredentialKey) (Snapshot, bool) {
 	if !ok {
 		return Snapshot{}, false
 	}
-	if o.now().Sub(snap.ObservedAt) > o.ttl {
+	if o.now().Sub(snap.ObservedAt) > o.freshFor(snap) {
 		o.mu.Lock()
-		if cur, still := o.data[key]; still && o.now().Sub(cur.ObservedAt) > o.ttl {
+		if cur, still := o.data[key]; still && o.now().Sub(cur.ObservedAt) > o.freshFor(cur) {
 			delete(o.data, key)
 		}
 		o.mu.Unlock()
@@ -163,7 +189,7 @@ func (o *Observer) Sweep() {
 	cutoff := o.now()
 	o.mu.Lock()
 	for k, s := range o.data {
-		if cutoff.Sub(s.ObservedAt) > o.ttl {
+		if cutoff.Sub(s.ObservedAt) > o.freshFor(s) {
 			delete(o.data, k)
 		}
 	}

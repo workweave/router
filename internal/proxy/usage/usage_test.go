@@ -122,10 +122,44 @@ func TestObserver_RecordGetTTL(t *testing.T) {
 	require.True(t, ok)
 	assert.InDelta(t, 0.5, got.Primary.UsedPercent, 1e-9)
 
-	// Past TTL → expired, dropped.
+	// A short idle gap (past the 10-min floor) must NOT drop a reading whose
+	// quota window (5h) is still open — its headroom is still authoritative.
 	now = now.Add(11 * time.Minute)
 	_, ok = o.Snapshot(key)
+	assert.True(t, ok, "a 5h-window reading survives a short idle gap")
+
+	// Past the binding window → quota has reset → expired, dropped.
+	now = now.Add(300 * time.Minute)
+	_, ok = o.Snapshot(key)
 	assert.False(t, ok)
+}
+
+// TestObserver_NearCapDoesNotResetToOptimistic is the regression for the
+// reviewer-flagged bug: a credential observed near its cap must not age out after
+// a short idle gap and then read as cold-start slack (which would re-subsidize a
+// still-capped subscription). Its near-1.0 factor must persist for the life of
+// the binding window, and only after that window resets should the entry drop so
+// the cold-start path can legitimately treat it as never-observed again.
+func TestObserver_NearCapDoesNotResetToOptimistic(t *testing.T) {
+	const eps, gamma = 0.05, 2.0
+	now := time.Unix(2_000_000, 0)
+	clock := func() time.Time { return now }
+	o := usage.NewObserver([]byte("salt"), 10*time.Minute, clock)
+	key := o.Key([]byte("sk-ant-oat01-capped"))
+
+	// Weekly window nearly exhausted.
+	o.Record(key, usage.Snapshot{Secondary: usage.Window{UsedPercent: 0.98, WindowMinutes: 10080}})
+
+	// 11 minutes later (past the old flat TTL): still observed, still ~full price.
+	now = now.Add(11 * time.Minute)
+	snap, ok := o.Snapshot(key)
+	require.True(t, ok, "a near-cap reading must survive past the 10-min floor")
+	assert.Greater(t, snap.CostFactor(eps, gamma), 0.9, "still near full price, not optimistic epsilon")
+
+	// After the weekly window elapses, the quota has reset → drop → cold start.
+	now = now.Add(10080 * time.Minute)
+	_, ok = o.Snapshot(key)
+	assert.False(t, ok, "after the binding window resets, the reading is no longer authoritative")
 }
 
 func TestObserver_RecordMergesWindows(t *testing.T) {

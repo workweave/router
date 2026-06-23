@@ -142,6 +142,13 @@ func (s *Service) subsidyFactors(ctx context.Context, headers http.Header) map[s
 // (subsidyEpsilon) when none has been observed yet. The optimistic default is
 // what lets the covered models win the FIRST turn and thereby get a chance to
 // serve and record real headroom; without it the feature never bootstraps.
+//
+// The optimistic floor is safe here precisely because the observer keeps a
+// reading alive for the life of its binding quota window (usage.Observer.freshFor),
+// not a short TTL: a Snapshot miss therefore means the credential was genuinely
+// never observed, or its window has since reset — both states where assuming
+// slack is correct. A credential observed near its cap keeps returning that
+// near-1.0 factor (no optimistic re-subsidy) until its window actually resets.
 func (s *Service) observedOrOptimisticFactor(token string) float64 {
 	if snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(token))); ok {
 		return snap.CostFactor(s.subsidyEpsilon, s.subsidyGamma)
