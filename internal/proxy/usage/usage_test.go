@@ -48,6 +48,20 @@ func TestParseCodexHeaders_NoneReportsFalse(t *testing.T) {
 	assert.False(t, ok)
 }
 
+// When Codex reports used-percent but omits window-minutes, the parser must
+// still supply the known window length (primary ~5h, secondary weekly) so a
+// near-cap reading stays authoritative for the window's life instead of aging
+// out after the short ttl floor and re-subsidizing a still-capped credential.
+func TestParseCodexHeaders_DefaultsWindowWhenOmitted(t *testing.T) {
+	h := http.Header{}
+	h.Set("x-codex-primary-used-percent", "80")
+	h.Set("x-codex-secondary-used-percent", "97")
+	snap, ok := usage.ParseCodexHeaders(h)
+	require.True(t, ok)
+	assert.Equal(t, 300, snap.Primary.WindowMinutes, "primary defaults to ~5h")
+	assert.Equal(t, 10080, snap.Secondary.WindowMinutes, "secondary defaults to weekly")
+}
+
 func TestParseAnthropicUnified_FromRemainingLimit(t *testing.T) {
 	h := http.Header{}
 	h.Set("anthropic-ratelimit-unified-5h-limit", "1000")

@@ -202,20 +202,28 @@ func (o *Observer) Sweep() {
 // rate-limit headers (primary = rolling/~5h, secondary = weekly). Reports false
 // if neither window is present. Used-percent headers are 0-100; we store [0,1].
 func ParseCodexHeaders(h http.Header) (Snapshot, bool) {
-	primary, pOK := parseCodexWindow(h, "primary")
-	secondary, sOK := parseCodexWindow(h, "secondary")
+	primary, pOK := parseCodexWindow(h, "primary", 5*60)
+	secondary, sOK := parseCodexWindow(h, "secondary", 7*24*60)
 	if !pOK && !sOK {
 		return Snapshot{}, false
 	}
 	return Snapshot{Primary: primary, Secondary: secondary}, true
 }
 
-func parseCodexWindow(h http.Header, which string) (Window, bool) {
+// parseCodexWindow reads one Codex window. defaultWindowMinutes is the known
+// window length (primary ~5h, secondary weekly) used when the upstream omits the
+// x-codex-*-window-minutes header — mirroring ParseAnthropicUnifiedHeaders, which
+// hardcodes its window lengths. This guarantees every observed reading carries a
+// window length, so freshFor never falls back to the short ttl floor for a real
+// subscription: a near-cap Codex reading keeps suppressing the subsidy for the
+// life of its window rather than aging out and re-applying the optimistic
+// epsilon to a still-capped credential.
+func parseCodexWindow(h http.Header, which string, defaultWindowMinutes int) (Window, bool) {
 	used, ok := parsePercent(h.Get("x-codex-" + which + "-used-percent"))
 	if !ok {
 		return Window{}, false
 	}
-	w := Window{UsedPercent: used}
+	w := Window{UsedPercent: used, WindowMinutes: defaultWindowMinutes}
 	if m, ok := parseInt(h.Get("x-codex-" + which + "-window-minutes")); ok {
 		w.WindowMinutes = m
 	}
