@@ -115,10 +115,24 @@ func (o *Observer) Record(key CredentialKey, snap Snapshot) {
 	if !snap.hasData() {
 		return
 	}
-	snap.ObservedAt = o.now()
 	o.mu.Lock()
+	defer o.mu.Unlock()
+	// Merge per-window with the prior (non-stale) observation: a single response
+	// may report only one window, and replacing the whole snapshot would erase
+	// the other window's last-known utilization — making CostFactor look slack
+	// and over-discounting until TTL. A genuinely reset window reports used≈0
+	// (still present), so it correctly overwrites; only an OMITTED window is
+	// preserved from the prior snapshot.
+	if prev, ok := o.data[key]; ok && o.now().Sub(prev.ObservedAt) <= o.ttl {
+		if !snap.Primary.present() {
+			snap.Primary = prev.Primary
+		}
+		if !snap.Secondary.present() {
+			snap.Secondary = prev.Secondary
+		}
+	}
+	snap.ObservedAt = o.now()
 	o.data[key] = snap
-	o.mu.Unlock()
 }
 
 // Snapshot returns the most recent non-stale observation for a credential, or

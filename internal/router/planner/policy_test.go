@@ -75,6 +75,14 @@ func TestDecide_SubscriptionDiscountFlipsSwitch(t *testing.T) {
 	assert.Equal(t, planner.OutcomeSwitch, switched.Outcome,
 		"subsidized covered model must win the stay-vs-switch EV")
 	assert.Equal(t, planner.ReasonEVPositive, switched.Reason)
+
+	// A 0.0 factor (epsilon=0) is a real "free" covered model, not "uncovered":
+	// membership in the map, not the sign, decides — matching the scorer.
+	zeroFactor := base
+	zeroFactor.SubsidizedCostFactor = map[string]float64{modelOpus: 0.0}
+	zero := planner.Decide(zeroFactor, defaultCfg)
+	assert.Equal(t, planner.OutcomeSwitch, zero.Outcome,
+		"a 0.0 covered-model factor must still be treated as free (switch), not uncovered")
 }
 
 func TestDecide(t *testing.T) {

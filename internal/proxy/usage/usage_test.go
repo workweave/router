@@ -128,6 +128,26 @@ func TestObserver_RecordGetTTL(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestObserver_RecordMergesWindows(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	o := usage.NewObserver([]byte("salt"), 10*time.Minute, func() time.Time { return now })
+	key := o.Key([]byte("tok"))
+
+	// First response reports both windows; weekly is nearly exhausted.
+	o.Record(key, usage.Snapshot{
+		Primary:   usage.Window{UsedPercent: 0.10, WindowMinutes: 300},
+		Secondary: usage.Window{UsedPercent: 0.95, WindowMinutes: 10080},
+	})
+	// A later response reports ONLY the primary window (secondary omitted).
+	o.Record(key, usage.Snapshot{Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300}})
+
+	got, ok := o.Snapshot(key)
+	require.True(t, ok)
+	assert.InDelta(t, 0.20, got.Primary.UsedPercent, 1e-9, "primary updates")
+	assert.InDelta(t, 0.95, got.Secondary.UsedPercent, 1e-9,
+		"omitted secondary window must NOT be erased to slack")
+}
+
 func TestObserver_DistinctTokensDistinctKeys(t *testing.T) {
 	o := usage.NewObserver([]byte("salt"), time.Minute, func() time.Time { return time.Unix(1, 0) })
 	assert.NotEqual(t, o.Key([]byte("token-a")), o.Key([]byte("token-b")))
