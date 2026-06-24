@@ -134,7 +134,8 @@ func MetricsDetailsHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 		const maxLimit = 1000
 		limit := int32(defaultLimit)
 		if raw := c.Query("limit"); raw != "" {
-			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			n, err := strconv.ParseInt(raw, 10, 32)
+			if err == nil && n > 0 {
 				if n > maxLimit {
 					n = maxLimit
 				}
