@@ -594,7 +594,7 @@ func main() {
 	var rlRouter router.Router
 	if rlSidecarURL := config.GetOr("ROUTER_RL_SIDECAR_URL", ""); rlSidecarURL != "" {
 		rlTimeout := parseEnvDurationMs("ROUTER_RL_SIDECAR_TIMEOUT_MS", rl.DefaultTimeout)
-		rlRouter = rl.New(rl.NewHTTPDecider(rlSidecarURL, nil, rlTimeout), availableModels)
+		rlRouter = rl.New(rl.NewHTTPDecider(rlSidecarURL, nil, rlTimeout), availableModels, availableProviders)
 		logger.Info("RL policy router wired", "sidecar_url", rlSidecarURL, "timeout_ms", rlTimeout.Milliseconds(), "candidate_models", len(availableModels))
 	} else {
 		logger.Info("RL policy router disabled (ROUTER_RL_SIDECAR_URL unset); x-weave-router-strategy: rl will return 503")

@@ -66,21 +66,25 @@ type Decider interface {
 // Router selects a model via the RL policy and returns a router.Decision whose
 // provider is resolved from the catalog so dispatch uses Weave's own providers.
 type Router struct {
-	decider  Decider
-	deployed map[string]struct{}
-	toolLow  map[string]struct{}
-	imageLow map[string]struct{}
+	decider   Decider
+	deployed  map[string]struct{}
+	available map[string]struct{}
+	toolLow   map[string]struct{}
+	imageLow  map[string]struct{}
 }
 
 // New builds an RL Router. deployed is the set of deployable catalog model IDs
-// (the same source the planner's available-models set is drawn from); the
-// policy can only be offered models the deploy actually serves.
-func New(decider Decider, deployed map[string]struct{}) *Router {
+// (the same source the planner's available-models set is drawn from); available
+// is the deployment's keyed-provider set (the cluster scorer's
+// availableProviders), used to resolve a model's dispatch binding when the
+// request does not restrict providers.
+func New(decider Decider, deployed, available map[string]struct{}) *Router {
 	return &Router{
-		decider:  decider,
-		deployed: deployed,
-		toolLow:  catalog.ToolUseLowSet(),
-		imageLow: catalog.ImageUnsupportedSet(),
+		decider:   decider,
+		deployed:  deployed,
+		available: available,
+		toolLow:   catalog.ToolUseLowSet(),
+		imageLow:  catalog.ImageUnsupportedSet(),
 	}
 }
 
@@ -112,20 +116,19 @@ func (r *Router) eligible(req router.Request) ([]Candidate, map[string]candidate
 		if !ok {
 			continue
 		}
-		// nil EnabledProviders means unrestricted (router.Request contract);
-		// the cluster scorer only gates when the set is non-nil, so mirror that
-		// and fall back to the model's primary binding when unrestricted.
-		var provider string
-		if req.EnabledProviders == nil {
-			provider = model.PrimaryProvider()
-		} else {
-			binding, ok := catalog.ResolveBinding(id, req.EnabledProviders)
-			if !ok {
-				continue
-			}
-			provider = binding.Provider
+		// nil EnabledProviders means unrestricted (router.Request contract); the
+		// cluster scorer's unrestricted path resolves the binding against the
+		// deployment's keyed providers, not the catalog primary, so mirror that
+		// by resolving against r.available. A non-nil set gates per-request.
+		providerSet := req.EnabledProviders
+		if providerSet == nil {
+			providerSet = r.available
 		}
-		base = append(base, eligibleCand{catalogID: id, rosterID: rosterIDFor(model), provider: provider})
+		binding, ok := catalog.ResolveBinding(id, providerSet)
+		if !ok {
+			continue
+		}
+		base = append(base, eligibleCand{catalogID: id, rosterID: rosterIDFor(model), provider: binding.Provider})
 	}
 
 	base = r.softFilter(base, req.HasImages, r.imageLow)

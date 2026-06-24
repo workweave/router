@@ -41,11 +41,22 @@ func enabled(names ...string) map[string]struct{} {
 	return out
 }
 
+// allProviders is the deployment's keyed-provider set used to resolve dispatch
+// bindings on the unrestricted (nil EnabledProviders) path.
+var allProviders = enabled(
+	providers.ProviderAnthropic,
+	providers.ProviderOpenAI,
+	providers.ProviderGoogle,
+	providers.ProviderDeepInfra,
+	providers.ProviderFireworks,
+	providers.ProviderBedrock,
+)
+
 func TestRouteMapsRosterChoiceBackToCatalogModel(t *testing.T) {
 	// The policy picks by OpenRouter-style roster ID; the router must dispatch
 	// the corresponding catalog model via its own provider.
 	dec := &fakeDecider{result: rl.Result{Model: "anthropic/claude-opus-4-8", Score: 1.5, ScoreLabel: "DPO score", StateLabel: "implementing"}}
-	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"))
+	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"), allProviders)
 
 	decision, err := r.Route(context.Background(), router.Request{
 		PromptText:       "refactor the auth module",
@@ -69,7 +80,7 @@ func TestRouteMapsRosterChoiceBackToCatalogModel(t *testing.T) {
 
 func TestRouteOmitsModelsWithNoEnabledProvider(t *testing.T) {
 	dec := &fakeDecider{result: rl.Result{Model: "anthropic/claude-opus-4-8"}}
-	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"))
+	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"), allProviders)
 
 	_, err := r.Route(context.Background(), router.Request{
 		PromptText:       "hi",
@@ -84,7 +95,7 @@ func TestRouteOmitsModelsWithNoEnabledProvider(t *testing.T) {
 
 func TestRouteExcludesRequestedExclusions(t *testing.T) {
 	dec := &fakeDecider{result: rl.Result{Model: "deepseek/deepseek-v4-flash"}}
-	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"))
+	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"), allProviders)
 
 	_, err := r.Route(context.Background(), router.Request{
 		PromptText:       "hi",
@@ -99,7 +110,7 @@ func TestRouteExcludesRequestedExclusions(t *testing.T) {
 
 func TestRouteNoEligibleCandidatesIsUnavailable(t *testing.T) {
 	dec := &fakeDecider{result: rl.Result{Model: "anthropic/claude-opus-4-8"}}
-	r := rl.New(dec, deployed("claude-opus-4-8"))
+	r := rl.New(dec, deployed("claude-opus-4-8"), allProviders)
 
 	_, err := r.Route(context.Background(), router.Request{
 		PromptText:       "hi",
@@ -111,7 +122,7 @@ func TestRouteNoEligibleCandidatesIsUnavailable(t *testing.T) {
 
 func TestRouteDeciderErrorIsUnavailable(t *testing.T) {
 	dec := &fakeDecider{err: errors.New("sidecar down")}
-	r := rl.New(dec, deployed("claude-opus-4-8"))
+	r := rl.New(dec, deployed("claude-opus-4-8"), allProviders)
 
 	_, err := r.Route(context.Background(), router.Request{
 		PromptText:       "hi",
@@ -126,7 +137,7 @@ func TestRouteNilEnabledProvidersIsUnrestricted(t *testing.T) {
 	// policy must still be offered the deployed models via their primary
 	// provider, not an empty set.
 	dec := &fakeDecider{result: rl.Result{Model: "anthropic/claude-opus-4-8"}}
-	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"))
+	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"), allProviders)
 
 	decision, err := r.Route(context.Background(), router.Request{
 		PromptText:       "hi",
@@ -143,7 +154,7 @@ func TestRouteToolTurnDropsToolUseLowFromCandidatesAndIndex(t *testing.T) {
 	// from BOTH the offered candidates and the response-mapping index — a
 	// sidecar that names it anyway is rejected, not dispatched.
 	dec := &fakeDecider{result: rl.Result{Model: "qwen/qwen3-235b-a22b-2507"}}
-	r := rl.New(dec, deployed("claude-opus-4-8", "qwen/qwen3-235b-a22b-2507"))
+	r := rl.New(dec, deployed("claude-opus-4-8", "qwen/qwen3-235b-a22b-2507"), allProviders)
 
 	_, err := r.Route(context.Background(), router.Request{
 		PromptText:       "use a tool",
@@ -162,7 +173,7 @@ func TestRouteImageTurnDropsImageUnsupported(t *testing.T) {
 	// deepseek/deepseek-v4-flash is image-unsupported; opus is vision-capable.
 	// An image turn must drop the text-only model when a capable one survives.
 	dec := &fakeDecider{result: rl.Result{Model: "anthropic/claude-opus-4-8"}}
-	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"))
+	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"), allProviders)
 
 	_, err := r.Route(context.Background(), router.Request{
 		PromptText:       "what is in this image",
@@ -178,7 +189,7 @@ func TestRouteImageTurnDropsImageUnsupported(t *testing.T) {
 
 func TestRouteUnknownReturnedModelIsUnavailable(t *testing.T) {
 	dec := &fakeDecider{result: rl.Result{Model: "openai/gpt-5.5"}} // never offered
-	r := rl.New(dec, deployed("claude-opus-4-8"))
+	r := rl.New(dec, deployed("claude-opus-4-8"), allProviders)
 
 	_, err := r.Route(context.Background(), router.Request{
 		PromptText:       "hi",
