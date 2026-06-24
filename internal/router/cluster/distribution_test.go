@@ -192,54 +192,49 @@ func loadV0_70(t *testing.T) *Scorer {
 // can assert the floor changed the realized routing.
 func clusterWinnerAt(s *Scorer, c int, t float64, withFloor bool) string {
 	knobs := s.defaultActiveKnobs()
-	if withFloor {
-		s.applyDialAlpha(t, knobs.Alpha)
-	} else {
-		a := s.dialToAlpha(t)
-		for i := range knobs.Alpha {
-			knobs.Alpha[i] = a
-		}
+	floor := knobs.AlphaFloor
+	if !withFloor {
+		floor = nil // reproduce the old uniform dial (no alpha_floor)
 	}
+	s.applyDialAlpha(t, knobs.Alpha, floor)
 	top := topPNearest(s.centroids.Row(c), s.centroids, s.cfg.TopP)
 	scores := s.blendScoresV2(top, knobs, s.models, nil)
 	winner, _ := argmax(scores, s.models)
 	return winner
 }
 
-func TestApplyDialAlpha_FloorsProtectedClustersOnly(t *testing.T) {
+func TestApplyDialAlpha_HoldsEachClusterAtItsDeclaredFloor(t *testing.T) {
 	s := loadV0_70(t)
-	def := s.defaultActiveKnobs().Alpha
-
-	// Identify the bundle's shape: protected clusters ship the max default
-	// alpha (0.96 = agentic/code), the rest are lower (0.8 = conversational).
-	maxDef := def[0]
-	for _, v := range def {
-		if v > maxDef {
-			maxDef = v
-		}
-	}
-	var protected, free []int
-	for i, v := range def {
-		if v >= maxDef-alphaShapeEpsilon {
-			protected = append(protected, i)
-		} else {
-			free = append(free, i)
-		}
-	}
-	require.NotEmpty(t, protected, "v0.70 must have top-alpha (protected) clusters")
-	require.NotEmpty(t, free, "v0.70 must have lower-alpha (conversational) clusters")
-
-	// At the price extreme (t=0, dialToAlpha=0): protected clusters are held at
-	// the floor; free clusters drop to 0 (fully cheapened).
 	knobs := s.defaultActiveKnobs()
-	s.applyDialAlpha(0.0, knobs.Alpha)
-	for _, i := range protected {
-		assert.InDelta(t, dialAlphaFloorFraction*maxDef, knobs.Alpha[i], 1e-9,
-			"protected cluster %d must be floored at the price extreme", i)
+	floor := knobs.AlphaFloor
+	require.Len(t, floor, s.centroids.K, "v0.70 must ship a full per-cluster alpha_floor")
+
+	// At the price extreme (t=0, dialToAlpha=0) every cluster is held at exactly
+	// its declared floor — no cluster collapses to alpha 0 (the cheapest model).
+	s.applyDialAlpha(0.0, knobs.Alpha, floor)
+	for i := range knobs.Alpha {
+		assert.InDelta(t, floor[i], knobs.Alpha[i], 1e-9,
+			"cluster %d must be held at its declared floor at the price extreme", i)
 	}
-	for _, i := range free {
-		assert.Equal(t, 0.0, knobs.Alpha[i],
-			"conversational cluster %d must stay fully dial-able (no floor)", i)
+
+	// Above a cluster's floor the dial governs (max(dialAlpha, floor)); at the
+	// quality extreme (t=1, dialToAlpha=1) every cluster reaches 1.0.
+	knobs2 := s.defaultActiveKnobs()
+	s.applyDialAlpha(1.0, knobs2.Alpha, knobs2.AlphaFloor)
+	for i := range knobs2.Alpha {
+		assert.InDelta(t, 1.0, knobs2.Alpha[i], 1e-9, "cluster %d must reach 1.0 at the quality extreme", i)
+	}
+}
+
+func TestApplyDialAlpha_NilFloorIsUniformDial(t *testing.T) {
+	// A bundle that ships no alpha_floor keeps the legacy uniform-dial behavior:
+	// every cluster gets dialToAlpha(t) verbatim.
+	s := loadV0_70(t)
+	knobs := s.defaultActiveKnobs()
+	s.applyDialAlpha(0.3, knobs.Alpha, nil)
+	want := s.dialToAlpha(0.3)
+	for i := range knobs.Alpha {
+		assert.Equal(t, want, knobs.Alpha[i], "cluster %d must equal the uniform dial alpha with no floor", i)
 	}
 }
 

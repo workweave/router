@@ -82,6 +82,34 @@ training:
     - 0.96  # c13 hard-code
     - 0.96  # c14
     - 0.80  # c15 trivial-NL
+    # Per-cluster floor the QualityBias dial may not pull alpha below — the
+    # LOWEST quality weight tolerated at maximum price-sensitivity. The dial
+    # collapses the per-cluster alpha vector to one uniform value, so without a
+    # floor a price-leaning dial cheaps out EVERY cluster, stranding agentic
+    # main-loop turns on models that can't drive the harness (tool/skill
+    # protocol — observed: minimax-m3 grepped for a skill instead of running
+    # it). Coding/agentic clusters floor at 0.88 so they stay on premium models
+    # at any dial; conversational/NL clusters floor at 0.55 — still much
+    # cheaper than their 0.80 default, but not collapsed to the cheapest model,
+    # so price-sensitive turns get the best quality their budget allows.
+    # Verify shifts with `cmd/routing-report --quality-bias`.
+    alpha_floor:
+    - 0.88  # c0  agentic/coding catch-all
+    - 0.88  # c1
+    - 0.55  # c2  conversational
+    - 0.88  # c3
+    - 0.88  # c4
+    - 0.88  # c5  coding/agentic
+    - 0.88  # c6
+    - 0.88  # c7
+    - 0.88  # c8
+    - 0.55  # c9  conversational/NL
+    - 0.55  # c10 conversational/NL (primary)
+    - 0.55  # c11 trivial-NL
+    - 0.88  # c12
+    - 0.88  # c13 hard-code
+    - 0.88  # c14
+    - 0.55  # c15 trivial-NL
     speed_weight: 0.0
     output_cost_ratio: 0.0
     expected_output_tokens: 2000

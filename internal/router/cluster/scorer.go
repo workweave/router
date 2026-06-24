@@ -178,6 +178,20 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 			if len(dk.Alpha) != bundle.Centroids.K {
 				return nil, fmt.Errorf("cluster %s: default_routing_knobs.alpha length %d must equal K=%d", bundle.Version, len(dk.Alpha), bundle.Centroids.K)
 			}
+			// alpha_floor is optional, but when present must be a full per-cluster
+			// vector with each entry a valid quality weight: applyDialAlpha writes
+			// floor[i] straight into the alpha slot, so a bad length or out-of-range
+			// value would silently produce an invalid blend.
+			if dk.AlphaFloor != nil {
+				if len(dk.AlphaFloor) != bundle.Centroids.K {
+					return nil, fmt.Errorf("cluster %s: default_routing_knobs.alpha_floor length %d must equal K=%d", bundle.Version, len(dk.AlphaFloor), bundle.Centroids.K)
+				}
+				for i, f := range dk.AlphaFloor {
+					if f < 0 || f > 1 {
+						return nil, fmt.Errorf("cluster %s: default_routing_knobs.alpha_floor[%d] (%f) must be in [0, 1]", bundle.Version, i, f)
+					}
+				}
+			}
 		}
 	} else {
 		for k := 0; k < bundle.Centroids.K; k++ {
@@ -327,68 +341,26 @@ func (s *Scorer) dialToAlpha(t float64) float64 {
 	return bp[i] + frac*(bp[i+1]-bp[i])
 }
 
-// dialAlphaFloorFraction caps how far the QualityBias dial can pull a
-// bundle's MOST-protected clusters below their shipped default alpha. The dial
-// resolves to a single uniform alpha, but a shaped bundle ships a per-cluster
-// alpha vector (high on agentic/code clusters, lower on conversational)
-// precisely so a price-leaning dial never strands an agentic main-loop turn on
-// a cheap model that cannot drive the harness (tool/skill protocol). Without a
-// floor, a low dial flips those clusters from the frontier to the cheapest
-// "good-enough" model. The floor holds the top-alpha clusters at >= this
-// fraction of their default; lower-alpha clusters (conversational) stay fully
-// dial-able, so the dial still cheapens chat/trivial turns aggressively.
-//
-// 0.92 (→ 0.92*0.96 ≈ 0.88 effective alpha on the protected clusters) is
-// calibrated against the v0.70 corpus: at a low dial (quality_bias=0.2) it
-// keeps agentic_tool ~73% / hard_code ~57% on premium models while leaving
-// conversational ~87% cheap. Lowering it toward 0.85 lets agentic fall to
-// capable mid-tier OSS (glm); 0.0 reproduces the pre-fix collapse to the
-// cheapest model. Verify shifts with `cmd/routing-report --quality-bias`.
-const dialAlphaFloorFraction = 0.92
-
-// alphaShapeEpsilon tolerates float noise when comparing default alpha values
-// loaded from the artifact JSON/YAML.
-const alphaShapeEpsilon = 1e-9
-
 // applyDialAlpha resolves the QualityBias dial position t into the effective
-// per-cluster alpha, writing in place into alpha. On entry alpha holds the
-// bundle's shipped default vector. It maps t through the bundle's mix-change
-// calibration (dialToAlpha) and then, only for a SHAPED bundle, floors the
-// top-alpha clusters at dialAlphaFloorFraction of their default — preserving
-// the bundle's intent that those clusters never cheap out, while leaving every
-// other cluster on the plain uniform dial. A uniform bundle (no shape to
-// protect, e.g. legacy v0.67) is left entirely on the uniform dial, so its
-// behavior is unchanged. Single source of truth for the dial->alpha resolution
-// shared by Route and RoutingDistribution. The floor reads each alpha[i]
-// (still the default) before overwriting it, and reads only the pre-captured
-// maxDefault, so the in-place update is correct in one pass.
-func (s *Scorer) applyDialAlpha(t float64, alpha []float64) {
+// per-cluster alpha, writing in place into alpha. It maps t through the
+// bundle's mix-change calibration (dialToAlpha) to a uniform alpha, then floors
+// each cluster at the bundle-declared floor[i]: alpha[i] = max(dialAlpha,
+// floor[i]). The floor is the LOWEST quality weight the bundle tolerates per
+// cluster at maximum price-sensitivity, so a price-leaning dial still routes
+// each cluster to the best model for that budget instead of collapsing the
+// whole vector to the cheapest model (which stranded agentic main-loop turns
+// on models that can't drive the harness). floor==nil disables flooring (the
+// plain uniform dial, legacy behavior for bundles that ship no alpha_floor).
+// Single source of truth for the dial->alpha resolution shared by Route and
+// RoutingDistribution. Caller guarantees len(floor) == len(alpha) when non-nil
+// (validated against K at load time).
+func (s *Scorer) applyDialAlpha(t float64, alpha, floor []float64) {
 	a := s.dialToAlpha(t)
-
-	// Capture the bundle's shape from the default vector before any overwrite:
-	// the max default alpha marks the most-protected clusters, and a non-uniform
-	// vector is the signal that the bundle deliberately protects some clusters
-	// over others.
-	maxDefault := alpha[0]
-	shaped := false
-	for _, v := range alpha {
-		if v > maxDefault {
-			maxDefault = v
-		}
-		if math.Abs(v-alpha[0]) > alphaShapeEpsilon {
-			shaped = true
-		}
-	}
-
 	for i := range alpha {
-		floor := 0.0
-		if shaped && alpha[i] >= maxDefault-alphaShapeEpsilon {
-			floor = dialAlphaFloorFraction * alpha[i]
-		}
-		if a > floor {
-			alpha[i] = a
+		if floor != nil && floor[i] > a {
+			alpha[i] = floor[i]
 		} else {
-			alpha[i] = floor
+			alpha[i] = a
 		}
 	}
 }
@@ -630,7 +602,7 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 				if math.IsNaN(t) || math.IsInf(t, 0) || t < 0 || t > 1 {
 					return router.Decision{}, fmt.Errorf("%w: quality_bias (%f) must be a finite value in [0, 1]", ErrInvalidRoutingKnobs, t)
 				}
-				s.applyDialAlpha(t, activeKnobs.Alpha)
+				s.applyDialAlpha(t, activeKnobs.Alpha, activeKnobs.AlphaFloor)
 			case req.RoutingKnobs.Alpha != nil:
 				// Sledgehammer behavior: uniformly replace every alpha with the
 				// scalar (eval/debug lever, ignores per-cluster dispersion).

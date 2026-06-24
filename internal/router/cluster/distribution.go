@@ -30,6 +30,7 @@ func (s *Scorer) defaultActiveKnobs() DefaultRoutingKnobs {
 	if s.metadata != nil && s.metadata.Training.DefaultRoutingKnobs != nil {
 		knobs := *s.metadata.Training.DefaultRoutingKnobs
 		knobs.Alpha = append([]float64(nil), knobs.Alpha...)
+		knobs.AlphaFloor = append([]float64(nil), knobs.AlphaFloor...)
 		return knobs
 	}
 	knobs := DefaultRoutingKnobs{
@@ -86,7 +87,7 @@ func (s *Scorer) RoutingDistribution(gridN int) ([]DistributionPoint, error) {
 		t := float64(g) / float64(gridN-1)
 
 		knobs := s.defaultActiveKnobs()
-		s.applyDialAlpha(t, knobs.Alpha)
+		s.applyDialAlpha(t, knobs.Alpha, knobs.AlphaFloor)
 
 		counts := make(map[string]int, len(s.models))
 		for c := 0; c < k; c++ {

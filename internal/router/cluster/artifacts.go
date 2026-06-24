@@ -143,7 +143,15 @@ type ArtifactEmbedder struct {
 }
 
 type DefaultRoutingKnobs struct {
-	Alpha                []float64 `yaml:"alpha"`
+	Alpha []float64 `yaml:"alpha"`
+	// AlphaFloor is an optional per-cluster minimum the QualityBias dial may not
+	// pull a cluster's alpha below. It lets a bundle declare, per cluster, the
+	// LOWEST quality weight it will tolerate at maximum price-sensitivity — so a
+	// price-leaning dial still routes each cluster to the best model available
+	// for that budget instead of collapsing the whole vector to the cheapest
+	// model. Length must equal K when present; nil/empty disables flooring (the
+	// dial maps to a uniform alpha, the legacy behavior). See applyDialAlpha.
+	AlphaFloor           []float64 `yaml:"alpha_floor,omitempty"`
 	SpeedWeight          float64   `yaml:"speed_weight"`
 	OutputCostRatio      float64   `yaml:"output_cost_ratio"`
 	ExpectedOutputTokens int       `yaml:"expected_output_tokens"`
