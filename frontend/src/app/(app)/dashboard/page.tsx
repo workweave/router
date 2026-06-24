@@ -4,6 +4,7 @@ import { Text } from "@/components/atoms/Text";
 import { ChartCard } from "@/components/ChartCard";
 import { CostBreakdownChart } from "@/components/charts/CostBreakdownChart";
 import { CumulativeSavingsChart } from "@/components/charts/CumulativeSavingsChart";
+import { ModelDistributionChart } from "@/components/charts/ModelDistributionChart";
 import { RouterCostSavingsChart } from "@/components/charts/RouterCostSavingsChart";
 import { SavingsRateChart } from "@/components/charts/SavingsRateChart";
 import {
@@ -15,7 +16,7 @@ import { Page } from "@/components/Page";
 import { PageHeader } from "@/components/PageHeader";
 import { ResponsiveGrid } from "@/components/ResponsiveGrid";
 import { Statistic } from "@/components/Statistic";
-import { api, type MetricsSummary, type TimeseriesBucket } from "@/lib/api";
+import { api, type MetricsDetailRow, type MetricsSummary, type TimeseriesBucket } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { LoadState } from "@/tools/LoadState";
 import { useEffect, useState } from "react";
@@ -38,11 +39,17 @@ export default function DashboardPage() {
 
   const [summary, setSummary] = useState<MetricsSummary | null>(null);
   const [buckets, setBuckets] = useState<TimeseriesBucket[]>([]);
+  const [detailRows, setDetailRows] = useState<MetricsDetailRow[]>([]);
+  const [detailRowsLoading, setDetailRowsLoading] = useState(true);
+  const [chartsLoading, setChartsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
+    setSummary(null);
+    setBuckets([]);
+    setChartsLoading(true);
     Promise.all([
       api.metrics.summary(fromISO, toISO),
       api.metrics.timeseries(granularity, fromISO, toISO),
@@ -51,15 +58,36 @@ export default function DashboardPage() {
         if (cancelled) return;
         setSummary(s);
         setBuckets(ts.buckets ?? []);
+        setChartsLoading(false);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        setChartsLoading(false);
         setError(err instanceof Error ? err.message : "Failed to load metrics.");
       });
     return () => {
       cancelled = true;
     };
   }, [fromISO, toISO, granularity]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDetailRows([]);
+    setDetailRowsLoading(true);
+    api.metrics.details(fromISO, toISO, 1000)
+      .then(d => {
+        if (cancelled) return;
+        setDetailRows(d.rows ?? []);
+        setDetailRowsLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDetailRowsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fromISO, toISO]);
 
   if (error) {
     return (
@@ -95,7 +123,12 @@ export default function DashboardPage() {
     summary == null || summary.request_count === 0
       ? 0
       : summary.total_tokens / summary.request_count;
-  const empty = buckets.length === 0;
+  const empty = !chartsLoading && buckets.length === 0;
+
+  const routedRows = detailRows.filter(r => r.decision_model !== "");
+  const substitutedRows = routedRows.filter(
+    r => r.decision_model !== r.requested_model,
+  );
 
   return (
     <Page
@@ -116,39 +149,56 @@ export default function DashboardPage() {
       <Page.Section>
         <DashboardPageFilters result={dashboardFilters} />
         <ResponsiveGrid>
-          <MetricCard
-            className={ResponsiveGrid.Small}
-            label="Cost saved"
-            value={summary == null ? "—" : formatUSD(Math.abs(summary.total_savings_usd))}
-            sub={
-              summary == null
-                ? undefined
-                : summary.total_savings_usd >= 0
-                  ? `${savingsRate.toFixed(1)}% of requested`
-                  : "Over requested cost"
-            }
-            accent={
-              summary == null
-                ? "default"
-                : summary.total_savings_usd >= 0
-                  ? "success"
-                  : "danger"
-            }
-          />
-          <MetricCard
-            className={ResponsiveGrid.Small}
-            label="Requests"
-            value={summary == null ? "—" : formatNumber(summary.request_count)}
-            sub={
-              summary == null ? undefined : `actual ${formatUSD(summary.total_actual_cost_usd)}`
-            }
-          />
-          <MetricCard
-            className={ResponsiveGrid.Small}
-            label="Tokens"
-            value={summary == null ? "—" : formatNumber(summary.total_tokens)}
-            sub={summary == null ? undefined : `${formatNumber(avgTokensPerReq)} avg / req`}
-          />
+          <div className={cn(ResponsiveGrid.Full, "grid grid-cols-2 gap-4 @xl:grid-cols-4")}>
+            <MetricCard
+              label="Cost saved"
+              value={summary == null ? "—" : formatUSD(Math.abs(summary.total_savings_usd))}
+              sub={
+                summary == null
+                  ? undefined
+                  : summary.total_savings_usd >= 0
+                    ? `${savingsRate.toFixed(1)}% of requested`
+                    : "Over requested cost"
+              }
+              accent={
+                summary == null
+                  ? "default"
+                  : summary.total_savings_usd >= 0
+                    ? "success"
+                    : "danger"
+              }
+            />
+            <MetricCard
+              label="Requests"
+              value={summary == null ? "—" : formatNumber(summary.request_count)}
+              sub={
+                summary == null ? undefined : `actual ${formatUSD(summary.total_actual_cost_usd)}`
+              }
+            />
+            <MetricCard
+              label="Tokens"
+              value={summary == null ? "—" : formatNumber(summary.total_tokens)}
+              sub={summary == null ? undefined : `${formatNumber(avgTokensPerReq)} avg / req`}
+            />
+            <MetricCard
+              label="Substitution rate"
+              value={
+                routedRows.length === 0
+                  ? "—"
+                  : detailRows.length === 1000
+                    ? `~${Math.round((substitutedRows.length / routedRows.length) * 100)}%`
+                    : `${Math.round((substitutedRows.length / routedRows.length) * 100)}%`
+              }
+              sub={
+                summary == null || routedRows.length === 0
+                  ? undefined
+                  : detailRows.length === 1000
+                    ? `${new Set(routedRows.map(r => r.decision_model)).size} models (sampled)`
+                    : `${new Set(routedRows.map(r => r.decision_model)).size} models served`
+              }
+              accent={substitutedRows.length > 0 ? "info" : "default"}
+            />
+          </div>
 
           <ChartCard
             className={ResponsiveGrid.Full}
@@ -175,6 +225,25 @@ export default function DashboardPage() {
               <RouterCostSavingsChart buckets={buckets} granularity={granularity} />
             )}
           </ChartCard>
+
+          <div className={cn(ResponsiveGrid.Full, "rounded-xl border bg-card shadow-sm")}>
+            <div className="border-b px-4 py-3 md:px-6">
+              <p className="text-sm font-semibold leading-tight text-foreground">
+                Model distribution
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Models and providers for requests served in the selected period.
+              </p>
+              {detailRows.length === 1000 && (
+                <p className="mt-0.5 text-xs text-muted-foreground/60">
+                  Showing first 1,000 requests — distribution may be a sample.
+                </p>
+              )}
+            </div>
+            <div className="p-4 md:p-6">
+              <ModelDistributionChart rows={detailRows} isLoading={detailRowsLoading} />
+            </div>
+          </div>
 
           <ChartCard
             className={ResponsiveGrid.Medium}
