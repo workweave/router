@@ -121,6 +121,61 @@ func TestRouteDeciderErrorIsUnavailable(t *testing.T) {
 	assert.True(t, errors.Is(err, rl.ErrPolicyUnavailable))
 }
 
+func TestRouteNilEnabledProvidersIsUnrestricted(t *testing.T) {
+	// nil EnabledProviders means "unrestricted" (router.Request contract); the
+	// policy must still be offered the deployed models via their primary
+	// provider, not an empty set.
+	dec := &fakeDecider{result: rl.Result{Model: "anthropic/claude-opus-4-8"}}
+	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"))
+
+	decision, err := r.Route(context.Background(), router.Request{
+		PromptText:       "hi",
+		EnabledProviders: nil,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-8", decision.Model)
+	assert.Equal(t, providers.ProviderAnthropic, decision.Provider)
+	assert.NotEmpty(t, dec.got.Candidates, "nil providers must not empty the candidate set")
+}
+
+func TestRouteToolTurnDropsToolUseLowFromCandidatesAndIndex(t *testing.T) {
+	// qwen/qwen3-235b-a22b-2507 is ToolUseLow. On a tool turn it must be absent
+	// from BOTH the offered candidates and the response-mapping index — a
+	// sidecar that names it anyway is rejected, not dispatched.
+	dec := &fakeDecider{result: rl.Result{Model: "qwen/qwen3-235b-a22b-2507"}}
+	r := rl.New(dec, deployed("claude-opus-4-8", "qwen/qwen3-235b-a22b-2507"))
+
+	_, err := r.Route(context.Background(), router.Request{
+		PromptText:       "use a tool",
+		HasTools:         true,
+		EnabledProviders: nil,
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, rl.ErrPolicyUnavailable))
+	for _, c := range dec.got.Candidates {
+		assert.NotEqual(t, "qwen/qwen3-235b-a22b-2507", c.RosterID,
+			"ToolUseLow model must not be offered on a tool turn")
+	}
+}
+
+func TestRouteImageTurnDropsImageUnsupported(t *testing.T) {
+	// deepseek/deepseek-v4-flash is image-unsupported; opus is vision-capable.
+	// An image turn must drop the text-only model when a capable one survives.
+	dec := &fakeDecider{result: rl.Result{Model: "anthropic/claude-opus-4-8"}}
+	r := rl.New(dec, deployed("claude-opus-4-8", "deepseek/deepseek-v4-flash"))
+
+	_, err := r.Route(context.Background(), router.Request{
+		PromptText:       "what is in this image",
+		HasImages:        true,
+		EnabledProviders: nil,
+	})
+	require.NoError(t, err)
+	for _, c := range dec.got.Candidates {
+		assert.NotEqual(t, "deepseek/deepseek-v4-flash", c.RosterID,
+			"image-unsupported model must not be offered on an image turn")
+	}
+}
+
 func TestRouteUnknownReturnedModelIsUnavailable(t *testing.T) {
 	dec := &fakeDecider{result: rl.Result{Model: "openai/gpt-5.5"}} // never offered
 	r := rl.New(dec, deployed("claude-opus-4-8"))

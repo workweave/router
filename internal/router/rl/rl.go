@@ -69,6 +69,7 @@ type Router struct {
 	decider  Decider
 	deployed map[string]struct{}
 	toolLow  map[string]struct{}
+	imageLow map[string]struct{}
 }
 
 // New builds an RL Router. deployed is the set of deployable catalog model IDs
@@ -79,18 +80,28 @@ func New(decider Decider, deployed map[string]struct{}) *Router {
 		decider:  decider,
 		deployed: deployed,
 		toolLow:  catalog.ToolUseLowSet(),
+		imageLow: catalog.ImageUnsupportedSet(),
 	}
+}
+
+// eligibleCand pairs the offered roster ID with the catalog model + dispatch
+// provider it maps back to.
+type eligibleCand struct {
+	catalogID string
+	rosterID  string
+	provider  string
 }
 
 // eligible builds the candidate list and a roster-ID → catalog model index for
 // mapping the policy's choice back. It mirrors the cluster scorer's
-// eligibility: deployed models with a binding in the request's enabled
-// providers, minus excluded models, and minus ToolUseLow models on tool turns
-// (relaxed only if the tool filter would empty the set).
+// eligibility: deployed models resolvable under the request's enabled providers
+// (nil = unrestricted), minus excluded models, minus image-unsupported models
+// on image turns, minus ToolUseLow models on tool turns — each soft filter
+// relaxed only if it would empty the pool. The index is built from the FINAL
+// returned slice so a soft-filtered model can never sneak back via the
+// response-mapping guard.
 func (r *Router) eligible(req router.Request) ([]Candidate, map[string]candidateBinding) {
-	withTool := make([]Candidate, 0, len(r.deployed))
-	withoutTool := make([]Candidate, 0, len(r.deployed))
-	idx := make(map[string]candidateBinding, len(r.deployed))
+	base := make([]eligibleCand, 0, len(r.deployed))
 	for id := range r.deployed {
 		if req.ExcludedModels != nil {
 			if _, excluded := req.ExcludedModels[id]; excluded {
@@ -101,23 +112,52 @@ func (r *Router) eligible(req router.Request) ([]Candidate, map[string]candidate
 		if !ok {
 			continue
 		}
-		binding, ok := catalog.ResolveBinding(id, req.EnabledProviders)
-		if !ok {
+		// nil EnabledProviders means unrestricted (router.Request contract);
+		// the cluster scorer only gates when the set is non-nil, so mirror that
+		// and fall back to the model's primary binding when unrestricted.
+		var provider string
+		if req.EnabledProviders == nil {
+			provider = model.PrimaryProvider()
+		} else {
+			binding, ok := catalog.ResolveBinding(id, req.EnabledProviders)
+			if !ok {
+				continue
+			}
+			provider = binding.Provider
+		}
+		base = append(base, eligibleCand{catalogID: id, rosterID: rosterIDFor(model), provider: provider})
+	}
+
+	base = r.softFilter(base, req.HasImages, r.imageLow)
+	base = r.softFilter(base, req.HasTools, r.toolLow)
+
+	candidates := make([]Candidate, 0, len(base))
+	idx := make(map[string]candidateBinding, len(base))
+	for _, c := range base {
+		candidates = append(candidates, Candidate{RosterID: c.rosterID, Provider: c.provider})
+		idx[c.rosterID] = candidateBinding{catalogID: c.catalogID, provider: c.provider}
+	}
+	return candidates, idx
+}
+
+// softFilter drops candidates whose catalog ID is in drop when active, but
+// keeps the unfiltered pool if the filter would empty it — the same empty-pool
+// fallback the cluster scorer uses for its tool-use and image filters.
+func (r *Router) softFilter(in []eligibleCand, active bool, drop map[string]struct{}) []eligibleCand {
+	if !active || len(drop) == 0 {
+		return in
+	}
+	kept := make([]eligibleCand, 0, len(in))
+	for _, c := range in {
+		if _, bad := drop[c.catalogID]; bad {
 			continue
 		}
-		rosterID := rosterIDFor(model)
-		cand := Candidate{RosterID: rosterID, Provider: binding.Provider}
-		idx[rosterID] = candidateBinding{catalogID: id, provider: binding.Provider}
-		withoutTool = append(withoutTool, cand)
-		if _, low := r.toolLow[id]; req.HasTools && low {
-			continue
-		}
-		withTool = append(withTool, cand)
+		kept = append(kept, c)
 	}
-	if req.HasTools && len(withTool) > 0 {
-		return withTool, idx
+	if len(kept) == 0 {
+		return in
 	}
-	return withoutTool, idx
+	return kept
 }
 
 type candidateBinding struct {
@@ -139,6 +179,11 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 		return router.Decision{}, fmt.Errorf("rl: no eligible candidate: %w", ErrPolicyUnavailable)
 	}
 
+	// TurnIndex is always 0: router.Request carries no turn index (the proxy
+	// classifies turn TYPE but not depth), so we cannot populate it server-side
+	// without new plumbing. The policy's scoring is dominated by the prompt
+	// embedding; turn index is a minor feature. Threading a real index through
+	// router.Request is a deliberate follow-up, not done here.
 	res, err := r.decider.Decide(ctx, Query{
 		PromptText: req.PromptText,
 		TurnIndex:  0,
