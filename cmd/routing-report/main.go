@@ -142,6 +142,7 @@ func main() {
 		corpusPath   = flag.String("corpus", "internal/router/cluster/testdata/register_probes.jsonl", "labeled probe corpus")
 		embPath      = flag.String("emb", "internal/router/cluster/testdata/register_probes.emb", "precomputed probe embeddings")
 		topP         = flag.Int("top-p", 2, "top-P clusters blended per decision (prod runs 2)")
+		qualityBias  = flag.Float64("quality-bias", -1, "QualityBias dial position in [0,1] to route at; <0 uses the bundle's default knobs (no dial)")
 		outPath      = flag.String("out", "", "write markdown here instead of stdout")
 	)
 	flag.Parse()
@@ -174,13 +175,13 @@ func main() {
 	}
 	embedder := buildEmbedder(hdr, probes, vecs)
 
-	tgt, err := routeCorpus(*artifactsDir, *target, probes, embedder, *topP)
+	tgt, err := routeCorpus(*artifactsDir, *target, probes, embedder, *topP, *qualityBias)
 	if err != nil {
 		fatal("route target %s: %v", *target, err)
 	}
 	var base *routeResult
 	if *baseline != *target {
-		base, err = routeCorpus(*artifactsDir, *baseline, probes, embedder, *topP)
+		base, err = routeCorpus(*artifactsDir, *baseline, probes, embedder, *topP, *qualityBias)
 		if err != nil {
 			fatal("route baseline %s: %v", *baseline, err)
 		}
@@ -206,7 +207,7 @@ type routeResult struct {
 	nearest     []int    // per probe single closest cluster (for auto-labels)
 }
 
-func routeCorpus(artifactsDir, version string, probes []probe, embedder *staticEmbedder, topP int) (*routeResult, error) {
+func routeCorpus(artifactsDir, version string, probes []probe, embedder *staticEmbedder, topP int, qualityBias float64) (*routeResult, error) {
 	dir := filepath.Join(artifactsDir, version)
 	bundle, err := cluster.LoadBundleFromDir(dir, version)
 	if err != nil {
@@ -230,8 +231,13 @@ func routeCorpus(artifactsDir, version string, probes []probe, embedder *staticE
 		nearest:     make([]int, len(probes)),
 	}
 	ctx := context.Background()
+	var knobs *router.Overrides
+	if qualityBias >= 0 {
+		qb := qualityBias
+		knobs = &router.Overrides{QualityBias: &qb}
+	}
 	for i, p := range probes {
-		dec, err := scorer.Route(ctx, router.Request{PromptText: p.Text})
+		dec, err := scorer.Route(ctx, router.Request{PromptText: p.Text, RoutingKnobs: knobs})
 		if err != nil {
 			return nil, fmt.Errorf("route probe %s: %w", p.ID, err)
 		}

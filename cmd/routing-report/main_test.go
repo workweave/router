@@ -58,7 +58,7 @@ func TestReportRunsOnLatest(t *testing.T) {
 	}
 	emb := buildEmbedder(hdr, probes, vecs)
 
-	res, err := routeCorpus(testArtifacts, latest, probes, emb, 2)
+	res, err := routeCorpus(testArtifacts, latest, probes, emb, 2, -1)
 	if err != nil {
 		t.Fatalf("route corpus on %s: %v", latest, err)
 	}

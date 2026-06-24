@@ -86,10 +86,7 @@ func (s *Scorer) RoutingDistribution(gridN int) ([]DistributionPoint, error) {
 		t := float64(g) / float64(gridN-1)
 
 		knobs := s.defaultActiveKnobs()
-		a := s.dialToAlpha(t)
-		for i := range knobs.Alpha {
-			knobs.Alpha[i] = a
-		}
+		s.applyDialAlpha(t, knobs.Alpha)
 
 		counts := make(map[string]int, len(s.models))
 		for c := 0; c < k; c++ {
