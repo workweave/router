@@ -62,6 +62,25 @@ func TestGeminiRoutingFooterWriter_SkipsToolCallTurn(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), "Was this routing right?", "functionCall turns must not get a footer")
 }
 
+// geminiEmptyFunctionCallStream carries a present-but-empty functionCall part
+// (null) ahead of a natural STOP, the exact shape gjson.Exists() falsely treats
+// as a tool turn.
+func geminiEmptyFunctionCallStream() string {
+	return `data: {"candidates":[{"content":{"parts":[{"text":"The answer is 42.","functionCall":null}],"role":"model"},"index":0}]}` + "\n\n" +
+		`data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP","index":0}]}` + "\n\n"
+}
+
+func TestGeminiRoutingFooterWriter_EmptyFunctionCallStillInjects(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewGeminiRoutingFooterWriter(rec, testFooter)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+
+	_, err := w.Write([]byte(geminiEmptyFunctionCallStream()))
+	require.NoError(t, err)
+	assert.Contains(t, rec.Body.String(), "Was this routing right?", "an empty/null functionCall must not latch the tool gate")
+}
+
 // geminiCoalescedStream packs the answer text and finishReason "STOP" into a
 // single chunk, which is the common Gemini terminal-chunk shape.
 func geminiCoalescedStream() string {
