@@ -1341,10 +1341,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// trailing assistant text. Like the routing marker, clients echo it back
 	// verbatim, so without this it (and its signed rate URLs) accumulates in
 	// upstream context and shifts assistant prefixes off the prompt cache.
-	body, stripErr = translate.StripFeedbackFooterFromMessages(body)
-	if stripErr != nil {
-		log.Error("Failed to strip feedback footer from inbound messages", "err", stripErr)
-		return fmt.Errorf("strip feedback footer: %w", stripErr)
+	// Best-effort: a strip failure returns a nil body, so we log-and-continue
+	// with the original bytes rather than aborting the turn over cosmetic
+	// cleanup — matching the OpenAI chat path's feedback-footer strip.
+	if strippedBody, ferr := translate.StripFeedbackFooterFromMessages(body); ferr != nil {
+		log.Error("Failed to strip feedback footer from inbound messages", "err", ferr)
+	} else {
+		body = strippedBody
 	}
 
 	// Strip Claude Code's 1M-context model variant tag (e.g.

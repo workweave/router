@@ -151,19 +151,20 @@ func geminiChunkHasText(payload []byte) bool {
 // emitCoalescedWithFooter splits a terminal chunk that carries both answer text
 // and finishReason into: a content chunk (finishReason removed), the footer
 // chunk, then a finish chunk (content removed) — so the footer always lands
-// after the last answer text and before the turn terminates. Falls back to the
-// original chunk on the rare sjson rewrite failure.
+// after the last answer text and before the turn terminates. On the rare sjson
+// rewrite failure it falls back to the original chunk first, then the footer, so
+// the rating prompt never renders above the answer text.
 func (w *GeminiRoutingFooterWriter) emitCoalescedWithFooter(finishChunk []byte) {
 	contentChunk, err := sjson.DeleteBytes(append([]byte(nil), finishChunk...), "candidates.0.finishReason")
 	if err != nil {
-		w.emitFooterChunk()
 		w.writeData(finishChunk)
+		w.emitFooterChunk()
 		return
 	}
 	finishOnly, err := sjson.DeleteBytes(append([]byte(nil), finishChunk...), "candidates.0.content")
 	if err != nil {
-		w.emitFooterChunk()
 		w.writeData(finishChunk)
+		w.emitFooterChunk()
 		return
 	}
 	w.writeData(contentChunk)

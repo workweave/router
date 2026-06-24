@@ -144,19 +144,20 @@ func chunkHasToolCall(payload []byte) bool {
 // emitCoalescedWithFooter splits a terminal chunk that carries both answer
 // content and a finish_reason into: a content chunk (finish_reason nulled), the
 // footer chunk, then a finish chunk (empty delta) — so the footer always lands
-// after the last answer text and before the turn terminates. Falls back to the
-// original chunk on the rare sjson rewrite failure.
+// after the last answer text and before the turn terminates. On the rare sjson
+// rewrite failure it falls back to the original chunk first, then the footer, so
+// the rating prompt never renders above the answer text.
 func (w *OpenAIRoutingFooterWriter) emitCoalescedWithFooter(finishChunk []byte) {
 	contentChunk, err := sjson.SetRawBytes(append([]byte(nil), finishChunk...), "choices.0.finish_reason", []byte("null"))
 	if err != nil {
-		w.emitFooterChunk(finishChunk)
 		w.writeData(finishChunk)
+		w.emitFooterChunk(finishChunk)
 		return
 	}
 	finishOnly, err := sjson.SetRawBytes(append([]byte(nil), finishChunk...), "choices.0.delta", []byte("{}"))
 	if err != nil {
-		w.emitFooterChunk(finishChunk)
 		w.writeData(finishChunk)
+		w.emitFooterChunk(finishChunk)
 		return
 	}
 	w.writeData(contentChunk)

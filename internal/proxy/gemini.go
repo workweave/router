@@ -45,10 +45,13 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	// trailing model text part. Clients echo it back in contents[] on the next
 	// turn, so without this it (and its signed rate URLs) accumulates in upstream
 	// context (see ProxyMessages for the symmetric Anthropic/OpenAI path).
-	body, stripErr := translate.StripFeedbackFooterFromGeminiContents(body)
-	if stripErr != nil {
+	// Best-effort: a strip failure returns a nil body, so we log-and-continue
+	// with the original bytes rather than aborting the turn over cosmetic
+	// cleanup — matching the OpenAI chat path's feedback-footer strip.
+	if strippedBody, stripErr := translate.StripFeedbackFooterFromGeminiContents(body); stripErr != nil {
 		log.Error("Failed to strip feedback footer from Gemini contents", "err", stripErr)
-		return fmt.Errorf("strip feedback footer: %w", stripErr)
+	} else {
+		body = strippedBody
 	}
 
 	env, parseErr := translate.ParseGemini(body)

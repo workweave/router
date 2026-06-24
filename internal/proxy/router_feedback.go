@@ -177,7 +177,7 @@ func persistedFeedbackText(rating, feedback string) string {
 	case translate.RouterFeedbackRatingDown:
 		return "👎"
 	}
-	return feedback
+	return ""
 }
 
 // writeSyntheticCommandResponse writes a router-command acknowledgment in the
