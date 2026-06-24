@@ -39,7 +39,7 @@ func TestGeminiRoutingFooterWriter_InjectsBeforeFinish(t *testing.T) {
 	footerIdx, finishIdx := -1, -1
 	for i, e := range events {
 		data := extractDataField(e)
-		if strings.Contains(gjson.Get(data, "candidates.0.content.parts.0.text").String(), "Was this routing right?") {
+		if strings.Contains(gjson.Get(data, "candidates.0.content.parts.0.text").String(), "Weave Router feedback") {
 			footerIdx = i
 		}
 		if gjson.Get(data, "candidates.0.finishReason").String() == "STOP" {
@@ -59,7 +59,7 @@ func TestGeminiRoutingFooterWriter_SkipsToolCallTurn(t *testing.T) {
 
 	_, err := w.Write([]byte(geminiToolCallStream()))
 	require.NoError(t, err)
-	assert.NotContains(t, rec.Body.String(), "Was this routing right?", "functionCall turns must not get a footer")
+	assert.NotContains(t, rec.Body.String(), "Weave Router feedback", "functionCall turns must not get a footer")
 }
 
 // geminiEmptyFunctionCallStream carries present-but-empty functionCall parts (a
@@ -78,7 +78,7 @@ func TestGeminiRoutingFooterWriter_EmptyFunctionCallStillInjects(t *testing.T) {
 
 	_, err := w.Write([]byte(geminiEmptyFunctionCallStream()))
 	require.NoError(t, err)
-	assert.Contains(t, rec.Body.String(), "Was this routing right?", "an empty/null functionCall must not latch the tool gate")
+	assert.Contains(t, rec.Body.String(), "Weave Router feedback", "an empty/null functionCall must not latch the tool gate")
 }
 
 // geminiCoalescedStream packs the answer text and finishReason "STOP" into a
@@ -104,7 +104,7 @@ func TestGeminiRoutingFooterWriter_CoalescedFooterAfterText(t *testing.T) {
 		if text == "The answer is 42." {
 			textIdx = i
 		}
-		if strings.Contains(text, "Was this routing right?") {
+		if strings.Contains(text, "Weave Router feedback") {
 			footerIdx = i
 		}
 		if gjson.Get(data, "candidates.0.finishReason").String() == "STOP" {

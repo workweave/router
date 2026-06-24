@@ -772,14 +772,14 @@ func encodeJSONStringNoHTMLEscape(s string) ([]byte, error) {
 var routingMarkerPattern = regexp.MustCompile(`✦ \*\*Weave Router\*\* → [^\n]*\n\n`)
 
 // feedbackFooterPattern matches the rating footer appended at the end of a
-// streamed response (see proxy.Service.feedbackFooter). It tolerates both
-// rendered forms — the clickable thumb links and the link-free hint — by
-// absorbing everything from the sentinel through the trailing `/rf-` companion,
-// which both forms end with. Leading newlines are absorbed so the blank-line
-// separator is removed with the footer. Stripping on ingress keeps the footer
-// (and its signed rate URLs) out of upstream context on later turns, the same
-// failure mode the routing marker had.
-var feedbackFooterPattern = regexp.MustCompile("\\n*_Was this routing right\\?_ [^\\n]*?`/rf-`")
+// streamed response (see proxy.Service.feedbackFooter). It absorbs everything
+// from the italic sentinel to the end of the footer line (the optional-note
+// example trails the commands, so a fixed end-anchor won't do). Leading
+// newlines are absorbed so the blank-line separator is removed with the footer.
+// Stripping on ingress keeps the footer out of upstream context on later turns,
+// the same failure mode the routing marker had. Keep the sentinel in sync with
+// proxy.feedbackFooterText.
+var feedbackFooterPattern = regexp.MustCompile("\\n*_Weave Router feedback:_ [^\\n]*")
 
 // StripRoutingMarkerFromMessages removes the routing-marker snippet from every
 // text block in messages[*].content[*]. Stripping on ingress keeps it out of
@@ -788,7 +788,7 @@ func StripRoutingMarkerFromMessages(body []byte) ([]byte, error) {
 	return stripPatternFromMessages(body, routingMarkerPattern)
 }
 
-// StripFeedbackFooterFromMessages removes the one-click thumbs footer from every
+// StripFeedbackFooterFromMessages removes the rating footer from every
 // text block in messages[*].content[*]. Like the routing marker, the footer is
 // injected as assistant text on egress, so clients echo it back verbatim on the
 // next turn; stripping it on ingress keeps it out of upstream context.

@@ -36,7 +36,7 @@ func TestOpenAIRoutingFooterWriter_InjectsBeforeFinish(t *testing.T) {
 	footerIdx, finishIdx := -1, -1
 	for i, e := range events {
 		data := extractDataField(e)
-		if strings.Contains(gjson.Get(data, "choices.0.delta.content").String(), "Was this routing right?") {
+		if strings.Contains(gjson.Get(data, "choices.0.delta.content").String(), "Weave Router feedback") {
 			footerIdx = i
 		}
 		if gjson.Get(data, "choices.0.finish_reason").String() == "stop" {
@@ -56,7 +56,7 @@ func TestOpenAIRoutingFooterWriter_SkipsToolCalls(t *testing.T) {
 
 	_, err := w.Write([]byte(openAIAnswerStream("tool_calls")))
 	require.NoError(t, err)
-	assert.NotContains(t, rec.Body.String(), "Was this routing right?", "tool_calls turns must not get a footer")
+	assert.NotContains(t, rec.Body.String(), "Weave Router feedback", "tool_calls turns must not get a footer")
 }
 
 // openAIToolCallStopStream streams a tool_calls delta and then closes the turn
@@ -76,7 +76,7 @@ func TestOpenAIRoutingFooterWriter_SkipsToolCallsClosedWithStop(t *testing.T) {
 
 	_, err := w.Write([]byte(openAIToolCallStopStream()))
 	require.NoError(t, err)
-	assert.NotContains(t, rec.Body.String(), "Was this routing right?",
+	assert.NotContains(t, rec.Body.String(), "Weave Router feedback",
 		"a turn that streamed tool_calls must not get a footer even when it ends with finish_reason stop")
 }
 
@@ -104,7 +104,7 @@ func TestOpenAIRoutingFooterWriter_CoalescedFooterAfterText(t *testing.T) {
 		if content == "Hi" {
 			textIdx = i
 		}
-		if strings.Contains(content, "Was this routing right?") {
+		if strings.Contains(content, "Weave Router feedback") {
 			footerIdx = i
 		}
 		if gjson.Get(data, "choices.0.finish_reason").String() == "stop" {
@@ -135,7 +135,7 @@ func TestOpenAIRoutingFooterWriter_EmptyToolCallsStillInjects(t *testing.T) {
 
 	_, err := w.Write([]byte(openAIEmptyToolCallsStream()))
 	require.NoError(t, err)
-	assert.Contains(t, rec.Body.String(), "Was this routing right?",
+	assert.Contains(t, rec.Body.String(), "Weave Router feedback",
 		"an empty tool_calls array must not suppress the footer on an answer-only turn")
 }
 

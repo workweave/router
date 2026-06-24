@@ -11,15 +11,13 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const footerSentinel = "_Was this routing right?_"
+const footerSentinel = "_Weave Router feedback:_"
 
-// sampleFooter mirrors proxy.Service.feedbackFooter's clickable output shape: a
-// leading blank-line separator, the prompt, two markdown thumb links to the
-// signed rate endpoint, and the /rf keyboard companion. The token uses URL-safe
-// base64 chars (-, _) to exercise the "[^)]*" URL match.
+// sampleFooter mirrors proxy.Service.feedbackFooter's output shape: a leading
+// blank-line separator, the italic sentinel, the /rf± typed-command hints, and
+// the trailing optional-note example.
 func sampleFooter() string {
-	base := "https://feedback.example/v1/feedback/rate?t=abc-123_XYZ.sig&r="
-	return "\n\n_Was this routing right?_ [👍](" + base + "up) [👎](" + base + "down) — or reply `/rf+` / `/rf-`"
+	return "\n\n_Weave Router feedback:_ `/rf+` good experience · `/rf-` poor experience — add an optional note, e.g. `/rf- too slow`"
 }
 
 func TestStripFeedbackFooter_AppendedToAssistantBlock(t *testing.T) {

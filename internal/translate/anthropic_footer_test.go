@@ -13,7 +13,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const testFooter = "\n\n_Was this routing right?_ [👍](u) · [👎](d)"
+const testFooter = "\n\n_Weave Router feedback:_ `/rf+` good experience · `/rf-` poor experience — add an optional note, e.g. `/rf- too slow`"
 
 // anthropicAnswerStream is a minimal text answer (index 0) that ends naturally.
 func anthropicAnswerStream(stopReason string) string {
@@ -43,7 +43,7 @@ func TestAnthropicRoutingFooterWriter_InjectsBeforeMessageDelta(t *testing.T) {
 	for i, e := range events {
 		data := extractDataField(e)
 		typ := gjson.Get(data, "type").String()
-		if typ == "content_block_delta" && strings.Contains(gjson.Get(data, "delta.text").String(), "Was this routing right?") {
+		if typ == "content_block_delta" && strings.Contains(gjson.Get(data, "delta.text").String(), "Weave Router feedback") {
 			footerIdx = i
 			assert.EqualValues(t, 1, gjson.Get(data, "index").Int(), "footer block index should be maxIndex+1")
 		}
@@ -65,7 +65,7 @@ func TestAnthropicRoutingFooterWriter_SkipsToolUseTurn(t *testing.T) {
 	_, err := w.Write([]byte(anthropicAnswerStream("tool_use")))
 	require.NoError(t, err)
 
-	assert.NotContains(t, rec.Body.String(), "Was this routing right?", "tool_use turns must not get a footer")
+	assert.NotContains(t, rec.Body.String(), "Weave Router feedback", "tool_use turns must not get a footer")
 }
 
 func TestAnthropicRoutingFooterWriter_EmptyFooterPassthrough(t *testing.T) {
@@ -104,7 +104,7 @@ func TestAnthropicRoutingFooterWriter_NoContentNoFooter(t *testing.T) {
 		buildAnthropicSSE("message_stop", `{"type":"message_stop"}`)
 	_, err := w.Write([]byte(in))
 	require.NoError(t, err)
-	assert.NotContains(t, rec.Body.String(), "Was this routing right?", "no content block means nothing to rate")
+	assert.NotContains(t, rec.Body.String(), "Weave Router feedback", "no content block means nothing to rate")
 }
 
 func TestAnthropicRoutingFooterWriter_EventSplitAcrossWrites(t *testing.T) {
@@ -121,7 +121,7 @@ func TestAnthropicRoutingFooterWriter_EventSplitAcrossWrites(t *testing.T) {
 	require.NoError(t, err)
 
 	body := rec.Body.String()
-	assert.Contains(t, body, "Was this routing right?", "split stream must still get a footer")
+	assert.Contains(t, body, "Weave Router feedback", "split stream must still get a footer")
 	// Footer must appear exactly once.
-	assert.Equal(t, 1, strings.Count(body, "Was this routing right?"))
+	assert.Equal(t, 1, strings.Count(body, "Weave Router feedback"))
 }
