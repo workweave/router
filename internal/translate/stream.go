@@ -11,11 +11,14 @@ import (
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
+	"workweave/router/internal/providers"
 	"workweave/router/internal/sse"
 	"workweave/router/internal/translate/toolcheck"
 
 	"github.com/tidwall/gjson"
 )
+
+var _ providers.OutputProgressArmer = (*AnthropicSSETranslator)(nil)
 
 // SSETranslator translates Anthropic streaming SSE to OpenAI chat.completion.chunk
 // on the fly. Non-streaming responses buffer for Finalize.

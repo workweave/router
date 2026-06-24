@@ -329,6 +329,19 @@ type RequestMutationStats struct {
 	GeminiValidatedToolMode bool
 }
 
+// OutputProgressArmer is implemented by a streaming response writer (the
+// format translator) that can distinguish output-bearing frames from
+// keepalive/reasoning frames. A provider adapter type-asserts its writer to
+// this interface to wire the output-progress watchdog (see ErrUpstreamOutputStall):
+// ArmOutputProgress installs mark, called on every output-bearing frame, and
+// reports whether the watchdog was armed (false for a non-streaming writer,
+// which is byte-idle-guarded only). Defining it here keeps the contract shared
+// across adapters and translator impls so a signature change fails to compile
+// at every call site rather than silently falling through to the no-watchdog path.
+type OutputProgressArmer interface {
+	ArmOutputProgress(mark func()) (armed bool)
+}
+
 type Client interface {
 	// Proxy forwards prep.Body verbatim to the upstream and streams the response into w.
 	Proxy(ctx context.Context, decision router.Decision, prep PreparedRequest, w http.ResponseWriter, r *http.Request) error

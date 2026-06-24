@@ -8,11 +8,14 @@ import (
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
+	"workweave/router/internal/providers"
 	"workweave/router/internal/sse"
 	"workweave/router/internal/translate/toolcheck"
 
 	"github.com/tidwall/gjson"
 )
+
+var _ providers.OutputProgressArmer = (*ResponsesToAnthropicWriter)(nil)
 
 // ResponsesToAnthropicWriter adapts a STREAMING OpenAI Responses upstream
 // (`POST /v1/responses` with `stream:true`) into an Anthropic Messages response

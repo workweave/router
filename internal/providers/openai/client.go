@@ -314,7 +314,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	// frames from reasoning/keepalive frames, so it is wired via ArmOutputProgress;
 	// a non-streaming client parses events at Finalize and returns armed=false.
 	if prep.Endpoint == providers.EndpointResponses {
-		if arm, ok := w.(interface{ ArmOutputProgress(func()) bool }); ok {
+		if arm, ok := w.(providers.OutputProgressArmer); ok {
 			outMark, outStop := httputil.StartIdleWatchdogCause(ctx, cancel, c.outputStallTimeout(), httputil.ErrUpstreamOutputStall)
 			if arm.ArmOutputProgress(outMark) {
 				defer outStop()

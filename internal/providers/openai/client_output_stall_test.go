@@ -43,6 +43,8 @@ type fakeProgressWriter struct {
 	markOnWrite bool
 }
 
+var _ providers.OutputProgressArmer = (*fakeProgressWriter)(nil)
+
 func (f *fakeProgressWriter) Header() http.Header {
 	if f.hdr == nil {
 		f.hdr = make(http.Header)
