@@ -771,10 +771,36 @@ func encodeJSONStringNoHTMLEscape(s string) ([]byte, error) {
 // injected in cross-format responses.
 var routingMarkerPattern = regexp.MustCompile(`✦ \*\*Weave Router\*\* → [^\n]*\n\n`)
 
+// feedbackFooterPattern matches the rating footer appended at the end of a
+// streamed response (see proxy.Service.feedbackFooter). It tolerates both
+// rendered forms — the clickable thumb links and the link-free hint — by
+// absorbing everything from the sentinel through the trailing `/rf-` companion,
+// which both forms end with. Leading newlines are absorbed so the blank-line
+// separator is removed with the footer. Stripping on ingress keeps the footer
+// (and its signed rate URLs) out of upstream context on later turns, the same
+// failure mode the routing marker had.
+var feedbackFooterPattern = regexp.MustCompile("\\n*_Was this routing right\\?_ [^\\n]*?`/rf-`")
+
 // StripRoutingMarkerFromMessages removes the routing-marker snippet from every
 // text block in messages[*].content[*]. Stripping on ingress keeps it out of
 // upstream context and stabilizes assistant prefixes for prompt-cache reuse.
 func StripRoutingMarkerFromMessages(body []byte) ([]byte, error) {
+	return stripPatternFromMessages(body, routingMarkerPattern)
+}
+
+// StripFeedbackFooterFromMessages removes the one-click thumbs footer from every
+// text block in messages[*].content[*]. Like the routing marker, the footer is
+// injected as assistant text on egress, so clients echo it back verbatim on the
+// next turn; stripping it on ingress keeps it out of upstream context.
+func StripFeedbackFooterFromMessages(body []byte) ([]byte, error) {
+	return stripPatternFromMessages(body, feedbackFooterPattern)
+}
+
+// stripPatternFromMessages removes every match of pattern from each text block
+// in messages[*].content[*], handling both the OpenAI plain-string content shape
+// and the Anthropic typed-block-array shape. Blocks whose text becomes empty are
+// dropped. Returns the original body unchanged when nothing matched.
+func stripPatternFromMessages(body []byte, pattern *regexp.Regexp) ([]byte, error) {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.Exists() || !messages.IsArray() {
 		return body, nil
@@ -794,11 +820,11 @@ func StripRoutingMarkerFromMessages(body []byte) ([]byte, error) {
 		// OpenAI format: content is a plain string.
 		if content.Type == gjson.String {
 			text := content.String()
-			if !routingMarkerPattern.MatchString(text) {
+			if !pattern.MatchString(text) {
 				msgRaws = append(msgRaws, msg.Raw)
 				return true
 			}
-			stripped := routingMarkerPattern.ReplaceAllString(text, "")
+			stripped := pattern.ReplaceAllString(text, "")
 			anyChanged = true
 			encoded, err := encodeJSONStringNoHTMLEscape(stripped)
 			if err != nil {
@@ -828,11 +854,11 @@ func StripRoutingMarkerFromMessages(body []byte) ([]byte, error) {
 				return true
 			}
 			text := block.Get("text").String()
-			if !routingMarkerPattern.MatchString(text) {
+			if !pattern.MatchString(text) {
 				newBlocks = append(newBlocks, block.Raw)
 				return true
 			}
-			stripped := routingMarkerPattern.ReplaceAllString(text, "")
+			stripped := pattern.ReplaceAllString(text, "")
 			msgChanged = true
 			if strings.TrimSpace(stripped) == "" {
 				return true
@@ -878,6 +904,87 @@ func StripRoutingMarkerFromMessages(body []byte) ([]byte, error) {
 
 	newMessagesArray := "[" + strings.Join(msgRaws, ",") + "]"
 	return sjson.SetRawBytes(body, "messages", []byte(newMessagesArray))
+}
+
+// StripFeedbackFooterFromGeminiContents removes the one-click thumbs footer from
+// every text part in contents[*].parts[*]. The Gemini footer is emitted as its
+// own model text part on egress (see GeminiRoutingFooterWriter), so clients echo
+// it back as a standalone part on the next turn; stripping it on ingress keeps
+// it out of upstream context. Parts whose text becomes empty are dropped.
+func StripFeedbackFooterFromGeminiContents(body []byte) ([]byte, error) {
+	contents := gjson.GetBytes(body, "contents")
+	if !contents.Exists() || !contents.IsArray() {
+		return body, nil
+	}
+
+	anyChanged := false
+	var contentRaws []string
+	var walkErr error
+
+	contents.ForEach(func(_, content gjson.Result) bool {
+		parts := content.Get("parts")
+		if !parts.Exists() || !parts.IsArray() {
+			contentRaws = append(contentRaws, content.Raw)
+			return true
+		}
+
+		var newParts []string
+		contentChanged := false
+		parts.ForEach(func(_, part gjson.Result) bool {
+			textNode := part.Get("text")
+			if !textNode.Exists() {
+				newParts = append(newParts, part.Raw)
+				return true
+			}
+			text := textNode.String()
+			if !feedbackFooterPattern.MatchString(text) {
+				newParts = append(newParts, part.Raw)
+				return true
+			}
+			stripped := feedbackFooterPattern.ReplaceAllString(text, "")
+			contentChanged = true
+			if strings.TrimSpace(stripped) == "" {
+				return true
+			}
+			encoded, err := encodeJSONStringNoHTMLEscape(stripped)
+			if err != nil {
+				walkErr = fmt.Errorf("marshal stripped gemini text: %w", err)
+				return false
+			}
+			newPart, err := sjson.SetRawBytes([]byte(part.Raw), "text", encoded)
+			if err != nil {
+				walkErr = fmt.Errorf("replace text in gemini part: %w", err)
+				return false
+			}
+			newParts = append(newParts, string(newPart))
+			return true
+		})
+		if walkErr != nil {
+			return false
+		}
+		if !contentChanged {
+			contentRaws = append(contentRaws, content.Raw)
+			return true
+		}
+
+		anyChanged = true
+		newPartsArray := "[" + strings.Join(newParts, ",") + "]"
+		newContent, err := sjson.SetRawBytes([]byte(content.Raw), "parts", []byte(newPartsArray))
+		if err != nil {
+			walkErr = fmt.Errorf("replace parts in gemini content: %w", err)
+			return false
+		}
+		contentRaws = append(contentRaws, string(newContent))
+		return true
+	})
+
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	if !anyChanged {
+		return body, nil
+	}
+	return sjson.SetRawBytes(body, "contents", []byte("["+strings.Join(contentRaws, ",")+"]"))
 }
 
 func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {

@@ -119,6 +119,53 @@ func SubmitHandler(svc *proxy.Service) gin.HandlerFunc {
 	}
 }
 
+// RateHandler serves GET /v1/feedback/rate?t=<token>&r=up|down: the one-click
+// thumb link embedded in a response footer. It records the rating straight from
+// the GET (no form page) and returns a tiny HTML confirmation. The signed token
+// is the sole credential, so these links carry no auth middleware. Note: a GET
+// that mutates can be triggered by link prefetchers, but the token is
+// unguessable and per-request, so the blast radius is one request's own rating.
+func RateHandler(svc *proxy.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		log := observability.FromGin(c)
+
+		rating := c.Query("r")
+		if rating != "up" && rating != "down" {
+			c.Data(http.StatusBadRequest, "text/html; charset=utf-8", ratePageError("That rating link looks malformed."))
+			return
+		}
+
+		claims, err := svc.VerifyFeedbackToken(c.Query("t"))
+		if err != nil {
+			msg := "This feedback link is invalid."
+			if errors.Is(err, token.ErrExpiredToken) {
+				msg = "This feedback link has expired."
+			}
+			status := http.StatusNotFound
+			if errors.Is(err, token.ErrExpiredToken) {
+				status = http.StatusGone
+			}
+			c.Data(status, "text/html; charset=utf-8", ratePageError(msg))
+			return
+		}
+
+		err = svc.SubmitFeedback(c.Request.Context(), proxy.SubmitFeedbackParams{
+			InstallationID: claims.InstallationID,
+			ExternalID:     claims.ExternalID,
+			RequestID:      claims.RequestID,
+			RouterUserID:   claims.RouterUserID,
+			Rating:         rating,
+		})
+		if err != nil {
+			log.Error("Failed to record one-click feedback", "err", err, "request_id", claims.RequestID, "rating", rating)
+			c.Data(http.StatusInternalServerError, "text/html; charset=utf-8", ratePageError("Sorry — we couldn't record that. Please try again."))
+			return
+		}
+
+		c.Data(http.StatusOK, "text/html; charset=utf-8", ratePageSuccess())
+	}
+}
+
 func toContextResponse(f proxy.FeedbackContext) contextResponse {
 	resp := contextResponse{
 		RequestID:      f.RequestID,

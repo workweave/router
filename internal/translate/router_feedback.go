@@ -6,9 +6,22 @@ import (
 
 // RouterFeedbackResult holds the parsed outcome of a /router-feedback command.
 type RouterFeedbackResult struct {
-	// Feedback is the free-form text the user submitted after the command.
+	// Rating is the thumbs verdict: "up", "down", or "" when the user gave a
+	// note-only command. Set from the /rf+ /rf- shortcuts or a leading
+	// 👍/👎/+/-/up/down token in the note.
+	Rating string
+	// Feedback is the free-form note the user submitted after the command,
+	// minus any leading rating token.
 	Feedback string
 }
+
+// RouterFeedbackRatingUp and RouterFeedbackRatingDown are the canonical
+// RouterFeedbackResult.Rating values, shared with telemetry and the handler so
+// the string never drifts.
+const (
+	RouterFeedbackRatingUp   = "up"
+	RouterFeedbackRatingDown = "down"
+)
 
 // ExtractRouterFeedbackCommand scans the last user-role message in env for a
 // /router-feedback <text> directive. When found, it strips the command line
@@ -44,17 +57,67 @@ func parseRouterFeedbackCommand(text string) (res RouterFeedbackResult, found bo
 	first, rest, _ := strings.Cut(trimmedBody, "\n")
 	first = strings.TrimSpace(first)
 
-	var feedback string
-	if after, ok := cutAnyPrefix(first, "/router-feedback ", "/rf "); ok {
-		feedback = strings.TrimSpace(after)
-	} else if first != "/router-feedback" && first != "/rf" {
+	rating, inline, ok := matchRouterFeedbackCommand(first)
+	if !ok {
 		return RouterFeedbackResult{}, false, text
 	}
+
+	feedback := strings.TrimSpace(inline)
 	if rest = strings.TrimSpace(rest); rest != "" {
 		if feedback != "" {
 			feedback += "\n"
 		}
 		feedback += rest
 	}
-	return RouterFeedbackResult{Feedback: feedback}, true, strings.TrimSpace(prefix)
+	// A note that opens with a bare verdict ("/rf 👍 too slow") promotes to a
+	// rating, so a single command can carry both verdict and explanation.
+	if rating == "" {
+		rating, feedback = splitLeadingRating(feedback)
+	}
+	return RouterFeedbackResult{Rating: rating, Feedback: feedback}, true, strings.TrimSpace(prefix)
+}
+
+// matchRouterFeedbackCommand recognizes the command token at the start of the
+// first line. It returns the rating encoded directly in the token (for the
+// /rf+ and /rf- shortcuts), the inline text following the token, and whether a
+// command matched at all.
+func matchRouterFeedbackCommand(first string) (rating, inline string, ok bool) {
+	for _, c := range []struct{ tok, rating string }{
+		{"/rf+", RouterFeedbackRatingUp},
+		{"/rf👍", RouterFeedbackRatingUp},
+		{"/rf-", RouterFeedbackRatingDown},
+		{"/rf👎", RouterFeedbackRatingDown},
+	} {
+		if first == c.tok {
+			return c.rating, "", true
+		}
+		if after, found := strings.CutPrefix(first, c.tok+" "); found {
+			return c.rating, after, true
+		}
+	}
+	if first == "/router-feedback" || first == "/rf" {
+		return "", "", true
+	}
+	if after, found := cutAnyPrefix(first, "/router-feedback ", "/rf "); found {
+		return "", after, true
+	}
+	return "", "", false
+}
+
+// splitLeadingRating promotes a leading 👍/👎/+/-/up/down token in a note to a
+// rating, returning the rating and the remaining note. Returns ("", s) when the
+// note does not open with a recognized verdict.
+func splitLeadingRating(s string) (rating, rest string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", ""
+	}
+	tok, after, _ := strings.Cut(s, " ")
+	switch strings.ToLower(tok) {
+	case "+", "👍", "up", "thumbsup":
+		return RouterFeedbackRatingUp, strings.TrimSpace(after)
+	case "-", "👎", "down", "thumbsdown":
+		return RouterFeedbackRatingDown, strings.TrimSpace(after)
+	}
+	return "", s
 }

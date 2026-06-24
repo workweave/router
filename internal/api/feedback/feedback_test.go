@@ -166,3 +166,80 @@ func TestSubmitHandler_InvalidTokenReturns404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Empty(t, repo.upserts)
 }
+
+func rateEngine(repo proxy.FeedbackRepository, signer *token.Signer) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.GET("/v1/feedback/rate", feedbackapi.RateHandler(newService(repo, signer)))
+	return engine
+}
+
+func TestRateHandler_OneClickUpPersists(t *testing.T) {
+	signer := token.NewSigner("secret", time.Hour)
+	repo := &fakeFeedbackRepo{}
+	tok := signer.Mint("inst-1", "org-1", "req-1", "user-1")
+
+	rec := httptest.NewRecorder()
+	rateEngine(repo, signer).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/feedback/rate?t="+tok+"&r=up", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, repo.upserts, 1)
+	up := repo.upserts[0]
+	assert.Equal(t, "req-1", up.RequestID)
+	assert.Equal(t, "up", up.Rating)
+	assert.Equal(t, "user-1", up.RouterUserID)
+	assert.Nil(t, up.Comment, "one-click ratings carry no comment")
+	assert.Contains(t, rec.Body.String(), "Thank you for your feedback!")
+	assert.Contains(t, rec.Body.String(), "/v1/feedback/assets/wooly-wave.png")
+	assert.Contains(t, rec.Body.String(), "/v1/feedback/assets/weave.svg")
+	assert.Contains(t, rec.Header().Get("Content-Type"), "text/html")
+}
+
+func TestRateHandler_OneClickDownPersists(t *testing.T) {
+	signer := token.NewSigner("secret", time.Hour)
+	repo := &fakeFeedbackRepo{}
+	tok := signer.Mint("inst-1", "org-1", "req-2", "")
+
+	rec := httptest.NewRecorder()
+	rateEngine(repo, signer).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/feedback/rate?t="+tok+"&r=down", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, repo.upserts, 1)
+	assert.Equal(t, "down", repo.upserts[0].Rating)
+}
+
+func TestRateHandler_RejectsBadRating(t *testing.T) {
+	signer := token.NewSigner("secret", time.Hour)
+	repo := &fakeFeedbackRepo{}
+	tok := signer.Mint("inst-1", "org-1", "req-1", "")
+
+	rec := httptest.NewRecorder()
+	rateEngine(repo, signer).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/feedback/rate?t="+tok+"&r=meh", nil))
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Empty(t, repo.upserts)
+}
+
+func TestRateHandler_InvalidTokenReturns404(t *testing.T) {
+	signer := token.NewSigner("secret", time.Hour)
+	repo := &fakeFeedbackRepo{}
+
+	rec := httptest.NewRecorder()
+	rateEngine(repo, signer).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/feedback/rate?t=bogus.token&r=up", nil))
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Empty(t, repo.upserts)
+}
+
+func TestRateHandler_ExpiredTokenReturns410(t *testing.T) {
+	signer := token.NewSigner("secret", time.Nanosecond)
+	repo := &fakeFeedbackRepo{}
+	tok := signer.Mint("inst-1", "org-1", "req-1", "")
+	time.Sleep(2 * time.Millisecond)
+
+	rec := httptest.NewRecorder()
+	rateEngine(repo, signer).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/feedback/rate?t="+tok+"&r=up", nil))
+
+	assert.Equal(t, http.StatusGone, rec.Code)
+	assert.Empty(t, repo.upserts)
+}

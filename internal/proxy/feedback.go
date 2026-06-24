@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -17,6 +18,12 @@ import (
 // the response served, so clients can surface a "rate this routing decision"
 // affordance. Omitted when the feedback-link feature is unwired.
 const HeaderRouterFeedbackURL = "x-router-feedback-url"
+
+// feedbackRatePath is the router endpoint backing the one-click thumb links in
+// the response footer. It lives on the same origin as feedbackBaseURL (the
+// router host, which already serves /v1/feedback/*), so footer links are simply
+// feedbackBaseURL + this + query.
+const feedbackRatePath = "/v1/feedback/rate"
 
 // routerFeedbackSpanName is the OTLP span the router emits on each submission so
 // the Weave backend mirrors feedback into its own router_request_feedback table.
@@ -151,19 +158,65 @@ func (s *Service) emitFeedbackSpan(p SubmitFeedbackParams) {
 	buf.Flush()
 }
 
+// mintFeedbackToken signs a feedback-link token for one request, or returns ""
+// when the feature is unwired or any required id is missing (e.g. anonymous /
+// no-external-id deployments). Callers treat "" as "feedback disabled".
+func (s *Service) mintFeedbackToken(installationID uuid.UUID, externalID, requestID, routerUserID string) string {
+	if s.feedbackSigner == nil || s.feedbackBaseURL == "" {
+		return ""
+	}
+	if installationID == uuid.Nil || externalID == "" || requestID == "" {
+		return ""
+	}
+	return s.feedbackSigner.Mint(installationID.String(), externalID, requestID, routerUserID)
+}
+
 // setFeedbackLinkHeader mints a signed feedback link for the request and sets
 // it on the response. No-op when the feature is unwired or any required id is
 // missing (e.g. anonymous / no-external-id deployments).
 func (s *Service) setFeedbackLinkHeader(w http.ResponseWriter, installationID uuid.UUID, externalID, requestID, routerUserID string) {
-	if s.feedbackSigner == nil || s.feedbackBaseURL == "" {
-		return
-	}
-	if installationID == uuid.Nil || externalID == "" || requestID == "" {
-		return
-	}
-	token := s.feedbackSigner.Mint(installationID.String(), externalID, requestID, routerUserID)
+	token := s.mintFeedbackToken(installationID, externalID, requestID, routerUserID)
 	if token == "" {
 		return
 	}
 	w.Header().Set(HeaderRouterFeedbackURL, s.feedbackBaseURL+"/f/"+token)
+}
+
+// terminalFeedbackClients are the coding agents whose entire streamed response
+// is user-facing chat, so a trailing rating hint renders cleanly and the user
+// can reply with /rf+ or /rf-. IDEs (cursor) and unknown clients are excluded:
+// they reuse the same endpoint for inline edits, applied diffs, and commit
+// messages, where an appended footer contaminates non-chat output.
+var terminalFeedbackClients = map[string]struct{}{
+	ClientAppClaudeCode: {},
+	ClientAppCodex:      {},
+	ClientAppOpencode:   {},
+}
+
+// feedbackFooterText is the link-free fallback hint, emitted when no signed
+// rate token is available (feature unwired or anonymous request) but durable
+// storage can still capture a typed /rf rating. translate.feedbackFooterPattern
+// matches both this and the clickable form on ingress — keep them in sync.
+const feedbackFooterText = "\n\n_Was this routing right?_ 👍 👎 — reply `/rf+` or `/rf-`"
+
+// feedbackFooter returns the rating affordance appended to a streamed response,
+// or "" to stay fully transparent. Gated to terminal coding agents
+// (terminalFeedbackClients) so IDEs never get chat text injected into non-chat
+// surfaces. When a signed rate token is available the thumbs are clickable
+// links (one-click GET to the rate endpoint); the /rf commands trail them as a
+// keyboard companion for terminals that don't render OSC-8 hyperlinks. Falls
+// back to the link-free hint when no token is mintable, and suppresses entirely
+// when neither a token nor durable storage can record a rating.
+func (s *Service) feedbackFooter(clientApp string, installationID uuid.UUID, externalID, requestID, routerUserID string) string {
+	if _, ok := terminalFeedbackClients[clientApp]; !ok {
+		return ""
+	}
+	if token := s.mintFeedbackToken(installationID, externalID, requestID, routerUserID); token != "" {
+		base := s.feedbackBaseURL + feedbackRatePath + "?t=" + url.QueryEscape(token) + "&r="
+		return "\n\n_Was this routing right?_ [👍](" + base + "up) [👎](" + base + "down) — or reply `/rf+` / `/rf-`"
+	}
+	if s.feedbackStore == nil {
+		return ""
+	}
+	return feedbackFooterText
 }

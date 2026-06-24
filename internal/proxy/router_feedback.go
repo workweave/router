@@ -32,7 +32,15 @@ type RouterFeedbackEvent struct {
 	SessionID      string
 	RequestedModel string
 	ServedModel    string
-	Feedback       string
+	// Rating is the thumbs verdict ("up", "down", or "" for a note-only
+	// submission), parsed from the /rf+ /rf- shortcuts or a leading verdict
+	// token in the note.
+	Rating string
+	// Feedback is the human-readable submission persisted to
+	// router.router_feedback. When the user gave only a verdict, it carries a
+	// compact label ("👍" / "👎") so the column is never empty and stays
+	// self-describing without a dedicated rating column.
+	Feedback string
 }
 
 // handleRouterFeedbackCommand processes a /router-feedback directive: it
@@ -53,13 +61,15 @@ func (s *Service) handleRouterFeedbackCommand(
 	role := roleForTier(catalog.TierFor(env.Model()))
 
 	feedback := strings.TrimSpace(cmd.Feedback)
-	if feedback == "" {
-		// Acknowledgment text is formatted as a routing marker so the existing
+	rating := cmd.Rating
+	if rating == "" && feedback == "" {
+		// Nothing actionable: no verdict and no note. Acknowledgment text is
+		// formatted as a routing marker so the existing
 		// StripRoutingMarkerFromMessages ingress stripper removes it from
 		// subsequent inbound requests (see handleForceModelCommand).
-		msg := "✦ **Weave Router** → Router-feedback needs a message, e.g. /router-feedback got stuck on Haiku for too long.\n\n"
+		msg := "✦ **Weave Router** → Router-feedback needs a verdict or a note, e.g. /rf+ or /rf- too slow.\n\n"
 		if env.SourceFormat() == translate.FormatOpenAI {
-			msg = "Weave Router: router-feedback needs a message, e.g. /router-feedback got stuck on Haiku for too long."
+			msg = "Weave Router: router-feedback needs a verdict or a note, e.g. /rf+ or /rf- too slow."
 		}
 		return writeSyntheticCommandResponse(w, env, msg, inputTokens)
 	}
@@ -92,7 +102,8 @@ func (s *Service) handleRouterFeedbackCommand(
 			SessionID:      clientID.SessionID,
 			RequestedModel: env.Model(),
 			ServedModel:    servedModel,
-			Feedback:       feedback,
+			Rating:         rating,
+			Feedback:       persistedFeedbackText(rating, feedback),
 		}
 		// context.Background(): the request ctx may already be canceled by the
 		// time this runs (client disconnected mid-command). Feedback the user
@@ -108,7 +119,7 @@ func (s *Service) handleRouterFeedbackCommand(
 		Name:  "router.feedback",
 		Start: now,
 		End:   now,
-		Attrs: otel.NewAttrBuilder(10).
+		Attrs: otel.NewAttrBuilder(11).
 			String("external_id", externalID).
 			String("router_user_id", routerUserID).
 			String("client.device_id", clientID.DeviceID).
@@ -118,23 +129,55 @@ func (s *Service) handleRouterFeedbackCommand(
 			String("requested.model", env.Model()).
 			String("feedback.served_model", servedModel).
 			String("feedback.role", role).
+			String("feedback.rating", rating).
 			String("feedback.text", feedback).
 			Build(),
 	})
 	otel.Flush(ctx)
 
 	log.Info("router.feedback",
+		"rating", rating,
 		"feedback", feedback,
 		"served_model", servedModel,
 		"requested_model", env.Model(),
 		"role", role,
 	)
 
-	msg := "✦ **Weave Router** → Feedback recorded. Thank you.\n\n"
-	if env.SourceFormat() == translate.FormatOpenAI {
-		msg = "Weave Router: Feedback recorded. Thank you."
+	return writeSyntheticCommandResponse(w, env, routerFeedbackAck(env.SourceFormat(), rating), inputTokens)
+}
+
+// routerFeedbackAck renders the synthetic acknowledgment for a recorded
+// submission, echoing the verdict so the user sees their rating landed. The
+// Anthropic-format ack is wrapped as a routing marker so the existing ingress
+// stripper removes it from subsequent turns.
+func routerFeedbackAck(format translate.Format, rating string) string {
+	verdict := ""
+	switch rating {
+	case translate.RouterFeedbackRatingUp:
+		verdict = " 👍"
+	case translate.RouterFeedbackRatingDown:
+		verdict = " 👎"
 	}
-	return writeSyntheticCommandResponse(w, env, msg, inputTokens)
+	if format == translate.FormatOpenAI {
+		return "Weave Router: Feedback recorded" + verdict + ". Thank you."
+	}
+	return "✦ **Weave Router** → Feedback recorded" + verdict + ". Thank you.\n\n"
+}
+
+// persistedFeedbackText is the value written to router.router_feedback.feedback.
+// A verdict-only submission stores a compact emoji so the NOT NULL column is
+// never empty and stays self-describing.
+func persistedFeedbackText(rating, feedback string) string {
+	if feedback != "" {
+		return feedback
+	}
+	switch rating {
+	case translate.RouterFeedbackRatingUp:
+		return "👍"
+	case translate.RouterFeedbackRatingDown:
+		return "👎"
+	}
+	return feedback
 }
 
 // writeSyntheticCommandResponse writes a router-command acknowledgment in the
