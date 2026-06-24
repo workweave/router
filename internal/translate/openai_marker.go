@@ -149,7 +149,7 @@ func chunkCarriesOutput(payload []byte) bool {
 	if delta.Get("reasoning_content").Str != "" || delta.Get("reasoning").Str != "" {
 		return true
 	}
-	if delta.Get("tool_calls").IsArray() {
+	if delta.Get("tool_calls.#").Int() > 0 {
 		return true
 	}
 	return false
