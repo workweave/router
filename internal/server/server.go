@@ -141,6 +141,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	messagesMiddleware = append(messagesMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
+		middleware.WithRouterStrategyOverride(),
 		middleware.WithRoutingKnobsOverride(),
 	)
 	messagesGroup := engine.Group("", messagesMiddleware...)
@@ -157,6 +158,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	chatCompletionMiddleware = append(chatCompletionMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
+		middleware.WithRouterStrategyOverride(),
 		middleware.WithRoutingKnobsOverride(),
 	)
 	chatCompletionGroup := engine.Group("", chatCompletionMiddleware...)
@@ -190,6 +192,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	routeMiddleware = append(routeMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
+		middleware.WithRouterStrategyOverride(),
 		middleware.WithRoutingKnobsOverride(),
 	)
 	routeGroup := engine.Group("", routeMiddleware...)

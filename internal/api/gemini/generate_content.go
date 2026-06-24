@@ -13,6 +13,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router/cluster"
+	"workweave/router/internal/router/rl"
 	"workweave/router/internal/server/middleware"
 	"workweave/router/internal/translate"
 
@@ -102,6 +103,13 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
 				log.Warn("Invalid routing knobs supplied", "err", err)
 				writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+				return
+			}
+			if errors.Is(err, rl.ErrPolicyUnavailable) {
+				log.Error("RL routing unavailable", "err", err)
+				c.Header("Retry-After", "1")
+				writeGeminiError(c, http.StatusServiceUnavailable, "UNAVAILABLE",
+					"Router unavailable: RL policy router failed and no fallback is configured.")
 				return
 			}
 			if errors.Is(err, cluster.ErrClusterUnavailable) {

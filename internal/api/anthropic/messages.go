@@ -13,6 +13,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router/cluster"
+	"workweave/router/internal/router/rl"
 	"workweave/router/internal/server/middleware"
 	"workweave/router/internal/translate"
 
@@ -106,6 +107,12 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
 				log.Warn("Invalid routing knobs supplied", "err", err)
 				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Invalid routing knobs supplied.")
+				return
+			}
+			if errors.Is(err, rl.ErrPolicyUnavailable) {
+				log.Error("RL routing unavailable", "err", err)
+				c.Header("Retry-After", "1")
+				writeAnthropicError(c, http.StatusServiceUnavailable, "api_error", "Router unavailable: RL policy router failed and no fallback is configured.")
 				return
 			}
 			if errors.Is(err, cluster.ErrClusterUnavailable) {
