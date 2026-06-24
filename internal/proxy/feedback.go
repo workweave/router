@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -18,12 +17,6 @@ import (
 // the response served, so clients can surface a "rate this routing decision"
 // affordance. Omitted when the feedback-link feature is unwired.
 const HeaderRouterFeedbackURL = "x-router-feedback-url"
-
-// feedbackRatePath is the router endpoint backing the one-click thumb links in
-// the response footer. It lives on the same origin as feedbackBaseURL (the
-// router host, which already serves /v1/feedback/*), so footer links are simply
-// feedbackBaseURL + this + query.
-const feedbackRatePath = "/v1/feedback/rate"
 
 // routerFeedbackSpanName is the OTLP span the router emits on each submission so
 // the Weave backend mirrors feedback into its own router_request_feedback table.
@@ -193,29 +186,27 @@ var terminalFeedbackClients = map[string]struct{}{
 	ClientAppOpencode:   {},
 }
 
-// feedbackFooterText is the link-free fallback hint, emitted when no signed
-// rate token is available (feature unwired or anonymous request) but durable
-// storage can still capture a typed /rf rating. translate.feedbackFooterPattern
-// matches both this and the clickable form on ingress — keep them in sync.
+// feedbackFooterText is the trailing rating hint appended to streamed answers
+// for terminal coding agents. It is deliberately link-free: Claude Code's
+// markdown renderer prints a [label](url) link as "label (url)" rather than
+// hiding the URL, so embedding the signed rate link dumps the entire token
+// inline. The typed /rf+ /rf- commands keep feedback one keystroke away and
+// render identically across the TUI, print mode, and IDEs.
+// translate.feedbackFooterPattern matches this on ingress to strip it back out
+// of upstream context — keep the two in sync.
 const feedbackFooterText = "\n\n_Was this routing right?_ 👍 👎 — reply `/rf+` or `/rf-`"
 
-// feedbackFooter returns the rating affordance appended to a streamed response,
-// or "" to stay fully transparent. Gated to terminal coding agents
+// feedbackFooter returns the in-terminal rating hint appended to a streamed
+// response, or "" to stay fully transparent. Gated to terminal coding agents
 // (terminalFeedbackClients) so IDEs never get chat text injected into non-chat
-// surfaces. When a signed rate token is available the thumbs are clickable
-// links (one-click GET to the rate endpoint); the /rf commands trail them as a
-// keyboard companion for terminals that don't render OSC-8 hyperlinks. Falls
-// back to the link-free hint when no token is mintable, and suppresses entirely
-// when neither a token nor durable storage can record a rating.
-func (s *Service) feedbackFooter(clientApp string, installationID uuid.UUID, externalID, requestID, routerUserID string) string {
-	if _, ok := terminalFeedbackClients[clientApp]; !ok {
+// surfaces, and to deployments with durable feedback storage so we never
+// advertise a rating command we can't record. The signed feedback link still
+// ships invisibly via the x-router-feedback-url header for rich GUI clients.
+func (s *Service) feedbackFooter(clientApp string) string {
+	if s.feedbackStore == nil {
 		return ""
 	}
-	if token := s.mintFeedbackToken(installationID, externalID, requestID, routerUserID); token != "" {
-		base := s.feedbackBaseURL + feedbackRatePath + "?t=" + url.QueryEscape(token) + "&r="
-		return "\n\n_Was this routing right?_ [👍](" + base + "up) [👎](" + base + "down) — or reply `/rf+` / `/rf-`"
-	}
-	if s.feedbackStore == nil {
+	if _, ok := terminalFeedbackClients[clientApp]; !ok {
 		return ""
 	}
 	return feedbackFooterText
