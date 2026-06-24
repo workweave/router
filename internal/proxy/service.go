@@ -1307,16 +1307,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return fmt.Errorf("strip routing marker: %w", stripErr)
 	}
 
-	// Strip the one-click thumbs footer that prior streamed answers appended as
-	// trailing assistant text. Like the routing marker, clients echo it back
-	// verbatim, so without this it (and its signed rate URLs) accumulates in
-	// upstream context and shifts assistant prefixes off the prompt cache.
-	body, stripErr = translate.StripFeedbackFooterFromMessages(body)
-	if stripErr != nil {
-		log.Error("Failed to strip feedback footer from inbound messages", "err", stripErr)
-		return fmt.Errorf("strip feedback footer: %w", stripErr)
-	}
-
 	// Strip Claude Code's 1M-context model variant tag (e.g.
 	// "claude-opus-4-8[1m]") to the canonical catalog id before parsing, so
 	// routing, session pins, and telemetry key off the real model — and so the
@@ -1675,17 +1665,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// The TTFB cost is a single round-trip's worth of buffered SSE bytes
 	// (~200B) released the moment the upstream's first byte arrives.
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
-	// Append the one-click feedback thumbs as a trailing content block on
-	// streaming answers. Wraps the client writer below the capture layer so the
-	// footer never lands in cached/logged bodies; transparent for non-streaming
-	// responses and when feedback is unwired.
-	clientSink := w
-	if env.Stream() {
-		if footer := s.feedbackFooter(ClientIdentityFrom(ctx).ClientApp, installationID, externalID, requestID, auth.UserIDFrom(ctx)); footer != "" {
-			clientSink = translate.NewAnthropicRoutingFooterWriter(w, footer)
-		}
-	}
-	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
+	contentSink, contentCap := s.maybeCaptureResponse(w)
 	preludeBuf := newPreludeBuffer(contentSink)
 	var rootSink http.ResponseWriter = preludeBuf
 	var captureW *captureWriter
@@ -2896,20 +2876,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 
-	// Keep the original bytes on strip failure: the strippers return a nil body
-	// alongside the error, and this path logs-and-continues rather than aborting,
-	// so overwriting body unconditionally would drop the request and break parse.
-	strippedBody, stripErr := translate.StripRoutingMarkerFromMessages(body)
+	body, stripErr := translate.StripRoutingMarkerFromMessages(body)
 	if stripErr != nil {
 		log.Error("Failed to strip routing marker from OpenAI messages", "err", stripErr)
-	} else {
-		body = strippedBody
-	}
-	strippedBody, stripErr = translate.StripFeedbackFooterFromMessages(body)
-	if stripErr != nil {
-		log.Error("Failed to strip feedback footer from OpenAI messages", "err", stripErr)
-	} else {
-		body = strippedBody
 	}
 	env, parseErr := translate.ParseOpenAI(body)
 	if parseErr != nil {
@@ -3149,19 +3118,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// so single-binding upstream errors don't strand the routing-marker chunk
 	// on the wire when the upstream never produces a first byte.
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
-	// Append the one-click feedback thumbs as a trailing chunk on streaming
-	// answers (see ProxyMessages for the rationale). Transparent for
-	// non-streaming responses and when feedback is unwired. Skipped on the
-	// Responses-API path (w is a *ResponsesWriter): wrapping it would defeat
-	// maybeCaptureResponse's ResponsesWriter special-casing, so /v1/responses
-	// footers are a follow-up.
-	clientSink := w
-	if _, isResponses := w.(*translate.ResponsesWriter); env.Stream() && !isResponses {
-		if footer := s.feedbackFooter(ClientIdentityFrom(ctx).ClientApp, installationID, externalID, requestID, auth.UserIDFrom(ctx)); footer != "" {
-			clientSink = translate.NewOpenAIRoutingFooterWriter(w, footer)
-		}
-	}
-	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
+	contentSink, contentCap := s.maybeCaptureResponse(w)
 	preludeBuf := newPreludeBuffer(contentSink)
 	var rootSink http.ResponseWriter = preludeBuf
 

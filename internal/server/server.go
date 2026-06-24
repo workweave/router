@@ -203,10 +203,6 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		feedbackGroup := engine.Group("/v1/feedback", middleware.WithTimeout(feedbackTimeout))
 		feedbackGroup.GET("/link/:token", feedbackapi.GetContextHandler(proxySvc))
 		feedbackGroup.POST("/link", feedbackapi.SubmitHandler(proxySvc))
-		// One-click thumb links embedded in response footers.
-		feedbackGroup.GET("/rate", feedbackapi.RateHandler(proxySvc))
-		feedbackGroup.GET("/assets/wooly-wave.png", feedbackapi.WoolyWaveHandler())
-		feedbackGroup.GET("/assets/weave.svg", feedbackapi.WeaveLogoHandler())
 	}
 }
 
