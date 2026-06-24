@@ -211,7 +211,7 @@ func (s *Service) runTurnLoop(
 
 	// Without a pin store, run the scorer and return its decision.
 	if s.pinStore == nil {
-		decision, err := s.router.Route(ctx, req)
+		decision, err := s.routeFor(ctx, req)
 		if err != nil {
 			return res, err
 		}
@@ -460,7 +460,7 @@ func (s *Service) runTurnLoop(
 		if constrained, ok := s.restrictToTier(req.ExcludedModels, forcedTierFloor); ok {
 			tierReq := req
 			tierReq.ExcludedModels = constrained
-			if dec, derr := s.router.Route(ctx, tierReq); derr == nil {
+			if dec, derr := s.routeFor(ctx, tierReq); derr == nil {
 				fresh, routed = dec, true
 				log.Info("user-forced model evicted; rerouted to next-best in same tier",
 					"forced_tier", forcedTierFloor.String(),
@@ -474,7 +474,7 @@ func (s *Service) runTurnLoop(
 		}
 	}
 	if !routed {
-		dec, err := s.router.Route(ctx, req)
+		dec, err := s.routeFor(ctx, req)
 		if err != nil {
 			log.Error("turnloop scorer failed", "err", err, "requested_model", req.RequestedModel)
 			return res, err

@@ -42,6 +42,7 @@ import (
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/planner"
+	"workweave/router/internal/router/rl"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/server"
 	"workweave/router/internal/translate"
@@ -585,7 +586,22 @@ func main() {
 		logger.Info("Feedback link disabled (set ROUTER_FEEDBACK_LINK_SECRET and ROUTER_FEEDBACK_BASE_URL to enable)")
 	}
 
+	// Opt-in RL/DPO policy router. Wired only when ROUTER_RL_SIDECAR_URL points
+	// at a running policy sidecar; the x-weave-router-strategy: rl header then
+	// routes through it, selecting from the same deployed catalog candidates and
+	// dispatching via Weave's own providers. Left unset, the header fails closed
+	// with HTTP 503 rather than silently serving the cluster scorer.
+	var rlRouter router.Router
+	if rlSidecarURL := config.GetOr("ROUTER_RL_SIDECAR_URL", ""); rlSidecarURL != "" {
+		rlTimeout := parseEnvDurationMs("ROUTER_RL_SIDECAR_TIMEOUT_MS", rl.DefaultTimeout)
+		rlRouter = rl.New(rl.NewHTTPDecider(rlSidecarURL, nil, rlTimeout), availableModels)
+		logger.Info("RL policy router wired", "sidecar_url", rlSidecarURL, "timeout_ms", rlTimeout.Milliseconds(), "candidate_models", len(availableModels))
+	} else {
+		logger.Info("RL policy router disabled (ROUTER_RL_SIDECAR_URL unset); x-weave-router-strategy: rl will return 503")
+	}
+
 	proxySvc := proxy.NewService(routeEntry, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
+		WithRLRouter(rlRouter).
 		WithContentCapture(captureMode, captureMaxBytes, nil).
 		WithFeedback(repo.Feedback, feedbackSigner, feedbackBaseURL).
 		WithByokOnly(byokOnly).
