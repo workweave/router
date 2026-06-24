@@ -62,11 +62,11 @@ func TestGeminiRoutingFooterWriter_SkipsToolCallTurn(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), "Was this routing right?", "functionCall turns must not get a footer")
 }
 
-// geminiEmptyFunctionCallStream carries a present-but-empty functionCall part
-// (null) ahead of a natural STOP, the exact shape gjson.Exists() falsely treats
-// as a tool turn.
+// geminiEmptyFunctionCallStream carries present-but-empty functionCall parts (a
+// null one and one whose name is an empty string) ahead of a natural STOP — the
+// exact shapes gjson.Exists() falsely treats as a tool turn.
 func geminiEmptyFunctionCallStream() string {
-	return `data: {"candidates":[{"content":{"parts":[{"text":"The answer is 42.","functionCall":null}],"role":"model"},"index":0}]}` + "\n\n" +
+	return `data: {"candidates":[{"content":{"parts":[{"text":"The answer is ","functionCall":null},{"functionCall":{"name":""}},{"text":"42."}],"role":"model"},"index":0}]}` + "\n\n" +
 		`data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP","index":0}]}` + "\n\n"
 }
 

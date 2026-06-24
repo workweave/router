@@ -181,13 +181,14 @@ func (w *GeminiRoutingFooterWriter) writeData(payload []byte) {
 
 // chunkHasFunctionCall reports whether any part of a Gemini chunk's first
 // candidate is a functionCall (a tool-call turn). A present-but-empty
-// functionCall (null or {}) does not count: gjson.Exists() is true for both,
-// and treating them as tool turns would latch the gate and silently suppress
-// the footer on a later natural STOP chunk. A real call always carries a name.
+// functionCall (null, {}, or an empty name) does not count: gjson.Exists() is
+// true for all of those, and treating them as tool turns would latch the gate
+// and silently suppress the footer on a later natural STOP chunk. A real call
+// always carries a non-empty name.
 func chunkHasFunctionCall(payload []byte) bool {
 	found := false
 	gjson.GetBytes(payload, "candidates.0.content.parts").ForEach(func(_, part gjson.Result) bool {
-		if part.Get("functionCall.name").Exists() {
+		if part.Get("functionCall.name").String() != "" {
 			found = true
 			return false
 		}
