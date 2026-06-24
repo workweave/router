@@ -194,7 +194,7 @@ var terminalFeedbackClients = map[string]struct{}{
 // render identically across the TUI, print mode, and IDEs.
 // translate.feedbackFooterPattern matches this on ingress to strip it back out
 // of upstream context — keep the two in sync.
-const feedbackFooterText = "\n\n_Weave Router feedback:_ `/rf+` good experience · `/rf-` poor experience · note optional, e.g. `/rf- too slow`"
+const feedbackFooterText = "\n\n_Weave Router feedback:_ `/rf +` good experience · `/rf -` poor experience · note optional, e.g. `/rf - too slow`"
 
 // feedbackFooter returns the in-terminal rating hint appended to a streamed
 // response, or "" to stay fully transparent. Gated to terminal coding agents

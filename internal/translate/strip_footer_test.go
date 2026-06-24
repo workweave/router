@@ -17,7 +17,7 @@ const footerSentinel = "_Weave Router feedback:_"
 // blank-line separator, the italic sentinel, the /rf± typed-command hints, and
 // the trailing optional-note example.
 func sampleFooter() string {
-	return "\n\n_Weave Router feedback:_ `/rf+` good experience · `/rf-` poor experience · note optional, e.g. `/rf- too slow`"
+	return "\n\n_Weave Router feedback:_ `/rf +` good experience · `/rf -` poor experience · note optional, e.g. `/rf - too slow`"
 }
 
 func TestStripFeedbackFooter_AppendedToAssistantBlock(t *testing.T) {

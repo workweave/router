@@ -13,7 +13,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const testFooter = "\n\n_Weave Router feedback:_ `/rf+` good experience · `/rf-` poor experience · note optional, e.g. `/rf- too slow`"
+const testFooter = "\n\n_Weave Router feedback:_ `/rf +` good experience · `/rf -` poor experience · note optional, e.g. `/rf - too slow`"
 
 // anthropicAnswerStream is a minimal text answer (index 0) that ends naturally.
 func anthropicAnswerStream(stopReason string) string {

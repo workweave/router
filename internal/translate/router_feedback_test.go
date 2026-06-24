@@ -60,6 +60,25 @@ func TestParseRouterFeedbackCommand(t *testing.T) {
 			wantFound:    true,
 		},
 		{
+			name:       "rf space plus promotes to thumbs up",
+			input:      "/rf +",
+			wantRating: "up",
+			wantFound:  true,
+		},
+		{
+			name:       "rf space minus promotes to thumbs down",
+			input:      "/rf -",
+			wantRating: "down",
+			wantFound:  true,
+		},
+		{
+			name:         "rf space minus carries a trailing note",
+			input:        "/rf - too slow",
+			wantRating:   "down",
+			wantFeedback: "too slow",
+			wantFound:    true,
+		},
+		{
 			name:         "note without a verdict keeps empty rating",
 			input:        "/rf the diff was incomplete",
 			wantFeedback: "the diff was incomplete",
