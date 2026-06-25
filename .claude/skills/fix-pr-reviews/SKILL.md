@@ -322,12 +322,17 @@ Do **not** use a single blocking `gh pr checks --watch` without also polling for
 ```bash
 HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
 
+# For cross-fork PRs, use headRepository; otherwise use baseRepository
+# (check-runs API needs the repo where the head commit lives)
+CHECKS_OWNER="$OWNER"
+CHECKS_REPO="$REPO"
+
 # Step 6.1: Wait for CI to DISPATCH for HEAD_SHA (~30-120s after push).
 DISPATCH_TIMEOUT=false
 for i in $(seq 1 12); do
   sleep 15
   # --- comment interrupt (run GraphQL; if actionable threads > 0 → exit 1) ---
-  count=$(gh api "repos/$OWNER/$REPO/commits/$HEAD_SHA/check-runs" --jq '.total_count')
+  count=$(gh api "repos/$CHECKS_OWNER/$CHECKS_REPO/commits/$HEAD_SHA/check-runs" --jq '.total_count')
   echo "[dispatch poll $i] checks for $HEAD_SHA: $count"
   # Dispatch detected when at least one check exists (some repos have fewer required checks)
   if [ "$count" -gt 0 ]; then break; fi
