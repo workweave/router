@@ -28,6 +28,16 @@ type Installation struct {
 	// remainder. nil means no preference -- the scorer keeps its tuned
 	// per-cluster defaults.
 	RoutingQualityWeight *float64
+	// UsageBypassEnabled toggles the per-installation subscription usage-bypass
+	// gate. When true, requests presenting a subscription credential whose
+	// observed rate-limit utilization is below UsageBypassThreshold pass
+	// straight through to the requested model (no routing, no billing debit).
+	// Defaults false -- strict opt-in.
+	UsageBypassEnabled bool
+	// UsageBypassThreshold is the [0, 1] utilization at/above which the bypass
+	// gate disengages and normal routing takes over. nil means "use the
+	// deployment default" so the toggle can be on before a value is chosen.
+	UsageBypassThreshold *float64
 }
 
 type CreateInstallationParams struct {
@@ -51,4 +61,8 @@ type InstallationRepository interface {
 	// fraction in [0, 1]). Passing nil clears the preference so the scorer
 	// reverts to its tuned per-cluster defaults.
 	UpdateRoutingPreference(ctx context.Context, externalID, id string, qualityWeight *float64) error
+	// UpdateUsageBypass sets the subscription usage-bypass gate. enabled toggles
+	// the gate; threshold is the [0, 1] utilization at/above which it disengages
+	// (nil = use the deployment default).
+	UpdateUsageBypass(ctx context.Context, externalID, id string, enabled bool, threshold *float64) error
 }

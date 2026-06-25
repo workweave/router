@@ -110,6 +110,9 @@ func (fakeInstallationRepository) UpdateExcludedProviders(ctx context.Context, e
 func (fakeInstallationRepository) UpdateRoutingPreference(ctx context.Context, externalID, id string, qualityWeight *float64) error {
 	return errors.New("not used")
 }
+func (fakeInstallationRepository) UpdateUsageBypass(ctx context.Context, externalID, id string, enabled bool, threshold *float64) error {
+	return errors.New("not used")
+}
 
 func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 	gin.SetMode(gin.TestMode)

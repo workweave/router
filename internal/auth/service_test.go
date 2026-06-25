@@ -99,6 +99,8 @@ type fakeInstallationRepository struct {
 	excludedProvidersByID         map[string][]string
 	excludedProvidersExternalByID map[string]string
 	routingQualityByID            map[string]*float64
+	usageBypassEnabledByID        map[string]bool
+	usageBypassThresholdByID      map[string]*float64
 }
 
 func (fakeInstallationRepository) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
@@ -140,6 +142,17 @@ func (f *fakeInstallationRepository) UpdateRoutingPreference(ctx context.Context
 		f.routingQualityByID = map[string]*float64{}
 	}
 	f.routingQualityByID[id] = qualityWeight
+	return nil
+}
+func (f *fakeInstallationRepository) UpdateUsageBypass(ctx context.Context, externalID, id string, enabled bool, threshold *float64) error {
+	if f.usageBypassEnabledByID == nil {
+		f.usageBypassEnabledByID = map[string]bool{}
+	}
+	if f.usageBypassThresholdByID == nil {
+		f.usageBypassThresholdByID = map[string]*float64{}
+	}
+	f.usageBypassEnabledByID[id] = enabled
+	f.usageBypassThresholdByID[id] = threshold
 	return nil
 }
 

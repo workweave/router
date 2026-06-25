@@ -135,6 +135,20 @@ func (r *installationRepo) UpdateRoutingPreference(ctx context.Context, external
 	})
 }
 
+func (r *installationRepo) UpdateUsageBypass(ctx context.Context, externalID, id string, enabled bool, threshold *float64) error {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return err
+	}
+	q := sqlc.New(r.tx)
+	return q.UpdateModelRouterInstallationUsageBypass(ctx, sqlc.UpdateModelRouterInstallationUsageBypassParams{
+		ID:                   parsed,
+		ExternalID:           externalID,
+		UsageBypassEnabled:   enabled,
+		UsageBypassThreshold: threshold,
+	})
+}
+
 type apiKeyRepo struct {
 	tx sqlc.DBTX
 }

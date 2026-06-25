@@ -258,6 +258,36 @@ type InstallationExcludedProvidersContextKey struct{}
 // routingKnobsForRequest.
 type InstallationRoutingKnobsContextKey struct{}
 
+// InstallationUsageBypassContextKey is the context key for the authed
+// installation's subscription usage-bypass gate config. Carried as
+// UsageBypassConfig. Absent when the installation hasn't enabled the gate.
+type InstallationUsageBypassContextKey struct{}
+
+// UsageBypassConfig is the per-installation subscription usage-bypass setting,
+// stashed on ctx by the auth middleware. Threshold is nil when the toggle is on
+// but no value has been chosen yet; the request path falls back to
+// defaultUsageBypassThreshold in that case.
+type UsageBypassConfig struct {
+	Enabled   bool
+	Threshold *float64
+}
+
+// defaultUsageBypassThreshold is the utilization at/above which the bypass gate
+// disengages when an installation has enabled the gate without choosing an
+// explicit threshold. Mirrors the conservative default of the legacy
+// ROUTER_USAGE_BYPASS_THRESHOLD knob.
+const defaultUsageBypassThreshold = 0.95
+
+// usageBypassFromContext returns the per-installation bypass config stashed on
+// ctx by the auth middleware, and whether one is present and enabled.
+func usageBypassFromContext(ctx context.Context) (UsageBypassConfig, bool) {
+	cfg, ok := ctx.Value(InstallationUsageBypassContextKey{}).(UsageBypassConfig)
+	if !ok || !cfg.Enabled {
+		return UsageBypassConfig{}, false
+	}
+	return cfg, true
+}
+
 // installationExcludedModelsFromContext returns the per-installation exclusion
 // list stashed on ctx by the auth middleware, or nil when none is present.
 
@@ -1503,6 +1533,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// tool_result blocks from env, which would zero out tool_result_bytes on a
 	// genuine tool_result turn read at telemetry time.
 	inboundLastUser := env.LastUserMessage()
+
+	// Subscription usage-bypass gate: while the caller's own Claude subscription
+	// has headroom (observed utilization below the installation's threshold, or
+	// cold start), serve the requested model straight from Anthropic — no
+	// routing, no substitution, no billing. The turn is paid for by the
+	// customer's plan; once they approach their cap the gate disengages and the
+	// normal routing path conserves the remainder. Excluded models still force
+	// routing so a tenant policy block can't be served via the bypass.
+	if _, blocked := s.excludedModelsForRequest(ctx)[feats.Model]; !blocked && s.usageBypassEngaged(ctx, r.Header, feats.Model) {
+		return s.bypassToAnthropic(ctx, env, feats, requestStart, requestID, externalID, r, w)
+	}
 
 	routeStart := time.Now()
 	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, router.Request{

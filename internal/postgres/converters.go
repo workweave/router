@@ -30,6 +30,8 @@ func toAuthInstallation(row sqlc.RouterModelRouterInstallation) *auth.Installati
 		ExcludedModels:       excluded,
 		ExcludedProviders:    excludedProviders,
 		RoutingQualityWeight: row.RoutingQualityWeight,
+		UsageBypassEnabled:   row.UsageBypassEnabled,
+		UsageBypassThreshold: row.UsageBypassThreshold,
 	}
 }
 

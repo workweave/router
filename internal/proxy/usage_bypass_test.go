@@ -1,0 +1,150 @@
+package proxy_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"workweave/router/internal/providers"
+	"workweave/router/internal/proxy"
+	"workweave/router/internal/proxy/usage"
+	"workweave/router/internal/router"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const (
+	bypassSubToken      = "sk-ant-oat01-subscription-token"
+	bypassRequestedMdl  = "claude-sonnet-4-6"
+	bypassScorerPickMdl = "claude-haiku-4-5"
+)
+
+// bypassFixture builds a service whose fake scorer would route to
+// bypassScorerPickMdl, with the subscription usage observer wired and a fake
+// Anthropic provider that returns a minimal valid Messages response so a routed
+// turn completes. seedUtil >= 0 pre-records an observation at that utilization
+// under the subscription token; seedUtil < 0 leaves the observer cold.
+func bypassFixture(t *testing.T, seedUtil float64) (*proxy.Service, *fakeRouter, *fakeProvider) {
+	t.Helper()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	p := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"` + bypassScorerPickMdl + `","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	if seedUtil >= 0 {
+		obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
+			Primary: usage.Window{UsedPercent: seedUtil, WindowMinutes: 300},
+		})
+	}
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
+	return svc, fr, p
+}
+
+// bypassCtx returns a ctx carrying a Claude subscription token plus a
+// per-installation usage-bypass config at the given threshold.
+func bypassCtx(threshold float64) context.Context {
+	ctx := context.WithValue(context.Background(), proxy.AnthropicSubscriptionContextKey{}, bypassSubToken)
+	return context.WithValue(ctx, proxy.InstallationUsageBypassContextKey{}, proxy.UsageBypassConfig{
+		Enabled:   true,
+		Threshold: &threshold,
+	})
+}
+
+func bypassRequest(t *testing.T) (*httptest.ResponseRecorder, *http.Request, []byte) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"` + bypassRequestedMdl + `","messages":[{"role":"user","content":"hi"}]}`)
+	return rec, req, body
+}
+
+// TestUsageBypass_BelowThreshold_SkipsScorer is the core contract: while the
+// caller's subscription utilization is below the installation threshold, the
+// scorer must NOT run and the requested model (not the scorer's pick) is served.
+func TestUsageBypass_BelowThreshold_SkipsScorer(t *testing.T) {
+	svc, fr, p := bypassFixture(t, 0.20)
+	rec, req, body := bypassRequest(t)
+
+	require.NoError(t, svc.ProxyMessages(bypassCtx(0.80), body, rec, req))
+
+	assert.Equal(t, 0, fr.routeCalls, "scorer must not run while subscription has headroom")
+	require.Len(t, p.proxyBodies, 1, "request must be dispatched to Anthropic exactly once")
+	assert.Contains(t, string(p.proxyBodies[0]), `"`+bypassRequestedMdl+`"`, "bypass must preserve the caller-requested model")
+	assert.Equal(t, "usage_bypass", rec.Header().Get("x-router-decision"))
+	assert.Equal(t, bypassRequestedMdl, rec.Header().Get("x-router-model"))
+}
+
+// TestUsageBypass_AtThreshold_EngagesRouting is the counterpart: once observed
+// utilization crosses the threshold, the scorer runs and substitutes its pick.
+func TestUsageBypass_AtThreshold_EngagesRouting(t *testing.T) {
+	svc, fr, _ := bypassFixture(t, 0.90)
+	rec, req, body := bypassRequest(t)
+
+	require.NoError(t, svc.ProxyMessages(bypassCtx(0.80), body, rec, req))
+
+	assert.Equal(t, 1, fr.routeCalls, "scorer must run once utilization crosses threshold")
+	assert.Equal(t, bypassScorerPickMdl, rec.Header().Get("x-router-model"), "scorer's pick replaces the requested model")
+}
+
+// TestUsageBypass_ColdStart_Bypasses: with the gate on and a subscription
+// present but no observation yet, the first turn serves on the subscription so
+// its response primes the observer (mirrors the subsidy bootstrap).
+func TestUsageBypass_ColdStart_Bypasses(t *testing.T) {
+	svc, fr, _ := bypassFixture(t, -1) // observer left cold
+	rec, req, body := bypassRequest(t)
+
+	require.NoError(t, svc.ProxyMessages(bypassCtx(0.80), body, rec, req))
+
+	assert.Equal(t, 0, fr.routeCalls, "cold start must bypass so the first turn primes the observer")
+	assert.Equal(t, bypassRequestedMdl, rec.Header().Get("x-router-model"))
+}
+
+// TestUsageBypass_GateDisabled_EngagesRouting: with no per-installation config
+// on ctx the gate is off, so routing runs even with headroom.
+func TestUsageBypass_GateDisabled_EngagesRouting(t *testing.T) {
+	svc, fr, _ := bypassFixture(t, 0.20)
+	rec, req, body := bypassRequest(t)
+	// Subscription present, but the installation never enabled the gate.
+	ctx := context.WithValue(context.Background(), proxy.AnthropicSubscriptionContextKey{}, bypassSubToken)
+
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, req))
+
+	assert.Equal(t, 1, fr.routeCalls, "scorer must run when the installation hasn't enabled the gate")
+}
+
+// TestUsageBypass_NoSubscription_EngagesRouting: the gate is on but the request
+// carries no subscription credential, so there's nothing to pass through onto —
+// routing runs.
+func TestUsageBypass_NoSubscription_EngagesRouting(t *testing.T) {
+	svc, fr, _ := bypassFixture(t, 0.20)
+	rec, req, body := bypassRequest(t)
+	threshold := 0.80
+	ctx := context.WithValue(context.Background(), proxy.InstallationUsageBypassContextKey{}, proxy.UsageBypassConfig{
+		Enabled:   true,
+		Threshold: &threshold,
+	})
+
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, req))
+
+	assert.Equal(t, 1, fr.routeCalls, "no subscription credential means nothing to bypass onto — scorer must run")
+}
+
+// TestUsageBypass_ExcludedModel_EngagesRouting: a model on the installation's
+// deny list must force routing even under threshold, so the bypass can't serve
+// a policy-blocked model.
+func TestUsageBypass_ExcludedModel_EngagesRouting(t *testing.T) {
+	svc, fr, _ := bypassFixture(t, 0.20)
+	svc = svc.WithExcludedModelsOverride([]string{bypassRequestedMdl})
+	rec, req, body := bypassRequest(t)
+
+	require.NoError(t, svc.ProxyMessages(bypassCtx(0.80), body, rec, req))
+
+	assert.Equal(t, 1, fr.routeCalls, "an excluded requested model must force routing even under threshold")
+}

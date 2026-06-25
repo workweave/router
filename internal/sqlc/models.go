@@ -76,6 +76,8 @@ type RouterModelRouterInstallation struct {
 	ExcludedModels       []string
 	ExcludedProviders    []string
 	RoutingQualityWeight *float64
+	UsageBypassEnabled   bool
+	UsageBypassThreshold *float64
 }
 
 type RouterModelRouterRequestTelemetry struct {

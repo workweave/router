@@ -130,6 +130,12 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 					QualityBias: installation.RoutingQualityWeight,
 				})
 			}
+			if installation.UsageBypassEnabled {
+				ctx = context.WithValue(ctx, proxy.InstallationUsageBypassContextKey{}, proxy.UsageBypassConfig{
+					Enabled:   true,
+					Threshold: installation.UsageBypassThreshold,
+				})
+			}
 		}
 		if externalKeys != nil && !byokDisabled {
 			ctx = context.WithValue(ctx, proxy.ExternalAPIKeysContextKey{}, externalKeys)

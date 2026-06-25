@@ -66,3 +66,16 @@ SET routing_quality_weight = sqlc.narg('routing_quality_weight'),
 WHERE id = @id::uuid
   AND external_id = @external_id::varchar
   AND deleted_at IS NULL;
+
+-- Sets the subscription usage-bypass gate, scoped to an external_id to prevent
+-- cross-tenant updates. enabled toggles the gate; threshold is the [0, 1]
+-- utilization at/above which the gate disengages and normal routing takes over.
+-- A NULL threshold means "use the deployment default" at request time.
+-- name: UpdateModelRouterInstallationUsageBypass :exec
+UPDATE router.model_router_installations
+SET usage_bypass_enabled = @usage_bypass_enabled::boolean,
+    usage_bypass_threshold = sqlc.narg('usage_bypass_threshold'),
+    updated_at = NOW()
+WHERE id = @id::uuid
+  AND external_id = @external_id::varchar
+  AND deleted_at IS NULL;
