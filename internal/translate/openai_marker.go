@@ -160,7 +160,7 @@ func chunkCarriesOutput(payload []byte) bool {
 // routing decision is made when the client requested streaming (streaming=true)
 // so first-byte latency drops to ~routing time rather than upstream prefill +
 // first decode. Safe to call once; subsequent Write/WriteHeader calls are
-// idempotent. No-op when streaming is false or marker is empty.
+// idempotent. No-op when streaming is false.
 func (w *OpenAIRoutingMarkerWriter) Prelude(streaming bool) error {
 	if !streaming || w.markerEmitted {
 		return nil
