@@ -83,8 +83,13 @@ func (s *Scorer) RoutingDistribution(gridN int, excludedModels, excludedProvider
 	k := s.centroids.K
 
 	// Eligibility is dial-independent, so resolve the exclusion-filtered pool
-	// once and reuse it across every grid step.
+	// once and reuse it across every grid step. An exclusion set that empties
+	// the pool is rejected the same way Route rejects it, rather than returning
+	// points whose shares sum to 0.
 	eligible := s.eligibleForDistribution(excludedModels, excludedProviders)
+	if len(eligible) == 0 {
+		return nil, fmt.Errorf("exclusions leave no eligible candidates: %w", ErrNoEligibleProvider)
+	}
 
 	// Each centroid's top-P clusters depend only on cluster geometry, not on
 	// the dial position, so compute them once instead of per grid step.

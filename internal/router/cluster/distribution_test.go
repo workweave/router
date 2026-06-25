@@ -306,6 +306,21 @@ func TestRoutingDistribution_ExcludedModelNeverAppears(t *testing.T) {
 	}
 }
 
+func TestRoutingDistribution_EmptyPoolErrors(t *testing.T) {
+	// Excluding every deployed model empties the eligible pool. Route returns
+	// ErrNoEligibleProvider in that case, so the preview must too rather than
+	// emit points whose shares sum to 0.
+	s := loadV0_70(t)
+	all := make(map[string]struct{}, len(s.models))
+	for _, m := range s.models {
+		all[m] = struct{}{}
+	}
+
+	_, err := s.RoutingDistribution(21, all, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNoEligibleProvider)
+}
+
 func TestRoutingDistribution_ExcludedProviderDropsSingleBindingModels(t *testing.T) {
 	// Excluding a provider must drop every model whose only binding is that
 	// provider, mirroring Route's EnabledProviders gate. Pick a single-binding
