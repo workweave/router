@@ -60,12 +60,19 @@ const defaultDistributionGrid = 21
 // preview a faithful read of the routing math; what it is NOT is traffic
 // weighted — every cluster counts once regardless of how much real traffic
 // lands there, so the dashboard should frame it as the mix "across request
-// types," not "your traffic." Per-installation model exclusions are not applied
-// (the catalog surface is global); the full deployed roster is eligible.
+// types," not "your traffic."
+//
+// excludedModels / excludedProviders mirror the caller's per-installation
+// exclusion lists: the preview routes over the SAME eligible pool Route would
+// (a model is dropped when it is named in excludedModels or when every one of
+// its provider bindings is excluded), so an excluded model never appears in the
+// dial preview and the cluster it would have won falls through to the next-best
+// eligible model rather than vanishing from the mix. Nil/empty sets leave the
+// full deployed roster eligible.
 //
 // gridN < 2 falls back to defaultDistributionGrid. Returns an error for v1
 // bundles, which have no quality_means to disperse over.
-func (s *Scorer) RoutingDistribution(gridN int) ([]DistributionPoint, error) {
+func (s *Scorer) RoutingDistribution(gridN int, excludedModels, excludedProviders map[string]struct{}) ([]DistributionPoint, error) {
 	if !s.isV2 {
 		return nil, fmt.Errorf("%w: routing distribution requires a v2 bundle", ErrClusterUnavailable)
 	}
@@ -74,6 +81,10 @@ func (s *Scorer) RoutingDistribution(gridN int) ([]DistributionPoint, error) {
 	}
 
 	k := s.centroids.K
+
+	// Eligibility is dial-independent, so resolve the exclusion-filtered pool
+	// once and reuse it across every grid step.
+	eligible := s.eligibleForDistribution(excludedModels, excludedProviders)
 
 	// Each centroid's top-P clusters depend only on cluster geometry, not on
 	// the dial position, so compute them once instead of per grid step.
@@ -89,10 +100,10 @@ func (s *Scorer) RoutingDistribution(gridN int) ([]DistributionPoint, error) {
 		knobs := s.defaultActiveKnobs()
 		s.applyDialAlpha(t, knobs.Alpha, knobs.AlphaFloor)
 
-		counts := make(map[string]int, len(s.models))
+		counts := make(map[string]int, len(eligible))
 		for c := 0; c < k; c++ {
-			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models, nil)
-			winner, _ := argmax(scores, s.models)
+			scores := s.blendScoresV2(centroidTopClusters[c], knobs, eligible, nil)
+			winner, _ := argmax(scores, eligible)
 			if winner != "" {
 				counts[winner]++
 			}

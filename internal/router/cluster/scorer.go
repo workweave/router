@@ -405,6 +405,50 @@ func filterByProviders(entries []DeployedEntry, available map[string]struct{}) [
 	return out
 }
 
+// eligibleForDistribution returns the deployed model ids that survive the
+// caller's exclusions, mirroring the eligibility Route enforces: a model is
+// dropped when it is named in excludedModels, or when every one of its catalog
+// provider bindings sits in excludedProviders. Empty exclusion sets return the
+// full roster unchanged. Iterates s.candidates so the order matches Route.
+func (s *Scorer) eligibleForDistribution(excludedModels, excludedProviders map[string]struct{}) []string {
+	if len(excludedModels) == 0 && len(excludedProviders) == 0 {
+		return s.models
+	}
+	out := make([]string, 0, len(s.models))
+	for _, c := range s.candidates {
+		if _, drop := excludedModels[c.Model]; drop {
+			continue
+		}
+		if !hasUnexcludedBinding(c.Model, c.Provider, excludedProviders) {
+			continue
+		}
+		out = append(out, c.Model)
+	}
+	return out
+}
+
+// hasUnexcludedBinding reports whether modelID has at least one provider binding
+// outside excludedProviders. Mirrors resolveProviderFor's catalog walk (with the
+// registry-provider fallback for models absent from the catalog) so the preview
+// drops a model on provider exclusion exactly when Route's EnabledProviders gate
+// would. An empty set keeps every model.
+func hasUnexcludedBinding(modelID, registryProvider string, excludedProviders map[string]struct{}) bool {
+	if len(excludedProviders) == 0 {
+		return true
+	}
+	m, ok := catalog.ByID(modelID)
+	if !ok {
+		_, excluded := excludedProviders[registryProvider]
+		return !excluded
+	}
+	for _, b := range m.Providers {
+		if _, excluded := excludedProviders[b.Provider]; !excluded {
+			return true
+		}
+	}
+	return false
+}
+
 func sortedKeys(m map[string]struct{}) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

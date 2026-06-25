@@ -3,6 +3,7 @@ package admin
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"workweave/router/internal/router/cluster"
 
@@ -10,10 +11,11 @@ import (
 )
 
 // RoutingDistributionSource projects the per-installation "quality vs price"
-// dial's model mix across a grid of dial positions. Implemented by
-// *cluster.Multiversion in production; callers can pass a fake in tests.
+// dial's model mix across a grid of dial positions, over the eligible pool left
+// by excludedModels / excludedProviders. Implemented by *cluster.Multiversion
+// in production; callers can pass a fake in tests.
 type RoutingDistributionSource interface {
-	DefaultRoutingDistribution(gridN int) ([]cluster.DistributionPoint, error)
+	DefaultRoutingDistribution(gridN int, excludedModels, excludedProviders map[string]struct{}) ([]cluster.DistributionPoint, error)
 }
 
 // maxDistributionGrid caps the requested grid size so a client can't ask the
@@ -33,6 +35,11 @@ type routingDistributionResponse struct {
 //
 // `grid` (optional) sets the number of dial positions in [2, 101]; omitted
 // leaves the scorer on its default grid.
+//
+// `excluded_models` / `excluded_providers` (optional, comma-separated) narrow
+// the eligible pool so the preview matches what Route would do for an
+// installation with those exclusions — the control plane passes the requesting
+// org's lists, keeping the endpoint unauthed/global while still org-correct.
 func RoutingDistributionHandler(dist RoutingDistributionSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		gridN := 0 // 0 -> scorer default
@@ -44,13 +51,34 @@ func RoutingDistributionHandler(dist RoutingDistributionSource) gin.HandlerFunc 
 			}
 			gridN = n
 		}
-		points, err := dist.DefaultRoutingDistribution(gridN)
+		excludedModels := parseCSVSet(c.Query("excluded_models"))
+		excludedProviders := parseCSVSet(c.Query("excluded_providers"))
+		points, err := dist.DefaultRoutingDistribution(gridN, excludedModels, excludedProviders)
 		if err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "routing distribution unavailable"})
 			return
 		}
 		c.JSON(http.StatusOK, routingDistributionResponse{Points: points})
 	}
+}
+
+// parseCSVSet splits a comma-separated query value into a set, trimming
+// whitespace and dropping empties. Returns nil for an empty/blank input so the
+// scorer keeps the full roster.
+func parseCSVSet(raw string) map[string]struct{} {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	out := make(map[string]struct{})
+	for _, part := range strings.Split(raw, ",") {
+		if v := strings.TrimSpace(part); v != "" {
+			out[v] = struct{}{}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 var _ RoutingDistributionSource = (*cluster.Multiversion)(nil)

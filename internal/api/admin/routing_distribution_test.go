@@ -16,13 +16,17 @@ import (
 )
 
 type fakeDistributionSource struct {
-	points   []cluster.DistributionPoint
-	err      error
-	lastGrid int
+	points            []cluster.DistributionPoint
+	err               error
+	lastGrid          int
+	lastExcludedMods  map[string]struct{}
+	lastExcludedProvs map[string]struct{}
 }
 
-func (f *fakeDistributionSource) DefaultRoutingDistribution(gridN int) ([]cluster.DistributionPoint, error) {
+func (f *fakeDistributionSource) DefaultRoutingDistribution(gridN int, excludedModels, excludedProviders map[string]struct{}) ([]cluster.DistributionPoint, error) {
 	f.lastGrid = gridN
+	f.lastExcludedMods = excludedModels
+	f.lastExcludedProvs = excludedProviders
 	return f.points, f.err
 }
 
@@ -76,6 +80,32 @@ func TestRoutingDistributionHandler_RejectsBadGrid(t *testing.T) {
 		engine.ServeHTTP(rec, req)
 		assert.Equal(t, http.StatusBadRequest, rec.Code, "grid=%q should be rejected", bad)
 	}
+}
+
+func TestRoutingDistributionHandler_ParsesExclusionParams(t *testing.T) {
+	src := &fakeDistributionSource{}
+	engine := newDistributionEngine(src)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/router/routing-distribution?excluded_models=claude-opus-4-8,%20deepseek-v4-flash%20&excluded_providers=fireworks", nil)
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, map[string]struct{}{"claude-opus-4-8": {}, "deepseek-v4-flash": {}}, src.lastExcludedMods, "comma-separated models should reach the source, trimmed")
+	assert.Equal(t, map[string]struct{}{"fireworks": {}}, src.lastExcludedProvs)
+}
+
+func TestRoutingDistributionHandler_NilExclusionsWhenAbsent(t *testing.T) {
+	src := &fakeDistributionSource{}
+	engine := newDistributionEngine(src)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/router/routing-distribution", nil)
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Nil(t, src.lastExcludedMods, "absent excluded_models should pass nil so the scorer keeps the full roster")
+	assert.Nil(t, src.lastExcludedProvs)
 }
 
 func TestRoutingDistributionHandler_SourceErrorIs503(t *testing.T) {

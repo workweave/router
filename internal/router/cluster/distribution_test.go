@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"workweave/router/internal/router/catalog"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,7 +80,7 @@ func loadV0_67(t *testing.T) *Scorer {
 func TestRoutingDistribution_EndpointsAndGradient(t *testing.T) {
 	s := loadV0_67(t)
 	const grid = 21
-	points, err := s.RoutingDistribution(grid)
+	points, err := s.RoutingDistribution(grid, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, points, grid)
 
@@ -121,7 +123,7 @@ func TestRoutingDistribution_EndpointsAndGradient(t *testing.T) {
 
 func TestRoutingDistribution_DefaultGridAndV1Guard(t *testing.T) {
 	s := loadV0_67(t)
-	points, err := s.RoutingDistribution(0) // 0 -> default grid
+	points, err := s.RoutingDistribution(0, nil, nil) // 0 -> default grid
 	require.NoError(t, err)
 	assert.Len(t, points, defaultDistributionGrid)
 }
@@ -132,7 +134,7 @@ func TestRoutingDistribution_NoDeadZone(t *testing.T) {
 	// A dead zone (a run of identical mixes) is exactly what made "50% look like
 	// 20%"; the calibration must keep all but a small number of steps live.
 	s := loadV0_67(t)
-	points, err := s.RoutingDistribution(21)
+	points, err := s.RoutingDistribution(21, nil, nil)
 	require.NoError(t, err)
 
 	identicalRuns := 0
@@ -153,7 +155,7 @@ func TestRoutingDistribution_MidDialIsPricierThanLowDial(t *testing.T) {
 	// same all-cheapest mix as a low dial (0.2). After calibration the mid dial
 	// must route a meaningfully pricier (higher-quality) mix.
 	s := loadV0_67(t)
-	points, err := s.RoutingDistribution(21)
+	points, err := s.RoutingDistribution(21, nil, nil)
 	require.NoError(t, err)
 
 	var low, mid DistributionPoint
@@ -264,6 +266,81 @@ func TestApplyDialAlpha_AgenticStaysOffCheapModelAtLowDial(t *testing.T) {
 	}
 	_, isFrontier := frontier[with]
 	assert.True(t, isFrontier, "with the floor the agentic cluster must route to a frontier model, got %s", with)
+}
+
+func TestRoutingDistribution_ExcludedModelNeverAppears(t *testing.T) {
+	// The dial preview must agree with what Route would actually do: an excluded
+	// model never shows up in the mix, and the clusters it would have won fall
+	// through to the next-best eligible model rather than vanishing (shares still
+	// sum to 1). Excluding the quality-extreme winner is the load-bearing case.
+	s := loadV0_70(t)
+
+	full, err := s.RoutingDistribution(21, nil, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, full[len(full)-1].Models)
+	excludedModel := full[len(full)-1].Models[0].Model
+
+	appearedUnfiltered := false
+	for _, p := range full {
+		for _, m := range p.Models {
+			if m.Model == excludedModel {
+				appearedUnfiltered = true
+			}
+		}
+	}
+	require.True(t, appearedUnfiltered, "excluded model must be in the unfiltered mix for this test to mean anything")
+
+	filtered, err := s.RoutingDistribution(21, map[string]struct{}{excludedModel: {}}, nil)
+	require.NoError(t, err)
+	require.Len(t, filtered, 21)
+
+	for _, p := range filtered {
+		var sum float64
+		for _, m := range p.Models {
+			assert.NotEqual(t, excludedModel, m.Model,
+				"excluded model must never appear in the preview (quality_bias=%v)", p.QualityBias)
+			sum += m.Share
+		}
+		assert.InDelta(t, 1.0, sum, 1e-9,
+			"shares must still sum to 1 after exclusion — votes fall through, not vanish (quality_bias=%v)", p.QualityBias)
+	}
+}
+
+func TestRoutingDistribution_ExcludedProviderDropsSingleBindingModels(t *testing.T) {
+	// Excluding a provider must drop every model whose only binding is that
+	// provider, mirroring Route's EnabledProviders gate. Pick a single-binding
+	// model that appears in the mix so the assertion is unambiguous.
+	s := loadV0_70(t)
+
+	full, err := s.RoutingDistribution(21, nil, nil)
+	require.NoError(t, err)
+
+	appeared := make(map[string]struct{})
+	for _, p := range full {
+		for _, m := range p.Models {
+			appeared[m.Model] = struct{}{}
+		}
+	}
+
+	var model, provider string
+	for m := range appeared {
+		c, ok := catalog.ByID(m)
+		if !ok || len(c.Providers) != 1 {
+			continue
+		}
+		model, provider = m, c.Providers[0].Provider
+		break
+	}
+	require.NotEmpty(t, model, "expected at least one single-binding model in the unfiltered mix")
+
+	filtered, err := s.RoutingDistribution(21, nil, map[string]struct{}{provider: {}})
+	require.NoError(t, err)
+	for _, p := range filtered {
+		for _, m := range p.Models {
+			assert.NotEqual(t, model, m.Model,
+				"single-binding model %s must vanish when its provider %s is excluded (quality_bias=%v)", model, provider, p.QualityBias)
+		}
+	}
 }
 
 // mixSignatureOf renders a DistributionPoint's model shares as a stable key for
