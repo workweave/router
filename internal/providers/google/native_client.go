@@ -163,6 +163,8 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 		}
 	}
 
+	providers.CopyUpstreamHeaders(w, resp)
+	w.WriteHeader(resp.StatusCode)
 	return httputil.StreamBody(ctx, cancel, c.idleTimeout(), resp.Body, resp.StatusCode, w, t)
 }
 
