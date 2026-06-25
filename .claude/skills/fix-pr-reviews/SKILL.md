@@ -73,8 +73,8 @@ The skill is **single-PR scoped**. If the user gave a PR number, use it. Otherwi
 
 ```bash
 # PR metadata (resolve PR_NUMBER, OWNER, REPO, HEAD_REF)
-gh pr view "${PR_NUMBER:-}" --json number,headRepositoryOwner,headRepository,headRefName,headRefOid \
-  -q '{owner: .headRepositoryOwner.login, repo: .headRepository.name, number: .number, branch: .headRefName, sha: .headRefOid}'
+gh pr view "${PR_NUMBER:-}" --json number,baseRepositoryOwner,baseRepository,headRepositoryOwner,headRepository,headRefName,headRefOid,isCrossRepository \
+  -q '{owner: (.isCrossRepository | if true then .baseRepositoryOwner.login else .headRepositoryOwner.login end), repo: (.isCrossRepository | if true then .baseRepository.name else .headRepository.name end), number: .number, branch: .headRefName, sha: .headRefOid}'
 ```
 
 Verify `git branch --show-current` matches `headRefName`. Run `git checkout <headRefName>` if not. Fixes always go on the branch of the PR whose threads you're addressing.
@@ -86,7 +86,7 @@ Re-fetch all four signals at the start of every iteration. Never reuse stale dat
 ```bash
 # Threads, reviews, review-requests (with pagination support)
 gh api graphql -f query='
-  query($owner: String!, $repo: String!, $pr: Int!, $threadCursor: String, $reviewCursor: String) {
+  query($owner: String!, $repo: String!, $pr: Int!, $threadCursor: String, $reviewRequestCursor: String, $reviewCursor: String) {
     repository(owner: $owner, name: $repo) {
       pullRequest(number: $pr) {
         headRefOid
@@ -97,7 +97,7 @@ gh api graphql -f query='
           }
           pageInfo { hasNextPage endCursor }
         }
-        reviewRequests(first: 50, after: $reviewCursor) {
+        reviewRequests(first: 50, after: $reviewRequestCursor) {
           nodes { requestedReviewer { ... on User { login } ... on Team { name } } }
           pageInfo { hasNextPage endCursor }
         }
@@ -314,6 +314,7 @@ Do **not** use a single blocking `gh pr checks --watch` without also polling for
 HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
 
 # Step 6.1: Wait for CI to DISPATCH for HEAD_SHA (~30-120s after push).
+DISPATCH_TIMEOUT=false
 for i in $(seq 1 12); do
   sleep 15
   # --- comment interrupt (run GraphQL; if actionable threads > 0 → exit 1) ---
@@ -321,7 +322,12 @@ for i in $(seq 1 12); do
   echo "[dispatch poll $i] checks for $HEAD_SHA: $count"
   # Dispatch detected when at least one check exists (some repos have fewer required checks)
   if [ "$count" -gt 0 ]; then break; fi
+  if [ "$i" -eq 12 ]; then DISPATCH_TIMEOUT=true; fi
 done
+
+if [ "$DISPATCH_TIMEOUT" = true ]; then
+  echo "[warning] CI dispatch timeout: no checks found for $HEAD_SHA after 3 minutes"
+fi
 
 # Step 6.2: Poll completion + comments. Cap ~30 min.
 for i in $(seq 1 60); do
@@ -384,6 +390,18 @@ If after **5 full iterations** the loop hasn't terminated, stop and surface the 
 | Resolved one thread and stopped babysitting | Other threads still open; lazy-pr-fix incomplete | Resolve/reply all actionable threads; print termination summary only when DONE |
 | Ending session during CI poll | Miss late bot comments and failing checks | Resume with Step 1 thread fetch; continue interruptible CI loop |
 
+## Notes
+
+- **Skip-thread persistence:** Skip-category threads are intentionally left unresolved (they're discussions, not action items). Without storing which threads were classified as Skip, the same unresolved discussion may be re-triaged on subsequent iterations. For production implementations, store skipped thread IDs in memory for the duration of this skill run.
+- Always fetch fresh threads, reviews, and checks at the **start** of every iteration — never trust a previous snapshot.
+- A "Skip" thread does NOT block the loop's DONE condition because it stays unresolved on purpose.
+- Prefer minimal fixes over large refactors.
+- When uncertain about fix vs decline (low-stakes, mechanical), err on making the change (easier to revert). But when the call is a genuine human decision (product/architecture/scope/intent), **Escalate** instead of guessing.
+- Escalations are surfaced via `AskQuestion` with options grounded in existing codebase patterns and a clear recommendation — never a bare "what do you want to do?".
+- When declining, always leave a reply — never silently resolve a thread without explanation.
+- Cap iterations at **5** to avoid infinite loops on adversarial reviews; surface to user when hit.
+- Output discipline: when iterating, *announce the unresolved thread list* before any CI work so the user can see them. If you interrupt a CI wait for new comments, say so explicitly ("new review thread — fixing before CI finishes").
+
 ## Error Handling
 
 | Issue | Solution |
@@ -399,11 +417,4 @@ If after **5 full iterations** the loop hasn't terminated, stop and surface the 
 
 ## Notes
 
-- Always fetch fresh threads, reviews, and checks at the **start** of every iteration — never trust a previous snapshot.
-- A "Skip" thread does NOT block the loop's DONE condition because it stays unresolved on purpose.
-- Prefer minimal fixes over large refactors.
-- When uncertain about fix vs decline (low-stakes, mechanical), err on making the change (easier to revert). But when the call is a genuine human decision (product/architecture/scope/intent), **Escalate** instead of guessing.
-- Escalations are surfaced via `AskQuestion` with options grounded in existing codebase patterns and a clear recommendation — never a bare "what do you want to do?".
-- When declining, always leave a reply — never silently resolve a thread without explanation.
-- Cap iterations at **5** to avoid infinite loops on adversarial reviews; surface to user when hit.
-- Output discipline: when iterating, *announce the unresolved thread list* before any CI work so the user can see them. If you interrupt a CI wait for new comments, say so explicitly ("new review thread — fixing before CI finishes").
+- **Skip-thread persistence:** Skip-category threads are intentionally left unresolved (they're discussions, not action items). Without storing which threads were classified as Skip, the same unresolved discussion may be re-triaged on subsequent iterations. For production implementations, store skipped thread IDs in memory for the duration of this skill run.
