@@ -435,6 +435,22 @@ func (s *Service) runTurnLoop(
 		pin = sessionpin.Pin{}
 	}
 
+	// Subscription usage-bypass: while the caller's own Claude subscription has
+	// headroom, serve the requested model straight through. Positioned after the
+	// higher-precedence pins that must win (hard-pin and user-forced pin both
+	// returned above) but BEFORE the tool-result / planner-disabled stickies, so
+	// the WHOLE session bypasses consistently: a stale pin from a prior routed
+	// stretch can't make a tool_result continuation diverge from the bypassed
+	// tool_use turn. The stale pin is left untouched and is re-evaluated by
+	// normal routing once utilization crosses the threshold. res.PriorServedModel
+	// (loaded above) lets the emit path strip thinking signatures from a
+	// different prior model.
+	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
+		res.Decision = dec
+		res.UsageBypass = true
+		return res, nil
+	}
+
 	// Tool-result turns are mid-turn continuations. Re-routing them on
 	// trailing tool_result embedding flips decisions to noisy candidates;
 	// reuse the pin verbatim when present and refresh the TTL.
@@ -454,17 +470,6 @@ func (s *Service) runTurnLoop(
 		res.StickyHit = true
 		res.PinTier = "postgres"
 		s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, decision)
-		return res, nil
-	}
-
-	// Subscription usage-bypass: while the caller's own Claude subscription has
-	// headroom, intercept the fresh scorer decision and serve the requested
-	// model straight through. Positioned after every higher-precedence path
-	// (hard-pin, user-forced pin, tool-result/planner-disabled stickies) so it
-	// only ever replaces a fresh scorer decision, never an explicit pin.
-	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
-		res.Decision = dec
-		res.UsageBypass = true
 		return res, nil
 	}
 

@@ -12,7 +12,9 @@ import (
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/sessionpin"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -147,6 +149,45 @@ func TestUsageBypass_ExcludedModel_EngagesRouting(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(bypassCtx(0.80), body, rec, req))
 
 	assert.Equal(t, 1, fr.routeCalls, "an excluded requested model must force routing even under threshold")
+}
+
+// TestUsageBypass_ToolResult_BeatsStalePin: a session that previously routed
+// (leaving a pin) and is now under threshold must bypass CONSISTENTLY. A
+// tool_result continuation must serve the requested model via the bypass, not
+// short-circuit to the stale pinned model through the tool-result sticky —
+// otherwise the continuation hits a different model than the tool_use turn.
+func TestUsageBypass_ToolResult_BeatsStalePin(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:      providers.ProviderAnthropic,
+		Model:         bypassScorerPickMdl, // stale pin from a prior routed stretch
+		Reason:        "cluster:v0.2",
+		PinnedUntil:   time.Now().Add(30 * time.Minute),
+		FirstPinnedAt: time.Now().Add(-5 * time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300}})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}}, nil, false, nil, store, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
+
+	ctx := context.WithValue(authedCtx(uuid.New().String()), proxy.AnthropicSubscriptionContextKey{}, bypassSubToken)
+	threshold := 0.80
+	ctx = context.WithValue(ctx, proxy.InstallationUsageBypassContextKey{}, proxy.UsageBypassConfig{Enabled: true, Threshold: &threshold})
+
+	toolResultBody := []byte(`{"model":"` + bypassRequestedMdl + `","messages":[` +
+		`{"role":"user","content":"do it"},` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"x","input":{}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}]}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+
+	require.NoError(t, svc.ProxyMessages(ctx, toolResultBody, rec, req))
+
+	assert.Equal(t, 0, fr.routeCalls, "bypass must preempt the tool-result sticky, not run the scorer")
+	assert.Equal(t, "usage_bypass", rec.Header().Get("x-router-decision"))
+	assert.Equal(t, bypassRequestedMdl, rec.Header().Get("x-router-model"), "continuation must serve the requested model, not the stale pin")
 }
 
 // TestUsageBypass_ExcludedProvider_EngagesRouting: when the installation has

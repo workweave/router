@@ -97,6 +97,7 @@ func (s *Service) bypassToAnthropic(
 	ctx context.Context,
 	env *translate.RequestEnvelope,
 	feats translate.RoutingFeatures,
+	modelSwitched bool,
 	requestStart time.Time,
 	requestID, externalID string,
 	r *http.Request,
@@ -133,6 +134,10 @@ func (s *Service) bypassToAnthropic(
 		Capabilities:          router.Lookup(decision.Model),
 		IncludeStreamUsage:    s.usageRequired(),
 		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserve),
+		// When the session previously served a different model, strip thinking
+		// blocks whose signatures the requested model would reject (else
+		// Anthropic 400s on the stale signature).
+		ModelSwitched: modelSwitched,
 	}
 	prep, emitErr := env.PrepareAnthropic(r.Header, opts)
 	if emitErr != nil {
