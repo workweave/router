@@ -7,12 +7,15 @@ import (
 	"net/http"
 	"time"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/translate"
+
+	"github.com/google/uuid"
 )
 
 // usageBypassDecision returns the passthrough decision when the subscription
@@ -171,12 +174,48 @@ func (s *Service) bypassToAnthropic(
 			Build(),
 	})
 	otel.Flush(ctx)
+
+	proxyMs := time.Since(proxyStart).Milliseconds()
+	installationID := installationIDFromContext(ctx)
+	if installationID != uuid.Nil {
+		clientID := ClientIdentityFrom(ctx)
+		s.fireTelemetry(InsertTelemetryParams{
+			InstallationID:         installationID.String(),
+			RequestID:              requestID,
+			SpanType:               "router.upstream",
+			TraceID:                requestID,
+			Timestamp:              requestStart,
+			RequestedModel:         feats.Model,
+			DecisionModel:          decision.Model,
+			DecisionProvider:       decision.Provider,
+			DecisionReason:         decision.Reason,
+			EstimatedInputTokens:   int32(feats.Tokens),
+			StickyHit:              false,
+			EmbedInput:             "",
+			InputTokens:            0,
+			OutputTokens:           0,
+			RequestedInputCostUSD:  0,
+			RequestedOutputCostUSD: 0,
+			ActualInputCostUSD:     0,
+			ActualOutputCostUSD:    0,
+			RouteLatencyMs:         0,
+			UpstreamLatencyMs:      proxyMs,
+			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
+			CrossFormat:            false,
+			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
+			DeviceID:               clientID.DeviceID,
+			SessionID:              clientID.SessionID,
+			RouterUserID:           auth.UserIDFrom(ctx),
+			ClientApp:              clientID.ClientApp,
+			TurnType:               "main_loop",
+		})
+	}
 	log.Info("ProxyMessages usage-bypass complete",
 		"request_id", requestID,
 		"external_id", externalID,
 		"requested_model", feats.Model,
 		"decision_model", decision.Model,
-		"proxy_ms", time.Since(proxyStart).Milliseconds(),
+		"proxy_ms", proxyMs,
 		"total_ms", time.Since(requestStart).Milliseconds(),
 		"proxy_err", proxyErr,
 	)
