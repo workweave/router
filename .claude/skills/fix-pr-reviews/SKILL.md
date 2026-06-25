@@ -74,7 +74,7 @@ The skill is **single-PR scoped**. If the user gave a PR number, use it. Otherwi
 ```bash
 # PR metadata (resolve PR_NUMBER, OWNER, REPO, HEAD_REF)
 gh pr view "${PR_NUMBER:-}" --json number,baseRepository,headRepository,headRefName,headRefOid,isCrossRepository \
-  -q '{owner: (.isCrossRepository | if true then .baseRepository.owner.login else .headRepository.owner.login end), repo: (.isCrossRepository | if true then .baseRepository.name else .headRepository.name end), number: .number, branch: .headRefName, sha: .headRefOid}'
+  -q '{owner: (if .isCrossRepository then .baseRepository.owner.login else .headRepository.owner.login end), repo: (if .isCrossRepository then .baseRepository.name else .headRepository.name end), number: .number, branch: .headRefName, sha: .headRefOid}'
 ```
 
 Verify `git branch --show-current` matches `headRefName`. Run `git checkout <headRefName>` if not. Fixes always go on the branch of the PR whose threads you're addressing.
@@ -334,10 +334,10 @@ for i in $(seq 1 12); do
   if [ "$i" -eq 12 ]; then DISPATCH_TIMEOUT=true; fi
 done
 
-# If no checks exist (e.g., repo has no required checks), treat as dispatched
-if [ "$count" -eq 0 ] && [ "$DISPATCH_TIMEOUT" = false ]; then
-  echo "[info] No checks configured for this repo; treating as dispatched"
-  DISPATCH_TIMEOUT=false
+# If no checks exist (e.g., repo has no required checks), treat as dispatched immediately
+# Note: count will be 0 if checks never existed OR if they were all cleared
+if [ "$count" -eq 0 ] && [ "$DISPATCH_TIMEOUT" != true ]; then
+  echo "[info] No checks configured or none dispatched; treating as dispatched"
 fi
 
 if [ "$DISPATCH_TIMEOUT" = true ]; then
