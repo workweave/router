@@ -102,6 +102,8 @@ func (s *Service) bypassToAnthropic(
 	env *translate.RequestEnvelope,
 	feats translate.RoutingFeatures,
 	modelSwitched bool,
+	turnType string,
+	routeMs int64,
 	requestStart time.Time,
 	requestID, externalID string,
 	r *http.Request,
@@ -200,7 +202,7 @@ func (s *Service) bypassToAnthropic(
 			RequestedOutputCostUSD: 0,
 			ActualInputCostUSD:     0,
 			ActualOutputCostUSD:    0,
-			RouteLatencyMs:         0,
+			RouteLatencyMs:         routeMs,
 			UpstreamLatencyMs:      proxyMs,
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
 			CrossFormat:            false,
@@ -209,7 +211,7 @@ func (s *Service) bypassToAnthropic(
 			SessionID:              clientID.SessionID,
 			RouterUserID:           auth.UserIDFrom(ctx),
 			ClientApp:              clientID.ClientApp,
-			TurnType:               "main_loop",
+			TurnType:               turnType,
 		})
 	}
 	log.Info("ProxyMessages usage-bypass complete",
