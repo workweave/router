@@ -187,24 +187,6 @@ func loadV0_70(t *testing.T) *Scorer {
 	return s
 }
 
-// clusterWinnerAt scores the centroid of cluster c at the given dial position
-// through the exact production path (defaultActiveKnobs -> applyDialAlpha ->
-// blendScoresV2 -> argmax over the top-P union) and returns the winning model.
-// withFloor=false reproduces the OLD uniform-dial behavior (the bug) so a test
-// can assert the floor changed the realized routing.
-func clusterWinnerAt(s *Scorer, c int, t float64, withFloor bool) string {
-	knobs := s.defaultActiveKnobs()
-	floor := knobs.AlphaFloor
-	if !withFloor {
-		floor = nil // reproduce the old uniform dial (no alpha_floor)
-	}
-	s.applyDialAlpha(t, knobs.Alpha, floor)
-	top := topPNearest(s.centroids.Row(c), s.centroids, s.cfg.TopP)
-	scores := s.blendScoresV2(top, knobs, s.models, nil)
-	winner, _ := argmax(scores, s.models)
-	return winner
-}
-
 func TestApplyDialAlpha_HoldsEachClusterAtItsDeclaredFloor(t *testing.T) {
 	s := loadV0_70(t)
 	knobs := s.defaultActiveKnobs()
@@ -240,32 +222,47 @@ func TestApplyDialAlpha_NilFloorIsUniformDial(t *testing.T) {
 	}
 }
 
-func TestApplyDialAlpha_AgenticStaysOffCheapModelAtLowDial(t *testing.T) {
+func TestApplyDialAlpha_AgenticStaysOnCapableModelAtLowDial(t *testing.T) {
 	// The reported bug, end to end: under a price-leaning dial the agentic
-	// cluster routed to minimax-m3 (a model that can't drive the Claude Code
-	// skill/tool protocol). Cluster 0 is the agentic catch-all. Without the
-	// floor (old uniform dial) the centroid routes to a cheap OSS model; with
-	// the floor it stays on a frontier model.
+	// cluster routed to a model that can't drive the Claude Code skill/tool
+	// protocol (minimax-m3 grepping for a skill instead of running it). Cluster 0
+	// is the agentic catch-all. The fix moved the guard off the quality WEIGHT
+	// (the old 0.88 floor pinned Opus and killed the dial) and onto the candidate
+	// POOL: on has_tools turns the scorer drops catalog.AgenticLowSet, so a low
+	// dial demotes Opus to the cheapest HARNESS-CAPABLE model instead of
+	// stranding the turn on an incapable one. The low alpha_floor only sets how
+	// far down the capable ladder the dial may travel.
 	s := loadV0_70(t)
-	const lowDial = 0.2
 
-	without := clusterWinnerAt(s, 0, lowDial, false)
-	with := clusterWinnerAt(s, 0, lowDial, true)
+	// Realized agentic alpha at the price extreme = the declared floor.
+	knobs := s.defaultActiveKnobs()
+	s.applyDialAlpha(0.0, knobs.Alpha, knobs.AlphaFloor)
+	top := topPNearest(s.centroids.Row(0), s.centroids, s.cfg.TopP)
 
-	assert.NotEqual(t, with, without,
-		"the floor must change the agentic winner at a low dial (old=%s)", without)
-	// The fixed winner must be a genuine agentic-capable frontier model, not the
-	// cheap pack the uniform dial fell through to.
-	frontier := map[string]struct{}{
-		"claude-opus-4-8":          {},
-		"claude-opus-4-7":          {},
-		"claude-sonnet-4-6":        {},
-		"gemini-3.1-pro-preview":   {},
-		"gpt-5.5":                  {},
-		"deepseek/deepseek-v4-pro": {},
+	low := catalog.AgenticLowSet()
+
+	// Precondition: WITHOUT the gate (full pool) the price-extreme dial falls
+	// through to an agentic-incapable cheap model — the bug the gate exists to
+	// fix. If this stops holding, the floor got too high to exercise the gate.
+	full, _ := argmax(s.blendScoresV2(top, knobs, s.models, nil), s.models)
+	_, fullIncapable := low[full]
+	require.Truef(t, fullIncapable,
+		"precondition: without the gate the price-extreme dial must fall through to an AgenticLow model, got %s", full)
+
+	// WITH the gate the realized winner is harness-capable, and the gate changed
+	// the routed model.
+	gated := make([]string, 0, len(s.models))
+	for _, m := range s.models {
+		if _, drop := low[m]; drop {
+			continue
+		}
+		gated = append(gated, m)
 	}
-	_, isFrontier := frontier[with]
-	assert.True(t, isFrontier, "with the floor the agentic cluster must route to a frontier model, got %s", with)
+	with, _ := argmax(s.blendScoresV2(top, knobs, gated, nil), gated)
+	_, withIncapable := low[with]
+	assert.Falsef(t, withIncapable,
+		"with the agentic-harness gate the price-extreme winner must be harness-capable, got %s", with)
+	assert.NotEqual(t, full, with, "the gate must change the realized agentic winner at the price extreme")
 }
 
 func TestRoutingDistribution_ExcludedModelNeverAppears(t *testing.T) {

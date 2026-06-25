@@ -135,6 +135,51 @@ func TestModel_ToolUseQualityDefaultsToUnknown(t *testing.T) {
 	assert.Equal(t, ToolUseUnknown, m.ToolUseQuality)
 }
 
+func TestAgenticLowSet_IncludesHarnessIncapableModels(t *testing.T) {
+	// These models emit valid tool calls (so they are not ToolUseLow) but can't
+	// sustain an agentic harness loop, so they must be dropped from has_tools
+	// turns — otherwise a price-leaning dial demotes Opus straight onto one of
+	// them (minimax-m3 grepping for a skill instead of running it is the
+	// canonical failure). If this fires, a row was unflagged or renamed.
+	set := AgenticLowSet()
+	for _, id := range []string{
+		"minimax/minimax-m3",
+		"qwen/qwen3-next-80b-a3b-instruct",
+		"gemini-3.1-flash-lite-preview",
+		"deepseek/deepseek-v4-flash",
+	} {
+		_, found := set[id]
+		assert.Truef(t, found, "%s must be marked AgenticLow", id)
+	}
+}
+
+func TestAgenticLowSet_OmitsHarnessCapableModels(t *testing.T) {
+	// The harness-capable demotion ladder must stay eligible on has_tools turns:
+	// Opus -> Sonnet -> the cheaper capable coders. haiku stays eligible too (it
+	// is a legitimate cheap tool model), so it must NOT be flagged.
+	set := AgenticLowSet()
+	for _, id := range []string{
+		"claude-opus-4-8",
+		"claude-sonnet-4-6",
+		"z-ai/glm-5.2",
+		"deepseek/deepseek-v4-pro",
+		"moonshotai/kimi-k2.6",
+		"qwen/qwen3-coder-next",
+		"claude-haiku-4-5",
+	} {
+		_, found := set[id]
+		assert.Falsef(t, found, "%s must NOT be in the AgenticLow set", id)
+	}
+}
+
+func TestModel_AgenticUseDefaultsToUnknown(t *testing.T) {
+	// Zero-value safety: an unset AgenticUse must default to AgenticUnknown so
+	// the scorer treats the model as harness-capable until proven otherwise.
+	// Guards against a future iota reorder flipping every row to AgenticLow.
+	var m Model
+	assert.Equal(t, AgenticUnknown, m.AgenticUse)
+}
+
 func TestImageUnsupportedSet_IncludesTextOnlyModels(t *testing.T) {
 	// Text-only OSS models reject image content parts with a 4xx (DeepInfra
 	// 405 "does not accept image input" on GLM-5.1 is the canonical case).

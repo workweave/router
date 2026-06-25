@@ -953,6 +953,74 @@ func TestScorer_HasToolsExcludesToolUseLowFromArgmax(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", got.Model, "has_tools=true must drop ToolUseLow models from argmax")
 }
 
+// has_tools=true must subtract catalog.AgenticLowSet from the argmax pool so a
+// model that emits valid tool calls but can't drive the agentic harness
+// (minimax-m3) cannot win an agentic turn — this is what lets a price-leaning
+// dial demote Opus to a cheaper HARNESS-CAPABLE model instead of collapsing onto
+// the cheapest model in the pool.
+func TestScorer_HasToolsExcludesAgenticLowFromArgmax(t *testing.T) {
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	cb := buildCentroidsBlob(t, 1, dim, c0)
+	// Ranking puts minimax-m3 above claude-opus so without the filter it would
+	// win; the agentic-harness filter must demote it on has_tools=true.
+	rb := []byte(`{"rankings": {"0": {
+		"minimax/minimax-m3": 0.95,
+		"claude-opus-4-7": 0.10
+	}}}`)
+	regb := []byte(`{
+		"deployed_models": [
+			{"model": "minimax/minimax-m3", "provider": "fireworks", "bench_column": "routerarena_minimax/minimax-m3"},
+			{"model": "claude-opus-4-7", "provider": "anthropic", "bench_column": "gpt-5", "proxy": true}
+		]
+	}`)
+	cfg := cfgForTest()
+	cfg.TopP = 1
+	s, err := NewScorer(bundleFromBlobs(t, "v-test-agenticfilter", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()},
+		map[string]struct{}{"fireworks": {}, "anthropic": {}})
+	require.NoError(t, err)
+
+	// No tools: minimax-m3 wins (highest score).
+	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.NoError(t, err)
+	assert.Equal(t, "minimax/minimax-m3", got.Model, "without tools, minimax-m3 should win on score")
+
+	// With tools: filter drops minimax-m3 → claude-opus wins.
+	got, err = s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100), HasTools: true})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", got.Model, "has_tools=true must drop AgenticLow models from argmax")
+}
+
+// Soft-filter regression: if the AgenticLow filter would empty the eligible
+// pool, fall back to the unfiltered set rather than 4xx-ing — a decision is
+// always returned even on an OSS-only deploy.
+func TestScorer_HasToolsFallsBackWhenAgenticFilterEmptiesPool(t *testing.T) {
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	cb := buildCentroidsBlob(t, 1, dim, c0)
+	rb := []byte(`{"rankings": {"0": {
+		"minimax/minimax-m3": 0.95
+	}}}`)
+	regb := []byte(`{
+		"deployed_models": [
+			{"model": "minimax/minimax-m3", "provider": "fireworks", "bench_column": "routerarena_minimax/minimax-m3"}
+		]
+	}`)
+	cfg := cfgForTest()
+	cfg.TopP = 1
+	s, err := NewScorer(bundleFromBlobs(t, "v-test-agenticfallback", cb, rb, regb), cfg, &fakeEmbedder{vec: makeOpusVec()},
+		map[string]struct{}{"fireworks": {}})
+	require.NoError(t, err)
+
+	// has_tools=true: filter would empty the pool, so we keep minimax-m3
+	// rather than returning an error.
+	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100), HasTools: true})
+	require.NoError(t, err)
+	assert.Equal(t, "minimax/minimax-m3", got.Model, "filter must fall back when it would empty the pool")
+}
+
 // Soft-filter regression: if the ToolUseLow filter would empty the eligible
 // pool, fall back to the unfiltered set rather than 4xx-ing — this is a
 // quality preference, not a correctness gate.

@@ -96,6 +96,24 @@ const (
 	ToolUseLow
 )
 
+// AgenticUse marks whether a model can reliably DRIVE an agentic harness — the
+// multi-step skill/tool-orchestration loop (Claude Code, opencode, …) where the
+// model must read tool results, follow a skill/tool protocol, and sustain a plan
+// across turns. This is a STRICTER axis than ToolUseQuality: a model can emit
+// well-formed tool calls (so it is not ToolUseLow) yet still be unable to run the
+// harness — e.g. minimax-m3 grepped the filesystem for a skill instead of
+// invoking it. AgenticUnknown (the zero value) means "no concerns recorded";
+// AgenticLow flags models the cluster scorer drops from has_tools turns so a
+// price-leaning quality dial demotes Opus to a cheaper HARNESS-CAPABLE model
+// (Sonnet, GLM, DeepSeek-Pro) instead of stranding the turn on the cheapest model
+// in the pool.
+type AgenticUse int
+
+const (
+	AgenticUnknown AgenticUse = iota
+	AgenticLow
+)
+
 // ImageInput marks whether a model accepts image content parts. ImageInputUnknown
 // (the zero value) means "no restriction recorded" — first-party models (Anthropic,
 // OpenAI, Google) are all multimodal, so they keep the default. ImageInputUnsupported
@@ -126,6 +144,11 @@ type Model struct {
 	// value (ToolUseUnknown) is the default — set ToolUseLow to remove the
 	// model from agentic argmax pools.
 	ToolUseQuality ToolUseQuality
+	// AgenticUse marks whether the model can drive an agentic harness under
+	// has_tools turns. Zero value (AgenticUnknown) is the default — set
+	// AgenticLow to keep the model out of the price dial's agentic demotion
+	// ladder (see the scorer's has_tools filter).
+	AgenticUse AgenticUse
 	// ImageInput marks whether the model accepts image content parts. Zero
 	// value (ImageInputUnknown) is the default — set ImageInputUnsupported on
 	// text-only models so the scorer keeps image-bearing turns off them.
@@ -269,7 +292,7 @@ var Models = []Model{
 	}},
 
 	// --- Google Gemini 3.x ---
-	{ID: "gemini-3.1-flash-lite-preview", Tier: TierLow, ContextWindow: 1_048_576, Providers: []ProviderBinding{
+	{ID: "gemini-3.1-flash-lite-preview", Tier: TierLow, ContextWindow: 1_048_576, AgenticUse: AgenticLow, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.10, OutputUSDPer1M: 0.40, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "gemini-3-flash-preview", Tier: TierMid, ContextWindow: 1_048_576, Providers: []ProviderBinding{
@@ -324,7 +347,7 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.500, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.070, OutputUSDPer1M: 0.300}},
 	}},
-	{ID: "qwen/qwen3-next-80b-a3b-instruct", Tier: TierMid, ContextWindow: 262_144, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+	{ID: "qwen/qwen3-next-80b-a3b-instruct", Tier: TierMid, ContextWindow: 262_144, ImageInput: ImageInputUnsupported, AgenticUse: AgenticLow, Providers: []ProviderBinding{
 		{Provider: providers.ProviderBedrock, UpstreamID: "qwen.qwen3-next-80b-a3b-instruct",
 			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.090, OutputUSDPer1M: 1.100}},
@@ -333,7 +356,7 @@ var Models = []Model{
 	// DeepInfra (Flash primary) and Fireworks (Pro primary) both serve the full
 	// window. The 131_072 carried over from V3.2 was filtering these out of any
 	// request over ~128K tokens (see excludeContextOverflowModels in proxy/service.go).
-	{ID: "deepseek/deepseek-v4-flash", Tier: TierLow, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+	{ID: "deepseek/deepseek-v4-flash", Tier: TierLow, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, AgenticUse: AgenticLow, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "deepseek-ai/DeepSeek-V4-Flash",
 			Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10}},
@@ -406,7 +429,7 @@ var Models = []Model{
 	// window (the model's headline 1M is not what the Fireworks endpoint
 	// exposes). Unlike m2.7 it accepts image parts, so ImageInput is left at the
 	// default (image-capable).
-	{ID: "minimax/minimax-m3", Tier: TierHigh, ContextWindow: 512_000, Providers: []ProviderBinding{
+	{ID: "minimax/minimax-m3", Tier: TierHigh, ContextWindow: 512_000, AgenticUse: AgenticLow, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/minimax-m3",
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},

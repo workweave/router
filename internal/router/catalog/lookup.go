@@ -154,6 +154,23 @@ func ToolUseLowSet() map[string]struct{} {
 	return out
 }
 
+// AgenticLowSet returns the set of model IDs whose AgenticUse is AgenticLow —
+// models that emit valid tool calls but can't sustain an agentic harness loop.
+// The cluster scorer subtracts this set from the eligible pool when req.HasTools
+// is true (on top of the ToolUseLow subtraction), so the price/quality dial
+// demotes Opus to a cheaper harness-capable model rather than the cheapest model
+// in the pool. Falls back to the unfiltered pool when the subtraction would empty
+// the eligible set so a routing decision is always returned. Mirrors ToolUseLowSet.
+func AgenticLowSet() map[string]struct{} {
+	out := make(map[string]struct{}, len(Models))
+	for _, m := range Models {
+		if m.AgenticUse == AgenticLow {
+			out[m.ID] = struct{}{}
+		}
+	}
+	return out
+}
+
 // ImageUnsupportedSet returns the set of model IDs flagged
 // ImageInputUnsupported. The cluster scorer subtracts this set from the
 // eligible pool when the inbound request carries image content, falling back

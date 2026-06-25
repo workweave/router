@@ -586,6 +586,38 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		}
 	}
 
+	// Agentic-harness filter. A has_tools turn is an agentic/main-loop turn, so
+	// drop any model the catalog marks AgenticLow — models that emit valid tool
+	// calls (hence not ToolUseLow) but can't sustain the skill/tool
+	// orchestration loop (observed: minimax-m3 grepped the filesystem for a
+	// skill instead of invoking it). This is the gate that lets the price/quality
+	// dial demote Opus to a cheaper HARNESS-CAPABLE model (Sonnet, GLM,
+	// DeepSeek-Pro) as it leans toward cost, instead of stranding the turn on the
+	// cheapest model in the pool — so the per-cluster alpha_floor no longer has to
+	// pin agentic on premium models. Soft filter with the same empty-pool
+	// fallback as the tool-use filter so a decision is always returned.
+	if req.HasTools {
+		if blacklist := catalog.AgenticLowSet(); len(blacklist) > 0 {
+			filtered := eligibleModels[:0:0]
+			var dropped []string
+			for _, m := range eligibleModels {
+				if _, drop := blacklist[m]; drop {
+					dropped = append(dropped, m)
+					continue
+				}
+				filtered = append(filtered, m)
+			}
+			if len(filtered) > 0 && len(dropped) > 0 {
+				log.Debug(
+					"Cluster scorer: agentic-harness blacklist applied",
+					"dropped_models", dropped,
+					"requested_model", req.RequestedModel,
+				)
+				eligibleModels = filtered
+			}
+		}
+	}
+
 	// Image-input filter. When the inbound carries image content, drop every
 	// model the catalog has marked ImageInputUnsupported (text-only OSS models
 	// that 4xx on image parts). Soft filter with the same empty-pool fallback as
