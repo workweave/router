@@ -53,8 +53,13 @@ type turnLoopResult struct {
 	TurnType   turntype.TurnType
 	StickyHit  bool
 	HardPinned bool
-	PinTier    string
-	PinAgeSec  int64
+	// UsageBypass is true when the subscription usage-bypass gate engaged for
+	// this turn: the caller's own subscription has headroom, so ProxyMessages
+	// must serve the requested model straight through to Anthropic with no
+	// billing debit rather than dispatching Decision through the normal path.
+	UsageBypass bool
+	PinTier     string
+	PinAgeSec   int64
 	// RequestedTier is the tier of the inbound requested model. Drives the
 	// session-pin role split (roleForTier) so a low-tier background turn and a
 	// high-tier main turn never share a pin.
@@ -209,8 +214,14 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
-	// Without a pin store, run the scorer and return its decision.
+	// Without a pin store, run the scorer and return its decision. The usage
+	// bypass intercepts the fresh scorer decision here too (no pins to honor).
 	if s.pinStore == nil {
+		if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
+			res.Decision = dec
+			res.UsageBypass = true
+			return res, nil
+		}
 		decision, err := s.routeFor(ctx, req)
 		if err != nil {
 			return res, err
@@ -443,6 +454,17 @@ func (s *Service) runTurnLoop(
 		res.StickyHit = true
 		res.PinTier = "postgres"
 		s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, decision)
+		return res, nil
+	}
+
+	// Subscription usage-bypass: while the caller's own Claude subscription has
+	// headroom, intercept the fresh scorer decision and serve the requested
+	// model straight through. Positioned after every higher-precedence path
+	// (hard-pin, user-forced pin, tool-result/planner-disabled stickies) so it
+	// only ever replaces a fresh scorer decision, never an explicit pin.
+	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
+		res.Decision = dec
+		res.UsageBypass = true
 		return res, nil
 	}
 

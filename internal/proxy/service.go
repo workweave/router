@@ -1534,17 +1534,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// genuine tool_result turn read at telemetry time.
 	inboundLastUser := env.LastUserMessage()
 
-	// Subscription usage-bypass gate: while the caller's own Claude subscription
-	// has headroom (observed utilization below the installation's threshold, or
-	// cold start), serve the requested model straight from Anthropic — no
-	// routing, no substitution, no billing. The turn is paid for by the
-	// customer's plan; once they approach their cap the gate disengages and the
-	// normal routing path conserves the remainder. Excluded models still force
-	// routing so a tenant policy block can't be served via the bypass.
-	if _, blocked := s.excludedModelsForRequest(ctx)[feats.Model]; !blocked && s.usageBypassEngaged(ctx, r.Header, feats.Model) {
-		return s.bypassToAnthropic(ctx, env, feats, requestStart, requestID, externalID, r, w)
-	}
-
 	routeStart := time.Now()
 	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, router.Request{
 		RequestedModel:       feats.Model,
@@ -1559,6 +1548,15 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if routeErr != nil {
 		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
 		return routeErr
+	}
+
+	// Subscription usage-bypass: the gate engaged inside runTurnLoop (after the
+	// hard-pin, force-pin, and tool-result sticky branches, so those still win).
+	// The caller's own Claude subscription has headroom, so serve the requested
+	// model straight through to Anthropic with no model substitution and no
+	// billing debit — the turn is paid for by the customer's plan.
+	if routeRes.UsageBypass {
+		return s.bypassToAnthropic(ctx, env, feats, requestStart, requestID, externalID, r, w)
 	}
 	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision

@@ -148,3 +148,17 @@ func TestUsageBypass_ExcludedModel_EngagesRouting(t *testing.T) {
 
 	assert.Equal(t, 1, fr.routeCalls, "an excluded requested model must force routing even under threshold")
 }
+
+// TestUsageBypass_ExcludedProvider_EngagesRouting: when the installation has
+// excluded the Anthropic provider (e.g. data-residency policy), the bypass must
+// not dispatch to Anthropic even under threshold — routing runs so the
+// exclusion is honored.
+func TestUsageBypass_ExcludedProvider_EngagesRouting(t *testing.T) {
+	svc, fr, _ := bypassFixture(t, 0.20)
+	rec, req, body := bypassRequest(t)
+	ctx := context.WithValue(bypassCtx(0.80), proxy.InstallationExcludedProvidersContextKey{}, []string{providers.ProviderAnthropic})
+
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, req))
+
+	assert.Equal(t, 1, fr.routeCalls, "an excluded Anthropic provider must force routing even under threshold")
+}
