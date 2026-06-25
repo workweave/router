@@ -190,6 +190,25 @@ func TestUsageBypass_ToolResult_BeatsStalePin(t *testing.T) {
 	assert.Equal(t, bypassRequestedMdl, rec.Header().Get("x-router-model"), "continuation must serve the requested model, not the stale pin")
 }
 
+// TestUsageBypass_WorksWithoutSubsidyDiscount: the gate must engage when the
+// observer is wired via WithUsageObserver alone (ROUTER_SUBSCRIPTION_AWARE_ROUTING
+// off) — the bypass is opt-in per installation and must not depend on the
+// separate subscription-aware cost-discount flag.
+func TestUsageBypass_WorksWithoutSubsidyDiscount(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	p := &fakeProvider{}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300}})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
+		WithUsageObserver(obs) // observer only — subsidy discount NOT enabled
+
+	rec, req, body := bypassRequest(t)
+	require.NoError(t, svc.ProxyMessages(bypassCtx(0.80), body, rec, req))
+
+	assert.Equal(t, 0, fr.routeCalls, "bypass must engage on observer alone, without the subsidy flag")
+	assert.Equal(t, bypassRequestedMdl, rec.Header().Get("x-router-model"))
+}
+
 // TestUsageBypass_ExcludedProvider_EngagesRouting: when the installation has
 // excluded the Anthropic provider (e.g. data-residency policy), the bypass must
 // not dispatch to Anthropic even under threshold — routing runs so the

@@ -674,6 +674,41 @@ func main() {
 	// AND have observed headroom (cold start / non-sub traffic = unchanged), so
 	// the blast radius is narrow. Set ROUTER_SUBSCRIPTION_AWARE_ROUTING=false to
 	// disable without a code change.
+	// The subscription usage observer is always wired: it feeds BOTH the
+	// subscription-aware cost discount (below, env-gated) AND the
+	// per-installation usage-bypass gate (DB-gated, so the env can't know
+	// whether any tenant enabled it). Recording is cheap and side-effect-free,
+	// so installing it unconditionally is what lets the bypass work regardless
+	// of the cost-discount flag.
+	subscriptionTTL := 10 * time.Minute
+	if v, err := time.ParseDuration(config.GetOr("ROUTER_SUBSCRIPTION_OBSERVATION_TTL", "10m")); err == nil {
+		subscriptionTTL = v
+	}
+	observerSalt := make([]byte, 16)
+	if _, err := rand.Read(observerSalt); err != nil {
+		logger.Error("Failed to seed subscription usage observer salt", "err", err)
+		panic(err)
+	}
+	usageObserver := usage.NewObserver(observerSalt, subscriptionTTL, time.Now)
+	// Bound memory: evict expired observations periodically (the usage package
+	// spawns no goroutines of its own).
+	go func() {
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for range t.C {
+			usageObserver.Sweep()
+		}
+	}()
+	proxySvc = proxySvc.WithUsageObserver(usageObserver)
+
+	// ROUTER_SUBSCRIPTION_AWARE_ROUTING discounts a covered model's cost term by
+	// the caller's observed subscription rate-limit headroom (see
+	// internal/proxy/usage): ~epsilon when the window has slack, →1 (full price)
+	// as it binds. Defaults ON: the discount only affects turns that present a
+	// subscription AND have observed headroom (cold start / non-sub traffic =
+	// unchanged), so the blast radius is narrow. Set to false to disable the
+	// discount without a code change — the observer (and the usage-bypass gate)
+	// stay wired.
 	if config.GetOr("ROUTER_SUBSCRIPTION_AWARE_ROUTING", "true") == "true" {
 		epsilon := 0.05
 		if v, err := strconv.ParseFloat(config.GetOr("ROUTER_SUBSCRIPTION_COST_EPSILON", "0.05"), 64); err == nil {
@@ -683,27 +718,10 @@ func main() {
 		if v, err := strconv.ParseFloat(config.GetOr("ROUTER_SUBSCRIPTION_COST_GAMMA", "2"), 64); err == nil {
 			gamma = v
 		}
-		ttl := 10 * time.Minute
-		if v, err := time.ParseDuration(config.GetOr("ROUTER_SUBSCRIPTION_OBSERVATION_TTL", "10m")); err == nil {
-			ttl = v
-		}
-		salt := make([]byte, 16)
-		if _, err := rand.Read(salt); err != nil {
-			logger.Error("Failed to seed subscription usage observer salt", "err", err)
-			panic(err)
-		}
-		observer := usage.NewObserver(salt, ttl, time.Now)
-		// Bound memory: evict expired observations periodically (the usage package
-		// spawns no goroutines of its own).
-		go func() {
-			t := time.NewTicker(time.Minute)
-			defer t.Stop()
-			for range t.C {
-				observer.Sweep()
-			}
-		}()
-		proxySvc = proxySvc.WithSubscriptionAwareRouting(observer, epsilon, gamma)
-		logger.Info("Subscription-aware routing configured", "epsilon", epsilon, "gamma", gamma, "observation_ttl", ttl)
+		proxySvc = proxySvc.WithSubscriptionAwareRouting(usageObserver, epsilon, gamma)
+		logger.Info("Subscription-aware routing configured", "epsilon", epsilon, "gamma", gamma, "observation_ttl", subscriptionTTL)
+	} else {
+		logger.Info("Usage observer wired; subscription-aware cost discount disabled", "observation_ttl", subscriptionTTL)
 	}
 
 	// APM (SigNoz) — adds standard HTTP server spans and Go runtime metrics

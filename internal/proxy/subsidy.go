@@ -37,8 +37,18 @@ func claudeCoveredModels() []string {
 // computed, so routing is byte-for-byte today's behavior.
 func (s *Service) WithSubscriptionAwareRouting(obs *usage.Observer, epsilon, gamma float64) *Service {
 	s.usageObserver = obs
+	s.subsidyEnabled = true
 	s.subsidyEpsilon = epsilon
 	s.subsidyGamma = gamma
+	return s
+}
+
+// WithUsageObserver wires the subscription rate-limit observer WITHOUT enabling
+// the cost discount. The composition root calls this so the per-installation
+// usage-bypass gate works even when ROUTER_SUBSCRIPTION_AWARE_ROUTING is off;
+// WithSubscriptionAwareRouting additionally turns on the discount.
+func (s *Service) WithUsageObserver(obs *usage.Observer) *Service {
+	s.usageObserver = obs
 	return s
 }
 
@@ -114,7 +124,7 @@ func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) co
 // feature is off or no subscription is present. Keyed identically to
 // withUsageObserver so record and read agree across all three harnesses.
 func (s *Service) subsidyFactors(ctx context.Context, headers http.Header) map[string]float64 {
-	if s.usageObserver == nil {
+	if s.usageObserver == nil || !s.subsidyEnabled {
 		return nil
 	}
 	codexTok, anthroTok := s.presentSubscriptionTokens(ctx, headers)

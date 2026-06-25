@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -147,6 +148,15 @@ func (s *Service) bypassToAnthropic(
 
 	proxyStart := time.Now()
 	proxyErr := p.Proxy(ctx, decision, prep, w, r)
+	// The Anthropic adapter returns a buffered *UpstreamErrorResponse on 4xx/5xx
+	// without writing to w (the routed path flushes it via dispatchWithFallback).
+	// Render it as the real upstream status+body so the caller sees e.g. a 429
+	// with its retry headers instead of a generic 502; treat the turn as served.
+	var upstreamErr *providers.UpstreamErrorResponse
+	if errors.As(proxyErr, &upstreamErr) {
+		flushUpstreamErrorAsAnthropic(w, proxyErr)
+		proxyErr = nil
+	}
 	otel.Record(ctx, otel.Span{
 		Name:  "router.usage_bypass",
 		Start: requestStart,
