@@ -3,7 +3,6 @@ package billing_test
 import (
 	"context"
 	"errors"
-	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -144,10 +143,10 @@ func TestDebitForInference_OverrideWritesZeroDeltaWithNotional(t *testing.T) {
 	assert.Equal(t, int64(6_750_000), repo.ledgerCalls[0].NotionalCostMicros, "notional records would-be charge")
 }
 
-func TestDebitForInference_SubscriptionDebitsOnlyTheFee(t *testing.T) {
-	// Served on the customer's own Anthropic subscription: the plan covers the
-	// tokens, so the ledger debits only SubscriptionFeeRate of cost while the
-	// notional row still records the full would-be cost.
+func TestDebitForInference_SubscriptionDebitsNothing(t *testing.T) {
+	// Served on the customer's own subscription: their plan already covers the
+	// tokens, so Weave charges nothing — the ledger debits 0 while the notional
+	// row still records the full would-be cost as a shadow trail.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
@@ -163,12 +162,10 @@ func TestDebitForInference_SubscriptionDebitsOnlyTheFee(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	notional := int64(6_750_000)                                              // 3.00 + 3.75
-	fee := int64(math.Round(float64(notional) * billing.SubscriptionFeeRate)) // 337_500
-	assert.Equal(t, 10_000_000-fee, balance, "subscription turns debit only the fee")
+	assert.Equal(t, int64(10_000_000), balance, "subscription turns debit nothing")
 	require.Len(t, repo.ledgerCalls, 1)
-	assert.Equal(t, -fee, repo.ledgerCalls[0].DeltaUsdMicros, "delta is the negative subscription fee, not full cost")
-	assert.Equal(t, notional, repo.ledgerCalls[0].NotionalCostMicros, "notional still records the full would-be cost")
+	assert.Equal(t, int64(0), repo.ledgerCalls[0].DeltaUsdMicros, "delta is zero — the customer's plan covers the tokens")
+	assert.Equal(t, int64(6_750_000), repo.ledgerCalls[0].NotionalCostMicros, "notional still records the full would-be cost")
 }
 
 func TestDebitForInference_OverrideBeatsSubscription(t *testing.T) {
