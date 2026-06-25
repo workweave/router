@@ -58,7 +58,7 @@ Follow this exact order when committing changes.
 The loop exits only when **every** condition is true on the same poll, *after CI has actually dispatched for the current head SHA*:
 
 1. **No unresolved review threads** — every `reviewThread` has `isResolved: true` or `isOutdated: true` (Skip-category threads count as resolved-for-loop-purposes). **Escalate threads awaiting a user decision block DONE** — do not exit while an escalated thread is still pending the human's choice. If the only remaining threads are escalations and the user has not yet responded, surface them and stop (see Step 3.5).
-2. **All required CI checks for the head SHA are present and concluded** — see Step 6 for how to validate dispatch.
+2. **All required CI checks for the head SHA are present and passed** — see Step 6 for how to validate dispatch. "Concluded" means the check state is `SUCCESS`, `FAILURE`, or `NEUTRAL` (not `PENDING`, `QUEUED`, or `IN_PROGRESS`).
 3. **No CI checks pending or running** — `gh pr checks` shows nothing in `PENDING`, `QUEUED`, or `IN_PROGRESS` state.
 4. **No reviewers with `REVIEW_REQUESTED`** — all requested reviewers have either submitted or been dismissed.
 5. **No `CHANGES_REQUESTED` reviews active** — the latest review state from each reviewer is `APPROVED`, `COMMENTED`, or `DISMISSED`.
@@ -84,32 +84,47 @@ Verify `git branch --show-current` matches `headRefName`. Run `git checkout <hea
 Re-fetch all four signals at the start of every iteration. Never reuse stale data.
 
 ```bash
-# Threads, reviews, review-requests
+# Threads, reviews, review-requests (with pagination support)
 gh api graphql -f query='
-  query($owner: String!, $repo: String!, $pr: Int!) {
+  query($owner: String!, $repo: String!, $pr: Int!, $threadCursor: String, $reviewCursor: String) {
     repository(owner: $owner, name: $repo) {
       pullRequest(number: $pr) {
         headRefOid
-        reviewThreads(first: 100) {
+        reviewThreads(first: 100, after: $threadCursor) {
           nodes {
             id isResolved isOutdated path line
             comments(first: 10) { nodes { id body author { login } createdAt } }
           }
+          pageInfo { hasNextPage endCursor }
         }
-        reviewRequests(first: 50) {
+        reviewRequests(first: 50, after: $reviewCursor) {
           nodes { requestedReviewer { ... on User { login } ... on Team { name } } }
+          pageInfo { hasNextPage endCursor }
         }
-        latestReviews(first: 50) {
+        latestReviews(first: 50, after: $reviewCursor) {
           nodes { author { login } state submittedAt }
+          pageInfo { hasNextPage endCursor }
         }
       }
     }
   }
 ' -f owner="$OWNER" -f repo="$REPO" -F pr="$PR_NUMBER"
 
+# For production implementations, iterate through all pages:
+# - Continue fetching reviewThreads with after=endCursor until !hasNextPage
+# - Continue fetching reviewRequests with after=endCursor until !hasNextPage
+# - Continue fetching latestReviews with after=endCursor until !hasNextPage
+
 # CI checks
 gh pr checks "$PR_NUMBER" --json name,state,bucket,link
 ```
+
+**Note:** For production implementations, iterate through all pages:
+- Continue fetching `reviewThreads` with `after: endCursor` until `pageInfo.hasNextPage` is false
+- Continue fetching `reviewRequests` with `after: endCursor` until `pageInfo.hasNextPage` is false  
+- Continue fetching `latestReviews` with `after: endCursor` until `pageInfo.hasNextPage` is false
+
+For brevity in this skill spec, we show only the first page fetch.
 
 Compute the five DONE flags. If all true, **exit the loop**.
 
@@ -160,7 +175,7 @@ Guidelines:
 
 - Make only the changes requested
 - Don't refactor unrelated code
-- If unclear, make a best judgment based on context
+- If unclear, **escalate to the user** rather than guessing. The Escalate category exists for cases where intent is ambiguous or product decisions are needed.
 
 #### For "Decline" comments
 
@@ -270,10 +285,12 @@ Auto-reviewers (`cursor[bot]`, `greptile-apps[bot]`, `cubic`, etc.) often file *
 Count actionable threads:
 
 ```bash
-# actionable = isResolved == false AND isOutdated == false
+# actionable = isResolved == false AND isOutdated == false AND NOT Skip-category
 gh api graphql ... # same query as Step 1
 | jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false and .isOutdated == false)] | length'
 ```
+
+**Note:** This count should exclude Skip-category threads (pure questions/discussion). In practice, the triage step determines Skip vs Fix/Decline/Escalate; for the post-push audit, assume any unresolved non-outdated thread needs attention unless you explicitly classified it as Skip earlier in this iteration.
 
 While count > 0 → triage/fix (Steps 2–5). Only when count == 0 → Step 6 CI wait.
 
@@ -302,7 +319,8 @@ for i in $(seq 1 12); do
   # --- comment interrupt (run GraphQL; if actionable threads > 0 → exit 1) ---
   count=$(gh api "repos/$OWNER/$REPO/commits/$HEAD_SHA/check-runs" --jq '.total_count')
   echo "[dispatch poll $i] checks for $HEAD_SHA: $count"
-  if [ "$count" -ge 5 ]; then break; fi
+  # Dispatch detected when at least one check exists (some repos have fewer required checks)
+  if [ "$count" -gt 0 ]; then break; fi
 done
 
 # Step 6.2: Poll completion + comments. Cap ~30 min.
@@ -327,7 +345,7 @@ Use shorter poll cycles (30s) so new comments are picked up quickly.
    gh run view <run-id> --log-failed 2>&1 | grep -E 'error|Error|##\[error\]|FAIL' | head -40
    ```
 
-   Failing checks become "issues to fix" — feed them into the next iteration's Step 3.
+   Failing checks become "issues to fix" — treat them as Fix-category items in the next iteration's Step 2 triage, then address them via Steps 3-5.
 
 2. **Re-fetch review threads** one more time before re-evaluating DONE (auto-reviewers may have posted at the end of the CI window).
 
