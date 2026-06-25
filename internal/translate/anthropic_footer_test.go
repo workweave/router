@@ -35,25 +35,58 @@ func TestAnthropicRoutingFooterWriter_InjectsBeforeMessageDelta(t *testing.T) {
 	require.NoError(t, err)
 
 	events := splitSSEEvents(rec.Body.String())
-	// 6 upstream events + 3 footer block events (start/delta/stop) = 9.
-	require.Len(t, events, 9)
+	// 6 upstream events + 1 injected footer text_delta = 7. The footer folds
+	// into the existing answer block, so no new content_block_start/stop pair.
+	require.Len(t, events, 7)
 
-	// Locate the footer text_delta and the message_delta; footer must precede it.
-	footerIdx, msgDeltaIdx := -1, -1
+	// Locate the footer text_delta, the answer block's content_block_stop, and
+	// the message_delta. The footer must land before both.
+	footerIdx, stopIdx, msgDeltaIdx := -1, -1, -1
 	for i, e := range events {
 		data := extractDataField(e)
 		typ := gjson.Get(data, "type").String()
-		if typ == "content_block_delta" && strings.Contains(gjson.Get(data, "delta.text").String(), "Weave Router feedback") {
-			footerIdx = i
-			assert.EqualValues(t, 1, gjson.Get(data, "index").Int(), "footer block index should be maxIndex+1")
-		}
-		if typ == "message_delta" {
+		switch typ {
+		case "content_block_delta":
+			if strings.Contains(gjson.Get(data, "delta.text").String(), "Weave Router feedback") {
+				footerIdx = i
+				assert.EqualValues(t, 0, gjson.Get(data, "index").Int(),
+					"footer must fold into the answer block (index 0), not a new block")
+			}
+		case "content_block_stop":
+			stopIdx = i
+		case "message_delta":
 			msgDeltaIdx = i
 		}
 	}
 	require.NotEqual(t, -1, footerIdx, "footer text_delta must be present")
+	require.NotEqual(t, -1, stopIdx, "content_block_stop must be present")
 	require.NotEqual(t, -1, msgDeltaIdx, "message_delta must be present")
+	assert.Less(t, footerIdx, stopIdx, "footer must precede the answer block's content_block_stop")
 	assert.Less(t, footerIdx, msgDeltaIdx, "footer must be injected before message_delta")
+}
+
+// TestAnthropicRoutingFooterWriter_FoldsIntoFinalTextBlock pins the Conductor
+// regression: the footer must share the final answer block's index rather than
+// arrive as a standalone trailing block. Clients that render only the last
+// content block (Conductor and other Claude Code wrappers) would otherwise show
+// the rating prompt as the entire message and bury the answer in the trace.
+func TestAnthropicRoutingFooterWriter_FoldsIntoFinalTextBlock(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewAnthropicRoutingFooterWriter(rec, testFooter)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+
+	_, err := w.Write([]byte(anthropicAnswerStream("end_turn")))
+	require.NoError(t, err)
+
+	for _, e := range splitSSEEvents(rec.Body.String()) {
+		data := extractDataField(e)
+		// No content block beyond the original answer block (index 0) may exist.
+		if strings.HasPrefix(gjson.Get(data, "type").String(), "content_block_") {
+			assert.EqualValues(t, 0, gjson.Get(data, "index").Int(),
+				"no content block may be added beyond the answer block (index 0)")
+		}
+	}
 }
 
 func TestAnthropicRoutingFooterWriter_SkipsToolUseTurn(t *testing.T) {

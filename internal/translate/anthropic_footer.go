@@ -20,16 +20,26 @@ var naturalStopReasons = map[string]struct{}{
 	"stop_sequence": {},
 }
 
-// AnthropicRoutingFooterWriter wraps an http.ResponseWriter and appends a footer
-// text content block at the END of an Anthropic-format SSE stream — after all
-// upstream content blocks, immediately before message_delta — so any client that
-// renders the answer also renders a post-answer affordance (a feedback thumb).
+// AnthropicRoutingFooterWriter wraps an http.ResponseWriter and appends the
+// footer as a trailing text_delta INTO the final text content block of an
+// Anthropic-format SSE stream — right before that block's content_block_stop —
+// so the footer becomes part of the answer block itself rather than a separate
+// block after it.
 //
-// It is the mirror of AnthropicRoutingMarkerWriter's index-0 prelude: it never
-// shifts indices, it only observes the highest content_block index and emits one
-// more block after it. Non-streaming responses and an empty footer pass through
-// untouched, and the footer is injected only when the turn completes naturally
-// (see naturalStopReasons) so tool-call turns stay clean.
+// Appending into the block (instead of emitting a new block at maxIndex+1)
+// matters for clients that render only the LAST content block as the headline
+// message: Conductor and other Claude Code wrappers surface content[last].text
+// as the chat bubble and relegate earlier blocks to a trace view. A standalone
+// footer block becomes content[last], so the user sees the rating prompt as the
+// whole message and has to open the trace to read the real answer. Folding the
+// footer into the answer block keeps content[last] == "<answer><footer>", which
+// renders correctly both there and in the Claude Code TUI (which concatenates
+// all text blocks). This mirrors how the OpenAI/Gemini footer writers coalesce
+// the footer into the single answer stream.
+//
+// Non-streaming responses and an empty footer pass through untouched, and the
+// footer is injected only when the turn completes naturally (see
+// naturalStopReasons) and the final block is text, so tool-call turns stay clean.
 type AnthropicRoutingFooterWriter struct {
 	inner   http.ResponseWriter
 	flusher http.Flusher
@@ -42,23 +52,31 @@ type AnthropicRoutingFooterWriter struct {
 	streaming      bool
 	headersEmitted bool
 	footerEmitted  bool
-	// maxIndex is the highest content_block index seen so far; -1 until the
-	// first content block arrives, which also gates injection on a non-empty
-	// answer.
-	maxIndex int
+
+	// pendingStop holds the most recent content_block_stop event, deferred until
+	// the next event reveals whether its block is the last one (and thus the
+	// footer target). nil when no stop is currently held.
+	pendingStop []byte
+	// pendingIndex / pendingIsText describe the block whose stop is held: its
+	// content_block index and whether it is a text block (the only kind we fold
+	// a text footer into).
+	pendingIndex  int
+	pendingIsText bool
+	// curType is the type ("text", "tool_use", "thinking", …) of the most
+	// recently started content block, used to classify pendingStop on its close.
+	curType string
 }
 
-// NewAnthropicRoutingFooterWriter wraps w so that footer is appended as a
-// trailing text block at the end of a streamed Anthropic response. If footer is
+// NewAnthropicRoutingFooterWriter wraps w so that footer is folded into the
+// final text content block of a streamed Anthropic response. If footer is
 // empty, all writes pass through unchanged.
 func NewAnthropicRoutingFooterWriter(w http.ResponseWriter, footer string) *AnthropicRoutingFooterWriter {
 	flusher, _ := w.(http.Flusher)
 	return &AnthropicRoutingFooterWriter{
-		inner:    w,
-		flusher:  flusher,
-		bw:       bufio.NewWriterSize(w, 4096),
-		footer:   footer,
-		maxIndex: -1,
+		inner:   w,
+		flusher: flusher,
+		bw:      bufio.NewWriterSize(w, 4096),
+		footer:  footer,
 	}
 }
 
@@ -91,10 +109,11 @@ func (w *AnthropicRoutingFooterWriter) Flush() {
 	}
 }
 
-// processUpstream parses the downstream Anthropic SSE, tracks the highest
-// content_block index, and injects the footer block right before the first
-// message_delta whose stop_reason is a natural turn end. Everything is forwarded
-// in order; the only mutation is the inserted block.
+// processUpstream parses the downstream Anthropic SSE, holds each
+// content_block_stop until the following event reveals whether its block is the
+// last one, and on a natural turn end folds the footer into that final text
+// block as an extra text_delta emitted just before its content_block_stop.
+// Everything is forwarded in order; the only mutation is the inserted text_delta.
 func (w *AnthropicRoutingFooterWriter) processUpstream(data []byte) (int, error) {
 	// Hold a partial trailing event until its terminating blank line arrives so
 	// an event split across two Write calls is parsed whole, not truncated.
@@ -107,21 +126,43 @@ func (w *AnthropicRoutingFooterWriter) processUpstream(data []byte) (int, error)
 		eventType, eventData := sse.ParseEvent(event)
 
 		switch string(eventType) {
-		case "content_block_start", "content_block_delta", "content_block_stop":
-			if idx := int(gjson.GetBytes(eventData, "index").Int()); idx > w.maxIndex {
-				w.maxIndex = idx
-			}
+		case "content_block_start":
+			// A new block starting means any held stop closed a non-final block.
+			w.flushPendingStop()
+			w.curType = gjson.GetBytes(eventData, "content_block.type").String()
 			w.bw.Write(event[:n])
 
+		case "content_block_delta":
+			w.flushPendingStop()
+			w.bw.Write(event[:n])
+
+		case "content_block_stop":
+			// Defer the stop: if this turns out to be the final block we want to
+			// inject the footer text_delta before it, not after.
+			w.flushPendingStop()
+			w.pendingStop = append([]byte(nil), event[:n]...)
+			w.pendingIndex = int(gjson.GetBytes(eventData, "index").Int())
+			w.pendingIsText = w.curType == "text"
+
 		case "message_delta":
-			if !w.footerEmitted && w.shouldInject(eventData) {
-				w.emitFooterBlock(w.maxIndex + 1)
+			if !w.footerEmitted && w.pendingStop != nil && w.pendingIsText && w.naturalStop(eventData) {
+				w.emitFooterDelta(w.pendingIndex)
 				w.footerEmitted = true
 			}
+			w.flushPendingStop()
+			w.bw.Write(event[:n])
+
+		case "ping":
+			// Heartbeat pings carry no ordering significance, so forward them
+			// without disturbing a held content_block_stop — a ping landing
+			// between the final block's stop and message_delta must not force
+			// the footer out of that block.
 			w.bw.Write(event[:n])
 
 		default:
-			// message_start, ping, error, message_stop, comments — pass through.
+			// message_start, error, message_stop, comments — flush any held stop
+			// first so a non-natural turn end still emits a well-formed stream.
+			w.flushPendingStop()
 			w.bw.Write(event[:n])
 		}
 		w.buf.Next(n)
@@ -135,35 +176,33 @@ func (w *AnthropicRoutingFooterWriter) processUpstream(data []byte) (int, error)
 	return len(data), nil
 }
 
-// shouldInject reports whether a message_delta event marks a natural turn end
-// with at least one preceding content block to attach the footer after.
-func (w *AnthropicRoutingFooterWriter) shouldInject(messageDelta []byte) bool {
-	if w.maxIndex < 0 {
-		return false
+// flushPendingStop writes out a deferred content_block_stop, if any.
+func (w *AnthropicRoutingFooterWriter) flushPendingStop() {
+	if w.pendingStop == nil {
+		return
 	}
+	w.bw.Write(w.pendingStop)
+	w.pendingStop = nil
+}
+
+// naturalStop reports whether a message_delta marks a turn ending with a real,
+// user-facing answer (see naturalStopReasons).
+func (w *AnthropicRoutingFooterWriter) naturalStop(messageDelta []byte) bool {
 	_, ok := naturalStopReasons[gjson.GetBytes(messageDelta, "delta.stop_reason").String()]
 	return ok
 }
 
-// emitFooterBlock writes the footer as a standalone text content block at the
-// given index (start + single text_delta + stop).
-func (w *AnthropicRoutingFooterWriter) emitFooterBlock(index int) {
-	w.bw.WriteString(`event: content_block_start
-data: {"type":"content_block_start","index":`)
-	sse.WriteJSONInt(w.bw, int64(index))
-	w.bw.WriteString(`,"content_block":{"type":"text","text":""}}` + "\n\n")
-
+// emitFooterDelta appends the footer to an existing text block as one more
+// text_delta at the given index. It is emitted after the block's last upstream
+// delta and before its (deferred) content_block_stop, so the footer renders as
+// the tail of the answer block.
+func (w *AnthropicRoutingFooterWriter) emitFooterDelta(index int) {
 	w.bw.WriteString(`event: content_block_delta
 data: {"type":"content_block_delta","index":`)
 	sse.WriteJSONInt(w.bw, int64(index))
 	w.bw.WriteString(`,"delta":{"type":"text_delta","text":`)
 	sse.WriteJSONString(w.bw, w.footer)
 	w.bw.WriteString(`}}` + "\n\n")
-
-	w.bw.WriteString(`event: content_block_stop
-data: {"type":"content_block_stop","index":`)
-	sse.WriteJSONInt(w.bw, int64(index))
-	w.bw.WriteString(`}` + "\n\n")
 }
 
 var _ http.ResponseWriter = (*AnthropicRoutingFooterWriter)(nil)
