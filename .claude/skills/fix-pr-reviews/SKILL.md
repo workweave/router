@@ -73,8 +73,8 @@ The skill is **single-PR scoped**. If the user gave a PR number, use it. Otherwi
 
 ```bash
 # PR metadata (resolve PR_NUMBER, OWNER, REPO, HEAD_REF)
-gh pr view "${PR_NUMBER:-}" --json number,baseRepositoryOwner,baseRepository,headRepositoryOwner,headRepository,headRefName,headRefOid,isCrossRepository \
-  -q '{owner: (.isCrossRepository | if true then .baseRepositoryOwner.login else .headRepositoryOwner.login end), repo: (.isCrossRepository | if true then .baseRepository.name else .headRepository.name end), number: .number, branch: .headRefName, sha: .headRefOid}'
+gh pr view "${PR_NUMBER:-}" --json number,baseRepository,headRepository,headRefName,headRefOid,isCrossRepository \
+  -q '{owner: (.isCrossRepository | if true then .baseRepository.owner.login else .headRepository.owner.login end), repo: (.isCrossRepository | if true then .baseRepository.name else .headRepository.name end), number: .number, branch: .headRefName, sha: .headRefOid}'
 ```
 
 Verify `git branch --show-current` matches `headRefName`. Run `git checkout <headRefName>` if not. Fixes always go on the branch of the PR whose threads you're addressing.
@@ -293,8 +293,8 @@ Count actionable threads:
 
 ```bash
 # actionable = isResolved == false AND isOutdated == false AND NOT Skip-category
-gh api graphql ... # same query as Step 1
-| jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false and .isOutdated == false)] | length'
+gh api graphql ... # same query as Step 1 | \
+  jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false and .isOutdated == false)] | length'
 ```
 
 **Note:** The jq query above counts all unresolved non-outdated threads, but Skip-category threads should be excluded from "actionable" for CI-wait decisions. In practice:
