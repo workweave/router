@@ -151,10 +151,13 @@ func (s *Service) bypassToAnthropic(
 
 	proxyStart := time.Now()
 	proxyErr := p.Proxy(ctx, decision, prep, w, r)
+	proxyMs := time.Since(proxyStart).Milliseconds()
 	// The Anthropic adapter returns a buffered *UpstreamErrorResponse on 4xx/5xx
 	// without writing to w (the routed path flushes it via dispatchWithFallback).
 	// Render it as the real upstream status+body so the caller sees e.g. a 429
 	// with its retry headers instead of a generic 502; treat the turn as served.
+	// Capture status before clearing proxyErr so telemetry records the real code.
+	upstreamStatusCode := int32(upstreamStatus(proxyErr))
 	var upstreamErr *providers.UpstreamErrorResponse
 	if errors.As(proxyErr, &upstreamErr) {
 		flushUpstreamErrorAsAnthropic(w, proxyErr)
@@ -175,7 +178,6 @@ func (s *Service) bypassToAnthropic(
 	})
 	otel.Flush(ctx)
 
-	proxyMs := time.Since(proxyStart).Milliseconds()
 	installationID := installationIDFromContext(ctx)
 	if installationID != uuid.Nil {
 		clientID := ClientIdentityFrom(ctx)
@@ -192,8 +194,8 @@ func (s *Service) bypassToAnthropic(
 			EstimatedInputTokens:   int32(feats.Tokens),
 			StickyHit:              false,
 			EmbedInput:             "",
-			InputTokens:            0,
-			OutputTokens:           0,
+			InputTokens:            0, // bypass proxies response verbatim; no usage extractor
+			OutputTokens:           0, // actual counts unavailable without response parse
 			RequestedInputCostUSD:  0,
 			RequestedOutputCostUSD: 0,
 			ActualInputCostUSD:     0,
@@ -202,7 +204,7 @@ func (s *Service) bypassToAnthropic(
 			UpstreamLatencyMs:      proxyMs,
 			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
 			CrossFormat:            false,
-			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
+			UpstreamStatusCode:     upstreamStatusCode,
 			DeviceID:               clientID.DeviceID,
 			SessionID:              clientID.SessionID,
 			RouterUserID:           auth.UserIDFrom(ctx),
