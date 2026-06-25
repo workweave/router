@@ -115,3 +115,13 @@ func TestRoutingDistributionHandler_SourceErrorIs503(t *testing.T) {
 	engine.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
+
+func TestRoutingDistributionHandler_EmptyPoolIs400(t *testing.T) {
+	// Exclusions that empty the eligible pool are a client config error, not a
+	// server outage — the handler maps ErrNoEligibleProvider to 4xx.
+	engine := newDistributionEngine(&fakeDistributionSource{err: cluster.ErrNoEligibleProvider})
+	req := httptest.NewRequest(http.MethodGet, "/v1/router/routing-distribution?excluded_models=a,b,c", nil)
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -55,6 +56,13 @@ func RoutingDistributionHandler(dist RoutingDistributionSource) gin.HandlerFunc 
 		excludedProviders := parseCSVSet(c.Query("excluded_providers"))
 		points, err := dist.DefaultRoutingDistribution(gridN, excludedModels, excludedProviders)
 		if err != nil {
+			// An exclusion set that empties the eligible pool is a client
+			// configuration error (4xx), not a server outage — same sentinel
+			// mapping cluster routing uses. Everything else is a 503.
+			if errors.Is(err, cluster.ErrNoEligibleProvider) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "exclusions leave no eligible models"})
+				return
+			}
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "routing distribution unavailable"})
 			return
 		}
