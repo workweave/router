@@ -41,8 +41,8 @@ Follow this exact order when committing changes.
 │ 2. If DONE conditions met → exit                             │
 │ 3. If actionable unresolved threads exist →                  │
 │    a. Triage threads → Fix / Decline / Skip / Escalate       │
-│    b. Escalate threads: ASK the user, wait for decision      │
-│    c. Fix each Fix thread → reply to declines                │
+│    b. Fix each Fix thread → reply to declines                │
+│    c. Escalate threads: ASK the user, wait for decision      │
 │    d. Run pre-commit validation (NEVER skip; see Step 4)     │
 │    e. Resolve threads → commit → push                        │
 │    f. Go to step 1 (do NOT wait for CI yet)                  │
@@ -124,9 +124,16 @@ gh pr checks "$PR_NUMBER" --json name,state,bucket,link
 - Continue fetching `reviewRequests` with `after: endCursor` until `pageInfo.hasNextPage` is false  
 - Continue fetching `latestReviews` with `after: endCursor` until `pageInfo.hasNextPage` is false
 
-For brevity in this skill spec, we show only the first page fetch.
+For production implementations, iterate through all pages before computing DONE flags. For brevity in this skill spec, we show only the first page fetch.
 
 Compute the five DONE flags. If all true, **exit the loop**.
+
+**Important:** The GraphQL query shown fetches only the first page of results. For production use, you must paginate through all pages:
+- `reviewThreads`: continue with `after: endCursor` until `!hasNextPage`
+- `reviewRequests`: continue with `after: endCursor` until `!hasNextPage`
+- `latestReviews`: continue with `after: endCursor` until `!hasNextPage`
+
+Only compute DONE after collecting all pages.
 
 **Comment-first branch:** If any thread is `isResolved: false` AND `isOutdated: false` and is not Skip-category → go to Steps 2–5 immediately. **Do not** wait for CI first, even if checks are still running or failed.
 
@@ -290,7 +297,9 @@ gh api graphql ... # same query as Step 1
 | jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false and .isOutdated == false)] | length'
 ```
 
-**Note:** This count should exclude Skip-category threads (pure questions/discussion). In practice, the triage step determines Skip vs Fix/Decline/Escalate; for the post-push audit, assume any unresolved non-outdated thread needs attention unless you explicitly classified it as Skip earlier in this iteration.
+**Note:** The jq query above counts all unresolved non-outdated threads, but Skip-category threads should be excluded from "actionable" for CI-wait decisions. In practice:
+- If you explicitly classified a thread as Skip earlier in this iteration, it should not count as actionable
+- For the post-push audit, assume any unresolved non-outdated thread needs attention unless you've already classified it as Skip
 
 While count > 0 → triage/fix (Steps 2–5). Only when count == 0 → Step 6 CI wait.
 
@@ -324,6 +333,12 @@ for i in $(seq 1 12); do
   if [ "$count" -gt 0 ]; then break; fi
   if [ "$i" -eq 12 ]; then DISPATCH_TIMEOUT=true; fi
 done
+
+# If no checks exist (e.g., repo has no required checks), treat as dispatched
+if [ "$count" -eq 0 ] && [ "$DISPATCH_TIMEOUT" = false ]; then
+  echo "[info] No checks configured for this repo; treating as dispatched"
+  DISPATCH_TIMEOUT=false
+fi
 
 if [ "$DISPATCH_TIMEOUT" = true ]; then
   echo "[warning] CI dispatch timeout: no checks found for $HEAD_SHA after 3 minutes"
@@ -389,18 +404,6 @@ If after **5 full iterations** the loop hasn't terminated, stop and surface the 
 | Fixed batch 1, pushed, then CI-wait without re-fetch | Bugbot posts new threads on the fix commit; user sees open comments | **Post-push thread audit** every time; Step 1 before Step 6 on same iteration |
 | Resolved one thread and stopped babysitting | Other threads still open; lazy-pr-fix incomplete | Resolve/reply all actionable threads; print termination summary only when DONE |
 | Ending session during CI poll | Miss late bot comments and failing checks | Resume with Step 1 thread fetch; continue interruptible CI loop |
-
-## Notes
-
-- **Skip-thread persistence:** Skip-category threads are intentionally left unresolved (they're discussions, not action items). Without storing which threads were classified as Skip, the same unresolved discussion may be re-triaged on subsequent iterations. For production implementations, store skipped thread IDs in memory for the duration of this skill run.
-- Always fetch fresh threads, reviews, and checks at the **start** of every iteration — never trust a previous snapshot.
-- A "Skip" thread does NOT block the loop's DONE condition because it stays unresolved on purpose.
-- Prefer minimal fixes over large refactors.
-- When uncertain about fix vs decline (low-stakes, mechanical), err on making the change (easier to revert). But when the call is a genuine human decision (product/architecture/scope/intent), **Escalate** instead of guessing.
-- Escalations are surfaced via `AskQuestion` with options grounded in existing codebase patterns and a clear recommendation — never a bare "what do you want to do?".
-- When declining, always leave a reply — never silently resolve a thread without explanation.
-- Cap iterations at **5** to avoid infinite loops on adversarial reviews; surface to user when hit.
-- Output discipline: when iterating, *announce the unresolved thread list* before any CI work so the user can see them. If you interrupt a CI wait for new comments, say so explicitly ("new review thread — fixing before CI finishes").
 
 ## Error Handling
 
