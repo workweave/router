@@ -43,8 +43,8 @@ func TestThinkTagClean(t *testing.T) {
 
 func TestThinkTagSplitAcrossDeltas(t *testing.T) {
 	var s thinkTagSplitter
-	// Tag split: <th + ink>
-	segs := s.collect("<th", "ink>inner</th", "ink>answer")
+	// Tag split: <think> + part of close tag
+	segs := s.collect("<think>in", "ner</", "think>answer")
 	assert.Equal(t, []thinkSegment{
 		{kind: segThinking, text: "inner"},
 		{kind: segText, text: "answer"},
