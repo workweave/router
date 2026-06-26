@@ -29,6 +29,9 @@ internal/proxy/service.go
   s_5a2c049b60d592::t_1e735eb3a6d8f4 1576
 internal/router/router.go
   s_5a2c049b60d592::t_e21d0ef673c012 43-50
+internal/router/cluster/distribution_test.go
+  s_5a2c049b60d592::t_2aeafc164e3f2d 261
+  s_5a2c049b60d592::t_f5c90495f07349 247
 ---
 {
   "schema_version": "authorship/3.0.0",
