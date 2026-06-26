@@ -110,7 +110,7 @@ func UpdateExcludedProvidersHandler(authSvc *auth.Service, models DeployedModels
 		stored, err := authSvc.SetInstallationExcludedProviders(c.Request.Context(), installation.ExternalID, installation.ID, req.Excluded, allowed)
 		if err != nil {
 			if errors.Is(err, auth.ErrUnknownProvider) {
-				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "unknown provider in exclusion list"})
 				return
 			}
 			log.Error("Failed to update excluded providers", "err", err, "installation_id", installation.ID)
