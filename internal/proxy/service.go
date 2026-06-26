@@ -1854,6 +1854,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 					WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
 					WithEstimatedInputTokens(feats.Tokens).
 					WithRequestHadTools(feats.HasTools).
+					WithThinkTagReasoning(catalog.ThinkTagReasoningFor(d.Model)).
 					WithToolValidator(toolValidator)
 			}
 			if err := translator.Prelude(env.Stream()); err != nil {

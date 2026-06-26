@@ -442,6 +442,14 @@ type AnthropicSSETranslator struct {
 	// Code's agentic loop alive.
 	requestHadTools bool
 
+	// thinkTagReasoning, when true, reroutes a leading <think>…</think> in the
+	// content channel into Anthropic thinking blocks via splitter. Set for
+	// models (e.g. xiaomi/mimo-v2.5-pro) that stream chain-of-thought as inline
+	// content tags instead of reasoning_content/reasoning. Off by default so
+	// every other upstream's content passes through unchanged.
+	thinkTagReasoning bool
+	splitter          thinkTagSplitter
+
 	// nudgeEmitted latches true when finishStream emitted the text-only
 	// recovery nudge, so Summary can surface it for log analysis.
 	nudgeEmitted bool
@@ -532,6 +540,16 @@ func (t *AnthropicSSETranslator) WithEstimatedInputTokens(n int) *AnthropicSSETr
 // mode on Gemini-3.1-Pro and Mimo-v2.5-Pro after PRs #280 / #281.
 func (t *AnthropicSSETranslator) WithRequestHadTools(hadTools bool) *AnthropicSSETranslator {
 	t.requestHadTools = hadTools
+	return t
+}
+
+// WithThinkTagReasoning enables rerouting of a leading <think>…</think> in the
+// content channel into Anthropic thinking blocks. Enable only for upstreams
+// (e.g. xiaomi/mimo-v2.5-pro) that stream chain-of-thought as inline content
+// tags rather than reasoning_content/reasoning. When off (the default) content
+// passes through unchanged.
+func (t *AnthropicSSETranslator) WithThinkTagReasoning(on bool) *AnthropicSSETranslator {
+	t.thinkTagReasoning = on
 	return t
 }
 
@@ -766,7 +784,7 @@ func (t *AnthropicSSETranslator) Finalize() error {
 		}
 	}
 
-	translated, issues, err := openAIToAnthropicResponse(body, t.requestModel, t.toolValidator)
+	translated, issues, err := openAIToAnthropicResponse(body, t.requestModel, t.toolValidator, t.thinkTagReasoning)
 	t.toolCallIssues = append(t.toolCallIssues, issues...)
 	if err != nil {
 		t.inner.Header().Set("Content-Type", "application/json")
@@ -877,6 +895,65 @@ func (t *AnthropicSSETranslator) extractAndForwardUsage(data []byte) {
 	}
 }
 
+// appendThinking emits text into an Anthropic thinking content block,
+// closing an open text block and opening a thinking block as needed. Shared by
+// the reasoning_content/reasoning branch and the <think>-tag splitter.
+func (t *AnthropicSSETranslator) appendThinking(text string) error {
+	if t.textOpen {
+		if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+			return err
+		}
+		t.textOpen = false
+	}
+	if !t.thinkingOpen {
+		if err := t.emitContentBlockStartThinking(t.blockIdx); err != nil {
+			return err
+		}
+		t.thinkingOpen = true
+		t.blockIdx++
+	}
+	return t.emitContentBlockDeltaThinking(t.blockIdx-1, text)
+}
+
+// appendText emits text into an Anthropic text content block. Whitespace-only
+// content with no text block open yet is buffered in pendingText so a "\n\n"
+// fragment between a thinking block and a tool_use (DeepSeek-v4) doesn't
+// surface as an empty text block; it flushes once real text justifies a block,
+// or is dropped if the turn ends on tool_use. Whitespace inside an open text
+// block is legitimate formatting and emits normally.
+func (t *AnthropicSSETranslator) appendText(content string) error {
+	if !t.textOpen && strings.TrimSpace(content) == "" {
+		t.pendingText.WriteString(content)
+		return nil
+	}
+	if t.thinkingOpen {
+		if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
+			return err
+		}
+		t.thinkingOpen = false
+	}
+	if !t.textOpen {
+		if err := t.emitContentBlockStartText(t.blockIdx); err != nil {
+			return err
+		}
+		t.textOpen = true
+		t.blockIdx++
+	}
+	if t.pendingText.Len() > 0 {
+		content = t.pendingText.String() + content
+		t.pendingText.Reset()
+	}
+	t.sawText = true
+	if n := t.leadingContent.Len(); n < leadingContentCap {
+		if room := leadingContentCap - n; len(content) > room {
+			t.leadingContent.WriteString(content[:room])
+		} else {
+			t.leadingContent.WriteString(content)
+		}
+	}
+	return t.emitContentBlockDeltaText(t.blockIdx-1, content)
+}
+
 func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 	// Reasoning arrives under different keys depending on upstream:
 	//   - OpenRouter normalizes to `reasoning`
@@ -890,20 +967,7 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 		// Streamed reasoning is real upstream output (rendered as a thinking
 		// block), so it counts as output progress and resets the stall watchdog.
 		t.markOutputProgress()
-		if t.textOpen {
-			if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
-				return err
-			}
-			t.textOpen = false
-		}
-		if !t.thinkingOpen {
-			if err := t.emitContentBlockStartThinking(t.blockIdx); err != nil {
-				return err
-			}
-			t.thinkingOpen = true
-			t.blockIdx++
-		}
-		if err := t.emitContentBlockDeltaThinking(t.blockIdx-1, reasoning); err != nil {
+		if err := t.appendThinking(reasoning); err != nil {
 			return err
 		}
 	}
@@ -913,45 +977,23 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 		// whitespace-only fragment), distinct from a keepalive — count it as
 		// output progress.
 		t.markOutputProgress()
-		// Defer opening a text block until non-whitespace arrives. A
-		// whitespace-only delta with no text block open yet would otherwise
-		// surface as an empty text block wedged between a thinking block and a
-		// tool_use (DeepSeek-v4 emits "\n\n" there). Buffer it instead; it is
-		// flushed once real text justifies a block, or dropped if the turn ends
-		// on tool_use. Whitespace inside an already-open text block is
-		// legitimate formatting and emits normally. Falls through to tool_calls
-		// since a single delta can carry both.
-		if !t.textOpen && strings.TrimSpace(content) == "" {
-			t.pendingText.WriteString(content)
-		} else {
-			if t.thinkingOpen {
-				if err := t.emitContentBlockStop(t.blockIdx - 1); err != nil {
-					return err
-				}
-				t.thinkingOpen = false
-			}
-			if !t.textOpen {
-				if err := t.emitContentBlockStartText(t.blockIdx); err != nil {
-					return err
-				}
-				t.textOpen = true
-				t.blockIdx++
-			}
-			if t.pendingText.Len() > 0 {
-				content = t.pendingText.String() + content
-				t.pendingText.Reset()
-			}
-			t.sawText = true
-			if n := t.leadingContent.Len(); n < leadingContentCap {
-				if room := leadingContentCap - n; len(content) > room {
-					t.leadingContent.WriteString(content[:room])
-				} else {
-					t.leadingContent.WriteString(content)
+		if t.thinkTagReasoning {
+			// Reroute a leading <think>…</think> into thinking blocks; the
+			// splitter passes everything else through as text (see think_tag.go).
+			for _, seg := range t.splitter.Feed(content) {
+				switch seg.kind {
+				case segThinking:
+					if err := t.appendThinking(seg.text); err != nil {
+						return err
+					}
+				default:
+					if err := t.appendText(seg.text); err != nil {
+						return err
+					}
 				}
 			}
-			if err := t.emitContentBlockDeltaText(t.blockIdx-1, content); err != nil {
-				return err
-			}
+		} else if err := t.appendText(content); err != nil {
+			return err
 		}
 	}
 
@@ -1118,6 +1160,12 @@ const leadingContentCap = 64
 // promoted the turn to stop_reason="tool_use", and looped the session (the
 // client ran the echo, re-pinned the same model, got another <think>+answer,
 // repeat). Only genuine tool-call markup is parse-fatal, so only it nudges.
+//
+// With WithThinkTagReasoning enabled (xiaomi/mimo-v2.5-pro) a leading
+// <think>…</think> is rerouted into a thinking block before this check ever
+// runs (see appendThinking via the splitter in emitDelta), so leadingContent
+// holds only the real answer — sharpening the nudge's final-answer guard
+// rather than weakening it.
 var toolishMarkupMarkers = []string{"<tool_call", "<function", "<invoke"}
 
 // leadsWithToolishMarkup reports whether the turn's content opens with
@@ -1268,6 +1316,22 @@ func (t *AnthropicSSETranslator) finishStream() error {
 		t.started = true
 		if err := t.emitRoutingMarkerIfConfigured(); err != nil {
 			return err
+		}
+	}
+	if t.thinkTagReasoning {
+		// Drain any buffered <think> content (an unclosed tag surfaces as
+		// thinking; a buffered partial open-tag surfaces as text).
+		for _, seg := range t.splitter.Flush() {
+			switch seg.kind {
+			case segThinking:
+				if err := t.appendThinking(seg.text); err != nil {
+					return err
+				}
+			default:
+				if err := t.appendText(seg.text); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	if t.textOpen {

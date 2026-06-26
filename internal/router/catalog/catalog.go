@@ -153,6 +153,11 @@ type Model struct {
 	// value (ImageInputUnknown) is the default — set ImageInputUnsupported on
 	// text-only models so the scorer keeps image-bearing turns off them.
 	ImageInput ImageInput
+	// ThinkTagReasoning marks a model that streams chain-of-thought as inline
+	// <think>…</think> in the content channel rather than reasoning_content/
+	// reasoning. When true, the Anthropic response translator reroutes a
+	// leading <think> block into Anthropic thinking. Default false.
+	ThinkTagReasoning bool
 	// Providers is the ordered fallback list. First binding whose
 	// Provider name is in the available set wins. Must be non-empty.
 	Providers []ProviderBinding
@@ -398,7 +403,7 @@ var Models = []Model{
 	// re-issue loops on weak agent prompts. Matches public reports against
 	// OpenCode (#24095) and Crush (#1699). The pro variant is kept — slower
 	// but doesn't exhibit the same instability in our sweep.
-	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, ThinkTagReasoning: true, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "XiaomiMiMo/MiMo-V2.5-Pro",
 			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000, CacheReadMultiplier: 0.10}},

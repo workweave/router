@@ -166,7 +166,7 @@ func AnthropicToOpenAIError(body []byte) []byte {
 // OpenAIToAnthropicResponse converts a non-streaming OpenAI response to
 // Anthropic Messages format.
 func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
-	out, _, err := openAIToAnthropicResponse(body, requestModel, nil)
+	out, _, err := openAIToAnthropicResponse(body, requestModel, nil, false)
 	return out, err
 }
 
@@ -174,7 +174,7 @@ func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error)
 // are checked (and safely repaired) against the request's tool schemas via
 // toolValidator, with one toolcheck.Issue returned per offending block. A nil
 // validator degrades to syntax-check-only.
-func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *toolcheck.Validator) ([]byte, []toolcheck.Issue, error) {
+func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *toolcheck.Validator, thinkTagReasoning bool) ([]byte, []toolcheck.Issue, error) {
 	if !gjson.ValidBytes(body) {
 		return nil, nil, fmt.Errorf("unmarshal openai response: invalid JSON")
 	}
@@ -219,7 +219,7 @@ func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *
 	jw.Key("model")
 	jw.Str(model)
 	jw.Key("content")
-	issues := writeAnthropicContentFromOpenAI(jw, message, toolValidator)
+	issues := writeAnthropicContentFromOpenAI(jw, message, toolValidator, thinkTagReasoning)
 	jw.Key("stop_reason")
 	jw.Str(openAIFinishToAnthropicStopReason(finishReason))
 	jw.Key("stop_sequence")
@@ -230,27 +230,51 @@ func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *
 	return jw.Bytes(), issues, nil
 }
 
-func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolValidator *toolcheck.Validator) (issues []toolcheck.Issue) {
+func writeAnthropicThinkingBlock(jw *jsonWriter, thinking string) {
+	jw.Obj()
+	jw.Key("type")
+	jw.Str("thinking")
+	jw.Key("thinking")
+	jw.Str(thinking)
+	jw.EndObj()
+}
+
+func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolValidator *toolcheck.Validator, thinkTagReasoning bool) (issues []toolcheck.Issue) {
 	jw.Arr()
 	reasoning := message.Get("reasoning_content").String()
 	if reasoning == "" {
 		reasoning = message.Get("reasoning").String()
 	}
 	if reasoning != "" {
-		jw.Obj()
-		jw.Key("type")
-		jw.Str("thinking")
-		jw.Key("thinking")
-		jw.Str(reasoning)
-		jw.EndObj()
+		writeAnthropicThinkingBlock(jw, reasoning)
 	}
 	if text := message.Get("content").String(); text != "" {
-		jw.Obj()
-		jw.Key("type")
-		jw.Str("text")
-		jw.Key("text")
-		jw.Str(text)
-		jw.EndObj()
+		if thinkTagReasoning {
+			// Reroute a leading <think>…</think> into a thinking block; the
+			// remainder (and any non-leading tag) stays text (see think_tag.go).
+			var splitter thinkTagSplitter
+			segs := append(splitter.Feed(text), splitter.Flush()...)
+			var think, prose strings.Builder
+			for _, seg := range segs {
+				if seg.kind == segThinking {
+					think.WriteString(seg.text)
+				} else {
+					prose.WriteString(seg.text)
+				}
+			}
+			if think.Len() > 0 {
+				writeAnthropicThinkingBlock(jw, think.String())
+			}
+			text = prose.String()
+		}
+		if text != "" {
+			jw.Obj()
+			jw.Key("type")
+			jw.Str("text")
+			jw.Key("text")
+			jw.Str(text)
+			jw.EndObj()
+		}
 	}
 	message.Get("tool_calls").ForEach(func(_, tc gjson.Result) bool {
 		id := tc.Get("id").String()

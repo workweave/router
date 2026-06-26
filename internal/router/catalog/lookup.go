@@ -103,6 +103,17 @@ func TierFor(id string) Tier {
 	return m.Tier
 }
 
+// ThinkTagReasoningFor reports whether the model streams chain-of-thought as
+// inline <think>…</think> in the content channel (so the Anthropic translator
+// should reroute it into thinking). Unknown models return false.
+func ThinkTagReasoningFor(id string) bool {
+	m, ok := ByID(id)
+	if !ok {
+		return false
+	}
+	return m.ThinkTagReasoning
+}
+
 // IsAtOrBelow reports whether the model has a known tier at or below the
 // ceiling. Unknown-tier models return false.
 func IsAtOrBelow(id string, ceiling Tier) bool {
