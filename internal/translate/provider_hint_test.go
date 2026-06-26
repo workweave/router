@@ -239,6 +239,21 @@ func TestPrepareOpenAI_ExplicitOpenRouterProviderStillGetsHints(t *testing.T) {
 	require.NotNil(t, reasoningField(t, out.Body))
 }
 
+func TestPrepareOpenAI_ExplicitTrustedRouterProviderGetsHints(t *testing.T) {
+	src := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)
+	env, err := translate.ParseAnthropic(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel:    "deepseek/deepseek-v4-pro",
+		TargetProvider: providers.ProviderTrustedRouter,
+	})
+	require.NoError(t, err)
+
+	require.NotNil(t, providerField(t, out.Body))
+	require.NotNil(t, reasoningField(t, out.Body))
+}
+
 func TestPrepareOpenAI_QwenAndGoogleGetSortHint(t *testing.T) {
 	cases := []string{"qwen/qwen3-max", "google/gemini-2.5-pro"}
 	for _, model := range cases {
