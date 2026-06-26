@@ -23,15 +23,17 @@ the router still registers the provider but forwards Anthropic auth headers
 (`Authorization` / `x-api-key`) to `api.anthropic.com` directly. This lets
 Claude Code keep using the user's logged-in plan.
 
-| Variable              | Default                                                   | Effect |
-| --------------------- | --------------------------------------------------------- | ------ |
-| `OPENROUTER_API_KEY`  | *(none)*                                                  | **Recommended baseline.** Enables OpenRouter and the full OSS-model pool the cluster scorer is trained against. |
-| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1`                            | Override for OpenRouter or any OpenAI-compatible endpoint (vLLM, Together, Fireworks, self-hosted). |
-| `ANTHROPIC_API_KEY`   | *(none — passthrough)*                                    | Router's own Anthropic key. When unset, client `Authorization` headers pass through. |
-| `OPENAI_API_KEY`      | *(none)*                                                  | Enables the OpenAI provider (Chat Completions API). |
-| `OPENAI_BASE_URL`     | `https://api.openai.com`                                  | Override for OpenAI (e.g. Azure OpenAI). |
-| `GOOGLE_API_KEY`      | *(none)*                                                  | Enables Gemini via its OpenAI-compatible endpoint. |
-| `GOOGLE_BASE_URL`     | `https://generativelanguage.googleapis.com/v1beta/openai` | Override for Gemini. |
+| Variable                 | Default                                                   | Effect |
+| ------------------------ | --------------------------------------------------------- | ------ |
+| `OPENROUTER_API_KEY`     | *(none)*                                                  | Enables OpenRouter and the full OSS-model pool the cluster scorer is trained against. |
+| `OPENROUTER_BASE_URL`    | `https://openrouter.ai/api/v1`                            | Override for OpenRouter or any OpenAI-compatible endpoint (vLLM, Together, Fireworks, self-hosted). |
+| `TRUSTEDROUTER_API_KEY`  | *(none)*                                                  | Enables TrustedRouter as an OpenAI-compatible aggregate provider. |
+| `TRUSTEDROUTER_BASE_URL` | `https://api.trustedrouter.com/v1`                        | Override for TrustedRouter-compatible deployments. |
+| `ANTHROPIC_API_KEY`      | *(none — passthrough)*                                    | Router's own Anthropic key. When unset, client `Authorization` headers pass through. |
+| `OPENAI_API_KEY`         | *(none)*                                                  | Enables the OpenAI provider (Chat Completions API). |
+| `OPENAI_BASE_URL`        | `https://api.openai.com`                                  | Override for OpenAI (e.g. Azure OpenAI). |
+| `GOOGLE_API_KEY`         | *(none)*                                                  | Enables Gemini via its OpenAI-compatible endpoint. |
+| `GOOGLE_BASE_URL`        | `https://generativelanguage.googleapis.com/v1beta/openai` | Override for Gemini. |
 
 **BYOK (per-installation keys).** Instead of (or in addition to) the env vars
 above, each installation can supply its own provider keys via the dashboard.

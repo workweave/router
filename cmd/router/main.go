@@ -225,6 +225,24 @@ func main() {
 	}
 
 	{
+		trustedRouterBaseURL := config.GetOr("TRUSTEDROUTER_BASE_URL", openaiCompatProvider.TrustedRouterBaseURL)
+		trustedRouterKey := ""
+		if !byokOnly {
+			trustedRouterKey = config.GetOr("TRUSTEDROUTER_API_KEY", "")
+		}
+		providerMap[providers.ProviderTrustedRouter] = openaiCompatProvider.NewClient(trustedRouterKey, trustedRouterBaseURL)
+		switch {
+		case byokOnly:
+			logger.Info("TrustedRouter provider enabled (BYOK only)", "base_url", trustedRouterBaseURL)
+		case trustedRouterKey != "":
+			envKeyedProviders[providers.ProviderTrustedRouter] = struct{}{}
+			logger.Info("TrustedRouter provider enabled", "base_url", trustedRouterBaseURL)
+		default:
+			logger.Info("TrustedRouter provider registered (BYOK only — set TRUSTEDROUTER_API_KEY for deployment-level use)", "base_url", trustedRouterBaseURL)
+		}
+	}
+
+	{
 		fireworksBaseURL := config.GetOr("FIREWORKS_BASE_URL", openaiCompatProvider.FireworksBaseURL)
 		registerDeploymentKeyedProvider(providerMap, envKeyedProviders, logger,
 			providers.ProviderFireworks, "Fireworks", "FIREWORKS_API_KEY", fireworksBaseURL, byokOnly,

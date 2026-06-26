@@ -124,6 +124,14 @@ func TestExtractClientCredentials_OpenRouter(t *testing.T) {
 	assert.Equal(t, "client", creds.Source)
 }
 
+func TestExtractClientCredentials_TrustedRouter(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer sk-tr-v1-byok-trustedrouter-key"}}
+	creds := proxy.ExtractClientCredentials("trustedrouter", headers)
+	require.NotNil(t, creds)
+	assert.Equal(t, []byte("sk-tr-v1-byok-trustedrouter-key"), creds.APIKey)
+	assert.Equal(t, "client", creds.Source)
+}
+
 func TestExtractClientCredentials_Fireworks(t *testing.T) {
 	headers := http.Header{"Authorization": []string{"Bearer fw_byok-fireworks-key"}}
 	creds := proxy.ExtractClientCredentials("fireworks", headers)
@@ -137,6 +145,13 @@ func TestExtractClientCredentials_RejectsRouterBearerForOpenRouter(t *testing.T)
 	creds := proxy.ExtractClientCredentials("openrouter", headers)
 	assert.Nil(t, creds,
 		"router-issued bearer tokens (rk_...) must never be forwarded as upstream OpenRouter credentials")
+}
+
+func TestExtractClientCredentials_RejectsRouterBearerForTrustedRouter(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer rk_should_not_leak_upstream"}}
+	creds := proxy.ExtractClientCredentials("trustedrouter", headers)
+	assert.Nil(t, creds,
+		"router-issued bearer tokens (rk_...) must never be forwarded as upstream TrustedRouter credentials")
 }
 
 func TestExtractClientCredentials_RejectsRouterBearerForFireworks(t *testing.T) {
@@ -222,7 +237,7 @@ func TestExtractClientCredentials_AnthropicAPIKeyBearerIsNotOAuth(t *testing.T) 
 func TestExtractClientCredentials_RejectsSubscriptionForNonAnthropic(t *testing.T) {
 	// A subscription token can only pay for Claude models; it must never be
 	// forwarded to another vendor's upstream.
-	for _, provider := range []string{"openai", "google", "openrouter", "fireworks"} {
+	for _, provider := range []string{"openai", "google", "openrouter", "trustedrouter", "fireworks"} {
 		headers := http.Header{"Authorization": []string{"Bearer sk-ant-oat01-subscription-token"}}
 		creds := proxy.ExtractClientCredentials(provider, headers)
 		assert.Nilf(t, creds, "a Claude subscription bearer must never be forwarded to %s", provider)
@@ -277,7 +292,7 @@ func TestExtractClientCredentials_CodexSubscriptionIsOpenAIOnly(t *testing.T) {
 		"Authorization":      []string{"Bearer " + codexJWT},
 		"Chatgpt-Account-Id": []string{"acct-12345"},
 	}
-	for _, provider := range []string{"google", "openrouter", "fireworks"} {
+	for _, provider := range []string{"google", "openrouter", "trustedrouter", "fireworks"} {
 		creds := proxy.ExtractClientCredentials(provider, headers)
 		if creds != nil {
 			assert.Falsef(t, creds.OAuth, "a Codex subscription must never be resolved for %s", provider)

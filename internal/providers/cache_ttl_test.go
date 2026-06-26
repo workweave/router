@@ -19,8 +19,16 @@ func TestCacheTTLFor(t *testing.T) {
 	// The OSS/compat providers cache best-effort on a minutes-scale window.
 	assert.Equal(t, 5*time.Minute, providers.CacheTTLFor(providers.ProviderFireworks),
 		"fireworks should report the short best-effort window")
+	assert.Equal(t, 5*time.Minute, providers.CacheTTLFor(providers.ProviderTrustedRouter),
+		"trustedrouter should report the short best-effort window")
 
 	// Unknown providers fall back to the conservative default.
 	assert.Equal(t, providers.DefaultCacheTTL, providers.CacheTTLFor("nonexistent-provider"),
 		"unknown provider should fall back to the default TTL")
+}
+
+func TestAPIKeyEnvVar_TrustedRouter(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "TRUSTEDROUTER_API_KEY", providers.APIKeyEnvVar(providers.ProviderTrustedRouter))
 }
