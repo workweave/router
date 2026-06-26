@@ -62,6 +62,34 @@ func TestResolveAndInjectCredentials_SuppressedSubscriptionFallsThroughToDeploym
 		"with the subscription suppressed and no BYOK, no credential is set so the deployment key serves the turn")
 }
 
+func TestResolveAndInjectCredentials_SuppressedInboundBearerNotReResolved(t *testing.T) {
+	// Self-hosted (no router key, no BYOK): the spent subscription arrives as an
+	// inbound Authorization bearer. With suppression on, neither the
+	// subscription-first block NOR the later ExtractClientCredentials fallback may
+	// re-resolve it — resolution must end with no credential so the deployment
+	// Anthropic key serves the turn.
+	ctx := withSuppressedClaudeSubscription(context.Background())
+	headers := http.Header{"Authorization": []string{"Bearer " + exhaustedSubToken}}
+
+	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
+	assert.Nil(t, CredentialsFromContext(out),
+		"a suppressed inbound subscription bearer must not be re-resolved via client extraction")
+}
+
+func TestResolveAndInjectCredentials_SuppressedKeepsRealClientApiKey(t *testing.T) {
+	// Suppression targets the spent OAuth subscription only. A self-hosted caller
+	// supplying a real Anthropic API key (sk-ant-api-, non-OAuth) must still have
+	// it resolved — it is a valid non-subscription credential, not the dead token.
+	ctx := withSuppressedClaudeSubscription(context.Background())
+	headers := http.Header{"X-Api-Key": []string{"sk-ant-api-real-client-key"}}
+
+	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
+	creds := CredentialsFromContext(out)
+	require.NotNil(t, creds, "a real client API key is not the suppressed subscription and must be kept")
+	assert.False(t, creds.OAuth)
+	assert.Equal(t, []byte("sk-ant-api-real-client-key"), creds.APIKey)
+}
+
 func TestResolveAndInjectCredentials_ClaudeSuppressionLeavesCodexIntact(t *testing.T) {
 	// A caller with BOTH a healthy Codex subscription and an exhausted Claude
 	// subscription, routed to an OpenAI model: the Claude-scoped suppression must

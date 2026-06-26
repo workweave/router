@@ -2707,7 +2707,18 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 		creds = byok[provider]
 	}
 	if creds == nil && !routerKeyed {
-		creds = ExtractClientCredentials(provider, headers)
+		client := ExtractClientCredentials(provider, headers)
+		// A suppressed Claude subscription must not slip back in here: off the
+		// router-key path the spent sk-ant-oat bearer arrives in Authorization and
+		// ExtractClientCredentials would re-resolve it as the subscription, undoing
+		// the skip of the subscription-first block above. Drop it so resolution
+		// falls through to the deployment Anthropic key. Scoped to the Anthropic
+		// OAuth bearer — a real client API key (non-OAuth) and any Codex OAuth on an
+		// OpenAI route are untouched.
+		if suppressClaudeSub && provider == providers.ProviderAnthropic && client != nil && client.OAuth {
+			client = nil
+		}
+		creds = client
 	}
 	if creds != nil {
 		return context.WithValue(ctx, CredentialsContextKey{}, creds)
