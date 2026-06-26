@@ -274,6 +274,19 @@ var Models = []Model{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 30.00, OutputUSDPer1M: 120.00, CacheReadMultiplier: 1.0}},
 	}},
 
+	// --- OpenAI GPT-5.6 (Sol/Terra/Luna capability tiers) ---
+	// ContextWindow tracks the rest of the GPT-5.x line (~1M) pending the
+	// official model card — the launch preview did not publish a number.
+	{ID: "gpt-5.6-luna", Tier: TierLow, ContextWindow: 1_000_000, Providers: []ProviderBinding{
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 1.00, OutputUSDPer1M: 6.00, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "gpt-5.6-terra", Tier: TierMid, ContextWindow: 1_000_000, Providers: []ProviderBinding{
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 2.50, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "gpt-5.6-sol", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
+		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 30.00, CacheReadMultiplier: 0.10}},
+	}},
+
 	// --- Google Gemini 2.x ---
 	{ID: "gemini-2.0-flash-lite", ContextWindow: 1_048_576, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.075, OutputUSDPer1M: 0.30, CacheReadMultiplier: 0.25}},
