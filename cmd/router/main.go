@@ -284,6 +284,29 @@ func main() {
 	}
 
 	{
+		// Makora OpenAI-compatible surface. Agent-optimized inference platform
+		// serving DeepSeek V4 (and other OSS models) at higher throughput;
+		// uses DeepSeek-canonical model IDs while the router exposes slash-form
+		// slugs, so modelIDMap is derived from the catalog's per-binding
+		// UpstreamID at boot.
+		makoraBaseURL := config.GetOr("MAKORA_BASE_URL", openaiCompatProvider.MakoraBaseURL)
+		makoraKey := ""
+		if !byokOnly {
+			makoraKey = config.GetOr("MAKORA_API_KEY", "")
+		}
+		providerMap[providers.ProviderMakora] = openaiCompatProvider.NewClientWithModelIDMap(makoraKey, makoraBaseURL, upstreamIDsForProvider(providers.ProviderMakora))
+		switch {
+		case byokOnly:
+			logger.Info("Makora provider enabled (BYOK only)", "base_url", makoraBaseURL)
+		case makoraKey != "":
+			envKeyedProviders[providers.ProviderMakora] = struct{}{}
+			logger.Info("Makora provider enabled", "base_url", makoraBaseURL)
+		default:
+			logger.Info("Makora provider registered (BYOK only — set MAKORA_API_KEY for deployment-level use)", "base_url", makoraBaseURL)
+		}
+	}
+
+	{
 		// Bedrock via the OpenAI-compatible "bedrock-mantle" surface
 		// (https://bedrock-mantle.{region}.api.aws/v1). AWS recommends this
 		// over the model-native bedrock-runtime/InvokeModel surface; both
