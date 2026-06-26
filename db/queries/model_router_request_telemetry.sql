@@ -16,6 +16,10 @@
 -- model served); pin_age_sec supports min-dwell analysis. Shadow-mode
 -- instrumentation for the hysteresis downgrade lever; NULL when the scorer did
 -- not run / no pin was loaded.
+-- credential_key_prefix + credential_key_suffix are the safe display parts of
+-- the upstream credential; credential_source names the precedence branch it came
+-- from. All NULL on deployment-key turns. Matching prefix/suffix values across
+-- distinct router_user_ids reveal one subscription paying for many seats.
 -- name: InsertRequestTelemetry :exec
 INSERT INTO router.model_router_request_telemetry (
     installation_id,
@@ -68,7 +72,10 @@ INSERT INTO router.model_router_request_telemetry (
     fresh_decision_model,
     fresh_candidate_scores,
     pin_age_sec,
-    tool_result_bytes
+    tool_result_bytes,
+    credential_key_prefix,
+    credential_key_suffix,
+    credential_source
 ) VALUES (
     @installation_id::uuid,
     @request_id::varchar,
@@ -120,7 +127,10 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('fresh_decision_model')::varchar,
     sqlc.narg('fresh_candidate_scores')::jsonb,
     sqlc.narg('pin_age_sec')::bigint,
-    sqlc.narg('tool_result_bytes')::int
+    sqlc.narg('tool_result_bytes')::int,
+    sqlc.narg('credential_key_prefix')::varchar,
+    sqlc.narg('credential_key_suffix')::varchar,
+    sqlc.narg('credential_source')::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 

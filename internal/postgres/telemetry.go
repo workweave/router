@@ -102,6 +102,9 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		FreshCandidateScores:   p.FreshCandidateScores,
 		PinAgeSec:              p.PinAgeSec,
 		ToolResultBytes:        p.ToolResultBytes,
+		CredentialKeyPrefix:    stringPtrOrNil(p.CredentialKeyPrefix),
+		CredentialKeySuffix:    stringPtrOrNil(p.CredentialKeySuffix),
+		CredentialSource:       stringPtrOrNil(p.CredentialSource),
 	})
 }
 

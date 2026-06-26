@@ -256,11 +256,6 @@ type InstallationExcludedModelsContextKey struct{}
 // installation's provider exclusion list. Carried as []string.
 type InstallationExcludedProvidersContextKey struct{}
 
-// InstallationPreferredModelsContextKey is the context key for the authed
-// installation's model priority ranking. Carried as []string in descending
-// preference (index 0 = first preference). See preferredModelsForRequest.
-type InstallationPreferredModelsContextKey struct{}
-
 // InstallationRoutingKnobsContextKey is the context key for the authed
 // installation's persisted routing preference (the "quality vs price" dial).
 // Carried as *router.Overrides with only Alpha (quality weight) set; the
@@ -473,26 +468,6 @@ func (s *Service) excludedProvidersForRequest(ctx context.Context) map[string]st
 	return out
 }
 
-// installationPreferredModelsFromContext returns the per-installation model
-// priority ranking stashed on ctx by the auth middleware, or nil when none is
-// present.
-func installationPreferredModelsFromContext(ctx context.Context) []string {
-	v := ctx.Value(InstallationPreferredModelsContextKey{})
-	if v == nil {
-		return nil
-	}
-	out, _ := v.([]string)
-	return out
-}
-
-// preferredModelsForRequest returns the request's ordered model priority
-// ranking (index 0 = first preference). The installation list flows through
-// unchanged; the scorer ignores entries not in the eligible pool. There is no
-// env override (priority is a per-installation product knob, not an eval lever).
-func (s *Service) preferredModelsForRequest(ctx context.Context) []string {
-	return installationPreferredModelsFromContext(ctx)
-}
-
 // contextWindowOverheadFactor scales the raw body-bytes token estimate to
 // account for JSON structure overhead (field names, brackets, quotes) inflating
 // byte count relative to actual tokens. The inverse of 5 bytes/token
@@ -677,28 +652,6 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 // stashed by the auth middleware (router-keyed path), or "" when none.
 func anthropicSubscriptionFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(AnthropicSubscriptionContextKey{}).(string)
-	return v
-}
-
-// suppressClaudeSubscriptionContextKey, when present and true, tells
-// resolveAndInjectCredentials to skip the caller's CLAUDE subscription OAuth
-// token so resolution falls through to BYOK / the deployment Anthropic key. Set
-// when the caller's Claude subscription is observed-exhausted (its plan window
-// has bound) so the turn serves on the Weave key instead of re-hitting a token
-// that will 429. Scoped to the Claude token only — a Codex subscription on the
-// same request is unaffected (its OpenAI turns still bill the customer's plan).
-type suppressClaudeSubscriptionContextKey struct{}
-
-// withSuppressedClaudeSubscription marks ctx so the next credential resolution
-// skips the caller's Claude subscription OAuth token (Anthropic only).
-func withSuppressedClaudeSubscription(ctx context.Context) context.Context {
-	return context.WithValue(ctx, suppressClaudeSubscriptionContextKey{}, true)
-}
-
-// claudeSubscriptionSuppressed reports whether the Claude subscription OAuth
-// token must be skipped during Anthropic credential resolution for this request.
-func claudeSubscriptionSuppressed(ctx context.Context) bool {
-	v, _ := ctx.Value(suppressClaudeSubscriptionContextKey{}).(bool)
 	return v
 }
 
@@ -1595,7 +1548,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		PromptText:           promptText,
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excluded,
-		PreferredModels:      s.preferredModelsForRequest(ctx),
 		RoutingKnobs:         routingKnobsForRequest(ctx),
 	})
 	if routeErr != nil {
@@ -1785,15 +1737,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
 	}
 
-	// A caller whose Claude subscription has bound its plan window can't serve
-	// another turn on it (the upstream 429s until reset). Suppress the spent
-	// token so resolution falls through to the deployment / BYOK Anthropic key —
-	// the turn then serves on the Weave key (billed at full cost, not the
-	// subscription rate) instead of hard-failing. Only fires once the observer
-	// has recorded the exhaustion and a fallback key exists.
-	if s.claudeSubscriptionExhausted(ctx, r.Header) {
-		ctx = withSuppressedClaudeSubscription(ctx)
-	}
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
 	// Wrap the client writer in a preludeBuffer for every request, not just
@@ -2092,11 +2035,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				"failed_provider", primaryProvider,
 				"baseline_model", baselineModel,
 				"err", proxyErr)
-			baselineCtx := ctx
-			if s.claudeSubscriptionExhausted(ctx, r.Header) {
-				baselineCtx = withSuppressedClaudeSubscription(baselineCtx)
-			}
-			baselineCtx = resolveAndInjectCredentials(baselineCtx, providers.ProviderAnthropic, r.Header)
+			baselineCtx := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, r.Header)
 			baselineBindings := s.resolveBindingsForDispatch(baselineCtx, baselineDecision)
 			baselineMarker := suppressMarkerIfRequested(r.Header, baselineRoutingMarkerFor(routeRes, baselineModel))
 			baselineAttempt := s.anthropicNativeAttempt(env, r, baselinePrep, sink, preludeBuf, baselineMarker, setExtractor)
@@ -2218,6 +2157,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	s.recordTurnUsage(routeRes, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if installationID != uuid.Nil {
+		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
 		failoverUsed := finalProvider != primaryProvider
 		degShadow := proxyErr == nil && isDegenerateResponse(out, respSummary.ToolUseBlocks, respSummary.StopReason, respSummary.StopReasonDemoted)
 		if degShadow {
@@ -2306,6 +2246,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			// tool_result turns (the structural triviality signal). NULL on turns
 			// with no trailing tool_result. No routing action is taken on it.
 			ToolResultBytes: toolResultBytesPtr(inboundLastUser, tt),
+			// Credential attribution: which safe display key parts actually paid for
+			// the turn. Lets a shared subscription token (one Claude account, many
+			// seats) be detected via equal prefix/suffix across router_user_ids.
+			CredentialKeyPrefix: credentialKeyPrefix,
+			CredentialKeySuffix: credentialKeySuffix,
+			CredentialSource:    credSource,
 		})
 	}
 
@@ -2670,13 +2616,7 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 // fallback in that case.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
-	// When the caller's Claude subscription is observed-exhausted, skip its OAuth
-	// token so resolution falls through to BYOK / the deployment Anthropic key
-	// (the turn then serves on the Weave key). Re-hitting a spent subscription
-	// would just 429 until its plan window resets. Scoped to Anthropic only — a
-	// Codex subscription on the same request must still pay for its OpenAI turns.
-	suppressClaudeSub := claudeSubscriptionSuppressed(ctx)
-	if provider == providers.ProviderAnthropic && !suppressClaudeSub {
+	if provider == providers.ProviderAnthropic {
 		// Subscription-first (precedence: subscription -> BYOK -> deployment). A
 		// caller's Claude subscription pays for their Claude turns ahead of any
 		// BYOK or deployment key. It arrives via the dedicated header on
@@ -2733,18 +2673,7 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 		creds = byok[provider]
 	}
 	if creds == nil && !routerKeyed {
-		client := ExtractClientCredentials(provider, headers)
-		// A suppressed Claude subscription must not slip back in here: off the
-		// router-key path the spent sk-ant-oat bearer arrives in Authorization and
-		// ExtractClientCredentials would re-resolve it as the subscription, undoing
-		// the skip of the subscription-first block above. Drop it so resolution
-		// falls through to the deployment Anthropic key. Scoped to the Anthropic
-		// OAuth bearer — a real client API key (non-OAuth) and any Codex OAuth on an
-		// OpenAI route are untouched.
-		if suppressClaudeSub && provider == providers.ProviderAnthropic && client != nil && client.OAuth {
-			client = nil
-		}
-		creds = client
+		creds = ExtractClientCredentials(provider, headers)
 	}
 	if creds != nil {
 		return context.WithValue(ctx, CredentialsContextKey{}, creds)
@@ -3198,7 +3127,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		PromptText:           promptText,
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excludedOAI,
-		PreferredModels:      s.preferredModelsForRequest(ctx),
 		RoutingKnobs:         routingKnobsForRequest(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
@@ -3652,6 +3580,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	installationIDOAI, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	if installationIDOAI != "" {
+		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
 		s.fireTelemetry(InsertTelemetryParams{
 			InstallationID:         installationIDOAI,
 			RequestID:              requestID,
@@ -3703,6 +3632,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			// tool_result turns (the structural triviality signal). NULL on turns
 			// with no trailing tool_result. No routing action is taken on it.
 			ToolResultBytes: toolResultBytesPtr(inboundLastUser, tt),
+			// Credential attribution — see the Anthropic-path write site.
+			CredentialKeyPrefix: credentialKeyPrefix,
+			CredentialKeySuffix: credentialKeySuffix,
+			CredentialSource:    credSource,
 		})
 	}
 

@@ -89,6 +89,16 @@ type InsertTelemetryParams struct {
 	// (shadow-mode instrumentation for the tier-cap lever). nil when the turn
 	// carries no trailing tool_result.
 	ToolResultBytes *int32
+
+	// CredentialKeyPrefix/CredentialKeySuffix are the safe display parts of the
+	// upstream credential that served the turn; CredentialSource names the
+	// precedence branch it came from (subscription / codex_subscription / byok /
+	// client). Empty on deployment-key turns, leaving the columns NULL. Equal
+	// prefix/suffix values across distinct RouterUserIDs reveal one subscription
+	// paying for many seats.
+	CredentialKeyPrefix string
+	CredentialKeySuffix string
+	CredentialSource    string
 }
 
 // TelemetrySummary holds aggregated totals for the dashboard cards.

@@ -859,7 +859,10 @@ INSERT INTO router.model_router_request_telemetry (
     fresh_decision_model,
     fresh_candidate_scores,
     pin_age_sec,
-    tool_result_bytes
+    tool_result_bytes,
+    credential_key_prefix,
+    credential_key_suffix,
+    credential_source
 ) VALUES (
     $1::uuid,
     $2::varchar,
@@ -911,7 +914,10 @@ INSERT INTO router.model_router_request_telemetry (
     $48::varchar,
     $49::jsonb,
     $50::bigint,
-    $51::int
+    $51::int,
+    $52::varchar,
+    $53::varchar,
+    $54::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -968,6 +974,9 @@ type InsertRequestTelemetryParams struct {
 	FreshCandidateScores   []byte
 	PinAgeSec              *int64
 	ToolResultBytes        *int32
+	CredentialKeyPrefix    *string
+	CredentialKeySuffix    *string
+	CredentialSource       *string
 }
 
 // Records a completed proxied request for the dashboard UI and routing
@@ -988,6 +997,10 @@ type InsertRequestTelemetryParams struct {
 // model served); pin_age_sec supports min-dwell analysis. Shadow-mode
 // instrumentation for the hysteresis downgrade lever; NULL when the scorer did
 // not run / no pin was loaded.
+// credential_key_prefix + credential_key_suffix are the safe display parts of
+// the upstream credential; credential_source names the precedence branch it came
+// from. All NULL on deployment-key turns. Matching prefix/suffix values across
+// distinct router_user_ids reveal one subscription paying for many seats.
 //
 //	INSERT INTO router.model_router_request_telemetry (
 //	    installation_id,
@@ -1040,7 +1053,10 @@ type InsertRequestTelemetryParams struct {
 //	    fresh_decision_model,
 //	    fresh_candidate_scores,
 //	    pin_age_sec,
-//	    tool_result_bytes
+//	    tool_result_bytes,
+//	    credential_key_prefix,
+//	    credential_key_suffix,
+//	    credential_source
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::varchar,
@@ -1092,7 +1108,10 @@ type InsertRequestTelemetryParams struct {
 //	    $48::varchar,
 //	    $49::jsonb,
 //	    $50::bigint,
-//	    $51::int
+//	    $51::int,
+//	    $52::varchar,
+//	    $53::varchar,
+//	    $54::varchar
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -1148,6 +1167,9 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.FreshCandidateScores,
 		arg.PinAgeSec,
 		arg.ToolResultBytes,
+		arg.CredentialKeyPrefix,
+		arg.CredentialKeySuffix,
+		arg.CredentialSource,
 	)
 	return err
 }

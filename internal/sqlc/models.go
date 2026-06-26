@@ -78,7 +78,6 @@ type RouterModelRouterInstallation struct {
 	RoutingQualityWeight *float64
 	UsageBypassEnabled   bool
 	UsageBypassThreshold *float64
-	PreferredModels      []string
 }
 
 type RouterModelRouterRequestTelemetry struct {
@@ -141,6 +140,12 @@ type RouterModelRouterRequestTelemetry struct {
 	PinAgeSec *int64
 	// Summed raw-JSON byte size of the trailing turn's tool_result payload(s) -- the incoming tool-output size. Structural triviality proxy for the tier-cap shadow. NULL when the turn carries no trailing tool_result.
 	ToolResultBytes *int32
+	// Safe display prefix (first 8 characters) of the upstream credential that served the turn. NULL on deployment-key turns.
+	CredentialKeyPrefix *string
+	// Safe display suffix (last 4 characters) of the upstream credential that served the turn. NULL on deployment-key turns or very short credentials.
+	CredentialKeySuffix *string
+	// Which credential precedence branch served the turn: subscription, codex_subscription, byok, or client. NULL on deployment-key turns.
+	CredentialSource *string
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.
@@ -240,6 +245,9 @@ type RouterProductionRequestTelemetry struct {
 	FreshCandidateScores   []byte
 	PinAgeSec              *int64
 	ToolResultBytes        *int32
+	CredentialKeyPrefix    *string
+	CredentialKeySuffix    *string
+	CredentialSource       *string
 }
 
 // Router-owned per-request human feedback captured via the no-login feedback link; mirrored into Weave via the router.feedback OTLP span
