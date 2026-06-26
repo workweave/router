@@ -1561,7 +1561,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// model straight through to Anthropic with no model substitution and no
 	// billing debit — the turn is paid for by the customer's plan.
 	if routeRes.UsageBypass {
-		return s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
+		return s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), string(routeRes.TurnType), time.Since(routeStart).Milliseconds(), requestStart, requestID, externalID, r, w)
 	}
 	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision

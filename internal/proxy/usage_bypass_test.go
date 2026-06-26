@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,44 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// fakeTelemetryRepo captures InsertRequestTelemetry calls so tests can assert
+// that fireTelemetry was invoked with expected parameters.
+type fakeTelemetryRepo struct {
+	mu     sync.Mutex
+	params []proxy.InsertTelemetryParams
+}
+
+func (f *fakeTelemetryRepo) InsertRequestTelemetry(_ context.Context, p proxy.InsertTelemetryParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.params = append(f.params, p)
+	return nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetrySummary(_ context.Context, _ string, _, _ time.Time) (proxy.TelemetrySummary, error) {
+	return proxy.TelemetrySummary{}, nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetryTimeseries(_ context.Context, _ string, _, _ time.Time, _ string) ([]proxy.TelemetryBucket, error) {
+	return nil, nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetrySummaryAll(_ context.Context, _, _ time.Time) (proxy.TelemetrySummary, error) {
+	return proxy.TelemetrySummary{}, nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetryTimeseriesAll(_ context.Context, _, _ time.Time, _ string) ([]proxy.TelemetryBucket, error) {
+	return nil, nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetryRows(_ context.Context, _ string, _, _ time.Time, _ int32) ([]proxy.TelemetryRow, error) {
+	return nil, nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetryRowsAll(_ context.Context, _, _ time.Time, _ int32) ([]proxy.TelemetryRow, error) {
+	return nil, nil
+}
 
 const (
 	bypassSubToken      = "sk-ant-oat01-subscription-token"
@@ -221,4 +260,105 @@ func TestUsageBypass_ExcludedProvider_EngagesRouting(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec, req))
 
 	assert.Equal(t, 1, fr.routeCalls, "an excluded Anthropic provider must force routing even under threshold")
+}
+
+// TestBypassToAnthropic_RecordsTelemetry: a usage-bypass turn must write a row
+// to router_request_telemetry so it appears in the dashboard's /metrics/details,
+// model distribution widget, and cost savings charts. This test FAILS before the
+// fireTelemetry call is added to bypassToAnthropic.
+func TestBypassToAnthropic_RecordsTelemetry(t *testing.T) {
+	telRepo := &fakeTelemetryRepo{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	p := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"` + bypassRequestedMdl + `","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
+		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+	})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, telRepo).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
+
+	installationID := uuid.New().String()
+	ctx := authedCtx(installationID)
+	ctx = context.WithValue(ctx, proxy.AnthropicSubscriptionContextKey{}, bypassSubToken)
+	threshold := 0.80
+	ctx = context.WithValue(ctx, proxy.InstallationUsageBypassContextKey{}, proxy.UsageBypassConfig{
+		Enabled:   true,
+		Threshold: &threshold,
+	})
+
+	rec, req, body := bypassRequest(t)
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, req))
+
+	// fireTelemetry fires asynchronously; wait up to 2 seconds.
+	require.Eventually(t, func() bool {
+		telRepo.mu.Lock()
+		defer telRepo.mu.Unlock()
+		return len(telRepo.params) >= 1
+	}, 2*time.Second, 10*time.Millisecond, "fireTelemetry must be called for usage-bypass turns")
+
+	telRepo.mu.Lock()
+	params := make([]proxy.InsertTelemetryParams, len(telRepo.params))
+	copy(params, telRepo.params)
+	telRepo.mu.Unlock()
+
+	require.Len(t, params, 1)
+	got := params[0]
+	assert.Equal(t, "usage_bypass", got.DecisionReason, "telemetry must record bypass as the decision reason")
+	assert.Equal(t, providers.ProviderAnthropic, got.DecisionProvider, "telemetry must record the Anthropic provider")
+	// Upstream returned 200 (fakeProvider writes StatusOK); proxyErr is nil
+	// so upstreamStatusCode is correctly 0 — not the cleared-error bug.
+	assert.Equal(t, int32(0), got.UpstreamStatusCode)
+}
+
+// TestBypassToAnthropic_RecordsTelemetry_UpstreamError: when the upstream returns
+// a 4xx buffered as *providers.UpstreamErrorResponse, bypassToAnthropic clears
+// proxyErr to nil after flushing the error to the client. This test verifies that
+// UpstreamStatusCode in the telemetry row reflects the real upstream status (429),
+// not 0 — confirming the status is captured before proxyErr is cleared.
+func TestBypassToAnthropic_RecordsTelemetry_UpstreamError(t *testing.T) {
+	telRepo := &fakeTelemetryRepo{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	p := &fakeProvider{proxyErr: &providers.UpstreamErrorResponse{Status: http.StatusTooManyRequests}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
+		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+	})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, telRepo).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
+
+	installationID := uuid.New().String()
+	ctx := authedCtx(installationID)
+	ctx = context.WithValue(ctx, proxy.AnthropicSubscriptionContextKey{}, bypassSubToken)
+	threshold := 0.80
+	ctx = context.WithValue(ctx, proxy.InstallationUsageBypassContextKey{}, proxy.UsageBypassConfig{
+		Enabled:   true,
+		Threshold: &threshold,
+	})
+
+	rec, req, body := bypassRequest(t)
+	// proxyErr is cleared after flushUpstreamErrorAsAnthropic writes to w,
+	// so bypassToAnthropic returns nil even though upstream 429'd.
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, req))
+
+	require.Eventually(t, func() bool {
+		telRepo.mu.Lock()
+		defer telRepo.mu.Unlock()
+		return len(telRepo.params) >= 1
+	}, 2*time.Second, 10*time.Millisecond, "fireTelemetry must be called for usage-bypass turns")
+
+	telRepo.mu.Lock()
+	params := make([]proxy.InsertTelemetryParams, len(telRepo.params))
+	copy(params, telRepo.params)
+	telRepo.mu.Unlock()
+
+	require.Len(t, params, 1)
+	got := params[0]
+	assert.Equal(t, "usage_bypass", got.DecisionReason)
+	assert.Equal(t, providers.ProviderAnthropic, got.DecisionProvider)
+	// Status must be 429, not 0 — captured before proxyErr was cleared.
+	assert.Equal(t, int32(http.StatusTooManyRequests), got.UpstreamStatusCode)
 }

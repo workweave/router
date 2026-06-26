@@ -7,12 +7,15 @@ import (
 	"net/http"
 	"time"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/translate"
+
+	"github.com/google/uuid"
 )
 
 // usageBypassDecision returns the passthrough decision when the subscription
@@ -99,6 +102,8 @@ func (s *Service) bypassToAnthropic(
 	env *translate.RequestEnvelope,
 	feats translate.RoutingFeatures,
 	modelSwitched bool,
+	turnType string,
+	routeMs int64,
 	requestStart time.Time,
 	requestID, externalID string,
 	r *http.Request,
@@ -148,10 +153,13 @@ func (s *Service) bypassToAnthropic(
 
 	proxyStart := time.Now()
 	proxyErr := p.Proxy(ctx, decision, prep, w, r)
+	proxyMs := time.Since(proxyStart).Milliseconds()
 	// The Anthropic adapter returns a buffered *UpstreamErrorResponse on 4xx/5xx
 	// without writing to w (the routed path flushes it via dispatchWithFallback).
 	// Render it as the real upstream status+body so the caller sees e.g. a 429
 	// with its retry headers instead of a generic 502; treat the turn as served.
+	// Capture status before clearing proxyErr so telemetry records the real code.
+	upstreamStatusCode := int32(upstreamStatus(proxyErr))
 	var upstreamErr *providers.UpstreamErrorResponse
 	if errors.As(proxyErr, &upstreamErr) {
 		flushUpstreamErrorAsAnthropic(w, proxyErr)
@@ -171,12 +179,47 @@ func (s *Service) bypassToAnthropic(
 			Build(),
 	})
 	otel.Flush(ctx)
+
+	installationID := installationIDFromContext(ctx)
+	if installationID != uuid.Nil {
+		clientID := ClientIdentityFrom(ctx)
+		s.fireTelemetry(InsertTelemetryParams{
+			InstallationID:         installationID.String(),
+			RequestID:              requestID,
+			SpanType:               "router.upstream",
+			TraceID:                requestID,
+			Timestamp:              requestStart,
+			RequestedModel:         feats.Model,
+			DecisionModel:          decision.Model,
+			DecisionProvider:       decision.Provider,
+			DecisionReason:         decision.Reason,
+			EstimatedInputTokens:   int32(feats.Tokens),
+			StickyHit:              false,
+			EmbedInput:             "",
+			InputTokens:            0, // bypass proxies response verbatim; no usage extractor
+			OutputTokens:           0, // actual counts unavailable without response parse
+			RequestedInputCostUSD:  0,
+			RequestedOutputCostUSD: 0,
+			ActualInputCostUSD:     0,
+			ActualOutputCostUSD:    0,
+			RouteLatencyMs:         routeMs,
+			UpstreamLatencyMs:      proxyMs,
+			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
+			CrossFormat:            false,
+			UpstreamStatusCode:     upstreamStatusCode,
+			DeviceID:               clientID.DeviceID,
+			SessionID:              clientID.SessionID,
+			RouterUserID:           auth.UserIDFrom(ctx),
+			ClientApp:              clientID.ClientApp,
+			TurnType:               turnType,
+		})
+	}
 	log.Info("ProxyMessages usage-bypass complete",
 		"request_id", requestID,
 		"external_id", externalID,
 		"requested_model", feats.Model,
 		"decision_model", decision.Model,
-		"proxy_ms", time.Since(proxyStart).Milliseconds(),
+		"proxy_ms", proxyMs,
 		"total_ms", time.Since(requestStart).Milliseconds(),
 		"proxy_err", proxyErr,
 	)
