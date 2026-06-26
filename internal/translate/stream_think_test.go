@@ -157,6 +157,35 @@ func TestThinkTagNonStreaming_SplitsThinkingAndText(t *testing.T) {
 	assert.Equal(t, "final answer", text["text"])
 }
 
+func TestThinkTagNonStreaming_ReasoningAndTagFoldIntoOneBlock(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewAnthropicSSETranslator(rec, "xiaomi/mimo-v2.5-pro", nil).
+		WithThinkTagReasoning(true)
+	require.NoError(t, w.Prelude(false)) // buffered path
+	w.WriteHeader(http.StatusOK)
+
+	// Upstream fills both reasoning_content and a leading <think> in content.
+	// The buffered path must fold both into a single thinking block, matching
+	// the streaming translator (appendThinking reuses an open thinking block).
+	body := `{"id":"cmpl-3","model":"xiaomi/mimo-v2.5-pro","choices":[{"message":{"role":"assistant","reasoning_content":"native reasoning ","content":"<think>tag reasoning</think>final answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":7}}`
+	_, err := w.Write([]byte(body))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
+	blocks, _ := doc["content"].([]any)
+	require.Len(t, blocks, 2)
+
+	think, _ := blocks[0].(map[string]any)
+	assert.Equal(t, "thinking", think["type"])
+	assert.Equal(t, "native reasoning tag reasoning", think["thinking"])
+
+	text, _ := blocks[1].(map[string]any)
+	assert.Equal(t, "text", text["type"])
+	assert.Equal(t, "final answer", text["text"])
+}
+
 func TestThinkTagNonStreaming_NoLeadingThinkUnchanged(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewAnthropicSSETranslator(rec, "xiaomi/mimo-v2.5-pro", nil).

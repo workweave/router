@@ -245,36 +245,37 @@ func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolV
 	if reasoning == "" {
 		reasoning = message.Get("reasoning").String()
 	}
+	text := message.Get("content").String()
+	if thinkTagReasoning && text != "" {
+		// Reroute a leading <think>…</think> into the thinking channel; the
+		// remainder (and any non-leading tag) stays text (see think_tag.go).
+		var splitter thinkTagSplitter
+		segs := append(splitter.Feed(text), splitter.Flush()...)
+		var think, prose strings.Builder
+		for _, seg := range segs {
+			if seg.kind == segThinking {
+				think.WriteString(seg.text)
+			} else {
+				prose.WriteString(seg.text)
+			}
+		}
+		// Fold tag-derived reasoning into the same thinking block as
+		// reasoning_content/reasoning, matching the streaming translator
+		// (appendThinking reuses an open thinking block) so a payload with both
+		// channels shapes identically for stream:false clients.
+		reasoning += think.String()
+		text = prose.String()
+	}
 	if reasoning != "" {
 		writeAnthropicThinkingBlock(jw, reasoning)
 	}
-	if text := message.Get("content").String(); text != "" {
-		if thinkTagReasoning {
-			// Reroute a leading <think>…</think> into a thinking block; the
-			// remainder (and any non-leading tag) stays text (see think_tag.go).
-			var splitter thinkTagSplitter
-			segs := append(splitter.Feed(text), splitter.Flush()...)
-			var think, prose strings.Builder
-			for _, seg := range segs {
-				if seg.kind == segThinking {
-					think.WriteString(seg.text)
-				} else {
-					prose.WriteString(seg.text)
-				}
-			}
-			if think.Len() > 0 {
-				writeAnthropicThinkingBlock(jw, think.String())
-			}
-			text = prose.String()
-		}
-		if text != "" {
-			jw.Obj()
-			jw.Key("type")
-			jw.Str("text")
-			jw.Key("text")
-			jw.Str(text)
-			jw.EndObj()
-		}
+	if text != "" {
+		jw.Obj()
+		jw.Key("type")
+		jw.Str("text")
+		jw.Key("text")
+		jw.Str(text)
+		jw.EndObj()
 	}
 	message.Get("tool_calls").ForEach(func(_, tc gjson.Result) bool {
 		id := tc.Get("id").String()
