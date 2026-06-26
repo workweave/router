@@ -35,12 +35,17 @@ type fakeProvider struct {
 	proxyBodies   [][]byte
 	proxyResponse func(w http.ResponseWriter)
 	proxyErr      error
+	// proxyCreds records the resolved credential each dispatch saw, so a test can
+	// assert WHICH key served the turn (subscription vs deployment/BYOK). nil
+	// entries mean no credential was set (deployment-key fallback).
+	proxyCreds []*proxy.Credentials
 }
 
 func (f *fakeProvider) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	saved := make([]byte, len(prep.Body))
 	copy(saved, prep.Body)
 	f.proxyBodies = append(f.proxyBodies, saved)
+	f.proxyCreds = append(f.proxyCreds, proxy.CredentialsFromContext(ctx))
 	if f.proxyResponse != nil {
 		f.proxyResponse(w)
 	}

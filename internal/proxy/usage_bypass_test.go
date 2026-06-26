@@ -222,3 +222,67 @@ func TestUsageBypass_ExcludedProvider_EngagesRouting(t *testing.T) {
 
 	assert.Equal(t, 1, fr.routeCalls, "an excluded Anthropic provider must force routing even under threshold")
 }
+
+// TestSubscriptionExhausted_ServesOnDeploymentKey is the customer-reported fix:
+// once the caller's Claude subscription has bound its plan window (the observer
+// records 100% utilization), a routed Anthropic turn must NOT keep injecting the
+// spent OAuth token (which would 429 until reset). With a deployment Anthropic
+// key wired, the turn drops the subscription and serves on that key instead, so
+// the customer keeps working through the limit instead of hard-failing.
+func TestSubscriptionExhausted_ServesOnDeploymentKey(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	p := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"` + bypassScorerPickMdl + `","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}}
+	// Observer seeded EXHAUSTED on the weekly window.
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
+		Secondary: usage.Window{UsedPercent: 1.0, WindowMinutes: 10080},
+	})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0).
+		WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderAnthropic: {}})
+
+	rec, req, body := bypassRequest(t)
+	require.NoError(t, svc.ProxyMessages(bypassCtx(0.80), body, rec, req))
+
+	require.Len(t, p.proxyCreds, 1, "the turn must be dispatched once")
+	creds := p.proxyCreds[0]
+	if creds != nil {
+		assert.False(t, creds.OAuth,
+			"an exhausted subscription must not be forwarded — the turn serves on the deployment key")
+	}
+	// nil creds is also correct: no credential set means the Anthropic client
+	// falls back to its own deployment key. Either way the spent token is gone.
+}
+
+// TestSubscriptionExhausted_NoDeploymentKey_KeepsSubscription guards the
+// safety rail: with no deployment / BYOK Anthropic key to fall through to,
+// dropping the subscription would leave the turn with no credential (a 400,
+// worse than the 429). So the subscription is kept even when exhausted.
+func TestSubscriptionExhausted_NoDeploymentKey_KeepsSubscription(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	p := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"` + bypassScorerPickMdl + `","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
+		Secondary: usage.Window{UsedPercent: 1.0, WindowMinutes: 10080},
+	})
+	// No WithDeploymentKeyedProviders — passthrough-only Anthropic.
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
+
+	rec, req, body := bypassRequest(t)
+	require.NoError(t, svc.ProxyMessages(bypassCtx(0.80), body, rec, req))
+
+	require.Len(t, p.proxyCreds, 1)
+	creds := p.proxyCreds[0]
+	require.NotNil(t, creds, "with no fallback key the subscription must still be used")
+	assert.True(t, creds.OAuth,
+		"no deployment/BYOK key to fall through to — keep the subscription rather than 400")
+}

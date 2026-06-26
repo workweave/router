@@ -67,6 +67,26 @@ type Snapshot struct {
 
 func (s Snapshot) hasData() bool { return s.Primary.present() || s.Secondary.present() }
 
+// exhaustedFraction is the per-window utilization at/above which a subscription
+// window is spent: the upstream 429s any further turn until the window resets.
+// Distinct from the usage-bypass/subsidy threshold (which governs when to START
+// conserving while the token still works) — this marks the credential as
+// currently unusable, so the proxy serves the turn on a fallback key rather than
+// re-hitting a token that will keep rejecting. Just under 1.0 to absorb integer
+// rounding in the upstream's reported utilization (Anthropic reports 0-100).
+const exhaustedFraction = 0.999
+
+// Exhausted reports whether either observed window has bound to the point where
+// the subscription can no longer serve a turn (the upstream 429s until the
+// window resets). A snapshot with no usable data is never exhausted — absence of
+// a reading is treated as cold-start slack, not a spent plan.
+func (s Snapshot) Exhausted() bool {
+	if !s.hasData() {
+		return false
+	}
+	return s.Primary.UsedPercent >= exhaustedFraction || s.Secondary.UsedPercent >= exhaustedFraction
+}
+
 // CostFactor maps observed utilization to a multiplier on a covered model's
 // catalog cost: epsilon when the binding window has slack, rising to 1.0 as it
 // approaches its cap. The tighter (more-used) of the two windows governs.

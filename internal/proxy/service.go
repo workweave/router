@@ -655,6 +655,26 @@ func anthropicSubscriptionFromContext(ctx context.Context) string {
 	return v
 }
 
+// suppressSubscriptionContextKey, when present and true, tells
+// resolveAndInjectCredentials to skip the caller's subscription OAuth token so
+// resolution falls through to BYOK / the deployment key. Set when the caller's
+// Claude subscription is observed-exhausted (its plan window has bound) so the
+// turn serves on the Weave key instead of re-hitting a token that will 429.
+type suppressSubscriptionContextKey struct{}
+
+// withSuppressedSubscription marks ctx so the next credential resolution skips
+// the caller's subscription OAuth token.
+func withSuppressedSubscription(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suppressSubscriptionContextKey{}, true)
+}
+
+// subscriptionSuppressed reports whether the subscription OAuth token must be
+// skipped during credential resolution for this request.
+func subscriptionSuppressed(ctx context.Context) bool {
+	v, _ := ctx.Value(suppressSubscriptionContextKey{}).(bool)
+	return v
+}
+
 // servedOnSubscription reports whether the turn's resolved credential is a
 // subscription OAuth token (Claude or Codex) — i.e. the customer's own plan
 // paid for it, so billing applies only the subscription fee rather than full
@@ -1737,6 +1757,15 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
 	}
 
+	// A caller whose Claude subscription has bound its plan window can't serve
+	// another turn on it (the upstream 429s until reset). Suppress the spent
+	// token so resolution falls through to the deployment / BYOK Anthropic key —
+	// the turn then serves on the Weave key (billed at full cost, not the
+	// subscription rate) instead of hard-failing. Only fires once the observer
+	// has recorded the exhaustion and a fallback key exists.
+	if s.claudeSubscriptionExhausted(ctx, r.Header) {
+		ctx = withSuppressedSubscription(ctx)
+	}
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
 	// Wrap the client writer in a preludeBuffer for every request, not just
@@ -2035,7 +2064,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				"failed_provider", primaryProvider,
 				"baseline_model", baselineModel,
 				"err", proxyErr)
-			baselineCtx := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, r.Header)
+			baselineCtx := ctx
+			if s.claudeSubscriptionExhausted(ctx, r.Header) {
+				baselineCtx = withSuppressedSubscription(baselineCtx)
+			}
+			baselineCtx = resolveAndInjectCredentials(baselineCtx, providers.ProviderAnthropic, r.Header)
 			baselineBindings := s.resolveBindingsForDispatch(baselineCtx, baselineDecision)
 			baselineMarker := suppressMarkerIfRequested(r.Header, baselineRoutingMarkerFor(routeRes, baselineModel))
 			baselineAttempt := s.anthropicNativeAttempt(env, r, baselinePrep, sink, preludeBuf, baselineMarker, setExtractor)
@@ -2609,7 +2642,12 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 // fallback in that case.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
-	if provider == providers.ProviderAnthropic {
+	// When the caller's subscription is observed-exhausted, skip its OAuth token
+	// entirely so resolution falls through to BYOK / the deployment key (the turn
+	// then serves on the Weave key). Re-hitting a spent subscription would just
+	// 429 until its plan window resets. Applies to both subscription families.
+	suppressSub := subscriptionSuppressed(ctx)
+	if provider == providers.ProviderAnthropic && !suppressSub {
 		// Subscription-first (precedence: subscription -> BYOK -> deployment). A
 		// caller's Claude subscription pays for their Claude turns ahead of any
 		// BYOK or deployment key. It arrives via the dedicated header on
@@ -2638,7 +2676,7 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 			return context.WithValue(ctx, CredentialsContextKey{}, inbound)
 		}
 	}
-	if provider == providers.ProviderOpenAI {
+	if provider == providers.ProviderOpenAI && !suppressSub {
 		// Codex (ChatGPT) subscription-first (precedence: subscription -> BYOK ->
 		// deployment), mirroring the Anthropic block above. The dedicated headers
 		// carry token + account-id on router-keyed requests.

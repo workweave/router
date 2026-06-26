@@ -242,3 +242,33 @@ func TestObserver_DistinctTokensDistinctKeys(t *testing.T) {
 	assert.NotEqual(t, o.Key([]byte("token-a")), o.Key([]byte("token-b")))
 	assert.Equal(t, o.Key([]byte("token-a")), o.Key([]byte("token-a")))
 }
+
+func TestSnapshot_Exhausted(t *testing.T) {
+	t.Run("no data is never exhausted", func(t *testing.T) {
+		assert.False(t, usage.Snapshot{}.Exhausted(),
+			"absence of a reading is cold-start slack, not a spent plan")
+	})
+	t.Run("slack windows are not exhausted", func(t *testing.T) {
+		s := usage.Snapshot{
+			Primary:   usage.Window{UsedPercent: 0.50, WindowMinutes: 300},
+			Secondary: usage.Window{UsedPercent: 0.95, WindowMinutes: 10080},
+		}
+		assert.False(t, s.Exhausted(), "95% still has headroom — the token can still serve")
+	})
+	t.Run("weekly window at cap is exhausted", func(t *testing.T) {
+		s := usage.Snapshot{
+			Primary:   usage.Window{UsedPercent: 0.10, WindowMinutes: 300},
+			Secondary: usage.Window{UsedPercent: 1.0, WindowMinutes: 10080},
+		}
+		assert.True(t, s.Exhausted(), "a bound weekly window means the upstream 429s")
+	})
+	t.Run("primary (5h) window at cap is exhausted", func(t *testing.T) {
+		s := usage.Snapshot{Primary: usage.Window{UsedPercent: 1.0, WindowMinutes: 300}}
+		assert.True(t, s.Exhausted())
+	})
+	t.Run("rounding just under 1.0 still reads exhausted", func(t *testing.T) {
+		s := usage.Snapshot{Secondary: usage.Window{UsedPercent: 0.999, WindowMinutes: 10080}}
+		assert.True(t, s.Exhausted(),
+			"integer-percent rounding at the cap must not read as headroom")
+	})
+}

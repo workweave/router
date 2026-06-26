@@ -87,6 +87,50 @@ func (s *Service) usageBypassEngaged(ctx context.Context, headers http.Header, r
 	return util < threshold
 }
 
+// claudeSubscriptionExhausted reports whether the caller's present Claude
+// subscription has bound its plan window — the upstream will 429 any further
+// turn until it resets. True only when: the usage observer is wired, a Claude
+// subscription token is present on this request, its most-recent observed
+// snapshot is exhausted, AND a non-subscription Anthropic key exists to serve the
+// turn instead. The token key is derived identically to withUsageObserver /
+// usageBypassEngaged so this read agrees with what the observer recorded. When
+// true the caller suppresses the subscription credential (withSuppressedSubscription)
+// so the turn serves on the Weave / BYOK key rather than the spent subscription.
+func (s *Service) claudeSubscriptionExhausted(ctx context.Context, headers http.Header) bool {
+	if s.usageObserver == nil {
+		return false
+	}
+	_, anthroTok := s.presentSubscriptionTokens(ctx, headers)
+	if anthroTok == "" {
+		return false
+	}
+	if !s.anthropicFallbackKeyAvailable(ctx) {
+		return false
+	}
+	snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(anthroTok)))
+	return ok && snap.Exhausted()
+}
+
+// anthropicFallbackKeyAvailable reports whether a non-subscription Anthropic
+// credential is configured to serve a Claude turn when the caller's subscription
+// is spent: a per-request BYOK Anthropic key, or the deployment's own
+// ANTHROPIC_API_KEY (tracked in deploymentKeyedProviders). Without one, dropping
+// the subscription token would leave the turn with no Anthropic credential and
+// 400 — strictly worse than the 429 — so the caller keeps using the subscription.
+func (s *Service) anthropicFallbackKeyAvailable(ctx context.Context) bool {
+	if byok := BuildCredentialsMap(externalKeysFromContext(ctx)); byok != nil {
+		if _, ok := byok[providers.ProviderAnthropic]; ok {
+			return true
+		}
+	}
+	if s.deploymentKeyedProviders != nil {
+		if _, ok := s.deploymentKeyedProviders[providers.ProviderAnthropic]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // bypassToAnthropic proxies an inbound Anthropic-Messages request straight to
 // the Anthropic provider with the caller-requested model. It deliberately skips
 // the cluster scorer, planner, session pin, semantic cache, AND billing: the
