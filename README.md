@@ -167,12 +167,6 @@ Settings → Models override above. See [install/README.md](install/README.md#sw
 - 🏗️ [**Architecture**](AGENTS.md): package layout, import contracts,
   recipes for adding endpoints / providers / strategies.
 
-## Roadmap
-
-- Token-aware rate limiting (Redis sliding window per installation)
-- Sub-installations for tenant hierarchies
-- Speculative dispatch + hedging for tail latency
-
 ## Star history
 
 <a href="https://star-history.com/#workweave/router&Date">
