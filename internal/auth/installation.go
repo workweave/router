@@ -21,6 +21,12 @@ type Installation struct {
 	// ExcludedProviders is the per-installation provider exclusion list.
 	// Empty means no exclusion.
 	ExcludedProviders []string
+	// PreferredModels is the per-installation model priority ranking, in
+	// descending preference (index 0 = first preference). The scorer lifts each
+	// preferred model's score by a small, rank-decaying additive bonus so a
+	// preferred model wins close calls without overriding a clearly-better
+	// model. Empty means no preference.
+	PreferredModels []string
 	// RoutingQualityWeight is the per-installation routing preference (the
 	// "quality vs price" dial), stored as the scorer's quality weight (Alpha)
 	// -- a normalized fraction in [0, 1] where 1.0 biases routing fully toward

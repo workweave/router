@@ -281,7 +281,7 @@ func (s *Scorer) computeDialCalibration() []float64 {
 		}
 		counts := make(map[string]int, len(s.models))
 		for c := 0; c < k; c++ {
-			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models, nil)
+			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models, nil, nil)
 			winner, _ := argmax(scores, s.models)
 			// Mirror RoutingDistribution's accounting exactly: skip an empty
 			// winner so a cluster that flips between "" and a real model can't
@@ -654,6 +654,32 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		}
 	}
 
+	// Per-installation model priority: turn the ranked preference list into a
+	// per-model additive bonus over the eligible pool. Rank is compacted over
+	// eligible entries — a preferred model that's excluded, undeployed, or
+	// filtered above is skipped, so the highest still-available preference gets
+	// the strongest nudge and a stale preference is a no-op. Built once here and
+	// applied per top-P cluster inside blendScoresV2.
+	var priorityBonus map[string]float32
+	if len(req.PreferredModels) > 0 {
+		eligible := make(map[string]struct{}, len(eligibleModels))
+		for _, m := range eligibleModels {
+			eligible[m] = struct{}{}
+		}
+		priorityBonus = make(map[string]float32, len(req.PreferredModels))
+		rank := 0
+		for _, m := range req.PreferredModels {
+			if _, ok := eligible[m]; !ok {
+				continue
+			}
+			if _, dup := priorityBonus[m]; dup {
+				continue
+			}
+			priorityBonus[m] = priorityBonusFor(rank)
+			rank++
+		}
+	}
+
 	scoreStart := time.Now()
 	topClusters := topPNearest(vec, s.centroids, s.cfg.TopP)
 
@@ -745,7 +771,7 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			activeKnobs.PerModelVerbosity,
 		)
 
-		scores = s.blendScoresV2(topClusters, activeKnobs, eligibleModels, req.SubsidizedModelCostFactor)
+		scores = s.blendScoresV2(topClusters, activeKnobs, eligibleModels, req.SubsidizedModelCostFactor, priorityBonus)
 	} else {
 		// Legacy v1 flow: static cluster rankings, no cost axis at all — so there
 		// is no cost term to discount and req.SubsidizedModelCostFactor does not
@@ -962,12 +988,37 @@ var _ router.Router = (*Scorer)(nil)
 // additive bonus so it disturbs none of the quality/cost/speed blend weights.
 const subsidyMaxBonus float32 = 1.0
 
+// preferredBonusBase is the rank-1 priority score bonus a per-installation
+// "preferred model" receives, in the same units as the per-cluster blend
+// (≈[0,1]). A preferred model wins a cluster's argmax when no peer leads it by
+// more than this in blended score — a soft "finger on the scale" that tilts
+// close calls toward the preference without overriding a clearly-better model
+// for the task. Applied as a per-cluster additive bonus, mirroring the
+// subscription preference, so it disturbs none of the quality/cost/speed blend
+// weights.
+const preferredBonusBase float32 = 0.15
+
+// preferredBonusDecay shrinks the bonus by rank so lower preferences press the
+// scale less hard: bonus(rank) = preferredBonusBase * decay^rank (rank 0-based).
+// 0.55 yields rank 0 ≈ 0.15, rank 1 ≈ 0.08, rank 2 ≈ 0.045.
+const preferredBonusDecay float64 = 0.55
+
+// priorityBonusFor returns the additive per-cluster score bonus for a model at
+// the given zero-based preference rank (0 = first preference). Later ranks decay
+// toward zero; a negative rank yields no bonus.
+func priorityBonusFor(rank int) float32 {
+	if rank < 0 {
+		return 0
+	}
+	return preferredBonusBase * float32(math.Pow(preferredBonusDecay, float64(rank)))
+}
+
 // blendScoresV2 computes the v2 per-model blended scores for the given top-P
 // clusters under the effective knobs. Extracted from Route so the routing
 // distribution preview scores identically to live routing (single source of
 // truth for the cost/quality/speed blend). Caller owns knob validation and the
 // QualityBias->Alpha derivation; this method consumes the resolved alpha vector.
-func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnobs, eligibleModels []string, subsidyFactors map[string]float64) map[string]float32 {
+func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnobs, eligibleModels []string, subsidyFactors map[string]float64, priorityBonus map[string]float32) map[string]float32 {
 	// 2. Effective per-model cost (knob-dependent). Costs stay at FULL catalog
 	// scale for every model, INCLUDING subscription-covered ones. On a plan the
 	// dollar price is prepaid, but the catalog ratio still tracks how much plan
@@ -1145,6 +1196,15 @@ func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnob
 			// Haiku for easy turns and Opus for hard ones.
 			if f, ok := subsidyFactors[m]; ok {
 				scores[m] += subsidyMaxBonus * float32(1.0-f)
+			}
+
+			// Per-installation model-priority preference: lift a preferred model
+			// by its rank-decaying bonus, per cluster. Additive (like the subsidy
+			// above) so it disturbs none of the blend weights — it only decides
+			// close calls, leaving the quality/cost spread to keep a clearly-better
+			// model ahead on hard clusters. Absent entry = no preference.
+			if b, ok := priorityBonus[m]; ok {
+				scores[m] += b
 			}
 		}
 	}

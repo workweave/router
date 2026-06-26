@@ -40,7 +40,14 @@ type Request struct {
 	// Per-request model exclusion — nil or empty means no exclusion.
 	// If filtering empties eligible set, scorer returns ErrNoEligibleProvider.
 	ExcludedModels map[string]struct{}
-	RoutingKnobs   *Overrides // NEW: parsed dynamic knobs
+	// PreferredModels is the per-installation model priority ranking, in
+	// descending preference (index 0 = first preference). The scorer lifts each
+	// preferred model's blended score by a small, rank-decaying additive bonus
+	// (a soft "finger on the scale") so a preferred model wins close calls but
+	// never overrides a clearly-better model for the task. Entries not in the
+	// eligible pool are ignored. nil or empty means no preference.
+	PreferredModels []string
+	RoutingKnobs    *Overrides // NEW: parsed dynamic knobs
 	// SubsidizedModelCostFactor is the per-model rate-limit headroom factor in
 	// [epsilon, 1] for models a caller's presented subscription covers, derived
 	// from observed headroom (see internal/proxy/usage): ~epsilon when the sub's

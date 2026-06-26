@@ -258,6 +258,49 @@ func TestScorer_SubscriptionPicksCheapestSufficientWithinFamily(t *testing.T) {
 		"easy cluster: a subscribed family routes to the cheap sufficient model (Haiku, not Opus)")
 }
 
+// TestScorer_PreferredModelSoftNudge exercises the per-installation model
+// priority bonus. It must behave as a soft "finger on the scale": a preferred
+// model wins a close call but never overrides a clearly-better model for the
+// cluster, and a stale/unknown preference is a no-op. makeOpusVec aligns with
+// cluster 0, where Opus is quality-favored; the alpha override sets the blend's
+// quality weight so the Opus↔Haiku margin is tunable.
+func TestScorer_PreferredModelSoftNudge(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s := newV2BundleForTest(t, emb, v2BundleOpts{})
+	ctx := context.Background()
+	prompt := strings.Repeat("x", 100)
+
+	alpha := func(a float64) *router.Overrides { return &router.Overrides{Alpha: &a} }
+
+	// Close call (alpha 0.55): Opus leads Haiku by only ~0.10 in blended score.
+	closeReq := router.Request{PromptText: prompt, RoutingKnobs: alpha(0.55)}
+	base, err := s.Route(ctx, closeReq)
+	require.NoError(t, err)
+	require.Equal(t, "claude-opus-4-7", base.Model, "no preference: quality-favored model wins the close call")
+
+	// Preferring the trailing model flips the close call — the rank-0 bonus
+	// (~0.15) exceeds the ~0.10 margin.
+	prefHaiku := closeReq
+	prefHaiku.PreferredModels = []string{"claude-haiku-4-5"}
+	flipped, err := s.Route(ctx, prefHaiku)
+	require.NoError(t, err)
+	assert.Equal(t, "claude-haiku-4-5", flipped.Model, "a preferred model wins a close call")
+
+	// Clear win (alpha 0.9): Opus leads by ~0.80. The same preference must NOT
+	// override a clearly-better model — the soft-nudge quality floor.
+	clearReq := router.Request{PromptText: prompt, RoutingKnobs: alpha(0.9), PreferredModels: []string{"claude-haiku-4-5"}}
+	clear, err := s.Route(ctx, clearReq)
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", clear.Model, "preference must not override a clearly-better model")
+
+	// Stale / unknown preference is ignored: routes identically to no preference.
+	staleReq := closeReq
+	staleReq.PreferredModels = []string{"does-not-exist"}
+	stale, err := s.Route(ctx, staleReq)
+	require.NoError(t, err)
+	assert.Equal(t, base.Model, stale.Model, "an unknown preferred model is a no-op")
+}
+
 // Removing any populated metadata field breaks routing telemetry rows.
 func TestScorer_PopulatesRoutingMetadata(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}

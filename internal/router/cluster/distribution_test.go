@@ -244,7 +244,7 @@ func TestApplyDialAlpha_AgenticStaysOnCapableModelAtLowDial(t *testing.T) {
 	// Precondition: WITHOUT the gate (full pool) the price-extreme dial falls
 	// through to an agentic-incapable cheap model — the bug the gate exists to
 	// fix. If this stops holding, the floor got too high to exercise the gate.
-	full, _ := argmax(s.blendScoresV2(top, knobs, s.models, nil), s.models)
+	full, _ := argmax(s.blendScoresV2(top, knobs, s.models, nil, nil), s.models)
 	_, fullIncapable := low[full]
 	require.Truef(t, fullIncapable,
 		"precondition: without the gate the price-extreme dial must fall through to an AgenticLow model, got %s", full)
@@ -258,7 +258,7 @@ func TestApplyDialAlpha_AgenticStaysOnCapableModelAtLowDial(t *testing.T) {
 		}
 		gated = append(gated, m)
 	}
-	with, _ := argmax(s.blendScoresV2(top, knobs, gated, nil), gated)
+	with, _ := argmax(s.blendScoresV2(top, knobs, gated, nil, nil), gated)
 	_, withIncapable := low[with]
 	assert.Falsef(t, withIncapable,
 		"with the agentic-harness gate the price-extreme winner must be harness-capable, got %s", with)

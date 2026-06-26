@@ -78,6 +78,7 @@ type RouterModelRouterInstallation struct {
 	RoutingQualityWeight *float64
 	UsageBypassEnabled   bool
 	UsageBypassThreshold *float64
+	PreferredModels      []string
 }
 
 type RouterModelRouterRequestTelemetry struct {

@@ -256,6 +256,11 @@ type InstallationExcludedModelsContextKey struct{}
 // installation's provider exclusion list. Carried as []string.
 type InstallationExcludedProvidersContextKey struct{}
 
+// InstallationPreferredModelsContextKey is the context key for the authed
+// installation's model priority ranking. Carried as []string in descending
+// preference (index 0 = first preference). See preferredModelsForRequest.
+type InstallationPreferredModelsContextKey struct{}
+
 // InstallationRoutingKnobsContextKey is the context key for the authed
 // installation's persisted routing preference (the "quality vs price" dial).
 // Carried as *router.Overrides with only Alpha (quality weight) set; the
@@ -466,6 +471,26 @@ func (s *Service) excludedProvidersForRequest(ctx context.Context) map[string]st
 		out[p] = struct{}{}
 	}
 	return out
+}
+
+// installationPreferredModelsFromContext returns the per-installation model
+// priority ranking stashed on ctx by the auth middleware, or nil when none is
+// present.
+func installationPreferredModelsFromContext(ctx context.Context) []string {
+	v := ctx.Value(InstallationPreferredModelsContextKey{})
+	if v == nil {
+		return nil
+	}
+	out, _ := v.([]string)
+	return out
+}
+
+// preferredModelsForRequest returns the request's ordered model priority
+// ranking (index 0 = first preference). The installation list flows through
+// unchanged; the scorer ignores entries not in the eligible pool. There is no
+// env override (priority is a per-installation product knob, not an eval lever).
+func (s *Service) preferredModelsForRequest(ctx context.Context) []string {
+	return installationPreferredModelsFromContext(ctx)
 }
 
 // contextWindowOverheadFactor scales the raw body-bytes token estimate to
@@ -1548,6 +1573,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		PromptText:           promptText,
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excluded,
+		PreferredModels:      s.preferredModelsForRequest(ctx),
 		RoutingKnobs:         routingKnobsForRequest(ctx),
 	})
 	if routeErr != nil {
@@ -3120,6 +3146,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		PromptText:           promptText,
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excludedOAI,
+		PreferredModels:      s.preferredModelsForRequest(ctx),
 		RoutingKnobs:         routingKnobsForRequest(ctx),
 	})
 	routeMs := time.Since(routeStart).Milliseconds()
