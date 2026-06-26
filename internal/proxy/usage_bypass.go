@@ -83,6 +83,13 @@ func (s *Service) usageBypassEngaged(ctx context.Context, headers http.Header, r
 	if !observed {
 		return true
 	}
+	// Never bypass onto a spent subscription: a passthrough would inject a token
+	// the upstream 429s. Disengage regardless of the installation threshold (which
+	// may sit above exhaustedFraction) so the turn takes the routed path, where the
+	// exhaustion failover serves it on the deployment / BYOK Anthropic key.
+	if snap.Exhausted() {
+		return false
+	}
 	util := max(snap.Primary.UsedPercent, snap.Secondary.UsedPercent)
 	return util < threshold
 }

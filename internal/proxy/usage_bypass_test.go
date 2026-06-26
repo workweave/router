@@ -286,3 +286,20 @@ func TestSubscriptionExhausted_NoDeploymentKey_KeepsSubscription(t *testing.T) {
 	assert.True(t, creds.OAuth,
 		"no deployment/BYOK key to fall through to — keep the subscription rather than 400")
 }
+
+// TestUsageBypass_ExhaustedDisengages_EvenAboveThreshold guards the failover
+// hand-off: if an installation sets its threshold above exhaustedFraction, the
+// gate must still disengage once the subscription is spent so the turn takes the
+// routed path (where the exhaustion failover serves it on the Weave key) rather
+// than bypassing onto a token that will 429.
+func TestUsageBypass_ExhaustedDisengages_EvenAboveThreshold(t *testing.T) {
+	// util 0.999 (exhausted) but BELOW a 1.0 threshold: the old `util < threshold`
+	// check alone would keep the gate engaged and bypass onto the spent token.
+	svc, fr, _ := bypassFixture(t, 0.999)
+	rec, req, body := bypassRequest(t)
+
+	require.NoError(t, svc.ProxyMessages(bypassCtx(1.0), body, rec, req))
+
+	assert.Equal(t, 1, fr.routeCalls,
+		"an exhausted subscription must disengage the bypass so routing (and the failover) runs")
+}
