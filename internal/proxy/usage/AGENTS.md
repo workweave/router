@@ -27,7 +27,7 @@ Subscription customers (Claude Code / Codex logged-in flows) want unused, perish
 
 - **Pure in-memory state, no persistence.**
 - Entries keyed by `usage.CredentialKey` (HMAC-SHA256 prefix of the token under a process-scoped salt) so logs + metrics never see the raw token.
-- A reading stays authoritative for the life of its binding quota window (`freshFor`), not a flat short TTL — a near-cap reading must not age out and re-read as optimistic slack while the window is still exhausted.
+- A reading stays authoritative for the life of its binding quota window (`freshFor`), not a flat short TTL — a near-cap reading must not age out and re-read as optimistic slack while the window is still exhausted. When the upstream reports a `*-reset` instant (`Window.ResetAt`), `freshFor` expires the reading at that reset (clamped to the window length) rather than a full window from observation — so an exhausted reading, and any exhaustion suppression keyed off it, lifts when the plan actually refills instead of lagging it by days.
 - Per-window merge on `Record`: a response reporting only one window must not erase the other window's last-known utilization.
 - Periodic `Sweep` (driven by the composition root on a ticker) bounds memory; the package spawns no goroutines of its own.
 - I/O-free per the inner-ring rule — just structs, maps, a mutex, and an injected clock.

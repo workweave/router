@@ -272,3 +272,71 @@ func TestSnapshot_Exhausted(t *testing.T) {
 			"integer-percent rounding at the cap must not read as headroom")
 	})
 }
+
+func TestParseAnthropicUnifiedHeaders_ResetAt(t *testing.T) {
+	t.Run("RFC3339 reset", func(t *testing.T) {
+		h := http.Header{}
+		h.Set("anthropic-ratelimit-unified-weekly-utilization", "100")
+		h.Set("anthropic-ratelimit-unified-weekly-reset", "2026-06-28T03:00:00Z")
+		snap, ok := usage.ParseAnthropicUnifiedHeaders(h)
+		require.True(t, ok)
+		assert.Equal(t, "2026-06-28T03:00:00Z", snap.Secondary.ResetAt.Format(time.RFC3339))
+	})
+	t.Run("unix-seconds reset fallback", func(t *testing.T) {
+		h := http.Header{}
+		h.Set("anthropic-ratelimit-unified-5h-utilization", "90")
+		h.Set("anthropic-ratelimit-unified-5h-reset", "1782702000")
+		snap, ok := usage.ParseAnthropicUnifiedHeaders(h)
+		require.True(t, ok)
+		assert.Equal(t, int64(1782702000), snap.Primary.ResetAt.Unix())
+	})
+	t.Run("absent reset leaves zero", func(t *testing.T) {
+		h := http.Header{}
+		h.Set("anthropic-ratelimit-unified-weekly-utilization", "50")
+		snap, ok := usage.ParseAnthropicUnifiedHeaders(h)
+		require.True(t, ok)
+		assert.True(t, snap.Secondary.ResetAt.IsZero())
+	})
+}
+
+// TestObserver_ResetAtExpiresBeforeWindowLength is the failover re-probe fix: an
+// exhausted weekly reading whose upstream reset is hours away must expire at that
+// reset, NOT a full 7-day window length from when it was observed — otherwise the
+// exhaustion suppression strands the subscription on the Weave key for days after
+// the plan has already refilled.
+func TestObserver_ResetAtExpiresBeforeWindowLength(t *testing.T) {
+	base := time.Unix(1_800_000_000, 0).UTC()
+	clock := base
+	o := usage.NewObserver([]byte("salt"), 10*time.Minute, func() time.Time { return clock })
+	key := o.Key([]byte("tok"))
+
+	// Exhausted weekly window, but the plan resets in 2 hours.
+	o.Record(key, usage.Snapshot{
+		Secondary: usage.Window{UsedPercent: 1.0, WindowMinutes: 10080, ResetAt: base.Add(2 * time.Hour)},
+	})
+
+	// 1 hour later (before reset): still authoritative → still exhausted.
+	clock = base.Add(1 * time.Hour)
+	snap, ok := o.Snapshot(key)
+	require.True(t, ok, "reading must survive until its reset")
+	assert.True(t, snap.Exhausted())
+
+	// 3 hours later (past reset): evicted, so the credential reads as never-observed
+	// and the next turn re-probes on the subscription instead of staying suppressed.
+	clock = base.Add(3 * time.Hour)
+	_, ok = o.Snapshot(key)
+	assert.False(t, ok, "reading must expire at the reset, not 7 days after observation")
+}
+
+func TestObserver_NoResetFallsBackToWindowLength(t *testing.T) {
+	base := time.Unix(1_800_000_000, 0).UTC()
+	clock := base
+	o := usage.NewObserver([]byte("salt"), 10*time.Minute, func() time.Time { return clock })
+	key := o.Key([]byte("tok"))
+	// Exhausted weekly window, no reset reported → retained for the full week.
+	o.Record(key, usage.Snapshot{Secondary: usage.Window{UsedPercent: 1.0, WindowMinutes: 10080}})
+
+	clock = base.Add(6 * 24 * time.Hour) // 6 days: still inside the 7-day window
+	_, ok := o.Snapshot(key)
+	assert.True(t, ok, "with no reset header the window-length horizon still applies")
+}
