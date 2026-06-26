@@ -144,6 +144,7 @@ func main() {
 		topP         = flag.Int("top-p", 2, "top-P clusters blended per decision (prod runs 2)")
 		qualityBias  = flag.Float64("quality-bias", -1, "QualityBias dial position in [0,1] to route at; <0 uses the bundle's default knobs (no dial)")
 		outPath      = flag.String("out", "", "write markdown here instead of stdout")
+		perPromptOut = flag.String("per-prompt-json", "", "also dump [{id,model}] per probe (target chosen model, corpus order) here")
 	)
 	flag.Parse()
 
@@ -178,6 +179,23 @@ func main() {
 	tgt, err := routeCorpus(*artifactsDir, *target, probes, embedder, *topP, *qualityBias)
 	if err != nil {
 		fatal("route target %s: %v", *target, err)
+	}
+	if *perPromptOut != "" {
+		type pp struct {
+			ID    string `json:"id"`
+			Model string `json:"model"`
+		}
+		rows := make([]pp, len(probes))
+		for i, p := range probes {
+			rows[i] = pp{ID: p.ID, Model: tgt.chosen[i]}
+		}
+		buf, mErr := json.MarshalIndent(rows, "", "  ")
+		if mErr != nil {
+			fatal("marshal per-prompt: %v", mErr)
+		}
+		if wErr := os.WriteFile(*perPromptOut, buf, 0o644); wErr != nil {
+			fatal("write per-prompt-json: %v", wErr)
+		}
 	}
 	var base *routeResult
 	if *baseline != *target {
