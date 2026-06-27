@@ -197,13 +197,10 @@ func TestAssistantToolCallSignatures_EmptyAndNonAssistant(t *testing.T) {
 	assert.Nil(t, env.AssistantToolCallSignatures())
 }
 
-func TestAssistantToolCallSignatures_SkipsRouterNudgeEntries(t *testing.T) {
-	// Router-synthesized recovery nudges have a constant command string so their
-	// InputHash never changes. If a model emits consecutive text-only turns the
-	// router injects a nudge each time; once 5 accumulate in the history both
-	// detectToolCallLoop and toolProgressMarker see 5 identical Bash sigs and
-	// fire — killing the session the nudge was trying to rescue. Nudges must be
-	// invisible to the detectors.
+func TestAssistantToolCallSignatures_IncludesRouterNudgeEntries(t *testing.T) {
+	// Router-synthesized recovery nudges are now included in loop detection.
+	// When a model repeatedly calls the same nudge (same name + args), it will
+	// trip the loop detector after 5+ consecutive calls, breaking the stuck loop.
 	body := mustMarshalJSON(t, map[string]any{
 		"model": "claude-sonnet-4-6",
 		"messages": []any{
@@ -235,8 +232,11 @@ func TestAssistantToolCallSignatures_SkipsRouterNudgeEntries(t *testing.T) {
 	require.NoError(t, err)
 
 	sigs := env.AssistantToolCallSignatures()
-	require.Len(t, sigs, 1, "router nudge tool_use entries must be filtered; only the real Read should appear")
-	assert.Equal(t, "Read", sigs[0].Name)
+	require.Len(t, sigs, 3, "router nudge tool_use entries are now counted; 2 nudges + 1 Read")
+	assert.Equal(t, "Bash", sigs[0].Name)
+	assert.Equal(t, "Bash", sigs[1].Name)
+	assert.Equal(t, "Read", sigs[2].Name)
+	assert.Equal(t, sigs[0].InputHash, sigs[1].InputHash, "identical nudge args produce identical hash")
 }
 
 // mustMarshalJSON is shared with force_model_test.go; redeclared here would be
