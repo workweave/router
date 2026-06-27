@@ -122,6 +122,9 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 			if len(installation.ExcludedProviders) > 0 {
 				ctx = context.WithValue(ctx, proxy.InstallationExcludedProvidersContextKey{}, installation.ExcludedProviders)
 			}
+			if len(installation.PreferredModels) > 0 {
+				ctx = context.WithValue(ctx, proxy.InstallationPreferredModelsContextKey{}, installation.PreferredModels)
+			}
 			if installation.RoutingQualityWeight != nil {
 				// The stored weight is the user-facing dial position, so it
 				// flows in as QualityBias (per-cluster, dispersion-aware), not
