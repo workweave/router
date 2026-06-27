@@ -9,11 +9,13 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -53,6 +55,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tidwall/gjson"
 )
 
 func main() {
@@ -232,7 +235,18 @@ func main() {
 		if !byokOnly {
 			openRouterKey = config.GetOr("OPENROUTER_API_KEY", "")
 		}
-		providerMap[providers.ProviderOpenRouter] = openaiCompatProvider.NewClient(openRouterKey, openRouterBaseURL)
+		openRouterModelIDMap := bootUpstreamModelIDMap(openRouterBaseURL, openRouterKey, logger)
+		if len(openRouterModelIDMap) > 0 {
+			providerMap[providers.ProviderOpenRouter] = openaiCompatProvider.NewClientWithModelIDMap(openRouterKey, openRouterBaseURL, openRouterModelIDMap)
+			ids := make([]string, 0, len(openRouterModelIDMap))
+			for k, v := range openRouterModelIDMap {
+				ids = append(ids, k+"→"+v)
+			}
+			sort.Strings(ids)
+			logger.Info("Auto-discovered upstream model ID map", "remapped_count", len(ids), "remapped", ids)
+		} else {
+			providerMap[providers.ProviderOpenRouter] = openaiCompatProvider.NewClient(openRouterKey, openRouterBaseURL)
+		}
 		switch {
 		case byokOnly:
 			logger.Info("OpenRouter provider enabled (BYOK only)", "base_url", openRouterBaseURL)
@@ -1341,6 +1355,87 @@ func upstreamIDsForProvider(provider string) map[string]string {
 		for _, b := range m.Providers {
 			if b.Provider == provider && b.UpstreamID != "" {
 				out[m.ID] = b.UpstreamID
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// bootUpstreamModelIDMap calls the upstream's /v1/models endpoint at boot
+// and returns a modelIDMap that rewrites catalog model IDs to the upstream's
+// naming convention. For each catalog model:
+//   - If the upstream lists the exact catalog ID → no rewrite needed (real
+//     OpenRouter).
+//   - If the upstream lists only the bare name (after the last '/') → map the
+//     catalog ID to the bare name (custom proxies like OpenCode Go).
+//   - If neither matches → skip (model not available on this upstream).
+//
+// Returns nil on any failure, leaving model names unchanged (existing
+// behavior). The 5s timeout keeps boot-time impact bounded.
+func bootUpstreamModelIDMap(baseURL, apiKey string, logger *slog.Logger) map[string]string {
+	modelURL := strings.TrimRight(baseURL, "/") + "/models"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelURL, nil)
+	if err != nil {
+		logger.Warn("Failed to build upstream /models request; skipping model ID discovery", "url", modelURL, "err", err)
+		return nil
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		logger.Warn("Upstream /models call failed; skipping model ID discovery", "url", modelURL, "err", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		logger.Warn("Upstream /models returned non-2xx; skipping model ID discovery", "url", modelURL, "status", resp.StatusCode)
+		return nil
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<19)) // 512KB
+	if err != nil {
+		logger.Warn("Failed to read upstream /models body; skipping model ID discovery", "url", modelURL, "err", err)
+		return nil
+	}
+
+	// OpenAI-compat /v1/models format: {"object":"list","data":[{"id":"..."},...]}
+	parsed := gjson.GetBytes(body, "data")
+	if !parsed.IsArray() {
+		logger.Warn("Upstream /models response missing 'data' array; skipping model ID discovery", "url", modelURL)
+		return nil
+	}
+
+	upstreamIDs := make(map[string]struct{}, len(parsed.Array()))
+	for _, item := range parsed.Array() {
+		id := item.Get("id").String()
+		if id != "" {
+			upstreamIDs[id] = struct{}{}
+		}
+	}
+	if len(upstreamIDs) == 0 {
+		return nil
+	}
+
+	out := make(map[string]string)
+	for _, m := range catalog.Models {
+		if _, ok := upstreamIDs[m.ID]; ok {
+			// Upstream uses the same name — no rewrite needed.
+			continue
+		}
+		// Check if the bare name (after the last '/') matches.
+		if idx := strings.LastIndexByte(m.ID, '/'); idx >= 0 {
+			bare := m.ID[idx+1:]
+			if _, ok := upstreamIDs[bare]; ok {
+				out[m.ID] = bare
 			}
 		}
 	}

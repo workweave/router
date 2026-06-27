@@ -223,3 +223,96 @@ func TestProxy_4xxStillBuffered(t *testing.T) {
 	assert.False(t, providers.IsRetryableStatus(buffered.Status),
 		"sanity: 400 must classify as non-retryable")
 }
+
+func TestProxy_ModelIDMapRewritesBodyModelField(t *testing.T) {
+	var gotModel string
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		gotModel = body.Model
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-remapped","object":"chat.completion"}`))
+	}))
+	defer upstream.Close()
+
+	modelIDMap := map[string]string{
+		"deepseek/deepseek-v4-flash": "deepseek-v4-flash",
+		"deepseek/deepseek-v4-pro":   "deepseek-v4-pro",
+		"moonshotai/kimi-k2.6":       "kimi-k2.6",
+	}
+	c := openaicompat.NewClientWithModelIDMap("test-key", upstream.URL+"/api/v1", modelIDMap)
+
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	rec := httptest.NewRecorder()
+	body := []byte(`{"model":"deepseek/deepseek-v4-flash","messages":[{"role":"user","content":"hello"}]}`)
+	prep := providers.PreparedRequest{Body: body, Headers: make(http.Header)}
+	err := c.Proxy(context.Background(), router.Decision{Model: "deepseek/deepseek-v4-flash"}, prep, rec, clientReq)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "deepseek-v4-flash", gotModel,
+		"body 'model' field must be rewritten per modelIDMap")
+}
+
+func TestProxy_ModelIDMapLeavesUnmappedModelsAlone(t *testing.T) {
+	var gotModel string
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		gotModel = body.Model
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-unmapped","object":"chat.completion"}`))
+	}))
+	defer upstream.Close()
+
+	modelIDMap := map[string]string{
+		"deepseek/deepseek-v4-flash": "deepseek-v4-flash",
+	}
+	c := openaicompat.NewClientWithModelIDMap("test-key", upstream.URL+"/api/v1", modelIDMap)
+
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	rec := httptest.NewRecorder()
+	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}]}`)
+	prep := providers.PreparedRequest{Body: body, Headers: make(http.Header)}
+	err := c.Proxy(context.Background(), router.Decision{Model: "claude-opus-4-8"}, prep, rec, clientReq)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "claude-opus-4-8", gotModel,
+		"unmapped model must be forwarded unchanged")
+}
+
+func TestProxy_NilModelIDMapDoesNotRewrite(t *testing.T) {
+	var gotModel string
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		gotModel = body.Model
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-nomap","object":"chat.completion"}`))
+	}))
+	defer upstream.Close()
+
+	c := openaicompat.NewClient("test-key", upstream.URL+"/api/v1")
+
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	rec := httptest.NewRecorder()
+	body := []byte(`{"model":"deepseek/deepseek-v4-flash","messages":[]}`)
+	prep := providers.PreparedRequest{Body: body, Headers: make(http.Header)}
+	err := c.Proxy(context.Background(), router.Decision{Model: "deepseek/deepseek-v4-flash"}, prep, rec, clientReq)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "deepseek/deepseek-v4-flash", gotModel,
+		"without modelIDMap the body must be forwarded unmodified")
+}
