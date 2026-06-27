@@ -261,28 +261,6 @@ type InstallationExcludedProvidersContextKey struct{}
 // preference (index 0 = first preference). See preferredModelsForRequest.
 type InstallationPreferredModelsContextKey struct{}
 
-// suppressClaudeSubscriptionContextKey, when present and true, tells
-// resolveAndInjectCredentials to skip the caller's CLAUDE subscription OAuth
-// token so resolution falls through to BYOK / the deployment Anthropic key. Set
-// when the caller's Claude subscription is observed-exhausted (its plan window
-// has bound) so the turn serves on the Weave key instead of re-hitting a token
-// that will 429. Scoped to the Claude token only — a Codex subscription on the
-// same request is unaffected (its OpenAI turns still bill the customer's plan).
-type suppressClaudeSubscriptionContextKey struct{}
-
-// withSuppressedClaudeSubscription marks ctx so the next credential resolution
-// skips the caller's Claude subscription OAuth token (Anthropic only).
-func withSuppressedClaudeSubscription(ctx context.Context) context.Context {
-	return context.WithValue(ctx, suppressClaudeSubscriptionContextKey{}, true)
-}
-
-// claudeSubscriptionSuppressed reports whether the Claude subscription OAuth
-// token must be skipped during Anthropic credential resolution for this request.
-func claudeSubscriptionSuppressed(ctx context.Context) bool {
-	v, _ := ctx.Value(suppressClaudeSubscriptionContextKey{}).(bool)
-	return v
-}
-
 // InstallationRoutingKnobsContextKey is the context key for the authed
 // installation's persisted routing preference (the "quality vs price" dial).
 // Carried as *router.Overrides with only Alpha (quality weight) set; the
@@ -699,6 +677,28 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 // stashed by the auth middleware (router-keyed path), or "" when none.
 func anthropicSubscriptionFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(AnthropicSubscriptionContextKey{}).(string)
+	return v
+}
+
+// suppressClaudeSubscriptionContextKey, when present and true, tells
+// resolveAndInjectCredentials to skip the caller's CLAUDE subscription OAuth
+// token so resolution falls through to BYOK / the deployment Anthropic key. Set
+// when the caller's Claude subscription is observed-exhausted (its plan window
+// has bound) so the turn serves on the Weave key instead of re-hitting a token
+// that will 429. Scoped to the Claude token only — a Codex subscription on the
+// same request is unaffected (its OpenAI turns still bill the customer's plan).
+type suppressClaudeSubscriptionContextKey struct{}
+
+// withSuppressedClaudeSubscription marks ctx so the next credential resolution
+// skips the caller's Claude subscription OAuth token (Anthropic only).
+func withSuppressedClaudeSubscription(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suppressClaudeSubscriptionContextKey{}, true)
+}
+
+// claudeSubscriptionSuppressed reports whether the Claude subscription OAuth
+// token must be skipped during Anthropic credential resolution for this request.
+func claudeSubscriptionSuppressed(ctx context.Context) bool {
+	v, _ := ctx.Value(suppressClaudeSubscriptionContextKey{}).(bool)
 	return v
 }
 
