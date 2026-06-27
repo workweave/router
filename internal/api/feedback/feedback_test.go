@@ -243,3 +243,32 @@ func TestRateHandler_ExpiredTokenReturns410(t *testing.T) {
 	assert.Equal(t, http.StatusGone, rec.Code)
 	assert.Empty(t, repo.upserts)
 }
+
+func TestSubmitHandler_RejectsOversizedComment(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	signer := token.NewSigner("secret", time.Hour)
+	repo := &fakeFeedbackRepo{}
+	engine := gin.New()
+	engine.POST("/v1/feedback/link", feedbackapi.SubmitHandler(newService(repo, signer)))
+	tok := signer.Mint("inst-1", "org-1", "req-99", "user-1")
+	longComment := strings.Repeat("a", 2049)
+	body := `{"token":"` + tok + `","rating":"up","comment":"` + longComment + `"}`
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/feedback/link", strings.NewReader(body)))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "comment too long")
+}
+
+func TestSubmitHandler_AcceptsCommentAtLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	signer := token.NewSigner("secret", time.Hour)
+	repo := &fakeFeedbackRepo{}
+	engine := gin.New()
+	engine.POST("/v1/feedback/link", feedbackapi.SubmitHandler(newService(repo, signer)))
+	tok := signer.Mint("inst-1", "org-1", "req-100", "user-1")
+	okComment := strings.Repeat("b", 2048)
+	body := `{"token":"` + tok + `","rating":"up","comment":"` + okComment + `"}`
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/feedback/link", strings.NewReader(body)))
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
