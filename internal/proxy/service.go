@@ -702,30 +702,6 @@ func anthropicSubscriptionFromContext(ctx context.Context) string {
 	return v
 }
 
-// claudeSubscriptionExhausted reports whether the caller's present Claude
-// subscription has bound its plan window — the upstream will 429 any further
-// turn until it resets. True only when: the usage observer is wired, a Claude
-// subscription token is present on this request, its most-recent observed
-// snapshot is exhausted, AND a non-subscription Anthropic key exists to serve the
-// turn instead. The token key is derived identically to withUsageObserver /
-// usageBypassEngaged so this read agrees with what the observer recorded. When
-// true the caller suppresses the subscription credential (withSuppressedClaudeSubscription)
-// so the turn serves on the Weave / BYOK key rather than the spent subscription.
-func (s *Service) claudeSubscriptionExhausted(ctx context.Context, headers http.Header) bool {
-	if s.usageObserver == nil {
-		return false
-	}
-	_, anthroTok := s.presentSubscriptionTokens(ctx, headers)
-	if anthroTok == "" {
-		return false
-	}
-	if !s.anthropicFallbackKeyAvailable(ctx) {
-		return false
-	}
-	snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(anthroTok)))
-	return ok && snap.Exhausted()
-}
-
 // servedOnSubscription reports whether the turn's resolved credential is a
 // subscription OAuth token (Claude or Codex) — i.e. the customer's own plan
 // paid for it, so billing applies only the subscription fee rather than full
