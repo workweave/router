@@ -151,7 +151,7 @@ func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string
 	if target == nil {
 		return nil, "", ErrAPIKeyNotFound
 	}
-	if err := s.apiKeys.SoftDelete(ctx, target.ID); err != nil {
+	if err := s.apiKeys.SoftDelete(ctx, installationID, target.ID); err != nil {
 		return nil, "", err
 	}
 	key, raw, err := s.IssueAPIKey(ctx, installationID, target.Name, createdBy)
@@ -168,7 +168,7 @@ func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string
 // cache TTL (5 min) — the same window that RotateAPIKey closes via
 // invalidateInstallation.
 func (s *Service) DeleteAPIKey(ctx context.Context, installationID, id string) error {
-	if err := s.apiKeys.SoftDelete(ctx, id); err != nil {
+	if err := s.apiKeys.SoftDelete(ctx, installationID, id); err != nil {
 		return err
 	}
 	s.invalidateInstallation(installationID)

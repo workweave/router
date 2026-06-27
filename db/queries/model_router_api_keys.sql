@@ -48,8 +48,10 @@ SET last_used_at = NOW()
 WHERE id = @id::uuid
   AND deleted_at IS NULL;
 
+-- Soft-deletes a router API key. Cross-tenant safe via installation_id predicate.
 -- name: SoftDeleteModelRouterAPIKey :exec
 UPDATE router.model_router_api_keys
 SET deleted_at = NOW()
 WHERE id = @id::uuid
+  AND installation_id = @installation_id::uuid
   AND deleted_at IS NULL;

@@ -219,16 +219,23 @@ const softDeleteModelRouterAPIKey = `-- name: SoftDeleteModelRouterAPIKey :exec
 UPDATE router.model_router_api_keys
 SET deleted_at = NOW()
 WHERE id = $1::uuid
+  AND installation_id = $2::uuid
   AND deleted_at IS NULL
 `
 
-// SoftDeleteModelRouterAPIKey
+type SoftDeleteModelRouterAPIKeyParams struct {
+	ID             uuid.UUID
+	InstallationID uuid.UUID
+}
+
+// Soft-deletes a router API key. Cross-tenant safe via installation_id predicate.
 //
 //	UPDATE router.model_router_api_keys
 //	SET deleted_at = NOW()
 //	WHERE id = $1::uuid
+//	  AND installation_id = $2::uuid
 //	  AND deleted_at IS NULL
-func (q *Queries) SoftDeleteModelRouterAPIKey(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, softDeleteModelRouterAPIKey, id)
+func (q *Queries) SoftDeleteModelRouterAPIKey(ctx context.Context, arg SoftDeleteModelRouterAPIKeyParams) error {
+	_, err := q.db.Exec(ctx, softDeleteModelRouterAPIKey, arg.ID, arg.InstallationID)
 	return err
 }
