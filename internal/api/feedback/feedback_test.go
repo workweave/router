@@ -272,3 +272,36 @@ func TestSubmitHandler_AcceptsCommentAtLimit(t *testing.T) {
 	engine.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/feedback/link", strings.NewReader(body)))
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
+
+func TestSubmitHandler_WhitespaceOnlyCommentStoresNil(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	signer := token.NewSigner("secret", time.Hour)
+	repo := &fakeFeedbackRepo{}
+	engine := gin.New()
+	engine.POST("/v1/feedback/link", feedbackapi.SubmitHandler(newService(repo, signer)))
+	tok := signer.Mint("inst-1", "org-1", "req-101", "user-1")
+	body := `{"token":"` + tok + `","rating":"up","comment":"     "}`
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/feedback/link", strings.NewReader(body)))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, repo.upserts, 1)
+	assert.Nil(t, repo.upserts[0].Comment, "all-whitespace comment must normalize to nil")
+}
+
+func TestSubmitHandler_WhitespacePaddedCommentAtLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	signer := token.NewSigner("secret", time.Hour)
+	repo := &fakeFeedbackRepo{}
+	engine := gin.New()
+	engine.POST("/v1/feedback/link", feedbackapi.SubmitHandler(newService(repo, signer)))
+	tok := signer.Mint("inst-1", "org-1", "req-102", "user-1")
+	// 2048 real bytes padded with spaces — trimmed length is exactly at the limit
+	paddedComment := "  " + strings.Repeat("c", 2048) + "  "
+	body := `{"token":"` + tok + `","rating":"up","comment":"` + paddedComment + `"}`
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/feedback/link", strings.NewReader(body)))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, repo.upserts, 1)
+	require.NotNil(t, repo.upserts[0].Comment)
+	assert.Equal(t, 2048, len(*repo.upserts[0].Comment), "whitespace padding must be stripped, real content stored")
+}
