@@ -94,30 +94,6 @@ func (s *Service) usageBypassEngaged(ctx context.Context, headers http.Header, r
 	return util < threshold
 }
 
-// claudeSubscriptionExhausted reports whether the caller's present Claude
-// subscription has bound its plan window — the upstream will 429 any further
-// turn until it resets. True only when: the usage observer is wired, a Claude
-// subscription token is present on this request, its most-recent observed
-// snapshot is exhausted, AND a non-subscription Anthropic key exists to serve the
-// turn instead. The token key is derived identically to withUsageObserver /
-// usageBypassEngaged so this read agrees with what the observer recorded. When
-// true the caller suppresses the subscription credential (withSuppressedSubscription)
-// so the turn serves on the Weave / BYOK key rather than the spent subscription.
-func (s *Service) claudeSubscriptionExhausted(ctx context.Context, headers http.Header) bool {
-	if s.usageObserver == nil {
-		return false
-	}
-	_, anthroTok := s.presentSubscriptionTokens(ctx, headers)
-	if anthroTok == "" {
-		return false
-	}
-	if !s.anthropicFallbackKeyAvailable(ctx) {
-		return false
-	}
-	snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(anthroTok)))
-	return ok && snap.Exhausted()
-}
-
 // anthropicFallbackKeyAvailable reports whether a non-subscription Anthropic
 // credential is configured to serve a Claude turn when the caller's subscription
 // is spent: a per-request BYOK Anthropic key, or the deployment's own

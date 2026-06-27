@@ -256,6 +256,28 @@ type InstallationExcludedModelsContextKey struct{}
 // installation's provider exclusion list. Carried as []string.
 type InstallationExcludedProvidersContextKey struct{}
 
+// suppressClaudeSubscriptionContextKey, when present and true, tells
+// resolveAndInjectCredentials to skip the caller's CLAUDE subscription OAuth
+// token so resolution falls through to BYOK / the deployment Anthropic key. Set
+// when the caller's Claude subscription is observed-exhausted (its plan window
+// has bound) so the turn serves on the Weave key instead of re-hitting a token
+// that will 429. Scoped to the Claude token only — a Codex subscription on the
+// same request is unaffected (its OpenAI turns still bill the customer's plan).
+type suppressClaudeSubscriptionContextKey struct{}
+
+// withSuppressedClaudeSubscription marks ctx so the next credential resolution
+// skips the caller's Claude subscription OAuth token (Anthropic only).
+func withSuppressedClaudeSubscription(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suppressClaudeSubscriptionContextKey{}, true)
+}
+
+// claudeSubscriptionSuppressed reports whether the Claude subscription OAuth
+// token must be skipped during Anthropic credential resolution for this request.
+func claudeSubscriptionSuppressed(ctx context.Context) bool {
+	v, _ := ctx.Value(suppressClaudeSubscriptionContextKey{}).(bool)
+	return v
+}
+
 // InstallationRoutingKnobsContextKey is the context key for the authed
 // installation's persisted routing preference (the "quality vs price" dial).
 // Carried as *router.Overrides with only Alpha (quality weight) set; the
@@ -653,6 +675,30 @@ func CredentialsFromContext(ctx context.Context) *Credentials {
 func anthropicSubscriptionFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(AnthropicSubscriptionContextKey{}).(string)
 	return v
+}
+
+// claudeSubscriptionExhausted reports whether the caller's present Claude
+// subscription has bound its plan window — the upstream will 429 any further
+// turn until it resets. True only when: the usage observer is wired, a Claude
+// subscription token is present on this request, its most-recent observed
+// snapshot is exhausted, AND a non-subscription Anthropic key exists to serve the
+// turn instead. The token key is derived identically to withUsageObserver /
+// usageBypassEngaged so this read agrees with what the observer recorded. When
+// true the caller suppresses the subscription credential (withSuppressedClaudeSubscription)
+// so the turn serves on the Weave / BYOK key rather than the spent subscription.
+func (s *Service) claudeSubscriptionExhausted(ctx context.Context, headers http.Header) bool {
+	if s.usageObserver == nil {
+		return false
+	}
+	_, anthroTok := s.presentSubscriptionTokens(ctx, headers)
+	if anthroTok == "" {
+		return false
+	}
+	if !s.anthropicFallbackKeyAvailable(ctx) {
+		return false
+	}
+	snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(anthroTok)))
+	return ok && snap.Exhausted()
 }
 
 // servedOnSubscription reports whether the turn's resolved credential is a
@@ -1737,6 +1783,15 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
 	}
 
+	// A caller whose Claude subscription has bound its plan window can't serve
+	// another turn on it (the upstream 429s until reset). Suppress the spent
+	// token so resolution falls through to the deployment / BYOK Anthropic key —
+	// the turn then serves on the Weave key (billed at full cost, not the
+	// subscription rate) instead of hard-failing. Only fires once the observer
+	// has recorded the exhaustion and a fallback key exists.
+	if s.claudeSubscriptionExhausted(ctx, r.Header) {
+		ctx = withSuppressedClaudeSubscription(ctx)
+	}
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
 	// Wrap the client writer in a preludeBuffer for every request, not just
@@ -2035,7 +2090,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				"failed_provider", primaryProvider,
 				"baseline_model", baselineModel,
 				"err", proxyErr)
-			baselineCtx := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, r.Header)
+			baselineCtx := ctx
+			if s.claudeSubscriptionExhausted(ctx, r.Header) {
+				baselineCtx = withSuppressedClaudeSubscription(baselineCtx)
+			}
+			baselineCtx = resolveAndInjectCredentials(baselineCtx, providers.ProviderAnthropic, r.Header)
 			baselineBindings := s.resolveBindingsForDispatch(baselineCtx, baselineDecision)
 			baselineMarker := suppressMarkerIfRequested(r.Header, baselineRoutingMarkerFor(routeRes, baselineModel))
 			baselineAttempt := s.anthropicNativeAttempt(env, r, baselinePrep, sink, preludeBuf, baselineMarker, setExtractor)
@@ -2077,6 +2136,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		finalProvider = providers.ProviderAnthropic
 	}
 	decision.Provider = finalProvider
+
+	// Re-resolve credentials for the binding that actually served the turn.
+	// During failover, each attempt gets its own per-attempt context with
+	// potentially different credentials. Update ctx so credentialKeyParts
+	// reads the correct key parts for telemetry.
+	ctx = resolveAndInjectCredentials(ctx, finalProvider, r.Header)
 
 	// Re-resolve actual pricing for the binding that actually served the
 	// request. The pre-dispatch lookup (`otel.Lookup(decision.Model)`)
@@ -2616,7 +2681,13 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 // fallback in that case.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
-	if provider == providers.ProviderAnthropic {
+	// When the caller's Claude subscription is observed-exhausted, skip its OAuth
+	// token so resolution falls through to BYOK / the deployment Anthropic key
+	// (the turn then serves on the Weave key). Re-hitting a spent subscription
+	// would just 429 until its plan window resets. Scoped to Anthropic only — a
+	// Codex subscription on the same request must still pay for its OpenAI turns.
+	suppressClaudeSub := claudeSubscriptionSuppressed(ctx)
+	if provider == providers.ProviderAnthropic && !suppressClaudeSub {
 		// Subscription-first (precedence: subscription -> BYOK -> deployment). A
 		// caller's Claude subscription pays for their Claude turns ahead of any
 		// BYOK or deployment key. It arrives via the dedicated header on
@@ -2673,7 +2744,18 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 		creds = byok[provider]
 	}
 	if creds == nil && !routerKeyed {
-		creds = ExtractClientCredentials(provider, headers)
+		client := ExtractClientCredentials(provider, headers)
+		// A suppressed Claude subscription must not slip back in here: off the
+		// router-key path the spent sk-ant-oat bearer arrives in Authorization and
+		// ExtractClientCredentials would re-resolve it as the subscription, undoing
+		// the skip of the subscription-first block above. Drop it so resolution
+		// falls through to the deployment Anthropic key. Scoped to the Anthropic
+		// OAuth bearer — a real client API key (non-OAuth) and any Codex OAuth on an
+		// OpenAI route are untouched.
+		if suppressClaudeSub && provider == providers.ProviderAnthropic && client != nil && client.OAuth {
+			client = nil
+		}
+		creds = client
 	}
 	if creds != nil {
 		return context.WithValue(ctx, CredentialsContextKey{}, creds)
@@ -3484,6 +3566,12 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		finalProvider = bindings[winnerIdx].Provider
 	}
 	decision.Provider = finalProvider
+
+	// Re-resolve credentials for the binding that actually served the turn.
+	// During failover, each attempt gets its own per-attempt context with
+	// potentially different credentials. Update ctx so credentialKeyParts
+	// reads the correct key parts for telemetry.
+	ctx = resolveAndInjectCredentials(ctx, finalProvider, r.Header)
 
 	// Re-resolve actual pricing for the binding that actually served the
 	// request — see ProxyMessages for the rationale.

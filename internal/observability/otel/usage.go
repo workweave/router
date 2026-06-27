@@ -61,15 +61,24 @@ func NewUsageExtractor(inner http.ResponseWriter, provider string) *UsageExtract
 }
 
 func (u *UsageExtractor) Header() http.Header {
+	if u.inner == nil {
+		return nil
+	}
 	return u.inner.Header()
 }
 
 func (u *UsageExtractor) WriteHeader(statusCode int) {
+	if u.inner == nil {
+		return
+	}
 	u.inner.WriteHeader(statusCode)
 }
 
 // Write sniffs p for token usage data then delegates to the inner writer.
 func (u *UsageExtractor) Write(p []byte) (int, error) {
+	if u.inner == nil {
+		return len(p), nil
+	}
 	u.leftover = append(u.leftover, p...)
 	u.scanBuffer()
 	return u.inner.Write(p)
