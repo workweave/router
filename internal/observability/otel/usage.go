@@ -14,9 +14,13 @@ import (
 // strings rather than introduce a circular import. Keep in sync with
 // internal/providers/provider.go.
 const (
-	providerAnthropic = "anthropic"
-	providerOpenAI    = "openai"
-	providerGoogle    = "google"
+	providerAnthropic  = "anthropic"
+	providerOpenAI     = "openai"
+	providerGoogle     = "google"
+	providerOpenRouter = "openrouter"
+	providerFireworks  = "fireworks"
+	providerDeepInfra  = "deepinfra"
+	providerBedrock    = "bedrock"
 )
 
 // UsageSink receives extracted token usage. Translators call RecordUsage /
@@ -173,7 +177,7 @@ func (u *UsageExtractor) extractFromSSEEvent(eventType []byte, data []byte) {
 	switch u.provider {
 	case providerAnthropic:
 		u.extractAnthropicSSE(eventType, data)
-	case providerOpenAI, providerGoogle:
+	case providerOpenAI, providerGoogle, providerOpenRouter, providerFireworks, providerDeepInfra, providerBedrock:
 		u.extractOpenAISSE(data)
 	}
 }
@@ -285,7 +289,7 @@ func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreati
 		output = int(usage.Get("output_tokens").Int())
 		cacheCreation = int(usage.Get("cache_creation_input_tokens").Int())
 		cacheRead = int(usage.Get("cache_read_input_tokens").Int())
-	case providerOpenAI, providerGoogle:
+	case providerOpenAI, providerGoogle, providerOpenRouter, providerFireworks, providerDeepInfra, providerBedrock:
 		// Chat Completions uses prompt_tokens/completion_tokens; the Responses
 		// API (Codex backend passthrough) uses input_tokens/output_tokens with
 		// input_tokens_details.cached_tokens. Probe both so one extractor serves

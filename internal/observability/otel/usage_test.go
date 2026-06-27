@@ -237,6 +237,34 @@ func TestUsageExtractor_OpenAICacheTokens_Streaming(t *testing.T) {
 	assert.Equal(t, 7, cacheRead)
 }
 
+func TestUsageExtractor_OpenAICompatProviders_Streaming(t *testing.T) {
+	for _, provider := range []string{"openrouter", "fireworks", "deepinfra", "bedrock"} {
+		t.Run(provider, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			ext := otel.NewUsageExtractor(rec, provider)
+
+			events := []string{
+				"data: {\"id\":\"chatcmpl-compat\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n",
+				"data: {\"id\":\"chatcmpl-compat\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":123,\"completion_tokens\":7,\"total_tokens\":130,\"prompt_tokens_details\":{\"cached_tokens\":23}}}\n\n",
+				"data: [DONE]\n\n",
+			}
+
+			for _, e := range events {
+				_, err := ext.Write([]byte(e))
+				require.NoError(t, err)
+			}
+
+			in, out := ext.Tokens()
+			assert.Equal(t, 123, in)
+			assert.Equal(t, 7, out)
+
+			cacheCreation, cacheRead := ext.CacheTokens()
+			assert.Equal(t, 0, cacheCreation)
+			assert.Equal(t, 23, cacheRead)
+		})
+	}
+}
+
 func TestUsageExtractor_GoogleNativeCacheTokens_NonStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ext := otel.NewUsageExtractor(rec, "google")
