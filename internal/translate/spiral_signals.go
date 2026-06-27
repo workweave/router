@@ -127,8 +127,7 @@ type ToolCallFilePath struct {
 // AssistantToolCallFilePaths returns, in message order, every assistant
 // tool_use invocation that carries a file_path or notebook_path argument.
 // The proxy's spiral detector counts repeat edits to the same path (the
-// same-file-thrash death-march shape). Anthropic format only — mirrors
-// AssistantToolCallSignatures' nudge skip.
+// same-file-thrash death-march shape). Anthropic format only.
 func (e *RequestEnvelope) AssistantToolCallFilePaths() []ToolCallFilePath {
 	if e.format != FormatAnthropic {
 		return nil
@@ -148,9 +147,6 @@ func (e *RequestEnvelope) AssistantToolCallFilePaths() []ToolCallFilePath {
 		}
 		content.ForEach(func(_, block gjson.Result) bool {
 			if block.Get("type").String() != "tool_use" {
-				return true
-			}
-			if strings.HasPrefix(block.Get("id").String(), "toolu_router_nudge_") {
 				return true
 			}
 			name := block.Get("name").String()
@@ -173,11 +169,11 @@ func (e *RequestEnvelope) AssistantToolCallFilePaths() []ToolCallFilePath {
 }
 
 // TrailingAssistantMonologue counts consecutive assistant messages at the
-// tail of the history that carry no real tool_use block (router-synthesized
-// nudges don't count as tool activity). The walk stops at the first
-// assistant message WITH tool activity or the first user message carrying
-// non-tool_result content — i.e. it measures "assistant turns since the last
-// real progress or real user input", the OpenHands monologue shape.
+// tail of the history that carry no tool_use block. The walk stops at the first
+// assistant message WITH a tool call (including router-synthesized nudges) or
+// the first user message carrying non-tool_result content — i.e. it measures
+// "assistant turns since the last real progress or real user input", the
+// OpenHands monologue shape.
 func (e *RequestEnvelope) TrailingAssistantMonologue() int {
 	if e.format != FormatAnthropic {
 		return 0
@@ -206,7 +202,8 @@ func (e *RequestEnvelope) TrailingAssistantMonologue() int {
 }
 
 // assistantHasRealToolUse reports whether an assistant message carries at
-// least one tool_use block that is not a router-synthesized nudge.
+// least one tool_use block. Router-synthesized nudges now count as tool
+// activity since they are included in loop detection.
 func assistantHasRealToolUse(msg gjson.Result) bool {
 	content := msg.Get("content")
 	if !content.IsArray() {
@@ -215,9 +212,6 @@ func assistantHasRealToolUse(msg gjson.Result) bool {
 	has := false
 	content.ForEach(func(_, block gjson.Result) bool {
 		if block.Get("type").String() != "tool_use" {
-			return true
-		}
-		if strings.HasPrefix(block.Get("id").String(), "toolu_router_nudge_") {
 			return true
 		}
 		has = true
