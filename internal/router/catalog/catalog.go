@@ -412,6 +412,8 @@ var Models = []Model{
 	// family. TierLow despite the MoE size because the active parameter
 	// budget + AA's Coding Index put it below v4-flash.
 	{ID: "qwen/qwen3.6-35b-a3b", Tier: TierLow, ContextWindow: 262_144, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+		{Provider: providers.ProviderMakora, UpstreamID: "unsloth/Qwen3.6-35B-A3B-NVFP4",
+			Price: Pricing{InputUSDPer1M: 0.1720, OutputUSDPer1M: 1.2002, CacheReadMultiplier: 0.75}},
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "Qwen/Qwen3.6-35B-A3B",
 			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 0.950}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.000, CacheReadMultiplier: 0.10}},
