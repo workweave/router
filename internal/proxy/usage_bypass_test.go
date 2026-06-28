@@ -303,3 +303,80 @@ func TestUsageBypass_ExhaustedDisengages_EvenAboveThreshold(t *testing.T) {
 	assert.Equal(t, 1, fr.routeCalls,
 		"an exhausted subscription must disengage the bypass so routing (and the failover) runs")
 }
+
+// TestProxyMessages_BypassWeeklyLimit_FallsBackToRoutedDispatch is the
+// end-to-end contract for the in-turn fall-through: a bypass attempt that
+// returns a buffered 429 must NOT be flushed at the client. ProxyMessages must
+// discard the bypass state, re-resolve via the normal routed path, and serve
+// the turn on the scorer's pick (a non-Anthropic model in this fixture).
+func TestProxyMessages_BypassWeeklyLimit_FallsBackToRoutedDispatch(t *testing.T) {
+	// Bypass attempt returns a buffered 429 with weekly-limit headers. The
+	// fakeProvider captures this as proxyErr; the routed fallback uses the same
+	// provider (the fixture only wires Anthropic), so the second dispatch
+	// succeeds with a 200.
+	bypassResp := &providers.UpstreamErrorResponse{
+		Status: http.StatusTooManyRequests,
+		Headers: http.Header{
+			"anthropic-ratelimit-unified-weekly-limit":   []string{"100000"},
+			"anthropic-ratelimit-unified-weekly-reset":    []string{"2025-12-31T00:00:00Z"},
+			"anthropic-ratelimit-unified-weekly-remaining": []string{"0"},
+		},
+		Body: []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"weekly limit exceeded"}}`),
+	}
+	routedResp := func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"` + bypassScorerPickMdl + `","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}
+	p := &fakeProvider{proxyErr: bypassResp, proxyResponse: routedResp}
+	// The fakeProvider returns the SAME proxyErr on every dispatch. To make the
+	// second (routed) dispatch succeed, swap proxyErr to nil after the first call.
+	wrappedP := &swapErrProvider{first: bypassResp, second: nil, inner: p}
+
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl, Reason: "cluster:v0.2"}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	// Seed under threshold so the bypass engages for the first attempt.
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
+		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+	})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: wrappedP}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
+
+	rec, req, body := bypassRequest(t)
+	require.NoError(t, svc.ProxyMessages(bypassCtx(0.80), body, rec, req))
+
+	assert.Equal(t, 1, fr.routeCalls,
+		"the scorer must run once on the reroute (zero on the bypass attempt, one after the 429)")
+	assert.NotEqual(t, http.StatusTooManyRequests, rec.Code,
+		"the 429 must NOT be flushed — the client must not see the bypass failure")
+	assert.Equal(t, bypassScorerPickMdl, rec.Header().Get("x-router-model"),
+		"the routed fallback's model replaces the bypass requested model")
+	assert.Equal(t, "cluster:v0.2", rec.Header().Get("x-router-decision"),
+		"the routed path's decision reason replaces the usage_bypass marker — the 429 must not be the last word")
+}
+
+// swapErrProvider wraps a fakeProvider and returns `first` as the proxyErr on
+// the first dispatch, `second` on every dispatch thereafter. Used to simulate a
+// bypass 429 followed by a successful routed dispatch against the same fake.
+type swapErrProvider struct {
+	first, second error
+	inner         *fakeProvider
+	calls         int
+}
+
+func (s *swapErrProvider) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
+	s.calls++
+	err := s.first
+	if s.calls > 1 {
+		err = s.second
+	}
+	orig := s.inner.proxyErr
+	s.inner.proxyErr = err
+	defer func() { s.inner.proxyErr = orig }()
+	return s.inner.Proxy(ctx, decision, prep, w, r)
+}
+
+func (s *swapErrProvider) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
+	return s.inner.Passthrough(ctx, prep, w, r)
+}
+

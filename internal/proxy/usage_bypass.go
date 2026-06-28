@@ -138,6 +138,12 @@ func (s *Service) anthropicFallbackKeyAvailable(ctx context.Context) bool {
 	return false
 }
 
+// errBypassRetryable is returned by bypassToAnthropic when the bypass attempt
+// hit a retryable upstream error (e.g., Anthropic 429 weekly-limit) BEFORE
+// writing any response bytes. The caller should fall through to the normal
+// routed dispatch path so the turn can still be served by a different provider.
+var errBypassRetryable = errors.New("usage bypass: retryable error, fall back to routed dispatch")
+
 // bypassToAnthropic proxies an inbound Anthropic-Messages request straight to
 // the Anthropic provider with the caller-requested model. It deliberately skips
 // the cluster scorer, planner, session pin, semantic cache, AND billing: the
@@ -201,9 +207,14 @@ func (s *Service) bypassToAnthropic(
 	proxyErr := p.Proxy(ctx, decision, prep, w, r)
 	// The Anthropic adapter returns a buffered *UpstreamErrorResponse on 4xx/5xx
 	// without writing to w (the routed path flushes it via dispatchWithFallback).
-	// Render it as the real upstream status+body so the caller sees e.g. a 429
-	// with its retry headers instead of a generic 502; treat the turn as served.
+	// When the error is retryable (429 weekly-limit) AND no bytes have been
+	// committed to w, return errBypassRetryable so the caller falls through to
+	// the normal routed dispatch. Non-retryable errors (400/401/403) still
+	// flush — those won't be fixed by a different upstream.
 	var upstreamErr *providers.UpstreamErrorResponse
+	if errors.As(proxyErr, &upstreamErr) && providers.IsRetryable(proxyErr) {
+		return errBypassRetryable
+	}
 	if errors.As(proxyErr, &upstreamErr) {
 		flushUpstreamErrorAsAnthropic(w, proxyErr)
 		proxyErr = nil

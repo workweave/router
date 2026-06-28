@@ -1587,7 +1587,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	inboundLastUser := env.LastUserMessage()
 
 	routeStart := time.Now()
-	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, router.Request{
+	req := router.Request{
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
@@ -1597,7 +1597,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		ExcludedModels:       excluded,
 		PreferredModels:      s.preferredModelsForRequest(ctx),
 		RoutingKnobs:         routingKnobsForRequest(ctx),
-	})
+	}
+	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, req)
 	if routeErr != nil {
 		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
 		return routeErr
@@ -1609,7 +1610,27 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// model straight through to Anthropic with no model substitution and no
 	// billing debit — the turn is paid for by the customer's plan.
 	if routeRes.UsageBypass {
-		return s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
+		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
+		if !errors.Is(err, errBypassRetryable) {
+			return err
+		}
+		// Bypass got a pre-commit retryable error (e.g., Anthropic 429 weekly-limit)
+		// — the observer now reflects near-cap headroom and the subsidy cost factor
+		// will naturally discount Anthropic in the next scoring pass. Re-resolve via
+		// the normal routed path so the turn completes on a non-Anthropic model.
+		log.Info("usage-bypass pre-commit failure, rerouting via scorer",
+			"request_id", requestID,
+			"external_id", externalID,
+			"requested_model", feats.Model,
+		)
+		routeRes.UsageBypass = false
+		decision, routeErr := s.routeFor(ctx, req)
+		if routeErr != nil {
+			log.Error("Reroute after usage-bypass failure failed", "err", routeErr)
+			return routeErr
+		}
+		routeRes.Decision = decision
+		routeRes.Fresh = decision
 	}
 	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision
