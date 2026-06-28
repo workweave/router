@@ -33,7 +33,7 @@ const (
 	// models) at notably higher throughput than the commodity providers; pair
 	// with NewClientWithModelIDMap to rewrite the router's public slash-form
 	// slugs to Makora's upstream IDs on the wire.
-	MakoraBaseURL = "https://api.makora.com/v1"
+	MakoraBaseURL = "https://inference.makora.com/v1"
 )
 
 // BedrockMantleBaseURLTemplate is the OpenAI-compatible bedrock-mantle endpoint
