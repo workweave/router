@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"time"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
+	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -71,7 +73,8 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		embedInput = "only_user_message"
 	}
 
-	ctx, log, _ = bindRequestLogger(ctx, env, apiKeyID, requestID, "gemini_generate_content")
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "gemini_generate_content")
 	log.Info("ProxyGeminiGenerateContent start",
 		"requested_model", feats.Model,
 		"stream", env.Stream(),
@@ -82,6 +85,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	)
 
 	logInboundRequestDiagnostics(log, env)
+	inboundLastUser := env.LastUserMessage()
 
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
@@ -251,6 +255,55 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
+	}
+
+	// Persist a durable telemetry row — mirrors the ProxyMessages and
+	// ProxyOpenAIChatCompletion paths. Without this, all native Gemini
+	// generateContent requests are invisible to the admin dashboard and
+	// Postgres-backed cost/usage tracking (OTel spans fire but no DB row).
+	if installationID != uuid.Nil {
+		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
+		s.fireTelemetry(InsertTelemetryParams{
+			InstallationID:         installationID.String(),
+			RequestID:              requestID,
+			SpanType:               "router.upstream",
+			TraceID:                requestID,
+			Timestamp:              requestStart,
+			RequestedModel:         feats.Model,
+			DecisionModel:          decision.Model,
+			DecisionProvider:       decision.Provider,
+			DecisionReason:         decision.Reason,
+			EstimatedInputTokens:   int32(feats.Tokens),
+			StickyHit:              stickyHit,
+			EmbedInput:             embedInput,
+			InputTokens:            int32(in),
+			OutputTokens:           int32(out),
+			RequestedInputCostUSD:  catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
+			RequestedOutputCostUSD: catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M),
+			ActualInputCostUSD:     catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
+			ActualOutputCostUSD:    catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M),
+			RouteLatencyMs:         routeMs,
+			UpstreamLatencyMs:      proxyMs,
+			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
+			CrossFormat:            false,
+			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
+			CacheCreationTokens:    cacheTokenPtr(cacheCreation),
+			CacheReadTokens:        cacheTokenPtr(cacheRead),
+			DeviceID:               clientID.DeviceID,
+			SessionID:              clientID.SessionID,
+			RouterUserID:           auth.UserIDFrom(ctx),
+			ClientApp:              clientID.ClientApp,
+			TurnType:               string(routeRes.TurnType),
+			RolloutID:              clientID.RolloutID,
+			FailoverUsed:           boolPtrTrue(false),
+			CredentialKeyPrefix:    credentialKeyPrefix,
+			CredentialKeySuffix:    credentialKeySuffix,
+			CredentialSource:       credSource,
+			SessionKey:             sessionKey[:],
+			Role:                   routeRes.PinRole,
+			PinAgeSec:              int64PtrIf(stickyHit && pinAgeSec > 0, pinAgeSec),
+			ToolResultBytes:        toolResultBytesPtr(inboundLastUser, tt),
+		})
 	}
 
 	log.Info("ProxyGeminiGenerateContent complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
