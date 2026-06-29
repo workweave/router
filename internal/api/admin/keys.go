@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/config"
+	"workweave/router/internal/providers"
 
 	"github.com/gin-gonic/gin"
 )
@@ -209,6 +211,16 @@ func UpsertExternalKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 		var req upsertExternalKeyRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Provider and key are required."})
+			return
+		}
+		// A provider configured via the deployment's env var (e.g. ANTHROPIC_API_KEY)
+		// must not be shadowed by a dashboard BYOK key — credential resolution
+		// prefers BYOK, so the stored key would silently win on every outbound call.
+		// The frontend grays out env-keyed providers, but that guard is derived from
+		// GET /admin/v1/config and fails open if that fetch errors; this is the only
+		// backend enforcement. Mirrors the env-key check in ConfigHandler.
+		if config.GetOr(providers.APIKeyEnvVar(req.Provider), "") != "" {
+			c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "Provider already configured via deployment environment variable. Remove the env var before adding a dashboard key."})
 			return
 		}
 		key, err := authSvc.UpsertExternalAPIKey(c.Request.Context(), installation.ID, req.Provider, req.Key, req.Name, nil)
