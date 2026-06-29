@@ -317,8 +317,8 @@ func TestProxyMessages_BypassWeeklyLimit_FallsBackToRoutedDispatch(t *testing.T)
 	bypassResp := &providers.UpstreamErrorResponse{
 		Status: http.StatusTooManyRequests,
 		Headers: http.Header{
-			"anthropic-ratelimit-unified-weekly-limit":   []string{"100000"},
-			"anthropic-ratelimit-unified-weekly-reset":    []string{"2025-12-31T00:00:00Z"},
+			"anthropic-ratelimit-unified-weekly-limit":     []string{"100000"},
+			"anthropic-ratelimit-unified-weekly-reset":     []string{"2025-12-31T00:00:00Z"},
 			"anthropic-ratelimit-unified-weekly-remaining": []string{"0"},
 		},
 		Body: []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"weekly limit exceeded"}}`),
@@ -379,4 +379,3 @@ func (s *swapErrProvider) Proxy(ctx context.Context, decision router.Decision, p
 func (s *swapErrProvider) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	return s.inner.Passthrough(ctx, prep, w, r)
 }
-

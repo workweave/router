@@ -1615,9 +1615,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			return err
 		}
 		// Bypass got a pre-commit retryable error (e.g., Anthropic 429 weekly-limit)
-		// — the observer now reflects near-cap headroom and the subsidy cost factor
-		// will naturally discount Anthropic in the next scoring pass. Re-resolve via
-		// the normal routed path so the turn completes on a non-Anthropic model.
+		// — the observer now reflects near-cap headroom. Update the subsidy cost
+		// factor before rerouting so the scorer discounts Anthropic appropriately.
+		req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, r.Header)
 		log.Info("usage-bypass pre-commit failure, rerouting via scorer",
 			"request_id", requestID,
 			"external_id", externalID,

@@ -21,13 +21,13 @@ import (
 // bypassToAnthropic tests. It records the response writer it received so a
 // test can assert no bytes were committed on a retryable error.
 type bypassFakeProvider struct {
-	proxyErr      error
-	dispatches    int
-	capturedW     http.ResponseWriter
-	capturedBody  []byte
-	capturedR     *http.Request
-	capturedCtx   context.Context
-	capturedDec   router.Decision
+	proxyErr     error
+	dispatches   int
+	capturedW    http.ResponseWriter
+	capturedBody []byte
+	capturedR    *http.Request
+	capturedCtx  context.Context
+	capturedDec  router.Decision
 }
 
 func (f *bypassFakeProvider) Proxy(ctx context.Context, decision router.Decision, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
