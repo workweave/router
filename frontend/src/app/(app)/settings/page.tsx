@@ -372,7 +372,9 @@ function providerLabel(p: Provider): string {
 
 function ProviderKeysPanel() {
   const [keys, setKeys] = useState<ExternalKey[]>([]);
-  const [envKeyed, setEnvKeyed] = useState<Provider[]>([]);
+  // null = config not yet loaded; [] = loaded with no env-keyed providers
+  const [envKeyed, setEnvKeyed] = useState<Provider[] | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pickedProvider, setPickedProvider] = useState<Provider | null>(null);
   const [keyValue, setKeyValue] = useState("");
@@ -399,16 +401,18 @@ function ProviderKeysPanel() {
           (PROVIDERS as readonly string[]).includes(p),
         );
         setEnvKeyed(set);
+        setConfigError(null);
       })
       .catch(() => {
-        // Non-fatal: the panel still works, env-keyed providers just won't
-        // be flagged as read-only.
-        setEnvKeyed([]);
+        setConfigError("Couldn't verify provider configuration — refresh to try again");
       });
   }, []);
 
-  const taken = new Set<string>([...keys.map(k => k.provider), ...envKeyed]);
-  const available: Provider[] = PROVIDERS.filter(p => !taken.has(p));
+  const configReady = envKeyed !== null && configError === null;
+  const taken = new Set<string>([...keys.map(k => k.provider), ...(envKeyed ?? [])]);
+  // Only offer providers for addition once we know which are env-keyed; until
+  // then any of the four could be read-only and we must not silently offer them.
+  const available: Provider[] = configReady ? PROVIDERS.filter(p => !taken.has(p)) : [];
   const provider: Provider | null =
     pickedProvider != null && available.includes(pickedProvider)
       ? pickedProvider
@@ -442,10 +446,11 @@ function ProviderKeysPanel() {
     }
   }
 
-  const hasAnyKey = keys.length > 0 || envKeyed.length > 0;
+  const hasAnyKey = keys.length > 0 || (envKeyed ?? []).length > 0;
   return (
     <>
       {error && <ErrorBanner>{error}</ErrorBanner>}
+      {configError && <ErrorBanner>{configError}</ErrorBanner>}
 
       {available.length > 0 && provider != null ? (
         <Card>
@@ -504,7 +509,7 @@ function ProviderKeysPanel() {
           </Card.Header>
           <Card.Content>
             <ul className="divide-y divide-border">
-              {envKeyed.map(p => (
+              {(envKeyed ?? []).map(p => (
                 <li
                   key={`env-${p}`}
                   className="flex items-center justify-between px-5 py-3"

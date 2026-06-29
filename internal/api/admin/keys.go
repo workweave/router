@@ -3,9 +3,12 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/config"
+	"workweave/router/internal/providers"
 
 	"github.com/gin-gonic/gin"
 )
@@ -200,6 +203,15 @@ func ListExternalKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
 	}
 }
 
+// isEnvKeyed reports whether provider's upstream API key is supplied via a
+// deployment env var (e.g. ANTHROPIC_API_KEY). Mirrors the check ConfigHandler
+// uses to populate EnvProviderKeys — kept here as its own function so the
+// write path can enforce it independently of whether /admin/v1/config ever
+// succeeds.
+func isEnvKeyed(provider string) bool {
+	return config.GetOr(providers.APIKeyEnvVar(strings.ToLower(provider)), "") != ""
+}
+
 func UpsertExternalKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -209,6 +221,10 @@ func UpsertExternalKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 		var req upsertExternalKeyRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Provider and key are required."})
+			return
+		}
+		if isEnvKeyed(req.Provider) {
+			c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "Provider already configured via deployment environment variable. Remove the env var before adding a dashboard key."})
 			return
 		}
 		key, err := authSvc.UpsertExternalAPIKey(c.Request.Context(), installation.ID, req.Provider, req.Key, req.Name, nil)
