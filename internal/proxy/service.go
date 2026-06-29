@@ -1611,13 +1611,31 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// billing debit — the turn is paid for by the customer's plan.
 	if routeRes.UsageBypass {
 		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
-		if !errors.Is(err, errBypassRetryable) {
+		if !errors.Is(err, errBypassRetryable) && !providers.IsRetryable(err) {
 			return err
 		}
-		// Bypass got a pre-commit retryable error (e.g., Anthropic 429 weekly-limit)
-		// — the observer now reflects near-cap headroom. Update the subsidy cost
-		// factor before rerouting so the scorer discounts Anthropic appropriately.
+		// Bypass got a pre-commit retryable error (e.g., Anthropic 429 weekly-limit
+		// or a raw transport error). The observer now reflects near-cap headroom.
+		// Update the subsidy cost factor before rerouting so the scorer discounts
+		// Anthropic appropriately. Also load session pin state for proper switch
+		// detection since bypass returns early without loading it.
 		req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, r.Header)
+
+		// Load session pin state for switch detection. Bypass returns early without
+		// loading the pin, so PriorServedModel and SessionEverSwitched would be
+		// empty. We need them populated so modelSwitched() correctly detects when
+		// switching from a pinned model to a different one.
+		var priorServedModel string
+		var sessionEverSwitched bool
+		if s.pinStore != nil {
+			sessionKey := DeriveSessionKey(env, apiKeyID)
+			pin, pinFound := s.loadPin(ctx, sessionKey, roleForTier(catalog.TierFor(feats.Model)))
+			if pinFound {
+				priorServedModel = pin.LastServedModel
+				sessionEverSwitched = pin.HasEverSwitched
+			}
+		}
+
 		log.Info("usage-bypass pre-commit failure, rerouting via scorer",
 			"request_id", requestID,
 			"external_id", externalID,
@@ -1631,6 +1649,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 		routeRes.Decision = decision
 		routeRes.Fresh = decision
+		// Populate switch detection fields that were skipped during bypass.
+		// This ensures modelSwitched() correctly detects transitions.
+		routeRes.PriorServedModel = priorServedModel
+		routeRes.SessionEverSwitched = sessionEverSwitched
 	}
 	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision
