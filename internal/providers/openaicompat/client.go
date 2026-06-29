@@ -28,6 +28,12 @@ const (
 	// HuggingFace-form model IDs; pair with NewClientWithModelIDMap to rewrite
 	// the router's public slash-form slugs on the wire.
 	DeepInfraBaseURL = "https://api.deepinfra.com/v1/openai"
+	// MakoraBaseURL is Makora's OpenAI-compatible surface. Makora is an
+	// agent-optimized inference platform serving DeepSeek V4 (and other OSS
+	// models) at notably higher throughput than the commodity providers; pair
+	// with NewClientWithModelIDMap to rewrite the router's public slash-form
+	// slugs to Makora's upstream IDs on the wire.
+	MakoraBaseURL = "https://inference.makora.com/v1"
 )
 
 // BedrockMantleBaseURLTemplate is the OpenAI-compatible bedrock-mantle endpoint

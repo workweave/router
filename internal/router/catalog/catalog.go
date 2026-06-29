@@ -362,11 +362,15 @@ var Models = []Model{
 	// window. The 131_072 carried over from V3.2 was filtering these out of any
 	// request over ~128K tokens (see excludeContextOverflowModels in proxy/service.go).
 	{ID: "deepseek/deepseek-v4-flash", Tier: TierLow, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, AgenticUse: AgenticLow, Providers: []ProviderBinding{
+		{Provider: providers.ProviderMakora, UpstreamID: "deepseek-ai/DeepSeek-V4-Flash",
+			Price: Pricing{InputUSDPer1M: 0.1134, OutputUSDPer1M: 0.2791, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "deepseek-ai/DeepSeek-V4-Flash",
 			Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "deepseek/deepseek-v4-pro", Tier: TierHigh, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+		{Provider: providers.ProviderMakora, UpstreamID: "deepseek-ai/DeepSeek-V4-Pro",
+			Price: Pricing{InputUSDPer1M: 1.3180, OutputUSDPer1M: 2.6361, CacheReadMultiplier: 0.10}},
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/deepseek-v4-pro",
 			Price: Pricing{InputUSDPer1M: 1.740, OutputUSDPer1M: 3.480, CacheReadMultiplier: 0.0862}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.435, OutputUSDPer1M: 0.870, CacheReadMultiplier: 0.10}},
@@ -413,6 +417,8 @@ var Models = []Model{
 	// family. TierLow despite the MoE size because the active parameter
 	// budget + AA's Coding Index put it below v4-flash.
 	{ID: "qwen/qwen3.6-35b-a3b", Tier: TierLow, ContextWindow: 262_144, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+		{Provider: providers.ProviderMakora, UpstreamID: "unsloth/Qwen3.6-35B-A3B-NVFP4",
+			Price: Pricing{InputUSDPer1M: 0.1720, OutputUSDPer1M: 1.2002, CacheReadMultiplier: 0.75}},
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "Qwen/Qwen3.6-35B-A3B",
 			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 0.950}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.000, CacheReadMultiplier: 0.10}},
@@ -439,7 +445,13 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
 	}},
+	// Fireworks is primary for the GLM-5 family: DeepInfra's FP8 GLM serving is
+	// an order of magnitude slower (AA clocks GLM-5 at ~33 t/s with a ~90s TTFT
+	// vs Fireworks' ~180 t/s), enough to make it the dominant timeout source.
+	// DeepInfra/OpenRouter are kept as ordered fallbacks.
 	{ID: "z-ai/glm-5", Tier: TierHigh, ContextWindow: 202_752, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/glm-5",
+			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.200, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5",
 			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 2.080}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 1.920, CacheReadMultiplier: 0.10}},
@@ -447,7 +459,10 @@ var Models = []Model{
 	// GLM-5.1 ships the streaming tool-call fix that GLM-5 lacks (tool_stream=true
 	// per Z.AI docs). Wired up for /force-model testing and v0.56 routing; the
 	// emit_openai layer injects tool_stream + disables thinking for this slug.
+	// Fireworks primary for the same speed reason as GLM-5 (cached input $0.26).
 	{ID: "z-ai/glm-5.1", Tier: TierHigh, ContextWindow: 202_752, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/glm-5p1",
+			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400, CacheReadMultiplier: 0.26 / 1.40}},
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5.1",
 			Price: Pricing{InputUSDPer1M: 1.050, OutputUSDPer1M: 3.500}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.980, OutputUSDPer1M: 3.080, CacheReadMultiplier: 0.18 / 0.98}},
