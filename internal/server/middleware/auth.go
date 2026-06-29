@@ -139,6 +139,9 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 					Threshold: installation.UsageBypassThreshold,
 				})
 			}
+			if installation.SubscriptionRoutingDisabled {
+				ctx = context.WithValue(ctx, proxy.InstallationSubscriptionRoutingDisabledContextKey{}, true)
+			}
 		}
 		if externalKeys != nil && !byokDisabled {
 			ctx = context.WithValue(ctx, proxy.ExternalAPIKeysContextKey{}, externalKeys)

@@ -273,6 +273,13 @@ type InstallationRoutingKnobsContextKey struct{}
 // UsageBypassConfig. Absent when the installation hasn't enabled the gate.
 type InstallationUsageBypassContextKey struct{}
 
+// InstallationSubscriptionRoutingDisabledContextKey is the context key for the
+// authed installation's "disable subscription-aware routing" toggle. Carried as
+// bool; absent (== false) when the installation hasn't disabled it. When set,
+// subsidyFactors returns nil so the scorer adds no subscription bonus and
+// routing decides on merits. See subscriptionRoutingDisabledForRequest.
+type InstallationSubscriptionRoutingDisabledContextKey struct{}
+
 // UsageBypassConfig is the per-installation subscription usage-bypass setting,
 // stashed on ctx by the auth middleware. Threshold is nil when the toggle is on
 // but no value has been chosen yet; the request path falls back to
@@ -414,6 +421,14 @@ func installationExcludedModelsFromContext(ctx context.Context) []string {
 	}
 	out, _ := v.([]string)
 	return out
+}
+
+// subscriptionRoutingDisabledForRequest reports whether the authed installation
+// has turned off subscription-aware routing. When true, the subscription
+// subsidy bonus is suppressed for this request so routing decides on merits.
+func subscriptionRoutingDisabledForRequest(ctx context.Context) bool {
+	disabled, _ := ctx.Value(InstallationSubscriptionRoutingDisabledContextKey{}).(bool)
+	return disabled
 }
 
 // routingKnobsForRequest resolves the routing knobs for a request. The

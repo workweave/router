@@ -292,6 +292,19 @@ func (s *Service) SetInstallationRoutingPreference(ctx context.Context, external
 	return nil
 }
 
+// SetInstallationSubscriptionRoutingDisabled toggles subscription-aware routing
+// for the installation. When true, the scorer's subscription subsidy bonus is
+// suppressed so routing decides on merits and non-Claude models compete fairly.
+// Invalidates the API-key cache so the change takes effect on the next request
+// rather than after the cache TTL.
+func (s *Service) SetInstallationSubscriptionRoutingDisabled(ctx context.Context, externalID, installationID string, disabled bool) error {
+	if err := s.installations.UpdateSubscriptionRoutingDisabled(ctx, externalID, installationID, disabled); err != nil {
+		return err
+	}
+	s.invalidateInstallation(installationID)
+	return nil
+}
+
 // VerifyAPIKey authenticates a raw bearer token against the API key cache then Postgres.
 // Returns ErrInvalidPrefix/ErrInvalidToken for unauthenticated cases.
 // Returned ExternalAPIKey slice has Plaintext populated; nil when none exist.

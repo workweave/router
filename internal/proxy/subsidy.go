@@ -120,11 +120,22 @@ func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) co
 // would never be observed, so the discount would never engage — a chicken-and-
 // egg that pins routing to whatever wins at full price. The optimistic factor
 // self-corrects to the real headroom once the first subscription-served response
-// records it (including a 429's near-cap reading). Returns nil only when the
-// feature is off or no subscription is present. Keyed identically to
-// withUsageObserver so record and read agree across all three harnesses.
+// records it (including a 429's near-cap reading). Returns nil when the feature
+// is off, no subscription is present, or the installation has disabled
+// subscription-aware routing. Keyed identically to withUsageObserver so record
+// and read agree across all three harnesses.
 func (s *Service) subsidyFactors(ctx context.Context, headers http.Header) map[string]float64 {
 	if s.usageObserver == nil || !s.subsidyEnabled {
+		return nil
+	}
+	// Per-installation opt-out: when the org has disabled subscription-aware
+	// routing, add no subscription bonus so the scorer decides on merits and
+	// non-Claude models (GLM, Kimi, DeepSeek, ...) compete fairly. The
+	// subscription credential is still forwarded downstream for turns that route
+	// to Claude on their own merits, so this removes only the routing bias, not
+	// the prepaid billing path. Keeping the usage observer installed (it is wired
+	// separately in withUsageObserver) preserves the usage-bypass gate.
+	if subscriptionRoutingDisabledForRequest(ctx) {
 		return nil
 	}
 	codexTok, anthroTok := s.presentSubscriptionTokens(ctx, headers)

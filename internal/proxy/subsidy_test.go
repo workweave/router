@@ -100,3 +100,26 @@ func TestSubsidyFactors_OptimisticColdStart(t *testing.T) {
 	require.NotNil(t, factors, "a present sub must produce factors even with no observed headroom")
 	assert.InDelta(t, 0.05, factors["claude-opus-4-8"], 1e-9, "cold start = optimistic epsilon (max bias)")
 }
+
+// Per-installation opt-out: when the org has disabled subscription-aware
+// routing, a present subscription must produce NO subsidy factors so the scorer
+// adds no Claude bonus and non-Claude models compete on merits. Mirrors the
+// cold-start case but with the disable flag stashed on ctx by the auth
+// middleware — the discount is otherwise non-nil there, so this asserts the
+// flag is what suppresses it.
+func TestSubsidyFactors_DisabledForInstallation(t *testing.T) {
+	s := (&Service{}).WithSubscriptionAwareRouting(
+		usage.NewObserver([]byte("salt"), time.Minute, time.Now), 0.05, 2.0)
+
+	h := http.Header{}
+	h.Set("Authorization", "Bearer sk-ant-oat01-cold")
+
+	// Sanity: without the flag the same request DOES subsidize (guards against a
+	// vacuous pass if the sub stopped being detected).
+	require.NotNil(t, s.subsidyFactors(context.Background(), h),
+		"baseline: a present sub subsidizes when routing is not disabled")
+
+	ctx := context.WithValue(context.Background(), InstallationSubscriptionRoutingDisabledContextKey{}, true)
+	assert.Nil(t, s.subsidyFactors(ctx, h),
+		"subscription routing disabled → no subsidy bonus, route on merits")
+}

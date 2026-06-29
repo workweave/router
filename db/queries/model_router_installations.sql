@@ -79,3 +79,16 @@ SET usage_bypass_enabled = @usage_bypass_enabled::boolean,
 WHERE id = @id::uuid
   AND external_id = @external_id::varchar
   AND deleted_at IS NULL;
+
+-- Toggles subscription-aware routing for the installation, scoped to an
+-- external_id to prevent cross-tenant updates. When true, the scorer's
+-- subscription subsidy bonus is suppressed so routing decides on merits and
+-- non-Claude models compete fairly; the subscription credential is still
+-- forwarded for turns that route to Claude on their own merits.
+-- name: UpdateModelRouterInstallationSubscriptionRoutingDisabled :exec
+UPDATE router.model_router_installations
+SET subscription_routing_disabled = @subscription_routing_disabled::boolean,
+    updated_at = NOW()
+WHERE id = @id::uuid
+  AND external_id = @external_id::varchar
+  AND deleted_at IS NULL;

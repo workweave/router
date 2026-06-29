@@ -149,6 +149,19 @@ func (r *installationRepo) UpdateUsageBypass(ctx context.Context, externalID, id
 	})
 }
 
+func (r *installationRepo) UpdateSubscriptionRoutingDisabled(ctx context.Context, externalID, id string, disabled bool) error {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return err
+	}
+	q := sqlc.New(r.tx)
+	return q.UpdateModelRouterInstallationSubscriptionRoutingDisabled(ctx, sqlc.UpdateModelRouterInstallationSubscriptionRoutingDisabledParams{
+		ID:                          parsed,
+		ExternalID:                  externalID,
+		SubscriptionRoutingDisabled: disabled,
+	})
+}
+
 type apiKeyRepo struct {
 	tx sqlc.DBTX
 }

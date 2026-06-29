@@ -44,6 +44,15 @@ type Installation struct {
 	// gate disengages and normal routing takes over. nil means "use the
 	// deployment default" so the toggle can be on before a value is chosen.
 	UsageBypassThreshold *float64
+	// SubscriptionRoutingDisabled turns off subscription-AWARE ROUTING for this
+	// installation. When true, the scorer's subscription subsidy bonus is
+	// suppressed, so routing decides purely on quality/cost/speed merits and
+	// non-Claude models compete fairly instead of always losing to the
+	// subsidized Claude family. It removes only the routing BIAS: a turn that
+	// still routes to Claude on its own merits is dispatched on the caller's
+	// subscription token exactly as before, so the prepaid billing path is
+	// unchanged. Defaults false -- preserves today's behavior.
+	SubscriptionRoutingDisabled bool
 }
 
 type CreateInstallationParams struct {
@@ -71,4 +80,8 @@ type InstallationRepository interface {
 	// the gate; threshold is the [0, 1] utilization at/above which it disengages
 	// (nil = use the deployment default).
 	UpdateUsageBypass(ctx context.Context, externalID, id string, enabled bool, threshold *float64) error
+	// UpdateSubscriptionRoutingDisabled toggles subscription-aware routing for
+	// the installation. When true, the scorer's subscription subsidy bonus is
+	// suppressed so routing decides on merits.
+	UpdateSubscriptionRoutingDisabled(ctx context.Context, externalID, id string, disabled bool) error
 }

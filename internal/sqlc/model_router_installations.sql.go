@@ -22,7 +22,7 @@ VALUES (
     $2::varchar,
     $3
 )
-RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models
+RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models, subscription_routing_disabled
 `
 
 type CreateModelRouterInstallationParams struct {
@@ -43,7 +43,7 @@ type CreateModelRouterInstallationParams struct {
 //	    $2::varchar,
 //	    $3
 //	)
-//	RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models
+//	RETURNING id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models, subscription_routing_disabled
 func (q *Queries) CreateModelRouterInstallation(ctx context.Context, arg CreateModelRouterInstallationParams) (RouterModelRouterInstallation, error) {
 	row := q.db.QueryRow(ctx, createModelRouterInstallation, arg.ExternalID, arg.Name, arg.CreatedBy)
 	var i RouterModelRouterInstallation
@@ -61,12 +61,13 @@ func (q *Queries) CreateModelRouterInstallation(ctx context.Context, arg CreateM
 		&i.UsageBypassEnabled,
 		&i.UsageBypassThreshold,
 		&i.PreferredModels,
+		&i.SubscriptionRoutingDisabled,
 	)
 	return i, err
 }
 
 const getModelRouterInstallation = `-- name: GetModelRouterInstallation :one
-SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models
+SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models, subscription_routing_disabled
 FROM router.model_router_installations
 WHERE id = $1::uuid
   AND external_id = $2::varchar
@@ -80,7 +81,7 @@ type GetModelRouterInstallationParams struct {
 
 // Gets an installation by id, scoped to an external_id to prevent cross-tenant access.
 //
-//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models
+//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models, subscription_routing_disabled
 //	FROM router.model_router_installations
 //	WHERE id = $1::uuid
 //	  AND external_id = $2::varchar
@@ -102,12 +103,13 @@ func (q *Queries) GetModelRouterInstallation(ctx context.Context, arg GetModelRo
 		&i.UsageBypassEnabled,
 		&i.UsageBypassThreshold,
 		&i.PreferredModels,
+		&i.SubscriptionRoutingDisabled,
 	)
 	return i, err
 }
 
 const listModelRouterInstallationsForExternalID = `-- name: ListModelRouterInstallationsForExternalID :many
-SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models
+SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models, subscription_routing_disabled
 FROM router.model_router_installations
 WHERE external_id = $1::varchar
   AND deleted_at IS NULL
@@ -116,7 +118,7 @@ ORDER BY created_at DESC
 
 // ListModelRouterInstallationsForExternalID
 //
-//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models
+//	SELECT id, external_id, name, created_at, updated_at, deleted_at, created_by, excluded_models, excluded_providers, routing_quality_weight, usage_bypass_enabled, usage_bypass_threshold, preferred_models, subscription_routing_disabled
 //	FROM router.model_router_installations
 //	WHERE external_id = $1::varchar
 //	  AND deleted_at IS NULL
@@ -144,6 +146,7 @@ func (q *Queries) ListModelRouterInstallationsForExternalID(ctx context.Context,
 			&i.UsageBypassEnabled,
 			&i.UsageBypassThreshold,
 			&i.PreferredModels,
+			&i.SubscriptionRoutingDisabled,
 		); err != nil {
 			return nil, err
 		}
@@ -267,6 +270,38 @@ type UpdateModelRouterInstallationRoutingPreferenceParams struct {
 //	  AND deleted_at IS NULL
 func (q *Queries) UpdateModelRouterInstallationRoutingPreference(ctx context.Context, arg UpdateModelRouterInstallationRoutingPreferenceParams) error {
 	_, err := q.db.Exec(ctx, updateModelRouterInstallationRoutingPreference, arg.RoutingQualityWeight, arg.ID, arg.ExternalID)
+	return err
+}
+
+const updateModelRouterInstallationSubscriptionRoutingDisabled = `-- name: UpdateModelRouterInstallationSubscriptionRoutingDisabled :exec
+UPDATE router.model_router_installations
+SET subscription_routing_disabled = $1::boolean,
+    updated_at = NOW()
+WHERE id = $2::uuid
+  AND external_id = $3::varchar
+  AND deleted_at IS NULL
+`
+
+type UpdateModelRouterInstallationSubscriptionRoutingDisabledParams struct {
+	SubscriptionRoutingDisabled bool
+	ID                          uuid.UUID
+	ExternalID                  string
+}
+
+// Toggles subscription-aware routing for the installation, scoped to an
+// external_id to prevent cross-tenant updates. When true, the scorer's
+// subscription subsidy bonus is suppressed so routing decides on merits and
+// non-Claude models compete fairly; the subscription credential is still
+// forwarded for turns that route to Claude on their own merits.
+//
+//	UPDATE router.model_router_installations
+//	SET subscription_routing_disabled = $1::boolean,
+//	    updated_at = NOW()
+//	WHERE id = $2::uuid
+//	  AND external_id = $3::varchar
+//	  AND deleted_at IS NULL
+func (q *Queries) UpdateModelRouterInstallationSubscriptionRoutingDisabled(ctx context.Context, arg UpdateModelRouterInstallationSubscriptionRoutingDisabledParams) error {
+	_, err := q.db.Exec(ctx, updateModelRouterInstallationSubscriptionRoutingDisabled, arg.SubscriptionRoutingDisabled, arg.ID, arg.ExternalID)
 	return err
 }
 

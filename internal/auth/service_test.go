@@ -94,13 +94,14 @@ func (f *fakeExternalAPIKeyRepo) MarkUsed(ctx context.Context, id string) error 
 }
 
 type fakeInstallationRepository struct {
-	excludedModelsByID            map[string][]string
-	excludedModelsExternalByID    map[string]string
-	excludedProvidersByID         map[string][]string
-	excludedProvidersExternalByID map[string]string
-	routingQualityByID            map[string]*float64
-	usageBypassEnabledByID        map[string]bool
-	usageBypassThresholdByID      map[string]*float64
+	excludedModelsByID              map[string][]string
+	excludedModelsExternalByID      map[string]string
+	excludedProvidersByID           map[string][]string
+	excludedProvidersExternalByID   map[string]string
+	routingQualityByID              map[string]*float64
+	usageBypassEnabledByID          map[string]bool
+	usageBypassThresholdByID        map[string]*float64
+	subscriptionRoutingDisabledByID map[string]bool
 }
 
 func (fakeInstallationRepository) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
@@ -142,6 +143,13 @@ func (f *fakeInstallationRepository) UpdateRoutingPreference(ctx context.Context
 		f.routingQualityByID = map[string]*float64{}
 	}
 	f.routingQualityByID[id] = qualityWeight
+	return nil
+}
+func (f *fakeInstallationRepository) UpdateSubscriptionRoutingDisabled(ctx context.Context, externalID, id string, disabled bool) error {
+	if f.subscriptionRoutingDisabledByID == nil {
+		f.subscriptionRoutingDisabledByID = map[string]bool{}
+	}
+	f.subscriptionRoutingDisabledByID[id] = disabled
 	return nil
 }
 func (f *fakeInstallationRepository) UpdateUsageBypass(ctx context.Context, externalID, id string, enabled bool, threshold *float64) error {

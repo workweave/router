@@ -24,19 +24,20 @@ func toAuthInstallation(row sqlc.RouterModelRouterInstallation) *auth.Installati
 		preferred = []string{}
 	}
 	return &auth.Installation{
-		ID:                   row.ID.String(),
-		ExternalID:           row.ExternalID,
-		Name:                 row.Name,
-		CreatedAt:            timestampOrZero(row.CreatedAt),
-		UpdatedAt:            timestampOrZero(row.UpdatedAt),
-		DeletedAt:            timestampPtr(row.DeletedAt),
-		CreatedBy:            row.CreatedBy,
-		ExcludedModels:       excluded,
-		ExcludedProviders:    excludedProviders,
-		PreferredModels:      preferred,
-		RoutingQualityWeight: row.RoutingQualityWeight,
-		UsageBypassEnabled:   row.UsageBypassEnabled,
-		UsageBypassThreshold: row.UsageBypassThreshold,
+		ID:                          row.ID.String(),
+		ExternalID:                  row.ExternalID,
+		Name:                        row.Name,
+		CreatedAt:                   timestampOrZero(row.CreatedAt),
+		UpdatedAt:                   timestampOrZero(row.UpdatedAt),
+		DeletedAt:                   timestampPtr(row.DeletedAt),
+		CreatedBy:                   row.CreatedBy,
+		ExcludedModels:              excluded,
+		ExcludedProviders:           excludedProviders,
+		PreferredModels:             preferred,
+		RoutingQualityWeight:        row.RoutingQualityWeight,
+		UsageBypassEnabled:          row.UsageBypassEnabled,
+		UsageBypassThreshold:        row.UsageBypassThreshold,
+		SubscriptionRoutingDisabled: row.SubscriptionRoutingDisabled,
 	}
 }
 
