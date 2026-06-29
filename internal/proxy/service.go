@@ -1611,7 +1611,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// billing debit — the turn is paid for by the customer's plan.
 	if routeRes.UsageBypass {
 		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
-		if !errors.Is(err, errBypassRetryable) && !providers.IsRetryable(err) {
+		if !errors.Is(err, errBypassRetryable) {
 			return err
 		}
 		// Bypass got a pre-commit retryable error (e.g., Anthropic 429 weekly-limit

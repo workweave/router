@@ -124,11 +124,12 @@ func TestBypass_NilError_ReturnsNil(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestBypass_TransportError_NotFlushed: a non-UpstreamErrorResponse transport
-// error is not an *UpstreamErrorResponse, so the errors.As branches both miss
-// and the raw error is returned. The caller will see a non-errBypassRetryable
-// error and propagate it (matching pre-change behavior for unexpected errors).
-func TestBypass_TransportError_NotTreatedAsRetryable(t *testing.T) {
+// TestBypass_TransportError_ReroutesViaScorer: a raw transport error (connection
+// reset, TLS timeout, etc.) from the upstream proxy call is classified by
+// providers.IsRetryable as retryable, so bypassToAnthropic must return
+// errBypassRetryable to let the caller fall through to the routed dispatch path.
+// No bytes are written to w, so the routed path gets a pristine writer.
+func TestBypass_TransportError_ReroutesViaScorer(t *testing.T) {
 	transportErr := errors.New("connection reset")
 	upstream := &bypassFakeProvider{proxyErr: transportErr}
 	svc := newBypassService(upstream)
@@ -140,6 +141,29 @@ func TestBypass_TransportError_NotTreatedAsRetryable(t *testing.T) {
 
 	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
 
-	require.ErrorIs(t, err, transportErr, "a raw transport error must propagate unchanged")
-	assert.NotErrorIs(t, err, errBypassRetryable, "transport errors are not the bypass-retryable sentinel")
+	assert.ErrorIs(t, err, errBypassRetryable, "a transport error must signal fall-through to routed dispatch")
+	assert.Equal(t, 1, upstream.dispatches, "the bypass attempt must hit the upstream exactly once")
+	assert.Equal(t, http.StatusOK, rec.Code, "no status header must be written — the routed path needs a pristine writer")
+	assert.Empty(t, rec.Body.Bytes(), "no body bytes must be flushed on a transport-error bypass failure")
+}
+
+// TestBypass_LocalPrepError_PropagatesToClient: a local preparation error from
+// bypassToAnthropic (provider not configured, emit-body failure) must NOT
+// trigger reroute via the scorer. The client must see the real failure. This
+// guards against regressions where providers.IsRetryable treats build errors as
+// retryable and silently reroutes.
+func TestBypass_LocalPrepError_PropagatesToClient(t *testing.T) {
+	// Wire a service WITHOUT the Anthropic provider to trigger the
+	// provider-not-configured prep error path.
+	svc := &Service{providers: map[string]providers.Client{}}
+
+	env := bypassAnthropicEnvelope(t)
+	feats := env.RoutingFeatures(false)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+
+	require.Error(t, err, "provider-not-configured must surface as a real error")
+	assert.NotErrorIs(t, err, errBypassRetryable, "local prep errors must not trigger reroute — the client must see them")
 }

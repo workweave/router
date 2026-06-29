@@ -207,12 +207,15 @@ func (s *Service) bypassToAnthropic(
 	proxyErr := p.Proxy(ctx, decision, prep, w, r)
 	// The Anthropic adapter returns a buffered *UpstreamErrorResponse on 4xx/5xx
 	// without writing to w (the routed path flushes it via dispatchWithFallback).
-	// When the error is retryable (429 weekly-limit) AND no bytes have been
+	// When the proxy error is retryable (429 weekly-limit, or a raw transport
+	// error like a connection reset / TLS timeout) AND no bytes have been
 	// committed to w, return errBypassRetryable so the caller falls through to
-	// the normal routed dispatch. Non-retryable errors (400/401/403) still
-	// flush — those won't be fixed by a different upstream.
+	// the normal routed dispatch. Non-retryable *UpstreamErrorResponse values
+	// (400/401/403) still flush — those won't be fixed by a different upstream.
+	// Local prep errors (provider-not-configured, emit-body) are returned
+	// directly so the client sees the real failure instead of a silent reroute.
 	var upstreamErr *providers.UpstreamErrorResponse
-	if errors.As(proxyErr, &upstreamErr) && providers.IsRetryable(proxyErr) {
+	if providers.IsRetryable(proxyErr) {
 		return errBypassRetryable
 	}
 	if errors.As(proxyErr, &upstreamErr) {
