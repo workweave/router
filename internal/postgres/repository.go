@@ -99,11 +99,18 @@ func (r *installationRepo) UpdateExcludedModels(ctx context.Context, externalID,
 		models = []string{}
 	}
 	q := sqlc.New(r.tx)
-	return q.UpdateModelRouterInstallationExcludedModels(ctx, sqlc.UpdateModelRouterInstallationExcludedModelsParams{
+	rows, err := q.UpdateModelRouterInstallationExcludedModels(ctx, sqlc.UpdateModelRouterInstallationExcludedModelsParams{
 		ID:             parsed,
 		ExternalID:     externalID,
 		ExcludedModels: models,
 	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return auth.ErrInstallationNotFound
+	}
+	return nil
 }
 
 func (r *installationRepo) UpdateExcludedProviders(ctx context.Context, externalID, id string, providerNames []string) error {
@@ -115,11 +122,18 @@ func (r *installationRepo) UpdateExcludedProviders(ctx context.Context, external
 		providerNames = []string{}
 	}
 	q := sqlc.New(r.tx)
-	return q.UpdateModelRouterInstallationExcludedProviders(ctx, sqlc.UpdateModelRouterInstallationExcludedProvidersParams{
+	rows, err := q.UpdateModelRouterInstallationExcludedProviders(ctx, sqlc.UpdateModelRouterInstallationExcludedProvidersParams{
 		ID:                parsed,
 		ExternalID:        externalID,
 		ExcludedProviders: providerNames,
 	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return auth.ErrInstallationNotFound
+	}
+	return nil
 }
 
 func (r *installationRepo) UpdateRoutingPreference(ctx context.Context, externalID, id string, qualityWeight *float64) error {
@@ -128,11 +142,18 @@ func (r *installationRepo) UpdateRoutingPreference(ctx context.Context, external
 		return err
 	}
 	q := sqlc.New(r.tx)
-	return q.UpdateModelRouterInstallationRoutingPreference(ctx, sqlc.UpdateModelRouterInstallationRoutingPreferenceParams{
+	rows, err := q.UpdateModelRouterInstallationRoutingPreference(ctx, sqlc.UpdateModelRouterInstallationRoutingPreferenceParams{
 		ID:                   parsed,
 		ExternalID:           externalID,
 		RoutingQualityWeight: qualityWeight,
 	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return auth.ErrInstallationNotFound
+	}
+	return nil
 }
 
 func (r *installationRepo) UpdateUsageBypass(ctx context.Context, externalID, id string, enabled bool, threshold *float64) error {
@@ -141,12 +162,19 @@ func (r *installationRepo) UpdateUsageBypass(ctx context.Context, externalID, id
 		return err
 	}
 	q := sqlc.New(r.tx)
-	return q.UpdateModelRouterInstallationUsageBypass(ctx, sqlc.UpdateModelRouterInstallationUsageBypassParams{
+	rows, err := q.UpdateModelRouterInstallationUsageBypass(ctx, sqlc.UpdateModelRouterInstallationUsageBypassParams{
 		ID:                   parsed,
 		ExternalID:           externalID,
 		UsageBypassEnabled:   enabled,
 		UsageBypassThreshold: threshold,
 	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return auth.ErrInstallationNotFound
+	}
+	return nil
 }
 
 func (r *installationRepo) UpdateSubscriptionRoutingDisabled(ctx context.Context, externalID, id string, disabled bool) error {
@@ -155,11 +183,18 @@ func (r *installationRepo) UpdateSubscriptionRoutingDisabled(ctx context.Context
 		return err
 	}
 	q := sqlc.New(r.tx)
-	return q.UpdateModelRouterInstallationSubscriptionRoutingDisabled(ctx, sqlc.UpdateModelRouterInstallationSubscriptionRoutingDisabledParams{
+	rows, err := q.UpdateModelRouterInstallationSubscriptionRoutingDisabled(ctx, sqlc.UpdateModelRouterInstallationSubscriptionRoutingDisabledParams{
 		ID:                          parsed,
 		ExternalID:                  externalID,
 		SubscriptionRoutingDisabled: disabled,
 	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return auth.ErrInstallationNotFound
+	}
+	return nil
 }
 
 type apiKeyRepo struct {

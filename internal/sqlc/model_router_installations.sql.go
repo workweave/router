@@ -183,7 +183,7 @@ func (q *Queries) SoftDeleteModelRouterInstallation(ctx context.Context, arg Sof
 	return err
 }
 
-const updateModelRouterInstallationExcludedModels = `-- name: UpdateModelRouterInstallationExcludedModels :exec
+const updateModelRouterInstallationExcludedModels = `-- name: UpdateModelRouterInstallationExcludedModels :execrows
 UPDATE router.model_router_installations
 SET excluded_models = $1::text[],
     updated_at = NOW()
@@ -208,12 +208,15 @@ type UpdateModelRouterInstallationExcludedModelsParams struct {
 //	WHERE id = $2::uuid
 //	  AND external_id = $3::varchar
 //	  AND deleted_at IS NULL
-func (q *Queries) UpdateModelRouterInstallationExcludedModels(ctx context.Context, arg UpdateModelRouterInstallationExcludedModelsParams) error {
-	_, err := q.db.Exec(ctx, updateModelRouterInstallationExcludedModels, arg.ExcludedModels, arg.ID, arg.ExternalID)
-	return err
+func (q *Queries) UpdateModelRouterInstallationExcludedModels(ctx context.Context, arg UpdateModelRouterInstallationExcludedModelsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateModelRouterInstallationExcludedModels, arg.ExcludedModels, arg.ID, arg.ExternalID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const updateModelRouterInstallationExcludedProviders = `-- name: UpdateModelRouterInstallationExcludedProviders :exec
+const updateModelRouterInstallationExcludedProviders = `-- name: UpdateModelRouterInstallationExcludedProviders :execrows
 UPDATE router.model_router_installations
 SET excluded_providers = $1::text[],
     updated_at = NOW()
@@ -238,12 +241,15 @@ type UpdateModelRouterInstallationExcludedProvidersParams struct {
 //	WHERE id = $2::uuid
 //	  AND external_id = $3::varchar
 //	  AND deleted_at IS NULL
-func (q *Queries) UpdateModelRouterInstallationExcludedProviders(ctx context.Context, arg UpdateModelRouterInstallationExcludedProvidersParams) error {
-	_, err := q.db.Exec(ctx, updateModelRouterInstallationExcludedProviders, arg.ExcludedProviders, arg.ID, arg.ExternalID)
-	return err
+func (q *Queries) UpdateModelRouterInstallationExcludedProviders(ctx context.Context, arg UpdateModelRouterInstallationExcludedProvidersParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateModelRouterInstallationExcludedProviders, arg.ExcludedProviders, arg.ID, arg.ExternalID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const updateModelRouterInstallationRoutingPreference = `-- name: UpdateModelRouterInstallationRoutingPreference :exec
+const updateModelRouterInstallationRoutingPreference = `-- name: UpdateModelRouterInstallationRoutingPreference :execrows
 UPDATE router.model_router_installations
 SET routing_quality_weight = $1,
     updated_at = NOW()
@@ -268,12 +274,15 @@ type UpdateModelRouterInstallationRoutingPreferenceParams struct {
 //	WHERE id = $2::uuid
 //	  AND external_id = $3::varchar
 //	  AND deleted_at IS NULL
-func (q *Queries) UpdateModelRouterInstallationRoutingPreference(ctx context.Context, arg UpdateModelRouterInstallationRoutingPreferenceParams) error {
-	_, err := q.db.Exec(ctx, updateModelRouterInstallationRoutingPreference, arg.RoutingQualityWeight, arg.ID, arg.ExternalID)
-	return err
+func (q *Queries) UpdateModelRouterInstallationRoutingPreference(ctx context.Context, arg UpdateModelRouterInstallationRoutingPreferenceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateModelRouterInstallationRoutingPreference, arg.RoutingQualityWeight, arg.ID, arg.ExternalID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const updateModelRouterInstallationSubscriptionRoutingDisabled = `-- name: UpdateModelRouterInstallationSubscriptionRoutingDisabled :exec
+const updateModelRouterInstallationSubscriptionRoutingDisabled = `-- name: UpdateModelRouterInstallationSubscriptionRoutingDisabled :execrows
 UPDATE router.model_router_installations
 SET subscription_routing_disabled = $1::boolean,
     updated_at = NOW()
@@ -300,12 +309,15 @@ type UpdateModelRouterInstallationSubscriptionRoutingDisabledParams struct {
 //	WHERE id = $2::uuid
 //	  AND external_id = $3::varchar
 //	  AND deleted_at IS NULL
-func (q *Queries) UpdateModelRouterInstallationSubscriptionRoutingDisabled(ctx context.Context, arg UpdateModelRouterInstallationSubscriptionRoutingDisabledParams) error {
-	_, err := q.db.Exec(ctx, updateModelRouterInstallationSubscriptionRoutingDisabled, arg.SubscriptionRoutingDisabled, arg.ID, arg.ExternalID)
-	return err
+func (q *Queries) UpdateModelRouterInstallationSubscriptionRoutingDisabled(ctx context.Context, arg UpdateModelRouterInstallationSubscriptionRoutingDisabledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateModelRouterInstallationSubscriptionRoutingDisabled, arg.SubscriptionRoutingDisabled, arg.ID, arg.ExternalID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const updateModelRouterInstallationUsageBypass = `-- name: UpdateModelRouterInstallationUsageBypass :exec
+const updateModelRouterInstallationUsageBypass = `-- name: UpdateModelRouterInstallationUsageBypass :execrows
 UPDATE router.model_router_installations
 SET usage_bypass_enabled = $1::boolean,
     usage_bypass_threshold = $2,
@@ -334,12 +346,15 @@ type UpdateModelRouterInstallationUsageBypassParams struct {
 //	WHERE id = $3::uuid
 //	  AND external_id = $4::varchar
 //	  AND deleted_at IS NULL
-func (q *Queries) UpdateModelRouterInstallationUsageBypass(ctx context.Context, arg UpdateModelRouterInstallationUsageBypassParams) error {
-	_, err := q.db.Exec(ctx, updateModelRouterInstallationUsageBypass,
+func (q *Queries) UpdateModelRouterInstallationUsageBypass(ctx context.Context, arg UpdateModelRouterInstallationUsageBypassParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateModelRouterInstallationUsageBypass,
 		arg.UsageBypassEnabled,
 		arg.UsageBypassThreshold,
 		arg.ID,
 		arg.ExternalID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

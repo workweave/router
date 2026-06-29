@@ -37,7 +37,7 @@ WHERE id = @id::uuid
 -- Replaces the per-installation model exclusion list, scoped to an external_id
 -- to prevent cross-tenant updates. Empty array means "no exclusion". Bumps
 -- updated_at so dashboards see the change.
--- name: UpdateModelRouterInstallationExcludedModels :exec
+-- name: UpdateModelRouterInstallationExcludedModels :execrows
 UPDATE router.model_router_installations
 SET excluded_models = @excluded_models::text[],
     updated_at = NOW()
@@ -48,7 +48,7 @@ WHERE id = @id::uuid
 -- Replaces the per-installation provider exclusion list, scoped to an
 -- external_id to prevent cross-tenant updates. Empty array means "no
 -- exclusion". Bumps updated_at so dashboards see the change.
--- name: UpdateModelRouterInstallationExcludedProviders :exec
+-- name: UpdateModelRouterInstallationExcludedProviders :execrows
 UPDATE router.model_router_installations
 SET excluded_providers = @excluded_providers::text[],
     updated_at = NOW()
@@ -59,7 +59,7 @@ WHERE id = @id::uuid
 -- Sets the routing preference quality weight (a normalized fraction in [0, 1]),
 -- scoped to an external_id to prevent cross-tenant updates. NULL clears the
 -- preference so the scorer reverts to its tuned defaults.
--- name: UpdateModelRouterInstallationRoutingPreference :exec
+-- name: UpdateModelRouterInstallationRoutingPreference :execrows
 UPDATE router.model_router_installations
 SET routing_quality_weight = sqlc.narg('routing_quality_weight'),
     updated_at = NOW()
@@ -71,7 +71,7 @@ WHERE id = @id::uuid
 -- cross-tenant updates. enabled toggles the gate; threshold is the [0, 1]
 -- utilization at/above which the gate disengages and normal routing takes over.
 -- A NULL threshold means "use the deployment default" at request time.
--- name: UpdateModelRouterInstallationUsageBypass :exec
+-- name: UpdateModelRouterInstallationUsageBypass :execrows
 UPDATE router.model_router_installations
 SET usage_bypass_enabled = @usage_bypass_enabled::boolean,
     usage_bypass_threshold = sqlc.narg('usage_bypass_threshold'),
@@ -85,7 +85,7 @@ WHERE id = @id::uuid
 -- subscription subsidy bonus is suppressed so routing decides on merits and
 -- non-Claude models compete fairly; the subscription credential is still
 -- forwarded for turns that route to Claude on their own merits.
--- name: UpdateModelRouterInstallationSubscriptionRoutingDisabled :exec
+-- name: UpdateModelRouterInstallationSubscriptionRoutingDisabled :execrows
 UPDATE router.model_router_installations
 SET subscription_routing_disabled = @subscription_routing_disabled::boolean,
     updated_at = NOW()

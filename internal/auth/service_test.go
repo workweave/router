@@ -102,6 +102,10 @@ type fakeInstallationRepository struct {
 	usageBypassEnabledByID          map[string]bool
 	usageBypassThresholdByID        map[string]*float64
 	subscriptionRoutingDisabledByID map[string]bool
+	// updateErr, when set, is returned by Update* methods instead of recording —
+	// simulates a zero-row update (stale/soft-deleted/cross-tenant id), which the
+	// real postgres repo surfaces as auth.ErrInstallationNotFound.
+	updateErr error
 }
 
 func (fakeInstallationRepository) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
@@ -139,6 +143,9 @@ func (f *fakeInstallationRepository) UpdateExcludedProviders(ctx context.Context
 	return nil
 }
 func (f *fakeInstallationRepository) UpdateRoutingPreference(ctx context.Context, externalID, id string, qualityWeight *float64) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
 	if f.routingQualityByID == nil {
 		f.routingQualityByID = map[string]*float64{}
 	}
@@ -717,6 +724,23 @@ func TestService_SetInstallationRoutingPreference(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, installRepo.routingQualityByID["inst-1"])
 	})
+}
+
+// A zero-row update (stale / soft-deleted / cross-tenant id) surfaces from the
+// repo as ErrInstallationNotFound. The Service must propagate it AND must not
+// invalidate the cache — otherwise the write looks successful and the next
+// requests would reload an unchanged row, the silent-no-op the rows-affected
+// guard exists to prevent.
+func TestService_SetInstallationRoutingPreference_NotFoundDoesNotInvalidate(t *testing.T) {
+	cache := newRecordingAPIKeyCache()
+	installRepo := &fakeInstallationRepository{updateErr: auth.ErrInstallationNotFound}
+	svc := auth.NewService(installRepo, &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}, nil, nil, cache, nil, frozenClock())
+
+	quality := 0.6
+	err := svc.SetInstallationRoutingPreference(context.Background(), "ext-1", "missing-inst", &quality)
+	require.ErrorIs(t, err, auth.ErrInstallationNotFound)
+	assert.Empty(t, cache.invalidationSnapshot(),
+		"a no-op update must not invalidate the cache — nothing changed to pick up")
 }
 
 type recordingNotifier struct {
