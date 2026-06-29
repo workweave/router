@@ -1,0 +1,20 @@
+# Code owners are automatically requested for review on PRs that touch
+# matching paths. See https://docs.github.com/articles/about-code-owners
+#
+# TODO(maintainers): add co-maintainer handles as the team grows. The
+# load-bearing subsystems below should gain dedicated owners over time so
+# review isn't bottlenecked on one person.
+
+# Default owner for everything.
+*                                   @steventohme
+
+# Routing core + cluster artifacts — highest blast radius, review carefully.
+/internal/router/                   @steventohme
+/internal/proxy/                    @steventohme
+
+# Provider adapters — the long-tail contribution surface.
+/internal/providers/                @steventohme
+
+# CI, automation, and repo governance.
+/.github/                           @steventohme
+/.claude/                           @steventohme

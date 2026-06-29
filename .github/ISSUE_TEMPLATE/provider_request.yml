@@ -1,0 +1,57 @@
+name: 🔌 Provider / model request
+description: Request (or offer to add) a new upstream provider or model.
+labels: ["enhancement", "provider-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Adding a provider or model is one of the most common contributions, and it follows a fixed recipe.
+        **If you plan to open the PR yourself, follow the [`add-provider` skill](https://github.com/workweave/router/blob/main/.claude/skills/add-provider/SKILL.md) to the letter** — it walks through the catalog entry, the env-var wiring, the composition-root registration, and the required tests. PRs that follow it are merged fast; ones that don't get sent back to it.
+
+  - type: checkboxes
+    id: prechecks
+    attributes:
+      label: Before you file
+      options:
+        - label: I checked the [model registry](https://github.com/workweave/router/blob/main/internal/router/cluster) and this provider/model isn't already wired.
+          required: true
+        - label: I read the [`add-provider` skill](https://github.com/workweave/router/blob/main/.claude/skills/add-provider/SKILL.md).
+          required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      placeholder: "e.g. Together, DeepInfra, Cerebras, a self-hosted vLLM endpoint"
+    validations:
+      required: true
+
+  - type: input
+    id: models
+    attributes:
+      label: Model(s)
+      description: Exact model slugs as the provider's API expects them.
+      placeholder: "e.g. deepseek-ai/DeepSeek-V4-Pro"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: api-shape
+    attributes:
+      label: API shape
+      description: Most new upstreams are OpenAI-compatible and need no new adapter package — just an openaicompat base URL.
+      options:
+        - OpenAI-compatible (/v1/chat/completions)
+        - Anthropic Messages
+        - Google Generative Language
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I intend to open the PR myself following the add-provider skill.
+          required: false

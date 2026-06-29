@@ -167,6 +167,18 @@ Settings → Models override above. See [install/README.md](install/README.md#sw
 - 🏗️ [**Architecture**](AGENTS.md): package layout, import contracts,
   recipes for adding endpoints / providers / strategies.
 
+## Contributing
+
+PRs welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first — it covers the
+layering rules, the dev loop, and how we triage and review (an agent takes a
+first pass; a human makes the call). Adding a provider or model is the most
+common contribution and follows a fixed recipe:
+[`.claude/skills/add-provider/SKILL.md`](.claude/skills/add-provider/SKILL.md).
+
+Questions or want to scope a change before building it? Join the
+[**contributors Slack**](https://TODO-REPLACE-WITH-SLACK-INVITE). By
+participating you agree to our [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Star history
 
 <a href="https://star-history.com/#workweave/router&Date">

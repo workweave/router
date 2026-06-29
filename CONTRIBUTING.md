@@ -12,6 +12,17 @@ conventions, and PR process.
 4. Make your changes on a topic branch.
 5. Open a PR.
 
+## Getting help & talking to maintainers
+
+The fastest way to reach us — and the right place to float an idea **before**
+you sink time into a big PR — is the contributors Slack:
+
+➡️ **[Join the contributors Slack](https://TODO-REPLACE-WITH-SLACK-INVITE)**
+
+For anything non-trivial, ask there first. We'd much rather help you scope it up
+front than send a finished PR back. Bug reports and feature requests go in
+[GitHub issues](https://github.com/workweave/router/issues/new/choose).
+
 ## Code of Conduct
 
 This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
@@ -180,6 +191,26 @@ Common types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`.
 3. Make sure CI is green (`make check` + the migration-timestamp check).
 4. A maintainer will review. Plan to iterate; reviews are usually 1-2
    rounds.
+
+## How we triage and review
+
+We lean on automation so humans can focus on the work that needs judgment.
+Knowing how it works will save you a round-trip:
+
+- **An automated agent takes a first pass.** New issues get an automated
+  first-pass reply (clearly labelled as a bot), and new PRs get an automated
+  review against the [layering rules](AGENTS.md) and the "What we won't accept"
+  list above. The agent never merges and never has the final say — a human does.
+  You can also summon it anytime by commenting `@claude` on an issue or PR.
+- **Tell us how you used AI.** If you wrote the change with an agent, say so in
+  the PR and paste the prompt. It's not a gotcha — disclosed, tested AI work is
+  welcome; undisclosed slop is what gets sent back.
+- **We prioritize honestly.** Not every issue gets fixed immediately, and we'd
+  rather tell you "we're not prioritizing this soon — ping us if it's blocking
+  you" than go quiet. A real answer beats a fake timeline.
+- **Adding a provider or model?** Follow the
+  [`add-provider` skill](.claude/skills/add-provider/SKILL.md) to the letter.
+  PRs that follow it merge fast.
 
 ## Adding documentation
 

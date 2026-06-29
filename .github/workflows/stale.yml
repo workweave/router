@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+# Auto-close inactive issues/PRs. After 90 days with no activity an item is
+# marked stale; if nobody responds within 10 more days it's closed. Comment
+# to keep it open, or add the `keep-open` label to exempt it permanently.
+name: Stale
+
+on:
+  schedule:
+    - cron: "0 8 * * *" # daily, 08:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stale:
+    if: github.repository == 'workweave/router'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-stale: 90
+          days-before-close: 10
+          stale-issue-label: stale
+          stale-pr-label: stale
+          exempt-issue-labels: "keep-open,pinned,security"
+          exempt-pr-labels: "keep-open,pinned,security"
+          exempt-all-milestones: true
+          stale-issue-message: >
+            This issue has been inactive for 90 days, so it's been marked stale.
+            If it's still relevant, just leave a comment and we'll keep it open —
+            otherwise it'll be closed in 10 days. Not a judgment on the issue, just
+            keeping the tracker honest.
+          stale-pr-message: >
+            This PR has been inactive for 90 days, so it's been marked stale.
+            Comment or push to keep it open; otherwise it'll be closed in 10 days.
+          close-issue-message: >
+            Closing this out after 10 more days of inactivity. Comment to reopen
+            anytime if it's still a problem — no hard feelings.
+          close-pr-message: >
+            Closing this out after 10 more days of inactivity. Reopen anytime
+            once you're ready to pick it back up.
+          ascending: true # touch the oldest items first
