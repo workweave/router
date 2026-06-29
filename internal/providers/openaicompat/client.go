@@ -34,6 +34,12 @@ const (
 	// with NewClientWithModelIDMap to rewrite the router's public slash-form
 	// slugs to Makora's upstream IDs on the wire.
 	MakoraBaseURL = "https://inference.makora.com/v1"
+	// TogetherBaseURL is Together AI's OpenAI-compatible surface. Together
+	// serves the OSS pool (DeepSeek, GLM, MiniMax, Qwen, Kimi, …) and is the
+	// fastest provider on artificialanalysis.ai for several of the models we
+	// route; pair with NewClientWithModelIDMap to rewrite the router's public
+	// slash-form slugs to Together's "Org/Model" upstream IDs on the wire.
+	TogetherBaseURL = "https://api.together.xyz/v1"
 )
 
 // BedrockMantleBaseURLTemplate is the OpenAI-compatible bedrock-mantle endpoint

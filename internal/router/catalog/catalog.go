@@ -369,8 +369,15 @@ var Models = []Model{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "deepseek/deepseek-v4-pro", Tier: TierHigh, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+		// Makora stays primary for cost ($1.318 / $2.636 vs Together's $1.74 / $3.48).
+		// Together is the #1 throughput provider for V4 Pro on artificialanalysis.ai
+		// (~209 t/s vs Fireworks ~120) at the same price as Fireworks, so it sits
+		// ahead of Fireworks as the fastest same-price fallback. Prices confirmed
+		// from the Together serverless catalog (cached $0.20).
 		{Provider: providers.ProviderMakora, UpstreamID: "deepseek-ai/DeepSeek-V4-Pro",
 			Price: Pricing{InputUSDPer1M: 1.3180, OutputUSDPer1M: 2.6361, CacheReadMultiplier: 0.10}},
+		{Provider: providers.ProviderTogether, UpstreamID: "deepseek-ai/DeepSeek-V4-Pro",
+			Price: Pricing{InputUSDPer1M: 1.740, OutputUSDPer1M: 3.480, CacheReadMultiplier: 0.20 / 1.740}},
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/deepseek-v4-pro",
 			Price: Pricing{InputUSDPer1M: 1.740, OutputUSDPer1M: 3.480, CacheReadMultiplier: 0.0862}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.435, OutputUSDPer1M: 0.870, CacheReadMultiplier: 0.10}},
@@ -430,6 +437,13 @@ var Models = []Model{
 	// MiniMax's "1M" marketing — do NOT raise without re-confirming the
 	// served cap, or requests over ~205K tokens will hard-400 (no failover).
 	{ID: "minimax/minimax-m2.7", Tier: TierHigh, ContextWindow: 204_800, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+		// Together dominates Fireworks on M2.7: AA clocks ~399 t/s (#1 latency too)
+		// vs Fireworks' ~95 t/s, at the identical $0.30 / $1.20 list price (cached
+		// $0.06) — confirmed from the Together serverless catalog ("MiniMax M2.7
+		// FP4"). Together leads the binding order; Fireworks/OpenRouter stay as
+		// ordered fallbacks.
+		{Provider: providers.ProviderTogether, UpstreamID: "MiniMaxAI/MiniMax-M2.7",
+			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.06 / 0.300}},
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/minimax-m2p7",
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.279, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
@@ -461,6 +475,12 @@ var Models = []Model{
 	// emit_openai layer injects tool_stream + disables thinking for this slug.
 	// Fireworks primary for the same speed reason as GLM-5 (cached input $0.26).
 	{ID: "z-ai/glm-5.1", Tier: TierHigh, ContextWindow: 202_752, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+		// Together edges out Fireworks on GLM-5.1: AA ranks it #1 in both throughput
+		// (~213 t/s vs Fireworks' ~180) and TTFT, so it leads the binding order.
+		// Same $1.40 / $4.40 list price as Fireworks, cached $0.26 — confirmed from
+		// the Together serverless catalog ("GLM 5.1 FP4").
+		{Provider: providers.ProviderTogether, UpstreamID: "zai-org/GLM-5.1",
+			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400, CacheReadMultiplier: 0.26 / 1.400}},
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/glm-5p1",
 			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400, CacheReadMultiplier: 0.26 / 1.40}},
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5.1",
@@ -472,6 +492,11 @@ var Models = []Model{
 	// (overstating triggers hard 400s — cf. the minimax 1M->204800 incident);
 	// bump once the served window is verified.
 	{ID: "z-ai/glm-5.2", Tier: TierHigh, ContextWindow: 202_752, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
+		// Together is #1 on artificialanalysis.ai for GLM-5.2 throughput (~382 t/s
+		// vs Fireworks ~347), so it leads the binding order. $1.40 / $4.40, cached
+		// $0.26 — confirmed from the Together serverless catalog ("GLM 5.2").
+		{Provider: providers.ProviderTogether, UpstreamID: "zai-org/GLM-5.2",
+			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400, CacheReadMultiplier: 0.26 / 1.400}},
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/glm-5p2",
 			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400, CacheReadMultiplier: 0.20}},
 	}},

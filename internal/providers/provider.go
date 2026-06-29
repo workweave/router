@@ -51,6 +51,7 @@ const (
 	ProviderDeepInfra  = "deepinfra"
 	ProviderBedrock    = "bedrock"
 	ProviderMakora     = "makora"
+	ProviderTogether   = "together"
 )
 
 // APIKeyEnvVars maps provider name to the env var providing its deployment-level upstream API key.
@@ -64,6 +65,7 @@ var APIKeyEnvVars = map[string]string{
 	ProviderDeepInfra:  "DEEPINFRA_API_KEY",
 	ProviderBedrock:    "AWS_BEARER_TOKEN_BEDROCK",
 	ProviderMakora:     "MAKORA_API_KEY",
+	ProviderTogether:   "TOGETHER_API_KEY",
 }
 
 // APIKeyEnvVar returns the env-var name for the given provider, or empty

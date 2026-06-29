@@ -307,6 +307,31 @@ func main() {
 	}
 
 	{
+		// Together AI OpenAI-compatible surface. Serves the OSS pool at the top
+		// of the artificialanalysis.ai throughput tables for several models we
+		// route (DeepSeek V4 Pro, GLM-5.1, MiniMax M2.7); primary binding for
+		// those, with the prior providers kept as ordered fallbacks. Together
+		// uses "Org/Model" model IDs while the router exposes slash-form slugs,
+		// so modelIDMap is derived from the catalog's per-binding UpstreamID at
+		// boot.
+		togetherBaseURL := config.GetOr("TOGETHER_BASE_URL", openaiCompatProvider.TogetherBaseURL)
+		togetherKey := ""
+		if !byokOnly {
+			togetherKey = config.GetOr("TOGETHER_API_KEY", "")
+		}
+		providerMap[providers.ProviderTogether] = openaiCompatProvider.NewClientWithModelIDMap(togetherKey, togetherBaseURL, upstreamIDsForProvider(providers.ProviderTogether))
+		switch {
+		case byokOnly:
+			logger.Info("Together provider enabled (BYOK only)", "base_url", togetherBaseURL)
+		case togetherKey != "":
+			envKeyedProviders[providers.ProviderTogether] = struct{}{}
+			logger.Info("Together provider enabled", "base_url", togetherBaseURL)
+		default:
+			logger.Info("Together provider registered (BYOK only — set TOGETHER_API_KEY for deployment-level use)", "base_url", togetherBaseURL)
+		}
+	}
+
+	{
 		// Bedrock via the OpenAI-compatible "bedrock-mantle" surface
 		// (https://bedrock-mantle.{region}.api.aws/v1). AWS recommends this
 		// over the model-native bedrock-runtime/InvokeModel surface; both
