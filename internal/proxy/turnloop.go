@@ -732,8 +732,9 @@ func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sess
 		InstallationID: installationID,
 		Provider:       chosen.Provider,
 		Model:          chosen.Model,
-		// Carry the frozen band pair forward. The DB preserves it on conflict
-		// regardless, but a faithful in-memory Pin keeps the upsert log honest.
+		// A plain refresh re-runs no scorer, so carry the existing pair forward
+		// unchanged: re-supplying the stored (non-empty) pair makes the upsert a
+		// no-op for these columns, and an empty one is preserved by ON CONFLICT.
 		PairedProvider:        existing.PairedProvider,
 		PairedModel:           existing.PairedModel,
 		Reason:                chosen.Reason,
@@ -753,10 +754,12 @@ func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sess
 // first-turn routing and switch turns. UpdateUsage fills in usage stats later.
 func (s *Service) writeNewPin(ctx context.Context, installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, role string, chosen router.Decision) {
 	log := observability.FromContext(ctx)
-	// The band pair is set only here, on the session's first pin write, from the
-	// scorer's runner-up. pinDecision(pin) reconstructions carry no Metadata, so
-	// a nil guard keeps the pair empty on the sticky/stay re-pin paths; the
-	// UpsertSessionPin ON CONFLICT preserves the first-written pair regardless.
+	// The band pair comes from the scorer's runner-up on the fresh decision, so
+	// every genuine re-route through here (first turn, switch, expired-pin
+	// re-anchor with a fresh decision) refreshes it and keeps pinned_model and
+	// the runner-up consistent. pinDecision(pin) reconstructions carry no
+	// Metadata, so the nil guard leaves the pair empty; UpsertSessionPin's
+	// ON CONFLICT then preserves the stored pair rather than wiping it.
 	var pairedProvider, pairedModel string
 	if chosen.Metadata != nil {
 		pairedProvider = chosen.Metadata.PairedProvider

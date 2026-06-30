@@ -40,13 +40,15 @@ type Pin struct {
 	Provider       string
 	Model          string
 	// PairedProvider / PairedModel are the other half of the band pair the
-	// scorer picked on the first turn of this session (the runner-up model and
-	// its provider). They are written once, on the pin's first insert, and
-	// preserved across every later upsert — so the pair stays frozen for the
-	// conversation's life, the way installation_id is. PairedModel is empty for
-	// pins created outside the scorer path (force-model, loop-break) or when
-	// only one model was eligible. A later per-turn policy reads them to swap
-	// between {Model, PairedModel} without re-running the scorer.
+	// scorer picks (the runner-up model and its provider). Upsert refreshes them
+	// whenever a genuine scorer re-run supplies a fresh runner-up (first turn,
+	// switch, expired-pin re-route) and preserves them on sticky refreshes and
+	// reconstructed re-anchors, which pass an empty pair — so the stored pair
+	// always matches the live routing decision and never collapses onto Model.
+	// PairedModel is empty for pins created outside the scorer path (force-model,
+	// loop-break) or when only one model was eligible. A later per-turn policy
+	// reads them to swap between {Model, PairedModel} without re-running the
+	// scorer.
 	PairedProvider            string
 	PairedModel               string
 	Reason                    string

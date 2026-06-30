@@ -26,11 +26,15 @@ WHERE session_key = @session_key::bytea
 -- slate). The reset on switch also covers the loop-break / force-model
 -- pin-expiry writes, which set pinned_model to the empty string.
 --
--- paired_provider / paired_model are set on the first insert and, like
--- installation_id, deliberately omitted from the ON CONFLICT update set: the
--- band pair the scorer picks on the session's first turn stays frozen for the
--- conversation's life, so a later per-turn swap policy reads a stable pair
--- rather than one that drifts as the served model changes turn to turn.
+-- paired_provider / paired_model hold the runner-up half of the band pair the
+-- scorer picks. They refresh on the conflict update only when the incoming
+-- value is non-empty -- i.e. when a genuine scorer re-run (first turn, switch,
+-- expired-pin re-route) supplies a fresh runner-up -- and are otherwise
+-- preserved. This keeps the pair current with the live routing decision (a
+-- switch updates pinned_model and the runner-up together, so the two never
+-- collapse onto the same slug) while a plain sticky refresh or a reconstructed
+-- re-anchor (both carry an empty pair) leaves the stored pair untouched. A
+-- later per-turn swap policy reads the pair that matches the active decision.
 -- name: UpsertSessionPin :exec
 INSERT INTO router.session_pins (
   session_key, role, installation_id, pinned_provider,
@@ -49,6 +53,19 @@ ON CONFLICT (session_key, role) DO UPDATE SET
   turn_count      = router.session_pins.turn_count + 1,
   pinned_until    = EXCLUDED.pinned_until,
   last_seen_at    = CURRENT_TIMESTAMP,
+  -- Refresh the band pair only when a fresh scorer decision supplies one
+  -- (non-empty); preserve the stored pair on sticky refreshes and reconstructed
+  -- re-anchors, which carry an empty pair.
+  paired_provider = CASE
+    WHEN EXCLUDED.paired_model <> ''
+      THEN EXCLUDED.paired_provider
+    ELSE router.session_pins.paired_provider
+  END,
+  paired_model = CASE
+    WHEN EXCLUDED.paired_model <> ''
+      THEN EXCLUDED.paired_model
+    ELSE router.session_pins.paired_model
+  END,
   consecutive_upstream_errors = CASE
     WHEN router.session_pins.pinned_model = EXCLUDED.pinned_model
       THEN router.session_pins.consecutive_upstream_errors
