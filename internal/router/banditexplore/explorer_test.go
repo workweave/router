@@ -132,6 +132,43 @@ func TestRoute_SwitchesToInBandPeerWithPropensity(t *testing.T) {
 	}
 }
 
+func TestRoute_RepairsBandPairWhenServingRunnerUp(t *testing.T) {
+	// Scorer picks opus (argmax 0.90) with sonnet (0.85) as the frozen
+	// runner-up. Band sorted -> [haiku, opus, sonnet]; force index 2 so
+	// exploration serves the runner-up sonnet. The pin pair must not collapse to
+	// {sonnet, sonnet}: it recomputes to the best remaining peer, opus.
+	scores := map[string]float32{"haiku": 0.82, "opus": 0.90, "sonnet": 0.85}
+	inner := clusterDecision(scores, "opus", "anthropic")
+	inner.Metadata.PairedModel = "sonnet"
+	inner.Metadata.PairedProvider = "anthropic"
+	inner.Metadata.PairedScore = 0.85
+	e := New(&fakeRouter{dec: inner}, staticProvider(map[string]string{
+		"opus":   "anthropic",
+		"sonnet": "anthropic",
+		"haiku":  "anthropic",
+	}), 0.1)
+	withIntn(e, 2)
+	dec, err := e.Route(context.Background(), router.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Model != "sonnet" {
+		t.Fatalf("expected exploration to serve sonnet, got %q", dec.Model)
+	}
+	if dec.Metadata.PairedModel == dec.Model {
+		t.Fatalf("band pair collapsed: Model and PairedModel are both %q", dec.Model)
+	}
+	if dec.Metadata.PairedModel != "opus" {
+		t.Fatalf("expected runner-up recomputed to opus, got %q", dec.Metadata.PairedModel)
+	}
+	if dec.Metadata.PairedProvider != "anthropic" {
+		t.Fatalf("expected paired provider anthropic, got %q", dec.Metadata.PairedProvider)
+	}
+	if dec.Metadata.PairedScore != 0.90 {
+		t.Fatalf("expected paired score 0.90, got %v", dec.Metadata.PairedScore)
+	}
+}
+
 func TestRoute_UnknownProviderFallsBackToArgmax(t *testing.T) {
 	scores := map[string]float32{"haiku": 0.90, "opus": 0.88}
 	inner := clusterDecision(scores, "haiku", "anthropic")

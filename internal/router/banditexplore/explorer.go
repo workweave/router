@@ -199,5 +199,44 @@ func (e *Explorer) annotate(dec *router.Decision, model, provider string, bandSi
 		if s, ok := dec.Metadata.CandidateScores[model]; ok {
 			dec.Metadata.ChosenScore = s
 		}
+		// Exploration just rewrote the served model, but the scorer computed the
+		// session-pin band pair's runner-up against the pre-exploration argmax.
+		// If we served that runner-up, Model == PairedModel and the first pin
+		// would freeze a collapsed pair, leaving a later per-turn swap policy no
+		// distinct second model. Recompute the runner-up against the new served
+		// model so the pair stays distinct.
+		e.repairBandPair(&dec.Metadata.PairedModel, &dec.Metadata.PairedProvider, &dec.Metadata.PairedScore, *dec, model)
 	}
+}
+
+// repairBandPair recomputes the band pair's runner-up after exploration has
+// rewritten the served model, writing it back through the metadata pointers.
+// It picks the highest-scoring servable peer other than served (tie-broken by
+// name for reproducibility), and clears the pair when no other model has a
+// resolvable provider — never leaving a runner-up equal to the served model.
+func (e *Explorer) repairBandPair(outModel, outProvider *string, outScore *float32, dec router.Decision, served string) {
+	scores := dec.Metadata.CandidateScores
+	models := make([]string, 0, len(scores))
+	for m := range scores {
+		models = append(models, m)
+	}
+	sort.Strings(models)
+
+	bestModel, bestProvider := "", ""
+	var bestScore float32
+	for _, m := range models {
+		if m == served {
+			continue
+		}
+		sc := scores[m]
+		if bestModel != "" && sc <= bestScore {
+			continue
+		}
+		provider, ok := e.providerForRequest(dec, m)
+		if !ok {
+			continue
+		}
+		bestModel, bestProvider, bestScore = m, provider, sc
+	}
+	*outModel, *outProvider, *outScore = bestModel, bestProvider, bestScore
 }
