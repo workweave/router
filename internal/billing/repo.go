@@ -23,6 +23,12 @@ type Repo interface {
 	// the post-debit balance.
 	DebitInference(ctx context.Context, p DebitParams) (balanceAfterMicros int64, err error)
 
+	// GetAPIKeySpend reads a key's lifetime spend cap and spend-to-date fresh
+	// from Postgres (bypassing the auth cache) so the spend-cap gate cannot be
+	// overrun by a hot cached key. found is false when no active key matches the
+	// id (deleted mid-request); callers treat that as "no cap to enforce".
+	GetAPIKeySpend(ctx context.Context, apiKeyID string) (spentMicros int64, capMicros *int64, found bool, err error)
+
 	// BillingTablesExist is a boot-time health check: returns true when
 	// all three billing tables exist in the router schema. A missing
 	// table means the migration hasn't run; the composition root then
@@ -38,4 +44,8 @@ type DebitParams struct {
 	EntryType          string // 'inference', 'adjustment', etc.
 	RouterRequestID    string // upstream call id; suffix ('_summary','_main') used for handover rows
 	RouterModel        string
+	// APIKeyID, when non-empty, attributes this debit to the api key so its
+	// lifetime spent_usd_micros is bumped in the same transaction. Empty on
+	// paths with no key on context.
+	APIKeyID string
 }

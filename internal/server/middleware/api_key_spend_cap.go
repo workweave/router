@@ -1,0 +1,67 @@
+package middleware
+
+import (
+	"net/http"
+
+	"workweave/router/internal/billing"
+	"workweave/router/internal/observability"
+
+	"github.com/gin-gonic/gin"
+)
+
+// WithAPIKeySpendCap enforces a per-key lifetime spend cap. Attached only in
+// managed mode and only after WithAuth, so the key below is populated and its
+// spent_usd_micros is metered by the debit hook.
+//
+// The cap and spend-to-date are read FRESH from Postgres each request (via the
+// billing service), not from the cached auth key — a cached key's spend would
+// be stale for the cache TTL, letting a hot key overrun its cap. This mirrors
+// the per-request balance read in WithBalanceCheck.
+//
+// A key with no cap passes through. A read error fails closed with 503, like
+// the balance gate: a prepaid cap that lets requests through on read errors is
+// an unbilled-usage hole. Spend is only known after a response settles, so a
+// key can still overshoot by at most one in-flight request's cost.
+func WithAPIKeySpendCap(svc *billing.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		log := observability.FromGin(c)
+
+		apiKey := APIKeyFrom(c)
+		if apiKey == nil || apiKey.ID == "" {
+			// Admin-cookie sessions and other non-keyed paths carry no api key.
+			c.Next()
+			return
+		}
+
+		result, err := svc.CheckAPIKeySpendCap(c.Request.Context(), apiKey.ID)
+		if err != nil {
+			log.Error("API key spend-cap check failed; refusing request", "err", err, "api_key_id", apiKey.ID)
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "billing_unavailable",
+				"message": "Billing system is temporarily unavailable. Retry in a few moments.",
+			})
+			return
+		}
+
+		if !result.Found || result.CapMicros == nil {
+			c.Next()
+			return
+		}
+
+		if result.SpentMicros >= *result.CapMicros {
+			log.Info("Request rejected: api key spend cap reached",
+				"api_key_id", apiKey.ID,
+				"spent_usd_micros", result.SpentMicros,
+				"spend_cap_usd_micros", *result.CapMicros,
+			)
+			c.AbortWithStatusJSON(http.StatusPaymentRequired, gin.H{
+				"error":                "key_spend_cap_reached",
+				"spent_usd_micros":     result.SpentMicros,
+				"spend_cap_usd_micros": *result.CapMicros,
+				"message":              "This router key has reached its spend cap. Mint a new key or raise the cap to continue.",
+			})
+			return
+		}
+		c.Next()
+	}
+}

@@ -25,6 +25,11 @@ type stubBillingRepo struct {
 	override    bool
 	balanceErr  error
 	overrideErr error
+	// Per-key spend-cap fields, exercised by WithAPIKeySpendCap.
+	spendMicros int64
+	capMicros   *int64
+	spendFound  bool
+	spendErr    error
 }
 
 func (r *stubBillingRepo) GetBalance(_ context.Context, _ string) (int64, error) {
@@ -35,6 +40,9 @@ func (r *stubBillingRepo) HasActiveOverride(_ context.Context, _ string) (bool, 
 }
 func (r *stubBillingRepo) DebitInference(_ context.Context, _ billing.DebitParams) (int64, error) {
 	return 0, nil
+}
+func (r *stubBillingRepo) GetAPIKeySpend(_ context.Context, _ string) (int64, *int64, bool, error) {
+	return r.spendMicros, r.capMicros, r.spendFound, r.spendErr
 }
 func (r *stubBillingRepo) BillingTablesExist(_ context.Context) (bool, error) {
 	return true, nil

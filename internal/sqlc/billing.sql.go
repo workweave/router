@@ -47,39 +47,55 @@ func (q *Queries) CheckBillingTablesExist(ctx context.Context) (bool, error) {
 const debitOrgCredits = `-- name: DebitOrgCredits :one
 WITH updated AS (
     UPDATE router.organization_credit_balance
-    SET balance_usd_micros = balance_usd_micros + $2::bigint,
+    SET balance_usd_micros = balance_usd_micros + $1::bigint,
         updated_at = NOW()
-    WHERE organization_id = $1::varchar
+    WHERE organization_id = $2::varchar
     RETURNING balance_usd_micros
+),
+ledger AS (
+    INSERT INTO router.organization_credit_ledger (
+        organization_id,
+        delta_usd_micros,
+        notional_cost_micros,
+        balance_after_micros,
+        entry_type,
+        router_request_id,
+        router_model
+    )
+    SELECT
+        $2::varchar,
+        $1::bigint,
+        $3::bigint,
+        updated.balance_usd_micros,
+        $4::varchar,
+        $5::varchar,
+        $6::varchar
+    FROM updated
+    RETURNING balance_after_micros
+),
+key_spend AS (
+    -- delta is negative on a real debit, so subtracting it adds the spend
+    -- magnitude; zero on override/subscription pass-throughs leaves it flat.
+    -- Gated on ` + "`" + `updated` + "`" + ` producing a row: if the org balance row was missing
+    -- (the debit no-ops and the app sees ErrBalanceRowMissing) we must NOT bump
+    -- the key's lifetime spend, or a capped key could trip its cap with no
+    -- matching ledger debit.
+    UPDATE router.model_router_api_keys
+    SET spent_usd_micros = spent_usd_micros - $1::bigint
+    WHERE id = $7::uuid
+      AND EXISTS (SELECT 1 FROM updated)
 )
-INSERT INTO router.organization_credit_ledger (
-    organization_id,
-    delta_usd_micros,
-    notional_cost_micros,
-    balance_after_micros,
-    entry_type,
-    router_request_id,
-    router_model
-)
-SELECT
-    $1::varchar,
-    $2::bigint,
-    $3::bigint,
-    updated.balance_usd_micros,
-    $4::varchar,
-    $5::varchar,
-    $6::varchar
-FROM updated
-RETURNING balance_after_micros
+SELECT balance_after_micros FROM ledger
 `
 
 type DebitOrgCreditsParams struct {
-	OrganizationID     string
 	DeltaUsdMicros     int64
+	OrganizationID     string
 	NotionalCostMicros int64
 	EntryType          string
 	RouterRequestID    *string
 	RouterModel        *string
+	APIKeyID           pgtype.UUID
 }
 
 // Atomic debit: decrement the balance and append a matching ledger row in a
@@ -96,40 +112,63 @@ type DebitOrgCreditsParams struct {
 // Returns the post-debit balance so middleware/log lines can report the
 // new value without a follow-up read.
 //
+// When api_key_id is supplied, the same statement also bumps that key's
+// lifetime spent_usd_micros by the debit magnitude (-delta: the real cost on a
+// debit, zero on an override/subscription pass-through where delta is 0), so
+// per-key cap enforcement reads a single up-to-date row. The key_spend CTE is
+// data-modifying, so Postgres runs it to completion even though the final
+// SELECT does not reference it; it no-ops when api_key_id is NULL.
+//
 //	WITH updated AS (
 //	    UPDATE router.organization_credit_balance
-//	    SET balance_usd_micros = balance_usd_micros + $2::bigint,
+//	    SET balance_usd_micros = balance_usd_micros + $1::bigint,
 //	        updated_at = NOW()
-//	    WHERE organization_id = $1::varchar
+//	    WHERE organization_id = $2::varchar
 //	    RETURNING balance_usd_micros
+//	),
+//	ledger AS (
+//	    INSERT INTO router.organization_credit_ledger (
+//	        organization_id,
+//	        delta_usd_micros,
+//	        notional_cost_micros,
+//	        balance_after_micros,
+//	        entry_type,
+//	        router_request_id,
+//	        router_model
+//	    )
+//	    SELECT
+//	        $2::varchar,
+//	        $1::bigint,
+//	        $3::bigint,
+//	        updated.balance_usd_micros,
+//	        $4::varchar,
+//	        $5::varchar,
+//	        $6::varchar
+//	    FROM updated
+//	    RETURNING balance_after_micros
+//	),
+//	key_spend AS (
+//	    -- delta is negative on a real debit, so subtracting it adds the spend
+//	    -- magnitude; zero on override/subscription pass-throughs leaves it flat.
+//	    -- Gated on `updated` producing a row: if the org balance row was missing
+//	    -- (the debit no-ops and the app sees ErrBalanceRowMissing) we must NOT bump
+//	    -- the key's lifetime spend, or a capped key could trip its cap with no
+//	    -- matching ledger debit.
+//	    UPDATE router.model_router_api_keys
+//	    SET spent_usd_micros = spent_usd_micros - $1::bigint
+//	    WHERE id = $7::uuid
+//	      AND EXISTS (SELECT 1 FROM updated)
 //	)
-//	INSERT INTO router.organization_credit_ledger (
-//	    organization_id,
-//	    delta_usd_micros,
-//	    notional_cost_micros,
-//	    balance_after_micros,
-//	    entry_type,
-//	    router_request_id,
-//	    router_model
-//	)
-//	SELECT
-//	    $1::varchar,
-//	    $2::bigint,
-//	    $3::bigint,
-//	    updated.balance_usd_micros,
-//	    $4::varchar,
-//	    $5::varchar,
-//	    $6::varchar
-//	FROM updated
-//	RETURNING balance_after_micros
+//	SELECT balance_after_micros FROM ledger
 func (q *Queries) DebitOrgCredits(ctx context.Context, arg DebitOrgCreditsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, debitOrgCredits,
-		arg.OrganizationID,
 		arg.DeltaUsdMicros,
+		arg.OrganizationID,
 		arg.NotionalCostMicros,
 		arg.EntryType,
 		arg.RouterRequestID,
 		arg.RouterModel,
+		arg.APIKeyID,
 	)
 	var balance_after_micros int64
 	err := row.Scan(&balance_after_micros)

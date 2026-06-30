@@ -63,6 +63,10 @@ func (r *fakeRepo) DebitInference(_ context.Context, p billing.DebitParams) (int
 
 func (r *fakeRepo) BillingTablesExist(_ context.Context) (bool, error) { return true, nil }
 
+func (r *fakeRepo) GetAPIKeySpend(_ context.Context, _ string) (int64, *int64, bool, error) {
+	return 0, nil, false, nil
+}
+
 func TestCheckBalance_Override(t *testing.T) {
 	repo := &fakeRepo{hasOverride: true, balanceRowExists: true, balanceMicros: 5_000_000}
 	svc := billing.NewService(repo)
@@ -243,6 +247,53 @@ func TestDebitForInference_RepoErrorPropagates(t *testing.T) {
 		Pricing:        catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00},
 	})
 	assert.Error(t, err)
+}
+
+func TestDebitForInference_AttributesAPIKey(t *testing.T) {
+	// The api_key_id and the negative delta both flow to the repo so the CTE
+	// can bump the key's lifetime spent counter by the debit magnitude. On a
+	// real debit spent should grow by exactly the notional charge (= -delta).
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
+	svc := billing.NewService(repo)
+	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
+	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID:  "org_x",
+		RouterRequestID: "req_key",
+		Model:           "claude-sonnet-4-5",
+		Provider:        providers.ProviderAnthropic,
+		InputTokens:     1_000_000,
+		OutputTokens:    250_000,
+		Pricing:         p,
+		APIKeyID:        "key-123",
+	})
+	require.NoError(t, err)
+	require.Len(t, repo.ledgerCalls, 1)
+	assert.Equal(t, "key-123", repo.ledgerCalls[0].APIKeyID, "api key id flows to the repo for per-key spend")
+	// spent grows by -delta: a real debit's delta is negative, so the key's
+	// lifetime spend rises by the full notional charge.
+	assert.Equal(t, int64(6_750_000), -repo.ledgerCalls[0].DeltaUsdMicros, "per-key spend increment equals the charge")
+}
+
+func TestDebitForInference_SubscriptionLeavesKeySpendFlat(t *testing.T) {
+	// A subscription-served turn debits 0, so the key's spend must not move —
+	// the customer's own plan paid, not their Weave key budget.
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
+	svc := billing.NewService(repo)
+	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
+	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID:     "org_sub",
+		Model:              "claude-opus-4-8",
+		Provider:           providers.ProviderAnthropic,
+		InputTokens:        1_000_000,
+		OutputTokens:       250_000,
+		Pricing:            p,
+		APIKeyID:           "key-sub",
+		SubscriptionServed: true,
+	})
+	require.NoError(t, err)
+	require.Len(t, repo.ledgerCalls, 1)
+	assert.Equal(t, "key-sub", repo.ledgerCalls[0].APIKeyID)
+	assert.Equal(t, int64(0), repo.ledgerCalls[0].DeltaUsdMicros, "subscription turn debits 0, so key spend stays flat")
 }
 
 func TestHasOverrideFromContext_Default(t *testing.T) {
