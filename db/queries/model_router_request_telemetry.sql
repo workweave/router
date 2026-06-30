@@ -23,6 +23,7 @@
 -- name: InsertRequestTelemetry :exec
 INSERT INTO router.model_router_request_telemetry (
     installation_id,
+    api_key_id,
     request_id,
     span_type,
     trace_id,
@@ -78,6 +79,7 @@ INSERT INTO router.model_router_request_telemetry (
     credential_source
 ) VALUES (
     @installation_id::uuid,
+    sqlc.narg('api_key_id')::uuid,
     @request_id::varchar,
     @span_type::varchar,
     @trace_id::varchar,

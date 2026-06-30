@@ -22,6 +22,9 @@ type TelemetryRepository interface {
 // InsertTelemetryParams mirrors one router.upstream span row.
 type InsertTelemetryParams struct {
 	InstallationID         string
+	// APIKeyID attributes the row to the authenticating api key (per-key spend
+	// audit). Empty leaves the column NULL.
+	APIKeyID               string
 	RequestID              string
 	SpanType               string
 	TraceID                string

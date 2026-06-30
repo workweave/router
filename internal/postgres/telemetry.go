@@ -52,6 +52,7 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 	q := sqlc.New(r.tx)
 	return q.InsertRequestTelemetry(ctx, sqlc.InsertRequestTelemetryParams{
 		InstallationID:         id,
+		APIKeyID:               uuidOrNil(p.APIKeyID),
 		RequestID:              p.RequestID,
 		SpanType:               p.SpanType,
 		TraceID:                p.TraceID,

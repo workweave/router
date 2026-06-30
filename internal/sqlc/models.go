@@ -37,11 +37,13 @@ type RouterModelRouterAPIKey struct {
 	// SHA-256 of the full rk_ token
 	KeyHash string
 	// Last 4 chars for display
-	KeySuffix  string
-	LastUsedAt pgtype.Timestamp
-	CreatedAt  pgtype.Timestamp
-	DeletedAt  pgtype.Timestamp
-	CreatedBy  *string
+	KeySuffix         string
+	LastUsedAt        pgtype.Timestamp
+	CreatedAt         pgtype.Timestamp
+	DeletedAt         pgtype.Timestamp
+	CreatedBy         *string
+	SpendCapUsdMicros *int64
+	SpentUsdMicros    int64
 }
 
 // Customer-owned provider API keys for BYOK routing
@@ -148,6 +150,7 @@ type RouterModelRouterRequestTelemetry struct {
 	CredentialKeySuffix *string
 	// Which credential precedence branch served the turn: subscription, codex_subscription, byok, or client. NULL on deployment-key turns.
 	CredentialSource *string
+	APIKeyID         pgtype.UUID
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.

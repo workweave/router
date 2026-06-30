@@ -223,6 +223,13 @@ const prevTurnMaxedOutThreshold = 8000
 // APIKeyIDContextKey is the request-context key for the authenticated api_key_id.
 type APIKeyIDContextKey struct{}
 
+// apiKeyIDFromContext returns the authenticated api_key_id, or "" when no key
+// is on context (selfhosted/admin paths).
+func apiKeyIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(APIKeyIDContextKey{}).(string)
+	return id
+}
+
 // ExternalIDContextKey is the request-context key for the installation's external_id.
 type ExternalIDContextKey struct{}
 
@@ -2304,6 +2311,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 		s.fireTelemetry(InsertTelemetryParams{
 			InstallationID:         installationID.String(),
+			APIKeyID:               apiKeyIDFromContext(ctx),
 			RequestID:              requestID,
 			SpanType:               "router.upstream",
 			TraceID:                requestID,
@@ -2390,6 +2398,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			sumUsage := compactionHandoverOutcome.SummaryUsage
 			if sumUsage.Model != "" && (sumUsage.InputTokens > 0 || sumUsage.OutputTokens > 0) {
 				sumPricing, _ := catalog.PrimaryPriceFor(sumUsage.Model)
+				apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
 				s.fireBilling(ctx, billing.DebitInferenceParams{
 					OrganizationID:  externalID,
 					RouterRequestID: requestID + "_compaction_summary",
@@ -2401,6 +2410,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 					CacheRead:       sumUsage.CacheRead,
 					Pricing:         sumPricing,
 					HasOverride:     billing.HasOverrideFromContext(ctx),
+					APIKeyID:        apiKeyID,
 				})
 			}
 		}
@@ -2975,6 +2985,7 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 		return
 	}
 	hasOverride := billing.HasOverrideFromContext(ctx)
+	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
 	s.fireBilling(ctx, billing.DebitInferenceParams{
 		OrganizationID:     externalID,
 		RouterRequestID:    requestID,
@@ -2987,6 +2998,7 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 		Pricing:            actPricing,
 		HasOverride:        hasOverride,
 		SubscriptionServed: servedOnSubscription(ctx),
+		APIKeyID:           apiKeyID,
 	})
 
 	// The handover summary runs on the deployment/BYOK key (never the
@@ -3007,6 +3019,7 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 				CacheRead:       sumUsage.CacheRead,
 				Pricing:         sumPricing,
 				HasOverride:     hasOverride,
+				APIKeyID:        apiKeyID,
 			})
 		}
 	}
@@ -3733,6 +3746,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
 		s.fireTelemetry(InsertTelemetryParams{
 			InstallationID:         installationIDOAI,
+			APIKeyID:               apiKeyIDFromContext(ctx),
 			RequestID:              requestID,
 			SpanType:               "router.upstream",
 			TraceID:                requestID,

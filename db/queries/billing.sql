@@ -33,6 +33,13 @@ SELECT EXISTS (
 --
 -- Returns the post-debit balance so middleware/log lines can report the
 -- new value without a follow-up read.
+--
+-- When api_key_id is supplied, the same statement also bumps that key's
+-- lifetime spent_usd_micros by the debit magnitude (-delta: the real cost on a
+-- debit, zero on an override/subscription pass-through where delta is 0), so
+-- per-key cap enforcement reads a single up-to-date row. The key_spend CTE is
+-- data-modifying, so Postgres runs it to completion even though the final
+-- SELECT does not reference it; it no-ops when api_key_id is NULL.
 -- name: DebitOrgCredits :one
 WITH updated AS (
     UPDATE router.organization_credit_balance
@@ -40,26 +47,36 @@ WITH updated AS (
         updated_at = NOW()
     WHERE organization_id = @organization_id::varchar
     RETURNING balance_usd_micros
+),
+ledger AS (
+    INSERT INTO router.organization_credit_ledger (
+        organization_id,
+        delta_usd_micros,
+        notional_cost_micros,
+        balance_after_micros,
+        entry_type,
+        router_request_id,
+        router_model
+    )
+    SELECT
+        @organization_id::varchar,
+        @delta_usd_micros::bigint,
+        @notional_cost_micros::bigint,
+        updated.balance_usd_micros,
+        @entry_type::varchar,
+        sqlc.narg('router_request_id')::varchar,
+        sqlc.narg('router_model')::varchar
+    FROM updated
+    RETURNING balance_after_micros
+),
+key_spend AS (
+    -- delta is negative on a real debit, so subtracting it adds the spend
+    -- magnitude; zero on override/subscription pass-throughs leaves it flat.
+    UPDATE router.model_router_api_keys
+    SET spent_usd_micros = spent_usd_micros - @delta_usd_micros::bigint
+    WHERE id = sqlc.narg('api_key_id')::uuid
 )
-INSERT INTO router.organization_credit_ledger (
-    organization_id,
-    delta_usd_micros,
-    notional_cost_micros,
-    balance_after_micros,
-    entry_type,
-    router_request_id,
-    router_model
-)
-SELECT
-    @organization_id::varchar,
-    @delta_usd_micros::bigint,
-    @notional_cost_micros::bigint,
-    updated.balance_usd_micros,
-    @entry_type::varchar,
-    sqlc.narg('router_request_id')::varchar,
-    sqlc.narg('router_model')::varchar
-FROM updated
-RETURNING balance_after_micros;
+SELECT balance_after_micros FROM ledger;
 
 -- Paginated read for the dashboard ledger panel. Sorted newest-first so the
 -- UI can render without an extra ORDER BY in Go.

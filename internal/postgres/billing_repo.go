@@ -61,6 +61,7 @@ func (r *BillingRepo) DebitInference(ctx context.Context, p billing.DebitParams)
 		EntryType:          p.EntryType,
 		RouterRequestID:    stringPtrOrNil(p.RouterRequestID),
 		RouterModel:        stringPtrOrNil(p.RouterModel),
+		APIKeyID:           uuidOrNil(p.APIKeyID),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

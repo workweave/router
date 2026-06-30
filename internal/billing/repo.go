@@ -38,4 +38,8 @@ type DebitParams struct {
 	EntryType          string // 'inference', 'adjustment', etc.
 	RouterRequestID    string // upstream call id; suffix ('_summary','_main') used for handover rows
 	RouterModel        string
+	// APIKeyID, when non-empty, attributes this debit to the api key so its
+	// lifetime spent_usd_micros is bumped in the same transaction. Empty on
+	// paths with no key on context.
+	APIKeyID string
 }

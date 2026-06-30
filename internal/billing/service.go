@@ -106,6 +106,10 @@ type DebitInferenceParams struct {
 	// Anthropic or Codex subscription token. Weave charges nothing for these —
 	// the customer's plan already paid for the tokens.
 	SubscriptionServed bool
+	// APIKeyID, when non-empty, attributes the debit to the api key that
+	// authenticated the request so its lifetime spend is tracked for cap
+	// enforcement. Empty leaves per-key spend untouched.
+	APIKeyID string
 }
 
 // DebitForInference computes the raw upstream cost and writes one ledger
@@ -135,6 +139,7 @@ func (s *Service) DebitForInference(ctx context.Context, p DebitInferenceParams)
 		EntryType:          EntryTypeInference,
 		RouterRequestID:    p.RouterRequestID,
 		RouterModel:        p.Model,
+		APIKeyID:           p.APIKeyID,
 	})
 }
 
