@@ -1,0 +1,37 @@
+install/npm/.gitignore
+  s_09ca5e2e44a0ed::t_eac7f41a76d952 9
+install/npm/package.json
+  s_09ca5e2e44a0ed::t_257b4a3adf955c 20
+install/opencode-weave/src/index.ts
+  s_09ca5e2e44a0ed::t_7c8ef46d229406 1-28,32-423
+  s_09ca5e2e44a0ed::t_c020ec299a0d58 29-31
+install/install.sh
+  s_09ca5e2e44a0ed::t_79d8b8db12c877 536-549
+  s_09ca5e2e44a0ed::t_5936d422f82938 611-640,642-646,649-654,659-662,666-667,675-687
+  s_09ca5e2e44a0ed::t_f9db9d57c12fa0 1779-1780,1785-1786,1792
+  s_09ca5e2e44a0ed::t_62c74fb5c63e3e 1815-1817
+install/opencode-weave/README.md
+  s_09ca5e2e44a0ed::t_75666393e58881 1-59
+install/uninstall.sh
+  s_09ca5e2e44a0ed::t_81af88b406a628 158,160-164,166,168-169,187-194
+install/opencode-weave/package.json
+  s_09ca5e2e44a0ed::t_96cef61046f0dc 1-9
+install/npm/scripts/copy-installer.js
+  s_09ca5e2e44a0ed::t_573ee285f14b2b 59-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "2599a6825696ad703695ee5f3cce0ec4e8f6e0e4",
+  "prompts": {},
+  "sessions": {
+    "s_09ca5e2e44a0ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35ef0a9f-52c3-476b-b860-781312b3d039",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

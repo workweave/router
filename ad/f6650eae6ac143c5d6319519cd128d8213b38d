@@ -1,0 +1,21 @@
+internal/translate/gemini_footer.go
+  s_6497efcbf5fbe7::t_6afdad6ba4f1b8 184-187,191
+internal/translate/gemini_footer_test.go
+  s_6497efcbf5fbe7::t_9853dd9c975ae1 65-67,69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "adf6650eae6ac143c5d6319519cd128d8213b38d",
+  "prompts": {},
+  "sessions": {
+    "s_6497efcbf5fbe7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7e6c8c31-340d-4213-89f1-db9abfc036e8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

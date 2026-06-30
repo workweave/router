@@ -1,0 +1,40 @@
+internal/postgres/converters.go
+  s_69901748f9f919::t_76652d537526af 18-27
+internal/sqlc/model_router_api_keys.sql.go
+  s_69901748f9f919::t_76652d537526af 95,114,143-144
+internal/server/middleware/auth.go
+  s_69901748f9f919::t_76652d537526af 12,104-108
+  s_69901748f9f919::t_5b1e111c00e6c3 109
+internal/auth/installation.go
+  s_69901748f9f919::t_76652d537526af 21-28
+internal/postgres/converters_test.go
+  s_69901748f9f919::t_062d3f2563c42e 1-38
+db/migrations/0012_installation-routing-preferences.down.sql
+  s_69901748f9f919::t_ac37652282c73a 1-7
+internal/proxy/routing_knobs_internal_test.go
+  s_69901748f9f919::t_ab4cfc7ea77c45 1-45
+internal/sqlc/models.go
+  s_69901748f9f919::t_76652d537526af 51-60
+db/migrations/0012_installation-routing-preferences.up.sql
+  s_69901748f9f919::t_ac37652282c73a 1-12
+internal/sqlc/model_router_installations.sql.go
+  s_69901748f9f919::t_76652d537526af 25,46,59-60,66,80,97-98,104,113,136-137
+internal/proxy/service.go
+  s_69901748f9f919::t_76652d537526af 134-140,247-260,895,1898
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0bd37f94c5147967922daee68c33fc25203d2472",
+  "prompts": {},
+  "sessions": {
+    "s_69901748f9f919": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb29b69e-56ec-4bee-8aa4-32bec7913af3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
