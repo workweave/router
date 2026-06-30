@@ -1,0 +1,22 @@
+internal/router/banditexplore/explorer.go
+  s_e314738a9195df::t_4a9bb271cb023b 202-208,211-241
+  s_e314738a9195df::t_cce3fe56738131 242
+internal/router/banditexplore/explorer_test.go
+  s_e314738a9195df::t_e8e21d8254de83 135-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "394f13fbb2f67fdeea5c4c29523a47284e61381d",
+  "prompts": {},
+  "sessions": {
+    "s_e314738a9195df": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "17bb5105-1a4b-4d8b-8633-f796bbc7df06",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
