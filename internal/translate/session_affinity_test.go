@@ -167,3 +167,41 @@ func TestSessionAffinity_OpenAIFallbackKeyVariesByPrefix(t *testing.T) {
 	b := keyFor(t, `"prompt B"`)
 	assert.NotEqual(t, a, b, "different cacheable prefixes must map to different cache keys")
 }
+
+// A same-format OpenAI caller that partitions caching with its own
+// prompt_cache_key must keep it — the router's synthetic prefix hash must not
+// clobber a deliberate caller key on the keyless fallback path.
+func TestSessionAffinity_OpenAIPreservesCallerPromptCacheKey(t *testing.T) {
+	const callerKey = "caller-partition-key"
+	src := []byte(`{"model":"gpt-5.5","prompt_cache_key":"` + callerKey + `","messages":[{"role":"system","content":"sys"},{"role":"user","content":"hi"}]}`)
+	env, err := translate.ParseOpenAI(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel:    "gpt-5.5",
+		TargetProvider: providers.ProviderOpenAI,
+	})
+	require.NoError(t, err)
+
+	v, ok := promptCacheKey(t, out.Body)
+	require.True(t, ok)
+	assert.Equal(t, callerKey, v, "caller-supplied prompt_cache_key must be preserved")
+}
+
+// A keyless request with no cacheable prefix (no system, no tools) must stay
+// unhinted: hashing the empty prefix would herd every such conversation onto
+// one synthetic cache key.
+func TestSessionAffinity_OpenAIEmptyPrefixStaysUnhinted(t *testing.T) {
+	src := []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}`)
+	env, err := translate.ParseOpenAI(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel:    "gpt-5.5",
+		TargetProvider: providers.ProviderOpenAI,
+	})
+	require.NoError(t, err)
+
+	_, ok := promptCacheKey(t, out.Body)
+	assert.False(t, ok, "a prefix-less keyless request must not carry a synthetic prompt_cache_key")
+}
