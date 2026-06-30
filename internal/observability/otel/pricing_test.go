@@ -20,6 +20,7 @@ func TestLookup(t *testing.T) {
 		{name: "claude-opus-4-8", model: "claude-opus-4-8", wantInput: 5.00, wantOutput: 25.00},
 		{name: "claude-opus-4-7", model: "claude-opus-4-7", wantInput: 5.00, wantOutput: 25.00},
 		{name: "claude-opus-4-6", model: "claude-opus-4-6", wantInput: 5.00, wantOutput: 25.00},
+		{name: "claude-sonnet-5", model: "claude-sonnet-5", wantInput: 3.00, wantOutput: 15.00},
 		{name: "claude-sonnet-4-5", model: "claude-sonnet-4-5", wantInput: 3.00, wantOutput: 15.00},
 		{name: "claude-haiku-4-5", model: "claude-haiku-4-5", wantInput: 0.80, wantOutput: 4.00},
 

@@ -195,6 +195,13 @@ var Models = []Model{
 	{ID: "claude-sonnet-4-6", Tier: TierMid, ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}},
 	}},
+	// claude-sonnet-5: 1M context behind the context-1m beta (catalog carries
+	// 200K, like the rest of the Sonnet line). Priced at the standard list rate
+	// $3/$15 — Anthropic's $2/$10 introductory rate runs through 2026-08-31; not
+	// encoded here to avoid a compile-time price that silently goes stale.
+	{ID: "claude-sonnet-5", Tier: TierMid, ContextWindow: 200_000, Providers: []ProviderBinding{
+		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}},
+	}},
 	// Opus 4.5+ shipped at $5/$25 per MTok (down from $15/$75 on Opus 4.1
 	// and earlier). The 4.6 / 4.7 entries were stale at the legacy price
 	// until 4.8 landed and forced a triple-check against

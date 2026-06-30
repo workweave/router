@@ -601,6 +601,7 @@ write_opencode_config() {
       name: "Weave Router",
       options: { apiKey: $key, baseURL: $url, headers: $headers },
       models: {
+        "claude-sonnet-5":   { name: "Claude Sonnet 5 (via Weave Router)" },
         "claude-sonnet-4-6": { name: "Claude Sonnet 4.6 (via Weave Router)" },
         "claude-opus-4-8":   { name: "Claude Opus 4.8 (via Weave Router)" },
         "claude-haiku-4-5":  { name: "Claude Haiku 4.5 (via Weave Router)" },
@@ -2076,6 +2077,7 @@ prices='{
     "claude-opus-4-8":                  0.005,
     "claude-sonnet-4-5":                0.003,
     "claude-sonnet-4-6":                0.003,
+    "claude-sonnet-5":                  0.003,
     "deepseek/deepseek-v4-flash":       0.0001134,
     "deepseek/deepseek-v4-pro":         0.001318,
     "gemini-2.0-flash":                 0.0001,
@@ -2132,6 +2134,7 @@ prices='{
     "claude-opus-4-8":                  0.025,
     "claude-sonnet-4-5":                0.015,
     "claude-sonnet-4-6":                0.015,
+    "claude-sonnet-5":                  0.015,
     "deepseek/deepseek-v4-flash":       0.0002791,
     "deepseek/deepseek-v4-pro":         0.0026361,
     "gemini-2.0-flash":                 0.0004,
