@@ -2293,8 +2293,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// reads the correct key parts for telemetry. When the subscription failover
 	// served the turn on the Weave / BYOK key, carry the suppression forward so
 	// cost.subscription_served + the billing key reflect the key that actually
-	// paid (full cost), not the spent subscription that 429'd.
-	if subscriptionRetryRan {
+	// paid (full cost), not the spent subscription that 429'd. Gate on
+	// subscriptionFailoverUsed (the retry actually succeeded on the Weave key),
+	// NOT subscriptionRetryRan: if PrepareAnthropic failed or the Weave retry
+	// itself errored, no byte was billed to the Weave key, so the turn stays
+	// attributed to the subscription that was originally on ctx.
+	if subscriptionFailoverUsed {
 		ctx = withSuppressedClaudeSubscription(ctx)
 	}
 	ctx = resolveAndInjectCredentials(ctx, finalProvider, r.Header)
@@ -2380,7 +2384,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	if installationID != uuid.Nil {
 		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
-		failoverUsed := finalProvider != primaryProvider
+		// Same-provider Anthropic subscription -> Weave retries keep finalProvider
+		// == primaryProvider, so the bare provider diff misses them. OR in the
+		// subscription-failover flag so the Postgres FailoverUsed column matches
+		// the OTel span + completion log (both already OR it in).
+		failoverUsed := finalProvider != primaryProvider || subscriptionFailoverUsed
 		degShadow := proxyErr == nil && isDegenerateResponse(out, respSummary.ToolUseBlocks, respSummary.StopReason, respSummary.StopReasonDemoted)
 		if degShadow {
 			log.Info("router.degenerate_shadow",
