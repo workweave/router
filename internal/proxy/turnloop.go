@@ -727,11 +727,15 @@ func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sess
 		return
 	}
 	p := sessionpin.Pin{
-		SessionKey:            sessionKey,
-		Role:                  role,
-		InstallationID:        installationID,
-		Provider:              chosen.Provider,
-		Model:                 chosen.Model,
+		SessionKey:     sessionKey,
+		Role:           role,
+		InstallationID: installationID,
+		Provider:       chosen.Provider,
+		Model:          chosen.Model,
+		// Carry the frozen band pair forward. The DB preserves it on conflict
+		// regardless, but a faithful in-memory Pin keeps the upsert log honest.
+		PairedProvider:        existing.PairedProvider,
+		PairedModel:           existing.PairedModel,
 		Reason:                chosen.Reason,
 		TurnCount:             1,
 		PinnedUntil:           pinExpiry(chosen.Reason),
@@ -749,7 +753,16 @@ func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sess
 // first-turn routing and switch turns. UpdateUsage fills in usage stats later.
 func (s *Service) writeNewPin(ctx context.Context, installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, role string, chosen router.Decision) {
 	log := observability.FromContext(ctx)
-	log.Info("writeNewPin called", "installation_id", installationID.String(), "role", role, "model", chosen.Model, "session_key_hex", fmt.Sprintf("%x", sessionKey))
+	// The band pair is set only here, on the session's first pin write, from the
+	// scorer's runner-up. pinDecision(pin) reconstructions carry no Metadata, so
+	// a nil guard keeps the pair empty on the sticky/stay re-pin paths; the
+	// UpsertSessionPin ON CONFLICT preserves the first-written pair regardless.
+	var pairedProvider, pairedModel string
+	if chosen.Metadata != nil {
+		pairedProvider = chosen.Metadata.PairedProvider
+		pairedModel = chosen.Metadata.PairedModel
+	}
+	log.Info("writeNewPin called", "installation_id", installationID.String(), "role", role, "model", chosen.Model, "paired_model", pairedModel, "paired_provider", pairedProvider, "session_key_hex", fmt.Sprintf("%x", sessionKey))
 	if installationID == uuid.Nil {
 		log.Info("writeNewPin: skipping because installationID is uuid.Nil")
 		return
@@ -760,6 +773,8 @@ func (s *Service) writeNewPin(ctx context.Context, installationID uuid.UUID, ses
 		InstallationID: installationID,
 		Provider:       chosen.Provider,
 		Model:          chosen.Model,
+		PairedProvider: pairedProvider,
+		PairedModel:    pairedModel,
 		Reason:         chosen.Reason,
 		TurnCount:      1,
 		PinnedUntil:    pinExpiry(chosen.Reason),

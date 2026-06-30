@@ -92,6 +92,16 @@ type RoutingMetadata struct {
 	// exploration policy randomizes. Logged so logged decisions carry the
 	// importance weight an off-policy estimator requires.
 	Propensity float32
+	// PairedModel is the runner-up — the second-highest-scoring eligible model
+	// for this request, the other half of the {Model, PairedModel} band pair
+	// Stage 1 freezes into the session pin so a later per-turn policy can swap
+	// between the two without re-running the scorer. Empty when only one model
+	// is eligible. PairedProvider is its per-request resolved provider binding;
+	// PairedScore is its blended score (same scale as ChosenScore). These are
+	// informational — they do not affect this request's routing.
+	PairedModel    string
+	PairedProvider string
+	PairedScore    float32
 }
 
 type Router interface {

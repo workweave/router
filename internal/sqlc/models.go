@@ -304,6 +304,8 @@ type RouterSessionPin struct {
 	ConsecutiveUpstreamErrors int32
 	LastServedModel           string
 	HasEverSwitched           bool
+	PairedProvider            string
+	PairedModel               string
 }
 
 // Shadow-mode spiral (death-march) detections: log-only fire-rate corpus measured on live traffic before escalation is armed

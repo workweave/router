@@ -13,7 +13,7 @@ import (
 )
 
 const getSessionPin = `-- name: GetSessionPin :one
-SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model, has_ever_switched
+SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model, has_ever_switched, paired_provider, paired_model
 FROM router.session_pins
 WHERE session_key = $1::bytea
   AND role        = $2::varchar
@@ -31,7 +31,7 @@ type GetSessionPinParams struct {
 // last_turn_ended_at carry the previous turn's upstream usage; the
 // planner reads them to weigh switch EV against eviction cost.
 //
-//	SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model, has_ever_switched
+//	SELECT session_key, role, installation_id, pinned_provider, pinned_model, decision_reason, turn_count, pinned_until, first_pinned_at, last_seen_at, last_input_tokens, last_cached_read_tokens, last_cached_write_tokens, last_output_tokens, last_turn_ended_at, consecutive_upstream_errors, last_served_model, has_ever_switched, paired_provider, paired_model
 //	FROM router.session_pins
 //	WHERE session_key = $1::bytea
 //	  AND role        = $2::varchar
@@ -57,6 +57,8 @@ func (q *Queries) GetSessionPin(ctx context.Context, arg GetSessionPinParams) (R
 		&i.ConsecutiveUpstreamErrors,
 		&i.LastServedModel,
 		&i.HasEverSwitched,
+		&i.PairedProvider,
+		&i.PairedModel,
 	)
 	return i, err
 }
@@ -209,11 +211,13 @@ func (q *Queries) UpdateSessionPinUsage(ctx context.Context, arg UpdateSessionPi
 const upsertSessionPin = `-- name: UpsertSessionPin :exec
 INSERT INTO router.session_pins (
   session_key, role, installation_id, pinned_provider,
-  pinned_model, decision_reason, turn_count, pinned_until
+  pinned_model, paired_provider, paired_model,
+  decision_reason, turn_count, pinned_until
 ) VALUES (
   $1::bytea, $2::varchar, $3::uuid,
   $4::varchar, $5::varchar,
-  $6::text, $7::int, $8::timestamp
+  $6::varchar, $7::varchar,
+  $8::text, $9::int, $10::timestamp
 )
 ON CONFLICT (session_key, role) DO UPDATE SET
   pinned_provider = EXCLUDED.pinned_provider,
@@ -235,6 +239,8 @@ type UpsertSessionPinParams struct {
 	InstallationID uuid.UUID
 	PinnedProvider string
 	PinnedModel    string
+	PairedProvider string
+	PairedModel    string
 	DecisionReason string
 	TurnCount      int32
 	PinnedUntil    pgtype.Timestamp
@@ -256,13 +262,21 @@ type UpsertSessionPinParams struct {
 // slate). The reset on switch also covers the loop-break / force-model
 // pin-expiry writes, which set pinned_model to the empty string.
 //
+// paired_provider / paired_model are set on the first insert and, like
+// installation_id, deliberately omitted from the ON CONFLICT update set: the
+// band pair the scorer picks on the session's first turn stays frozen for the
+// conversation's life, so a later per-turn swap policy reads a stable pair
+// rather than one that drifts as the served model changes turn to turn.
+//
 //	INSERT INTO router.session_pins (
 //	  session_key, role, installation_id, pinned_provider,
-//	  pinned_model, decision_reason, turn_count, pinned_until
+//	  pinned_model, paired_provider, paired_model,
+//	  decision_reason, turn_count, pinned_until
 //	) VALUES (
 //	  $1::bytea, $2::varchar, $3::uuid,
 //	  $4::varchar, $5::varchar,
-//	  $6::text, $7::int, $8::timestamp
+//	  $6::varchar, $7::varchar,
+//	  $8::text, $9::int, $10::timestamp
 //	)
 //	ON CONFLICT (session_key, role) DO UPDATE SET
 //	  pinned_provider = EXCLUDED.pinned_provider,
@@ -283,6 +297,8 @@ func (q *Queries) UpsertSessionPin(ctx context.Context, arg UpsertSessionPinPara
 		arg.InstallationID,
 		arg.PinnedProvider,
 		arg.PinnedModel,
+		arg.PairedProvider,
+		arg.PairedModel,
 		arg.DecisionReason,
 		arg.TurnCount,
 		arg.PinnedUntil,

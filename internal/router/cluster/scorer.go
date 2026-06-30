@@ -847,6 +847,22 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	if p, ok := resolvedProvider[chosen.Model]; ok {
 		chosenProvider = p
 	}
+	// Runner-up: the second-best eligible model for this request. It is the
+	// other half of the band pair Stage 1 freezes into the session pin so a
+	// later per-turn policy can swap between {chosen, paired} without
+	// re-scoring. Resolve its provider the same way as the chosen model's
+	// (per-request binding first, boot-time default otherwise). Empty when the
+	// eligible pool has a single model — no pair to persist.
+	pairedModel, pairedScore := runnerUp(scores, eligibleModels, chosen.Model)
+	pairedProvider := ""
+	if pairedModel != "" {
+		if pc := s.lookupCandidate(pairedModel); pc != nil {
+			pairedProvider = pc.Provider
+		}
+		if p, ok := resolvedProvider[pairedModel]; ok {
+			pairedProvider = p
+		}
+	}
 	decision := router.Decision{
 		Provider: chosenProvider,
 		Model:    chosen.Model,
@@ -866,7 +882,10 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			// Deterministic argmax: the chosen model was selected with
 			// certainty. An exploration policy wrapping this scorer overwrites
 			// Propensity with its sampling probability.
-			Propensity: 1.0,
+			Propensity:     1.0,
+			PairedModel:    pairedModel,
+			PairedProvider: pairedProvider,
+			PairedScore:    pairedScore,
 		},
 	}
 	log.Info(
@@ -875,6 +894,9 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		"decision_model", decision.Model,
 		"decision_provider", decision.Provider,
 		"decision_reason", decision.Reason,
+		"paired_model", pairedModel,
+		"paired_provider", pairedProvider,
+		"paired_score", pairedScore,
 		"top_clusters", topClusters,
 		"chosen_score", chosenScore,
 		"embed_ms", embedMs,
@@ -939,6 +961,31 @@ func argmax(scores map[string]float32, order []string) (string, float32) {
 	var bestScore float32
 	first := true
 	for _, m := range order {
+		s, ok := scores[m]
+		if !ok {
+			continue
+		}
+		if first || s > bestScore {
+			bestModel = m
+			bestScore = s
+			first = false
+		}
+	}
+	return bestModel, bestScore
+}
+
+// runnerUp returns the highest-scoring model other than exclude, tie-breaking
+// by order to match argmax. Returns ("", 0) when no eligible peer exists (a
+// single-model pool), so the caller surfaces an empty PairedModel rather than a
+// duplicate of the chosen model.
+func runnerUp(scores map[string]float32, order []string, exclude string) (string, float32) {
+	var bestModel string
+	var bestScore float32
+	first := true
+	for _, m := range order {
+		if m == exclude {
+			continue
+		}
 		s, ok := scores[m]
 		if !ok {
 			continue

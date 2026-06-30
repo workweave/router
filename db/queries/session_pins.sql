@@ -25,13 +25,21 @@ WHERE session_key = @session_key::bytea
 -- sticky pin) but reset to 0 on a switch (different model = clean
 -- slate). The reset on switch also covers the loop-break / force-model
 -- pin-expiry writes, which set pinned_model to the empty string.
+--
+-- paired_provider / paired_model are set on the first insert and, like
+-- installation_id, deliberately omitted from the ON CONFLICT update set: the
+-- band pair the scorer picks on the session's first turn stays frozen for the
+-- conversation's life, so a later per-turn swap policy reads a stable pair
+-- rather than one that drifts as the served model changes turn to turn.
 -- name: UpsertSessionPin :exec
 INSERT INTO router.session_pins (
   session_key, role, installation_id, pinned_provider,
-  pinned_model, decision_reason, turn_count, pinned_until
+  pinned_model, paired_provider, paired_model,
+  decision_reason, turn_count, pinned_until
 ) VALUES (
   @session_key::bytea, @role::varchar, @installation_id::uuid,
   @pinned_provider::varchar, @pinned_model::varchar,
+  @paired_provider::varchar, @paired_model::varchar,
   @decision_reason::text, @turn_count::int, @pinned_until::timestamp
 )
 ON CONFLICT (session_key, role) DO UPDATE SET

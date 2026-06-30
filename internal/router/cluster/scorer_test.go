@@ -319,6 +319,48 @@ func TestScorer_PopulatesRoutingMetadata(t *testing.T) {
 		"with cfgForTest TopP=1, only the closest cluster (Opus-aligned) is summed")
 }
 
+// Stage 1 band pair: the scorer must surface the runner-up (second-best
+// eligible model) alongside the chosen model so the turn loop can freeze the
+// {chosen, paired} pair into the session pin. On the Opus-aligned cluster 0
+// (opus 0.9 > haiku 0.1), chosen=opus and paired must be haiku, scored below.
+func TestScorer_PopulatesBandPair(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	s := newScorerForTest(t, emb, cfgForTest())
+
+	got, err := s.Route(context.Background(), router.Request{
+		PromptText: strings.Repeat("x", 100),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got.Metadata)
+	require.Equal(t, "claude-opus-4-7", got.Model, "chosen must be the cluster-preferred model")
+	assert.Equal(t, "claude-haiku-4-5", got.Metadata.PairedModel,
+		"paired must be the runner-up, not the chosen model")
+	assert.Equal(t, "anthropic", got.Metadata.PairedProvider)
+	assert.NotEqual(t, got.Model, got.Metadata.PairedModel, "the pair must be two distinct models")
+	assert.Less(t, got.Metadata.PairedScore, got.Metadata.ChosenScore,
+		"the runner-up must score below the chosen model")
+}
+
+// A single-model eligible pool has no runner-up: PairedModel must be empty so
+// the turn loop persists no pair rather than duplicating the chosen model.
+func TestScorer_BandPairEmptyForSingleModel(t *testing.T) {
+	dim := EmbedDim
+	c0 := make([]float32, dim)
+	c0[0] = 1
+	cb := buildCentroidsBlob(t, 1, dim, c0)
+	rb := []byte(`{"rankings": {"0": {"claude-opus-4-7": 0.9}}}`)
+	regb := []byte(`{"deployed_models": [{"model": "claude-opus-4-7", "provider": "anthropic", "bench_column": "gpt-5", "proxy": true}]}`)
+	s, err := NewScorer(bundleFromBlobs(t, "v-test", cb, rb, regb), cfgForTest(), &fakeEmbedder{vec: makeOpusVec()}, map[string]struct{}{"anthropic": {}})
+	require.NoError(t, err)
+
+	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.NoError(t, err)
+	require.NotNil(t, got.Metadata)
+	assert.Equal(t, "claude-opus-4-7", got.Model)
+	assert.Empty(t, got.Metadata.PairedModel, "single-model pool must surface no pair")
+	assert.Empty(t, got.Metadata.PairedProvider)
+}
+
 func TestScorer_PicksOtherClusterWhenAligned(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeHaikuVec()}
 	s := newScorerForTest(t, emb, cfgForTest())
