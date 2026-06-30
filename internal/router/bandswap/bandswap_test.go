@@ -1,6 +1,44 @@
 package bandswap
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"testing"
+)
+
+// TestParityWithTrainedModel asserts the Go inference reproduces the exported
+// model's predictions on real embeddings. testdata/parity_cases.json is
+// generated from dataset.npz + the exported artifact (standardize + matmul +
+// argmax) — if Go drifts from the trained head, this fails.
+func TestParityWithTrainedModel(t *testing.T) {
+	clf, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	raw, err := os.ReadFile("testdata/parity_cases.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var cases []struct {
+		Embedding      []float32 `json:"embedding"`
+		ExpectedAction string    `json:"expected_action"`
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	if len(cases) == 0 {
+		t.Fatal("no parity cases")
+	}
+	for i, c := range cases {
+		got, ok := clf.PredictAction(c.Embedding)
+		if !ok {
+			t.Fatalf("case %d: predict not ok", i)
+		}
+		if got != c.ExpectedAction {
+			t.Errorf("case %d: got %q, want %q", i, got, c.ExpectedAction)
+		}
+	}
+}
 
 func TestNewLoadsEmbeddedModel(t *testing.T) {
 	clf, err := New()
