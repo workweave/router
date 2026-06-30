@@ -197,6 +197,20 @@ var ErrUpstreamIdleTimeout = errors.New("upstream sse idle timeout")
 // httputil re-exports it as httputil.ErrUpstreamOutputStall.
 var ErrUpstreamOutputStall = errors.New("upstream sse output stall")
 
+// ErrUpstreamSlowThroughput is the sentinel cause set when a provider adapter's
+// minimum-throughput watchdog fires: the upstream IS producing output (so
+// neither ErrUpstreamIdleTimeout nor ErrUpstreamOutputStall trips — the mark is
+// fed steadily), but at a sustained rate so low that the turn would dribble for
+// minutes and trip none of the other watchdogs while the client (Claude Code)
+// appears frozen. This is the 2026-06-25 failure mode: a deepseek/deepseek-v4-flash
+// stream emitted ~1774 output deltas over ~132s (~13 events/s) — a clean,
+// steadily-flowing 200 that no existing guard classified as retryable, riding
+// toward the 600s request cap. Like the other stall sentinels it is
+// upstream-owned and retryable. Defined here (not in httputil) so IsRetryable
+// can classify it without the import cycle; httputil re-exports it as
+// httputil.ErrUpstreamSlowThroughput.
+var ErrUpstreamSlowThroughput = errors.New("upstream sse slow throughput")
+
 // IsRetryableStatus reports whether an upstream HTTP status is worth
 // retrying on a different provider. Covers transient upstream-side faults
 // (5xx + 408 timeout + 429 rate-limit). 4xx ≠ 408/429 are the client's
@@ -237,6 +251,14 @@ func IsRetryable(err error) bool {
 	// the caller-cancellation guard for the same reason as ErrUpstreamIdleTimeout
 	// — the watchdog surfaces it via the request context's cancel cause.
 	if errors.Is(err, ErrUpstreamOutputStall) {
+		return true
+	}
+	// A sustained sub-throughput stall is upstream-owned: the stream produced
+	// output the whole time, just far too slowly to be usable. Classified
+	// before the caller-cancellation guard for the same reason as the other
+	// stall sentinels — the watchdog surfaces it via the request context's
+	// cancel cause, which may also chain context.Canceled.
+	if errors.Is(err, ErrUpstreamSlowThroughput) {
 		return true
 	}
 	// Client-side cancellation and per-request deadlines are owned by the

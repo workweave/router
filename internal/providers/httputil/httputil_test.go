@@ -207,3 +207,86 @@ func TestErrUpstreamIdleTimeout_AliasIsRetryable(t *testing.T) {
 
 // Sanity guard: ensure the exported sentinel is actually used.
 var _ = errors.Is(ErrUpstreamIdleTimeout, ErrUpstreamIdleTimeout)
+
+func TestStartThroughputWatchdog_NoOpWhenDisabled(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	// minDeltas <= 0 disables the watchdog (operator escape hatch).
+	mark, stop := StartThroughputWatchdog(ctx, cancel, 50*time.Millisecond, 0, 0, ErrUpstreamSlowThroughput)
+	mark()
+	stop()
+	assert.NoError(t, context.Cause(ctx))
+
+	// window <= 0 also disables.
+	mark2, stop2 := StartThroughputWatchdog(ctx, cancel, 0, 0, 5, ErrUpstreamSlowThroughput)
+	mark2()
+	stop2()
+	assert.NoError(t, context.Cause(ctx))
+}
+
+func TestStartThroughputWatchdog_InertDuringWarmup(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	// Require 100 deltas/window but never mark: with a 300ms warmup the watchdog
+	// must NOT fire before warmup elapses even though throughput is zero.
+	_, stop := StartThroughputWatchdog(ctx, cancel, 50*time.Millisecond, 300*time.Millisecond, 100, ErrUpstreamSlowThroughput)
+	defer stop()
+
+	select {
+	case <-ctx.Done():
+		t.Fatalf("watchdog fired during warmup: %v", context.Cause(ctx))
+	case <-time.After(150 * time.Millisecond):
+	}
+	assert.NoError(t, context.Cause(ctx), "must stay inert through the warmup period")
+}
+
+func TestStartThroughputWatchdog_FiresOnSustainedSubFloor(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	// After a tiny warmup, require >=5 deltas per 60ms window. Mark only once per
+	// ~40ms (well under the floor): the stream is "alive" but too slow, so the
+	// watchdog must trip with the slow-throughput cause.
+	mark, stop := StartThroughputWatchdog(ctx, cancel, 60*time.Millisecond, 30*time.Millisecond, 5, ErrUpstreamSlowThroughput)
+	defer stop()
+
+	go func() {
+		for i := 0; i < 50; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(40 * time.Millisecond):
+				mark()
+			}
+		}
+	}()
+
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	select {
+	case <-ctx.Done():
+	case <-deadline.C:
+		t.Fatal("watchdog never fired on a sustained sub-floor stream")
+	}
+	assert.ErrorIs(t, context.Cause(ctx), ErrUpstreamSlowThroughput)
+}
+
+func TestStartThroughputWatchdog_DoesNotFireOnHealthyStream(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	// Require >=3 deltas per 60ms window after a 30ms warmup; mark every ~5ms
+	// (~12 per window, well above the floor). Must NOT fire.
+	mark, stop := StartThroughputWatchdog(ctx, cancel, 60*time.Millisecond, 30*time.Millisecond, 3, ErrUpstreamSlowThroughput)
+	defer stop()
+
+	end := time.Now().Add(400 * time.Millisecond)
+	for time.Now().Before(end) {
+		mark()
+		time.Sleep(5 * time.Millisecond)
+	}
+	assert.NoError(t, context.Cause(ctx), "healthy throughput must not trip the watchdog")
+}
+
+func TestErrUpstreamSlowThroughput_AliasIsRetryable(t *testing.T) {
+	assert.True(t, errors.Is(ErrUpstreamSlowThroughput, providers.ErrUpstreamSlowThroughput))
+	assert.True(t, providers.IsRetryable(ErrUpstreamSlowThroughput))
+}

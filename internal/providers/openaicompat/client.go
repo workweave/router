@@ -75,6 +75,14 @@ type Client struct {
 	// inject a small value to drive the output-stall trip without waiting out the
 	// real budget.
 	outputStall time.Duration
+	// throughputWindow / throughputMinElapsed / throughputMinDeltas, when > 0
+	// (and >= 0 for the delta count), override the minimum-throughput watchdog
+	// budgets. Production uses the httputil defaults; tests inject small values
+	// to drive a slow-throughput trip without waiting out the real warmup.
+	throughputWindow     time.Duration
+	throughputMinElapsed time.Duration
+	throughputMinDeltas  int
+	throughputOverride   bool
 }
 
 func NewClient(apiKey, baseURL string) *Client {
@@ -123,6 +131,28 @@ func (c *Client) outputStallTimeout() time.Duration {
 		return c.outputStall
 	}
 	return httputil.DefaultOutputStallTimeout
+}
+
+// throughputParams returns the minimum-throughput watchdog budgets: the injected
+// test overrides when set, else the httputil defaults.
+func (c *Client) throughputParams() (window, minElapsed time.Duration, minDeltas int) {
+	if c.throughputOverride {
+		return c.throughputWindow, c.throughputMinElapsed, c.throughputMinDeltas
+	}
+	return httputil.DefaultThroughputWindow, httputil.DefaultThroughputMinElapsed, httputil.DefaultMinThroughputDeltasPerWindow
+}
+
+// NewClientWithThroughputGuard is NewClient with injected minimum-throughput
+// watchdog budgets, so a test can drive a slow-throughput trip with a tiny
+// warmup/window while keeping the idle and output-stall watchdogs large enough
+// that they aren't what fire.
+func NewClientWithThroughputGuard(apiKey, baseURL string, window, minElapsed time.Duration, minDeltas int) *Client {
+	c := NewClient(apiKey, baseURL)
+	c.throughputOverride = true
+	c.throughputWindow = window
+	c.throughputMinElapsed = minElapsed
+	c.throughputMinDeltas = minDeltas
+	return c
 }
 
 // rewriteModelField rewrites the body's top-level "model" field according to
@@ -225,17 +255,34 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	// keepalives, so it is wired via ArmOutputProgress; a non-streaming client
 	// (or a writer without the hook) returns armed=false and is byte-idle-guarded
 	// only.
+	// A third watchdog runs on the same output-progress mark: the
+	// minimum-throughput guard. The output-stall watchdog above only catches a
+	// stream that stops producing output entirely; it never trips on a clean 200
+	// that keeps dribbling output-bearing deltas (resetting outMark on each one)
+	// but at a crawl. The throughput watchdog measures the COUNT of those deltas
+	// over a rolling window and, once warmup has passed, aborts with
+	// ErrUpstreamSlowThroughput (retryable) when the rate stays below the floor
+	// (2026-06-25 deepseek-v4-flash ~132s dribble). Both are fed by the single
+	// ArmOutputProgress mark, so the installed mark fans out to both.
 	if arm, ok := w.(providers.OutputProgressArmer); ok {
 		outMark, outStop := httputil.StartIdleWatchdogCause(ctx, cancel, c.outputStallTimeout(), httputil.ErrUpstreamOutputStall)
-		if arm.ArmOutputProgress(outMark) {
+		tpWindow, tpMinElapsed, tpMinDeltas := c.throughputParams()
+		tpMark, tpStop := httputil.StartThroughputWatchdog(ctx, cancel, tpWindow, tpMinElapsed, tpMinDeltas, httputil.ErrUpstreamSlowThroughput)
+		combined := func() {
+			outMark()
+			tpMark()
+		}
+		if arm.ArmOutputProgress(combined) {
 			defer outStop()
+			defer tpStop()
 		} else {
 			outStop()
+			tpStop()
 		}
 	}
 
 	streamErr := httputil.StreamBody(ctx, cancel, c.idleTimeout(), resp.Body, resp.StatusCode, w, t)
-	if errors.Is(streamErr, httputil.ErrUpstreamIdleTimeout) || errors.Is(streamErr, httputil.ErrUpstreamOutputStall) {
+	if errors.Is(streamErr, httputil.ErrUpstreamIdleTimeout) || errors.Is(streamErr, httputil.ErrUpstreamOutputStall) || errors.Is(streamErr, httputil.ErrUpstreamSlowThroughput) {
 		logStreamStall(decision.Model, c.baseURL, streamErr)
 	}
 	return streamErr
@@ -249,8 +296,11 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 // when nothing reached the client; this log is the per-model paper trail.
 func logStreamStall(model, baseURL string, cause error) {
 	stallKind := "byte_idle"
-	if errors.Is(cause, httputil.ErrUpstreamOutputStall) {
+	switch {
+	case errors.Is(cause, httputil.ErrUpstreamOutputStall):
 		stallKind = "output_idle"
+	case errors.Is(cause, httputil.ErrUpstreamSlowThroughput):
+		stallKind = "slow_throughput"
 	}
 	observability.Get().Error("Upstream OpenAI-compatible stream stalled mid-response; aborting for retry",
 		"model", model,
