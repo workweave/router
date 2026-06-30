@@ -9,4 +9,14 @@ ALTER TABLE router.model_router_api_keys
     ADD COLUMN spend_cap_usd_micros BIGINT,
     ADD COLUMN spent_usd_micros BIGINT NOT NULL DEFAULT 0;
 
+-- Attribute each request to the api key that authenticated it, so per-key
+-- spend can be audited and dashboarded. Nullable: pre-existing rows and any
+-- non-keyed path leave it NULL. No FK — telemetry deliberately carries no
+-- constraints for ingestion throughput.
+ALTER TABLE router.model_router_request_telemetry
+    ADD COLUMN api_key_id UUID;
+
+CREATE INDEX idx_router_request_telemetry_api_key_id
+    ON router.model_router_request_telemetry (api_key_id, timestamp DESC);
+
 COMMIT;

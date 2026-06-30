@@ -154,6 +154,35 @@ func (q *Queries) GetActiveModelRouterAPIKeyWithInstallationByHash(ctx context.C
 	return i, err
 }
 
+const getModelRouterAPIKeySpend = `-- name: GetModelRouterAPIKeySpend :one
+SELECT spend_cap_usd_micros, spent_usd_micros
+FROM router.model_router_api_keys
+WHERE id = $1::uuid
+  AND deleted_at IS NULL
+`
+
+type GetModelRouterAPIKeySpendRow struct {
+	SpendCapUsdMicros *int64
+	SpentUsdMicros    int64
+}
+
+// Fresh per-request read of a key's lifetime spend cap and spend-to-date for
+// the spend-cap gate. Read straight from Postgres (not the auth cache) so a
+// hot cached key cannot overrun its cap within the cache TTL window — mirrors
+// the per-request balance read in WithBalanceCheck. Returns sql.ErrNoRows when
+// the key is missing/soft-deleted.
+//
+//	SELECT spend_cap_usd_micros, spent_usd_micros
+//	FROM router.model_router_api_keys
+//	WHERE id = $1::uuid
+//	  AND deleted_at IS NULL
+func (q *Queries) GetModelRouterAPIKeySpend(ctx context.Context, id uuid.UUID) (GetModelRouterAPIKeySpendRow, error) {
+	row := q.db.QueryRow(ctx, getModelRouterAPIKeySpend, id)
+	var i GetModelRouterAPIKeySpendRow
+	err := row.Scan(&i.SpendCapUsdMicros, &i.SpentUsdMicros)
+	return i, err
+}
+
 const listModelRouterAPIKeysForInstallation = `-- name: ListModelRouterAPIKeysForInstallation :many
 SELECT id, installation_id, external_id, name, key_prefix, key_hash, key_suffix, last_used_at, created_at, deleted_at, created_by, spend_cap_usd_micros, spent_usd_micros
 FROM router.model_router_api_keys

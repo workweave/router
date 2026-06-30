@@ -76,9 +76,14 @@ ledger AS (
 key_spend AS (
     -- delta is negative on a real debit, so subtracting it adds the spend
     -- magnitude; zero on override/subscription pass-throughs leaves it flat.
+    -- Gated on ` + "`" + `updated` + "`" + ` producing a row: if the org balance row was missing
+    -- (the debit no-ops and the app sees ErrBalanceRowMissing) we must NOT bump
+    -- the key's lifetime spend, or a capped key could trip its cap with no
+    -- matching ledger debit.
     UPDATE router.model_router_api_keys
     SET spent_usd_micros = spent_usd_micros - $1::bigint
     WHERE id = $7::uuid
+      AND EXISTS (SELECT 1 FROM updated)
 )
 SELECT balance_after_micros FROM ledger
 `
@@ -145,9 +150,14 @@ type DebitOrgCreditsParams struct {
 //	key_spend AS (
 //	    -- delta is negative on a real debit, so subtracting it adds the spend
 //	    -- magnitude; zero on override/subscription pass-throughs leaves it flat.
+//	    -- Gated on `updated` producing a row: if the org balance row was missing
+//	    -- (the debit no-ops and the app sees ErrBalanceRowMissing) we must NOT bump
+//	    -- the key's lifetime spend, or a capped key could trip its cap with no
+//	    -- matching ledger debit.
 //	    UPDATE router.model_router_api_keys
 //	    SET spent_usd_micros = spent_usd_micros - $1::bigint
 //	    WHERE id = $7::uuid
+//	      AND EXISTS (SELECT 1 FROM updated)
 //	)
 //	SELECT balance_after_micros FROM ledger
 func (q *Queries) DebitOrgCredits(ctx context.Context, arg DebitOrgCreditsParams) (int64, error) {

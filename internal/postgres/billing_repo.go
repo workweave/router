@@ -7,6 +7,7 @@ import (
 	"workweave/router/internal/billing"
 	"workweave/router/internal/sqlc"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -70,6 +71,26 @@ func (r *BillingRepo) DebitInference(ctx context.Context, p billing.DebitParams)
 		return 0, err
 	}
 	return balanceAfter, nil
+}
+
+// GetAPIKeySpend reads a key's cap and spend-to-date fresh from Postgres.
+// Returns found=false (nil error) when no active key matches the id.
+func (r *BillingRepo) GetAPIKeySpend(ctx context.Context, apiKeyID string) (int64, *int64, bool, error) {
+	parsed, err := uuid.Parse(apiKeyID)
+	if err != nil {
+		// A malformed id can't match any row; treat as "no cap to enforce"
+		// rather than failing the request closed on a client-shaped value.
+		return 0, nil, false, nil
+	}
+	q := sqlc.New(r.tx)
+	row, err := q.GetModelRouterAPIKeySpend(ctx, parsed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil, false, nil
+		}
+		return 0, nil, false, err
+	}
+	return row.SpentUsdMicros, row.SpendCapUsdMicros, true, nil
 }
 
 // BillingTablesExist runs the boot-time health check. Returns true when

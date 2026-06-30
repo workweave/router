@@ -59,6 +59,27 @@ type CheckResult struct {
 	BalanceMicros int64
 }
 
+// APIKeySpendCapResult is the outcome of a preflight per-key spend-cap check.
+// Found is false when the key was deleted mid-request; CapMicros is nil for an
+// uncapped key. The middleware blocks when Found && CapMicros != nil &&
+// SpentMicros >= *CapMicros.
+type APIKeySpendCapResult struct {
+	Found       bool
+	SpentMicros int64
+	CapMicros   *int64
+}
+
+// CheckAPIKeySpendCap reads the key's cap and spend-to-date fresh from the repo
+// (not the auth cache) so a hot cached key cannot overrun its cap within the
+// cache TTL. Returns Found=false when the key no longer exists.
+func (s *Service) CheckAPIKeySpendCap(ctx context.Context, apiKeyID string) (APIKeySpendCapResult, error) {
+	spent, cap, found, err := s.repo.GetAPIKeySpend(ctx, apiKeyID)
+	if err != nil {
+		return APIKeySpendCapResult{}, err
+	}
+	return APIKeySpendCapResult{Found: found, SpentMicros: spent, CapMicros: cap}, nil
+}
+
 // CheckBalance reads the override flag and balance row. Returns
 // HasOverride=true and short-circuits the balance read when an override is
 // active. Caller (middleware) compares BalanceMicros against the

@@ -17,13 +17,6 @@ type APIKey struct {
 	CreatedAt      time.Time
 	DeletedAt      *time.Time
 	CreatedBy      *string
-	// SpendCapUsdMicros is the key's lifetime spend cap in USD micros. nil =
-	// uncapped. Enforced in managed mode: once SpentUsdMicros reaches the cap
-	// the key is rejected.
-	SpendCapUsdMicros *int64
-	// SpentUsdMicros is the key's cumulative lifetime spend in USD micros,
-	// bumped in the same transaction as each org debit.
-	SpentUsdMicros int64
 }
 
 type CreateAPIKeyParams struct {

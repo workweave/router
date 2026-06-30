@@ -50,12 +50,10 @@ func toAuthAPIKey(row sqlc.RouterModelRouterAPIKey) *auth.APIKey {
 		KeyPrefix:      row.KeyPrefix,
 		KeyHash:        row.KeyHash,
 		KeySuffix:      row.KeySuffix,
-		LastUsedAt:        timestampPtr(row.LastUsedAt),
-		CreatedAt:         timestampOrZero(row.CreatedAt),
-		DeletedAt:         timestampPtr(row.DeletedAt),
-		CreatedBy:         row.CreatedBy,
-		SpendCapUsdMicros: row.SpendCapUsdMicros,
-		SpentUsdMicros:    row.SpentUsdMicros,
+		LastUsedAt:     timestampPtr(row.LastUsedAt),
+		CreatedAt:      timestampOrZero(row.CreatedAt),
+		DeletedAt:      timestampPtr(row.DeletedAt),
+		CreatedBy:      row.CreatedBy,
 	}
 }
 

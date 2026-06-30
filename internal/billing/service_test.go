@@ -63,6 +63,10 @@ func (r *fakeRepo) DebitInference(_ context.Context, p billing.DebitParams) (int
 
 func (r *fakeRepo) BillingTablesExist(_ context.Context) (bool, error) { return true, nil }
 
+func (r *fakeRepo) GetAPIKeySpend(_ context.Context, _ string) (int64, *int64, bool, error) {
+	return 0, nil, false, nil
+}
+
 func TestCheckBalance_Override(t *testing.T) {
 	repo := &fakeRepo{hasOverride: true, balanceRowExists: true, balanceMicros: 5_000_000}
 	svc := billing.NewService(repo)

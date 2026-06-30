@@ -48,6 +48,17 @@ SET last_used_at = NOW()
 WHERE id = @id::uuid
   AND deleted_at IS NULL;
 
+-- Fresh per-request read of a key's lifetime spend cap and spend-to-date for
+-- the spend-cap gate. Read straight from Postgres (not the auth cache) so a
+-- hot cached key cannot overrun its cap within the cache TTL window — mirrors
+-- the per-request balance read in WithBalanceCheck. Returns sql.ErrNoRows when
+-- the key is missing/soft-deleted.
+-- name: GetModelRouterAPIKeySpend :one
+SELECT spend_cap_usd_micros, spent_usd_micros
+FROM router.model_router_api_keys
+WHERE id = @id::uuid
+  AND deleted_at IS NULL;
+
 -- Soft-deletes a router API key. Cross-tenant safe via installation_id predicate.
 -- name: SoftDeleteModelRouterAPIKey :exec
 UPDATE router.model_router_api_keys
