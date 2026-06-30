@@ -97,6 +97,12 @@ func (e *Explorer) Route(ctx context.Context, req router.Request) (router.Decisi
 	// only on a real switch keeps argmax-cache reuse intact when we draw it.
 	if pick.model != argmaxModel && dec.Metadata != nil {
 		dec.Metadata.EffectiveKnobsHash = mixModel(dec.Metadata.EffectiveKnobsHash, pick.model)
+		// Only a real switch can collapse the band pair: the scorer's runner-up
+		// was computed against the argmax, so it may equal the now-served peer.
+		// Recompute it against the served model. When we draw the argmax the
+		// scorer's pair is already distinct, so leave its metadata untouched
+		// rather than overwrite it with our own tie-break.
+		e.repairBandPair(&dec.Metadata.PairedModel, &dec.Metadata.PairedProvider, &dec.Metadata.PairedScore, dec, pick.model)
 	}
 	return dec, nil
 }
@@ -199,13 +205,6 @@ func (e *Explorer) annotate(dec *router.Decision, model, provider string, bandSi
 		if s, ok := dec.Metadata.CandidateScores[model]; ok {
 			dec.Metadata.ChosenScore = s
 		}
-		// Exploration just rewrote the served model, but the scorer computed the
-		// session-pin band pair's runner-up against the pre-exploration argmax.
-		// If we served that runner-up, Model == PairedModel and the first pin
-		// would freeze a collapsed pair, leaving a later per-turn swap policy no
-		// distinct second model. Recompute the runner-up against the new served
-		// model so the pair stays distinct.
-		e.repairBandPair(&dec.Metadata.PairedModel, &dec.Metadata.PairedProvider, &dec.Metadata.PairedScore, *dec, model)
 	}
 }
 

@@ -169,6 +169,37 @@ func TestRoute_RepairsBandPairWhenServingRunnerUp(t *testing.T) {
 	}
 }
 
+func TestRoute_DrawingArgmaxPreservesScorerPair(t *testing.T) {
+	// Band = [haiku, opus, sonnet]; force index 1 -> opus, the argmax. Since the
+	// served model is unchanged, the scorer's runner-up metadata (here haiku,
+	// deliberately not what our own tie-break would pick) must be left intact
+	// rather than recomputed.
+	scores := map[string]float32{"haiku": 0.82, "opus": 0.90, "sonnet": 0.85}
+	inner := clusterDecision(scores, "opus", "anthropic")
+	inner.Metadata.PairedModel = "haiku"
+	inner.Metadata.PairedProvider = "anthropic"
+	inner.Metadata.PairedScore = 0.82
+	e := New(&fakeRouter{dec: inner}, staticProvider(map[string]string{
+		"opus":   "anthropic",
+		"sonnet": "anthropic",
+		"haiku":  "anthropic",
+	}), 0.1)
+	withIntn(e, 1)
+	dec, err := e.Route(context.Background(), router.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Model != "opus" {
+		t.Fatalf("expected to draw the argmax opus, got %q", dec.Model)
+	}
+	if dec.Metadata.PairedModel != "haiku" {
+		t.Fatalf("argmax draw must preserve the scorer's runner-up haiku, got %q", dec.Metadata.PairedModel)
+	}
+	if dec.Metadata.PairedScore != 0.82 {
+		t.Fatalf("argmax draw must preserve the scorer's paired score, got %v", dec.Metadata.PairedScore)
+	}
+}
+
 func TestRoute_UnknownProviderFallsBackToArgmax(t *testing.T) {
 	scores := map[string]float32{"haiku": 0.90, "opus": 0.88}
 	inner := clusterDecision(scores, "haiku", "anthropic")
