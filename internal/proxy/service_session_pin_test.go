@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -329,7 +330,7 @@ func TestService_HardPin_Compaction_ByokOnly_UsesRequestResolver(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
 
-	resolver := func(enabled map[string]struct{}) (string, string, bool) {
+	resolver := func(enabled, _ map[string]struct{}) (string, string, bool) {
 		if _, ok := enabled[providers.ProviderAnthropic]; ok {
 			return providers.ProviderAnthropic, "claude-haiku-anthropic-byok", true
 		}
@@ -369,7 +370,7 @@ func TestService_HardPin_Compaction_ByokOnly_NoEligibleProviderErrors(t *testing
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
 
-	resolver := func(enabled map[string]struct{}) (string, string, bool) {
+	resolver := func(enabled, _ map[string]struct{}) (string, string, bool) {
 		if _, ok := enabled[providers.ProviderAnthropic]; ok {
 			return providers.ProviderAnthropic, "claude-haiku", true
 		}
@@ -390,6 +391,65 @@ func TestService_HardPin_Compaction_ByokOnly_NoEligibleProviderErrors(t *testing
 	require.Error(t, err, "hard-pin with no eligible provider must surface an error, not silently dispatch")
 	assert.ErrorIs(t, err, cluster.ErrClusterUnavailable,
 		"error must be ErrClusterUnavailable so handlers map it to HTTP 503")
+}
+
+// classifierBody is a canonical Classifier-shaped turn: small max_tokens,
+// no tools, one short message. DetectFromEnvelope hard-pins this turn type,
+// bypassing the scorer (the only component that otherwise applies
+// excluded_models), so it exercises the exclusion-on-hard-pin path.
+const classifierBody = `{"model":"claude-haiku-4-5","max_tokens":5,"messages":[{"role":"user","content":"hello"}]}`
+
+// Regression guard: an installation's excluded_models must be honored on the
+// hard-pin (title-gen/classifier/probe) tier. Prod symptom: an installation
+// that excluded gemini-3.1-flash-lite-preview still had ALL its utility
+// traffic routed to it because the hard-pin path picked a model without
+// consulting req.ExcludedModels. The resolver now receives the deny set and
+// must skip the excluded model in favor of the next allowed candidate.
+func TestService_HardPin_Classifier_AppliesExcludedModels(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
+
+	const excludedModel = "gemini-3.1-flash-lite-preview"
+	const allowedFallback = "claude-haiku-4-5"
+
+	// Mimics the production-wired resolver (cluster.FastestModelInSet): the
+	// fastest candidate is the excluded gemini model, but when it lands in the
+	// deny set the resolver must fall through to the next allowed candidate.
+	resolver := func(enabled, denySet map[string]struct{}) (string, string, bool) {
+		if _, denied := denySet[excludedModel]; !denied {
+			return providers.ProviderGoogle, excludedModel, true
+		}
+		return providers.ProviderAnthropic, allowedFallback, true
+	}
+
+	// Both upstreams answer 200 so the served model reflects the hard-pin
+	// decision itself, not a failover away from an empty/erroring upstream.
+	okResp := func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`)
+	}
+	providerMap := map[string]providers.Client{
+		providers.ProviderAnthropic: &fakeProvider{proxyResponse: okResp},
+		providers.ProviderGoogle:    &fakeProvider{proxyResponse: okResp},
+	}
+	svc := proxy.NewService(
+		fr, providerMap, nil, false, nil, store, false,
+		providers.ProviderGoogle, excludedModel, // boot-time pin is the excluded model
+		nil,
+	).WithHardPinResolver(resolver)
+
+	ctx := context.WithValue(authedCtx(uuid.New().String()),
+		proxy.InstallationExcludedModelsContextKey{}, []string{excludedModel})
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(classifierBody), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls, "classifier must bypass the cluster scorer")
+	assert.Equal(t, allowedFallback, rec.Header().Get(proxy.HeaderRouterModel),
+		"hard-pin must skip the excluded model and serve an allowed candidate")
+	assert.NotEqual(t, excludedModel, rec.Header().Get(proxy.HeaderRouterModel),
+		"excluded model must never be served on the hard-pin tier")
 }
 
 func TestService_HardPin_CompactionAlwaysRoutesToHaiku(t *testing.T) {

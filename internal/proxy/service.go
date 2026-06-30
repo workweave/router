@@ -63,10 +63,14 @@ type Service struct {
 	hardPinProvider string
 	hardPinModel    string
 	// hardPinResolver, when set, overrides boot-time hardPin{Provider,Model}
-	// per-request. Used in byokOnly deployments where the registered cheapest
-	// model is unsafe — the installation may only BYOK a subset of providers.
-	// Returns (provider, model, ok); ok=false signals no eligible provider.
-	hardPinResolver func(enabled map[string]struct{}) (provider, model string, ok bool)
+	// per-request. Used both to keep byokOnly deployments on a provider the
+	// request can authenticate to (the registered cheapest model is unsafe when
+	// the installation only BYOK'd a subset of providers) and to honor the
+	// installation's excluded_models on the hard-pin tier: denySet carries
+	// req.ExcludedModels so an excluded model is skipped here, just as the
+	// scorer skips it on the main-loop path. Returns (provider, model, ok);
+	// ok=false signals no eligible provider.
+	hardPinResolver func(enabled, denySet map[string]struct{}) (provider, model string, ok bool)
 	// telemetry is an optional repository for persisting per-request telemetry.
 	telemetry TelemetryRepository
 	// captureMode controls whether high-fidelity `router.call` OTLP log
@@ -952,7 +956,7 @@ func (s *Service) WithAvailableModels(models map[string]struct{}) *Service {
 // WithHardPinResolver installs a per-request hard-pin resolver. nil
 // preserves the boot-time hardPin{Provider,Model} for every request.
 // ok=false signals no eligible provider, surfacing ErrClusterUnavailable.
-func (s *Service) WithHardPinResolver(resolver func(enabled map[string]struct{}) (provider, model string, ok bool)) *Service {
+func (s *Service) WithHardPinResolver(resolver func(enabled, denySet map[string]struct{}) (provider, model string, ok bool)) *Service {
 	s.hardPinResolver = resolver
 	return s
 }

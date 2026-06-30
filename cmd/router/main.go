@@ -504,28 +504,44 @@ func main() {
 	}
 	logger.Info("Hard-pin model resolved", "provider", hardPinProvider, "model", hardPinModel, "byok_only", byokOnly)
 
-	// Per-request hard-pin resolver for byokOnly deployments. Loads the
-	// default cluster bundle once and closes over its metadata/registry; the
-	// resolver is then called from the proxy with the request's enabled-
-	// providers set so compaction lands on the cheapest model the request
-	// can actually authenticate to. Selfhosted mode leaves the resolver nil
-	// — its boot-time hardPin{Provider,Model} is already correct.
-	var hardPinResolver func(map[string]struct{}) (string, string, bool)
-	if byokOnly {
+	// Per-request hard-pin resolver. Loads the default cluster bundle once and
+	// closes over its metadata/registry; the resolver is then called from the
+	// proxy with the request's enabled-providers set and the installation's
+	// excluded_models deny set. It serves two purposes:
+	//   - byokOnly: the boot-time pin was computed over every registered
+	//     provider, but the request may only BYOK a subset; resolving per
+	//     request keeps the hard-pin on a provider the request can
+	//     authenticate to.
+	//   - all modes: the hard-pin tier bypasses the scorer, which is the only
+	//     component that applies excluded_models. Passing the deny set here
+	//     skips an excluded model on the title-gen/classifier/probe path, just
+	//     as the scorer does on the main-loop path.
+	// If the bundle fails to load the resolver stays nil and the proxy falls
+	// back to the boot-time hardPin{Provider,Model}.
+	//
+	// An explicit ROUTER_HARD_PIN_MODEL operator override is absolute by design
+	// (it also bypasses the tier ceiling downstream); we do NOT wire the
+	// resolver in that case so the operator's chosen model is never silently
+	// rewritten. excluded_models then can't redirect it, but an operator pin is
+	// a deliberate opt-in — the proxy logs if it collides with the exclude list.
+	var hardPinResolver func(enabled, denySet map[string]struct{}) (string, string, bool)
+	if config.GetOr("ROUTER_HARD_PIN_MODEL", "") == "" {
 		reqVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
 		if version, vErr := cluster.ResolveVersion(reqVersion); vErr == nil {
 			if bundle, bErr := cluster.LoadBundle(version); bErr == nil {
 				meta, registry := bundle.Metadata, bundle.Registry
-				hardPinResolver = func(enabled map[string]struct{}) (string, string, bool) {
-					return cluster.FastestModel(meta, registry, enabled)
+				hardPinResolver = func(enabled, denySet map[string]struct{}) (string, string, bool) {
+					return cluster.FastestModelInSet(meta, registry, enabled, denySet, nil)
 				}
-				logger.Info("Hard-pin resolver wired for byokOnly mode (per-request fastest model from cluster bundle)", "version", version)
+				logger.Info("Hard-pin resolver wired (per-request fastest model from cluster bundle, applies excluded_models)", "version", version, "byok_only", byokOnly)
 			} else {
-				logger.Warn("Hard-pin resolver disabled: cluster bundle failed to load; byokOnly hard-pin will fall back to boot-time defaults", "err", bErr, "version", version)
+				logger.Warn("Hard-pin resolver disabled: cluster bundle failed to load; hard-pin will fall back to boot-time defaults and cannot apply excluded_models", "err", bErr, "version", version)
 			}
 		} else {
-			logger.Warn("Hard-pin resolver disabled: could not resolve cluster version; byokOnly hard-pin will fall back to boot-time defaults", "err", vErr)
+			logger.Warn("Hard-pin resolver disabled: could not resolve cluster version; hard-pin will fall back to boot-time defaults and cannot apply excluded_models", "err", vErr)
 		}
+	} else {
+		logger.Info("Hard-pin resolver not wired: ROUTER_HARD_PIN_MODEL operator override is set and absolute by design", "model", hardPinModel)
 	}
 
 	// Default-eligible set for proxy.Service: env-keyed providers only.

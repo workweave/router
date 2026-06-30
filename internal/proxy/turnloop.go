@@ -183,9 +183,14 @@ func (s *Service) runTurnLoop(
 		// computed over every registered provider, but the request may
 		// only have BYOK credentials for a subset. Resolve per-request
 		// against the request's enabled-providers set so compaction
-		// stays on a provider the request can authenticate to.
+		// stays on a provider the request can authenticate to. The
+		// resolver also applies the installation's excluded_models
+		// (req.ExcludedModels) as a deny set — the hard-pin path bypasses
+		// the scorer, which is otherwise the only place exclusions are
+		// honored, so without this an excluded model would still serve
+		// all title-gen/classifier/probe traffic.
 		if s.hardPinResolver != nil {
-			p, m, ok := s.hardPinResolver(req.EnabledProviders)
+			p, m, ok := s.hardPinResolver(req.EnabledProviders, req.ExcludedModels)
 			if !ok {
 				log.Warn(
 					"Hard-pin: no eligible provider for request; returning ErrClusterUnavailable",
@@ -195,6 +200,17 @@ func (s *Service) runTurnLoop(
 				return res, fmt.Errorf("hard-pin: no eligible provider for %s: %w", res.TurnType, cluster.ErrClusterUnavailable)
 			}
 			provider, model = p, m
+		} else if _, excluded := req.ExcludedModels[model]; excluded {
+			// No resolver wired (bundle load failed at boot) but the
+			// static boot-time pin is on the installation's exclude
+			// list. We have no cluster bundle here to pick an allowed
+			// alternative, so preserve current behavior and serve the
+			// pin, but log so the misroute is visible in telemetry.
+			log.Warn(
+				"Hard-pin: boot-time pin is in excluded_models but no resolver is wired to pick an alternative; serving pin anyway",
+				"turn_type", string(res.TurnType),
+				"model", model,
+			)
 		}
 		// Operator hard-pins bypass the tier ceiling by design — the
 		// ROUTER_HARD_PIN_MODEL env var is an explicit operator opt-in
