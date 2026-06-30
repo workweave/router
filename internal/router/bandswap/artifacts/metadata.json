@@ -1,9 +1,10 @@
 {
-  "served_artifact": "action_clf_logreg_embonly.json",
+  "served_artifact": "action_clf_lgbm_embonly.txt",
+  "served_engine": "lightgbm (pure-Go leaves reader)",
   "feature_layout": {
     "embedding_dim": 768,
     "embedding": "jina-embeddings-v2-base-code INT8, current user message, tail 1024 chars, mean-pool + L2",
-    "served_features": "embedding[768] only (standardize -> multinomial-logreg -> argmax -> band)",
+    "served_features": "embedding[768] only (LightGBM multiclass -> argmax -> band)",
     "offline_scalar_names": [
       "turn_count",
       "log1p_turn_count",
@@ -20,6 +21,14 @@
     "tool_call",
     "confirmation",
     "refinement"
+  ],
+  "classes_order": [
+    "confirmation",
+    "learning",
+    "planning",
+    "providing_info",
+    "refinement",
+    "tool_call"
   ],
   "band_map": {
     "planning": "large",

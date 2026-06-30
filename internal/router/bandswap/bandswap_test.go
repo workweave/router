@@ -6,10 +6,11 @@ import (
 	"testing"
 )
 
-// TestParityWithTrainedModel asserts the Go inference reproduces the exported
-// model's predictions on real embeddings. testdata/parity_cases.json is
-// generated from dataset.npz + the exported artifact (standardize + matmul +
-// argmax) — if Go drifts from the trained head, this fails.
+// TestParityWithTrainedModel asserts the Go `leaves` inference reproduces the
+// exported LightGBM booster's predictions on real embeddings.
+// testdata/parity_cases.json is generated from dataset.npz + the exported
+// booster (multiclass predict -> argmax over class order) — if Go drifts from
+// the trained head, this fails.
 func TestParityWithTrainedModel(t *testing.T) {
 	clf, err := New()
 	if err != nil {
