@@ -112,6 +112,35 @@ func TestProxy_DevModeEnvKeyUsedWhenNoCredentialsOnContext(t *testing.T) {
 		"when no credentials are on context (dev mode / no BYOK), the deployment env key must be sent to OpenRouter")
 }
 
+func TestProxy_RewritesModelWithModelIDMap(t *testing.T) {
+	var gotBody map[string]any
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		require.NoError(t, json.Unmarshal(body, &gotBody))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-alias","object":"chat.completion"}`))
+	}))
+	defer upstream.Close()
+
+	c := openaicompat.NewClientWithModelIDMap("test-key", upstream.URL+"/api/v1", map[string]string{
+		"deepseek/deepseek-v4-flash": "deepseek-v4-flash",
+	})
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	prep := providers.PreparedRequest{
+		Body:    []byte(`{"model":"deepseek/deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`),
+		Headers: make(http.Header),
+	}
+
+	err := c.Proxy(context.Background(), router.Decision{Model: "deepseek/deepseek-v4-flash"}, prep, rec, clientReq)
+
+	require.NoError(t, err)
+	assert.Equal(t, "deepseek-v4-flash", gotBody["model"])
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
 func TestPassthrough_StripsInboundV1Prefix(t *testing.T) {
 	var gotPath string
 
