@@ -120,3 +120,50 @@ func TestSessionAffinity_EmptyIsNoOp(t *testing.T) {
 	_, hasBody := promptCacheKey(t, out.Body)
 	assert.False(t, hasBody)
 }
+
+// Without a session key, an OpenAI cross-format route still carries a
+// prompt_cache_key — a stable hash of the cacheable prefix — so OpenAI's
+// prompt caching engages instead of re-billing the full prefix every turn.
+func TestSessionAffinity_OpenAIFallsBackToStablePrefixKey(t *testing.T) {
+	src := []byte(`{"model":"claude-opus-4-7","system":"you are a helpful assistant","tools":[{"name":"read","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)
+
+	prepare := func(t *testing.T) string {
+		env, err := translate.ParseAnthropic(src)
+		require.NoError(t, err)
+		out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+			TargetModel:    "gpt-5.5",
+			TargetProvider: providers.ProviderOpenAI,
+		})
+		require.NoError(t, err)
+		v, ok := promptCacheKey(t, out.Body)
+		require.True(t, ok, "OpenAI must carry a prompt_cache_key even without a session key")
+		assert.NotEmpty(t, v)
+		return v
+	}
+
+	first := prepare(t)
+	second := prepare(t)
+	assert.Equal(t, first, second, "fallback prompt_cache_key must be stable for the same prefix")
+}
+
+// A different cacheable prefix (different system + tools) yields a different
+// fallback key, so unrelated conversations don't share one cache bucket.
+func TestSessionAffinity_OpenAIFallbackKeyVariesByPrefix(t *testing.T) {
+	keyFor := func(t *testing.T, system string) string {
+		src := []byte(`{"model":"claude-opus-4-7","system":` + system + `,"messages":[{"role":"user","content":"hi"}],"max_tokens":256}`)
+		env, err := translate.ParseAnthropic(src)
+		require.NoError(t, err)
+		out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+			TargetModel:    "gpt-5.5",
+			TargetProvider: providers.ProviderOpenAI,
+		})
+		require.NoError(t, err)
+		v, ok := promptCacheKey(t, out.Body)
+		require.True(t, ok)
+		return v
+	}
+
+	a := keyFor(t, `"prompt A"`)
+	b := keyFor(t, `"prompt B"`)
+	assert.NotEqual(t, a, b, "different cacheable prefixes must map to different cache keys")
+}
