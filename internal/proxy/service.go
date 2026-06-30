@@ -2244,12 +2244,22 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		if subEmitErr != nil {
 			log.Error("Subscription failover: emit Anthropic body failed; surfacing original error", "err", subEmitErr, "model", decision.Model)
 			flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
+		} else if subBindings := s.resolveBindingsForDispatch(subCtx, decision); len(subBindings) == 0 {
+			// The suppressed context resolved to no usable Anthropic binding, so
+			// dispatchWithFallback would only return a synthetic 502 that masks the
+			// real rate-limit/timeout. Surface the original retryable error instead
+			// — the client should see the actual throttle, not a bad-gateway. No
+			// Weave key was attempted, so attribution stays on the subscription.
+			log.Warn("Subscription failover: no fallback Anthropic binding available; surfacing original error",
+				"model", decision.Model,
+				"err", proxyErr,
+				"upstream_status", upstreamStatus(proxyErr))
+			flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
 		} else {
 			log.Warn("Subscription failover: subscription throttled/timed out, retrying requested model on Weave key",
 				"model", decision.Model,
 				"err", proxyErr,
 				"upstream_status", upstreamStatus(proxyErr))
-			subBindings := s.resolveBindingsForDispatch(subCtx, decision)
 			subAttempt := s.anthropicNativeAttempt(env, r, subPrep, sink, preludeBuf, marker, setExtractor)
 			crossFormat = false
 			respSummary = translate.ResponseSummary{}
