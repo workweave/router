@@ -41,10 +41,11 @@ type Pin struct {
 	Model          string
 	// PairedProvider / PairedModel are the other half of the band pair the
 	// scorer picks (the runner-up model and its provider). Upsert refreshes them
-	// whenever a genuine scorer re-run supplies a fresh runner-up (first turn,
-	// switch, expired-pin re-route) and preserves them on sticky refreshes and
-	// reconstructed re-anchors, which pass an empty pair — so the stored pair
-	// always matches the live routing decision and never collapses onto Model.
+	// on a genuine scorer re-run (first turn, switch, expired-pin re-route),
+	// preserves them on a same-model sticky refresh or re-anchor (which pass an
+	// empty pair), and clears them when the pinned model changes without a fresh
+	// pair (force-model, loop-break, eviction) — so the stored pair always
+	// matches the live routing decision and never collapses onto Model.
 	// PairedModel is empty for pins created outside the scorer path (force-model,
 	// loop-break) or when only one model was eligible. A later per-turn policy
 	// reads them to swap between {Model, PairedModel} without re-running the

@@ -226,18 +226,27 @@ ON CONFLICT (session_key, role) DO UPDATE SET
   turn_count      = router.session_pins.turn_count + 1,
   pinned_until    = EXCLUDED.pinned_until,
   last_seen_at    = CURRENT_TIMESTAMP,
-  -- Refresh the band pair only when a fresh scorer decision supplies one
-  -- (non-empty); preserve the stored pair on sticky refreshes and reconstructed
-  -- re-anchors, which carry an empty pair.
+  -- Band pair maintenance, in priority order:
+  --   1. A fresh scorer decision supplies a non-empty pair -> take it.
+  --   2. Empty incoming pair but the pinned model is unchanged (sticky refresh,
+  --      reconstructed re-anchor of the same model) -> preserve the stored pair.
+  --   3. Empty incoming pair and the pinned model changed (force-model,
+  --      loop-escalation, eviction -- non-scorer writes) -> clear the pair, so a
+  --      model change never inherits a stale runner-up or collapses pinned_model
+  --      and paired_model onto the same slug.
   paired_provider = CASE
     WHEN EXCLUDED.paired_model <> ''
       THEN EXCLUDED.paired_provider
-    ELSE router.session_pins.paired_provider
+    WHEN EXCLUDED.pinned_model = router.session_pins.pinned_model
+      THEN router.session_pins.paired_provider
+    ELSE ''
   END,
   paired_model = CASE
     WHEN EXCLUDED.paired_model <> ''
       THEN EXCLUDED.paired_model
-    ELSE router.session_pins.paired_model
+    WHEN EXCLUDED.pinned_model = router.session_pins.pinned_model
+      THEN router.session_pins.paired_model
+    ELSE ''
   END,
   consecutive_upstream_errors = CASE
     WHEN router.session_pins.pinned_model = EXCLUDED.pinned_model
@@ -276,14 +285,15 @@ type UpsertSessionPinParams struct {
 // pin-expiry writes, which set pinned_model to the empty string.
 //
 // paired_provider / paired_model hold the runner-up half of the band pair the
-// scorer picks. They refresh on the conflict update only when the incoming
-// value is non-empty -- i.e. when a genuine scorer re-run (first turn, switch,
-// expired-pin re-route) supplies a fresh runner-up -- and are otherwise
-// preserved. This keeps the pair current with the live routing decision (a
-// switch updates pinned_model and the runner-up together, so the two never
-// collapse onto the same slug) while a plain sticky refresh or a reconstructed
-// re-anchor (both carry an empty pair) leaves the stored pair untouched. A
-// later per-turn swap policy reads the pair that matches the active decision.
+// scorer picks. On the conflict update they refresh to a fresh scorer runner-up
+// (non-empty incoming pair), are preserved when the pinned model is unchanged
+// (sticky refresh / same-model re-anchor carry an empty pair), and are cleared
+// when the pinned model changes without a fresh pair (force-model,
+// loop-escalation, eviction -- non-scorer writes). This keeps the stored pair
+// consistent with the live decision: it tracks genuine re-routes, never
+// inherits a stale runner-up across a non-scorer model change, and never
+// collapses pinned_model and paired_model onto the same slug. A later per-turn
+// swap policy reads the pair that matches the active decision.
 //
 //	INSERT INTO router.session_pins (
 //	  session_key, role, installation_id, pinned_provider,
@@ -302,18 +312,27 @@ type UpsertSessionPinParams struct {
 //	  turn_count      = router.session_pins.turn_count + 1,
 //	  pinned_until    = EXCLUDED.pinned_until,
 //	  last_seen_at    = CURRENT_TIMESTAMP,
-//	  -- Refresh the band pair only when a fresh scorer decision supplies one
-//	  -- (non-empty); preserve the stored pair on sticky refreshes and reconstructed
-//	  -- re-anchors, which carry an empty pair.
+//	  -- Band pair maintenance, in priority order:
+//	  --   1. A fresh scorer decision supplies a non-empty pair -> take it.
+//	  --   2. Empty incoming pair but the pinned model is unchanged (sticky refresh,
+//	  --      reconstructed re-anchor of the same model) -> preserve the stored pair.
+//	  --   3. Empty incoming pair and the pinned model changed (force-model,
+//	  --      loop-escalation, eviction -- non-scorer writes) -> clear the pair, so a
+//	  --      model change never inherits a stale runner-up or collapses pinned_model
+//	  --      and paired_model onto the same slug.
 //	  paired_provider = CASE
 //	    WHEN EXCLUDED.paired_model <> ''
 //	      THEN EXCLUDED.paired_provider
-//	    ELSE router.session_pins.paired_provider
+//	    WHEN EXCLUDED.pinned_model = router.session_pins.pinned_model
+//	      THEN router.session_pins.paired_provider
+//	    ELSE ''
 //	  END,
 //	  paired_model = CASE
 //	    WHEN EXCLUDED.paired_model <> ''
 //	      THEN EXCLUDED.paired_model
-//	    ELSE router.session_pins.paired_model
+//	    WHEN EXCLUDED.pinned_model = router.session_pins.pinned_model
+//	      THEN router.session_pins.paired_model
+//	    ELSE ''
 //	  END,
 //	  consecutive_upstream_errors = CASE
 //	    WHEN router.session_pins.pinned_model = EXCLUDED.pinned_model
