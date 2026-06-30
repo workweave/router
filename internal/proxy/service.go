@@ -2111,6 +2111,33 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		baselineModel != decision.Model &&
 		baselineKnown && baselineCatalog.PrimaryProvider() == providers.ProviderAnthropic
 
+	// Subscription-credit failover eligibility. When a Claude turn is served on
+	// the caller's own subscription (sk-ant-oat) and the upstream returns a
+	// retryable 429 / header-timeout, the request is pinned to a single Anthropic
+	// binding (shouldFailover is false while a subscription credential rides on
+	// ctx) so dispatchWithFallback has nowhere to fail over to — the raw 429 /
+	// ~90s hang reaches the client. This is the gap behind the prod instability:
+	// the observer-driven exhaustion suppression (claudeSubscriptionExhausted ->
+	// withSuppressedClaudeSubscription, above) only fires when a PRIOR snapshot
+	// already read >= exhaustedFraction, but the binding 429 IS usually the first
+	// signal the window bound, so the stale snapshot still reads "slack" and the
+	// spent token is sent anyway.
+	//
+	// When a non-subscription Anthropic key is configured (per-request BYOK, or
+	// the deployment's own ANTHROPIC_API_KEY), retry the SAME requested model on
+	// that key exactly once. This is the deliberate product decision documented in
+	// the PR: a retryable 429 on a customer's subscription is treated as "serve
+	// this turn on the Weave key" (billed at full cost, not the subscription rate)
+	// rather than surface the throttle — the same fallback claudeSubscriptionExhausted
+	// already takes pre-emptively, just driven by the live error instead of a stale
+	// snapshot. Eligible only pre-commit (nothing on the wire), on a subscription-
+	// served Anthropic turn, with a fallback key available. Computed pre-dispatch
+	// so the primary dispatch defers its exhaustion flush to us. Mutually exclusive
+	// with baselineEligible (which requires a non-Anthropic routed provider).
+	subscriptionRetryEligible := decision.Provider == providers.ProviderAnthropic &&
+		servedOnSubscription(ctx) &&
+		s.anthropicFallbackKeyAvailable(ctx)
+
 	primaryProvider := decision.Provider
 	var winnerIdx int
 	winnerIdx, proxyErr = s.dispatchWithFallback(ctx, failoverInputs{
@@ -2122,7 +2149,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		bindings:               bindings,
 		attempt:                attempt,
 		flushErr:               flushUpstreamErrorAsAnthropic,
-		deferFlushOnExhaustion: baselineEligible,
+		deferFlushOnExhaustion: baselineEligible || subscriptionRetryEligible,
 	})
 
 	// The routed model's bindings all failed with a fault a different model
@@ -2193,6 +2220,61 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
 	}
 
+	// Subscription-credit failover: the requested Anthropic model was served on
+	// the caller's subscription and the upstream returned a retryable fault
+	// (429 weekly/5h-limit, or a ~90s header-timeout) before any byte reached
+	// the client. Suppress the subscription token and re-dispatch the SAME model
+	// once on the Weave / BYOK Anthropic key so the turn still completes instead
+	// of surfacing the throttle raw. Bounded to a single extra attempt (no loop),
+	// gated on pre-commit (!preludeBuf.Committed()) and on the error being
+	// genuinely retryable — a committed stream or a 4xx the client owns is never
+	// retried. Skipped when baseline failover already ran (mutually exclusive:
+	// baseline requires a non-Anthropic routed provider).
+	subscriptionFailoverUsed := false
+	subscriptionRetryRan := false
+	if subscriptionRetryEligible && !baselineAttempted && proxyErr != nil &&
+		!preludeBuf.Committed() && providers.IsRetryable(proxyErr) {
+		subscriptionRetryRan = true
+		subCtx := withSuppressedClaudeSubscription(ctx)
+		subCtx = resolveAndInjectCredentials(subCtx, providers.ProviderAnthropic, r.Header)
+		// Re-emit the body against the suppressed-subscription context. The model
+		// is unchanged, so opts/prep are identical to the primary attempt; rebuild
+		// the prep so the retry gets a pristine PreparedRequest.
+		subPrep, subEmitErr := env.PrepareAnthropic(r.Header, opts)
+		if subEmitErr != nil {
+			log.Error("Subscription failover: emit Anthropic body failed; surfacing original error", "err", subEmitErr, "model", decision.Model)
+			flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
+		} else {
+			log.Warn("Subscription failover: subscription throttled/timed out, retrying requested model on Weave key",
+				"model", decision.Model,
+				"err", proxyErr,
+				"upstream_status", upstreamStatus(proxyErr))
+			subBindings := s.resolveBindingsForDispatch(subCtx, decision)
+			subAttempt := s.anthropicNativeAttempt(env, r, subPrep, sink, preludeBuf, marker, setExtractor)
+			crossFormat = false
+			respSummary = translate.ResponseSummary{}
+			reqStats = providers.RequestMutationStats{}
+			logUpstreamBody(log, routeRes.SessionKey, decision, feats, subPrep.Body)
+			winnerIdx, proxyErr = s.dispatchWithFallback(subCtx, failoverInputs{
+				w:               contentSink,
+				buf:             preludeBuf,
+				initialDecision: decision,
+				bindings:        subBindings,
+				attempt:         subAttempt,
+				flushErr:        flushUpstreamErrorAsAnthropic,
+			})
+			bindings = subBindings
+			subscriptionFailoverUsed = proxyErr == nil
+		}
+	}
+	// We deferred the primary's exhaustion flush for the subscription retry but
+	// the retry didn't run (response committed mid-stream, or a non-retryable
+	// error). Surface the original upstream error envelope now so a deferred
+	// flush is never silently dropped.
+	if subscriptionRetryEligible && !baselineAttempted && !subscriptionRetryRan && proxyErr != nil && !preludeBuf.Committed() {
+		flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
+	}
+
 	finalProvider := primaryProvider
 	if winnerIdx >= 0 && winnerIdx < len(bindings) {
 		finalProvider = bindings[winnerIdx].Provider
@@ -2208,7 +2290,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Re-resolve credentials for the binding that actually served the turn.
 	// During failover, each attempt gets its own per-attempt context with
 	// potentially different credentials. Update ctx so credentialKeyParts
-	// reads the correct key parts for telemetry.
+	// reads the correct key parts for telemetry. When the subscription failover
+	// served the turn on the Weave / BYOK key, carry the suppression forward so
+	// cost.subscription_served + the billing key reflect the key that actually
+	// paid (full cost), not the spent subscription that 429'd.
+	if subscriptionRetryRan {
+		ctx = withSuppressedClaudeSubscription(ctx)
+	}
 	ctx = resolveAndInjectCredentials(ctx, finalProvider, r.Header)
 
 	// Re-resolve actual pricing for the binding that actually served the
@@ -2269,8 +2357,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		String("dispatch.primary_provider", primaryProvider).
 		String("dispatch.final_provider", finalProvider).
 		Int64("dispatch.fallback_attempts", int64(winnerIdx)).
-		Bool("dispatch.failover_used", finalProvider != primaryProvider).
-		Bool("dispatch.baseline_failover", baselineFailoverUsed)
+		Bool("dispatch.failover_used", finalProvider != primaryProvider || subscriptionFailoverUsed).
+		Bool("dispatch.baseline_failover", baselineFailoverUsed).
+		Bool("dispatch.subscription_failover", subscriptionFailoverUsed)
 	applyPlannerAttrs(upstreamBuilder, routeRes)
 	addTimingAttrs(ctx, upstreamBuilder)
 
@@ -2440,7 +2529,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		)
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "gemini_validated_tool_mode", reqStats.GeminiValidatedToolMode, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
+	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider || subscriptionFailoverUsed, "subscription_failover", subscriptionFailoverUsed, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "gemini_validated_tool_mode", reqStats.GeminiValidatedToolMode, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
 	return proxyErr
 }
 

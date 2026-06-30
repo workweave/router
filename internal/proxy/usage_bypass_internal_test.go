@@ -167,3 +167,45 @@ func TestBypass_LocalPrepError_PropagatesToClient(t *testing.T) {
 	require.Error(t, err, "provider-not-configured must surface as a real error")
 	assert.NotErrorIs(t, err, errBypassRetryable, "local prep errors must not trigger reroute — the client must see them")
 }
+
+// subscriptionCtx returns a ctx carrying a Claude subscription token (as the
+// auth middleware would stash it from X-Weave-Anthropic-Subscription) plus a
+// non-empty installation id so resolveAndInjectCredentials takes the
+// router-keyed subscription-first branch.
+func subscriptionCtx() context.Context {
+	ctx := context.WithValue(context.Background(), AnthropicSubscriptionContextKey{}, "sk-ant-oat01-test-subscription-token")
+	return context.WithValue(ctx, InstallationIDContextKey{}, "11111111-1111-1111-1111-111111111111")
+}
+
+// TestSubscriptionFailover_EligibilityAndSuppression covers the three
+// load-bearing predicates of the subscription-credit failover added for the
+// 429/header-timeout bug: a subscription-served Anthropic turn is detected as
+// such, a deployment Anthropic key counts as a fallback, and suppressing the
+// subscription flips credential resolution onto the deployment key.
+func TestSubscriptionFailover_EligibilityAndSuppression(t *testing.T) {
+	// A request whose Anthropic credential resolves to the caller's subscription.
+	ctx := resolveAndInjectCredentials(subscriptionCtx(), providers.ProviderAnthropic, http.Header{})
+	require.True(t, servedOnSubscription(ctx), "a resolved subscription token must report servedOnSubscription")
+
+	t.Run("no fallback key: not eligible", func(t *testing.T) {
+		s := &Service{} // no deployment Anthropic key, no BYOK
+		assert.False(t, s.anthropicFallbackKeyAvailable(ctx),
+			"without a Weave/BYOK Anthropic key there is nothing to fail over to")
+	})
+
+	t.Run("deployment Anthropic key present: eligible", func(t *testing.T) {
+		s := &Service{deploymentKeyedProviders: map[string]struct{}{providers.ProviderAnthropic: {}}}
+		assert.True(t, s.anthropicFallbackKeyAvailable(ctx),
+			"a deployment Anthropic key is a valid failover target for a throttled subscription")
+	})
+
+	t.Run("suppression flips resolution off the subscription", func(t *testing.T) {
+		// After withSuppressedClaudeSubscription, resolution must NOT pick the
+		// subscription token — so the retry dispatches on the deployment key and
+		// servedOnSubscription reports false (billed at full cost, not sub rate).
+		suppressed := withSuppressedClaudeSubscription(subscriptionCtx())
+		suppressed = resolveAndInjectCredentials(suppressed, providers.ProviderAnthropic, http.Header{})
+		assert.False(t, servedOnSubscription(suppressed),
+			"a suppressed subscription must not resolve back as the served credential")
+	})
+}
