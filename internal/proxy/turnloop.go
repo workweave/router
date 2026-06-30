@@ -618,11 +618,16 @@ func (s *Service) runTurnLoop(
 	res.PlannerDecision = decision
 
 	if decision.Outcome == planner.OutcomeStay && pinFound {
-		stay := pinDecision(pin)
-		res.Decision = stay
+		anchor := pinDecision(pin)
+		// Per-turn band swap: on a sticky MainLoop the predicted next action
+		// chooses which half of the pinned pair actually serves this turn. The
+		// PIN stays anchored (pinned_model/paired unchanged via the anchor
+		// refresh below) so we can swap again next turn; only res.Decision moves.
+		served := s.bandSwapServed(ctx, res.TurnType, pin, fresh, req.HasImages)
+		res.Decision = served
 		res.StickyHit = true
 		res.PinTier = "postgres_stay_" + decision.Reason
-		s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, stay)
+		s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, anchor)
 		return res, nil
 	}
 
