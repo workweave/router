@@ -142,7 +142,7 @@ func applySessionAffinity(body []byte, headers http.Header, opts EmitOptions) ([
 // route still carries a consistent cache hint instead of none.
 //
 // Returns "" when the request has no cacheable prefix at all (no system
-// content and no tools). Hashing an empty prefix would yield one constant key
+// content and no non-empty tools array). Hashing an empty prefix would yield one constant key
 // shared by every prefix-less conversation, herding unrelated keyless requests
 // onto a single synthetic cache bucket; such requests are better left unhinted.
 func stablePromptCacheKey(body []byte) string {
@@ -158,8 +158,13 @@ func stablePromptCacheKey(body []byte) string {
 		return true
 	})
 	h.Write([]byte{0x00})
-	if tools := gjson.GetBytes(body, "tools"); tools.Exists() && tools.Raw != "" {
-		h.Write([]byte(tools.Raw))
+	// An empty tools array ("tools":[]) is not a cacheable prefix —
+	// gjson's .Exists() is true for it and .Raw is "[]" (non-empty), so
+	// gate on a non-empty array to avoid herding unrelated keyless,
+	// prefix-less requests (common with same-format OpenAI bodies that keep
+	// "tools":[]) onto one synthetic key.
+	if hasNonEmptyTools(body) {
+		h.Write([]byte(gjson.GetBytes(body, "tools").Raw))
 		hasPrefix = true
 	}
 	if !hasPrefix {

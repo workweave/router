@@ -205,3 +205,22 @@ func TestSessionAffinity_OpenAIEmptyPrefixStaysUnhinted(t *testing.T) {
 	_, ok := promptCacheKey(t, out.Body)
 	assert.False(t, ok, "a prefix-less keyless request must not carry a synthetic prompt_cache_key")
 }
+
+// An empty tools array ("tools":[]) is not a cacheable prefix: gjson's
+// .Exists() is true and .Raw is "[]" (non-empty), so a naive presence check
+// would herd every such keyless request onto one synthetic key. It must stay
+// unhinted just like a request with no tools field at all.
+func TestSessionAffinity_OpenAIEmptyToolsArrayStaysUnhinted(t *testing.T) {
+	src := []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}],"tools":[]}`)
+	env, err := translate.ParseOpenAI(src)
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel:    "gpt-5.5",
+		TargetProvider: providers.ProviderOpenAI,
+	})
+	require.NoError(t, err)
+
+	_, ok := promptCacheKey(t, out.Body)
+	assert.False(t, ok, "an empty tools array must not count as a cacheable prefix")
+}
