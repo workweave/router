@@ -441,11 +441,14 @@ func TestService_ProxyOpenAIChatCompletion_NativeOpenRouter(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"chat.completion"`)
 }
 
-// SOC 2 isolation adds DeepInfra and Bedrock as direct providers
-// served by the openaicompat client. Both surfaces must route those
-// decisions through the OpenAI-emission case rather than the default
-// "no translation path" branch; otherwise the scorer's argmax silently
-// 502s for every prompt that lands on them.
+// DeepInfra, Bedrock, Makora, and Together are direct providers served by
+// the openaicompat client. Every surface must route those decisions through
+// the OpenAI-emission case rather than the default "no translation path"
+// branch; otherwise the scorer's argmax silently 502s for every prompt that
+// lands on them. Makora/Together are the DeepSeek-V4 primaries: they were
+// registered + made catalog-primary but omitted from this switch, so every
+// Claude Code turn routed to them 502'd with "no translation path defined
+// for inbound Anthropic Messages", then no-progress-looped back to Claude.
 func TestService_ProxyMessages_DispatchesDeepInfraAndBedrock(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -454,6 +457,8 @@ func TestService_ProxyMessages_DispatchesDeepInfraAndBedrock(t *testing.T) {
 	}{
 		{"deepinfra", providers.ProviderDeepInfra, "deepseek/deepseek-v4-flash"},
 		{"bedrock", providers.ProviderBedrock, "moonshotai/kimi-k2.5"},
+		{"makora", providers.ProviderMakora, "deepseek/deepseek-v4-pro"},
+		{"together", providers.ProviderTogether, "deepseek/deepseek-v4-pro"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -488,6 +493,8 @@ func TestService_ProxyOpenAIChatCompletion_DispatchesDeepInfraAndBedrock(t *test
 	}{
 		{"deepinfra", providers.ProviderDeepInfra, "deepseek/deepseek-v4-flash"},
 		{"bedrock", providers.ProviderBedrock, "qwen/qwen3-coder-next"},
+		{"makora", providers.ProviderMakora, "deepseek/deepseek-v4-pro"},
+		{"together", providers.ProviderTogether, "deepseek/deepseek-v4-pro"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
