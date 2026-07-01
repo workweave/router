@@ -9,6 +9,7 @@ import (
 
 	"workweave/router/internal/feedback"
 	"workweave/router/internal/observability/otel"
+	"workweave/router/internal/router/turntype"
 
 	"github.com/google/uuid"
 )
@@ -202,11 +203,22 @@ const feedbackFooterText = "\n\n_Weave Router feedback:_ `/rf +` good experience
 // surfaces, and to deployments with durable feedback storage so we never
 // advertise a rating command we can't record. The signed feedback link still
 // ships invisibly via the x-router-feedback-url header for rich GUI clients.
-func (s *Service) feedbackFooter(clientApp string) string {
+//
+// Also gated to the user's own conversation turns (MainLoop / ToolResult).
+// Subagent dispatches and machine turns (compaction, probe, title-gen,
+// classifier) render final text the user never directly initiated, so a
+// trailing /rf hint strands beneath it — e.g. under an Explore subagent's
+// result in the Claude Code TUI. The common final-answer turn arrives on a
+// ToolResult inbound (the assistant used tools first), so it must stay in the
+// allowlist or the footer would almost never fire.
+func (s *Service) feedbackFooter(clientApp string, tt turntype.TurnType) string {
 	if s.feedbackStore == nil {
 		return ""
 	}
 	if _, ok := terminalFeedbackClients[clientApp]; !ok {
+		return ""
+	}
+	if tt != turntype.MainLoop && tt != turntype.ToolResult {
 		return ""
 	}
 	return feedbackFooterText
