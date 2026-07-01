@@ -56,6 +56,31 @@ func TestSessionAffinity_DeepInfraSetsHeader(t *testing.T) {
 	assert.Equal(t, affinityKey, out.Headers.Get("x-session-affinity"))
 }
 
+// Makora and Together are serverless OpenAI-compat upstreams that were missing
+// from the old literal affinity list, so their turns paid a cold-replica
+// prefill. Keying the header off the OpenAI-compat family gives them replica
+// stickiness with no per-provider edit.
+func TestSessionAffinity_MakoraAndTogetherSetHeader(t *testing.T) {
+	for _, provider := range []string{providers.ProviderMakora, providers.ProviderTogether} {
+		t.Run(provider, func(t *testing.T) {
+			env, err := translate.ParseAnthropic(anthropicSrc())
+			require.NoError(t, err)
+
+			out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+				TargetModel:     "deepseek/deepseek-v4-pro",
+				TargetProvider:  provider,
+				SessionAffinity: affinityKey,
+			})
+			require.NoError(t, err)
+
+			assert.Equal(t, affinityKey, out.Headers.Get("x-session-affinity"))
+			assert.Empty(t, out.Headers.Get("x-session-id"))
+			_, hasBody := promptCacheKey(t, out.Body)
+			assert.False(t, hasBody, "%s must not carry the OpenAI prompt_cache_key body field", provider)
+		})
+	}
+}
+
 func TestSessionAffinity_OpenRouterUsesSessionIDHeader(t *testing.T) {
 	env, err := translate.ParseAnthropic(anthropicSrc())
 	require.NoError(t, err)

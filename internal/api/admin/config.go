@@ -23,21 +23,17 @@ type configResponse struct {
 	EnvProviderKeys []string `json:"env_provider_keys"`
 }
 
-var configProviderOrder = []string{
-	providers.ProviderAnthropic,
-	providers.ProviderOpenAI,
-	providers.ProviderOpenRouter,
-	providers.ProviderFireworks,
-	providers.ProviderGoogle,
-}
-
 func ConfigHandler(c *gin.Context) {
 	if middleware.AdminPrincipalFrom(c) == nil && middleware.InstallationFrom(c) == nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_key"})
 		return
 	}
-	envKeyed := make([]string, 0, len(configProviderOrder))
-	for _, p := range configProviderOrder {
+	// Iterate every known provider (sorted) rather than a hand-maintained
+	// display list, so a newly-added provider's env key shows up in the
+	// dashboard without a separate edit here.
+	providerOrder := providers.AllProviders()
+	envKeyed := make([]string, 0, len(providerOrder))
+	for _, p := range providerOrder {
 		if config.GetOr(providers.APIKeyEnvVar(p), "") != "" {
 			envKeyed = append(envKeyed, p)
 		}

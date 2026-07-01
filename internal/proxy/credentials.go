@@ -80,8 +80,13 @@ func BuildCredentialsMap(keys []*auth.ExternalAPIKey) map[string]*Credentials {
 // credentials from leaking upstream. TrimSpace matches the auth middleware's
 // normalization so embedded whitespace can't slip past the prefix guard.
 func ExtractClientCredentials(provider string, headers http.Header) *Credentials {
-	switch provider {
-	case providers.ProviderAnthropic:
+	// Anthropic is its own translation family and reads x-api-key / sk-ant-
+	// shapes, so it keeps a dedicated branch. Every other family (OpenAI-compat
+	// plus Gemini/Google, which shares the Authorization: Bearer shape) resolves
+	// via the shared Bearer branch — keyed off the family so a newly-added
+	// OpenAI-compat provider's client bearer is honored without editing a list.
+	family := providers.FamilyFor(provider)
+	if family == providers.FamilyAnthropic {
 		// Real Anthropic API keys carry the sk-ant- prefix; requiring it here
 		// prevents a misplaced cross-provider key (e.g. an OpenAI `sk-…`
 		// passed in `x-api-key` by mistake) from being misclassified as
@@ -107,28 +112,33 @@ func ExtractClientCredentials(provider string, headers http.Header) *Credentials
 				}
 			}
 		}
-	case providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderMakora, providers.ProviderTogether, providers.ProviderBedrock:
-		authHeader := headers.Get("Authorization")
-		if raw, found := strings.CutPrefix(authHeader, "Bearer "); found {
-			key := strings.TrimSpace(raw)
-			// A Codex ChatGPT subscription bearer arrives on the OpenAI surface
-			// with a ChatGPT-Account-ID header; that pairing is the signal that
-			// distinguishes the subscription JWT from a plain client API key, so
-			// we resolve it before the client-key branch. OpenAI-only — the JWT
-			// can't authenticate any other Bearer-using upstream, and a caller's
-			// stray ChatGPT-Account-ID on a non-OpenAI route must not reclassify
-			// that route's bearer.
-			if provider == providers.ProviderOpenAI {
-				if sub := codexSubscriptionCreds(key, headers.Get(chatGPTAccountIDHeader)); sub != nil {
-					return sub
-				}
+		return nil
+	}
+	// OpenAI-compat upstreams and Gemini/Google authenticate via
+	// Authorization: Bearer. FamilyUnknown providers fall through to nil.
+	if family != providers.FamilyOpenAICompat && family != providers.FamilyGemini {
+		return nil
+	}
+	authHeader := headers.Get("Authorization")
+	if raw, found := strings.CutPrefix(authHeader, "Bearer "); found {
+		key := strings.TrimSpace(raw)
+		// A Codex ChatGPT subscription bearer arrives on the OpenAI surface
+		// with a ChatGPT-Account-ID header; that pairing is the signal that
+		// distinguishes the subscription JWT from a plain client API key, so
+		// we resolve it before the client-key branch. OpenAI-only — the JWT
+		// can't authenticate any other Bearer-using upstream, and a caller's
+		// stray ChatGPT-Account-ID on a non-OpenAI route must not reclassify
+		// that route's bearer.
+		if provider == providers.ProviderOpenAI {
+			if sub := codexSubscriptionCreds(key, headers.Get(chatGPTAccountIDHeader)); sub != nil {
+				return sub
 			}
-			// Reject Anthropic-shaped tokens (API keys AND OAuth bearers)
-			// here so one Bearer header doesn't get misidentified as creds
-			// for every Bearer-using provider.
-			if key != "" && !auth.HasAPIKeyPrefix(key) && !strings.HasPrefix(key, "sk-ant-") {
-				return &Credentials{APIKey: []byte(key), Source: credSourceClient}
-			}
+		}
+		// Reject Anthropic-shaped tokens (API keys AND OAuth bearers)
+		// here so one Bearer header doesn't get misidentified as creds
+		// for every Bearer-using provider.
+		if key != "" && !auth.HasAPIKeyPrefix(key) && !strings.HasPrefix(key, "sk-ant-") {
+			return &Credentials{APIKey: []byte(key), Source: credSourceClient}
 		}
 	}
 	return nil

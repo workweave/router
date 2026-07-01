@@ -75,11 +75,12 @@ func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (provi
 // cold replica and pay a full prefill (the deepseek-v4-pro/Fireworks incident:
 // 60k-token turn, zero cache read, 26s TTFT). Each upstream exposes a different
 // knob:
-//   - Fireworks / DeepInfra: x-session-affinity request header
+//   - Serverless OpenAI-compat (Fireworks / DeepInfra / Makora / Together / …):
+//     x-session-affinity request header (the default for OpenAI-compat)
 //   - OpenRouter: x-session-id request header (its sticky-routing key, ≤256 chars)
 //   - OpenAI: prompt_cache_key body field
 //
-// The serverless-affinity *headers* (Fireworks/DeepInfra/OpenRouter) are gated
+// The serverless-affinity *headers* (OpenAI-compat default / OpenRouter) are gated
 // on a real session key: collapsing every keyless request onto one synthetic
 // affinity bucket would herd unrelated conversations onto a single replica,
 // which is worse than letting them load-balance. OpenAI's prompt_cache_key is
@@ -97,17 +98,19 @@ func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (provi
 // raises the hit rate.
 //
 // Bedrock (explicit cachePoint caching, centrally routed — no replica roulette)
-// and any unrecognized target get nothing.
+// and any non-OpenAI-compat target get nothing. The x-session-affinity header
+// branch is the DEFAULT for OpenAI-compat providers rather than an enumerated
+// list, so a newly-added serverless OpenAI-compat upstream (Makora, Together, …)
+// gets replica stickiness without editing this switch. OpenRouter and OpenAI are
+// special-cased above it because they expose a different knob (x-session-id and
+// the prompt_cache_key body field, respectively).
 func applySessionAffinity(body []byte, headers http.Header, opts EmitOptions) ([]byte, error) {
 	switch opts.TargetProvider {
-	case providers.ProviderFireworks, providers.ProviderDeepInfra:
-		if opts.SessionAffinity != "" {
-			headers.Set("x-session-affinity", opts.SessionAffinity)
-		}
 	case providers.ProviderOpenRouter:
 		if opts.SessionAffinity != "" {
 			headers.Set("x-session-id", opts.SessionAffinity)
 		}
+		return body, nil
 	case providers.ProviderOpenAI:
 		cacheKey := opts.SessionAffinity
 		if cacheKey == "" {
@@ -130,6 +133,16 @@ func applySessionAffinity(body []byte, headers http.Header, opts EmitOptions) ([
 			return nil, fmt.Errorf("set prompt_cache_key: %w", err)
 		}
 		return out, nil
+	case providers.ProviderBedrock:
+		// Explicit cachePoint caching, centrally routed — no replica roulette.
+		return body, nil
+	}
+	// Every other OpenAI-compat serverless upstream (Fireworks, DeepInfra,
+	// Makora, Together, …) exposes the x-session-affinity replica-stickiness
+	// header. Gated on a real session key: collapsing keyless requests onto one
+	// synthetic bucket would herd unrelated conversations onto a single replica.
+	if providers.IsOpenAICompat(opts.TargetProvider) && opts.SessionAffinity != "" {
+		headers.Set("x-session-affinity", opts.SessionAffinity)
 	}
 	return body, nil
 }

@@ -445,10 +445,11 @@ func TestService_ProxyOpenAIChatCompletion_NativeOpenRouter(t *testing.T) {
 // the openaicompat client. Every surface must route those decisions through
 // the OpenAI-emission case rather than the default "no translation path"
 // branch; otherwise the scorer's argmax silently 502s for every prompt that
-// lands on them. Makora/Together are the DeepSeek-V4 primaries: they were
-// registered + made catalog-primary but omitted from this switch, so every
-// Claude Code turn routed to them 502'd with "no translation path defined
-// for inbound Anthropic Messages", then no-progress-looped back to Claude.
+// lands on them. Makora/Together are the DeepSeek-V4 primaries whose omission
+// from the old literal dispatch lists 502'd in prod ("no translation path
+// defined for inbound Anthropic Messages", then no-progress-looped back to
+// Claude); keying dispatch off the translation family covers every
+// OpenAI-compat provider, so they route here too.
 func TestService_ProxyMessages_DispatchesDeepInfraAndBedrock(t *testing.T) {
 	cases := []struct {
 		name     string

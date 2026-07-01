@@ -84,6 +84,21 @@ func TestExtractClientCredentials_Google(t *testing.T) {
 	assert.Equal(t, []byte("goog-client-key"), creds.APIKey)
 }
 
+// Makora and Together are OpenAI-compat providers that were missing from the
+// old literal Bearer-branch list, so a client-supplied key for them was dropped
+// (never forwarded as BYOK). Keying off the translation family fixes that.
+func TestExtractClientCredentials_OpenAICompatBearer(t *testing.T) {
+	for _, provider := range []string{"makora", "together"} {
+		t.Run(provider, func(t *testing.T) {
+			headers := http.Header{"Authorization": []string{"Bearer sk-oss-client"}}
+			creds := proxy.ExtractClientCredentials(provider, headers)
+			require.NotNil(t, creds, "%s client bearer must resolve", provider)
+			assert.Equal(t, []byte("sk-oss-client"), creds.APIKey)
+			assert.Equal(t, "client", creds.Source)
+		})
+	}
+}
+
 func TestExtractClientCredentials_MissingHeader(t *testing.T) {
 	creds := proxy.ExtractClientCredentials("anthropic", http.Header{})
 	assert.Nil(t, creds,

@@ -1923,8 +1923,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// for upstream headers so non-2xx responses can stay buffered/retryable.
 	setExtractor := func(e *otel.UsageExtractor) { extractor = e }
 	var attempt dispatchAttempt
-	switch decision.Provider {
-	case providers.ProviderAnthropic:
+	// Dispatch keys off the provider's translation family, not an enumerated set
+	// of provider names, so a newly-added OpenAI-compat provider routes here the
+	// moment it has a ProviderFamilies entry (see internal/providers/provider.go).
+	switch providers.FamilyFor(decision.Provider) {
+	case providers.FamilyAnthropic:
 		prep, emitErr := env.PrepareAnthropic(r.Header, opts)
 		if emitErr != nil {
 			log.Error("Failed to emit Anthropic body", "err", emitErr)
@@ -1932,7 +1935,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
 		attempt = s.anthropicNativeAttempt(env, r, prep, sink, preludeBuf, marker, setExtractor)
-	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderMakora, providers.ProviderTogether, providers.ProviderBedrock:
+	case providers.FamilyOpenAICompat:
 		crossFormat = true
 		// Prep rebuilt per attempt: targetIsOpenRouter(opts) gates four
 		// OpenRouter-only body fields (provider hint, reasoning, system
@@ -2004,7 +2007,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			respSummary = translator.Summary()
 			return finErr
 		}
-	case providers.ProviderGoogle:
+	case providers.FamilyGemini:
 		crossFormat = true
 		prep, emitErr := env.PrepareGemini(r.Header, opts)
 		reqStats = prep.Stats
@@ -2712,17 +2715,9 @@ func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers htt
 	if len(externalKeysFromContext(ctx)) > 0 {
 		return true
 	}
-	for _, p := range []string{
-		providers.ProviderAnthropic,
-		providers.ProviderOpenAI,
-		providers.ProviderGoogle,
-		providers.ProviderOpenRouter,
-		providers.ProviderFireworks,
-		providers.ProviderDeepInfra,
-		providers.ProviderMakora,
-		providers.ProviderTogether,
-		providers.ProviderBedrock,
-	} {
+	// Scan every known provider (not a hand-maintained subset) so a newly-added
+	// provider's client-supplied credential can't slip past the BYOK guard.
+	for _, p := range providers.AllProviders() {
 		if ExtractClientCredentials(p, headers) != nil {
 			return true
 		}
@@ -3593,8 +3588,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	var extractor *otel.UsageExtractor
 
 	var attempt dispatchAttempt
-	switch decision.Provider {
-	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderMakora, providers.ProviderTogether, providers.ProviderBedrock:
+	// Dispatch keys off the provider's translation family, not an enumerated set
+	// of provider names, so a newly-added OpenAI-compat provider routes here the
+	// moment it has a ProviderFamilies entry (see internal/providers/provider.go).
+	switch providers.FamilyFor(decision.Provider) {
+	case providers.FamilyOpenAICompat:
 		// Prep rebuilt per attempt: targetIsOpenRouter(opts) gates four
 		// OpenRouter-only body fields (provider hint, reasoning, system
 		// reminder, tool-temp override) that the Fireworks/DeepInfra/
@@ -3656,7 +3654,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			}
 			return err
 		}
-	case providers.ProviderGoogle:
+	case providers.FamilyGemini:
 		crossFormat = true
 		prep, emitErr := env.PrepareGemini(r.Header, opts)
 		if emitErr != nil {
@@ -3708,7 +3706,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			}
 			return finalize(rawErr)
 		}
-	case providers.ProviderAnthropic:
+	case providers.FamilyAnthropic:
 		crossFormat = true
 		prep, emitErr := env.PrepareAnthropic(r.Header, opts)
 		if emitErr != nil {

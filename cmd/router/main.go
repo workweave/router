@@ -385,6 +385,20 @@ func main() {
 		availableProviders[name] = struct{}{}
 	}
 
+	// Fail loud if any registered provider lacks a ProviderFamilies entry: an
+	// inbound request routed to it would fall through every cross-format dispatch
+	// switch to ErrProviderNotConfigured (a silent 502) even though the provider
+	// looked "enabled" at boot. Panic here so the misconfiguration aborts the
+	// process rather than surfacing in production traffic.
+	registeredProviders := make([]string, 0, len(providerMap))
+	for name := range providerMap {
+		registeredProviders = append(registeredProviders, name)
+	}
+	if err := providers.ValidateDispatchable(registeredProviders); err != nil {
+		logger.Error("Registered provider missing a translation family; refusing to boot", "err", err)
+		panic(err)
+	}
+
 	rtr, err := buildClusterScorer(availableProviders)
 	if err != nil {
 		// Ops alerts on Cloud Run boot failures; silent degradation would mask quality regressions.
