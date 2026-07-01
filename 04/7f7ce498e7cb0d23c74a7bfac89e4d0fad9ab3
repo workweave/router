@@ -1,0 +1,47 @@
+internal/proxy/credentials.go
+  s_0807cddef20927::t_0eeb1dea3e7230 83-89,115-134,137-141
+  s_0807cddef20927::t_2f1700e9fef860 142
+internal/api/admin/config.go
+  s_0807cddef20927::t_1a06cb12606949 31-36
+internal/proxy/service.go
+  s_0807cddef20927::t_053dc0515e51c3 1926-1930,1938
+  s_0807cddef20927::t_622953932e8d47 3657
+  s_0807cddef20927::t_b291315281cb37 3709
+  s_0807cddef20927::t_6579b91d157dc1 2010
+  s_0807cddef20927::t_3f3226ab3f4ee8 2718-2720
+  s_0807cddef20927::t_de6153527025ed 3591-3595
+internal/providers/provider.go
+  s_0807cddef20927::t_e98667538e3cc0 46-54,67-146
+  s_0807cddef20927::t_cc7a1d11593db9 10
+  s_0807cddef20927::t_76ae4316296b9b 147
+internal/providers/families_test.go
+  s_0807cddef20927::t_10401ed6eaf3d6 1-77
+internal/proxy/service_test.go
+  s_0807cddef20927::t_9e9de1f4413af9 498
+  s_0807cddef20927::t_62c82a1a596b24 452,462
+internal/translate/session_affinity_test.go
+  s_0807cddef20927::t_b52c437213331f 59-83
+internal/proxy/credentials_test.go
+  s_0807cddef20927::t_2227404c5bbcfb 87-101
+cmd/router/main.go
+  s_0807cddef20927::t_9b7093b2131c2b 388-401
+internal/translate/emit_openai.go
+  s_0807cddef20927::t_04cf967f47adbe 101-106,113,136-145
+  s_0807cddef20927::t_15de5ddb7bb203 78-79,83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "047f7ce498e7cb0d23c74a7bfac89e4d0fad9ab3",
+  "prompts": {},
+  "sessions": {
+    "s_0807cddef20927": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2f443442-4bae-4ce7-8400-1b9e2256c16d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
