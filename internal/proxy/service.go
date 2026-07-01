@@ -1884,7 +1884,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// responses and when feedback is unwired.
 	clientSink := w
 	if env.Stream() {
-		if footer := s.feedbackFooter(ClientIdentityFrom(ctx).ClientApp); footer != "" {
+		if footer := s.feedbackFooter(ClientIdentityFrom(ctx).ClientApp, routeRes.TurnType); footer != "" {
 			clientSink = translate.NewAnthropicRoutingFooterWriter(w, footer)
 		}
 	}
@@ -3506,7 +3506,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// footers are a follow-up.
 	clientSink := w
 	if _, isResponses := w.(*translate.ResponsesWriter); env.Stream() && !isResponses {
-		if footer := s.feedbackFooter(ClientIdentityFrom(ctx).ClientApp); footer != "" {
+		if footer := s.feedbackFooter(ClientIdentityFrom(ctx).ClientApp, routeRes.TurnType); footer != "" {
 			clientSink = translate.NewOpenAIRoutingFooterWriter(w, footer)
 		}
 	}

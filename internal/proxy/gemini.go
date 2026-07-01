@@ -183,7 +183,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	// router user, matching the decision span and feedback header above.
 	clientSink := w
 	if env.Stream() {
-		if footer := s.feedbackFooter(ClientIdentityFrom(ctx).ClientApp); footer != "" {
+		if footer := s.feedbackFooter(ClientIdentityFrom(ctx).ClientApp, routeRes.TurnType); footer != "" {
 			clientSink = translate.NewGeminiRoutingFooterWriter(w, footer)
 		}
 	}
