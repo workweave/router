@@ -610,6 +610,29 @@ data: {"type":"response.failed","response":{"id":"r","status":"failed","error":{
 	assert.Contains(t, e["message"], "boom")
 }
 
+// A response.incomplete terminal carrying an error object is a failure
+// (finalizeBuffered rejects it) and its error text must survive the buffer
+// scan — not fall through to the generic no-terminal message.
+func TestResponsesToAnthropicWriter_NonStreamingIncompleteWithError(t *testing.T) {
+	const fixture = `event: response.incomplete
+data: {"type":"response.incomplete","response":{"id":"r","status":"incomplete","error":{"code":"server_error","message":"ran out of juice"},"output":[]}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(false))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	var msg map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &msg))
+	assert.Equal(t, "error", msg["type"])
+	e, _ := msg["error"].(map[string]any)
+	require.NotNil(t, e)
+	assert.Contains(t, e["message"], "ran out of juice")
+}
+
 func TestResponsesToAnthropicWriter_NonStreamingFailedNoErrorObject(t *testing.T) {
 	const fixture = `event: response.failed
 data: {"type":"response.failed","response":{"id":"r","status":"failed","output":[]}}

@@ -738,6 +738,16 @@ func (t *ResponsesToAnthropicWriter) anthropicErrorFromBuffer() []byte {
 			resp := gjson.GetBytes(data, "response")
 			errType, msg := responsesFailureFromResponse(resp)
 			return responsesError(errType, msg)
+		case "response.incomplete":
+			// An incomplete terminal is only an error when it carries an error
+			// object (finalizeBuffered routes that case here); a plain
+			// max_output_tokens incomplete is a valid truncated response and
+			// must not short-circuit the scan.
+			resp := gjson.GetBytes(data, "response")
+			if e := resp.Get("error"); e.Exists() && e.Type != gjson.Null {
+				errType, msg := responsesFailureFromResponse(resp)
+				return responsesError(errType, msg)
+			}
 		}
 	}
 	return responsesError("api_error", "upstream Responses stream ended without a terminal response event")
