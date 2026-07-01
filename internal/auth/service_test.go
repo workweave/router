@@ -121,6 +121,9 @@ func (fakeInstallationRepository) SoftDelete(ctx context.Context, externalID, id
 	return errors.New("not used")
 }
 func (f *fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, externalID, id string, models []string) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
 	if f.excludedModelsByID == nil {
 		f.excludedModelsByID = map[string][]string{}
 	}
@@ -132,6 +135,9 @@ func (f *fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, e
 	return nil
 }
 func (f *fakeInstallationRepository) UpdateExcludedProviders(ctx context.Context, externalID, id string, providerNames []string) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
 	if f.excludedProvidersByID == nil {
 		f.excludedProvidersByID = map[string][]string{}
 	}
@@ -153,6 +159,9 @@ func (f *fakeInstallationRepository) UpdateRoutingPreference(ctx context.Context
 	return nil
 }
 func (f *fakeInstallationRepository) UpdateSubscriptionRoutingDisabled(ctx context.Context, externalID, id string, disabled bool) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
 	if f.subscriptionRoutingDisabledByID == nil {
 		f.subscriptionRoutingDisabledByID = map[string]bool{}
 	}
@@ -160,6 +169,9 @@ func (f *fakeInstallationRepository) UpdateSubscriptionRoutingDisabled(ctx conte
 	return nil
 }
 func (f *fakeInstallationRepository) UpdateUsageBypass(ctx context.Context, externalID, id string, enabled bool, threshold *float64) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
 	if f.usageBypassEnabledByID == nil {
 		f.usageBypassEnabledByID = map[string]bool{}
 	}
@@ -727,20 +739,45 @@ func TestService_SetInstallationRoutingPreference(t *testing.T) {
 }
 
 // A zero-row update (stale / soft-deleted / cross-tenant id) surfaces from the
-// repo as ErrInstallationNotFound. The Service must propagate it AND must not
-// invalidate the cache — otherwise the write looks successful and the next
+// repo as ErrInstallationNotFound. Every Set* method must propagate it AND must
+// not invalidate the cache — otherwise the write looks successful and the next
 // requests would reload an unchanged row, the silent-no-op the rows-affected
-// guard exists to prevent.
-func TestService_SetInstallationRoutingPreference_NotFoundDoesNotInvalidate(t *testing.T) {
-	cache := newRecordingAPIKeyCache()
-	installRepo := &fakeInstallationRepository{updateErr: auth.ErrInstallationNotFound}
-	svc := auth.NewService(installRepo, &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}, nil, nil, cache, nil, frozenClock())
-
+// guard exists to prevent. Each method invalidates independently, so each is
+// asserted independently.
+func TestService_SetInstallation_NotFoundDoesNotInvalidate(t *testing.T) {
 	quality := 0.6
-	err := svc.SetInstallationRoutingPreference(context.Background(), "ext-1", "missing-inst", &quality)
-	require.ErrorIs(t, err, auth.ErrInstallationNotFound)
-	assert.Empty(t, cache.invalidationSnapshot(),
-		"a no-op update must not invalidate the cache — nothing changed to pick up")
+	cases := []struct {
+		name string
+		call func(context.Context, *auth.Service) error
+	}{
+		{"ExcludedModels", func(ctx context.Context, svc *auth.Service) error {
+			_, err := svc.SetInstallationExcludedModels(ctx, "ext-1", "missing-inst", []string{"opus"}, nil)
+			return err
+		}},
+		{"ExcludedProviders", func(ctx context.Context, svc *auth.Service) error {
+			_, err := svc.SetInstallationExcludedProviders(ctx, "ext-1", "missing-inst", []string{"openai"}, nil)
+			return err
+		}},
+		{"RoutingPreference", func(ctx context.Context, svc *auth.Service) error {
+			return svc.SetInstallationRoutingPreference(ctx, "ext-1", "missing-inst", &quality)
+		}},
+		{"SubscriptionRoutingDisabled", func(ctx context.Context, svc *auth.Service) error {
+			return svc.SetInstallationSubscriptionRoutingDisabled(ctx, "ext-1", "missing-inst", true)
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := newRecordingAPIKeyCache()
+			installRepo := &fakeInstallationRepository{updateErr: auth.ErrInstallationNotFound}
+			svc := auth.NewService(installRepo, &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}, nil, nil, cache, nil, frozenClock())
+
+			err := tc.call(context.Background(), svc)
+			require.ErrorIs(t, err, auth.ErrInstallationNotFound)
+			assert.Empty(t, cache.invalidationSnapshot(),
+				"a no-op update must not invalidate the cache — nothing changed to pick up")
+		})
+	}
 }
 
 type recordingNotifier struct {
