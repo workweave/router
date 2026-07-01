@@ -3,6 +3,7 @@ package bandit
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
 	"testing"
 
 	"workweave/router/internal/router"
@@ -91,11 +92,41 @@ func TestRoute_SamplesHigherPosteriorMean(t *testing.T) {
 	if dec.Model != "claude-haiku-4-5" {
 		t.Fatalf("expected Thompson pick haiku, got %q", dec.Model)
 	}
-	if dec.Metadata.Propensity != 0.5 {
-		t.Fatalf("expected propensity 0.5 for 2 candidates, got %v", dec.Metadata.Propensity)
+	// With zero noise the higher-mean arm wins every MC trial, so the true TS
+	// propensity is 1.0 — not the old bogus 1/n = 0.5.
+	if dec.Metadata.Propensity != 1.0 {
+		t.Fatalf("expected propensity 1.0 for a deterministically dominant arm, got %v", dec.Metadata.Propensity)
 	}
 	if dec.Metadata.EffectiveKnobsHash == 99 {
 		t.Fatal("model switch must perturb cache key")
+	}
+}
+
+func TestRoute_PropensityReflectsPosteriorOverlap(t *testing.T) {
+	// Two arms with identical posteriors -> each is the sampled argmax ~50% of
+	// the time, so the logged propensity must be ~0.5 (the true TS propensity),
+	// regardless of which one the single realized draw happened to serve. A
+	// naive 1/n would also read 0.5 here; the dominant-arm test above is what
+	// distinguishes the fix, and this pins the estimator's calibration.
+	scores := map[string]float32{"claude-haiku-4-5": 0.5, "claude-sonnet-4-6": 0.5}
+	inner := clusterDecision(scores, []int{0}, "claude-haiku-4-5", "anthropic")
+	post := &Posterior{cells: map[int]map[string]Arm{
+		0: {
+			"claude-haiku-4-5":  {Mean: 0.5, Variance: 0.04},
+			"claude-sonnet-4-6": {Mean: 0.5, Variance: 0.04},
+		},
+	}}
+	b := New(&fakeInner{dec: inner}, post)
+	// Seeded generator keeps the MC estimate deterministic across runs.
+	g := rand.New(rand.NewPCG(1, 2))
+	b.norm = g.NormFloat64
+	dec, err := b.Route(context.Background(), router.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := dec.Metadata.Propensity
+	if p < 0.4 || p > 0.6 {
+		t.Fatalf("expected propensity ~0.5 for symmetric arms, got %v", p)
 	}
 }
 

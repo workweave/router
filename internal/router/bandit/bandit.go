@@ -23,6 +23,13 @@ import (
 // decision (posterior missing, inner scorer failed, or no servable candidate).
 var ErrBanditUnavailable = errors.New("bandit: router unavailable")
 
+// defaultPropensityTrials is the Monte-Carlo sample count used to estimate the
+// Thompson-sampling selection probability (the true propensity of the served
+// action). 1024 gives a standard error <= ~0.016 on any propensity, ample for
+// the 1/propensity importance weights the off-policy (IPS/DR/WDR) estimators
+// consume. Overridable per-Router for deterministic tests.
+const defaultPropensityTrials = 1024
+
 // normFunc draws a standard normal variate. Injected for deterministic tests.
 type normFunc func() float64
 
@@ -32,14 +39,18 @@ type Router struct {
 	inner router.Router
 	post  *Posterior
 	norm  normFunc
+	// trials is the Monte-Carlo sample count for the served action's true TS
+	// propensity. <= 0 disables MC and logs propensity 1.0 (single realized draw).
+	trials int
 }
 
 // New constructs a bandit Router. post must be non-nil.
 func New(inner router.Router, post *Posterior) *Router {
 	return &Router{
-		inner: inner,
-		post:  post,
-		norm:  rand.NormFloat64,
+		inner:  inner,
+		post:   post,
+		norm:   rand.NormFloat64,
+		trials: defaultPropensityTrials,
 	}
 }
 
@@ -68,23 +79,21 @@ func (b *Router) Route(ctx context.Context, req router.Request) (router.Decision
 		return dec, nil
 	}
 
-	type candidate struct {
-		model    string
-		provider string
-		sample   float64
-	}
 	candidates := make([]candidate, 0, len(md.CandidateScores))
 	for model := range md.CandidateScores {
 		provider, ok := providerFor(dec, model)
 		if !ok {
 			continue
 		}
+		// fallback is the cluster scorer's blended score, served verbatim when
+		// the model has no posterior arm. Stored so the propensity MC replays
+		// the exact same draw-or-fallback selection the live path just ran.
+		fallback := float64(md.CandidateScores[model])
 		sample, ok := b.post.Sample(clusterIDs, model, b.norm)
 		if !ok {
-			// No posterior arm: fall back to the cluster scorer's blended score.
-			sample = float64(md.CandidateScores[model])
+			sample = fallback
 		}
-		candidates = append(candidates, candidate{model: model, provider: provider, sample: sample})
+		candidates = append(candidates, candidate{model: model, provider: provider, sample: sample, fallback: fallback})
 	}
 	if len(candidates) < 2 {
 		return dec, nil
@@ -99,7 +108,7 @@ func (b *Router) Route(ctx context.Context, req router.Request) (router.Decision
 
 	argmaxModel := dec.Model
 	pick := candidates[0]
-	b.annotate(&dec, pick.model, pick.provider, len(candidates), pick.sample)
+	b.annotate(&dec, pick.model, pick.provider, b.propensity(clusterIDs, candidates, pick.model), pick.sample)
 	if pick.model != argmaxModel && md.EffectiveKnobsHash != 0 {
 		md.EffectiveKnobsHash = mixModel(md.EffectiveKnobsHash, pick.model)
 	}
@@ -118,18 +127,59 @@ func providerFor(dec router.Decision, model string) (string, bool) {
 	return "", false
 }
 
-func (b *Router) annotate(dec *router.Decision, model, provider string, n int, sample float64) {
+// candidate is a servable model paired with its provider, its single realized
+// Thompson draw (used for the live pick), and its blended-score fallback (used
+// when the model has no posterior arm, in both the live pick and the MC).
+type candidate struct {
+	model    string
+	provider string
+	sample   float64
+	fallback float64
+}
+
+// propensity Monte-Carlo estimates P(served is the Thompson-sampling argmax) —
+// the true propensity of the TS policy, which the off-policy estimators use as
+// the 1/propensity importance weight. It replays the exact live selection
+// (per-arm Gaussian draw via Sample, blended-score fallback for arm-less
+// models, model-name tie-break) `trials` times and returns the served model's
+// win fraction. Floored at 1/trials so a genuine winner never logs propensity
+// 0 (which would make its importance weight blow up). Returns 1.0 when MC is
+// disabled or the band is a singleton.
+func (b *Router) propensity(clusterIDs []int, cands []candidate, served string) float32 {
+	if b.trials <= 0 || len(cands) < 2 {
+		return 1.0
+	}
+	wins := 0
+	for t := 0; t < b.trials; t++ {
+		bestModel := ""
+		var bestVal float64
+		for _, c := range cands {
+			v, ok := b.post.Sample(clusterIDs, c.model, b.norm)
+			if !ok {
+				v = c.fallback
+			}
+			if bestModel == "" || v > bestVal || (v == bestVal && c.model < bestModel) {
+				bestModel, bestVal = c.model, v
+			}
+		}
+		if bestModel == served {
+			wins++
+		}
+	}
+	if wins == 0 {
+		wins = 1
+	}
+	return float32(wins) / float32(b.trials)
+}
+
+func (b *Router) annotate(dec *router.Decision, model, provider string, propensity float32, sample float64) {
 	dec.Model = model
 	dec.Provider = provider
-	dec.Reason = fmt.Sprintf("bandit:ts n=%d sample=%.4g %s provider=%s base=[%s]", n, sample, model, provider, dec.Reason)
+	dec.Reason = fmt.Sprintf("bandit:ts p=%.4g sample=%.4g %s provider=%s base=[%s]", propensity, sample, model, provider, dec.Reason)
 	if dec.Metadata == nil {
 		return
 	}
-	if n >= 2 {
-		dec.Metadata.Propensity = 1.0 / float32(n)
-	} else {
-		dec.Metadata.Propensity = 1.0
-	}
+	dec.Metadata.Propensity = propensity
 	if s, ok := dec.Metadata.CandidateScores[model]; ok {
 		dec.Metadata.ChosenScore = s
 	}
