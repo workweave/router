@@ -31,18 +31,15 @@ type rotateCapKeyRepo struct {
 func (r *rotateCapKeyRepo) Create(_ context.Context, p auth.CreateAPIKeyParams) (*auth.APIKey, error) {
 	r.next++
 	key := &auth.APIKey{
-		ID:             auth.GenerateID("kid"),
-		InstallationID: p.InstallationID,
-		ExternalID:     p.ExternalID,
-		Name:           p.Name,
-		KeyPrefix:      p.KeyPrefix,
-		KeyHash:        p.KeyHash,
-		KeySuffix:      p.KeySuffix,
-		CreatedBy:      p.CreatedBy,
-		// SpendCapUsdMicros intentionally NOT set — this mirrors the real
-		// CreateModelRouterAPIKey SQL which has no spend_cap_usd_micros column
-		// in its INSERT, so new keys always start with a nil cap.
-		SpendCapUsdMicros: nil,
+		ID:                auth.GenerateID("kid"),
+		InstallationID:    p.InstallationID,
+		ExternalID:        p.ExternalID,
+		Name:              p.Name,
+		KeyPrefix:         p.KeyPrefix,
+		KeyHash:           p.KeyHash,
+		KeySuffix:         p.KeySuffix,
+		CreatedBy:         p.CreatedBy,
+		SpendCapUsdMicros: p.SpendCapUsdMicros,
 	}
 	r.keys = append(r.keys, key)
 	return key, nil

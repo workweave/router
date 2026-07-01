@@ -6,7 +6,8 @@ INSERT INTO router.model_router_api_keys (
     key_prefix,
     key_hash,
     key_suffix,
-    created_by
+    created_by,
+    spend_cap_usd_micros
 )
 VALUES (
     @installation_id::uuid,
@@ -15,7 +16,8 @@ VALUES (
     @key_prefix::varchar,
     @key_hash::varchar,
     @key_suffix::varchar,
-    @created_by
+    @created_by,
+    sqlc.narg('spend_cap_usd_micros')
 )
 RETURNING *;
 

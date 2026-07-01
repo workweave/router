@@ -208,13 +208,14 @@ func (r *apiKeyRepo) Create(ctx context.Context, params auth.CreateAPIKeyParams)
 	}
 	q := sqlc.New(r.tx)
 	row, err := q.CreateModelRouterAPIKey(ctx, sqlc.CreateModelRouterAPIKeyParams{
-		InstallationID: installationID,
-		ExternalID:     params.ExternalID,
-		Name:           params.Name,
-		KeyPrefix:      params.KeyPrefix,
-		KeyHash:        params.KeyHash,
-		KeySuffix:      params.KeySuffix,
-		CreatedBy:      params.CreatedBy,
+		InstallationID:    installationID,
+		ExternalID:        params.ExternalID,
+		Name:              params.Name,
+		KeyPrefix:         params.KeyPrefix,
+		KeyHash:           params.KeyHash,
+		KeySuffix:         params.KeySuffix,
+		CreatedBy:         params.CreatedBy,
+		SpendCapUsdMicros: params.SpendCapUsdMicros,
 	})
 	if err != nil {
 		return nil, err
