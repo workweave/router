@@ -1,0 +1,25 @@
+.github/workflows/check_cluster_routing.yml
+  s_c5c3a4e3dd2fe4::t_e84c6b9a4e8b34 16-20,32,37
+scripts/embed_register_probes.py
+  s_c5c3a4e3dd2fe4::t_1b132fe0513f7b 92
+  s_c5c3a4e3dd2fe4::t_e9c700b954c469 56,58-71
+  s_c5c3a4e3dd2fe4::t_f1237bb0c1ff57 15-18
+.github/workflows/cluster_routing_ack.yml
+  s_c5c3a4e3dd2fe4::t_ac9cc39f129fbf 1-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "5b5e6714522ce2bae0da83ca89b9b1366c7cf519",
+  "prompts": {},
+  "sessions": {
+    "s_c5c3a4e3dd2fe4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8d2654f-a38b-4c45-aa60-fdc811fcf202",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
