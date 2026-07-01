@@ -590,6 +590,9 @@ func main() {
 	// falls back to handover.TrimLastN on switch turns.
 	plannerEnabled := config.GetOr("ROUTER_PLANNER_ENABLED", "true") == "true"
 	effortEscalation := config.GetOr("ROUTER_EFFORT_ESCALATION", "false") == "true"
+	// Per-turn large-vs-small action-classifier swap. Off by default until the
+	// Layer-2 extrinsic validation clears it; enabling loads the compiled-in head.
+	bandSwapEnabled := config.GetOr("ROUTER_BAND_SWAP", "false") == "true"
 	// Cyclic-loop escalate-to-opus kill switch + log-not-act holdout. Enabled
 	// by default (the lever shipped enabled); flipping the switch off detaches
 	// the escalation ACTION without losing detection telemetry. The holdout
@@ -711,6 +714,7 @@ func main() {
 		WithHardPinResolver(hardPinResolver).
 		WithPlannerEnabled(plannerEnabled).
 		WithEffortEscalation(effortEscalation).
+		WithBandSwap(bandSwapEnabled).
 		WithLoopEscalationConfig(loopEscalationEnabled, loopEscalationHoldoutPct).
 		WithLoopEscalationStore(repo.Telemetry).
 		WithSpiralShadowConfig(spiralShadowEnabled).

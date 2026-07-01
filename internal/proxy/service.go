@@ -20,6 +20,7 @@ import (
 	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/bandit"
+	"workweave/router/internal/router/bandswap"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/handover"
@@ -120,6 +121,12 @@ type Service struct {
 	// failed/no-progress turn; gemini is pinned low. Off by default (set from
 	// ROUTER_EFFORT_ESCALATION) so it can be baked off before enabling.
 	effortEscalation bool
+	// bandSwap is the per-turn large-vs-small action classifier. Non-nil only
+	// when ROUTER_BAND_SWAP is on AND the head loaded; when set, a sticky
+	// MainLoop STAY serves the band the predicted action maps to (one of the
+	// pin's {Model, PairedModel}) instead of always the anchor. Off by default so
+	// it can be baked off behind the Layer-2 validation before enabling.
+	bandSwap *bandswap.Classifier
 	// loopEscalationEnabled is the kill switch for the cyclic-loop
 	// escalate-to-opus ACTION. When false, detection and telemetry keep
 	// running (events recorded with action=disabled) but no escalation pin is
@@ -844,6 +851,26 @@ func (s *Service) WithPlannerEnabled(enabled bool) *Service {
 // When false (default) the router leaves request-derived effort untouched.
 func (s *Service) WithEffortEscalation(enabled bool) *Service {
 	s.effortEscalation = enabled
+	return s
+}
+
+// WithBandSwap enables the per-turn large-vs-small action-classifier swap. When
+// enabled the compiled-in head is loaded once; a load failure logs and leaves
+// the swap disabled (fail-safe to anchor-only sticky behavior) rather than
+// killing boot. When false (default) the orchestrator always serves the pin's
+// anchor on a STAY, as before.
+func (s *Service) WithBandSwap(enabled bool) *Service {
+	if !enabled {
+		s.bandSwap = nil
+		return s
+	}
+	clf, err := bandswap.New()
+	if err != nil {
+		observability.Get().Error("band swap head failed to load; per-turn swap disabled", "err", err)
+		s.bandSwap = nil
+		return s
+	}
+	s.bandSwap = clf
 	return s
 }
 
@@ -2680,6 +2707,107 @@ func pinDecision(p sessionpin.Pin) router.Decision {
 		Model:    p.Model,
 		Reason:   p.Reason,
 	}
+}
+
+// bandSwapServed picks which half of a pinned band pair serves this sticky turn.
+// It returns the pin's anchor decision unchanged (the prior behavior) when the
+// swap head is disabled, the pin has no runner-up, the turn isn't a MainLoop,
+// the user-message-only embedding isn't available, prediction fails, or the
+// chosen model isn't safely servable this turn. Otherwise it predicts the next
+// engineer action from the current user-message embedding, collapses it to a
+// band, and serves the matching member of the pinned pair: LARGE -> the stronger
+// model, SMALL -> the cheaper one. The pin itself stays anchored (the caller
+// refreshes with the anchor), so the pair survives for the next turn's swap.
+func (s *Service) bandSwapServed(ctx context.Context, turnType turntype.TurnType, pin sessionpin.Pin, fresh router.Decision, hasImages bool, enabledProviders, excludedModels map[string]struct{}) router.Decision {
+	anchor := pinDecision(pin)
+	if s.bandSwap == nil || pin.PairedModel == "" || turnType != turntype.MainLoop {
+		return anchor
+	}
+	// Parity guard: the head trains on the user-message-only embedding. If this
+	// deploy embeds the full prompt instead, skip rather than feed a skewed input.
+	if !s.ResolveEmbedOnlyUserMessage(ctx) {
+		return anchor
+	}
+	if fresh.Metadata == nil || len(fresh.Metadata.Embedding) != bandswap.EmbedDim {
+		return anchor
+	}
+	action, band, ok := s.bandSwap.PredictBand(fresh.Metadata.Embedding)
+	if !ok {
+		return anchor
+	}
+	large, small := orderBandPair(pin)
+	served := large
+	if band == bandswap.Small {
+		served = small
+	}
+	// Only honor a swap away from the anchor when the chosen model is actually
+	// servable this turn; otherwise fall back rather than route to a model the
+	// deploy can't run, that can't take this turn's images, that the
+	// context-window pre-filter excluded, or whose provider the request can't
+	// use. These mirror the sticky-pin guards turnloop already enforces on the
+	// anchor, so a swap can't reach a model the anchor path would have rejected.
+	if served.Model != pin.Model {
+		if _, available := s.availableModels[served.Model]; !available {
+			return anchor
+		}
+		if hasImages && !catalog.AcceptsImages(served.Model) {
+			return anchor
+		}
+		// Context-window pre-filter deny set: the paired model may no longer fit
+		// this turn even when the anchor does. Serving it would trade a safe
+		// anchor for a guaranteed upstream context error.
+		if _, excluded := excludedModels[served.Model]; excluded {
+			return anchor
+		}
+		// Provider eligibility: an empty or unregistered provider fails dispatch
+		// outright, and a provider outside the request's enabled set (BYOK /
+		// installation filters) fails authenticated dispatch. nil enabledProviders
+		// means "no restriction" (boot behavior), matching turnloop's pin guard.
+		if _, registered := s.providers[served.Provider]; !registered {
+			return anchor
+		}
+		if enabledProviders != nil {
+			if _, ok := enabledProviders[served.Provider]; !ok {
+				return anchor
+			}
+		}
+	}
+	observability.FromContext(ctx).Info("band swap served",
+		"predicted_action", action,
+		"band", band,
+		"served_model", served.Model,
+		"served_provider", served.Provider,
+		"anchor_model", pin.Model,
+		"paired_model", pin.PairedModel,
+	)
+	return served
+}
+
+// orderBandPair splits a pin's {Model, PairedModel} into the stronger (large)
+// and cheaper (small) member by capability tier, tie-broken by primary input
+// price so two same-tier models still get a deterministic split.
+func orderBandPair(pin sessionpin.Pin) (large, small router.Decision) {
+	a := router.Decision{Provider: pin.Provider, Model: pin.Model, Reason: pin.Reason}
+	b := router.Decision{Provider: pin.PairedProvider, Model: pin.PairedModel, Reason: pin.Reason}
+	ta, tb := catalog.TierFor(a.Model), catalog.TierFor(b.Model)
+	if ta != tb {
+		if ta > tb {
+			return a, b
+		}
+		return b, a
+	}
+	if primaryInputPrice(a.Model) >= primaryInputPrice(b.Model) {
+		return a, b
+	}
+	return b, a
+}
+
+func primaryInputPrice(model string) float64 {
+	pricing, ok := catalog.PrimaryPriceFor(model)
+	if !ok {
+		return 0
+	}
+	return pricing.InputUSDPer1M
 }
 
 // clusterIDsFromDecision returns cluster ids from a decision's metadata.

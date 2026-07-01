@@ -1,0 +1,51 @@
+{
+  "served_artifact": "action_clf_lgbm_embonly.txt",
+  "served_engine": "lightgbm (pure-Go leaves reader)",
+  "feature_layout": {
+    "embedding_dim": 768,
+    "embedding": "jina-embeddings-v2-base-code INT8, current user message, tail 1024 chars, mean-pool + L2",
+    "served_features": "embedding[768] only (LightGBM multiclass -> argmax -> band)",
+    "offline_scalar_names": [
+      "turn_count",
+      "log1p_turn_count",
+      "is_first_turn",
+      "current_char_count",
+      "log1p_current_char_count",
+      "slash_command"
+    ]
+  },
+  "action_types": [
+    "providing_info",
+    "planning",
+    "learning",
+    "tool_call",
+    "confirmation",
+    "refinement"
+  ],
+  "classes_order": [
+    "confirmation",
+    "learning",
+    "planning",
+    "providing_info",
+    "refinement",
+    "tool_call"
+  ],
+  "band_map": {
+    "planning": "large",
+    "learning": "large",
+    "providing_info": "small",
+    "tool_call": "small",
+    "confirmation": "small",
+    "refinement": "small"
+  },
+  "bands": {
+    "large": "large",
+    "small": "small",
+    "large_actions": [
+      "planning",
+      "learning"
+    ]
+  },
+  "trained_on_rows": 5086,
+  "note": "v1 trained on the 5,119-turn jun_9 export; retrain on full corpus via dataset.py when accessible."
+}
