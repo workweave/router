@@ -633,6 +633,29 @@ data: {"type":"response.incomplete","response":{"id":"r","status":"incomplete","
 	assert.Contains(t, e["message"], "ran out of juice")
 }
 
+// An error object with a code but empty message keeps the upstream code in
+// the envelope (with a fallback message) instead of degrading to api_error.
+func TestResponsesToAnthropicWriter_NonStreamingFailedCodeNoMessage(t *testing.T) {
+	const fixture = `event: response.failed
+data: {"type":"response.failed","response":{"id":"r","status":"failed","error":{"code":"rate_limit_exceeded","message":""},"output":[]}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(false))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	var msg map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &msg))
+	assert.Equal(t, "error", msg["type"])
+	e, _ := msg["error"].(map[string]any)
+	require.NotNil(t, e)
+	assert.Equal(t, "rate_limit_exceeded", e["type"], "upstream error code preserved")
+	assert.Contains(t, e["message"], "status: failed")
+}
+
 func TestResponsesToAnthropicWriter_NonStreamingFailedNoErrorObject(t *testing.T) {
 	const fixture = `event: response.failed
 data: {"type":"response.failed","response":{"id":"r","status":"failed","output":[]}}

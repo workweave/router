@@ -754,7 +754,9 @@ func (t *ResponsesToAnthropicWriter) anthropicErrorFromBuffer() []byte {
 }
 
 // responsesFailureFromResponse extracts an error type/message from a Responses
-// API `response` object on a response.failed terminal event.
+// API `response` object on a response.failed terminal event. A parsed error
+// code/type is preserved even when the message is empty and a fallback message
+// is used (responsesError defaults an empty type to "api_error").
 func responsesFailureFromResponse(resp gjson.Result) (errType, msg string) {
 	if !resp.Exists() {
 		return "", ""
@@ -764,18 +766,17 @@ func responsesFailureFromResponse(resp gjson.Result) (errType, msg string) {
 		if errType == "" {
 			errType = e.Get("type").String()
 		}
-		msg = e.Get("message").String()
-		if msg != "" {
+		if msg = e.Get("message").String(); msg != "" {
 			return errType, msg
 		}
 	}
 	if reason := resp.Get("incomplete_details.reason").String(); reason != "" {
-		return "api_error", "upstream Responses request incomplete: " + reason
+		return errType, "upstream Responses request incomplete: " + reason
 	}
 	if resp.Get("status").String() == "failed" {
-		return "api_error", "upstream Responses request failed (status: failed)"
+		return errType, "upstream Responses request failed (status: failed)"
 	}
-	return "", ""
+	return errType, ""
 }
 
 // responsesError builds an Anthropic error envelope from a Responses-style
