@@ -1,0 +1,26 @@
+frontend/package.json
+  s_eec8a919641d26::t_4718efcf2b0361 22
+frontend/package-lock.json
+  ai_agent 21,740-742,756-758,772-774,788-790,804-806,820-822,836-838,852-854,868-870,5319-5322,5325,5340-5347
+go.sum
+  ai_agent 98-99,233-234
+go.mod
+  s_eec8a919641d26::t_500a944f2d3d8d 77
+  s_eec8a919641d26::t_ed2631a75846ef 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "e6365537e1f1d2fe99227497851599f67a161507",
+  "prompts": {},
+  "sessions": {
+    "s_eec8a919641d26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "42baac02-05a0-44fb-bc29-631420bb6f84",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

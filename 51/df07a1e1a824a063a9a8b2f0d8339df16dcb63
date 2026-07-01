@@ -1,0 +1,27 @@
+internal/router/cluster/scorer_test.go
+  s_09ca5e2e44a0ed::t_2646fbd19ea0fd 192-209,211-213,217,220,223-224,227,230-231,234-242,244-255,257-258
+  s_09ca5e2e44a0ed::t_4293a2d63a8072 168-173
+  s_09ca5e2e44a0ed::t_f335a329bce552 210,214-216,218-219,221-222,225-226,228-229,232-233,243,256,259-260
+internal/router/cluster/scorer.go
+  s_09ca5e2e44a0ed::t_70cd2a670036e0 842-850
+  s_09ca5e2e44a0ed::t_4c7bf676abf7cb 857-867
+  s_09ca5e2e44a0ed::t_6772c9a19c3f3e 1022-1034
+internal/router/router.go
+  s_09ca5e2e44a0ed::t_994f408dbae739 44-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.11",
+  "base_commit_sha": "51df07a1e1a824a063a9a8b2f0d8339df16dcb63",
+  "prompts": {},
+  "sessions": {
+    "s_09ca5e2e44a0ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35ef0a9f-52c3-476b-b860-781312b3d039",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

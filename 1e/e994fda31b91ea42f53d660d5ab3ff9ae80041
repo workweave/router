@@ -1,0 +1,31 @@
+install/install.sh
+  s_d194893f3c9bb0::t_cd6cf8daf712bb 1339-1375
+install/uninstall.sh
+  s_d194893f3c9bb0::t_454b7e9284f859 272-287
+install/commands/unforce-model.md
+  s_d194893f3c9bb0::t_a69dcfc724b7d3 1-5
+install/npm/scripts/copy-installer.js
+  s_d194893f3c9bb0::t_30851c6cce2a37 7,23-32
+install/commands/force-model.md
+  s_d194893f3c9bb0::t_a200f3e199c84b 1-6
+install/npm/package.json
+  s_d194893f3c9bb0::t_f9fe6aea77e276 13
+install/npm/.gitignore
+  s_d194893f3c9bb0::t_e4f0e1094b8200 3,7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "1ee994fda31b91ea42f53d660d5ab3ff9ae80041",
+  "prompts": {},
+  "sessions": {
+    "s_d194893f3c9bb0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "badae19b-6c59-4cb2-b815-7fcdc7dfce6f",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

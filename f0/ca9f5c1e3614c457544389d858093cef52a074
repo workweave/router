@@ -1,0 +1,20 @@
+internal/translate/emit_openai.go
+  s_6a47df7c07691e::t_aae0c93e2baf35 486-489
+  s_6a47df7c07691e::t_c6711813b2eb9a 148-151,154-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "f0ca9f5c1e3614c457544389d858093cef52a074",
+  "prompts": {},
+  "sessions": {
+    "s_6a47df7c07691e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5206d9af-d5e6-4e45-8ac7-ead1fdb0cd81",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}
