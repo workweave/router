@@ -1966,13 +1966,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			attemptOpts := opts
 			attemptOpts.TargetProvider = d.Provider
 			respSummary = translate.ResponseSummary{}
-			// Reasoning OpenAI models (gpt-5.x) reject reasoning_effort + tools
-			// on /v1/chat/completions; an agentic Anthropic client that asks the
-			// model to reason must go through the Responses API instead. Scoped
-			// to the direct OpenAI provider (the only one with /v1/responses).
-			useResponses := d.Provider == providers.ProviderOpenAI &&
-				attemptOpts.Capabilities.Supports(router.CapReasoning) &&
-				feats.HasTools && env.ReasoningRequested()
+			// Reasoning OpenAI models (gpt-5.x) reject tools, stop, and
+			// reasoning_effort on /v1/chat/completions; any agentic turn with
+			// tools must go through the Responses API instead. Scoped to the
+			// direct OpenAI provider (the only one with /v1/responses).
+			useResponses := translate.UseOpenAIResponsesAPI(
+				d.Provider, attemptOpts.Capabilities, feats.HasTools)
 			var prep providers.PreparedRequest
 			var emitErr error
 			if useResponses {

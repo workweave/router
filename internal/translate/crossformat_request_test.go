@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"workweave/router/internal/router"
 	"workweave/router/internal/translate"
 
 	"github.com/stretchr/testify/assert"
@@ -1226,6 +1227,29 @@ func TestCrossFormat_AnthropicToOpenAI_ScalarFieldsCarriedThrough(t *testing.T) 
 	assert.Equal(t, float64(0.8), doc["top_p"])
 	stop := doc["stop"].([]any)
 	assert.Equal(t, []any{"STOP"}, stop)
+}
+
+func TestCrossFormat_AnthropicToOpenAI_ReasoningModelOmitsStop(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-5",
+		"stream": true,
+		"messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+		"stop_sequences": ["STOP"],
+		"tools": [{"name": "Bash", "description": "run", "input_schema": {"type": "object"}}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{
+		TargetModel:    "gpt-5.4-mini",
+		TargetProvider: "openai",
+		Capabilities:   router.Lookup("gpt-5.4-mini"),
+	})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	_, hasStop := doc["stop"]
+	assert.False(t, hasStop, "gpt-5.x rejects stop on chat/completions")
 }
 
 func TestCrossFormat_OpenAIToGemini_ScalarFieldsCarriedThrough(t *testing.T) {

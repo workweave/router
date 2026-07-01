@@ -360,3 +360,11 @@ func TestPrepareGemini_ThinkingBudget_Legacy25(t *testing.T) {
 	_, hasLevel := tc["thinkingLevel"]
 	assert.False(t, hasLevel, "gemini-2.5 must NOT send thinkingLevel")
 }
+
+func TestUseOpenAIResponsesAPI(t *testing.T) {
+	caps := router.Lookup("gpt-5.4-mini")
+	assert.True(t, translate.UseOpenAIResponsesAPI(providers.ProviderOpenAI, caps, true))
+	assert.False(t, translate.UseOpenAIResponsesAPI(providers.ProviderOpenAI, caps, false))
+	assert.False(t, translate.UseOpenAIResponsesAPI(providers.ProviderFireworks, caps, true))
+	assert.False(t, translate.UseOpenAIResponsesAPI(providers.ProviderOpenAI, router.Lookup("gpt-4o"), true))
+}

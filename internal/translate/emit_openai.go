@@ -266,8 +266,10 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, pr
 	// System + Messages
 	writeOpenAISystemAndMessagesFromAnthropic(jw, body, opts)
 
-	// Stop sequences
-	if r := gjson.GetBytes(body, "stop_sequences"); r.Exists() {
+	// Stop sequences — reasoning OpenAI models (gpt-5.x) reject `stop` on
+	// /v1/chat/completions ("Unsupported parameter: 'stop' is not supported").
+	if r := gjson.GetBytes(body, "stop_sequences"); r.Exists() &&
+		!opts.Capabilities.Supports(router.CapReasoning) {
 		jw.Key("stop")
 		jw.Raw(r.Raw)
 	}

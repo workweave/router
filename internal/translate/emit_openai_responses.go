@@ -59,6 +59,17 @@ func (e *RequestEnvelope) ReasoningRequested() bool {
 	return reasoningEffortFromAnthropic(e.body) != ""
 }
 
+// UseOpenAIResponsesAPI reports whether an Anthropic ingress dispatch to the
+// direct OpenAI provider should use POST /v1/responses instead of
+// /v1/chat/completions. Reasoning OpenAI models (gpt-5.x) reject tools,
+// stop, and reasoning_effort on chat/completions, so any agentic turn with
+// tools must go through the Responses API.
+func UseOpenAIResponsesAPI(provider string, caps router.ModelSpec, hasTools bool) bool {
+	return provider == providers.ProviderOpenAI &&
+		caps.Supports(router.CapReasoning) &&
+		hasTools
+}
+
 // reasoningEffortFromAnthropic resolves the Responses `reasoning.effort` from an
 // Anthropic body: the `thinking` budget (Claude Code) via effortForBudget, or an
 // explicit `reasoning_effort` if an OpenAI-format field rode along. "" = none.

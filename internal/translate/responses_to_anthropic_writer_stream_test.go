@@ -544,8 +544,8 @@ data: {"type":"response.failed","response":{"id":"r","status":"failed","error":{
 	assert.NotContains(t, body, "event: message_stop", "no success trailer after an error close")
 }
 
-// response.failed with no error object is still surfaced as an error (generic
-// message), not a normal success close.
+// response.failed with no error object is still surfaced as an error (status
+// detail in the message), not a normal success close.
 func TestResponsesToAnthropicWriter_StreamingFailedNoErrorObject(t *testing.T) {
 	const fixture = `event: response.failed
 data: {"type":"response.failed","response":{"id":"r","status":"failed","output":[]}}
@@ -560,6 +560,7 @@ data: {"type":"response.failed","response":{"id":"r","status":"failed","output":
 
 	body := rec.Body.String()
 	assert.Contains(t, body, "event: error")
+	assert.Contains(t, body, "status: failed")
 	assert.NotContains(t, body, "event: message_stop")
 }
 
@@ -607,6 +608,26 @@ data: {"type":"response.failed","response":{"id":"r","status":"failed","error":{
 	e, _ := msg["error"].(map[string]any)
 	require.NotNil(t, e)
 	assert.Contains(t, e["message"], "boom")
+}
+
+func TestResponsesToAnthropicWriter_NonStreamingFailedNoErrorObject(t *testing.T) {
+	const fixture = `event: response.failed
+data: {"type":"response.failed","response":{"id":"r","status":"failed","output":[]}}
+
+`
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+	require.NoError(t, w.Prelude(false))
+	_, err := w.Write([]byte(fixture))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	var msg map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &msg))
+	assert.Equal(t, "error", msg["type"])
+	e, _ := msg["error"].(map[string]any)
+	require.NotNil(t, e)
+	assert.Contains(t, e["message"], "status: failed")
 }
 
 // A routing marker is emitted as content block 0; upstream content then starts
