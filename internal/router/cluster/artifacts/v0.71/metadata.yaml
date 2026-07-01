@@ -165,6 +165,7 @@ deployed_models:
 - minimax/minimax-m3
 - moonshotai/kimi-k2.7
 - qwen/qwen3.7-plus
+- claude-sonnet-5
 cost_per_1k_input_usd:
   claude-haiku-4-5: 0.0008
   claude-opus-4-7: 0.005
@@ -185,6 +186,7 @@ cost_per_1k_input_usd:
   minimax/minimax-m3: 0.0006
   moonshotai/kimi-k2.7: 0.00095
   qwen/qwen3.7-plus: 0.0004
+  claude-sonnet-5: 0.003
 changelog: 'v0.70 = v0.68 with four new models added on FROZEN v0.68 geometry
   (z-ai/glm-5.2, minimax/minimax-m3, moonshotai/kimi-k2.7, qwen/qwen3.7-plus).
   centroids.bin is BYTE-IDENTICAL to v0.68 (no retrain, no re-cluster): v0.68''s
