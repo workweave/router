@@ -524,6 +524,37 @@ func TestTurnLoop_MaxedOutPinExcludedFromCandidates(t *testing.T) {
 		"router must serve the fresh decision, not the broken pin")
 }
 
+// With band swap, the model that actually served (and maxed out) last turn can
+// differ from the pin's anchor Model. The maxed-out guard must exclude the
+// served model that hit the cap (LastServedModel), not the anchor — otherwise
+// the broken paired model stays eligible and the auto-continue loop resumes.
+func TestTurnLoop_MaxedOutExcludesLastServedModelNotAnchor(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:         providers.ProviderAnthropic,
+		Model:            "claude-haiku-4-5",     // anchor, healthy
+		LastServedModel:  "moonshotai/kimi-k2.6", // swapped-to paired model that saturated the cap
+		Reason:           "cluster:v0.52",
+		PinnedUntil:      time.Now().Add(time.Hour),
+		LastOutputTokens: 8192, // saturated previous turn
+		LastTurnEndedAt:  time.Now().Add(-10 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-5", Reason: "fresh"}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	require.NotNil(t, fr.capturedReq, "scorer must run after a maxed-out pin is dropped")
+	assert.Contains(t, fr.capturedReq.ExcludedModels, "moonshotai/kimi-k2.6",
+		"the model that actually maxed out (LastServedModel) must be excluded")
+	assert.NotContains(t, fr.capturedReq.ExcludedModels, "claude-haiku-4-5",
+		"the healthy anchor must not be excluded when the paired model maxed out")
+}
+
 // TestTurnLoop_UnderMaxedOutThresholdKeepsPin guards against false positives:
 // a turn that produced output well below the cap is healthy, so the pin
 // must not be excluded and the planner's normal STAY logic applies.

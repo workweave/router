@@ -337,9 +337,21 @@ func (s *Service) runTurnLoop(
 	// this turn and treat the pin as missing so downstream sticky branches
 	// (ToolResult, !plannerEnabled) cannot re-anchor it before the scorer runs.
 	if pinFound && pin.LastOutputTokens >= prevTurnMaxedOutThreshold {
+		// Exclude the model that actually generated LastOutputTokens. With band
+		// swap the served model can be the paired member while the pin row keeps
+		// the anchor in Model, so keying off pin.Model would exclude the wrong
+		// (healthy) model and leave the broken one eligible — reopening the very
+		// auto-continue loop this guard breaks. LastServedModel comes from usage
+		// writeback and names the model that hit the cap; fall back to pin.Model
+		// for older rows written before the field existed.
+		maxedModel := pin.LastServedModel
+		if maxedModel == "" {
+			maxedModel = pin.Model
+		}
 		log.Info("Session pin maxed out on previous turn; excluding for this turn",
 			"pin_model", pin.Model,
 			"pin_provider", pin.Provider,
+			"maxed_model", maxedModel,
 			"last_output_tokens", pin.LastOutputTokens,
 		)
 		// Defensive copy: callers may share the ExcludedModels map across requests.
@@ -347,7 +359,7 @@ func (s *Service) runTurnLoop(
 		for k := range req.ExcludedModels {
 			excluded[k] = struct{}{}
 		}
-		excluded[pin.Model] = struct{}{}
+		excluded[maxedModel] = struct{}{}
 		req.ExcludedModels = excluded
 		pinFound = false
 		pin = sessionpin.Pin{}
