@@ -36,6 +36,7 @@ import (
 	"workweave/router/internal/proxy/usage"
 	routerpubsub "workweave/router/internal/pubsub"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/bandit"
 	"workweave/router/internal/router/banditexplore"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/catalog"
@@ -600,8 +601,30 @@ func main() {
 		logger.Info("RL policy router disabled (ROUTER_RL_SIDECAR_URL unset); x-weave-router-strategy: rl will return 503")
 	}
 
+	// Opt-in Thompson-sampling bandit. Wired only when ROUTER_BANDIT_POSTERIOR_FILE
+	// points at a ts_posterior.json from train_thompson_posterior.py; the
+	// x-weave-router-strategy: bandit header then routes through it. Wraps the
+	// raw cluster scorer (not the explore wrapper). Unset path -> nil -> 503.
+	var banditRouter router.Router
+	if posteriorPath := strings.TrimSpace(config.GetOr("ROUTER_BANDIT_POSTERIOR_FILE", "")); posteriorPath != "" {
+		post, loadErr := bandit.LoadPosterior(posteriorPath)
+		if loadErr != nil {
+			logger.Error(
+				"Bandit posterior load failed; x-weave-router-strategy: bandit will return 503",
+				"path", posteriorPath,
+				"err", loadErr,
+			)
+		} else {
+			banditRouter = bandit.New(rtr, post)
+			logger.Info("Bandit strategy router wired", "posterior_file", posteriorPath)
+		}
+	} else {
+		logger.Info("Bandit strategy router disabled (ROUTER_BANDIT_POSTERIOR_FILE unset); x-weave-router-strategy: bandit will return 503")
+	}
+
 	proxySvc := proxy.NewService(routeEntry, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithRLRouter(rlRouter).
+		WithBanditRouter(banditRouter).
 		WithContentCapture(captureMode, captureMaxBytes, nil).
 		WithFeedback(repo.Feedback, feedbackSigner, feedbackBaseURL).
 		WithByokOnly(byokOnly).

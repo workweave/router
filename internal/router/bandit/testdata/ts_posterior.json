@@ -1,0 +1,9 @@
+{
+  "meta": {"kappa0": 10.0},
+  "posterior": {
+    "0": {
+      "claude-haiku-4-5": {"mean": 0.8, "variance": 0.01, "kappa": 10.0, "prior_mean": 0.7, "n_obs": 0},
+      "claude-sonnet-4-6": {"mean": 0.75, "variance": 0.02, "kappa": 10.0, "prior_mean": 0.7, "n_obs": 0}
+    }
+  }
+}

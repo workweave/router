@@ -46,6 +46,11 @@ func TestRouterStrategyOverride_AppliesRL(t *testing.T) {
 	assert.Equal(t, router.StrategyRL, got, "rl header must select the RL strategy")
 }
 
+func TestRouterStrategyOverride_AppliesBandit(t *testing.T) {
+	got := runStrategyOverride(t, &auth.Installation{ID: "inst-eval"}, "bandit")
+	assert.Equal(t, router.StrategyBandit, got, "bandit header must select the bandit strategy")
+}
+
 func TestRouterStrategyOverride_CaseInsensitiveAndTrimmed(t *testing.T) {
 	got := runStrategyOverride(t, &auth.Installation{ID: "inst-eval"}, "  RL  ")
 	assert.Equal(t, router.StrategyRL, got, "value must be lowercased and trimmed before matching")

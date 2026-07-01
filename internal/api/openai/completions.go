@@ -11,6 +11,7 @@ import (
 	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/router/bandit"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/server/middleware"
@@ -79,6 +80,12 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 				log.Error("RL routing unavailable", "err", err)
 				c.Header("Retry-After", "1")
 				writeOpenAIError(c, http.StatusServiceUnavailable, "api_error", "Router unavailable: RL policy router failed and no fallback is configured.")
+				return
+			}
+			if errors.Is(err, bandit.ErrBanditUnavailable) {
+				log.Error("Bandit routing unavailable", "err", err)
+				c.Header("Retry-After", "1")
+				writeOpenAIError(c, http.StatusServiceUnavailable, "api_error", "Router unavailable: bandit router failed and no fallback is configured.")
 				return
 			}
 			if errors.Is(err, cluster.ErrClusterUnavailable) {

@@ -13,6 +13,10 @@ const (
 	// StrategyRL routes via the trained RL/DPO policy served by the
 	// out-of-process policy sidecar. Opt-in only; never the silent default.
 	StrategyRL Strategy = "rl"
+	// StrategyBandit routes via Thompson sampling over a frozen
+	// ts_posterior.json (cluster×model reward posterior). Opt-in only; wired
+	// when ROUTER_BANDIT_POSTERIOR_FILE is set at boot.
+	StrategyBandit Strategy = "bandit"
 )
 
 type strategyContextKey struct{}

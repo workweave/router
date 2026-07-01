@@ -10,9 +10,10 @@ import (
 )
 
 // RouterStrategyOverrideHeader selects the routing strategy for a request.
-// Accepted values are "cluster" (the default scorer) and "rl" (the trained
-// RL/DPO policy router). Absent or unrecognized values fall through to the
-// deployment default.
+// Accepted values are "cluster" (the default scorer), "rl" (the trained
+// RL/DPO policy router), and "bandit" (Thompson sampling over a frozen
+// posterior). Absent or unrecognized values fall through to the deployment
+// default.
 const RouterStrategyOverrideHeader = "x-weave-router-strategy"
 
 // WithRouterStrategyOverride stashes the requested routing strategy on the
@@ -33,7 +34,7 @@ func WithRouterStrategyOverride() gin.HandlerFunc {
 			return
 		}
 		strategy := router.Strategy(raw)
-		if strategy != router.StrategyCluster && strategy != router.StrategyRL {
+		if strategy != router.StrategyCluster && strategy != router.StrategyRL && strategy != router.StrategyBandit {
 			observability.FromGin(c).Warn(
 				"Router-strategy override ignored: unrecognized value",
 				"installation_id", installation.ID,

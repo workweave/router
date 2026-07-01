@@ -19,6 +19,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/bandit"
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/handover"
@@ -39,7 +40,11 @@ type Service struct {
 	// x-weave-router-strategy: rl header. Nil when no policy sidecar is wired
 	// (ROUTER_RL_SIDECAR_URL unset); the strategy header then 503s rather than
 	// silently serving the cluster scorer.
-	rlRouter             router.Router
+	rlRouter router.Router
+	// banditRouter is the opt-in Thompson-sampling router, selected per-request
+	// via x-weave-router-strategy: bandit. Nil when ROUTER_BANDIT_POSTERIOR_FILE
+	// is unset at boot; the strategy header then 503s.
+	banditRouter         router.Router
 	providers            map[string]providers.Client
 	emitter              *otel.Emitter
 	embedOnlyUserMessage bool
@@ -1178,19 +1183,34 @@ func (s *Service) WithRLRouter(r router.Router) *Service {
 	return s
 }
 
+// WithBanditRouter installs the opt-in Thompson-sampling bandit router. nil
+// leaves x-weave-router-strategy: bandit with no backing router, in which case
+// routeFor 503s rather than silently serving the cluster scorer.
+func (s *Service) WithBanditRouter(r router.Router) *Service {
+	s.banditRouter = r
+	return s
+}
+
 // routeFor picks the active router for the request's strategy. The default
 // (and the cluster strategy) is the cluster scorer; the rl strategy uses the
 // RL policy router when wired, and otherwise fails closed with
 // ErrPolicyUnavailable (→ HTTP 503) — never a silent fallback that would mask
 // which strategy actually served the turn.
 func (s *Service) routeFor(ctx context.Context, req router.Request) (router.Decision, error) {
-	if router.StrategyFromContext(ctx) == router.StrategyRL {
+	switch router.StrategyFromContext(ctx) {
+	case router.StrategyRL:
 		if s.rlRouter == nil {
 			return router.Decision{}, fmt.Errorf("rl strategy requested but no policy sidecar configured: %w", rl.ErrPolicyUnavailable)
 		}
 		return s.rlRouter.Route(ctx, req)
+	case router.StrategyBandit:
+		if s.banditRouter == nil {
+			return router.Decision{}, fmt.Errorf("bandit strategy requested but no posterior configured: %w", bandit.ErrBanditUnavailable)
+		}
+		return s.banditRouter.Route(ctx, req)
+	default:
+		return s.router.Route(ctx, req)
 	}
-	return s.router.Route(ctx, req)
 }
 
 // Route exposes the underlying router for callers that need a decision
