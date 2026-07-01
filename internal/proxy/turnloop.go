@@ -623,7 +623,7 @@ func (s *Service) runTurnLoop(
 		// chooses which half of the pinned pair actually serves this turn. The
 		// PIN stays anchored (pinned_model/paired unchanged via the anchor
 		// refresh below) so we can swap again next turn; only res.Decision moves.
-		served := s.bandSwapServed(ctx, res.TurnType, pin, fresh, req.HasImages)
+		served := s.bandSwapServed(ctx, res.TurnType, pin, fresh, req.HasImages, req.EnabledProviders, req.ExcludedModels)
 		res.Decision = served
 		res.StickyHit = true
 		res.PinTier = "postgres_stay_" + decision.Reason

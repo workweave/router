@@ -2719,7 +2719,7 @@ func pinDecision(p sessionpin.Pin) router.Decision {
 // band, and serves the matching member of the pinned pair: LARGE -> the stronger
 // model, SMALL -> the cheaper one. The pin itself stays anchored (the caller
 // refreshes with the anchor), so the pair survives for the next turn's swap.
-func (s *Service) bandSwapServed(ctx context.Context, turnType turntype.TurnType, pin sessionpin.Pin, fresh router.Decision, hasImages bool) router.Decision {
+func (s *Service) bandSwapServed(ctx context.Context, turnType turntype.TurnType, pin sessionpin.Pin, fresh router.Decision, hasImages bool, enabledProviders, excludedModels map[string]struct{}) router.Decision {
 	anchor := pinDecision(pin)
 	if s.bandSwap == nil || pin.PairedModel == "" || turnType != turntype.MainLoop {
 		return anchor
@@ -2743,13 +2743,34 @@ func (s *Service) bandSwapServed(ctx context.Context, turnType turntype.TurnType
 	}
 	// Only honor a swap away from the anchor when the chosen model is actually
 	// servable this turn; otherwise fall back rather than route to a model the
-	// deploy can't run or that can't take this turn's images.
+	// deploy can't run, that can't take this turn's images, that the
+	// context-window pre-filter excluded, or whose provider the request can't
+	// use. These mirror the sticky-pin guards turnloop already enforces on the
+	// anchor, so a swap can't reach a model the anchor path would have rejected.
 	if served.Model != pin.Model {
 		if _, available := s.availableModels[served.Model]; !available {
 			return anchor
 		}
 		if hasImages && !catalog.AcceptsImages(served.Model) {
 			return anchor
+		}
+		// Context-window pre-filter deny set: the paired model may no longer fit
+		// this turn even when the anchor does. Serving it would trade a safe
+		// anchor for a guaranteed upstream context error.
+		if _, excluded := excludedModels[served.Model]; excluded {
+			return anchor
+		}
+		// Provider eligibility: an empty or unregistered provider fails dispatch
+		// outright, and a provider outside the request's enabled set (BYOK /
+		// installation filters) fails authenticated dispatch. nil enabledProviders
+		// means "no restriction" (boot behavior), matching turnloop's pin guard.
+		if _, registered := s.providers[served.Provider]; !registered {
+			return anchor
+		}
+		if enabledProviders != nil {
+			if _, ok := enabledProviders[served.Provider]; !ok {
+				return anchor
+			}
 		}
 	}
 	observability.FromContext(ctx).Info("band swap served",
