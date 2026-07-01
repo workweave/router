@@ -1932,7 +1932,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
 		attempt = s.anthropicNativeAttempt(env, r, prep, sink, preludeBuf, marker, setExtractor)
-	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
+	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderMakora, providers.ProviderTogether, providers.ProviderBedrock:
 		crossFormat = true
 		// Prep rebuilt per attempt: targetIsOpenRouter(opts) gates four
 		// OpenRouter-only body fields (provider hint, reasoning, system
@@ -2719,6 +2719,8 @@ func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers htt
 		providers.ProviderOpenRouter,
 		providers.ProviderFireworks,
 		providers.ProviderDeepInfra,
+		providers.ProviderMakora,
+		providers.ProviderTogether,
 		providers.ProviderBedrock,
 	} {
 		if ExtractClientCredentials(p, headers) != nil {
@@ -3592,7 +3594,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	var attempt dispatchAttempt
 	switch decision.Provider {
-	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
+	case providers.ProviderOpenAI, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderMakora, providers.ProviderTogether, providers.ProviderBedrock:
 		// Prep rebuilt per attempt: targetIsOpenRouter(opts) gates four
 		// OpenRouter-only body fields (provider hint, reasoning, system
 		// reminder, tool-temp override) that the Fireworks/DeepInfra/

@@ -107,7 +107,7 @@ func ExtractClientCredentials(provider string, headers http.Header) *Credentials
 				}
 			}
 		}
-	case providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderBedrock:
+	case providers.ProviderOpenAI, providers.ProviderGoogle, providers.ProviderOpenRouter, providers.ProviderFireworks, providers.ProviderDeepInfra, providers.ProviderMakora, providers.ProviderTogether, providers.ProviderBedrock:
 		authHeader := headers.Get("Authorization")
 		if raw, found := strings.CutPrefix(authHeader, "Bearer "); found {
 			key := strings.TrimSpace(raw)
