@@ -6,6 +6,7 @@ toolchain go1.25.9
 
 require (
 	cloud.google.com/go/pubsub/v2 v2.4.0
+	github.com/dmitryikh/leaves v0.0.0-20230708180554-25d19a787328
 	github.com/gin-gonic/gin v1.10.1
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7

@@ -1,0 +1,188 @@
+{
+  "served_engine": "lightgbm binary band (pure-Go leaves reader)",
+  "task": "P(LARGE) for the agent's NEXT per-API-call action; serve SMALL iff p_large < threshold",
+  "decision_rule": "serve SMALL iff p_large < threshold",
+  "default_miss_cap": 0.1,
+  "markov_feature_names": [
+    "lag1_0",
+    "lag1_1",
+    "lag1_2",
+    "lag1_3",
+    "lag1_4",
+    "lag1_5",
+    "lag1_6",
+    "lag2_0",
+    "lag2_1",
+    "lag2_2",
+    "lag2_3",
+    "lag2_4",
+    "lag2_5",
+    "lag2_6",
+    "lag3_0",
+    "lag3_1",
+    "lag3_2",
+    "lag3_3",
+    "lag3_4",
+    "lag3_5",
+    "lag3_6",
+    "lag4_0",
+    "lag4_1",
+    "lag4_2",
+    "lag4_3",
+    "lag4_4",
+    "lag4_5",
+    "lag4_6",
+    "lag5_0",
+    "lag5_1",
+    "lag5_2",
+    "lag5_3",
+    "lag5_4",
+    "lag5_5",
+    "lag5_6",
+    "lastk_reason",
+    "lastk_explore",
+    "lastk_execute",
+    "lastk_edit",
+    "lastk_orchestrate",
+    "lastk_integrate",
+    "lastk12_reason",
+    "lastk12_explore",
+    "lastk12_execute",
+    "lastk12_edit",
+    "lastk12_orchestrate",
+    "lastk12_integrate",
+    "cum_reason",
+    "cum_explore",
+    "cum_execute",
+    "cum_edit",
+    "cum_orchestrate",
+    "cum_integrate",
+    "since_reason",
+    "since_explore",
+    "since_execute",
+    "since_edit",
+    "since_orchestrate",
+    "since_integrate",
+    "streak",
+    "distinct_actions",
+    "action_entropy",
+    "frac_tool_result",
+    "is_tool_result",
+    "is_main_loop",
+    "step_idx",
+    "time_since_last",
+    "time_since_start",
+    "is_long_gap",
+    "log_ctx_tokens",
+    "prev_out",
+    "prev2_out",
+    "mean_out",
+    "last_is_error",
+    "ext_code",
+    "ext_config",
+    "ext_docs",
+    "ext_data",
+    "ext_other",
+    "ext_none"
+  ],
+  "embedding": {
+    "dim": 768,
+    "spec": "jina-embeddings-v2-base-code INT8, routing-time messages[-1] tail, mean-pool + L2",
+    "served_vector_layout": "markov_feature_names (in order) ++ embedding[0..dim-1]"
+  },
+  "action_types": [
+    "reason",
+    "explore",
+    "execute",
+    "edit",
+    "orchestrate",
+    "integrate"
+  ],
+  "band_map": {
+    "reason": "large",
+    "orchestrate": "large",
+    "edit": "large",
+    "explore": "small",
+    "execute": "small",
+    "integrate": "small"
+  },
+  "bands": {
+    "large": "large",
+    "small": "small"
+  },
+  "tunable_actions": [
+    "edit",
+    "execute"
+  ],
+  "trained_on_rows": 100055,
+  "heads": {
+    "markov": {
+      "file": "percall_band_markov.txt",
+      "n_features": 80,
+      "uses_embedding": false,
+      "oof_org_auc": 0.8044531032560623,
+      "oof_session_auc": 0.8602975269007951,
+      "default_threshold": 0.08,
+      "thresholds_by_miss_cap": {
+        "miss_5": {
+          "miss_cap": 0.05,
+          "t": 0.05,
+          "small_frac": 0.2462045874768877,
+          "small_tok": 0.0741717146026248,
+          "large_miss": 0.04244514707291367,
+          "miss_tok": 0.025456095004494483
+        },
+        "miss_10": {
+          "miss_cap": 0.1,
+          "t": 0.08,
+          "small_frac": 0.368757183549048,
+          "small_tok": 0.14509379023153487,
+          "large_miss": 0.09116604388234167,
+          "miss_tok": 0.05784402113905975
+        },
+        "miss_15": {
+          "miss_cap": 0.15,
+          "t": 0.11,
+          "small_frac": 0.4550197391434711,
+          "small_tok": 0.22155966652060452,
+          "large_miss": 0.14017437961099932,
+          "miss_tok": 0.09903127080239003
+        }
+      }
+    },
+    "markov_emb": {
+      "file": "percall_band_markov_emb.txt",
+      "n_features": 848,
+      "uses_embedding": true,
+      "oof_org_auc": 0.8234625097701105,
+      "oof_session_auc": 0.8787623419191067,
+      "default_threshold": 0.08,
+      "thresholds_by_miss_cap": {
+        "miss_5": {
+          "miss_cap": 0.05,
+          "t": 0.05,
+          "small_frac": 0.2573084803358153,
+          "small_tok": 0.08092046503424186,
+          "large_miss": 0.034684296253712756,
+          "miss_tok": 0.023945629090928476
+        },
+        "miss_10": {
+          "miss_cap": 0.1,
+          "t": 0.08,
+          "small_frac": 0.39999000549697666,
+          "small_tok": 0.16436138951752072,
+          "large_miss": 0.09471112388617418,
+          "miss_tok": 0.061691084799454135
+        },
+        "miss_15": {
+          "miss_cap": 0.15,
+          "t": 0.11,
+          "small_frac": 0.49452800959472293,
+          "small_tok": 0.24796971500231602,
+          "large_miss": 0.14989939637826963,
+          "miss_tok": 0.10974646321887563
+        }
+      }
+    }
+  }
+}
