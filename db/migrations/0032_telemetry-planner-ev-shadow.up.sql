@@ -31,7 +31,7 @@ COMMENT ON COLUMN router.model_router_request_telemetry.planner_threshold_usd IS
 COMMENT ON COLUMN router.model_router_request_telemetry.planner_pin_cache_cold IS
     'Whether the EV math priced the pin''s upstream prompt cache as cold (provider cache TTL lapsed). NULL on early-return reasons and when the planner did not run.';
 COMMENT ON COLUMN router.model_router_request_telemetry.planner_pin_model IS
-    'The pinned (from) model the planner weighed against the fresh recommendation — preserved on SWITCH rows where decision_model already names the switched-to model. NULL when the planner did not run.';
+    'The pinned (from) model the planner weighed against the fresh recommendation — preserved on SWITCH rows where decision_model already names the switched-to model. NULL on no_pin rows (the planner weighed no pin, even if a dropped pin was loaded earlier in the turn) and when the planner did not run.';
 
 -- Recreate the production-traffic view so the new columns surface through it
 -- (CREATE VIEW ... SELECT * freezes its column list at creation). Body text

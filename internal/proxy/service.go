@@ -2675,7 +2675,14 @@ func applyPlannerTelemetry(p *InsertTelemetryParams, res turnLoopResult) {
 	}
 	p.PlannerOutcome = plannerOutcomeAttr(res)
 	p.PlannerReason = res.PlannerDecision.Reason
-	p.PlannerPinModel = res.PinModel
+	// On no_pin rows the planner weighed no pin, but res.PinModel can still
+	// carry the model of a pin a turn-loop guard dropped after the lookup
+	// (maxed-out output, context overflow, provider eligibility, image
+	// constraint). Persisting it would contradict the planner input, so the
+	// column stays NULL there; the drop reason is visible on the OTel span.
+	if res.PlannerDecision.Reason != planner.ReasonNoPin {
+		p.PlannerPinModel = res.PinModel
+	}
 	if !res.PlannerDecision.EVComputed {
 		return
 	}

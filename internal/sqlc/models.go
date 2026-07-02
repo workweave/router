@@ -163,7 +163,7 @@ type RouterModelRouterRequestTelemetry struct {
 	PlannerThresholdUsd *float64
 	// Whether the EV math priced the pin's upstream prompt cache as cold (provider cache TTL lapsed). NULL on early-return reasons and when the planner did not run.
 	PlannerPinCacheCold *bool
-	// The pinned (from) model the planner weighed against the fresh recommendation — preserved on SWITCH rows where decision_model already names the switched-to model. NULL when the planner did not run.
+	// The pinned (from) model the planner weighed against the fresh recommendation — preserved on SWITCH rows where decision_model already names the switched-to model. NULL on no_pin rows (the planner weighed no pin, even if a dropped pin was loaded earlier in the turn) and when the planner did not run.
 	PlannerPinModel *string
 }
 

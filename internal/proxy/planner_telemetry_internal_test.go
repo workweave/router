@@ -26,6 +26,29 @@ func TestApplyPlannerTelemetry_SkippedLeavesFieldsNull(t *testing.T) {
 	assert.Nil(t, p.PlannerPinCacheCold)
 }
 
+// A no_pin verdict must leave planner_pin_model NULL even when res.PinModel
+// carries a stale value from a pin that a turn-loop guard dropped after the
+// lookup (maxed-out output, context overflow, provider eligibility, images):
+// the planner weighed no pin, and persisting the dropped model would
+// contradict the planner input in the shadow corpus.
+func TestApplyPlannerTelemetry_NoPinLeavesStalePinModelNull(t *testing.T) {
+	t.Parallel()
+	res := turnLoopResult{
+		PinModel: "claude-opus-4-7", // stale: loaded, then dropped by a guard
+		PlannerDecision: planner.Decision{
+			Outcome: planner.OutcomeSwitch,
+			Reason:  planner.ReasonNoPin,
+		},
+	}
+	var p InsertTelemetryParams
+	applyPlannerTelemetry(&p, res)
+
+	assert.Equal(t, "switch", p.PlannerOutcome)
+	assert.Equal(t, planner.ReasonNoPin, p.PlannerReason)
+	assert.Empty(t, p.PlannerPinModel, "no_pin rows must not carry a dropped pin's model")
+	assert.Nil(t, p.PlannerExpectedSavingsUSD)
+}
+
 // An early-return planner verdict (same_model, no_prior_usage, ...) must
 // persist outcome/reason/pin-model — those are facts — but leave the USD and
 // warmth columns NULL: the EV math never ran, so their zero values are
