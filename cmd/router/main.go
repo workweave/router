@@ -229,8 +229,17 @@ func main() {
 
 	{
 		openRouterBaseURL := config.GetOr("OPENROUTER_BASE_URL", openaiCompatProvider.DefaultBaseURL)
+		// Managed deploys don't use OpenRouter as a platform source by default:
+		// we don't read our own OPENROUTER_API_KEY, so it never lands in
+		// envKeyedProviders and the scorer + failover chain won't route platform
+		// traffic to it. A self-hoster running in managed mode can opt back in
+		// with ROUTER_OPENROUTER_PLATFORM_ENABLED=true; self-hosted mode reads the
+		// key unconditionally as before. Either way the provider stays registered
+		// so a caller's BYOK OpenRouter key still dispatches.
+		openRouterPlatformEnabled := deploymentMode == server.DeploymentModeSelfHosted ||
+			config.GetOr("ROUTER_OPENROUTER_PLATFORM_ENABLED", "false") == "true"
 		openRouterKey := ""
-		if !byokOnly {
+		if !byokOnly && openRouterPlatformEnabled {
 			openRouterKey = config.GetOr("OPENROUTER_API_KEY", "")
 		}
 		providerMap[providers.ProviderOpenRouter] = openaiCompatProvider.NewClient(openRouterKey, openRouterBaseURL)
@@ -240,6 +249,8 @@ func main() {
 		case openRouterKey != "":
 			envKeyedProviders[providers.ProviderOpenRouter] = struct{}{}
 			logger.Info("OpenRouter provider enabled", "base_url", openRouterBaseURL)
+		case !openRouterPlatformEnabled:
+			logger.Info("OpenRouter provider registered (BYOK only — managed deploys don't use OpenRouter as a platform source; set ROUTER_OPENROUTER_PLATFORM_ENABLED=true to opt in)", "base_url", openRouterBaseURL)
 		default:
 			logger.Info("OpenRouter provider registered (BYOK only — set OPENROUTER_API_KEY for deployment-level use)", "base_url", openRouterBaseURL)
 		}
