@@ -1,0 +1,29 @@
+cmd/router/main.go
+  s_035d3d44682683::t_095ea2baf6c02e 648,650-653,748,764
+internal/proxy/turnloop_test.go
+  s_035d3d44682683::t_095ea2baf6c02e 494-626
+internal/proxy/turnloop.go
+  s_035d3d44682683::t_095ea2baf6c02e 96-103,241-274,292,667-670,710-724
+internal/router/planner/policy.go
+  s_035d3d44682683::t_095ea2baf6c02e 63-70,104,174-180
+internal/proxy/service.go
+  s_035d3d44682683::t_095ea2baf6c02e 64-71,835-839,850,876,887-894,1832-1838,1840-1851
+internal/router/planner/policy_test.go
+  s_035d3d44682683::t_095ea2baf6c02e 88-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "cb5b78fec09bf4b8d493c213103beec4ea55823b",
+  "prompts": {},
+  "sessions": {
+    "s_035d3d44682683": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5c55d20d-8d65-432d-a371-d871e40baee0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
