@@ -26,7 +26,7 @@ func TestExcludeContextOverflowModels_KeepsExtendedContextModel(t *testing.T) {
 		"claude-haiku-4-5": {},
 	}
 
-	out, overflowed := excludeContextOverflowModels(250_000, 8_000, nil, available)
+	out, overflowed := excludeContextOverflowModels(250_000, 0, 8_000, nil, available)
 
 	assert.Contains(t, overflowed, "claude-haiku-4-5", "200K-only model overflows a 258K request")
 	assert.NotContains(t, overflowed, "claude-opus-4-8", "extended-context model fits at 1M and must stay eligible")
@@ -42,10 +42,33 @@ func TestExcludeContextOverflowModels_NoOverflowUnderWindow(t *testing.T) {
 		"claude-haiku-4-5": {},
 	}
 
-	out, overflowed := excludeContextOverflowModels(10_000, 8_000, nil, available)
+	out, overflowed := excludeContextOverflowModels(10_000, 0, 8_000, nil, available)
 
 	assert.Empty(t, overflowed)
 	assert.Nil(t, out, "no additions returns the original (nil) denylist unchanged")
+}
+
+// TestExcludeContextOverflowModels_SignatureSavingsOnlyForStrippingTargets is
+// the regression for the review finding: base64 thought-signatures are stripped
+// before dispatch to a non-Anthropic target but kept for an Anthropic
+// passthrough. So the signature savings must be applied only to stripping
+// (non-Anthropic-family) models. Here the raw estimate overflows both a 256K
+// OSS model and a 200K Anthropic model; the savings pull the OSS model back
+// under its window (it never receives the signatures) but must NOT rescue the
+// Anthropic model (it does).
+func TestExcludeContextOverflowModels_SignatureSavingsOnlyForStrippingTargets(t *testing.T) {
+	available := map[string]struct{}{
+		"moonshotai/kimi-k2.7": {}, // fireworks → OpenAI-compat, strips signatures, 262144 window
+		"claude-haiku-4-5":     {}, // anthropic → keeps signatures, 200K window
+	}
+
+	// est+reserve = 268K overflows kimi's 262144 without savings; -20K savings = 248K fits.
+	out, overflowed := excludeContextOverflowModels(260_000, 20_000, 8_000, nil, available)
+
+	assert.NotContains(t, overflowed, "moonshotai/kimi-k2.7", "OSS target strips signatures, so the savings keep it under its 256K window")
+	assert.Contains(t, overflowed, "claude-haiku-4-5", "Anthropic target keeps signatures, so the savings do not apply and it overflows 200K")
+	_, kimiExcluded := out["moonshotai/kimi-k2.7"]
+	assert.False(t, kimiExcluded, "stripping target must not be denylisted")
 }
 
 // TestShouldEnableExtendedContext gates the 1M-context beta on request size:

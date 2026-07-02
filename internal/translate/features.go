@@ -54,19 +54,32 @@ func (e *RequestEnvelope) FullTokenEstimate() int {
 	return len(e.body) / 6
 }
 
-// ContextOverflowTokenEstimate estimates the token count of the body as a
-// non-Anthropic upstream will actually receive it, for context-window overflow
-// pre-filtering. It subtracts the base64 thought-signature payloads — which the
-// translator strips before dispatch to any OpenAI/Gemini/OSS model — from the
-// raw byte count, then divides the remaining dense content by
-// contentBytesPerToken. This fixes the ÷6 undercount on signature-light,
-// content-dense bodies (which overflowed 256K OSS models and 400'd) without
-// reintroducing the base64 over-count that ÷6 guards against. Distinct from
-// FullTokenEstimate, which stays ÷6 so the extended-context beta trigger keeps
-// its existing calibration.
+// ContextOverflowTokenEstimate estimates the token count of the full body for
+// context-window overflow pre-filtering — the count a signature-KEEPING target
+// (an Anthropic-family upstream) receives. Divides raw body bytes by
+// contentBytesPerToken (~4.2 real bytes/token on dense Claude Code bodies),
+// deliberately lower than FullTokenEstimate's ÷6 so a genuinely large,
+// signature-light body is no longer undercounted onto a too-small window (the
+// bug: a ~263K prompt estimated ~175K under ÷6 and 400'd on a 256K OSS model).
+// FullTokenEstimate stays ÷6 so the extended-context beta trigger keeps its
+// existing calibration. Signature-STRIPPING targets subtract
+// SignatureTokenSavings from this figure — see excludeContextOverflowModels.
 func (e *RequestEnvelope) ContextOverflowTokenEstimate() int {
-	contentBytes := max(0, len(e.body)-base64SignatureBytes(e.body))
-	return contentBytes / contentBytesPerToken
+	return len(e.body) / contentBytesPerToken
+}
+
+// SignatureTokenSavings returns the tokens a signature-STRIPPING target saves
+// versus ContextOverflowTokenEstimate: the translator drops base64
+// thought-signature blocks before dispatch to any non-Anthropic model, so those
+// bytes never occupy that target's window. Zero for non-Anthropic inbound
+// formats — they carry no Anthropic thought-signatures, so a stray "signature"
+// field there is caller data, not a block to strip (which would falsely
+// undercount an OpenAI/Gemini request).
+func (e *RequestEnvelope) SignatureTokenSavings() int {
+	if e.format != FormatAnthropic {
+		return 0
+	}
+	return base64SignatureBytes(e.body) / contentBytesPerToken
 }
 
 // base64SignatureBytes sums the byte length of every base64 thought-signature

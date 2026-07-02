@@ -575,22 +575,44 @@ func contextWindowForRequest(modelID string) int {
 	return catalog.ContextWindowFor(modelID)
 }
 
+// modelStripsAnthropicSignatures reports whether dispatching to model drops the
+// Anthropic-only base64 thought-signature blocks from the request — every
+// non-Anthropic-family target does (the translator strips them). Signature
+// bytes only occupy a target's context window when that target keeps them, so
+// the overflow check discounts them for stripping targets and counts them for
+// Anthropic passthrough. Unknown models default to "keeps" (the conservative,
+// higher-`needed` side).
+func modelStripsAnthropicSignatures(model string) bool {
+	m, ok := catalog.ByID(model)
+	if !ok {
+		return false
+	}
+	return providers.FamilyFor(m.PrimaryProvider()) != providers.FamilyAnthropic
+}
+
 // excludeContextOverflowModels returns a copy of excluded augmented with every
 // model in available whose context window is too small to serve the request,
 // plus the sorted IDs of the models it newly excluded (for logging).
-// est is the full-body token estimate (translate.RequestEnvelope.FullTokenEstimate).
+// est is the full-body token estimate (translate.RequestEnvelope.ContextOverflowTokenEstimate),
+// the count a signature-keeping target receives. sigSavings is the tokens a
+// signature-stripping target saves (translate.RequestEnvelope.SignatureTokenSavings);
+// it is subtracted per-model only for stripping targets so an Anthropic
+// passthrough model is still checked against the full body.
 // outputReserve is the expected output budget (feats.MaxTokens or the const above).
 // Returns the original excluded map unchanged and a nil slice when no models are added.
-func excludeContextOverflowModels(est, outputReserve int, excluded, available map[string]struct{}) (map[string]struct{}, []string) {
+func excludeContextOverflowModels(est, sigSavings, outputReserve int, excluded, available map[string]struct{}) (map[string]struct{}, []string) {
 	if est <= 0 {
 		return excluded, nil
 	}
-	needed := est + outputReserve
 	var out map[string]struct{}
 	var overflowed []string
 	for model := range available {
 		if _, alreadyExcluded := excluded[model]; alreadyExcluded {
 			continue
+		}
+		needed := est + outputReserve
+		if sigSavings > 0 && modelStripsAnthropicSignatures(model) {
+			needed -= sigSavings
 		}
 		cw := contextWindowForRequest(model)
 		if needed <= cw {
@@ -1620,7 +1642,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 	baseExcluded := s.excludedModelsForRequest(ctx)
 	overflowEstimate := env.ContextOverflowTokenEstimate()
-	excluded, ctxOverflowed := excludeContextOverflowModels(overflowEstimate, outputReserve, baseExcluded, s.availableModels)
+	excluded, ctxOverflowed := excludeContextOverflowModels(overflowEstimate, env.SignatureTokenSavings(), outputReserve, baseExcluded, s.availableModels)
 	if len(ctxOverflowed) > 0 {
 		log.Info("context window pre-filter: excluded over-capacity models",
 			"overflow_token_estimate", overflowEstimate,
@@ -3524,7 +3546,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 	baseExcludedOAI := s.excludedModelsForRequest(ctx)
 	overflowEstimateOAI := env.ContextOverflowTokenEstimate()
-	excludedOAI, ctxOverflowedOAI := excludeContextOverflowModels(overflowEstimateOAI, outputReserveOAI, baseExcludedOAI, s.availableModels)
+	excludedOAI, ctxOverflowedOAI := excludeContextOverflowModels(overflowEstimateOAI, env.SignatureTokenSavings(), outputReserveOAI, baseExcludedOAI, s.availableModels)
 	if len(ctxOverflowedOAI) > 0 {
 		log.Info("context window pre-filter: excluded over-capacity models",
 			"overflow_token_estimate", overflowEstimateOAI,

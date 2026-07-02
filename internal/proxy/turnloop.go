@@ -382,6 +382,9 @@ func (s *Service) runTurnLoop(
 				outputReserveForPin = feats.MaxTokens
 			}
 			pinTokenEstimate := env.ContextOverflowTokenEstimate()
+			if modelStripsAnthropicSignatures(pin.Model) {
+				pinTokenEstimate -= env.SignatureTokenSavings()
+			}
 			needed := pinTokenEstimate + outputReserveForPin
 			modelCW := contextWindowForRequest(pin.Model)
 			if needed > modelCW {
@@ -416,7 +419,7 @@ func (s *Service) runTurnLoop(
 				}
 				log.Info("Session pin preserved despite context-window pre-filter exclusion",
 					"pin_model", pin.Model,
-					"token_estimate", env.FullTokenEstimate(),
+					"token_estimate", pinTokenEstimate,
 					"needed", needed,
 					"model_context_window", modelCW,
 				)

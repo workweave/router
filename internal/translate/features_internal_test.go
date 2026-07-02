@@ -17,27 +17,29 @@ func TestBase64SignatureBytes(t *testing.T) {
 	assert.Equal(t, 0, base64SignatureBytes([]byte(`{"signature":"AAAA`)), "unterminated payload is skipped")
 }
 
-// TestContextOverflowTokenEstimate_DenseBody divides content-only bytes by the
+// TestContextOverflowTokenEstimate_FullBody divides the full body bytes
+// (signatures included — the count a signature-keeping target receives) by the
 // dense-content ratio.
-func TestContextOverflowTokenEstimate_DenseBody(t *testing.T) {
+func TestContextOverflowTokenEstimate_FullBody(t *testing.T) {
 	body := []byte(strings.Repeat("x", 400))
 	e := &RequestEnvelope{body: body, format: FormatAnthropic}
-	assert.Equal(t, 100, e.ContextOverflowTokenEstimate(), "400 dense bytes / 4 = 100 tokens")
+	assert.Equal(t, 100, e.ContextOverflowTokenEstimate(), "400 bytes / 4 = 100 tokens")
 }
 
-// TestContextOverflowTokenEstimate_SubtractsSignatures excludes the base64
-// signature payload — which is stripped before dispatch to a non-Anthropic
-// model — before applying the content ratio.
-func TestContextOverflowTokenEstimate_SubtractsSignatures(t *testing.T) {
+// TestSignatureTokenSavings returns the token savings a signature-stripping
+// target gets from dropping the base64 payloads — but only for Anthropic-format
+// input; other formats carry no Anthropic thought-signatures to strip.
+func TestSignatureTokenSavings(t *testing.T) {
 	sig := strings.Repeat("A", 800)
 	body := []byte(`{"content":"` + strings.Repeat("x", 400) + `","signature":"` + sig + `"}`)
-	e := &RequestEnvelope{body: body, format: FormatAnthropic}
 
-	withSig := e.ContextOverflowTokenEstimate()
-	contentOnly := &RequestEnvelope{body: []byte(`{"content":"` + strings.Repeat("x", 400) + `"}`), format: FormatAnthropic}
-	// The 800-byte signature adds 800/4 = 200 tokens if it were counted; it must
-	// not, so the two estimates differ only by the non-signature framing bytes.
-	assert.Less(t, withSig-contentOnly.ContextOverflowTokenEstimate(), 200, "signature bytes are not counted as content tokens")
+	anthropic := &RequestEnvelope{body: body, format: FormatAnthropic}
+	assert.Equal(t, 200, anthropic.SignatureTokenSavings(), "800 signature bytes / 4 = 200 tokens saved")
+
+	// Same bytes arriving as an OpenAI body: the "signature" field is caller
+	// data, not an Anthropic block, so nothing is stripped and nothing is saved.
+	openai := &RequestEnvelope{body: body, format: FormatOpenAI}
+	assert.Equal(t, 0, openai.SignatureTokenSavings(), "non-Anthropic format saves nothing")
 }
 
 // TestContextOverflowTokenEstimate_TicketRegression is the regression for the
