@@ -138,7 +138,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	// Surface subscription rate-limit headroom (anthropic-ratelimit-unified-*) to
 	// the proxy's usage observer. Done for every response, including 429s where
 	// the headroom signal matters most.
-	providers.ObserveUpstreamHeaders(ctx, resp.Header)
+	providers.ObserveUpstreamHeaders(ctx, resp.StatusCode, resp.Header)
 
 	if resp.StatusCode >= 400 {
 		bufBody, totalRead, drainErr := readCapped(resp.Body, providers.MaxBufferedErrorBytes)

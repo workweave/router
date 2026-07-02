@@ -216,6 +216,57 @@ func (o *Observer) Record(key CredentialKey, snap Snapshot) {
 	o.data[key] = snap
 }
 
+// exhaustedFallbackWindowMinutes bounds how long a header-less exhaustion
+// signal (a 429 whose retry hints we couldn't read) stays authoritative: the
+// primary ~5h session window. A weekly-cap 429 whose reset we couldn't parse
+// thus re-reads as slack after ~5h rather than staying suppressed for a week —
+// self-healing, at the cost of at most one extra 429 per 5h until the real
+// reset re-records it.
+const exhaustedFallbackWindowMinutes = 5 * 60
+
+// RecordExhausted marks a credential's session window fully spent as of now, so
+// Snapshot().Exhausted() reports true until resetAt — or, when resetAt is zero,
+// for exhaustedFallbackWindowMinutes. Use it when the upstream 429s a
+// subscription turn without the unified-utilization headers the header path
+// keys off (the Claude OAuth session-limit 429 is a bare rate_limit_error): the
+// 429 itself is ground truth that the plan is bound. Goes through Record, so it
+// merges with any prior snapshot and preserves the other window's last-known
+// reading rather than erasing it.
+func (o *Observer) RecordExhausted(key CredentialKey, resetAt time.Time) {
+	windowMinutes := exhaustedFallbackWindowMinutes
+	if !resetAt.IsZero() {
+		if mins := int(math.Ceil(resetAt.Sub(o.now()).Minutes())); mins > windowMinutes {
+			windowMinutes = mins
+		}
+	}
+	o.Record(key, Snapshot{Primary: Window{UsedPercent: 1, WindowMinutes: windowMinutes, ResetAt: resetAt}})
+}
+
+// RecordExhaustedFromHeaders is RecordExhausted with the refill instant derived
+// from a 429 response's retry hints (Retry-After delta-seconds, else an absolute
+// anthropic-ratelimit-unified-*-reset). Falls back to the default session window
+// when neither is present.
+func (o *Observer) RecordExhaustedFromHeaders(key CredentialKey, h http.Header) {
+	o.RecordExhausted(key, retryResetFrom(h, o.now()))
+}
+
+// retryResetFrom derives an absolute refill instant from a 429 response's retry
+// hints: the standard Retry-After delta-seconds header (now + delta) takes
+// precedence, else an absolute anthropic-ratelimit-unified-{5h,weekly}-reset.
+// Returns zero when neither is present, letting the caller fall back to the
+// default session window.
+func retryResetFrom(h http.Header, now time.Time) time.Time {
+	if secs, ok := parseFloat(h.Get("retry-after")); ok && secs > 0 {
+		return now.Add(time.Duration(secs * float64(time.Second)))
+	}
+	for _, which := range [...]string{"5h", "weekly"} {
+		if t, ok := parseResetTime(h.Get("anthropic-ratelimit-unified-" + which + "-reset")); ok {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
 // Snapshot returns the most recent non-stale observation for a credential, or
 // (zero, false) if none / expired. Expired entries are dropped lazily.
 func (o *Observer) Snapshot(key CredentialKey) (Snapshot, bool) {

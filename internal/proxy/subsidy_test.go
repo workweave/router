@@ -74,7 +74,7 @@ func TestSubsidy_RecordReadKeyAgreement(t *testing.T) {
 	resp := http.Header{}
 	resp.Set("x-codex-primary-used-percent", "10")
 	resp.Set("x-codex-primary-window-minutes", "300")
-	providers.ObserveUpstreamHeaders(callCtx, resp)
+	providers.ObserveUpstreamHeaders(callCtx, http.StatusOK, resp)
 
 	// subsidyFactors must read back the SAME key and discount covered GPT models.
 	factors := s.subsidyFactors(ctx, headers)

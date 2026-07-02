@@ -85,7 +85,7 @@ func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) co
 	if codexTok == "" && anthroTok == "" {
 		return ctx
 	}
-	obs := func(callCtx context.Context, h http.Header) {
+	obs := func(callCtx context.Context, status int, h http.Header) {
 		// Record only when the call's RESOLVED credential is one of THIS request's
 		// detected subscription tokens — not any incidental OAuth credential — and
 		// key by that token so subsidyFactors reads the same key. Gating on the
@@ -99,12 +99,27 @@ func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) co
 		}
 		switch string(creds.APIKey) {
 		case codexTok:
+			// Codex reports x-codex-* headroom on every response, including 429s,
+			// so the parse below records the near-cap reading without special-casing.
 			if snap, ok := usage.ParseCodexHeaders(h); ok {
 				s.usageObserver.Record(s.usageObserver.Key([]byte(codexTok)), snap)
 			}
 		case anthroTok:
+			key := s.usageObserver.Key([]byte(anthroTok))
+			// The Claude OAuth session-limit 429 is a bare rate_limit_error that
+			// carries none of the anthropic-ratelimit-unified-* utilization headers
+			// the parse below keys off, so header-only detection never marks the plan
+			// spent and the spent token gets re-injected every turn (surfacing as a
+			// hard 429 to the caller). The 429 is itself ground truth that the plan
+			// is bound: record exhaustion (bounded by Retry-After so it lifts at the
+			// real reset) so the next turn suppresses the subscription and fails over
+			// to the deployment / BYOK Anthropic key.
+			if status == http.StatusTooManyRequests {
+				s.usageObserver.RecordExhaustedFromHeaders(key, h)
+				return
+			}
 			if snap, ok := usage.ParseAnthropicUnifiedHeaders(h); ok {
-				s.usageObserver.Record(s.usageObserver.Key([]byte(anthroTok)), snap)
+				s.usageObserver.Record(key, snap)
 			}
 		}
 	}
