@@ -30,11 +30,12 @@ var expectedRosterPrefix = map[string]string{
 // (OpenAI-compat upstreams dispatched via catalog models with slash IDs) or
 // the RL policy roster doesn't need to distinguish them.
 var defaultRosterPrefixProviders = map[string]struct{}{
-	providers.ProviderOpenRouter: {},
-	providers.ProviderFireworks:  {},
-	providers.ProviderBedrock:    {},
-	providers.ProviderMakora:     {},
-	providers.ProviderTogether:   {},
+	providers.ProviderOpenRouter:    {},
+	providers.ProviderTrustedRouter: {},
+	providers.ProviderFireworks:     {},
+	providers.ProviderBedrock:       {},
+	providers.ProviderMakora:        {},
+	providers.ProviderTogether:      {},
 }
 
 // TestRosterIDForCoversEveryProvider guards against a new Provider* constant
