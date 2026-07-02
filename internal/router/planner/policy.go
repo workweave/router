@@ -72,7 +72,17 @@ type Inputs struct {
 	Pin                  sessionpin.Pin
 	Fresh                router.Decision
 	EstimatedInputTokens int
-	AvailableModels      map[string]struct{}
+	// ObservedInputTokens is the previous turn's actual billed prompt size
+	// (fresh input + cache-read + cache-creation tokens) from the session
+	// pin's usage writeback. EstimatedInputTokens is a text-only char/4
+	// estimate that misses tool schemas, tool results, and images — on long
+	// agent sessions it undercounts the prefix the EV math is pricing by a
+	// wide margin. An agent prefix grows monotonically, so the prior turn's
+	// observed total is a hard floor for this turn; Decide prices tokens as
+	// max(EstimatedInputTokens, ObservedInputTokens). Zero when no usage has
+	// been recorded yet (falls back to the estimate alone).
+	ObservedInputTokens int
+	AvailableModels     map[string]struct{}
 	// PinCacheCold reports that the pin's upstream prompt cache has lapsed —
 	// no turn completed within the pinned provider's cache TTL. The proxy
 	// computes this (it owns the clock); the planner stays a pure function.
@@ -139,7 +149,12 @@ func Decide(in Inputs, cfg EVConfig) Decision {
 	pinPrice = applySubsidy(pinPrice, in.SubsidizedCostFactor, in.Pin.Model)
 	freshPrice = applySubsidy(freshPrice, in.SubsidizedCostFactor, in.Fresh.Model)
 
-	tokens := float64(in.EstimatedInputTokens)
+	// Ground the prefix size in observed usage when it exceeds the text-only
+	// estimate: the previous turn's billed input is a hard floor for this
+	// turn's monotonically growing agent prefix, while the estimate misses
+	// tool schemas/results entirely. max() keeps the estimate authoritative
+	// on the rare turn where it's larger (e.g. a huge inline paste).
+	tokens := float64(max(in.EstimatedInputTokens, in.ObservedInputTokens))
 	// Per-model cache-read multipliers scale savings: only the cache-read
 	// portion of per-turn delta accrues over the horizon — but only while the
 	// pin's cache is warm. A cold pin earns no discount and switching evicts

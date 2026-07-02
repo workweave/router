@@ -20,6 +20,10 @@
 -- the upstream credential; credential_source names the precedence branch it came
 -- from. All NULL on deployment-key turns. Matching prefix/suffix values across
 -- distinct router_user_ids reveal one subscription paying for many seats.
+-- planner_* mirror the cache-aware planner's per-turn EV verdict (outcome,
+-- reason, expected savings / eviction cost / threshold in USD, warmth
+-- assumption, and the pinned from-model). Shadow corpus for offline
+-- switch-policy replay; all NULL on turns where the planner did not run.
 -- name: InsertRequestTelemetry :exec
 INSERT INTO router.model_router_request_telemetry (
     installation_id,
@@ -76,7 +80,14 @@ INSERT INTO router.model_router_request_telemetry (
     tool_result_bytes,
     credential_key_prefix,
     credential_key_suffix,
-    credential_source
+    credential_source,
+    planner_outcome,
+    planner_reason,
+    planner_expected_savings_usd,
+    planner_eviction_cost_usd,
+    planner_threshold_usd,
+    planner_pin_cache_cold,
+    planner_pin_model
 ) VALUES (
     @installation_id::uuid,
     sqlc.narg('api_key_id')::uuid,
@@ -132,7 +143,14 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('tool_result_bytes')::int,
     sqlc.narg('credential_key_prefix')::varchar,
     sqlc.narg('credential_key_suffix')::varchar,
-    sqlc.narg('credential_source')::varchar
+    sqlc.narg('credential_source')::varchar,
+    sqlc.narg('planner_outcome')::varchar,
+    sqlc.narg('planner_reason')::varchar,
+    sqlc.narg('planner_expected_savings_usd')::double precision,
+    sqlc.narg('planner_eviction_cost_usd')::double precision,
+    sqlc.narg('planner_threshold_usd')::double precision,
+    sqlc.narg('planner_pin_cache_cold')::boolean,
+    sqlc.narg('planner_pin_model')::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 

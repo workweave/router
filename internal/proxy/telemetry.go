@@ -102,6 +102,21 @@ type InsertTelemetryParams struct {
 	CredentialKeyPrefix string
 	CredentialKeySuffix string
 	CredentialSource    string
+
+	// Planner* mirror the cache-aware planner's EV verdict for this turn —
+	// the shadow corpus for offline switch-policy replay (sweep thresholds,
+	// horizons, cold-pin policies against billed cost). PlannerPinModel is
+	// the pinned from-model, preserved on SWITCH rows where DecisionModel
+	// already names the switched-to model. Empty/nil when the planner did
+	// not run (hard pins, tool-result stickies, user-forced pins, usage
+	// bypass, planner disabled), leaving the columns NULL.
+	PlannerOutcome            string
+	PlannerReason             string
+	PlannerExpectedSavingsUSD *float64
+	PlannerEvictionCostUSD    *float64
+	PlannerThresholdUSD       *float64
+	PlannerPinCacheCold       *bool
+	PlannerPinModel           string
 }
 
 // TelemetrySummary holds aggregated totals for the dashboard cards.

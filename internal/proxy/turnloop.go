@@ -647,10 +647,20 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
+	// Ground the planner's prefix size in the previous turn's actual billed
+	// input (usage writeback on the pin): feats.Tokens is a text-only char/4
+	// estimate that misses tool schemas and results, so on long agent
+	// sessions it undercounts the prefix the EV math prices. Only meaningful
+	// on a live pin — the no-pin path early-returns before the EV math.
+	observedInput := 0
+	if pinFound {
+		observedInput = pin.LastInputTokens + pin.LastCachedReadTokens + pin.LastCachedWriteTokens
+	}
 	plannerIn := planner.Inputs{
 		Pin:                  pin,
 		Fresh:                fresh,
 		EstimatedInputTokens: feats.Tokens,
+		ObservedInputTokens:  observedInput,
 		AvailableModels:      s.availableModels,
 		// A trimmed prefix kills the cache even inside the provider TTL.
 		PinCacheCold: pinFound && (!cacheWarm(pin) || prefixBroken),

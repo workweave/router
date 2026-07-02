@@ -2500,7 +2500,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			// is the best available recovery for the session's next turn.
 			s.evictPinAfterDegenerateResponse(ctx, stickyHit, decision.Reason, installationID, routeRes.SessionKey, routeRes.PinRole)
 		}
-		s.fireTelemetry(InsertTelemetryParams{
+		telemetryParams := InsertTelemetryParams{
 			InstallationID:         installationID.String(),
 			APIKeyID:               apiKeyIDFromContext(ctx),
 			RequestID:              requestID,
@@ -2577,7 +2577,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			CredentialKeyPrefix: credentialKeyPrefix,
 			CredentialKeySuffix: credentialKeySuffix,
 			CredentialSource:    credSource,
-		})
+		}
+		// Planner EV shadow corpus: persist the STAY/SWITCH verdict and its
+		// USD breakdown so switch-policy counterfactuals (threshold, horizon,
+		// cold-pin handling) are replayable offline against billed cost. NULL
+		// on turns where the planner did not run.
+		applyPlannerTelemetry(&telemetryParams, routeRes)
+		s.fireTelemetry(telemetryParams)
 	}
 
 	// Debit prepaid credits — no-op when billing is unwired (selfhosted).
@@ -2653,6 +2659,28 @@ func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilde
 		Int64("handover.summary_tokens", int64(res.Handover.SummaryTokens)).
 		Bool("handover.fallback_to_full_history", res.Handover.FallbackToFullHistory)
 	return b
+}
+
+// applyPlannerTelemetry stamps the planner's EV verdict onto a telemetry row.
+// No-op when the planner did not run this turn (Reason empty), leaving the
+// planner_* columns NULL so skipped turns stay distinct from measured zeros.
+// The USD fields are recorded even on early-return reasons (no_pin,
+// same_model, ...) where they are zero — planner_reason disambiguates.
+func applyPlannerTelemetry(p *InsertTelemetryParams, res turnLoopResult) {
+	if res.PlannerDecision.Reason == "" {
+		return
+	}
+	savings := res.PlannerDecision.ExpectedSavingsUSD
+	eviction := res.PlannerDecision.EvictionCostUSD
+	threshold := res.PlannerDecision.ThresholdUSD
+	cold := res.PlannerDecision.PinCacheCold
+	p.PlannerOutcome = plannerOutcomeAttr(res)
+	p.PlannerReason = res.PlannerDecision.Reason
+	p.PlannerExpectedSavingsUSD = &savings
+	p.PlannerEvictionCostUSD = &eviction
+	p.PlannerThresholdUSD = &threshold
+	p.PlannerPinCacheCold = &cold
+	p.PlannerPinModel = res.PinModel
 }
 
 // plannerOutcomeAttr maps the planner's typed outcome to an OTel string.
@@ -4047,7 +4075,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	installationIDOAI, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	if installationIDOAI != "" {
 		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
-		s.fireTelemetry(InsertTelemetryParams{
+		telemetryParams := InsertTelemetryParams{
 			InstallationID:         installationIDOAI,
 			APIKeyID:               apiKeyIDFromContext(ctx),
 			RequestID:              requestID,
@@ -4103,7 +4131,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			CredentialKeyPrefix: credentialKeyPrefix,
 			CredentialKeySuffix: credentialKeySuffix,
 			CredentialSource:    credSource,
-		})
+		}
+		// Planner EV shadow corpus — see the Anthropic-path write site.
+		applyPlannerTelemetry(&telemetryParams, routeRes)
+		s.fireTelemetry(telemetryParams)
 	}
 
 	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
