@@ -29,13 +29,15 @@ COMMENT ON COLUMN router.model_router_request_telemetry.planner_eviction_cost_us
 COMMENT ON COLUMN router.model_router_request_telemetry.planner_threshold_usd IS
     'The switch EV threshold the verdict was compared against. NULL on early-return reasons and when the planner did not run.';
 COMMENT ON COLUMN router.model_router_request_telemetry.planner_pin_cache_cold IS
-    'Whether the EV math priced the pin''s upstream prompt cache as cold (provider cache TTL lapsed). NULL when the planner did not run.';
+    'Whether the EV math priced the pin''s upstream prompt cache as cold (provider cache TTL lapsed). NULL on early-return reasons and when the planner did not run.';
 COMMENT ON COLUMN router.model_router_request_telemetry.planner_pin_model IS
     'The pinned (from) model the planner weighed against the fresh recommendation — preserved on SWITCH rows where decision_model already names the switched-to model. NULL when the planner did not run.';
 
 -- Recreate the production-traffic view so the new columns surface through it
--- (CREATE VIEW ... SELECT * freezes its column list at creation). Body
--- unchanged from migration 0028.
+-- (CREATE VIEW ... SELECT * freezes its column list at creation). Body text
+-- unchanged from migration 0028; the refreshed freeze also picks up
+-- api_key_id (added by 0031 without a view refresh). The down migration
+-- restores the exact 0028-era column list — see its comment.
 DROP VIEW router.production_request_telemetry;
 CREATE VIEW router.production_request_telemetry AS
 SELECT * FROM router.model_router_request_telemetry

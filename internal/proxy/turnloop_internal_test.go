@@ -105,6 +105,39 @@ func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	assert.False(t, store.lastUsage.EndedAt.IsZero(), "EndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
 
+// TestObservedPromptTokens_ProviderSemantics guards the provider split the
+// EV grounding relies on (mirroring catalog.EffectiveInputCost): Anthropic
+// bills input_tokens exclusive of cache tokens (total = sum of all three),
+// while OpenAI-shape and Gemini prompt counts already include cached tokens —
+// summing there would double-count the prefix and inflate the EV math.
+func TestObservedPromptTokens_ProviderSemantics(t *testing.T) {
+	anthropic := sessionpin.Pin{
+		Provider:              "anthropic",
+		LastInputTokens:       1_000,
+		LastCachedReadTokens:  40_000,
+		LastCachedWriteTokens: 2_000,
+	}
+	assert.Equal(t, 43_000, observedPromptTokens(anthropic),
+		"anthropic input_tokens is fresh-only: total prompt = input + cache read + cache write")
+
+	openai := sessionpin.Pin{
+		Provider:              "openai",
+		LastInputTokens:       43_000, // prompt_tokens already includes cached_tokens
+		LastCachedReadTokens:  40_000,
+		LastCachedWriteTokens: 0,
+	}
+	assert.Equal(t, 43_000, observedPromptTokens(openai),
+		"openai prompt_tokens already includes cached tokens; adding them double-counts")
+
+	openrouter := sessionpin.Pin{
+		Provider:             "openrouter",
+		LastInputTokens:      20_000,
+		LastCachedReadTokens: 15_000,
+	}
+	assert.Equal(t, 20_000, observedPromptTokens(openrouter),
+		"OpenAI-compat providers share the inclusive prompt_tokens semantics")
+}
+
 // TestLoadPin_DoesNotServeExpiredPostgresPinButKeepsEmitHistory guards the
 // expiry filter: expired rows must be routing misses, but their
 // has_ever_switched / last_served_model history still protects Anthropic emit

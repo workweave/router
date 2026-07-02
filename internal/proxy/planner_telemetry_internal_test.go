@@ -26,6 +26,33 @@ func TestApplyPlannerTelemetry_SkippedLeavesFieldsNull(t *testing.T) {
 	assert.Nil(t, p.PlannerPinCacheCold)
 }
 
+// An early-return planner verdict (same_model, no_prior_usage, ...) must
+// persist outcome/reason/pin-model — those are facts — but leave the USD and
+// warmth columns NULL: the EV math never ran, so their zero values are
+// structural, not measurements. Writing them would poison the shadow corpus
+// with measured-looking zeros.
+func TestApplyPlannerTelemetry_EarlyReturnLeavesEVFieldsNull(t *testing.T) {
+	t.Parallel()
+	res := turnLoopResult{
+		PinModel: "claude-opus-4-7",
+		PlannerDecision: planner.Decision{
+			Outcome: planner.OutcomeStay,
+			Reason:  planner.ReasonSameModel,
+			// EVComputed false: Decide early-returned before the EV math.
+		},
+	}
+	var p InsertTelemetryParams
+	applyPlannerTelemetry(&p, res)
+
+	assert.Equal(t, "stay", p.PlannerOutcome)
+	assert.Equal(t, planner.ReasonSameModel, p.PlannerReason)
+	assert.Equal(t, "claude-opus-4-7", p.PlannerPinModel)
+	assert.Nil(t, p.PlannerExpectedSavingsUSD, "USD fields must stay NULL on early returns")
+	assert.Nil(t, p.PlannerEvictionCostUSD)
+	assert.Nil(t, p.PlannerThresholdUSD)
+	assert.Nil(t, p.PlannerPinCacheCold)
+}
+
 // A planner STAY verdict must be persisted with its full EV breakdown and the
 // pinned from-model, including genuinely zero USD values.
 func TestApplyPlannerTelemetry_StayRecordsEVBreakdown(t *testing.T) {
@@ -39,6 +66,7 @@ func TestApplyPlannerTelemetry_StayRecordsEVBreakdown(t *testing.T) {
 			EvictionCostUSD:    0.225,
 			ThresholdUSD:       0.001,
 			PinCacheCold:       false,
+			EVComputed:         true,
 		},
 	}
 	var p InsertTelemetryParams
@@ -70,6 +98,7 @@ func TestApplyPlannerTelemetry_SwitchPreservesFromModel(t *testing.T) {
 			EvictionCostUSD:    0.036,
 			ThresholdUSD:       0.001,
 			PinCacheCold:       true,
+			EVComputed:         true,
 		},
 	}
 	var p InsertTelemetryParams

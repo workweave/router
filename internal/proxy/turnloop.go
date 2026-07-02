@@ -39,6 +39,20 @@ func installationIDFromContext(ctx context.Context) uuid.UUID {
 // cacheWarm reports whether the pin's upstream prompt cache is likely still
 // warm — a prior turn completed within the pinned provider's best-effort cache
 // TTL. A cold pin earns no cache-read discount in the planner's EV math.
+// observedPromptTokens returns the pin's previous-turn total billed prompt
+// size. Usage writeback preserves each provider's own accounting, so the sum
+// is provider-dependent (same split as catalog.EffectiveInputCost): Anthropic
+// bills input_tokens EXCLUSIVE of cache tokens, so the total is the sum of all
+// three; OpenAI-shape and Gemini prompt counts already INCLUDE cached tokens
+// (the cache fields are subsets), so adding them would double-count the prefix
+// and inflate the EV math.
+func observedPromptTokens(pin sessionpin.Pin) int {
+	if pin.Provider == providers.ProviderAnthropic {
+		return pin.LastInputTokens + pin.LastCachedReadTokens + pin.LastCachedWriteTokens
+	}
+	return pin.LastInputTokens
+}
+
 func cacheWarm(pin sessionpin.Pin) bool {
 	if pin.LastTurnEndedAt.IsZero() {
 		return false
@@ -654,7 +668,7 @@ func (s *Service) runTurnLoop(
 	// on a live pin — the no-pin path early-returns before the EV math.
 	observedInput := 0
 	if pinFound {
-		observedInput = pin.LastInputTokens + pin.LastCachedReadTokens + pin.LastCachedWriteTokens
+		observedInput = observedPromptTokens(pin)
 	}
 	plannerIn := planner.Inputs{
 		Pin:                  pin,

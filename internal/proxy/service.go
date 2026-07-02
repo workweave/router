@@ -2662,25 +2662,31 @@ func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilde
 }
 
 // applyPlannerTelemetry stamps the planner's EV verdict onto a telemetry row.
-// No-op when the planner did not run this turn (Reason empty), leaving the
+// No-op when the planner did not run this turn (Reason empty), leaving all
 // planner_* columns NULL so skipped turns stay distinct from measured zeros.
-// The USD fields are recorded even on early-return reasons (no_pin,
-// same_model, ...) where they are zero — planner_reason disambiguates.
+// The USD fields and the warmth assumption are persisted only when the EV
+// math actually ran (Decision.EVComputed): on early-return reasons (no_pin,
+// same_model, no_prior_usage, ...) those fields are structural zeros, not
+// measurements, and must stay NULL — only outcome/reason/pin-model are facts
+// there.
 func applyPlannerTelemetry(p *InsertTelemetryParams, res turnLoopResult) {
 	if res.PlannerDecision.Reason == "" {
+		return
+	}
+	p.PlannerOutcome = plannerOutcomeAttr(res)
+	p.PlannerReason = res.PlannerDecision.Reason
+	p.PlannerPinModel = res.PinModel
+	if !res.PlannerDecision.EVComputed {
 		return
 	}
 	savings := res.PlannerDecision.ExpectedSavingsUSD
 	eviction := res.PlannerDecision.EvictionCostUSD
 	threshold := res.PlannerDecision.ThresholdUSD
 	cold := res.PlannerDecision.PinCacheCold
-	p.PlannerOutcome = plannerOutcomeAttr(res)
-	p.PlannerReason = res.PlannerDecision.Reason
 	p.PlannerExpectedSavingsUSD = &savings
 	p.PlannerEvictionCostUSD = &eviction
 	p.PlannerThresholdUSD = &threshold
 	p.PlannerPinCacheCold = &cold
-	p.PlannerPinModel = res.PinModel
 }
 
 // plannerOutcomeAttr maps the planner's typed outcome to an OTel string.

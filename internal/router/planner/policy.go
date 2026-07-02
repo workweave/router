@@ -47,6 +47,13 @@ type Decision struct {
 	// PinCacheCold echoes the warmth assumption the EV math ran under, for
 	// observability. Only meaningful on the EV path; false on early returns.
 	PinCacheCold bool
+	// EVComputed is true only when the EV math actually ran — i.e. the
+	// decision carries measured ExpectedSavingsUSD / EvictionCostUSD /
+	// ThresholdUSD / PinCacheCold values. False on early returns (no_pin,
+	// same_model, pin_model_missing, no_prior_usage, pricing_missing), where
+	// those fields are structural zeros, not measurements. Telemetry keys on
+	// this to persist NULL instead of measured-looking zeros.
+	EVComputed bool
 }
 
 // EVConfig parameterizes the policy. Constructed once at boot from env.
@@ -175,6 +182,7 @@ func Decide(in Inputs, cfg EVConfig) Decision {
 		EvictionCostUSD:    evictionCost,
 		ThresholdUSD:       cfg.ThresholdUSD,
 		PinCacheCold:       in.PinCacheCold,
+		EVComputed:         true,
 	}
 	switch {
 	case expectedSavings-evictionCost > cfg.ThresholdUSD:
