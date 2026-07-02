@@ -36,9 +36,10 @@ func TestPrepareOpenAI_AnthropicSource_InjectsDeepSeekProviderHint(t *testing.T)
 	p := providerField(t, out.Body)
 	require.NotNil(t, p, "expected provider hint for deepseek/* target")
 	order, _ := p["order"].([]any)
-	require.Len(t, order, 1)
-	assert.Equal(t, "deepseek", order[0])
-	assert.Equal(t, false, p["allow_fallbacks"])
+	require.Len(t, order, 2)
+	assert.Equal(t, "deepseek", order[0], "native DeepSeek (cheapest cache reads) stays the preferred backend")
+	assert.Equal(t, "fireworks", order[1], "fireworks is the full-precision caching fallback when deepseek is unavailable")
+	assert.Equal(t, false, p["allow_fallbacks"], "fallbacks stay disabled so OpenRouter never drops to a non-caching/quantized host")
 }
 
 func TestPrepareOpenAI_AnthropicSource_InjectsMoonshotProviderHint(t *testing.T) {
@@ -72,8 +73,9 @@ func TestPrepareOpenAI_OpenAISource_InjectsProviderHint(t *testing.T) {
 	p := providerField(t, out.Body)
 	require.NotNil(t, p, "OpenAI→OpenAI path must inject the hint too")
 	order, _ := p["order"].([]any)
-	require.Len(t, order, 1)
+	require.Len(t, order, 2)
 	assert.Equal(t, "deepseek", order[0])
+	assert.Equal(t, "fireworks", order[1])
 }
 
 func TestPrepareOpenAI_NoHintForUnrecognizedModel(t *testing.T) {

@@ -6,11 +6,20 @@ import "strings"
 // that need pinning to caching-capable backends. Without a hint, OpenRouter
 // load-balances by price and picks hosts without prefix caching, which breaks
 // agentic workloads re-sending large transcripts each turn.
+//
+// The order lists multiple full-precision, prefix-caching backends rather than a
+// single one: with allow_fallbacks:false a one-element order makes OpenRouter
+// return 404 ("No endpoints found") whenever that single backend has no live
+// endpoint, which turns a transient backend outage into a hard request failure —
+// fatal on the failover path where OpenRouter is already the last resort after a
+// direct-provider timeout. Listing deepseek then fireworks keeps the strict
+// caching guarantee (allow_fallbacks stays false, so OpenRouter never drops to a
+// non-caching or quantized host) while surviving a single backend going dark.
 func openRouterProviderHint(model string) map[string]any {
 	switch {
 	case strings.HasPrefix(model, "deepseek/"):
 		return map[string]any{
-			"order":           []string{"deepseek"},
+			"order":           []string{"deepseek", "fireworks"},
 			"allow_fallbacks": false,
 		}
 	case strings.HasPrefix(model, "moonshotai/"):
