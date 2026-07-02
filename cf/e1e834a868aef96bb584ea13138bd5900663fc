@@ -1,0 +1,19 @@
+cmd/router/main.go
+  s_09658d2c710b6a::t_a7d6759a61147e 232-236,238,248-249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "cfe1e834a868aef96bb584ea13138bd5900663fc",
+  "prompts": {},
+  "sessions": {
+    "s_09658d2c710b6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2077aa2-279e-4953-a77e-20853ff6ce8d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
