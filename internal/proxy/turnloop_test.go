@@ -451,6 +451,34 @@ func TestTurnLoop_PlannerDisabledPreservesFirstDecisionWins(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
+// A transcript below compactionMinHistoryMessages must not floor the EV
+// tokens at the pin's prior billed size: compaction turns are hard-pinned and
+// skip usage writeback, so after a client compaction the pin still carries the
+// pre-compaction prompt size. Flooring there would price a tiny transcript as
+// a 50k-token switch opportunity.
+func TestTurnLoop_ObservedFloorSkippedOnSmallTranscript(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-opus-4-7",
+		Reason:          "cluster:v0.2",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 50_000,                            // stale pre-compaction size
+		LastTurnEndedAt: time.Now().Add(-30 * time.Minute), // cache cold: eviction is free
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel),
+		"a 1-message turn must be priced at its own tiny estimate (EV stay), not the pin's stale 50k floor")
+}
+
 // TestTurnLoop_UsageWritebackPersistsCacheStats wires a usage-emitting
 // fake provider through ProxyMessages and asserts the orchestrator
 // writes the upstream usage back to the pin row.

@@ -660,8 +660,14 @@ func (s *Service) runTurnLoop(
 
 	// feats.Tokens is a text-only char/4 estimate that misses tool schemas
 	// and results; the pin's usage writeback records what was actually billed.
+	// The floor assumes a monotonically growing prefix, which a client
+	// compaction breaks: the transcript collapses to a few messages while the
+	// pin still carries the pre-compaction billed size (compaction turns are
+	// hard-pinned and skip usage writeback). A transcript below
+	// compactionMinHistoryMessages is either fresh or just-compacted, so the
+	// prior turn's billed size is not a floor there.
 	observedInput := 0
-	if pinFound {
+	if pinFound && feats.MessageCount >= compactionMinHistoryMessages {
 		observedInput = observedPromptTokens(pin)
 	}
 	plannerIn := planner.Inputs{
