@@ -1,6 +1,6 @@
 BEGIN;
 
--- Rebuild the view against the pre-0032 column set first (its frozen SELECT *
+-- Rebuild the view against the pre-0033 column set first (its frozen SELECT *
 -- list still references the dropped columns otherwise).
 DROP VIEW router.production_request_telemetry;
 
@@ -13,9 +13,9 @@ ALTER TABLE router.model_router_request_telemetry
     DROP COLUMN planner_pin_cache_cold,
     DROP COLUMN planner_pin_model;
 
--- Recreate the view with the explicit pre-0032 column list rather than
+-- Recreate the view with the explicit pre-0033 column list rather than
 -- SELECT *. The production view was last frozen by migration 0028, BEFORE
--- 0031 added api_key_id, so the pre-0032 view does not reference api_key_id.
+-- 0031 added api_key_id, so the pre-0033 view does not reference api_key_id.
 -- A SELECT * here would freeze api_key_id in and make 0031's down migration
 -- fail ("cannot drop column api_key_id ... view depends on it") on a full
 -- roll-down.
