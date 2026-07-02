@@ -36,16 +36,10 @@ func installationIDFromContext(ctx context.Context) uuid.UUID {
 	return id
 }
 
-// cacheWarm reports whether the pin's upstream prompt cache is likely still
-// warm — a prior turn completed within the pinned provider's best-effort cache
-// TTL. A cold pin earns no cache-read discount in the planner's EV math.
 // observedPromptTokens returns the pin's previous-turn total billed prompt
-// size. Usage writeback preserves each provider's own accounting, so the sum
-// is provider-dependent (same split as catalog.EffectiveInputCost): Anthropic
-// bills input_tokens EXCLUSIVE of cache tokens, so the total is the sum of all
-// three; OpenAI-shape and Gemini prompt counts already INCLUDE cached tokens
-// (the cache fields are subsets), so adding them would double-count the prefix
-// and inflate the EV math.
+// size. Anthropic bills input_tokens exclusive of cache tokens; OpenAI-shape
+// and Gemini prompt counts already include them, so summing there would
+// double-count the prefix (same split as catalog.EffectiveInputCost).
 func observedPromptTokens(pin sessionpin.Pin) int {
 	if pin.Provider == providers.ProviderAnthropic {
 		return pin.LastInputTokens + pin.LastCachedReadTokens + pin.LastCachedWriteTokens
@@ -53,6 +47,9 @@ func observedPromptTokens(pin sessionpin.Pin) int {
 	return pin.LastInputTokens
 }
 
+// cacheWarm reports whether the pin's upstream prompt cache is likely still
+// warm — a prior turn completed within the pinned provider's best-effort cache
+// TTL. A cold pin earns no cache-read discount in the planner's EV math.
 func cacheWarm(pin sessionpin.Pin) bool {
 	if pin.LastTurnEndedAt.IsZero() {
 		return false
@@ -661,11 +658,8 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
-	// Ground the planner's prefix size in the previous turn's actual billed
-	// input (usage writeback on the pin): feats.Tokens is a text-only char/4
-	// estimate that misses tool schemas and results, so on long agent
-	// sessions it undercounts the prefix the EV math prices. Only meaningful
-	// on a live pin — the no-pin path early-returns before the EV math.
+	// feats.Tokens is a text-only char/4 estimate that misses tool schemas
+	// and results; the pin's usage writeback records what was actually billed.
 	observedInput := 0
 	if pinFound {
 		observedInput = observedPromptTokens(pin)

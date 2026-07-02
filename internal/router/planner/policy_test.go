@@ -133,10 +133,7 @@ func TestDecide_ColdPinFollowFresh(t *testing.T) {
 	assert.Equal(t, planner.ReasonEVPositive, pos.Reason, "EV-positive must take precedence over the cold-pin reason")
 }
 
-// The EV math must price the prefix at max(estimate, observed prior-turn
-// usage): the text-only estimate misses tool schemas/results and can be near
-// zero, while the pin's usage writeback records what the upstream actually
-// billed — a hard floor for a monotonically growing agent prefix.
+// The EV math prices the prefix at max(estimate, observed prior-turn usage).
 func TestDecide_ObservedInputTokensFloorsEstimate(t *testing.T) {
 	t.Parallel()
 	base := planner.Inputs{
@@ -145,17 +142,12 @@ func TestDecide_ObservedInputTokensFloorsEstimate(t *testing.T) {
 		AvailableModels: availableAll,
 	}
 
-	// Tiny estimate alone: opus -> haiku at 100 tokens is under the switch
-	// threshold, so the planner stays.
 	small := base
 	small.EstimatedInputTokens = 100
 	stay := planner.Decide(small, defaultCfg)
 	assert.Equal(t, planner.OutcomeStay, stay.Outcome, "100-token estimate alone must stay")
 	assert.Equal(t, planner.ReasonEVNegative, stay.Reason)
 
-	// Same tiny estimate but the prior turn billed 50k input tokens: the
-	// observed floor must produce the exact EV numbers of a 50k prompt
-	// (see the ev_positive table case) and flip the verdict to switch.
 	grounded := small
 	grounded.ObservedInputTokens = 50_000
 	switched := planner.Decide(grounded, defaultCfg)
@@ -164,8 +156,6 @@ func TestDecide_ObservedInputTokensFloorsEstimate(t *testing.T) {
 	assert.InDelta(t, 0.063, switched.ExpectedSavingsUSD, 1e-9)
 	assert.InDelta(t, 0.036, switched.EvictionCostUSD, 1e-9)
 
-	// The estimate stays authoritative when it exceeds the observed usage
-	// (e.g. a huge inline paste on this turn).
 	estimateWins := base
 	estimateWins.EstimatedInputTokens = 50_000
 	estimateWins.ObservedInputTokens = 100

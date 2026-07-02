@@ -47,12 +47,9 @@ type Decision struct {
 	// PinCacheCold echoes the warmth assumption the EV math ran under, for
 	// observability. Only meaningful on the EV path; false on early returns.
 	PinCacheCold bool
-	// EVComputed is true only when the EV math actually ran — i.e. the
-	// decision carries measured ExpectedSavingsUSD / EvictionCostUSD /
-	// ThresholdUSD / PinCacheCold values. False on early returns (no_pin,
-	// same_model, pin_model_missing, no_prior_usage, pricing_missing), where
-	// those fields are structural zeros, not measurements. Telemetry keys on
-	// this to persist NULL instead of measured-looking zeros.
+	// EVComputed is true only when the EV math ran. On early returns the USD
+	// fields are structural zeros, not measurements; telemetry keys on this
+	// to persist NULL instead.
 	EVComputed bool
 }
 
@@ -79,15 +76,10 @@ type Inputs struct {
 	Pin                  sessionpin.Pin
 	Fresh                router.Decision
 	EstimatedInputTokens int
-	// ObservedInputTokens is the previous turn's actual billed prompt size
-	// (fresh input + cache-read + cache-creation tokens) from the session
-	// pin's usage writeback. EstimatedInputTokens is a text-only char/4
-	// estimate that misses tool schemas, tool results, and images — on long
-	// agent sessions it undercounts the prefix the EV math is pricing by a
-	// wide margin. An agent prefix grows monotonically, so the prior turn's
-	// observed total is a hard floor for this turn; Decide prices tokens as
-	// max(EstimatedInputTokens, ObservedInputTokens). Zero when no usage has
-	// been recorded yet (falls back to the estimate alone).
+	// ObservedInputTokens is the previous turn's billed prompt size from the
+	// pin's usage writeback. The agent prefix grows monotonically, so it is a
+	// hard floor for this turn where the text-only estimate undercounts (tool
+	// schemas, tool results, images). Zero when no usage is recorded yet.
 	ObservedInputTokens int
 	AvailableModels     map[string]struct{}
 	// PinCacheCold reports that the pin's upstream prompt cache has lapsed —
@@ -156,11 +148,6 @@ func Decide(in Inputs, cfg EVConfig) Decision {
 	pinPrice = applySubsidy(pinPrice, in.SubsidizedCostFactor, in.Pin.Model)
 	freshPrice = applySubsidy(freshPrice, in.SubsidizedCostFactor, in.Fresh.Model)
 
-	// Ground the prefix size in observed usage when it exceeds the text-only
-	// estimate: the previous turn's billed input is a hard floor for this
-	// turn's monotonically growing agent prefix, while the estimate misses
-	// tool schemas/results entirely. max() keeps the estimate authoritative
-	// on the rare turn where it's larger (e.g. a huge inline paste).
 	tokens := float64(max(in.EstimatedInputTokens, in.ObservedInputTokens))
 	// Per-model cache-read multipliers scale savings: only the cache-read
 	// portion of per-turn delta accrues over the horizon — but only while the

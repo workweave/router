@@ -105,11 +105,8 @@ func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	assert.False(t, store.lastUsage.EndedAt.IsZero(), "EndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
 
-// TestObservedPromptTokens_ProviderSemantics guards the provider split the
-// EV grounding relies on (mirroring catalog.EffectiveInputCost): Anthropic
-// bills input_tokens exclusive of cache tokens (total = sum of all three),
-// while OpenAI-shape and Gemini prompt counts already include cached tokens —
-// summing there would double-count the prefix and inflate the EV math.
+// Anthropic bills input_tokens exclusive of cache tokens; OpenAI-shape prompt
+// counts already include them, so summing there would double-count.
 func TestObservedPromptTokens_ProviderSemantics(t *testing.T) {
 	anthropic := sessionpin.Pin{
 		Provider:              "anthropic",
@@ -122,7 +119,7 @@ func TestObservedPromptTokens_ProviderSemantics(t *testing.T) {
 
 	openai := sessionpin.Pin{
 		Provider:              "openai",
-		LastInputTokens:       43_000, // prompt_tokens already includes cached_tokens
+		LastInputTokens:       43_000,
 		LastCachedReadTokens:  40_000,
 		LastCachedWriteTokens: 0,
 	}

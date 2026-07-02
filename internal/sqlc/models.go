@@ -151,19 +151,19 @@ type RouterModelRouterRequestTelemetry struct {
 	// Which credential precedence branch served the turn: subscription, codex_subscription, byok, or client. NULL on deployment-key turns.
 	CredentialSource *string
 	APIKeyID         pgtype.UUID
-	// The cache-aware planner's verdict for this turn: stay or switch. NULL when the planner did not run.
+	// Planner verdict for this turn: stay or switch. NULL when the planner did not run.
 	PlannerOutcome *string
-	// Snake_case planner reason (ev_positive, ev_negative, tier_upgrade, no_pin, ...). NULL when the planner did not run.
+	// Planner reason (ev_positive, ev_negative, tier_upgrade, no_pin, ...). NULL when the planner did not run.
 	PlannerReason *string
-	// Expected switch savings over the planner horizon in USD (can be negative). Populated only on the EV path; NULL on early-return reasons and when the planner did not run.
+	// Expected switch savings over the planner horizon in USD (can be negative). NULL unless the EV math ran.
 	PlannerExpectedSavingsUsd *float64
-	// One-time cost of abandoning the pin's warm prompt cache in USD. Zero when the pin was priced cold. NULL on early-return reasons and when the planner did not run.
+	// One-time cost of abandoning the pin's warm prompt cache in USD. NULL unless the EV math ran.
 	PlannerEvictionCostUsd *float64
-	// The switch EV threshold the verdict was compared against. NULL on early-return reasons and when the planner did not run.
+	// The switch EV threshold the verdict was compared against. NULL unless the EV math ran.
 	PlannerThresholdUsd *float64
-	// Whether the EV math priced the pin's upstream prompt cache as cold (provider cache TTL lapsed). NULL on early-return reasons and when the planner did not run.
+	// Whether the EV math priced the pin's upstream prompt cache as cold. NULL unless the EV math ran.
 	PlannerPinCacheCold *bool
-	// The pinned (from) model the planner weighed against the fresh recommendation — preserved on SWITCH rows where decision_model already names the switched-to model. NULL on no_pin rows (the planner weighed no pin, even if a dropped pin was loaded earlier in the turn) and when the planner did not run.
+	// The pinned (from) model the planner weighed against the fresh recommendation. NULL on no_pin rows and when the planner did not run.
 	PlannerPinModel *string
 }
 

@@ -1025,10 +1025,8 @@ type InsertRequestTelemetryParams struct {
 // the upstream credential; credential_source names the precedence branch it came
 // from. All NULL on deployment-key turns. Matching prefix/suffix values across
 // distinct router_user_ids reveal one subscription paying for many seats.
-// planner_* mirror the cache-aware planner's per-turn EV verdict (outcome,
-// reason, expected savings / eviction cost / threshold in USD, warmth
-// assumption, and the pinned from-model). Shadow corpus for offline
-// switch-policy replay; all NULL on turns where the planner did not run.
+// planner_* mirror the cache-aware planner's per-turn EV verdict; all NULL on
+// turns where the planner did not run.
 //
 //	INSERT INTO router.model_router_request_telemetry (
 //	    installation_id,

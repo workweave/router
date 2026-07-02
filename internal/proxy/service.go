@@ -2578,10 +2578,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			CredentialKeySuffix: credentialKeySuffix,
 			CredentialSource:    credSource,
 		}
-		// Planner EV shadow corpus: persist the STAY/SWITCH verdict and its
-		// USD breakdown so switch-policy counterfactuals (threshold, horizon,
-		// cold-pin handling) are replayable offline against billed cost. NULL
-		// on turns where the planner did not run.
 		applyPlannerTelemetry(&telemetryParams, routeRes)
 		s.fireTelemetry(telemetryParams)
 	}
@@ -2662,24 +2658,18 @@ func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilde
 }
 
 // applyPlannerTelemetry stamps the planner's EV verdict onto a telemetry row.
-// No-op when the planner did not run this turn (Reason empty), leaving all
-// planner_* columns NULL so skipped turns stay distinct from measured zeros.
-// The USD fields and the warmth assumption are persisted only when the EV
-// math actually ran (Decision.EVComputed): on early-return reasons (no_pin,
-// same_model, no_prior_usage, ...) those fields are structural zeros, not
-// measurements, and must stay NULL — only outcome/reason/pin-model are facts
-// there.
+// No-op when the planner did not run this turn (Reason empty). The USD fields
+// stay NULL unless the EV math actually ran (Decision.EVComputed), so early
+// returns don't persist measured-looking zeros.
 func applyPlannerTelemetry(p *InsertTelemetryParams, res turnLoopResult) {
 	if res.PlannerDecision.Reason == "" {
 		return
 	}
 	p.PlannerOutcome = plannerOutcomeAttr(res)
 	p.PlannerReason = res.PlannerDecision.Reason
-	// On no_pin rows the planner weighed no pin, but res.PinModel can still
-	// carry the model of a pin a turn-loop guard dropped after the lookup
-	// (maxed-out output, context overflow, provider eligibility, image
-	// constraint). Persisting it would contradict the planner input, so the
-	// column stays NULL there; the drop reason is visible on the OTel span.
+	// On no_pin rows res.PinModel can still carry a pin that a turn-loop
+	// guard dropped after the lookup; persisting it would contradict the
+	// planner input.
 	if res.PlannerDecision.Reason != planner.ReasonNoPin {
 		p.PlannerPinModel = res.PinModel
 	}
@@ -4145,7 +4135,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			CredentialKeySuffix: credentialKeySuffix,
 			CredentialSource:    credSource,
 		}
-		// Planner EV shadow corpus — see the Anthropic-path write site.
 		applyPlannerTelemetry(&telemetryParams, routeRes)
 		s.fireTelemetry(telemetryParams)
 	}

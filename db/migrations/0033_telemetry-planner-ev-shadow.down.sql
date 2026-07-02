@@ -14,11 +14,8 @@ ALTER TABLE router.model_router_request_telemetry
     DROP COLUMN planner_pin_model;
 
 -- Recreate the view with the explicit pre-0033 column list rather than
--- SELECT *. The production view was last frozen by migration 0028, BEFORE
--- 0031 added api_key_id, so the pre-0033 view does not reference api_key_id.
--- A SELECT * here would freeze api_key_id in and make 0031's down migration
--- fail ("cannot drop column api_key_id ... view depends on it") on a full
--- roll-down.
+-- SELECT *: freezing api_key_id in would make 0031's down migration fail
+-- ("view depends on it") on a full roll-down.
 CREATE VIEW router.production_request_telemetry AS
 SELECT
     id,

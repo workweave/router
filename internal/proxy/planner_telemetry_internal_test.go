@@ -9,9 +9,7 @@ import (
 	"workweave/router/internal/router/planner"
 )
 
-// applyPlannerTelemetry must leave every planner_* field nil/empty when the
-// planner did not run this turn, so skipped turns stay distinct from measured
-// zeros in the shadow corpus.
+// Every planner_* field stays nil/empty when the planner did not run.
 func TestApplyPlannerTelemetry_SkippedLeavesFieldsNull(t *testing.T) {
 	t.Parallel()
 	var p InsertTelemetryParams
@@ -27,14 +25,11 @@ func TestApplyPlannerTelemetry_SkippedLeavesFieldsNull(t *testing.T) {
 }
 
 // A no_pin verdict must leave planner_pin_model NULL even when res.PinModel
-// carries a stale value from a pin that a turn-loop guard dropped after the
-// lookup (maxed-out output, context overflow, provider eligibility, images):
-// the planner weighed no pin, and persisting the dropped model would
-// contradict the planner input in the shadow corpus.
+// carries a stale value from a pin a turn-loop guard dropped after the lookup.
 func TestApplyPlannerTelemetry_NoPinLeavesStalePinModelNull(t *testing.T) {
 	t.Parallel()
 	res := turnLoopResult{
-		PinModel: "claude-opus-4-7", // stale: loaded, then dropped by a guard
+		PinModel: "claude-opus-4-7",
 		PlannerDecision: planner.Decision{
 			Outcome: planner.OutcomeSwitch,
 			Reason:  planner.ReasonNoPin,
@@ -49,11 +44,8 @@ func TestApplyPlannerTelemetry_NoPinLeavesStalePinModelNull(t *testing.T) {
 	assert.Nil(t, p.PlannerExpectedSavingsUSD)
 }
 
-// An early-return planner verdict (same_model, no_prior_usage, ...) must
-// persist outcome/reason/pin-model — those are facts — but leave the USD and
-// warmth columns NULL: the EV math never ran, so their zero values are
-// structural, not measurements. Writing them would poison the shadow corpus
-// with measured-looking zeros.
+// Early-return verdicts persist outcome/reason/pin-model but leave the USD
+// and warmth columns NULL — the EV math never ran.
 func TestApplyPlannerTelemetry_EarlyReturnLeavesEVFieldsNull(t *testing.T) {
 	t.Parallel()
 	res := turnLoopResult{
@@ -61,7 +53,6 @@ func TestApplyPlannerTelemetry_EarlyReturnLeavesEVFieldsNull(t *testing.T) {
 		PlannerDecision: planner.Decision{
 			Outcome: planner.OutcomeStay,
 			Reason:  planner.ReasonSameModel,
-			// EVComputed false: Decide early-returned before the EV math.
 		},
 	}
 	var p InsertTelemetryParams
@@ -76,8 +67,7 @@ func TestApplyPlannerTelemetry_EarlyReturnLeavesEVFieldsNull(t *testing.T) {
 	assert.Nil(t, p.PlannerPinCacheCold)
 }
 
-// A planner STAY verdict must be persisted with its full EV breakdown and the
-// pinned from-model, including genuinely zero USD values.
+// A STAY verdict persists its full EV breakdown and the pinned from-model.
 func TestApplyPlannerTelemetry_StayRecordsEVBreakdown(t *testing.T) {
 	t.Parallel()
 	res := turnLoopResult{
@@ -108,8 +98,8 @@ func TestApplyPlannerTelemetry_StayRecordsEVBreakdown(t *testing.T) {
 	assert.False(t, *p.PlannerPinCacheCold)
 }
 
-// A SWITCH verdict must record outcome "switch" and preserve the pinned
-// from-model even though the row's decision_model names the switched-to model.
+// A SWITCH verdict preserves the pinned from-model (decision_model names the
+// switched-to model).
 func TestApplyPlannerTelemetry_SwitchPreservesFromModel(t *testing.T) {
 	t.Parallel()
 	res := turnLoopResult{
