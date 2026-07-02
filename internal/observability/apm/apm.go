@@ -34,6 +34,7 @@ import (
 
 	"workweave/router/internal/config"
 	"workweave/router/internal/observability"
+	"workweave/router/internal/version"
 )
 
 // serviceName is the resource attribute the SigNoz UI groups spans + metrics
@@ -67,12 +68,11 @@ func initLocked() {
 
 	ctx := context.Background()
 	deployEnv := config.GetOr("ROUTER_DEPLOYMENT_ENV", config.GetOr("ENV", "dev"))
-	version := config.GetOr("ROUTER_VERSION", "unknown")
 
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceName(serviceName),
-			semconv.ServiceVersion(version),
+			semconv.ServiceVersion(version.Commit),
 			semconv.DeploymentEnvironment(deployEnv),
 		),
 		resource.WithHost(),
@@ -133,7 +133,7 @@ func initLocked() {
 		"endpoint", endpoint,
 		"service", serviceName,
 		"deployment_env", deployEnv,
-		"version", version,
+		"version", version.Commit,
 		"insecure", insecure,
 	)
 }

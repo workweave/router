@@ -68,6 +68,12 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
 
+	// /v1/version reports the running binary's git commit + build time (stamped
+	// via -ldflags) so operators and the README's managed-deployment badge can
+	// tell which router commit is live. Unauthed + mounted in both modes, like
+	// /health — the fields are public build metadata with no leak risk.
+	engine.GET("/v1/version", middleware.WithTimeout(healthTimeout), admin.VersionHandler)
+
 	// /v1/router/models surfaces the active artifact's deployed-models list so
 	// the Weave control plane can validate per-org exclusion submissions
 	// against the live universe instead of hand-copying it on every gitlink

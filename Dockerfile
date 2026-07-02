@@ -52,6 +52,11 @@ ARG HF_MODEL_REPO
 ARG HF_MODEL_REVISION
 ARG HF_QWEN_REPO
 ARG HF_QWEN_REVISION
+# Build identity stamped into the binary via -ldflags (see the go build below)
+# and surfaced at GET /v1/version. Default to "unknown" so a plain
+# `docker build` with no --build-arg still produces a runnable image.
+ARG ROUTER_SHA=unknown
+ARG ROUTER_BUILD_TIME=unknown
 # TARGETARCH is set automatically by buildx (`amd64` or `arm64`) so we
 # can pull the matching native ONNX Runtime + libtokenizers tarball.
 # Without this, building on Apple Silicon / Graviton picks up x86_64
@@ -193,7 +198,9 @@ WORKDIR /app/cmd/router
 # main.go fail-opens to the heuristic. Don't drop the tag.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    GOOS=linux go build -tags ORT -o /server
+    GOOS=linux go build -tags ORT \
+      -ldflags "-X workweave/router/internal/version.Commit=${ROUTER_SHA} -X workweave/router/internal/version.BuildTime=${ROUTER_BUILD_TIME}" \
+      -o /server
 
 
 FROM gcr.io/distroless/cc-debian12 AS build-release-stage
