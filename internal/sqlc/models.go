@@ -168,6 +168,23 @@ type RouterModelRouterUser struct {
 	DisplayName *string
 }
 
+type RouterOrganizationAutopayConfig struct {
+	OrganizationID      string
+	Enabled             bool
+	ThresholdUsdMicros  int64
+	RechargeUsdMicros   int64
+	HasPaymentMethod    bool
+	State               string
+	ConsecutiveFailures int32
+	LastAttemptID       pgtype.UUID
+	LastAttemptAt       pgtype.Timestamptz
+	LastSuccessAt       pgtype.Timestamptz
+	CooldownUntil       pgtype.Timestamptz
+	CreatedBy           *string
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+}
+
 type RouterOrganizationBillingOverride struct {
 	OrganizationID string
 	Reason         string
@@ -177,9 +194,10 @@ type RouterOrganizationBillingOverride struct {
 }
 
 type RouterOrganizationCreditBalance struct {
-	OrganizationID   string
-	BalanceUsdMicros int64
-	UpdatedAt        pgtype.Timestamptz
+	OrganizationID       string
+	BalanceUsdMicros     int64
+	UpdatedAt            pgtype.Timestamptz
+	LowBalanceNotifiedAt pgtype.Timestamptz
 }
 
 type RouterOrganizationCreditLedger struct {

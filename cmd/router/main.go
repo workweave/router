@@ -438,6 +438,22 @@ func main() {
 	publisher := pubsubClient.Publisher(pubsubTopicID)
 	notifier := routerpubsub.NewInvalidationNotifier(publisher)
 	defer notifier.Stop()
+
+	// Autopay recharge signalling (managed mode only). When the autopay topic
+	// is configured, the billing debit hook publishes a signal the moment an
+	// org's balance crosses below its recharge threshold; the Weave control
+	// plane subscribes and charges the saved card. Optional: an unset topic
+	// leaves billing in place with autopay disabled, so selfhosted and
+	// not-yet-rolled-out deploys don't panic.
+	if billingSvc != nil {
+		if autopayTopicID := config.GetOr("PUBSUB_TOPIC_ROUTER_AUTOPAY", ""); autopayTopicID != "" {
+			autopayNotifier := routerpubsub.NewAutopayNotifier(pubsubClient.Publisher(autopayTopicID))
+			defer autopayNotifier.Stop()
+			billingSvc = billingSvc.WithAutopayNotifier(autopayNotifier)
+			logger.Info("Autopay recharge signalling enabled", "topic", autopayTopicID)
+		}
+	}
+
 	authSvc := auth.NewService(repo.Installations, repo.APIKeys, repo.ExternalAPIKeys, repo.Users, cache, userCache, time.Now).
 		WithEncryptor(encryptor).
 		WithInstallationChangeNotifier(notifier)

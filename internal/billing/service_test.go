@@ -27,6 +27,9 @@ type fakeRepo struct {
 	ledgerCalls      []billing.DebitParams
 	balanceRowExists bool
 	debitCalls       atomic.Int32
+	autopayEnabled   bool
+	autopayThreshold int64
+	autopayErr       error
 }
 
 func (r *fakeRepo) GetBalance(_ context.Context, _ string) (int64, error) {
@@ -65,6 +68,31 @@ func (r *fakeRepo) BillingTablesExist(_ context.Context) (bool, error) { return 
 
 func (r *fakeRepo) GetAPIKeySpend(_ context.Context, _ string) (int64, *int64, bool, error) {
 	return 0, nil, false, nil
+}
+
+func (r *fakeRepo) GetAutopayConfig(_ context.Context, _ string) (bool, int64, error) {
+	if r.autopayErr != nil {
+		return false, 0, r.autopayErr
+	}
+	return r.autopayEnabled, r.autopayThreshold, nil
+}
+
+// fakeAutopayNotifier records the org ids the service asked to recharge.
+type fakeAutopayNotifier struct {
+	mu       sync.Mutex
+	notified []string
+}
+
+func (n *fakeAutopayNotifier) NotifyRechargeNeeded(organizationID string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.notified = append(n.notified, organizationID)
+}
+
+func (n *fakeAutopayNotifier) calls() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.notified...)
 }
 
 func TestCheckBalance_Override(t *testing.T) {
@@ -294,6 +322,62 @@ func TestDebitForInference_SubscriptionLeavesKeySpendFlat(t *testing.T) {
 	require.Len(t, repo.ledgerCalls, 1)
 	assert.Equal(t, "key-sub", repo.ledgerCalls[0].APIKeyID)
 	assert.Equal(t, int64(0), repo.ledgerCalls[0].DeltaUsdMicros, "subscription turn debits 0, so key spend stays flat")
+}
+
+func TestDebitForInference_AutopaySignalsOnDownwardCrossing(t *testing.T) {
+	// Each debit is $6.75 (1M input + 250k output at $3/$15 per 1M).
+	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
+	debit := func(svc *billing.Service) error {
+		_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+			OrganizationID: "org_x",
+			InputTokens:    1_000_000,
+			OutputTokens:   250_000,
+			Pricing:        p,
+			Provider:       providers.ProviderAnthropic,
+		})
+		return err
+	}
+
+	t.Run("fires once when the debit crosses below the threshold", func(t *testing.T) {
+		// $10.00 balance, $5.00 threshold; one $6.75 debit lands at $3.25 (< $5).
+		repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000, autopayEnabled: true, autopayThreshold: 5_000_000}
+		notifier := &fakeAutopayNotifier{}
+		svc := billing.NewService(repo).WithAutopayNotifier(notifier)
+		require.NoError(t, debit(svc))
+		assert.Equal(t, []string{"org_x"}, notifier.calls(), "the crossing debit signals exactly once")
+	})
+
+	t.Run("does not fire when already below the threshold (below to below)", func(t *testing.T) {
+		// $3.25 balance is already under the $5 threshold: the next debit is not a crossing.
+		repo := &fakeRepo{balanceRowExists: true, balanceMicros: 3_250_000, autopayEnabled: true, autopayThreshold: 5_000_000}
+		notifier := &fakeAutopayNotifier{}
+		svc := billing.NewService(repo).WithAutopayNotifier(notifier)
+		require.NoError(t, debit(svc))
+		assert.Empty(t, notifier.calls(), "below→below must not re-fire; that's the transition guard")
+	})
+
+	t.Run("does not fire when the debit stays above the threshold", func(t *testing.T) {
+		// $100.00 → $93.25, still comfortably above $5.
+		repo := &fakeRepo{balanceRowExists: true, balanceMicros: 100_000_000, autopayEnabled: true, autopayThreshold: 5_000_000}
+		notifier := &fakeAutopayNotifier{}
+		svc := billing.NewService(repo).WithAutopayNotifier(notifier)
+		require.NoError(t, debit(svc))
+		assert.Empty(t, notifier.calls())
+	})
+
+	t.Run("does not fire when autopay is disabled", func(t *testing.T) {
+		repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000, autopayEnabled: false, autopayThreshold: 5_000_000}
+		notifier := &fakeAutopayNotifier{}
+		svc := billing.NewService(repo).WithAutopayNotifier(notifier)
+		require.NoError(t, debit(svc))
+		assert.Empty(t, notifier.calls())
+	})
+
+	t.Run("no notifier wired is a no-op", func(t *testing.T) {
+		repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000, autopayEnabled: true, autopayThreshold: 5_000_000}
+		svc := billing.NewService(repo) // autopay signalling not wired
+		require.NoError(t, debit(svc))
+	})
 }
 
 func TestHasOverrideFromContext_Default(t *testing.T) {

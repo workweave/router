@@ -93,6 +93,22 @@ func (r *BillingRepo) GetAPIKeySpend(ctx context.Context, apiKeyID string) (int6
 	return row.SpentUsdMicros, row.SpendCapUsdMicros, true, nil
 }
 
+// GetAutopayConfig reads the org's autopay enabled flag and recharge threshold.
+// Maps pgx.ErrNoRows (org never configured autopay) to enabled=false with a nil
+// error so the debit hook skips the crossing check rather than treating a
+// missing row as a failure.
+func (r *BillingRepo) GetAutopayConfig(ctx context.Context, orgID string) (bool, int64, error) {
+	q := sqlc.New(r.tx)
+	row, err := q.GetAutopayConfig(ctx, orgID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, 0, nil
+		}
+		return false, 0, err
+	}
+	return row.Enabled, row.ThresholdUsdMicros, nil
+}
+
 // BillingTablesExist runs the boot-time health check. Returns true when
 // all three billing tables exist in the router schema.
 func (r *BillingRepo) BillingTablesExist(ctx context.Context) (bool, error) {

@@ -29,6 +29,13 @@ type Repo interface {
 	// id (deleted mid-request); callers treat that as "no cap to enforce".
 	GetAPIKeySpend(ctx context.Context, apiKeyID string) (spentMicros int64, capMicros *int64, found bool, err error)
 
+	// GetAutopayConfig reports whether the org has autopay enabled and its
+	// recharge threshold (USD micros), read by the debit hook to detect a
+	// balance crossing below the threshold. A missing config row (org never
+	// configured autopay) returns enabled=false with a nil error — callers
+	// treat that as "autopay off" and skip the crossing check.
+	GetAutopayConfig(ctx context.Context, orgID string) (enabled bool, thresholdMicros int64, err error)
+
 	// BillingTablesExist is a boot-time health check: returns true when
 	// all three billing tables exist in the router schema. A missing
 	// table means the migration hasn't run; the composition root then

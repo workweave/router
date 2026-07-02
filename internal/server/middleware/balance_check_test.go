@@ -47,6 +47,9 @@ func (r *stubBillingRepo) GetAPIKeySpend(_ context.Context, _ string) (int64, *i
 func (r *stubBillingRepo) BillingTablesExist(_ context.Context) (bool, error) {
 	return true, nil
 }
+func (r *stubBillingRepo) GetAutopayConfig(_ context.Context, _ string) (bool, int64, error) {
+	return false, 0, nil
+}
 
 func withInstallation(c *gin.Context, externalID string) {
 	c.Set("router_installation", &auth.Installation{

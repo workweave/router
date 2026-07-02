@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 
+	"workweave/router/internal/observability"
 	"workweave/router/internal/router/catalog"
 )
 
@@ -42,13 +43,31 @@ const MinBalanceMicros int64 = 0
 // Service orchestrates balance reads and debits. No I/O of its own — all
 // persistence flows through the Repo interface.
 type Service struct {
-	repo Repo
+	repo    Repo
+	autopay AutopayNotifier
 }
 
 // NewService constructs a billing service. The Repo is required; nil panics
 // at request time, so the composition root must guard against it.
 func NewService(repo Repo) *Service {
 	return &Service{repo: repo}
+}
+
+// AutopayNotifier signals the control plane that an org's balance just crossed
+// below its autopay threshold and a recharge should fire. Implemented by a
+// Pub/Sub adapter in internal/pubsub; left nil when autopay signalling isn't
+// wired (selfhosted, or the autopay topic env is unset), which disables the
+// crossing check entirely.
+type AutopayNotifier interface {
+	NotifyRechargeNeeded(organizationID string)
+}
+
+// WithAutopayNotifier attaches the autopay recharge signaller and returns the
+// service for chaining. Wired only in managed mode when the autopay topic is
+// configured.
+func (s *Service) WithAutopayNotifier(n AutopayNotifier) *Service {
+	s.autopay = n
+	return s
 }
 
 // CheckResult is the outcome of a preflight balance check. The middleware
@@ -153,7 +172,7 @@ func (s *Service) DebitForInference(ctx context.Context, p DebitInferenceParams)
 		// below as a shadow billing trail.
 		delta = 0
 	}
-	return s.repo.DebitInference(ctx, DebitParams{
+	balanceAfter, err := s.repo.DebitInference(ctx, DebitParams{
 		OrganizationID:     p.OrganizationID,
 		DeltaUsdMicros:     delta,
 		NotionalCostMicros: notional,
@@ -162,6 +181,39 @@ func (s *Service) DebitForInference(ctx context.Context, p DebitInferenceParams)
 		RouterModel:        p.Model,
 		APIKeyID:           p.APIKeyID,
 	})
+	if err != nil {
+		return balanceAfter, err
+	}
+	s.maybeSignalRecharge(ctx, p.OrganizationID, delta, balanceAfter)
+	return balanceAfter, nil
+}
+
+// maybeSignalRecharge fires exactly one autopay recharge signal on the debit
+// that takes the org's balance from at-or-above its configured threshold to
+// below it — the single downward crossing. It no-ops when autopay signalling
+// isn't wired, the debit moved nothing (override or subscription-served), or
+// the org hasn't enabled autopay. The signal is the primary autopay trigger;
+// the control-plane reconciliation sweep backstops a dropped signal, so a
+// config read error is logged and dropped rather than failing the
+// already-served request.
+func (s *Service) maybeSignalRecharge(ctx context.Context, orgID string, delta, balanceAfter int64) {
+	if s.autopay == nil || delta >= 0 {
+		return
+	}
+	enabled, threshold, err := s.repo.GetAutopayConfig(ctx, orgID)
+	if err != nil {
+		observability.Get().Warn("Autopay crossing check skipped: config read failed",
+			"organization_id", orgID, "err", err)
+		return
+	}
+	if !enabled {
+		return
+	}
+	// delta < 0, so the pre-debit balance is strictly greater than balanceAfter.
+	balanceBefore := balanceAfter - delta
+	if balanceBefore >= threshold && balanceAfter < threshold {
+		s.autopay.NotifyRechargeNeeded(orgID)
+	}
 }
 
 // computeNotionalMicros returns the would-be charge in USD micros. Always
