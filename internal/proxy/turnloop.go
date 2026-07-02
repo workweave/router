@@ -611,8 +611,14 @@ func (s *Service) runTurnLoop(
 	//   (g) this turn does NOT carry images if the prior model is text-only
 	//       (image guard mirrors the live-pin check above — re-anchoring a
 	//       text-only model on an image-bearing turn would immediately 4xx)
+	//   (h) the client did NOT trim its history this turn (prefix-trim
+	//       free-switch armed) — re-anchoring exists to avoid noise-driven
+	//       lateral switches, but a trim turn is a genuine free-switch
+	//       boundary: the prior model's cache is dead regardless of the pin's
+	//       expiry, so the scorer's fresh pick should win, mirroring the
+	//       cold-pricing the planner applies on the live-pin path below.
 	// When re-anchoring, write a new pin so the next turn is a sticky hit.
-	if !pinFound && pin.Model != "" {
+	if !pinFound && pin.Model != "" && !prefixBroken {
 		pinTier := catalog.TierFor(pin.Model)
 		freshTier := catalog.TierFor(fresh.Model)
 		if pinTier != catalog.TierUnknown && freshTier != catalog.TierUnknown && freshTier <= pinTier {

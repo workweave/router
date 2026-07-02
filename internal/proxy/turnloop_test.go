@@ -588,6 +588,42 @@ func TestTurnLoop_PrefixTrimKillSwitchPreservesWarmStay(t *testing.T) {
 	assert.Equal(t, int32(0), sz.calls.Load())
 }
 
+// TestTurnLoop_PrefixTrimSkipsExpiredPinReAnchor guards guard (h) on the
+// expired-pin re-anchor: re-anchoring exists to damp noise-driven lateral
+// switches on the one expiry turn, but a trim turn is a genuine free-switch
+// boundary — the prior model's cache is dead regardless of pin expiry — so the
+// scorer's fresh pick must win instead of the expired pin's model.
+func TestTurnLoop_PrefixTrimSkipsExpiredPinReAnchor(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	expired := warmOpusPin()
+	expired.PinnedUntil = time.Now().Add(-time.Minute)
+	store.pin = expired
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
+	svc := newPinSvc(fr, store).WithAvailableModels(map[string]struct{}{
+		"claude-opus-4-7":  {},
+		"claude-haiku-4-5": {},
+	})
+	ctx := authedCtx(uuid.New().String())
+
+	// Turn 1 (9 messages, no trim): the expired pin re-anchors — haiku is not
+	// a tier upgrade over opus, opus is routable — proving the re-anchor path
+	// is live in this harness before the trim turn bypasses it.
+	rec1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, trimSessionTurn(t, 9), rec1, req1))
+	require.Equal(t, "claude-opus-4-7", rec1.Header().Get(proxy.HeaderRouterModel),
+		"expired pin must re-anchor on a normal turn (guard baseline)")
+
+	// Turn 2 (3 messages): trim detected → re-anchor skipped → the scorer's
+	// fresh pick serves.
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, trimSessionTurn(t, 3), rec2, req2))
+	assert.Equal(t, "claude-haiku-4-5", rec2.Header().Get(proxy.HeaderRouterModel),
+		"trim turn must skip the expired-pin re-anchor and follow the fresh pick")
+}
+
 // TestTurnLoop_SubAgentDoesNotInheritMainLoopTrimBaseline guards sub-agent
 // independence: a sub-agent's opening turn (small message count, distinct
 // first user message) derives its own session key, so it lands in its own
