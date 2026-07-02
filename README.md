@@ -27,7 +27,7 @@ for *every* request: using a tiny on-box embedder, not a vibes-based prompt.
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](go.mod)
 [![Tests](https://github.com/workweave/router/actions/workflows/test.yml/badge.svg)](https://github.com/workweave/router/actions/workflows/test.yml)
 [![License: ELv2](https://img.shields.io/badge/License-ELv2-00BFB3.svg)](https://www.elastic.co/licensing/elastic-license)
-[![Managed deployment](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Frouter.workweave.ai%2Fv1%2Fversion&query=%24.commit_short&label=managed%20deployment&color=EC6341&cacheSeconds=1800)](https://router.workweave.ai/v1/version)
+[![Managed deployment](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Frouter.workweave.ai%2Fv1%2Fversion&query=%24.display&label=managed%20deployment&color=EC6341&cacheSeconds=1800)](https://github.com/workweave/router/deployments)
 
 *Built by [Weave](https://www.workweave.ai): The #1 engineering intelligence platform,
 loved by Robinhood, PostHog, Reducto, and hundreds of others.*

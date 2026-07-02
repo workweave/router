@@ -17,9 +17,10 @@ import (
 func TestVersionHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	orig := version.Commit
-	t.Cleanup(func() { version.Commit = orig })
+	origCommit, origPR := version.Commit, version.PR
+	t.Cleanup(func() { version.Commit, version.PR = origCommit, origPR })
 	version.Commit = "0fb46ee9707c8db7d0ef69b7308a79a95d559e25"
+	version.PR = "572"
 	t.Setenv("ROUTER_CLUSTER_VERSION", "v0.71")
 
 	engine := gin.New()
@@ -34,6 +35,8 @@ func TestVersionHandler(t *testing.T) {
 	var body struct {
 		Commit         string `json:"commit"`
 		CommitShort    string `json:"commit_short"`
+		PR             string `json:"pr"`
+		Display        string `json:"display"`
 		BuildTime      string `json:"build_time"`
 		ClusterVersion string `json:"cluster_version"`
 	}
@@ -41,5 +44,7 @@ func TestVersionHandler(t *testing.T) {
 
 	assert.Equal(t, "0fb46ee9707c8db7d0ef69b7308a79a95d559e25", body.Commit)
 	assert.Equal(t, "0fb46ee", body.CommitShort)
+	assert.Equal(t, "572", body.PR)
+	assert.Equal(t, "#572 (0fb46ee)", body.Display)
 	assert.Equal(t, "v0.71", body.ClusterVersion)
 }

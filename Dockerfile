@@ -57,6 +57,7 @@ ARG HF_QWEN_REVISION
 # `docker build` with no --build-arg still produces a runnable image.
 ARG ROUTER_SHA=unknown
 ARG ROUTER_BUILD_TIME=unknown
+ARG ROUTER_PR=unknown
 # TARGETARCH is set automatically by buildx (`amd64` or `arm64`) so we
 # can pull the matching native ONNX Runtime + libtokenizers tarball.
 # Without this, building on Apple Silicon / Graviton picks up x86_64
@@ -199,7 +200,7 @@ WORKDIR /app/cmd/router
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOOS=linux go build -tags ORT \
-      -ldflags "-X workweave/router/internal/version.Commit=${ROUTER_SHA} -X workweave/router/internal/version.BuildTime=${ROUTER_BUILD_TIME}" \
+      -ldflags "-X workweave/router/internal/version.Commit=${ROUTER_SHA} -X workweave/router/internal/version.BuildTime=${ROUTER_BUILD_TIME} -X workweave/router/internal/version.PR=${ROUTER_PR}" \
       -o /server
 
 

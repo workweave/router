@@ -12,6 +12,8 @@ import (
 type versionResponse struct {
 	Commit         string `json:"commit"`
 	CommitShort    string `json:"commit_short"`
+	PR             string `json:"pr"`
+	Display        string `json:"display"`
 	BuildTime      string `json:"build_time"`
 	ClusterVersion string `json:"cluster_version"`
 }
@@ -25,6 +27,8 @@ func VersionHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, versionResponse{
 		Commit:         version.Commit,
 		CommitShort:    version.ShortCommit(),
+		PR:             version.PR,
+		Display:        version.Display(),
 		BuildTime:      version.BuildTime,
 		ClusterVersion: config.GetOr("ROUTER_CLUSTER_VERSION", "artifacts/latest"),
 	})
