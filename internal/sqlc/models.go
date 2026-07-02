@@ -161,7 +161,7 @@ type RouterModelRouterRequestTelemetry struct {
 	PlannerEvictionCostUsd *float64
 	// The switch EV threshold the verdict was compared against. NULL on early-return reasons and when the planner did not run.
 	PlannerThresholdUsd *float64
-	// Whether the EV math priced the pin's upstream prompt cache as cold (provider cache TTL lapsed). NULL when the planner did not run.
+	// Whether the EV math priced the pin's upstream prompt cache as cold (provider cache TTL lapsed). NULL on early-return reasons and when the planner did not run.
 	PlannerPinCacheCold *bool
 	// The pinned (from) model the planner weighed against the fresh recommendation — preserved on SWITCH rows where decision_model already names the switched-to model. NULL when the planner did not run.
 	PlannerPinModel *string
