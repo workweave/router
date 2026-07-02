@@ -3086,6 +3086,19 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	if creds != nil {
 		return context.WithValue(ctx, CredentialsContextKey{}, creds)
 	}
+	// A suppressed Claude subscription that resolved no replacement credential must
+	// have its credential EXPLICITLY cleared, not left as-is. On a router-keyed
+	// request (every managed customer) with no BYOK, none of the branches above
+	// resolve anything, so ctx still carries the subscription credential injected on
+	// the primary attempt — returning it re-sends the spent sk-ant-oat the
+	// suppression meant to drop (the exhaustion / 429 failover then re-hits the same
+	// 429 forever). The provider client only falls back to its deployment
+	// ANTHROPIC_API_KEY when ctx carries NO credential, so clear it. Safe because
+	// suppression is only ever set when a fallback key exists
+	// (anthropicFallbackKeyAvailable gates both callers).
+	if suppressClaudeSub && provider == providers.ProviderAnthropic {
+		return clearCredentials(ctx)
+	}
 	return ctx
 }
 
