@@ -1,12 +1,27 @@
 package translate
 
 import (
+	"bytes"
 	"strings"
 
 	"github.com/tidwall/gjson"
 )
 
 const previewMaxChars = 120
+
+// contentBytesPerToken is the byte-to-token ratio for the dense JSON + code +
+// tool-result content that dominates a Claude Code request body, measured
+// against real upstream token counts (~4.2 bytes/token). Used by
+// ContextOverflowTokenEstimate. Deliberately lower than FullTokenEstimate's ÷6:
+// that divisor is tuned so base64 thought-signatures don't over-count and evict
+// the 1M Anthropic models; the overflow estimate instead subtracts the
+// signature bytes explicitly, so the remaining content divides at its true
+// ratio.
+const contentBytesPerToken = 4
+
+// signatureFieldMarker precedes a base64 thought-signature payload in an
+// Anthropic request body.
+var signatureFieldMarker = []byte(`"signature":"`)
 
 // RoutingFeatures bundles router inputs and per-request metadata for logging.
 type RoutingFeatures struct {
@@ -37,6 +52,45 @@ func (e *RequestEnvelope) FullTokenEstimate() int {
 	// Base64 thought signatures heavily inflate the byte length, often leading
 	// to false context-window evictions for Opus. Divide by 6 to account for this.
 	return len(e.body) / 6
+}
+
+// ContextOverflowTokenEstimate estimates the token count of the body as a
+// non-Anthropic upstream will actually receive it, for context-window overflow
+// pre-filtering. It subtracts the base64 thought-signature payloads — which the
+// translator strips before dispatch to any OpenAI/Gemini/OSS model — from the
+// raw byte count, then divides the remaining dense content by
+// contentBytesPerToken. This fixes the ÷6 undercount on signature-light,
+// content-dense bodies (which overflowed 256K OSS models and 400'd) without
+// reintroducing the base64 over-count that ÷6 guards against. Distinct from
+// FullTokenEstimate, which stays ÷6 so the extended-context beta trigger keeps
+// its existing calibration.
+func (e *RequestEnvelope) ContextOverflowTokenEstimate() int {
+	contentBytes := max(0, len(e.body)-base64SignatureBytes(e.body))
+	return contentBytes / contentBytesPerToken
+}
+
+// base64SignatureBytes sums the byte length of every base64 thought-signature
+// payload in body. Signatures are pure base64 ([A-Za-z0-9+/=], no quotes or
+// backslashes), so each payload runs from its field marker to the next double
+// quote. These bytes inflate the raw body length far out of proportion to their
+// token cost and are stripped before dispatch to any non-Anthropic model, so
+// the overflow estimate excludes them.
+func base64SignatureBytes(body []byte) int {
+	total := 0
+	for i := 0; ; {
+		rel := bytes.Index(body[i:], signatureFieldMarker)
+		if rel < 0 {
+			break
+		}
+		start := i + rel + len(signatureFieldMarker)
+		end := bytes.IndexByte(body[start:], '"')
+		if end < 0 {
+			break
+		}
+		total += end
+		i = start + end + 1
+	}
+	return total
 }
 
 // RoutingFeatures extracts routing inputs from the envelope. When

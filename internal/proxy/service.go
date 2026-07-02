@@ -1619,10 +1619,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		outputReserve = feats.MaxTokens
 	}
 	baseExcluded := s.excludedModelsForRequest(ctx)
-	excluded, ctxOverflowed := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserve, baseExcluded, s.availableModels)
+	overflowEstimate := env.ContextOverflowTokenEstimate()
+	excluded, ctxOverflowed := excludeContextOverflowModels(overflowEstimate, outputReserve, baseExcluded, s.availableModels)
 	if len(ctxOverflowed) > 0 {
 		log.Info("context window pre-filter: excluded over-capacity models",
-			"full_token_estimate", env.FullTokenEstimate(),
+			"overflow_token_estimate", overflowEstimate,
 			"output_reserve", outputReserve,
 			"excluded_count", len(ctxOverflowed),
 			"excluded_models", strings.Join(ctxOverflowed, ","),
@@ -3522,10 +3523,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		outputReserveOAI = feats.MaxTokens
 	}
 	baseExcludedOAI := s.excludedModelsForRequest(ctx)
-	excludedOAI, ctxOverflowedOAI := excludeContextOverflowModels(env.FullTokenEstimate(), outputReserveOAI, baseExcludedOAI, s.availableModels)
+	overflowEstimateOAI := env.ContextOverflowTokenEstimate()
+	excludedOAI, ctxOverflowedOAI := excludeContextOverflowModels(overflowEstimateOAI, outputReserveOAI, baseExcludedOAI, s.availableModels)
 	if len(ctxOverflowedOAI) > 0 {
 		log.Info("context window pre-filter: excluded over-capacity models",
-			"full_token_estimate", env.FullTokenEstimate(),
+			"overflow_token_estimate", overflowEstimateOAI,
 			"output_reserve", outputReserveOAI,
 			"excluded_count", len(ctxOverflowedOAI),
 			"excluded_models", strings.Join(ctxOverflowedOAI, ","),
