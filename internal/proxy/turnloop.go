@@ -93,6 +93,14 @@ type turnLoopResult struct {
 	// x-weave-suggestion-mode header. The routing marker is suppressed so
 	// the badge does not appear in suggestion-overlay responses.
 	SuggestionMode bool
+	// PrefixTrimmed is true when the compaction tracker detected a client-side
+	// history trim on THIS turn (full compaction or rolling-window trimming)
+	// relative to the session's previous observation. Detected before routing
+	// so the planner can price the pin's now-unreachable cache as cold and the
+	// switch handover can be skipped (the client's own compaction summary is
+	// already in the body). ProxyMessages also reads it post-routing to run
+	// the non-Anthropic compaction handover without re-recording the tracker.
+	PrefixTrimmed bool
 	// EscalateEffort is true when the previous turn in this session looked like
 	// an observable failure (produced no output, or the pin carried a consecutive
 	// upstream error). The escalate-on-failure effort policy reads it to bump a
@@ -230,6 +238,40 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
+	// sessionKey is local until the pin store is known to exist:
+	// res.SessionKey must stay zero in no-pin-store mode — downstream
+	// consumers (sessionAffinityHint, the spiral/telemetry join comment in
+	// ProxyMessages) rely on that invariant — but trim detection needs the
+	// key either way.
+	sessionKey := DeriveSessionKey(env, apiKeyID)
+
+	// Prefix-trim detection runs BEFORE routing (previously it ran after, and
+	// only on non-Anthropic decisions) so the planner can price the pin's
+	// cache as dead on the very turn the client broke the prompt prefix: a
+	// compaction or rolling-window trim rewrites the transcript head, so the
+	// upstream cache entries keyed on the old prefix are unreachable no matter
+	// how recently the pin served. Hard-pinned turn types never reach this
+	// point (their small bodies would poison the tracker's baselines, same
+	// rationale as the post-routing guard this detection used to live behind).
+	// env has not been rewritten yet, so the counts match what the client sent.
+	// ProxyMessages consumes res.PrefixTrimmed for the post-routing compaction
+	// handover instead of re-recording (a second checkAndRecord on the same
+	// turn would compare the counts against themselves and always miss).
+	res.PrefixTrimmed = s.compaction.checkAndRecord(
+		sessionKey, installationID, res.PinRole,
+		feats.MessageCount, len(env.AssistantToolCallSignatures()),
+	)
+	// prefixTrimFreeSwitch gates the ACTIONS on the signal (cold pricing +
+	// handover skip below); detection/recording itself is unconditional so the
+	// post-routing compaction handover keeps working when the lever is off.
+	prefixBroken := s.prefixTrimFreeSwitch && res.PrefixTrimmed
+	if res.PrefixTrimmed {
+		log.Info("turnloop detected client history trim",
+			"message_count", feats.MessageCount,
+			"free_switch_armed", prefixBroken,
+		)
+	}
+
 	// Without a pin store, run the scorer and return its decision. The usage
 	// bypass intercepts the fresh scorer decision here too (no pins to honor).
 	if s.pinStore == nil {
@@ -247,7 +289,7 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
-	res.SessionKey = DeriveSessionKey(env, apiKeyID)
+	res.SessionKey = sessionKey
 
 	pin, pinFound := s.loadPin(ctx, res.SessionKey, res.PinRole)
 	res.PriorServedModel = pin.LastServedModel
@@ -622,7 +664,10 @@ func (s *Service) runTurnLoop(
 		Fresh:                fresh,
 		EstimatedInputTokens: feats.Tokens,
 		AvailableModels:      s.availableModels,
-		PinCacheCold:         pinFound && !cacheWarm(pin),
+		// A trimmed prefix kills the cache even inside the provider TTL: the
+		// upstream cache is keyed on the (now rewritten) prompt prefix, so a
+		// recent LastTurnEndedAt proves nothing about reuse on this turn.
+		PinCacheCold: pinFound && (!cacheWarm(pin) || prefixBroken),
 		// Price covered models at their subsidized marginal cost in the EV math
 		// too, so the discount takes effect on sticky (pinned) sessions, not just
 		// the fresh decision. nil when subscription-aware routing is off.
@@ -662,7 +707,21 @@ func (s *Service) runTurnLoop(
 	// Only when the request is BYOK/client-keyed AND no matching creds for
 	// the summarizer's provider were forwarded do we skip summarization and
 	// pass the full history through.
-	if pinFound {
+	if pinFound && prefixBroken {
+		// Free-switch window: the client just compacted/trimmed its own
+		// history, so the body already carries the client's summary of the
+		// elided turns and is as small as it will ever be. Running the switch
+		// summarizer here would summarize that summary — pure cost, no context
+		// preserved that the compacted body doesn't already have. Skip it and
+		// forward the compacted body unchanged. (For a non-Anthropic decision
+		// the post-routing compaction handover in ProxyMessages may still
+		// rewrite — exactly one rewrite either way.)
+		log.Info("Handover summarizer skipped: client history trim already bounded this switch turn",
+			"pin_model", pin.Model,
+			"fresh_model", fresh.Model,
+		)
+	}
+	if pinFound && !prefixBroken {
 		var (
 			sumProvider       string
 			sumCreds          *Credentials

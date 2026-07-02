@@ -491,6 +491,139 @@ func TestTurnLoop_UsageWritebackPersistsCacheStats(t *testing.T) {
 	assert.Equal(t, 200, got.CachedWriteTokens)
 }
 
+// trimSessionTurn builds a main-loop Anthropic body with msgCount alternating
+// user/assistant text messages (msgCount must be odd so the turn trails with
+// user text, not a tool_result). The first user message is constant so every
+// turn derives the same session key — the compaction tracker's bucket.
+func trimSessionTurn(t *testing.T, msgCount int) []byte {
+	t.Helper()
+	require.True(t, msgCount%2 == 1, "odd msgCount keeps the trailing message a user turn")
+	msgs := make([]string, 0, msgCount)
+	for i := 0; i < msgCount; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		msgs = append(msgs, `{"role":"`+role+`","content":"TRIM-SESSION turn `+itoa(i)+`"}`)
+	}
+	// messages.0 is identical across turns; only the tail varies.
+	msgs[0] = `{"role":"user","content":"TRIM-SESSION refactor the dispatch loop"}`
+	return []byte(`{"model":"claude-opus-4-7","system":"sys","messages":[` + strings.Join(msgs, ",") + `]}`)
+}
+
+// warmOpusPin is a pin whose prior turn billed ~1.5k input tokens and ended
+// seconds ago (warm). At that size an opus→haiku switch is EV-negative under
+// warm pricing (net ≈ $0.00081 < $0.001 threshold) but strongly EV-positive
+// under cold pricing (≈ $0.0189, eviction $0) — so the same session flips
+// verdicts purely on the warmth assumption, which is what the prefix-trim
+// tests need to observe.
+func warmOpusPin() sessionpin.Pin {
+	return sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-opus-4-7",
+		Reason:          "cluster:v0.2",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 1500,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+}
+
+// TestTurnLoop_PrefixTrimPricesPinColdAndSkipsSummarizer is the free-switch
+// window end-to-end: a client history trim (9 → 3 messages on one session)
+// must make the planner price the warm pin's cache as dead — flipping an
+// otherwise EV-negative stay into a switch — and must NOT invoke the switch
+// summarizer, because the client's own compaction summary already bounds the
+// forwarded body.
+func TestTurnLoop_PrefixTrimPricesPinColdAndSkipsSummarizer(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = warmOpusPin()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
+	sz := &fakeSummarizer{summary: "Prior conversation summary."}
+	svc := newPinSvc(fr, store).WithSummarizer(sz)
+	ctx := authedCtx(uuid.New().String())
+
+	// Turn 1 (9 messages) records the compaction baseline. Warm pricing keeps
+	// the EV under threshold, so the planner stays on the opus pin.
+	rec1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, trimSessionTurn(t, 9), rec1, req1))
+	require.Equal(t, "claude-opus-4-7", rec1.Header().Get(proxy.HeaderRouterModel),
+		"warm pin under the EV threshold must stay on turn 1")
+
+	// Turn 2 drops to 3 messages: a full-compaction trim. Cold pricing makes
+	// the switch strongly EV-positive.
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, trimSessionTurn(t, 3), rec2, req2))
+	assert.Equal(t, "claude-haiku-4-5", rec2.Header().Get(proxy.HeaderRouterModel),
+		"trim turn must price the pin cold and switch to the fresh pick")
+	assert.Equal(t, int32(0), sz.calls.Load(),
+		"switch on a trim turn must skip the summarizer — the client's compaction summary already bounds the body")
+}
+
+// TestTurnLoop_PrefixTrimKillSwitchPreservesWarmStay proves
+// ROUTER_PREFIX_TRIM_FREE_SWITCH=false restores today's behavior: the trim is
+// still detected and recorded (the post-routing compaction handover depends on
+// that), but the planner keeps pricing the pin warm and stays.
+func TestTurnLoop_PrefixTrimKillSwitchPreservesWarmStay(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = warmOpusPin()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
+	sz := &fakeSummarizer{summary: "Prior conversation summary."}
+	svc := newPinSvc(fr, store).WithSummarizer(sz).WithPrefixTrimFreeSwitch(false)
+	ctx := authedCtx(uuid.New().String())
+
+	rec1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, trimSessionTurn(t, 9), rec1, req1))
+	require.Equal(t, "claude-opus-4-7", rec1.Header().Get(proxy.HeaderRouterModel))
+
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, trimSessionTurn(t, 3), rec2, req2))
+	assert.Equal(t, "claude-opus-4-7", rec2.Header().Get(proxy.HeaderRouterModel),
+		"kill switch off must preserve the warm-priced EV stay on the trim turn")
+	assert.Equal(t, int32(0), sz.calls.Load())
+}
+
+// TestTurnLoop_SubAgentDoesNotInheritMainLoopTrimBaseline guards sub-agent
+// independence: a sub-agent's opening turn (small message count, distinct
+// first user message) derives its own session key, so it lands in its own
+// compaction bucket and must NOT read as a trim of the main loop's 9-message
+// baseline — which would falsely cold-price the sub-agent's pin.
+func TestTurnLoop_SubAgentDoesNotInheritMainLoopTrimBaseline(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = warmOpusPin()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
+	sz := &fakeSummarizer{summary: "Prior conversation summary."}
+	svc := newPinSvc(fr, store).WithSummarizer(sz)
+	ctx := authedCtx(uuid.New().String())
+
+	// Main loop establishes a 9-message baseline in ITS bucket.
+	rec1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, trimSessionTurn(t, 9), rec1, req1))
+	require.Equal(t, "claude-opus-4-7", rec1.Header().Get(proxy.HeaderRouterModel))
+
+	// A sub-agent thread opens with 3 messages and a DIFFERENT first user
+	// message → different session key → first observation in a fresh bucket,
+	// not a drop. The warm EV stay must hold.
+	subAgentBody := []byte(`{"model":"claude-opus-4-7","system":"sys","messages":[
+		{"role":"user","content":"SUB-AGENT find every .go file under internal/"},
+		{"role":"assistant","content":"searching"},
+		{"role":"user","content":"narrow to the proxy package"}
+	]}`)
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, subAgentBody, rec2, req2))
+	assert.Equal(t, "claude-opus-4-7", rec2.Header().Get(proxy.HeaderRouterModel),
+		"a sub-agent's small opening turn must not read as a trim of the main loop's baseline")
+	assert.Equal(t, int32(0), sz.calls.Load())
+}
+
 // TestTurnLoop_MaxedOutPinExcludedFromCandidates locks in the
 // runaway-tool-call escape hatch: when the previous turn saturated the
 // output cap (a hallmark of OSS-model parse-failure runaways), the pinned
