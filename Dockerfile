@@ -30,7 +30,14 @@ ARG HF_MODEL_REVISION=516f4baf13dec4ddddda8631e019b5737c8bc250
 # pull; the runtime constructs embedders lazily, so deploys serving
 # only Jina bundles don't need the asset. Pin HF_QWEN_REVISION to the
 # upload commit SHA printed by the export script. Bump deliberately.
-ARG HF_QWEN_REPO=weave-eng/qwen3-embedding-0.6b-onnx-router
+#
+# Default is empty: the Qwen3 model.onnx is ~1 GB and pulls from HF at
+# ~6 MB/s (~3 min), which dominates the whole image build. No committed
+# bundle uses this embedder (every artifacts/v* declares
+# embedder_model: jina-v2-base-code-int8), so the runtime never loads
+# it. Re-set this to weave-eng/qwen3-embedding-0.6b-onnx-router if a
+# Qwen-embedder bundle is ever promoted to `latest`.
+ARG HF_QWEN_REPO=
 ARG HF_QWEN_REVISION=a43740ed1bb6436deaa4b79c9a132a3d98756ace
 
 # --- Stage 1: build the Next.js mini UI ---
