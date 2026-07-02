@@ -85,9 +85,8 @@ func TestDecide_SubscriptionDiscountFlipsSwitch(t *testing.T) {
 		"a 0.0 covered-model factor must still be treated as free (switch), not uncovered")
 }
 
-// A cold pin holds no warm cache worth preserving, so with ColdPinFollowFresh
-// enabled the scorer's fresh pick must win even when the raw-price EV is below
-// threshold — first-decision inertia only pays for itself through cache reuse.
+// With ColdPinFollowFresh enabled, a cold pin follows the scorer's fresh pick
+// even when the raw-price EV is below threshold.
 func TestDecide_ColdPinFollowFresh(t *testing.T) {
 	t.Parallel()
 	coldCfg := planner.EVConfig{
@@ -95,8 +94,8 @@ func TestDecide_ColdPinFollowFresh(t *testing.T) {
 		ExpectedRemainingTurns: 3,
 		ColdPinFollowFresh:     true,
 	}
-	// Cheap pin → expensive fresh: raw-price EV is strongly negative
-	// (savings ≈ −$0.63 at 50k tokens), so only the cold-pin lever can flip it.
+	// Cheap pin → expensive fresh: raw-price EV is strongly negative, so only
+	// the cold-pin lever can flip it.
 	base := planner.Inputs{
 		Pin:                  pinWithUsage(modelHaiku),
 		Fresh:                router.Decision{Model: modelOpus},
@@ -110,21 +109,18 @@ func TestDecide_ColdPinFollowFresh(t *testing.T) {
 	assert.Equal(t, planner.ReasonColdPinFresh, got.Reason)
 	assert.True(t, got.PinCacheCold, "decision must echo the cold pricing assumption")
 
-	// Lever off: the same cold, EV-negative inputs must preserve today's stay.
 	off := planner.Decide(base, defaultCfg)
 	assert.Equal(t, planner.OutcomeStay, off.Outcome, "lever off must preserve the EV-negative stay")
 	assert.Equal(t, planner.ReasonEVNegative, off.Reason)
 
-	// Warm pin: the lever must never fire — the warm cache is exactly the
-	// asset the EV math protects.
 	warm := base
 	warm.PinCacheCold = false
 	stay := planner.Decide(warm, coldCfg)
 	assert.Equal(t, planner.OutcomeStay, stay.Outcome, "warm pin must not follow fresh on the cold lever")
 	assert.Equal(t, planner.ReasonEVNegative, stay.Reason)
 
-	// Precedence: a cold pin whose switch is already EV-positive (expensive
-	// pin → cheap fresh) must keep the more specific ev_positive reason.
+	// A cold pin whose switch is already EV-positive keeps the more specific
+	// ev_positive reason.
 	evPositive := planner.Inputs{
 		Pin:                  pinWithUsage(modelOpus),
 		Fresh:                router.Decision{Model: modelHaiku},

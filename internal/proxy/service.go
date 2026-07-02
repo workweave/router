@@ -63,11 +63,8 @@ type Service struct {
 	compaction *compactionTracker
 	// prefixTrimFreeSwitch treats a detected client history trim as a
 	// free-switch window: the planner prices the pin's cache as cold on that
-	// turn (the rewritten prefix makes the old cache unreachable regardless of
-	// TTL) and the switch handover is skipped (the client's own compaction
-	// summary already bounds the body). Kill switch:
-	// ROUTER_PREFIX_TRIM_FREE_SWITCH; defaults to true because both effects
-	// are accuracy corrections, not new policy.
+	// turn and the switch handover is skipped. Kill switch:
+	// ROUTER_PREFIX_TRIM_FREE_SWITCH.
 	prefixTrimFreeSwitch bool
 	// hardPinExplore gates the Explore sub-agent hard-pin.
 	hardPinExplore bool
@@ -832,9 +829,8 @@ const DefaultPlannerExpectedRemainingTurns = 3
 // turn can't pin a Low-tier model for the session.
 const DefaultPlannerTierUpgradeEnabled = true
 
-// DefaultPlannerColdPinFollowFresh ships the cold-pin follow-fresh lever off:
-// it flips lateral/downgrade switches on for cold pins, so it must first be
-// sized against the planner_* shadow telemetry before it's armed.
+// DefaultPlannerColdPinFollowFresh ships off: size it against the planner_*
+// shadow telemetry before arming.
 const DefaultPlannerColdPinFollowFresh = false
 
 func NewService(r router.Router, providerMap map[string]providers.Client, emitter *otel.Emitter, embedOnlyUserMessage bool, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
@@ -885,8 +881,7 @@ func (s *Service) WithPlannerEnabled(enabled bool) *Service {
 }
 
 // WithPrefixTrimFreeSwitch is the kill switch for the prefix-trim free-switch
-// window (cold cache pricing + handover skip on client history trims).
-// Detection and the post-routing compaction handover are unaffected.
+// window. Detection and the post-routing compaction handover are unaffected.
 func (s *Service) WithPrefixTrimFreeSwitch(enabled bool) *Service {
 	s.prefixTrimFreeSwitch = enabled
 	return s
@@ -1829,17 +1824,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// rewrite the envelope with a handover summary before dispatch.
 	compactionHandoverRan := false
 	var compactionHandoverOutcome handoverOutcome
-	// Detection (compaction.checkAndRecord) now runs inside runTurnLoop, before
-	// routing, so the planner can price the pin's cache as cold on the trim
-	// turn; routeRes.PrefixTrimmed carries the verdict here. Re-recording in
-	// this block would compare this turn's counts against themselves and never
-	// fire. Hard-pinned turn types never reach the turnloop's detection (their
-	// small bodies would mimic trims), so the HardPinned guard below is
-	// belt-and-suspenders — PrefixTrimmed is always false for them.
-	//
-	// Skip when the planner already ran a model-switch handover for this turn
-	// (routeRes.Handover.Invoked). Applying runCompactionHandover on top of an
-	// already-rewritten envelope would double-trim it.
+	// Detection runs pre-routing in runTurnLoop; routeRes.PrefixTrimmed carries
+	// the verdict (re-recording here would compare this turn's counts against
+	// themselves and never fire). Skip when a model-switch handover already
+	// rewrote the envelope this turn — a second rewrite would double-trim it.
 	if decision.Provider != providers.ProviderAnthropic && !routeRes.HardPinned && !routeRes.Handover.Invoked && routeRes.PrefixTrimmed {
 		log.Info("Context trimming detected on non-Anthropic route; rewriting context with handover summary",
 			"message_count", feats.MessageCount,

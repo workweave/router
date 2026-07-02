@@ -94,12 +94,9 @@ type turnLoopResult struct {
 	// the badge does not appear in suggestion-overlay responses.
 	SuggestionMode bool
 	// PrefixTrimmed is true when the compaction tracker detected a client-side
-	// history trim on THIS turn (full compaction or rolling-window trimming)
-	// relative to the session's previous observation. Detected before routing
-	// so the planner can price the pin's now-unreachable cache as cold and the
-	// switch handover can be skipped (the client's own compaction summary is
-	// already in the body). ProxyMessages also reads it post-routing to run
-	// the non-Anthropic compaction handover without re-recording the tracker.
+	// history trim on this turn. Detected before routing so the planner can
+	// price the pin's cache as cold; ProxyMessages also reads it post-routing
+	// for the compaction handover without re-recording the tracker.
 	PrefixTrimmed bool
 	// EscalateEffort is true when the previous turn in this session looked like
 	// an observable failure (produced no output, or the pin carried a consecutive
@@ -238,32 +235,20 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
-	// sessionKey is local until the pin store is known to exist:
-	// res.SessionKey must stay zero in no-pin-store mode — downstream
-	// consumers (sessionAffinityHint, the spiral/telemetry join comment in
-	// ProxyMessages) rely on that invariant — but trim detection needs the
-	// key either way.
+	// res.SessionKey must stay zero in no-pin-store mode, but trim detection
+	// needs the key either way.
 	sessionKey := DeriveSessionKey(env, apiKeyID)
 
-	// Prefix-trim detection runs BEFORE routing (previously it ran after, and
-	// only on non-Anthropic decisions) so the planner can price the pin's
-	// cache as dead on the very turn the client broke the prompt prefix: a
-	// compaction or rolling-window trim rewrites the transcript head, so the
-	// upstream cache entries keyed on the old prefix are unreachable no matter
-	// how recently the pin served. Hard-pinned turn types never reach this
-	// point (their small bodies would poison the tracker's baselines, same
-	// rationale as the post-routing guard this detection used to live behind).
-	// env has not been rewritten yet, so the counts match what the client sent.
-	// ProxyMessages consumes res.PrefixTrimmed for the post-routing compaction
-	// handover instead of re-recording (a second checkAndRecord on the same
-	// turn would compare the counts against themselves and always miss).
+	// Trim detection runs before routing so the planner can price the pin's
+	// cache as dead on the turn the client rewrote the prompt prefix. env has
+	// not been rewritten yet, so the counts match what the client sent.
 	res.PrefixTrimmed = s.compaction.checkAndRecord(
 		sessionKey, installationID, res.PinRole,
 		feats.MessageCount, len(env.AssistantToolCallSignatures()),
 	)
-	// prefixTrimFreeSwitch gates the ACTIONS on the signal (cold pricing +
-	// handover skip below); detection/recording itself is unconditional so the
-	// post-routing compaction handover keeps working when the lever is off.
+	// prefixTrimFreeSwitch gates the actions only; detection stays
+	// unconditional so the post-routing compaction handover keeps working
+	// when the lever is off.
 	prefixBroken := s.prefixTrimFreeSwitch && res.PrefixTrimmed
 	if res.PrefixTrimmed {
 		log.Info("turnloop detected client history trim",
@@ -611,12 +596,9 @@ func (s *Service) runTurnLoop(
 	//   (g) this turn does NOT carry images if the prior model is text-only
 	//       (image guard mirrors the live-pin check above — re-anchoring a
 	//       text-only model on an image-bearing turn would immediately 4xx)
-	//   (h) the client did NOT trim its history this turn (prefix-trim
-	//       free-switch armed) — re-anchoring exists to avoid noise-driven
-	//       lateral switches, but a trim turn is a genuine free-switch
-	//       boundary: the prior model's cache is dead regardless of the pin's
-	//       expiry, so the scorer's fresh pick should win, mirroring the
-	//       cold-pricing the planner applies on the live-pin path below.
+	//   (h) the client did NOT trim its history this turn — a trim kills the
+	//       prior model's cache regardless of pin expiry, so the scorer's
+	//       fresh pick should win
 	// When re-anchoring, write a new pin so the next turn is a sticky hit.
 	if !pinFound && pin.Model != "" && !prefixBroken {
 		pinTier := catalog.TierFor(pin.Model)
@@ -670,9 +652,7 @@ func (s *Service) runTurnLoop(
 		Fresh:                fresh,
 		EstimatedInputTokens: feats.Tokens,
 		AvailableModels:      s.availableModels,
-		// A trimmed prefix kills the cache even inside the provider TTL: the
-		// upstream cache is keyed on the (now rewritten) prompt prefix, so a
-		// recent LastTurnEndedAt proves nothing about reuse on this turn.
+		// A trimmed prefix kills the cache even inside the provider TTL.
 		PinCacheCold: pinFound && (!cacheWarm(pin) || prefixBroken),
 		// Price covered models at their subsidized marginal cost in the EV math
 		// too, so the discount takes effect on sticky (pinned) sessions, not just
@@ -714,14 +694,9 @@ func (s *Service) runTurnLoop(
 	// the summarizer's provider were forwarded do we skip summarization and
 	// pass the full history through.
 	if pinFound && prefixBroken {
-		// Free-switch window: the client just compacted/trimmed its own
-		// history, so the body already carries the client's summary of the
-		// elided turns and is as small as it will ever be. Running the switch
-		// summarizer here would summarize that summary — pure cost, no context
-		// preserved that the compacted body doesn't already have. Skip it and
-		// forward the compacted body unchanged. (For a non-Anthropic decision
-		// the post-routing compaction handover in ProxyMessages may still
-		// rewrite — exactly one rewrite either way.)
+		// The client just trimmed its own history: the body already carries
+		// its compaction summary and is as small as it gets. Summarizing it
+		// again is pure cost, so forward it unchanged.
 		log.Info("Handover summarizer skipped: client history trim already bounded this switch turn",
 			"pin_model", pin.Model,
 			"fresh_model", fresh.Model,
