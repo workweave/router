@@ -368,11 +368,12 @@ func (s *Service) runTurnLoop(
 	// Context-window overflow guard: if the pre-filter in ProxyMessages /
 	// ProxyOpenAIChatCompletion added the pinned model to ExcludedModels
 	// (because this turn's estimated context exceeds the model's window),
-	// verify with a direct fit-check before evicting the pin. The pre-filter
-	// uses body_bytes÷5 as a conservative token estimate; the pin guard uses
-	// the same formula but checks the model's actual context window, so a
-	// conservative over-estimate that only slightly overshoots a large-window
-	// model does not cause an unnecessary mid-session switch.
+	// verify with a direct fit-check before evicting the pin. The fit-check MUST
+	// use the same estimate as the pre-filter (ContextOverflowTokenEstimate) —
+	// otherwise a dense, signature-light body the pre-filter excludes (÷4) could
+	// be judged to fit here (via the looser ÷6 FullTokenEstimate), un-excluding
+	// the pinned small-window model and letting sticky routing dispatch to it
+	// and hit the same hard context-overflow 400 the pre-filter prevents.
 	// A confirmed overflow (needed > model window) still evicts the pin.
 	if pinFound {
 		if _, overCapacity := req.ExcludedModels[pin.Model]; overCapacity {
@@ -380,13 +381,14 @@ func (s *Service) runTurnLoop(
 			if feats.MaxTokens > outputReserveForPin {
 				outputReserveForPin = feats.MaxTokens
 			}
-			needed := env.FullTokenEstimate() + outputReserveForPin
+			pinTokenEstimate := env.ContextOverflowTokenEstimate()
+			needed := pinTokenEstimate + outputReserveForPin
 			modelCW := contextWindowForRequest(pin.Model)
 			if needed > modelCW {
 				log.Info("Session pin excluded by context-window pre-filter; falling through to scorer",
 					"pin_model", pin.Model,
 					"pin_provider", pin.Provider,
-					"token_estimate", env.FullTokenEstimate(),
+					"token_estimate", pinTokenEstimate,
 					"needed", needed,
 					"model_context_window", modelCW,
 				)
