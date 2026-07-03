@@ -450,10 +450,9 @@ func main() {
 		logger.Error("Failed to create OTel emitter", "err", err)
 		panic(err)
 	}
-	// telemetryEmitter is proxy.NewService's interface-typed parameter. Left as
-	// a true nil interface (not a nil-valued *otel.Emitter wrapped in an
-	// interface) when OTel is disabled, so proxy's `s.emitter == nil` checks
-	// keep working correctly.
+	// Keep as a true nil interface, not a nil *otel.Emitter wrapped in an
+	// interface (which would be non-nil), so proxy's s.emitter == nil checks
+	// work correctly.
 	var telemetryEmitter proxy.TelemetryEmitter
 	if emitter != nil {
 		telemetryEmitter = emitter

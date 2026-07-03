@@ -34,12 +34,8 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// TelemetryEmitter is the narrow inner-ring interface proxy needs from the
-// OTel observability adapter: a request-scoped span/log buffer. Implemented
-// by *otel.Emitter (internal/observability/otel) and injected from
-// cmd/router/main.go, mirroring the sessionpin.Store / handover.Summarizer /
-// billing.Repo pattern so proxy depends on an interface it owns rather than
-// the adapter's concrete type.
+// TelemetryEmitter is the narrow interface proxy owns for OTel: a
+// request-scoped span/log buffer. Implemented by *otel.Emitter.
 type TelemetryEmitter interface {
 	// NewBuffer returns a request-scoped span/log buffer, or nil when the
 	// emitter itself is disabled.
@@ -1079,10 +1075,8 @@ func (s *Service) usageRequired() bool {
 	return s.emitter != nil || s.telemetry != nil || s.billing != nil
 }
 
-// newTelemetryBuffer returns a request-scoped span/log buffer, or nil when no
-// TelemetryEmitter is wired (OTel disabled). Callers invoke this instead of
-// calling s.emitter.NewBuffer() directly so a nil emitter interface never
-// causes a nil-interface method-call panic.
+// newTelemetryBuffer returns a request-scoped buffer, or nil when OTel is
+// disabled — guards against a nil-interface method-call panic.
 func (s *Service) newTelemetryBuffer() *otel.Buffer {
 	if s.emitter == nil {
 		return nil

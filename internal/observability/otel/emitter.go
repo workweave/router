@@ -103,8 +103,7 @@ func NewEmitter(cfg EmitterConfig) (*Emitter, error) {
 }
 
 // NewBuffer returns a request-scoped span/log buffer wrapping e, or nil when e
-// is nil (OTel disabled). Satisfies proxy.TelemetryEmitter so callers can
-// depend on that narrow interface instead of the concrete *Emitter type.
+// is nil (OTel disabled).
 func (e *Emitter) NewBuffer() *Buffer {
 	return NewBuffer(e)
 }
