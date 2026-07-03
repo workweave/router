@@ -20,12 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeAPIKeyRepository is a minimal in-memory auth.APIKeyRepository, modeled on
-// the fake of the same name in internal/auth/service_test.go. That fake lives in
-// package auth_test and isn't reusable here, so this is a local copy scoped to
-// what the admin handlers under test actually exercise (Create/ListForInstallation
-// /SoftDelete) — GetActiveByHashWithInstallation/MarkUsed aren't touched by these
-// handlers and just satisfy the interface.
+// fakeAPIKeyRepository is a local in-memory auth.APIKeyRepository (the one in
+// package auth_test isn't exported). Only implements methods used by these handlers.
 type fakeAPIKeyRepository struct {
 	mu     sync.Mutex
 	keys   []*auth.APIKey
@@ -96,9 +92,7 @@ func (f *fakeAPIKeyRepository) softDeletedSnapshot() []string {
 
 const testInstallationID = "inst-1"
 
-// apiKeysEngine wires the router-key lifecycle handlers behind a middleware that
-// injects an already-authed installation, mirroring upsertKeyEngine above and the
-// route layout in internal/server/server.go's mgmt group.
+// apiKeysEngine mirrors upsertKeyEngine with the key-lifecycle routes.
 func apiKeysEngine(svc *auth.Service) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
