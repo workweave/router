@@ -1180,9 +1180,8 @@ func (s *Service) MetricsRowsAll(ctx context.Context, from, to time.Time, limit 
 // provider that is not present in the registry.
 var ErrProviderNotConfigured = errors.New("provider not configured")
 
-// ErrRequestNotJSONObject re-exports translate.ErrNotJSONObject so that
-// internal/api/* handlers can check request-body-shape errors without
-// importing internal/translate directly (see root CLAUDE.md layering rules).
+// ErrRequestNotJSONObject re-exports translate.ErrNotJSONObject so api/* handlers
+// avoid importing internal/translate directly (layering rule, root CLAUDE.md).
 var ErrRequestNotJSONObject = translate.ErrNotJSONObject
 
 // semanticCacheMaxBodyBytes caps how large a response the cache will store;
