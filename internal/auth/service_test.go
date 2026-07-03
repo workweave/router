@@ -1,14 +1,18 @@
 package auth_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/observability"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +21,9 @@ import (
 type fakeAPIKeyRepository struct {
 	byHash   map[string]fakeKeyRow
 	override error
+
+	// markUsedPanic, when true, causes MarkUsed to panic so fireMarkUsed recovery can be exercised.
+	markUsedPanic bool
 
 	mu       sync.Mutex
 	markUsed []string
@@ -55,6 +62,9 @@ func (f *fakeAPIKeyRepository) ListForInstallation(ctx context.Context, installa
 }
 
 func (f *fakeAPIKeyRepository) MarkUsed(ctx context.Context, id string) error {
+	if f.markUsedPanic {
+		panic("boom: mark used")
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.markUsed = append(f.markUsed, id)
@@ -391,6 +401,52 @@ func TestService_VerifyAPIKey_HappyPathReturnsInstallationAndKey(t *testing.T) {
 		return len(snap) == 1 && snap[0] == "key_xyz"
 	}, 500*time.Millisecond, 10*time.Millisecond,
 		"VerifyAPIKey must asynchronously call MarkUsed with the matched key id")
+}
+
+func TestService_VerifyAPIKey_RecoversFromMarkUsedPanic(t *testing.T) {
+	rawToken := "rk_panic_token_for_test_only"
+	keyHash := auth.HashAPIKeySHA256(rawToken)
+
+	wantInstall := &auth.Installation{
+		ID:         "install_panic",
+		ExternalID: "org_panic",
+		Name:       "panic-api",
+		CreatedAt:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		UpdatedAt:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+	wantKey := &auth.APIKey{
+		ID:             "key_panic",
+		InstallationID: wantInstall.ID,
+		ExternalID:     wantInstall.ExternalID,
+		KeyPrefix:      "rk_",
+		KeyHash:        keyHash,
+		KeySuffix:      "only",
+		CreatedAt:      time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	svc, apiKeys := makeService(t, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
+	apiKeys.markUsedPanic = true
+
+	// Prime observability's sync.Once before overriding slog.Default; otherwise the goroutine's
+	// first Get() call races SetDefault and resets the handler.
+	observability.Get()
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	require.NotPanics(t, func() {
+		gotInstall, gotKey, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+		require.NoError(t, err)
+		require.NotNil(t, gotInstall)
+		require.NotNil(t, gotKey)
+	}, "a panicking MarkUsed must not crash the request path")
+
+	require.Eventually(t, func() bool {
+		return strings.Contains(buf.String(), "panic in fireMarkUsed")
+	}, 500*time.Millisecond, 10*time.Millisecond,
+		"the async fireMarkUsed goroutine must recover and log the panic")
 }
 
 func makeServiceWithCacheAndCounter(t *testing.T, cache auth.APIKeyCache, rows ...fakeKeyRow) (*auth.Service, *repoCallCounter) {
