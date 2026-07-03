@@ -445,6 +445,12 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	}
 	resCh := make(chan embedResult, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("Cluster scorer: embed panic; returning ErrClusterUnavailable", "panic", fmt.Sprint(r))
+				resCh <- embedResult{err: fmt.Errorf("embed panic: %v", r)}
+			}
+		}()
 		v, e := s.embed.Embed(embedCtx, text)
 		resCh <- embedResult{vec: v, err: e}
 	}()

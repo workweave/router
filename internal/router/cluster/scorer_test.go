@@ -425,6 +425,27 @@ func TestScorer_ReturnsErrOnEmbedderError(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrClusterUnavailable))
 }
 
+// panicEmbedder panics inside Embed to simulate a crash in the native
+// ONNX/hugot pipeline, exercising the goroutine's recover().
+type panicEmbedder struct{}
+
+func (panicEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
+	panic("simulated onnx/hugot panic")
+}
+
+func (panicEmbedder) ID() string { return EmbedderJinaV2 }
+
+func (panicEmbedder) Dim() int { return EmbedDim }
+
+func TestScorer_RecoversFromEmbedPanic(t *testing.T) {
+	s := newScorerForTest(t, panicEmbedder{}, cfgForTest())
+
+	_, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrClusterUnavailable))
+	assert.Contains(t, err.Error(), "embed panic")
+}
+
 func TestScorer_ReturnsErrOnDimMismatch(t *testing.T) {
 	emb := &fakeEmbedder{vec: make([]float32, 7)} // wrong size
 	s := newScorerForTest(t, emb, cfgForTest())
