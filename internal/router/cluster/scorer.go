@@ -646,6 +646,14 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 
 	if s.isV2 {
 		// 1. Resolve Knobs and Validate
+		//
+		// defaultKnobs is kept alongside activeKnobs (both fresh clones from
+		// defaultActiveKnobs) so the extreme-value check below can tell a
+		// request-level override apart from the bundle's own baked-in
+		// defaults -- a bundle is allowed to ship an alpha > 0.9 on some
+		// clusters by design, and that's not something an operator can act
+		// on, so it must never WARN.
+		defaultKnobs := s.defaultActiveKnobs()
 		activeKnobs := s.defaultActiveKnobs()
 
 		if req.RoutingKnobs != nil {
@@ -692,6 +700,14 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		if activeKnobs.SpeedWeight < 0 || activeKnobs.SpeedWeight > 1 {
 			return router.Decision{}, fmt.Errorf("%w: speed_weight (%f) must be in [0, 1]", ErrInvalidRoutingKnobs, activeKnobs.SpeedWeight)
 		}
+		// speedWeightOverridden is request-scoped (SpeedWeight is a single
+		// scalar, not per-cluster), so it's resolved once outside the loop.
+		speedWeightOverridden := activeKnobs.SpeedWeight != defaultKnobs.SpeedWeight
+
+		var extremeAlphaClusters []int
+		var extremeAlphaValues []float64
+		var extremeAlphaSpeedClusters []int
+		var extremeAlphaSpeedValues []float64
 		for i, a := range activeKnobs.Alpha {
 			if a < 0 || a > 1 {
 				return router.Decision{}, fmt.Errorf("%w: alpha[%d] (%f) must be in [0, 1]", ErrInvalidRoutingKnobs, i, a)
@@ -699,12 +715,37 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			if a+activeKnobs.SpeedWeight > 1.0+1e-9 {
 				return router.Decision{}, fmt.Errorf("%w: alpha[%d] (%f) + speed_weight (%f) must be <= 1.0", ErrInvalidRoutingKnobs, i, a, activeKnobs.SpeedWeight)
 			}
-			if a > 0.9 {
-				log.Warn("Extreme routing knob: alpha > 0.9", "cluster", i, "alpha", a)
+			// Only flag a cluster as "extreme" if the request actually moved
+			// it away from the bundle's own default -- otherwise this fires
+			// on every request for a bundle that simply ships a high alpha
+			// on some clusters by design, drowning out genuinely actionable
+			// WARNs. Aggregated below into a single log line per bundle.
+			alphaOverridden := a != defaultKnobs.Alpha[i]
+			if alphaOverridden && a > 0.9 {
+				extremeAlphaClusters = append(extremeAlphaClusters, i)
+				extremeAlphaValues = append(extremeAlphaValues, a)
 			}
-			if a+activeKnobs.SpeedWeight > 0.95 {
-				log.Warn("Extreme routing knob: alpha + speed_weight > 0.95", "cluster", i, "alpha", a, "speed_weight", activeKnobs.SpeedWeight)
+			if (alphaOverridden || speedWeightOverridden) && a+activeKnobs.SpeedWeight > 0.95 {
+				extremeAlphaSpeedClusters = append(extremeAlphaSpeedClusters, i)
+				extremeAlphaSpeedValues = append(extremeAlphaSpeedValues, a)
 			}
+		}
+		if len(extremeAlphaClusters) > 0 {
+			log.Warn(
+				"Extreme routing knob override: alpha > 0.9",
+				"clusters", extremeAlphaClusters,
+				"alphas", extremeAlphaValues,
+				"count", len(extremeAlphaClusters),
+			)
+		}
+		if len(extremeAlphaSpeedClusters) > 0 {
+			log.Warn(
+				"Extreme routing knob override: alpha + speed_weight > 0.95",
+				"clusters", extremeAlphaSpeedClusters,
+				"alphas", extremeAlphaSpeedValues,
+				"speed_weight", activeKnobs.SpeedWeight,
+				"count", len(extremeAlphaSpeedClusters),
+			)
 		}
 		if activeKnobs.OutputCostRatio < 0 || activeKnobs.OutputCostRatio > 10 {
 			return router.Decision{}, fmt.Errorf("%w: output_cost_ratio (%f) must be in [0, 10]", ErrInvalidRoutingKnobs, activeKnobs.OutputCostRatio)
