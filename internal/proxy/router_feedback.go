@@ -16,15 +16,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// routerFeedbackCommandSpanName is the OTLP span the /router-feedback (aka
-// /rf) slash command emits. This is a distinct span from routerFeedbackSpanName
-// ("router.feedback", defined in feedback.go): that name is the documented
-// contract the Weave backend's buildFeedbackRow reads to populate
-// router.request_feedback, and it always carries a feedback.rating attribute.
-// This command path persists into the separate router.router_feedback table
-// (DB write is authoritative; this span is best-effort mirroring/observability
-// only) and has its own, incompatible attribute schema — do not reuse
-// "router.feedback" here, and do not change routerFeedbackSpanName's schema.
+// routerFeedbackCommandSpanName is the OTLP span for the /router-feedback (/rf)
+// slash command. Distinct from routerFeedbackSpanName ("router.feedback" in
+// feedback.go), which is a downstream contract (buildFeedbackRow); do not reuse
+// that name or alter its schema.
 const routerFeedbackCommandSpanName = "router.feedback.command"
 
 // RouterFeedbackStore persists /router-feedback submissions durably

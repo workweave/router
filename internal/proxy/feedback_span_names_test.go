@@ -86,12 +86,9 @@ func newTestEmitter(t *testing.T, endpoint string) *otel.Emitter {
 	return em
 }
 
-// TestFeedbackSpans_UseDistinctNamesAndSchemas guards against the two
-// independent feedback pipelines colliding on the OTLP span name
-// "router.feedback" (finding [28]): the signed-link pipeline
-// (Service.SubmitFeedback) owns that name as a documented contract the Weave
-// backend's buildFeedbackRow reads, while the /router-feedback slash-command
-// pipeline must emit under its own distinct name with its own schema.
+// TestFeedbackSpans_UseDistinctNamesAndSchemas guards against the two feedback
+// pipelines colliding on "router.feedback": the signed-link pipeline owns that
+// name as a downstream contract; the /router-feedback command must use its own.
 func TestFeedbackSpans_UseDistinctNamesAndSchemas(t *testing.T) {
 	collector := newSpanCollector(t)
 	emitter := newTestEmitter(t, collector.srv.URL)
