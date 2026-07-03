@@ -19,10 +19,7 @@ func init() {
 }
 
 // ByID returns the model with the given ID. If the exact ID isn't found,
-// retries after stripping a trailing date suffix — either Anthropic's compact
-// form (e.g. "-20251001") or OpenAI's dashed form (e.g. "-2024-08-06") — using
-// the same stripper router.Lookup uses, so capability and pricing/tier
-// lookups normalize dated model IDs identically.
+// retries after stripping a trailing Anthropic (-20251001) or OpenAI (-2024-08-06) date suffix.
 func ByID(id string) (Model, bool) {
 	if m, ok := byID[id]; ok {
 		return m, true
