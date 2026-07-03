@@ -3,6 +3,7 @@ package translate_test
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -77,7 +78,10 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	reasoning, _ := out["reasoning"].(map[string]any)
 	require.NotNil(t, reasoning, "reasoning must be set from thinking budget")
 	assert.Equal(t, "high", reasoning["effort"], "31999 budget -> high")
-	assert.EqualValues(t, 4096, out["max_output_tokens"])
+	// max_tokens 4096 is floored to minResponsesOutputTokens (16000): a reasoning
+	// model needs output-budget headroom for hidden reasoning before any visible
+	// token, so the requested 4096 is lifted to the reasoning floor.
+	assert.EqualValues(t, 16000, out["max_output_tokens"])
 	assert.Equal(t, "auto", out["tool_choice"])
 
 	// tools: FLAT function shape (no nested "function" wrapper)
@@ -119,6 +123,43 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	assert.Equal(t, "file.go", fco["output"])
 
 	assert.Equal(t, providers.EndpointResponses, prep.Endpoint)
+}
+
+// A tiny client max_tokens (Claude Code sends 1 for a probe, 64 for a
+// title/topic turn) must be floored to the reasoning output budget: a reasoning
+// model burns the budget on hidden reasoning before any visible token, so the
+// raw tiny value 400s ("max_tokens or model output limit was reached"). A budget
+// already above the floor is passed through unchanged (clamped only to the cap).
+func TestPrepareOpenAIResponses_FloorsMaxOutputTokensForReasoning(t *testing.T) {
+	cases := []struct {
+		name       string
+		maxTokens  int
+		wantMaxOut int64
+	}{
+		{name: "probe max_tokens=1 floored", maxTokens: 1, wantMaxOut: 16000},
+		{name: "title-turn max_tokens=64 floored", maxTokens: 64, wantMaxOut: 16000},
+		{name: "at floor unchanged", maxTokens: 16000, wantMaxOut: 16000},
+		{name: "large budget passes through", maxTokens: 32000, wantMaxOut: 32000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(fmt.Sprintf(`{
+				"model":"claude-opus-4-8","max_tokens":%d,
+				"tools":[{"name":"bash","description":"run","input_schema":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}],
+				"messages":[{"role":"user","content":"hi"}]
+			}`, tc.maxTokens))
+			env, err := translate.ParseAnthropic(body)
+			require.NoError(t, err)
+			prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{
+				TargetModel:  "gpt-5.4-mini",
+				Capabilities: router.Lookup("gpt-5.4-mini"),
+			})
+			require.NoError(t, err)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(prep.Body, &out))
+			assert.EqualValues(t, tc.wantMaxOut, out["max_output_tokens"])
+		})
+	}
 }
 
 // Gemini sessions smuggle a thoughtSignature into tool_use ids

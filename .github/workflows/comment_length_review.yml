@@ -1,8 +1,9 @@
 name: Comment Length Review
 
 # Advisory-only: flags overly long comments on new/changed Go code and leaves
-# a PR comment with shorter suggestions. Never blocks merge (no required
-# status check is registered for this job).
+# INLINE review comments (anchored to the offending lines) with shorter
+# suggestions. Never blocks merge (no required status check is registered, and
+# the review is posted as event=COMMENT, not REQUEST_CHANGES).
 
 on:
   pull_request:
@@ -33,8 +34,8 @@ jobs:
         uses: anthropics/claude-code-action@beta
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          model: "claude-haiku-4-5-20251001"
-          allowed_tools: "Bash(git diff:*),Bash(git log:*),Bash(gh pr comment:*)"
+          model: "claude-sonnet-4-6"
+          allowed_tools: "Bash(git diff:*),Bash(git log:*),Bash(gh api:*)"
           direct_prompt: |
             You are a lightweight, advisory-only comment-style linter for a Go
             codebase. You are NOT a general code reviewer — do not comment on
@@ -46,20 +47,40 @@ jobs:
             2. Look only at ADDED comment lines (lines starting with `+` that are
                `//` line comments or inside a `/* */` block). Find comment blocks
                that are 3 or more consecutive lines long.
-            3. For each one, judge it against this rule: keep it long only if it
-               explains a genuinely non-obvious WHY (a hidden constraint, a
-               subtle invariant, a workaround for a specific bug, or behavior
-               that would surprise a reader). If it's just restating what the
-               code does, narrating steps, or padded with filler, it's too long.
-            4. If you find zero comments worth flagging, do NOT post any comment
-               at all — exit silently. Do not post a comment that just says
-               "no issues found."
-            5. If you find one or more, post a single PR comment via
-               `gh pr comment ${{ github.event.pull_request.number }} --body-file <file>`
-               with one short bullet per finding: the file:line, a 1-line
-               quote/paraphrase of the bloated comment, and a suggested
-               shortened version. Keep the whole comment under ~40 lines total.
-               Open with one sentence noting this is advisory only and won't
-               block merge.
+            3. Flag a block if it restates what the code does, narrates steps, is
+               padded with filler, OR could be cut to ~5 lines or fewer without
+               losing a genuinely non-obvious WHY (a hidden constraint, a subtle
+               invariant, a workaround for a specific bug, or surprising
+               behavior). A block that DOES explain a real why is still too long
+               if it explains it verbosely — judge concision, not just presence.
+            4. If nothing is worth flagging, exit silently — do NOT post anything.
+               Never post a "no issues found" message.
+            5. Otherwise post ONE pull-request review with an INLINE comment per
+               finding. For each finding, determine its file path and the
+               new-file line number of the block's first line from the diff hunk
+               headers (`@@ -a,b +c,d @@`: `c` is the new-file start line of the
+               hunk; count the `+` and context lines down to the flagged line;
+               ignore `-` lines). Only use lines that appear as `+` (added) lines
+               so they exist on the RIGHT side of the diff, or the API rejects the
+               review. Post via stdin heredoc:
+
+               ```
+               gh api --method POST \
+                 repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
+                 --input - <<'JSON'
+               {
+                 "event": "COMMENT",
+                 "body": "Advisory only — comment-length nits. Won't block merge.",
+                 "comments": [
+                   {"path": "internal/foo/bar.go", "line": 42, "side": "RIGHT",
+                    "body": "This 8-line block restates the code. Suggested:\n```go\n// bar does X because Y.\n```"}
+                 ]
+               }
+               JSON
+               ```
+
+               One entry in `comments` per finding: `path`, `line`, `side:
+               RIGHT`, and a `body` with a 1-line reason plus a fenced shortened
+               version. Keep each body short.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
