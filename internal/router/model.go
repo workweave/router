@@ -38,13 +38,22 @@ func NewSpec(caps ...ModelCapability) ModelSpec {
 // dateSuffix matches Anthropic (-20251001) and OpenAI (-2024-08-06) trailing date stamps.
 var dateSuffix = regexp.MustCompile(`-\d{4}-?\d{2}-?\d{2}$`)
 
+// StripDateSuffix removes a trailing Anthropic-style compact date stamp
+// (-20251001) or OpenAI-style dashed date stamp (-2024-08-06) from a model
+// ID, if present. Returns the input unchanged when no such suffix matches.
+// Shared by Lookup and catalog.ByID so both capability and pricing/tier
+// lookups normalize dated model IDs identically.
+func StripDateSuffix(model string) string {
+	return dateSuffix.ReplaceAllString(model, "")
+}
+
 // Lookup returns the spec for a known model ID. Dated variants (e.g.
 // "-20251001") fall back to the base model; unknown models get zero-value.
 func Lookup(model string) ModelSpec {
 	if s, ok := registry[model]; ok {
 		return s
 	}
-	if base := dateSuffix.ReplaceAllString(model, ""); base != model {
+	if base := StripDateSuffix(model); base != model {
 		if s, ok := registry[base]; ok {
 			return s
 		}

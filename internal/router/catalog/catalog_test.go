@@ -60,6 +60,22 @@ func TestByID_DateStrippedFallback(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", m.ID)
 }
 
+func TestByID_OpenAIDashedDateStrippedFallback(t *testing.T) {
+	// gpt-4o-2024-08-06 is an exact dated OpenAI model ID (dashed
+	// YYYY-MM-DD suffix); it should resolve to the base "gpt-4o" catalog
+	// entry the same way router.Lookup already resolves it for capability
+	// checks. Regression test for a bug where catalog's stripper only
+	// handled Anthropic's compact 8-digit suffix and missed this shape,
+	// causing ByID/PriceFor/TierFor to report not-found for dated OpenAI IDs.
+	m, ok := ByID("gpt-4o-2024-08-06")
+	require.True(t, ok)
+	assert.Equal(t, "gpt-4o", m.ID)
+
+	p, ok := PriceFor(providers.ProviderOpenAI, "gpt-4o-2024-08-06")
+	require.True(t, ok)
+	assert.Greater(t, p.InputUSDPer1M, 0.0)
+}
+
 func TestByID_UnknownReturnsFalse(t *testing.T) {
 	_, ok := ByID("definitely-not-a-model")
 	assert.False(t, ok)
