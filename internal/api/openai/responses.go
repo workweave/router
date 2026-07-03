@@ -13,7 +13,6 @@ import (
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/server/middleware"
-	"workweave/router/internal/translate"
 
 	"github.com/gin-gonic/gin"
 )
@@ -63,7 +62,7 @@ func ResponsesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc
 				writeOpenAIError(c, http.StatusBadGateway, "api_error", "Provider not configured.")
 				return
 			}
-			if errors.Is(err, translate.ErrNotJSONObject) {
+			if errors.Is(err, proxy.ErrRequestNotJSONObject) {
 				writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "request body must be a JSON object")
 				return
 			}
