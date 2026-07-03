@@ -13,6 +13,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  id-token: write
 
 concurrency:
   group: comment-length-review-${{ github.event.pull_request.number }}
