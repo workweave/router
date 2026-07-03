@@ -206,7 +206,7 @@ func warnOnUnknownPricing(p DebitInferenceParams) {
 	if p.Pricing.InputUSDPer1M != 0 || p.Pricing.OutputUSDPer1M != 0 {
 		return
 	}
-	if p.InputTokens == 0 && p.OutputTokens == 0 {
+	if p.InputTokens == 0 && p.OutputTokens == 0 && p.CacheCreation == 0 && p.CacheRead == 0 {
 		return
 	}
 	observability.Get().Error("Billing debit resolved zero-value catalog pricing for a real turn — add the model to internal/router/catalog/catalog.go's Models table",
@@ -216,6 +216,8 @@ func warnOnUnknownPricing(p DebitInferenceParams) {
 		"router_request_id", p.RouterRequestID,
 		"input_tokens", p.InputTokens,
 		"output_tokens", p.OutputTokens,
+		"cache_creation_tokens", p.CacheCreation,
+		"cache_read_tokens", p.CacheRead,
 	)
 }
 
