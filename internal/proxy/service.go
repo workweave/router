@@ -1348,12 +1348,9 @@ func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName s
 	return proxyErr
 }
 
-// logUpstreamBody emits per-attempt dispatch metadata at Info so it shows up
-// in GCP without flipping LOG_LEVEL. It intentionally does NOT include the
-// raw request body — that would violate the "never log full request bodies"
-// rule regardless of truncation, and duplicates the purpose-built, opt-in,
-// redactable captureMode/Redactor pipeline (see turn_logs.go / recordCallLog)
-// which already exists for "what did we actually send" debugging.
+// logUpstreamBody emits per-attempt dispatch metadata at Info. Body is
+// intentionally omitted — use captureMode/Redactor (turn_logs.go) for
+// per-attempt body capture.
 func logUpstreamBody(log *slog.Logger, sessionKey [sessionpin.SessionKeyLen]byte, decision router.Decision, feats translate.RoutingFeatures, body []byte) {
 	log.Info("upstream prepared request",
 		"session_key", hex.EncodeToString(sessionKey[:8]),
