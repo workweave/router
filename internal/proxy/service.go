@@ -1317,6 +1317,35 @@ func (s *Service) Route(ctx context.Context, req router.Request) (router.Decisio
 	return s.routeFor(ctx, req)
 }
 
+// RouteAnthropicRequest parses a raw Anthropic-Messages body and returns the
+// routing decision without dispatching (e.g. the /v1/route dry-run endpoint).
+// Owns translate.ParseAnthropic + RoutingFeatures extraction internally so
+// callers in internal/api/* never import internal/translate directly,
+// matching ProxyMessages.
+func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte) (decision router.Decision, err error) {
+	env, parseErr := translate.ParseAnthropic(body)
+	if parseErr != nil {
+		err = fmt.Errorf("parse request: %w", parseErr)
+		return decision, err
+	}
+
+	embedFlag := s.ResolveEmbedOnlyUserMessage(ctx)
+	feats := env.RoutingFeatures(embedFlag)
+	promptText := feats.PromptText
+	if embedFlag && feats.OnlyUserMessageText != "" {
+		promptText = feats.OnlyUserMessageText
+	}
+
+	decision, err = s.Route(ctx, router.Request{
+		RequestedModel:       feats.Model,
+		EstimatedInputTokens: feats.Tokens,
+		HasTools:             feats.HasTools,
+		PromptText:           promptText,
+		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
+	})
+	return decision, err
+}
+
 // PassthroughToProvider forwards a non-routing request to the default
 // (Anthropic) provider for metadata endpoints (count_tokens, models).
 func (s *Service) PassthroughToProvider(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {

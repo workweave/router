@@ -7,9 +7,7 @@ import (
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/proxy"
-	"workweave/router/internal/router"
 	"workweave/router/internal/router/cluster"
-	"workweave/router/internal/translate"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,27 +27,13 @@ func RouteHandler(svc *proxy.Service) gin.HandlerFunc {
 			return
 		}
 
-		env, parseErr := translate.ParseAnthropic(body)
-		if parseErr != nil {
-			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Request body must be a JSON object.")
-			return
-		}
-
 		ctx := c.Request.Context()
-		embedFlag := svc.ResolveEmbedOnlyUserMessage(ctx)
-		feats := env.RoutingFeatures(embedFlag)
-		promptText := feats.PromptText
-		if embedFlag && feats.OnlyUserMessageText != "" {
-			promptText = feats.OnlyUserMessageText
-		}
-		decision, routeErr := svc.Route(ctx, router.Request{
-			RequestedModel:       feats.Model,
-			EstimatedInputTokens: feats.Tokens,
-			HasTools:             feats.HasTools,
-			PromptText:           promptText,
-			RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
-		})
+		decision, routeErr := svc.RouteAnthropicRequest(ctx, body)
 		if routeErr != nil {
+			if errors.Is(routeErr, proxy.ErrRequestNotJSONObject) {
+				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Request body must be a JSON object.")
+				return
+			}
 			if errors.Is(routeErr, cluster.ErrInvalidRoutingKnobs) {
 				log.Warn("Invalid routing knobs supplied on route", "err", routeErr)
 				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Invalid routing knobs supplied.")
