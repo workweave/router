@@ -8,6 +8,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router/bandit"
 	"workweave/router/internal/router/cluster"
+	"workweave/router/internal/router/hmm"
 	"workweave/router/internal/router/rl"
 )
 
@@ -30,6 +31,7 @@ const (
 	DispatchErrorInvalidRoutingKnobs
 	DispatchErrorRLPolicyUnavailable
 	DispatchErrorBanditUnavailable
+	DispatchErrorHMMUnavailable
 	DispatchErrorClusterUnavailable
 )
 
@@ -120,6 +122,15 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 			RetryAfter: true,
 			LogLevel:   "error",
 			LogMessage: "Bandit routing unavailable",
+		}, true
+	case errors.Is(err, hmm.ErrHMMUnavailable):
+		return DispatchErrorClass{
+			Kind:       DispatchErrorHMMUnavailable,
+			Status:     http.StatusServiceUnavailable,
+			Message:    "Router unavailable: HMM policy router failed and no fallback is configured.",
+			RetryAfter: true,
+			LogLevel:   "error",
+			LogMessage: "HMM routing unavailable",
 		}, true
 	case errors.Is(err, cluster.ErrClusterUnavailable):
 		return DispatchErrorClass{

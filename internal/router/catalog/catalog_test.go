@@ -128,7 +128,15 @@ func TestResolveBinding_PicksFirstAvailable(t *testing.T) {
 func TestTierFor_KnownAndUnknown(t *testing.T) {
 	assert.Equal(t, TierHigh, TierFor("claude-opus-4-7"))
 	assert.Equal(t, TierLow, TierFor("claude-haiku-4-5"))
+	assert.Equal(t, TierLow, TierFor("google/gemma-4-26b-a4b-it"))
 	assert.Equal(t, TierUnknown, TierFor("definitely-not-a-model"))
+}
+
+func TestResolveBinding_GemmaUsesNativeGoogleUpstreamID(t *testing.T) {
+	b, ok := ResolveBinding("google/gemma-4-26b-a4b-it", map[string]struct{}{providers.ProviderGoogle: {}})
+	require.True(t, ok)
+	assert.Equal(t, providers.ProviderGoogle, b.Provider)
+	assert.Equal(t, "gemma-4-26b-a4b-it", b.UpstreamID)
 }
 
 func TestAllowedAtOrBelow_FiltersOutUnknownTier(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 	"workweave/router/internal/router/cache"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/handover"
+	"workweave/router/internal/router/hmm"
 	"workweave/router/internal/router/planner"
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/router/sessionpin"
@@ -50,6 +51,10 @@ type Service struct {
 	// (ROUTER_RL_SIDECAR_URL unset); the strategy header then 503s rather than
 	// silently serving the cluster scorer.
 	rlRouter router.Router
+	// hmmRouter is the opt-in HMM/classifier/bandit policy router, selected
+	// per-request via x-weave-router-strategy: hmm.
+	hmmRouter          router.Router
+	hmmOutcomeReporter hmm.OutcomeReporter
 	// banditRouter is the opt-in Thompson-sampling router, selected per-request
 	// via x-weave-router-strategy: bandit. Nil when ROUTER_BANDIT_POSTERIOR_FILE
 	// is unset at boot; the strategy header then 503s.
@@ -325,6 +330,9 @@ func usageBypassFromContext(ctx context.Context) (UsageBypassConfig, bool) {
 // model out-of-band and can't show a standalone marker text block without it
 // hiding the actual answer. off/false/0/none disables it.
 const routingMarkerHeader = "X-Weave-Routing-Marker"
+const routingMarkerPrefix = "✦ **Weave Router** → "
+const maxSidecarDisplayMarkerRunes = 512
+const hmmOutcomeReportTimeout = 2 * time.Second
 
 // suppressMarkerIfRequested returns "" when the request opted out via
 // routingMarkerHeader, otherwise the marker unchanged. Only applies to the
@@ -354,10 +362,48 @@ func routingMarkerFor(res turnLoopResult) string {
 		return ""
 	}
 	parts := []string{"✦ **Weave Router** → " + decision.Model}
+	if decision.Metadata != nil {
+		if marker := sanitizeSidecarDisplayMarker(decision.Metadata.DisplayMarker); marker != "" {
+			return marker + "\n\n"
+		}
+	}
 	if reason := routingReasonShort(res); reason != "" {
 		parts = append(parts, reason)
 	}
 	return strings.Join(parts, " · ") + "\n\n"
+}
+
+func sanitizeSidecarDisplayMarker(raw string) string {
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	raw = strings.ReplaceAll(raw, "\r", "\n")
+	raw = strings.TrimSpace(raw)
+	if raw == "" || !strings.HasPrefix(raw, routingMarkerPrefix) {
+		return ""
+	}
+	lines := strings.Split(raw, "\n")
+	kept := make([]string, 0, 3)
+	for i, line := range lines {
+		if i >= 3 {
+			break
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			break
+		}
+		if i > 0 && !strings.HasPrefix(line, "↳ ") {
+			break
+		}
+		kept = append(kept, line)
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	out := strings.Join(kept, "\n")
+	runes := []rune(out)
+	if len(runes) > maxSidecarDisplayMarkerRunes {
+		out = string(runes[:maxSidecarDisplayMarkerRunes])
+	}
+	return out
 }
 
 // User-facing routing-marker prose. These are the single source of truth for
@@ -1281,6 +1327,19 @@ func (s *Service) WithRLRouter(r router.Router) *Service {
 	return s
 }
 
+// WithHMMRouter installs the opt-in HMM routing sidecar. nil leaves the
+// x-weave-router-strategy: hmm header with no backing router; routeFor then
+// 503s rather than silently serving the cluster scorer.
+func (s *Service) WithHMMRouter(r router.Router) *Service {
+	s.hmmRouter = r
+	if reporter, ok := r.(hmm.OutcomeReporter); ok {
+		s.hmmOutcomeReporter = reporter
+	} else {
+		s.hmmOutcomeReporter = nil
+	}
+	return s
+}
+
 // WithBanditRouter installs the opt-in Thompson-sampling bandit router. nil
 // leaves x-weave-router-strategy: bandit with no backing router, in which case
 // routeFor 503s rather than silently serving the cluster scorer.
@@ -1301,6 +1360,11 @@ func (s *Service) routeFor(ctx context.Context, req router.Request) (router.Deci
 			return router.Decision{}, fmt.Errorf("rl strategy requested but no policy sidecar configured: %w", rl.ErrPolicyUnavailable)
 		}
 		return s.rlRouter.Route(ctx, req)
+	case router.StrategyHMM:
+		if s.hmmRouter == nil {
+			return router.Decision{}, fmt.Errorf("hmm strategy requested but no policy sidecar configured: %w", hmm.ErrHMMUnavailable)
+		}
+		return s.hmmRouter.Route(ctx, req)
 	case router.StrategyBandit:
 		if s.banditRouter == nil {
 			return router.Decision{}, fmt.Errorf("bandit strategy requested but no posterior configured: %w", bandit.ErrBanditUnavailable)
@@ -2456,6 +2520,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider || subscriptionFailoverUsed, "subscription_failover", subscriptionFailoverUsed, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "gemini_validated_tool_mode", reqStats.GeminiValidatedToolMode, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
+	s.reportHMMOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr)
 	return proxyErr
 }
 
@@ -2552,6 +2617,56 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedModel string, in, ou
 	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, usage); err != nil {
 		observability.Get().Error("session pin usage writeback failed", "err", err)
 	}
+}
+
+func (s *Service) reportHMMOutcome(ctx context.Context, res turnLoopResult, decision router.Decision, finalProvider string, estimatedInputTokens, inputTokens, outputTokens, cacheCreation, cacheRead int, routeMs, proxyMs int64, proxyErr error) {
+	if s.hmmOutcomeReporter == nil {
+		return
+	}
+	routeDecision := decision
+	routeMetadata := decision.Metadata
+	if routeMetadata == nil || routeMetadata.Strategy != string(router.StrategyHMM) || routeMetadata.RouteID == "" {
+		routeDecision = res.Fresh
+		routeMetadata = res.Fresh.Metadata
+	}
+	if routeMetadata == nil || routeMetadata.Strategy != string(router.StrategyHMM) || routeMetadata.RouteID == "" {
+		return
+	}
+	payload := map[string]interface{}{
+		"route_id":               routeMetadata.RouteID,
+		"strategy":               routeMetadata.Strategy,
+		"served_model":           decision.Model,
+		"served_provider":        finalProvider,
+		"decision_model":         routeDecision.Model,
+		"decision_provider":      routeDecision.Provider,
+		"status":                 upstreamStatus(proxyErr),
+		"error":                  "",
+		"estimated_input_tokens": estimatedInputTokens,
+		"input_tokens":           inputTokens,
+		"output_tokens":          outputTokens,
+		"cache_creation_tokens":  cacheCreation,
+		"cache_read_tokens":      cacheRead,
+		"route_latency_ms":       routeMs,
+		"upstream_latency_ms":    proxyMs,
+		"turn_type":              string(res.TurnType),
+		"sticky_hit":             res.StickyHit,
+	}
+	if proxyErr != nil {
+		payload["error"] = proxyErr.Error()
+	}
+	log := observability.FromContext(ctx)
+	if err := ctx.Err(); err != nil {
+		log.Debug("Skipping HMM outcome report for canceled request", "err", err, "route_id", routeMetadata.RouteID)
+		return
+	}
+	routeID := routeMetadata.RouteID
+	go func() {
+		reportCtx, cancel := context.WithTimeout(context.Background(), hmmOutcomeReportTimeout)
+		defer cancel()
+		if err := s.hmmOutcomeReporter.ReportOutcome(reportCtx, payload); err != nil {
+			log.Error("HMM outcome report failed", "err", err, "route_id", routeID)
+		}
+	}()
 }
 
 // pinDecision rehydrates a router.Decision from a stored pin. Metadata is nil
@@ -3819,6 +3934,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	s.reportHMMOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr)
 	return proxyErr
 }
 

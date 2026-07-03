@@ -68,7 +68,17 @@ type RoutingMetadata struct {
 	CandidateModels      []string
 	ChosenScore          float32
 	ClusterRouterVersion string
-	EffectiveKnobsHash   uint64 // NEW: canonical knobs hash for response-cache isolation
+	// Strategy identifies opt-in sidecar routers ("rl", "hmm") when metadata
+	// is produced outside the default cluster scorer.
+	Strategy string
+	// RouteID is an opaque sidecar correlation id. Outcome reporters and logs
+	// use it to join route decisions to final dispatch usage.
+	RouteID string
+	// DisplayMarker is an optional, already-humanized route badge. Sidecars
+	// use this to show strategy-specific labels without moving their display
+	// logic into router-internal.
+	DisplayMarker      string
+	EffectiveKnobsHash uint64 // NEW: canonical knobs hash for response-cache isolation
 	// CandidateScores: full pre-argmax blended score per eligible model, for
 	// off-policy analysis (contextual bandit substrate). Doesn't affect routing.
 	CandidateScores map[string]float32

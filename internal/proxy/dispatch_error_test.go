@@ -10,6 +10,7 @@ import (
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router/bandit"
 	"workweave/router/internal/router/cluster"
+	"workweave/router/internal/router/hmm"
 	"workweave/router/internal/router/rl"
 
 	"github.com/stretchr/testify/assert"
@@ -64,8 +65,8 @@ func TestClassifyDispatchError_NoEligibleProviderIsClientErrorAndWarns(t *testin
 	assert.False(t, cls.RetryAfter)
 }
 
-func TestClassifyDispatchError_BanditAndRLUnavailableRetry(t *testing.T) {
-	for _, err := range []error{bandit.ErrBanditUnavailable, rl.ErrPolicyUnavailable} {
+func TestClassifyDispatchError_BanditRLandHMMUnavailableRetry(t *testing.T) {
+	for _, err := range []error{bandit.ErrBanditUnavailable, rl.ErrPolicyUnavailable, hmm.ErrHMMUnavailable} {
 		cls, ok := proxy.ClassifyDispatchError(err)
 		require.True(t, ok, "expected %v to be classified", err)
 		assert.Equal(t, http.StatusServiceUnavailable, cls.Status)

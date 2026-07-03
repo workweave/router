@@ -722,7 +722,7 @@ func encodeJSONStringNoHTMLEscape(s string) ([]byte, error) {
 
 // routingMarkerPattern matches the "✦ **Weave Router** → ..." snippet
 // injected in cross-format responses.
-var routingMarkerPattern = regexp.MustCompile(`✦ \*\*Weave Router\*\* → [^\n]*\n\n`)
+var routingMarkerPattern = regexp.MustCompile(`(?s)✦ \*\*Weave Router\*\* → .*?\n\n`)
 
 // feedbackFooterPattern matches the rating footer appended to streamed
 // responses (see proxy.Service.feedbackFooter), absorbing leading newlines

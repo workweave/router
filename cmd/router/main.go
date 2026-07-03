@@ -41,6 +41,7 @@ import (
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/handover"
+	"workweave/router/internal/router/hmm"
 	"workweave/router/internal/router/planner"
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/router/sessionpin"
@@ -614,6 +615,17 @@ func main() {
 		logger.Info("RL policy router disabled (ROUTER_RL_SIDECAR_URL unset); x-weave-router-strategy: rl will return 503")
 	}
 
+	// Wired only when ROUTER_HMM_SIDECAR_URL is set; x-weave-router-strategy:
+	// hmm then routes through it. Unset fails closed with 503.
+	var hmmRouter router.Router
+	if hmmSidecarURL := config.GetOr("ROUTER_HMM_SIDECAR_URL", ""); hmmSidecarURL != "" {
+		hmmTimeout := parseEnvDurationMs("ROUTER_HMM_SIDECAR_TIMEOUT_MS", hmm.DefaultTimeout)
+		hmmRouter = hmm.New(hmm.NewHTTPDecider(hmmSidecarURL, nil, hmmTimeout), availableModels, availableProviders)
+		logger.Info("HMM policy router wired", "sidecar_url", hmmSidecarURL, "timeout_ms", hmmTimeout.Milliseconds(), "candidate_models", len(availableModels))
+	} else {
+		logger.Info("HMM policy router disabled (ROUTER_HMM_SIDECAR_URL unset); x-weave-router-strategy: hmm will return 503")
+	}
+
 	// Wired only when ROUTER_BANDIT_POSTERIOR_FILE points at a ts_posterior.json;
 	// x-weave-router-strategy: bandit then routes through it. Wraps the raw
 	// cluster scorer, not the explore wrapper. Unset -> nil -> 503.
@@ -636,6 +648,7 @@ func main() {
 
 	proxySvc := proxy.NewService(routeEntry, providerMap, telemetryEmitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithRLRouter(rlRouter).
+		WithHMMRouter(hmmRouter).
 		WithBanditRouter(banditRouter).
 		WithContentCapture(captureMode, captureMaxBytes, nil).
 		WithFeedback(repo.Feedback, feedbackSigner, feedbackBaseURL).
