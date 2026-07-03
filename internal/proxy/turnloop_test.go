@@ -150,20 +150,20 @@ func newPinSvcCapturing(fr *fakeRouter, store *fakePinStore) (*proxy.Service, *f
 	return svc, p
 }
 
-// TestTurnLoop_ToolResultWithPinSkipsScorerAndPlanner pins down the
-// short-circuit: a trailing tool_result turn must reuse the pin without
-// consulting the scorer (re-routing on tool_result embeddings flips
-// decisions to noisy candidates) or the planner.
-func TestTurnLoop_ToolResultWithPinSkipsScorerAndPlanner(t *testing.T) {
-	const toolResultBody = `{
-		"model":"claude-opus-4-7",
-		"system":"sys",
-		"messages":[
-			{"role":"user","content":"plan"},
-			{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"R","input":{}}]},
-			{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}
-		]
-	}`
+const toolResultPinnedBody = `{
+	"model":"claude-opus-4-7",
+	"system":"sys",
+	"messages":[
+		{"role":"user","content":"plan"},
+		{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"R","input":{}}]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}
+	]
+}`
+
+// TestTurnLoop_ToolResultScoringDisabledSkipsScorer pins down the kill-switch
+// (WithScoreToolResultTurns(false)) legacy behavior: a trailing tool_result
+// turn reuses the pin verbatim without consulting the scorer or planner.
+func TestTurnLoop_ToolResultScoringDisabledSkipsScorer(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -174,16 +174,92 @@ func TestTurnLoop_ToolResultWithPinSkipsScorerAndPlanner(t *testing.T) {
 	}
 	// fakeRouter.err makes any Route() call fail; the test passes only
 	// if the orchestrator never touches the scorer.
-	fr := &fakeRouter{err: errors.New("scorer must not be called on tool_result turn")}
-	svc := newPinSvc(fr, store)
+	fr := &fakeRouter{err: errors.New("scorer must not be called when tool-result scoring is disabled")}
+	svc := newPinSvc(fr, store).WithScoreToolResultTurns(false)
 
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultBody), rec, httpReq))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultPinnedBody), rec, httpReq))
 
-	assert.Equal(t, 0, fr.routeCalls, "tool_result must not invoke the scorer")
+	assert.Equal(t, 0, fr.routeCalls, "disabled tool-result scoring must not invoke the scorer")
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
+}
+
+// TestTurnLoop_ToolResultScoringEnabledRunsScorerAndStays verifies the default
+// (WithScoreToolResultTurns(true)): a pinned tool_result turn now runs the
+// scorer for MainLoop parity — the fresh decision is computed (and logged) —
+// but when the planner agrees it STAYs on the pinned model, so the served
+// model is unchanged from the verbatim-reuse behavior.
+func TestTurnLoop_ToolResultScoringEnabledRunsScorerAndStays(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderAnthropic,
+		Model:       "claude-haiku-4-5",
+		Reason:      "cluster:v0.2",
+		PinnedUntil: time.Now().Add(time.Hour),
+	}
+	// Scorer agrees with the pin, so the planner STAYs and the served model
+	// is the pin's — but the scorer MUST have been consulted (routeCalls==1).
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
+	svc := newPinSvc(fr, store) // default: scoreToolResultTurns == true
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultPinnedBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "tool_result must run the scorer under MainLoop parity")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "planner agreement STAYs on the pinned model")
+}
+
+// TestTurnLoop_ToolResultScoringEnabledSwitchesSafely exercises the genuinely
+// new path: a positive-EV switch triggered ON a tool_result turn. The planner
+// switches off the pinned opus model and the handover rewrite must strip the
+// orphaned tool_result (the summary carries no matching tool_use), so the body
+// forwarded to the switched-to model is well-formed rather than a 400-inducing
+// tool_result-without-tool_use sequence.
+func TestTurnLoop_ToolResultScoringEnabledSwitchesSafely(t *testing.T) {
+	chunk := strings.Repeat("aaaa ", 4000) // ~5k tokens each, positive EV
+	toolResultLargeBody := []byte(`{
+		"model":"claude-opus-4-7",
+		"system":"sys",
+		"messages":[
+			{"role":"user","content":"` + chunk + `"},
+			{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"R","input":{}}]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"` + chunk + `"}]}
+		]
+	}`)
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-opus-4-7",
+		Reason:          "cluster:v0.2",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 5000,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
+	sz := &fakeSummarizer{summary: "Prior conversation summary."}
+	svc, up := newPinSvcCapturing(fr, store)
+	svc = svc.WithSummarizer(sz)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, toolResultLargeBody, rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "tool_result must run the scorer under MainLoop parity")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "positive-EV switch must move off the pinned model")
+	assert.Equal(t, int32(1), sz.calls.Load(), "summarizer must be invoked on a tool_result switch")
+
+	// The forwarded body must not contain the orphaned tool_result: handover
+	// rewrote history to [summary, latestUser-minus-tool_results].
+	require.NotEmpty(t, up.proxyBodies, "upstream must have been called")
+	assert.NotContains(t, string(up.proxyBodies[0]), "tool_result",
+		"handover must strip the orphaned tool_result on a mid-tool-use switch")
 }
 
 // TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer guards the

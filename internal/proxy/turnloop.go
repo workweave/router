@@ -511,10 +511,18 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
-	// Tool-result turns are mid-turn continuations. Re-routing them on
-	// trailing tool_result embedding flips decisions to noisy candidates;
-	// reuse the pin verbatim when present and refresh the TTL.
-	if res.TurnType == turntype.ToolResult && pinFound {
+	// Tool-result turns are mid-turn continuations. By default they now run the
+	// scorer + planner exactly like MainLoop (fall through below), so the fresh
+	// cluster decision is computed and logged on every tool_result turn and the
+	// planner may switch on EV grounds. The legacy behavior — reuse the pin
+	// verbatim with no scorer call — is preserved behind the scoreToolResultTurns
+	// kill switch. That skip was originally chosen (#82) because re-routing on a
+	// trailing tool_result embedding could flip to noisy candidates; but under the
+	// prod only_user_message embed mode the tool_result blocks are stripped from
+	// the embed input (see translate.userPromptTextGJSON), so the embedding is the
+	// stable user instruction, not the tool output. Switches still degrade safely:
+	// handover.RewriteEnvelope strips orphaned tool_results on the switch turn.
+	if !s.scoreToolResultTurns && res.TurnType == turntype.ToolResult && pinFound {
 		decision := pinDecision(pin)
 		res.Decision = decision
 		res.StickyHit = true
