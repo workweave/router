@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"workweave/router/internal/observability"
-	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/sse"
 	"workweave/router/internal/translate/toolcheck"
@@ -38,12 +37,12 @@ type SSETranslator struct {
 	toolIdx       int
 	currentIsTool bool
 
-	usageSink   otel.UsageSink
+	usageSink   UsageSink
 	inputTokens int // persists input token count from message_start for use in handleMessageDelta
 }
 
 // NewSSETranslator wraps w. Call Finalize after upstream returns.
-func NewSSETranslator(w http.ResponseWriter, model string, sink otel.UsageSink) *SSETranslator {
+func NewSSETranslator(w http.ResponseWriter, model string, sink UsageSink) *SSETranslator {
 	flusher, _ := w.(http.Flusher)
 	return &SSETranslator{
 		inner:     w,
@@ -398,7 +397,7 @@ type AnthropicSSETranslator struct {
 	messageID                string
 	modelFromUpstream        string
 
-	usageSink otel.UsageSink
+	usageSink UsageSink
 
 	// onOutputProgress fires on every output-bearing delta (text, reasoning,
 	// tool-call args, terminal finish), never on keepalives/empty deltas. Feeds
@@ -463,7 +462,7 @@ type AnthropicSSETranslator struct {
 const upstreamErrorBodyCap = 8 << 10
 
 // NewAnthropicSSETranslator wraps w. Call Finalize after upstream returns.
-func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink otel.UsageSink) *AnthropicSSETranslator {
+func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink UsageSink) *AnthropicSSETranslator {
 	flusher, _ := w.(http.Flusher)
 	return &AnthropicSSETranslator{
 		inner:           w,

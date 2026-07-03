@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"workweave/router/internal/observability"
-	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/sse"
 	"workweave/router/internal/translate/toolcheck"
@@ -29,7 +28,7 @@ type ResponsesToAnthropicWriter struct {
 	flusher      http.Flusher
 	bw           *bufio.Writer
 	requestModel string
-	usageSink    otel.UsageSink
+	usageSink    UsageSink
 	// messageID: generated fresh per response since Prelude fires message_start
 	// before upstream produces a `resp_...` id (no passthrough possible). Must
 	// be unique — clients like ccusage dedupe usage records by message id, so a
@@ -96,7 +95,7 @@ type ResponsesToAnthropicWriter struct {
 
 // NewResponsesToAnthropicWriter wraps w to translate a streaming Responses
 // upstream into Anthropic for the client.
-func NewResponsesToAnthropicWriter(w http.ResponseWriter, requestModel string, sink otel.UsageSink) *ResponsesToAnthropicWriter {
+func NewResponsesToAnthropicWriter(w http.ResponseWriter, requestModel string, sink UsageSink) *ResponsesToAnthropicWriter {
 	flusher, _ := w.(http.Flusher)
 	return &ResponsesToAnthropicWriter{
 		inner:               w,

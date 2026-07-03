@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/sse"
 
@@ -37,7 +36,7 @@ type GeminiToOpenAISSETranslator struct {
 	// sibling, held for the next tool_call chunk.
 	pendingSig string
 
-	usageSink otel.UsageSink
+	usageSink UsageSink
 
 	// onOutputProgress, set via ArmOutputProgress, fires on output-bearing events
 	// (text delta, tool-call chunk, finish) to feed the output-progress watchdog.
@@ -46,7 +45,7 @@ type GeminiToOpenAISSETranslator struct {
 }
 
 // NewGeminiToOpenAISSETranslator wraps w. Call Finalize after upstream returns.
-func NewGeminiToOpenAISSETranslator(w http.ResponseWriter, model string, sink otel.UsageSink) *GeminiToOpenAISSETranslator {
+func NewGeminiToOpenAISSETranslator(w http.ResponseWriter, model string, sink UsageSink) *GeminiToOpenAISSETranslator {
 	flusher, _ := w.(http.Flusher)
 	return &GeminiToOpenAISSETranslator{
 		inner:     w,
