@@ -175,6 +175,20 @@ var Models = []Model{
 	{ID: "claude-sonnet-5", Tier: TierMid, ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}},
 	}},
+	// Legacy Opus IDs kept passthrough-priced (no Tier — not a routing
+	// target; see gpt-4o below for the same pattern) so BYOK/direct-model
+	// requests billing-debit at real cost instead of catalog.PrimaryPriceFor
+	// silently returning $0. Prices per the opus-4-6 comment below: 4.1 and
+	// earlier were $15/$75; 4.5 is the first $5/$25 release.
+	{ID: "claude-opus-4-0", ContextWindow: 200_000, Providers: []ProviderBinding{
+		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 15.00, OutputUSDPer1M: 75.00, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "claude-opus-4-1", ContextWindow: 200_000, Providers: []ProviderBinding{
+		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 15.00, OutputUSDPer1M: 75.00, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "claude-opus-4-5", ContextWindow: 200_000, Providers: []ProviderBinding{
+		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
+	}},
 	// Opus 4.5+ is $5/$25 per MTok (down from $15/$75 on 4.1 and earlier).
 	// 4.6+/4.7+/4.8 support 1M context via the context-1m-2025-08-07 beta; the
 	// catalog reports 200K and the pre-filter expands to 1M when the beta

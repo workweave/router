@@ -145,6 +145,7 @@ type DebitInferenceParams struct {
 // Returns the post-debit balance (0 on override, since balance doesn't
 // change).
 func (s *Service) DebitForInference(ctx context.Context, p DebitInferenceParams) (int64, error) {
+	warnOnUnknownPricing(p)
 	notional := computeNotionalMicros(p)
 	delta := -notional
 	switch {
@@ -191,6 +192,31 @@ func (s *Service) maybeSignalRecharge(ctx context.Context, orgID string, delta, 
 	if balanceBefore >= threshold && balanceAfter < threshold {
 		s.autopay.NotifyRechargeNeeded(orgID)
 	}
+}
+
+// warnOnUnknownPricing logs when a billable turn resolves to zero-value
+// catalog pricing — the model ID has no internal/router/catalog.Models
+// entry, so PrimaryPriceFor/PriceFor returned a zero Pricing and this turn
+// is about to debit $0 for real usage. Override/subscription-served turns
+// are exempt: those are intentionally free, not a pricing gap.
+func warnOnUnknownPricing(p DebitInferenceParams) {
+	if p.HasOverride || p.SubscriptionServed {
+		return
+	}
+	if p.Pricing.InputUSDPer1M != 0 || p.Pricing.OutputUSDPer1M != 0 {
+		return
+	}
+	if p.InputTokens == 0 && p.OutputTokens == 0 {
+		return
+	}
+	observability.Get().Error("Billing debit resolved zero-value catalog pricing for a real turn — add the model to internal/router/catalog/catalog.go's Models table",
+		"model", p.Model,
+		"provider", p.Provider,
+		"organization_id", p.OrganizationID,
+		"router_request_id", p.RouterRequestID,
+		"input_tokens", p.InputTokens,
+		"output_tokens", p.OutputTokens,
+	)
 }
 
 // computeNotionalMicros returns the would-be charge in USD micros,

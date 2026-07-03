@@ -1,19 +1,39 @@
 package billing_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	"workweave/router/internal/billing"
+	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router/catalog"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// captureLogs swaps slog's default logger for one writing text lines into
+// the returned buffer, restoring the previous default on test cleanup.
+//
+// observability.Get() lazily installs its own default handler exactly once
+// (sync.Once) the first time any test calls it; if that happens after we've
+// installed our buffer handler, it clobbers it. Force that one-time init
+// first so our SetDefault below is the one that sticks.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	observability.Get()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
 
 // fakeRepo is an in-memory billing.Repo for testing the Service without
 // hitting Postgres. Atomic fields keep the concurrent-debit test honest.
@@ -147,6 +167,82 @@ func TestDebitForInference_MatchesExportedCostMath(t *testing.T) {
 	assert.Equal(t, billing.EntryTypeInference, repo.ledgerCalls[0].EntryType)
 	assert.Equal(t, "req_abc", repo.ledgerCalls[0].RouterRequestID)
 	assert.Equal(t, "claude-sonnet-4-5", repo.ledgerCalls[0].RouterModel)
+}
+
+func TestDebitForInference_WarnsOnZeroPricingForRealUsage(t *testing.T) {
+	// A model ID with no catalog.Models entry resolves to a zero-value
+	// Pricing (see catalog.PrimaryPriceFor). Debiting real token usage at
+	// that price silently charges $0 — this must surface as an Error log so
+	// the gap gets noticed instead of masked (finding [30]).
+	buf := captureLogs(t)
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
+	svc := billing.NewService(repo)
+	balance, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID:  "org_x",
+		RouterRequestID: "req_unknown",
+		Model:           "gpt-5.2",
+		Provider:        providers.ProviderOpenAI,
+		InputTokens:     1_000_000,
+		OutputTokens:    250_000,
+		Pricing:         catalog.Pricing{}, // zero value: model not in catalog
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(10_000_000), balance, "zero pricing charges nothing even though real tokens were used")
+	assert.Contains(t, buf.String(), "level=ERROR")
+	assert.Contains(t, buf.String(), "zero-value catalog pricing")
+	assert.Contains(t, buf.String(), "gpt-5.2")
+}
+
+func TestDebitForInference_NoWarnOnKnownPricing(t *testing.T) {
+	buf := captureLogs(t)
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
+	svc := billing.NewService(repo)
+	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
+	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID: "org_x",
+		Model:          "claude-sonnet-4-5",
+		Provider:       providers.ProviderAnthropic,
+		InputTokens:    1_000_000,
+		OutputTokens:   250_000,
+		Pricing:        p,
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "zero-value catalog pricing", "a priced model must not trip the unknown-pricing warning")
+}
+
+func TestDebitForInference_NoWarnOnZeroPricingOverride(t *testing.T) {
+	// Override/subscription-served turns are intentionally free — a $0 debit
+	// there is expected behavior, not a pricing gap.
+	buf := captureLogs(t)
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 0}
+	svc := billing.NewService(repo)
+	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID: "org_internal",
+		Model:          "gpt-5.2",
+		Provider:       providers.ProviderOpenAI,
+		InputTokens:    1_000_000,
+		OutputTokens:   250_000,
+		Pricing:        catalog.Pricing{},
+		HasOverride:    true,
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "zero-value catalog pricing", "override turns are exempt from the unknown-pricing warning")
+}
+
+func TestDebitForInference_NoWarnOnZeroTokenUsage(t *testing.T) {
+	// 0-token usage (e.g. a failed request before generation) has zero
+	// pricing AND zero tokens — nothing was actually billed, so no warning.
+	buf := captureLogs(t)
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 5_000_000}
+	svc := billing.NewService(repo)
+	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID: "org_x",
+		Model:          "gpt-5.2",
+		Provider:       providers.ProviderOpenAI,
+		Pricing:        catalog.Pricing{},
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "zero-value catalog pricing")
 }
 
 func TestDebitForInference_OverrideWritesZeroDeltaWithNotional(t *testing.T) {

@@ -90,6 +90,29 @@ func TestPriceFor_KnownPair(t *testing.T) {
 	assert.Equal(t, 0.10, p.CacheReadMultiplier)
 }
 
+func TestPrimaryPriceFor_LegacyOpusIDsResolve(t *testing.T) {
+	// claude-opus-4-0/4-1/4-5 are legacy passthrough IDs (finding [30]):
+	// registered as capability specs in internal/router/model.go but were
+	// missing from catalog.Models, so PrimaryPriceFor silently returned a
+	// zero Pricing and billing debited $0 for real usage. Prices per the
+	// opus-4-6 comment in catalog.go: 4.1-and-earlier = $15/$75, 4.5 = $5/$25.
+	cases := []struct {
+		id             string
+		inputUSDPer1M  float64
+		outputUSDPer1M float64
+	}{
+		{"claude-opus-4-0", 15.00, 75.00},
+		{"claude-opus-4-1", 15.00, 75.00},
+		{"claude-opus-4-5", 5.00, 25.00},
+	}
+	for _, tc := range cases {
+		p, ok := PrimaryPriceFor(tc.id)
+		require.True(t, ok, "%s must resolve to a catalog entry", tc.id)
+		assert.Equal(t, tc.inputUSDPer1M, p.InputUSDPer1M, "%s input price", tc.id)
+		assert.Equal(t, tc.outputUSDPer1M, p.OutputUSDPer1M, "%s output price", tc.id)
+	}
+}
+
 func TestResolveBinding_PicksFirstAvailable(t *testing.T) {
 	// claude-opus-4-7 is anthropic-only, so it should resolve only when anthropic is available.
 	avail := map[string]struct{}{providers.ProviderAnthropic: {}}
