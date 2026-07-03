@@ -16,6 +16,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// routerFeedbackCommandSpanName is the OTLP span for the /router-feedback (/rf)
+// slash command. Distinct from routerFeedbackSpanName ("router.feedback" in
+// feedback.go), which is a downstream contract (buildFeedbackRow); do not reuse
+// that name or alter its schema.
+const routerFeedbackCommandSpanName = "router.feedback.command"
+
 // RouterFeedbackStore persists /router-feedback submissions durably
 // (router.router_feedback). Nil degrades to span + log only.
 type RouterFeedbackStore interface {
@@ -41,8 +47,8 @@ type RouterFeedbackEvent struct {
 }
 
 // handleRouterFeedbackCommand persists a /router-feedback submission, emits a
-// router.feedback span on the standard OTel pipeline, and returns a synthetic
-// acknowledgment without dispatching to any upstream.
+// router.feedback.command span on the standard OTel pipeline, and returns a
+// synthetic acknowledgment without dispatching to any upstream.
 func (s *Service) handleRouterFeedbackCommand(
 	ctx context.Context,
 	w http.ResponseWriter,
@@ -108,7 +114,7 @@ func (s *Service) handleRouterFeedbackCommand(
 
 	now := time.Now()
 	otel.Record(ctx, otel.Span{
-		Name:  "router.feedback",
+		Name:  routerFeedbackCommandSpanName,
 		Start: now,
 		End:   now,
 		Attrs: otel.NewAttrBuilder(11).
@@ -127,7 +133,7 @@ func (s *Service) handleRouterFeedbackCommand(
 	})
 	otel.Flush(ctx)
 
-	log.Info("router.feedback",
+	log.Info("router.feedback.command",
 		"rating", rating,
 		"feedback", feedback,
 		"served_model", servedModel,
