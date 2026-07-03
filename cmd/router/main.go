@@ -450,6 +450,14 @@ func main() {
 		logger.Error("Failed to create OTel emitter", "err", err)
 		panic(err)
 	}
+	// telemetryEmitter is proxy.NewService's interface-typed parameter. Left as
+	// a true nil interface (not a nil-valued *otel.Emitter wrapped in an
+	// interface) when OTel is disabled, so proxy's `s.emitter == nil` checks
+	// keep working correctly.
+	var telemetryEmitter proxy.TelemetryEmitter
+	if emitter != nil {
+		telemetryEmitter = emitter
+	}
 
 	semanticCache := buildSemanticCache(rtr)
 
@@ -627,7 +635,7 @@ func main() {
 		logger.Info("Bandit strategy router disabled (ROUTER_BANDIT_POSTERIOR_FILE unset); x-weave-router-strategy: bandit will return 503")
 	}
 
-	proxySvc := proxy.NewService(routeEntry, providerMap, emitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
+	proxySvc := proxy.NewService(routeEntry, providerMap, telemetryEmitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithRLRouter(rlRouter).
 		WithBanditRouter(banditRouter).
 		WithContentCapture(captureMode, captureMaxBytes, nil).

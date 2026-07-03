@@ -33,7 +33,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	log := observability.FromContext(ctx)
 	requestStart := time.Now()
 	requestID := uuid.New().String()
-	buf := otel.NewBuffer(s.emitter)
+	buf := s.newTelemetryBuffer()
 	ctx = buf.WithContext(ctx)
 
 	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)

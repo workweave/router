@@ -144,7 +144,7 @@ func (s *Service) emitFeedbackSpan(p SubmitFeedbackParams) {
 	if p.RouterUserID != "" {
 		b = b.String("router_user_id", p.RouterUserID)
 	}
-	buf := otel.NewBuffer(s.emitter)
+	buf := s.newTelemetryBuffer()
 	buf.Record(otel.Span{Name: routerFeedbackSpanName, Start: now, End: now, Attrs: b.Build()})
 	buf.Flush()
 }

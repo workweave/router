@@ -102,6 +102,13 @@ func NewEmitter(cfg EmitterConfig) (*Emitter, error) {
 	return e, nil
 }
 
+// NewBuffer returns a request-scoped span/log buffer wrapping e, or nil when e
+// is nil (OTel disabled). Satisfies proxy.TelemetryEmitter so callers can
+// depend on that narrow interface instead of the concrete *Emitter type.
+func (e *Emitter) NewBuffer() *Buffer {
+	return NewBuffer(e)
+}
+
 // Enqueue submits a span to the export queue. Non-blocking: drops on queue-full
 // or post-shutdown. Nil receiver is a no-op.
 func (e *Emitter) Enqueue(s *tracev1.Span) {
