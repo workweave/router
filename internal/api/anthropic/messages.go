@@ -71,7 +71,6 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 			"model", gjson.GetBytes(body, "model").String(),
 			"max_tokens", gjson.GetBytes(body, "max_tokens").Int(),
 			"session_id", c.Request.Header.Get("X-Claude-Code-Session-Id"),
-			"body", string(body),
 		)
 
 		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header, body)
