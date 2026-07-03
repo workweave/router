@@ -752,7 +752,7 @@ func TestAnthropicToOpenAIError_WrapsError(t *testing.T) {
 func TestAnthropicToOpenAIError_PassthroughOnEmpty(t *testing.T) {
 	body := []byte(`<html>Bad Gateway</html>`)
 	out := translate.AnthropicToOpenAIError(body)
-	assert.Equal(t, body, out, "malformed input must pass through unchanged")
+	assert.Equal(t, body, out, "non-JSON body with no extractable fields must pass through unchanged")
 }
 
 func TestAnthropicToOpenAIError_PassthroughOnEmptyFields(t *testing.T) {
@@ -776,7 +776,7 @@ func TestOpenAIToAnthropicError_WrapsError(t *testing.T) {
 func TestOpenAIToAnthropicError_PassthroughOnEmpty(t *testing.T) {
 	body := []byte(`<html>502</html>`)
 	out := translate.OpenAIToAnthropicError(body)
-	assert.Equal(t, body, out, "malformed input must pass through unchanged")
+	assert.Equal(t, body, out, "non-JSON body with no extractable fields must pass through unchanged")
 }
 
 func TestOpenAIToAnthropicError_PassthroughOnEmptyFields(t *testing.T) {
@@ -801,7 +801,7 @@ func TestGeminiToOpenAIError_WrapsError(t *testing.T) {
 func TestGeminiToOpenAIError_PassthroughOnEmpty(t *testing.T) {
 	body := []byte(`<html>503</html>`)
 	out := translate.GeminiToOpenAIError(body)
-	assert.Equal(t, body, out, "malformed input must pass through unchanged")
+	assert.Equal(t, body, out, "non-JSON body with no extractable fields must pass through unchanged")
 }
 
 func TestGeminiToOpenAIError_PassthroughOnEmptyMessageAndStatus(t *testing.T) {
@@ -819,6 +819,73 @@ func TestGeminiToOpenAIError_MissingCodeIsZero(t *testing.T) {
 	// gjson.Int() returns 0 for absent fields, matching the struct-based behavior.
 	assert.Equal(t, float64(0), errObj["code"])
 }
+func TestGeminiToAnthropicError_MapsKnownStatuses(t *testing.T) {
+	cases := []struct {
+		status      string
+		wantErrType string
+	}{
+		{"RESOURCE_EXHAUSTED", "rate_limit_error"},
+		{"INVALID_ARGUMENT", "invalid_request_error"},
+		{"PERMISSION_DENIED", "authentication_error"},
+		{"UNAUTHENTICATED", "authentication_error"},
+		{"NOT_FOUND", "not_found_error"},
+		{"INTERNAL", "api_error"},
+		{"UNAVAILABLE", "overloaded_error"},
+		{"DEADLINE_EXCEEDED", "overloaded_error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.status, func(t *testing.T) {
+			body := []byte(`{"error":{"code":429,"message":"quota exceeded","status":"` + tc.status + `"}}`)
+			out := translate.GeminiToAnthropicError(body)
+			doc := unmarshal(t, out)
+			assert.Equal(t, "error", doc["type"])
+			errObj, _ := doc["error"].(map[string]any)
+			require.NotNil(t, errObj)
+			assert.Equal(t, tc.wantErrType, errObj["type"])
+			assert.Equal(t, "quota exceeded", errObj["message"])
+		})
+	}
+}
+
+func TestGeminiToAnthropicError_UnknownStatusFallsBackToAPIError(t *testing.T) {
+	body := []byte(`{"error":{"code":500,"message":"something weird","status":"UNKNOWN_STATUS"}}`)
+	out := translate.GeminiToAnthropicError(body)
+	doc := unmarshal(t, out)
+	errObj, _ := doc["error"].(map[string]any)
+	require.NotNil(t, errObj)
+	assert.Equal(t, "api_error", errObj["type"])
+}
+
+func TestGeminiToAnthropicError_PassthroughWhenBothFieldsAbsent(t *testing.T) {
+	body := []byte(`<html>503</html>`)
+	out := translate.GeminiToAnthropicError(body)
+	assert.Equal(t, body, out, "non-JSON body with no extractable fields must pass through unchanged")
+}
+
+func TestGeminiToAnthropicError_PassthroughOnEmptyFields(t *testing.T) {
+	body := []byte(`{"error":{"code":0,"message":"","status":""}}`)
+	out := translate.GeminiToAnthropicError(body)
+	assert.Equal(t, body, out, "empty message and status must pass through unchanged")
+}
+
+func TestUpstreamToAnthropicError_RoutesGeminiBody(t *testing.T) {
+	body := []byte(`{"error":{"code":429,"message":"quota exceeded","status":"RESOURCE_EXHAUSTED"}}`)
+	out := translate.UpstreamToAnthropicError("google", body)
+	doc := unmarshal(t, out)
+	errObj, _ := doc["error"].(map[string]any)
+	require.NotNil(t, errObj)
+	assert.Equal(t, "rate_limit_error", errObj["type"], "google provider must use Gemini status mapping")
+}
+
+func TestUpstreamToAnthropicError_RoutesOpenAIBody(t *testing.T) {
+	body := []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`)
+	out := translate.UpstreamToAnthropicError("fireworks", body)
+	doc := unmarshal(t, out)
+	errObj, _ := doc["error"].(map[string]any)
+	require.NotNil(t, errObj)
+	assert.Equal(t, "rate_limit_error", errObj["type"])
+}
+
 func TestAnthropicToOpenAIResponse_InvalidJSON_ReturnsError(t *testing.T) {
 	_, err := translate.AnthropicToOpenAIResponse([]byte(`not json`), "m")
 	assert.Error(t, err)
