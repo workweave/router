@@ -74,13 +74,9 @@ type Service struct {
 	hardPinProvider string
 	hardPinModel    string
 	// hardPinResolver, when set, overrides boot-time hardPin{Provider,Model}
-	// per-request. Used both to keep byokOnly deployments on a provider the
-	// request can authenticate to (the registered cheapest model is unsafe when
-	// the installation only BYOK'd a subset of providers) and to honor the
-	// installation's excluded_models on the hard-pin tier: denySet carries
-	// req.ExcludedModels so an excluded model is skipped here, just as the
-	// scorer skips it on the main-loop path. Returns (provider, model, ok);
-	// ok=false signals no eligible provider.
+	// per-request: keeps byokOnly deployments on a provider they can
+	// authenticate to, and honors excluded_models on the hard-pin tier via
+	// denySet. ok=false signals no eligible provider.
 	hardPinResolver func(enabled, denySet map[string]struct{}) (provider, model string, ok bool)
 	// telemetry is an optional repository for persisting per-request telemetry.
 	telemetry TelemetryRepository
@@ -109,50 +105,39 @@ type Service struct {
 	deploymentKeyedProviders map[string]struct{}
 	// passthroughEligibleProviders is the subset of registered providers
 	// reachable via client-supplied auth headers (no deployment key, no
-	// BYOK). Entries here are added to the eligible set only when the
-	// inbound request came in via the matching surface — otherwise the
-	// OpenAI client would forward an Anthropic-surface request's `x-api-key`
-	// to api.openai.com (and vice versa), which is a cross-provider
-	// credential leak even when upstream 401s. Surface-scoping ensures
-	// passthrough creds only enable the upstream they were issued for.
+	// BYOK). Surface-scoped: only enabled when the inbound surface matches,
+	// otherwise an Anthropic-surface `x-api-key` could forward to
+	// api.openai.com (and vice versa) — a cross-provider credential leak.
 	passthroughEligibleProviders map[string]struct{}
 	// planner parameterizes the Prism-style EV policy for stay-vs-switch.
 	planner planner.EVConfig
 	// plannerEnabled is the kill switch. When false, the orchestrator falls
 	// back to first-decision-wins behavior.
 	plannerEnabled bool
-	// effortEscalation enables the escalate-on-failure reasoning-effort policy:
-	// gpt-5.x serves low effort by default and high after an observed
-	// failed/no-progress turn; gemini is pinned low. Off by default (set from
-	// ROUTER_EFFORT_ESCALATION) so it can be baked off before enabling.
+	// effortEscalation enables escalate-on-failure reasoning effort: gpt-5.x
+	// serves low by default, high after a failed/no-progress turn; gemini
+	// stays pinned low. Off by default (ROUTER_EFFORT_ESCALATION).
 	effortEscalation bool
 	// bandSwap is the per-turn large-vs-small action classifier. Non-nil only
-	// when ROUTER_BAND_SWAP is on AND the head loaded; when set, a sticky
-	// MainLoop STAY serves the band the predicted action maps to (one of the
-	// pin's {Model, PairedModel}) instead of always the anchor. Off by default so
-	// it can be baked off behind the Layer-2 validation before enabling.
+	// when ROUTER_BAND_SWAP is on and the head loaded; a sticky MainLoop STAY
+	// then serves the predicted band (one of the pin's {Model, PairedModel})
+	// instead of always the anchor.
 	bandSwap *bandswap.Classifier
 	// loopEscalationEnabled is the kill switch for the cyclic-loop
-	// escalate-to-opus ACTION. When false, detection and telemetry keep
-	// running (events recorded with action=disabled) but no escalation pin is
-	// written. Defaults to true (the lever shipped enabled); set from
-	// ROUTER_LOOP_ESCALATION_ENABLED.
+	// escalate-to-opus action. False keeps detection/telemetry running
+	// (action=disabled) but writes no escalation pin. Defaults true.
 	loopEscalationEnabled bool
 	// loopEscalationHoldoutPct is the percentage of loop-detected sessions
-	// deterministically assigned to the log-not-act holdout: the event is
-	// recorded but the rescue withheld, so the self-recovery baseline can be
-	// subtracted from rescue-rate claims. 0 disables the holdout. Set from
-	// ROUTER_LOOP_ESCALATION_HOLDOUT_PCT.
+	// deterministically assigned to a log-not-act holdout, so the self-recovery
+	// baseline can be subtracted from rescue-rate claims. 0 disables it.
 	loopEscalationHoldoutPct int
-	// loopEscalationStore persists loop detections durably
-	// (router.loop_escalation_events) and enforces the once-per-session
-	// budget. Nil disables persistence — and with it the holdout, which is
-	// only meaningful when the withheld rescue leaves a row behind.
+	// loopEscalationStore persists loop detections (router.loop_escalation_events)
+	// and enforces the once-per-session budget. Nil disables persistence and the
+	// holdout (which needs a durable row for the withheld rescue).
 	loopEscalationStore LoopEscalationStore
 	// spiralShadowEnabled gates the shadow-mode spiral detector (log-only
-	// death-march signals; see spiral_detection.go). Defaults to true — shadow
-	// mode changes no routing behavior — with ROUTER_SPIRAL_SHADOW_ENABLED as
-	// the kill switch.
+	// death-march signals; see spiral_detection.go). Defaults true — shadow mode
+	// changes no routing behavior.
 	spiralShadowEnabled bool
 	// spiralTracker de-duplicates shadow fires per (session, role, reason) on
 	// this replica.
@@ -194,18 +179,16 @@ type Service struct {
 	// feedback-link header emission on proxied responses.
 	feedbackBaseURL string
 	// usageObserver records per-credential subscription rate-limit headroom from
-	// upstream response headers. Two independent consumers read it: the
-	// subscription-aware cost discount (subsidyFactors, gated by subsidyEnabled)
-	// and the per-installation usage-bypass gate (usageBypassEngaged). It is
-	// wired whenever EITHER feature may be used; nil disables both.
+	// upstream response headers, feeding both the cost discount (subsidyFactors)
+	// and the usage-bypass gate. Wired when either feature may be used; nil
+	// disables both.
 	usageObserver *usage.Observer
-	// subsidyEnabled gates the subscription-aware cost discount independently of
-	// the observer: the observer can be wired (so the usage-bypass gate works)
-	// without the discount being active (ROUTER_SUBSCRIPTION_AWARE_ROUTING=false).
+	// subsidyEnabled gates the cost discount independently of the observer: the
+	// observer can be wired for usage-bypass alone while the discount stays off.
 	subsidyEnabled bool
 	// subsidyEpsilon/subsidyGamma parameterize usage.Snapshot.CostFactor: the
-	// floor multiplier for a fully-slack covered model and the curvature that
-	// keeps the factor near epsilon until the window is genuinely near its cap.
+	// floor multiplier for a fully-slack model, and the curvature keeping the
+	// factor near epsilon until the window nears its cap.
 	subsidyEpsilon float64
 	subsidyGamma   float64
 }
@@ -214,13 +197,11 @@ type Service struct {
 // so the pin lifecycle tracks the cache it's keeping warm.
 const pinSessionTTL = time.Hour
 
-// pinNeverExpires is the sentinel PinnedUntil for user-forced pins. A
-// /force-model is an explicit, durable user directive — it must persist across
-// arbitrarily long idle gaps and only clear on /unforce-model, never lapse on
-// the cache-driven session TTL. Far enough out to never be reached, well within
-// Postgres's timestamp range; loadPin's PinnedUntil.After(now) check and the
-// pinned_until-based sweep both read it as live indefinitely. /unforce-model
-// rewrites the row with a past PinnedUntil, so the escape hatch still works.
+// pinNeverExpires is the sentinel PinnedUntil for user-forced pins: a
+// /force-model must survive arbitrarily long idle gaps and only clear on
+// /unforce-model, never lapse on the session TTL. Far enough out to read as
+// live indefinitely everywhere PinnedUntil is checked, but still within
+// Postgres's timestamp range. /unforce-model rewrites it to a past time.
 var pinNeverExpires = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // pinExpiry returns the PinnedUntil to record for a pin with the given decision
@@ -233,12 +214,11 @@ func pinExpiry(reason string) time.Time {
 	return time.Now().Add(pinSessionTTL)
 }
 
-// prevTurnMaxedOutThreshold is the LastOutputTokens count above which we treat
-// the previous turn as having saturated the output cap. Set just under the
-// 8192 defaultMaxOutputTokenCap; legitimate end_turn completions almost never
-// approach this on tool-calling turns, while OSS-model parse-failure runaways
-// land exactly at the cap. Used by runTurnLoop to break the auto-continue
-// loop by excluding the pinned model for the next turn.
+// prevTurnMaxedOutThreshold is the LastOutputTokens count above which the
+// previous turn is treated as having saturated the output cap (just under
+// the 8192 default). OSS-model parse-failure runaways land exactly at the
+// cap while legitimate completions rarely approach it; runTurnLoop uses this
+// to exclude the pinned model on the next turn and break the auto-continue loop.
 const prevTurnMaxedOutThreshold = 8000
 
 // APIKeyIDContextKey is the request-context key for the authenticated api_key_id.
@@ -263,10 +243,9 @@ type CredentialsContextKey struct{}
 type AnthropicSubscriptionContextKey struct{}
 
 // OpenAISubscriptionContextKey and OpenAIAccountIDContextKey are the
-// request-context keys for a caller's raw Codex (ChatGPT) subscription OAuth JWT
-// and its paired ChatGPT-Account-ID, stashed by the auth middleware from the
-// X-Weave-OpenAI-Subscription / X-Weave-OpenAI-Account-ID headers on router-keyed
-// requests.
+// request-context keys for a caller's raw Codex (ChatGPT) subscription OAuth
+// JWT and paired ChatGPT-Account-ID, stashed from the
+// X-Weave-OpenAI-Subscription / X-Weave-OpenAI-Account-ID headers.
 type OpenAISubscriptionContextKey struct{}
 type OpenAIAccountIDContextKey struct{}
 
@@ -333,21 +312,15 @@ func usageBypassFromContext(ctx context.Context) (UsageBypassConfig, bool) {
 	return cfg, true
 }
 
-// installationExcludedModelsFromContext returns the per-installation exclusion
-// list stashed on ctx by the auth middleware, or nil when none is present.
-
 // routingMarkerHeader lets a client suppress the in-band "✦ **Weave Router** → …"
-// routing badge. Programmatic clients that surface the routed model out-of-band
-// (e.g. pi reads the x-router-model response header into its status bar) and
-// render the assistant message into their own UI can't show a standalone marker
-// text block without it hiding the actual answer. Any of off/false/0/none
-// disables it; absent or anything else keeps the default.
+// badge — needed by programmatic clients (e.g. pi) that surface the routed
+// model out-of-band and can't show a standalone marker text block without it
+// hiding the actual answer. off/false/0/none disables it.
 const routingMarkerHeader = "X-Weave-Routing-Marker"
 
-// suppressMarkerIfRequested returns "" when the request opted out of the routing
-// marker via routingMarkerHeader, otherwise the marker unchanged. Scoped to the
-// per-turn routing badge; the no-progress / loop / force-model markers are
-// standalone single-block messages and are intentionally always emitted.
+// suppressMarkerIfRequested returns "" when the request opted out via
+// routingMarkerHeader, otherwise the marker unchanged. Only applies to the
+// per-turn routing badge; no-progress/loop/force-model markers always fire.
 func suppressMarkerIfRequested(h http.Header, marker string) string {
 	switch strings.ToLower(strings.TrimSpace(h.Get(routingMarkerHeader))) {
 	case "off", "false", "0", "none":
@@ -366,10 +339,8 @@ func routingMarkerFor(res turnLoopResult) string {
 	if res.SuggestionMode {
 		return ""
 	}
-	// Suppress the marker on tool-result follow-ups: every post-tool turn would
-	// otherwise re-emit a duplicate mid-stream. But always show the marker if the
-	// model changed, even if the reason code is unknown (recovery codes return
-	// empty from humanReasonFromPlanner).
+	// Suppress on tool-result follow-ups (would re-emit a duplicate mid-stream),
+	// but always show it if the model changed, even with an unknown reason code.
 	modelChanged := res.PriorServedModel != "" && res.PriorServedModel != res.Decision.Model
 	if res.PlannerDecision.Reason == "" && !res.HardPinned && res.StickyHit && !modelChanged {
 		return ""
@@ -442,6 +413,8 @@ func humanReasonFromPlanner(code string) string {
 	}
 }
 
+// installationExcludedModelsFromContext returns the per-installation exclusion
+// list stashed on ctx by the auth middleware, or nil when none is present.
 func installationExcludedModelsFromContext(ctx context.Context) []string {
 	v := ctx.Value(InstallationExcludedModelsContextKey{})
 	if v == nil {
@@ -536,43 +509,29 @@ func (s *Service) preferredModelsForRequest(ctx context.Context) []string {
 	return installationPreferredModelsFromContext(ctx)
 }
 
-// contextWindowOverheadFactor scales the raw body-bytes token estimate to
-// account for JSON structure overhead (field names, brackets, quotes) inflating
-// byte count relative to actual tokens. The inverse of 5 bytes/token
-// comes from empirical Anthropic request bodies; tool-heavy sessions run higher.
-// This constant is intentionally baked into FullTokenEstimate (body/5).
-
 // contextWindowOutputReserve is the minimum tokens reserved for the model's
 // response when comparing the request estimate against the context window.
 const contextWindowOutputReserve = 8_000
 
-// extendedContextTriggerTokens is the estimated request size (input estimate +
-// output reserve) at which the proxy turns on a CapExtendedContext model's 1M
-// window by injecting the context-1m-2025-08-07 beta. It sits well below the
-// 200K standard window on purpose: FullTokenEstimate (body bytes ÷5)
-// undercounts real tokens by ~20-30% on dense Claude Code bodies, so 140K
-// estimated is roughly 175-200K real tokens — the beta is in place before a
-// request that's truly near 200K reaches the upstream and 400s on the default
-// window. Below this the beta is omitted so ordinary sub-200K turns stay on the
-// standard window (no needless opt-in to long-context behavior/pricing).
+// extendedContextTriggerTokens triggers the context-1m-2025-08-07 beta well
+// below the 200K standard window: FullTokenEstimate (body bytes ÷5) undercounts
+// real tokens by ~20-30% on dense Claude Code bodies, so 140K estimated is
+// roughly 175-200K real — the beta must be in place before that arrives.
 const extendedContextTriggerTokens = 140_000
 
 // shouldEnableExtendedContext reports whether a request is large enough to
-// warrant turning on a CapExtendedContext model's 1M window. Gating on the
-// estimate (rather than always-on) keeps ordinary turns on the standard
-// window; the trigger sits low enough that the ÷5 estimate's undercount can't
-// let a genuinely-near-200K request slip onto the 200K default.
+// warrant a CapExtendedContext model's 1M window. Gating on the estimate keeps
+// ordinary turns on the standard window; the trigger is low enough that the
+// ÷5 undercount can't let a genuinely-near-200K request slip through.
 func shouldEnableExtendedContext(est, outputReserve int) bool {
 	return est+outputReserve > extendedContextTriggerTokens
 }
 
 // contextWindowForRequest returns the effective context window for a model.
-// CapExtendedContext models (Opus 4.6+, Sonnet 4.6) always report 1M: the proxy
-// unconditionally injects the context-1m-2025-08-07 beta when it dispatches to
-// them (EmitOptions.EnableExtendedContext), so the filter must not exclude them
-// for requests that fit 1M. Gating this on the client's beta header — or on the
-// body-byte token estimate — would let a large request slip onto a 200K window
-// it overflows on the first turn. All other models report their catalog window.
+// CapExtendedContext models (Opus 4.6+, Sonnet 4.6) always report 1M since the
+// proxy unconditionally injects the context-1m beta for them — gating on the
+// client's beta header or the token estimate instead would let a large
+// request slip onto 200K and overflow on the first turn.
 func contextWindowForRequest(modelID string) int {
 	if router.Lookup(modelID).Supports(router.CapExtendedContext) {
 		return 1_000_000
@@ -580,13 +539,11 @@ func contextWindowForRequest(modelID string) int {
 	return catalog.ContextWindowFor(modelID)
 }
 
-// modelStripsAnthropicSignatures reports whether dispatching to model drops the
-// Anthropic-only base64 thought-signature blocks from the request — every
-// non-Anthropic-family target does (the translator strips them). Signature
-// bytes only occupy a target's context window when that target keeps them, so
-// the overflow check discounts them for stripping targets and counts them for
-// Anthropic passthrough. Unknown models default to "keeps" (the conservative,
-// higher-`needed` side).
+// modelStripsAnthropicSignatures reports whether dispatching to model drops
+// the Anthropic-only thought-signature blocks (every non-Anthropic-family
+// target does). Lets the overflow check discount those bytes for stripping
+// targets while counting them for Anthropic passthrough. Unknown models
+// default to "keeps" (the conservative side).
 func modelStripsAnthropicSignatures(model string) bool {
 	m, ok := catalog.ByID(model)
 	if !ok {
@@ -596,15 +553,12 @@ func modelStripsAnthropicSignatures(model string) bool {
 }
 
 // excludeContextOverflowModels returns a copy of excluded augmented with every
-// model in available whose context window is too small to serve the request,
-// plus the sorted IDs of the models it newly excluded (for logging).
-// est is the full-body token estimate (translate.RequestEnvelope.ContextOverflowTokenEstimate),
-// the count a signature-keeping target receives. sigSavings is the tokens a
-// signature-stripping target saves (translate.RequestEnvelope.SignatureTokenSavings);
-// it is subtracted per-model only for stripping targets so an Anthropic
-// passthrough model is still checked against the full body.
-// outputReserve is the expected output budget (feats.MaxTokens or the const above).
-// Returns the original excluded map unchanged and a nil slice when no models are added.
+// model in available whose context window is too small for the request, plus
+// the sorted IDs newly excluded (for logging). est is the full-body token
+// estimate; sigSavings (tokens a signature-stripping target saves) is
+// subtracted only for stripping targets, so Anthropic passthrough is still
+// checked against the full body. Returns excluded unchanged and nil when
+// nothing is added.
 func excludeContextOverflowModels(est, sigSavings, outputReserve int, excluded, available map[string]struct{}) (map[string]struct{}, []string) {
 	if est <= 0 {
 		return excluded, nil
@@ -647,14 +601,11 @@ func gemini3xRequiresSignedHistory(model string) bool {
 	return strings.HasPrefix(model, "gemini-3")
 }
 
-// excludeGemini3xOnUnsignedHistory augments excluded with every Gemini 3.x model
-// in available when the request history carries an assistant tool call lacking a
-// Gemini thoughtSignature. Routing such a turn into Gemini 3.x is a guaranteed
-// 400 (foreign/cross-model history — planner switch or tier clamp into Gemini),
-// so the models are made ineligible and the scorer/clamp pick a non-Gemini
-// candidate instead. Returns the original map unchanged (and nil) when nothing
-// is added. Native Gemini continuations round-trip their own signature and are
-// not affected.
+// excludeGemini3xOnUnsignedHistory augments excluded with every Gemini 3.x
+// model when the request history carries an assistant tool call lacking a
+// Gemini thoughtSignature (guaranteed 400 on foreign/cross-model history).
+// Native Gemini continuations round-trip their own signature and are
+// unaffected. Returns excluded unchanged (and nil) when nothing is added.
 func excludeGemini3xOnUnsignedHistory(env *translate.RequestEnvelope, excluded, available map[string]struct{}) (map[string]struct{}, []string) {
 	if env == nil || !env.HasUnsignedToolCallHistory() {
 		return excluded, nil
@@ -684,15 +635,12 @@ func excludeGemini3xOnUnsignedHistory(env *translate.RequestEnvelope, excluded, 
 	return out, added
 }
 
-// restrictToTier returns a copy of excluded augmented with every routable model
-// whose tier differs from the target. It is the scorer-side counterpart to a
-// dropped user-forced pin: when the forced model can no longer serve a turn
-// (most often the session outgrew its context window and the pre-filter evicted
-// it), the user still asked for a model of that tier, so the fresh decision
-// should pick the next-best model in the same tier rather than collapsing to the
-// cheap tier-default. ok is false (and the original map returned unchanged) when
-// no in-tier model would survive the constraint, so the caller can leave routing
-// unconstrained instead of handing the scorer an empty pool.
+// restrictToTier returns a copy of excluded augmented with every routable
+// model whose tier differs from target. Counterpart to a dropped user-forced
+// pin: when the forced model can no longer serve (e.g. the pre-filter evicted
+// it for context size), the fresh decision should stay in the requested tier
+// rather than collapse to the cheap default. ok is false (map unchanged) when
+// no in-tier model survives, so the caller can leave routing unconstrained.
 func (s *Service) restrictToTier(excluded map[string]struct{}, tier catalog.Tier) (map[string]struct{}, bool) {
 	if tier == catalog.TierUnknown {
 		return excluded, false
@@ -711,8 +659,8 @@ func (s *Service) restrictToTier(excluded map[string]struct{}, tier catalog.Tier
 		}
 		out[model] = struct{}{}
 	}
-	// nil availableModels means "every model routable" (see WithAvailableModels);
-	// enumerate the catalog in that case so the constraint still has a universe.
+	// nil availableModels means "every model routable"; enumerate the catalog
+	// in that case so the constraint still has a universe.
 	if s.availableModels != nil {
 		for model := range s.availableModels {
 			consider(model)
@@ -745,13 +693,11 @@ func anthropicSubscriptionFromContext(ctx context.Context) string {
 	return v
 }
 
-// suppressClaudeSubscriptionContextKey, when present and true, tells
-// resolveAndInjectCredentials to skip the caller's CLAUDE subscription OAuth
-// token so resolution falls through to BYOK / the deployment Anthropic key. Set
-// when the caller's Claude subscription is observed-exhausted (its plan window
-// has bound) so the turn serves on the Weave key instead of re-hitting a token
-// that will 429. Scoped to the Claude token only — a Codex subscription on the
-// same request is unaffected (its OpenAI turns still bill the customer's plan).
+// suppressClaudeSubscriptionContextKey, when true, tells
+// resolveAndInjectCredentials to skip the caller's Claude subscription OAuth
+// token (falls through to BYOK / deployment key) because the subscription is
+// observed-exhausted and would just 429. Scoped to Claude only — a Codex
+// subscription on the same request is unaffected.
 type suppressClaudeSubscriptionContextKey struct{}
 
 // withSuppressedClaudeSubscription marks ctx so the next credential resolution
@@ -769,9 +715,7 @@ func claudeSubscriptionSuppressed(ctx context.Context) bool {
 
 // servedOnSubscription reports whether the turn's resolved credential is a
 // subscription OAuth token (Claude or Codex) — i.e. the customer's own plan
-// paid for it, so billing applies only the subscription fee rather than full
-// cost. The credential is read from the same ctx that resolveAndInjectCredentials
-// stamped and dispatch used.
+// paid, so billing applies the subscription fee rather than full cost.
 func servedOnSubscription(ctx context.Context) bool {
 	creds := CredentialsFromContext(ctx)
 	return creds != nil && creds.OAuth
@@ -798,14 +742,13 @@ func codexSubscriptionFromContext(ctx context.Context) *Credentials {
 }
 
 // codexResponsesRequest reports whether this /v1/responses request carries a
-// usable Codex (ChatGPT) subscription — the dedicated header pair, or an inbound
-// Authorization bearer + ChatGPT-Account-ID. When true, ProxyOpenAIResponses
-// routes the turn to the Codex backend instead of the chat-completions canonical
-// path. Mirrors the resolution precedence in resolveAndInjectCredentials so
-// detection and injection never disagree: the inbound-bearer shape is honored
-// even on a router-keyed request (Codex CLI keeps its ChatGPT auth in
-// Authorization while the router key rides in X-Weave-Router-Key), so it must
-// not be gated on the installation being absent.
+// usable Codex (ChatGPT) subscription — the dedicated header pair, or an
+// inbound Authorization bearer + ChatGPT-Account-ID. When true,
+// ProxyOpenAIResponses routes to the Codex backend instead of the
+// chat-completions path. Mirrors resolveAndInjectCredentials's precedence so
+// detection and injection never disagree; the inbound-bearer shape is honored
+// even on router-keyed requests (Codex CLI keeps its auth in Authorization
+// while the router key rides in X-Weave-Router-Key).
 func codexResponsesRequest(ctx context.Context, headers http.Header) bool {
 	if codexSubscriptionFromContext(ctx) != nil {
 		return true
@@ -894,11 +837,9 @@ func (s *Service) WithEffortEscalation(enabled bool) *Service {
 	return s
 }
 
-// WithBandSwap enables the per-turn large-vs-small action-classifier swap. When
-// enabled the compiled-in head is loaded once; a load failure logs and leaves
-// the swap disabled (fail-safe to anchor-only sticky behavior) rather than
-// killing boot. When false (default) the orchestrator always serves the pin's
-// anchor on a STAY, as before.
+// WithBandSwap enables the per-turn large-vs-small action-classifier swap,
+// loading the compiled-in head once. A load failure logs and leaves the swap
+// disabled (fail-safe to anchor-only) rather than killing boot.
 func (s *Service) WithBandSwap(enabled bool) *Service {
 	if !enabled {
 		s.bandSwap = nil
@@ -915,10 +856,9 @@ func (s *Service) WithBandSwap(enabled bool) *Service {
 }
 
 // WithLoopEscalationConfig sets the cyclic-loop escalation kill switch and the
-// log-not-act holdout percentage. enabled=false keeps detection and telemetry
-// running but never writes the escalation pin. holdoutPct is clamped to
-// [0, 100]; it only takes effect when a LoopEscalationStore is wired, because
-// a withheld rescue with no durable row is pure loss, not a measurement.
+// log-not-act holdout percentage (clamped to [0, 100]). The holdout only takes
+// effect when a LoopEscalationStore is wired — otherwise a withheld rescue
+// leaves no durable row and is pure loss, not a measurement.
 func (s *Service) WithLoopEscalationConfig(enabled bool, holdoutPct int) *Service {
 	s.loopEscalationEnabled = enabled
 	if holdoutPct < 0 {
@@ -976,17 +916,14 @@ func (s *Service) WithContentCapture(mode ContentCaptureMode, maxBytes int, reda
 	return s
 }
 
-// forcedReasoningEffort implements the escalate-on-failure effort policy and
-// returns the EmitOptions.ForceReasoningEffort override ("" = no override):
+// forcedReasoningEffort implements escalate-on-failure effort policy, returning
+// the EmitOptions.ForceReasoningEffort override ("" = no override):
 //
-//   - gpt-5.x: "low" by default, "high" once escalate is set (an observed
-//     failed/no-progress prior turn). Measured on SWE-Bench Pro, serving low
-//     then retrying high on failure beats both fixed policies (low 24% < high
-//     32% < escalate ~40% resolved) because it spends high only where it flips
-//     the outcome and avoids the cases high regresses.
-//   - gemini-3.x: pinned "low" — effort-immune on hard tasks (0/15 effort-helps
-//     in the sweep), so high is wasted spend.
-//   - everything else (incl. anthropic adaptive): "" — left to its own path.
+//   - gpt-5.x: "low" by default, "high" after a failed/no-progress prior turn.
+//     On SWE-Bench Pro this beats both fixed policies (24% < 32% < ~40% resolved)
+//     since high is spent only where it flips the outcome.
+//   - gemini-3.x: pinned "low" — effort-immune on hard tasks (0/15 in the sweep).
+//   - everything else: "" — left to its own path.
 func forcedReasoningEffort(model string, escalate bool) string {
 	switch {
 	case strings.HasPrefix(model, "gpt-5"):
@@ -1412,31 +1349,21 @@ func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName s
 }
 
 // upstreamBodyLogHead and upstreamBodyLogTail bound the bytes attached to
-// each "upstream prepared body" log entry. Real Claude Code turns routinely
-// hit 50-400KB; logging them whole at Info would blow up GCP ingest cost and
-// hit the 256KB per-entry hard cap. Head + tail captures both useful slices:
-//
-//   - head (4KB): JSON envelope, sampling params, system prompt header,
-//     opening of tool definitions — answers "is the request shape right?"
-//   - tail (4KB): end of the messages array, last tool_result / user
-//     message / assistant turn — answers "what did the model just see?"
-//
-// Middle (typically tool def details + middle of message history) is dropped
-// with a "…<n bytes omitted>…" marker so the truncation is obvious in the
-// log. Bodies <= upstreamBodyLogHead + upstreamBodyLogTail go through whole.
+// each "upstream prepared body" log entry. Claude Code turns routinely hit
+// 50-400KB; logging whole at Info would blow up GCP ingest cost and hit the
+// 256KB per-entry cap. Head (4KB) shows request shape (envelope, sampling
+// params, tool defs); tail (4KB) shows what the model just saw (end of
+// messages, last tool_result/turn). Middle is dropped with a
+// "…<n bytes omitted>…" marker; bodies that fit go through whole.
 const (
 	upstreamBodyLogHead = 4 * 1024
 	upstreamBodyLogTail = 4 * 1024
 )
 
 // logUpstreamBody emits the prepared upstream request body at Info so it
-// shows up in GCP without flipping LOG_LEVEL. Used for per-turn investigation
-// of "what did we actually send" — model misbehavior, broken tool shapes,
-// prompt-cache stability, etc.
-//
-// Bodies over upstreamBodyLogHead+upstreamBodyLogTail are head+tail
-// truncated. body_truncated + body_omitted_bytes make the cut obvious so a
-// reader doesn't mistake a truncated body for a malformed one.
+// shows up in GCP without flipping LOG_LEVEL, for per-turn investigation of
+// "what did we actually send". Bodies over the head+tail limit are truncated;
+// body_truncated + body_omitted_bytes make the cut obvious.
 func logUpstreamBody(log *slog.Logger, sessionKey [sessionpin.SessionKeyLen]byte, decision router.Decision, feats translate.RoutingFeatures, body []byte) {
 	bodyStr, truncated, omitted := truncateBodyForLog(body, upstreamBodyLogHead, upstreamBodyLogTail)
 	log.Info("upstream prepared body",
@@ -1472,12 +1399,10 @@ func truncateBodyForLog(body []byte, head, tail int) (string, bool, int) {
 // ProxyMessages routes a raw Anthropic-Messages request body and streams the
 // upstream response back. The routing decision is reflected in x-router-* headers.
 // anthropicNativeAttempt builds the per-binding dispatch closure for an
-// Anthropic-native upstream (no cross-format translation). prep is the
-// emitted body for the attempt's model; the marker sink and usage extractor
-// are rebuilt per attempt off the dispatched decision (d) so a baseline
-// failover that switches the model id renders the routing marker for the
-// model that actually served. setExtractor publishes the attempt's extractor
-// to the caller for post-dispatch token attribution.
+// Anthropic-native upstream (no cross-format translation). The marker sink
+// and usage extractor are rebuilt per attempt off the dispatched decision (d)
+// so a baseline failover that switches models renders the right marker.
+// setExtractor publishes the attempt's extractor for post-dispatch attribution.
 func (s *Service) anthropicNativeAttempt(
 	env *translate.RequestEnvelope,
 	r *http.Request,
@@ -1502,11 +1427,9 @@ func (s *Service) anthropicNativeAttempt(
 			preludeBuf.Seal()
 		}
 		err := p.Proxy(actx, d, prep, proxyWriter, r)
-		// Post-commit streaming error: the routing-marker chunk has already
-		// been flushed past the buffer to the wire; render the upstream error
-		// as an in-stream `data: {...}` frame instead of letting dispatch's
-		// flushErr append a corrupting Anthropic envelope. Pre-commit errors
-		// are handled by dispatchWithFallback (Discard + flushErr).
+		// Post-commit: bytes already on the wire, so render the error as an
+		// in-stream frame instead of letting flushErr append a corrupting
+		// envelope. Pre-commit errors go through dispatchWithFallback instead.
 		if err != nil && env.Stream() && preludeBuf.Committed() {
 			err = emitAnthropicSSEErrorEvent(sink, err)
 		}
@@ -1522,23 +1445,19 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	buf := otel.NewBuffer(s.emitter)
 	ctx = buf.WithContext(ctx)
 
-	// Strip the routing marker that prior cross-format responses injected as
-	// standalone assistant text blocks. Without this, the marker round-trips
-	// through clients that preserve content verbatim and ends up in upstream
-	// context on every subsequent turn.
+	// Strip the routing marker prior responses injected as assistant text —
+	// clients echo it back verbatim, so left in place it accumulates in
+	// upstream context every turn.
 	body, stripErr := translate.StripRoutingMarkerFromMessages(body)
 	if stripErr != nil {
 		log.Error("Failed to strip routing marker from inbound messages", "err", stripErr)
 		return fmt.Errorf("strip routing marker: %w", stripErr)
 	}
 
-	// Strip the one-click thumbs footer that prior streamed answers appended as
-	// trailing assistant text. Like the routing marker, clients echo it back
-	// verbatim, so without this it (and its signed rate URLs) accumulates in
-	// upstream context and shifts assistant prefixes off the prompt cache.
-	// Best-effort: a strip failure returns a nil body, so we log-and-continue
-	// with the original bytes rather than aborting the turn over cosmetic
-	// cleanup — matching the OpenAI chat path's feedback-footer strip.
+	// Same for the one-click thumbs footer (and its signed rate URLs), which
+	// would otherwise shift assistant prefixes off the prompt cache.
+	// Best-effort: log-and-continue on failure rather than abort over cosmetic
+	// cleanup, matching the OpenAI chat path.
 	if strippedBody, ferr := translate.StripFeedbackFooterFromMessages(body); ferr != nil {
 		log.Error("Failed to strip feedback footer from inbound messages", "err", ferr)
 	} else {
@@ -1546,10 +1465,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	// Strip Claude Code's 1M-context model variant tag (e.g.
-	// "claude-opus-4-8[1m]") to the canonical catalog id before parsing, so
-	// routing, session pins, and telemetry key off the real model — and so the
-	// tag never reaches a native Anthropic upstream, which 404s on it. The 1M
-	// window is enabled separately, size-triggered via the context-1m beta.
+	// "claude-opus-4-8[1m]") to the canonical id before parsing, so routing/pins/
+	// telemetry key off the real model and it never reaches a native Anthropic
+	// upstream (which 404s on it). The 1M window is enabled separately via the
+	// context-1m beta.
 	if canon, _, modelErr := translate.CanonicalizeModelInBody(body); modelErr != nil {
 		log.Error("Failed to canonicalize inbound model", "err", modelErr)
 	} else {
@@ -1580,10 +1499,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	clientID := ClientIdentityFrom(ctx)
 	bypassEval := hasEvalOverrideHeader(r)
 
-	// Bind session_key/request_id/api_key_id/ingress onto a ctx-scoped logger so
-	// every downstream log line in this turn carries them. The derived key is
-	// reused for the force-model and loop-break paths below to avoid a second
-	// hash + a divergent key in the rare case env.body mutates mid-flow.
+	// Bind session_key/request_id/api_key_id/ingress onto a ctx-scoped logger.
+	// The derived key is reused below to avoid a second hash + a divergent key
+	// if env.body mutates mid-flow.
 	var sessionKey [sessionpin.SessionKeyLen]byte
 	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "anthropic_messages")
 	log.Info("ProxyMessages start",
@@ -1595,12 +1513,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		"prompt_preview", preview(promptText, 200),
 	)
 
-	// Handle /force-model <model> and /unforce-model commands before routing.
-	// The command is stripped from env.body so the upstream never sees it.
-	// Session key is derived before extraction: ExtractForceModelCommand mutates
-	// env.body, and DeriveSessionKey falls back to prompt text when
-	// metadata.user_id is absent. Deriving after the strip would produce a key
-	// that mismatches subsequent turns where the unstripped message is present.
+	// Handle /force-model and /unforce-model before routing (stripped from
+	// env.body so the upstream never sees it). Session key is derived before
+	// extraction: DeriveSessionKey can fall back to prompt text, and deriving
+	// after the strip would mismatch subsequent turns with the unstripped message.
 	if s.pinStore != nil {
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
 			log.Info("ProxyMessages force-model command", "force_model_cmd", cmd)
@@ -1617,17 +1533,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// the pin up and serves the requested model on this same turn.
 	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
 
-	// Tool-call loop break: when the same (tool_name, args) appears at least
-	// loopDetectionMaxRepeats times in the last loopDetectionWindowSize
-	// assistant turns, synthesize end_turn and expire the session pin. Catches
-	// runaway OSS-model tool-call cycles (qwen3, in particular) that the
-	// previous-turn-maxed-out guard misses because each individual tool call
-	// returns quickly and well under the output cap.
-	// Wide cyclic re-read loop on a cheap/mid model (re-reading the same few
-	// files for dozens of turns, no edits) → escalate the session to opus and
-	// fall through to normal routing. The escalation pin (an immutable sticky)
-	// takes effect from the next turn, like /force-model. This takes precedence
-	// over the tight-loop break below: rescuing the session beats stopping it.
+	// Tool-call loop break: catches runaway OSS-model tool-call cycles (qwen3
+	// in particular) that the previous-turn-maxed-out guard misses because
+	// each call returns quickly and under the output cap.
+	// Wide cyclic re-read loop (same few files, no edits, dozens of turns) on a
+	// cheap/mid model escalates the session to opus instead, taking precedence
+	// over the tight-loop break below — rescuing beats stopping.
 	escalatedLoop := false
 	if cyc, csig, ccount, cratio, cwin := detectCyclicToolCallLoop(env); cyc {
 		loopRole := roleForTier(catalog.TierFor(feats.Model))
@@ -1676,28 +1587,23 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		)
 	}
 
-	// Snapshot inbound tool-call count before runTurnLoop potentially mutates
-	// env (model-switch handover may call RewriteForHandover). The compaction
-	// tracker must compare the count the client actually sent, not the
-	// post-rewrite count, to avoid false-positive detection when the router
-	// itself is the one that shortened the message window.
+	// Snapshot inbound tool-call count before runTurnLoop, which may mutate env
+	// via a model-switch handover's RewriteForHandover. The compaction tracker
+	// must compare what the client actually sent, not the post-rewrite count,
+	// to avoid false-positives when the router itself shortened the window.
 	inboundToolCallCount := len(env.AssistantToolCallSignatures())
 
-	// Snapshot spiral signals from the inbound body for the same reason: a
-	// model-switch handover replaces the history with a summary, which would
-	// wipe error streaks / thrash / repetition on exactly the turns they
-	// cross thresholds. The signals must reflect what the client actually
-	// sent; the fire decision happens after routing, where the decision and
-	// turn type are known.
+	// Same reasoning for spiral signals: a handover-rewritten history would
+	// wipe error streaks / thrash / repetition on exactly the turns that cross
+	// threshold.
 	var inboundSpiralSignals spiralSignals
 	if s.spiralShadowEnabled {
 		inboundSpiralSignals = computeSpiralSignals(env, feats.MessageCount)
 	}
 
-	// Snapshot the inbound tool-output size before runTurnLoop, for the same
-	// reason: a model-switch / compaction handover RewriteForHandover strips
-	// tool_result blocks from env, which would zero out tool_result_bytes on a
-	// genuine tool_result turn read at telemetry time.
+	// Same reasoning for tool-output size: a handover rewrite strips
+	// tool_result blocks from env, which would zero out tool_result_bytes for
+	// a genuine tool_result turn at telemetry time.
 	inboundLastUser := env.LastUserMessage()
 
 	routeStart := time.Now()
@@ -1718,27 +1624,22 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return routeErr
 	}
 
-	// Subscription usage-bypass: the gate engaged inside runTurnLoop (after the
-	// hard-pin, force-pin, and tool-result sticky branches, so those still win).
-	// The caller's own Claude subscription has headroom, so serve the requested
-	// model straight through to Anthropic with no model substitution and no
-	// billing debit — the turn is paid for by the customer's plan.
+	// Subscription usage-bypass: engaged inside runTurnLoop after hard-pin,
+	// force-pin, and tool-result sticky branches (those still win). The
+	// caller's own Claude subscription has headroom, so serve straight through
+	// to Anthropic with no substitution and no billing debit.
 	if routeRes.UsageBypass {
 		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
 		if !errors.Is(err, errBypassRetryable) {
 			return err
 		}
-		// Bypass got a pre-commit retryable error (e.g., Anthropic 429 weekly-limit
-		// or a raw transport error). The observer now reflects near-cap headroom.
-		// Update the subsidy cost factor before rerouting so the scorer discounts
-		// Anthropic appropriately. Also load session pin state for proper switch
-		// detection since bypass returns early without loading it.
+		// Bypass hit a pre-commit retryable error (e.g. Anthropic 429 weekly-limit
+		// or transport error). Refresh the subsidy cost factor so the scorer
+		// discounts Anthropic correctly on reroute.
 		req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, r.Header)
 
-		// Load session pin state for switch detection. Bypass returns early without
-		// loading the pin, so PriorServedModel and SessionEverSwitched would be
-		// empty. We need them populated so modelSwitched() correctly detects when
-		// switching from a pinned model to a different one.
+		// Bypass returns early without loading the pin, so load it now for
+		// modelSwitched() to correctly detect a switch away from it.
 		var priorServedModel string
 		var sessionEverSwitched bool
 		if s.pinStore != nil {
@@ -1763,8 +1664,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 		routeRes.Decision = decision
 		routeRes.Fresh = decision
-		// Populate switch detection fields that were skipped during bypass.
-		// This ensures modelSwitched() correctly detects transitions.
+		// Populate switch-detection fields skipped during bypass.
 		routeRes.PriorServedModel = priorServedModel
 		routeRes.SessionEverSwitched = sessionEverSwitched
 	}
@@ -1777,17 +1677,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	routeMs := time.Since(routeStart).Milliseconds()
 	s.logPlannerOutcome(ctx, routeRes)
 
-	// Cross-envelope no-progress detector: if this session has dispatched the
-	// same (decision_model, decision_provider, message_count, tool-progress,
-	// prompt-prefix) burst >= noProgressMatchThreshold times within
-	// noProgressTimeWindow, the agent is stuck (a sub-agent spawn loop, or a
-	// model re-issuing one identical call) and another dispatch will only
-	// reproduce the same useless response. Break the pin and emit a synthetic
-	// stop instead. The tool-progress marker is the primary guard: a
-	// progressing agent appends a new, distinct tool call each turn, so its
-	// fingerprint diverges and it is never mistaken for a stuck loop — even when
-	// the top-level message count stays flat, as it does for Claude Code's
-	// Explore sub-agent.
+	// Cross-envelope no-progress detector: if this session dispatches the same
+	// (decision, message_count, tool-progress, prompt-prefix) fingerprint
+	// repeatedly within a window, the agent is stuck (sub-agent spawn loop, or
+	// a re-issued identical call) — break the pin and emit a synthetic stop.
+	// The tool-progress marker is the key guard: a genuinely progressing agent
+	// appends a new tool call each turn, so it never false-positives even when
+	// top-level message count stays flat (as with Explore sub-agents).
 	if fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env)); s.noProgress != nil {
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
@@ -1796,38 +1692,30 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	// Shadow-mode spiral detector: log-only death-march signals (error grind,
-	// same-file thrash, fuzzy repetition, monologue) recorded once per
-	// (session, reason) so live fire rates and precision can be measured
-	// before any escalation action is armed. Signals were snapshotted from
-	// the inbound body above, before any handover rewrite. Main-loop /
-	// tool-result turns only — hard-pinned turn types (Probe, TitleGen,
-	// Compaction, sub-agent dispatch) carry history shapes that mimic the
-	// signals.
+	// same-file thrash, fuzzy repetition, monologue), once per (session,
+	// reason), so fire rates/precision can be measured before any escalation
+	// is armed. Main-loop / tool-result turns only — hard-pinned turn types
+	// carry history shapes that mimic the signals.
 	if s.spiralShadowEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
 		if reasons := spiralReasons(inboundSpiralSignals); len(reasons) > 0 {
 			role := roleForTier(catalog.TierFor(feats.Model))
-			// Use the bindRequestLogger digest (same DeriveSessionKey, computed
-			// unconditionally) rather than routeRes.SessionKey, which is zero
-			// when no pin store is configured. This keeps the spiral event's
-			// session_key equal to the telemetry row's in every mode so the
-			// offline join holds; in the pinned production path the two are
-			// already identical, so this is a no-op there.
+			// Use the bindRequestLogger digest, not routeRes.SessionKey (zero
+			// with no pin store), so the spiral event's session_key matches the
+			// telemetry row's in every mode for the offline join.
 			s.handleSpiralShadow(ctx, inboundSpiralSignals, reasons, installationID, sessionKey, role, decision.Model, string(tt))
 		}
 	}
 
-	// Compaction-aware handover: Claude Code can trim its history window in two
-	// ways — full compaction (messageCount drops sharply) or rolling-window
-	// trimming (messageCount flat but tool-call count shrinks by one per turn).
-	// Either case leaves the non-Anthropic model without awareness of edits and
-	// decisions that lived only in the now-elided turns. Detect either drop and
-	// rewrite the envelope with a handover summary before dispatch.
+	// Compaction-aware handover: Claude Code can trim history via full
+	// compaction (message count drops sharply) or rolling-window trimming
+	// (flat message count, tool-call count shrinks). Either leaves the
+	// non-Anthropic model unaware of elided edits/decisions, so rewrite the
+	// envelope with a handover summary before dispatch.
 	compactionHandoverRan := false
 	var compactionHandoverOutcome handoverOutcome
 	// Detection runs pre-routing in runTurnLoop; routeRes.PrefixTrimmed carries
-	// the verdict (re-recording here would compare this turn's counts against
-	// themselves and never fire). Skip when a model-switch handover already
-	// rewrote the envelope this turn — a second rewrite would double-trim it.
+	// the verdict. Skip if a model-switch handover already rewrote env this
+	// turn — a second rewrite would double-trim it.
 	if decision.Provider != providers.ProviderAnthropic && !routeRes.HardPinned && !routeRes.Handover.Invoked && routeRes.PrefixTrimmed {
 		log.Info("Context trimming detected on non-Anthropic route; rewriting context with handover summary",
 			"message_count", feats.MessageCount,
@@ -1840,15 +1728,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	// Semantic-cache eligibility: configured, non-streaming, decision has
-	// metadata, externalID present, not eval traffic.
-	// Skip when a compaction handover rewrote env: the embedding in
-	// decision.Metadata was computed from the pre-handover body, so a cache
-	// hit would return a response built for different upstream context.
-	// Subscription-aware routing makes the chosen model depend on observed quota
-	// headroom, which the semantic-cache key does not capture — so a hit could
-	// return a body from a model chosen under different headroom. Make subsidized
-	// requests cache-ineligible. subsidyFactors early-returns nil when the feature
-	// is off, so OFF deployments pay nothing here.
+	// metadata, externalID present, not eval traffic. Skip when a compaction
+	// handover rewrote env (embedding predates the rewrite) or when subsidy
+	// factors are non-empty (the cache key doesn't capture quota-headroom-
+	// dependent model choice; subsidyFactors returns nil when the feature is off).
 	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !compactionHandoverRan && len(s.subsidyFactors(ctx, r.Header)) == 0
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
@@ -1933,33 +1816,26 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	// A caller whose Claude subscription has bound its plan window can't serve
-	// another turn on it (the upstream 429s until reset). Suppress the spent
-	// token so resolution falls through to the deployment / BYOK Anthropic key —
-	// the turn then serves on the Weave key (billed at full cost, not the
-	// subscription rate) instead of hard-failing. Only fires once the observer
-	// has recorded the exhaustion and a fallback key exists.
+	// another turn on it (429 until reset). Suppress the spent token so
+	// resolution falls through to the deployment/BYOK key — the turn serves on
+	// the Weave key (full cost) instead of hard-failing. Only fires once the
+	// observer has recorded exhaustion and a fallback key exists.
 	if s.claudeSubscriptionExhausted(ctx, r.Header) {
 		ctx = withSuppressedClaudeSubscription(ctx)
 	}
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
-	// Wrap the client writer in a preludeBuffer for every request, not just
-	// multi-binding ones. The buffer absorbs per-attempt Prelude bytes (the
-	// routing-marker text block + message_start) so that when the upstream
-	// errors before producing its first byte, we discard the buffered prelude
-	// and render an upstream-error envelope instead of stranding the marker
-	// on the wire. Single-binding requests previously bypassed the buffer for
-	// TTFB, but the v0.58 SWE-bench bake-off attributed 46/84 empty-patch
-	// failures to that bypass: half of all upstream calls api_error'd, and
-	// each one delivered a turn that was just `✦ **Weave Router** → …` text
-	// to Claude Code, which then rejected the turn for missing tool_use.
-	// The TTFB cost is a single round-trip's worth of buffered SSE bytes
-	// (~200B) released the moment the upstream's first byte arrives.
+	// Wrap every request (not just multi-binding) in a preludeBuffer so a
+	// pre-first-byte upstream error can discard the buffered prelude (marker +
+	// message_start) and render an error envelope instead of stranding the
+	// marker on the wire. Single-binding requests used to skip this for TTFB,
+	// but the v0.58 SWE-bench bake-off traced 46/84 empty-patch failures to
+	// exactly that: an api_error left Claude Code with only marker text and no
+	// tool_use. Cost: one round-trip's buffered SSE bytes (~200B).
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
-	// Append the one-click feedback thumbs as a trailing content block on
-	// streaming answers. Wraps the client writer below the capture layer so the
-	// footer never lands in cached/logged bodies; transparent for non-streaming
-	// responses and when feedback is unwired.
+	// Append the one-click feedback thumbs as a trailing content block,
+	// wrapped below the capture layer so the footer never lands in
+	// cached/logged bodies. Transparent when streaming/feedback is off.
 	clientSink := w
 	if env.Stream() {
 		if footer := s.feedbackFooter(ClientIdentityFrom(ctx).ClientApp, routeRes.TurnType); footer != "" {
@@ -1981,29 +1857,22 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	crossFormat := false
 	var extractor *otel.UsageExtractor
 	// respSummary captures the winning attempt's translated-response signals
-	// (finish_reason, emitted stop_reason, tool_use count) for the completion
-	// log. Populated by the translator-backed paths; stays zero for the
-	// Anthropic-native passthrough path, which has no translator.
+	// for the completion log. Populated by translator-backed paths; stays
+	// zero for Anthropic-native passthrough (no translator).
 	var respSummary translate.ResponseSummary
-	// reqStats captures the translation-time mutations applied to the
-	// winning attempt's upstream request body. Overwritten on each attempt;
-	// on dispatch success it reflects the binding that actually ran. Zero
-	// for Anthropic-native passthrough — that path skips the translator.
+	// reqStats captures translation-time mutations on the winning attempt's
+	// request body. Zero for Anthropic-native passthrough.
 	var reqStats providers.RequestMutationStats
 
 	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
-	// toolValidator compiles the request's tool schemas once for all attempts
-	// (LRU-cached across turns); response translators validate and repair
-	// model-emitted tool calls against it. Nil when the request has no tools.
+	// toolValidator compiles the request's tool schemas once (LRU-cached);
+	// translators validate/repair model tool calls against it. Nil if no tools.
 	toolValidator := env.ToolValidator()
-	// markerSink wraps sink with an AnthropicRoutingMarkerWriter per attempt.
-	// Unlike translator-backed paths, the Anthropic-native writer must wait
-	// for upstream headers so non-2xx responses can stay buffered/retryable.
 	setExtractor := func(e *otel.UsageExtractor) { extractor = e }
 	var attempt dispatchAttempt
-	// Dispatch keys off the provider's translation family, not an enumerated set
-	// of provider names, so a newly-added OpenAI-compat provider routes here the
-	// moment it has a ProviderFamilies entry (see internal/providers/provider.go).
+	// Dispatch keys off the provider's translation family, not a hardcoded name
+	// list, so a new OpenAI-compat provider routes here as soon as it has a
+	// ProviderFamilies entry (see internal/providers/provider.go).
 	switch providers.FamilyFor(decision.Provider) {
 	case providers.FamilyAnthropic:
 		prep, emitErr := env.PrepareAnthropic(r.Header, opts)
@@ -2016,18 +1885,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	case providers.FamilyOpenAICompat:
 		crossFormat = true
 		// Prep rebuilt per attempt: targetIsOpenRouter(opts) gates four
-		// OpenRouter-only body fields (provider hint, reasoning, system
-		// reminder, tool-temp override). If the primary is Fireworks and
-		// we fail over to OpenRouter, the second attempt's body must be
-		// re-emitted with TargetProvider = openrouter so those gates fire.
+		// OpenRouter-only body fields. On failover from Fireworks to
+		// OpenRouter, the body must be re-emitted with TargetProvider =
+		// openrouter so those gates fire.
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
 			attemptOpts := opts
 			attemptOpts.TargetProvider = d.Provider
 			respSummary = translate.ResponseSummary{}
-			// Reasoning OpenAI models (gpt-5.x) reject tools, stop, and
-			// reasoning_effort on /v1/chat/completions; any agentic turn with
-			// tools must go through the Responses API instead. Scoped to the
-			// direct OpenAI provider (the only one with /v1/responses).
+			// Reasoning OpenAI models (gpt-5.x) reject tools/stop/reasoning_effort
+			// on /v1/chat/completions; agentic tool turns must use Responses
+			// instead. Scoped to direct OpenAI (the only one with /v1/responses).
 			useResponses := translate.UseOpenAIResponsesAPI(
 				d.Provider, attemptOpts.Capabilities, feats.HasTools)
 			var prep providers.PreparedRequest
@@ -2070,13 +1937,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				preludeBuf.Seal()
 			}
 			err := p.Proxy(actx, d, prep, translator, r)
-			// Post-commit streaming error: the preludeBuffer has already
-			// flushed HTTP 200 + message_start past the buffer to the
-			// wire, so the dispatch loop's flushErr would append a
-			// trailing JSON envelope that corrupts the SSE stream.
-			// Render the upstream error as an in-stream `event: error`
-			// frame instead. Pre-commit errors are handled cleanly by
-			// dispatchWithFallback (Discard + flushErr).
+			// Post-commit: HTTP 200 + message_start already on the wire, so
+			// render the error as an in-stream `event: error` frame instead of
+			// a corrupting trailing envelope. Pre-commit errors go through
+			// dispatchWithFallback instead.
 			if err != nil && env.Stream() && preludeBuf.Committed() {
 				err = emitAnthropicSSEErrorEvent(sink, err)
 			}
@@ -2093,20 +1957,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			return fmt.Errorf("translate anthropic request to gemini: %w", emitErr)
 		}
 		logUpstreamBody(log, routeRes.SessionKey, decision, feats, prep.Body)
-		// geminiUsedValidated marks a request that went out with
+		// geminiUsedValidated marks a request sent with
 		// functionCallingConfig.mode=VALIDATED (Gemini 3.x, tools, unforced
-		// choice). Gemini compiles each tool's parameter schema into a
-		// decode-time grammar under VALIDATED; one it can't compile makes it
-		// reject the whole request with a generic 400 INVALID_ARGUMENT. The
-		// attempt below retries once with mode=AUTO (no grammar compilation)
-		// when nothing has reached the client yet.
+		// choice): Gemini compiles each tool schema into a decode-time grammar,
+		// and one it can't compile 400s the whole request. Retried once below
+		// with mode=AUTO if nothing has reached the client yet.
 		geminiUsedValidated := prep.Stats.GeminiValidatedToolMode
-		// dispatchGemini does one Gemini call with pr (fresh translator chain +
-		// seal + proxy) and returns the RAW upstream error plus a finalize thunk.
-		// Splitting dispatch from finalize lets the attempt below inspect a
-		// pre-commit 400 before finalize flushes the translators (which would
-		// commit the prelude buffer and foreclose the retry). Translators are
-		// stateful, so a retry rebuilds the chain by calling this again.
+		// dispatchGemini does one call and returns the raw upstream error plus a
+		// finalize thunk, split so the attempt can inspect a pre-commit 400
+		// before finalize commits the prelude buffer and forecloses the retry.
+		// Translators are stateful, so a retry rebuilds the chain via a fresh call.
 		dispatchGemini := func(actx context.Context, d router.Decision, p providers.Client, pr providers.PreparedRequest) (error, func(error) error) {
 			respSummary = translate.ResponseSummary{}
 			var usage otel.UsageSink
@@ -2129,9 +1989,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			geminiTr := translate.NewGeminiToOpenAISSETranslator(anthropicTr, d.Model, nil)
 			rawErr := p.Proxy(actx, d, pr, geminiTr, r)
 			finalize := func(err error) error {
-				// Post-commit streaming error: see ProxyMessages OpenAI-compat
-				// case for rationale — render upstream error as in-stream
-				// `event: error` rather than corrupt the SSE stream.
+				// Post-commit: see the OpenAI-compat case above.
 				if err != nil && env.Stream() && preludeBuf.Committed() {
 					err = emitAnthropicSSEErrorEvent(sink, err)
 				}
@@ -2145,10 +2003,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
 			rawErr, finalize := dispatchGemini(actx, d, p, prep)
 			// VALIDATED-mode schema-grammar 400: retry once with mode=AUTO while
-			// nothing has reached the client yet. AUTO only drops the decode-time
-			// grammar constraint, so it can't make a request worse — a non-schema
-			// 400 simply 400s again and surfaces normally. The first attempt's
-			// translators are abandoned (Discard), so its finalize never runs.
+			// pre-commit. AUTO only drops the grammar constraint, so it can't make
+			// things worse — a non-schema 400 just 400s again normally. The first
+			// attempt's translators are abandoned (Discard).
 			if rawErr != nil && geminiUsedValidated && !committed(preludeBuf) && upstreamStatus(rawErr) == http.StatusBadRequest {
 				autoOpts := opts
 				autoOpts.DowngradeGeminiValidatedToAuto = true
@@ -2173,19 +2030,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return fmt.Errorf("%w: %s (no translation path defined for inbound Anthropic Messages)", ErrProviderNotConfigured, decision.Provider)
 	}
 
-	// In-turn baseline failover eligibility. When the router cost-routes an
-	// Anthropic-model request to an OSS/Gemini model and every binding for that
-	// model fails (provider outage or model-not-found), the turn should fall
-	// back to the requested model on Anthropic rather than hard-fail with
-	// "the selected model may not exist". Eligible only when: the request isn't
+	// In-turn baseline failover eligibility: when the router cost-routes to an
+	// OSS/Gemini model and every binding fails, fall back to the requested
+	// model on Anthropic instead of hard-failing. Eligible only when: not
 	// BYOK/inbound-credential bound (those resolve to a single provider),
-	// Anthropic isn't excluded for the installation (otherwise failing over to
-	// Anthropic would violate the exclusion contract — and deferring the OSS
-	// error to a baseline that then can't dispatch would surface a generic
-	// gateway failure instead of the real upstream error), the routed model
-	// isn't already Anthropic, and the baseline is a known Anthropic-served
-	// catalog model distinct from the routed one. Computed pre-dispatch so the
-	// primary dispatch defers its exhaustion flush to us.
+	// Anthropic isn't excluded for the installation (else failing over would
+	// violate the exclusion contract), the routed model isn't already
+	// Anthropic, and the baseline is a distinct known Anthropic catalog model.
+	// Computed pre-dispatch so the primary dispatch defers its exhaustion flush.
 	baselineModel := s.baselineFor(feats.Model)
 	baselineCatalog, baselineKnown := catalog.ByID(baselineModel)
 	_, anthropicExcluded := s.excludedProvidersForRequest(ctx)[providers.ProviderAnthropic]
@@ -2195,29 +2047,21 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		baselineModel != decision.Model &&
 		baselineKnown && baselineCatalog.PrimaryProvider() == providers.ProviderAnthropic
 
-	// Subscription-credit failover eligibility. When a Claude turn is served on
-	// the caller's own subscription (sk-ant-oat) and the upstream returns a
-	// retryable 429 / header-timeout, the request is pinned to a single Anthropic
-	// binding (shouldFailover is false while a subscription credential rides on
-	// ctx) so dispatchWithFallback has nowhere to fail over to — the raw 429 /
-	// ~90s hang reaches the client. This is the gap behind the prod instability:
-	// the observer-driven exhaustion suppression (claudeSubscriptionExhausted ->
-	// withSuppressedClaudeSubscription, above) only fires when a PRIOR snapshot
-	// already read >= exhaustedFraction, but the binding 429 IS usually the first
-	// signal the window bound, so the stale snapshot still reads "slack" and the
-	// spent token is sent anyway.
+	// Subscription-credit failover eligibility. A Claude turn served on the
+	// caller's subscription (sk-ant-oat) is pinned to a single Anthropic
+	// binding, so a retryable 429/timeout has nowhere to fail over to and
+	// reaches the client raw. This is the gap behind prod instability: the
+	// observer-driven exhaustion suppression above only fires once a PRIOR
+	// snapshot already read exhausted, but the binding 429 is usually the
+	// first signal — the stale snapshot still reads "slack".
 	//
-	// When a non-subscription Anthropic key is configured (per-request BYOK, or
-	// the deployment's own ANTHROPIC_API_KEY), retry the SAME requested model on
-	// that key exactly once. This is the deliberate product decision documented in
-	// the PR: a retryable 429 on a customer's subscription is treated as "serve
-	// this turn on the Weave key" (billed at full cost, not the subscription rate)
-	// rather than surface the throttle — the same fallback claudeSubscriptionExhausted
-	// already takes pre-emptively, just driven by the live error instead of a stale
-	// snapshot. Eligible only pre-commit (nothing on the wire), on a subscription-
-	// served Anthropic turn, with a fallback key available. Computed pre-dispatch
-	// so the primary dispatch defers its exhaustion flush to us. Mutually exclusive
-	// with baselineEligible (which requires a non-Anthropic routed provider).
+	// When a non-subscription Anthropic key exists (BYOK or deployment), retry
+	// the same model on it once: a retryable 429 on the subscription is served
+	// on the Weave key (full cost) rather than surfaced raw — the same
+	// fallback claudeSubscriptionExhausted takes pre-emptively, just driven by
+	// the live error instead of a stale snapshot. Eligible only pre-commit, on
+	// a subscription-served Anthropic turn, with a fallback key available.
+	// Mutually exclusive with baselineEligible (non-Anthropic routed provider).
 	subscriptionRetryEligible := decision.Provider == providers.ProviderAnthropic &&
 		servedOnSubscription(ctx) &&
 		s.anthropicFallbackKeyAvailable(ctx)
@@ -2225,8 +2069,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	primaryProvider := decision.Provider
 	var winnerIdx int
 	winnerIdx, proxyErr = s.dispatchWithFallback(ctx, failoverInputs{
-		// contentSink routes the failover-exhaustion error envelope through the
-		// content-capture writer; it is the raw w when capture is off.
+		// contentSink is the raw w when capture is off.
 		w:                      contentSink,
 		buf:                    preludeBuf,
 		initialDecision:        decision,
@@ -2236,11 +2079,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		deferFlushOnExhaustion: baselineEligible || subscriptionRetryEligible,
 	})
 
-	// The routed model's bindings all failed with a fault a different model
-	// could satisfy, and nothing reached the client yet — re-dispatch the
-	// requested model on Anthropic. crossFormat/respSummary/reqStats are reset
-	// to their Anthropic-native (no-translator) values so completion telemetry
-	// reflects the binding that actually served.
+	// The routed model's bindings all failed with a fault another model could
+	// satisfy, pre-commit — re-dispatch the requested model on Anthropic.
+	// crossFormat/respSummary/reqStats reset to Anthropic-native values so
+	// telemetry reflects the binding that actually served.
 	baselineFailoverUsed := false
 	baselineAttempted := false
 	if baselineEligible && proxyErr != nil && !preludeBuf.Committed() &&
@@ -2252,9 +2094,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		baselineOpts.TargetModel = baselineModel
 		baselineOpts.TargetProvider = providers.ProviderAnthropic
 		baselineOpts.Capabilities = router.Lookup(baselineModel)
-		// Recompute the switch flag against the baseline model that actually
-		// serves (not the cost-routed OSS id). Otherwise PrepareAnthropic may
-		// leave stale signed thinking blocks the baseline model rejects → 400.
+		// Recompute against the model that actually serves, not the cost-routed
+		// OSS id — otherwise PrepareAnthropic may leave stale signed thinking
+		// blocks the baseline model rejects (400).
 		baselineOpts.ModelSwitched = routeRes.PriorServedModel != baselineModel || routeRes.SessionEverSwitched
 		if s.effortEscalation {
 			baselineOpts.ForceReasoningEffort = forcedReasoningEffort(baselineModel, routeRes.EscalateEffort)
@@ -2292,28 +2134,23 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			decision = baselineDecision
 			bindings = baselineBindings
 			baselineAttempted = true
-			// Reflect whether the baseline actually served the turn — a failed
-			// Anthropic retry must not report baseline_failover=true and skew
-			// bake-off / incident analysis.
+			// Reflect whether the baseline actually served — a failed retry must
+			// not report baseline_failover=true and skew bake-off analysis.
 			baselineFailoverUsed = proxyErr == nil
 		}
 	} else if baselineEligible && proxyErr != nil {
-		// We deferred the primary's exhaustion flush but didn't run the baseline
-		// (response committed mid-stream, or a non-failoverable error). Surface
-		// the original upstream error envelope now.
+		// Baseline didn't run (mid-stream commit, or non-failoverable error);
+		// surface the deferred original error now.
 		flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
 	}
 
-	// Subscription-credit failover: the requested Anthropic model was served on
-	// the caller's subscription and the upstream returned a retryable fault
-	// (429 weekly/5h-limit, or a ~90s header-timeout) before any byte reached
-	// the client. Suppress the subscription token and re-dispatch the SAME model
-	// once on the Weave / BYOK Anthropic key so the turn still completes instead
-	// of surfacing the throttle raw. Bounded to a single extra attempt (no loop),
-	// gated on pre-commit (!preludeBuf.Committed()) and on the error being
-	// genuinely retryable — a committed stream or a 4xx the client owns is never
-	// retried. Skipped when baseline failover already ran (mutually exclusive:
-	// baseline requires a non-Anthropic routed provider).
+	// Subscription-credit failover: a subscription-served Anthropic turn got a
+	// retryable fault (429 weekly/5h-limit, or ~90s timeout) pre-commit.
+	// Suppress the subscription token and retry the SAME model once on the
+	// Weave/BYOK key so the turn completes instead of surfacing the throttle
+	// raw. Bounded to one extra attempt, pre-commit only, genuinely retryable
+	// only. Skipped when baseline failover already ran (mutually exclusive:
+	// that requires a non-Anthropic routed provider).
 	subscriptionFailoverUsed := false
 	subscriptionRetryRan := false
 	if subscriptionRetryEligible && !baselineAttempted && proxyErr != nil &&
@@ -2321,19 +2158,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		subscriptionRetryRan = true
 		subCtx := withSuppressedClaudeSubscription(ctx)
 		subCtx = resolveAndInjectCredentials(subCtx, providers.ProviderAnthropic, r.Header)
-		// Re-emit the body against the suppressed-subscription context. The model
-		// is unchanged, so opts/prep are identical to the primary attempt; rebuild
-		// the prep so the retry gets a pristine PreparedRequest.
+		// Model is unchanged, but rebuild prep so the retry gets a pristine
+		// PreparedRequest under the suppressed-subscription context.
 		subPrep, subEmitErr := env.PrepareAnthropic(r.Header, opts)
 		if subEmitErr != nil {
 			log.Error("Subscription failover: emit Anthropic body failed; surfacing original error", "err", subEmitErr, "model", decision.Model)
 			flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
 		} else if subBindings := s.resolveBindingsForDispatch(subCtx, decision); len(subBindings) == 0 {
-			// The suppressed context resolved to no usable Anthropic binding, so
-			// dispatchWithFallback would only return a synthetic 502 that masks the
-			// real rate-limit/timeout. Surface the original retryable error instead
-			// — the client should see the actual throttle, not a bad-gateway. No
-			// Weave key was attempted, so attribution stays on the subscription.
+			// No usable Anthropic binding under suppression — surface the
+			// original retryable error (real throttle) rather than a synthetic
+			// 502 that would mask it. No Weave key attempted, so attribution
+			// stays on the subscription.
 			log.Warn("Subscription failover: no fallback Anthropic binding available; surfacing original error",
 				"model", decision.Model,
 				"err", proxyErr,
@@ -2361,10 +2196,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			subscriptionFailoverUsed = proxyErr == nil
 		}
 	}
-	// We deferred the primary's exhaustion flush for the subscription retry but
-	// the retry didn't run (response committed mid-stream, or a non-retryable
-	// error). Surface the original upstream error envelope now so a deferred
-	// flush is never silently dropped.
+	// The subscription retry didn't run (mid-stream commit, or non-retryable
+	// error); surface the deferred original error now so it's never dropped.
 	if subscriptionRetryEligible && !baselineAttempted && !subscriptionRetryRan && proxyErr != nil && !preludeBuf.Committed() {
 		flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
 	}
@@ -2373,35 +2206,27 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if winnerIdx >= 0 && winnerIdx < len(bindings) {
 		finalProvider = bindings[winnerIdx].Provider
 	} else if baselineAttempted {
-		// Baseline failover ran but no binding served (winnerIdx == -1). The
-		// last provider attempted was Anthropic with the baseline model, so
-		// finalProvider must match decision.Model rather than reverting to the
-		// OSS primary that never served the requested baseline model.
+		// Baseline ran but no binding served (winnerIdx == -1); the last
+		// attempt was Anthropic with the baseline model, so finalProvider must
+		// not revert to the OSS primary that never served it.
 		finalProvider = providers.ProviderAnthropic
 	}
 	decision.Provider = finalProvider
 
-	// Re-resolve credentials for the binding that actually served the turn.
-	// During failover, each attempt gets its own per-attempt context with
-	// potentially different credentials. Update ctx so credentialKeyParts
-	// reads the correct key parts for telemetry. When the subscription failover
-	// served the turn on the Weave / BYOK key, carry the suppression forward so
-	// cost.subscription_served + the billing key reflect the key that actually
-	// paid (full cost), not the spent subscription that 429'd. Gate on
-	// subscriptionFailoverUsed (the retry actually succeeded on the Weave key),
-	// NOT subscriptionRetryRan: if PrepareAnthropic failed or the Weave retry
-	// itself errored, no byte was billed to the Weave key, so the turn stays
-	// attributed to the subscription that was originally on ctx.
+	// Re-resolve credentials for the binding that actually served — each
+	// failover attempt gets its own context. Carry the suppression forward on
+	// subscriptionFailoverUsed (not subscriptionRetryRan) so cost.subscription_served
+	// and the billing key reflect the Weave key that actually paid, not the
+	// spent subscription — but only once the Weave retry actually succeeded.
 	if subscriptionFailoverUsed {
 		ctx = withSuppressedClaudeSubscription(ctx)
 	}
 	ctx = resolveAndInjectCredentials(ctx, finalProvider, r.Header)
 
-	// Re-resolve actual pricing for the binding that actually served the
-	// request. The pre-dispatch lookup (`otel.Lookup(decision.Model)`)
-	// always returns the catalog's PRIMARY binding price; on a successful
-	// failover we'd otherwise debit + report the primary's per-1M rate
-	// while the request was actually billed at the fallback's rate.
+	// Re-resolve pricing for the binding that actually served: the
+	// pre-dispatch lookup always returns the catalog's PRIMARY binding price,
+	// which would misreport cost after a successful failover to a different
+	// binding's rate.
 	if actBindingPricing, ok := catalog.PriceFor(finalProvider, decision.Model); ok {
 		actPricing = actBindingPricing
 	}
@@ -2478,10 +2303,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	if installationID != uuid.Nil {
 		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
-		// Same-provider Anthropic subscription -> Weave retries keep finalProvider
-		// == primaryProvider, so the bare provider diff misses them. OR in the
-		// subscription-failover flag so the Postgres FailoverUsed column matches
-		// the OTel span + completion log (both already OR it in).
+		// Same-provider subscription->Weave retries keep finalProvider ==
+		// primaryProvider, so OR in subscriptionFailoverUsed to match the OTel
+		// span + completion log.
 		failoverUsed := finalProvider != primaryProvider || subscriptionFailoverUsed
 		degShadow := proxyErr == nil && isDegenerateResponse(out, respSummary.ToolUseBlocks, respSummary.StopReason, respSummary.StopReasonDemoted)
 		if degShadow {
@@ -2494,10 +2318,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				"upstream_finish_reason", respSummary.UpstreamFinishReason,
 				"would_failover", true,
 			)
-			// Evict the session pin so the next turn re-scores instead of
-			// continuing to serve the same misbehaving model. The current
-			// turn has already been streamed (cannot retry), but eviction
-			// is the best available recovery for the session's next turn.
+			// Evict the pin so the next turn re-scores instead of repeating the
+			// same misbehaving model — this turn already streamed and can't retry.
 			s.evictPinAfterDegenerateResponse(ctx, stickyHit, decision.Reason, installationID, routeRes.SessionKey, routeRes.PinRole)
 		}
 		s.fireTelemetry(InsertTelemetryParams{
@@ -2542,47 +2364,40 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			RolloutID:              clientID.RolloutID,
 			UpstreamFinishReason:   stringPtrOrEmpty(respSummary.UpstreamFinishReason),
 			StopReason:             stringPtrOrEmpty(respSummary.StopReason),
-			// ToolUseBlocks and InvalidToolArgsBlocks are only valid when a
-			// translator ran (StopReason is populated). The Anthropic-native
-			// passthrough path leaves respSummary zero; storing 0 there would
-			// look like a measured zero-tool turn rather than missing data.
+			// Only valid when a translator ran (StopReason populated) — the
+			// Anthropic-native passthrough path leaves respSummary zero, which
+			// must not look like a measured zero-tool turn.
 			ToolUseBlocks:         int32PtrIfKnown(int32(respSummary.ToolUseBlocks), respSummary.StopReason != ""),
 			InvalidToolArgsBlocks: int32PtrIfKnown(int32(respSummary.InvalidToolArgsBlocks), respSummary.StopReason != ""),
 			FailoverUsed:          boolPtrTrue(failoverUsed),
 			DegenerateShadow:      boolPtrOrNil(degShadow),
-			// (session_key, role) are the offline join key to spiral_shadow_events
-			// and session_pins. sessionKey is the bindRequestLogger digest — the
-			// SAME DeriveSessionKey(env, apiKeyID) the turn loop and spiral use, but
-			// computed unconditionally, so it is populated even on hard-pin turns
-			// and no-pin-store paths where routeRes.SessionKey stays zero. On the
-			// main_loop/tool_result turns spiral actually writes, the two are equal
-			// byte-for-byte. role mirrors routeRes.PinRole (set unconditionally) =
-			// roleForTier(catalog.TierFor(feats.Model)), the spiral join value.
+			// (session_key, role) is the offline join key to spiral_shadow_events
+			// and session_pins. sessionKey is the bindRequestLogger digest, computed
+			// unconditionally so it's populated even when routeRes.SessionKey stays
+			// zero (hard-pin / no-pin-store paths); equal byte-for-byte on the
+			// main_loop/tool_result turns spiral actually writes.
 			SessionKey: sessionKey[:],
 			Role:       routeRes.PinRole,
-			// Shadow-mode hysteresis instrumentation: the fresh scorer's pick +
-			// score vector (captured even on STAY, where obs.CandidateScores is
-			// NULL) and the loaded pin's age, so the downgrade opportunity is
-			// measurable offline. No routing action is taken on these.
+			// Shadow-mode hysteresis instrumentation: fresh scorer's pick + score
+			// vector (captured even on STAY) and the loaded pin's age, so the
+			// downgrade opportunity is measurable offline. No routing action taken.
 			FreshDecisionModel:   obs.FreshDecisionModel,
 			FreshCandidateScores: obs.FreshCandidateScores,
 			PinAgeSec:            int64PtrIf(stickyHit && pinAgeSec > 0, pinAgeSec),
-			// Shadow-mode tier-cap instrumentation: incoming tool-output size on
-			// tool_result turns (the structural triviality signal). NULL on turns
-			// with no trailing tool_result. No routing action is taken on it.
+			// Shadow-mode tier-cap instrumentation: tool-output size on
+			// tool_result turns. NULL elsewhere. No routing action taken.
 			ToolResultBytes: toolResultBytesPtr(inboundLastUser, tt),
-			// Credential attribution: which safe display key parts actually paid for
-			// the turn. Lets a shared subscription token (one Claude account, many
-			// seats) be detected via equal prefix/suffix across router_user_ids.
+			// Credential attribution: safe display key parts, so a shared
+			// subscription (one account, many seats) shows via equal
+			// prefix/suffix across router_user_ids.
 			CredentialKeyPrefix: credentialKeyPrefix,
 			CredentialKeySuffix: credentialKeySuffix,
 			CredentialSource:    credSource,
 		})
 	}
 
-	// Debit prepaid credits — no-op when billing is unwired (selfhosted).
-	// The cache-hit branch above already returned, so we only reach this
-	// point on a real upstream call.
+	// No-op when billing is unwired (selfhosted); only reached on a real
+	// upstream call since the cache-hit branch above already returned.
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 		if compactionHandoverOutcome.Invoked && !compactionHandoverOutcome.FallbackToFullHistory {
@@ -2607,17 +2422,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 	}
 
-	// Two-strike pin eviction: a session pinned to a model that keeps
-	// returning non-retryable 4xx wedges until the user manually
-	// /force-model's out. Increment a persistent counter and expire the
-	// pin once it reaches the threshold so the next turn re-routes.
-	// Successful turns reset the counter.
+	// Two-strike eviction: a session pinned to a model returning non-retryable
+	// 4xx wedges until manually /force-model'd out. Expires the pin after a
+	// persistent counter hits threshold; successful turns reset it.
 	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, routeRes.PinRole)
 
-	// One event per tool_use block that failed toolcheck validation —
-	// including blocks deterministic repair recovered. Queryable per
-	// model×provider, so beyond debugging it doubles as a per-upstream
-	// tool-calling-quality signal for future routing decisions.
+	// One event per tool_use block that failed toolcheck validation, including
+	// repaired ones — doubles as a per-model×provider tool-calling-quality signal.
 	for _, iss := range respSummary.ToolCallIssues {
 		log.Info("router.tool_call_invalid",
 			"tool_name", iss.ToolName,
@@ -2740,15 +2551,13 @@ func pinDecision(p sessionpin.Pin) router.Decision {
 	}
 }
 
-// bandSwapServed picks which half of a pinned band pair serves this sticky turn.
-// It returns the pin's anchor decision unchanged (the prior behavior) when the
-// swap head is disabled, the pin has no runner-up, the turn isn't a MainLoop,
-// the user-message-only embedding isn't available, prediction fails, or the
-// chosen model isn't safely servable this turn. Otherwise it predicts the next
-// engineer action from the current user-message embedding, collapses it to a
-// band, and serves the matching member of the pinned pair: LARGE -> the stronger
-// model, SMALL -> the cheaper one. The pin itself stays anchored (the caller
-// refreshes with the anchor), so the pair survives for the next turn's swap.
+// bandSwapServed picks which half of a pinned band pair serves this sticky
+// turn. Returns the pin's anchor unchanged when the swap head is disabled,
+// the pin has no runner-up, the turn isn't MainLoop, the embedding is
+// unavailable, prediction fails, or the chosen model isn't servable this
+// turn. Otherwise predicts the action from the embedding and serves the
+// matching band member (LARGE -> stronger, SMALL -> cheaper). The pin itself
+// stays anchored so the pair survives for the next turn's swap.
 func (s *Service) bandSwapServed(ctx context.Context, turnType turntype.TurnType, pin sessionpin.Pin, fresh router.Decision, hasImages bool, enabledProviders, excludedModels map[string]struct{}) router.Decision {
 	anchor := pinDecision(pin)
 	if s.bandSwap == nil || pin.PairedModel == "" || turnType != turntype.MainLoop {
@@ -2771,12 +2580,9 @@ func (s *Service) bandSwapServed(ctx context.Context, turnType turntype.TurnType
 	if band == bandswap.Small {
 		served = small
 	}
-	// Only honor a swap away from the anchor when the chosen model is actually
-	// servable this turn; otherwise fall back rather than route to a model the
-	// deploy can't run, that can't take this turn's images, that the
-	// context-window pre-filter excluded, or whose provider the request can't
-	// use. These mirror the sticky-pin guards turnloop already enforces on the
-	// anchor, so a swap can't reach a model the anchor path would have rejected.
+	// Only honor a swap when the chosen model is actually servable this turn —
+	// same guards turnloop already enforces on the anchor, so a swap can't
+	// reach a model the anchor path would have rejected.
 	if served.Model != pin.Model {
 		if _, available := s.availableModels[served.Model]; !available {
 			return anchor
@@ -2784,16 +2590,13 @@ func (s *Service) bandSwapServed(ctx context.Context, turnType turntype.TurnType
 		if hasImages && !catalog.AcceptsImages(served.Model) {
 			return anchor
 		}
-		// Context-window pre-filter deny set: the paired model may no longer fit
-		// this turn even when the anchor does. Serving it would trade a safe
-		// anchor for a guaranteed upstream context error.
+		// The paired model may no longer fit this turn even when the anchor
+		// does — serving it would trade a safe anchor for a context error.
 		if _, excluded := excludedModels[served.Model]; excluded {
 			return anchor
 		}
-		// Provider eligibility: an empty or unregistered provider fails dispatch
-		// outright, and a provider outside the request's enabled set (BYOK /
-		// installation filters) fails authenticated dispatch. nil enabledProviders
-		// means "no restriction" (boot behavior), matching turnloop's pin guard.
+		// nil enabledProviders means "no restriction" (boot behavior), matching
+		// turnloop's pin guard.
 		if _, registered := s.providers[served.Provider]; !registered {
 			return anchor
 		}
@@ -2881,11 +2684,9 @@ func externalKeysFromContext(ctx context.Context) []*auth.ExternalAPIKey {
 }
 
 // requestUsesNonDeploymentCreds reports whether the request would use BYOK
-// or client-supplied creds for upstream calls. The summarizer is wired with
-// deployment-level creds; calling it on a BYOK request would route prior
-// conversation context through the platform account, violating tenant data
-// boundaries. The orchestrator uses this to skip the summarizer and pass the
-// full prior history through unchanged.
+// or client-supplied creds. The summarizer is wired with deployment-level
+// creds, so calling it on a BYOK request would route conversation context
+// through the platform account — the orchestrator skips the summarizer here.
 func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers http.Header) bool {
 	if s.byokOnly {
 		return true
@@ -2907,9 +2708,8 @@ func (s *Service) requestUsesNonDeploymentCreds(ctx context.Context, headers htt
 // for this request (deployment key, BYOK, or client-supplied header).
 // surfaceProvider is the inbound wire-format's natural provider. A
 // client-supplied bearer header is treated as creds for that surface only —
-// never as a licence to enable other OpenAI-compat upstreams that share the
-// same Authorization header format. A router-key-authed request must rely on
-// BYOK; a header on such a request is for the inbound surface only.
+// never a licence to enable other OpenAI-compat upstreams sharing the same
+// Authorization format.
 func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvider string, headers http.Header) map[string]struct{} {
 	out := make(map[string]struct{}, len(s.providers))
 	if !s.byokOnly {
@@ -2931,64 +2731,43 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 		}
 		out[k.Provider] = struct{}{}
 	}
-	// A caller's Claude subscription enrolls Anthropic for routing
-	// eligibility, mirroring resolveAndInjectCredentials so the scorer can
-	// actually pick a Claude model. The dedicated X-Weave-Anthropic-Subscription
-	// header unambiguously carries only a subscription token, so — like
-	// credential injection — it is honored even on router-keyed requests, past
-	// the installation guard below. Without this a managed request carrying
-	// only a subscription token (no BYOK) leaves Anthropic out of the enabled
-	// set and the scorer fails with ErrNoEligibleProvider before any Claude
-	// turn runs. Anthropic-only: the token can't authenticate any other
-	// upstream. (The self-hosted inbound-bearer path is already covered by the
-	// ExtractClientCredentials block below.)
+	// A caller's Claude subscription enrolls Anthropic for routing eligibility
+	// (mirrors resolveAndInjectCredentials), honored even on router-keyed
+	// requests. Without this, a subscription-only request (no BYOK) leaves
+	// Anthropic out of the enabled set and the scorer fails with
+	// ErrNoEligibleProvider before any Claude turn runs.
 	if subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)) != nil {
 		out[providers.ProviderAnthropic] = struct{}{}
 	}
 	// Likewise, a Claude subscription bearer (sk-ant-oat-) in the inbound
-	// Authorization enrolls Anthropic even on router-keyed requests — the
-	// managed Claude Code path keeps its OAuth token there while the router key
-	// rides in X-Weave-Router-Key. Mirrors resolveAndInjectCredentials so the
-	// scorer can pick a Claude model the subscription will pay for. OAuth-subset
-	// only (ExtractClientCredentials gates OAuth to sk-ant-oat-): a general
-	// inbound API key still cannot enroll a provider on the router-key path.
+	// Authorization enrolls Anthropic even on router-keyed requests — Claude
+	// Code keeps its OAuth token there while the router key rides in
+	// X-Weave-Router-Key. OAuth-subset only: a general API key still can't
+	// enroll a provider on the router-key path.
 	if c := ExtractClientCredentials(providers.ProviderAnthropic, headers); c != nil && c.OAuth {
 		out[providers.ProviderAnthropic] = struct{}{}
 	}
-	// A caller's Codex (ChatGPT) subscription enrolls OpenAI for routing
-	// eligibility, mirroring the Anthropic block above so the scorer can pick an
-	// OpenAI model. The dedicated X-Weave-OpenAI-Subscription / -Account-ID
-	// headers unambiguously carry only a subscription, so they are honored even
-	// on router-keyed requests. Enrollment requires BOTH token and account-id
-	// (codexSubscriptionFromContext returns nil without the account-id) so the
-	// scorer can't pick OpenAI for a turn the Codex backend would 401 on for a
-	// missing ChatGPT-Account-ID. OpenAI-only: the JWT can't authenticate any
-	// other upstream.
+	// A caller's Codex (ChatGPT) subscription enrolls OpenAI, mirroring the
+	// Anthropic block above. Requires BOTH token and account-id
+	// (codexSubscriptionFromContext returns nil without it) so the scorer
+	// can't pick OpenAI for a turn the Codex backend would 401 on.
 	if codexSubscriptionFromContext(ctx) != nil {
 		out[providers.ProviderOpenAI] = struct{}{}
 	}
-	// And, mirroring the Anthropic inbound-bearer block, a Codex subscription
-	// bearer in the inbound Authorization (paired with ChatGPT-Account-ID)
-	// enrolls OpenAI even on router-keyed requests — the managed Codex CLI path
-	// keeps its ChatGPT JWT in Authorization while the router key rides in
-	// X-Weave-Router-Key. OAuth-subset only (ExtractClientCredentials flags
-	// OAuth only for a JWT + account-id pairing): a plain client API key still
-	// cannot enroll OpenAI on the router-key path.
+	// Mirroring the Anthropic inbound-bearer block, a Codex subscription bearer
+	// in Authorization (paired with ChatGPT-Account-ID) enrolls OpenAI even on
+	// router-keyed requests. OAuth-subset only: a plain API key still can't
+	// enroll OpenAI on the router-key path.
 	if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
 		out[providers.ProviderOpenAI] = struct{}{}
 	}
-	// Passthrough-eligible providers are surface-scoped: a provider
-	// registered without a deployment key joins the eligible set only when
-	// the inbound surface matches. Otherwise an Anthropic-surface request's
-	// `x-api-key` would flow to api.openai.com (and vice versa) when no
-	// BYOK / env keys are configured — a cross-provider credential leak
-	// even when upstream 401s.
-	//
-	// Skip when the request is router-key-authed (installationID set) and
-	// surfaceProvider isn't already enrolled via BYOK. Passthrough depends on
-	// the client's inbound auth header, but for router-key auth that header
-	// IS the router key — setAuth strips it, so the upstream call would
-	// dispatch unauthenticated and 401 instead of failing fast with a 503.
+	// Passthrough-eligible providers are surface-scoped: a provider without a
+	// deployment key joins the eligible set only when the inbound surface
+	// matches, else an Anthropic-surface `x-api-key` could leak to
+	// api.openai.com (and vice versa). Skipped for router-key-authed requests
+	// not already BYOK-enrolled: the inbound auth header IS the router key
+	// there (stripped by setAuth), so dispatch would 401 unauthenticated
+	// instead of failing fast with a 503.
 	if surfaceProvider != "" {
 		if _, ok := s.passthroughEligibleProviders[surfaceProvider]; ok {
 			_, alreadyByok := out[surfaceProvider]
@@ -3021,52 +2800,40 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 }
 
 // resolveAndInjectCredentials resolves credentials for provider and stashes
-// them on ctx, in precedence order: a caller's Claude subscription token
-// (Anthropic only) first, then BYOK, then a client-supplied header credential.
+// them on ctx, in precedence order: Claude subscription (Anthropic only),
+// then BYOK, then a client-supplied header credential.
 //
-// Subscription-first lets a caller's own Claude subscription pay for their
-// Claude turns. It arrives one of two ways, both honored even on router-keyed
-// requests: the dedicated X-Weave-Anthropic-Subscription header, or a
-// subscription OAuth bearer (sk-ant-oat-) in the inbound Authorization — the
-// shape Claude Code sends when routed through the Weave Router (router key in
-// X-Weave-Router-Key, its own subscription token left in Authorization).
+// Subscription-first lets a caller's own Claude subscription pay for Claude
+// turns. It arrives via the dedicated X-Weave-Anthropic-Subscription header,
+// or (Claude Code routed through the Weave Router) as a sk-ant-oat- bearer
+// left in Authorization while the router key rides in X-Weave-Router-Key —
+// both honored even on router-keyed requests.
 //
 // The inbound-bearer path is restricted to the OAuth subset: a general client
-// API key is still NOT extracted on the router-key path, since that would let
-// the client's inbound Anthropic key be forwarded to a different upstream
-// provider. The deployment-level env key on the provider client is the correct
-// fallback in that case.
+// API key is NOT extracted on the router-key path, since that would forward
+// the client's inbound key to a different upstream provider. The deployment
+// env key is the correct fallback there.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
 	// When the caller's Claude subscription is observed-exhausted, skip its OAuth
-	// token so resolution falls through to BYOK / the deployment Anthropic key
-	// (the turn then serves on the Weave key). Re-hitting a spent subscription
-	// would just 429 until its plan window resets. Scoped to Anthropic only — a
-	// Codex subscription on the same request must still pay for its OpenAI turns.
+	// token so resolution falls through to BYOK / the deployment key instead of
+	// re-hitting a token that will just 429. Anthropic only — a Codex
+	// subscription on the same request still pays for its OpenAI turns.
 	suppressClaudeSub := claudeSubscriptionSuppressed(ctx)
 	if provider == providers.ProviderAnthropic && !suppressClaudeSub {
-		// Subscription-first (precedence: subscription -> BYOK -> deployment). A
-		// caller's Claude subscription pays for their Claude turns ahead of any
-		// BYOK or deployment key. It arrives via the dedicated header on
-		// router-keyed requests, or — when not router-keyed — as the inbound
-		// Authorization bearer. Resolving it before the BYOK lookup keeps the
-		// precedence explicit here rather than relying on BYOK being absent off
-		// the router-key path (it is today, but a future BYOK-loading path must
-		// not silently outrank the subscription).
+		// Subscription-first (subscription -> BYOK -> deployment), resolved here
+		// explicitly rather than relying on BYOK being absent off the router-key
+		// path — a future BYOK-loading path must not silently outrank it.
 		if sub := subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)); sub != nil {
 			observability.FromContext(ctx).Info("Resolved Claude subscription credential",
 				"credential_source", sub.Source)
 			return context.WithValue(ctx, CredentialsContextKey{}, sub)
 		}
 		// A Claude subscription bearer (sk-ant-oat-) in the inbound Authorization
-		// is honored even on router-keyed requests. Claude Code routed through
-		// the Weave Router keeps its own subscription OAuth token in
-		// Authorization while the router key rides in X-Weave-Router-Key, so a
-		// managed CC turn pays from the caller's own plan without needing the
-		// dedicated header. Restricted to the OAuth subset: ExtractClientCredentials
-		// only sets OAuth for sk-ant-oat-, so a general inbound API key is still
-		// NOT forwarded on the router-key path (the cross-provider-leak guard
-		// below still applies to it).
+		// is honored even on router-keyed requests: Claude Code keeps its own
+		// OAuth token there while the router key rides in X-Weave-Router-Key.
+		// Restricted to the OAuth subset — a general API key is still not
+		// forwarded on the router-key path (cross-provider-leak guard below).
 		if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
 			observability.FromContext(ctx).Info("Resolved Claude subscription credential",
 				"credential_source", inbound.Source)
@@ -3074,22 +2841,16 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 		}
 	}
 	if provider == providers.ProviderOpenAI {
-		// Codex (ChatGPT) subscription-first (precedence: subscription -> BYOK ->
-		// deployment), mirroring the Anthropic block above. The dedicated headers
-		// carry token + account-id on router-keyed requests.
+		// Codex (ChatGPT) subscription-first, mirroring the Anthropic block above.
 		if sub := codexSubscriptionFromContext(ctx); sub != nil {
 			observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", sub.Source)
 			return context.WithValue(ctx, CredentialsContextKey{}, sub)
 		}
-		// A Codex subscription bearer (ChatGPT OAuth JWT paired with a
-		// ChatGPT-Account-ID) in the inbound Authorization is honored even on
-		// router-keyed requests. Codex CLI routed through the Weave Router keeps
-		// its own ChatGPT auth in Authorization while the router key rides in
-		// X-Weave-Router-Key, so a managed Codex turn pays from the caller's own
-		// plan without needing the dedicated header. Restricted to the OAuth
-		// subset: ExtractClientCredentials flags OAuth only for a JWT + account-id
-		// pairing, so a general inbound OpenAI API key is still NOT forwarded on
-		// the router-key path (the cross-provider-leak guard below still applies).
+		// A Codex subscription bearer (ChatGPT OAuth JWT + ChatGPT-Account-ID) in
+		// the inbound Authorization is honored even on router-keyed requests:
+		// Codex CLI keeps its ChatGPT auth there while the router key rides in
+		// X-Weave-Router-Key. OAuth subset only — a general API key is still not
+		// forwarded on the router-key path (cross-provider-leak guard below).
 		if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
 			observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", inbound.Source)
 			return context.WithValue(ctx, CredentialsContextKey{}, inbound)
@@ -3103,12 +2864,9 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	if creds == nil && !routerKeyed {
 		client := ExtractClientCredentials(provider, headers)
 		// A suppressed Claude subscription must not slip back in here: off the
-		// router-key path the spent sk-ant-oat bearer arrives in Authorization and
-		// ExtractClientCredentials would re-resolve it as the subscription, undoing
-		// the skip of the subscription-first block above. Drop it so resolution
-		// falls through to the deployment Anthropic key. Scoped to the Anthropic
-		// OAuth bearer — a real client API key (non-OAuth) and any Codex OAuth on an
-		// OpenAI route are untouched.
+		// router-key path the spent sk-ant-oat bearer would otherwise re-resolve
+		// as the subscription, undoing the skip above. Scoped to the Anthropic
+		// OAuth bearer only.
 		if suppressClaudeSub && provider == providers.ProviderAnthropic && client != nil && client.OAuth {
 			client = nil
 		}
@@ -3117,16 +2875,12 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	if creds != nil {
 		return context.WithValue(ctx, CredentialsContextKey{}, creds)
 	}
-	// A suppressed Claude subscription that resolved no replacement credential must
-	// have its credential EXPLICITLY cleared, not left as-is. On a router-keyed
-	// request (every managed customer) with no BYOK, none of the branches above
-	// resolve anything, so ctx still carries the subscription credential injected on
-	// the primary attempt — returning it re-sends the spent sk-ant-oat the
-	// suppression meant to drop (the exhaustion / 429 failover then re-hits the same
-	// 429 forever). The provider client only falls back to its deployment
-	// ANTHROPIC_API_KEY when ctx carries NO credential, so clear it. Safe because
-	// suppression is only ever set when a fallback key exists
-	// (anthropicFallbackKeyAvailable gates both callers).
+	// Explicitly clear rather than leave as-is: on a router-keyed request with
+	// no BYOK, none of the branches above resolve anything, so ctx would still
+	// carry the primary attempt's subscription credential — re-sending the
+	// spent sk-ant-oat the suppression meant to drop. The provider client only
+	// falls back to its deployment key when ctx carries NO credential. Safe
+	// because suppression is only ever set when a fallback key exists.
 	if suppressClaudeSub && provider == providers.ProviderAnthropic {
 		return clearCredentials(ctx)
 	}
@@ -3193,10 +2947,9 @@ func boolPtrTrue(v bool) *bool {
 }
 
 // int64PtrIf returns a pointer to v when known is true, else nil. Used for
-// pin_age_sec: callers gate on sticky_hit AND a positive age, so hard-pin turns
-// and no-pin turns (which carry sticky_hit but never compute a real age, leaving
-// it 0) stay NULL instead of recording a spurious measured zero that would skew
-// min-dwell analysis.
+// pin_age_sec, gated on sticky_hit AND a positive age, so hard-pin/no-pin
+// turns (sticky_hit true but age never computed) stay NULL instead of a
+// spurious zero that would skew min-dwell analysis.
 func int64PtrIf(known bool, v int64) *int64 {
 	if !known {
 		return nil
@@ -3205,19 +2958,14 @@ func int64PtrIf(known bool, v int64) *int64 {
 }
 
 // toolResultBytesPtr returns the incoming tool-output size for telemetry on a
-// tool_result turn, else nil. It takes an inbound LastUserMessage snapshot, NOT
-// the live env: a model-switch or compaction handover may call RewriteForHandover
-// and strip tool_result blocks from env before the telemetry write, which would
-// otherwise read 0 bytes on a genuine tool_result turn. The snapshot is taken
-// before runTurnLoop, alongside inboundToolCallCount / inboundSpiralSignals.
+// tool_result turn, else nil. Takes an inbound LastUserMessage snapshot, not
+// the live env: a handover may strip tool_result blocks from env before the
+// telemetry write, which would otherwise read 0 on a genuine tool_result turn.
 //
 // Gated on the classified turn type, not just info.HasToolResult: the
-// Anthropic/Gemini walkers report the last *user* message in the whole history,
-// so a request ending in a trailing assistant reply after a prior tool_result
-// would otherwise write a stale non-NULL value. turntype.ToolResult is itself
-// derived from LastKind=="tool_result" (the trailing message), so this ties the
-// column exactly to its meaning. NULL elsewhere so a 0 stays distinct from "no
-// tool output this turn".
+// Anthropic/Gemini walkers report the last *user* message in the whole
+// history, so a trailing assistant reply after a prior tool_result would
+// otherwise write a stale non-NULL value.
 func toolResultBytesPtr(inbound translate.LastUserMessageInfo, tt turntype.TurnType) *int32 {
 	if tt != turntype.ToolResult || !inbound.HasToolResult {
 		return nil
@@ -3243,10 +2991,9 @@ const degenerateOutputThreshold = 10
 // calls emitted, and a normal end_turn stop reason. A valid tool-only turn or
 // a brief legitimate end_turn must not trip this.
 //
-// stopReasonDemoted guards against false positives from cross-format demotions:
-// broken finish_reason="tool_calls" turns that the translator demotes to end_turn
-// (zero surviving tool blocks) must not fire the degenerate shadow — they are
-// handled translation failures, not genuinely empty completions.
+// stopReasonDemoted excludes cross-format demotions: a broken
+// finish_reason="tool_calls" turn the translator demotes to end_turn is a
+// handled translation failure, not a genuinely empty completion.
 func isDegenerateResponse(outputTokens, toolUseBlocks int, stopReason string, stopReasonDemoted bool) bool {
 	return outputTokens < degenerateOutputThreshold &&
 		toolUseBlocks == 0 &&
@@ -3268,17 +3015,11 @@ func (s *Service) fireTelemetry(p InsertTelemetryParams) {
 	}()
 }
 
-// emitBilling debits the customer for one upstream call and, on switch
-// turns that invoked the handover summarizer successfully, a second
-// debit for the summary call under a `_summary` request_id suffix. Safe
-// to call when billing is unwired or externalID is empty — both branches
-// no-op.
-//
-// Pricing for the summary turn is looked up from the canonical pricing
-// table by the summarizer's reported model name. Unknown model → zero
-// pricing → notional_cost=0 ledger row (still recorded so the audit
-// trail is complete even if the price table doesn't know about a
-// freshly-deployed handover model).
+// emitBilling debits the customer for one upstream call and, on switch turns
+// that invoked the handover summarizer, a second debit for the summary call
+// (`_summary` request_id suffix). No-op when billing is unwired or
+// externalID is empty. Unknown summarizer model prices as zero rather than
+// skipping the ledger row, keeping the audit trail complete.
 func (s *Service) emitBilling(ctx context.Context, requestID, externalID string, decision router.Decision, actPricing catalog.Pricing, routeRes turnLoopResult, in, out, cacheCreation, cacheRead int) {
 	if s.billing == nil || externalID == "" {
 		return
@@ -3300,9 +3041,8 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 		APIKeyID:           apiKeyID,
 	})
 
-	// The handover summary runs on the deployment/BYOK key (never the
-	// subscription token — see resolveSummarizerCreds), so it bills at full
-	// cost regardless of whether the main turn was subscription-served.
+	// The handover summary always runs on the deployment/BYOK key (never the
+	// subscription token), so it bills full cost regardless of the main turn.
 	if routeRes.Handover.Invoked && !routeRes.Handover.FallbackToFullHistory {
 		sumUsage := routeRes.Handover.SummaryUsage
 		if sumUsage.Model != "" && (sumUsage.InputTokens > 0 || sumUsage.OutputTokens > 0) {
@@ -3324,28 +3064,19 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 	}
 }
 
-// fireBilling debits the org's prepaid credit balance for one upstream
-// call. Synchronous so the ledger row is durable before handler return,
-// but uses context.Background() so cancellation by the customer doesn't
-// abort the write — the inference has already been served and we owe
-// ourselves the bookkeeping. 5s timeout matches fireTelemetry.
-//
-// On failure we log Error with full context for manual reconciliation;
-// the customer's response is unaffected because they already got it.
-// The accompanying OTel span lets log-based metrics alert on debit
-// failure rate without adding a prometheus dependency.
-//
-// Inputs are intentionally small — composition root wires up everything
-// the billing service needs; this hook only forwards token counts +
-// pricing + request metadata.
+// fireBilling debits the org's prepaid credit balance for one upstream call.
+// Synchronous so the ledger row is durable before handler return, but uses
+// context.Background() so customer cancellation doesn't abort the write —
+// the inference was already served, so the bookkeeping still owed. On
+// failure, logs Error for manual reconciliation; the customer's response is
+// unaffected since they already got it.
 func (s *Service) fireBilling(ctx context.Context, p billing.DebitInferenceParams) {
 	if s.billing == nil {
 		return
 	}
 	if p.OrganizationID == "" {
-		// Shouldn't happen on managed-mode authed requests; middleware
-		// already pulled installation.ExternalID. Log Debug so a synthetic
-		// test exercising the hook doesn't page on-call.
+		// Shouldn't happen on managed-mode authed requests. Debug level so a
+		// synthetic test exercising the hook doesn't page on-call.
 		observability.Get().Debug("Billing debit skipped: no organization_id on request")
 		return
 	}
@@ -3366,10 +3097,8 @@ func (s *Service) fireBilling(ctx context.Context, p billing.DebitInferenceParam
 	logBillingDebitFailure(ctx, p, err)
 }
 
-// logBillingDebitFailure emits a structured Error log and OTel attributes
-// so on-call alerting can fire on the resulting log/span rate without
-// requiring a new prometheus dependency. Counter-style metrics are
-// derivable from the structured log query in the dashboard panel.
+// logBillingDebitFailure emits a structured Error log so on-call alerting can
+// fire on the resulting log rate without a new prometheus dependency.
 func logBillingDebitFailure(ctx context.Context, p billing.DebitInferenceParams, err error) {
 	observability.Get().Error("router_billing_debit_failed",
 		"err", err,
@@ -3435,9 +3164,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 
-	// Keep the original bytes on strip failure: the strippers return a nil body
-	// alongside the error, and this path logs-and-continues rather than aborting,
-	// so overwriting body unconditionally would drop the request and break parse.
+	// Keep original bytes on strip failure: strippers return a nil body
+	// alongside the error, and this path logs-and-continues rather than aborts.
 	strippedBody, stripErr := translate.StripRoutingMarkerFromMessages(body)
 	if stripErr != nil {
 		log.Error("Failed to strip routing marker from OpenAI messages", "err", stripErr)
@@ -3482,12 +3210,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		"prompt_preview", preview(promptText, 200),
 	)
 
-	// Handle /force-model <model> and /unforce-model commands before routing.
-	// The command is stripped from env.body so the upstream never sees it.
-	// Session key is derived before extraction: ExtractForceModelCommand mutates
-	// env.body, and DeriveSessionKey falls back to prompt text when
-	// metadata.user_id is absent. Deriving after the strip would produce a key
-	// that mismatches subsequent turns where the unstripped message is present.
+	// Handle /force-model and /unforce-model before routing (stripped from
+	// env.body so the upstream never sees it). Session key is derived before
+	// extraction: DeriveSessionKey can fall back to prompt text, and deriving
+	// after the strip would mismatch subsequent turns with the unstripped message.
 	if s.pinStore != nil {
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
 			log.Info("ProxyOpenAIChatCompletion force-model command", "force_model_cmd", cmd)
@@ -3530,20 +3256,15 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header)
 
 	// Codex (ChatGPT) subscription passthrough: ProxyOpenAIResponses stashed the
-	// caller's original Responses body. Such turns skip the chat-completions
-	// routing marker + semantic cache below, and — when the routed decision is
-	// an OpenAI model — dispatch the verbatim Responses body to the Codex backend
-	// (see the codexPassthrough branch in the dispatch switch).
+	// caller's original Responses body. Such turns skip the routing marker +
+	// semantic cache below, and dispatch the verbatim body to the Codex
+	// backend when routed to an OpenAI model (see codexPassthrough branch).
 	//
-	// We deliberately do NOT force OpenAI-only routing here. enabledProviders
-	// (from enabledProvidersForRequest) already scopes the request to providers
-	// it can pay for: a lone Codex sub yields {OpenAI} on its own, but a caller
-	// presenting both a Codex and a Claude subscription gets {OpenAI, Anthropic}
-	// and routes freely across them — GPT turns bill the ChatGPT plan via the
-	// Codex backend, Claude turns bill the Claude plan via the translated path.
-	// Subscriptions are credentials scoped to the routed model, not a provider
-	// you pin. (No current client sends multiple subs, so this is behavior-
-	// preserving today; it unlocks the unified-provider client.)
+	// Deliberately not forcing OpenAI-only routing: enabledProviders already
+	// scopes to providers the caller can pay for, so a dual Codex+Claude
+	// subscription routes freely across both, each billing its own plan.
+	// Subscriptions are credentials scoped to the routed model, not a pinned
+	// provider.
 	codexBody, _ := ctx.Value(codexResponsesBodyContextKey{}).([]byte)
 	codexPassthrough := len(codexBody) > 0
 
@@ -3690,12 +3411,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// so single-binding upstream errors don't strand the routing-marker chunk
 	// on the wire when the upstream never produces a first byte.
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
-	// Append the one-click feedback thumbs as a trailing chunk on streaming
-	// answers (see ProxyMessages for the rationale). Transparent for
-	// non-streaming responses and when feedback is unwired. Skipped on the
-	// Responses-API path (w is a *ResponsesWriter): wrapping it would defeat
-	// maybeCaptureResponse's ResponsesWriter special-casing, so /v1/responses
-	// footers are a follow-up.
+	// Append the one-click feedback thumbs as a trailing chunk (see
+	// ProxyMessages). Skipped on the Responses-API path (w is a
+	// *ResponsesWriter): wrapping it would defeat maybeCaptureResponse's
+	// special-casing — /v1/responses footers are a follow-up.
 	clientSink := w
 	if _, isResponses := w.(*translate.ResponsesWriter); env.Stream() && !isResponses {
 		if footer := s.feedbackFooter(ClientIdentityFrom(ctx).ClientApp, routeRes.TurnType); footer != "" {
@@ -3712,19 +3431,14 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// (Codex client sees response.created via ResponsesWriter's lazy
 	// emitCreated on the first upstream byte instead).
 	if rw, ok := w.(*translate.ResponsesWriter); ok {
-		// A Codex-sub turn that routed to the Codex backend (decision == OpenAI)
-		// streams Responses SSE natively — forward it verbatim. A Codex-sub turn
-		// that routed elsewhere (Claude/OSS) leaves the writer in translate mode
-		// so its chat/Anthropic output is re-emitted as Responses.
+		// A Codex-sub turn routed to OpenAI streams Responses SSE natively
+		// (verbatim); routed elsewhere it stays in translate mode.
 		//
-		// Set once here (before Prelude) rather than per-attempt because Prelude's
-		// response.created suppression depends on passthrough being engaged before
-		// the first write. Safe across the dispatch loop: passthrough engages only
-		// when decision.Provider == OpenAI, which in the catalog is always a
-		// single-binding GPT model — there is no cross-format fallback binding to
-		// fail over to, and single-binding retry re-hits OpenAI (still verbatim).
-		// The per-attempt body below is independently gated on d.Provider == OpenAI.
-		// If a GPT model ever gains a cross-format fallback, gate this per-attempt.
+		// Set once here (before Prelude), not per-attempt: response.created
+		// suppression depends on passthrough being engaged before the first
+		// write. Safe because decision.Provider == OpenAI is always a
+		// single-binding GPT model with no cross-format fallback to retry
+		// into. If a GPT model ever gains a fallback, gate this per-attempt.
 		if codexPassthrough && decision.Provider == providers.ProviderOpenAI {
 			rw.SetPassthrough()
 		}
@@ -3749,17 +3463,14 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		marker = ""
 	}
 	_, isResponses := w.(*translate.ResponsesWriter)
-	// markerSink wraps sink with an OpenAIRoutingMarkerWriter that emits
-	// the routing-marker chunk + HTTP 200 eagerly (Prelude). Skipped when
-	// the inbound is /v1/responses (ResponsesWriter handles its own badge).
-	// Called per attempt so retries re-emit into a fresh preludeBuffer state.
+	// makeMarkerSink wraps sink with an OpenAIRoutingMarkerWriter emitting the
+	// marker chunk + HTTP 200 eagerly (skipped for /v1/responses). Called per
+	// attempt so retries re-emit into a fresh preludeBuffer state.
 	//
-	// Wrapped even when marker == "": the wrapper is the OpenAI→openaicompat
-	// passthrough's only ArmOutputProgress provider (no translator parses the
-	// same-format stream), and the empty-marker Prelude still flips the writer's
-	// streaming flag so the provider client can arm the output-progress watchdog.
-	// An empty marker emits a harmless ": routing complete" SSE comment, not a
-	// content chunk.
+	// Wrapped even when marker == "": it's the only ArmOutputProgress provider
+	// for the OpenAI→openaicompat passthrough, and the empty-marker Prelude
+	// still flips the streaming flag so the watchdog can arm (emits a harmless
+	// ": routing complete" comment, not a content chunk).
 	makeMarkerSink := func() http.ResponseWriter {
 		// Codex passthrough streams raw Responses SSE; wrapping it in a
 		// chat-completions marker writer would inject a foreign frame (and the
@@ -3780,27 +3491,21 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	var extractor *otel.UsageExtractor
 
 	var attempt dispatchAttempt
-	// Dispatch keys off the provider's translation family, not an enumerated set
-	// of provider names, so a newly-added OpenAI-compat provider routes here the
-	// moment it has a ProviderFamilies entry (see internal/providers/provider.go).
+	// Dispatch keys off the provider's translation family, not a hardcoded name
+	// list, so a new OpenAI-compat provider routes here as soon as it has a
+	// ProviderFamilies entry (see internal/providers/provider.go).
 	switch providers.FamilyFor(decision.Provider) {
 	case providers.FamilyOpenAICompat:
 		// Prep rebuilt per attempt: targetIsOpenRouter(opts) gates four
-		// OpenRouter-only body fields (provider hint, reasoning, system
-		// reminder, tool-temp override) that the Fireworks/DeepInfra/
-		// Bedrock primary should not see. On failover to OpenRouter the
-		// body must be re-emitted with TargetProvider = openrouter.
+		// OpenRouter-only body fields that Fireworks/DeepInfra/Bedrock should
+		// not see. On failover to OpenRouter the body must be re-emitted.
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
 			var prep providers.PreparedRequest
 			if codexPassthrough && d.Provider == providers.ProviderOpenAI {
-				// Dispatch the caller's ORIGINAL Responses body (untranslated)
-				// to the Codex backend, rewriting only the model to the routed
-				// pick. The OpenAI client switches to chatgpt.com/backend-api/
-				// codex when it sees the Codex subscription credential. Gated on
-				// d.Provider == OpenAI: a Codex-sub turn that routes to an OSS
-				// provider in this case (OpenRouter/Fireworks/…) must NOT ship a
-				// verbatim Responses body there — it gets the translated chat
-				// body below, like any other turn.
+				// Dispatch the caller's ORIGINAL Responses body (untranslated) to
+				// the Codex backend, rewriting only the model. Gated on
+				// d.Provider == OpenAI: a Codex-sub turn routed to an OSS
+				// provider gets the translated chat body below instead.
 				outBody, setErr := sjson.SetBytes(codexBody, "model", d.Model)
 				if setErr != nil {
 					log.Error("Failed to set routed model on Codex Responses body", "err", setErr, "decision_model", d.Model)
@@ -3827,19 +3532,13 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 				preludeBuf.Seal()
 			}
 			err := p.Proxy(actx, d, prep, proxyWriter, r)
-			// Post-commit streaming error: the routing-marker chunk has
-			// already been flushed past the buffer to the wire; render
-			// the upstream error as an in-stream `data: {...}` frame
-			// instead of letting dispatch's flushErr append a corrupting
-			// JSON envelope. Pre-commit errors are handled by
-			// dispatchWithFallback (Discard + flushErr).
-			// Gate on THIS attempt being the verbatim Codex backend, not on
-			// codexPassthrough alone: post-Phase-1 that flag only means a Codex
-			// body was stashed, and a Codex-sub turn can route to Claude/OSS,
-			// which streams through the translating ResponsesWriter and still
-			// needs an error frame just like any non-sub Responses turn. Only the
-			// verbatim Codex attempt already delivered the upstream's own
-			// Responses error event, so only it skips the chat-completions frame.
+			// Post-commit: bytes already on the wire, render as an in-stream
+			// frame instead of a corrupting envelope (pre-commit goes through
+			// dispatchWithFallback). Gate on THIS attempt being the verbatim
+			// Codex backend, not codexPassthrough alone: a Codex-sub turn can
+			// still route to Claude/OSS through the translating ResponsesWriter,
+			// which needs its own error frame — only the verbatim Codex attempt
+			// already delivered the upstream's own Responses error event.
 			verbatimCodex := codexPassthrough && d.Provider == providers.ProviderOpenAI
 			if err != nil && !verbatimCodex && env.Stream() && preludeBuf.Committed() {
 				err = emitOpenAISSEErrorEvent(sink, err)
@@ -3930,8 +3629,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	primaryProvider := decision.Provider
 	var winnerIdx int
 	winnerIdx, proxyErr = s.dispatchWithFallback(ctx, failoverInputs{
-		// contentSink routes the failover-exhaustion error envelope through the
-		// content-capture writer; it is the raw w when capture is off.
+		// contentSink is the raw w when capture is off.
 		w:               contentSink,
 		buf:             preludeBuf,
 		initialDecision: decision,
@@ -3945,14 +3643,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 	decision.Provider = finalProvider
 
-	// Re-resolve credentials for the binding that actually served the turn.
-	// During failover, each attempt gets its own per-attempt context with
-	// potentially different credentials. Update ctx so credentialKeyParts
-	// reads the correct key parts for telemetry.
+	// Re-resolve credentials for the binding that actually served — each
+	// failover attempt gets its own context with potentially different creds.
 	ctx = resolveAndInjectCredentials(ctx, finalProvider, r.Header)
 
-	// Re-resolve actual pricing for the binding that actually served the
-	// request — see ProxyMessages for the rationale.
+	// Re-resolve pricing for the binding that actually served (see ProxyMessages).
 	if actBindingPricing, ok := catalog.PriceFor(finalProvider, decision.Model); ok {
 		actPricing = actBindingPricing
 	}
@@ -4095,9 +3790,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			FreshDecisionModel:   openaiObs.FreshDecisionModel,
 			FreshCandidateScores: openaiObs.FreshCandidateScores,
 			PinAgeSec:            int64PtrIf(stickyHit && pinAgeSec > 0, pinAgeSec),
-			// Shadow-mode tier-cap instrumentation: incoming tool-output size on
-			// tool_result turns (the structural triviality signal). NULL on turns
-			// with no trailing tool_result. No routing action is taken on it.
+			// Shadow-mode tier-cap instrumentation: tool-output size on
+			// tool_result turns. NULL elsewhere. No routing action taken.
 			ToolResultBytes: toolResultBytesPtr(inboundLastUser, tt),
 			// Credential attribution — see the Anthropic-path write site.
 			CredentialKeyPrefix: credentialKeyPrefix,
@@ -4122,16 +3816,12 @@ func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.
 		return fmt.Errorf("translate responses request: %w", err)
 	}
 	// Codex (ChatGPT) subscription: stash the caller's ORIGINAL Responses body.
-	// A turn that resolves a Codex sub AND routes to the Codex backend
-	// (decision == OpenAI) is dispatched verbatim and streamed back with the
-	// ResponsesWriter in passthrough mode (set post-routing in
-	// ProxyOpenAIChatCompletion), so reasoning/tool/encrypted content is never
-	// lossily re-translated. A Codex-sub turn that routes elsewhere
-	// (Claude/OSS — possible once both subs are presented) falls through to the
-	// normal chat->Responses translation, exactly like a non-sub Responses turn.
-	// Either way the writer is a ResponsesWriter; only the per-decision mode
-	// differs. Routing, billing (5% subscription fee), and telemetry are reused
-	// via ProxyOpenAIChatCompletion (chatBody feeds routing only).
+	// A turn that resolves a Codex sub and routes to OpenAI is dispatched
+	// verbatim (passthrough mode, set post-routing) so reasoning/tool/encrypted
+	// content is never lossily re-translated. Routed elsewhere, it falls
+	// through to normal chat->Responses translation like any Responses turn.
+	// Routing, billing, and telemetry are reused via ProxyOpenAIChatCompletion
+	// (chatBody feeds routing only).
 	if codexResponsesRequest(ctx, r.Header) {
 		ctx = context.WithValue(ctx, codexResponsesBodyContextKey{}, body)
 	}
@@ -4144,14 +3834,11 @@ func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.
 	// call log's io.request_body matches the Responses-format response body
 	// (ProxyOpenAIChatCompletion otherwise sees the translated chatBody).
 	deferredLog.requestBody = body
-	// Prelude (response.created emit) deferred to ProxyOpenAIChatCompletion.
-	// It knows the post-routing decision and the binding count; only fires
-	// eagerly when the request is single-binding (no failover possible).
-	// Multi-binding requests rely on ResponsesWriter.Write's lazy
-	// emitCreated on first upstream byte instead — losing #220's TTFB win
-	// on /v1/responses for multi-binding models, but preserving the failover
-	// invariant that nothing reaches the client before the upstream
-	// commits.
+	// Prelude (response.created emit) deferred to ProxyOpenAIChatCompletion,
+	// which knows the post-routing decision and binding count: fires eagerly
+	// only when single-binding, else relies on ResponsesWriter's lazy
+	// emitCreated on first byte — preserving the failover invariant that
+	// nothing reaches the client before the upstream commits.
 	proxyErr := s.ProxyOpenAIChatCompletion(ctx, chatBody, wrapper, r)
 	if proxyErr != nil {
 		// If the Responses stream already committed (response.created is on the

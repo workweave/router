@@ -14,10 +14,8 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// INVARIANTS:
-//   - e.body is immutable after parse. Same-format emit uses gjson/sjson overrides
-//     on e.body with no cloning. Cross-format emit reads via gjson, writes via jsonWriter.
-//   - Field accessors use gjson directly on e.body.
+// INVARIANTS: e.body is immutable after parse. Same-format emit overrides it via
+// gjson/sjson with no cloning; cross-format emit reads via gjson, writes via jsonWriter.
 
 // ErrNotJSONObject is returned when the request body is not a valid JSON object.
 var ErrNotJSONObject = errors.New("request body must be a JSON object")
@@ -33,58 +31,38 @@ const (
 // EmitOptions parameterizes output-body construction.
 type EmitOptions struct {
 	TargetModel string
-	// TargetProvider is the resolved upstream provider name (the
-	// providers.Provider* constant, e.g. "openrouter", "fireworks",
-	// "deepinfra", "bedrock"). OpenAI-compat emission keys provider-
-	// specific hints (the OpenRouter `provider`/`reasoning` body fields,
-	// tool-turn temperature override, system reminders) on this so the
-	// same model slug routed to a non-OpenRouter binding (post SOC 2
-	// isolation) doesn't carry OpenRouter-only fields the direct upstream
-	// rejects with 400. Empty falls back to model-slug behavior for
-	// callers that don't plumb a provider through yet (handover summary).
+	// TargetProvider is the resolved upstream provider (providers.Provider*,
+	// e.g. "openrouter", "fireworks"). Gates OpenRouter-only body fields
+	// (provider/reasoning hints, tool-turn temp override) so a model slug
+	// rebound to a non-OpenRouter upstream doesn't send fields it 400s on.
+	// Empty falls back to model-slug behavior for callers not yet plumbing it.
 	TargetProvider     string
 	Capabilities       router.ModelSpec
 	IncludeStreamUsage bool
-	// SessionAffinity is a stable per-conversation identifier forwarded to
-	// the upstream as a prompt-cache stickiness hint so a session's turns
-	// land on the same serverless replica (where the prefix KV-cache lives)
-	// rather than being load-balanced to a cold one. The knob differs per
-	// upstream — see applySessionAffinity. Empty disables the hint.
+	// SessionAffinity is a per-conversation ID forwarded as a prompt-cache
+	// stickiness hint so a session lands on the same warm replica instead of
+	// a cold one. Knob differs per upstream — see applySessionAffinity.
 	SessionAffinity string
-	// ModelSwitched reports that the model serving this turn differs from the
-	// one that served the previous turn in the same session. Anthropic
-	// thinking-block `signature`s are only valid for the model that produced
-	// them, so historical thinking blocks carried over from a different model
-	// (after auto-routing or a /force-model switch) make Anthropic reject the
-	// request with `Invalid signature in thinking block` (400). When set, the
-	// Anthropic emit path strips thinking blocks from the conversation so the
-	// stale signatures never reach the upstream.
+	// ModelSwitched reports the serving model changed since the last turn.
+	// Thinking-block signatures are only valid for the model that produced
+	// them, so carried-over blocks make Anthropic 400 with "Invalid signature
+	// in thinking block". When set, the emit path strips thinking blocks.
 	ModelSwitched bool
-	// ForceReasoningEffort, when non-empty ("low"/"medium"/"high"), overrides the
-	// request-derived reasoning effort for reasoning-capable targets (gpt-5.x via
-	// the Responses API, gemini-3.x via thinkingConfig). Set by the proxy's
-	// escalate-on-failure policy: gpt-5.x serves "low" by default and "high" after
-	// an observed failed/no-progress turn; gemini is pinned "low" (effort-immune on
-	// hard tasks). Empty leaves the request-derived effort untouched, so the
-	// feature is a no-op unless the policy is enabled.
+	// ForceReasoningEffort, when non-empty, overrides the request-derived
+	// reasoning effort for gpt-5.x (Responses API) / gemini-3.x (thinkingConfig).
+	// Set by the proxy's escalate-on-failure policy: gpt-5.x starts "low", goes
+	// "high" after a failed/no-progress turn; gemini stays "low" (effort-immune).
 	ForceReasoningEffort string
-	// EnableExtendedContext injects the context-1m-2025-08-07 Anthropic beta on
-	// the upstream request so CapExtendedContext targets (Opus 4.6+, Sonnet 4.6)
-	// serve at their 1M window instead of the 200K default. The proxy sets this
-	// for every extended-context-capable Anthropic dispatch so a large request is
-	// never sent to a model whose default window it would immediately overflow
-	// (Anthropic 400 "prompt is too long"). Below 200K input it is a no-op:
-	// standard pricing, no behavior change. deriveAnthropicHeaders gates the
-	// actual injection on the target's CapExtendedContext support.
+	// EnableExtendedContext injects the context-1m-2025-08-07 beta so
+	// CapExtendedContext targets (Opus 4.6+, Sonnet 4.6) get a 1M window
+	// instead of 200K, avoiding a 400 "prompt is too long" on large requests.
+	// No-op below 200K input. deriveAnthropicHeaders gates on CapExtendedContext.
 	EnableExtendedContext bool
-	// DowngradeGeminiValidatedToAuto, when true, makes the Gemini emit path emit
-	// functionCallingConfig.mode=AUTO in place of the mode=VALIDATED it would
-	// otherwise set for a tools-with-no-forced-choice Gemini 3.x request. Under
-	// VALIDATED, Gemini compiles every tool's parameter schema into a decode-time
-	// grammar; a schema it can't compile makes it reject the whole request with a
-	// generic 400 INVALID_ARGUMENT. The proxy sets this on a one-shot retry after
-	// such a 400 — AUTO skips grammar compilation, so the same tools survive. A
-	// no-op when the request would not have used VALIDATED.
+	// DowngradeGeminiValidatedToAuto emits functionCallingConfig.mode=AUTO
+	// instead of VALIDATED for Gemini 3.x. VALIDATED compiles tool schemas into
+	// a decode-time grammar and 400s INVALID_ARGUMENT if one won't compile; the
+	// proxy sets this on a one-shot retry after such a 400 since AUTO skips
+	// compilation. No-op when VALIDATED wouldn't have been used.
 	DowngradeGeminiValidatedToAuto bool
 }
 
@@ -153,10 +131,8 @@ func (e *RequestEnvelope) MetadataUserID() string {
 	return gjson.GetBytes(e.body, "metadata.user_id").String()
 }
 
-// clientSessionEmbeddedUUID matches a UUID following an explicit "session_" or
-// "session-" or "sessionId=" / "sessionId:" marker. Lets us pull the bare
-// session UUID out of bundled identifiers like Claude Code's
-// "user_<account>_account__session_<session>".
+// clientSessionEmbeddedUUID pulls the bare session UUID out of bundled
+// identifiers like Claude Code's "user_<account>_account__session_<session>".
 var clientSessionEmbeddedUUID = regexp.MustCompile(
 	`(?i)session[_\-]?(?:id[=:])?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`,
 )
@@ -169,24 +145,12 @@ var clientSessionTrailingUUID = regexp.MustCompile(
 
 const clientSessionIDMaxLen = 64
 
-// ClientSessionID returns the calling client's own session identifier, suitable
-// for log correlation. Unlike the internal session_key (a sha256 over apiKeyID
-// + user_id used for sticky-pin lookup), this is the value the client knows
-// itself by — so running `/status` in Claude Code (or the equivalent in
-// OpenCode / Codex) yields a string the operator can grep for in router logs.
-//
-// Per-ingress source:
-//   - Anthropic (`metadata.user_id`): Claude Code packs the bundle
-//     "user_<account>_account__session_<session>"; we pull the trailing UUID.
-//   - OpenAI (`user`): Codex / OpenCode put the session UUID here directly;
-//     same extraction handles wrapped forms.
-//   - Gemini: no canonical field today; we still check `metadata.user_id` so a
-//     wrapper that sets it gets picked up.
-//
-// If the raw value contains a UUID-shaped session marker we return the bare
-// UUID; otherwise we return the raw value truncated to clientSessionIDMaxLen
-// so a free-form string still grep-correlates without bloating log lines.
-// Returns "" when nothing usable is set.
+// ClientSessionID returns the calling client's own session identifier for log
+// correlation — unlike the internal session_key (sha256 of apiKeyID+user_id),
+// this is the value visible to the client itself (e.g. via `/status`).
+// Extracted from metadata.user_id (Anthropic/Gemini) or user (OpenAI); a
+// UUID-shaped marker is pulled out bare, otherwise the raw value is truncated
+// to clientSessionIDMaxLen. Returns "" when nothing usable is set.
 func (e *RequestEnvelope) ClientSessionID() string {
 	var raw string
 	switch e.format {
@@ -201,10 +165,9 @@ func (e *RequestEnvelope) ClientSessionID() string {
 	if raw == "" {
 		return ""
 	}
-	// Claude Code (post 0.x) packs the identifier as a stringified JSON object
-	// like {"device_id":"…","session_id":"<uuid>","account_id":"…"}. Probe the
-	// well-known session-id keys first; only fall through to regex on the raw
-	// string when no key matches.
+	// Claude Code packs the identifier as a stringified JSON object like
+	// {"device_id":"…","session_id":"<uuid>","account_id":"…"}; probe known
+	// keys before falling back to regex.
 	if id := jsonSessionIDField(raw); id != "" {
 		return id
 	}
@@ -220,10 +183,8 @@ func (e *RequestEnvelope) ClientSessionID() string {
 	return raw
 }
 
-// jsonSessionIDField returns the value of the first matching session-id field
-// when raw is a JSON object, else "". Order matches observed client shapes:
-// Claude Code uses "session_id"; OpenAI surfaces have variously used
-// "sessionId", and chat-style clients sometimes use "conversation_id".
+// jsonSessionIDField returns the first matching session-id field when raw is
+// a JSON object, else "". Key order matches observed client shapes.
 func jsonSessionIDField(raw string) string {
 	if len(raw) == 0 || raw[0] != '{' {
 		return ""
@@ -259,10 +220,9 @@ type LastUserMessageInfo struct {
 	HasToolResult   bool
 	ToolResultCount int
 	Text            string
-	// ToolResultBytes is the summed raw-JSON byte size of the trailing turn's
-	// tool_result payload(s) — the incoming tool-output size. A cheap structural
-	// triviality proxy for the right-sizing tier-cap shadow (tiny tool_result →
-	// likely-trivial continuation). 0 when no tool_result is present.
+	// ToolResultBytes sums the trailing turn's tool_result payload size — a
+	// cheap triviality proxy for the tier-cap shadow (tiny result → likely
+	// trivial continuation). 0 when no tool_result is present.
 	ToolResultBytes int
 }
 
@@ -310,13 +270,11 @@ func (e *RequestEnvelope) HasTools() bool {
 	return r.Int() > 0
 }
 
-// ToolValidator compiles the inbound Anthropic tool definitions
-// (tools[].input_schema) into a toolcheck.Validator, used by the response
-// translators to validate and repair model-emitted tool calls. Returns nil
-// for non-Anthropic source formats or when the request carries no tools —
-// translators treat a nil validator as syntax-check-only. Compilation is
-// amortized across turns via toolcheck's LRU (agent sessions resend a
-// byte-identical tools block every turn).
+// ToolValidator compiles inbound Anthropic tool definitions into a
+// toolcheck.Validator for validating/repairing model-emitted tool calls.
+// Returns nil for non-Anthropic formats or no tools (translators treat nil as
+// syntax-check-only). Compilation is cached via toolcheck's LRU since agent
+// sessions resend a byte-identical tools block every turn.
 func (e *RequestEnvelope) ToolValidator() *toolcheck.Validator {
 	if e.format != FormatAnthropic {
 		return nil
@@ -328,11 +286,10 @@ func (e *RequestEnvelope) ToolValidator() *toolcheck.Validator {
 	return toolcheck.CompileCached([]byte(tools.Raw))
 }
 
-// HasImages reports whether any message carries image (or other inline media)
-// content. Used to keep image-bearing turns off text-only models, which reject
-// image parts with a 4xx (e.g. DeepInfra's "does not accept image input" on
-// GLM-5.1). A single image anywhere in the history is enough — clients like
-// Cursor re-send earlier pasted screenshots on every subsequent turn.
+// HasImages reports whether any message carries image content. Used to keep
+// such turns off text-only models, which 4xx on image parts (e.g. DeepInfra's
+// GLM-5.1). Checks the whole history since clients like Cursor re-send earlier
+// screenshots on every turn.
 func (e *RequestEnvelope) HasImages() bool {
 	switch e.format {
 	case FormatAnthropic:
@@ -381,27 +338,23 @@ type EmitOverrides struct {
 	DefaultMaxTokensValue   int64
 	InjectStreamUsage       bool
 	StripThinkingBlocks     bool
-	// SanitizeToolUseIDs rewrites tool_use.id / tool_use_id values that contain
-	// characters outside ^[a-zA-Z0-9_-]+$. Always set when targeting Anthropic:
-	// non-Anthropic upstreams (e.g. Kimi-k2.6) emit IDs like "functions.Read:0"
-	// that Anthropic rejects when the history is forwarded back to it.
+	// SanitizeToolUseIDs rewrites tool_use.id / tool_use_id values outside
+	// ^[a-zA-Z0-9_-]+$. Always set for Anthropic targets: upstreams like
+	// Kimi-k2.6 emit IDs (e.g. "functions.Read:0") Anthropic rejects on replay.
 	SanitizeToolUseIDs bool
-	// StripThoughtSignature removes the `thought_signature` field from every
-	// messages[*].content[*] block. Set when targeting Anthropic: Gemini 3.x
-	// signatures are foreign to Anthropic, and Anthropic rejects unknown block
-	// fields with a non-retryable 400.
+	// StripThoughtSignature removes `thought_signature` from content blocks.
+	// Set for Anthropic targets: the field is Gemini-only and Anthropic 400s
+	// on unknown block fields.
 	StripThoughtSignature bool
 	// RewriteThinkingAdaptive replaces the inbound thinking block with
 	// {"type":"adaptive"} and sets output_config.effort. Used when the target
 	// model only accepts adaptive thinking (claude-opus-4-6+ / sonnet-4-6+).
 	RewriteThinkingAdaptive bool
 	OutputConfigEffort      string
-	// ClampEffortXhighTo downgrades a caller-supplied effort level of "xhigh"
-	// (top-level `effort` and `output_config.effort`) to this value. Set when
-	// the target model's effort menu lacks xhigh (router.CapXhighEffort): a
-	// mid-session re-route from opus to sonnet otherwise forwards the client's
-	// xhigh verbatim and Anthropic rejects the request with a non-retryable
-	// 400, killing the session.
+	// ClampEffortXhighTo downgrades a caller-supplied "xhigh" effort (`effort`
+	// and `output_config.effort`) to this value. Set when the target lacks
+	// xhigh (router.CapXhighEffort) so a mid-session re-route doesn't forward
+	// an effort level Anthropic rejects with a session-killing 400.
 	ClampEffortXhighTo string
 }
 
@@ -771,14 +724,10 @@ func encodeJSONStringNoHTMLEscape(s string) ([]byte, error) {
 // injected in cross-format responses.
 var routingMarkerPattern = regexp.MustCompile(`✦ \*\*Weave Router\*\* → [^\n]*\n\n`)
 
-// feedbackFooterPattern matches the rating footer appended at the end of a
-// streamed response (see proxy.Service.feedbackFooter). It absorbs everything
-// from the italic sentinel to the end of the footer line (the optional-note
-// example trails the commands, so a fixed end-anchor won't do). Leading
-// newlines are absorbed so the blank-line separator is removed with the footer.
-// Stripping on ingress keeps the footer out of upstream context on later turns,
-// the same failure mode the routing marker had. Keep the sentinel in sync with
-// proxy.feedbackFooterText.
+// feedbackFooterPattern matches the rating footer appended to streamed
+// responses (see proxy.Service.feedbackFooter), absorbing leading newlines
+// and everything to end of line since there's no fixed end-anchor. Keep the
+// sentinel in sync with proxy.feedbackFooterText.
 var feedbackFooterPattern = regexp.MustCompile("\\n*_Weave Router feedback:_ [^\\n]*")
 
 // StripRoutingMarkerFromMessages removes the routing-marker snippet from every
@@ -1046,11 +995,9 @@ const (
 	effortXhigh = "xhigh"
 )
 
-// effortForBudget maps the legacy thinking.budget_tokens value onto the
-// adaptive output_config.effort tier. The thresholds match Anthropic's
-// published guidance: ≤4k tokens is "low" headroom, ≤16k is "medium", and
-// anything larger is "high". Zero or missing budget defaults to "medium" so
-// pre-rollout clients keep working.
+// effortForBudget maps legacy thinking.budget_tokens onto an adaptive
+// output_config.effort tier per Anthropic's guidance (≤4k low, ≤16k medium,
+// else high). Missing/zero budget defaults to "medium".
 func effortForBudget(budgetTokens int64) string {
 	switch {
 	case budgetTokens <= 0:
@@ -1103,10 +1050,8 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		}
 	}
 
-	// Adaptive targets keep caller-supplied effort, but the menu differs per
-	// model: "xhigh" is opus-4-7+ only. Clamp to the highest level every
-	// adaptive model accepts so a re-route never manufactures an invalid
-	// request out of a valid one.
+	// "xhigh" is opus-4-7+ only; clamp to the max every adaptive model accepts
+	// so a re-route can't turn a valid request into an invalid one.
 	if opts.Capabilities.Supports(router.CapAdaptiveThinking) && !opts.Capabilities.Supports(router.CapXhighEffort) {
 		ov.ClampEffortXhighTo = effortMax
 	}
@@ -1115,11 +1060,8 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		ov.StripThinkingBlocks = true
 	}
 
-	// On a mid-session model switch, any thinking blocks carried over in the
-	// conversation history were signed by the previous model; Anthropic rejects
-	// them with `Invalid signature in thinking block` (400). Strip them so the
-	// stale signatures never reach the upstream. The new model produces its own
-	// thinking fresh, so nothing is lost beyond cross-model reasoning continuity.
+	// Carried-over thinking blocks were signed by the previous model; strip
+	// them so stale signatures don't 400 against the new one.
 	if opts.ModelSwitched {
 		ov.StripThinkingBlocks = true
 	}

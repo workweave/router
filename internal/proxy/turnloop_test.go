@@ -24,10 +24,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// fakeSummarizer is a deterministic handover.Summarizer for tests.
-// summary is returned verbatim on Summarize; if errOnCall is non-nil it
-// is returned instead. calls counts invocations so tests can assert the
-// adapter was reached.
+// fakeSummarizer is a deterministic handover.Summarizer: returns summary,
+// or errOnCall if set. calls counts invocations.
 type fakeSummarizer struct {
 	summary   string
 	errOnCall error
@@ -44,9 +42,8 @@ func (f *fakeSummarizer) Summarize(ctx context.Context, env *translate.RequestEn
 
 func (f *fakeSummarizer) Provider() string { return providers.ProviderAnthropic }
 
-// usageProvider is a fakeProvider that writes an Anthropic non-streaming
-// response with the configured token-usage payload so the OTel
-// UsageExtractor surfaces non-zero usage to the cache-stats writeback.
+// usageProvider writes an Anthropic response with the configured token
+// usage so the OTel UsageExtractor surfaces it to the cache-stats writeback.
 type usageProvider struct {
 	in       int
 	out      int
@@ -92,9 +89,7 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
-// largeBody yields ~10k estimated input tokens via a long user prompt;
-// the planner's EV math scales with feats.Tokens so we need a sizable
-// prompt to push expected savings comfortably over the threshold.
+// largeBody yields ~10k input tokens so the planner's EV math clears threshold.
 func largeBody(t *testing.T) []byte {
 	t.Helper()
 	prompt := strings.Repeat("aaaa ", 8000) // ~10k tokens
@@ -105,10 +100,9 @@ func largeBody(t *testing.T) []byte {
 	}`)
 }
 
-// largeMultiTurnBody yields a ~10k-token conversation of six non-system
-// messages so a trim-to-last-3 fallback would be observable: the forwarded
-// body would shrink from 6 messages to 3. Used to prove the handover failure
-// path preserves the full history rather than trimming it.
+// largeMultiTurnBody yields a 6-message conversation so a trim-to-last-3
+// fallback would be observable (6→3), proving the handover failure path
+// preserves full history instead.
 func largeMultiTurnBody(t *testing.T) []byte {
 	t.Helper()
 	chunk := strings.Repeat("aaaa ", 1600) // ~2k tokens each
@@ -150,10 +144,8 @@ func newPinSvcCapturing(fr *fakeRouter, store *fakePinStore) (*proxy.Service, *f
 	return svc, p
 }
 
-// TestTurnLoop_ToolResultWithPinSkipsScorerAndPlanner pins down the
-// short-circuit: a trailing tool_result turn must reuse the pin without
-// consulting the scorer (re-routing on tool_result embeddings flips
-// decisions to noisy candidates) or the planner.
+// A trailing tool_result turn must reuse the pin without consulting the
+// scorer (tool_result embeddings flip decisions to noisy candidates) or planner.
 func TestTurnLoop_ToolResultWithPinSkipsScorerAndPlanner(t *testing.T) {
 	const toolResultBody = `{
 		"model":"claude-opus-4-7",
@@ -186,13 +178,9 @@ func TestTurnLoop_ToolResultWithPinSkipsScorerAndPlanner(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
-// TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer guards the
-// provider-eligibility pin guard: a session pinned to a provider that has
-// since been excluded (installation list, env override, or BYOK narrowing)
-// must NOT be served through the sticky branches — the turn falls through to
-// the scorer, which routes within the remaining enabled set. Without the
-// guard, ordinary stickies (unlike user-forced pins) kept hitting the
-// excluded provider until the pin expired.
+// A pin whose provider has since been excluded must not be served sticky —
+// it falls through to the scorer. Without this guard, ordinary stickies
+// (unlike user-forced pins) kept hitting the excluded provider until expiry.
 func TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer(t *testing.T) {
 	const toolResultBody = `{
 		"model":"claude-opus-4-7",
@@ -244,9 +232,7 @@ func TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer(t *testing
 		"the turn must be served on the scorer's fresh decision, not the excluded pin")
 }
 
-// TestTurnLoop_PlannerStaysWhenScorerAgrees verifies the same-model
-// trivial-stay branch: scorer recommends the pin's model, planner
-// returns reason=same_model, pin wins.
+// Same-model trivial-stay: scorer recommends the pin's model, pin wins.
 func TestTurnLoop_PlannerStaysWhenScorerAgrees(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -269,10 +255,8 @@ func TestTurnLoop_PlannerStaysWhenScorerAgrees(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
-// TestTurnLoop_PlannerSwitchesOnPositiveEV constructs a scenario where
-// pinning the (expensive) opus model against a (cheap) haiku scorer
-// recommendation makes the EV math strongly positive, so the planner
-// switches and the handover summarizer is invoked.
+// Pinning expensive opus against a cheap haiku recommendation makes EV
+// strongly positive, so the planner switches and invokes the summarizer.
 func TestTurnLoop_PlannerSwitchesOnPositiveEV(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -303,11 +287,9 @@ func TestTurnLoop_PlannerSwitchesOnPositiveEV(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", last.Model, "switch must persist the new model on the pin")
 }
 
-// TestTurnLoop_SummarizerErrorPreservesFullHistory asserts the failure
-// path: a summarizer error must not abort the request, and must NOT trim the
-// conversation — the orchestrator forwards the full prior history to the new
-// model so it keeps the context it needs. Trimming to the last few turns
-// silently lobotomized switched-to models in prod.
+// A summarizer error must not abort the request or trim history — the
+// orchestrator forwards full prior history. Trimming silently lobotomized
+// switched-to models in prod.
 func TestTurnLoop_SummarizerErrorPreservesFullHistory(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -335,10 +317,8 @@ func TestTurnLoop_SummarizerErrorPreservesFullHistory(t *testing.T) {
 	assert.Contains(t, string(provider.proxyBodies[0]), "FIRST-USER-MARKER", "the earliest user turn must survive (trim-to-last-N would drop it)")
 }
 
-// TestTurnLoop_HandoverPreservesFullHistoryWhenSummarizerNotWired guards the
-// no-summarizer path: when no summarizer is wired (e.g. a self-hoster without
-// an Anthropic key for handover), the switch turn must forward the full
-// conversation unchanged rather than trimming it.
+// No-summarizer path (e.g. self-hoster without an Anthropic key): the switch
+// turn must forward the full conversation unchanged rather than trimming it.
 func TestTurnLoop_HandoverPreservesFullHistoryWhenSummarizerNotWired(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -363,14 +343,9 @@ func TestTurnLoop_HandoverPreservesFullHistoryWhenSummarizerNotWired(t *testing.
 	assert.Equal(t, 6, forwardedMessageCount(t, provider), "all 6 messages must be forwarded when no summarizer is wired — no trimming")
 }
 
-// TestTurnLoop_HandoverUsesClientCredsForSummarizerProvider verifies the
-// caller-keyed summarization path: when the request forwards credentials
-// for the summarizer's own provider, the orchestrator runs summarization
-// using the caller's credentials rather than skipping it. This preserves
-// the tenant boundary (no traffic through the deployment account) while
-// still producing a clean handover envelope that cross-provider models
-// (e.g. Gemini 3.x, which requires thoughtSignature on every functionCall)
-// can accept.
+// When the request forwards creds for the summarizer's own provider, the
+// orchestrator summarizes using the caller's creds (not the deployment
+// account), still producing a clean envelope cross-provider models can accept.
 func TestTurnLoop_HandoverUsesClientCredsForSummarizerProvider(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -396,11 +371,9 @@ func TestTurnLoop_HandoverUsesClientCredsForSummarizerProvider(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
-// TestTurnLoop_HandoverSkippedWhenClientCredsCrossProvider keeps the
-// tenant-boundary guard: if the request is BYOK/client-keyed for a
-// DIFFERENT provider than the summarizer's, the deployment summarizer
-// would route prior conversation through the platform account. Skip
-// summarization in that case and pass the full history through unchanged.
+// If the request is BYOK for a different provider than the summarizer's,
+// summarizing would route prior conversation through the platform account —
+// skip it and pass full history through unchanged.
 func TestTurnLoop_HandoverSkippedWhenClientCredsCrossProvider(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -427,9 +400,8 @@ func TestTurnLoop_HandoverSkippedWhenClientCredsCrossProvider(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "switch must still happen with full history passed through")
 }
 
-// TestTurnLoop_PlannerDisabledPreservesFirstDecisionWins exercises the
-// ROUTER_PLANNER_ENABLED kill switch: an existing pin wins outright and
-// the scorer is not consulted, mirroring the legacy stickiness.
+// ROUTER_PLANNER_ENABLED kill switch: an existing pin wins outright without
+// consulting the scorer, mirroring legacy stickiness.
 func TestTurnLoop_PlannerDisabledPreservesFirstDecisionWins(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -451,16 +423,13 @@ func TestTurnLoop_PlannerDisabledPreservesFirstDecisionWins(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
-// TestTurnLoop_UsageWritebackPersistsCacheStats wires a usage-emitting
-// fake provider through ProxyMessages and asserts the orchestrator
-// writes the upstream usage back to the pin row.
+// Asserts the orchestrator writes upstream usage back to the pin row.
 func TestTurnLoop_UsageWritebackPersistsCacheStats(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "fresh"}}
 	provider := &usageProvider{in: 1200, out: 80, cacheIn: 900, cacheOut: 200}
-	// Telemetry repo flips usageRequired() on, which is what wires the
-	// extractor up so its tokens flow into recordTurnUsage. nil here
-	// would short-circuit usage extraction in the proxy.
+	// Telemetry repo flips usageRequired() on; nil here would short-circuit
+	// usage extraction in the proxy.
 	svc := proxy.NewService(
 		fr,
 		map[string]providers.Client{providers.ProviderAnthropic: provider},
@@ -492,9 +461,8 @@ func TestTurnLoop_UsageWritebackPersistsCacheStats(t *testing.T) {
 	assert.Equal(t, 200, got.CachedWriteTokens)
 }
 
-// trimSessionTurn builds a main-loop Anthropic body with msgCount alternating
-// user/assistant messages. The first user message is constant so every turn
-// derives the same session key (the compaction tracker's bucket).
+// trimSessionTurn builds an alternating user/assistant body with a constant
+// first message, so every turn derives the same session key.
 func trimSessionTurn(t *testing.T, msgCount int) []byte {
 	t.Helper()
 	require.True(t, msgCount%2 == 1, "odd msgCount keeps the trailing message a user turn")
@@ -557,9 +525,8 @@ func TestTurnLoop_PrefixTrimPricesPinColdAndSkipsSummarizer(t *testing.T) {
 		"switch on a trim turn must skip the summarizer — the client's compaction summary already bounds the body")
 }
 
-// With the kill switch off, the trim is still detected and recorded but the
-// planner keeps pricing the pin warm and stays — even with the cold-pin
-// follow-fresh lever armed.
+// With the kill switch off, the trim is detected but the planner keeps
+// pricing the pin warm and stays, even with the cold-pin lever armed.
 func TestTurnLoop_PrefixTrimKillSwitchPreservesWarmStay(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -645,13 +612,10 @@ func TestTurnLoop_SubAgentDoesNotInheritMainLoopTrimBaseline(t *testing.T) {
 	assert.Equal(t, int32(0), sz.calls.Load())
 }
 
-// TestTurnLoop_MaxedOutPinExcludedFromCandidates locks in the
-// runaway-tool-call escape hatch: when the previous turn saturated the
-// output cap (a hallmark of OSS-model parse-failure runaways), the pinned
-// model is excluded from the candidate set and the pin is treated as
-// missing so sticky branches cannot re-anchor it before the scorer runs.
-// Without this, Claude Code's "Output token limit hit. Resume directly…"
-// auto-continue locks the session into the broken model for minutes.
+// Runaway-tool-call escape hatch: when the prior turn saturated the output
+// cap, the pinned model is excluded and treated as missing before the scorer
+// runs. Without this, Claude Code's auto-continue locks the session into the
+// broken model for minutes.
 func TestTurnLoop_MaxedOutPinExcludedFromCandidates(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -678,10 +642,9 @@ func TestTurnLoop_MaxedOutPinExcludedFromCandidates(t *testing.T) {
 		"router must serve the fresh decision, not the broken pin")
 }
 
-// With band swap, the model that actually served (and maxed out) last turn can
-// differ from the pin's anchor Model. The maxed-out guard must exclude the
-// served model that hit the cap (LastServedModel), not the anchor — otherwise
-// the broken paired model stays eligible and the auto-continue loop resumes.
+// With band swap, the served model can differ from the pin's anchor. The
+// maxed-out guard must exclude LastServedModel, not the anchor — otherwise
+// the broken paired model stays eligible.
 func TestTurnLoop_MaxedOutExcludesLastServedModelNotAnchor(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -709,9 +672,7 @@ func TestTurnLoop_MaxedOutExcludesLastServedModelNotAnchor(t *testing.T) {
 		"the healthy anchor must not be excluded when the paired model maxed out")
 }
 
-// TestTurnLoop_UnderMaxedOutThresholdKeepsPin guards against false positives:
-// a turn that produced output well below the cap is healthy, so the pin
-// must not be excluded and the planner's normal STAY logic applies.
+// Output well below the cap is healthy: the pin must not be excluded.
 func TestTurnLoop_UnderMaxedOutThresholdKeepsPin(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -737,9 +698,8 @@ func TestTurnLoop_UnderMaxedOutThresholdKeepsPin(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
-// recordingTelemetry is the minimum no-op telemetry repository that
-// flips proxy.Service.usageRequired() on so the OTel extractor wires up.
-// We do not assert on telemetry rows here.
+// recordingTelemetry is a no-op repo that flips usageRequired() on; we
+// don't assert on telemetry rows here.
 type recordingTelemetry struct{}
 
 func (recordingTelemetry) InsertRequestTelemetry(ctx context.Context, p proxy.InsertTelemetryParams) error {

@@ -1,7 +1,6 @@
-// Command router is the entry point for the router service. Composition root:
-// the only place concrete repositories, routers, and provider clients are
-// instantiated, then injected into auth.Service (identity) and proxy.Service
-// (routing/dispatch).
+// Command router is the entry point for the router service — the composition
+// root where repositories, routers, and provider clients are wired into
+// auth.Service and proxy.Service.
 package main
 
 import (
@@ -64,20 +63,15 @@ func main() {
 		logger.Error("Failed to parse postgres DSN", "err", err)
 		panic(err)
 	}
-	// Pin every new connection to the router schema. Defense-in-depth: even if
-	// DATABASE_URL forgets `?search_path=router`, no query in the app can
-	// accidentally read or write `public.*`. Migrations run through a separate
-	// connection (golang-migrate) and need the same pin via the migrate URL.
+	// Defense-in-depth: pin every connection to the router schema so a missing
+	// `?search_path=router` in DATABASE_URL can't leak into public.*.
 	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		_, err := conn.Exec(ctx, "SET search_path TO router, public")
 		return err
 	}
-	// 6 conns covers MarkUsed writes (sparse, auth-cache absorbs most
-	// reads) plus session-pin reads/writes when ROUTER_SESSION_PIN_ENABLED
-	// is on (~1 read + 1 async write per pin miss). The 30s in-proc LRU
-	// in proxy.Service collapses the steady-state read load. If pgxpool
-	// wait p95 climbs above 1ms with the flag on, that's the
-	// migrate-to-Memorystore signal — not a bigger pool.
+	// 6 conns covers MarkUsed writes plus session-pin traffic (auth-cache and
+	// the in-proc LRU absorb most reads). If pgxpool wait p95 climbs above 1ms
+	// with pinning on, that's the migrate-to-Memorystore signal, not a bigger pool.
 	cfg.MaxConns = 6
 	cfg.MinConns = 1
 	cfg.MaxConnLifetime = 30 * time.Minute
@@ -91,10 +85,9 @@ func main() {
 	}
 	defer pool.Close()
 
-	// Deployment mode gates the self-hoster dashboard + /admin/v1/* API.
-	// Default is selfhosted so docker-compose / bare-binary deployments
-	// "just work"; Weave-managed Cloud Run services explicitly set
-	// ROUTER_DEPLOYMENT_MODE=managed to drop the redundant admin surface.
+	// Gates the self-hoster dashboard + /admin/v1/* API. Defaults to selfhosted
+	// so docker-compose/bare-binary deploys work out of the box; managed Cloud
+	// Run services set ROUTER_DEPLOYMENT_MODE=managed to drop that surface.
 	deploymentMode := server.DeploymentMode(config.GetOr("ROUTER_DEPLOYMENT_MODE", string(server.DeploymentModeSelfHosted)))
 	switch deploymentMode {
 	case server.DeploymentModeSelfHosted, server.DeploymentModeManaged:
@@ -105,13 +98,9 @@ func main() {
 	}
 	logger.Info("Router deployment mode", "mode", deploymentMode)
 
-	// Load Tink keyset for external API key encryption. The keyset is optional:
-	// if EXTERNAL_KEY_ENCRYPTION_KEY is unset the router boots with the no-op
-	// encryptor and stores BYOK secrets unencrypted at rest. This is convenient
-	// for self-hosters and local dev; for production deployments handling
-	// customer BYOK secrets, set the keyset so ciphertext is at-rest encrypted.
-	// A malformed keyset is still fail-closed — we only bypass when the var is
-	// genuinely absent, never when it's set-but-broken.
+	// EXTERNAL_KEY_ENCRYPTION_KEY is optional: unset falls back to a no-op
+	// encryptor (BYOK secrets stored unencrypted, fine for self-hosted/local).
+	// A malformed keyset still fails closed — only a genuinely absent var bypasses.
 	keysetJSON := config.GetOr("EXTERNAL_KEY_ENCRYPTION_KEY", "")
 	var encryptor auth.Encryptor
 	if keysetJSON == "" {
@@ -128,30 +117,20 @@ func main() {
 	repo := postgres.NewRepository(pool, encryptor)
 
 	providerMap := make(map[string]providers.Client)
-	// envKeyedProviders tracks providers whose deployment-level API key is
-	// actually configured (env var present). This set feeds resolveHardPinModel
-	// so compaction only lands on providers with real deployment auth — a
-	// BYOK-only or passthrough-only provider would 401 on a request that
-	// doesn't carry the matching credential.
+	// envKeyedProviders = providers with a real deployment-level API key.
+	// Feeds resolveHardPinModel so compaction only lands where deployment
+	// auth actually exists — a BYOK/passthrough-only provider would 401.
 	envKeyedProviders := make(map[string]struct{})
-	// anthropicPassthroughEligible is true when Anthropic is registered with
-	// no deployment env key but is reachable via client-supplied auth
-	// (OAuth / x-api-key headers) — Claude Code's logged-in plan flow. It
-	// must NOT taint envKeyedProviders since hard-pin can't rely on
-	// every inbound request carrying Anthropic credentials.
+	// True when Anthropic has no deployment key but is reachable via client
+	// auth passthrough (Claude Code's OAuth/x-api-key flow). Must stay out of
+	// envKeyedProviders since not every request carries those credentials.
 	anthropicPassthroughEligible := false
-	// openaiPassthroughEligible mirrors anthropicPassthroughEligible for the
-	// OpenAI provider — Codex's logged-in plan flow. Same invariant: must NOT
-	// taint envKeyedProviders.
+	// Mirrors anthropicPassthroughEligible for OpenAI (Codex's plan flow).
 	openaiPassthroughEligible := false
 
-	// Credit billing service: wired by default in managed mode. The
-	// boot-time health check exists only to surface the "tables actually
-	// missing" rollback path — if the check errors (timeout, transient
-	// pool unreadiness on a cold replica), we default to billing-enabled
-	// rather than silently falling into BYOK-only mode, which would 400
-	// every request for "no provider keys available". Self-hosted
-	// deployments never wire billing.
+	// Wired by default in managed mode. A boot-time health-check error (e.g.
+	// transient pool unreadiness) defaults to billing-enabled rather than
+	// silently falling to BYOK-only, which would 400 every request.
 	var billingSvc *billing.Service
 	if deploymentMode == server.DeploymentModeManaged {
 		billingRepo := postgres.NewBillingRepo(pool)
@@ -170,17 +149,13 @@ func main() {
 		}
 	}
 
-	// In managed mode without billing we keep BYOK-only behavior (zero
-	// active customers today, but we don't want to silently spend
-	// platform-key budget if billing fails to wire). With billing on, we
-	// flip to platform-key mode: the balance check gates spending and the
-	// debit hook books each call. Self-hosted stays at byokOnly=false so
-	// platform env keys work the way operators expect.
+	// Managed without billing stays BYOK-only (avoids spending platform-key
+	// budget if billing fails to wire); managed with billing flips to
+	// platform-key mode gated by balance checks. Self-hosted is never BYOK-only.
 	byokOnly := deploymentMode == server.DeploymentModeManaged && billingSvc == nil
 
-	// Anthropic is always registered. With ANTHROPIC_API_KEY (selfhosted only)
-	// the router uses its own key; otherwise the client's auth headers
-	// (OAuth / x-api-key) are passed through to api.anthropic.com directly.
+	// Always registered. With ANTHROPIC_API_KEY (selfhosted only) the router
+	// uses its own key; otherwise client auth headers pass through directly.
 	anthropicKey := ""
 	if !byokOnly {
 		anthropicKey = config.GetOr("ANTHROPIC_API_KEY", "")
@@ -193,11 +168,7 @@ func main() {
 		envKeyedProviders[providers.ProviderAnthropic] = struct{}{}
 		logger.Info("Anthropic provider enabled (router key)", "base_url", anthropic.DefaultBaseURL)
 	default:
-		// Anthropic in selfhosted with no env key serves the passthrough
-		// path on client OAuth/x-api-key. It's eligible for routing but
-		// must stay out of envKeyedProviders so resolveHardPinModel doesn't
-		// pin compaction to a model that needs a credential the inbound
-		// request might not carry.
+		// Selfhosted, no env key: passthrough-only, kept out of envKeyedProviders.
 		anthropicPassthroughEligible = true
 		logger.Info("Anthropic provider enabled (client auth passthrough)", "base_url", anthropic.DefaultBaseURL)
 	}
@@ -208,10 +179,8 @@ func main() {
 		if !byokOnly {
 			openaiKey = config.GetOr("OPENAI_API_KEY", "")
 		}
-		// A caller's Codex (ChatGPT) subscription reroutes OpenAI turns to the
-		// Codex backend (chatgpt.com/backend-api/codex) over the Responses API;
-		// that switch lives in the OpenAI client, keyed off the resolved
-		// subscription credential — no separate wiring here.
+		// Codex (ChatGPT) subscription reroute to the Codex backend lives in
+		// the OpenAI client itself, keyed off the resolved credential.
 		providerMap[providers.ProviderOpenAI] = openaiProvider.NewClient(openaiKey, openaiBaseURL)
 		switch {
 		case byokOnly:
@@ -229,13 +198,9 @@ func main() {
 
 	{
 		openRouterBaseURL := config.GetOr("OPENROUTER_BASE_URL", openaiCompatProvider.DefaultBaseURL)
-		// Managed deploys don't use OpenRouter as a platform source by default:
-		// we don't read our own OPENROUTER_API_KEY, so it never lands in
-		// envKeyedProviders and the scorer + failover chain won't route platform
-		// traffic to it. A self-hoster running in managed mode can opt back in
-		// with ROUTER_OPENROUTER_PLATFORM_ENABLED=true; self-hosted mode reads the
-		// key unconditionally as before. Either way the provider stays registered
-		// so a caller's BYOK OpenRouter key still dispatches.
+		// Managed deploys don't use OpenRouter as a platform source by default
+		// (opt in via ROUTER_OPENROUTER_PLATFORM_ENABLED=true); selfhosted reads
+		// the key unconditionally. Either way BYOK OpenRouter keys still dispatch.
 		openRouterPlatformEnabled := deploymentMode == server.DeploymentModeSelfHosted ||
 			config.GetOr("ROUTER_OPENROUTER_PLATFORM_ENABLED", "false") == "true"
 		openRouterKey := ""
@@ -275,9 +240,8 @@ func main() {
 	}
 
 	{
-		// DeepInfra OpenAI-compatible surface. DeepInfra uses HuggingFace-form
-		// model IDs while the router exposes slash-form slugs; modelIDMap is
-		// derived from the catalog's per-binding UpstreamID at boot.
+		// DeepInfra uses HuggingFace-form model IDs vs. the router's slash-form
+		// slugs; modelIDMap comes from the catalog's per-binding UpstreamID.
 		deepInfraBaseURL := config.GetOr("DEEPINFRA_BASE_URL", openaiCompatProvider.DeepInfraBaseURL)
 		deepInfraKey := ""
 		if !byokOnly {
@@ -296,11 +260,8 @@ func main() {
 	}
 
 	{
-		// Makora OpenAI-compatible surface. Agent-optimized inference platform
-		// serving DeepSeek V4 (and other OSS models) at higher throughput;
-		// uses DeepSeek-canonical model IDs while the router exposes slash-form
-		// slugs, so modelIDMap is derived from the catalog's per-binding
-		// UpstreamID at boot.
+		// Makora uses DeepSeek-canonical model IDs vs. the router's slash-form
+		// slugs; modelIDMap comes from the catalog's per-binding UpstreamID.
 		makoraBaseURL := config.GetOr("MAKORA_BASE_URL", openaiCompatProvider.MakoraBaseURL)
 		makoraKey := ""
 		if !byokOnly {
@@ -319,13 +280,10 @@ func main() {
 	}
 
 	{
-		// Together AI OpenAI-compatible surface. Serves the OSS pool at the top
-		// of the artificialanalysis.ai throughput tables for several models we
-		// route (DeepSeek V4 Pro, GLM-5.1, MiniMax M2.7); primary binding for
-		// those, with the prior providers kept as ordered fallbacks. Together
-		// uses "Org/Model" model IDs while the router exposes slash-form slugs,
-		// so modelIDMap is derived from the catalog's per-binding UpstreamID at
-		// boot.
+		// Primary binding for DeepSeek V4 Pro / GLM-5.1 / MiniMax M2.7 (top of
+		// artificialanalysis.ai throughput tables); prior providers stay as
+		// ordered fallbacks. Uses "Org/Model" IDs vs. the router's slash-form
+		// slugs; modelIDMap comes from the catalog's per-binding UpstreamID.
 		togetherBaseURL := config.GetOr("TOGETHER_BASE_URL", openaiCompatProvider.TogetherBaseURL)
 		togetherKey := ""
 		if !byokOnly {
@@ -344,14 +302,10 @@ func main() {
 	}
 
 	{
-		// Bedrock via the OpenAI-compatible "bedrock-mantle" surface
-		// (https://bedrock-mantle.{region}.api.aws/v1). AWS recommends this
-		// over the model-native bedrock-runtime/InvokeModel surface; both
-		// Qwen3 and Kimi K2.5 model IDs are addressable through it directly.
-		// Auth is a static long-term Bedrock API key (AWS_BEARER_TOKEN_BEDROCK),
-		// not SigV4, so the standard openaicompat bearer flow applies. Bedrock
-		// expects dot-form model IDs; modelIDMap is derived from the catalog
-		// at boot.
+		// "bedrock-mantle" OpenAI-compatible surface (AWS-recommended over
+		// bedrock-runtime/InvokeModel). Auth is a static Bedrock API key
+		// (AWS_BEARER_TOKEN_BEDROCK), not SigV4, so the standard bearer flow
+		// applies. Expects dot-form model IDs; modelIDMap comes from the catalog.
 		bedrockRegion := config.GetOr("AWS_REGION", "us-east-1")
 		bedrockBaseURL := config.GetOr("BEDROCK_BASE_URL", openaiCompatProvider.BedrockMantleBaseURL(bedrockRegion))
 		bedrockKey := ""
@@ -371,10 +325,8 @@ func main() {
 	}
 
 	{
-		// Native Generative Language REST surface — required for multi-turn
-		// tool use against Gemini 3.x preview models, whose opaque
-		// thought_signature field is not exposed by the OpenAI-compat
-		// surface. See router/internal/providers/google/native_client.go.
+		// Native REST surface, required for multi-turn tool use against Gemini
+		// 3.x's opaque thought_signature field (not exposed via OpenAI-compat).
 		googleBaseURL := config.GetOr("GOOGLE_BASE_URL", googleProvider.NativeBaseURL)
 		googleKey := ""
 		if !byokOnly {
@@ -397,11 +349,8 @@ func main() {
 		availableProviders[name] = struct{}{}
 	}
 
-	// Fail loud if any registered provider lacks a ProviderFamilies entry: an
-	// inbound request routed to it would fall through every cross-format dispatch
-	// switch to ErrProviderNotConfigured (a silent 502) even though the provider
-	// looked "enabled" at boot. Panic here so the misconfiguration aborts the
-	// process rather than surfacing in production traffic.
+	// A provider missing a ProviderFamilies entry would silently 502 every
+	// request despite looking "enabled" — panic at boot instead.
 	registeredProviders := make([]string, 0, len(providerMap))
 	for name := range providerMap {
 		registeredProviders = append(registeredProviders, name)
@@ -439,12 +388,9 @@ func main() {
 	notifier := routerpubsub.NewInvalidationNotifier(publisher)
 	defer notifier.Stop()
 
-	// Autopay recharge signalling (managed mode only). When the autopay topic
-	// is configured, the billing debit hook publishes a signal the moment an
-	// org's balance crosses below its recharge threshold; the Weave control
-	// plane subscribes and charges the saved card. Optional: an unset topic
-	// leaves billing in place with autopay disabled, so selfhosted and
-	// not-yet-rolled-out deploys don't panic.
+	// When configured, the billing debit hook publishes a signal once an org's
+	// balance crosses its recharge threshold; the Weave control plane charges
+	// the saved card. Unset topic just leaves autopay disabled.
 	if billingSvc != nil {
 		if autopayTopicID := config.GetOr("PUBSUB_TOPIC_ROUTER_AUTOPAY", ""); autopayTopicID != "" {
 			autopayNotifier := routerpubsub.NewAutopayNotifier(pubsubClient.Publisher(autopayTopicID))
@@ -458,9 +404,8 @@ func main() {
 		WithEncryptor(encryptor).
 		WithInstallationChangeNotifier(notifier)
 
-	// Listener fans out Pub/Sub-published invalidations to this replica's cache so
-	// settings changes are visible on the next request across the fleet. The 5-min
-	// cache TTL is the safety net if the listener falls behind.
+	// Fans out Pub/Sub invalidations to this replica's cache; the 5-min TTL
+	// is the safety net if the listener falls behind.
 	subCtx, subCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	subscriptionName, deleteSubscription, err := routerpubsub.CreateReplicaSubscription(
 		subCtx, pubsubClient, pubsubProjectID, pubsubTopicID, pubsubSubscriptionPrefix,
@@ -481,10 +426,7 @@ func main() {
 	}()
 	go listener.Run(listenerCtx)
 
-	// Admin dashboard password. In managed mode the dashboard is not mounted
-	// at all so the password is irrelevant. In selfhosted mode, fall back to
-	// "admin" when unset and warn — operators that care about securing the
-	// dashboard should always set ROUTER_ADMIN_PASSWORD explicitly.
+	// Managed mode doesn't mount the dashboard, so this only matters selfhosted.
 	if deploymentMode == server.DeploymentModeSelfHosted {
 		adminPassword := config.GetOr("ROUTER_ADMIN_PASSWORD", "")
 		if adminPassword == "" {
@@ -511,16 +453,10 @@ func main() {
 
 	semanticCache := buildSemanticCache(rtr)
 
-	// Default-on: the cluster scorer's α-blend is baked at training time on
-	// per-prompt cost numbers that don't account for prompt-cache continuity.
-	// Without session pinning, mid-conversation provider switches discard the
-	// cache prefix (Anthropic's cache is keyed per-model) and pay the cache-
-	// write penalty on the new model — over a 30-turn agentic trajectory that
-	// dominates routing-decision savings. Until cost models reflect cache-warm
-	// economics, leaving pinning off makes the router optimize a number that
-	// doesn't match production.
-	//
-	// Set ROUTER_SESSION_PIN_ENABLED=false to opt out (kill switch).
+	// Default-on: the scorer's α-blend ignores prompt-cache continuity, so
+	// without pinning, mid-conversation provider switches pay a cache-write
+	// penalty (Anthropic caches per-model) that dwarfs routing savings over a
+	// long trajectory. Set ROUTER_SESSION_PIN_ENABLED=false to opt out.
 	var pinStore sessionpin.Store
 	if config.GetOr("ROUTER_SESSION_PIN_ENABLED", "true") == "true" {
 		pinStore = postgres.NewSessionPinRepo(pool)
@@ -529,43 +465,24 @@ func main() {
 	}
 
 	hardPinExplore := config.GetOr("ROUTER_HARD_PIN_EXPLORE", "true") == "true"
-	// Pin to a model whose provider has actual deployment-level auth — a
-	// BYOK-only registered provider would 401 here since hard-pin compaction
-	// runs on every installation, including ones without their own BYOK.
-	// Anthropic-passthrough is excluded for the same reason: an inbound
-	// request that doesn't carry Anthropic client headers would 401.
-	// In selfhosted mode the boot-time hard-pin is computed over providers
-	// with deployment-level env keys — those are the only ones a hard-pin
-	// can rely on across every installation. In managed/byokOnly mode there
-	// is no provider with deployment auth, so any boot-time hard-pin would
-	// 401 for installations that didn't BYOK that exact provider; we resolve
-	// hard-pin per-request from the cluster bundle below instead.
+	// Hard-pin compaction runs on every installation, so it must land on a
+	// provider with real deployment auth (env-keyed, excluding BYOK/passthrough)
+	// or it 401s. In managed/byokOnly mode no provider has deployment auth, so
+	// the boot-time pin here is just a fallback — per-request resolution below
+	// does the real work.
 	hardPinProvider, hardPinModel := resolveHardPinModel(envKeyedProviders, logger)
 	if hardPinExplore {
 		logger.Info("Explore sub-agent hard-pin enabled", "provider", hardPinProvider, "model", hardPinModel)
 	}
 	logger.Info("Hard-pin model resolved", "provider", hardPinProvider, "model", hardPinModel, "byok_only", byokOnly)
 
-	// Per-request hard-pin resolver. Loads the default cluster bundle once and
-	// closes over its metadata/registry; the resolver is then called from the
-	// proxy with the request's enabled-providers set and the installation's
-	// excluded_models deny set. It serves two purposes:
-	//   - byokOnly: the boot-time pin was computed over every registered
-	//     provider, but the request may only BYOK a subset; resolving per
-	//     request keeps the hard-pin on a provider the request can
-	//     authenticate to.
-	//   - all modes: the hard-pin tier bypasses the scorer, which is the only
-	//     component that applies excluded_models. Passing the deny set here
-	//     skips an excluded model on the title-gen/classifier/probe path, just
-	//     as the scorer does on the main-loop path.
-	// If the bundle fails to load the resolver stays nil and the proxy falls
-	// back to the boot-time hardPin{Provider,Model}.
-	//
-	// An explicit ROUTER_HARD_PIN_MODEL operator override is absolute by design
-	// (it also bypasses the tier ceiling downstream); we do NOT wire the
-	// resolver in that case so the operator's chosen model is never silently
-	// rewritten. excluded_models then can't redirect it, but an operator pin is
-	// a deliberate opt-in — the proxy logs if it collides with the exclude list.
+	// Per-request hard-pin resolver: closes over the default cluster bundle so
+	// the proxy can resolve per-request against the request's enabled-providers
+	// and the installation's excluded_models (the hard-pin tier bypasses the
+	// scorer, the only component that otherwise applies excluded_models).
+	// nil if the bundle fails to load, falling back to boot-time hardPin{Provider,Model}.
+	// Not wired when ROUTER_HARD_PIN_MODEL is set — an operator override is
+	// absolute and must never be silently rewritten by excluded_models.
 	var hardPinResolver func(enabled, denySet map[string]struct{}) (string, string, bool)
 	if config.GetOr("ROUTER_HARD_PIN_MODEL", "") == "" {
 		reqVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
@@ -586,22 +503,18 @@ func main() {
 		logger.Info("Hard-pin resolver not wired: ROUTER_HARD_PIN_MODEL operator override is set and absolute by design", "model", hardPinModel)
 	}
 
-	// Default-eligible set for proxy.Service: env-keyed providers only.
-	// BYOK and client-supplied credentials add to this set per-request
-	// inside enabledProvidersForRequest.
+	// Default-eligible set: env-keyed providers only. BYOK/client credentials
+	// add to this per-request inside enabledProvidersForRequest.
 	deploymentEligible := make(map[string]struct{}, len(envKeyedProviders))
 	for p := range envKeyedProviders {
 		deploymentEligible[p] = struct{}{}
 	}
 
-	// Passthrough-eligible providers join the eligible set ONLY when the
-	// inbound request matches their surface (see WithPassthroughEligibleProviders
-	// in internal/proxy/service.go). Adding them to deploymentEligible above
-	// would let an Anthropic-surface request route to OpenAI in passthrough
-	// mode, which would forward the inbound `x-api-key` (an Anthropic token)
-	// to api.openai.com — a cross-provider credential leak. Surface-scoping
-	// keeps each provider's passthrough credentials inside their own trust
-	// boundary.
+	// Kept separate from deploymentEligible: adding these unconditionally would
+	// let e.g. an Anthropic-surface request route to OpenAI in passthrough mode,
+	// forwarding an Anthropic `x-api-key` to api.openai.com — a credential leak.
+	// WithPassthroughEligibleProviders only admits a provider when the request
+	// matches its own surface.
 	passthroughEligible := make(map[string]struct{}, 2)
 	if anthropicPassthroughEligible {
 		passthroughEligible[providers.ProviderAnthropic] = struct{}{}
@@ -610,23 +523,18 @@ func main() {
 		passthroughEligible[providers.ProviderOpenAI] = struct{}{}
 	}
 
-	// Planner + handover config (Prism-style cache-aware routing). Defaults
-	// keep the kill switch on, $0.001 EV threshold, and a 3-turn horizon —
-	// each can be overridden per deployment. The summarizer is only wired
-	// when its provider client is registered; otherwise the orchestrator
-	// falls back to handover.TrimLastN on switch turns.
+	// Planner + handover config (Prism-style cache-aware routing); each default
+	// below can be overridden per deployment.
 	plannerEnabled := config.GetOr("ROUTER_PLANNER_ENABLED", "true") == "true"
 	effortEscalation := config.GetOr("ROUTER_EFFORT_ESCALATION", "false") == "true"
 	// Per-turn large-vs-small action-classifier swap. Off by default until the
 	// Layer-2 extrinsic validation clears it; enabling loads the compiled-in head.
 	bandSwapEnabled := config.GetOr("ROUTER_BAND_SWAP", "false") == "true"
-	// Cyclic-loop escalate-to-opus kill switch + log-not-act holdout. Enabled
-	// by default (the lever shipped enabled); flipping the switch off detaches
-	// the escalation ACTION without losing detection telemetry. The holdout
-	// assigns that percentage of loop-detected sessions to record-only, so the
-	// self-recovery baseline can be subtracted from rescue-rate claims. Parsed
-	// inline rather than via parseEnvInt because 0 (holdout off) is a
-	// legitimate value that parseEnvInt would reject.
+	// Cyclic-loop escalate-to-opus kill switch + log-not-act holdout. Turning
+	// the switch off detaches the escalation ACTION without losing detection
+	// telemetry; the holdout % is record-only, giving a self-recovery baseline
+	// to subtract from rescue-rate claims. Parsed inline (not parseEnvInt)
+	// because 0 is a legitimate "holdout off" value.
 	loopEscalationEnabled := config.GetOr("ROUTER_LOOP_ESCALATION_ENABLED", "true") == "true"
 	loopEscalationHoldoutPct := 10
 	if raw := config.GetOr("ROUTER_LOOP_ESCALATION_HOLDOUT_PCT", ""); raw != "" {
@@ -637,9 +545,8 @@ func main() {
 			loopEscalationHoldoutPct = n
 		}
 	}
-	// Shadow-mode spiral detector kill switch. Shadow mode is log-only (no
-	// routing action), so it ships enabled; the switch sheds the per-turn
-	// signal-scan cost if it ever misbehaves.
+	// Shadow mode is log-only, so it ships enabled; the switch just sheds the
+	// per-turn signal-scan cost if it misbehaves.
 	spiralShadowEnabled := config.GetOr("ROUTER_SPIRAL_SHADOW_ENABLED", "true") == "true"
 	plannerCfg := planner.EVConfig{
 		ThresholdUSD:           parseEnvFloat("ROUTER_SWITCH_EV_THRESHOLD_USD", proxy.DefaultPlannerThresholdUSD),
@@ -651,9 +558,8 @@ func main() {
 	handoverProviderName := config.GetOr("ROUTER_HANDOVER_PROVIDER", providers.ProviderAnthropic)
 	handoverModel := config.GetOr("ROUTER_HANDOVER_MODEL", proxy.DefaultHandoverModel)
 	handoverTimeout := parseEnvDurationMs("ROUTER_HANDOVER_TIMEOUT_MS", proxy.DefaultHandoverTimeout)
-	// summarizer stays as the interface type so an unregistered provider
-	// leaves it as a true nil interface — passing a typed-nil *ProviderSummarizer
-	// through WithSummarizer would defeat the orchestrator's `!= nil` check.
+	// Kept as the interface type: a typed-nil *ProviderSummarizer would defeat
+	// the orchestrator's `!= nil` check.
 	var summarizer handover.Summarizer
 	if client, ok := providerMap[handoverProviderName]; ok {
 		summarizer = proxy.NewProviderSummarizer(client, handoverModel, handoverTimeout)
@@ -662,30 +568,22 @@ func main() {
 		logger.Info("Handover summarizer disabled (provider not registered); switch turns will fall back to TrimLastN", "requested_provider", handoverProviderName)
 	}
 
-	// Available-models set lets the planner force a switch when a pinned
-	// model's provider has been removed. Sourced from the default cluster
-	// bundle's deployed_models filtered by registered providers — same
-	// logic as resolveHardPinModel, so a missing/unloadable bundle leaves
-	// it nil (planner then treats every pin as still routable).
+	// Lets the planner force a switch when a pinned model's provider is
+	// removed. nil on a missing/unloadable bundle treats every pin as routable.
 	availableModels := resolveAvailableModels(availableProviders, logger)
 
-	// Optional, OFF by default: wrap the router in the quality-tie-band
-	// explorer to collect propensity-logged trajectories (Phase 1 of the
-	// bandit foundation). rtr stays the *cluster.Multiversion the admin cast
-	// and semantic cache reference; only the proxy's routing entrypoint is
-	// wrapped. Prod leaves ROUTER_EXPLORE_ENABLED unset → deterministic argmax.
+	// OFF by default: wraps only the proxy's routing entrypoint, so rtr stays
+	// the *cluster.Multiversion the admin cast and semantic cache reference.
 	routeEntry := buildExploringRouter(rtr, logger)
 
-	// High-fidelity OTLP content capture. Off unless WV_CAPTURE_CONTENT is set
-	// (opt-in for self-hosted/OSS); Weave-managed deploys set it to "full" in
-	// their deploy config. Redactor is nil here (no-op); managed wires one.
+	// Off unless WV_CAPTURE_CONTENT is set; managed deploys set "full". Redactor
+	// is nil (no-op) here — managed wires one.
 	captureMode := proxy.ParseCaptureMode(config.GetOr("WV_CAPTURE_CONTENT", ""))
 	captureMaxBytes := parseEnvInt("WV_CAPTURE_MAX_BYTES", 1<<20)
 	logger.Info("Router content capture configured", "mode", captureMode.String(), "max_bytes", captureMaxBytes)
 
-	// Signed no-login feedback link. The signer mints per-request tokens and
-	// verifies them on the feedback endpoints; both the signer and the public
-	// base URL must be set for the link header to be emitted on responses.
+	// Both the signer and base URL must be set for the feedback link header
+	// to be emitted on responses.
 	feedbackSigner := feedback.NewSigner(config.GetOr("ROUTER_FEEDBACK_LINK_SECRET", ""), feedbackLinkTTL())
 	feedbackBaseURL := config.GetOr("ROUTER_FEEDBACK_BASE_URL", "")
 	switch {
@@ -697,11 +595,9 @@ func main() {
 		logger.Info("Feedback link disabled (set ROUTER_FEEDBACK_LINK_SECRET and ROUTER_FEEDBACK_BASE_URL to enable)")
 	}
 
-	// Opt-in RL/DPO policy router. Wired only when ROUTER_RL_SIDECAR_URL points
-	// at a running policy sidecar; the x-weave-router-strategy: rl header then
-	// routes through it, selecting from the same deployed catalog candidates and
-	// dispatching via Weave's own providers. Left unset, the header fails closed
-	// with HTTP 503 rather than silently serving the cluster scorer.
+	// Wired only when ROUTER_RL_SIDECAR_URL is set; x-weave-router-strategy: rl
+	// then routes through it. Unset fails closed with 503 rather than
+	// silently falling back to the cluster scorer.
 	var rlRouter router.Router
 	if rlSidecarURL := config.GetOr("ROUTER_RL_SIDECAR_URL", ""); rlSidecarURL != "" {
 		rlTimeout := parseEnvDurationMs("ROUTER_RL_SIDECAR_TIMEOUT_MS", rl.DefaultTimeout)
@@ -711,10 +607,9 @@ func main() {
 		logger.Info("RL policy router disabled (ROUTER_RL_SIDECAR_URL unset); x-weave-router-strategy: rl will return 503")
 	}
 
-	// Opt-in Thompson-sampling bandit. Wired only when ROUTER_BANDIT_POSTERIOR_FILE
-	// points at a ts_posterior.json from train_thompson_posterior.py; the
-	// x-weave-router-strategy: bandit header then routes through it. Wraps the
-	// raw cluster scorer (not the explore wrapper). Unset path -> nil -> 503.
+	// Wired only when ROUTER_BANDIT_POSTERIOR_FILE points at a ts_posterior.json;
+	// x-weave-router-strategy: bandit then routes through it. Wraps the raw
+	// cluster scorer, not the explore wrapper. Unset -> nil -> 503.
 	var banditRouter router.Router
 	if posteriorPath := strings.TrimSpace(config.GetOr("ROUTER_BANDIT_POSTERIOR_FILE", "")); posteriorPath != "" {
 		post, loadErr := bandit.LoadPosterior(posteriorPath)
@@ -801,20 +696,9 @@ func main() {
 		logger.Info("Provider exclusion override active", "excluded_providers", cleaned)
 	}
 
-	// ROUTER_SUBSCRIPTION_AWARE_ROUTING discounts a covered model's cost term by
-	// the caller's observed subscription rate-limit headroom (see
-	// internal/proxy/usage): ~epsilon when the window has slack, →1 (full price)
-	// as it binds. Off by default — ships dark until validated.
-	// Defaults ON: the discount only affects turns that present a subscription
-	// AND have observed headroom (cold start / non-sub traffic = unchanged), so
-	// the blast radius is narrow. Set ROUTER_SUBSCRIPTION_AWARE_ROUTING=false to
-	// disable without a code change.
-	// The subscription usage observer is always wired: it feeds BOTH the
-	// subscription-aware cost discount (below, env-gated) AND the
-	// per-installation usage-bypass gate (DB-gated, so the env can't know
-	// whether any tenant enabled it). Recording is cheap and side-effect-free,
-	// so installing it unconditionally is what lets the bypass work regardless
-	// of the cost-discount flag.
+	// The usage observer is always wired (cheap, side-effect-free) even though
+	// the cost discount below is env-gated: it also feeds the per-installation
+	// usage-bypass gate, which is DB-gated and can't know the env flag's state.
 	subscriptionTTL := 10 * time.Minute
 	if v, err := time.ParseDuration(config.GetOr("ROUTER_SUBSCRIPTION_OBSERVATION_TTL", "10m")); err == nil {
 		subscriptionTTL = v
@@ -836,14 +720,10 @@ func main() {
 	}()
 	proxySvc = proxySvc.WithUsageObserver(usageObserver)
 
-	// ROUTER_SUBSCRIPTION_AWARE_ROUTING discounts a covered model's cost term by
-	// the caller's observed subscription rate-limit headroom (see
-	// internal/proxy/usage): ~epsilon when the window has slack, →1 (full price)
-	// as it binds. Defaults ON: the discount only affects turns that present a
-	// subscription AND have observed headroom (cold start / non-sub traffic =
-	// unchanged), so the blast radius is narrow. Set to false to disable the
-	// discount without a code change — the observer (and the usage-bypass gate)
-	// stay wired.
+	// Discounts a covered model's cost term by the caller's observed
+	// subscription rate-limit headroom (~epsilon with slack, →1 as it binds).
+	// Defaults ON; only affects turns with an observed subscription, so
+	// blast radius is narrow. Disabling here leaves the observer/bypass gate wired.
 	if config.GetOr("ROUTER_SUBSCRIPTION_AWARE_ROUTING", "true") == "true" {
 		epsilon := 0.05
 		if v, err := strconv.ParseFloat(config.GetOr("ROUTER_SUBSCRIPTION_COST_EPSILON", "0.05"), 64); err == nil {
@@ -859,10 +739,8 @@ func main() {
 		logger.Info("Usage observer wired; subscription-aware cost discount disabled", "observation_ttl", subscriptionTTL)
 	}
 
-	// APM (SigNoz) — adds standard HTTP server spans and Go runtime metrics
-	// to the same OTel resource shape as the rest of the Weave services.
 	// No-op when WV_APM_OTLP_ENDPOINT is unset. Flushed explicitly in the
-	// graceful-shutdown path below; defer would run after SIGKILL.
+	// shutdown path below since a defer would run after SIGKILL.
 	apm.Init()
 
 	engine := gin.New()
@@ -875,18 +753,16 @@ func main() {
 		gin.Recovery(),
 	)
 
-	// Cast the router to *cluster.Multiversion so the admin model-selection
-	// handler can surface the universe of deployed models. The fallback nil
-	// keeps non-cluster routers (heuristic dev override, etc.) bootable.
+	// Lets the admin model-selection handler surface deployed models; nil
+	// fallback keeps non-cluster routers bootable.
 	deployedModels, _ := rtr.(*cluster.Multiversion)
 	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),
 		Handler: engine,
-		// Slowloris primitive. ReadTimeout/WriteTimeout would break
-		// streaming bodies/responses, so per-route gin timeouts handle
-		// non-streaming routes and this only bounds header read time.
+		// ReadTimeout/WriteTimeout would break streaming; per-route gin
+		// timeouts handle non-streaming routes instead.
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20,
@@ -911,10 +787,8 @@ func main() {
 	select {
 	case err := <-serverErr:
 		logger.Error("Server exited with error", "err", err)
-		// Flush APM here too: a ListenAndServe failure bypasses the SIGTERM
-		// path below, so without an explicit shutdown the buffered SDK
-		// traces + metrics describing the failure itself would never reach
-		// SigNoz — exactly when they'd be most useful.
+		// A ListenAndServe failure bypasses the SIGTERM path below, so flush
+		// APM here too or the traces describing the failure never reach SigNoz.
 		apmFailCtx, apmFailCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 		defer apmFailCancel()
 		apm.ShutdownWithContext(apmFailCtx)
@@ -923,15 +797,10 @@ func main() {
 		logger.Info("Received shutdown signal; draining", "signal", sig.String())
 	}
 
-	// Cloud Run gives 10s between SIGTERM and SIGKILL. Budget across three
-	// flush stages so the SDK trace/metric batch actually exports before
-	// SIGKILL — a defer on apm.Shutdown would never run in time.
-	//
-	//   srv.Shutdown:    6.0s — long-lived streams are the hard part
-	//   emitter.Shutdown: 1.5s — custom OTLP/HTTP decision spans
-	//   apm.Shutdown:    1.5s — SDK trace + metric batchers
-	//                    ----
-	//                    9.0s, leaving ~1s slack before SIGKILL
+	// Cloud Run gives 10s between SIGTERM and SIGKILL; budget across three
+	// flush stages (defer on apm.Shutdown would never run in time):
+	//   srv.Shutdown 6.0s + emitter.Shutdown 1.5s + apm.Shutdown 1.5s = 9.0s,
+	//   leaving ~1s slack.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -948,14 +817,9 @@ func main() {
 }
 
 // buildExploringRouter optionally wraps rtr in the quality-tie-band explorer.
-// OFF unless ROUTER_EXPLORE_ENABLED=true; returns rtr unchanged otherwise so
-// prod keeps serving the deterministic argmax. The band half-width comes from
-// ROUTER_EXPLORE_EPSILON (default 0.05, score units). The model->provider
-// resolver is sourced from the default bundle's deployed models, so the
-// explorer can only ever switch to a known, deployed peer.
-//
-// Intended for staging / a small traffic slice while real propensities and
-// exploration support accrue — never flip it on fleet-wide without a bake-off.
+// OFF unless ROUTER_EXPLORE_ENABLED=true (band half-width ROUTER_EXPLORE_EPSILON,
+// default 0.05). Intended for staging/small slices — never flip fleet-wide
+// without a bake-off.
 func buildExploringRouter(rtr router.Router, logger *slog.Logger) router.Router {
 	if !strings.EqualFold(config.GetOr("ROUTER_EXPLORE_ENABLED", "false"), "true") {
 		return rtr
@@ -1003,10 +867,9 @@ func parseOtelHeaders(raw string) map[string]string {
 	return out
 }
 
-// buildClusterScorer constructs the cluster.Multiversion router. One ONNX
-// embedder is shared across all artifact versions. Returns an error on any
-// artifact, embedder, or warmup failure; the caller panics so the boot
-// fails loud rather than silently degrading to a default model.
+// buildClusterScorer constructs the cluster.Multiversion router, sharing one
+// ONNX embedder across versions. Errors force the caller to panic rather
+// than silently degrade to a default model.
 func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, error) {
 	logger := observability.Get()
 
@@ -1016,12 +879,9 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 		return nil, fmt.Errorf("Resolve cluster version %q: %w", requestedVersion, err)
 	}
 
-	// Default to building only the served version. Staging/eval deployments
-	// opt in to building every committed bundle by setting
-	// ROUTER_CLUSTER_BUILD_ALL_VERSIONS=true; that powers the eval harness's
-	// per-request x-weave-cluster-version header A/B. Prod doesn't need the
-	// other bundles in memory and exposing them via header override is a
-	// foot-gun.
+	// Builds only the served version by default. ROUTER_CLUSTER_BUILD_ALL_VERSIONS=true
+	// powers the eval harness's per-request x-weave-cluster-version A/B; prod
+	// skips it to avoid the extra memory and the header-override foot-gun.
 	buildAll := strings.EqualFold(config.GetOr("ROUTER_CLUSTER_BUILD_ALL_VERSIONS", "false"), "true")
 	var versions []string
 	if buildAll {
@@ -1223,12 +1083,9 @@ func parseEnvInt(key string, fallback int) int {
 	return n
 }
 
-// parseEnvFloat reads an env var as a float64. Returns fallback when the
-// var is unset, empty, or unparseable. Logs a warning only on parse
-// failure. Zero and negative values are valid: ROUTER_SWITCH_EV_THRESHOLD_USD
-// uses a USD threshold in `expectedSavings - evictionCost > threshold`, so
-// operators set it to <= 0 to make the planner switch aggressively (the PR
-// test plan documents `-1` as the force-switch knob).
+// parseEnvFloat reads an env var as a float64, falling back on unset/empty/
+// unparseable. Zero and negative values are valid — e.g. operators set
+// ROUTER_SWITCH_EV_THRESHOLD_USD <= 0 to force aggressive planner switching.
 func parseEnvFloat(key string, fallback float64) float64 {
 	raw := config.GetOr(key, "")
 	if raw == "" {
@@ -1242,16 +1099,10 @@ func parseEnvFloat(key string, fallback float64) float64 {
 	return v
 }
 
-// feedbackLinkTTL returns the lifetime of a minted feedback-link token,
-// from ROUTER_FEEDBACK_LINK_TTL_SEC (default 30 days). The link is a low-stakes
-// rating affordance, so a long expiry trades little risk for the convenience of
-// a user rating a routing decision they noticed hours later.
 // feedbackLinkTTL resolves the feedback-link token lifetime from
-// ROUTER_FEEDBACK_LINK_TTL_SEC. Unset, negative, or unparseable falls back to
-// 30 days; an explicit 0 means "never expire" — matching feedback.NewSigner's
-// non-positive-TTL contract. Parsed inline rather than via parseEnvInt, which
-// rejects 0 and so would silently turn an operator's "never expire" into the
-// 30-day default.
+// ROUTER_FEEDBACK_LINK_TTL_SEC (default 30 days). An explicit 0 means "never
+// expire" (feedback.NewSigner's non-positive-TTL contract); parsed inline
+// rather than via parseEnvInt, which would reject 0.
 func feedbackLinkTTL() time.Duration {
 	const defaultSec = 30 * 24 * 60 * 60
 	raw := config.GetOr("ROUTER_FEEDBACK_LINK_TTL_SEC", "")
@@ -1289,19 +1140,10 @@ func parseEnvDurationMs(key string, fallback time.Duration) time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-// buildSemanticCache constructs the cross-request semantic cache, or
-// returns nil when disabled. Wiring honors:
-//
-//	ROUTER_SEMANTIC_CACHE_ENABLED — "false" disables; default enabled.
-//	ROUTER_SEMANTIC_CACHE_TTL_SEC — per-entry TTL in seconds (default 3600).
-//	ROUTER_SEMANTIC_CACHE_BUCKET  — per-(installation, format, cluster)
-//	                                 LRU capacity (default 1024).
-//
-// Per-cluster cosine thresholds are pulled from the default version's
-// metadata.yaml `cache_config` block. Other built versions reuse the
-// default's thresholds at runtime — keeping the cache config tied to
-// the default version means promotion (flipping `artifacts/latest`)
-// also flips cache thresholds atomically.
+// buildSemanticCache constructs the cross-request semantic cache, or nil when
+// disabled (ROUTER_SEMANTIC_CACHE_ENABLED=false). Per-cluster cosine thresholds
+// come from the default version's metadata.yaml, so promoting `artifacts/latest`
+// flips cache thresholds atomically along with the cluster version.
 func buildSemanticCache(rtr router.Router) *cache.Cache {
 	logger := observability.Get()
 	if config.GetOr("ROUTER_SEMANTIC_CACHE_ENABLED", "true") != "true" {
@@ -1310,10 +1152,7 @@ func buildSemanticCache(rtr router.Router) *cache.Cache {
 	}
 	multi, ok := rtr.(*cluster.Multiversion)
 	if !ok {
-		// Defensive: main.go always wires *cluster.Multiversion now that
-		// the heuristic fallback is removed, but keep the guard so a
-		// future refactor that introduces another router shape doesn't
-		// silently disable the cache.
+		// Defensive: guards against a future router shape silently disabling the cache.
 		logger.Warn("Semantic cache disabled: router is not a cluster.Multiversion")
 		return nil
 	}
@@ -1358,11 +1197,9 @@ func buildSemanticCache(rtr router.Router) *cache.Cache {
 	return cache.New(cfg)
 }
 
-// runSessionPinSweep deletes pins that have been expired for >24h on
-// an hourly cadence. Bounded: row count is one per active session.
-// Runs under context.Background() so the sweep keeps draining stale
-// rows even during a graceful shutdown — the work is idempotent and
-// short.
+// runSessionPinSweep deletes pins expired >24h on an hourly cadence. Uses
+// context.Background() internally so the (idempotent, short) sweep keeps
+// draining during graceful shutdown.
 func runSessionPinSweep(ctx context.Context, store sessionpin.Store) {
 	logger := observability.Get()
 	ticker := time.NewTicker(1 * time.Hour)
@@ -1389,10 +1226,9 @@ const (
 )
 
 // resolveDefaultBaselineModel returns the cost-comparison baseline used when
-// the inbound RequestedModel has no pricing entry. Unset → default
-// claude-sonnet-4-5; set to empty → no substitution. config.GetOr collapses
-// the empty-set and unset cases, so we use os.LookupEnv directly to preserve
-// the "" → disable contract documented in .env.example.
+// RequestedModel has no pricing entry. Uses os.LookupEnv directly (not
+// config.GetOr) to distinguish unset (-> claude-sonnet-4-5) from explicit ""
+// (-> no substitution), per the contract in .env.example.
 func resolveDefaultBaselineModel() string {
 	v, ok := os.LookupEnv("ROUTER_DEFAULT_BASELINE_MODEL")
 	if !ok {
@@ -1401,11 +1237,9 @@ func resolveDefaultBaselineModel() string {
 	return strings.TrimSpace(v)
 }
 
-// resolveHardPinModel returns the (provider, model) to use for compaction and
-// Explore hard-pins. Operator override wins; otherwise the fastest model (by
-// measured tok/s) in the default artifact bundle among available providers is
-// selected, falling back to cheapest when the bundle lacks speed annotations.
-// Falls back to (defaultHardPinProvider, defaultHardPinModel) when no bundle is loadable.
+// resolveHardPinModel returns the (provider, model) for compaction and
+// Explore hard-pins: operator override wins, else the fastest available
+// model in the default bundle, else (defaultHardPinProvider, defaultHardPinModel).
 func resolveHardPinModel(available map[string]struct{}, logger *slog.Logger) (provider, model string) {
 	if m := config.GetOr("ROUTER_HARD_PIN_MODEL", ""); m != "" {
 		p := config.GetOr("ROUTER_HARD_PIN_PROVIDER", defaultHardPinProvider)
@@ -1431,11 +1265,9 @@ func resolveHardPinModel(available map[string]struct{}, logger *slog.Logger) (pr
 	return p, m
 }
 
-// resolveAvailableModels returns the boot-time set of routable model names,
-// derived from the default cluster bundle's deployed_models intersected with
-// the registered provider set. Returns nil on any load failure — the planner
-// then treats every pin as still routable (best-effort behavior; matches
-// resolveHardPinModel's fallback posture).
+// resolveAvailableModels returns the boot-time set of routable model names
+// (default bundle's deployed_models ∩ registered providers), or nil on load
+// failure so the planner treats every pin as routable.
 func resolveAvailableModels(availableProviders map[string]struct{}, logger *slog.Logger) map[string]struct{} {
 	reqVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
 	defaultVersion, err := cluster.ResolveVersion(reqVersion)
@@ -1455,9 +1287,8 @@ func resolveAvailableModels(availableProviders map[string]struct{}, logger *slog
 	return out
 }
 
-// envVarHint returns the env var name for a provider's API key, formatted
-// for log warnings. Wraps providers.APIKeyEnvVar so the "unknown provider"
-// fallback is readable in operator-facing logs.
+// envVarHint returns the env var name for a provider's API key, for log
+// warnings; falls back to a readable "unknown provider" string.
 func envVarHint(provider string) string {
 	if v := providers.APIKeyEnvVar(provider); v != "" {
 		return v
@@ -1465,11 +1296,9 @@ func envVarHint(provider string) string {
 	return "<unknown provider " + provider + ">"
 }
 
-// upstreamIDsForProvider walks the catalog and returns the map of public
-// model ID → upstream model ID for every binding on the given provider that
-// has a non-empty UpstreamID. Returns nil when no rewriting is needed (e.g.
-// OpenRouter, where the public slug IS the upstream ID). Callers pass the
-// result straight to openaicompat.NewClientWithModelIDMap.
+// upstreamIDsForProvider maps public model ID -> upstream model ID for a
+// provider's bindings with a non-empty UpstreamID; nil if no rewriting is
+// needed (e.g. OpenRouter, where the slug IS the upstream ID).
 func upstreamIDsForProvider(provider string) map[string]string {
 	out := make(map[string]string)
 	for _, m := range catalog.Models {

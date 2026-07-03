@@ -1,16 +1,9 @@
-// Package catalog is the single source of truth for per-model data used
-// by the router: capability tier, per-provider upstream IDs, per-provider
-// pricing. Adding a new model is one struct literal here; pricing,
-// capability, install-script generation, and the cluster scorer all read
-// through this package.
-//
-// Multi-provider: every model carries an ordered Providers list. The
-// first binding whose Provider name is in the deploy's available set is
-// chosen. Today every entry is a single-element list; the schema is in
-// place so SOC-2 direct-provider rows can append an OpenRouter fallback
-// without touching call sites.
-//
-// Pure inner-ring. No I/O.
+// Package catalog is the single source of truth for per-model data: tier,
+// per-provider upstream IDs, per-provider pricing. Adding a model is one
+// struct literal here. Every model carries an ordered Providers list; the
+// first binding whose Provider is in the deploy's available set is chosen,
+// letting SOC-2 direct-provider rows append an OpenRouter fallback. Pure
+// inner-ring, no I/O.
 package catalog
 
 import (
@@ -83,12 +76,11 @@ type ProviderBinding struct {
 	Price Pricing
 }
 
-// ToolUseQuality marks a model's qualitative reliability under has_tools=true
-// turns. ToolUseUnknown (the zero value) means "no concerns recorded"; ToolUseLow
-// flags models that hallucinate tool calls, emit malformed tool_use blocks, or
-// loop on the same tool. The cluster scorer excludes ToolUseLow models from
-// argmax when the inbound request carries tools, falling back to the unfiltered
-// pool only if the blacklist would otherwise empty the eligible set.
+// ToolUseQuality marks a model's reliability under has_tools=true turns.
+// ToolUseUnknown (zero value) = no concerns recorded; ToolUseLow flags models
+// that hallucinate tool calls, emit malformed tool_use blocks, or loop on the
+// same tool. The scorer excludes ToolUseLow models from argmax on tool-bearing
+// requests, falling back to the unfiltered pool only if that would empty it.
 type ToolUseQuality int
 
 const (
@@ -96,17 +88,13 @@ const (
 	ToolUseLow
 )
 
-// AgenticUse marks whether a model can reliably DRIVE an agentic harness — the
-// multi-step skill/tool-orchestration loop (Claude Code, opencode, …) where the
-// model must read tool results, follow a skill/tool protocol, and sustain a plan
-// across turns. This is a STRICTER axis than ToolUseQuality: a model can emit
-// well-formed tool calls (so it is not ToolUseLow) yet still be unable to run the
-// harness — e.g. minimax-m3 grepped the filesystem for a skill instead of
-// invoking it. AgenticUnknown (the zero value) means "no concerns recorded";
-// AgenticLow flags models the cluster scorer drops from has_tools turns so a
-// price-leaning quality dial demotes Opus to a cheaper HARNESS-CAPABLE model
-// (Sonnet, GLM, DeepSeek-Pro) instead of stranding the turn on the cheapest model
-// in the pool.
+// AgenticUse marks whether a model can reliably drive an agentic harness (the
+// multi-step skill/tool-orchestration loop in Claude Code, opencode, etc).
+// Stricter than ToolUseQuality: a model can emit well-formed tool calls yet
+// still fail to run the harness (e.g. minimax-m3 grepped the filesystem for a
+// skill instead of invoking it). AgenticLow flags models the scorer drops
+// from has_tools turns, so the price dial can demote Opus to a cheaper
+// harness-capable model instead of stranding the turn on the cheapest one.
 type AgenticUse int
 
 const (
@@ -114,14 +102,11 @@ const (
 	AgenticLow
 )
 
-// ImageInput marks whether a model accepts image content parts. ImageInputUnknown
-// (the zero value) means "no restriction recorded" — first-party models (Anthropic,
-// OpenAI, Google) are all multimodal, so they keep the default. ImageInputUnsupported
-// flags text-only models that reject image parts with an upstream 4xx (e.g. DeepInfra's
-// "Model … does not accept image input" on GLM-5.1). The cluster scorer subtracts the
-// ImageInputUnsupported set from the eligible pool when the inbound request carries
-// images, mirroring the ToolUseLow filter — flag a new text-only OSS model here the
-// same way you'd assess its tool-use quality.
+// ImageInput marks whether a model accepts image content parts.
+// ImageInputUnknown (zero value) = no restriction; first-party models default
+// here since they're all multimodal. ImageInputUnsupported flags text-only
+// models that 4xx on image parts (e.g. DeepInfra's GLM-5.1). The scorer
+// excludes the ImageInputUnsupported set from image-bearing requests.
 type ImageInput int
 
 const (
@@ -140,22 +125,17 @@ type Model struct {
 	// ContextWindow is the model's total input+output token budget in tokens.
 	// 0 means use catalog.DefaultContextWindow.
 	ContextWindow int
-	// ToolUseQuality marks a model's reliability under has_tools=true. Zero
-	// value (ToolUseUnknown) is the default — set ToolUseLow to remove the
+	// ToolUseQuality: default ToolUseUnknown; set ToolUseLow to remove the
 	// model from agentic argmax pools.
 	ToolUseQuality ToolUseQuality
-	// AgenticUse marks whether the model can drive an agentic harness under
-	// has_tools turns. Zero value (AgenticUnknown) is the default — set
-	// AgenticLow to keep the model out of the price dial's agentic demotion
-	// ladder (see the scorer's has_tools filter).
+	// AgenticUse: default AgenticUnknown; set AgenticLow to keep the model
+	// out of the price dial's agentic demotion ladder.
 	AgenticUse AgenticUse
-	// ImageInput marks whether the model accepts image content parts. Zero
-	// value (ImageInputUnknown) is the default — set ImageInputUnsupported on
+	// ImageInput: default ImageInputUnknown; set ImageInputUnsupported on
 	// text-only models so the scorer keeps image-bearing turns off them.
 	ImageInput ImageInput
-	// ThinkTagReasoning marks a model that streams chain-of-thought as inline
-	// <think>…</think> in the content channel rather than reasoning_content/
-	// reasoning. When true, the Anthropic response translator reroutes a
+	// ThinkTagReasoning marks a model that streams inline <think>...</think>
+	// instead of reasoning_content; the Anthropic translator reroutes a
 	// leading <think> block into Anthropic thinking. Default false.
 	ThinkTagReasoning bool
 	// Providers is the ordered fallback list. First binding whose
@@ -173,17 +153,11 @@ func (m Model) PrimaryProvider() string {
 	return m.Providers[0].Provider
 }
 
-// Models is the source of truth. One struct literal per model, grouped by
-// family and tier. To add a model:
-//
-//  1. Append a Model{} entry below.
-//  2. If the deploy needs to route to it, list it in the cluster artifact
-//     bundle's model_registry.json (the cluster scorer's per-version
-//     candidate list — model_registry.json controls which versions can
-//     route to the model, this catalog controls how it's priced and
-//     dispatched).
-//
-// No other files need to change.
+// Models is the source of truth, one struct literal per model, grouped by
+// family and tier. To add a model: append a Model{} below, and if the deploy
+// should route to it, list it in the cluster bundle's model_registry.json
+// (that file controls which versions route to it; this catalog controls
+// pricing/dispatch). No other files need to change.
 var Models = []Model{
 	// --- Anthropic ---
 	{ID: "claude-haiku-4-5", Tier: TierLow, ContextWindow: 200_000, Providers: []ProviderBinding{
@@ -195,20 +169,16 @@ var Models = []Model{
 	{ID: "claude-sonnet-4-6", Tier: TierMid, ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}},
 	}},
-	// claude-sonnet-5: 1M context behind the context-1m beta (catalog carries
-	// 200K, like the rest of the Sonnet line). Priced at the standard list rate
-	// $3/$15 — Anthropic's $2/$10 introductory rate runs through 2026-08-31; not
-	// encoded here to avoid a compile-time price that silently goes stale.
+	// 1M context is behind the context-1m beta (catalog carries 200K like the
+	// rest of Sonnet). Priced at standard $3/$15, not the $2/$10 introductory
+	// rate (through 2026-08-31) — avoids a compile-time price going stale.
 	{ID: "claude-sonnet-5", Tier: TierMid, ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}},
 	}},
-	// Opus 4.5+ shipped at $5/$25 per MTok (down from $15/$75 on Opus 4.1
-	// and earlier). The 4.6 / 4.7 entries were stale at the legacy price
-	// until 4.8 landed and forced a triple-check against
-	// platform.claude.com/docs/en/about-claude/pricing.
-	// Opus 4.6+, Opus 4.7+, Opus 4.8 support 1M context via context-1m-2025-08-07 beta;
-	// the catalog conservatively reports 200K, and the pre-filter dynamically expands
-	// to 1M when the beta header is present (see contextWindowForRequest in proxy/service.go).
+	// Opus 4.5+ is $5/$25 per MTok (down from $15/$75 on 4.1 and earlier).
+	// 4.6+/4.7+/4.8 support 1M context via the context-1m-2025-08-07 beta; the
+	// catalog reports 200K and the pre-filter expands to 1M when the beta
+	// header is present (contextWindowForRequest in proxy/service.go).
 	{ID: "claude-opus-4-6", Tier: TierHigh, ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
@@ -218,10 +188,9 @@ var Models = []Model{
 	{ID: "claude-opus-4-8", Tier: TierHigh, ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
-	// Fable 5 (Mythos-class, GA 2026-06-09) ships a 1M context window by
-	// default — no context-1m beta header required — so the catalog carries
-	// the full window, unlike Opus 4.6+ above. Its safety classifiers can
-	// return stop_reason "refusal" (HTTP 200); see mapStopReason in translate.
+	// Ships 1M context by default (no beta header needed), unlike Opus 4.6+.
+	// Safety classifiers can return stop_reason "refusal" (HTTP 200); see
+	// mapStopReason in translate.
 	{ID: "claude-fable-5", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 10.00, OutputUSDPer1M: 50.00, CacheReadMultiplier: 0.10}},
 	}},
@@ -322,33 +291,18 @@ var Models = []Model{
 
 	// --- OSS pool ---
 	//
-	// Each row carries an ordered Providers list. Managed-prod deploys ship
-	// only the SOC-2-compliant primary key (Fireworks / DeepInfra / Bedrock /
-	// OpenAI / Anthropic / Google) and silently drop the trailing OpenRouter
-	// binding at boot. Self-hosters with only an OpenRouter key get every OSS
-	// model routed via that trailing binding.
+	// Each row carries an ordered Providers list. Managed-prod ships only the
+	// SOC-2 primary key (Fireworks/DeepInfra/Bedrock/OpenAI/Anthropic/Google)
+	// and drops the trailing OpenRouter binding; self-hosters with only an
+	// OpenRouter key route every OSS model via that fallback.
 	//
-	// Verified against each upstream's live catalog 2026-05-17, re-checked
-	// on 2026-05-20 when the v0.55 bundle reintroduced the dedicated-only
-	// Qwen rows:
-	// - qwen/qwen3-30b-a3b-instruct-2507 — dedicated-only on Fireworks,
-	//   absent from DeepInfra + Bedrock. Managed-prod resolves via the
-	//   trailing OpenRouter binding.
-	// - qwen/qwen3-coder (480B-A35B) — dedicated-only on Fireworks, absent
-	//   from DeepInfra + Bedrock us-east-1. Managed-prod resolves via the
-	//   trailing OpenRouter binding.
-	// - qwen/qwen3-235b-a22b-2507 — AWS published the Instruct-2507 variant
-	//   on bedrock-mantle in all major regions (verified 2026-05-22 against
-	//   the Bedrock model card). Primary moves to Bedrock; OpenRouter
-	//   stays as a trailing fallback for self-hosters without an AWS key.
-	//   The OR primary was dropped because we observed non-SSE responses
-	//   when OR routed Qwen through Google's hosting (silent CC stalls).
-	//   ToolUseLow: Instruct-2507 is the non-thinking variant and is
-	//   documented (Qwen model card, arxiv 2604.02155) to under-perform
-	//   the Thinking variant on tool use; production traffic against the
-	//   Bedrock binding (2026-05-23) showed the model returning narrative
-	//   "I edited the file" responses with zero tool_use blocks. Excluded
-	//   from agentic argmax pools until the Thinking variant lands.
+	// qwen/qwen3-235b-a22b-2507: Bedrock primary (verified 2026-05-22) after
+	// OpenRouter showed non-SSE responses routing Qwen through Google hosting
+	// (silent CC stalls). ToolUseLow: the non-thinking Instruct-2507 variant
+	// underperforms Thinking on tool use (Qwen model card, arxiv 2604.02155)
+	// and was observed returning narrative text with zero tool_use blocks in
+	// prod traffic (2026-05-23) — excluded from agentic pools until Thinking
+	// lands.
 	{ID: "qwen/qwen3-235b-a22b-2507", Tier: TierMid, ContextWindow: 262_144, ToolUseQuality: ToolUseLow, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderBedrock, UpstreamID: "qwen.qwen3-235b-a22b-2507",
 			Price: Pricing{InputUSDPer1M: 0.2266, OutputUSDPer1M: 0.9064}},
@@ -364,10 +318,9 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.090, OutputUSDPer1M: 1.100}},
 	}},
-	// DeepSeek V4 (Flash + Pro) natively serves a 1,048,576-token context;
-	// DeepInfra (Flash primary) and Fireworks (Pro primary) both serve the full
-	// window. The 131_072 carried over from V3.2 was filtering these out of any
-	// request over ~128K tokens (see excludeContextOverflowModels in proxy/service.go).
+	// DeepSeek V4 natively serves 1,048,576 tokens; the 131_072 carried over
+	// from V3.2 was filtering requests over ~128K (excludeContextOverflowModels
+	// in proxy/service.go).
 	{ID: "deepseek/deepseek-v4-flash", Tier: TierLow, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, AgenticUse: AgenticLow, Providers: []ProviderBinding{
 		{Provider: providers.ProviderMakora, UpstreamID: "deepseek-ai/DeepSeek-V4-Flash",
 			Price: Pricing{InputUSDPer1M: 0.1134, OutputUSDPer1M: 0.2791, CacheReadMultiplier: 0.20}},
@@ -376,11 +329,9 @@ var Models = []Model{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "deepseek/deepseek-v4-pro", Tier: TierHigh, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
-		// Makora stays primary for cost ($1.318 / $2.636 vs Together's $1.74 / $3.48).
-		// Together is the #1 throughput provider for V4 Pro on artificialanalysis.ai
-		// (~209 t/s vs Fireworks ~120) at the same price as Fireworks, so it sits
-		// ahead of Fireworks as the fastest same-price fallback. Prices confirmed
-		// from the Together serverless catalog (cached $0.20).
+		// Makora primary for cost ($1.318/$2.636 vs Together's $1.74/$3.48).
+		// Together ranks ahead of Fireworks as fallback: #1 AA throughput
+		// (~209 t/s vs Fireworks ~120) at the same price.
 		{Provider: providers.ProviderMakora, UpstreamID: "deepseek-ai/DeepSeek-V4-Pro",
 			Price: Pricing{InputUSDPer1M: 1.3180, OutputUSDPer1M: 2.6361, CacheReadMultiplier: 0.10}},
 		{Provider: providers.ProviderTogether, UpstreamID: "deepseek-ai/DeepSeek-V4-Pro",
@@ -399,37 +350,27 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.1684}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.10}},
 	}},
-	// kimi-k2.7 (the "Code" agentic variant) launched day-0 on Fireworks
-	// serverless. Same Moonshot public rates as k2.6 ($0.95/$4.00, cached $0.19
-	// = 0.20x) but ~30% less thinking-token usage. 262k context. Fireworks-only
-	// for now — not yet on OpenRouter, so no trailing fallback binding.
+	// kimi-k2.7 "Code" variant: same rates as k2.6, ~30% less thinking-token
+	// usage. Fireworks-only — not yet on OpenRouter, so no fallback binding.
 	{ID: "moonshotai/kimi-k2.7", Tier: TierHigh, ContextWindow: 262_144, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/kimi-k2p7-code",
 			Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.20}},
 	}},
-	// AA top-performer additions (2026-05-18).
-	//
-	// Selection ranked OSS models on the artificialanalysis.ai API by a
-	// composite of quality (Intelligence Index v4.0), cost (blended
-	// 3:1 input:output), and effective time per 2k-token query
-	// (median TTFT + 2000/TPS). Provider availability verified against
-	// per-model "API providers" pages and OpenRouter's v1/models API.
+	// AA top-performer additions (2026-05-18): ranked by composite of quality
+	// (Intelligence Index v4.0), cost (blended 3:1), and effective time per
+	// 2k-token query.
 	//
 	// xiaomi/mimo-v2.5 (base) was removed 2026-05-23 after sustained
-	// tool-calling failures in real Claude Code sessions: malformed empty-input
-	// tool_use blocks, hallucinated tool names, and same-tool same-args
-	// re-issue loops on weak agent prompts. Matches public reports against
-	// OpenCode (#24095) and Crush (#1699). The pro variant is kept — slower
-	// but doesn't exhibit the same instability in our sweep.
+	// tool-calling failures in real Claude Code sessions (malformed empty-input
+	// tool_use, hallucinated tool names, repeat-args loops — matches OpenCode
+	// #24095 and Crush #1699). The pro variant doesn't show the instability.
 	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, ThinkTagReasoning: true, Providers: []ProviderBinding{
 		{Provider: providers.ProviderDeepInfra, UpstreamID: "XiaomiMiMo/MiMo-V2.5-Pro",
 			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000, CacheReadMultiplier: 0.10}},
 	}},
-	// qwen3.6-35b-a3b is a 35B-A3B MoE — Intel 44 at ~13s wall-clock per
-	// 2k tokens on DeepInfra FP8, the speed/cost end of the new Qwen3.6
-	// family. TierLow despite the MoE size because the active parameter
-	// budget + AA's Coding Index put it below v4-flash.
+	// TierLow despite MoE size: active-parameter budget + AA Coding Index put
+	// it below v4-flash.
 	{ID: "qwen/qwen3.6-35b-a3b", Tier: TierLow, ContextWindow: 262_144, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderMakora, UpstreamID: "unsloth/Qwen3.6-35B-A3B-NVFP4",
 			Price: Pricing{InputUSDPer1M: 0.1720, OutputUSDPer1M: 1.2002, CacheReadMultiplier: 0.75}},
@@ -437,39 +378,27 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 0.950}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.000, CacheReadMultiplier: 0.10}},
 	}},
-	// minimax-m2.7 sits in an unusual quality/cost spot: Intel 50 at
-	// $0.52 blended, cheaper than every TierMid model. Letting the
-	// trainer find its niche rather than pinning a tier by price alone.
-	// Context window is 204,800 on both Fireworks and OpenRouter despite
-	// MiniMax's "1M" marketing — do NOT raise without re-confirming the
-	// served cap, or requests over ~205K tokens will hard-400 (no failover).
+	// Context window is 204,800 on Fireworks and OpenRouter despite MiniMax's
+	// "1M" marketing — do NOT raise without re-confirming the served cap, or
+	// requests over ~205K will hard-400 with no failover.
 	{ID: "minimax/minimax-m2.7", Tier: TierHigh, ContextWindow: 204_800, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
-		// Together dominates Fireworks on M2.7: AA clocks ~399 t/s (#1 latency too)
-		// vs Fireworks' ~95 t/s, at the identical $0.30 / $1.20 list price (cached
-		// $0.06) — confirmed from the Together serverless catalog ("MiniMax M2.7
-		// FP4"). Together leads the binding order; Fireworks/OpenRouter stay as
-		// ordered fallbacks.
+		// Together dominates on M2.7: AA clocks ~399 t/s vs Fireworks' ~95 t/s
+		// at the identical $0.30/$1.20 list price.
 		{Provider: providers.ProviderTogether, UpstreamID: "MiniMaxAI/MiniMax-M2.7",
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.06 / 0.300}},
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/minimax-m2p7",
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.279, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
 	}},
-	// minimax-m3 is the MiniMax Sparse Attention (MSA) successor to m2.7 — a
-	// ~225B-param native-multimodal model. Same Fireworks serverless price as
-	// m2.7 ($0.30/$1.20, cached $0.06 = 0.20x). Fireworks serves a 512k context
-	// window (the model's headline 1M is not what the Fireworks endpoint
-	// exposes). Unlike m2.7 it accepts image parts, so ImageInput is left at the
-	// default (image-capable).
+	// Fireworks serves 512k context — the model's headline 1M is not what the
+	// endpoint exposes. Unlike m2.7 it accepts images, so ImageInput stays default.
 	{ID: "minimax/minimax-m3", Tier: TierHigh, ContextWindow: 512_000, AgenticUse: AgenticLow, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/minimax-m3",
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
 	}},
-	// Fireworks is primary for the GLM-5 family: DeepInfra's FP8 GLM serving is
-	// an order of magnitude slower (AA clocks GLM-5 at ~33 t/s with a ~90s TTFT
-	// vs Fireworks' ~180 t/s), enough to make it the dominant timeout source.
-	// DeepInfra/OpenRouter are kept as ordered fallbacks.
+	// Fireworks primary: DeepInfra's FP8 GLM serving is an order of magnitude
+	// slower (~33 t/s, ~90s TTFT vs Fireworks' ~180 t/s), the dominant timeout source.
 	{ID: "z-ai/glm-5", Tier: TierHigh, ContextWindow: 202_752, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/glm-5",
 			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.200, CacheReadMultiplier: 0.20}},
@@ -477,15 +406,11 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 2.080}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 1.920, CacheReadMultiplier: 0.10}},
 	}},
-	// GLM-5.1 ships the streaming tool-call fix that GLM-5 lacks (tool_stream=true
-	// per Z.AI docs). Wired up for /force-model testing and v0.56 routing; the
-	// emit_openai layer injects tool_stream + disables thinking for this slug.
-	// Fireworks primary for the same speed reason as GLM-5 (cached input $0.26).
+	// GLM-5.1 ships the streaming tool-call fix GLM-5 lacks (tool_stream=true);
+	// emit_openai injects tool_stream + disables thinking for this slug.
 	{ID: "z-ai/glm-5.1", Tier: TierHigh, ContextWindow: 202_752, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
-		// Together edges out Fireworks on GLM-5.1: AA ranks it #1 in both throughput
-		// (~213 t/s vs Fireworks' ~180) and TTFT, so it leads the binding order.
-		// Same $1.40 / $4.40 list price as Fireworks, cached $0.26 — confirmed from
-		// the Together serverless catalog ("GLM 5.1 FP4").
+		// Together edges out Fireworks: AA ranks it #1 in throughput (~213 t/s
+		// vs ~180) and TTFT, at the same $1.40/$4.40 list price.
 		{Provider: providers.ProviderTogether, UpstreamID: "zai-org/GLM-5.1",
 			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400, CacheReadMultiplier: 0.26 / 1.400}},
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/glm-5p1",
@@ -494,23 +419,19 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 1.050, OutputUSDPer1M: 3.500}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.980, OutputUSDPer1M: 3.080, CacheReadMultiplier: 0.18 / 0.98}},
 	}},
-	// GLM-5.2 (day-0 Fireworks serverless, glm-5p2). ContextWindow held at the
-	// glm-family 202_752 pending confirmation of the Fireworks served window
-	// (overstating triggers hard 400s — cf. the minimax 1M->204800 incident);
-	// bump once the served window is verified.
+	// ContextWindow held at glm-family 202_752 pending confirmation of the
+	// Fireworks served window — overstating triggers hard 400s (cf. the
+	// minimax 1M->204800 incident).
 	{ID: "z-ai/glm-5.2", Tier: TierHigh, ContextWindow: 202_752, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
-		// Together is #1 on artificialanalysis.ai for GLM-5.2 throughput (~382 t/s
-		// vs Fireworks ~347), so it leads the binding order. $1.40 / $4.40, cached
-		// $0.26 — confirmed from the Together serverless catalog ("GLM 5.2").
+		// Together leads: #1 AA throughput (~382 t/s vs Fireworks ~347) at the
+		// same $1.40/$4.40 price.
 		{Provider: providers.ProviderTogether, UpstreamID: "zai-org/GLM-5.2",
 			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400, CacheReadMultiplier: 0.26 / 1.400}},
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/glm-5p2",
 			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400, CacheReadMultiplier: 0.20}},
 	}},
-	// v0.55 bundle additions (2026-05-20). Fireworks-dedicated rows carry
-	// an OpenRouter trailing binding so managed-prod deploys without a
-	// Fireworks key can still resolve them; pricing reflects the
-	// OpenRouter list price for the public model card on 2026-05-20.
+	// Fireworks-dedicated rows below carry an OpenRouter trailing binding so
+	// managed-prod deploys without a Fireworks key can still resolve them.
 	{ID: "mistralai/mistral-small-2603", Tier: TierMid, ContextWindow: 262_144, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.200, OutputUSDPer1M: 0.600, CacheReadMultiplier: 0.10}},
 	}},
@@ -527,12 +448,9 @@ var Models = []Model{
 	{ID: "qwen/qwen3.5-flash-02-23", Tier: TierLow, ContextWindow: 1_000_000, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.050, OutputUSDPer1M: 0.150, CacheReadMultiplier: 0.10}},
 	}},
-	// qwen3.7-plus is Alibaba's cost-effective agentic tier, now served day-0
-	// and exclusively on Fireworks serverless (the closed Alibaba API surface is
-	// deliberately avoided — Fireworks is SOC-2 and keeps prompts off Alibaba).
-	// $0.40/$1.60, cached $0.08 (0.20x), 262k context. Native multimodal, so
-	// ImageInput stays at the default (image-capable). Fireworks-only binding —
-	// the OpenRouter route for this model forwards to Alibaba, which we skip.
+	// Fireworks-only: the closed Alibaba API surface is deliberately avoided
+	// (Fireworks is SOC-2, keeps prompts off Alibaba); OpenRouter's route for
+	// this model forwards to Alibaba, so it's skipped.
 	{ID: "qwen/qwen3.7-plus", Tier: TierHigh, ContextWindow: 262_144, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/qwen3p7-plus",
 			Price: Pricing{InputUSDPer1M: 0.400, OutputUSDPer1M: 1.600, CacheReadMultiplier: 0.20}},

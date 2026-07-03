@@ -60,14 +60,10 @@ type Scorer struct {
 	qualityMeans       Rankings
 	modelAxes          map[string]ModelAxis
 	medianVerbosity    float64
-	// dialAlphaBreakpoints calibrates the QualityBias dial against this bundle's
-	// actual routing behavior. It holds the ascending uniform-alpha values at
-	// which the routed model mix changes (one entry per distinct mix, first =
-	// 0, last = 1). dialToAlpha interpolates across them so equal dial travel
-	// produces an equal number of mix changes — which is what removes the dead
-	// zones (wide alpha ranges that route an identical mix) that otherwise make
-	// the slider's lower half feel inert. Computed once at NewScorer; nil for v1
-	// bundles, where dialToAlpha falls back to the identity t -> alpha.
+	// dialAlphaBreakpoints holds ascending uniform-alpha values where the routed
+	// mix changes (first=0, last=1). dialToAlpha interpolates across them so
+	// equal dial travel = equal mix changes, killing dead zones where a wide
+	// alpha range routes an identical mix. nil for v1 bundles.
 	dialAlphaBreakpoints []float64
 }
 
@@ -117,9 +113,8 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 		return nil, fmt.Errorf("cluster: availableProviders must not be empty")
 	}
 
-	// Embedder-identity guard: a bundle trained in one embedding space
-	// must never be scored with a different embedder. Dim alone is not
-	// enough (two models can share a dim), so both ID and dim are checked.
+	// A bundle trained in one embedding space must never be scored with a
+	// different embedder; dim alone doesn't guard this since dims can collide.
 	if embed.ID() != bundle.EmbedderID() {
 		return nil, fmt.Errorf("cluster %s: bundle declares embedder %q but runtime embedder is %q", bundle.Version, bundle.EmbedderID(), embed.ID())
 	}
@@ -158,8 +153,8 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 		models[i] = c.Model
 	}
 
-	// Validate every cluster in [0, K) has a ranking/quality_means row so a missing
-	// cluster can't win top-p at request time and silently contribute zero.
+	// Every cluster in [0, K) must have a ranking/quality_means row, or a
+	// missing cluster could win top-p at request time and contribute zero.
 	if bundle.IsV2 {
 		for k := 0; k < bundle.Centroids.K; k++ {
 			row, ok := bundle.QualityMeans[k]
@@ -172,20 +167,16 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 				}
 			}
 		}
-		// Validate bundle's default routing knobs against centroids.K so a
-		// misconfigured metadata.yaml fails at load time rather than HTTP 400-ing
-		// every v2 request. The Alpha-override path is a scalar replacement that
-		// preserves length, so once defaults are sized correctly the request-time
-		// length check is unreachable from valid overrides.
+		// Validate default routing knobs against centroids.K at load time so a
+		// misconfigured metadata.yaml fails here instead of HTTP 400-ing every
+		// v2 request.
 		if bundle.Metadata != nil && bundle.Metadata.Training.DefaultRoutingKnobs != nil {
 			dk := bundle.Metadata.Training.DefaultRoutingKnobs
 			if len(dk.Alpha) != bundle.Centroids.K {
 				return nil, fmt.Errorf("cluster %s: default_routing_knobs.alpha length %d must equal K=%d", bundle.Version, len(dk.Alpha), bundle.Centroids.K)
 			}
-			// alpha_floor is optional, but when present must be a full per-cluster
-			// vector with each entry a valid quality weight: applyDialAlpha writes
-			// floor[i] straight into the alpha slot, so a bad length or out-of-range
-			// value would silently produce an invalid blend.
+			// alpha_floor, if present, must be a full per-cluster vector of valid
+			// weights: applyDialAlpha writes floor[i] straight into the alpha slot.
 			if dk.AlphaFloor != nil {
 				if len(dk.AlphaFloor) != bundle.Centroids.K {
 					return nil, fmt.Errorf("cluster %s: default_routing_knobs.alpha_floor length %d must equal K=%d", bundle.Version, len(dk.AlphaFloor), bundle.Centroids.K)
@@ -227,41 +218,32 @@ func NewScorer(bundle *Bundle, cfg Config, embed Embedder, availableProviders ma
 		modelAxes:          bundle.ModelAxes,
 		medianVerbosity:    bundle.MedianVerbosity,
 	}
-	// The dial calibration replays the scorer across the alpha range, so it must
-	// be computed after the fields it reads (qualityMeans, modelAxes, models,
-	// centroids) are populated. v1 bundles have no quality_means and keep a nil
-	// calibration (dialToAlpha then falls back to identity).
+	// Must run after qualityMeans/modelAxes/models/centroids are populated,
+	// since it replays the scorer across the alpha range. v1 bundles keep a
+	// nil calibration (dialToAlpha falls back to identity).
 	if bundle.IsV2 {
 		s.dialAlphaBreakpoints = s.computeDialCalibration()
 	}
 	return s, nil
 }
 
-// qualityBiasCalibrationGrid is the uniform-alpha resolution swept at
-// scorer-build time to discover where the routed model mix changes. 401 points
-// = steps of 0.0025, fine enough to separate adjacent crossovers.
+// qualityBiasCalibrationGrid is the uniform-alpha resolution swept at build
+// time to find mix-change points: 401 points = steps of 0.0025.
 const qualityBiasCalibrationGrid = 401
 
 // computeDialCalibration walks a uniform alpha from 0 to 1, scoring every
-// cluster centroid through the same blend as live routing, and records the
-// alpha at which the routed model mix (the multiset of per-cluster winners)
-// first changes. Those alphas — ascending, first forced to 0, last forced to 1
-// — are the dial breakpoints.
+// cluster centroid through the live blend, and records each alpha where the
+// routed model mix first changes (ascending, first forced to 0, last to 1) —
+// the dial breakpoints.
 //
-// They exist to defeat the dead-zone problem. The cheapest models are far
-// cheaper than the rest while quality_means are tightly bunched, so the blend
-// routes an identical all-cheapest mix across a wide low-alpha range, an
-// identical saturated mix across a wide high-alpha range, and can sit on a
-// stable mid mix for a wide middle range too. A dial that maps linearly to
-// alpha spends most of its travel in those flat regions — the reported
-// "50% looks the same as 20%" bug. dialToAlpha instead interpolates across
-// these breakpoints, so equal dial travel crosses an equal number of mix
-// changes and every part of the slider does something.
+// These exist because cheap models are far cheaper while quality_means are
+// tightly bunched, so a linear dial spends most of its travel on flat
+// all-cheapest/all-best/stable-mid regions (the "50% looks like 20%" bug).
+// dialToAlpha interpolates across the breakpoints instead, so equal dial
+// travel crosses an equal number of mix changes.
 //
-// Forcing the first breakpoint to 0 keeps the price extreme at the single
-// cheapest model; forcing the last to 1 keeps the quality extreme at the pure
-// best-per-cluster mix. Returns nil when fewer than two distinct mixes exist
-// (no cost/quality separation), so dialToAlpha falls back to the identity.
+// Returns nil when fewer than two distinct mixes exist, so dialToAlpha falls
+// back to the identity.
 func (s *Scorer) computeDialCalibration() []float64 {
 	k := s.centroids.K
 	centroidTopClusters := make([][]int, k)
@@ -283,9 +265,8 @@ func (s *Scorer) computeDialCalibration() []float64 {
 		for c := 0; c < k; c++ {
 			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models, nil, nil)
 			winner, _ := argmax(scores, s.models)
-			// Mirror RoutingDistribution's accounting exactly: skip an empty
-			// winner so a cluster that flips between "" and a real model can't
-			// inject a phantom breakpoint the dashboard distribution never shows.
+			// Skip empty winners (matches RoutingDistribution) so a cluster
+			// flipping between "" and a real model can't fake a breakpoint.
 			if winner != "" {
 				counts[winner]++
 			}
@@ -321,11 +302,9 @@ func mixSignature(counts map[string]int) string {
 }
 
 // dialToAlpha maps the QualityBias dial t in [0, 1] to the uniform per-cluster
-// alpha the scorer should run at. It places the bundle's mix breakpoints at
-// equal dial spacing and interpolates between them, so the dial spends equal
-// travel on each distinct routed mix instead of wasting its lower half on a
-// dead zone. With no calibration (v1 bundles, or a bundle with no mix
-// separation) it is the identity. t outside [0, 1] is clamped.
+// alpha, placing the bundle's mix breakpoints at equal dial spacing so travel
+// isn't wasted on a dead zone. Identity when uncalibrated. t is clamped to
+// [0, 1].
 func (s *Scorer) dialToAlpha(t float64) float64 {
 	if t <= 0 {
 		return 0
@@ -346,19 +325,13 @@ func (s *Scorer) dialToAlpha(t float64) float64 {
 	return bp[i] + frac*(bp[i+1]-bp[i])
 }
 
-// applyDialAlpha resolves the QualityBias dial position t into the effective
-// per-cluster alpha, writing in place into alpha. It maps t through the
-// bundle's mix-change calibration (dialToAlpha) to a uniform alpha, then floors
-// each cluster at the bundle-declared floor[i]: alpha[i] = max(dialAlpha,
-// floor[i]). The floor is the LOWEST quality weight the bundle tolerates per
-// cluster at maximum price-sensitivity, so a price-leaning dial still routes
-// each cluster to the best model for that budget instead of collapsing the
-// whole vector to the cheapest model (which stranded agentic main-loop turns
-// on models that can't drive the harness). floor==nil disables flooring (the
-// plain uniform dial, legacy behavior for bundles that ship no alpha_floor).
-// Single source of truth for the dial->alpha resolution shared by Route and
-// RoutingDistribution. Caller guarantees len(floor) == len(alpha) when non-nil
-// (validated against K at load time).
+// applyDialAlpha resolves dial position t to per-cluster alpha in place:
+// alpha[i] = max(dialToAlpha(t), floor[i]). floor is the lowest quality
+// weight the bundle tolerates per cluster at max price-sensitivity, so a
+// price-leaning dial can't collapse the whole vector onto the cheapest model
+// (which stranded agentic turns on models that can't drive the harness).
+// floor==nil disables flooring. Single source of truth shared by Route and
+// RoutingDistribution; caller guarantees len(floor)==len(alpha) when non-nil.
 func (s *Scorer) applyDialAlpha(t float64, alpha, floor []float64) {
 	a := s.dialToAlpha(t)
 	for i := range alpha {
@@ -391,12 +364,10 @@ func resolveProviderFor(modelID, registryProvider string, available map[string]s
 	return ""
 }
 
-// filterByProviders drops entries whose model has no ProviderBinding
-// resolvable under the available set, and rewrites the entry's Provider
-// to the resolved binding so downstream dispatch lands on the right
-// upstream. Same semantics as a plain registry-Provider match for
-// single-binding models; for multi-binding rows (e.g. fireworks primary,
-// openrouter fallback) it picks the first available in catalog order.
+// filterByProviders drops entries with no ProviderBinding resolvable under
+// available, and rewrites each surviving entry's Provider to the resolved
+// binding. For multi-binding rows (e.g. fireworks primary, openrouter
+// fallback) it picks the first available in catalog order.
 func filterByProviders(entries []DeployedEntry, available map[string]struct{}) []DeployedEntry {
 	out := make([]DeployedEntry, 0, len(entries))
 	for _, e := range entries {
@@ -410,23 +381,19 @@ func filterByProviders(entries []DeployedEntry, available map[string]struct{}) [
 	return out
 }
 
-// eligibleForDistribution returns the deployed model ids that survive the
-// caller's exclusions, mirroring the eligibility Route enforces: a model is
-// dropped when it is named in excludedModels, or when none of its bindings
-// resolves against the deployment's wired providers minus the excluded ones.
-// Empty exclusion sets return the full roster unchanged. Iterates s.candidates
-// so the order matches Route.
+// eligibleForDistribution returns deployed model ids surviving the caller's
+// exclusions, mirroring Route's eligibility: dropped if named in
+// excludedModels, or if no binding resolves against wired providers minus
+// excluded ones. Empty exclusions return the full roster. Iterates
+// s.candidates so order matches Route.
 func (s *Scorer) eligibleForDistribution(excludedModels, excludedProviders map[string]struct{}) []string {
 	if len(excludedModels) == 0 && len(excludedProviders) == 0 {
 		return s.models
 	}
 
-	// Mirror Route's provider gate: a model survives only if one of its bindings
-	// resolves under the wired providers minus the excluded ones. Checking the
-	// full catalog binding list instead would keep a model whose only WIRED
-	// provider is excluded (its other catalog binding isn't deployed, so Route
-	// would drop it). With no provider exclusions the effective set is the wired
-	// set and every candidate resolves, leaving only the model filter.
+	// Gate against wired providers minus excluded, not the full catalog
+	// binding list — else a model whose only WIRED binding is excluded would
+	// wrongly survive on an undeployed catalog binding.
 	effective := s.availableProviders
 	if len(excludedProviders) > 0 {
 		effective = make(map[string]struct{}, len(s.availableProviders))
@@ -511,12 +478,9 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		return router.Decision{}, fmt.Errorf("embedding dim %d != expected %d: %w", len(vec), s.centroids.Dim, ErrClusterUnavailable)
 	}
 
-	// Per-request gating complements boot-time filterByProviders. For
-	// multi-binding catalog rows we re-walk the binding list under the
-	// per-request EnabledProviders set: a BYOK-only request may have a
-	// narrower or wider provider set than the deployment, and the chosen
-	// binding determines which upstream gets the dispatch. Track the
-	// resolved binding per model so Decision.Provider reflects it.
+	// Re-walk multi-binding rows under the per-request EnabledProviders set: a
+	// BYOK-only request may narrow/widen the provider set vs. the deployment.
+	// Track the resolved binding per model so Decision.Provider reflects it.
 	eligibleModels := s.models
 	resolvedProvider := make(map[string]string, len(s.candidates))
 	if req.EnabledProviders != nil {
@@ -558,12 +522,9 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		eligibleModels = filtered
 	}
 
-	// Tool-use quality filter. When the inbound carries tools, drop any
-	// model the catalog has marked ToolUseLow (e.g. instruct-only variants
-	// that hallucinate tool calls). Soft filter: if the subtraction would
-	// empty the eligible pool, fall back to the unfiltered set rather than
-	// 4xx-ing the request — this is a quality preference, not a correctness
-	// gate.
+	// Drop ToolUseLow models (e.g. instruct-only variants that hallucinate
+	// tool calls) when the request carries tools. Soft filter: falls back to
+	// the unfiltered set if it would empty the pool — a preference, not a gate.
 	if req.HasTools {
 		if blacklist := catalog.ToolUseLowSet(); len(blacklist) > 0 {
 			filtered := eligibleModels[:0:0]
@@ -586,16 +547,12 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		}
 	}
 
-	// Agentic-harness filter. A has_tools turn is an agentic/main-loop turn, so
-	// drop any model the catalog marks AgenticLow — models that emit valid tool
-	// calls (hence not ToolUseLow) but can't sustain the skill/tool
-	// orchestration loop (observed: minimax-m3 grepped the filesystem for a
-	// skill instead of invoking it). This is the gate that lets the price/quality
-	// dial demote Opus to a cheaper HARNESS-CAPABLE model (Sonnet, GLM,
-	// DeepSeek-Pro) as it leans toward cost, instead of stranding the turn on the
-	// cheapest model in the pool — so the per-cluster alpha_floor no longer has to
-	// pin agentic on premium models. Soft filter with the same empty-pool
-	// fallback as the tool-use filter so a decision is always returned.
+	// Drop AgenticLow models on has_tools turns — models that emit valid tool
+	// calls but can't sustain the skill/tool loop (e.g. minimax-m3 grepped the
+	// filesystem for a skill instead of invoking it). This is what lets the
+	// price dial demote Opus to a cheaper harness-capable model (Sonnet, GLM,
+	// DeepSeek-Pro) instead of stranding the turn on the pool's cheapest model.
+	// Same soft empty-pool fallback as the tool-use filter.
 	if req.HasTools {
 		if blacklist := catalog.AgenticLowSet(); len(blacklist) > 0 {
 			filtered := eligibleModels[:0:0]
@@ -618,13 +575,10 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		}
 	}
 
-	// Image-input filter. When the inbound carries image content, drop every
-	// model the catalog has marked ImageInputUnsupported (text-only OSS models
-	// that 4xx on image parts). Soft filter with the same empty-pool fallback as
-	// the tool-use filter: if no image-capable candidate is deployed (e.g. an
-	// OSS-only self-host), keep the unfiltered pool and let the upstream report
-	// the rejection rather than 503-ing here. The managed pool always carries
-	// vision-capable Claude/Gemini/GPT candidates, so the drop is effective.
+	// Drop ImageInputUnsupported models (text-only OSS that 4xx on image parts)
+	// on image-bearing requests. Same soft fallback: if no image-capable
+	// candidate is deployed, keep the unfiltered pool and let the upstream
+	// report the rejection rather than 503-ing here.
 	if req.HasImages {
 		if textOnly := catalog.ImageUnsupportedSet(); len(textOnly) > 0 {
 			filtered := eligibleModels[:0:0]
@@ -654,12 +608,10 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		}
 	}
 
-	// Per-installation model priority: turn the ranked preference list into a
-	// per-model additive bonus over the eligible pool. Rank is compacted over
-	// eligible entries — a preferred model that's excluded, undeployed, or
-	// filtered above is skipped, so the highest still-available preference gets
-	// the strongest nudge and a stale preference is a no-op. Built once here and
-	// applied per top-P cluster inside blendScoresV2.
+	// Turn the ranked preference list into a per-model additive bonus. Rank is
+	// compacted over eligible entries, so an excluded/undeployed/filtered
+	// preference is skipped (stale preference = no-op). Applied per top-P
+	// cluster inside blendScoresV2.
 	var priorityBonus map[string]float32
 	if len(req.PreferredModels) > 0 {
 		eligible := make(map[string]struct{}, len(eligibleModels))
@@ -693,22 +645,18 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		if req.RoutingKnobs != nil {
 			switch {
 			case req.RoutingKnobs.QualityBias != nil:
-				// Dial path: map the single dial position through this bundle's
-				// mix-change calibration (so the slider spends equal travel on
-				// each distinct routed mix, no dead zone), then floor each
-				// cluster at a fraction of its shipped default so the dial
-				// preserves the bundle's per-cluster alpha shape instead of
-				// flattening it — a price-leaning dial cheapens conversational
-				// turns but never strands agentic on a cheap model. Takes
-				// precedence over a co-set Alpha (the higher-level intent wins).
+				// Map the dial through the mix-change calibration (no dead
+				// zone), then floor each cluster so the dial cheapens
+				// conversational turns without ever stranding agentic on a
+				// cheap model. Takes precedence over a co-set Alpha.
 				t := *req.RoutingKnobs.QualityBias
 				if math.IsNaN(t) || math.IsInf(t, 0) || t < 0 || t > 1 {
 					return router.Decision{}, fmt.Errorf("%w: quality_bias (%f) must be a finite value in [0, 1]", ErrInvalidRoutingKnobs, t)
 				}
 				s.applyDialAlpha(t, activeKnobs.Alpha, activeKnobs.AlphaFloor)
 			case req.RoutingKnobs.Alpha != nil:
-				// Sledgehammer behavior: uniformly replace every alpha with the
-				// scalar (eval/debug lever, ignores per-cluster dispersion).
+				// Eval/debug lever: replace every alpha with the scalar,
+				// ignoring per-cluster dispersion.
 				for i := range activeKnobs.Alpha {
 					activeKnobs.Alpha[i] = *req.RoutingKnobs.Alpha
 				}
@@ -727,18 +675,14 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			}
 		}
 
-		// Validate effective knobs. Alpha length is sanity-checked here as a
-		// defensive backstop — NewScorer validates the bundle defaults against K
-		// at load time, and the override path replaces values in place without
-		// resizing, so a mismatch here means a server-side bundle/registry bug
-		// rather than bad client input. Map to ErrClusterUnavailable (HTTP 503)
-		// to avoid misreporting a server config error as a client 400.
+		// Alpha length mismatch here means a server-side bundle/registry bug, not
+		// bad client input (NewScorer validates defaults against K; overrides
+		// replace in place without resizing) — map to 503, not 400.
 		if len(activeKnobs.Alpha) != s.centroids.K {
 			return router.Decision{}, fmt.Errorf("%w: alpha vector length %d must equal K=%d", ErrClusterUnavailable, len(activeKnobs.Alpha), s.centroids.K)
 		}
-		// Validate speed_weight bounds before the per-alpha loop so an
-		// out-of-range speed_weight is reported as such rather than masked by the
-		// combined alpha+speed_weight constraint inside the loop.
+		// Check speed_weight bounds before the per-alpha loop so it's reported
+		// distinctly, not masked by the combined alpha+speed_weight check below.
 		if activeKnobs.SpeedWeight < 0 || activeKnobs.SpeedWeight > 1 {
 			return router.Decision{}, fmt.Errorf("%w: speed_weight (%f) must be in [0, 1]", ErrInvalidRoutingKnobs, activeKnobs.SpeedWeight)
 		}
@@ -773,10 +717,9 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 
 		scores = s.blendScoresV2(topClusters, activeKnobs, eligibleModels, req.SubsidizedModelCostFactor, priorityBonus)
 	} else {
-		// Legacy v1 flow: static cluster rankings, no cost axis at all — so there
-		// is no cost term to discount and req.SubsidizedModelCostFactor does not
-		// apply. Subscription-aware routing is V2-only by construction; all
-		// deployed bundles run V2 (the v1 path is a legacy fallback).
+		// Legacy v1: static cluster rankings, no cost axis, so
+		// SubsidizedModelCostFactor doesn't apply. All deployed bundles run V2;
+		// this is a fallback.
 		scores = make(map[string]float32, len(eligibleModels))
 		for _, k := range topClusters {
 			row := s.rankings[k]
@@ -814,9 +757,8 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	copy(clustersCopy, topClusters)
 	candidatesCopy := make([]string, len(eligibleModels))
 	copy(candidatesCopy, eligibleModels)
-	// Surface the full pre-argmax score vector for off-policy logging. This is
-	// the same map argmax just read; copying it changes no decision. Restricted
-	// to eligible models so the logged vector matches the candidate set.
+	// Copy the pre-argmax score vector for off-policy logging, restricted to
+	// eligible models so it matches the candidate set.
 	scoresCopy := make(map[string]float32, len(eligibleModels))
 	for _, m := range eligibleModels {
 		if v, ok := scores[m]; ok {
@@ -824,8 +766,7 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		}
 	}
 	// Per-request provider binding per eligible model, for a wrapping explorer.
-	// resolvedProvider is set only when EnabledProviders gates the request;
-	// otherwise fall back to each candidate's default (first-binding-wins).
+	// Falls back to each candidate's default when EnabledProviders wasn't set.
 	providersCopy := make(map[string]string, len(eligibleModels))
 	for _, m := range eligibleModels {
 		if p, ok := resolvedProvider[m]; ok {
@@ -839,20 +780,16 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			}
 		}
 	}
-	// Prefer the per-request resolved binding (which may differ from the
-	// boot-time default when the request's EnabledProviders narrows or
-	// widens the deployment set, e.g. self-hoster with only OPENROUTER_API_KEY
-	// served by a row whose primary binding is bedrock).
+	// Per-request resolved binding may differ from the boot-time default
+	// (e.g. a self-hoster with only OPENROUTER_API_KEY served by a row whose
+	// primary binding is bedrock).
 	chosenProvider := chosen.Provider
 	if p, ok := resolvedProvider[chosen.Model]; ok {
 		chosenProvider = p
 	}
-	// Runner-up: the second-best eligible model for this request. It is the
-	// other half of the band pair Stage 1 freezes into the session pin so a
-	// later per-turn policy can swap between {chosen, paired} without
-	// re-scoring. Resolve its provider the same way as the chosen model's
-	// (per-request binding first, boot-time default otherwise). Empty when the
-	// eligible pool has a single model — no pair to persist.
+	// Runner-up: second-best eligible model, the other half of the band pair
+	// frozen into the session pin so a later per-turn policy can swap without
+	// re-scoring. Empty when the pool has a single model.
 	pairedModel, pairedScore := runnerUp(scores, eligibleModels, chosen.Model)
 	pairedProvider := ""
 	if pairedModel != "" {
@@ -879,9 +816,8 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			EffectiveKnobsHash:   effectiveKnobsHash,
 			CandidateScores:      scoresCopy,
 			CandidateProviders:   providersCopy,
-			// Deterministic argmax: the chosen model was selected with
-			// certainty. An exploration policy wrapping this scorer overwrites
-			// Propensity with its sampling probability.
+			// Deterministic argmax; an exploration policy wrapping this scorer
+			// overwrites Propensity with its sampling probability.
 			Propensity:     1.0,
 			PairedModel:    pairedModel,
 			PairedProvider: pairedProvider,
@@ -1026,23 +962,18 @@ func clusterIDsString(ks []int) string {
 
 var _ router.Router = (*Scorer)(nil)
 
-// subsidyMaxBonus is the maximum per-cluster score lift a subscription-covered
-// model receives when its plan window is fully slack (headroom factor f≈epsilon).
-// It scales by (1−f), fading to 0 as the window binds so cash/OSS re-enter on
-// their merits (soft spill). Set to the per-cluster blend ceiling (1.0): a fully
-// slack plan is preferred over paying cash unless the covered model is near-worst
-// for the task — the prepaid "use-it-or-lose-it" preference — applied as an
-// additive bonus so it disturbs none of the quality/cost/speed blend weights.
+// subsidyMaxBonus is the max per-cluster score lift for a subscription-covered
+// model, scaling by (1−f) where f is plan-window headroom (≈epsilon when
+// slack, →1 as it binds) so cash/OSS re-enter on merit as the plan saturates.
+// Set to the blend ceiling (1.0): prefer a fully-slack plan over cash unless
+// the covered model is near-worst for the task. Additive, so it never
+// disturbs the quality/cost/speed blend weights.
 const subsidyMaxBonus float32 = 1.0
 
-// preferredBonusBase is the rank-1 priority score bonus a per-installation
-// "preferred model" receives, in the same units as the per-cluster blend
-// (≈[0,1]). A preferred model wins a cluster's argmax when no peer leads it by
-// more than this in blended score — a soft "finger on the scale" that tilts
-// close calls toward the preference without overriding a clearly-better model
-// for the task. Applied as a per-cluster additive bonus, mirroring the
-// subscription preference, so it disturbs none of the quality/cost/speed blend
-// weights.
+// preferredBonusBase is the rank-1 score bonus (≈[0,1] blend units) a
+// per-installation preferred model gets — a soft finger on the scale that
+// tilts close argmax calls without overriding a clearly-better model.
+// Additive, like the subsidy bonus above.
 const preferredBonusBase float32 = 0.15
 
 // preferredBonusDecay shrinks the bonus by rank so lower preferences press the
@@ -1060,23 +991,17 @@ func priorityBonusFor(rank int) float32 {
 	return preferredBonusBase * float32(math.Pow(preferredBonusDecay, float64(rank)))
 }
 
-// blendScoresV2 computes the v2 per-model blended scores for the given top-P
-// clusters under the effective knobs. Extracted from Route so the routing
-// distribution preview scores identically to live routing (single source of
-// truth for the cost/quality/speed blend). Caller owns knob validation and the
-// QualityBias->Alpha derivation; this method consumes the resolved alpha vector.
+// blendScoresV2 computes v2 per-model blended scores for the top-P clusters
+// under the effective knobs. Extracted from Route so the distribution preview
+// scores identically to live routing — single source of truth for the
+// cost/quality/speed blend. Caller owns knob validation and QualityBias->Alpha.
 func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnobs, eligibleModels []string, subsidyFactors map[string]float64, priorityBonus map[string]float32) map[string]float32 {
-	// 2. Effective per-model cost (knob-dependent). Costs stay at FULL catalog
-	// scale for every model, INCLUDING subscription-covered ones. On a plan the
-	// dollar price is prepaid, but the catalog ratio still tracks how much plan
-	// quota each model burns (Anthropic's unified rate limit weights Opus far
-	// above Haiku), and that is exactly the intra-family signal we want the blend
-	// to weigh. Keeping covered models at full cost preserves the Haiku↔Opus
-	// spread, so the blend below still picks the cheap covered model for easy
-	// turns and the strong one for hard turns. The subscription PREFERENCE (use
-	// the prepaid plan over paying cash) is applied separately, as a uniform
-	// per-family score bonus in the blend loop — never by compressing the cost
-	// axis, which would wash Haiku and Opus together.
+	// 2. Effective per-model cost. Kept at FULL catalog scale even for
+	// subscription-covered models: the catalog ratio tracks plan-quota burn
+	// (Anthropic's unified rate limit weights Opus far above Haiku), which is
+	// the intra-family signal the blend needs — compressing it would wash
+	// Haiku and Opus together. The subscription PREFERENCE (use the prepaid
+	// plan over cash) is a separate uniform per-family bonus below.
 	costs := make(map[string]float64, len(s.models))
 	for _, m := range s.models {
 		axis := s.modelAxes[m]
@@ -1207,11 +1132,9 @@ func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnob
 
 			sPtr := speeds[m]
 			if sRange > 0 {
-				// Mixed-timing pool: untimed peers are treated as
-				// worst-case speed (sNorm=1, no wS bonus). This keeps
-				// wQ/wC weighting consistent across timed and untimed
-				// models — without this, the redistribution branch
-				// would silently drop the cost axis when wC=0.
+				// Untimed peers count as worst-case speed (sNorm=1, no wS
+				// bonus) so wQ/wC weighting stays consistent across timed and
+				// untimed models.
 				var sNorm float32 = 1.0
 				if sPtr != nil {
 					sNorm = float32((*sPtr - sMin) / sRange)
@@ -1219,10 +1142,8 @@ func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnob
 				blend := wQ*qNorm + wC*(1.0-cNorm) + wS*(1.0-sNorm)
 				scores[m] += blend
 			} else {
-				// No timing differentiation across the entire pool
-				// (all models lack AA timing, or all share the same
-				// speed). Redistribute wS into wQ and wC so the
-				// remaining weights still sum to 1.
+				// No timing differentiation across the pool: redistribute wS
+				// into wQ/wC so weights still sum to 1.
 				total := wQ + wC
 				if total > 0 {
 					blend := (wQ/total)*qNorm + (wC/total)*(1.0-cNorm)
@@ -1232,24 +1153,16 @@ func (s *Scorer) blendScoresV2(topClusters []int, activeKnobs DefaultRoutingKnob
 				}
 			}
 
-			// Subscription preference: lift a covered model by the headroom bonus
-			// subsidyMaxBonus·(1−f) per cluster. f is the per-credential headroom
-			// factor (≈epsilon while the plan window is slack, →1 as it binds), so
-			// the bonus is near its max on a fresh plan and fades to 0 near the cap,
-			// letting cash/OSS re-enter on their own merits (soft spill). The bonus
-			// is UNIFORM across a covered family — every covered model shares its
-			// credential's f — so it only decides plan-vs-cash and never reorders
-			// models within the family; the full-catalog cost axis above still picks
-			// Haiku for easy turns and Opus for hard ones.
+			// Subscription preference: lift a covered model by
+			// subsidyMaxBonus·(1−f), f = per-credential headroom (≈epsilon
+			// slack, →1 as it binds). Uniform across the covered family, so it
+			// only decides plan-vs-cash and never reorders within the family.
 			if f, ok := subsidyFactors[m]; ok {
 				scores[m] += subsidyMaxBonus * float32(1.0-f)
 			}
 
-			// Per-installation model-priority preference: lift a preferred model
-			// by its rank-decaying bonus, per cluster. Additive (like the subsidy
-			// above) so it disturbs none of the blend weights — it only decides
-			// close calls, leaving the quality/cost spread to keep a clearly-better
-			// model ahead on hard clusters. Absent entry = no preference.
+			// Per-installation preference: lift by its rank-decaying bonus.
+			// Additive, so it only decides close calls. Absent = no preference.
 			if b, ok := priorityBonus[m]; ok {
 				scores[m] += b
 			}

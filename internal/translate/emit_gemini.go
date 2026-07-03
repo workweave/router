@@ -13,9 +13,8 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// PrepareGemini builds a Gemini native REST request body. The native surface is
-// required for multi-turn tool use against Gemini 3.x preview models because
-// OpenAI-compat does not return the opaque thought_signature field.
+// PrepareGemini builds a Gemini native REST request body. Native is required for
+// multi-turn tool use on Gemini 3.x: OpenAI-compat doesn't return thought_signature.
 func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
 	// Strip synthetic top-level "model" and "stream" — belonging to routing, not Gemini.
 	if e.format == FormatGemini {
@@ -59,9 +58,7 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 		}
 		stats.CCOnlyToolsStripped = removed
 		// Mirror writeGeminiFromAnthropic's reminder gate so Stats reflects
-		// whether the system-prompt reminder reached upstream. Computing it
-		// here costs only the model-prefix check + a tools array length
-		// glance, both already cached by the body emit path.
+		// whether the reminder actually reached upstream.
 		if reminder := geminiSystemReminder(opts.TargetModel); reminder != "" && hasNonEmptyTools(filtered) {
 			stats.GeminiReminderInjected = true
 		}
@@ -82,18 +79,14 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 	return providers.PreparedRequest{Body: body, Headers: headers, Stats: stats}, nil
 }
 
-// GeminiStreamHintHeader is the synthetic header PrepareGemini sets when the
-// inbound request asked for streaming. The native Gemini client consumes it
-// to pick between :generateContent and :streamGenerateContent and strips it
-// before forwarding.
+// GeminiStreamHintHeader tells the native Gemini client to pick
+// :streamGenerateContent over :generateContent; stripped before forwarding.
 const GeminiStreamHintHeader = "X-Router-Gemini-Stream"
 
-// sanitizeGeminiTools walks the tools array of an already-Gemini-format request
-// body and runs sanitizeSchemaForGemini on every function declaration's
-// parameters. The same-format path (FormatGemini) bypasses the per-field
-// translation helpers, so tool schemas must be sanitized in-place.
+// sanitizeGeminiTools runs sanitizeSchemaForGemini over every function
+// declaration's parameters in an already-Gemini-format body, since the
+// same-format path bypasses the per-field translation helpers.
 func sanitizeGeminiTools(body []byte) ([]byte, error) {
-	// Quick check: if there are no tools, return unchanged.
 	if !gjson.GetBytes(body, "tools").Exists() {
 		return body, nil
 	}
@@ -160,13 +153,9 @@ func copyMap(m map[string]any) map[string]any {
 func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error {
 	msgs := gjson.GetBytes(body, "messages")
 
-	// First pass: build tool_call ID → function name map for role:tool messages,
-	// and detect any tool_call lacking a thoughtSignature. Gemini 3.x rejects
-	// requests whose history carries a functionCall without one, so when even
-	// one is missing we drop ALL tool_call + role:tool blocks. Mirrors the
-	// guard in writeGeminiFromAnthropic — covers OpenAI-surface clients whose
-	// assistant history was produced by a non-Gemini provider before a
-	// mid-session router switch.
+	// Build tool_call ID → name map, and check for any missing thoughtSignature:
+	// Gemini 3.x rejects a functionCall without one, so if any is missing we drop
+	// ALL tool_call/role:tool blocks (covers history from a pre-switch provider).
 	toolNames := make(map[string]string)
 	anyToolCallMissingSig := false
 	msgs.ForEach(func(_, msg gjson.Result) bool {
@@ -226,13 +215,9 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 		jw.EndObj()
 	}
 
-	// Second pass: build content entries, then post-process for role
-	// alternation before emitting. Two-pass is necessary because dropping
-	// sig-less tool turns can leave placeholder entries adjacent to real
-	// content of the same role — e.g. the OpenAI per-tool_call_id
-	// `role:"tool"` messages each contribute a user placeholder and the
-	// following real user turn would land right after. The collapser merges
-	// placeholders with real content of the same role.
+	// Build entries, then collapse before emitting: dropping sig-less tool turns
+	// can leave placeholder entries adjacent to real content of the same role
+	// (e.g. a role:"tool" placeholder immediately before a real user turn).
 	entries := make([]contentEntry, 0, 8)
 	var walkErr error
 	msgs.ForEach(func(_, msg gjson.Result) bool {
@@ -477,12 +462,9 @@ func writeGeminiToolsFromOpenAI(jw *jsonWriter, body []byte) {
 }
 
 // writeGeminiToolChoiceFromOpenAI writes toolConfig into jw from an OpenAI body.
-//
-// Mirrors writeGeminiToolChoiceFromAnthropic: when the request carries tools
-// and the client didn't force a mode (absent or "auto" tool_choice),
-// Gemini-3.x targets get mode=VALIDATED so emitted calls are
-// schema-constrained at decode time. Explicit none/required/function choices
-// are passed through untouched.
+// Mirrors writeGeminiToolChoiceFromAnthropic: unforced tool_choice (absent or
+// "auto") on Gemini 3.x gets mode=VALIDATED for schema-constrained decoding;
+// explicit none/required/function choices pass through untouched.
 func writeGeminiToolChoiceFromOpenAI(jw *jsonWriter, body []byte, model string, downgradeValidated bool) {
 	r := gjson.GetBytes(body, "tool_choice")
 	choice := ""
@@ -653,13 +635,10 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 
 	msgs := gjson.GetBytes(body, "messages")
 
-	// First pass: collect tool_use ID → name for tool_result recovery, and
-	// detect any tool_use lacking a thoughtSignature. Gemini 3.x rejects any
-	// request whose history contains a functionCall without a signature, so
-	// when even one is missing we drop ALL tool_use/tool_result blocks from
-	// the history. This prevents 400s on sticky-pin Gemini turns whose
-	// history was produced by a different provider (mimo/qwen/etc.) before
-	// a mid-session router switch.
+	// Collect tool_use ID → name for tool_result recovery, and check for any
+	// missing thoughtSignature: Gemini 3.x rejects a functionCall without one,
+	// so if any is missing we drop ALL tool_use/tool_result blocks — avoids
+	// 400s on sticky-pin turns whose history came from a different provider.
 	toolNames := make(map[string]string)
 	anyToolUseMissingSig := false
 	dropToolBlocks := false
@@ -680,16 +659,13 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 		})
 		return true
 	})
-	// Only Gemini 3.x preview models hard-require thoughtSignature on every
-	// functionCall part. 2.x accepts sig-less calls, so don't molest those
-	// requests — the lossless translation is correct there.
+	// Only 3.x hard-requires thoughtSignature; 2.x accepts sig-less calls.
 	if anyToolUseMissingSig && isGemini3xModel(opts.TargetModel) {
 		dropToolBlocks = true
 	}
 
-	// Second pass: build entries, then collapse + emit. See contentEntry /
-	// collapseConsecutiveRoles — they preserve role alternation when the
-	// sig-less-tool drop guard would otherwise produce same-role runs.
+	// Build entries, then collapse + emit (see collapseConsecutiveRoles) to
+	// preserve role alternation when the drop guard leaves same-role runs.
 	entries := make([]contentEntry, 0, 8)
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
@@ -734,21 +710,18 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 	writeGeminiGenerationConfigFromAnthropic(jw, body, opts.TargetModel, opts.ForceReasoningEffort)
 }
 
-// contentEntry is a buffered Gemini `contents` array entry. Both `Prepare*`
-// paths collect entries first so a post-pass can merge placeholders with
-// real same-role content before emitting, preserving role alternation.
+// contentEntry is a buffered Gemini `contents` entry, collected so a post-pass
+// can merge placeholders with real same-role content, preserving alternation.
 type contentEntry struct {
 	role        string   // "user" or "model"
 	parts       []string // pre-serialized Gemini part JSON objects
 	placeholder bool     // synthesized by the sig-less-tool drop guard
 }
 
-// collapseConsecutiveRoles merges adjacent entries that share a role. When
-// a placeholder neighbors real same-role content, the real content wins and
-// the placeholder is dropped. Two real same-role entries merge their parts.
-// Two placeholders collapse to one. Required because the sig-less-tool drop
-// guard can otherwise emit user/user or model/model sequences (Gemini 400s
-// on non-alternating roles).
+// collapseConsecutiveRoles merges adjacent same-role entries: real content
+// wins over a neighboring placeholder, otherwise parts are merged. Needed
+// because the sig-less-tool drop guard can emit non-alternating role runs,
+// which Gemini 400s on.
 func collapseConsecutiveRoles(in []contentEntry) []contentEntry {
 	if len(in) == 0 {
 		return in
@@ -814,27 +787,22 @@ func geminiFunctionResponsePart(name, result string) string {
 	return string(pw.Bytes())
 }
 
-// Placeholders inserted when Gemini 3.x sig-less tool blocks are dropped from
-// the request. They preserve role alternation in the `contents` array so a
-// run of dropped tool turns doesn't collapse adjacent assistant or user turns
-// into back-to-back same-role entries (Gemini 400s on non-alternating roles).
+// Placeholders inserted when sig-less tool blocks are dropped, to preserve
+// role alternation (Gemini 400s on non-alternating roles).
 const (
 	droppedToolCallPlaceholder   = "[router: prior tool call omitted — provider's signed thinking state was unavailable for cross-model carry-over]"
 	droppedToolResultPlaceholder = "[router: prior tool result omitted — paired with a dropped tool call]"
 )
 
-// isGemini3xModel returns true for Gemini 3.x preview models, which require
-// thoughtSignature on every functionCall part across turns. 2.x and earlier
-// accept sig-less calls.
+// isGemini3xModel reports whether model is a Gemini 3.x preview, which
+// requires thoughtSignature on every functionCall; 2.x accepts sig-less calls.
 func isGemini3xModel(model string) bool {
 	return strings.HasPrefix(model, "gemini-3")
 }
 
-// geminiToolMode returns the functionCallingConfig.mode the unforced-tool-choice
-// Gemini 3.x branch emits: VALIDATED normally, AUTO when the proxy has asked for
-// a downgrade after a VALIDATED-mode INVALID_ARGUMENT. AUTO leaves the model
-// free to call a tool or answer in text (same as VALIDATED) but skips decode-time
-// schema-grammar compilation, so tool schemas Gemini can't compile no longer 400.
+// geminiToolMode returns VALIDATED normally, or AUTO when the proxy requested
+// a downgrade after a VALIDATED-mode INVALID_ARGUMENT — AUTO skips decode-time
+// schema-grammar compilation so uncompilable tool schemas stop 400ing.
 func geminiToolMode(downgradeValidated bool) string {
 	if downgradeValidated {
 		return "AUTO"
@@ -842,11 +810,10 @@ func geminiToolMode(downgradeValidated bool) string {
 	return "VALIDATED"
 }
 
-// geminiEmitsValidatedToolMode reports whether the cross-format Gemini emit path
-// sets functionCallingConfig.mode=VALIDATED for body+model: tools are present,
-// the client did not force a tool_choice, and the target is a Gemini 3.x model.
-// Mirrors the gate in writeGeminiToolChoiceFrom{Anthropic,OpenAI} so the proxy
-// can predict VALIDATED emission (RequestMutationStats) without re-deriving it.
+// geminiEmitsValidatedToolMode reports whether the emit path would set
+// mode=VALIDATED for body+model. Mirrors the gate in
+// writeGeminiToolChoiceFrom{Anthropic,OpenAI} so RequestMutationStats can
+// predict it without re-deriving.
 func geminiEmitsValidatedToolMode(body []byte, model string, format Format) bool {
 	if !hasNonEmptyTools(body) || !isGemini3xModel(model) {
 		return false
@@ -870,9 +837,8 @@ func geminiEmitsValidatedToolMode(body []byte, model string, format Format) bool
 	}
 }
 
-// filterOutGeminiFunctionCallParts strips functionCall parts from a slice of
-// serialized Gemini parts. Used when the assistant history contains tool_use
-// blocks without thoughtSignature — emitting them to Gemini 3.x would 400.
+// filterOutGeminiFunctionCallParts strips functionCall parts; used when
+// history has tool_use blocks without thoughtSignature (Gemini 3.x would 400).
 func filterOutGeminiFunctionCallParts(parts []string) []string {
 	out := parts[:0]
 	for _, p := range parts {
@@ -884,9 +850,8 @@ func filterOutGeminiFunctionCallParts(parts []string) []string {
 	return out
 }
 
-// filterOutGeminiToolResponseParts strips functionResponse parts so tool_results
-// dangle no longer reference functionCalls we dropped. Without this, Gemini
-// rejects functionResponses whose matching functionCalls aren't in history.
+// filterOutGeminiToolResponseParts strips functionResponse parts left dangling
+// by a dropped functionCall; Gemini rejects responses with no matching call.
 func filterOutGeminiToolResponseParts(parts []string) []string {
 	out := parts[:0]
 	for _, p := range parts {
@@ -977,10 +942,8 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 		}
 		return []string{geminiTextPart(s)}
 	case gjson.JSON:
-		// First pass: find any thought_signature in the assistant turn so
-		// functionCall blocks without their own sig can inherit it. Gemini 3.x
-		// rejects requests with missing thoughtSignature on any functionCall
-		// part — only one block per turn typically carries the original sig.
+		// Find any thought_signature in the turn so functionCall blocks without
+		// their own sig can inherit it (only one block per turn usually has one).
 		var inheritedSig string
 		content.ForEach(func(_, block gjson.Result) bool {
 			if sig := extractThoughtSignature(block); sig != "" {
@@ -1022,9 +985,7 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 				pw.Key("args")
 				pw.Raw(inputRaw)
 				pw.EndObj()
-				// thought_signature may live on the block or be smuggled in
-				// block.id. Fall back to the assistant turn's first sig so
-				// every functionCall carries one on round-trip.
+				// Fall back to the turn's inherited sig so every functionCall has one.
 				sig := extractThoughtSignature(block)
 				if sig == "" {
 					sig = inheritedSig
@@ -1096,14 +1057,10 @@ func writeGeminiToolsFromAnthropic(jw *jsonWriter, body []byte) {
 	jw.EndArr()
 }
 
-// writeGeminiToolChoiceFromAnthropic writes toolConfig into jw from an Anthropic body.
-//
-// When the request carries tools and the client didn't force a mode (absent
-// or "auto" tool_choice), Gemini-3.x targets get mode=VALIDATED: like AUTO
-// the model may answer with text or call a function, but emitted calls are
-// schema-constrained at decode time — the only Gemini mode that enforces
-// argument schemas without forcing a tool call. Explicit any/none/tool
-// choices are passed through untouched.
+// writeGeminiToolChoiceFromAnthropic writes toolConfig into jw from an Anthropic
+// body. Unforced tool_choice (absent or "auto") on Gemini 3.x gets
+// mode=VALIDATED — schema-constrained decoding without forcing a tool call.
+// Explicit any/none/tool choices pass through untouched.
 func writeGeminiToolChoiceFromAnthropic(jw *jsonWriter, body []byte, model string, downgradeValidated bool) {
 	r := gjson.GetBytes(body, "tool_choice")
 	choice := ""
@@ -1197,9 +1154,8 @@ func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model
 			fields = append(fields, field{"stopSequences", raw})
 		}
 	}
-	// Claude Code drives reasoning via `thinking`; map its budget onto a Gemini
-	// thinkingConfig (native generateContent honors it) so gemini-3.x reasons
-	// instead of running at its minimal default. reasoning_effort wins if set.
+	// Claude Code drives reasoning via `thinking`; map its budget onto Gemini's
+	// thinkingConfig so 3.x doesn't run at its minimal default. reasoning_effort wins if set.
 	effort := geminiReasoningEffort(body)
 	if forceEffort != "" {
 		effort = forceEffort
@@ -1260,11 +1216,9 @@ func stopToArrayRaw(r gjson.Result) string {
 	return "[" + strings.Join(items, ",") + "]"
 }
 
-// thinkingConfigRaw returns the raw JSON for a Gemini thinkingConfig given an
-// OpenAI reasoning_effort string. Returns "" for unrecognised values.
-// geminiReasoningEffort resolves the reasoning effort for a native-Gemini
-// request: an explicit reasoning_effort, else an Anthropic-style `thinking`
-// budget (Claude Code sends `thinking`, not reasoning_effort). "" = none.
+// geminiReasoningEffort resolves reasoning effort for a native-Gemini request:
+// explicit reasoning_effort, else an Anthropic-style `thinking` budget
+// (Claude Code sends `thinking`, not reasoning_effort). "" = none.
 func geminiReasoningEffort(body []byte) string {
 	if r := gjson.GetBytes(body, "reasoning_effort"); r.Exists() && r.Type == gjson.String {
 		return r.String()
@@ -1275,18 +1229,18 @@ func geminiReasoningEffort(body []byte) string {
 	return ""
 }
 
+// thinkingConfigRaw returns raw JSON for a Gemini thinkingConfig given an
+// OpenAI reasoning_effort string, or "" for unrecognised values.
 func thinkingConfigRaw(effort, model string) string {
-	// Gemini 3.x uses thinkingLevel (string); the legacy numeric thinkingBudget
-	// is "accepted for backwards compatibility" but documented as suboptimal for
-	// 3.x, and mixing both fields 400s. Gemini 2.5 keeps thinkingBudget.
+	// 3.x uses thinkingLevel; the legacy numeric thinkingBudget is documented as
+	// suboptimal there and mixing both fields 400s. 2.5 keeps thinkingBudget.
 	if isGemini3xModel(model) {
 		var level string
 		switch effort {
 		case "low", "medium", "high":
 			level = effort
 		default:
-			// "none"/unknown: 3.x cannot disable thinking — omit the config and
-			// let the model use its default level rather than send an invalid value.
+			// 3.x can't disable thinking — omit config rather than send an invalid value.
 			return ""
 		}
 		fw := newJSONWriter()
@@ -1318,16 +1272,9 @@ func thinkingConfigRaw(effort, model string) string {
 	return string(fw.Bytes())
 }
 
-// sanitizeGeminiTools walks the tools array of an already-Gemini-format request
-// body and runs sanitizeSchemaForGemini on every function declaration's
-// parameters. The same-format path (FormatGemini) bypasses the per-field
-// translation helpers, so tool schemas must be sanitized in-place.
-
-// geminiSchemaAllowedKeys is the set of JSON Schema keywords that Gemini's
-// function-calling API accepts, derived from the Schema struct in the Google
-// genai Go SDK (googleapis/go-genai types.go). Any key not in this set is
-// silently dropped — this is an allow-list, not a deny-list, so new JSON
-// Schema keywords that tool authors add are rejected before they can 400.
+// geminiSchemaAllowedKeys is the set of JSON Schema keywords Gemini's
+// function-calling API accepts (allow-list, not deny-list, so new keywords
+// tool authors add are rejected before they can 400).
 var geminiSchemaAllowedKeys = map[string]struct{}{
 	"type":             {},
 	"nullable":         {},
@@ -1353,12 +1300,9 @@ var geminiSchemaAllowedKeys = map[string]struct{}{
 	"propertyOrdering": {},
 }
 
-// geminiSupportedFormats is the set of JSON Schema "format" values Gemini's
-// function-calling API accepts: STRING allows enum + date-time, numeric types
-// allow float/double/int32/int64. Any other value (uri, email, uuid, hostname,
-// …) makes Google reject the whole request with a generic INVALID_ARGUMENT, so
-// sanitizeSchemaFiltered drops formats outside this set rather than forwarding
-// the key with its value intact.
+// geminiSupportedFormats are the "format" values Gemini accepts; any other
+// value (uri, email, uuid, ...) makes Google reject the whole request, so
+// sanitizeSchemaFiltered drops formats outside this set.
 var geminiSupportedFormats = map[string]struct{}{
 	"enum":      {},
 	"date-time": {},
@@ -1368,19 +1312,16 @@ var geminiSupportedFormats = map[string]struct{}{
 	"int64":     {},
 }
 
-// sanitizeSchemaForGemini returns a deep copy of v containing only the JSON
-// Schema fields that Gemini's function-calling API accepts. Uses an allow-list
-// derived from the googleapis/go-genai Schema struct. Always returns a copy so
-// the caller can mutate without touching the original input_schema (other
-// emitters DO accept full JSON Schema).
+// sanitizeSchemaForGemini returns a deep copy of v with only the JSON Schema
+// fields Gemini accepts, so the caller can mutate without touching the
+// original input_schema (other emitters DO accept full JSON Schema).
 func sanitizeSchemaForGemini(v any) any {
 	return sanitizeSchemaFiltered(v, true)
 }
 
-// sanitizeSchemaFiltered is the recursive workhorse. When filterKeys is false,
-// all map keys pass through unfiltered (used for user-defined property names
-// inside "properties", which must not be checked against the schema-keyword
-// allow-list).
+// sanitizeSchemaFiltered is the recursive workhorse. filterKeys=false passes
+// all map keys through unfiltered (used inside "properties", where keys are
+// user-defined, not schema keywords).
 func sanitizeSchemaFiltered(v any, filterKeys bool) any {
 	switch node := v.(type) {
 	case map[string]any:
@@ -1399,9 +1340,8 @@ func sanitizeSchemaFiltered(v any, filterKeys bool) any {
 				out[k] = cleaned
 				continue
 			}
-			// Gemini only accepts a narrow set of "format" values; forwarding
-			// anything else (e.g. "uri", "email") makes Google reject the whole
-			// request with INVALID_ARGUMENT. Keep supported values, drop the rest.
+			// Unsupported "format" values (e.g. "uri", "email") make Google reject
+			// the whole request; keep only supported values.
 			if k == "format" && filterKeys {
 				if s, ok := child.(string); ok {
 					if _, supported := geminiSupportedFormats[s]; supported {
@@ -1410,29 +1350,22 @@ func sanitizeSchemaFiltered(v any, filterKeys bool) any {
 				}
 				continue
 			}
-			// User-defined property names inside "properties" must not be
-			// checked against the schema-keyword allow-list, but their values
-			// (the per-property schemas) MUST be filtered. Only apply this
-			// special case when filterKeys is true — when it is false we are
-			// already inside a properties map and "properties" here is just
-			// another user-defined property name whose value is a schema.
+			// Property names under "properties" are user-defined, not schema
+			// keywords, but their values are still schemas and must be filtered.
 			if k == "properties" && filterKeys {
 				out[k] = sanitizeSchemaFiltered(child, false)
 				continue
 			}
-			// When we are inside a properties map (filterKeys=false), each value
-			// is a JSON Schema. A boolean true/false is valid JSON Schema ("any
-			// type" / "reject all") but Gemini's proto Schema rejects both.
-			// Convert to empty Schema objects so they survive translation.
+			// Inside a properties map, a bool value (valid JSON Schema "any type"/
+			// "reject all") is rejected by Gemini's proto Schema — use empty Schema instead.
 			if !filterKeys {
 				if _, isBool := child.(bool); isBool {
 					out[k] = map[string]any{}
 					continue
 				}
 			}
-			// Values of "default" and "example" are arbitrary JSON data, not JSON
-			// Schema — pass them through without recursive filtering so object
-			// keys like {"host":"localhost","port":8080} are not stripped.
+			// "default"/"example" values are arbitrary JSON data, not schema —
+			// pass through unfiltered so their object keys aren't stripped.
 			if (k == "default" || k == "example") && filterKeys {
 				out[k] = child
 				continue
@@ -1444,27 +1377,17 @@ func sanitizeSchemaFiltered(v any, filterKeys bool) any {
 		// JSON Schema allows `items` to be a boolean (true = any, false = none).
 		// Gemini's proto Schema.items is optional Schema and rejects booleans.
 		out = collapseItemsBool(out)
-		// Anthropic permits `{"type":"array"}` with no `items`; Gemini's strict
-		// function-calling validator rejects it ("missing field"). Inject a
-		// permissive default so the tool definition survives translation. Real
-		// items schemas from the source were preserved by the loop above.
+		// Anthropic permits `{"type":"array"}` with no `items`; Gemini rejects it
+		// ("missing field"). Inject a permissive default.
 		if t, ok := out["type"].(string); ok && t == "array" {
 			if existing, has := out["items"]; !has || existing == nil {
 				out["items"] = map[string]any{"type": "string"}
 			}
 		}
-		// Gemini's function-calling validator requires every entry in
-		// "required" to name a key present in "properties"; a dangling entry
-		// (common in hand-written MCP tool schemas) makes Google reject the
-		// whole request with INVALID_ARGUMENT. The keyword allow-list above
-		// keeps these keys but never reconciles them, so prune "required"
-		// down to the properties that actually survived translation.
-		//
-		// Only do this in schema-node context (filterKeys). Inside a
-		// "properties" map (filterKeys == false) the keys are user-defined
-		// parameter names, so a parameter literally named "required" is a
-		// property schema — not the "required" keyword — and must be left
-		// untouched.
+		// Prune dangling "required" entries (name not in "properties") since the
+		// allow-list keeps the key but doesn't reconcile it. Skip when
+		// filterKeys is false: there we're inside "properties" and a key
+		// literally named "required" is a user property, not the keyword.
 		if filterKeys {
 			out = pruneDanglingRequired(out)
 		}
@@ -1480,12 +1403,9 @@ func sanitizeSchemaFiltered(v any, filterKeys bool) any {
 	}
 }
 
-// pruneDanglingRequired drops any name in out["required"] that is not a key in
-// out["properties"], and removes "required" entirely when nothing valid remains
-// (or there are no properties at all). Gemini's strict function-calling schema
-// validator 400s ("Request contains an invalid argument") when "required"
-// references a property that does not exist — well-formed JSON Schema permits
-// it, so the inbound tool schema may carry one even after keyword filtering.
+// pruneDanglingRequired drops "required" entries missing from "properties"
+// (valid JSON Schema, but Gemini 400s on it), removing the key entirely if
+// nothing remains.
 func pruneDanglingRequired(out map[string]any) map[string]any {
 	req, ok := out["required"].([]any)
 	if !ok {
@@ -1541,9 +1461,8 @@ func collapseTypeArray(out map[string]any) map[string]any {
 	return out
 }
 
-// collapseItemsBool converts JSON Schema boolean "items" (true = any schema,
-// false = no items) into Gemini's Schema-or-null convention. `true` becomes
-// an empty Schema (equivalent to "any type"). `false` is removed.
+// collapseItemsBool converts boolean "items" (true = any, false = none) into
+// Gemini's Schema-or-null convention: true → empty Schema, false → removed.
 func collapseItemsBool(out map[string]any) map[string]any {
 	v, ok := out["items"]
 	if !ok {
@@ -1560,10 +1479,8 @@ func collapseItemsBool(out map[string]any) map[string]any {
 	return out
 }
 
-// filterStringEnum returns enum entries that are non-empty strings. Google's
-// function-calling surface requires TYPE_STRING enums and rejects empty-string
-// entries ("enum[i]: cannot be empty"); both filter out here. Returns an empty
-// slice when nothing survives so the caller can drop the field entirely.
+// filterStringEnum returns non-empty string enum entries; Gemini requires
+// TYPE_STRING enums and rejects empty strings.
 func filterStringEnum(v any) []any {
 	arr, ok := v.([]any)
 	if !ok {

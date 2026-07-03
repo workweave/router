@@ -1,0 +1,63 @@
+name: Comment Length Review
+
+# Advisory-only: flags overly long comments on new/changed Go code and leaves
+# a PR comment with shorter suggestions. Never blocks merge (no required
+# status check is registered for this job).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "**/*.go"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: comment-length-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude comment-length review
+        uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          model: "claude-haiku-4-5-20251001"
+          allowed_tools: "Bash(git diff:*),Bash(git log:*),Bash(gh pr comment:*)"
+          direct_prompt: |
+            You are a lightweight, advisory-only comment-style linter for a Go
+            codebase. You are NOT a general code reviewer — do not comment on
+            logic, correctness, naming, tests, or anything other than comment
+            length/verbosity.
+
+            1. Run `git diff origin/${{ github.event.pull_request.base.ref }}...HEAD -- '*.go'`
+               to see what changed in this PR.
+            2. Look only at ADDED comment lines (lines starting with `+` that are
+               `//` line comments or inside a `/* */` block). Find comment blocks
+               that are 3 or more consecutive lines long.
+            3. For each one, judge it against this rule: keep it long only if it
+               explains a genuinely non-obvious WHY (a hidden constraint, a
+               subtle invariant, a workaround for a specific bug, or behavior
+               that would surprise a reader). If it's just restating what the
+               code does, narrating steps, or padded with filler, it's too long.
+            4. If you find zero comments worth flagging, do NOT post any comment
+               at all — exit silently. Do not post a comment that just says
+               "no issues found."
+            5. If you find one or more, post a single PR comment via
+               `gh pr comment ${{ github.event.pull_request.number }} --body-file <file>`
+               with one short bullet per finding: the file:line, a 1-line
+               quote/paraphrase of the bloated comment, and a suggested
+               shortened version. Keep the whole comment under ~40 lines total.
+               Open with one sentence noting this is advisory only and won't
+               block merge.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

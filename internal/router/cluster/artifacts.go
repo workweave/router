@@ -117,13 +117,9 @@ type ArtifactMetadata struct {
 	DeployedProviders []string           `yaml:"deployed_providers,omitempty"`
 	DeployedModels    []string           `yaml:"deployed_models,omitempty"`
 	CostPer1KInputUSD map[string]float64 `yaml:"cost_per_1k_input_usd,omitempty"`
-	// TokPerS holds measured median output throughput (tokens/sec) keyed by
-	// provider then model — e.g. TokPerS["google"]["gemini-3.1-flash-lite-preview"].
-	// Provider-keyed because the same model's throughput varies sharply by
-	// provider. Consumed by FastestModel to break the tier-clamp / hard-pin
-	// out of cost-only selection; absent or partial annotation degrades to
-	// cost-only via CheapestModel. Informational to the scorer (which carries
-	// its own speed_weight); only the clamp/hard-pin selectors read it.
+	// TokPerS holds measured median tok/s keyed by provider then model (same
+	// model varies sharply by provider). Read only by FastestModel/clamp
+	// selectors; missing/partial data degrades to CheapestModel.
 	TokPerS   map[string]map[string]float64 `yaml:"tok_per_s,omitempty"`
 	Changelog string                        `yaml:"changelog,omitempty"`
 	// CacheConfig carries per-version semantic-cache knobs.
@@ -144,13 +140,10 @@ type ArtifactEmbedder struct {
 
 type DefaultRoutingKnobs struct {
 	Alpha []float64 `yaml:"alpha"`
-	// AlphaFloor is an optional per-cluster minimum the QualityBias dial may not
-	// pull a cluster's alpha below. It lets a bundle declare, per cluster, the
-	// LOWEST quality weight it will tolerate at maximum price-sensitivity — so a
-	// price-leaning dial still routes each cluster to the best model available
-	// for that budget instead of collapsing the whole vector to the cheapest
-	// model. Length must equal K when present; nil/empty disables flooring (the
-	// dial maps to a uniform alpha, the legacy behavior). See applyDialAlpha.
+	// AlphaFloor is an optional per-cluster minimum the QualityBias dial won't
+	// pull alpha below, so a price-leaning dial doesn't collapse a cluster to
+	// the cheapest model. Length must equal K when present; empty disables
+	// flooring (legacy uniform-alpha behavior). See applyDialAlpha.
 	AlphaFloor           []float64 `yaml:"alpha_floor,omitempty"`
 	SpeedWeight          float64   `yaml:"speed_weight"`
 	OutputCostRatio      float64   `yaml:"output_cost_ratio"`
@@ -292,12 +285,9 @@ func LoadBundle(version string) (*Bundle, error) {
 }
 
 // LoadBundleFromDir reads a bundle from an arbitrary on-disk directory
-// instead of the embedded tree. Used by the release-gate diff test
-// (TestV2MatchesV1) and any tooling that needs to load a bundle
-// produced into a temp directory before it's been committed.
-//
-// dir is the directory directly containing centroids.bin / metadata.yaml
-// / etc. The version label is informational only.
+// (dir contains centroids.bin/metadata.yaml/etc directly) instead of the
+// embedded tree. Used by the release-gate diff test (TestV2MatchesV1) and
+// tooling loading a bundle before it's committed. version is informational only.
 func LoadBundleFromDir(dir string, version string) (*Bundle, error) {
 	return loadBundleFromPath(os.DirFS(dir), version, ".")
 }
@@ -369,14 +359,9 @@ func loadBundleFromPath(fsys fs.FS, version, dir string) (*Bundle, error) {
 			}
 		}
 
-		// model_features.json is best-effort and, when present, becomes the
-		// authoritative source for the quality + axes tables (the no-op
-		// onboarding surface: a new model is one appended column). It is a
-		// faithful repackaging of quality_means.json + model_axes.json, so
-		// routing is unchanged on the current roster (asserted by
-		// TestFeaturesMatchQualityMeans). A model added here without a
-		// matching quality_means.json entry still routes; a deployed model
-		// absent here, or a column of the wrong length, fails fast.
+		// model_features.json, if present, overrides quality_means/model_axes
+		// (repackaged, so routing is unchanged on the current roster — see
+		// TestFeaturesMatchQualityMeans). A deployed model missing here fails fast.
 		if rawFeatures, ferr := fs.ReadFile(fsys, path.Join(dir, "model_features.json")); ferr == nil {
 			featureQualityMeans, featureAxes, err := loadModelFeatures(rawFeatures, centroids.K)
 			if err != nil {
@@ -609,12 +594,9 @@ func loadModelAxes(raw []byte) (map[string]ModelAxis, error) {
 }
 
 // modelFeaturesFile is the on-disk form of model_features.json: a
-// model-centric repackaging of the quality_means + model_axes tables. Each
-// model carries its per-cluster quality column (psi_probe, length K) and its
-// operational block (the same fields as ModelAxis). Routing from this artifact
-// is identical to routing from quality_means.json + model_axes.json on a given
-// roster; its purpose is to make onboarding a model a no-op (append one column,
-// no retrain).
+// model-centric repackaging of quality_means + model_axes (per-cluster
+// psi_probe column + ModelAxis operational block). Routing is identical to
+// the two-file form; purpose is to make onboarding a model a no-op (append one column).
 type modelFeaturesFile struct {
 	Meta   interface{} `json:"meta,omitempty"`
 	Models map[string]struct {
@@ -623,11 +605,9 @@ type modelFeaturesFile struct {
 	} `json:"models"`
 }
 
-// loadModelFeatures parses model_features.json into the runtime's existing
-// shapes: a per-cluster quality table (Rankings) and the per-model axes map.
-// k is the cluster count from centroids.bin; every psi_probe column must match
-// it exactly (a mismatched column means the file was built against a different
-// artifact version and must be rebuilt).
+// loadModelFeatures parses model_features.json into Rankings + per-model axes.
+// k is the cluster count from centroids.bin; a mismatched psi_probe length
+// means the file was built against a different artifact version.
 func loadModelFeatures(raw []byte, k int) (Rankings, map[string]ModelAxis, error) {
 	if len(raw) == 0 {
 		return nil, nil, fmt.Errorf("model_features.json is empty")
@@ -697,12 +677,9 @@ func cheapestModelFiltered(meta *ArtifactMetadata, registry *ModelRegistry, avai
 	return
 }
 
-// FastestModel returns the highest measured-throughput (tok/s) entry among
-// registry entries whose provider is in available. Throughput is read from
-// meta.TokPerS keyed by the resolved provider, so the same model on a slow
-// provider can lose to a different model on a fast one. Falls back to
-// CheapestModel when the bundle carries no usable speed annotation — it
-// never returns a worse decision than the cost-only selector.
+// FastestModel returns the highest tok/s registry entry among providers in
+// available (keyed by resolved provider, so the same model can rank
+// differently by provider). Falls back to CheapestModel if unannotated.
 func FastestModel(meta *ArtifactMetadata, registry *ModelRegistry, available map[string]struct{}) (provider, model string, ok bool) {
 	return fastestModelFiltered(meta, registry, available, nil, nil)
 }
@@ -745,21 +722,17 @@ func fastestModelFiltered(meta *ArtifactMetadata, registry *ModelRegistry, avail
 		}
 	}
 	if !ok {
-		// No speed-annotated candidate resolved (un-annotated bundle, or
-		// every in-ceiling model lacks a tok/s entry). Preserve the
-		// established cost-only behavior rather than failing the clamp.
+		// No speed-annotated candidate (un-annotated bundle, or every
+		// in-ceiling model lacks a tok/s entry) — fall back to cost-only.
 		return cheapestModelFiltered(meta, registry, available, denySet, allowSet)
 	}
 	return
 }
 
-// RoutableModelSet returns the set of model names from registry that have
-// at least one catalog provider binding resolvable under available — the
-// same view of "routable now" that NewScorer's filter applies. Callers in
-// the composition root use this to seed the planner's available-models
-// set so a pin to e.g. deepseek-v4-flash stays valid when the deploy only
-// has OPENROUTER_API_KEY (catalog provides the trailing OpenRouter
-// fallback binding even though the registry row reads `deepinfra`).
+// RoutableModelSet returns model names with at least one catalog provider
+// binding resolvable under available (NewScorer's "routable now" view). Used
+// to seed the planner's available-models set so a pin stays valid even when
+// the registry's primary provider isn't configured but a catalog fallback is.
 func RoutableModelSet(registry *ModelRegistry, available map[string]struct{}) map[string]struct{} {
 	out := make(map[string]struct{}, len(registry.DeployedModels))
 	for _, e := range registry.DeployedModels {

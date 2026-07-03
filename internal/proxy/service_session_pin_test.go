@@ -134,9 +134,8 @@ func authedCtx(installationID string) context.Context {
 	return context.WithValue(ctx, proxy.InstallationIDContextKey{}, installationID)
 }
 
-// authedCtxWithExternalKey mirrors authedCtx and additionally stashes one
-// BYOK ExternalAPIKey on the context, the way the auth middleware does at
-// runtime.
+// authedCtxWithExternalKey also stashes a BYOK ExternalAPIKey, as the auth
+// middleware does at runtime.
 func authedCtxWithExternalKey(installationID, provider string, plaintext []byte) context.Context {
 	ctx := authedCtx(installationID)
 	keys := []*auth.ExternalAPIKey{{
@@ -153,11 +152,8 @@ const pinTestBody = `{
 	"messages":[{"role":"user","content":"original prompt"}]
 }`
 
-// With a Postgres-tier pin and divergent scorer recommendation, the
-// planner stays on the pin (ReasonNoPriorUsage covers the case where no
-// turn has completed yet so we have no cache-warm evidence to evict).
-// The scorer runs once per turn now (Prism-style re-eval), but the
-// pinned model still wins.
+// Pin vs. divergent scorer recommendation: planner stays on the pin under
+// ReasonNoPriorUsage since there's no cache-warm evidence yet to justify eviction.
 func TestService_SessionPin_PostgresHitKeepsPinnedModel(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -176,22 +172,16 @@ func TestService_SessionPin_PostgresHitKeepsPinnedModel(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	// The scorer runs even on a pin hit (Prism-style re-eval); the
-	// planner then keeps the pinned model because we have no prior-turn
-	// usage to justify paying eviction cost.
+	// Scorer runs even on a pin hit, but planner keeps the pin (no prior-turn usage).
 	assert.Equal(t, 1, fr.routeCalls, "scorer runs every MainLoop turn under the planner")
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 	waitForUpsert(t, store)
 }
 
-// A session pinned to a text-only model must not serve an image-bearing turn.
-// The guard drops the pin and routes on the scorer's fresh (image-capable)
-// decision instead — without it, the pin would 4xx upstream the moment a
-// screenshot lands in the conversation (DeepInfra 405 "does not accept image
-// input" on GLM-5.1). The guard must NOT add the pin to ExcludedModels: the
-// scorer's own image-input filter drops text-only models softly (with an
-// empty-pool fallback), whereas exclusion is a hard filter that would fail
-// routing on an OSS-only self-host with no image-capable candidate.
+// A text-only pin must not serve an image turn (DeepInfra 405s on GLM-5.1
+// image input). Drop the pin and route fresh, but don't add it to
+// ExcludedModels: that's a hard filter that could empty the pool on an
+// OSS-only self-host, unlike the scorer's soft image-input filter.
 func TestService_SessionPin_ImageTurnEvictsTextOnlyPin(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -227,9 +217,7 @@ func TestService_SessionPin_ImageTurnEvictsTextOnlyPin(t *testing.T) {
 		"served model must be the image-capable fresh decision, not the text-only pin")
 }
 
-// Every turn must consult Postgres for its session pin — there is no
-// in-process cache. The scorer still runs every MainLoop turn under the
-// planner regardless of pin state.
+// Every turn must consult Postgres for its pin — there is no in-process cache.
 func TestService_SessionPin_EveryTurnReadsPostgres(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5", Reason: "fresh"}}
@@ -284,9 +272,7 @@ func TestService_SessionPin_ExpiredPinIsIgnored(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
-// Eval-override headers must NOT bypass session-key pinning; the
-// planner still runs and stays on the pin (no prior usage → cannot
-// justify eviction cost).
+// Eval-override headers must NOT bypass session-key pinning.
 func TestService_SessionPin_EvalOverrideHeaderKeepsSessionKeyPinning(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -300,8 +286,7 @@ func TestService_SessionPin_EvalOverrideHeaderKeepsSessionKeyPinning(t *testing.
 	httpReq.Header.Set("x-weave-cluster-version", "v0.2")
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
-	// Scorer still runs (planner re-eval is unconditional) but the pin
-	// wins under ReasonNoPriorUsage.
+	// Scorer still runs, but the pin wins under ReasonNoPriorUsage.
 	assert.Equal(t, 1, fr.routeCalls, "scorer runs every MainLoop turn under the planner")
 	assert.Equal(t, 1, store.getCalls)
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
@@ -321,11 +306,8 @@ const exploreBody = `{
 	"messages":[{"role":"user","content":"list go files"}]
 }`
 
-// In byokOnly mode the per-request hard-pin resolver overrides the
-// boot-time hardPin{Provider,Model} so compaction lands on a model the
-// request can authenticate to. Resolver receives the request's
-// enabled-providers set; here we BYOK only Anthropic and assert the
-// hard-pin lands on Anthropic regardless of the boot-time default.
+// In byokOnly mode, the per-request resolver must override the boot-time
+// hard-pin so compaction lands on a model the request can authenticate to.
 func TestService_HardPin_Compaction_ByokOnly_UsesRequestResolver(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
@@ -344,9 +326,8 @@ func TestService_HardPin_Compaction_ByokOnly_UsesRequestResolver(t *testing.T) {
 		providers.ProviderAnthropic:  &fakeProvider{},
 		providers.ProviderOpenRouter: &fakeProvider{},
 	}
-	// Boot-time hard-pin points at OpenRouter (mimics the buggy managed-mode
-	// boot path); the per-request resolver must override it to Anthropic
-	// because the installation only BYOKs Anthropic.
+	// Boot-time hard-pin points at OpenRouter; resolver must override to
+	// Anthropic since the installation only BYOKs Anthropic.
 	svc := proxy.NewService(
 		fr, providerMap, nil, false, nil, store, false,
 		providers.ProviderOpenRouter, "deepseek/cheap",
@@ -363,9 +344,8 @@ func TestService_HardPin_Compaction_ByokOnly_UsesRequestResolver(t *testing.T) {
 		"per-request resolver must land hard-pin on the installation's BYOK provider, not the boot-time default")
 }
 
-// With no BYOK and no client creds in byokOnly mode the resolver returns
-// ok=false; the hard-pin branch must surface ErrClusterUnavailable rather
-// than dispatching to the boot-time default that the request can't auth to.
+// With no BYOK and resolver ok=false, hard-pin must surface
+// ErrClusterUnavailable rather than dispatch to an unauthenticatable default.
 func TestService_HardPin_Compaction_ByokOnly_NoEligibleProviderErrors(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
@@ -393,18 +373,13 @@ func TestService_HardPin_Compaction_ByokOnly_NoEligibleProviderErrors(t *testing
 		"error must be ErrClusterUnavailable so handlers map it to HTTP 503")
 }
 
-// classifierBody is a canonical Classifier-shaped turn: small max_tokens,
-// no tools, one short message. DetectFromEnvelope hard-pins this turn type,
-// bypassing the scorer (the only component that otherwise applies
-// excluded_models), so it exercises the exclusion-on-hard-pin path.
+// classifierBody: small max_tokens, no tools — DetectFromEnvelope hard-pins
+// this, bypassing the scorer that normally applies excluded_models.
 const classifierBody = `{"model":"claude-haiku-4-5","max_tokens":5,"messages":[{"role":"user","content":"hello"}]}`
 
-// Regression guard: an installation's excluded_models must be honored on the
-// hard-pin (title-gen/classifier/probe) tier. Prod symptom: an installation
-// that excluded gemini-3.1-flash-lite-preview still had ALL its utility
-// traffic routed to it because the hard-pin path picked a model without
-// consulting req.ExcludedModels. The resolver now receives the deny set and
-// must skip the excluded model in favor of the next allowed candidate.
+// Regression guard: excluded_models must be honored on the hard-pin tier too.
+// Prod symptom: an excluded gemini model still got all utility traffic
+// because the hard-pin path never consulted req.ExcludedModels.
 func TestService_HardPin_Classifier_AppliesExcludedModels(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}
@@ -412,9 +387,8 @@ func TestService_HardPin_Classifier_AppliesExcludedModels(t *testing.T) {
 	const excludedModel = "gemini-3.1-flash-lite-preview"
 	const allowedFallback = "claude-haiku-4-5"
 
-	// Mimics the production-wired resolver (cluster.FastestModelInSet): the
-	// fastest candidate is the excluded gemini model, but when it lands in the
-	// deny set the resolver must fall through to the next allowed candidate.
+	// Mimics cluster.FastestModelInSet: fastest candidate is excluded, so
+	// resolver must fall through to the next allowed candidate.
 	resolver := func(enabled, denySet map[string]struct{}) (string, string, bool) {
 		if _, denied := denySet[excludedModel]; !denied {
 			return providers.ProviderGoogle, excludedModel, true
@@ -422,8 +396,7 @@ func TestService_HardPin_Classifier_AppliesExcludedModels(t *testing.T) {
 		return providers.ProviderAnthropic, allowedFallback, true
 	}
 
-	// Both upstreams answer 200 so the served model reflects the hard-pin
-	// decision itself, not a failover away from an empty/erroring upstream.
+	// Both upstreams answer 200 so the served model reflects the hard-pin, not a failover.
 	okResp := func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -712,9 +685,8 @@ func TestService_SessionPin_OpenAI_ToolResultShortCircuit(t *testing.T) {
 	assert.Equal(t, "gpt-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
-// newOpenAIHardPinSvc configures a service whose hard-pin target is on the
-// OpenAI provider, keeping the path same-format (the cross-format Anthropic
-// translator needs a real response body to finalize).
+// newOpenAIHardPinSvc keeps the hard-pin target on OpenAI so the path stays
+// same-format (cross-format translation needs a real response body).
 func newOpenAIHardPinSvc(fr *fakeRouter, store *fakePinStore, hardPinExplore bool) *proxy.Service {
 	return proxy.NewService(
 		fr,
@@ -731,13 +703,9 @@ func newOpenAIHardPinSvc(fr *fakeRouter, store *fakePinStore, hardPinExplore boo
 	)
 }
 
-// TestService_OpenAI_CompactionPhraseDoesNotHardPin regression-guards the
-// Codex false-positive: Claude Code's compaction system phrase is a
-// Claude-Code-only marker, but pre-fix the detector matched it on any wire
-// format. Codex sends an `instructions` field via /v1/responses that gets
-// flattened into an OpenAI-style system message, so any incidental mention
-// of "compact" / "conversation" used to hard-pin every Codex turn to the
-// cheap model — and the resulting session pin made subsequent turns stick.
+// Regression guard: Claude Code's compaction phrase is Claude-Code-only, but
+// pre-fix the detector matched it on any wire format, so Codex's flattened
+// `instructions` field could hard-pin every turn to the cheap model.
 // Compaction detection is now gated on Anthropic format only.
 func TestService_OpenAI_CompactionPhraseDoesNotHardPin(t *testing.T) {
 	const compactionOpenAIBody = `{
@@ -775,18 +743,13 @@ func TestService_HardPin_OpenAI_SubAgentHeaderHintRoutesToHardPin(t *testing.T) 
 	assert.Equal(t, "gpt-4o-mini", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
-// TestService_HardPin_BypassesTierCeiling regression-guards the PR #100
-// finding: ROUTER_HARD_PIN_MODEL is an explicit operator opt-in that
-// MUST win over the requested-model tier ceiling. Before the fix, the
-// orchestrator clamped the hard-pin decision and silently rewrote the
-// operator's chosen model to the cheapest in-ceiling alternative when
-// the operator pinned an over-ceiling (or unknown-tier) model.
+// Regression guard (PR #100): ROUTER_HARD_PIN_MODEL must win over the
+// requested-model tier ceiling instead of being silently clamped down.
 func TestService_HardPin_BypassesTierCeiling(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
 
-	// Hard-pin set to opus (High); inbound model haiku. The hard pin is served
-	// regardless of the requested tier.
+	// Hard-pin is opus; inbound model is haiku — hard pin wins regardless.
 	svc := proxy.NewService(
 		fr,
 		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
@@ -811,20 +774,16 @@ func TestService_HardPin_BypassesTierCeiling(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "operator hard-pin must win over the tier ceiling")
 }
 
-// haikuClampBody requests a Low-tier model (haiku); the scorer is stubbed to
-// return an Opus (High) pick. The router now honors that upgrade rather than
-// downgrading it to a cheap in-tier model.
+// haikuClampBody requests haiku (Low); scorer returns opus (High) — router
+// honors the upgrade instead of downgrading to a cheap in-tier model.
 const haikuClampBody = `{
 	"model":"claude-haiku-4-5",
 	"system":"sys",
 	"messages":[{"role":"user","content":"summarize this"}]
 }`
 
-// TestService_TierClamp_HaikuRequestedHonorsHighScore covers the policy that
-// replaced the haiku-tier downgrade: a haiku-requested turn whose scorer
-// recommended an Opus (High) pick is served on Opus. The requested tier is a
-// floor for the router's judgement, not a ceiling — previously this clamped
-// down to the fastest in-ceiling model (gemini-flash-lite).
+// Requested tier is a floor on the router's judgement, not a ceiling —
+// previously this clamped down to the fastest in-ceiling model.
 func TestService_TierClamp_HaikuRequestedHonorsHighScore(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-opus-4-7", Reason: "cluster:v0.37"}}
@@ -855,10 +814,8 @@ func TestService_TierClamp_OpusRequestedDecisionPassesThrough(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "scorer's pick must pass through unchanged")
 }
 
-// TestService_TierClamp_PinAboveRequestedTierHonored covers the pin-hit path:
-// a session pin from a previous opus turn points at opus (High); the next turn
-// requests haiku (Low). The pin's stronger model is served unchanged — the
-// requested tier no longer downgrades it.
+// Pin-hit path: a prior opus pin outranks a haiku-requested turn — the
+// requested tier no longer downgrades a stronger pin.
 func TestService_TierClamp_PinAboveRequestedTierHonored(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -881,10 +838,7 @@ func TestService_TierClamp_PinAboveRequestedTierHonored(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel), "pin above the requested tier must be honored, not clamped down")
 }
 
-// TestService_ForcedPin_ReasonStaysUserForced verifies a user-forced pin is
-// served unchanged with the plain "user_forced" reason (it is never downgraded).
-//
-// (formerly two tests, clamped + unclamped; the tier clamp no longer downgrades.)
+// A user-forced pin is served unchanged with the plain "user_forced" reason.
 func TestService_ForcedPin_ReasonStaysUserForced(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -907,9 +861,7 @@ func TestService_ForcedPin_ReasonStaysUserForced(t *testing.T) {
 	assert.Equal(t, translate.ReasonUserForceModel, rec.Header().Get(proxy.HeaderRouterDecision), "forced pin keeps the plain user_forced reason")
 }
 
-// TestService_LoopEscalationPin_HonoredAsImmutableSticky verifies a
-// loop_escalation pin is treated like a /force-model pin: the scorer's (cheap)
-// decision is bypassed and the session stays on the escalated opus model.
+// A loop_escalation pin is treated like /force-model: bypasses the scorer.
 func TestService_LoopEscalationPin_HonoredAsImmutableSticky(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -932,9 +884,8 @@ func TestService_LoopEscalationPin_HonoredAsImmutableSticky(t *testing.T) {
 	assert.Equal(t, translate.ReasonLoopEscalation, rec.Header().Get(proxy.HeaderRouterDecision), "escalation pin must report loop_escalation, not the scorer reason")
 }
 
-// buildCyclicLoopBody returns an Anthropic request whose assistant history is a
-// wide re-read cycle (same few files Read many times, no edits) — enough to trip
-// detectCyclicToolCallLoop.
+// buildCyclicLoopBody builds a wide re-read cycle (same files re-Read, no
+// edits) — enough to trip detectCyclicToolCallLoop.
 func buildCyclicLoopBody(t *testing.T, nFiles, total int) []byte {
 	t.Helper()
 	msgs := []any{map[string]any{"role": "user", "content": "do the task"}}
@@ -955,9 +906,8 @@ func buildCyclicLoopBody(t *testing.T, nFiles, total int) []byte {
 	return b
 }
 
-// TestService_LoopEscalation_DoesNotOverwriteUserForcedPin verifies a user's
-// explicit /force-model choice outranks auto-escalation: a cyclic loop on a
-// forced session is recorded but must NOT replace the user_forced pin with opus.
+// A user's explicit /force-model choice outranks auto-escalation: a cyclic
+// loop must not replace the user_forced pin with opus.
 func TestService_LoopEscalation_DoesNotOverwriteUserForcedPin(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -981,11 +931,8 @@ func TestService_LoopEscalation_DoesNotOverwriteUserForcedPin(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "session stays on the user's forced model, not opus")
 }
 
-// TestService_UserForcedPin_IneligibleProviderFallsThrough covers the BYOK
-// provider-eligibility check: a forced pin whose provider is not in the
-// per-request EnabledProviders set must NOT be served. Otherwise the router
-// dispatches a turn to a provider the request has no credentials for,
-// resulting in a 401 / silent unauthenticated upstream call.
+// A forced pin whose provider isn't in EnabledProviders must not be served —
+// otherwise the router dispatches to a provider the request has no creds for.
 func TestService_UserForcedPin_IneligibleProviderFallsThrough(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -1008,9 +955,8 @@ func TestService_UserForcedPin_IneligibleProviderFallsThrough(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "must dispatch to the eligible provider, not gpt-5/openai")
 }
 
-// The x-weave-force-model header is the headless equivalent of /force-model:
-// it must write an immutable user_forced pin for the alias-resolved canonical
-// model so the turn loop's user-forced branch serves it for the session.
+// x-weave-force-model is the headless equivalent of /force-model: it must
+// write an immutable user_forced pin for the alias-resolved canonical model.
 func TestService_ForceModelHeader_WritesUserForcedPin(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "fresh"}}
@@ -1036,9 +982,8 @@ func TestService_ForceModelHeader_WritesUserForcedPin(t *testing.T) {
 	assert.Equal(t, providers.ProviderAnthropic, forced.Provider)
 }
 
-// An unrecognized x-weave-force-model value must be ignored: routing proceeds
-// automatically and no user_forced pin is written, so a typo can't strand a
-// session on an unservable directive.
+// An unrecognized x-weave-force-model value must be ignored, so a typo
+// can't strand a session on an unservable directive.
 func TestService_ForceModelHeader_UnknownModelIgnored(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "fresh"}}

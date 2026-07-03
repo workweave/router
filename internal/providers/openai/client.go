@@ -23,10 +23,10 @@ import (
 
 const DefaultBaseURL = "https://api.openai.com"
 
-// Codex (ChatGPT) subscription backend. A caller's ChatGPT plan authenticates
-// only against this base URL over the Responses API — never api.openai.com —
-// and requires the ChatGPT-Account-ID header paired with the OAuth bearer
-// (401/403 without it). These mirror what the Codex CLI sends (codex_cli_rs).
+// Codex (ChatGPT) subscription backend. A ChatGPT plan authenticates only
+// against this base URL over the Responses API — never api.openai.com — and
+// requires ChatGPT-Account-ID paired with the OAuth bearer (401/403 without
+// it). Mirrors what the Codex CLI sends (codex_cli_rs).
 const (
 	chatGPTCodexBaseURL   = "https://chatgpt.com/backend-api/codex"
 	codexResponsesPath    = "/responses"
@@ -39,10 +39,9 @@ const (
 	codexUserAgentValue   = "codex_cli_rs"
 )
 
-// codexSubscriptionCreds returns the resolved per-request credential when it is
-// a Codex (ChatGPT) subscription bearer — an OAuth token carrying a paired
-// ChatGPT account id — and nil otherwise. Such a turn must dispatch to the
-// Codex backend over the Responses API instead of api.openai.com.
+// codexSubscriptionCreds returns the resolved credential when it's a Codex
+// (ChatGPT) subscription bearer (OAuth token with a paired account id), else
+// nil. Such a turn must dispatch to the Codex backend, not api.openai.com.
 func codexSubscriptionCreds(ctx context.Context) *proxy.Credentials {
 	creds := proxy.CredentialsFromContext(ctx)
 	if creds != nil && creds.OAuth && len(creds.AccountID) > 0 {
@@ -51,13 +50,11 @@ func codexSubscriptionCreds(ctx context.Context) *proxy.Credentials {
 	return nil
 }
 
-// responseHeaderTimeout guards time-to-first-byte for OpenAI upstreams. It is
-// raised above the 30s default because the Responses API (gpt-5.x reasoning)
-// can take well over 30s to emit its first streamed event under high effort;
-// the default would false-trip "http2: timeout awaiting response headers" on a
-// healthy model. Once the stream is flowing, inter-event gaps are bounded by
-// StreamBody's idle watchdog, so this generous header budget cannot reintroduce
-// an unbounded hang. Applies to both /v1/chat/completions and /v1/responses.
+// responseHeaderTimeout is raised above the 30s default because the Responses
+// API (gpt-5.x reasoning) can take well over 30s to emit its first event under
+// high effort, false-tripping the default. StreamBody's idle watchdog still
+// bounds inter-event gaps once streaming starts, so this can't reintroduce an
+// unbounded hang.
 const responseHeaderTimeout = 120 * time.Second
 
 type Client struct {
@@ -65,20 +62,14 @@ type Client struct {
 	baseURL string
 	http    *http.Client
 	// sseIdleTimeout, when > 0, overrides the per-endpoint idle-progress
-	// threshold (httputil.DefaultSSEIdleTimeout for chat/completions,
-	// httputil.DefaultResponsesSSEIdleTimeout for /v1/responses). Production
-	// always uses the defaults via NewClient; tests inject a small value to
-	// exercise the mid-stream stall watchdog without waiting out the real
-	// threshold (mirrors the header-timeout injection below).
+	// threshold. Tests inject a small value to exercise the stall watchdog
+	// without waiting out the real threshold.
 	sseIdleTimeout time.Duration
-	// outputStall, when > 0, overrides httputil.DefaultResponsesOutputStallTimeout
-	// for the /v1/responses output-progress watchdog. Production uses the
-	// default via NewClient; tests inject a small value to exercise the
-	// output-stall trip without waiting out the real threshold.
+	// outputStall, when > 0, overrides the /v1/responses output-progress
+	// watchdog budget for tests, same reason as sseIdleTimeout.
 	outputStall time.Duration
-	// codexBaseURL is the base URL for the Codex (ChatGPT) subscription backend.
-	// Production uses chatGPTCodexBaseURL; tests override it to point a Codex
-	// dispatch at an httptest server.
+	// codexBaseURL is the Codex (ChatGPT) subscription backend base URL;
+	// tests override it to point at an httptest server.
 	codexBaseURL string
 }
 
@@ -87,10 +78,8 @@ func NewClient(apiKey, baseURL string) *Client {
 }
 
 // NewClientWithResponseHeaderTimeout is NewClient with a caller-chosen
-// time-to-first-byte guard. Production uses the 120s default via NewClient;
-// the override exists so a test can inject a small timeout and exercise the
-// bounded-stall behavior (a stalled upstream surfaces an error, not a hang —
-// the #331 belt-and-suspenders) without waiting the full default.
+// time-to-first-byte guard, so tests can exercise bounded-stall behavior
+// (#331) without waiting out the 120s default.
 func NewClientWithResponseHeaderTimeout(apiKey, baseURL string, headerTimeout time.Duration) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
@@ -111,18 +100,16 @@ func NewClientWithTimeouts(apiKey, baseURL string, headerTimeout, sseIdleTimeout
 	return c
 }
 
-// NewClientWithStallTimeouts is NewClientWithTimeouts with an additional
-// injected /v1/responses output-stall threshold; see Client.outputStall. Exists
-// so a test can drive the output-progress watchdog with a small budget.
+// NewClientWithStallTimeouts additionally injects the /v1/responses
+// output-stall threshold (Client.outputStall) for tests.
 func NewClientWithStallTimeouts(apiKey, baseURL string, headerTimeout, sseIdleTimeout, outputStall time.Duration) *Client {
 	c := NewClientWithTimeouts(apiKey, baseURL, headerTimeout, sseIdleTimeout)
 	c.outputStall = outputStall
 	return c
 }
 
-// idleTimeoutFor picks the idle-progress watchdog threshold for the upstream
-// endpoint. /v1/responses gets the more generous reasoning budget — see
-// httputil.DefaultResponsesSSEIdleTimeout.
+// idleTimeoutFor picks the idle-progress threshold; /v1/responses gets the
+// more generous reasoning budget.
 func (c *Client) idleTimeoutFor(endpoint providers.Endpoint) time.Duration {
 	if c.sseIdleTimeout > 0 {
 		return c.sseIdleTimeout
@@ -142,9 +129,8 @@ func (c *Client) outputStallTimeout() time.Duration {
 	return httputil.DefaultResponsesOutputStallTimeout
 }
 
-// stallBudgetFor returns the budget that the watchdog identified by cause was
-// configured with, so logStreamStall reports the threshold that actually fired
-// (output-stall, not the byte-idle threshold the same call site also handles).
+// stallBudgetFor returns the budget the watchdog identified by cause used, so
+// logStreamStall reports the threshold that actually fired.
 func (c *Client) stallBudgetFor(endpoint providers.Endpoint, cause error) time.Duration {
 	if errors.Is(cause, httputil.ErrUpstreamOutputStall) {
 		return c.outputStallTimeout()
@@ -154,13 +140,12 @@ func (c *Client) stallBudgetFor(endpoint providers.Endpoint, cause error) time.D
 
 // setAuth applies authentication to the upstream request. Precedence:
 // (1) per-request BYOK credentials in ctx; (2) deployment-level API key;
-// (3) passthrough of the client's own OpenAI auth header (Codex plan flow).
+// (3) passthrough of the inbound auth header (Codex plan flow).
 //
-// The passthrough tier strips `Authorization: Bearer rk_...` because the
-// router auth middleware accepts the same header for router-key auth — we
-// must not relay a router credential to OpenAI just because no BYOK or
-// deployment key is configured. Mirrors the !HasAPIKeyPrefix guard in
-// proxy.ExtractClientCredentials.
+// The passthrough tier strips `Authorization: Bearer rk_...` — the router
+// auth middleware accepts the same header for router-key auth, so we must not
+// relay a router credential to OpenAI. Mirrors proxy.ExtractClientCredentials's
+// !HasAPIKeyPrefix guard.
 func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		upstream.Header.Set("Authorization", "Bearer "+string(creds.APIKey))
@@ -174,13 +159,11 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *h
 	if v == "" {
 		return
 	}
-	// Only forward if the Bearer token isn't a router-issued key. Any other
-	// shape (incl. raw or malformed) we still forward — upstream will 401 on
-	// invalid creds, which is the correct failure mode for "no auth resolvable".
-	// Match the bearer prefix case-insensitively to mirror the router auth
-	// middleware's extractBearer; otherwise `authorization: bearer rk_...`
-	// (lowercased by some clients) bypasses this guard and the router key
-	// crosses the trust boundary to OpenAI.
+	// Skip forwarding only if the Bearer token is a router-issued key; any
+	// other shape is forwarded as-is (upstream 401s on invalid creds). Prefix
+	// match is case-insensitive to mirror extractBearer — otherwise a
+	// lowercased `authorization: bearer rk_...` bypasses this guard and leaks
+	// the router key to OpenAI.
 	const bearerPrefix = "Bearer "
 	if len(v) > len(bearerPrefix) && strings.EqualFold(v[:len(bearerPrefix)], bearerPrefix) {
 		if auth.HasAPIKeyPrefix(strings.TrimSpace(v[len(bearerPrefix):])) {
@@ -194,12 +177,9 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
-	// A Codex (ChatGPT) subscription turn dispatches to the Codex backend over
-	// the Responses API; everything else uses the configured base URL + the
-	// endpoint-appropriate path. Gate on EndpointResponses so a chat-completions
-	// body that happens to resolve a Codex credential is never posted to the
-	// Codex /responses endpoint (which only accepts the Responses schema) — the
-	// routed Codex passthrough always builds a Responses-shaped request.
+	// Gate Codex dispatch on EndpointResponses too, so a chat-completions body
+	// that happens to resolve a Codex credential never hits the Codex
+	// /responses endpoint (Responses schema only).
 	codexCreds := codexSubscriptionCreds(ctx)
 	useCodex := codexCreds != nil && prep.Endpoint == providers.EndpointResponses
 	baseURL := c.baseURL
@@ -223,9 +203,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	if v := r.Header.Get("Accept"); v != "" {
 		upstream.Header.Set("Accept", v)
 	}
-	// Codex backend required headers, set AFTER the prep.Headers copy so they
-	// are never clobbered. setAuth has already written Authorization: Bearer
-	// <jwt> from the resolved OAuth credential.
+	// Set after the prep.Headers copy so these can't be clobbered.
 	if useCodex {
 		upstream.Header.Set(codexAccountIDHeader, string(codexCreds.AccountID))
 		upstream.Header.Set(codexOpenAIBetaHeader, codexOpenAIBetaValue)
@@ -241,9 +219,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	}
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
-	// Surface Codex subscription rate-limit headroom (x-codex-*) to the proxy's
-	// usage observer. Done for every response, including 429s where the headroom
-	// signal matters most.
+	// Surface Codex rate-limit headroom (x-codex-*) even on 429s, where it matters most.
 	providers.ObserveUpstreamHeaders(ctx, resp.Header)
 
 	idleTimeout := c.idleTimeoutFor(prep.Endpoint)
@@ -256,19 +232,14 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		"request_id", resp.Header.Get("X-Request-Id"),
 	)
 
-	// Buffer non-2xx and surface as UpstreamErrorResponse so the dispatch
-	// loop can fail over (multi-binding models) or render the upstream error
-	// envelope in the inbound format (single-binding models like gpt-*).
-	// Writing the upstream status straight through corrupts the SSE stream
-	// when a translator's Prelude already committed `200 + message_start`
-	// to the prelude buffer, and silently drops the upstream error body —
-	// neither debugging signal nor failover survive.
+	// Buffer non-2xx as UpstreamErrorResponse so the dispatch loop can fail
+	// over or render the error in the inbound format. Writing the status
+	// straight through would corrupt the SSE stream if a translator's Prelude
+	// already committed `200 + message_start`, and would drop the error body.
 	if resp.StatusCode >= 400 {
-		// Guard the error-body read with the same idle watchdog as the
-		// streaming path below: readCapped's blocking reads would otherwise
-		// hang indefinitely on an upstream that returns error headers and
-		// then stalls the body — the response-header timeout no longer
-		// applies once headers have arrived.
+		// Same idle watchdog as the streaming path: readCapped's blocking
+		// reads would otherwise hang on an upstream that returns error
+		// headers then stalls the body (header timeout no longer applies).
 		mark, stop := httputil.StartIdleWatchdog(ctx, cancel, idleTimeout)
 		body := &progressReader{r: resp.Body, mark: mark}
 		bufBody, totalRead, drainErr := readCapped(body, providers.MaxBufferedErrorBytes)
@@ -303,16 +274,13 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	w.WriteHeader(resp.StatusCode)
 	status := resp.StatusCode
 
-	// Output-progress watchdog (Responses streaming only). The byte-idle
-	// watchdog below resets on ANY upstream byte, so a stream that stays alive
-	// with non-output frames (reasoning deltas, keepalives) while producing zero
-	// output tokens rides to the 600s request cap (2026-06-16 incident). This
-	// second watchdog measures time-since-last-OUTPUT: its mark is fed by the
-	// Responses→Anthropic translator only on output-bearing events. On trip it
-	// cancels ctx with ErrUpstreamOutputStall (retryable; fails over while the
-	// preludeBuffer is still uncommitted). Only the translator can tell output
-	// frames from reasoning/keepalive frames, so it is wired via ArmOutputProgress;
-	// a non-streaming client parses events at Finalize and returns armed=false.
+	// Output-progress watchdog (Responses only): the byte-idle watchdog below
+	// resets on ANY byte, so a stream alive on reasoning/keepalive frames but
+	// producing zero output rides to the 600s cap (2026-06-16 incident). This
+	// one measures time-since-last-OUTPUT, fed by the translator only on
+	// output-bearing events, and trips ErrUpstreamOutputStall (retryable).
+	// Wired via ArmOutputProgress since only the translator can tell output
+	// frames from reasoning/keepalive frames.
 	if prep.Endpoint == providers.EndpointResponses {
 		if arm, ok := w.(providers.OutputProgressArmer); ok {
 			outMark, outStop := httputil.StartIdleWatchdogCause(ctx, cancel, c.outputStallTimeout(), httputil.ErrUpstreamOutputStall)
@@ -379,11 +347,9 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	}
 }
 
-// progressReader counts upstream bytes and reports each successful read as
-// watchdog progress. The byte count feeds the stall log's bytes_received
-// field; mark (optional, nil-safe) feeds StartIdleWatchdog on paths that do
-// not go through StreamBody's built-in marking. Single-goroutine use only —
-// the count is read by the same goroutine after the stream loop returns.
+// progressReader counts upstream bytes for the stall log's bytes_received
+// field and reports each read to mark (optional, nil-safe) for watchdog
+// paths outside StreamBody's built-in marking. Single-goroutine use only.
 type progressReader struct {
 	r    io.Reader
 	mark func()
@@ -401,20 +367,11 @@ func (p *progressReader) Read(buf []byte) (n int, err error) {
 	return n, err
 }
 
-// logStreamStall reports a watchdog trip at ERROR: the upstream accepted the
-// request and returned headers, then stalled for the full budget. Two stall
-// modes, distinguished by cause:
-//   - ErrUpstreamIdleTimeout (byte-idle): zero bytes for the idle budget (prod
-//     incident 2026-06-09: two /v1/responses streams produced no bytes until
-//     the 600s request cap).
-//   - ErrUpstreamOutputStall (output-idle): stream stayed byte-alive on
-//     reasoning/keepalive frames but produced zero output for the output-stall
-//     budget (prod incident 2026-06-16: gpt-5.5 at zero output tokens for the
-//     full 600s, bytes flowing the whole time).
-//
-// Both are classified retryable, so dispatchWithFallback re-attempts when
-// nothing has been committed to the client; this log is the per-model paper
-// trail for how often each mode happens. stall_kind tags which.
+// logStreamStall reports a watchdog trip at ERROR, distinguishing two modes
+// via stall_kind: byte_idle (ErrUpstreamIdleTimeout, zero bytes — 2026-06-09
+// incident) vs output_idle (ErrUpstreamOutputStall, bytes flowing but zero
+// output — 2026-06-16 incident). Both are retryable; this is the per-model
+// paper trail for how often each happens.
 func logStreamStall(model, path string, budget time.Duration, bytesReceived int64, cause error) {
 	stallKind := "byte_idle"
 	if errors.Is(cause, httputil.ErrUpstreamOutputStall) {
@@ -438,9 +395,8 @@ func truncateBytes(b []byte, n int) string {
 }
 
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
-	// Codex (ChatGPT) subscriptions are served only on the routed Responses
-	// dispatch (Proxy), never this non-routed passthrough path, so no Codex
-	// backend switch is applied here.
+	// Codex subscriptions are served only via the routed Responses dispatch
+	// (Proxy), never here — no Codex backend switch needed.
 	url := c.baseURL + r.URL.Path
 	if r.URL.RawQuery != "" {
 		url += "?" + r.URL.RawQuery
@@ -494,10 +450,8 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	return err
 }
 
-// readCapped reads up to limit bytes from r into a buffer, then drains the
-// rest without retention up to maxDrain to bound failover latency on a slow
-// upstream returning a large error body. The connection is closed by the
-// caller's defer regardless, so the unread tail is discarded by Close.
+// readCapped reads up to limit bytes into a buffer, then drains the rest
+// (up to maxDrain, discarded) to bound failover latency on a large error body.
 func readCapped(r io.Reader, limit int) ([]byte, int64, error) {
 	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
 	totalRead := int64(len(prefix))
@@ -519,18 +473,16 @@ func previewBytes(body []byte) string {
 	return string(body)
 }
 
-// headerCapture is a minimal http.ResponseWriter that captures headers only,
-// used to reuse providers.CopyUpstreamHeaders against an http.Header we own.
-// Write/WriteHeader are no-ops.
+// headerCapture is a minimal http.ResponseWriter used to reuse
+// providers.CopyUpstreamHeaders against an http.Header we own.
 type headerCapture struct{ h http.Header }
 
 func (c headerCapture) Header() http.Header       { return c.h }
 func (c headerCapture) Write([]byte) (int, error) { return 0, nil }
 func (c headerCapture) WriteHeader(int)           {}
 
-// logUpstreamStatus logs non-2xx upstream responses with a body preview.
-// Severity is ERROR for >=500 and >=400 except 429 (which is a routine
-// rate-limit signal that callers handle via failover).
+// logUpstreamStatus logs non-2xx responses at ERROR, except 429 (routine
+// rate-limit signal handled via failover), logged at WARN.
 func logUpstreamStatus(msg string, status int, attrs ...any) {
 	merged := append([]any{"status", status}, attrs...)
 	if status >= 500 || (status >= 400 && status != http.StatusTooManyRequests) {

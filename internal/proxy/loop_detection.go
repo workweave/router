@@ -18,9 +18,8 @@ import (
 // escalateModel is the strong model a looping cheap/mid session is rescued onto.
 const escalateModel = "claude-opus-4-8"
 
-// LoopEscalationStore persists cyclic-loop detections durably (the
-// router.loop_escalation_events table). One row per (session, role) detection;
-// the count query enforces the once-per-session budget across pin TTL expiry.
+// LoopEscalationStore persists cyclic-loop detections (one row per
+// session+role); CountLoopEscalationEvents enforces the once-per-session budget.
 type LoopEscalationStore interface {
 	InsertLoopEscalationEvent(ctx context.Context, p LoopEscalationEvent) error
 	CountLoopEscalationEvents(ctx context.Context, sessionKey []byte, role string) (count int64, err error)
@@ -45,10 +44,8 @@ type LoopEscalationEvent struct {
 const (
 	// loopActionEscalated: the session was pinned to escalateModel.
 	loopActionEscalated = "escalated"
-	// loopActionHoldout: log-not-act measurement bucket — the loop was
-	// detected but deliberately NOT escalated, so the self-recovery rate
-	// (sessions that un-stick on their own; measured at 43% in the agent-flow
-	// session-dynamics analysis) can be subtracted from any rescue claim.
+	// loopActionHoldout: log-not-act bucket — loop detected but not escalated,
+	// so the ~43% self-recovery rate can be subtracted from rescue claims.
 	loopActionHoldout = "holdout"
 	// loopActionAlreadyStrong: the looping model IS the escalation target — a
 	// genuinely hard task, not a misroute. Record-only training signal.
@@ -61,10 +58,8 @@ const (
 	loopActionDisabled = "disabled"
 )
 
-// inLoopEscalationHoldout deterministically buckets a session into the
-// log-not-act holdout. Keyed on the session key (already a sha256-derived
-// digest, so uniformly distributed) rather than a random draw, so the same
-// session always lands in the same bucket across replicas and retries.
+// inLoopEscalationHoldout deterministically buckets a session using the
+// session key (already uniform sha256), so the bucket is stable across replicas/retries.
 func inLoopEscalationHoldout(sessionKey [sessionpin.SessionKeyLen]byte, pct int) bool {
 	if pct <= 0 {
 		return false
@@ -75,24 +70,17 @@ func inLoopEscalationHoldout(sessionKey [sessionpin.SessionKeyLen]byte, pct int)
 	return int(binary.BigEndian.Uint32(sessionKey[0:4])%100) < pct
 }
 
-// Loop-detection knobs. Window is the number of recent tool calls inspected;
-// MaxRepeats is the count of identical (name+args) calls within the window
-// that trips the break. Values mirror charmbracelet/crush's loop detector:
-// large enough to absorb legitimate retries of a tool that returns the same
-// result twice, small enough to catch the qwen3 "same call N times in a row"
-// failure mode within a few seconds rather than minutes.
+// Loop-detection knobs: MaxRepeats identical (name+args) calls within the
+// last Window calls trips the break. Mirrors charmbracelet/crush's detector —
+// tolerates legit retries but catches qwen3's repeat-call failure mode fast.
 const (
 	loopDetectionWindowSize = 10
 	loopDetectionMaxRepeats = 5
 )
 
-// detectToolCallLoop scans the trailing tool-call signatures in the assistant's
-// message history and reports whether the same (tool_name, args) signature
-// appears at least loopDetectionMaxRepeats times within the most recent
-// loopDetectionWindowSize entries.
-//
-// Returns the looping signature and its count so the caller can surface them
-// in logs and the synthetic stop message.
+// detectToolCallLoop reports whether the same (tool_name, args) signature
+// repeats loopDetectionMaxRepeats+ times within the last loopDetectionWindowSize
+// tool calls, returning the signature and count for logs/the stop message.
 func detectToolCallLoop(env *translate.RequestEnvelope) (looped bool, sig translate.ToolCallSig, count int) {
 	sigs := env.AssistantToolCallSignatures()
 	if len(sigs) < loopDetectionMaxRepeats {
@@ -110,11 +98,8 @@ func detectToolCallLoop(env *translate.RequestEnvelope) (looped bool, sig transl
 		counts[key]++
 		keys[key] = s
 		if counts[key] >= loopDetectionMaxRepeats {
-			// Dump the full ordered window so we can tell a real loop
-			// (5× identical args) from a false positive (5 distinct
-			// args that canonicalize-collide). On a true loop every
-			// printed entry will match; on a false positive they'll
-			// look different in this log even though they share a hash.
+			// Dump the ordered window to distinguish a real loop (identical
+			// args) from a false positive (distinct args that canonicalize-collide).
 			log := observability.Get()
 			args := env.AssistantToolCallArgsPreview(start, 200)
 			log.Info("loop detector window dump",
@@ -128,11 +113,9 @@ func detectToolCallLoop(env *translate.RequestEnvelope) (looped bool, sig transl
 	return false, translate.ToolCallSig{}, 0
 }
 
-// Cyclic-loop-detection knobs. Where detectToolCallLoop catches a TIGHT loop
-// (the same single call >=5x in the last 10), this catches a WIDER cycle: an
-// agent re-reading the same small set of files over and over across dozens of
-// turns (observed in the post-#332 re-bake — gpt-5.5/haiku reading defaults.ini
-// x45, package.json x51 across 400 turns, never editing, ending error_max_turns).
+// Cyclic-loop-detection knobs. detectToolCallLoop catches a TIGHT loop (one
+// call >=5x in 10); this catches a WIDER cycle — re-reading a few files for
+// dozens of turns (seen post-#332: gpt-5.5/haiku re-read x45+ over 400 turns).
 const (
 	cyclicLoopWindowSize       = 30
 	cyclicLoopMinCalls         = 24
@@ -145,14 +128,10 @@ var editToolNames = map[string]struct{}{
 	"Edit": {}, "Write": {}, "MultiEdit": {}, "NotebookEdit": {},
 }
 
-// detectCyclicToolCallLoop reports whether the trailing tool-call window is a
-// wide re-read cycle: at least cyclicLoopMinCalls calls whose distinct
-// (name, args) fraction is below cyclicLoopMaxDistinctRatio, with no edit/write
-// call in the window (the no-progress guard). A healthy Explore sub-agent reads
-// MANY DISTINCT files (high diversity → no trip); a stuck agent re-reads the
-// SAME few (low diversity → trip) — the #271 false-positive guard applied to the
-// wide-cycle case. Returns the most-repeated signature + count, the distinct
-// ratio, and the window size, for telemetry.
+// detectCyclicToolCallLoop reports a wide re-read cycle: cyclicLoopMinCalls+
+// calls with distinct-signature ratio below cyclicLoopMaxDistinctRatio and no
+// edit/write call in the window (the #271 false-positive guard — a healthy
+// Explore reads many distinct files; a stuck agent re-reads the same few).
 func detectCyclicToolCallLoop(env *translate.RequestEnvelope) (looped bool, top translate.ToolCallSig, topCount int, distinctRatio float64, total int) {
 	sigs := env.AssistantToolCallSignatures()
 	if len(sigs) < cyclicLoopMinCalls {
@@ -186,20 +165,13 @@ func detectCyclicToolCallLoop(env *translate.RequestEnvelope) (looped bool, top 
 	return true, top, topCount, distinctRatio, len(window)
 }
 
-// handleLoopEscalation rescues a session stuck in a wide tool-call cycle by
-// pinning it to opus for the remainder of its life, and records a structured
-// telemetry event. It does NOT write a synthetic response — the caller falls
-// through to normal routing, which loads the just-written escalation pin (an
-// immutable sticky, like /force-model) and dispatches this turn to opus.
-//
-// Idempotent: a session already on a loop_escalation pin is left alone, and a
-// durable once-per-session budget (CountLoopEscalationEvents) backstops the pin
-// check across TTL expiry, so the telemetry fires once per session. The pin
-// write is further gated by the kill switch (loopEscalationEnabled), the
-// log-not-act holdout (loopEscalationHoldoutPct), a user-forced pin, and the
-// looping model already being the escalation target — in every one of those
-// cases the event is still recorded (action column says which), only the
-// rescue is withheld.
+// handleLoopEscalation pins a session stuck in a wide tool-call cycle to opus
+// and records a telemetry event; it writes no response, so normal routing
+// picks up the pin and dispatches this turn. Idempotent via the pin check plus
+// a durable once-per-session budget. The pin write is further gated by the
+// kill switch, the log-not-act holdout, a user-forced pin, or the looping
+// model already being the target — those cases still record the event
+// (action column says which) but withhold the rescue.
 func (s *Service) handleLoopEscalation(
 	ctx context.Context,
 	top translate.ToolCallSig,
@@ -223,9 +195,8 @@ func (s *Service) handleLoopEscalation(
 			if existing.Reason == translate.ReasonLoopEscalation {
 				return // already rescued this session; don't re-pin or double-log
 			}
-			// A user's explicit /force-model (or x-weave-force-model) choice
-			// outranks auto-escalation — never silently overwrite it. Record the
-			// loop for telemetry, but leave the forced pin in place.
+			// A user's explicit /force-model choice outranks auto-escalation —
+			// record the loop for telemetry but leave the forced pin in place.
 			if existing.Reason == translate.ReasonUserForceModel {
 				userForced = true
 			}
@@ -235,12 +206,9 @@ func (s *Service) handleLoopEscalation(
 		}
 	}
 
-	// Once-per-session budget, durable across pin TTL expiry. The
-	// ReasonLoopEscalation pin check above covers the common case, but a
-	// session outliving its pin (1h sliding TTL) would otherwise re-fire — and
-	// the non-escalating actions (holdout/disabled/already-strong) never write
-	// a pin at all, so without this check they would emit one event per turn.
-	// Best-effort: a lookup failure proceeds rather than suppressing a rescue.
+	// Once-per-session budget, durable past pin TTL expiry: covers sessions
+	// outliving their pin, and non-escalating actions that never write a pin
+	// (else they'd emit one event per turn). Lookup failure proceeds (best-effort).
 	if s.loopEscalationStore != nil && installationID != uuid.Nil {
 		count, err := s.loopEscalationStore.CountLoopEscalationEvents(ctx, sessionKey[:], role)
 		if err != nil {
@@ -250,10 +218,8 @@ func (s *Service) handleLoopEscalation(
 		}
 	}
 
-	// Holdout only applies when the event can actually be recorded —
-	// withholding the rescue without a durable row would be pure loss, not a
-	// measurement. That requires both a wired store AND a real installation id
-	// (the insert is skipped for unauthenticated requests).
+	// Holdout only applies when the event can be recorded (wired store + real
+	// installation id) — otherwise withholding the rescue is pure loss, not measurement.
 	holdout := s.loopEscalationStore != nil && installationID != uuid.Nil &&
 		inLoopEscalationHoldout(sessionKey, s.loopEscalationHoldoutPct)
 
@@ -270,11 +236,8 @@ func (s *Service) handleLoopEscalation(
 	}
 	willEscalate := action == loopActionEscalated
 
-	// First-class telemetry. This (session, looping_model) → looped event is the
-	// exact misroute the embedder cannot predict up front, so it is a training
-	// label for the difficulty/routing model. Emit for prod AND eval traffic; the
-	// post-escalation outcome is joined offline by session_key against the final
-	// shard result.
+	// This (session, looping_model) event is a training label for the
+	// difficulty/routing model; joined offline by session_key against the final shard result.
 	log.Info("router.loop_escalation",
 		"looping_model", loopingModel,
 		"action", action,
@@ -290,13 +253,9 @@ func (s *Service) handleLoopEscalation(
 		"role", role,
 	)
 
-	// Rescue first, record second. The durable row is what the
-	// once-per-session budget counts, so for the escalating action it must not
-	// land unless the opus pin actually did — recording a failed rescue would
-	// permanently block this session's retry (the next detection would see
-	// count > 0 and bail) while leaving it un-rescued. On upsert failure we
-	// return WITHOUT a row: the loop is still live, so the next turn
-	// re-detects and retries the whole rescue.
+	// Rescue first, record second: the durable row backs the once-per-session
+	// budget, so recording before the pin lands would permanently block retry
+	// on a failed rescue. On upsert failure, return without a row so the loop re-detects next turn.
 	if willEscalate {
 		// Pin opus for the rest of the session (immutable sticky via
 		// ReasonLoopEscalation).
@@ -326,12 +285,9 @@ func (s *Service) handleLoopEscalation(
 		}
 	}
 
-	// Durable row in router.loop_escalation_events — the queryable fire-rate /
-	// opus-share / rescue-rate source and the training corpus.
-	// context.Background(): the request ctx may already be canceled; losing the
-	// row would both skew the corpus and break the once-per-session budget.
-	// (If THIS write fails after a successful pin, the pin's
-	// ReasonLoopEscalation check still dedupes re-fires for the pin's TTL.)
+	// Durable row for fire-rate/opus-share metrics and the training corpus.
+	// context.Background(): request ctx may be canceled; losing the row would
+	// skew the corpus and break the once-per-session budget (pin check still dedupes re-fires meanwhile).
 	if s.loopEscalationStore != nil && installationID != uuid.Nil {
 		event := LoopEscalationEvent{
 			InstallationID:   installationID.String(),
@@ -352,14 +308,10 @@ func (s *Service) handleLoopEscalation(
 	}
 }
 
-// handleToolCallLoopBreak short-circuits a runaway tool-call loop. It writes a
-// synthetic end_turn response in the inbound wire format and expires the
-// session pin so the next user turn re-routes to a fresh decision rather than
-// re-anchoring on the model that produced the loop.
-//
-// Pin expiry is best-effort: a Postgres write failure logs but does not block
-// the response, because the client is already stuck and getting a clean break
-// out is more important than guaranteeing the pin row reflects the new state.
+// handleToolCallLoopBreak short-circuits a runaway tool-call loop: writes a
+// synthetic end_turn response and expires the session pin so the next turn
+// re-routes instead of re-anchoring on the looping model. Pin expiry is
+// best-effort — a write failure logs but doesn't block the response.
 func (s *Service) handleToolCallLoopBreak(
 	ctx context.Context,
 	w http.ResponseWriter,
@@ -396,10 +348,8 @@ func (s *Service) handleToolCallLoopBreak(
 		"role", role,
 	)
 
-	// Expire the session pin so the NEXT user turn re-routes. We cannot
-	// simply Remove() the in-proc cache without also pushing an expired row
-	// to Postgres — a racing reader on another pod would repopulate the LRU
-	// from the stale row and re-anchor on the bad model.
+	// Expire the pin in Postgres (not just the in-proc cache) so a racing
+	// reader on another pod can't repopulate the LRU from the stale row.
 	if s.pinStore != nil && installationID != uuid.Nil {
 		expired := sessionpin.Pin{
 			SessionKey:     sessionKey,
@@ -411,9 +361,8 @@ func (s *Service) handleToolCallLoopBreak(
 			TurnCount:      1,
 			PinnedUntil:    time.Now().Add(-time.Second),
 		}
-		// context.Background() — the request ctx may already be canceled by
-		// the time we get here (Claude Code drops slow turns). Upserting on
-		// a canceled context would silently fail and leave the bad pin.
+		// context.Background(): request ctx may already be canceled (client
+		// drops slow turns); upserting on it would silently fail, leaving the bad pin.
 		if err := s.pinStore.Upsert(context.Background(), expired); err != nil {
 			log.Error("loop-break: pin store upsert failed", "err", err)
 		}

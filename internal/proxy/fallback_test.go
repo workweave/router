@@ -17,10 +17,8 @@ import (
 	"workweave/router/internal/router/catalog"
 )
 
-// fakeClient is a per-attempt scripted providers.Client. It exposes the
-// minimum surface the dispatch helper needs: Proxy returns whatever the
-// next scripted outcome says, while optionally writing bytes to w to
-// simulate a partial flush. Passthrough is unused here.
+// fakeClient is a per-attempt scripted providers.Client; Proxy replays the
+// next outcome (write bytes and/or return err). Passthrough is unused.
 type fakeClient struct {
 	name     string
 	outcomes []fakeOutcome
@@ -51,9 +49,8 @@ func (f *fakeClient) Passthrough(context.Context, providers.PreparedRequest, htt
 	return providers.ErrNotImplemented
 }
 
-// newServiceWithProviders builds a *Service with just enough state for
-// dispatchWithFallback to operate. The router and other dependencies are
-// nil — dispatchWithFallback doesn't read them.
+// newServiceWithProviders builds a minimal *Service; dispatchWithFallback
+// doesn't touch the other fields.
 func newServiceWithProviders(t *testing.T, providerMap map[string]providers.Client) *Service {
 	t.Helper()
 	s := &Service{providers: providerMap}
@@ -103,9 +100,7 @@ func TestDispatchWithFallback_PrimarySucceedsNoRetry(t *testing.T) {
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			// Production closures call buf.Seal() between the Prelude
-			// phase and the upstream call. These tests have no Prelude,
-			// so Seal happens immediately before p.Proxy.
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
 			buf.Seal()
 			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
@@ -146,9 +141,7 @@ func TestDispatchWithFallback_RetriesOnRetryableBufferedError(t *testing.T) {
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			// Production closures call buf.Seal() between the Prelude
-			// phase and the upstream call. These tests have no Prelude,
-			// so Seal happens immediately before p.Proxy.
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
 			buf.Seal()
 			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
@@ -190,9 +183,7 @@ func TestDispatchWithFallback_RetriesOnTransportError(t *testing.T) {
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			// Production closures call buf.Seal() between the Prelude
-			// phase and the upstream call. These tests have no Prelude,
-			// so Seal happens immediately before p.Proxy.
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
 			buf.Seal()
 			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
@@ -245,12 +236,9 @@ func TestDispatchWithFallback_RetriesOnResponseHeaderTimeout(t *testing.T) {
 	assert.Equal(t, providers.ProviderDeepInfra, rec.Header().Get(HeaderRouterFallbackFrom))
 }
 
-// TestDispatchWithFallback_RetriesOnUpstreamIdleTimeout covers the mid-stream
-// stall watchdog (prod incident 2026-06-09: /v1/responses streams went silent
-// after headers, zero output tokens until the 600s cap). The adapter aborts
-// the stalled stream and returns providers.ErrUpstreamIdleTimeout without
-// having written anything through the prelude buffer, so the dispatch loop
-// must rescue the turn on the next binding.
+// Covers the mid-stream stall watchdog (prod incident 2026-06-09: streams
+// went silent after headers). Adapter returns ErrUpstreamIdleTimeout having
+// written nothing, so dispatch must rescue via the next binding.
 func TestDispatchWithFallback_RetriesOnUpstreamIdleTimeout(t *testing.T) {
 	primary := &fakeClient{
 		name:     "openai",
@@ -317,9 +305,7 @@ func TestDispatchWithFallback_NoRetryOnNonRetryableStatus(t *testing.T) {
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			// Production closures call buf.Seal() between the Prelude
-			// phase and the upstream call. These tests have no Prelude,
-			// so Seal happens immediately before p.Proxy.
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
 			buf.Seal()
 			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
@@ -335,10 +321,8 @@ func TestDispatchWithFallback_NoRetryOnNonRetryableStatus(t *testing.T) {
 }
 
 func TestDispatchWithFallback_ModelNotFoundFailsOverToNextBinding(t *testing.T) {
-	// A 404 means the primary provider doesn't serve this model (stale/wrong
-	// upstream id). It is NOT in IsRetryable, so it must not retry the same
-	// binding — but a different provider binding may carry the model, so the
-	// dispatcher should fail over rather than hard-fail the turn.
+	// 404 means primary doesn't serve this model; not retryable in-place, but
+	// another binding may carry it, so dispatch fails over instead of hard-failing.
 	primary := &fakeClient{
 		name:     "bedrock",
 		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 404, Body: []byte(`{"message":"model does not exist"}`)}}},
@@ -380,8 +364,7 @@ func TestDispatchWithFallback_ModelNotFoundFailsOverToNextBinding(t *testing.T) 
 }
 
 func TestDispatchWithFallback_ModelNotFoundSingleBindingFlushes(t *testing.T) {
-	// 404 on the only binding: no provider to fail over to, and a 404 must
-	// not same-binding-retry (futile). The 404 envelope flushes after one try.
+	// 404 on the sole binding: nothing to fail over to, and 404 isn't retried in-place.
 	only := &fakeClient{
 		name:     "bedrock",
 		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 404, Body: []byte(`nope`)}}},
@@ -411,9 +394,8 @@ func TestDispatchWithFallback_ModelNotFoundSingleBindingFlushes(t *testing.T) {
 }
 
 func TestDispatchWithFallback_NoRetryAfterBytesFlushed(t *testing.T) {
-	// Primary writes some bytes, *then* errors. Even though the error is
-	// retryable in isolation, the dispatcher can't retry — partial SSE is
-	// already on the wire and the client is committed.
+	// Primary writes bytes then errors; even though retryable in isolation,
+	// partial SSE is already on the wire so the dispatcher can't retry.
 	primary := &fakeClient{
 		name: "fireworks",
 		outcomes: []fakeOutcome{{
@@ -441,9 +423,7 @@ func TestDispatchWithFallback_NoRetryAfterBytesFlushed(t *testing.T) {
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			// Production closures call buf.Seal() between the Prelude
-			// phase and the upstream call. These tests have no Prelude,
-			// so Seal happens immediately before p.Proxy.
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
 			buf.Seal()
 			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
@@ -482,9 +462,7 @@ func TestDispatchWithFallback_BothFailFinalBodyFlushed(t *testing.T) {
 			{Provider: "openrouter"},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
-			// Production closures call buf.Seal() between the Prelude
-			// phase and the upstream call. These tests have no Prelude,
-			// so Seal happens immediately before p.Proxy.
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
 			buf.Seal()
 			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
 		},
@@ -504,9 +482,8 @@ func TestDispatchWithFallback_BothFailFinalBodyFlushed(t *testing.T) {
 func noopSleep(context.Context, time.Duration) error { return nil }
 
 func TestDispatchWithFallback_SingleBindingExhaustsRetries(t *testing.T) {
-	// A single-binding model (Anthropic/OpenAI/Google) has no provider to
-	// fail over to, so a persistent retryable error is retried in place up
-	// to maxSameBindingRetries before the buffered envelope flushes.
+	// Single-binding models have nowhere to fail over, so a persistent
+	// retryable error retries in place up to maxSameBindingRetries before flushing.
 	only := &fakeClient{
 		name: "anthropic",
 		outcomes: []fakeOutcome{
@@ -715,17 +692,15 @@ func TestResolveBindingsForDispatch(t *testing.T) {
 		assert.Equal(t, "fireworks", bs[0].Provider)
 	})
 	t.Run("all bindings excluded with excluded primary returns empty walk", func(t *testing.T) {
-		// When exclusion filters out every binding AND the decision names an
-		// excluded provider, the walk must be empty so dispatchWithFallback
-		// 502s instead of serving the forbidden provider.
+		// If exclusion filters out every binding, the walk must be empty so
+		// dispatch 502s instead of serving a forbidden provider.
 		s := &Service{deploymentKeyedProviders: map[string]struct{}{"fireworks": {}, "openrouter": {}}}
 		ctx := context.WithValue(context.Background(), InstallationExcludedProvidersContextKey{}, []string{"fireworks", "openrouter"})
 		bs := s.resolveBindingsForDispatch(ctx, router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "fireworks"})
 		assert.Empty(t, bs, "no eligible binding may remain when the primary itself is excluded")
 	})
 	t.Run("catalog-miss model keeps legacy single-attempt primary", func(t *testing.T) {
-		// A model with no catalog bindings (zero before any filtering) must
-		// keep the legacy [primary] walk when the primary is not excluded.
+		// Catalog-miss model keeps the legacy [primary] walk when primary isn't excluded.
 		s := &Service{deploymentKeyedProviders: map[string]struct{}{"anthropic": {}}}
 		ctx := context.WithValue(context.Background(), InstallationExcludedProvidersContextKey{}, []string{"openrouter"})
 		bs := s.resolveBindingsForDispatch(ctx, router.Decision{Model: "not-in-catalog", Provider: "anthropic"})
@@ -733,10 +708,8 @@ func TestResolveBindingsForDispatch(t *testing.T) {
 		assert.Equal(t, "anthropic", bs[0].Provider)
 	})
 	t.Run("excluded primary is never re-added as the first attempt", func(t *testing.T) {
-		// Defense in depth: routing already filters excluded providers, so a
-		// decision naming one is an upstream bug — dispatch must serve only
-		// the eligible bindings rather than re-prepending the excluded
-		// primary.
+		// Defense in depth: routing already filters excluded providers, so this
+		// would be an upstream bug — dispatch must not re-prepend the excluded primary.
 		s := &Service{deploymentKeyedProviders: map[string]struct{}{"fireworks": {}, "openrouter": {}}}
 		ctx := context.WithValue(context.Background(), InstallationExcludedProvidersContextKey{}, []string{"fireworks"})
 		bs := s.resolveBindingsForDispatch(ctx, router.Decision{Model: "deepseek/deepseek-v4-pro", Provider: "fireworks"})
@@ -798,10 +771,8 @@ func TestProvidersIsUpstreamModelNotFound(t *testing.T) {
 	}
 }
 
-// TestPreludeBuffer_BuffersUntilSealedFirstWrite asserts the core
-// preludeBuffer contract: pre-Seal writes are buffered; the first
-// post-Seal write triggers commit, ordering the buffered Prelude bytes
-// ahead of the upstream content on the wire.
+// Core preludeBuffer contract: pre-Seal writes are buffered; the first
+// post-Seal write commits, ordering buffered bytes ahead of upstream content.
 func TestPreludeBuffer_BuffersUntilSealedFirstWrite(t *testing.T) {
 	rec := httptest.NewRecorder()
 	rec.Header().Set("Content-Type", "application/json") // simulate middleware default
@@ -827,9 +798,8 @@ func TestPreludeBuffer_BuffersUntilSealedFirstWrite(t *testing.T) {
 		"Prelude's Content-Type override flushed with the commit")
 }
 
-// TestPreludeBuffer_DiscardResetsBufferAndHeaders asserts that Discard()
-// drops buffered bytes and restores Header() to the construction-time
-// snapshot, so a retry can begin with a pristine writer.
+// Discard() drops buffered bytes and restores Header() to its
+// construction-time snapshot so a retry starts clean.
 func TestPreludeBuffer_DiscardResetsBufferAndHeaders(t *testing.T) {
 	rec := httptest.NewRecorder()
 	rec.Header().Set("Content-Type", "application/json")
@@ -865,10 +835,8 @@ func TestPreludeBuffer_DiscardResetsBufferAndHeaders(t *testing.T) {
 		"only attempt-2's bytes reach the client; attempt-1 was discarded")
 }
 
-// TestPreludeBuffer_NoOpFlushPreCommit asserts that Flush() does not
-// reach the inner writer until commit fires. This is critical: a
-// translator's Flush() call between Prelude writes and the upstream
-// commit must not leak partial bytes to the client.
+// Flush() must not reach the inner writer until commit fires — a
+// translator's Flush() between Prelude writes and commit must not leak partial bytes.
 func TestPreludeBuffer_NoOpFlushPreCommit(t *testing.T) {
 	flushCount := 0
 	w := &fakeFlushTracker{ResponseRecorder: httptest.NewRecorder(), onFlush: func() { flushCount++ }}

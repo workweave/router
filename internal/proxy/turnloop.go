@@ -21,9 +21,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// installationIDFromContext reads and parses the installation ID stashed by
-// auth middleware. Returns uuid.Nil for unauthenticated or invalid values;
-// both skip the async pin upsert downstream.
+// installationIDFromContext reads the installation ID stashed by auth
+// middleware. Returns uuid.Nil (which skips the async pin upsert) if missing or invalid.
 func installationIDFromContext(ctx context.Context) uuid.UUID {
 	raw, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	if raw == "" {
@@ -36,9 +35,9 @@ func installationIDFromContext(ctx context.Context) uuid.UUID {
 	return id
 }
 
-// cacheWarm reports whether the pin's upstream prompt cache is likely still
-// warm — a prior turn completed within the pinned provider's best-effort cache
-// TTL. A cold pin earns no cache-read discount in the planner's EV math.
+// cacheWarm reports whether the pin's upstream prompt cache is still warm
+// (prior turn ended within the provider's cache TTL). Cold pins get no
+// cache-read discount in the planner's EV math.
 func cacheWarm(pin sessionpin.Pin) bool {
 	if pin.LastTurnEndedAt.IsZero() {
 		return false
@@ -53,16 +52,14 @@ type turnLoopResult struct {
 	TurnType   turntype.TurnType
 	StickyHit  bool
 	HardPinned bool
-	// UsageBypass is true when the subscription usage-bypass gate engaged for
-	// this turn: the caller's own subscription has headroom, so ProxyMessages
-	// must serve the requested model straight through to Anthropic with no
-	// billing debit rather than dispatching Decision through the normal path.
+	// UsageBypass is true when the caller's own subscription has headroom:
+	// ProxyMessages must serve the requested model straight through with no
+	// billing debit, bypassing Decision's normal dispatch.
 	UsageBypass bool
 	PinTier     string
 	PinAgeSec   int64
-	// RequestedTier is the tier of the inbound requested model. Drives the
-	// session-pin role split (roleForTier) so a low-tier background turn and a
-	// high-tier main turn never share a pin.
+	// RequestedTier drives the session-pin role split (roleForTier) so a
+	// low-tier background turn and a high-tier main turn never share a pin.
 	RequestedTier catalog.Tier
 	// PinRole is the session-pin role used for this turn, preventing a
 	// low-tier background turn and a high-tier main turn from sharing a pin.
@@ -71,50 +68,43 @@ type turnLoopResult struct {
 	Fresh router.Decision
 	// PlannerDecision holds the planner's verdict and EV math when the planner ran.
 	PlannerDecision planner.Decision
-	// PinModel is the model on the loaded pin (stamped independently of
-	// PlannerDecision so log lines can name the from-model even on stay outcomes).
+	// PinModel is stamped independently of PlannerDecision so log lines can
+	// name the from-model even on stay outcomes.
 	PinModel string
-	// PriorServedModel is the model that actually served the previous turn in
-	// this session (the pin's LastServedModel), independent of PinModel — a
-	// /force-model write changes PinModel but not this. Compared against the
-	// current decision model to detect a mid-session switch so the Anthropic
-	// emit path can strip thinking blocks whose signatures the new model rejects.
+	// PriorServedModel is the pin's LastServedModel, independent of PinModel
+	// (a /force-model write changes PinModel but not this). Compared against
+	// the decision model to detect a mid-session switch, so the Anthropic
+	// emit path can strip thinking blocks the new model would reject.
 	PriorServedModel string
-	// SessionEverSwitched is the pin's latched has_ever_switched flag: true once
-	// the session has served two different models at any point. PriorServedModel
-	// only flags the single switch-back turn, but the stale-signed thinking
-	// blocks a cross-model excursion left in the client transcript persist on
-	// every later turn, so the emit path ORs this into ModelSwitched to keep
-	// stripping them for the life of the session.
+	// SessionEverSwitched is true once the session has ever served two
+	// different models. PriorServedModel only flags the single switch-back
+	// turn, but stale-signed thinking blocks from that excursion persist in
+	// the client transcript on every later turn, so the emit path ORs this
+	// in to keep stripping them for the life of the session.
 	SessionEverSwitched bool
 	// Handover captures the summarize-or-trim step when the planner switched.
 	Handover handoverOutcome
-	// SuggestionMode is true when the request arrived with the
-	// x-weave-suggestion-mode header. The routing marker is suppressed so
-	// the badge does not appear in suggestion-overlay responses.
+	// SuggestionMode suppresses the routing-marker badge for requests carrying
+	// the x-weave-suggestion-mode header.
 	SuggestionMode bool
 	// PrefixTrimmed is true when the compaction tracker detected a client-side
-	// history trim on this turn. Detected before routing so the planner can
-	// price the pin's cache as cold; ProxyMessages also reads it post-routing
-	// for the compaction handover without re-recording the tracker.
+	// history trim this turn. Set before routing so the planner can price the
+	// pin's cache as cold; ProxyMessages also reads it post-routing for the
+	// compaction handover without re-recording the tracker.
 	PrefixTrimmed bool
-	// EscalateEffort is true when the previous turn in this session looked like
-	// an observable failure (produced no output, or the pin carried a consecutive
-	// upstream error). The escalate-on-failure effort policy reads it to bump a
-	// gpt-5.x turn from low to high effort. It reflects the loaded pin's prior-turn
-	// state regardless of any same-turn pin-drop guards below, and is a no-op
-	// unless Service.effortEscalation is enabled.
+	// EscalateEffort is true when the pin's prior turn looked like an
+	// observable failure (no output, or a consecutive upstream error).
+	// Reflects the loaded pin regardless of same-turn pin-drop guards below;
+	// the escalate-on-failure policy (Service.effortEscalation) reads it to
+	// bump a gpt-5.x turn from low to high effort, and is a no-op when disabled.
 	EscalateEffort bool
 }
 
 // modelSwitched reports whether the Anthropic emit path must strip historical
-// thinking blocks for this turn. Two cases force a strip: the transition turn
-// itself (the model serving this turn differs from the one that served the
-// previous turn), and any turn in a session that has ever switched — because
-// Claude Code re-sends its full transcript every turn, so the stale-signed
-// blocks an earlier cross-model excursion left behind keep coming back and
-// would 400 with `Invalid signature in thinking block` on every later turn,
-// not just the switch-back.
+// thinking blocks: true on the transition turn itself, or any turn after a
+// session has ever switched. Claude Code re-sends the full transcript every
+// turn, so stale-signed blocks from an earlier cross-model excursion would
+// otherwise 400 with "Invalid signature in thinking block" on every later turn.
 func (r turnLoopResult) modelSwitched() bool {
 	transition := r.PriorServedModel != "" && r.PriorServedModel != r.Decision.Model
 	return transition || r.SessionEverSwitched
@@ -126,14 +116,11 @@ type handoverOutcome struct {
 	LatencyMS     int64
 	SummaryTokens int
 	// FallbackToFullHistory is set when handover was invoked but no summary
-	// was applied (summarizer unwired, tenant-boundary skip, timeout, error,
-	// or empty summary). The original body is passed through unchanged rather
-	// than trimmed, so the model keeps full prior context. No summary ledger
-	// row is billed on this path.
+	// was applied (unwired, tenant-boundary skip, timeout, error, or empty
+	// summary), so the full body passes through unchanged. No ledger row billed.
 	FallbackToFullHistory bool
-	// SummaryUsage captures upstream token usage for the summarizer call
-	// so proxy.fireBilling can debit it as a separate ledger row with the
-	// "_summary" request_id suffix. Zero on fallback/error paths.
+	// SummaryUsage is the summarizer call's upstream usage, so fireBilling can
+	// debit it as a separate "_summary" ledger row. Zero on fallback/error paths.
 	SummaryUsage handover.Usage
 }
 
@@ -141,8 +128,8 @@ type handoverOutcome struct {
 // short-circuit hard pins, load pin, run scorer, hand to planner, and on
 // switch attempt bounded-cost handover.
 //
-// installationID == uuid.Nil skips async pin upsert (pin rows need an
-// installation_id); the rest of the path runs normally.
+// installationID == uuid.Nil skips the async pin upsert (rows need one); the
+// rest of the path runs normally.
 func (s *Service) runTurnLoop(
 	ctx context.Context,
 	env *translate.RequestEnvelope,
@@ -167,33 +154,26 @@ func (s *Service) runTurnLoop(
 		"sub_agent_hint", subAgentHint,
 	)
 
-	// Subscription-aware cost discount: discount covered models' cost term by the
-	// observed rate-limit headroom of the caller's present subscription(s). nil
-	// (feature off / no sub / no headroom observed yet) leaves scoring unchanged.
+	// Discounts covered models' cost term by the caller's observed subscription
+	// headroom. nil (feature off / no headroom yet) leaves scoring unchanged.
 	req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, reqHeaders)
 
-	// Hard pins bypass pin lookup, pin write, planner, and scorer entirely.
-	// Probes and title-gen MUST NOT create a session pin — the Anthropic SDK
-	// fires probes on init before the first real user turn, and Claude Code
-	// fires title-gen ~25ms before the real-conv call. An anchored pin would
-	// inherit the cheap-model decision into the immediately-following real
-	// conversation that should have routed on its own.
+	// Hard pins bypass pin lookup/write, planner, and scorer entirely. Probes
+	// and title-gen must never create a session pin: the Anthropic SDK fires
+	// probes before the first real turn, and Claude Code fires title-gen
+	// ~25ms before the real-conv call — an anchored pin would leak the
+	// cheap-model decision into the conversation that follows.
 	if res.TurnType == turntype.Compaction ||
 		res.TurnType == turntype.Probe ||
 		res.TurnType == turntype.TitleGen ||
 		res.TurnType == turntype.Classifier ||
 		(res.TurnType == turntype.SubAgentDispatch && s.hardPinExplore) {
 		provider, model := s.hardPinProvider, s.hardPinModel
-		// In byokOnly mode the boot-time hard-pin is unsafe: it was
-		// computed over every registered provider, but the request may
-		// only have BYOK credentials for a subset. Resolve per-request
-		// against the request's enabled-providers set so compaction
-		// stays on a provider the request can authenticate to. The
-		// resolver also applies the installation's excluded_models
-		// (req.ExcludedModels) as a deny set — the hard-pin path bypasses
-		// the scorer, which is otherwise the only place exclusions are
-		// honored, so without this an excluded model would still serve
-		// all title-gen/classifier/probe traffic.
+		// The boot-time hard-pin was computed over every registered provider,
+		// but a BYOK request may only authenticate to a subset. Resolve
+		// per-request against enabled-providers, and apply ExcludedModels
+		// here too — this path bypasses the scorer, the only other place
+		// exclusions are honored.
 		if s.hardPinResolver != nil {
 			p, m, ok := s.hardPinResolver(req.EnabledProviders, req.ExcludedModels)
 			if !ok {
@@ -206,23 +186,16 @@ func (s *Service) runTurnLoop(
 			}
 			provider, model = p, m
 		} else if _, excluded := req.ExcludedModels[model]; excluded {
-			// No resolver wired (bundle load failed at boot) but the
-			// static boot-time pin is on the installation's exclude
-			// list. We have no cluster bundle here to pick an allowed
-			// alternative, so preserve current behavior and serve the
-			// pin, but log so the misroute is visible in telemetry.
+			// No resolver wired (bundle load failed at boot), so we can't
+			// pick an alternative. Serve the pin anyway but log the misroute.
 			log.Warn(
 				"Hard-pin: boot-time pin is in excluded_models but no resolver is wired to pick an alternative; serving pin anyway",
 				"turn_type", string(res.TurnType),
 				"model", model,
 			)
 		}
-		// Operator hard-pins bypass the tier ceiling by design — the
-		// ROUTER_HARD_PIN_MODEL env var is an explicit operator opt-in
-		// that wins over the requested-model ceiling. Clamping here
-		// would silently rewrite an unknown-tier hard-pin to the
-		// cheapest in-ceiling alternative, defeating the operator's
-		// stated intent.
+		// Operator hard-pins (ROUTER_HARD_PIN_MODEL) bypass the tier ceiling
+		// by design; clamping would silently defeat an explicit operator opt-in.
 		hardDecision := router.Decision{
 			Provider: provider,
 			Model:    model,
@@ -239,16 +212,15 @@ func (s *Service) runTurnLoop(
 	// needs the key either way.
 	sessionKey := DeriveSessionKey(env, apiKeyID)
 
-	// Trim detection runs before routing so the planner can price the pin's
-	// cache as dead on the turn the client rewrote the prompt prefix. env has
-	// not been rewritten yet, so the counts match what the client sent.
+	// Runs before routing so the planner can price the pin's cache as dead on
+	// the turn the client rewrote the prompt prefix; env isn't rewritten yet
+	// so counts match what the client sent.
 	res.PrefixTrimmed = s.compaction.checkAndRecord(
 		sessionKey, installationID, res.PinRole,
 		feats.MessageCount, len(env.AssistantToolCallSignatures()),
 	)
-	// prefixTrimFreeSwitch gates the actions only; detection stays
-	// unconditional so the post-routing compaction handover keeps working
-	// when the lever is off.
+	// prefixTrimFreeSwitch gates actions only; detection stays unconditional
+	// so the compaction handover keeps working when the lever is off.
 	prefixBroken := s.prefixTrimFreeSwitch && res.PrefixTrimmed
 	if res.PrefixTrimmed {
 		log.Info("turnloop detected client history trim",
@@ -279,11 +251,8 @@ func (s *Service) runTurnLoop(
 	pin, pinFound := s.loadPin(ctx, res.SessionKey, res.PinRole)
 	res.PriorServedModel = pin.LastServedModel
 	res.SessionEverSwitched = pin.HasEverSwitched
-	// Escalate-on-failure signal: a prior turn that completed (LastTurnEndedAt set)
-	// but produced no output, or left a consecutive upstream error, is an
-	// observable failure. Computed from the loaded pin before any same-turn
-	// pin-drop guards below so it reflects the prior turn's outcome. The policy
-	// that acts on it (Service.effortEscalation) is gated separately.
+	// Computed before any same-turn pin-drop guards below so it reflects the
+	// prior turn's outcome; Service.effortEscalation gates whether it's acted on.
 	res.EscalateEffort = pinFound && !pin.LastTurnEndedAt.IsZero() &&
 		(pin.LastOutputTokens == 0 || pin.ConsecutiveUpstreamErrors > 0)
 	if pinFound {
@@ -302,29 +271,17 @@ func (s *Service) runTurnLoop(
 		log.Info("turnloop pin lookup miss", "role", res.PinRole)
 	}
 
-	// User-forced pins are immutable stickies — skip scorer and planner entirely.
-	// The pin was written by /force-model with a never-expires PinnedUntil, so it
-	// survives arbitrarily long idle gaps and stays active until /unforce-model
-	// clears it (rewriting the row with a past PinnedUntil), at which point the
-	// pin is expired and this branch is not taken.
+	// User-forced pins (/force-model) are immutable stickies with a never-expires
+	// PinnedUntil, so they skip scorer/planner until /unforce-model expires them.
+	// Still enforced per-request: (1) exclusion policy — a newly-excluded forced
+	// model falls through to normal routing; (2) provider eligibility — a BYOK
+	// request missing the pinned provider's creds falls through rather than
+	// guaranteeing a 401.
 	//
-	// Invariants maintained here:
-	//   1. Excluded-model policy is still enforced: if the forced model has been
-	//      added to the installation exclusion list since the pin was written, fall
-	//      through to normal routing so the exclusion takes effect immediately.
-	//   2. Provider eligibility is enforced per-request. In BYOK mode the request's
-	//      EnabledProviders may not contain the pinned provider (e.g. the user
-	//      forced gpt-5 but the current request only carries Anthropic BYOK creds).
-	//      Falling through to normal routing avoids a guaranteed 401/unauthenticated
-	//      upstream call.
-	//   3. The user's forced model is served as-is and the pin is refreshed with
-	//      the original decision, so the directive survives across turns.
-	// forcedTierFloor preserves the user's tier intent when a user-forced pin
-	// is dropped below because its model can no longer serve this turn (most
-	// often the session outgrew the model's context window and the pre-filter
-	// evicted it). The scorer call further down constrains the fresh decision
-	// to this tier so we pick the next-best model in it rather than collapsing
-	// to the cheap tier-default. TierUnknown means "no constraint".
+	// forcedTierFloor preserves the user's tier intent when the forced pin gets
+	// dropped below (usually the session outgrew the model's context window):
+	// the scorer call further down constrains the fresh decision to this tier
+	// instead of collapsing to the cheap tier-default. TierUnknown = no constraint.
 	forcedTierFloor := catalog.TierUnknown
 	if pinFound && (pin.Reason == translate.ReasonUserForceModel || pin.Reason == translate.ReasonLoopEscalation) {
 		_, excluded := req.ExcludedModels[pin.Model]
@@ -340,37 +297,28 @@ func (s *Service) runTurnLoop(
 			return res, nil
 		}
 		if excluded {
-			// The forced model can't serve this turn — typically the session
-			// outgrew its context window and the pre-filter evicted it. The
-			// user still asked for a model of this tier, so remember it and
-			// constrain the fresh decision to the same tier below.
+			// User still asked for this tier; constrain the fresh decision
+			// to it below rather than losing the intent entirely.
 			forcedTierFloor = catalog.TierFor(pin.Model)
 		}
-		// Forced pin is no longer servable on this request (excluded by policy
-		// or pinned provider not in EnabledProviders/BYOK). Treat it as missing
-		// so downstream sticky branches don't dispatch to an unauthorized
-		// provider. The pin row remains in storage — a later request whose
-		// EnabledProviders includes the forced provider will resume serving it.
+		// Treat as missing so downstream sticky branches don't dispatch to an
+		// unauthorized provider. The row stays in storage — a later request
+		// with the forced provider enabled resumes serving it.
 		pinFound = false
 		pin = sessionpin.Pin{}
 	}
 
 	// Previous-turn-maxed-out guard: when an OSS model's tool-call tokens fail
-	// to parse server-side (kimi <|tool_call_begin|>, qwen3 <tool_call> XML)
-	// the upstream emits them as content and generates to the output cap.
-	// Claude Code's "Output token limit hit. Resume directly…" auto-continue
-	// then re-pins the same broken model, producing a multi-minute loop. When
-	// the previous turn saturated the output cap, exclude the pinned model for
-	// this turn and treat the pin as missing so downstream sticky branches
-	// (ToolResult, !plannerEnabled) cannot re-anchor it before the scorer runs.
+	// to parse server-side (kimi/qwen3), the upstream emits them as content and
+	// generates to the output cap, triggering Claude Code's auto-continue to
+	// re-pin the same broken model in a loop. Exclude it and treat the pin as
+	// missing so sticky branches (ToolResult, !plannerEnabled) can't re-anchor
+	// it before the scorer runs.
 	if pinFound && pin.LastOutputTokens >= prevTurnMaxedOutThreshold {
-		// Exclude the model that actually generated LastOutputTokens. With band
-		// swap the served model can be the paired member while the pin row keeps
-		// the anchor in Model, so keying off pin.Model would exclude the wrong
-		// (healthy) model and leave the broken one eligible — reopening the very
-		// auto-continue loop this guard breaks. LastServedModel comes from usage
-		// writeback and names the model that hit the cap; fall back to pin.Model
-		// for older rows written before the field existed.
+		// Key off LastServedModel, not pin.Model: with band swap the served
+		// model can be the paired member, so pin.Model could name the wrong
+		// (healthy) model and leave the broken one eligible. Fall back to
+		// pin.Model for older rows written before LastServedModel existed.
 		maxedModel := pin.LastServedModel
 		if maxedModel == "" {
 			maxedModel = pin.Model
@@ -392,16 +340,12 @@ func (s *Service) runTurnLoop(
 		pin = sessionpin.Pin{}
 	}
 
-	// Context-window overflow guard: if the pre-filter in ProxyMessages /
-	// ProxyOpenAIChatCompletion added the pinned model to ExcludedModels
-	// (because this turn's estimated context exceeds the model's window),
-	// verify with a direct fit-check before evicting the pin. The fit-check MUST
-	// use the same estimate as the pre-filter (ContextOverflowTokenEstimate) —
-	// otherwise a dense, signature-light body the pre-filter excludes (÷4) could
-	// be judged to fit here (via the looser ÷6 FullTokenEstimate), un-excluding
-	// the pinned small-window model and letting sticky routing dispatch to it
-	// and hit the same hard context-overflow 400 the pre-filter prevents.
-	// A confirmed overflow (needed > model window) still evicts the pin.
+	// If the pre-filter excluded the pinned model for context overflow,
+	// re-verify with a direct fit-check before evicting the pin. Must reuse
+	// the pre-filter's estimate (ContextOverflowTokenEstimate, ÷4) rather than
+	// the looser ÷6 FullTokenEstimate — otherwise a dense body the pre-filter
+	// correctly excluded could be judged to fit here, un-excluding the pin and
+	// hitting the same context-overflow 400 the pre-filter prevents.
 	if pinFound {
 		if _, overCapacity := req.ExcludedModels[pin.Model]; overCapacity {
 			outputReserveForPin := contextWindowOutputReserve
@@ -425,13 +369,10 @@ func (s *Service) runTurnLoop(
 				pinFound = false
 				pin = sessionpin.Pin{}
 			} else {
-				// Pre-filter was overly conservative — pin model fits.
-				// Remove it from ExcludedModels only if it was added
-				// exclusively by the context-overflow filter, NOT by an
-				// operator/installation policy exclusion. Policy exclusions
-				// are a hard operator constraint; lifting them here would
-				// let sticky routing bypass an operator-excluded model on
-				// the very turns where the context window happens to fit.
+				// Pre-filter was overly conservative — pin fits. Only lift
+				// the exclusion if it came from the context filter, not an
+				// operator/installation policy exclusion (a hard constraint
+				// that must not be bypassed just because context happens to fit).
 				policyExcluded := s.excludedModelsForRequest(ctx)
 				if _, policyExcludes := policyExcluded[pin.Model]; !policyExcludes {
 					if len(req.ExcludedModels) > 0 {
@@ -454,14 +395,10 @@ func (s *Service) runTurnLoop(
 		}
 	}
 
-	// Provider-eligibility guard: when the pinned provider is no longer in
-	// this request's enabled set (installation/env provider exclusion, or a
-	// BYOK request without that provider's creds), treat the pin as missing
-	// so the sticky branches below (ToolResult, OutcomeStay, !plannerEnabled)
-	// cannot keep serving through a provider the request must not use.
-	// Mirrors the providerEligible check on the user-forced pin path above —
-	// without it, a session pinned before the exclusion was saved would keep
-	// hitting the excluded provider until the pin expired.
+	// If the pinned provider is no longer in this request's enabled set
+	// (installation/env exclusion, or BYOK without that provider's creds),
+	// treat the pin as missing so sticky branches below can't keep serving
+	// through it. Mirrors the providerEligible check on the forced-pin path above.
 	if pinFound && req.EnabledProviders != nil {
 		if _, ok := req.EnabledProviders[pin.Provider]; !ok {
 			log.Info("Session pin provider not in enabled set; falling through to scorer",
@@ -473,19 +410,12 @@ func (s *Service) runTurnLoop(
 		}
 	}
 
-	// Image-input guard: when this turn carries image content but the pinned
-	// model is text-only, drop the pin and fall through to the scorer so an
-	// image-capable model is chosen. The scorer's own image-input filter then
-	// removes text-only models from the eligible pool, with a soft empty-pool
-	// fallback (an OSS-only self-host with no image-capable candidate keeps the
-	// text-only pool and lets the upstream surface the 4xx). We deliberately do
-	// NOT add the pin to ExcludedModels: exclusion is a hard filter that errors
-	// on an empty pool, which would turn that soft fallback into a routing
-	// failure on exactly those deploys. Without this guard, a session pinned to
-	// a text-only model on earlier text turns 4xxs the moment the user pastes a
-	// screenshot — the pin would otherwise bypass the image-aware fresh decision
-	// via the sticky branches below. Runs before those branches for the same
-	// reason as the context-window guard.
+	// If this turn carries images but the pinned model is text-only, drop the
+	// pin so the scorer picks an image-capable model. Deliberately not added
+	// to ExcludedModels: that's a hard filter that errors on an empty pool,
+	// which would break the soft fallback for OSS-only deploys with no
+	// image-capable candidate. Without this guard a text-pinned session would
+	// 4xx the moment the user pastes a screenshot.
 	if pinFound && req.HasImages && !catalog.AcceptsImages(pin.Model) {
 		log.Info("Session pin is text-only for image-bearing turn; falling through to scorer",
 			"pin_model", pin.Model,
@@ -495,16 +425,11 @@ func (s *Service) runTurnLoop(
 		pin = sessionpin.Pin{}
 	}
 
-	// Subscription usage-bypass: while the caller's own Claude subscription has
-	// headroom, serve the requested model straight through. Positioned after the
-	// higher-precedence pins that must win (hard-pin and user-forced pin both
-	// returned above) but BEFORE the tool-result / planner-disabled stickies, so
-	// the WHOLE session bypasses consistently: a stale pin from a prior routed
-	// stretch can't make a tool_result continuation diverge from the bypassed
-	// tool_use turn. The stale pin is left untouched and is re-evaluated by
-	// normal routing once utilization crosses the threshold. res.PriorServedModel
-	// (loaded above) lets the emit path strip thinking signatures from a
-	// different prior model.
+	// Positioned after hard-pin/forced-pin (higher precedence) but before the
+	// tool-result/planner-disabled stickies below, so a stale pin from a prior
+	// routed stretch can't make a tool_result continuation diverge from the
+	// bypassed tool_use turn. The pin itself is untouched and resumes once
+	// utilization crosses the threshold.
 	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
 		res.Decision = dec
 		res.UsageBypass = true
@@ -533,14 +458,10 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
-	// Always run the scorer when no pin, or on MainLoop with a pin. When a
-	// user-forced pin was just evicted (typically the session outgrew the
-	// model's context window), the user still asked for a model of that tier:
-	// route the scorer constrained to the forced model's tier and pick the
-	// next-best in it. Collapsing straight to the cheap tier-default would
-	// silently downgrade the user's directive. Fall back to the unconstrained
-	// scorer when no in-tier model survives the request's other filters, so the
-	// constraint never turns a routable turn into a failure.
+	// If a user-forced pin was just evicted, route constrained to its tier so
+	// we pick the next-best model instead of silently downgrading the user's
+	// directive. Fall back to the unconstrained scorer if no in-tier model
+	// survives the request's other filters.
 	var fresh router.Decision
 	routed := false
 	if forcedTierFloor != catalog.TierUnknown {
@@ -575,31 +496,16 @@ func (s *Service) runTurnLoop(
 	)
 	res.Fresh = fresh
 
-	// Expired-pin re-anchor: when the session pin has lapsed mid-session
-	// (!pinFound but pin.Model != "" — an expired row, not a first-turn
-	// miss), prefer staying on the prior model instead of taking whatever
-	// lateral switch the scorer happened to pick on the one expiry turn.
-	// A model-switch on a single expiry turn is frequently noise: the
-	// scorer may land in a different cluster on that turn and return a
-	// different model that the session then stays on for the rest of its
-	// life, even if subsequent turns would have scored the prior model
-	// equally well. Re-anchor when all of the following hold:
-	//   (a) both model tiers are known (TierUnknown falls through to scorer)
-	//   (b) the fresh recommendation is NOT a tier upgrade
-	//   (c) the prior model is still routable (in availableModels)
-	//   (d) the prior model is not excluded (e.g. context-window overflow)
-	//   (e) the prior provider is still in the request's enabled set
-	//   (f) the prior turn did NOT saturate the output cap (maxed-out guard
-	//       mirrors the live-pin check above — re-anchoring a broken model
-	//       that already generated to the cap would restart the degenerate
-	//       auto-continue loop)
-	//   (g) this turn does NOT carry images if the prior model is text-only
-	//       (image guard mirrors the live-pin check above — re-anchoring a
-	//       text-only model on an image-bearing turn would immediately 4xx)
-	//   (h) the client did NOT trim its history this turn — a trim kills the
-	//       prior model's cache regardless of pin expiry, so the scorer's
-	//       fresh pick should win
-	// When re-anchoring, write a new pin so the next turn is a sticky hit.
+	// Expired-pin re-anchor: when the pin lapsed mid-session (!pinFound but
+	// pin.Model != "", not a first-turn miss), prefer the prior model over a
+	// lateral scorer switch on just the expiry turn — a single-turn switch is
+	// often noise the session would otherwise stay on for its whole life.
+	// Re-anchor only if: both tiers known, fresh isn't a tier upgrade, prior
+	// model is routable/not excluded, prior provider still enabled, prior
+	// turn didn't max out the output cap (mirrors the live-pin guard above),
+	// this turn has no images if prior model is text-only (ditto), and the
+	// client didn't trim history this turn (a trim kills the cache anyway,
+	// so let the fresh pick win). Writes a new pin so next turn is a sticky hit.
 	if !pinFound && pin.Model != "" && !prefixBroken {
 		pinTier := catalog.TierFor(pin.Model)
 		freshTier := catalog.TierFor(fresh.Model)
@@ -654,9 +560,8 @@ func (s *Service) runTurnLoop(
 		AvailableModels:      s.availableModels,
 		// A trimmed prefix kills the cache even inside the provider TTL.
 		PinCacheCold: pinFound && (!cacheWarm(pin) || prefixBroken),
-		// Price covered models at their subsidized marginal cost in the EV math
-		// too, so the discount takes effect on sticky (pinned) sessions, not just
-		// the fresh decision. nil when subscription-aware routing is off.
+		// Applies the subsidy discount to pinned sessions too, not just fresh
+		// decisions. nil when subscription-aware routing is off.
 		SubsidizedCostFactor: req.SubsidizedModelCostFactor,
 	}
 	if !pinFound {
@@ -667,10 +572,8 @@ func (s *Service) runTurnLoop(
 
 	if decision.Outcome == planner.OutcomeStay && pinFound {
 		anchor := pinDecision(pin)
-		// Per-turn band swap: on a sticky MainLoop the predicted next action
-		// chooses which half of the pinned pair actually serves this turn. The
-		// PIN stays anchored (pinned_model/paired unchanged via the anchor
-		// refresh below) so we can swap again next turn; only res.Decision moves.
+		// Band swap picks which half of the pinned pair serves this turn; the
+		// pin itself stays anchored (refreshed below) so we can swap again next turn.
 		served := s.bandSwapServed(ctx, res.TurnType, pin, fresh, req.HasImages, req.EnabledProviders, req.ExcludedModels)
 		res.Decision = served
 		res.StickyHit = true
@@ -679,24 +582,18 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
-	// Switch path: when switching off a warm cache, attempt bounded-cost
-	// handover. On any summarizer failure we keep the full prior history
-	// rather than trimming it — a more expensive switch turn is always
-	// preferable to silently dropping the conversation the new model needs.
+	// Switch path: attempt bounded-cost handover off a warm cache. Any
+	// summarizer failure keeps the full prior history rather than trimming —
+	// an expensive switch turn beats silently dropping context.
 	//
-	// Privacy guard: the summarizer is wired with deployment-level creds.
-	// Routing a BYOK/client request's prior conversation through that
-	// deployment account would cross the tenant boundary. We avoid that by
-	// preferring per-request creds for the summarizer's provider when the
-	// caller forwarded them (BYOK or inbound Authorization/x-api-key for
-	// that provider) — that's the caller's own account, not the platform's.
-	// Only when the request is BYOK/client-keyed AND no matching creds for
-	// the summarizer's provider were forwarded do we skip summarization and
-	// pass the full history through.
+	// Privacy guard: the summarizer runs on deployment-level creds by default,
+	// which would cross the tenant boundary for a BYOK/client request. Prefer
+	// the caller's own forwarded creds for the summarizer's provider when
+	// available; skip summarization (pass full history through) only when the
+	// request is BYOK/client-keyed with no matching creds forwarded.
 	if pinFound && prefixBroken {
-		// The client just trimmed its own history: the body already carries
-		// its compaction summary and is as small as it gets. Summarizing it
-		// again is pure cost, so forward it unchanged.
+		// Client already trimmed its own history — summarizing again is pure
+		// cost, so forward unchanged.
 		log.Info("Handover summarizer skipped: client history trim already bounded this switch turn",
 			"pin_model", pin.Model,
 			"fresh_model", fresh.Model,
@@ -728,10 +625,8 @@ func (s *Service) runTurnLoop(
 			if sumCreds != nil {
 				summCtx = context.WithValue(ctx, CredentialsContextKey{}, sumCreds)
 			} else {
-				// Run on the deployment key: strip any request credential
-				// (notably a subscription OAuth token) the turn resolved, so
-				// this synthetic call doesn't inherit it from ctx and 401 /
-				// cross a tenant boundary.
+				// Strip any request credential (e.g. subscription OAuth token)
+				// so this synthetic call doesn't inherit it and 401/cross tenants.
 				summCtx = clearCredentials(ctx)
 			}
 			start := time.Now()
@@ -810,9 +705,8 @@ func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sess
 		InstallationID: installationID,
 		Provider:       chosen.Provider,
 		Model:          chosen.Model,
-		// A plain refresh re-runs no scorer, so carry the existing pair forward
-		// unchanged: re-supplying the stored (non-empty) pair makes the upsert a
-		// no-op for these columns, and an empty one is preserved by ON CONFLICT.
+		// No scorer runs on a plain refresh, so carry the existing pair
+		// forward unchanged (ON CONFLICT preserves an empty one).
 		PairedProvider:        existing.PairedProvider,
 		PairedModel:           existing.PairedModel,
 		Reason:                chosen.Reason,
@@ -832,12 +726,9 @@ func (s *Service) refreshPin(ctx context.Context, installationID uuid.UUID, sess
 // first-turn routing and switch turns. UpdateUsage fills in usage stats later.
 func (s *Service) writeNewPin(ctx context.Context, installationID uuid.UUID, sessionKey [sessionpin.SessionKeyLen]byte, role string, chosen router.Decision) {
 	log := observability.FromContext(ctx)
-	// The band pair comes from the scorer's runner-up on the fresh decision, so
-	// every genuine re-route through here (first turn, switch, expired-pin
-	// re-anchor with a fresh decision) refreshes it and keeps pinned_model and
-	// the runner-up consistent. pinDecision(pin) reconstructions carry no
-	// Metadata, so the nil guard leaves the pair empty; UpsertSessionPin's
-	// ON CONFLICT then preserves the stored pair rather than wiping it.
+	// pinDecision(pin) reconstructions carry no Metadata, so the nil guard
+	// leaves the pair empty; ON CONFLICT then preserves the stored pair
+	// instead of wiping it.
 	var pairedProvider, pairedModel string
 	if chosen.Metadata != nil {
 		pairedProvider = chosen.Metadata.PairedProvider
@@ -886,13 +777,9 @@ func estimateSummaryTokens(s string) int {
 }
 
 // resolveSummarizerCreds returns BYOK or client-supplied credentials for
-// provider when available on the request. Used by the handover orchestrator
-// to run summarization on the caller's own account, avoiding tenant data
-// crossing the deployment key boundary when the request is BYOK/client-keyed.
-// Returns nil when no caller-supplied creds for the provider exist; callers
-// then either use the deployment key (if request is fully deployment-keyed)
-// or skip summarization (if request is BYOK/client-keyed for a different
-// provider).
+// provider so the handover orchestrator can summarize on the caller's own
+// account instead of crossing the deployment-key tenant boundary. Returns nil
+// if no caller creds exist; callers then use the deployment key or skip summarization.
 func resolveSummarizerCreds(ctx context.Context, provider string, headers http.Header) *Credentials {
 	if provider == "" {
 		return nil
@@ -904,10 +791,8 @@ func resolveSummarizerCreds(ctx context.Context, provider string, headers http.H
 	}
 	creds := ExtractClientCredentials(provider, headers)
 	if creds != nil && creds.OAuth {
-		// A Claude subscription token can't authenticate the router's synthetic
-		// summarizer call: that body has no Claude Code identity block, which
-		// subscription auth requires, so it would 401. Decline it here; the
-		// caller then either runs on the deployment key or skips summarization.
+		// A Claude subscription token can't authenticate the synthetic
+		// summarizer call (no Claude Code identity block) and would 401.
 		return nil
 	}
 	return creds

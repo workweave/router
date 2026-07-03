@@ -11,21 +11,15 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// OpenAI-compat upstreams on vLLM/SGLang sometimes emit malformed JSON in
-// tool_call.function.arguments — partial keys, unbalanced braces, mid-string
-// truncation. The translator buffers args per tool block, validates at
-// content_block_stop via toolcheck, and emits exactly one input_json_delta
-// carrying the valid buffered payload, a minimal deterministic repair of it
-// (truncation closed, trailing comma dropped), or `{}` as the last resort
-// when no repair applies. Repair-or-`{}` converts a stream-parser-fatal turn
-// (Claude Code's strict Anthropic parser refuses malformed input_json_delta)
-// into a tool-call the client can dispatch — which then errors on whatever is
-// genuinely wrong and triggers a normal CC retry that re-routes through the
-// scorer.
+// OpenAI-compat upstreams (vLLM/SGLang) sometimes emit malformed JSON in
+// tool_call.function.arguments. The translator buffers args per block and at
+// content_block_stop emits either the valid payload, a minimal deterministic
+// repair, or `{}` as last resort — turning a stream-parser-fatal turn (CC's
+// strict parser rejects malformed input_json_delta) into a dispatchable call
+// that errors cleanly and triggers a normal CC retry.
 
-// driveAnthropicSSEWithSummary feeds events through a translator and returns
-// the final response summary alongside the translated body, so tests can
-// assert on InvalidToolArgsBlocks.
+// driveAnthropicSSEWithSummary feeds events through a translator, returning
+// the translated body and Summary for assertions.
 func driveAnthropicSSEWithSummary(
 	t *testing.T,
 	model string,
@@ -45,11 +39,8 @@ func driveAnthropicSSEWithSummary(
 }
 
 func TestAnthropicSSETranslator_RepairsTruncatedToolArgs(t *testing.T) {
-	// Truncated JSON: opening brace, key, colon, opening string — then EOF.
-	// This is the most common malformed shape seen from GLM/Kimi on vLLM
-	// when the model hits the max_tokens cap mid-tool-call. toolcheck's
-	// minimal repair closes the string + brace, preserving the intact args
-	// (path) instead of degrading the whole payload to `{}`.
+	// Truncated JSON (brace/key/colon/string then EOF) is the common GLM/Kimi
+	// max_tokens-cutoff shape; repair closes it, preserving intact args instead of `{}`.
 	body, summary := driveAnthropicSSEWithSummary(t, "z-ai/glm-5.1", []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"Edit","arguments":"{\"path\":\"a.go\",\"old_string\":\"hel"}}]},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}` + "\n\n",
@@ -73,11 +64,9 @@ func TestAnthropicSSETranslator_RepairsTruncatedToolArgs(t *testing.T) {
 }
 
 func TestAnthropicSSETranslator_SubstitutesEmptyArgsWhenUnrepairable(t *testing.T) {
-	// A mismatched closer can't be fixed by the minimal repair pass. The
-	// translator falls back to `{}`, which CC's parser accepts; the tool then
-	// errors on missing required params and CC retries via a normal
-	// tool_result instead of dying mid-stream on "tool call could not be
-	// parsed."
+	// Mismatched closer can't be minimally repaired, so the translator falls
+	// back to `{}`; CC's parser accepts it, the tool errors on missing params,
+	// and CC retries normally instead of dying mid-stream.
 	body, summary := driveAnthropicSSEWithSummary(t, "z-ai/glm-5.1", []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"Edit","arguments":"{\"path\":\"a.go\"]"}}]},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}` + "\n\n",
@@ -111,9 +100,8 @@ func TestAnthropicSSETranslator_AcceptsValidToolArgs(t *testing.T) {
 }
 
 func TestAnthropicSSETranslator_FlagsEachInvalidBlockIndependently(t *testing.T) {
-	// Two tool_calls: one with valid args, one with an unrepairable
-	// mismatched closer. Each block is buffered + validated under its own
-	// Anthropic content-block index, so the count tracks blocks not turns.
+	// Two tool_calls, one valid and one unrepairable. Each block is
+	// buffered/validated under its own content-block index, so the count tracks blocks not turns.
 	_, summary := driveAnthropicSSEWithSummary(t, "z-ai/glm-5.1", []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"Read","arguments":"{\"path\":\"a.go\"}"}}]},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"Edit","arguments":"{\"path\":\"b.go\"]"}}]},"finish_reason":null}]}` + "\n\n",
@@ -128,9 +116,8 @@ func TestAnthropicSSETranslator_FlagsEachInvalidBlockIndependently(t *testing.T)
 	assert.Equal(t, "Edit", summary.ToolCallIssues[0].ToolName)
 }
 
-// driveAnthropicSSEWithTools is driveAnthropicSSEWithSummary plus an
-// explicit "request had tools" flag, enabling the text-only-turn nudge
-// synthesis path.
+// driveAnthropicSSEWithTools is driveAnthropicSSEWithSummary plus a "had
+// tools" flag, for exercising the nudge-synthesis path.
 func driveAnthropicSSEWithTools(
 	t *testing.T,
 	model string,
@@ -152,11 +139,10 @@ func driveAnthropicSSEWithTools(
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SynthesizesBash(t *testing.T) {
-	// OpenAI-compat failure mode (e.g. Mimo-v2.5): upstream serializes a tool
-	// call as XML in the content channel, no structured tool_calls. Request HAD
-	// tools available. finishStream must synthesize a Bash tool_use so Claude
-	// Code's loop doesn't die on "tool call could not be parsed". (Gemini-3.x
-	// is deliberately excluded — see the _SuppressedOnGemini3x test below.)
+	// Upstream (e.g. Mimo-v2.5) leaks a tool call as XML text instead of a
+	// structured tool_calls entry. finishStream must synthesize a Bash
+	// tool_use so CC's loop doesn't die on "tool call could not be parsed"
+	// (Gemini-3.x excluded, see _SuppressedOnGemini3x below).
 	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\":\"Read\",\"path\":\"a.go\"}</tool_call>"},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
@@ -177,15 +163,11 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_SynthesizesBash(t *testing.T) 
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedOnVisibleThinkingThenAnswer(t *testing.T) {
-	// Production regression (session 1f2ce8be): Mimo-v2.5 streams visible
-	// chain-of-thought as <think>…</think> text and then a real prose answer,
-	// finishing with finish_reason="stop". That is a complete, valid turn —
-	// Claude Code renders the text fine; there is no parse failure to rescue.
-	// The old marker set treated a leading <think> as the failure mode, stapled
-	// a synthetic Bash call onto the answer, promoted it to stop_reason=tool_use,
-	// and looped the session (client runs the echo → re-pins Mimo → another
-	// <think>+answer → repeat) until the user interrupted. The nudge must NOT
-	// fire: <think> is reasoning text, not leaked tool-call markup.
+	// Regression (session 1f2ce8be): Mimo-v2.5 streams <think>…</think> then a
+	// real prose answer with finish_reason=stop — a valid, complete turn. The
+	// old detector treated leading <think> as a failure mode, stapled on a
+	// synthetic Bash call, and looped the session. Nudge must NOT fire: <think>
+	// is reasoning text, not a leaked tool call.
 	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<think>Let me look at the file…</think>"},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Good catch — the sqlc.yml override does map uuid to google/uuid."},"finish_reason":null}]}` + "\n\n",
@@ -202,12 +184,10 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedOnVisibleThinkingThenAn
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SuppressedOnGemini3x(t *testing.T) {
-	// Regression: the synthetic Bash block has no thoughtSignature. On
-	// Gemini-3.x the next turn drops the ENTIRE tool_use/tool_result history
-	// (anyToolUseMissingSig → dropToolBlocks in emit_gemini.go), wiping the
-	// agent's working context and looping it to the turn ceiling. So even
-	// though the request had tools and the upstream leaked a tool call as text,
-	// the nudge MUST be suppressed when the routed model is Gemini-3.x.
+	// The synthetic Bash block has no thoughtSignature. On Gemini-3.x the next
+	// turn drops the entire tool_use/tool_result history (dropToolBlocks in
+	// emit_gemini.go), wiping context and looping to the turn ceiling — so the
+	// nudge must be suppressed on Gemini-3.x even though the upstream leaked a tool call as text.
 	body, summary := driveAnthropicSSEWithTools(t, "gemini-3.1-pro-preview", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\":\"Read\",\"path\":\"a.go\"}</tool_call>"},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
@@ -223,9 +203,8 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_SuppressedOnGemini3x(t *testin
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_NoToolsInRequest(t *testing.T) {
-	// When the inbound request had no tools the model legitimately had
-	// nothing else to do — nudge must NOT fire (would inject a Bash call
-	// the client never declared).
+	// No tools in the request means nothing else to do — nudge must not
+	// fire (would inject a Bash call the client never declared).
 	body, summary := driveAnthropicSSEWithTools(t, "claude-opus-4-8", false, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Here is the explanation you asked for."},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n",
@@ -253,11 +232,9 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedWhenToolUseAlreadyEmitt
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedOnCleanProseFinalAnswer(t *testing.T) {
-	// The false positive this guard fixes: a model (e.g. DeepSeek) finishes its
-	// work and returns a clean prose final answer with finish_reason="stop".
-	// Tools were available, but the text carries no tool-call-like markup, so
-	// the turn is a legitimate completion — stapling a synthetic Bash call onto
-	// it would revive an already-finished turn. Nudge must NOT fire.
+	// False positive this guards against: clean prose with finish_reason=stop
+	// and no tool-call markup is a legitimate completion — stapling on a Bash
+	// call would revive an already-finished turn. Nudge must NOT fire.
 	body, summary := driveAnthropicSSEWithTools(t, "deepseek-v3.2", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"I've finished the refactor and all tests pass."},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":" Let me know if you need anything else."},"finish_reason":null}]}` + "\n\n",
@@ -274,10 +251,8 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedOnCleanProseFinalAnswer
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresWhenLeadingWithToolishMarkup(t *testing.T) {
-	// finish_reason="stop" but the turn OPENS with a tool call leaked into the
-	// content channel as plain text (the parse-failure mode Claude Code
-	// rejects). Leading markup is the discriminator that keeps the nudge firing
-	// even though the upstream said "stop" — this is NOT a clean final answer.
+	// Turn opens with a tool call leaked as plain text (finish_reason=stop
+	// notwithstanding); leading markup is the discriminator that keeps the nudge firing.
 	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\":\"Edit\"}</tool_call>"},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":15}}` + "\n\n",
@@ -291,9 +266,8 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresWhenLeadingWithToolishMar
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedWhenLeadingWithRedactedThinking(t *testing.T) {
-	// <redacted_thinking>, like <think>, is reasoning text — not a tool call the
-	// parser dead-ends on. A turn leading with it and finishing on stop is a
-	// valid turn; nudging it manufactured the production loop (session 1f2ce8be).
+	// <redacted_thinking>, like <think>, is reasoning text, not a leaked tool
+	// call. Nudging it manufactured the production loop (session 1f2ce8be).
 	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"<redacted_thinking>opaque</redacted_thinking>"},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":" Here is the answer."},"finish_reason":null}]}` + "\n\n",
@@ -308,10 +282,8 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedWhenLeadingWithRedacted
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedWhenProseMentionsMarkup(t *testing.T) {
-	// The substring-match trap: a legitimate final answer that *discusses* tag
-	// syntax — e.g. a model explaining this very router code — contains
-	// "<think" mid-prose. Because the markup is not at the START of the turn,
-	// it's a real answer, not a leak, and must NOT be nudged.
+	// Substring-match trap: prose that *discusses* tag syntax mid-sentence
+	// isn't a leak since the markup isn't at the start — must not be nudged.
 	body, summary := driveAnthropicSSEWithTools(t, "deepseek-v3.2", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"The detector trips when content begins with a <think> tag, "},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"so prose mentioning <tool_call> or <function> mid-sentence is fine."},"finish_reason":null}]}` + "\n\n",
@@ -326,9 +298,8 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedWhenProseMentionsMarkup
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresOnToolCallsFinish(t *testing.T) {
-	// finish_reason="tool_calls" means the upstream itself signaled a tool call
-	// that never materialized as a structured block. The model intended a tool,
-	// so the nudge is correct even though the visible text is clean prose.
+	// finish_reason=tool_calls means the upstream signaled a tool call that
+	// never materialized — nudge is correct despite clean visible prose.
 	body, summary := driveAnthropicSSEWithTools(t, "z-ai/glm-5.1", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"I'll create the PR now."},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":20,"completion_tokens":6}}` + "\n\n",
@@ -342,8 +313,8 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresOnToolCallsFinish(t *test
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedOnLengthTruncation(t *testing.T) {
-	// finish_reason="length": the model was cut off mid-output. A Bash echo
-	// can't help a truncated turn — it needs to continue. Nudge must NOT fire.
+	// finish_reason=length means truncation mid-output; a Bash echo can't
+	// help — nudge must not fire.
 	body, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Here is the first part of the plan and then"},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":40,"completion_tokens":4096}}` + "\n\n",
@@ -357,10 +328,8 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_SkippedOnLengthTruncation(t *t
 }
 
 func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresOnEmptyTurn(t *testing.T) {
-	// A turn that emits no text and no tool_use at all (finish_reason=stop) is
-	// not a final answer — it's an empty dead-end. The nudge still fires to
-	// keep the loop alive, since the clean-prose guard only suppresses turns
-	// that actually produced prose.
+	// A turn with no text and no tool_use is an empty dead-end, not a final
+	// answer. Nudge still fires since the clean-prose guard only suppresses turns with actual prose.
 	_, summary := driveAnthropicSSEWithTools(t, "mimo-v2.5-pro", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":0}}` + "\n\n",
@@ -373,9 +342,8 @@ func TestAnthropicSSETranslator_TextOnlyTurnNudge_FiresOnEmptyTurn(t *testing.T)
 }
 
 func TestAnthropicSSETranslator_EmptyArgsNotFlagged(t *testing.T) {
-	// Some tools take no input. The upstream emits no arguments fragment at
-	// all (or an empty one). An empty buffer is the trivial case — not
-	// malformed, not flagged.
+	// Some tools take no input, so an empty/missing arguments buffer is the
+	// trivial case, not malformed.
 	_, summary := driveAnthropicSSEWithSummary(t, "z-ai/glm-5.1", []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"Ping"}}]},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n",
