@@ -316,13 +316,7 @@ func (t *SSETranslator) emitDone() error {
 }
 
 func (t *SSETranslator) flushEvent() error {
-	if err := t.bw.Flush(); err != nil {
-		return err
-	}
-	if t.flusher != nil {
-		t.flusher.Flush()
-	}
-	return nil
+	return sse.FlushWriter(t.bw, t.flusher)
 }
 
 var _ http.ResponseWriter = (*SSETranslator)(nil)
@@ -1450,13 +1444,7 @@ func (t *AnthropicSSETranslator) emitMessageStop() error {
 }
 
 func (t *AnthropicSSETranslator) flushEvent() error {
-	if err := t.bw.Flush(); err != nil {
-		return err
-	}
-	if t.flusher != nil {
-		t.flusher.Flush()
-	}
-	return nil
+	return sse.FlushWriter(t.bw, t.flusher)
 }
 
 func openAIFinishToAnthropic(reason string) string {

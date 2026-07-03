@@ -981,13 +981,7 @@ func (t *ResponsesToAnthropicWriter) emitStreamErrorEvent(errType, msg string) e
 }
 
 func (t *ResponsesToAnthropicWriter) flushEvent() error {
-	if err := t.bw.Flush(); err != nil {
-		return err
-	}
-	if t.flusher != nil {
-		t.flusher.Flush()
-	}
-	return nil
+	return sse.FlushWriter(t.bw, t.flusher)
 }
 
 var _ http.ResponseWriter = (*ResponsesToAnthropicWriter)(nil)

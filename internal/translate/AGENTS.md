@@ -15,7 +15,7 @@ Covers all three directions: Anthropic ⇄ OpenAI and Gemini ⇄ {Anthropic, Ope
 When a new inbound format needs to talk to an existing upstream provider with a different wire format:
 
 1. **Add conversion functions to this package.** Pure functions only — no I/O, no provider knowledge, no domain types.
-2. **If response streaming, adapt [`stream.go`](stream.go) / [`gemini_stream.go`](gemini_stream.go)** or add a sibling decorator. Decorators wrap `http.ResponseWriter` and translate on the fly so we never buffer entire responses. Use [`../sse`](../sse) for zero-alloc SSE framing.
+2. **If response streaming, adapt [`stream.go`](stream.go) / [`gemini_stream.go`](gemini_stream.go)** or add a sibling decorator. Decorators wrap `http.ResponseWriter` and translate on the fly so we never buffer entire responses. Use [`../sse`](../sse) for zero-alloc SSE framing. A decorator that only prepends synthetic content to a stream (like the `*RoutingMarkerWriter` types) should embed `sse.ChunkedWriter` for the shared `Header`/`WriteHeader`/`Flush`/`FlushEvent` + streaming-detection bookkeeping, and add only its format-specific `Write`/`emit*` methods. A full response translator (buffers to translate one wire format into another, e.g. `AnthropicSSETranslator`) has enough divergent `WriteHeader`/streaming logic that it should NOT embed `ChunkedWriter` — reuse only `sse.FlushWriter(bw, flusher)` for its `flushEvent` helper.
 3. **Compose the new translation in `proxy.Service.Proxy*`.** Proxy is the only caller of `translate`.
 
 ## Anthropic-specific stripping (load-bearing)

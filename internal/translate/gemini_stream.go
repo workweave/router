@@ -375,13 +375,7 @@ func (t *GeminiToOpenAISSETranslator) writeChunkHeader() {
 }
 
 func (t *GeminiToOpenAISSETranslator) flushEvent() error {
-	if err := t.bw.Flush(); err != nil {
-		return err
-	}
-	if t.flusher != nil {
-		t.flusher.Flush()
-	}
-	return nil
+	return sse.FlushWriter(t.bw, t.flusher)
 }
 
 var _ http.ResponseWriter = (*GeminiToOpenAISSETranslator)(nil)
