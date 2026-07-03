@@ -3,7 +3,9 @@ package cluster
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1630,4 +1632,103 @@ func TestInvalidEffectiveKnobs(t *testing.T) {
 			assert.ErrorIs(t, err, ErrInvalidRoutingKnobs, "%s must return ErrInvalidRoutingKnobs", tc.name)
 		})
 	}
+}
+
+// capturingHandler is a minimal slog.Handler that records every emitted
+// record so tests can assert on WARN volume without parsing stderr.
+type capturingHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *capturingHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r)
+	return nil
+}
+
+func (h *capturingHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(_ string) slog.Handler      { return h }
+
+func (h *capturingHandler) warnRecords() []slog.Record {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []slog.Record
+	for _, r := range h.records {
+		if r.Level == slog.LevelWarn {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// withCapturedLogs swaps in a capturingHandler as the slog default for the
+// duration of the test (observability.Get() reads slog.Default()) and
+// restores the previous default on cleanup.
+func withCapturedLogs(t *testing.T) *capturingHandler {
+	t.Helper()
+	h := &capturingHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return h
+}
+
+// TestExtremeRoutingKnobWarnOnlyOnOverride is the regression test for the
+// "extreme routing knob" WARN spam finding: a bundle is allowed to ship an
+// alpha > 0.9 on some clusters by design (e.g. v0.70), and that must never
+// WARN on a default request -- only a request that actually overrides a
+// value into extreme territory should.
+func TestExtremeRoutingKnobWarnOnlyOnOverride(t *testing.T) {
+	// Bundle default alpha is already > 0.9 on both clusters, mirroring the
+	// deployed v0.70 bundle shape that triggered the original spam.
+	extremeDefaults := &DefaultRoutingKnobs{
+		Alpha:                []float64{0.95, 0.95},
+		SpeedWeight:          0.0,
+		OutputCostRatio:      0.0,
+		ExpectedOutputTokens: 2000,
+		PerModelVerbosity:    false,
+	}
+
+	t.Run("bundle's own extreme defaults never warn", func(t *testing.T) {
+		emb := &fakeEmbedder{vec: makeOpusVec()}
+		scorer := newV2BundleForTest(t, emb, v2BundleOpts{defaultKnobs: extremeDefaults})
+		handler := withCapturedLogs(t)
+
+		_, err := scorer.Route(context.Background(), router.Request{PromptText: "test"})
+		require.NoError(t, err)
+
+		assert.Empty(t, handler.warnRecords(), "bundle's own baked-in defaults must not produce an extreme-knob WARN")
+	})
+
+	t.Run("request override into extreme territory still warns, aggregated", func(t *testing.T) {
+		emb := &fakeEmbedder{vec: makeOpusVec()}
+		// Start from a non-extreme default so the override is unambiguously
+		// the thing that pushes both clusters over the threshold.
+		scorer := newV2BundleForTest(t, emb, v2BundleOpts{})
+		handler := withCapturedLogs(t)
+
+		alphaVal := 0.99
+		_, err := scorer.Route(context.Background(), router.Request{
+			PromptText: "test",
+			RoutingKnobs: &router.Overrides{
+				Alpha: &alphaVal,
+			},
+		})
+		require.NoError(t, err)
+
+		// alpha=0.99 trips both the alpha>0.9 check and the
+		// alpha+speed_weight>0.95 check, but each check aggregates across
+		// clusters into a single line -- so 2 clusters overridden into
+		// extreme territory produces exactly 2 WARN lines (one per check),
+		// not 4 (one per cluster per check).
+		warns := handler.warnRecords()
+		require.Len(t, warns, 2, "each extreme-knob check must aggregate across clusters into a single WARN line")
+		for _, w := range warns {
+			assert.Contains(t, w.Message, "Extreme routing knob override")
+		}
+	})
 }
