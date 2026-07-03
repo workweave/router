@@ -91,7 +91,10 @@ func NewInvalidationListener(subscriber *gcppubsub.Subscriber, cache auth.APIKey
 }
 
 // Run blocks until ctx is canceled, forwarding invalidation messages to cache.
+// done is closed via defer so Wait() can't hang if a caller wraps Run with
+// panic recovery (e.g. safeGo) — the defer still fires as the panic unwinds.
 func (l *InvalidationListener) Run(ctx context.Context) {
+	defer close(l.done)
 	log := observability.Get()
 	log.Info("Invalidation listener active", "subscription", l.subscriber.String())
 	err := l.subscriber.Receive(ctx, func(_ context.Context, msg *gcppubsub.Message) {
@@ -104,7 +107,6 @@ func (l *InvalidationListener) Run(ctx context.Context) {
 	if err != nil && ctx.Err() == nil {
 		log.Warn("Invalidation listener receive loop ended unexpectedly", "err", err)
 	}
-	close(l.done)
 }
 
 // Wait blocks until Run has returned. Intended for shutdown coordination.

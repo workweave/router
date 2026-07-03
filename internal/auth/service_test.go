@@ -22,9 +22,7 @@ type fakeAPIKeyRepository struct {
 	byHash   map[string]fakeKeyRow
 	override error
 
-	// markUsedPanic simulates a bug in the underlying MarkUsed implementation
-	// so tests can assert the async fireMarkUsed goroutine recovers instead
-	// of crashing the process.
+	// markUsedPanic, when true, causes MarkUsed to panic so fireMarkUsed recovery can be exercised.
 	markUsedPanic bool
 
 	mu       sync.Mutex
@@ -429,10 +427,8 @@ func TestService_VerifyAPIKey_RecoversFromMarkUsedPanic(t *testing.T) {
 	svc, apiKeys := makeService(t, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
 	apiKeys.markUsedPanic = true
 
-	// Force observability's lazy sync.Once init to run before we override the
-	// default logger below — otherwise the first-ever Get() call (which may
-	// happen inside the async fireMarkUsed goroutine) races our SetDefault
-	// and clobbers it back to the production handler.
+	// Prime observability's sync.Once before overriding slog.Default; otherwise the goroutine's
+	// first Get() call races SetDefault and resets the handler.
 	observability.Get()
 
 	var buf bytes.Buffer

@@ -48,10 +48,8 @@ func (panicTelemetryRepo) GetTelemetryRowsAll(ctx context.Context, from, to time
 // TestFireTelemetryRecoversFromPanic proves a panic inside the async
 // telemetry insert is caught and logged instead of crashing the process.
 func TestFireTelemetryRecoversFromPanic(t *testing.T) {
-	// Force observability's lazy sync.Once init to run before we override the
-	// default logger below — otherwise the first-ever Get() call (which may
-	// happen inside the async fireTelemetry goroutine) races our SetDefault
-	// and clobbers it back to the production handler.
+	// Prime observability's sync.Once before overriding slog.Default; otherwise the goroutine's
+	// first Get() call races SetDefault and resets the handler.
 	observability.Get()
 
 	var buf bytes.Buffer
