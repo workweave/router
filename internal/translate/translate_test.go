@@ -494,11 +494,10 @@ func messageStartID(t *testing.T, body string) string {
 	return ""
 }
 
-// On the eager-Prelude path (the normal streaming dispatch), message_start
-// fires before any upstream chunk carries an id, so the translator generates
-// the message id itself. It must be unique per response — clients (notably
-// ccusage) dedupe usage records by message id, so a constant placeholder
-// collapses every turn of a session into one record and undercounts cost.
+// On the eager-Prelude path, message_start fires before any upstream chunk
+// carries an id, so the translator generates one itself. It must be unique per
+// response: clients (e.g. ccusage) dedupe usage records by message id, so a
+// constant placeholder would collapse a session's turns into one record.
 func TestAnthropicSSETranslator_EagerPreludeMessageIDUniquePerResponse(t *testing.T) {
 	startID := func() string {
 		rec := httptest.NewRecorder()
@@ -556,14 +555,11 @@ func TestAnthropicSSETranslator_StreamingToolUse(t *testing.T) {
 	assert.Contains(t, body, "event: message_stop")
 }
 
-// Anthropic invariant: any response containing tool_use blocks MUST report
-// stop_reason="tool_use", regardless of what the OpenAI-compat upstream sent
-// as finish_reason. GLM-5.1 on DeepInfra (vLLM, tool_stream=true) and other
-// OpenAI-compat serves have been observed closing tool-emitting turns with
-// finish_reason="stop" or "" instead of "tool_calls"; without this promotion
-// the client receives tool_use blocks alongside stop_reason="end_turn" and
-// Claude Code executes the (often partial-arg) tool_use anyway, looping on
-// the identical result.
+// Any response with tool_use blocks must report stop_reason="tool_use" even if
+// the upstream finish_reason says otherwise. Some OpenAI-compat serves (e.g.
+// GLM-5.1 on DeepInfra) close tool-emitting turns with "stop" or "", which
+// without this promotion leaves Claude Code executing the tool_use anyway
+// under stop_reason="end_turn" and looping.
 func TestAnthropicSSETranslator_PromotesStopReasonWhenToolUseEmitted(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "z-ai/glm-5.1", nil)
@@ -592,10 +588,9 @@ func TestAnthropicSSETranslator_PromotesStopReasonWhenToolUseEmitted(t *testing.
 		"end_turn alongside emitted tool_use violates Anthropic spec and triggers client loops")
 }
 
-// Summary must expose, post-stream, the signals needed to diagnose the
-// GLM-5.1/DeepInfra tool loop from logs alone: the raw upstream finish_reason,
-// the promoted stop_reason, the fact that promotion fired, the tool_use block
-// count, and the upstream completion-token count.
+// Summary must expose the raw finish_reason, promoted stop_reason, whether
+// promotion fired, tool_use count, and completion tokens — enough to diagnose
+// the GLM-5.1/DeepInfra tool loop from logs alone.
 func TestAnthropicSSETranslator_SummaryReportsPromotionAndToolUse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "z-ai/glm-5.1", nil)
@@ -654,12 +649,10 @@ func TestAnthropicSSETranslator_SummaryNoPromotionOnPlainStop(t *testing.T) {
 	assert.Equal(t, 0, got.ToolUseBlocks)
 }
 
-// Load-bearing: Gemini 3.x requires the opaque thoughtSignature round-tripped
-// on the next turn's functionCall part. When an upstream emits it as
-// function.thought_signature with a plain tool-call id (a Gemini model behind an
-// OpenAI-compatible gateway), AnthropicSSE must smuggle it into the tool_use id
-// — the single SDK-safe carrier — so every client echoes it back, instead of an
-// off-spec block field that typed SDKs drop and Anthropic upstreams reject.
+// Gemini 3.x requires the opaque thoughtSignature round-tripped on the next
+// turn's functionCall. When it arrives as function.thought_signature (Gemini
+// behind an OpenAI-compat gateway), we must smuggle it into the tool_use id —
+// the only field typed SDKs preserve and Anthropic upstreams won't reject.
 func TestAnthropicSSETranslator_StreamingToolUsePreservesThoughtSignature(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "gemini-x", nil)
@@ -711,10 +704,8 @@ func TestAnthropicSSETranslator_NonStreamingResponse(t *testing.T) {
 	assert.Equal(t, "Hello!", block["text"])
 }
 
-// Qwen via OpenRouter (and DeepSeek native) emit reasoning traces in
-// `reasoning` / `reasoning_content` deltas. Without translation these either
-// vanished or — when the model embedded the reasoning inline — leaked into the
-// visible text channel.
+// Qwen (via OpenRouter) and DeepSeek emit reasoning in `reasoning`/`reasoning_content`
+// deltas; without translation these vanish or leak into the visible text channel.
 func TestAnthropicSSETranslator_StreamingReasoningEmitsThinkingBlock(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "qwen/qwen3-coder-next", nil)
@@ -780,11 +771,10 @@ func TestAnthropicSSETranslator_StreamingReasoningContentField(t *testing.T) {
 	assert.Contains(t, body, `"text":"answer"`)
 }
 
-// DeepSeek-v4 on Fireworks emits a whitespace-only "\n\n" content delta
-// between its reasoning_content and its tool_calls. Opening a text block for it
-// renders as an empty assistant block wedged between the thinking block and the
-// tool_use. The translator must buffer whitespace-only leading content and drop
-// it when the turn ends on a tool_use rather than real text.
+// DeepSeek-v4/Fireworks emits a whitespace-only "\n\n" content delta between
+// reasoning_content and tool_calls. Opening a text block for it would wedge an
+// empty block between thinking and tool_use, so the translator must buffer and
+// drop whitespace-only leading content when the turn ends on tool_use.
 func TestAnthropicSSETranslator_WhitespaceOnlyContentBeforeToolCallSuppressed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "deepseek/deepseek-v4-pro", nil)
@@ -813,9 +803,8 @@ func TestAnthropicSSETranslator_WhitespaceOnlyContentBeforeToolCallSuppressed(t 
 	assert.NotContains(t, body, `"type":"text_delta"`)
 }
 
-// When real text follows the whitespace-only delta, the buffered whitespace is
-// flushed as the text block's leading content so the model's formatting is
-// preserved (only the trailing-before-tool_use case is dropped).
+// When real text follows the whitespace-only delta, it's flushed as leading
+// content instead of dropped (only the trailing-before-tool_use case drops it).
 func TestAnthropicSSETranslator_WhitespaceFlushedWhenRealTextFollows(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "deepseek/deepseek-v4-pro", nil)

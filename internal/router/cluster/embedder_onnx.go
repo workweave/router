@@ -14,18 +14,16 @@ import (
 	"github.com/knights-analytics/hugot/pipelines"
 )
 
-// Each embedder's model.onnx and tokenizer.json live under
-// <assetsRoot>/<EmbedderSpec.AssetSubdir>/. Override the root with
-// ROUTER_ONNX_ASSETS_DIR for local dev.
+// Model files live under <assetsRoot>/<EmbedderSpec.AssetSubdir>/; override
+// the root with ROUTER_ONNX_ASSETS_DIR for local dev.
 const defaultAssetsDir = "/opt/router/assets"
 
 // minModelSizeBytes catches unpopulated HF downloads or placeholders.
 // Real INT8-quantized embedders are >100 MB.
 const minModelSizeBytes = 1 << 20
 
-// onnxEmbedder is the production Embedder for one EmbedderSpec. The
-// pipeline is goroutine-safe so one instance serves all requests; the
-// hugot session is owned by the EmbedderSet, not the embedder.
+// onnxEmbedder is the production Embedder for one EmbedderSpec. The pipeline
+// is goroutine-safe (one instance serves all requests); EmbedderSet owns the hugot session.
 type onnxEmbedder struct {
 	spec     EmbedderSpec
 	pipeline *pipelines.FeatureExtractionPipeline
@@ -39,9 +37,8 @@ func resolveAssetsDir() string {
 	return defaultAssetsDir
 }
 
-// assetsDirForSpec resolves the model directory for a spec. The Jina
-// embedder falls back to the flat legacy layout (<root>/model.onnx)
-// when its subdir is absent, so existing local-dev setups keep working.
+// assetsDirForSpec resolves the model directory for a spec. Jina falls back
+// to the flat legacy layout (<root>/model.onnx) if its subdir is absent.
 func assetsDirForSpec(spec EmbedderSpec) string {
 	root := resolveAssetsDir()
 	dir := filepath.Join(root, spec.AssetSubdir)
@@ -56,13 +53,12 @@ func assetsDirForSpec(spec EmbedderSpec) string {
 	return dir
 }
 
-// newONNXEmbedder builds the feature-extraction pipeline for one spec on
-// a shared hugot session.
+// newONNXEmbedder builds the feature-extraction pipeline for one spec on a
+// shared hugot session.
 //
-// Pooling contract: the Jina export emits token-level (3D) outputs which
-// hugot mean-pools; the Qwen3 export bakes last-token pooling into the
-// graph and emits a pooled (2D) output which hugot returns as-is. Both
-// are L2-normalized via WithNormalization.
+// Pooling: Jina emits token-level (3D) output that hugot mean-pools; Qwen3
+// bakes last-token pooling into the graph and emits pooled (2D) output as-is.
+// Both are L2-normalized via WithNormalization.
 func newONNXEmbedder(session *hugot.Session, spec EmbedderSpec) (*onnxEmbedder, error) {
 	assetsDir := assetsDirForSpec(spec)
 	modelPath := filepath.Join(assetsDir, "model.onnx")
@@ -93,9 +89,8 @@ func newONNXEmbedder(session *hugot.Session, spec EmbedderSpec) (*onnxEmbedder, 
 	return &onnxEmbedder{spec: spec, pipeline: pipeline}, nil
 }
 
-// Embed runs the pipeline on a single text. ctx is ignored because hugot
-// v0.7.0's RunPipeline doesn't accept one; scorer.Route races this call
-// against context.WithTimeout in a goroutine instead.
+// Embed runs the pipeline on a single text. ctx is ignored — hugot v0.7.0's
+// RunPipeline has no ctx param; scorer.Route races this call in a goroutine instead.
 func (e *onnxEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
 	out, err := e.pipeline.RunPipeline([]string{text})
 	if err != nil {
@@ -119,10 +114,9 @@ func (e *onnxEmbedder) Dim() int { return e.spec.Dim }
 
 var _ Embedder = (*onnxEmbedder)(nil)
 
-// EmbedderSet lazily constructs and caches one Embedder per registered
-// spec, all sharing a single ORT session. Construct in the composition
-// root; Get only the IDs the built artifact versions require so prod
-// (single default version) loads exactly one model into memory.
+// EmbedderSet lazily constructs and caches one Embedder per registered spec,
+// sharing a single ORT session. Get only the IDs the built artifact versions
+// require, so prod (single default version) loads exactly one model.
 type EmbedderSet struct {
 	mu        sync.Mutex
 	session   *hugot.Session
@@ -203,9 +197,8 @@ type StandaloneEmbedder struct {
 // Close releases the underlying ORT session. Idempotent.
 func (s *StandaloneEmbedder) Close() error { return s.set.Close() }
 
-// NewEmbedder constructs a standalone Jina v2 embedder with its own
-// session. Retained for the parity integration tests; the composition
-// root uses NewEmbedderSet directly.
+// NewEmbedder constructs a standalone Jina v2 embedder with its own session.
+// Retained for parity integration tests; the composition root uses NewEmbedderSet directly.
 func NewEmbedder() (*StandaloneEmbedder, error) {
 	set, err := NewEmbedderSet()
 	if err != nil {

@@ -51,10 +51,8 @@ func TestProxy_ForwardsToChatCompletionsUnderVersionedBaseURL(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
-// TestProxy_BYOKCredentialsOverrideEnvKey covers the case where a BYOK key is
-// stashed on context (e.g. a managed installation that brings its own
-// OpenRouter key). The context credential must win over the deployment-level
-// env key.
+// TestProxy_BYOKCredentialsOverrideEnvKey: a BYOK key on context (e.g. a
+// managed installation's own OpenRouter key) must win over the deployment env key.
 func TestProxy_BYOKCredentialsOverrideEnvKey(t *testing.T) {
 	var gotAuth string
 
@@ -80,11 +78,9 @@ func TestProxy_BYOKCredentialsOverrideEnvKey(t *testing.T) {
 		"BYOK credentials on context must override the deployment-level env key")
 }
 
-// TestProxy_DevModeEnvKeyUsedWhenNoCredentialsOnContext covers the dev-mode /
-// non-BYOK path: no credentials are stashed on context (WithAuth middleware
-// is skipped), so setAuth must fall back to the deployment-level env key.
-// This is the primary path for self-hosters and local dev with OPENROUTER_API_KEY
-// set in .env.local.
+// TestProxy_DevModeEnvKeyUsedWhenNoCredentialsOnContext: with no context
+// credentials (WithAuth skipped, e.g. ROUTER_DEV_MODE), setAuth must fall
+// back to the deployment env key — the path self-hosters/local dev rely on.
 func TestProxy_DevModeEnvKeyUsedWhenNoCredentialsOnContext(t *testing.T) {
 	var gotAuth string
 
@@ -134,11 +130,9 @@ func TestPassthrough_StripsInboundV1Prefix(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
-// TestProxy_BuffersErrorBodyAndDoesNotTouchWriter is the core failover
-// precondition: when the upstream returns >=400, openaicompat MUST NOT
-// write headers or status to the client writer. Instead it returns
-// *UpstreamErrorResponse carrying the buffered body, leaving the
-// dispatcher free to retry on another binding.
+// TestProxy_BuffersErrorBodyAndDoesNotTouchWriter: on upstream >=400,
+// openaicompat must not touch the client writer — it returns
+// *UpstreamErrorResponse so the dispatcher can retry on another binding.
 func TestProxy_BuffersErrorBodyAndDoesNotTouchWriter(t *testing.T) {
 	const errBody = `{"error":{"message":"fireworks is having a moment","type":"service_unavailable"}}`
 
@@ -163,17 +157,14 @@ func TestProxy_BuffersErrorBodyAndDoesNotTouchWriter(t *testing.T) {
 	assert.Equal(t, errBody, string(buffered.Body))
 	assert.Equal(t, "application/json", buffered.Headers.Get("Content-Type"))
 
-	// The writer must remain pristine — no headers, no body, no status.
-	// httptest.ResponseRecorder defaults to 200 and reports it via Code
-	// even before WriteHeader is called, so we check that nothing was
-	// actually written instead.
+	// ResponseRecorder reports Code=200 by default even without WriteHeader,
+	// so check that nothing was actually written instead.
 	assert.Equal(t, 0, rec.Body.Len(), "writer must not be touched on retryable upstream error")
 	assert.False(t, rec.HeaderMap.Get("Content-Type") != "", "writer headers must not be set on retryable upstream error")
 }
 
-// TestProxy_BuffersErrorBodyTruncatedAtCap ensures that a chatty upstream
-// can't OOM us via a huge error body. Beyond MaxBufferedErrorBytes the
-// remainder is drained and discarded.
+// TestProxy_BuffersErrorBodyTruncatedAtCap: a chatty upstream can't OOM us —
+// beyond MaxBufferedErrorBytes the remainder is drained and discarded.
 func TestProxy_BuffersErrorBodyTruncatedAtCap(t *testing.T) {
 	// 256KB body, well over the 64KB cap.
 	largeBody := strings.Repeat("x", 256*1024)
@@ -199,10 +190,8 @@ func TestProxy_BuffersErrorBodyTruncatedAtCap(t *testing.T) {
 		"body must be truncated at MaxBufferedErrorBytes")
 }
 
-// TestProxy_4xxStillBuffered confirms that non-retryable 4xx is also
-// buffered — the classifier (providers.IsRetryable) decides retry
-// eligibility, not the adapter. Adapter just stops bytes from leaking
-// to the client until the dispatcher decides whether to flush or retry.
+// TestProxy_4xxStillBuffered: non-retryable 4xx is buffered too — the
+// adapter just withholds bytes; providers.IsRetryable decides eligibility.
 func TestProxy_4xxStillBuffered(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

@@ -1,13 +1,9 @@
 package proxy_test
 
-// Golden-file helpers for the translation-conformance suite. The router writes
-// translated responses with a fixed key order (hand-written JSON buffers, not
-// Go maps), and every input here is fixture-driven, so output is deterministic.
-// normalizeResponse re-canonicalizes anyway — it parses the response, redacts
-// the handful of volatile values (generated message ids, timestamps), and
-// re-serializes with sorted keys — so a golden never flakes on key order and a
-// diff pinpoints a real translation change. Run `go test -update` to (re)write
-// goldens, then review the diff before committing.
+// Golden-file helpers for the translation-conformance suite. Output is
+// deterministic (fixture-driven), but normalizeResponse still redacts
+// volatile values (ids, timestamps) and sorts keys so a diff always
+// reflects a real translation change. Run `go test -update` to regenerate.
 
 import (
 	"bytes"
@@ -67,9 +63,8 @@ type normalizedFrame struct {
 	Data  map[string]interface{} `json:"data"`
 }
 
-// normalizeResponse canonicalizes a client-facing Anthropic response (SSE stream
-// or one-shot JSON) into stable, diffable bytes: volatile values redacted, JSON
-// keys sorted. SSE vs JSON is detected from the recorded body.
+// normalizeResponse canonicalizes an Anthropic response (SSE or one-shot JSON)
+// into stable, diffable bytes: volatile values redacted, keys sorted.
 func normalizeResponse(t *testing.T, contentType string, raw []byte) []byte {
 	t.Helper()
 	trimmed := bytes.TrimSpace(raw)
@@ -106,9 +101,8 @@ func normalizeJSON(t *testing.T, raw []byte) []byte {
 	return marshalCanonical(t, normalizedFrame{Data: redactJSON(t, bytes.TrimSpace(raw))})
 }
 
-// marshalCanonical renders v as indented JSON with sorted map keys (encoding/json
-// sorts map keys) and HTML escaping off, so goldens stay readable (`<id>`, not
-// the <id> escape) and any < > & in model text isn't mangled.
+// marshalCanonical renders v as indented JSON with sorted keys and HTML
+// escaping off, so `<id>` etc. stay readable in the golden.
 func marshalCanonical(t *testing.T, v interface{}) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -119,12 +113,9 @@ func marshalCanonical(t *testing.T, v interface{}) []byte {
 	return buf.Bytes()
 }
 
-// redactJSON unmarshals one JSON object and replaces values that the translator
-// generates fresh (so they vary even with a fixed fixture) with stable
-// placeholders: a message's generated id and any wire timestamp. Everything that
-// flows deterministically from the fixture (text, tool args, tool_use ids that
-// echo the upstream call id, usage, stop_reason) is left intact so the golden
-// asserts real translation behavior.
+// redactJSON unmarshals one JSON object and replaces the translator's
+// freshly-generated values (message id, timestamp) with stable placeholders;
+// everything fixture-derived is left intact.
 func redactJSON(t *testing.T, data []byte) map[string]interface{} {
 	t.Helper()
 	var m map[string]interface{}
@@ -133,17 +124,13 @@ func redactJSON(t *testing.T, data []byte) map[string]interface{} {
 	return m
 }
 
-// synthToolID matches a tool-call id the translator generates from scratch
-// (Gemini has no native call id: gemini_response.go uses "call_"+randomHex(4) =
-// 8 hex chars). Upstream-echoed ids in fixtures ("call_abc", "call_x") don't
-// match, so they stay in the golden and assert the echo behavior; only the
-// random ones get neutralized.
+// synthToolID matches tool-call ids the translator invents (Gemini has no
+// native call id: gemini_response.go uses "call_"+randomHex(4)). Upstream-
+// echoed ids like "call_abc" don't match this pattern and stay in the golden.
 var synthToolID = regexp.MustCompile(`^call_[0-9a-f]{8}$`)
 
-// redactVolatile walks a decoded response frame and replaces the values the
-// translator generates fresh — a message's id and any synthesized tool-call id —
-// with stable placeholders, and drops wire timestamps. Everything fixture-driven
-// stays intact so the golden still asserts real translation behavior.
+// redactVolatile walks a decoded frame, replacing message ids and synthesized
+// tool-call ids with placeholders and dropping wire timestamps.
 func redactVolatile(v interface{}) {
 	switch x := v.(type) {
 	case map[string]interface{}:

@@ -79,9 +79,8 @@ func (c *captureTelemetry) firstRow(t *testing.T) proxy.InsertTelemetryParams {
 	return c.rows[0]
 }
 
-// TestProxyMessages_RecordsClusterObservation asserts cluster-routed
-// decisions surface every routing-brain field into the telemetry row.
-// W-1339 / W-1335 depend on the writer populating them.
+// TestProxyMessages_RecordsClusterObservation asserts cluster-routed decisions
+// surface every routing-brain field into the telemetry row (W-1339/W-1335).
 func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 	const installID = "11111111-1111-1111-1111-111111111111"
 	decision := router.Decision{
@@ -124,9 +123,8 @@ func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 	require.NotNil(t, row.ChosenScore)
 	assert.InDelta(t, 0.85, *row.ChosenScore, 1e-6)
 	assert.Equal(t, "v-test", row.ClusterRouterVersion)
-	// Propensity is &1.0 for the deterministic argmax scorer; candidate_scores
-	// carries the full pre-argmax vector as jsonb. These are the off-policy
-	// logging substrate — a nil here means the writer dropped them.
+	// Propensity=&1.0 for the deterministic argmax scorer; candidate_scores is
+	// the pre-argmax vector — off-policy logging substrate.
 	require.NotNil(t, row.Propensity)
 	assert.InDelta(t, 1.0, *row.Propensity, 1e-6)
 	require.NotNil(t, row.CandidateScores)
@@ -134,18 +132,15 @@ func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 	require.NoError(t, json.Unmarshal(row.CandidateScores, &gotScores))
 	assert.InDelta(t, 0.85, gotScores["claude-opus-4-7"], 1e-6)
 	assert.InDelta(t, 0.42, gotScores["claude-haiku-4-5"], 1e-6)
-	// AlphaBreakdown is a W-1335 forward-compat slot; nil here.
-	// Cache* are nil because the fake provider returns no body, so the
-	// usage extractor reports 0 and cacheTokenPtr returns nil.
+	// AlphaBreakdown is a W-1335 forward-compat slot; Cache* are nil since the
+	// fake provider returns no body.
 	assert.Nil(t, row.AlphaBreakdown)
 	assert.Nil(t, row.CacheCreationTokens)
 	assert.Nil(t, row.CacheReadTokens)
 }
 
-// TestProxyMessages_PersistsCacheTokens covers the inverse of the above:
-// when the upstream actually reports cache_creation_input_tokens and
-// cache_read_input_tokens, those values must land on the telemetry row.
-// Regression guard against the W-1309 fields being declared but never wired.
+// TestProxyMessages_PersistsCacheTokens: cache_creation/read_input_tokens
+// reported upstream must land on the telemetry row (W-1309 regression guard).
 func TestProxyMessages_PersistsCacheTokens(t *testing.T) {
 	const installID = "44444444-4444-4444-4444-444444444444"
 	decision := router.Decision{
@@ -181,9 +176,8 @@ func TestProxyMessages_PersistsCacheTokens(t *testing.T) {
 	assert.Equal(t, int32(2048), *row.CacheReadTokens)
 }
 
-// TestProxyMessages_ChosenScoreZeroIsPersisted pins the *float64 semantics:
-// nil = not a cluster decision, &0 = legitimate zero. Regression guard
-// against a `!= 0` simplification that silently drops zero scores.
+// TestProxyMessages_ChosenScoreZeroIsPersisted: nil = not a cluster decision,
+// &0 = legitimate zero. Guards against a `!= 0` simplification dropping zero scores.
 func TestProxyMessages_ChosenScoreZeroIsPersisted(t *testing.T) {
 	const installID = "33333333-3333-3333-3333-333333333333"
 	decision := router.Decision{
@@ -259,10 +253,8 @@ func TestProxyMessages_NoMetadataOmitsClusterFields(t *testing.T) {
 	assert.Nil(t, row.Propensity)
 }
 
-// TestProxyMessages_PersistsTurnType asserts the turntype classification
-// lands on the telemetry row, so dashboard/analytics queries can separate
-// automated turns (probe, title_gen, compaction, classifier) from user
-// traffic when computing per-model shares.
+// TestProxyMessages_PersistsTurnType asserts turntype classification lands on
+// the telemetry row, so analytics can separate automated turns from user traffic.
 func TestProxyMessages_PersistsTurnType(t *testing.T) {
 	const installID = "55555555-5555-5555-5555-555555555555"
 	decision := router.Decision{
@@ -309,10 +301,8 @@ func TestProxyMessages_PersistsTurnType(t *testing.T) {
 	}
 }
 
-// TestProxyMessages_PersistsRolloutID asserts the eval/training-harness
-// rollout correlation id flows from ClientIdentity to the telemetry row —
-// the join key for bandit-loop reward attribution. Empty stays empty (NULL
-// column) for normal traffic.
+// TestProxyMessages_PersistsRolloutID asserts the rollout correlation id
+// flows from ClientIdentity to the telemetry row (bandit-loop reward join key).
 func TestProxyMessages_PersistsRolloutID(t *testing.T) {
 	const installID = "66666666-6666-6666-6666-666666666666"
 	const rolloutID = "swerebench-cc-r1/router-v0.65/0/owner__repo-123"
@@ -341,13 +331,10 @@ func TestProxyMessages_PersistsRolloutID(t *testing.T) {
 	assert.Equal(t, rolloutID, row.RolloutID)
 }
 
-// TestProxyMessages_PersistsSessionKeyAndRole asserts the offline join key to
-// router.spiral_shadow_events / session_pins lands on the telemetry row.
-// session_key must be the 16-byte digest (never empty for a real request), and
-// role must be roleForTier(TierFor(requestedModel)) — the exact value spiral
-// shadow events are keyed on, so the join matches byte-for-byte. The requested
-// model here is claude-opus-4-7 (TierHigh) → "default_high", regardless of the
-// cheaper decision model the router picked.
+// TestProxyMessages_PersistsSessionKeyAndRole: session_key/role are the join
+// key to router.spiral_shadow_events, so they must match spiral's encoding
+// byte-for-byte. role is keyed off the *requested* model (opus-4-7 ->
+// "default_high"), not the cheaper model the router actually picked.
 func TestProxyMessages_PersistsSessionKeyAndRole(t *testing.T) {
 	const installID = "77777777-7777-7777-7777-777777777777"
 	decision := router.Decision{

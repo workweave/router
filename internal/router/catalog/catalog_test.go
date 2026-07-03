@@ -79,9 +79,7 @@ func TestPriceFor_KnownPair(t *testing.T) {
 }
 
 func TestResolveBinding_PicksFirstAvailable(t *testing.T) {
-	// Hypothetical: build a synthetic model with ordered fallback to
-	// verify the resolver respects ordering. Use a real one: claude-opus-4-7
-	// only has anthropic — should only resolve when anthropic is available.
+	// claude-opus-4-7 is anthropic-only, so it should resolve only when anthropic is available.
 	avail := map[string]struct{}{providers.ProviderAnthropic: {}}
 	b, ok := ResolveBinding("claude-opus-4-7", avail)
 	require.True(t, ok)
@@ -110,11 +108,8 @@ func TestAllowedAtOrBelow_FiltersOutUnknownTier(t *testing.T) {
 }
 
 func TestToolUseLowSet_IncludesQwen3_235BInstruct(t *testing.T) {
-	// Production traffic on 2026-05-23 saw Instruct-2507 emit narrative
-	// "I edited the file" without tool_use blocks — flagged ToolUseLow so
-	// the cluster scorer excludes it from agentic argmax. If this assertion
-	// fires, either the entry was downgraded back to ToolUseUnknown or the
-	// catalog row was renamed.
+	// Instruct-2507 emits narrative text instead of tool_use blocks (seen in prod
+	// 2026-05-23), so it's flagged ToolUseLow to exclude it from agentic argmax.
 	set := ToolUseLowSet()
 	_, found := set["qwen/qwen3-235b-a22b-2507"]
 	assert.True(t, found, "qwen/qwen3-235b-a22b-2507 must be marked ToolUseLow")
@@ -129,20 +124,16 @@ func TestToolUseLowSet_OmitsHealthyModels(t *testing.T) {
 }
 
 func TestModel_ToolUseQualityDefaultsToUnknown(t *testing.T) {
-	// Zero-value safety: an unset ToolUseQuality must default to
-	// ToolUseUnknown so the scorer treats the model as healthy until
-	// proven otherwise. Guards against a future iota reorder that would
-	// silently flip every catalog row to ToolUseLow.
+	// Zero-value must default to ToolUseUnknown (healthy) so a future iota
+	// reorder can't silently flip every catalog row to ToolUseLow.
 	var m Model
 	assert.Equal(t, ToolUseUnknown, m.ToolUseQuality)
 }
 
 func TestAgenticLowSet_IncludesHarnessIncapableModels(t *testing.T) {
-	// These models emit valid tool calls (so they are not ToolUseLow) but can't
-	// sustain an agentic harness loop, so they must be dropped from has_tools
-	// turns — otherwise a price-leaning dial demotes Opus straight onto one of
-	// them (minimax-m3 grepping for a skill instead of running it is the
-	// canonical failure). If this fires, a row was unflagged or renamed.
+	// These models emit valid tool calls but can't sustain an agentic harness
+	// loop, so they're dropped from has_tools turns (minimax-m3 grepping for a
+	// skill instead of running it is the canonical failure).
 	set := AgenticLowSet()
 	for _, id := range []string{
 		"minimax/minimax-m3",
@@ -156,9 +147,8 @@ func TestAgenticLowSet_IncludesHarnessIncapableModels(t *testing.T) {
 }
 
 func TestAgenticLowSet_OmitsHarnessCapableModels(t *testing.T) {
-	// The harness-capable demotion ladder must stay eligible on has_tools turns:
-	// Opus -> Sonnet -> the cheaper capable coders. haiku stays eligible too (it
-	// is a legitimate cheap tool model), so it must NOT be flagged.
+	// Demotion ladder (Opus -> Sonnet -> cheaper capable coders) plus haiku, a
+	// legitimate cheap tool model, must all stay eligible on has_tools turns.
 	set := AgenticLowSet()
 	for _, id := range []string{
 		"claude-opus-4-8",
@@ -175,17 +165,15 @@ func TestAgenticLowSet_OmitsHarnessCapableModels(t *testing.T) {
 }
 
 func TestModel_AgenticUseDefaultsToUnknown(t *testing.T) {
-	// Zero-value safety: an unset AgenticUse must default to AgenticUnknown so
-	// the scorer treats the model as harness-capable until proven otherwise.
-	// Guards against a future iota reorder flipping every row to AgenticLow.
+	// Zero-value must default to AgenticUnknown (harness-capable) so a future
+	// iota reorder can't silently flip every row to AgenticLow.
 	var m Model
 	assert.Equal(t, AgenticUnknown, m.AgenticUse)
 }
 
 func TestImageUnsupportedSet_IncludesTextOnlyModels(t *testing.T) {
-	// Text-only OSS models reject image content parts with a 4xx (DeepInfra
-	// 405 "does not accept image input" on GLM-5.1 is the canonical case).
-	// They must be flagged so the scorer keeps image-bearing turns off them.
+	// Text-only OSS models reject image parts with a 4xx (DeepInfra 405 on
+	// GLM-5.1 is the canonical case), so they must be flagged.
 	set := ImageUnsupportedSet()
 	for _, id := range []string{"z-ai/glm-5.1", "z-ai/glm-5", "deepseek/deepseek-v4-pro", "moonshotai/kimi-k2.6", "qwen/qwen3-coder"} {
 		_, found := set[id]
@@ -194,9 +182,8 @@ func TestImageUnsupportedSet_IncludesTextOnlyModels(t *testing.T) {
 }
 
 func TestImageUnsupportedSet_OmitsMultimodalModels(t *testing.T) {
-	// First-party models (Anthropic / OpenAI / Google) are all multimodal and
-	// must keep the default. mistral-small-2603 is a multimodal OSS row and is
-	// deliberately left unflagged.
+	// First-party models are all multimodal; mistral-small-2603 is a
+	// multimodal OSS row and is deliberately left unflagged too.
 	set := ImageUnsupportedSet()
 	for _, id := range []string{"claude-opus-4-7", "gpt-5.5", "gemini-3.1-pro-preview", "mistralai/mistral-small-2603"} {
 		_, found := set[id]
@@ -213,9 +200,8 @@ func TestAcceptsImages(t *testing.T) {
 }
 
 func TestModel_ImageInputDefaultsToUnknown(t *testing.T) {
-	// Zero-value safety: an unset ImageInput must default to ImageInputUnknown
-	// (treated as image-capable) so a new first-party model is never silently
-	// excluded from image turns.
+	// Zero-value must default to ImageInputUnknown (image-capable) so a new
+	// first-party model is never silently excluded from image turns.
 	var m Model
 	assert.Equal(t, ImageInputUnknown, m.ImageInput)
 }
