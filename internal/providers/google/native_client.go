@@ -117,18 +117,16 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
 
-	providers.CopyUpstreamHeaders(w, resp)
-	w.WriteHeader(resp.StatusCode)
-
 	if resp.StatusCode >= 400 {
-		var snip [1024]byte
-		n, _ := io.ReadFull(resp.Body, snip[:])
-		if n > 0 {
+		// Buffer the upstream error — do NOT touch w. The proxy's failover loop
+		// decides whether to retry on another binding or flush this buffer to
+		// the client. Calling w.WriteHeader here would commit the preludeBuffer
+		// and make retries impossible (preludeBuf.Committed() gates all retries).
+		bufBody, totalRead, drainErr := providers.ReadCapped(resp.Body, providers.MaxBufferedErrorBytes)
+		if len(bufBody) > 0 {
 			t.StampUpstreamFirstByte()
 		}
-		_, snipWriteErr := w.Write(snip[:n])
-		rest, copyErr := io.Copy(w, resp.Body)
-		if copyErr == nil {
+		if drainErr == nil {
 			t.StampUpstreamEOF()
 		}
 		logUpstreamStatus(
@@ -136,16 +134,14 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 			resp.StatusCode,
 			"routed_model", decision.Model,
 			"streaming", stream,
-			"body_preview", string(snip[:n]),
-			"body_total_bytes", int64(n)+rest,
+			"body_preview", providers.PreviewBytes(bufBody),
+			"body_total_bytes", totalRead,
 		)
-		if snipWriteErr != nil {
-			return snipWriteErr
+		return &providers.UpstreamErrorResponse{
+			Status:  resp.StatusCode,
+			Headers: providers.CaptureUpstreamHeaders(resp),
+			Body:    bufBody,
 		}
-		if copyErr != nil {
-			return copyErr
-		}
-		return &providers.UpstreamStatusError{Status: resp.StatusCode}
 	}
 
 	// Output-progress watchdog: StreamBody's byte-idle watchdog resets on ANY
@@ -167,6 +163,8 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 		}
 	}
 
+	providers.CopyUpstreamHeaders(w, resp)
+	w.WriteHeader(resp.StatusCode)
 	return httputil.StreamBody(ctx, cancel, c.idleTimeout(), resp.Body, resp.StatusCode, w, t)
 }
 
@@ -204,9 +202,9 @@ func (c *NativeClient) Passthrough(ctx context.Context, prep providers.PreparedR
 	}
 	defer resp.Body.Close()
 
-	providers.CopyUpstreamHeaders(w, resp)
-	w.WriteHeader(resp.StatusCode)
 	if resp.StatusCode >= 400 {
+		providers.CopyUpstreamHeaders(w, resp)
+		w.WriteHeader(resp.StatusCode)
 		var snip [1024]byte
 		n, _ := io.ReadFull(resp.Body, snip[:])
 		_, snipWriteErr := w.Write(snip[:n])
@@ -226,6 +224,8 @@ func (c *NativeClient) Passthrough(ctx context.Context, prep providers.PreparedR
 		}
 		return &providers.UpstreamStatusError{Status: resp.StatusCode}
 	}
+	providers.CopyUpstreamHeaders(w, resp)
+	w.WriteHeader(resp.StatusCode)
 	_, err = io.Copy(w, resp.Body)
 	return err
 }
