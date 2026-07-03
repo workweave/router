@@ -1,0 +1,30 @@
+internal/router/catalog/cost.go
+  s_1f1a9a31dbf011::t_088a753f09d3fe 31,37-40,43-44
+  s_1f1a9a31dbf011::t_9b09fbae9789ac 32-36,41-42
+internal/router/catalog/cost_test.go
+  s_1f1a9a31dbf011::t_bf1a46d0e101cf 1-59
+internal/proxy/service.go
+  s_1f1a9a31dbf011::t_7d99687a201a59 2519,4066
+  s_1f1a9a31dbf011::t_4760837f4b24cc 2446,3993
+internal/proxy/gemini.go
+  s_1f1a9a31dbf011::t_ebf819240c2cdf 227
+internal/proxy/turnloop.go
+  s_1f1a9a31dbf011::t_f85637f16498bc 123,128-132
+  s_1f1a9a31dbf011::t_35a8bc7e7cf3d4 124-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ba38407a3c805d83ef14679890a2049aea0c21a9",
+  "prompts": {},
+  "sessions": {
+    "s_1f1a9a31dbf011": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e10fc80b-7f73-4990-bf71-3fe20f7e4736",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
