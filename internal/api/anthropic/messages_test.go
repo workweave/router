@@ -190,6 +190,25 @@ func TestMessagesHandler_BanditUnavailableReturns503(t *testing.T) {
 	assert.Contains(t, errObj["message"], "bandit router")
 }
 
+// TestMessagesHandler_ProviderNotConfiguredReturns502 guards the fix for the
+// anthropic handler previously falling through to the generic 502
+// "Upstream call failed." branch (with no dedicated log line) whenever
+// ProxyMessages returned proxy.ErrProviderNotConfigured — the exact error the
+// dispatch switch in service.go returns for a decision naming a provider with
+// no known translation family. openai and gemini already special-cased this
+// sentinel; anthropic was missing it before the shared proxy.ClassifyDispatchError.
+func TestMessagesHandler_ProviderNotConfiguredReturns502(t *testing.T) {
+	svc := newTestService(&fakeRouter{decision: router.Decision{Provider: "not-a-real-provider", Model: "claude-sonnet-4-5"}}, "", nil)
+	engine := messagesEngine(svc)
+
+	rec := postMessages(engine, []byte(validAnthropicBody))
+
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	errObj := errorEnvelope(t, rec.Body.Bytes())
+	assert.Equal(t, "api_error", errObj["type"])
+	assert.Equal(t, "Provider not configured.", errObj["message"])
+}
+
 func TestMessagesHandler_UpstreamStatusErrorPassesThroughStatus(t *testing.T) {
 	client := &fakeProviderClient{proxyErr: &providers.UpstreamStatusError{Status: http.StatusTooManyRequests}}
 	svc := newTestService(

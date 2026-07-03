@@ -10,11 +10,7 @@ import (
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
-	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
-	"workweave/router/internal/router/bandit"
-	"workweave/router/internal/router/cluster"
-	"workweave/router/internal/router/rl"
 	"workweave/router/internal/server/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -66,12 +62,12 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 		c.Request = c.Request.WithContext(ctx)
 
 		if err := svc.ProxyGeminiGenerateContent(c.Request.Context(), body, c.Writer, c.Request); err != nil {
-			var statusErr *providers.UpstreamStatusError
-			if errors.As(err, &statusErr) {
+			cls, ok := proxy.ClassifyDispatchError(err)
+			if ok && cls.Kind == proxy.DispatchErrorUpstreamStatus {
 				if c.Writer.Written() {
 					return
 				}
-				writeGeminiError(c, statusErr.Status, "UPSTREAM_ERROR", "Upstream call failed.")
+				writeGeminiError(c, cls.Status, "UPSTREAM_ERROR", cls.Message)
 				return
 			}
 			if c.Writer.Written() {
@@ -82,48 +78,12 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 				writeGeminiError(c, http.StatusNotImplemented, "UNIMPLEMENTED", "Cross-format request not supported by the upstream Gemini provider.")
 				return
 			}
-			if errors.Is(err, providers.ErrNotImplemented) {
-				writeGeminiError(c, http.StatusNotImplemented, "UNIMPLEMENTED", "Provider not implemented.")
-				return
-			}
-			if errors.Is(err, proxy.ErrProviderNotConfigured) {
-				writeGeminiError(c, http.StatusBadGateway, "FAILED_PRECONDITION", "Provider not configured.")
-				return
-			}
-			if errors.Is(err, proxy.ErrRequestNotJSONObject) {
-				writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "Request body must be a JSON object.")
-				return
-			}
-			if errors.Is(err, cluster.ErrNoEligibleProvider) {
-				log.Warn("No eligible provider for Gemini request", "err", err)
-				writeGeminiError(c, http.StatusBadRequest, "FAILED_PRECONDITION",
-					"No provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header.")
-				return
-			}
-			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
-				log.Warn("Invalid routing knobs supplied", "err", err)
-				writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
-				return
-			}
-			if errors.Is(err, rl.ErrPolicyUnavailable) {
-				log.Error("RL routing unavailable", "err", err)
-				c.Header("Retry-After", "1")
-				writeGeminiError(c, http.StatusServiceUnavailable, "UNAVAILABLE",
-					"Router unavailable: RL policy router failed and no fallback is configured.")
-				return
-			}
-			if errors.Is(err, bandit.ErrBanditUnavailable) {
-				log.Error("Bandit routing unavailable", "err", err)
-				c.Header("Retry-After", "1")
-				writeGeminiError(c, http.StatusServiceUnavailable, "UNAVAILABLE",
-					"Router unavailable: bandit router failed and no fallback is configured.")
-				return
-			}
-			if errors.Is(err, cluster.ErrClusterUnavailable) {
-				log.Error("Cluster routing unavailable", "err", err)
-				c.Header("Retry-After", "1")
-				writeGeminiError(c, http.StatusServiceUnavailable, "UNAVAILABLE",
-					"Router unavailable: cluster scorer failed and no fallback is configured.")
+			if ok {
+				proxy.LogDispatchErrorClass(log, cls, err)
+				if cls.RetryAfter {
+					c.Header("Retry-After", "1")
+				}
+				writeGeminiError(c, cls.Status, geminiErrorStatus(cls.Kind), cls.Message)
 				return
 			}
 			log.Error("Gemini proxy failed", "err", err)
@@ -170,6 +130,29 @@ func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
 		RolloutID:   proxy.NormalizeRolloutID(h.Get(proxy.RolloutIDHeader)),
 	}
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
+}
+
+// geminiErrorStatus maps a classified dispatch error to the Gemini native
+// error envelope's "status" field. Gemini's taxonomy is finer-grained than
+// Anthropic/OpenAI's two-way split, so this switches on Kind directly rather
+// than reusing DispatchErrorKind.IsClientError.
+func geminiErrorStatus(kind proxy.DispatchErrorKind) string {
+	switch kind {
+	case proxy.DispatchErrorNotImplemented:
+		return "UNIMPLEMENTED"
+	case proxy.DispatchErrorProviderNotConfigured:
+		return "FAILED_PRECONDITION"
+	case proxy.DispatchErrorRequestNotJSONObject:
+		return "INVALID_ARGUMENT"
+	case proxy.DispatchErrorNoEligibleProvider:
+		return "FAILED_PRECONDITION"
+	case proxy.DispatchErrorInvalidRoutingKnobs:
+		return "INVALID_ARGUMENT"
+	case proxy.DispatchErrorRLPolicyUnavailable, proxy.DispatchErrorBanditUnavailable, proxy.DispatchErrorClusterUnavailable:
+		return "UNAVAILABLE"
+	default:
+		return "UPSTREAM_ERROR"
+	}
 }
 
 func writeGeminiError(c *gin.Context, status int, errStatus, message string) {

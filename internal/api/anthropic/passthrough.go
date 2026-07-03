@@ -1,12 +1,10 @@
 package anthropic
 
 import (
-	"errors"
 	"io"
 	"net/http"
 
 	"workweave/router/internal/observability"
-	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 
 	"github.com/gin-gonic/gin"
@@ -28,20 +26,20 @@ func PassthroughHandler(svc *proxy.Service) gin.HandlerFunc {
 		}
 
 		if err := svc.PassthroughToProvider(c.Request.Context(), body, c.Writer, c.Request); err != nil {
-			var statusErr *providers.UpstreamStatusError
-			if errors.As(err, &statusErr) {
+			cls, ok := proxy.ClassifyDispatchError(err)
+			if ok && cls.Kind == proxy.DispatchErrorUpstreamStatus {
 				if c.Writer.Written() {
 					return
 				}
-				writeAnthropicError(c, statusErr.Status, "api_error", "Upstream call failed.")
+				writeAnthropicError(c, cls.Status, "api_error", cls.Message)
 				return
 			}
 			if c.Writer.Written() {
 				log.Error("Passthrough failed mid-stream", "err", err, "path", c.Request.URL.Path)
 				return
 			}
-			if errors.Is(err, providers.ErrNotImplemented) {
-				writeAnthropicError(c, http.StatusNotImplemented, "api_error", "Provider not implemented.")
+			if ok && cls.Kind == proxy.DispatchErrorNotImplemented {
+				writeAnthropicError(c, cls.Status, anthropicErrorType(cls.Kind), cls.Message)
 				return
 			}
 			log.Error("Passthrough failed", "err", err, "path", c.Request.URL.Path)

@@ -3,18 +3,13 @@ package anthropic
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"runtime/debug"
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
-	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
-	"workweave/router/internal/router/bandit"
-	"workweave/router/internal/router/cluster"
-	"workweave/router/internal/router/rl"
 	"workweave/router/internal/server/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -78,52 +73,24 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 
 		w := &tracingWriter{ResponseWriter: c.Writer}
 		if err := svc.ProxyMessages(c.Request.Context(), body, w, c.Request); err != nil {
-			var statusErr *providers.UpstreamStatusError
-			if errors.As(err, &statusErr) {
+			cls, ok := proxy.ClassifyDispatchError(err)
+			if ok && cls.Kind == proxy.DispatchErrorUpstreamStatus {
 				if c.Writer.Written() {
 					return
 				}
-				writeAnthropicError(c, statusErr.Status, "api_error", "Upstream call failed.")
+				writeAnthropicError(c, cls.Status, "api_error", cls.Message)
 				return
 			}
 			if c.Writer.Written() {
 				log.Error("Proxy failed mid-stream", "err", err)
 				return
 			}
-			if errors.Is(err, providers.ErrNotImplemented) {
-				writeAnthropicError(c, http.StatusNotImplemented, "api_error", "Provider not implemented.")
-				return
-			}
-			if errors.Is(err, proxy.ErrRequestNotJSONObject) {
-				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Request body must be a JSON object.")
-				return
-			}
-			if errors.Is(err, cluster.ErrNoEligibleProvider) {
-				log.Warn("No eligible provider for request", "err", err)
-				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "No provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header.")
-				return
-			}
-			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
-				log.Warn("Invalid routing knobs supplied", "err", err)
-				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Invalid routing knobs supplied.")
-				return
-			}
-			if errors.Is(err, rl.ErrPolicyUnavailable) {
-				log.Error("RL routing unavailable", "err", err)
-				c.Header("Retry-After", "1")
-				writeAnthropicError(c, http.StatusServiceUnavailable, "api_error", "Router unavailable: RL policy router failed and no fallback is configured.")
-				return
-			}
-			if errors.Is(err, bandit.ErrBanditUnavailable) {
-				log.Error("Bandit routing unavailable", "err", err)
-				c.Header("Retry-After", "1")
-				writeAnthropicError(c, http.StatusServiceUnavailable, "api_error", "Router unavailable: bandit router failed and no fallback is configured.")
-				return
-			}
-			if errors.Is(err, cluster.ErrClusterUnavailable) {
-				log.Error("Cluster routing unavailable", "err", err)
-				c.Header("Retry-After", "1")
-				writeAnthropicError(c, http.StatusServiceUnavailable, "api_error", "Router unavailable: cluster scorer failed and no fallback is configured.")
+			if ok {
+				proxy.LogDispatchErrorClass(log, cls, err)
+				if cls.RetryAfter {
+					c.Header("Retry-After", "1")
+				}
+				writeAnthropicError(c, cls.Status, anthropicErrorType(cls.Kind), cls.Message)
 				return
 			}
 			log.Error("Proxy failed", "err", err)
@@ -176,6 +143,17 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// anthropicErrorType maps a classified dispatch error to the Anthropic
+// Messages error envelope's "type" field. Anthropic only distinguishes
+// client-input problems ("invalid_request_error") from everything else
+// ("api_error").
+func anthropicErrorType(kind proxy.DispatchErrorKind) string {
+	if kind.IsClientError() {
+		return "invalid_request_error"
+	}
+	return "api_error"
 }
 
 func writeAnthropicError(c *gin.Context, status int, errType, message string) {
