@@ -193,6 +193,26 @@ func TestDebitForInference_WarnsOnZeroPricingForRealUsage(t *testing.T) {
 	assert.Contains(t, buf.String(), "gpt-5.2")
 }
 
+func TestDebitForInference_WarnsOnZeroPricingForCacheOnlyUsage(t *testing.T) {
+	// A turn can be all cache reads/writes with zero fresh InputTokens/
+	// OutputTokens (e.g. a fully cache-hit prompt) — that's still real,
+	// billable usage and must not be treated as "nothing happened."
+	buf := captureLogs(t)
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
+	svc := billing.NewService(repo)
+	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID:  "org_x",
+		RouterRequestID: "req_cache_only",
+		Model:           "gpt-5.2",
+		Provider:        providers.ProviderOpenAI,
+		CacheRead:       500_000,
+		Pricing:         catalog.Pricing{}, // zero value: model not in catalog
+	})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "level=ERROR")
+	assert.Contains(t, buf.String(), "zero-value catalog pricing", "cache-only usage must still trip the unknown-pricing warning")
+}
+
 func TestDebitForInference_NoWarnOnKnownPricing(t *testing.T) {
 	buf := captureLogs(t)
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
