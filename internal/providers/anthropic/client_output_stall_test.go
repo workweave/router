@@ -1,9 +1,8 @@
 package anthropic_test
 
-// Guards the output-progress watchdog on the native Anthropic adapter. Anthropic
+// Guards the output-progress watchdog on the native Anthropic adapter: Anthropic
 // ping keepalives reset the byte-idle watchdog, so only an output-bearing
-// watchdog ends a ping-alive/zero-output stream (prod 2026-07: sonnet-5 stuck at
-// output_tokens=0, ~200s, no failover). Drives the real routing-marker writer.
+// watchdog ends a ping-alive/zero-output stream.
 
 import (
 	"context"
@@ -24,9 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// flushRecorder is a minimal streaming ResponseWriter. It does NOT implement
-// ArmOutputProgress, so wrapping it in the routing-marker writer is what exposes
-// the hook; passed bare, it exercises the not-armed degradation path.
+// flushRecorder is a minimal streaming ResponseWriter without ArmOutputProgress.
 type flushRecorder struct {
 	hdr http.Header
 	n   int
@@ -101,9 +98,7 @@ func TestProxy_OutputStallAbortsOnPingOnlyStream(t *testing.T) {
 }
 
 func TestProxy_ContentDeltasResetOutputStall(t *testing.T) {
-	// content_block_delta frames carry real output; the marker writer marks each,
-	// so the output-stall watchdog keeps resetting and never trips even though the
-	// stream outlives its budget.
+	// content_block_delta marks each reset; the stream outlives the budget.
 	const frames = 6
 	const frameInterval = 20 * time.Millisecond
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -48,9 +48,7 @@ func NewClient(apiKey, baseURL string) *Client {
 	}
 }
 
-// NewClientWithStallTimeouts is NewClient with injected byte-idle and
-// output-stall watchdog budgets so a test can trip the output-stall watchdog
-// without waiting out the real budgets.
+// NewClientWithStallTimeouts is NewClient with watchdog budgets injected for testing.
 func NewClientWithStallTimeouts(apiKey, baseURL string, sseIdleTimeout, outputStall time.Duration) *Client {
 	c := NewClient(apiKey, baseURL)
 	c.sseIdleTimeout = sseIdleTimeout
@@ -215,12 +213,9 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 
-	// Output-progress + throughput watchdogs. Anthropic streams `ping` keepalives
-	// that reset StreamBody's byte-idle watchdog, so a ping-alive/zero-output
-	// stream (prod: sonnet-5 stuck at output_tokens=0, no failover) needs an
-	// output-only watchdog to abort with ErrUpstreamOutputStall /
-	// ErrUpstreamSlowThroughput (retryable). Marker-suppressed passthrough (no
-	// ArmOutputProgress hook) stays byte-idle-guarded only.
+	// Anthropic ping keepalives reset the byte-idle watchdog, so also arm
+	// output-progress + throughput watchdogs — a ping-alive/zero-output stream
+	// (prod: sonnet-5 stuck at 0 output, no failover) otherwise never aborts.
 	if arm, ok := w.(providers.OutputProgressArmer); ok {
 		outMark, outStop := httputil.StartIdleWatchdogCause(ctx, cancel, c.outputStallTimeout(), httputil.ErrUpstreamOutputStall)
 		tpWindow, tpMinElapsed, tpMinDeltas := c.throughputParams()

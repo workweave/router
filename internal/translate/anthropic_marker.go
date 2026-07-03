@@ -175,9 +175,7 @@ func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error)
 			continue
 
 		case "content_block_start", "content_block_delta", "content_block_stop":
-			// content_block_delta carries real output (text / thinking / tool
-			// args); mark it so the output-stall watchdog tracks
-			// time-since-last-output. start/stop are structural, not output.
+			// Mark on output-bearing content_block_delta only; start/stop are structural.
 			if string(eventType) == "content_block_delta" && w.onOutputProgress != nil {
 				w.onOutputProgress()
 			}
@@ -213,12 +211,9 @@ func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error)
 	return len(data), nil
 }
 
-// ArmOutputProgress installs mark to fire on output-bearing content_block_delta
-// frames only — never the injected marker, pings, or structural frames — so the
-// native Anthropic output-stall watchdog tracks time-since-last-output, not
-// last-byte (Anthropic pings reset the byte-idle watchdog). Returns false when
-// not streaming or without a marker (the transparent-passthrough path never
-// parses frames). Call after WriteHeader/Prelude.
+// ArmOutputProgress fires mark on output-bearing content_block_delta frames only
+// (not pings or structural frames) so the native output-stall watchdog tracks
+// time-since-last-output. Returns false when not streaming or without a marker.
 func (w *AnthropicRoutingMarkerWriter) ArmOutputProgress(mark func()) (armed bool) {
 	if !w.streaming || w.marker == "" {
 		return false

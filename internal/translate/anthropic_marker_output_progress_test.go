@@ -10,9 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Pins the output-progress classification the native Anthropic output-stall
-// watchdog depends on: content_block_delta counts as output; pings and
-// structural frames (message_start, content_block_start/stop) must not.
+// Pins the output-progress classification the output-stall watchdog depends on:
+// content_block_delta counts; pings and structural frames must not.
 
 func newAnthropicMarkerStreamingWriter(t *testing.T) (*translate.AnthropicRoutingMarkerWriter, *int) {
 	t.Helper()
