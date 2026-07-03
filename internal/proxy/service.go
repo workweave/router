@@ -2145,16 +2145,18 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	// Subscription-credit failover: a subscription-served Anthropic turn got a
-	// retryable fault (429 weekly/5h-limit, or ~90s timeout) pre-commit.
-	// Suppress the subscription token and retry the SAME model once on the
-	// Weave/BYOK key so the turn completes instead of surfacing the throttle
-	// raw. Bounded to one extra attempt, pre-commit only, genuinely retryable
-	// only. Skipped when baseline failover already ran (mutually exclusive:
-	// that requires a non-Anthropic routed provider).
+	// retryable fault (429 weekly/5h-limit, or ~90s timeout) OR had its OAuth
+	// token refused (401 authentication_error / 403 permission_error — expired
+	// token, or an org that disabled OAuth) pre-commit. Suppress the subscription
+	// token and retry the SAME model once on the Weave/BYOK key so the turn
+	// completes instead of surfacing the throttle/rejection raw. Bounded to one
+	// extra attempt, pre-commit only. Skipped when baseline failover already ran
+	// (mutually exclusive: that requires a non-Anthropic routed provider).
 	subscriptionFailoverUsed := false
 	subscriptionRetryRan := false
 	if subscriptionRetryEligible && !baselineAttempted && proxyErr != nil &&
-		!preludeBuf.Committed() && providers.IsRetryable(proxyErr) {
+		!preludeBuf.Committed() &&
+		(providers.IsRetryable(proxyErr) || anthropicOAuthCredentialRejected(proxyErr)) {
 		subscriptionRetryRan = true
 		subCtx := withSuppressedClaudeSubscription(ctx)
 		subCtx = resolveAndInjectCredentials(subCtx, providers.ProviderAnthropic, r.Header)

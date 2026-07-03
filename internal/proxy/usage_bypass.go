@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -136,6 +137,35 @@ func (s *Service) anthropicFallbackKeyAvailable(ctx context.Context) bool {
 		}
 	}
 	return false
+}
+
+// anthropicOAuthCredentialRejected reports whether err is a buffered Anthropic
+// 401/403 that means the caller's subscription OAuth token was refused — an
+// expired/invalid token (401 authentication_error) or an org that has disabled
+// OAuth sign-in (403 permission_error, "OAuth authentication is currently not
+// allowed for this organization"). On a subscription-served turn these are the
+// credential's fault, not the client's, and a retry on the deployment/BYOK
+// Anthropic key serves the turn — so they gate the subscription-credit failover
+// alongside the transient faults IsRetryable already covers. Deliberately narrow:
+// only the two error types actually produced by a rejected OAuth token, so an
+// unrelated 403 (e.g. content policy) is left terminal.
+func anthropicOAuthCredentialRejected(err error) bool {
+	var buffered *providers.UpstreamErrorResponse
+	if !errors.As(err, &buffered) {
+		return false
+	}
+	if buffered.Status != http.StatusUnauthorized && buffered.Status != http.StatusForbidden {
+		return false
+	}
+	var env struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if jsonErr := json.Unmarshal(buffered.Body, &env); jsonErr != nil {
+		return false
+	}
+	return env.Error.Type == "authentication_error" || env.Error.Type == "permission_error"
 }
 
 // errBypassRetryable is returned by bypassToAnthropic when the bypass attempt
