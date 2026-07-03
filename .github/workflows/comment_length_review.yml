@@ -23,6 +23,10 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
+    # Skip cleanly (not a failure) until ANTHROPIC_API_KEY is added to this
+    # repo's secrets -- it currently only exists on the main workweave/weave
+    # repo, not here.
+    if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
