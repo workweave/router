@@ -49,9 +49,8 @@ func NewClient(apiKey, baseURL string) *Client {
 }
 
 // NewClientWithStallTimeouts is NewClient with injected byte-idle and
-// output-stall watchdog budgets, so a test can drive the output-progress
-// watchdog with a small budget while keeping the byte-idle watchdog large enough
-// that it isn't what fires.
+// output-stall watchdog budgets so a test can trip the output-stall watchdog
+// without waiting out the real budgets.
 func NewClientWithStallTimeouts(apiKey, baseURL string, sseIdleTimeout, outputStall time.Duration) *Client {
 	c := NewClient(apiKey, baseURL)
 	c.sseIdleTimeout = sseIdleTimeout
@@ -216,15 +215,12 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 
-	// Output-progress + throughput watchdogs. StreamBody's byte-idle watchdog
-	// resets on ANY byte, and Anthropic streams `ping` keepalives every few
-	// seconds, so a stream that pings but produces zero output tokens (prod:
-	// sonnet-5 turns stuck at output_tokens=0, ttft unset, riding to the request
-	// cap with no failover) never trips it. These are marked only on
-	// output-bearing content_block_delta frames by the routing-marker writer (via
-	// ArmOutputProgress) and trip ErrUpstreamOutputStall / ErrUpstreamSlowThroughput
-	// (both retryable). Writers without the hook (marker-suppressed passthrough)
-	// stay byte-idle-guarded only.
+	// Output-progress + throughput watchdogs. Anthropic streams `ping` keepalives
+	// that reset StreamBody's byte-idle watchdog, so a ping-alive/zero-output
+	// stream (prod: sonnet-5 stuck at output_tokens=0, no failover) needs an
+	// output-only watchdog to abort with ErrUpstreamOutputStall /
+	// ErrUpstreamSlowThroughput (retryable). Marker-suppressed passthrough (no
+	// ArmOutputProgress hook) stays byte-idle-guarded only.
 	if arm, ok := w.(providers.OutputProgressArmer); ok {
 		outMark, outStop := httputil.StartIdleWatchdogCause(ctx, cancel, c.outputStallTimeout(), httputil.ErrUpstreamOutputStall)
 		tpWindow, tpMinElapsed, tpMinDeltas := c.throughputParams()

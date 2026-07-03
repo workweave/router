@@ -175,11 +175,9 @@ func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error)
 			continue
 
 		case "content_block_start", "content_block_delta", "content_block_stop":
-			// A content_block_delta carries real output (text / thinking /
-			// tool-call args); mark output progress so the output-stall watchdog
-			// tracks time-since-last-output. Anthropic ping keepalives reset the
-			// byte-idle watchdog, so a zero-output stream trips nothing without
-			// this. content_block_start/stop are structural, not output.
+			// content_block_delta carries real output (text / thinking / tool
+			// args); mark it so the output-stall watchdog tracks
+			// time-since-last-output. start/stop are structural, not output.
 			if string(eventType) == "content_block_delta" && w.onOutputProgress != nil {
 				w.onOutputProgress()
 			}
@@ -215,15 +213,12 @@ func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error)
 	return len(data), nil
 }
 
-// ArmOutputProgress installs mark to fire on output-bearing upstream deltas
-// (content_block_delta: text, thinking, tool-call args), never on the injected
-// marker or keepalive frames — so the output-stall watchdog tracks
-// time-since-last-output rather than time-since-last-byte. The native Anthropic
-// path needs this because Anthropic streams ping keepalives that reset
-// StreamBody's byte-idle watchdog, so a byte-alive/zero-output stream would
-// otherwise ride to the request cap with no failover. Returns false when not
-// streaming or when no marker is configured (the transparent-passthrough path
-// never parses frames, so it can't mark). Call after WriteHeader/Prelude.
+// ArmOutputProgress installs mark to fire on output-bearing content_block_delta
+// frames only — never the injected marker, pings, or structural frames — so the
+// native Anthropic output-stall watchdog tracks time-since-last-output, not
+// last-byte (Anthropic pings reset the byte-idle watchdog). Returns false when
+// not streaming or without a marker (the transparent-passthrough path never
+// parses frames). Call after WriteHeader/Prelude.
 func (w *AnthropicRoutingMarkerWriter) ArmOutputProgress(mark func()) (armed bool) {
 	if !w.streaming || w.marker == "" {
 		return false

@@ -10,13 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests pin the OUTPUT-progress classification the native Anthropic
-// output-stall watchdog depends on (see anthropic.Client.Proxy). The
-// routing-marker writer is the only layer on the native path that parses the
-// upstream Anthropic SSE, so it owns the mark: a content_block_delta (text /
-// thinking / tool-call args) is output and must count; ping keepalives and
-// structural frames (message_start, content_block_start/stop) must NOT — else a
-// ping-alive/output-silent Anthropic stream would keep resetting the watchdog.
+// Pins the output-progress classification the native Anthropic output-stall
+// watchdog depends on: content_block_delta counts as output; pings and
+// structural frames (message_start, content_block_start/stop) must not.
 
 func newAnthropicMarkerStreamingWriter(t *testing.T) (*translate.AnthropicRoutingMarkerWriter, *int) {
 	t.Helper()

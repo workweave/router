@@ -1,16 +1,9 @@
 package anthropic_test
 
-// Guards the OUTPUT-progress watchdog on the native Anthropic adapter. Prod
-// sweep (2026-07): claude-sonnet-5 turns sat at output_tokens=0 with ttft unset
-// for ~200s and returned nothing, with no failover. Anthropic streams `ping`
-// keepalives every few seconds, so the byte-idle watchdog (which resets on ANY
-// byte) never fires; only a watchdog that measures time-since-last-OUTPUT can end
-// it. The routing-marker writer reports output progress via ArmOutputProgress,
-// marking only on content_block_delta frames (not pings). These tests drive the
-// real writer against fake upstreams: a ping-only stream aborts at the
-// output-stall budget with a retryable ErrUpstreamOutputStall, a stream emitting
-// content deltas is never aborted, and a writer without the hook stays byte-idle
-// guarded.
+// Guards the output-progress watchdog on the native Anthropic adapter. Anthropic
+// ping keepalives reset the byte-idle watchdog, so only an output-bearing
+// watchdog ends a ping-alive/zero-output stream (prod 2026-07: sonnet-5 stuck at
+// output_tokens=0, ~200s, no failover). Drives the real routing-marker writer.
 
 import (
 	"context"
@@ -49,9 +42,8 @@ func (r *flushRecorder) Write(p []byte) (int, error) { r.n += len(p); return len
 func (r *flushRecorder) WriteHeader(int)             {}
 func (r *flushRecorder) Flush()                      {}
 
-// streamsFramesForever commits 200 + SSE headers then emits frame every interval
-// until the client disconnects. Bytes keep flowing so the byte-idle watchdog
-// never trips.
+// streamsFramesForever emits frame every interval until the client disconnects,
+// keeping the stream byte-alive so the byte-idle watchdog never trips.
 func streamsFramesForever(frame string, interval time.Duration) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
