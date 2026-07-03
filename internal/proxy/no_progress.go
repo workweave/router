@@ -132,7 +132,21 @@ func (r *fingerprintRing) recordAndDetect(fp noProgressFingerprint, now time.Tim
 
 // noProgressTracker is the package-level tracker. Construct via
 // newNoProgressTracker; nil receivers are valid (no-op).
+//
+// mu guards the bucket's check-then-create step in recordAndDetect. The
+// underlying LRU is internally synchronized for each individual Get/Add
+// call, but the two-step "look up the ring, create one if absent" sequence
+// is not atomic across that pair: two goroutines racing on the first
+// insert for the same bucket can each observe a miss, each allocate their
+// own *fingerprintRing, and each call Add — the LRU's last-write-wins
+// semantics then silently drop one goroutine's ring (and the fingerprint
+// recorded into it) with no signal to either caller. mu serializes just
+// that check-then-create step so at most one ring is ever created per
+// bucket; ring.recordAndDetect runs outside mu since fingerprintRing
+// already protects its own state, so a brief stall there under contention
+// never blocks unrelated buckets.
 type noProgressTracker struct {
+	mu    sync.Mutex
 	cache *lru.LRU[string, *fingerprintRing]
 }
 
@@ -192,7 +206,19 @@ const compactionMinHistoryMessages = 8
 // not mistaken for trimming (see that constant's doc).
 //
 // nil receivers are valid (no-op), matching noProgressTracker semantics.
+//
+// mu guards the read-compare-write sequence in checkAndRecord. Each
+// individual Get/Add call on the LRU is internally synchronized, but
+// reading the prior state and writing the new state are two separate
+// calls: a concurrent Get from another goroutine between them can observe
+// the same stale prior state, so two goroutines can each evaluate their
+// drop check against state that is no longer current once both writes
+// land — producing a possible false-positive detection neither caller's
+// own update should have triggered alone. mu makes the read+write a
+// single step per bucket so each caller's comparison is always against
+// the immediately prior write.
 type compactionTracker struct {
+	mu    sync.Mutex
 	cache *lru.LRU[string, compactionState]
 }
 
@@ -215,8 +241,11 @@ func (t *compactionTracker) checkAndRecord(sessionKey [sessionpin.SessionKeyLen]
 	if !ok {
 		return false
 	}
+	t.mu.Lock()
 	last, found := t.cache.Get(key)
 	t.cache.Add(key, compactionState{msgCount: messageCount, toolCallCount: toolCallCount})
+	t.mu.Unlock()
+
 	if !found {
 		return false
 	}
@@ -262,11 +291,14 @@ func (t *noProgressTracker) recordAndDetect(sessionKey [sessionpin.SessionKeyLen
 	if !ok {
 		return false, 0
 	}
+	t.mu.Lock()
 	ring, ringOk := t.cache.Get(key)
 	if !ringOk || ring == nil {
 		ring = &fingerprintRing{}
 		t.cache.Add(key, ring)
 	}
+	t.mu.Unlock()
+
 	return ring.recordAndDetect(fp, now)
 }
 
