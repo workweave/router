@@ -62,17 +62,10 @@ func (f *fakeProviderClient) Passthrough(_ context.Context, _ providers.Prepared
 	return nil
 }
 
-// max_tokens is kept above turntype's classifier/probe thresholds (4 and 256
-// respectively) so DetectFromEnvelope classifies this as a normal MainLoop
-// turn and runs the scorer via routeFor, rather than short-circuiting through
-// the hard-pin path used for probes/title-gen/classifier calls.
+// max_tokens > 256 so DetectFromEnvelope treats this as a MainLoop turn, not a probe/classifier.
 const validAnthropicBody = `{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}],"max_tokens":4096}`
 
-// newTestService builds a proxy.Service wired with a fake router and, when
-// clientName/client are non-empty/non-nil, a single fake provider — enough to
-// drive MessagesHandler/RouteHandler/PassthroughHandler end to end without any
-// real dependency (DB, HTTP upstream, etc), mirroring the fake-repo pattern in
-// internal/api/feedback/feedback_test.go.
+// newTestService wires a proxy.Service with a fake router and optional fake provider, no real I/O.
 func newTestService(r router.Router, clientName string, client providers.Client) *proxy.Service {
 	providerMap := map[string]providers.Client{}
 	if clientName != "" && client != nil {
@@ -164,9 +157,7 @@ func TestMessagesHandler_ClusterUnavailableReturns503WithRetryAfter(t *testing.T
 }
 
 func TestMessagesHandler_RLPolicyUnavailableReturns503(t *testing.T) {
-	// No RL router wired (WithRLRouter never called), so opting into the rl
-	// strategy fails closed rather than silently falling back to the cluster
-	// scorer.
+	// No RL router wired — strategy fails closed rather than falling back to cluster scorer.
 	svc := newTestService(&fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-5"}}, "", nil)
 	engine := messagesEngine(svc)
 
