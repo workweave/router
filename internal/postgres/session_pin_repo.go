@@ -55,13 +55,9 @@ func (r *SessionPinRepo) Upsert(ctx context.Context, p sessionpin.Pin) error {
 	})
 }
 
-// UpdateUsage records the previous turn's upstream token usage on the
-// existing pin row. The UPDATE matches by (session_key, role); a
-// missing pin (evicted, never created, or already swept) affects zero
-// rows and surfaces as a successful no-op so callers off the request
-// path don't have to special-case it. A zero-valued EndedAt is
-// defensively stamped with time.Now so the column is always populated
-// once a turn has produced usage.
+// UpdateUsage records the previous turn's usage on the pin row. A missing
+// pin (evicted/swept/never created) is a no-op, not an error. A zero
+// EndedAt is stamped with time.Now so the column is always populated.
 func (r *SessionPinRepo) UpdateUsage(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string, usage sessionpin.Usage) error {
 	endedAt := usage.EndedAt
 	if endedAt.IsZero() {
@@ -80,11 +76,9 @@ func (r *SessionPinRepo) UpdateUsage(ctx context.Context, sessionKey [sessionpin
 	})
 }
 
-// IncrementUpstreamErrors atomically bumps the consecutive-error
-// counter and returns the new value. A missing pin (already evicted
-// by force-model or loop-break, or never created) surfaces as
-// (0, nil) so the turn loop's two-strike check treats it as a no-op
-// — the relevant signal is gone and there's no row left to evict.
+// IncrementUpstreamErrors atomically bumps the consecutive-error counter.
+// A missing pin (already evicted or never created) returns (0, nil): the
+// two-strike check treats it as a no-op since there's no row left to evict.
 func (r *SessionPinRepo) IncrementUpstreamErrors(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) (int, error) {
 	q := sqlc.New(r.tx)
 	count, err := q.IncrementSessionPinUpstreamErrors(ctx, sqlc.IncrementSessionPinUpstreamErrorsParams{
@@ -101,8 +95,7 @@ func (r *SessionPinRepo) IncrementUpstreamErrors(ctx context.Context, sessionKey
 }
 
 // ResetUpstreamErrors clears the consecutive-error counter after a
-// successful turn. Missing pin = successful no-op (mirrors
-// UpdateUsage's semantics).
+// successful turn. Missing pin is a no-op, same as UpdateUsage.
 func (r *SessionPinRepo) ResetUpstreamErrors(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) error {
 	q := sqlc.New(r.tx)
 	return q.ResetSessionPinUpstreamErrors(ctx, sqlc.ResetSessionPinUpstreamErrorsParams{
@@ -143,9 +136,8 @@ func toSessionPin(row sqlc.RouterSessionPin) sessionpin.Pin {
 	return pin
 }
 
-// timestamptzOrZero mirrors timestampOrZero for TIMESTAMPTZ columns;
-// NULL on the wire is surfaced as the time.Time zero value so callers
-// can branch on IsZero() rather than threading a pointer through.
+// timestamptzOrZero mirrors timestampOrZero for TIMESTAMPTZ columns:
+// NULL becomes the zero value instead of a pointer.
 func timestamptzOrZero(t pgtype.Timestamptz) time.Time {
 	if !t.Valid {
 		return time.Time{}

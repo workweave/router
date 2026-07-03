@@ -1,18 +1,12 @@
 package openai_test
 
-// Guards the mid-stream half of the gpt-5.x stall protection (the
-// time-to-first-byte half lives in client_timeout_test.go). Prod incident
-// 2026-06-09 (customer benchmark org): two /v1/responses streams returned
-// headers and then produced ZERO output tokens until the router's 600s cap
-// (proxy_ms 599,991 and 599,880, both resp_output_tokens=0). The
-// ResponseHeaderTimeout cannot fire once headers have arrived, so the only
-// guard against a post-header stall is the idle-progress watchdog. These
-// tests pin its contract: a zero-progress stall aborts at the idle threshold,
-// the error is retryable (so dispatchWithFallback re-attempts), and no
-// response bytes reach the client writer; a slow-but-flowing stream — long
-// reasoning turns emit SSE event frames even while "thinking", and ANY bytes
-// count as progress — is never aborted; and a stalled >=400 error body cannot
-// hang the buffered-error read.
+// Guards the mid-stream half of gpt-5.x stall protection (TTFB half is in
+// client_timeout_test.go). Prod incident 2026-06-09: /v1/responses streams
+// returned headers then produced ZERO output tokens until the 600s cap.
+// ResponseHeaderTimeout can't fire post-header, so the idle-progress
+// watchdog is the only guard. Pins: zero-progress stalls abort + retryable +
+// no bytes written; flowing streams (any bytes = progress) are never
+// aborted; a stalled error body can't hang the buffered-error read.
 
 import (
 	"context"
@@ -43,10 +37,8 @@ func responsesPrep() providers.PreparedRequest {
 }
 
 func TestProxy_MidStreamStallAbortsRetryableNothingWritten(t *testing.T) {
-	// The upstream commits 200 + SSE headers, then goes silent forever. The
-	// only timer in play is the injected tiny idle threshold; release is
-	// closed (defer, LIFO) before upstream.Close() so the handler unblocks
-	// even if the watchdog's cancel didn't already end its request context.
+	// Upstream sends headers then goes silent forever. release closes
+	// (defer, LIFO) before upstream.Close() so the handler always unblocks.
 	release := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -76,17 +68,15 @@ func TestProxy_MidStreamStallAbortsRetryableNothingWritten(t *testing.T) {
 	assert.GreaterOrEqual(t, elapsed, idleTimeout, "must not abort before the idle threshold")
 	assert.Less(t, elapsed, stallTestHeaderTimeout,
 		"must abort at the idle threshold — a regression here re-opens the 600s zero-token hang")
-	// In the dispatch path the per-attempt writer is the preludeBuffer chain,
-	// and failover is only legal while it holds zero committed bytes. A stall
-	// with no upstream bytes must therefore leave the writer body empty.
+	// Failover is only legal while the preludeBuffer chain holds zero
+	// committed bytes, so a zero-byte stall must leave the writer empty.
 	assert.Zero(t, rec.Body.Len(), "no response bytes may reach the client writer on a zero-byte stall")
 }
 
 func TestProxy_SlowButFlowingStreamIsNotAborted(t *testing.T) {
-	// Frames arrive slower than a fast stream but well inside the idle
-	// budget; the stream's TOTAL duration exceeds the idle budget several
-	// times over. Only a zero-progress gap may trip the watchdog — total
-	// duration never does (long thinking turns with progress must survive).
+	// Frames arrive slower than a fast stream but each gap is inside the
+	// idle budget, even though total duration exceeds it — only a
+	// zero-progress gap may trip the watchdog, never total duration.
 	const frame = "event: response.in_progress\ndata: {}\n\n"
 	const frames = 5
 	const frameInterval = 60 * time.Millisecond
@@ -120,10 +110,9 @@ func TestProxy_SlowButFlowingStreamIsNotAborted(t *testing.T) {
 }
 
 func TestProxy_StalledErrorBodyDoesNotHang(t *testing.T) {
-	// The upstream returns 500 headers, promises a body, and never sends it.
-	// The buffered-error read must abort on the idle watchdog and still
-	// surface the status-classified *UpstreamErrorResponse so the dispatch
-	// loop's status-based retry logic applies.
+	// Upstream sends 500 headers, promises a body, never sends it. The
+	// buffered-error read must abort on the idle watchdog yet still surface
+	// *UpstreamErrorResponse for the dispatch loop's status-based retry.
 	release := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

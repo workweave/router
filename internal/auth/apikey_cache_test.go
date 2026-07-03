@@ -75,12 +75,9 @@ func TestLRUAPIKeyCache_InvalidateInstallationDoesNotTouchNegativeEntries(t *tes
 }
 
 func TestLRUAPIKeyCache_NaturalEvictionKeepsSecondaryIndexConsistent(t *testing.T) {
-	// Capacity of 1 forces the second insert to evict the first via the LRU
-	// callback. If the secondary index still held the evicted hash, a later
-	// invalidate of installation A would try to remove a hash that's already
-	// gone (harmless) — but if the second insert *re-used* installation A,
-	// the invalidate must still drop the surviving entry. This guards the
-	// onEvict bookkeeping that ties the two together.
+	// Capacity 1 forces eviction on the second insert. Guards that onEvict
+	// bookkeeping still lets InvalidateInstallation drop the surviving entry
+	// when the second insert reuses the same installation.
 	cache := auth.NewLRUAPIKeyCache(1, 1, time.Hour, time.Hour)
 
 	cache.Set("h-old", auth.CachedKey{
@@ -99,16 +96,12 @@ func TestLRUAPIKeyCache_NaturalEvictionKeepsSecondaryIndexConsistent(t *testing.
 		"after an LRU eviction-then-reinsert under the same installation, InvalidateInstallation must still drop the surviving entry")
 }
 
-// TestLRUAPIKeyCache_InvalidationDuringSetEvictsOrphan models the
-// concurrency window where Set has indexed its keyHash under
-// byInstallation but has not yet completed positive.Add when
-// InvalidateInstallation runs. Without the generation-counter
-// recheck in Set, the entry would land in the positive LRU after
-// the invalidate already cleared the index — orphaning it until
-// TTL and silently surviving a policy change. Driving the race
-// directly is flaky; instead we drive the same logical sequence
-// step-by-step from a single goroutine, exercising the exact
-// state transitions Set traverses.
+// TestLRUAPIKeyCache_InvalidationDuringSetEvictsOrphan covers the race where
+// Set indexes byInstallation before positive.Add completes while
+// InvalidateInstallation runs concurrently. Without the generation-counter
+// recheck in Set, the entry would land in the LRU after the index was
+// already cleared, orphaning it until TTL. The true race is flaky to
+// trigger, so this drives the same interleaving deterministically.
 func TestLRUAPIKeyCache_InvalidationDuringSetEvictsOrphan(t *testing.T) {
 	cache := auth.NewLRUAPIKeyCache(8, 8, time.Hour, time.Hour)
 
@@ -118,11 +111,8 @@ func TestLRUAPIKeyCache_InvalidationDuringSetEvictsOrphan(t *testing.T) {
 		Installation: &auth.Installation{ID: "inst-A"},
 	})
 
-	// Invalidate concurrently from another goroutine while we race a
-	// Set. The test passes deterministically because of the recheck:
-	// regardless of interleaving, every invalidation that fires after
-	// the Set begins must result in a cache that does NOT serve the
-	// new entry on Get.
+	// Race Invalidate against Set from another goroutine; the recheck
+	// guarantees no invalidation-after-Set-start leaves h-race visible.
 	done := make(chan struct{})
 	go func() {
 		for range 50 {
@@ -135,9 +125,7 @@ func TestLRUAPIKeyCache_InvalidationDuringSetEvictsOrphan(t *testing.T) {
 			APIKey:       &auth.APIKey{ID: "k-race"},
 			Installation: &auth.Installation{ID: "inst-A"},
 		})
-		// After every Set/Invalidate pair, follow with a final
-		// invalidate so the post-state is unambiguous: nothing for
-		// inst-A may survive.
+		// Final invalidate ensures nothing for inst-A survives.
 		cache.InvalidateInstallation("inst-A")
 	}
 	<-done
@@ -145,9 +133,8 @@ func TestLRUAPIKeyCache_InvalidationDuringSetEvictsOrphan(t *testing.T) {
 	_, ok := cache.Get("h-race")
 	assert.False(t, ok, "no entry for inst-A may survive the final invalidation, even when Set and Invalidate interleave")
 
-	// And follow-up: a fresh Set after the final invalidate must
-	// land in the cache (proving generation tracking didn't pin
-	// the installation out permanently).
+	// A fresh Set after the final invalidate must still land (generation
+	// tracking isn't a permanent pin).
 	cache.Set("h-post", auth.CachedKey{
 		APIKey:       &auth.APIKey{ID: "k-post"},
 		Installation: &auth.Installation{ID: "inst-A"},

@@ -35,10 +35,8 @@ func TestBuildCredentialsMap_IndexesByProvider(t *testing.T) {
 }
 
 func TestBuildCredentialsMap_DropsEmptyPlaintext(t *testing.T) {
-	// An empty Plaintext indicates a stale or malformed BYOK row (insertion
-	// bug, or decryption that produced no bytes). Such an entry must not
-	// enroll the provider into the routing eligibility set: argmax would
-	// pick it and the upstream call would 401 with no auth header.
+	// An empty Plaintext means a stale/malformed BYOK row; it must not enroll
+	// the provider, or argmax would pick it and the upstream call would 401.
 	keys := []*auth.ExternalAPIKey{
 		{Provider: "openrouter", Plaintext: []byte{}},
 		{Provider: "anthropic", Plaintext: []byte("sk-ant-byok")},
@@ -84,9 +82,8 @@ func TestExtractClientCredentials_Google(t *testing.T) {
 	assert.Equal(t, []byte("goog-client-key"), creds.APIKey)
 }
 
-// Makora and Together are OpenAI-compat providers that were missing from the
-// old literal Bearer-branch list, so a client-supplied key for them was dropped
-// (never forwarded as BYOK). Keying off the translation family fixes that.
+// Makora/Together were missing from the old literal Bearer-branch list, so a
+// client-supplied key was dropped; keying off the translation family fixes it.
 func TestExtractClientCredentials_OpenAICompatBearer(t *testing.T) {
 	for _, provider := range []string{"makora", "together"} {
 		t.Run(provider, func(t *testing.T) {
@@ -150,9 +147,8 @@ func TestExtractClientCredentials_RejectsRouterBearerForFireworks(t *testing.T) 
 }
 
 func TestExtractClientCredentials_OpenRouterNoAuthHeader(t *testing.T) {
-	// Anthropic-format clients (Claude Code with x-api-key) have no Authorization
-	// header. ExtractClientCredentials must return nil so the caller falls back to
-	// the deployment-level env key rather than injecting empty credentials.
+	// Anthropic-format clients have no Authorization header; must return nil
+	// so the caller falls back to the deployment-level env key.
 	headers := http.Header{"X-Api-Key": []string{"rk_router_key"}}
 	creds := proxy.ExtractClientCredentials("openrouter", headers)
 	assert.Nil(t, creds,
@@ -283,10 +279,8 @@ func TestResolveCredentials_SubscriptionBeatsBYOK(t *testing.T) {
 const codexJWT = "eyJhbGciOiJSUzI1NiJ9.codex-access-token.signature"
 
 func TestExtractClientCredentials_CodexSubscription(t *testing.T) {
-	// A Codex (ChatGPT) subscription arrives on the OpenAI surface as an OAuth
-	// JWT bearer paired with a ChatGPT-Account-ID header. The pairing is what
-	// distinguishes it from a plain client API key, and both pieces are carried
-	// so the OpenAI client can reach the Codex backend.
+	// A Codex subscription is an OAuth JWT bearer paired with a
+	// ChatGPT-Account-Id header, distinguishing it from a plain API key.
 	headers := http.Header{
 		"Authorization":      []string{"Bearer " + codexJWT},
 		"Chatgpt-Account-Id": []string{"acct-12345"},
@@ -324,9 +318,8 @@ func TestExtractClientCredentials_OpenAIKeyWithAccountIDIsNotSubscription(t *tes
 }
 
 func TestExtractClientCredentials_CodexSubscriptionIsOpenAIOnly(t *testing.T) {
-	// The Codex JWT authenticates only the OpenAI Codex backend; a ChatGPT
-	// account-id header on another vendor's surface must not produce an OAuth
-	// credential for that vendor.
+	// The Codex JWT is OpenAI-only; an account-id header on another vendor's
+	// surface must not produce an OAuth credential there.
 	headers := http.Header{
 		"Authorization":      []string{"Bearer " + codexJWT},
 		"Chatgpt-Account-Id": []string{"acct-12345"},

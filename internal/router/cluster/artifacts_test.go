@@ -197,9 +197,8 @@ func TestLoadRegistry_MissingBenchColumn(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing bench_column")
 }
 
-// Catches in CI the "ship one bad bundle, lose the cluster scorer
-// entirely" footgun — production refuses to boot on any malformed
-// committed version.
+// Guards against shipping one bad bundle that boots production with no
+// cluster scorer at all.
 func TestEmbeddedArtifacts_AllVersionsLoadable(t *testing.T) {
 	versions, err := ListVersions()
 	require.NoError(t, err)
@@ -251,9 +250,7 @@ func TestListVersions_FlattensLegacyAndOmitsPseudoName(t *testing.T) {
 	assert.Contains(t, versions, "v0.21", "legacy v0.21 must remain reachable after the move")
 }
 
-// Confirms bundleDirForVersion resolves legacy bundles transparently —
-// callers don't have to know whether a version lives at the root or
-// under legacy/.
+// bundleDirForVersion must resolve legacy bundles transparently.
 func TestResolveVersion_LegacyBundleIsReachable(t *testing.T) {
 	resolved, err := ResolveVersion("v0.21")
 	require.NoError(t, err)
@@ -352,11 +349,7 @@ func TestCheapestModelInSet(t *testing.T) {
 	})
 
 	t.Run("denySet excludes models even when allowed by allowSet", func(t *testing.T) {
-		// allowSet permits model-b and model-c (both google, both in
-		// the registry); denySet excludes the cheapest of the two —
-		// model-c — forcing the resolver to fall back to model-b.
-		// Guards the PR #100 issue where tier clamping bypassed the
-		// request's ExcludedModels denylist.
+		// Guards PR #100: tier clamping bypassed the request's denylist.
 		allow := map[string]struct{}{"model-b": {}, "model-c": {}}
 		deny := map[string]struct{}{"model-c": {}}
 		p, m, ok := CheapestModelInSet(meta, registry, available, deny, allow)
@@ -450,9 +443,7 @@ func TestFastestModelInSet(t *testing.T) {
 	available := map[string]struct{}{"google": {}, "deepinfra": {}}
 
 	t.Run("low-tier clamp prefers fast flash-lite over cheap v4-flash", func(t *testing.T) {
-		// Mirrors the real haiku-tier clamp: both models are in-ceiling;
-		// cost-only picks v4-flash (the slow one), FastestModel picks
-		// flash-lite.
+		// Mirrors the real haiku-tier clamp, where cost-only picks the slow v4-flash.
 		allow := map[string]struct{}{"flash-lite": {}, "v4-flash": {}}
 		p, m, ok := FastestModelInSet(meta, registry, available, nil, allow)
 		require.True(t, ok)
@@ -485,11 +476,8 @@ func TestFastestModelInSet(t *testing.T) {
 	})
 }
 
-// Integration guard against the real shipped bundle: the low-tier clamp
-// (the path that funneled production traffic onto the slowest provider)
-// must now resolve to the fastest annotated low-tier model rather than the
-// cheapest. Pins the actual symptom this change fixes; will fail loudly if
-// a future bundle drops the flash-lite speed annotation or its tier.
+// Pins the fix on the real bundle: low-tier clamp must pick the fastest
+// annotated model, not the cheapest slow incumbent.
 func TestFastestModel_RealLatestBundle_LowTierPrefersFastFlash(t *testing.T) {
 	version, err := ResolveVersion(LatestVersion)
 	require.NoError(t, err)

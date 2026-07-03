@@ -12,9 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ProviderExclusionOverrideSource reports whether ROUTER_EXCLUDED_PROVIDERS
-// (or an equivalent deployment-wide override) is in effect, and what its
-// contents are. Implemented by *proxy.Service.
+// ProviderExclusionOverrideSource reports the deployment-wide ROUTER_EXCLUDED_PROVIDERS
+// override, if active. Implemented by *proxy.Service.
 type ProviderExclusionOverrideSource interface {
 	HasExcludedProvidersOverride() bool
 	ExcludedProvidersOverride() []string
@@ -30,9 +29,8 @@ type updateExcludedProvidersRequest struct {
 	Excluded []string `json:"excluded"`
 }
 
-// deployedProvidersDTO returns the distinct provider names behind the
-// deployed-models registry, sorted. Centralized so the GET and PUT responses
-// cannot drift apart.
+// deployedProvidersDTO returns distinct provider names from the deployed-models
+// registry, sorted, so GET and PUT responses can't drift apart.
 func deployedProvidersDTO(models DeployedModelsSource) []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0)
@@ -47,10 +45,8 @@ func deployedProvidersDTO(models DeployedModelsSource) []string {
 	return out
 }
 
-// GetExcludedProvidersHandler returns the deployed provider names and the
-// installation's provider exclusion list. When a deployment-wide env override
-// is active, `env_override_active` is true and the UI must render the
-// checklist read-only.
+// GetExcludedProvidersHandler returns deployed providers and the installation's
+// exclusion list. `env_override_active` tells the UI to render read-only.
 func GetExcludedProvidersHandler(authSvc *auth.Service, models DeployedModelsSource, override ProviderExclusionOverrideSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -78,9 +74,8 @@ func GetExcludedProvidersHandler(authSvc *auth.Service, models DeployedModelsSou
 	}
 }
 
-// UpdateExcludedProvidersHandler replaces the installation's provider
-// exclusion list. Rejects unknown provider names with 400. Returns 403 when
-// the env override is active so the UI never silently loses a save.
+// UpdateExcludedProvidersHandler replaces the installation's exclusion list.
+// 400 on unknown providers; 403 if the env override is active.
 func UpdateExcludedProvidersHandler(authSvc *auth.Service, models DeployedModelsSource, override ProviderExclusionOverrideSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)

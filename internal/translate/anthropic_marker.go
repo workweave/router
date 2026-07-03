@@ -12,10 +12,8 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// AnthropicRoutingMarkerWriter wraps an http.ResponseWriter and injects a
-// routing-marker text block at index 0 of an Anthropic-format SSE stream.
-// Upstream content_block_* indices are shifted by +1 to accommodate the
-// injected block. Non-streaming responses pass through unmodified.
+// AnthropicRoutingMarkerWriter injects a routing-marker text block at index 0
+// of an Anthropic SSE stream, shifting upstream content_block_* indices by +1.
 type AnthropicRoutingMarkerWriter struct {
 	inner   http.ResponseWriter
 	flusher http.Flusher
@@ -31,9 +29,8 @@ type AnthropicRoutingMarkerWriter struct {
 	markerEmitted  bool
 }
 
-// NewAnthropicRoutingMarkerWriter creates a writer that injects marker as a
-// standalone text block at index 0 before any upstream data. If marker is
-// empty, all writes pass through unchanged.
+// NewAnthropicRoutingMarkerWriter injects marker as a text block at index 0.
+// If marker is empty, writes pass through unchanged.
 func NewAnthropicRoutingMarkerWriter(w http.ResponseWriter, model, marker string) *AnthropicRoutingMarkerWriter {
 	flusher, _ := w.(http.Flusher)
 	return &AnthropicRoutingMarkerWriter{
@@ -81,12 +78,10 @@ func (w *AnthropicRoutingMarkerWriter) Write(data []byte) (int, error) {
 	return n, nil
 }
 
-// Prelude commits headers and emits the routing marker immediately, before the
-// upstream provider has returned a single byte. Call this right after the
-// routing decision is made when the client requested streaming (streaming=true)
-// so first-byte latency drops to ~routing time rather than upstream prefill +
-// first decode. Safe to call once; subsequent Write/WriteHeader calls are
-// idempotent. No-op when streaming is false or marker is empty.
+// Prelude commits headers and emits the marker before upstream responds, so
+// first-byte latency is ~routing time instead of upstream prefill+decode. Call
+// once right after the routing decision; later Write/WriteHeader calls are
+// idempotent. No-op if streaming is false or marker is empty.
 func (w *AnthropicRoutingMarkerWriter) Prelude(streaming bool) error {
 	if !streaming || w.markerEmitted {
 		return nil
@@ -149,12 +144,10 @@ func (w *AnthropicRoutingMarkerWriter) emitPreludeEvents() error {
 }
 
 // processUpstream parses upstream SSE events, drops message_start, and shifts
-// content_block_* indices by +1. Non-indexed events (message_delta,
-// message_stop, ping, error) pass through unchanged.
+// content_block_* indices by +1; other events pass through unchanged.
 func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error) {
-	// Accumulate into a persistent buffer so an SSE event split across two
-	// Write calls is held until its terminating blank line arrives, rather
-	// than being parsed as a truncated (and silently dropped) event.
+	// Buffer across Write calls so an SSE event split mid-stream isn't parsed
+	// as truncated (and silently dropped) before its terminating blank line.
 	w.buf.Write(data)
 	for {
 		event, n := sse.SplitNext(w.buf.Bytes())

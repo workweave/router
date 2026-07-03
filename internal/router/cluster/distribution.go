@@ -11,21 +11,19 @@ type ModelShare struct {
 	Share float64 `json:"share"` // fraction in [0, 1]
 }
 
-// DistributionPoint is the projected model mix at one dial position. Share
-// values sum to 1 (modulo rounding). ProjectedCostPer1KInputUSD is the
-// share-weighted input price, the basis for the dashboard's "spend vs all-Opus"
-// readout.
+// DistributionPoint is the projected model mix at one dial position (shares
+// sum to 1, modulo rounding); ProjectedCostPer1KInputUSD is the share-weighted
+// input price for the dashboard's "spend vs all-Opus" readout.
 type DistributionPoint struct {
 	QualityBias                float64      `json:"quality_bias"`
 	Models                     []ModelShare `json:"models"`
 	ProjectedCostPer1KInputUSD float64      `json:"projected_cost_per_1k_input_usd"`
 }
 
-// defaultActiveKnobs returns a fresh copy of the bundle's default routing knobs
-// (Alpha slice cloned so callers can mutate per request without leaking into
-// the shared bundle defaults). When the bundle ships no defaults it falls back
-// to a neutral alpha of 0.53 on every cluster. Single source of truth for both
-// Route and RoutingDistribution.
+// defaultActiveKnobs returns a fresh copy of the bundle's default routing
+// knobs (Alpha/AlphaFloor cloned so callers can mutate without leaking into
+// shared defaults), falling back to alpha 0.53 on every cluster if the bundle
+// ships none. Shared by Route and RoutingDistribution.
 func (s *Scorer) defaultActiveKnobs() DefaultRoutingKnobs {
 	if s.metadata != nil && s.metadata.Training.DefaultRoutingKnobs != nil {
 		knobs := *s.metadata.Training.DefaultRoutingKnobs
@@ -46,32 +44,23 @@ func (s *Scorer) defaultActiveKnobs() DefaultRoutingKnobs {
 	return knobs
 }
 
-// defaultDistributionGrid is the dial-position count used when a caller does
-// not request a specific grid size: 21 points = steps of 0.05, fine enough for
-// the dashboard to render a smooth curve and seat the slider handle.
+// defaultDistributionGrid is the default dial-position count: 21 points = 0.05
+// steps, fine enough for a smooth dashboard curve.
 const defaultDistributionGrid = 21
 
-// RoutingDistribution projects the model mix the QualityBias dial would produce
-// across a grid of gridN evenly spaced dial positions in [0, 1].
+// RoutingDistribution projects the model mix the QualityBias dial would
+// produce across gridN evenly spaced dial positions in [0, 1].
 //
-// Each cluster centroid is treated as one representative request, routed with
-// the SAME scoring path as live traffic (dialToAlpha -> blendScoresV2 ->
-// argmax), and the winners are tallied with equal weight. This makes the
-// preview a faithful read of the routing math; what it is NOT is traffic
-// weighted — every cluster counts once regardless of how much real traffic
-// lands there, so the dashboard should frame it as the mix "across request
-// types," not "your traffic."
+// Each cluster centroid is routed once via the same scoring path as live
+// traffic (dialToAlpha -> blendScoresV2 -> argmax) and tallied with equal
+// weight, so the result is a mix "across request types," NOT traffic-weighted.
 //
-// excludedModels / excludedProviders mirror the caller's per-installation
-// exclusion lists: the preview routes over the SAME eligible pool Route would
-// (a model is dropped when it is named in excludedModels or when every one of
-// its provider bindings is excluded), so an excluded model never appears in the
-// dial preview and the cluster it would have won falls through to the next-best
-// eligible model rather than vanishing from the mix. Nil/empty sets leave the
-// full deployed roster eligible.
+// excludedModels/excludedProviders apply the same eligibility filter as
+// Route: an excluded model never appears, and its clusters fall through to
+// the next-best eligible model instead of vanishing from the mix.
 //
-// gridN < 2 falls back to defaultDistributionGrid. Returns an error for v1
-// bundles, which have no quality_means to disperse over.
+// gridN < 2 falls back to defaultDistributionGrid. Errors on v1 bundles
+// (no quality_means to disperse over).
 func (s *Scorer) RoutingDistribution(gridN int, excludedModels, excludedProviders map[string]struct{}) ([]DistributionPoint, error) {
 	if !s.isV2 {
 		return nil, fmt.Errorf("%w: routing distribution requires a v2 bundle", ErrClusterUnavailable)
@@ -82,10 +71,7 @@ func (s *Scorer) RoutingDistribution(gridN int, excludedModels, excludedProvider
 
 	k := s.centroids.K
 
-	// Eligibility is dial-independent, so resolve the exclusion-filtered pool
-	// once and reuse it across every grid step. An exclusion set that empties
-	// the pool is rejected the same way Route rejects it, rather than returning
-	// points whose shares sum to 0.
+	// Eligibility is dial-independent: resolve once and reuse per grid step.
 	eligible := s.eligibleForDistribution(excludedModels, excludedProviders)
 	if len(eligible) == 0 {
 		return nil, fmt.Errorf("exclusions leave no eligible candidates: %w", ErrNoEligibleProvider)

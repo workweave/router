@@ -75,10 +75,9 @@ func TestAnthropicSSETranslator_ForwardsOpenAICachedTokens(t *testing.T) {
 	assert.Equal(t, 64, sink.cacheRead)
 }
 
-// Cross-format upstreams (OpenAI, Gemini) only learn the real input_tokens
-// at the end of the stream, but Claude Code's subagent counter reads off
-// message_start.usage.input_tokens. Without WithEstimatedInputTokens the
-// counter shows zero tokens for every subagent turn.
+// Cross-format upstreams only learn real input_tokens at stream end, but
+// Claude Code's subagent counter reads message_start.usage.input_tokens.
+// Without WithEstimatedInputTokens it shows zero for every subagent turn.
 func TestAnthropicSSETranslator_MessageStartCarriesEstimatedInputTokens(t *testing.T) {
 	rec := httptest.NewRecorder()
 	translator := translate.NewAnthropicSSETranslator(rec, "gpt-4o", nil).
@@ -105,10 +104,8 @@ func TestAnthropicSSETranslator_MessageStartCarriesEstimatedInputTokens(t *testi
 	assert.Contains(t, startSegment, `"usage":{"input_tokens":1234,"output_tokens":0}`)
 }
 
-// Catches the Gemini cachedContentTokenCount field being dropped on its way
-// to the usage sink. Gemini implicit caching is the only signal we have that
-// caching is working at all on the Gemini path, so this number must reach
-// recordTurnUsage → session_pins / telemetry.
+// Gemini implicit caching is the only signal we have that caching works on
+// the Gemini path, so cachedContentTokenCount must reach the usage sink.
 func TestGeminiSSETranslator_ForwardsCachedContentTokenCount(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sink := &fakeUsageSink{}
@@ -132,9 +129,8 @@ func TestGeminiSSETranslator_ForwardsCachedContentTokenCount(t *testing.T) {
 	assert.Equal(t, 0, sink.cacheCreation, "Gemini reports only cache reads, not creation")
 	assert.Equal(t, 1900, sink.cacheRead)
 
-	// The serialized OpenAI chunk must carry prompt_tokens_details.cached_tokens
-	// so the downstream AnthropicSSETranslator picks it up via gjson at the
-	// path it already reads (stream.go:604).
+	// Must carry prompt_tokens_details.cached_tokens for the downstream
+	// AnthropicSSETranslator to pick up (stream.go:604).
 	body := rec.Body.String()
 	assert.Contains(t, body, `"prompt_tokens_details":{"cached_tokens":1900}`)
 }
@@ -159,12 +155,9 @@ func TestGeminiSSETranslator_NonStreamingForwardsCachedContentTokenCount(t *test
 	assert.Equal(t, 1200, sink.cacheRead)
 }
 
-// Catches the missing inputTokens field on SSETranslator: Anthropic splits
-// token counts across two events — message_start carries input_tokens,
-// message_delta carries output_tokens with no input_tokens field. Without
-// persisting the value from message_start, handleMessageDelta re-reads
-// input_tokens from the event body via gjson and gets 0, so the final
-// OpenAI chunk emitted to the client always has prompt_tokens:0.
+// Anthropic splits token counts across two events: message_start carries
+// input_tokens, message_delta carries only output_tokens. Without persisting
+// input_tokens from message_start, the final chunk's prompt_tokens is always 0.
 func TestSSETranslator_FinalChunkCarriesPromptTokensFromMessageStart(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sink := &fakeUsageSink{}
@@ -188,8 +181,7 @@ func TestSSETranslator_FinalChunkCarriesPromptTokensFromMessageStart(t *testing.
 
 	body := rec.Body.String()
 
-	// Locate the final chunk — emitted by handleMessageDelta, identified by
-	// finish_reason. This is what OpenAI SDK clients read for cost attribution.
+	// Final chunk carries finish_reason; OpenAI SDK clients read it for cost attribution.
 	chunks := strings.Split(body, "\n\n")
 	var finalChunk string
 	for _, chunk := range chunks {
@@ -204,10 +196,9 @@ func TestSSETranslator_FinalChunkCarriesPromptTokensFromMessageStart(t *testing.
 	assert.Contains(t, finalChunk, `"total_tokens":59`)
 }
 
-// Catches the sink accumulation across the full message_start → message_delta
-// sequence. The UsageExtractor guards RecordUsage with if value > 0, so
-// input tokens recorded in handleMessageStart must not be overwritten by the
-// zero value re-read in handleMessageDelta.
+// UsageExtractor guards RecordUsage with if value > 0, so input tokens from
+// handleMessageStart must not be overwritten by the zero re-read in
+// handleMessageDelta.
 func TestSSETranslator_SinkAccumulatesInputAndOutputAcrossStream(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sink := &fakeUsageSink{}

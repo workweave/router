@@ -55,10 +55,8 @@ func TestParseForceModelCommand_ForceModel(t *testing.T) {
 			wantFound: false,
 		},
 		{
-			// Security guard: a /force-model anywhere other than the leading
-			// non-empty line is ignored. Pasted content (snippets, transcripts,
-			// log dumps) frequently contains lines starting with "/" and must
-			// not silently rewrite session routing.
+			// Only a leading /force-model triggers; pasted content often has
+			// lines starting with "/" and must not rewrite session routing.
 			name:      "command after leading text is ignored",
 			input:     "Please help me.\n/force-model gemini-2.5-pro",
 			wantFound: false,
@@ -88,9 +86,8 @@ func TestParseForceModelCommand_ForceModel(t *testing.T) {
 			wantStripped: "",
 		},
 		{
-			// Claude Code injects <system-reminder> blocks ahead of the user's
-			// typed text. The command must still be recognized; injected blocks
-			// must be preserved in the stripped output.
+			// Injected <system-reminder> blocks must not block recognition
+			// and must be preserved in the stripped output.
 			name:         "leading system-reminder before command",
 			input:        "<system-reminder>be helpful</system-reminder>\n/force-model gpt-5",
 			wantModel:    "gpt-5",
@@ -119,9 +116,8 @@ func TestParseForceModelCommand_ForceModel(t *testing.T) {
 			wantFound: false,
 		},
 		{
-			// Tags with attributes are not part of Claude Code's injection set
-			// and must not unlock the guard — they may originate from pasted
-			// HTML/XML content.
+			// Attributed tags aren't part of Claude Code's injection set and
+			// may be pasted HTML/XML, so they must not unlock the guard.
 			name:      "tag with attributes does not unlock leading-line guard",
 			input:     "<div class=\"x\">hi</div>\n/force-model gpt-5",
 			wantFound: false,
@@ -204,10 +200,8 @@ func TestExtractForceModelCommand_ArrayContent(t *testing.T) {
 }
 
 func TestExtractForceModelCommand_ArrayContentMultipleTextBlocks(t *testing.T) {
-	// Claude Code clients sometimes split a slash-command turn into multiple
-	// text blocks: one carries the injected <command-name>/<command-args>
-	// tags, and the typed directive lands in a separate block. The parser
-	// must scan every text block, not just the first.
+	// The directive can land in a non-first text block (e.g. after an
+	// injected <command-name> block), so the parser must scan all of them.
 	body := mustMarshalJSON(t, map[string]any{
 		"model": "claude-sonnet-4-6",
 		"messages": []any{

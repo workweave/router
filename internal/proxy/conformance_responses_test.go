@@ -1,9 +1,8 @@
 package proxy_test
 
-// OpenAI Responses API (/v1/responses) conformance cases. Reasoning gpt-5.x with
-// tools routes here instead of /v1/chat/completions. These guard router #331
-// (the request MUST stream upstream, or the header-timeout hang returns) and the
-// Responses-SSE -> Anthropic translation, plus the #328 medium-effort promotion.
+// OpenAI Responses API conformance: reasoning gpt-5.x + tools routes here
+// instead of chat/completions. Guards #331 (must stream upstream) and #328
+// (medium-effort promotion).
 
 import (
 	"net/http"
@@ -26,9 +25,7 @@ func TestConformance_OpenAIResponses(t *testing.T) {
 
 	cases := []conformanceCase{
 		{
-			// Streaming client: full Responses-SSE -> Anthropic translation
-			// (reasoning->thinking, output_text->text, function_call->tool_use)
-			// plus the load-bearing stream:true guard.
+			// Full Responses-SSE -> Anthropic translation plus the load-bearing stream:true guard.
 			name:            "responses/toolcall_stream",
 			provider:        providers.ProviderOpenAI,
 			model:           "gpt-5.5",
@@ -74,10 +71,8 @@ func TestConformance_OpenAIResponses(t *testing.T) {
 			},
 		},
 		{
-			// Strict-decode prevention layer: every strictifiable tool schema
-			// must go out with strict:true + the strictified parameters
-			// (additionalProperties:false, all-required, optionals nullable),
-			// so gpt-5.x grammar-constrains tool arguments at decode time.
+			// Strictifiable schemas must go out strict:true, additionalProperties:false,
+			// all-required, optionals as null unions.
 			name:            "responses/strict_tools",
 			provider:        providers.ProviderOpenAI,
 			model:           "gpt-5.5",
@@ -102,10 +97,8 @@ func TestConformance_OpenAIResponses(t *testing.T) {
 			},
 		},
 		{
-			// toolcheck on the Responses path: a truncated function_call
-			// arguments payload (missing closing brace in both the deltas and
-			// the terminal item) is deterministically repaired before reaching
-			// the client. The golden pins the closed, valid input.
+			// toolcheck must repair a truncated function_call arguments payload
+			// (missing closing brace) before it reaches the client.
 			name:            "responses/invalid_toolcall",
 			provider:        providers.ProviderOpenAI,
 			model:           "gpt-5.5",

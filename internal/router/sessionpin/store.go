@@ -1,6 +1,5 @@
 // Package sessionpin defines the inner-ring contract for session-sticky
-// routing pins. Pure types + interface; the Postgres adapter lives in
-// internal/postgres.
+// routing pins (pure types + interface); the Postgres adapter lives in internal/postgres.
 package sessionpin
 
 import (
@@ -18,38 +17,29 @@ const SessionKeyLen = 16
 // turn-type detector can land non-breakingly.
 const DefaultRole = "default"
 
-// Pin is one row in the session-pin table. Mirrors a routing decision
-// so a hit can rehydrate router.Decision without re-running the scorer.
+// Pin is one row in the session-pin table, mirroring a routing decision so a
+// hit can rehydrate router.Decision without re-running the scorer.
 //
-// Last*Tokens / LastTurnEndedAt record the previous turn's upstream usage
-// and are written by Store.UpdateUsage after a turn completes. They are
-// deliberately left untouched by Upsert so an at-start-of-turn refresh
-// cannot clobber them with zeros.
+// Last*Tokens / LastTurnEndedAt hold the previous turn's usage, written by
+// Store.UpdateUsage; Upsert leaves them untouched so a start-of-turn refresh
+// can't clobber them with zeros.
 //
-// ConsecutiveUpstreamErrors counts consecutive turns ending in a
-// non-retryable upstream error (4xx other than 408/429). The turn loop
-// increments via Store.IncrementUpstreamErrors after a sticky-pinned
-// turn fails and evicts the pin once the count hits the two-strike
-// threshold; Store.ResetUpstreamErrors clears it on any successful
-// turn. Upsert preserves it on a same-model refresh and resets it on
-// a switch (different model).
+// ConsecutiveUpstreamErrors counts consecutive non-retryable upstream errors
+// (4xx other than 408/429); IncrementUpstreamErrors bumps it and the turn loop
+// evicts at the two-strike threshold. Upsert preserves it on a same-model
+// refresh, resets it on a model switch.
 type Pin struct {
 	SessionKey     [SessionKeyLen]byte
 	Role           string
 	InstallationID uuid.UUID
 	Provider       string
 	Model          string
-	// PairedProvider / PairedModel are the other half of the band pair the
-	// scorer picks (the runner-up model and its provider). Upsert refreshes them
-	// on a genuine scorer re-run (first turn, switch, expired-pin re-route),
-	// preserves them on a same-model sticky refresh or re-anchor (which pass an
-	// empty pair), and clears them when the pinned model changes without a fresh
-	// pair (force-model, loop-break, eviction) — so the stored pair always
-	// matches the live routing decision and never collapses onto Model.
-	// PairedModel is empty for pins created outside the scorer path (force-model,
-	// loop-break) or when only one model was eligible. A later per-turn policy
-	// reads them to swap between {Model, PairedModel} without re-running the
-	// scorer.
+	// PairedProvider/PairedModel are the scorer's runner-up pick, refreshed by
+	// Upsert on a genuine scorer re-run, preserved on a same-model refresh, and
+	// cleared on a model change without a fresh pair (force-model, loop-break,
+	// eviction) so the stored pair never goes stale. Empty for non-scorer pins
+	// or single-candidate routing; a later per-turn policy swaps between the
+	// pair without re-scoring.
 	PairedProvider            string
 	PairedModel               string
 	Reason                    string
@@ -63,19 +53,16 @@ type Pin struct {
 	LastOutputTokens          int
 	LastTurnEndedAt           time.Time
 	ConsecutiveUpstreamErrors int
-	// LastServedModel is the model that actually served the previous turn,
-	// written by Store.UpdateUsage (post-turn) and left untouched by Upsert.
-	// A /force-model pin overwrites Model via Upsert but not this field, so
-	// the next turn can compare it against the new target model to detect a
-	// mid-session model switch (and strip Anthropic thinking-block signatures
-	// the new model would otherwise reject with a 400).
+	// LastServedModel is the model that served the previous turn (written by
+	// UpdateUsage, untouched by Upsert). Comparing it to the new target model
+	// detects a mid-session switch, so stale Anthropic thinking-block
+	// signatures that would 400 on the new model get stripped.
 	LastServedModel string
-	// HasEverSwitched latches true the first time this session served a model
-	// different from the prior LastServedModel. It stays set for the life of
-	// the pin and is flipped atomically inside Store.UpdateUsage. The emit
-	// path ORs it into ModelSwitched so the stale-signed thinking blocks an
-	// earlier cross-model excursion left in the client transcript are stripped
-	// on every subsequent turn, not just the single switch-back turn.
+	// HasEverSwitched latches true (in UpdateUsage) the first time the session
+	// serves a model different from LastServedModel, and stays set for the
+	// pin's life. The emit path ORs it into ModelSwitched so stale-signed
+	// thinking blocks from an earlier cross-model excursion are stripped on
+	// every later turn, not just the one the switch happened on.
 	HasEverSwitched bool
 }
 
@@ -91,15 +78,12 @@ type Usage struct {
 }
 
 // Store is the I/O surface for session pins. Get returns (zero, false, nil)
-// when no row exists. UpdateUsage, IncrementUpstreamErrors, and
-// ResetUpstreamErrors are no-ops when the pin has been evicted or never
-// existed.
+// when no row exists; UpdateUsage/IncrementUpstreamErrors/ResetUpstreamErrors
+// are no-ops on an evicted or missing pin.
 //
-// IncrementUpstreamErrors atomically increments the consecutive-error
-// counter on the existing pin and returns the new count, so the turn
-// loop can apply a two-strike eviction without a read-modify-write race
-// across pods. Returns (0, nil) for a missing pin — the caller treats
-// that as "pin already evicted" rather than an error.
+// IncrementUpstreamErrors atomically bumps the error counter and returns the
+// new count so the turn loop can two-strike-evict without a cross-pod
+// read-modify-write race; it returns (0, nil) for a missing pin.
 type Store interface {
 	Get(ctx context.Context, sessionKey [SessionKeyLen]byte, role string) (Pin, bool, error)
 	Upsert(ctx context.Context, p Pin) error

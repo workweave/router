@@ -29,12 +29,10 @@ const anthropicMessageSSE = "event: message_start\ndata: {\"type\":\"message_sta
 	"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n" +
 	"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 
-// TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic wires the real
-// dispatch path against stub upstreams and asserts the in-turn baseline
-// failover: when the router cost-routes a `claude-opus-4-8` request to an OSS
-// model (deepseek/deepseek-v4-pro) and every OSS binding fails (the Redwood
-// demo's Fireworks-503 → OpenRouter-down double outage), the turn re-dispatches
-// the requested model on Anthropic instead of surfacing "model may not exist".
+// TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic: when a cost-routed
+// OSS model (deepseek/deepseek-v4-pro) fails on every binding, the turn
+// re-dispatches the requested model (claude-opus-4-8) on Anthropic instead of
+// surfacing "model may not exist" (the Redwood demo double outage).
 func TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 	var (
 		mu                     sync.Mutex
@@ -125,10 +123,9 @@ func TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-8", store.usages[len(store.usages)-1].ServedModel, "pin usage records the served baseline model")
 }
 
-// TestProxyMessages_OSSOutageNoBaselineWhenRequestedModelIsOSS asserts the
-// guard: when the caller themselves requested the OSS model (so the baseline
-// equals the routed model), exhaustion surfaces the upstream error envelope —
-// baseline failover does NOT fire and does not mask the real failure.
+// TestProxyMessages_OSSOutageNoBaselineWhenRequestedModelIsOSS: when the caller
+// requested the OSS model directly (baseline == routed model), exhaustion
+// surfaces the real upstream error instead of masking it via failover.
 func TestProxyMessages_OSSOutageNoBaselineWhenRequestedModelIsOSS(t *testing.T) {
 	var anthropicCount int
 	anthropicUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -168,10 +165,9 @@ func TestProxyMessages_OSSOutageNoBaselineWhenRequestedModelIsOSS(t *testing.T) 
 	assert.Equal(t, 0, anthropicCount, "baseline failover must not fire when the caller requested the OSS model")
 }
 
-// TestProxyMessages_OSSOutageNoBaselineWhenAnthropicExcluded asserts the
-// provider-exclusion contract: when the installation excludes Anthropic,
-// baseline failover must NOT defer the OSS error to an Anthropic retry it can
-// never run — the original upstream error surfaces and Anthropic is never hit.
+// TestProxyMessages_OSSOutageNoBaselineWhenAnthropicExcluded: when Anthropic is
+// excluded, baseline failover must not retry against it — the original
+// upstream error surfaces instead.
 func TestProxyMessages_OSSOutageNoBaselineWhenAnthropicExcluded(t *testing.T) {
 	var anthropicCount int
 	anthropicUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -211,10 +207,9 @@ func TestProxyMessages_OSSOutageNoBaselineWhenAnthropicExcluded(t *testing.T) {
 	assert.NotEqual(t, providers.ProviderAnthropic, rec.Header().Get(proxy.HeaderRouterProvider), "served provider must not be the excluded Anthropic")
 }
 
-// TestProxyMessages_FailedBaselineReportsAnthropicProvider asserts that when
-// both the OSS bindings AND the Anthropic baseline retry fail, the telemetry
-// row pairs the baseline (Anthropic) model with the Anthropic provider — not
-// the OSS primary that never served that model.
+// TestProxyMessages_FailedBaselineReportsAnthropicProvider: when both the OSS
+// bindings and the Anthropic baseline retry fail, telemetry must pair the
+// baseline model with the Anthropic provider, not the OSS primary.
 func TestProxyMessages_FailedBaselineReportsAnthropicProvider(t *testing.T) {
 	fail := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

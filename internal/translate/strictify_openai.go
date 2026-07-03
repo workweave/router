@@ -20,33 +20,25 @@ var strictifyBailKeywords = []string{
 	"dependentSchemas", "unevaluatedProperties", "unevaluatedItems", "prefixItems",
 }
 
-// strictifyDropKeywords are constraint keywords strict mode rejects; they are
-// stripped from the node and appended to its description so the model still
-// sees the constraint as guidance. Order fixes the appended-text order.
+// strictifyDropKeywords are constraints strict mode rejects; they're stripped
+// from the node and appended to its description as guidance instead.
 var strictifyDropKeywords = []string{
 	"format", "pattern", "default", "examples",
 	"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
 	"minLength", "maxLength", "minItems", "maxItems", "uniqueItems",
 	"minProperties", "maxProperties",
-	// Key/membership constraints strict mode rejects outright. propertyNames
-	// in particular rode through untouched and 400'd the whole request
-	// ("'propertyNames' is not permitted") for any session carrying the
+	// propertyNames rode through untouched and 400'd requests carrying the
 	// playwright MCP tools (browser_drop) on the gpt-5.x Responses path.
 	"propertyNames", "contains", "minContains", "maxContains", "dependentRequired",
 }
 
-// strictifyOpenAISchema converts a tool input_schema (already $ref-inlined by
-// inlineSchemaDefs) into the subset OpenAI structured outputs requires for
-// `strict:true` function tools: additionalProperties:false on every object,
-// every property required, and originally-optional properties made nullable
-// (type union with "null") so the call can still omit them semantically.
-// Constraint keywords strict mode rejects are moved into descriptions.
+// strictifyOpenAISchema converts a $ref-inlined tool input_schema into the
+// subset OpenAI strict mode requires: additionalProperties:false everywhere,
+// all properties required (optional ones made nullable instead), and rejected
+// constraint keywords moved into descriptions.
 //
-// Returns ok=false when the schema cannot be faithfully strictified (root is
-// not an object schema, bail keywords like oneOf / unresolved $ref are
-// present, or size limits are exceeded); the caller then emits the original
-// schema without strict. The input is never mutated — the result is a deep
-// transform over a copy.
+// Returns ok=false if the schema can't be strictified (non-object root, bail
+// keywords, unresolved $ref, or size limits exceeded). Input is never mutated.
 func strictifyOpenAISchema(schema any) (out any, ok bool) {
 	root, isMap := schema.(map[string]any)
 	if !isMap {
@@ -184,9 +176,8 @@ func strictifyNode(node map[string]any, depth int, propCount *int) (out map[stri
 	return res, true
 }
 
-// makeNullable rewrites a property schema so null is an accepted value:
-// strict mode requires every property listed in `required`, so optionality is
-// expressed as a null union instead of omission.
+// makeNullable adds null as an accepted type: strict mode requires every
+// property in `required`, so optionality is expressed via null union instead.
 func makeNullable(node map[string]any) map[string]any {
 	switch t := node["type"].(type) {
 	case string:

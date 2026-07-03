@@ -101,8 +101,7 @@ func TestCheckBalance_Override(t *testing.T) {
 	res, err := svc.CheckBalance(context.Background(), "org_x")
 	require.NoError(t, err)
 	assert.True(t, res.HasOverride)
-	// When override is active the service must not bother reading the
-	// balance — the middleware doesn't need it and the row may be missing.
+	// Override path skips the balance read entirely; the row may be missing.
 	assert.Equal(t, int64(0), res.BalanceMicros, "balance must be skipped on override path")
 }
 
@@ -123,10 +122,8 @@ func TestCheckBalance_MissingRowPropagates(t *testing.T) {
 }
 
 func TestDebitForInference_MatchesExportedCostMath(t *testing.T) {
-	// The debit hook must compute the same notional cost as the OTel
-	// emitter and telemetry writer — they all go through the exported
-	// pricing functions now. If this drifts the customer sees a billed
-	// amount different from the dashboard cost.
+	// Debit cost must match the OTel emitter/telemetry writer (same pricing
+	// funcs) — drift means the billed amount diverges from the dashboard.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
@@ -153,9 +150,8 @@ func TestDebitForInference_MatchesExportedCostMath(t *testing.T) {
 }
 
 func TestDebitForInference_OverrideWritesZeroDeltaWithNotional(t *testing.T) {
-	// Override path: ledger row must record the would-be charge in
-	// notional_cost_micros while leaving the balance untouched. This is
-	// the shadow billing trail the plan requires for capacity planning.
+	// Override: ledger records the would-be charge in notional_cost_micros
+	// but leaves balance untouched — the shadow trail for capacity planning.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 0}
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
@@ -176,9 +172,8 @@ func TestDebitForInference_OverrideWritesZeroDeltaWithNotional(t *testing.T) {
 }
 
 func TestDebitForInference_SubscriptionDebitsNothing(t *testing.T) {
-	// Served on the customer's own subscription: their plan already covers the
-	// tokens, so Weave charges nothing — the ledger debits 0 while the notional
-	// row still records the full would-be cost as a shadow trail.
+	// Subscription-served: the customer's plan covers the tokens, so the debit
+	// is 0 while notional still records the full would-be cost as a shadow trail.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
@@ -224,10 +219,8 @@ func TestDebitForInference_OverrideBeatsSubscription(t *testing.T) {
 }
 
 func TestDebitForInference_BalanceCanGoNegative(t *testing.T) {
-	// Concurrent-debit semantics: when two requests pass preflight with a
-	// thin balance and both debit, the second goes negative. The Service
-	// must accept this — no balance>=amount guard. The middleware's
-	// min-balance threshold bounds the typical dip.
+	// Two concurrent debits against a thin balance: the Service has no
+	// balance>=amount guard, so the second goes negative by design.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 500_000} // $0.50
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
@@ -249,10 +242,8 @@ func TestDebitForInference_BalanceCanGoNegative(t *testing.T) {
 }
 
 func TestDebitForInference_ZeroTokensYieldsZeroCharge(t *testing.T) {
-	// A real failure mode: upstream returns 0-token usage (timeouts, 5xx
-	// before any tokens were produced). Notional must be 0 and balance
-	// unchanged — billing the customer for "0 tokens worth of cost" would
-	// be confusing.
+	// 0-token usage (timeout/5xx before generation) must yield 0 notional
+	// cost and leave the balance unchanged.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 5_000_000}
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
@@ -278,9 +269,8 @@ func TestDebitForInference_RepoErrorPropagates(t *testing.T) {
 }
 
 func TestDebitForInference_AttributesAPIKey(t *testing.T) {
-	// The api_key_id and the negative delta both flow to the repo so the CTE
-	// can bump the key's lifetime spent counter by the debit magnitude. On a
-	// real debit spent should grow by exactly the notional charge (= -delta).
+	// api_key_id and delta flow to the repo's CTE, which bumps the key's
+	// lifetime spend by the debit magnitude (-delta).
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
