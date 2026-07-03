@@ -19,10 +19,8 @@ import (
 // stall the request that triggered the settings change.
 const notifyTimeout = 2 * time.Second
 
-// replicaSubscriptionTTL is the expiration policy applied to per-replica
-// subscriptions. If a replica crashes without running its deferred cleanup,
-// the subscription is reclaimed by GCP after this idle window so leaked
-// subscriptions can't accumulate forever.
+// replicaSubscriptionTTL reclaims subscriptions leaked by replicas that
+// crash before running their deferred cleanup.
 const replicaSubscriptionTTL = 24 * time.Hour
 
 // subscriptionDeleteTimeout bounds the cleanup call during shutdown so a slow
@@ -40,8 +38,7 @@ func NewInvalidationNotifier(publisher *gcppubsub.Publisher) *InvalidationNotifi
 }
 
 // NotifyInstallationChanged publishes installationID on the invalidation topic.
-// Fire-and-forget: errors are logged and dropped because the write has already
-// committed and TTL is the cross-replica safety net.
+// Fire-and-forget: the write already committed, so failures just log and rely on cache TTL.
 func (n *InvalidationNotifier) NotifyInstallationChanged(installationID string) {
 	if installationID == "" {
 		return
@@ -60,16 +57,14 @@ func (n *InvalidationNotifier) NotifyInstallationChanged(installationID string) 
 	}()
 }
 
-// Stop flushes any buffered messages and shuts the publisher's background
-// goroutines down. Must be called during graceful shutdown — Client.Close()
-// does not stop publishers.
+// Stop flushes buffered messages and shuts the publisher down. Must be
+// called on graceful shutdown — Client.Close() does not stop publishers.
 func (n *InvalidationNotifier) Stop() {
 	n.publisher.Stop()
 }
 
 // InvalidationListener subscribes to the invalidation topic and forwards every
-// payload to the local cache. Pub/Sub's built-in retry handles transient failures;
-// under a sustained outage the cache TTL acts as the safety net.
+// payload to the local cache; cache TTL is the fallback under sustained outages.
 type InvalidationListener struct {
 	subscriber *gcppubsub.Subscriber
 	cache      auth.APIKeyCache
@@ -107,17 +102,10 @@ func (l *InvalidationListener) Run(ctx context.Context) {
 func (l *InvalidationListener) Wait() { <-l.done }
 
 // CreateReplicaSubscription provisions a per-replica subscription on topicID so
-// every replica receives every invalidation message. A shared subscription
-// would load-balance — only one replica would see each message — defeating
-// the cross-fleet broadcast we need for cache invalidation.
-//
-// The subscription name is "<prefix>-<uuid>" so concurrent replicas don't
-// collide. An expiration policy is set so subscriptions leaked by crashed
-// replicas are reclaimed automatically.
-//
-// Returns the fully-qualified subscription name and a cleanup func that
-// deletes the subscription. Cleanup uses context.Background() internally so
-// shutdown completes even when the parent context is already canceled.
+// every replica sees every invalidation message — a shared subscription would
+// load-balance and defeat the broadcast. Returns the subscription name and a
+// cleanup func; cleanup uses context.Background() so it still runs if the
+// caller's context is already canceled at shutdown.
 func CreateReplicaSubscription(
 	ctx context.Context,
 	client *gcppubsub.Client,

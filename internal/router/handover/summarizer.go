@@ -1,12 +1,10 @@
-// Package handover defines the contract for bounded-cost context handover
-// when the planner switches models mid-session. The provider-backed
-// implementation lives in internal/proxy; this package only declares the
-// interface and envelope-rewrite helpers so inner-ring code can describe
-// the operation without an I/O dependency.
+// Package handover declares the interface and envelope-rewrite helpers for
+// bounded-cost context handover when the planner switches models mid-session
+// (provider-backed implementation lives in internal/proxy).
 //
-// Why: switching mid-session forces a prompt-cache miss on the full prior
-// context. Summarizing and replacing history with [summary, latestUser]
-// bounds switch-turn input cost regardless of session length.
+// Switching mid-session forces a prompt-cache miss on the full prior context;
+// replacing history with [summary, latestUser] bounds switch-turn input cost
+// regardless of session length.
 package handover
 
 import (
@@ -15,10 +13,9 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// Usage captures the upstream token counts of a Summarize call so callers
-// can record a separate billing ledger row for the summary turn alongside
-// the main inference debit. Zero values mean no usage was reported (e.g.
-// fallback path or implementation that doesn't track tokens).
+// Usage captures the upstream token counts of a Summarize call so callers can
+// bill the summary turn separately from the main inference debit. Zero
+// values mean usage wasn't reported.
 type Usage struct {
 	InputTokens   int
 	OutputTokens  int
@@ -30,18 +27,15 @@ type Usage struct {
 	Provider string
 }
 
-// Summarizer produces a prose summary of the prior conversation for
-// seeding a new model's context after a router switch.
+// Summarizer produces a prose summary of the prior conversation for seeding
+// a new model's context after a router switch.
 //
-// Implementations SHOULD respect the context deadline. On timeout or
-// error, callers pass the full prior history through unchanged rather than
-// dropping it. Usage is reported on success; on error it is the zero value.
+// Implementations SHOULD respect the context deadline; on timeout or error,
+// callers keep the full prior history unchanged instead of dropping it.
 //
-// Provider returns the upstream provider this summarizer dispatches to
-// (e.g. "anthropic"). The orchestrator uses this to plumb matching
-// client/BYOK creds through so summarization can run on the caller's
-// own account when the request is BYOK or carries client-supplied keys,
-// avoiding tenant data crossing the deployment key boundary.
+// Provider identifies the upstream this summarizer dispatches to (e.g.
+// "anthropic"), so the orchestrator can plumb matching BYOK creds through
+// and keep tenant data from crossing the deployment key boundary.
 type Summarizer interface {
 	Summarize(ctx context.Context, env *translate.RequestEnvelope) (summary string, usage Usage, err error)
 	Provider() string
@@ -49,9 +43,7 @@ type Summarizer interface {
 
 // RewriteEnvelope mutates env in-place: keeps system blocks, replaces
 // messages with [assistantSummary, latestUser]. Returns the number of
-// original messages elided.
-//
-// Pure: no I/O. Returns 0 when env is nil or the message array is missing/empty.
+// messages elided (0 if env is nil or has no messages).
 func RewriteEnvelope(env *translate.RequestEnvelope, summary string) int {
 	if env == nil {
 		return 0
@@ -59,18 +51,12 @@ func RewriteEnvelope(env *translate.RequestEnvelope, summary string) int {
 	return env.RewriteForHandover(summary)
 }
 
-// TrimLastN is a bounded-trim primitive that keeps the most recent n
-// non-system messages plus system blocks; n <= 0 is treated as 3. Returns
-// the number of messages elided.
+// TrimLastN keeps the most recent n non-system messages plus system blocks
+// (n <= 0 treated as 3) and returns the number elided; 0 if env is nil.
 //
-// NOTE: this is no longer the handover failure path — on summarizer failure
-// the orchestrator keeps the full prior history rather than trimming, because
-// silently dropping the conversation a switched-to model needs is worse than a
-// pricier switch turn. Retained as a primitive for a future context-window
-// overflow guard (trim only when full history would exceed the target model's
-// context window).
-//
-// Pure: no I/O. Returns 0 when env is nil.
+// No longer used on the handover failure path — summarizer failure now keeps
+// full history instead of trimming. Retained for a future context-window
+// overflow guard.
 func TrimLastN(env *translate.RequestEnvelope, n int) int {
 	if env == nil {
 		return 0

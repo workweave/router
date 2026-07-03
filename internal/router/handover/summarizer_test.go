@@ -14,11 +14,8 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// anthropicConversation is a representative 6-message conversation:
-// top-level system, two user turns, two assistant turns, and a trailing
-// user tool_result follow-up. RewriteEnvelope must preserve system on
-// the separate top-level field and collapse messages to
-// [summary, lastUser].
+// anthropicConversation: system + 2 user + 2 assistant turns + trailing
+// tool_result. RewriteEnvelope must collapse messages to [summary, lastUser].
 const anthropicConversation = `{
   "model": "claude-opus-4-7",
   "system": "You are a careful assistant.",
@@ -137,9 +134,7 @@ func TestRewriteEnvelope_OpenAIPreservesLeadingSystemMessages(t *testing.T) {
 func TestTrimLastN_KeepsLastNMessagesAndSystem(t *testing.T) {
 	t.Parallel()
 
-	// Anthropic-shape conversation with 10 messages; system on the
-	// top-level field stays untouched. TrimLastN(3) keeps the last 3,
-	// eliding 7.
+	// 10 messages; TrimLastN(3) keeps the last 3, eliding 7.
 	const tenMessageBody = `{
   "model": "claude-opus-4-7",
   "system": "sys",
@@ -208,9 +203,8 @@ func TestTrimLastN_NilEnvelopeReturnsZero(t *testing.T) {
 func TestTrimLastN_StripsOrphanedAnthropicToolResults(t *testing.T) {
 	t.Parallel()
 
-	// 5 messages: user text, assistant with tool_use, user with tool_result,
-	// assistant text, user text. TrimLastN(3) keeps the last 3, which starts
-	// with the user tool_result whose matching tool_use was trimmed.
+	// TrimLastN(3) keeps the last 3, starting with a tool_result whose
+	// matching tool_use gets trimmed away.
 	const body = `{
   "model": "claude-opus-4-7",
   "messages": [
@@ -333,15 +327,13 @@ func TestRewriteEnvelope_StripsToolResultsFromLatestUser(t *testing.T) {
 	assert.Equal(t, "assistant", msgs[0].Get("role").String())
 }
 
-// Regression test for the exact failure path observed in production:
-// mid-session model switch triggers TrimLastN → orphaned tool_result blocks
-// survive into the Anthropic→Gemini translation → empty function_response.name
-// → Gemini 400.
+// Regression: mid-session model switch + TrimLastN can orphan tool_result
+// blocks, which the Anthropic→Gemini translation turned into an empty
+// functionResponse.name (Gemini 400).
 func TestTrimLastN_ThenPrepareGemini_NoEmptyFunctionResponseName(t *testing.T) {
 	t.Parallel()
 
-	// Simulates a Conductor/Claude-Code session with multiple tool-use rounds
-	// followed by a text turn. TrimLastN(3) orphans the tool_result in msg[4].
+	// TrimLastN(3) orphans the tool_result in msg[4].
 	const body = `{
   "model": "claude-opus-4-7",
   "system": "You are a helpful assistant.",

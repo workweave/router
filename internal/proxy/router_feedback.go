@@ -32,22 +32,17 @@ type RouterFeedbackEvent struct {
 	SessionID      string
 	RequestedModel string
 	ServedModel    string
-	// Rating is the thumbs verdict ("up", "down", or "" for a note-only
-	// submission), parsed from the /rf+ /rf- shortcuts or a leading verdict
-	// token in the note.
+	// Rating is the thumbs verdict ("up", "down", or "" for note-only),
+	// parsed from /rf+ /rf- or a leading verdict token in the note.
 	Rating string
-	// Feedback is the human-readable submission persisted to
-	// router.router_feedback. When the user gave only a verdict, it carries a
-	// compact label ("👍" / "👎") so the column is never empty and stays
-	// self-describing without a dedicated rating column.
+	// Feedback is the persisted submission text; verdict-only submissions
+	// get a compact emoji so the column is never empty.
 	Feedback string
 }
 
-// handleRouterFeedbackCommand processes a /router-feedback directive: it
-// persists the feedback to router.router_feedback, emits a router.feedback
-// telemetry span (the same OTel pipeline the per-request decision/upstream
-// spans ride, so the WorkWeave backend ingests it like any other event), and
-// returns a synthetic acknowledgment without dispatching to any upstream.
+// handleRouterFeedbackCommand persists a /router-feedback submission, emits a
+// router.feedback span on the standard OTel pipeline, and returns a synthetic
+// acknowledgment without dispatching to any upstream.
 func (s *Service) handleRouterFeedbackCommand(
 	ctx context.Context,
 	w http.ResponseWriter,
@@ -63,10 +58,8 @@ func (s *Service) handleRouterFeedbackCommand(
 	feedback := strings.TrimSpace(cmd.Feedback)
 	rating := cmd.Rating
 	if rating == "" && feedback == "" {
-		// Nothing actionable: no verdict and no note. Acknowledgment text is
-		// formatted as a routing marker so the existing
-		// StripRoutingMarkerFromMessages ingress stripper removes it from
-		// subsequent inbound requests (see handleForceModelCommand).
+		// No verdict and no note. Message is formatted as a routing marker so
+		// StripRoutingMarkerFromMessages strips it from later requests.
 		msg := "✦ **Weave Router** → Router-feedback needs a verdict or a note, e.g. /rf+ or /rf- too slow.\n\n"
 		if env.SourceFormat() == translate.FormatOpenAI {
 			msg = "Weave Router: router-feedback needs a verdict or a note, e.g. /rf+ or /rf- too slow."
@@ -105,9 +98,8 @@ func (s *Service) handleRouterFeedbackCommand(
 			Rating:         rating,
 			Feedback:       persistedFeedbackText(rating, feedback),
 		}
-		// context.Background(): the request ctx may already be canceled by the
-		// time this runs (client disconnected mid-command). Feedback the user
-		// explicitly typed must not be dropped on a canceled context.
+		// context.Background(): ctx may already be canceled (client disconnected
+		// mid-command); don't drop feedback the user explicitly typed.
 		if err := s.feedbackStore.InsertRouterFeedback(context.Background(), event); err != nil {
 			log.Error("/router-feedback: feedback insert failed", "err", err)
 			return err
@@ -146,10 +138,9 @@ func (s *Service) handleRouterFeedbackCommand(
 	return writeSyntheticCommandResponse(w, env, routerFeedbackAck(env.SourceFormat(), rating), inputTokens)
 }
 
-// routerFeedbackAck renders the synthetic acknowledgment for a recorded
-// submission, echoing the verdict so the user sees their rating landed. The
-// Anthropic-format ack is wrapped as a routing marker so the existing ingress
-// stripper removes it from subsequent turns.
+// routerFeedbackAck renders the acknowledgment, echoing the verdict. The
+// Anthropic-format ack is wrapped as a routing marker so it gets stripped
+// from subsequent turns.
 func routerFeedbackAck(format translate.Format, rating string) string {
 	verdict := ""
 	switch rating {
@@ -165,8 +156,7 @@ func routerFeedbackAck(format translate.Format, rating string) string {
 }
 
 // persistedFeedbackText is the value written to router.router_feedback.feedback.
-// A verdict-only submission stores a compact emoji so the NOT NULL column is
-// never empty and stays self-describing.
+// Verdict-only submissions get a compact emoji so the NOT NULL column is never empty.
 func persistedFeedbackText(rating, feedback string) string {
 	if feedback != "" {
 		return feedback
@@ -181,9 +171,7 @@ func persistedFeedbackText(rating, feedback string) string {
 }
 
 // writeSyntheticCommandResponse writes a router-command acknowledgment in the
-// inbound wire format without dispatching upstream. inputTokens is the
-// request's RoutingFeatures.Tokens so the client's token counter reflects the
-// actual turn input.
+// inbound wire format without dispatching upstream.
 func writeSyntheticCommandResponse(w http.ResponseWriter, env *translate.RequestEnvelope, msg string, inputTokens int) error {
 	switch env.SourceFormat() {
 	case translate.FormatOpenAI:

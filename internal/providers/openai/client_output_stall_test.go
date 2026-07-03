@@ -1,16 +1,13 @@
 package openai_test
 
-// Guards the OUTPUT-progress watchdog — the second half of the gpt-5.x stall
-// protection, distinct from the byte-idle watchdog in client_stall_test.go.
-// Prod incident 2026-06-16: a /v1/responses stream stayed byte-alive (reasoning
-// deltas / keepalives kept the byte-idle watchdog reset) yet produced ZERO
-// output tokens until the router's 600s cap. The byte-idle watchdog cannot
-// catch that — only a watchdog that measures time-since-last-OUTPUT can. The
-// translator reports output progress via ArmOutputProgress; these tests stand
-// in a fake writer for it so the client half is pinned independently: a
-// byte-alive/output-silent stream aborts at the output-stall budget with a
-// retryable ErrUpstreamOutputStall, while a stream whose writer keeps marking
-// output progress is never aborted.
+// Guards the OUTPUT-progress watchdog, the second half of gpt-5.x stall
+// protection (distinct from the byte-idle watchdog in client_stall_test.go).
+// Prod incident 2026-06-16: a stream stayed byte-alive (keepalives reset the
+// byte-idle watchdog) yet produced ZERO output tokens until the 600s cap —
+// only a time-since-last-OUTPUT watchdog catches that. A fake writer stands
+// in for the translator's ArmOutputProgress so the client half is pinned
+// independently: byte-alive/output-silent aborts retryable; output-flowing
+// never aborts.
 
 import (
 	"context"
@@ -31,9 +28,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeProgressWriter stands in for the Responses→Anthropic translator: it
-// exposes ArmOutputProgress so the client wires its output-progress watchdog,
-// and optionally calls the mark on each Write to simulate output flowing.
+// fakeProgressWriter stands in for the translator: it exposes
+// ArmOutputProgress and optionally marks progress on each Write.
 type fakeProgressWriter struct {
 	mu          sync.Mutex
 	hdr         http.Header
@@ -74,10 +70,9 @@ func (f *fakeProgressWriter) ArmOutputProgress(mark func()) bool {
 	return f.armReturns
 }
 
-// streamsNonOutputFramesForever returns an upstream that commits 200 + SSE
-// headers, then emits a non-output frame every interval until the client
-// disconnects. Bytes keep flowing (the byte-idle watchdog never trips); none of
-// them is output-bearing, so only the output-progress watchdog can end it.
+// streamsNonOutputFramesForever emits a non-output SSE frame every interval
+// until disconnect: bytes keep flowing (byte-idle never trips) but none is
+// output-bearing, so only the output-progress watchdog can end it.
 func streamsNonOutputFramesForever(interval time.Duration) *httptest.Server {
 	const frame = "event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n"
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,9 +98,8 @@ func TestProxy_OutputStallAbortsRetryable_ByteAliveNoOutput(t *testing.T) {
 	upstream := streamsNonOutputFramesForever(15 * time.Millisecond)
 	defer upstream.Close()
 
-	// Byte-idle far longer than the frame interval (so it never fires);
-	// output-stall short (so it fires). This is the 2026-06-16 separation:
-	// bytes flowing, output silent.
+	// byteIdle >> frame interval (never fires); outputStall short (fires) —
+	// the 2026-06-16 separation of bytes-flowing vs. output-silent.
 	const byteIdle = 5 * time.Second
 	const outputStall = 120 * time.Millisecond
 	c := openai.NewClientWithStallTimeouts("test-key", upstream.URL, stallTestHeaderTimeout, byteIdle, outputStall)
@@ -128,8 +122,7 @@ func TestProxy_OutputStallAbortsRetryable_ByteAliveNoOutput(t *testing.T) {
 }
 
 func TestProxy_OutputFlowingStreamIsNotOutputStalled(t *testing.T) {
-	// Same frame cadence, but the writer marks output progress on every relayed
-	// frame (simulating real output). The output-stall watchdog must keep
+	// Writer marks output progress on every frame; the watchdog must keep
 	// resetting and never trip, even though total duration exceeds its budget.
 	const frame = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"x\"}\n\n"
 	const frames = 6

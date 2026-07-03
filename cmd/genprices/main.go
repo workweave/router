@@ -1,7 +1,6 @@
-// Command genprices rewrites the BEGIN_GENERATED_PRICES block in both
-// install/cc-statusline.sh and install/install.sh (the heredoc copy) from
-// pricingTable in internal/observability/otel/pricing.go.
-// Run via `make generate` or `go generate ./internal/observability/otel/`.
+// Command genprices rewrites the BEGIN_GENERATED_PRICES block in
+// install/cc-statusline.sh and install/install.sh from pricingTable in
+// internal/observability/otel/pricing.go. Run via `make generate`.
 package main
 
 import (
@@ -20,9 +19,9 @@ const (
 	endMarker   = "# END_GENERATED_PRICES"
 )
 
-// scriptPaths lists every file that contains a BEGIN/END_GENERATED_PRICES
-// block. install.sh carries the block inside a heredoc so the installer writes
-// cc-statusline.sh from its own content — no URL fetch required.
+// scriptPaths lists files containing a BEGIN/END_GENERATED_PRICES block.
+// install.sh carries it in a heredoc, letting the installer write
+// cc-statusline.sh without a URL fetch.
 var scriptPaths = []string{
 	"install/cc-statusline.sh",
 	"install/install.sh",
@@ -51,9 +50,8 @@ func spliceFile(path, block string) error {
 	return os.WriteFile(path, []byte(updated), 0o755)
 }
 
-// buildBlock produces the shell prices='{...}' assignment from the pricing table.
-// Values are in USD/1k (= USD/1M ÷ 1000) to match what the jq math in
-// cc-statusline.sh expects.
+// buildBlock produces the shell prices='{...}' assignment from the pricing
+// table, in USD/1k (= USD/1M ÷ 1000) to match cc-statusline.sh's jq math.
 func buildBlock(table map[string]otel.Pricing) string {
 	models := make([]string, 0, len(table))
 	for m := range table {
@@ -110,12 +108,9 @@ func maxLen(models []string) int {
 	return n
 }
 
-// fmtPrice formats a USD/1k price for the jq math in cc-statusline.sh.
-// Rounds to 6 significant figures before formatting so the generated block
-// doesn't carry IEEE 754 representation artifacts (e.g. 0.071/1000 would
-// otherwise render as 0.00007099999999999999). 6 sig figs gives ~10×
-// headroom over the smallest input we ever serialize (~6.5e-5 USD/k) and
-// stays well within the precision the downstream jq calculation needs.
+// fmtPrice formats a USD/1k price for cc-statusline.sh's jq math. Rounds to
+// 6 sig figs first so IEEE 754 artifacts (e.g. 0.071/1000 rendering as
+// 0.00007099999999999999) don't leak into the generated block.
 func fmtPrice(v float64) string {
 	if v == 0 {
 		return "0"

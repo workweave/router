@@ -14,8 +14,7 @@ import (
 )
 
 // stubPinStore is a minimal sessionpin.Store for testing recordTurnUsage.
-// getPin/getFound configure the Get response; both default to a miss so
-// existing tests that rely on "no Postgres row" keep working unchanged.
+// getPin/getFound configure Get's response and default to a miss.
 type stubPinStore struct {
 	mu        sync.Mutex
 	lastUsage sessionpin.Usage
@@ -65,9 +64,8 @@ func (s *stubPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionK
 func (s *stubPinStore) SweepExpired(context.Context) error { return nil }
 
 // TestRecordTurnUsage_WritesToStore guards the synchronous UpdateUsage write:
-// recordTurnUsage must persist Last* fields to Postgres in-line on the request
-// path so the planner has prior-turn evidence by the time the next turn loads
-// the pin.
+// recordTurnUsage must persist Last* fields in-line so the planner has
+// prior-turn evidence by the next turn.
 func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(
@@ -105,10 +103,9 @@ func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	assert.False(t, store.lastUsage.EndedAt.IsZero(), "EndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
 
-// TestLoadPin_DoesNotServeExpiredPostgresPinButKeepsEmitHistory guards the
-// expiry filter: expired rows must be routing misses, but their
-// has_ever_switched / last_served_model history still protects Anthropic emit
-// from poisoned thinking blocks that remain in the client transcript.
+// TestLoadPin_DoesNotServeExpiredPostgresPinButKeepsEmitHistory: expired rows
+// are routing misses, but has_ever_switched/last_served_model must survive so
+// Anthropic emit still strips poisoned thinking blocks.
 func TestLoadPin_DoesNotServeExpiredPostgresPinButKeepsEmitHistory(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(
@@ -193,11 +190,9 @@ func TestLoadPin_ServesFreshPostgresPin(t *testing.T) {
 	assert.Equal(t, "anthropic", pin.Provider)
 }
 
-// TestModelSwitched covers the switch → stay → stay lifecycle that motivated
-// the has_ever_switched latch. The transition turn alone is not enough: once a
-// session has served two models, the stale-signed thinking blocks persist in
-// the client transcript, so every subsequent same-model turn must keep
-// stripping or Anthropic 400s.
+// TestModelSwitched covers switch → stay → stay: once a session has served
+// two models, every later same-model turn must keep stripping stale-signed
+// thinking blocks or Anthropic 400s — the has_ever_switched latch.
 func TestModelSwitched(t *testing.T) {
 	tests := []struct {
 		name             string

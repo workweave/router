@@ -17,12 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// tierProbeRouter mimics the production-observed collapse that motivated the
-// fix: among the eligible candidates (available models minus ExcludedModels) it
-// returns the CHEAPEST one (lowest tier). Without a tier constraint a dropped
-// high-tier force-model would therefore route to the low-tier default; with the
-// constraint the low-tier candidates are excluded, so it must return a same-tier
-// model. It records every request so the constraint itself can be asserted.
+// tierProbeRouter reproduces the production collapse: it returns the cheapest
+// eligible candidate, so an unconstrained fallback would pick the low-tier
+// default. It records every request so the tier constraint can be asserted.
 type tierProbeRouter struct {
 	available map[string]struct{}
 	captured  []router.Request
@@ -69,12 +66,9 @@ func (s *forcedPinStore) ResetUpstreamErrors(context.Context, [sessionpin.Sessio
 }
 func (s *forcedPinStore) SweepExpired(context.Context) error { return nil }
 
-// TestRunTurnLoop_ForcedModelContextOverflow_StaysInTier is the regression for
-// the debug-session bug: a user force-pinned deepseek-v4-pro (TierHigh) was
-// evicted by the context-window pre-filter and the turn collapsed all the way
-// to haiku (TierLow) instead of the next-best same-tier model. The fix
-// constrains the fresh decision to the forced model's tier, so the evicted
-// high-tier pin reroutes to a high-tier model (here, Opus).
+// Regression: a force-pinned high-tier model evicted by the context-window
+// pre-filter used to collapse all the way to the low-tier default instead of
+// the next-best same-tier model.
 func TestRunTurnLoop_ForcedModelContextOverflow_StaysInTier(t *testing.T) {
 	const forced = "deepseek/deepseek-v4-pro"
 	require.Equal(t, catalog.TierHigh, catalog.TierFor(forced), "test premise: forced model is high-tier")
@@ -123,10 +117,8 @@ func TestRunTurnLoop_ForcedModelContextOverflow_StaysInTier(t *testing.T) {
 	assert.False(t, opusExcluded, "the same-tier replacement must remain eligible")
 }
 
-// TestRestrictToTier_FallsBackWhenNoInTierCandidate guards the empty-pool
-// escape hatch: when no in-tier model would survive the constraint, the helper
-// returns the original denylist and ok=false so the caller leaves routing
-// unconstrained rather than handing the scorer an empty pool.
+// Guards the empty-pool escape hatch: with no in-tier candidate, the helper
+// must return ok=false rather than hand the scorer an empty pool.
 func TestRestrictToTier_FallsBackWhenNoInTierCandidate(t *testing.T) {
 	svc := NewService(nil, nil, nil, false, nil, nil, false,
 		providers.ProviderAnthropic, "claude-haiku-4-5", nil).
@@ -138,9 +130,8 @@ func TestRestrictToTier_FallsBackWhenNoInTierCandidate(t *testing.T) {
 	assert.Equal(t, excluded, out, "the original denylist is returned unchanged on fallback")
 }
 
-// TestRestrictToTier_ExcludesOtherTiers verifies the constraint set: every
-// available model outside the target tier is added to the denylist while
-// in-tier models stay eligible.
+// Every available model outside the target tier gets excluded; in-tier
+// models stay eligible.
 func TestRestrictToTier_ExcludesOtherTiers(t *testing.T) {
 	svc := NewService(nil, nil, nil, false, nil, nil, false,
 		providers.ProviderAnthropic, "claude-haiku-4-5", nil).
