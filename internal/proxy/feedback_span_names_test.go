@@ -30,8 +30,8 @@ import (
 // spanCollector runs an httptest server that decodes OTLP/HTTP trace export
 // requests and records every span it receives, keyed by name.
 type spanCollector struct {
-	srv *httptest.Server
-	mu  sync.Mutex
+	srv    *httptest.Server
+	mu     sync.Mutex
 	byName map[string][]*tracev1.Span
 }
 
