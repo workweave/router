@@ -141,21 +141,8 @@ const DefaultResponseHeaderTimeout = 30 * time.Second
 
 // SanitizeInboundAuthHeader returns v unchanged unless it carries a
 // router-issued key as a Bearer token, in which case it returns "" so the
-// caller skips forwarding it upstream.
-//
-// Client-passthrough fallback tiers (used when neither a resolved BYOK/
-// subscription credential nor a deployment-level key is configured) must run
-// the client's raw inbound `Authorization` header through this before
-// relaying it upstream — the router auth middleware accepts the same header
-// shape (`Authorization: Bearer rk_...`) for router-key auth, so without this
-// guard a client authenticating to the router would have its router API key
-// relayed verbatim to the upstream provider. Any other Bearer value (e.g. a
-// BYOK provider key, or a Claude subscription `sk-ant-oat` token) is left
-// untouched and forwarded as-is; the upstream 401s on invalid credentials.
-//
-// Prefix match is case-insensitive to mirror extractBearer — otherwise a
-// lowercased `authorization: bearer rk_...` bypasses this guard and leaks the
-// router key upstream.
+// caller skips forwarding it upstream. Prefix match is case-insensitive to
+// guard against `bearer rk_...` bypassing the scrub.
 func SanitizeInboundAuthHeader(v string) string {
 	const bearerPrefix = "Bearer "
 	if len(v) > len(bearerPrefix) && strings.EqualFold(v[:len(bearerPrefix)], bearerPrefix) {

@@ -104,10 +104,7 @@ func TestProxy_ScrubsRouterKeyFromInboundAuthorizationHeader(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	// No deployment-level key configured, so setAuth falls through to the
-	// client-passthrough tier. A client authenticating to the router itself
-	// via `Authorization: Bearer rk_...` must never have that credential
-	// relayed to Anthropic.
+	// No deployment key -> passthrough tier; router key must not leak to Anthropic.
 	c := anthropic.NewClient("", upstream.URL)
 	rec := httptest.NewRecorder()
 	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
