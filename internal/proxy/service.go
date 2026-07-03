@@ -2144,14 +2144,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		flushUpstreamErrorAsAnthropic(contentSink, proxyErr)
 	}
 
-	// Subscription-credit failover: a subscription-served Anthropic turn got a
-	// retryable fault (429 weekly/5h-limit, or ~90s timeout) OR had its OAuth
-	// token refused (401 authentication_error / 403 permission_error — expired
-	// token, or an org that disabled OAuth) pre-commit. Suppress the subscription
-	// token and retry the SAME model once on the Weave/BYOK key so the turn
-	// completes instead of surfacing the throttle/rejection raw. Bounded to one
-	// extra attempt, pre-commit only. Skipped when baseline failover already ran
-	// (mutually exclusive: that requires a non-Anthropic routed provider).
+	// Subscription-credit failover: suppress the OAuth token and retry the SAME
+	// model once on the Weave/BYOK key when a subscription-served Anthropic turn
+	// hit a transient fault (429/timeout) or an OAuth rejection (401/403),
+	// pre-commit. Skipped when baseline failover already ran (non-Anthropic).
 	subscriptionFailoverUsed := false
 	subscriptionRetryRan := false
 	if subscriptionRetryEligible && !baselineAttempted && proxyErr != nil &&

@@ -140,15 +140,11 @@ func (s *Service) anthropicFallbackKeyAvailable(ctx context.Context) bool {
 }
 
 // anthropicOAuthCredentialRejected reports whether err is a buffered Anthropic
-// 401/403 that means the caller's subscription OAuth token was refused — an
-// expired/invalid token (401 authentication_error) or an org that has disabled
-// OAuth sign-in (403 permission_error, "OAuth authentication is currently not
-// allowed for this organization"). On a subscription-served turn these are the
-// credential's fault, not the client's, and a retry on the deployment/BYOK
-// Anthropic key serves the turn — so they gate the subscription-credit failover
-// alongside the transient faults IsRetryable already covers. Deliberately narrow:
-// only the two error types actually produced by a rejected OAuth token, so an
-// unrelated 403 (e.g. content policy) is left terminal.
+// 401 authentication_error or 403 permission_error — a rejected subscription
+// OAuth token (expired, or an org with OAuth sign-in disabled). On a
+// subscription-served turn these are the credential's fault, so they gate the
+// failover onto the BYOK/deployment key. Deliberately narrow so an unrelated 403
+// (e.g. content policy) stays terminal.
 func anthropicOAuthCredentialRejected(err error) bool {
 	var buffered *providers.UpstreamErrorResponse
 	if !errors.As(err, &buffered) {
