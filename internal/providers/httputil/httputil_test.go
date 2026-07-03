@@ -290,3 +290,58 @@ func TestErrUpstreamSlowThroughput_AliasIsRetryable(t *testing.T) {
 	assert.True(t, errors.Is(ErrUpstreamSlowThroughput, providers.ErrUpstreamSlowThroughput))
 	assert.True(t, providers.IsRetryable(ErrUpstreamSlowThroughput))
 }
+
+func TestSanitizeInboundAuthHeader(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "empty header passes through unchanged",
+			in:   "",
+			want: "",
+		},
+		{
+			name: "router key bearer is scrubbed",
+			in:   "Bearer rk_abcdefghijklmnopqrstuvwx",
+			want: "",
+		},
+		{
+			name: "router key bearer is scrubbed case-insensitively",
+			in:   "bearer rk_abcdefghijklmnopqrstuvwx",
+			want: "",
+		},
+		{
+			name: "router key bearer with mixed-case prefix is scrubbed",
+			in:   "BEARER rk_abcdefghijklmnopqrstuvwx",
+			want: "",
+		},
+		{
+			name: "BYOK anthropic subscription bearer is forwarded",
+			in:   "Bearer sk-ant-oat01-abcdefg",
+			want: "Bearer sk-ant-oat01-abcdefg",
+		},
+		{
+			name: "BYOK openai-shaped bearer is forwarded",
+			in:   "Bearer sk-proj-abcdefg",
+			want: "Bearer sk-proj-abcdefg",
+		},
+		{
+			name: "non-bearer auth scheme is forwarded untouched",
+			in:   "Basic dXNlcjpwYXNz",
+			want: "Basic dXNlcjpwYXNz",
+		},
+		{
+			name: "bearer with only rk-like substring (not prefixed) is forwarded",
+			in:   "Bearer sk-rk_notarealrouterkey",
+			want: "Bearer sk-rk_notarealrouterkey",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, SanitizeInboundAuthHeader(tt.in))
+		})
+	}
+}

@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 )
@@ -136,6 +138,33 @@ func idleTimeoutFromEnv(envVar string, fallback time.Duration) time.Duration {
 // NewTransport. Streaming upstreams return headers immediately, so 30s is ample
 // for them; it only bites a non-streaming upstream that buffers a slow response.
 const DefaultResponseHeaderTimeout = 30 * time.Second
+
+// SanitizeInboundAuthHeader returns v unchanged unless it carries a
+// router-issued key as a Bearer token, in which case it returns "" so the
+// caller skips forwarding it upstream.
+//
+// Client-passthrough fallback tiers (used when neither a resolved BYOK/
+// subscription credential nor a deployment-level key is configured) must run
+// the client's raw inbound `Authorization` header through this before
+// relaying it upstream — the router auth middleware accepts the same header
+// shape (`Authorization: Bearer rk_...`) for router-key auth, so without this
+// guard a client authenticating to the router would have its router API key
+// relayed verbatim to the upstream provider. Any other Bearer value (e.g. a
+// BYOK provider key, or a Claude subscription `sk-ant-oat` token) is left
+// untouched and forwarded as-is; the upstream 401s on invalid credentials.
+//
+// Prefix match is case-insensitive to mirror extractBearer — otherwise a
+// lowercased `authorization: bearer rk_...` bypasses this guard and leaks the
+// router key upstream.
+func SanitizeInboundAuthHeader(v string) string {
+	const bearerPrefix = "Bearer "
+	if len(v) > len(bearerPrefix) && strings.EqualFold(v[:len(bearerPrefix)], bearerPrefix) {
+		if auth.HasAPIKeyPrefix(strings.TrimSpace(v[len(bearerPrefix):])) {
+			return ""
+		}
+	}
+	return v
+}
 
 // NewTransport returns a pooled http.Transport sized for sustained traffic to a single upstream host.
 //

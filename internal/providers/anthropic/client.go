@@ -49,6 +49,12 @@ const subscriptionTokenPrefix = "sk-ant-oat"
 // credential (subscription/BYOK/client), deployment key, then client-sent auth
 // headers. A subscription OAuth credential authenticates via Authorization:
 // Bearer and must NOT send x-api-key; everything else uses x-api-key.
+//
+// The passthrough tier scrubs `Authorization: Bearer rk_...` via
+// httputil.SanitizeInboundAuthHeader — the router auth middleware accepts the
+// same header shape for router-key auth, so we must not relay a router
+// credential to Anthropic. Mirrors the openai adapter's guard so the two
+// client-passthrough fallbacks can't drift.
 func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		if creds.OAuth {
@@ -62,7 +68,7 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *h
 		upstream.Header.Set("x-api-key", c.apiKey)
 		return
 	}
-	if v := inbound.Header.Get("authorization"); v != "" {
+	if v := httputil.SanitizeInboundAuthHeader(inbound.Header.Get("authorization")); v != "" {
 		upstream.Header.Set("authorization", v)
 	}
 	if v := inbound.Header.Get("x-api-key"); v != "" {

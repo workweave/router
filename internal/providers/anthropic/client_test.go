@@ -94,6 +94,61 @@ func TestProxy_PassesThroughAnthropicAuthWithoutRouterKey(t *testing.T) {
 	assert.Empty(t, gotRouterKey, "router auth must not be forwarded to Anthropic")
 }
 
+func TestProxy_ScrubsRouterKeyFromInboundAuthorizationHeader(t *testing.T) {
+	var gotAuth string
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1"}`))
+	}))
+	defer upstream.Close()
+
+	// No deployment-level key configured, so setAuth falls through to the
+	// client-passthrough tier. A client authenticating to the router itself
+	// via `Authorization: Bearer rk_...` must never have that credential
+	// relayed to Anthropic.
+	c := anthropic.NewClient("", upstream.URL)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	clientReq.Header.Set("Authorization", "Bearer rk_abcdefghijklmnopqrstuvwx")
+
+	prep := providers.PreparedRequest{
+		Body:    []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`),
+		Headers: make(http.Header),
+	}
+	err := c.Proxy(context.Background(), router.Decision{Model: "claude-haiku-4-5"}, prep, rec, clientReq)
+
+	require.NoError(t, err)
+	assert.Empty(t, gotAuth, "router-issued key must not be forwarded to Anthropic")
+}
+
+func TestProxy_ScrubsRouterKeyFromInboundAuthorizationHeaderCaseInsensitive(t *testing.T) {
+	var gotAuth string
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1"}`))
+	}))
+	defer upstream.Close()
+
+	c := anthropic.NewClient("", upstream.URL)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	// Lowercased "bearer" prefix must not bypass the scrub guard.
+	clientReq.Header.Set("Authorization", "bearer rk_abcdefghijklmnopqrstuvwx")
+
+	prep := providers.PreparedRequest{
+		Body:    []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`),
+		Headers: make(http.Header),
+	}
+	err := c.Proxy(context.Background(), router.Decision{Model: "claude-haiku-4-5"}, prep, rec, clientReq)
+
+	require.NoError(t, err)
+	assert.Empty(t, gotAuth, "router-issued key must not be forwarded to Anthropic regardless of Bearer casing")
+}
+
 func TestProxy_RouterKeyDoesNotOverrideConfiguredAnthropicKey(t *testing.T) {
 	var (
 		gotAuth   string

@@ -9,10 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
-	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
@@ -160,15 +158,10 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *h
 		return
 	}
 	// Skip forwarding only if the Bearer token is a router-issued key; any
-	// other shape is forwarded as-is (upstream 401s on invalid creds). Prefix
-	// match is case-insensitive to mirror extractBearer — otherwise a
-	// lowercased `authorization: bearer rk_...` bypasses this guard and leaks
-	// the router key to OpenAI.
-	const bearerPrefix = "Bearer "
-	if len(v) > len(bearerPrefix) && strings.EqualFold(v[:len(bearerPrefix)], bearerPrefix) {
-		if auth.HasAPIKeyPrefix(strings.TrimSpace(v[len(bearerPrefix):])) {
-			return
-		}
+	// other shape is forwarded as-is (upstream 401s on invalid creds). See
+	// httputil.SanitizeInboundAuthHeader for the shared scrub guard.
+	if v = httputil.SanitizeInboundAuthHeader(v); v == "" {
+		return
 	}
 	upstream.Header.Set("Authorization", v)
 }
