@@ -242,7 +242,14 @@ func main() {
 		if !byokOnly && openRouterPlatformEnabled {
 			openRouterKey = config.GetOr("OPENROUTER_API_KEY", "")
 		}
-		providerMap[providers.ProviderOpenRouter] = openaiCompatProvider.NewClient(openRouterKey, openRouterBaseURL)
+		openRouterModelIDMap, invalidOpenRouterModelIDMap := parseModelIDMap(config.GetOr(openRouterModelIDMapEnv, ""))
+		if len(invalidOpenRouterModelIDMap) > 0 {
+			logger.Warn("Invalid model ID map entries ignored", "env_var", openRouterModelIDMapEnv, "entries", invalidOpenRouterModelIDMap)
+		}
+		if len(openRouterModelIDMap) > 0 {
+			logger.Info("OpenRouter model ID aliases configured", "env_var", openRouterModelIDMapEnv, "count", len(openRouterModelIDMap))
+		}
+		providerMap[providers.ProviderOpenRouter] = openaiCompatProvider.NewClientWithModelIDMap(openRouterKey, openRouterBaseURL, openRouterModelIDMap)
 		switch {
 		case byokOnly:
 			logger.Info("OpenRouter provider enabled (BYOK only)", "base_url", openRouterBaseURL)
@@ -1399,6 +1406,35 @@ func resolveDefaultBaselineModel() string {
 		return "claude-sonnet-4-5"
 	}
 	return strings.TrimSpace(v)
+}
+
+const openRouterModelIDMapEnv = "OPENROUTER_MODEL_ID_MAP"
+
+// parseModelIDMap parses comma-separated "router=upstream" model ID aliases.
+func parseModelIDMap(raw string) (map[string]string, []string) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	out := make(map[string]string)
+	var invalid []string
+	for _, part := range strings.Split(raw, ",") {
+		entry := strings.TrimSpace(part)
+		if entry == "" {
+			continue
+		}
+		publicID, upstreamID, ok := strings.Cut(entry, "=")
+		publicID = strings.TrimSpace(publicID)
+		upstreamID = strings.TrimSpace(upstreamID)
+		if !ok || publicID == "" || upstreamID == "" {
+			invalid = append(invalid, entry)
+			continue
+		}
+		out[publicID] = upstreamID
+	}
+	if len(out) == 0 {
+		return nil, invalid
+	}
+	return out, invalid
 }
 
 // resolveHardPinModel returns the (provider, model) to use for compaction and
