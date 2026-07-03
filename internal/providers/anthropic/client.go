@@ -24,6 +24,17 @@ type Client struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
+	// sseIdleTimeout overrides httputil.DefaultSSEIdleTimeout when > 0; tests set
+	// it small so the output-stall watchdog fires before this one.
+	sseIdleTimeout time.Duration
+	// outputStall overrides httputil.DefaultOutputStallTimeout when > 0; used by
+	// tests to trip output-stall without waiting out the real budget.
+	outputStall time.Duration
+	// throughput* override the minimum-throughput watchdog budgets when set.
+	throughputWindow     time.Duration
+	throughputMinElapsed time.Duration
+	throughputMinDeltas  int
+	throughputOverride   bool
 }
 
 func NewClient(apiKey, baseURL string) *Client {
@@ -35,6 +46,44 @@ func NewClient(apiKey, baseURL string) *Client {
 		baseURL: baseURL,
 		http:    &http.Client{Transport: httputil.NewTransport(10*time.Second, 10*time.Second)},
 	}
+}
+
+// NewClientWithStallTimeouts is NewClient with injected byte-idle and
+// output-stall watchdog budgets, so a test can drive the output-progress
+// watchdog with a small budget while keeping the byte-idle watchdog large enough
+// that it isn't what fires.
+func NewClientWithStallTimeouts(apiKey, baseURL string, sseIdleTimeout, outputStall time.Duration) *Client {
+	c := NewClient(apiKey, baseURL)
+	c.sseIdleTimeout = sseIdleTimeout
+	c.outputStall = outputStall
+	return c
+}
+
+// idleTimeout returns the byte-idle watchdog budget: the injected test override
+// when set, else httputil.DefaultSSEIdleTimeout.
+func (c *Client) idleTimeout() time.Duration {
+	if c.sseIdleTimeout > 0 {
+		return c.sseIdleTimeout
+	}
+	return httputil.DefaultSSEIdleTimeout
+}
+
+// outputStallTimeout returns the output-progress watchdog budget: the injected
+// test override when set, else httputil.DefaultOutputStallTimeout.
+func (c *Client) outputStallTimeout() time.Duration {
+	if c.outputStall > 0 {
+		return c.outputStall
+	}
+	return httputil.DefaultOutputStallTimeout
+}
+
+// throughputParams returns the minimum-throughput watchdog budgets: the injected
+// test overrides when set, else the httputil defaults.
+func (c *Client) throughputParams() (window, minElapsed time.Duration, minDeltas int) {
+	if c.throughputOverride {
+		return c.throughputWindow, c.throughputMinElapsed, c.throughputMinDeltas
+	}
+	return httputil.DefaultThroughputWindow, httputil.DefaultThroughputMinElapsed, httputil.DefaultMinThroughputDeltasPerWindow
 }
 
 // oauthBetaToken is the anthropic-beta flag Anthropic requires for Claude
@@ -166,7 +215,34 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
-	return httputil.StreamBody(ctx, cancel, httputil.DefaultSSEIdleTimeout, resp.Body, resp.StatusCode, w, t)
+
+	// Output-progress + throughput watchdogs. StreamBody's byte-idle watchdog
+	// resets on ANY byte, and Anthropic streams `ping` keepalives every few
+	// seconds, so a stream that pings but produces zero output tokens (prod:
+	// sonnet-5 turns stuck at output_tokens=0, ttft unset, riding to the request
+	// cap with no failover) never trips it. These are marked only on
+	// output-bearing content_block_delta frames by the routing-marker writer (via
+	// ArmOutputProgress) and trip ErrUpstreamOutputStall / ErrUpstreamSlowThroughput
+	// (both retryable). Writers without the hook (marker-suppressed passthrough)
+	// stay byte-idle-guarded only.
+	if arm, ok := w.(providers.OutputProgressArmer); ok {
+		outMark, outStop := httputil.StartIdleWatchdogCause(ctx, cancel, c.outputStallTimeout(), httputil.ErrUpstreamOutputStall)
+		tpWindow, tpMinElapsed, tpMinDeltas := c.throughputParams()
+		tpMark, tpStop := httputil.StartThroughputWatchdog(ctx, cancel, tpWindow, tpMinElapsed, tpMinDeltas, httputil.ErrUpstreamSlowThroughput)
+		combined := func() {
+			outMark()
+			tpMark()
+		}
+		if arm.ArmOutputProgress(combined) {
+			defer outStop()
+			defer tpStop()
+		} else {
+			outStop()
+			tpStop()
+		}
+	}
+
+	return httputil.StreamBody(ctx, cancel, c.idleTimeout(), resp.Body, resp.StatusCode, w, t)
 }
 
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
