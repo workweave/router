@@ -2989,6 +2989,11 @@ func (s *Service) fireTelemetry(p InsertTelemetryParams) {
 		return
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				observability.Get().Error("telemetry insert panicked", "panic", r)
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.telemetry.InsertRequestTelemetry(ctx, p); err != nil {

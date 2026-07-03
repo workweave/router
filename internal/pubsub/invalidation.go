@@ -44,6 +44,15 @@ func (n *InvalidationNotifier) NotifyInstallationChanged(installationID string) 
 		return
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				observability.Get().Error(
+					"Panic publishing installation invalidation",
+					"installation_id", installationID,
+					"panic", r,
+				)
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
 		defer cancel()
 		result := n.publisher.Publish(ctx, &gcppubsub.Message{Data: []byte(installationID)})

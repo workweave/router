@@ -415,6 +415,11 @@ func userIdentityKey(email, claudeAccountUUID string) string {
 // the parent ctx is often canceled (response written) before the UPDATE completes.
 func (s *Service) fireMarkUsed(apiKeyID string) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				observability.Get().Error("panic in fireMarkUsed", "panic", r, "api_key_id", apiKeyID)
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if err := s.apiKeys.MarkUsed(ctx, apiKeyID); err != nil {

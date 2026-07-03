@@ -424,7 +424,7 @@ func main() {
 		listenerCancel()
 		listener.Wait()
 	}()
-	go listener.Run(listenerCtx)
+	safeGo(logger, "invalidation-listener", func() { listener.Run(listenerCtx) })
 
 	// Managed mode doesn't mount the dashboard, so this only matters selfhosted.
 	if deploymentMode == server.DeploymentModeSelfHosted {
@@ -467,7 +467,7 @@ func main() {
 	var pinStore sessionpin.Store
 	if config.GetOr("ROUTER_SESSION_PIN_ENABLED", "true") == "true" {
 		pinStore = postgres.NewSessionPinRepo(pool)
-		go runSessionPinSweep(context.Background(), pinStore)
+		safeGo(logger, "session-pin-sweep", func() { runSessionPinSweep(context.Background(), pinStore) })
 		logger.Info("Session pin store enabled (sliding 1h TTL, hourly sweep)")
 	}
 
@@ -1202,6 +1202,20 @@ func buildSemanticCache(rtr router.Router) *cache.Cache {
 		"version", multi.Default,
 	)
 	return cache.New(cfg)
+}
+
+// safeGo launches fn in a goroutine with panic recovery so a bug in a
+// long-running background task (Pub/Sub listener, sweep loop, etc.) logs and
+// dies quietly instead of crashing the whole process.
+func safeGo(logger *slog.Logger, name string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("Background goroutine panicked", "goroutine", name, "panic", r)
+			}
+		}()
+		fn()
+	}()
 }
 
 // runSessionPinSweep deletes pins expired >24h on an hourly cadence. Uses
