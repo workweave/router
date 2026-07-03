@@ -24,21 +24,16 @@ import (
 const (
 	DefaultBaseURL   = "https://openrouter.ai/api/v1"
 	FireworksBaseURL = "https://api.fireworks.ai/inference/v1"
-	// DeepInfraBaseURL is DeepInfra's OpenAI-compatible surface. DeepInfra uses
-	// HuggingFace-form model IDs; pair with NewClientWithModelIDMap to rewrite
-	// the router's public slash-form slugs on the wire.
+	// DeepInfraBaseURL uses HuggingFace-form model IDs; pair with
+	// NewClientWithModelIDMap to rewrite the router's slash-form slugs.
 	DeepInfraBaseURL = "https://api.deepinfra.com/v1/openai"
-	// MakoraBaseURL is Makora's OpenAI-compatible surface. Makora is an
-	// agent-optimized inference platform serving DeepSeek V4 (and other OSS
-	// models) at notably higher throughput than the commodity providers; pair
-	// with NewClientWithModelIDMap to rewrite the router's public slash-form
-	// slugs to Makora's upstream IDs on the wire.
+	// MakoraBaseURL serves DeepSeek V4 (and other OSS models) at higher
+	// throughput than commodity providers; pair with NewClientWithModelIDMap
+	// to rewrite slugs to Makora's upstream IDs.
 	MakoraBaseURL = "https://inference.makora.com/v1"
-	// TogetherBaseURL is Together AI's OpenAI-compatible surface. Together
-	// serves the OSS pool (DeepSeek, GLM, MiniMax, Qwen, Kimi, …) and is the
-	// fastest provider on artificialanalysis.ai for several of the models we
-	// route; pair with NewClientWithModelIDMap to rewrite the router's public
-	// slash-form slugs to Together's "Org/Model" upstream IDs on the wire.
+	// TogetherBaseURL serves the OSS pool (DeepSeek, GLM, MiniMax, Qwen, Kimi)
+	// and is fastest on artificialanalysis.ai for several routed models; pair
+	// with NewClientWithModelIDMap to rewrite slugs to Together's "Org/Model" IDs.
 	TogetherBaseURL = "https://api.together.xyz/v1"
 )
 
@@ -60,25 +55,19 @@ type Client struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
-	// modelIDMap rewrites the request body's "model" field before sending.
-	// Empty map (or nil) = no rewrite. Used when the router's public slash-form
-	// slug differs from the upstream's canonical ID (Bedrock dot-form,
-	// DeepInfra HuggingFace-form).
+	// modelIDMap rewrites the request body's "model" field before sending, when
+	// the router's public slug differs from the upstream's canonical ID
+	// (Bedrock dot-form, DeepInfra HuggingFace-form). Nil/empty = no rewrite.
 	modelIDMap map[string]string
-	// sseIdleTimeout, when > 0, overrides httputil.DefaultSSEIdleTimeout for the
-	// byte-idle watchdog. Production uses the default; tests inject a small value
-	// so the output-stall watchdog can be exercised without the byte-idle one
-	// firing first.
+	// sseIdleTimeout overrides httputil.DefaultSSEIdleTimeout when > 0; tests
+	// set it small so the output-stall watchdog fires before this one.
 	sseIdleTimeout time.Duration
-	// outputStall, when > 0, overrides httputil.DefaultOutputStallTimeout for the
-	// output-progress watchdog. Production uses the default via NewClient; tests
-	// inject a small value to drive the output-stall trip without waiting out the
-	// real budget.
+	// outputStall overrides httputil.DefaultOutputStallTimeout when > 0; used
+	// by tests to trip output-stall without waiting out the real budget.
 	outputStall time.Duration
-	// throughputWindow / throughputMinElapsed / throughputMinDeltas, when > 0
-	// (and >= 0 for the delta count), override the minimum-throughput watchdog
-	// budgets. Production uses the httputil defaults; tests inject small values
-	// to drive a slow-throughput trip without waiting out the real warmup.
+	// throughputWindow/MinElapsed/MinDeltas override the minimum-throughput
+	// watchdog budgets when set; used by tests to trip slow-throughput without
+	// waiting out the real warmup.
 	throughputWindow     time.Duration
 	throughputMinElapsed time.Duration
 	throughputMinDeltas  int
@@ -213,9 +202,8 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	t.StampUpstreamHeaders()
 
 	if resp.StatusCode >= 400 {
-		// Buffer the upstream error response — do NOT touch w. The proxy's
-		// failover loop decides whether to retry on the next binding or
-		// flush this buffer to the client.
+		// Buffer the error — do NOT touch w; the failover loop decides whether
+		// to retry or flush this buffer to the client.
 		bufBody, totalRead, drainErr := readCapped(resp.Body, providers.MaxBufferedErrorBytes)
 		if len(bufBody) > 0 {
 			t.StampUpstreamFirstByte()
@@ -243,27 +231,17 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 
-	// Output-progress watchdog. StreamBody's byte-idle watchdog below resets on
-	// ANY upstream byte, so a stream that stays byte-alive with SSE keepalive
-	// comments or empty/role-only delta frames while producing zero output rides
-	// to the 600s request cap (2026-06-19 DeepInfra incident). This second
-	// watchdog measures time-since-last-OUTPUT: its mark is fed by the
-	// OpenAI→Anthropic SSE translator only on output-bearing deltas (text,
-	// reasoning, tool-call args, terminal finish). On trip it cancels ctx with
-	// ErrUpstreamOutputStall (retryable; fails over while the preludeBuffer is
-	// still uncommitted). Only the translator can tell output frames from
-	// keepalives, so it is wired via ArmOutputProgress; a non-streaming client
-	// (or a writer without the hook) returns armed=false and is byte-idle-guarded
-	// only.
-	// A third watchdog runs on the same output-progress mark: the
-	// minimum-throughput guard. The output-stall watchdog above only catches a
-	// stream that stops producing output entirely; it never trips on a clean 200
-	// that keeps dribbling output-bearing deltas (resetting outMark on each one)
-	// but at a crawl. The throughput watchdog measures the COUNT of those deltas
-	// over a rolling window and, once warmup has passed, aborts with
-	// ErrUpstreamSlowThroughput (retryable) when the rate stays below the floor
-	// (2026-06-25 deepseek-v4-flash ~132s dribble). Both are fed by the single
-	// ArmOutputProgress mark, so the installed mark fans out to both.
+	// Output-progress watchdog: StreamBody's byte-idle watchdog resets on ANY
+	// byte, so keepalive/empty-delta frames with zero real output ride to the
+	// request cap (2026-06-19 DeepInfra incident). This one is marked only on
+	// output-bearing deltas by the SSE translator (via ArmOutputProgress) and
+	// trips ErrUpstreamOutputStall (retryable). Non-streaming/no-hook writers
+	// stay byte-idle-guarded only.
+	//
+	// A second watchdog shares the same mark: minimum-throughput. It catches a
+	// clean 200 that keeps dribbling output at a crawl (2026-06-25
+	// deepseek-v4-flash ~132s dribble) by counting deltas over a rolling window
+	// and tripping ErrUpstreamSlowThroughput once warmup passes.
 	if arm, ok := w.(providers.OutputProgressArmer); ok {
 		outMark, outStop := httputil.StartIdleWatchdogCause(ctx, cancel, c.outputStallTimeout(), httputil.ErrUpstreamOutputStall)
 		tpWindow, tpMinElapsed, tpMinDeltas := c.throughputParams()
@@ -288,12 +266,9 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	return streamErr
 }
 
-// logStreamStall reports a watchdog trip at ERROR: the upstream returned 200 +
-// headers, then stalled for the full budget. byte_idle = zero bytes for the
-// idle budget; output_idle = stream stayed byte-alive on keepalive/empty frames
-// but produced zero output content for the output-stall budget (the 2026-06-19
-// DeepInfra mode). Both classify retryable, so dispatchWithFallback re-attempts
-// when nothing reached the client; this log is the per-model paper trail.
+// logStreamStall reports a watchdog trip at ERROR after upstream returned
+// 200 + headers then stalled for the full budget. Both stall kinds are
+// retryable (dispatchWithFallback re-attempts); this is the paper trail.
 func logStreamStall(model, baseURL string, cause error) {
 	stallKind := "byte_idle"
 	switch {
@@ -309,12 +284,9 @@ func logStreamStall(model, baseURL string, cause error) {
 	)
 }
 
-// readCapped reads up to limit bytes from r into a buffer, then drains the
-// rest without retention up to maxDrain to bound failover latency on a
-// slow upstream returning a large error body. The connection is closed by
-// the caller's defer regardless, so the unread tail is discarded by Close.
-// Returns the buffered prefix, total bytes read, and any read error
-// (io.EOF mapped to nil).
+// readCapped buffers up to limit bytes from r, then drains (without retaining)
+// up to maxDrain more to bound failover latency on a large error body. Returns
+// the buffered prefix, total bytes read, and any read error (io.EOF -> nil).
 func readCapped(r io.Reader, limit int) ([]byte, int64, error) {
 	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
 	totalRead := int64(len(prefix))

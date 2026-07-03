@@ -1,20 +1,16 @@
-// Command routing-report renders the register-routing report for a cluster
-// artifact: it routes a labeled probe corpus (testdata/register_probes.jsonl)
-// through the REAL cluster Scorer and reports, per register, which models get
-// chosen — plus an auto-derived label for each cluster (the register mix that
-// lands in it) and a diff vs the currently-deployed `latest` artifact.
+// Command routing-report routes a labeled probe corpus
+// (testdata/register_probes.jsonl) through the REAL cluster Scorer for a
+// given artifact and reports, per register, which models get chosen — plus
+// an auto-derived label per cluster and a diff vs the deployed `latest`
+// artifact. Lets a PR reviewer see where conversational/trivial turns route
+// before shipping a clustering change, instead of finding out post-deploy
+// that everything went to Opus.
 //
-// It exists so a human reviewing a PR that changes the deployed clustering
-// model can SEE where conversational / trivial turns route before it ships,
-// rather than discovering post-deploy that everything went to Opus.
-//
-// No ONNX at runtime: probe embeddings are precomputed and committed
-// (testdata/register_probes.emb), so this builds and runs under
-// `-tags no_onnx`. The Scorer is fed a static embedder that returns the
-// cached vector per probe, so the blend, normalization, and all eligibility
-// filters are the exact production code path. Regenerate the cache with
-// scripts/embed_register_probes.py whenever the corpus or embedder changes; a
-// corpus-hash mismatch fails this tool loudly.
+// Runs under `-tags no_onnx`: probe embeddings are precomputed
+// (testdata/register_probes.emb) and fed to the Scorer via a static
+// embedder, so the blend/normalization/eligibility path is exact production
+// code. Regenerate the cache with scripts/embed_register_probes.py when the
+// corpus or embedder changes — a hash mismatch fails loudly.
 //
 // Usage:
 //
@@ -48,8 +44,7 @@ var registers = []string{
 }
 
 // opusModels and premiumModels classify the deployed pool for the summary
-// percentages. Premium = the four most expensive tiers a chit-chat turn has no
-// business reaching.
+// percentages; premium = tiers a chit-chat turn has no business reaching.
 var opusModels = map[string]struct{}{
 	"claude-opus-4-8": {}, "claude-opus-4-7": {},
 }
@@ -74,14 +69,12 @@ type embHeader struct {
 	Comment      string `json:"comment"`
 }
 
-// maxPromptChars mirrors the Scorer's Config.MaxPromptChars: the Scorer
-// tail-truncates the prompt to this many bytes before calling Embed, so the
-// cache must be keyed by the same truncation.
+// maxPromptChars mirrors Scorer's Config.MaxPromptChars; the cache must be
+// keyed by the same tail-truncation the Scorer applies before Embed.
 const maxPromptChars = 1024
 
-// staticEmbedder satisfies cluster.Embedder from precomputed vectors keyed by
-// the tail-truncated probe text — the exact string the Scorer passes to
-// Embed — so a probe longer than maxPromptChars still resolves.
+// staticEmbedder satisfies cluster.Embedder from vectors keyed by the
+// tail-truncated probe text, matching what the Scorer passes to Embed.
 type staticEmbedder struct {
 	id     string
 	dim    int
@@ -107,9 +100,8 @@ func (s *staticEmbedder) Embed(_ context.Context, text string) ([]float32, error
 func (s *staticEmbedder) ID() string { return s.id }
 func (s *staticEmbedder) Dim() int   { return s.dim }
 
-// tailTruncate keeps the last maxChars bytes of s, advancing off any partial
-// UTF-8 continuation byte. Byte-for-byte identical to the Scorer's helper, so
-// the cache key matches the string the Scorer embeds.
+// tailTruncate keeps the last maxChars bytes of s, skipping any partial UTF-8
+// continuation byte. Must match the Scorer's helper byte-for-byte.
 func tailTruncate(s string, maxChars int) string {
 	if len(s) <= maxChars {
 		return s
@@ -129,9 +121,8 @@ func truncForErr(s string) string {
 }
 
 func main() {
-	// The Scorer warns on every alpha>0.9 cluster, which floods stderr with
-	// ~20 lines per probe under the deployed config. Quiet it unless the
-	// caller asked for more. Must precede the first observability.Get().
+	// Scorer warns on every alpha>0.9 cluster (~20 lines/probe under deployed
+	// config); quiet unless caller overrides. Must precede first observability.Get().
 	if os.Getenv("LOG_LEVEL") == "" {
 		os.Setenv("LOG_LEVEL", "error")
 	}

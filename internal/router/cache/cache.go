@@ -1,7 +1,6 @@
-// Package cache implements a semantic response cache. Short-circuits
-// near-duplicate non-streaming requests by cosine similarity on prompt
-// embedding; per-(installation, inbound-format) isolation. Entries expire
-// lazily on Lookup once they exceed the configured TTL.
+// Package cache short-circuits near-duplicate non-streaming requests by cosine
+// similarity on prompt embedding, isolated per (installation, inbound-format).
+// Entries expire lazily on Lookup once past the configured TTL.
 package cache
 
 import (
@@ -29,15 +28,13 @@ type Config struct {
 	// BucketSize caps each per-(installation, format, clusterID, clusterVersion,
 	// knobsHash) LRU.
 	BucketSize int
-	// MaxBucketsPerInstallation caps the number of distinct buckets each
-	// installation may hold. Bucket identity includes attacker-influenceable
-	// inputs (cluster version, knobs hash), so without a per-installation cap
-	// one tenant could vary x-weave-routing-* headers to evict other tenants'
-	// buckets out of a shared global LRU.
+	// MaxBucketsPerInstallation caps buckets per installation. Bucket identity
+	// includes attacker-influenceable inputs (cluster version, knobs hash), so
+	// without this cap one tenant could vary x-weave-routing-* headers to evict
+	// other tenants' buckets from a shared global LRU.
 	MaxBucketsPerInstallation int
-	// MaxInstallations caps the number of distinct installations tracked.
-	// Installations come from authenticated bearer tokens, not request
-	// headers, so this is defense in depth.
+	// MaxInstallations caps tracked installations. Defense in depth since
+	// installations come from bearer tokens, not request headers.
 	MaxInstallations int
 	TTL              time.Duration
 	MaxBodyBytes     int
@@ -57,11 +54,9 @@ func DefaultConfig() Config {
 
 // Cache is the in-memory semantic cache. Concurrent-safe.
 //
-// Per-bucket TTL is implemented with `storedAt` on each entry checked
-// lazily by Lookup, not via a background goroutine. expirable.LRU was
-// the obvious fit but its v2.0.7 cleanup goroutine has no public
-// shutdown — using it for inner buckets would leak one goroutine per
-// evicted bucket whenever an installation churned past
+// TTL is enforced lazily via `storedAt` on Lookup, not a background goroutine:
+// expirable.LRU's v2.0.7 cleanup goroutine has no public shutdown, so using it
+// for inner buckets would leak one goroutine per bucket evicted past
 // MaxBucketsPerInstallation.
 type Cache struct {
 	cfg           Config
@@ -142,9 +137,8 @@ func (c *Cache) thresholdFor(clusterID int) float32 {
 	return c.cfg.DefaultThreshold
 }
 
-// Lookup walks buckets for (installation, format, clusterIDs) and
-// returns the first entry whose cosine clears the threshold.
-// embedding must be L2-normalized; clusterIDs order is irrelevant.
+// Lookup walks buckets for (installation, format, clusterIDs) and returns the
+// first entry whose cosine clears the threshold. embedding must be L2-normalized.
 func (c *Cache) Lookup(installationID string, format Format, embedding []float32, clusterIDs []int, clusterVersion string, knobsHash uint64) (CachedResponse, bool) {
 	if c == nil || len(embedding) == 0 || len(clusterIDs) == 0 {
 		return CachedResponse{}, false
@@ -198,10 +192,8 @@ func (c *Cache) Store(installationID string, format Format, embedding []float32,
 	})
 }
 
-// bucket returns the LRU for a key. create=false returns nil for missing
-// buckets (lookup path); create=true allocates lazily, capping per-
-// installation so one tenant cannot churn knob hashes to evict another's
-// buckets.
+// bucket returns the LRU for a key. create=false returns nil if missing
+// (lookup path); create=true allocates lazily, capped per-installation.
 func (c *Cache) bucket(installationID string, format Format, clusterID int, clusterVersion string, knobsHash uint64, create bool) *lru.Cache[entryKey, *entry] {
 	key := bucketKey{
 		format:         format,

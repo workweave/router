@@ -95,9 +95,8 @@ func TestResponsesToChatCompletions_ToolsFlatToNested(t *testing.T) {
 }
 
 func TestResponsesToChatCompletions_StripsRoutingBadgeFromAssistantHistory(t *testing.T) {
-	// Codex re-sends every prior assistant turn in the input array. The badge
-	// we prepend on egress must not survive ingress, or the upstream sees
-	// per-turn router-injected bytes that break prompt-cache reuse.
+	// The egress badge must not survive ingress, or repeated turns leak
+	// router bytes that break prompt-cache reuse.
 	body := []byte(`{
 		"model": "gpt-5",
 		"input": [
@@ -171,11 +170,9 @@ func TestResponsesToChatCompletions_MaxOutputAndDropsReasoning(t *testing.T) {
 	assert.False(t, gjson.GetBytes(out, "reasoning").Exists())
 }
 
-// TestResponsesToChatCompletions_DropsReasoningEffort guards the Codex blocker:
-// Codex ALWAYS sends a `reasoning` field (including effort:"none", which is not
-// a valid Chat Completions reasoning_effort), and reasoning OpenAI models reject
-// reasoning_effort + tools — both 400 after response.created and close the
-// stream. None of these efforts may leak into the translated chat body.
+// Codex always sends a `reasoning` field, including effort:"none" (invalid as
+// reasoning_effort); reasoning OpenAI models also 400 on reasoning_effort+tools.
+// No effort value may leak into the translated chat body.
 func TestResponsesToChatCompletions_DropsReasoningEffort(t *testing.T) {
 	for _, effort := range []string{"none", "minimal", "low", "medium", "high"} {
 		body := []byte(`{"model":"gpt-5.5","input":"hi","reasoning":{"effort":"` + effort + `"},"include":["reasoning.encrypted_content"]}`)
@@ -186,10 +183,9 @@ func TestResponsesToChatCompletions_DropsReasoningEffort(t *testing.T) {
 	}
 }
 
-// TestResponsesWriter_FinalizeErrorEmitsFailed guards the stream-termination
-// half of the Codex fix: once response.created is on the wire, an upstream
-// error must close the stream with a response.failed terminal, never a bare
-// disconnect (which Codex reports as "stream closed before response.completed").
+// Once response.created is on the wire, an upstream error must terminate with
+// response.failed, never a bare disconnect (Codex reports that as "stream
+// closed before response.completed").
 func TestResponsesWriter_FinalizeErrorEmitsFailed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesWriter(rec, "")
@@ -210,9 +206,8 @@ func TestResponsesWriter_FinalizeErrorEmitsFailed(t *testing.T) {
 	assert.NotNil(t, resp["error"])
 }
 
-// TestResponsesWriter_FinalizeErrorNoopBeforeCreated: when nothing has been
-// streamed yet, FinalizeError writes nothing so the handler can still emit a
-// JSON error envelope.
+// Before anything streams, FinalizeError writes nothing so the handler can
+// still emit a JSON error envelope.
 func TestResponsesWriter_FinalizeErrorNoopBeforeCreated(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesWriter(rec, "")
@@ -223,9 +218,8 @@ func TestResponsesWriter_FinalizeErrorNoopBeforeCreated(t *testing.T) {
 
 func TestResponsesWriter_StreamingText(t *testing.T) {
 	rec := httptest.NewRecorder()
-	// Empty initial model + no x-router-model header means the badge can't
-	// resolve a routed pick and stays silent — lets this test focus on the
-	// chunk translation contract.
+	// No model / x-router-model header, so the badge stays silent and the
+	// test can focus on chunk translation.
 	w := translate.NewResponsesWriter(rec, "")
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -256,9 +250,8 @@ func TestResponsesWriter_StreamingText(t *testing.T) {
 	assert.Contains(t, types, "response.output_item.done")
 	assert.Contains(t, types, "response.completed")
 
-	// Concatenated text deltas, skipping the routing badge prefix that the
-	// writer prepends on the first delta whenever a routed model is known.
-	// Chunks here carry model="gpt-5" so the badge resolves and fires.
+	// Skip the badge prefix the writer prepends on the first delta (model
+	// "gpt-5" resolves here so the badge fires).
 	var combined strings.Builder
 	for _, e := range events {
 		if e["type"] != "response.output_text.delta" {
@@ -280,10 +273,8 @@ func TestResponsesWriter_StreamingText(t *testing.T) {
 	assert.EqualValues(t, 2, usage["output_tokens"])
 }
 
-// TestResponsesWriter_PassthroughForwardsVerbatim guards the Codex-backend
-// path: when the upstream already speaks Responses natively, the writer must
-// forward bytes unchanged and must NOT emit its own response.created prelude
-// (which would duplicate the upstream's).
+// When upstream already speaks Responses natively, the writer must forward
+// bytes unchanged and skip its own response.created prelude.
 func TestResponsesWriter_PassthroughForwardsVerbatim(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesWriter(rec, "gpt-5.5")

@@ -41,9 +41,8 @@ func decodeOpenAIReasoningTestSignature(t *testing.T, sig string) map[string]any
 	return out
 }
 
-// Anthropic (Claude Code) → OpenAI Responses request: the thinking budget must
-// become reasoning.effort, messages must become typed input items, tool_use →
-// function_call, tool_result → function_call_output, tools the flat shape.
+// Anthropic → OpenAI Responses request shape: thinking budget, typed input
+// items, tool_use/tool_result mapping, flat tools.
 func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	body := []byte(`{
       "model":"claude-opus-4-8","max_tokens":4096,
@@ -122,12 +121,10 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	assert.Equal(t, providers.EndpointResponses, prep.Endpoint)
 }
 
-// A session that ran on Gemini accumulates tool_use ids with a base64
-// thoughtSignature smuggled in (call_xxx__thought__<sig>, often >1KB). When a
-// later turn re-routes to a gpt-5.x Responses model, the call_id must be
-// stripped of the signature and clamped to OpenAI's 64-char limit, or the
-// upstream 400s ("input[N].call_id: string too long, max 64"). The tool_use
-// and its tool_result must still map to the same clamped call_id so they pair.
+// Gemini sessions smuggle a thoughtSignature into tool_use ids
+// (call_xxx__thought__<sig>, often >1KB). On re-route to a gpt-5.x Responses
+// model, call_id must be stripped and clamped to 64 chars or the upstream
+// 400s; tool_use and tool_result must still share the clamped call_id.
 func TestPrepareOpenAIResponses_ClampsGeminiThoughtSignatureCallID(t *testing.T) {
 	longSig := strings.Repeat("A", 1300) // valid base64url, > 64 chars
 	id := "call_abc123__thought__" + longSig
@@ -242,9 +239,8 @@ func TestPrepareOpenAIResponses_ReplaysSignedReasoningAfterModelSwitch(t *testin
 
 // budget→effort ladder.
 func TestPrepareOpenAIResponses_EffortLadder(t *testing.T) {
-	// gpt-5.x has a measured "medium" dead-zone on hard agentic coding (Pro:
-	// low 16%, medium 0%, high 41%), so the medium band (budget ≤16384) is
-	// promoted to high. Small budgets still resolve to low — easy stays cheap.
+	// gpt-5.x has a measured "medium" dead-zone on hard agentic coding, so the
+	// medium band (budget ≤16384) is promoted to high; small budgets stay low.
 	for _, tc := range []struct {
 		budget int
 		want   string
@@ -296,9 +292,8 @@ func TestResponsesToAnthropicResponse(t *testing.T) {
 	assert.Equal(t, "here is the fix", b1["text"])
 	b2, _ := content[2].(map[string]any)
 	assert.Equal(t, "tool_use", b2["type"])
-	// The preceding reasoning item's signature is also carried on the tool_use id
-	// (the Claude Code round-trip drops the thinking block but preserves the id),
-	// so the id is the call_id plus an opaque reasoning-signature suffix.
+	// The tool_use id also carries the preceding reasoning item's signature,
+	// since Claude Code drops the thinking block on round-trip but keeps the id.
 	toolID, _ := b2["id"].(string)
 	assert.True(t, strings.HasPrefix(toolID, "call_9"), "tool id keeps the call_id prefix, got %q", toolID)
 	assert.Contains(t, toolID, "__openai_reasoning__", "tool id carries the reasoning signature for replay")
@@ -324,9 +319,8 @@ func TestResponsesToAnthropicResponse_StopReasons(t *testing.T) {
 	assert.Equal(t, "end_turn", gjsonStopReason(out))
 }
 
-// gemini-3.x (native) must receive a thinkingConfig derived from the Anthropic
-// thinking budget so it reasons. Gemini 3.x uses the string `thinkingLevel`;
-// the legacy numeric `thinkingBudget` is suboptimal for 3.x and mixing both 400s.
+// gemini-3.x uses string `thinkingLevel`, not the legacy numeric `thinkingBudget`
+// (sending both 400s).
 func TestPrepareGemini_ThinkingBudgetToThinkingConfig(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":31999}}`)
 	env, err := translate.ParseAnthropic(body)

@@ -30,9 +30,8 @@ func ByID(id string) (Model, bool) {
 	return Model{}, false
 }
 
-// ResolveBinding returns the first ProviderBinding whose Provider name is
-// in `available`. Used at boot by the cluster scorer to pick which
-// upstream serves each routable model.
+// ResolveBinding returns the first ProviderBinding whose Provider is in
+// `available`. Used at boot to pick each routable model's upstream.
 func ResolveBinding(id string, available map[string]struct{}) (ProviderBinding, bool) {
 	m, ok := ByID(id)
 	if !ok {
@@ -46,11 +45,9 @@ func ResolveBinding(id string, available map[string]struct{}) (ProviderBinding, 
 	return ProviderBinding{}, false
 }
 
-// AvailableBindings returns every ProviderBinding for the model whose
-// Provider name is in `available`, in catalog order. Used by the proxy's
-// per-request failover loop: index 0 is the primary, indexes >0 are
-// ordered fallbacks. Empty result means the model has no binding under
-// the available set.
+// AvailableBindings returns every ProviderBinding for the model whose Provider
+// is in `available`, in catalog order. Used by the proxy's failover loop:
+// index 0 is primary, indexes >0 are ordered fallbacks.
 func AvailableBindings(id string, available map[string]struct{}) []ProviderBinding {
 	m, ok := ByID(id)
 	if !ok {
@@ -65,8 +62,7 @@ func AvailableBindings(id string, available map[string]struct{}) []ProviderBindi
 	return out
 }
 
-// PriceFor returns the per-(provider, model) pricing. Used by the planner
-// when both pin and fresh have a resolved provider.
+// PriceFor returns the per-(provider, model) pricing.
 func PriceFor(provider, id string) (Pricing, bool) {
 	m, ok := ByID(id)
 	if !ok {
@@ -80,9 +76,8 @@ func PriceFor(provider, id string) (Pricing, bool) {
 	return Pricing{}, false
 }
 
-// PrimaryPriceFor returns the pricing of the first (primary) binding for
-// the given model. Used by call sites (OTel emitter, billing debit hook,
-// install-script generation) that don't yet thread provider through.
+// PrimaryPriceFor returns the pricing of the model's first (primary) binding,
+// for call sites that don't thread a specific provider through.
 func PrimaryPriceFor(id string) (Pricing, bool) {
 	m, ok := ByID(id)
 	if !ok {
@@ -104,8 +99,8 @@ func TierFor(id string) Tier {
 }
 
 // ThinkTagReasoningFor reports whether the model streams chain-of-thought as
-// inline <think>…</think> in the content channel (so the Anthropic translator
-// should reroute it into thinking). Unknown models return false.
+// inline <think>…</think> in content (the Anthropic translator reroutes it
+// into thinking). Unknown models return false.
 func ThinkTagReasoningFor(id string) bool {
 	m, ok := ByID(id)
 	if !ok {
@@ -150,11 +145,9 @@ func ContextWindowFor(id string) int {
 	return m.ContextWindow
 }
 
-// ToolUseLowSet returns the set of model IDs whose ToolUseQuality is
-// ToolUseLow. The cluster scorer subtracts this set from the eligible pool
-// when req.HasTools is true; falls back to the unfiltered pool when the
-// subtraction would empty the eligible set so a routing decision is always
-// returned.
+// ToolUseLowSet returns model IDs with ToolUseLow quality. The cluster scorer
+// excludes these when req.HasTools, falling back to the unfiltered pool if
+// that would empty the eligible set.
 func ToolUseLowSet() map[string]struct{} {
 	out := make(map[string]struct{}, len(Models))
 	for _, m := range Models {
@@ -165,13 +158,10 @@ func ToolUseLowSet() map[string]struct{} {
 	return out
 }
 
-// AgenticLowSet returns the set of model IDs whose AgenticUse is AgenticLow —
-// models that emit valid tool calls but can't sustain an agentic harness loop.
-// The cluster scorer subtracts this set from the eligible pool when req.HasTools
-// is true (on top of the ToolUseLow subtraction), so the price/quality dial
-// demotes Opus to a cheaper harness-capable model rather than the cheapest model
-// in the pool. Falls back to the unfiltered pool when the subtraction would empty
-// the eligible set so a routing decision is always returned. Mirrors ToolUseLowSet.
+// AgenticLowSet returns model IDs whose AgenticUse is AgenticLow — models that
+// emit valid tool calls but can't sustain an agentic harness loop. Excluded
+// alongside ToolUseLowSet so a cost demotion lands on a harness-capable model,
+// not just the cheapest one. Mirrors ToolUseLowSet's fallback behavior.
 func AgenticLowSet() map[string]struct{} {
 	out := make(map[string]struct{}, len(Models))
 	for _, m := range Models {
@@ -182,11 +172,9 @@ func AgenticLowSet() map[string]struct{} {
 	return out
 }
 
-// ImageUnsupportedSet returns the set of model IDs flagged
-// ImageInputUnsupported. The cluster scorer subtracts this set from the
-// eligible pool when the inbound request carries image content, falling back
-// to the unfiltered pool when the subtraction would empty the eligible set so
-// a routing decision is always returned. Mirrors ToolUseLowSet.
+// ImageUnsupportedSet returns model IDs flagged ImageInputUnsupported,
+// excluded when the request carries image content. Mirrors ToolUseLowSet's
+// fallback behavior.
 func ImageUnsupportedSet() map[string]struct{} {
 	out := make(map[string]struct{}, len(Models))
 	for _, m := range Models {
@@ -197,10 +185,9 @@ func ImageUnsupportedSet() map[string]struct{} {
 	return out
 }
 
-// AcceptsImages reports whether the model accepts image content parts. Unknown
-// models and models with no ImageInput flag are treated as image-capable — only
-// an explicit ImageInputUnsupported flag returns false. Used by the turn loop to
-// evict a text-only session pin when the current turn carries an image.
+// AcceptsImages reports whether the model accepts image content. Unknown
+// models default to true; only an explicit ImageInputUnsupported flag
+// returns false.
 func AcceptsImages(id string) bool {
 	m, ok := ByID(id)
 	if !ok {
@@ -209,9 +196,8 @@ func AcceptsImages(id string) bool {
 	return m.ImageInput != ImageInputUnsupported
 }
 
-// AllPrimaryPricing returns a copy of the primary-binding pricing for
-// every known model, keyed by model ID. Used by the OTel emitter and the
-// genprices install-script generator.
+// AllPrimaryPricing returns primary-binding pricing for every known model,
+// keyed by model ID.
 func AllPrimaryPricing() map[string]Pricing {
 	out := make(map[string]Pricing, len(Models))
 	for _, m := range Models {
@@ -223,9 +209,8 @@ func AllPrimaryPricing() map[string]Pricing {
 	return out
 }
 
-// ValidateDeployed returns an error naming any deployed model missing
-// from the catalog or lacking a tier. Called once at boot against the
-// cluster scorer's deployed-model set.
+// ValidateDeployed returns an error naming any deployed model missing from
+// the catalog or lacking a tier.
 func ValidateDeployed(deployed []string) error {
 	var missing []string
 	for _, id := range deployed {

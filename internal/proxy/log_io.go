@@ -7,9 +7,8 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// preview returns the first n runes of s with an ellipsis suffix when
-// truncated. Empty in, empty out. Used everywhere we want a log-safe excerpt
-// of free-text payloads — full bodies stay behind LOG_LEVEL=debug.
+// preview returns a log-safe excerpt of s, truncated to n bytes with an
+// ellipsis suffix. Full bodies stay behind LOG_LEVEL=debug.
 func preview(s string, n int) string {
 	if s == "" || n <= 0 {
 		return ""
@@ -25,14 +24,10 @@ func preview(s string, n int) string {
 	return cut + "…"
 }
 
-// logInboundToolTraffic emits a Debug log line summarising the tool-use blocks
-// the model is about to see on this turn. Keeps payload small (just names +
-// short arg previews of the last few assistant calls) so we can correlate a
-// broken turn back to the prior tool_use / tool_result shape without dumping
-// the entire body.
-//
-// Gemini envelopes are skipped — the underlying preview helper only knows
-// Anthropic + OpenAI shapes today.
+// logInboundToolTraffic logs names + short arg previews of the last few
+// assistant tool_use calls, to correlate a broken turn without dumping the
+// full body. Gemini envelopes are skipped — preview only knows Anthropic +
+// OpenAI shapes today.
 func logInboundToolTraffic(log *slog.Logger, env *translate.RequestEnvelope) {
 	if env == nil {
 		return
@@ -64,13 +59,9 @@ func logInboundRequestDiagnostics(log *slog.Logger, env *translate.RequestEnvelo
 	logInboundSystemTail(log, env)
 }
 
-// logInboundConversationTail emits a structured summary of the last few
-// inbound messages, with role + per-block type/name/preview. Pairs with
-// logInboundToolTraffic: the tool-call view shows what the model previously
-// invoked, this view shows the visible prose context (assistant text, last
-// user prompt, last tool_result) the model is about to react to. Used to
-// diagnose stuck conversations where bytes change but the model keeps
-// emitting the same prefix.
+// logInboundConversationTail logs role + per-block type/name/preview for the
+// last few inbound messages — the visible prose context the model is about
+// to react to, complementing logInboundToolTraffic's view of prior tool calls.
 func logInboundConversationTail(log *slog.Logger, env *translate.RequestEnvelope) {
 	if env == nil {
 		return
@@ -110,10 +101,9 @@ func logInboundConversationTail(log *slog.Logger, env *translate.RequestEnvelope
 	)
 }
 
-// logInboundSystemTail emits the system-prompt length plus head/tail
-// excerpts. The static Claude Code system prompt dwarfs any per-turn
-// system_reminder injections; logging head + tail makes those injections
-// visible without paying to log the whole prompt every turn.
+// logInboundSystemTail logs system-prompt length plus head/tail excerpts,
+// surfacing per-turn system_reminder injections without logging the whole
+// prompt (which the static Claude Code prompt otherwise dwarfs).
 func logInboundSystemTail(log *slog.Logger, env *translate.RequestEnvelope) {
 	if env == nil {
 		return
@@ -130,12 +120,9 @@ func logInboundSystemTail(log *slog.Logger, env *translate.RequestEnvelope) {
 	)
 }
 
-// logAssistantOutputSummary emits a Debug summary of the assistant blocks the
-// upstream produced this turn: counts of text / tool_use / thinking blocks and
-// short previews of each tool_use call. Streaming providers should call this
-// once the response stream has closed and the buffered text/tool blocks are
-// known; for non-streaming responses it can be invoked directly on the parsed
-// body.
+// logAssistantOutputSummary logs counts of text/tool_use/thinking blocks and
+// tool_use previews for the assistant's turn. Streaming providers call it
+// once the stream closes; non-streaming callers pass the parsed body directly.
 func logAssistantOutputSummary(
 	log *slog.Logger,
 	textBlocks, thinkingBlocks int,
@@ -160,10 +147,8 @@ func logAssistantOutputSummary(
 	)
 }
 
-// ToolCallPreview is a log-friendly snapshot of one assistant tool_use block.
-// Kept in this package to avoid coupling translate or providers to a logging
-// type; populated by the streaming/non-streaming response parsers when they
-// can cheaply observe the block.
+// ToolCallPreview is a log-friendly snapshot of one assistant tool_use block,
+// kept here to avoid coupling translate/providers to a logging type.
 type ToolCallPreview struct {
 	Name     string
 	ArgsJSON string
