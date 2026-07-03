@@ -1483,7 +1483,7 @@ func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name, 
 	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"content_block\":{\"type\":\"tool_use\",\"id\":")
-	sse.WriteJSONString(t.bw, embedSignatureInID(id, sig))
+	sse.WriteJSONString(t.bw, embedSignatureInID(sanitizeToolUseID(id), sig))
 	t.bw.WriteString(",\"name\":")
 	sse.WriteJSONString(t.bw, name)
 	t.bw.WriteString(",\"input\":{}}}\n\n")
