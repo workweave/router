@@ -28,3 +28,17 @@ func EffectiveInputCost(inputTokens, cacheCreation, cacheRead int, pricePer1M fl
 func EffectiveOutputCost(outputTokens int, pricePer1M float64) float64 {
 	return float64(outputTokens) / 1_000_000 * pricePer1M
 }
+
+// CounterfactualInputCost is EffectiveInputCost for the savings baseline, except
+// on a model-switch turn (switchPrefillPaid) it reprices the served model's
+// cold-cache prefill as a cache read: a session that never switched would have
+// kept that context warm, so charging the baseline the prefill overstates
+// savings. Off the switch turn it is identical to EffectiveInputCost.
+func CounterfactualInputCost(inputTokens, cacheCreation, cacheRead int, pricePer1M float64, p Pricing, upstreamProvider string, switchPrefillPaid bool) float64 {
+	if !switchPrefillPaid {
+		return EffectiveInputCost(inputTokens, cacheCreation, cacheRead, pricePer1M, p, upstreamProvider)
+	}
+	// New tokens for a single turn are negligible against the carried context, so
+	// fold the whole prefill into cache reads rather than splitting new-vs-carried.
+	return EffectiveInputCost(inputTokens, 0, cacheCreation+cacheRead, pricePer1M, p, upstreamProvider)
+}
