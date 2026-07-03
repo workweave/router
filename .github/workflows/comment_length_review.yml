@@ -1,9 +1,11 @@
 name: Comment Length Review
 
 # Advisory-only: flags overly long comments on new/changed Go code and leaves
-# INLINE review comments (anchored to the offending lines) with shorter
-# suggestions. Never blocks merge (no required status check is registered, and
-# the review is posted as event=COMMENT, not REQUEST_CHANGES).
+# INLINE review comments (anchored to the offending lines) whose body is a
+# committable GitHub ```suggestion``` with the shortened comment. Comments are
+# posted by the action's own GitHub tooling, so they come from the Claude app,
+# not github-actions[bot]. Never blocks merge (no required status check, and
+# these are plain review comments, not a REQUEST_CHANGES review).
 
 on:
   pull_request:
@@ -35,7 +37,9 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           model: "claude-sonnet-4-6"
-          allowed_tools: "Bash(git diff:*),Bash(git log:*),Bash(gh api:*)"
+          # Post via the action's own inline-comment tool (authored by the Claude
+          # app), not `gh api` under GITHUB_TOKEN (which stamps github-actions[bot]).
+          allowed_tools: "Bash(git diff:*),Bash(git log:*),mcp__github_inline_comment__create_inline_comment"
           direct_prompt: |
             You are a lightweight, advisory-only comment-style linter for a Go
             codebase. You are NOT a general code reviewer — do not comment on
@@ -55,32 +59,26 @@ jobs:
                if it explains it verbosely — judge concision, not just presence.
             4. If nothing is worth flagging, exit silently — do NOT post anything.
                Never post a "no issues found" message.
-            5. Otherwise post ONE pull-request review with an INLINE comment per
-               finding. For each finding, determine its file path and the
-               new-file line number of the block's first line from the diff hunk
-               headers (`@@ -a,b +c,d @@`: `c` is the new-file start line of the
-               hunk; count the `+` and context lines down to the flagged line;
-               ignore `-` lines). Only use lines that appear as `+` (added) lines
-               so they exist on the RIGHT side of the diff, or the API rejects the
-               review. Post via stdin heredoc:
+            5. For EACH flagged block, post one inline review comment with the
+               `mcp__github_inline_comment__create_inline_comment` tool:
+               - `path`: the file.
+               - `startLine` and `line`: the first and last NEW-FILE line numbers
+                 of the entire comment block. Derive them from the diff hunk
+                 header `@@ -a,b +c,d @@` — `c` is the hunk's new-file start line;
+                 count `+` and context lines down to the block, ignoring `-`
+                 lines. Span the whole block so the suggestion replaces all of it.
+               - `side`: `RIGHT`. `confirmed`: true.
+               - `body`: a committable GitHub suggestion that IS the shortened
+                 comment. The ```suggestion``` block must contain the COMPLETE
+                 replacement for lines startLine..line, each line carrying the
+                 SAME leading indentation (tabs) as the original so it commits
+                 cleanly. Prefix the body with
+                 `Comment-length nit (advisory, won't block):` and follow the
+                 suggestion with one short sentence on why it was too long. Shape:
 
-               ```
-               gh api --method POST \
-                 repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
-                 --input - <<'JSON'
-               {
-                 "event": "COMMENT",
-                 "body": "Advisory only — comment-length nits. Won't block merge.",
-                 "comments": [
-                   {"path": "internal/foo/bar.go", "line": 42, "side": "RIGHT",
-                    "body": "This 8-line block restates the code. Suggested:\n```go\n// bar does X because Y.\n```"}
-                 ]
-               }
-               JSON
-               ```
-
-               One entry in `comments` per finding: `path`, `line`, `side:
-               RIGHT`, and a `body` with a 1-line reason plus a fenced shortened
-               version. Keep each body short.
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                 Comment-length nit (advisory, won't block):
+                 ```suggestion
+                 // shortened line 1
+                 // shortened line 2
+                 ```
+                 Was 8 lines restating the code; the WHY fits in two.
