@@ -1,0 +1,22 @@
+db/migrations/0033_telemetry-planner-ev-shadow.down.sql
+  s_035d3d44682683::t_7e7ca7b2649e56 3,16,18
+  s_035d3d44682683::t_6b46770fd5f31c 1-2,4-15,17,19-84
+db/migrations/0033_telemetry-planner-ev-shadow.up.sql
+  s_035d3d44682683::t_6b46770fd5f31c 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "195f4f4c438c3c5aedc30a1341289be784eb3496",
+  "prompts": {},
+  "sessions": {
+    "s_035d3d44682683": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5c55d20d-8d65-432d-a371-d871e40baee0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
