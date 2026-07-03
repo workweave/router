@@ -111,7 +111,7 @@ Pick by responsibility, then read that package's `CLAUDE.md`:
 | Cache-aware turn routing internals | `internal/router/{planner,handover,cache,sessionpin,pricing,capability,turntype}/` | each has its own CLAUDE.md |
 | Anthropic usage-bypass gate | `internal/proxy/usage` | [internal/proxy/usage/CLAUDE.md](internal/proxy/usage/CLAUDE.md) |
 | New column / SQL query | `db/queries/` + `internal/postgres/` | [db/CLAUDE.md](db/CLAUDE.md), [internal/postgres/CLAUDE.md](internal/postgres/CLAUDE.md) |
-| Doc under `docs/` | `docs/` | [docs/CLAUDE.md](docs/CLAUDE.md) |
+| Doc under `docs/` | `docs/` | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
 
 **Default rule:** put logic in the package that uses it. Only promote to a shared home (`auth`, `proxy`, `translate`, `config`, `observability`, `sse`) when 3+ packages need the same logic.
 
