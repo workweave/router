@@ -35,9 +35,8 @@ type fakeProvider struct {
 	proxyBodies   [][]byte
 	proxyResponse func(w http.ResponseWriter)
 	proxyErr      error
-	// proxyCreds records the resolved credential each dispatch saw, so a test can
-	// assert WHICH key served the turn (subscription vs deployment/BYOK). nil
-	// entries mean no credential was set (deployment-key fallback).
+	// proxyCreds records the resolved credential per dispatch; nil means
+	// deployment-key fallback (no credential set).
 	proxyCreds []*proxy.Credentials
 }
 
@@ -79,14 +78,11 @@ func TestService_ProxyMessages_PropagatesUpstreamStatusError(t *testing.T) {
 	assert.Equal(t, 400, got.Status)
 }
 
-// TestService_ProxyMessages_CrossFormatUpstreamErrorBodyReachesClient guards
-// against the regression where a cross-format upstream non-2xx (e.g. OpenRouter
-// 402 "out of credits") buffered the upstream body inside the
-// AnthropicSSETranslator but never flushed it, because Finalize was skipped on
-// any non-nil proxyErr. Claude Code would then see only the generic
-// "upstream call failed" envelope written by the handler. The translated body
-// must reach the client and the typed UpstreamStatusError must still surface
-// to the handler so telemetry records the upstream status.
+// TestService_ProxyMessages_CrossFormatUpstreamErrorBodyReachesClient guards a
+// regression: a cross-format upstream non-2xx (e.g. OpenRouter 402) buffered
+// the body inside AnthropicSSETranslator but never flushed it, because
+// Finalize was skipped on any non-nil proxyErr. Both the translated body and
+// the typed UpstreamStatusError must reach the client/handler.
 func TestService_ProxyMessages_CrossFormatUpstreamErrorBodyReachesClient(t *testing.T) {
 	const upstreamBody = `{"error":{"message":"OpenRouter: insufficient credits","code":402,"type":"invalid_request_error"}}`
 	provider := &fakeProvider{
@@ -119,12 +115,10 @@ func TestService_ProxyMessages_CrossFormatUpstreamErrorBodyReachesClient(t *test
 	assert.Contains(t, respBody, `"type":"error"`, "body must be in Anthropic error envelope shape")
 }
 
-// TestService_ProxyMessages_StripsRoutingMarkerFromInboundHistory guards the
-// hygiene fix at internal/proxy/service.go: the routing-marker text injected
-// on prior cross-format responses (✦ **Weave Router** → ...) must not survive
-// into the upstream body. Without the strip, the marker round-trips through
-// clients that preserve assistant content verbatim and pollutes context on
-// every subsequent turn.
+// TestService_ProxyMessages_StripsRoutingMarkerFromInboundHistory guards
+// service.go's hygiene fix: the routing-marker text injected on prior
+// cross-format responses (✦ **Weave Router** → ...) must not survive into the
+// upstream body, or it round-trips and pollutes context on every later turn.
 func TestService_ProxyMessages_StripsRoutingMarkerFromInboundHistory(t *testing.T) {
 	const markerSentinel = "Weave Router"
 	body := []byte(`{
@@ -161,10 +155,8 @@ func TestService_ProxyMessages_StripsRoutingMarkerFromInboundHistory(t *testing.
 func TestService_ProxyMessages_EmbedOnlyUserMessageFlag(t *testing.T) {
 	const firstUserPrompt = "Walk every Go file under router/internal/ and produce a one-paragraph summary of each."
 	const secondUserPrompt = "Now narrow it to handlers under internal/api/."
-	// CC-shaped body: system preamble + two user prompts separated by an
-	// assistant turn + trailing tool_result. embedOnlyUserMessage must keep
-	// both user prompts and drop the system text, the assistant tool_use, and
-	// the tool_result blocks.
+	// embedOnlyUserMessage must keep both user prompts, drop system text,
+	// assistant tool_use, and tool_result blocks.
 	body := []byte(`{
 		"model":"claude-opus-4-7",
 		"system":"You are Claude Code. CLAUDE.md says: do not use emojis...",
@@ -294,9 +286,8 @@ func TestService_ProxyMessages_EmbedOnlyUserMessageContextOverride(t *testing.T)
 
 func boolPtr(b bool) *bool { return &b }
 
-// TestService_ProxyMessages_NoPinStoreRunsScorerEveryTurn verifies the
-// pin-store-disabled path: without a pin store, every turn re-runs the
-// cluster scorer (no Tier-3 legacy LRU short-circuits routing anymore).
+// TestService_ProxyMessages_NoPinStoreRunsScorerEveryTurn verifies that
+// without a pin store, every turn re-runs the cluster scorer.
 func TestService_ProxyMessages_NoPinStoreRunsScorerEveryTurn(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-haiku-4-5"}}
@@ -410,10 +401,9 @@ func TestService_ProxyOpenAIChatCompletion_NativeOpenAI(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"chat.completion"`)
 }
 
-// OpenRouter speaks OpenAI Chat Completions natively: an OpenAI-format
+// OpenRouter speaks OpenAI Chat Completions natively, so an OpenAI-format
 // inbound landing on an OpenRouter decision must take the no-translation path.
-// Regression: eval harness v0.27 (OpenRouter OSS models) via mini-swe-agent's
-// OpenAI client hit "no translation path defined".
+// Regression: eval harness v0.27 hit "no translation path defined".
 func TestService_ProxyOpenAIChatCompletion_NativeOpenRouter(t *testing.T) {
 	provider := &fakeProvider{
 		proxyResponse: func(w http.ResponseWriter) {
@@ -441,15 +431,12 @@ func TestService_ProxyOpenAIChatCompletion_NativeOpenRouter(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"chat.completion"`)
 }
 
-// DeepInfra, Bedrock, Makora, and Together are direct providers served by
-// the openaicompat client. Every surface must route those decisions through
-// the OpenAI-emission case rather than the default "no translation path"
-// branch; otherwise the scorer's argmax silently 502s for every prompt that
-// lands on them. Makora/Together are the DeepSeek-V4 primaries whose omission
-// from the old literal dispatch lists 502'd in prod ("no translation path
-// defined for inbound Anthropic Messages", then no-progress-looped back to
-// Claude); keying dispatch off the translation family covers every
-// OpenAI-compat provider, so they route here too.
+// DeepInfra, Bedrock, Makora, and Together are direct providers served by the
+// openaicompat client and must route through the OpenAI-emission case, not
+// the default "no translation path" branch. Regression: Makora/Together
+// (DeepSeek-V4 primaries) were missing from the old literal dispatch list and
+// 502'd in prod. Keying dispatch off the translation family fixes all of
+// them.
 func TestService_ProxyMessages_DispatchesDeepInfraAndBedrock(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -474,9 +461,8 @@ func TestService_ProxyMessages_DispatchesDeepInfraAndBedrock(t *testing.T) {
 				router.Decision{Provider: tc.provider, Model: tc.model, Reason: "test"},
 				map[string]providers.Client{tc.provider: p},
 			)
-			// Tools present + opus requested keeps the turn out of the
-			// classifier-hard-pin path so the test exercises the
-			// switch we just widened, not the hard-pin fallback.
+			// Tools + opus keeps this out of the classifier-hard-pin path,
+			// so the test exercises the widened switch, not the fallback.
 			body := []byte(`{"model":"claude-opus-4-7","max_tokens":16,"tools":[{"name":"calc","description":"add","input_schema":{"type":"object","properties":{"a":{"type":"integer"},"b":{"type":"integer"}},"required":["a","b"]}}],"messages":[{"role":"user","content":"What is 7+5? Use calc."}]}`)
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
@@ -519,19 +505,15 @@ func TestService_ProxyOpenAIChatCompletion_DispatchesDeepInfraAndBedrock(t *test
 	}
 }
 
-// TestService_CodexPassthrough_RoutesFreelyWithBothSubs guards the
-// subscription-credential routing flip: a /v1/responses turn that resolves a
-// Codex (ChatGPT) subscription must NOT force OpenAI-only routing when a Claude
-// subscription is also present. Both providers stay eligible so the scorer can
-// route freely and the sub matching the chosen model pays — GPT via the Codex
-// backend, Claude via the translated path. (Single-sub callers are unaffected:
-// enabledProvidersForRequest already yields {OpenAI} on a lone Codex sub.)
+// TestService_CodexPassthrough_RoutesFreelyWithBothSubs guards against a
+// Codex (ChatGPT) subscription forcing OpenAI-only routing when a Claude
+// subscription is also present. Both should stay eligible so the scorer can
+// route freely and the sub matching the chosen model pays. (Single-sub
+// callers are unaffected: a lone Codex sub still yields {OpenAI}.)
 func TestService_CodexPassthrough_RoutesFreelyWithBothSubs(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6"}}
-	// The Anthropic upstream returns a normal Messages response; the proxy
-	// translates it back to the Responses wire format for the /v1/responses
-	// client (NOT the verbatim Codex-backend path, which only applies to an
-	// OpenAI decision).
+	// Anthropic upstream returns a normal Messages response; proxy translates
+	// it to Responses wire format (not the verbatim Codex-backend path).
 	anthropicResp := func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -561,18 +543,16 @@ func TestService_CodexPassthrough_RoutesFreelyWithBothSubs(t *testing.T) {
 	assert.Contains(t, fr.capturedReq.EnabledProviders, providers.ProviderAnthropic,
 		"Codex passthrough must NOT force OpenAI-only when a Claude subscription is also present")
 
-	// The Claude-routed turn comes back in Responses shape (translated), not
-	// chat-completions — proving a Codex-sub turn routed to Claude isn't sent
-	// through the verbatim Codex-backend path.
+	// Response must be in Responses shape, not chat-completions, proving this
+	// didn't go through the verbatim Codex-backend path.
 	out := rec.Body.String()
 	assert.Contains(t, out, `"object":"response"`)
 	assert.Contains(t, out, `"output_text"`)
 	assert.NotContains(t, out, "chat.completion")
 }
 
-// TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer: with
-// WithByokOnly(true), registered providers must not appear in EnabledProviders
-// without per-request credentials, or argmax routes to the platform key and 402s.
+// TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer: with BYOK-only,
+// providers without per-request creds must be excluded, or argmax 402s.
 func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`)
 	providerMap := map[string]providers.Client{
@@ -607,11 +587,9 @@ func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 	})
 
 	t.Run("byok-on Anthropic surface with x-api-key enables Anthropic only", func(t *testing.T) {
-		// On the Anthropic surface, a client x-api-key is the legitimate
-		// passthrough credential and enables Anthropic. It must NOT enable
-		// OpenRouter or any other OpenAI-compat upstream — those use a
-		// different inbound surface and reading the same header would be a
-		// cross-provider credential leak.
+		// A client x-api-key on the Anthropic surface is a legitimate passthrough
+		// credential and enables Anthropic, but must not leak into OpenRouter or
+		// other OpenAI-compat upstreams on a different inbound surface.
 		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
 		svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
 			WithByokOnly(true)
@@ -629,15 +607,10 @@ func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
 	})
 
 	t.Run("byok-on Anthropic surface with inbound subscription Bearer enables Anthropic only", func(t *testing.T) {
-		// Claude Code passes a Claude subscription OAuth bearer (Authorization:
-		// Bearer sk-ant-oat…) on every request. It is legitimate Anthropic auth
-		// (forwarded as Bearer + the oauth beta header), so it enables Anthropic
-		// — the caller's subscription pays for their Claude turns.
-		//
-		// It must still NEVER enable OpenRouter or any other OpenAI-compat
-		// upstream. That cross-provider leak (treating the bearer as creds for
-		// every Bearer-using provider) was the 2026-05-13 prod incident:
-		// argmax picked OpenRouter and 401'd at dispatch with no OpenRouter key.
+		// A Claude subscription OAuth bearer is legitimate Anthropic auth and
+		// enables Anthropic, but must never enable OpenRouter or other
+		// OpenAI-compat upstreams — that cross-provider leak was the 2026-05-13
+		// prod incident (argmax picked OpenRouter, 401'd with no OpenRouter key).
 		fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}}
 		svc := proxy.NewService(fr, providerMap, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
 			WithByokOnly(true)

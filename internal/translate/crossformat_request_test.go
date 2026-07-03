@@ -85,9 +85,8 @@ var openAIAssistantTextAndToolCalls = []byte(`{
 }`)
 
 // openAIAssistantArrayContentAndToolCalls mirrors openAIAssistantTextAndToolCalls
-// but carries assistant content as an OpenAI parts array (the shape Cursor sends)
-// rather than a plain string. The array form must flatten to the inner text, not
-// be serialized verbatim into the Anthropic text block.
+// but with assistant content as an OpenAI parts array (Cursor's shape); it must
+// flatten to inner text, not serialize verbatim.
 var openAIAssistantArrayContentAndToolCalls = []byte(`{
 	"model": "gpt-4",
 	"messages": [
@@ -356,11 +355,9 @@ var openAICacheInjectionConversation = []byte(`{
 
 var ephemeral = map[string]any{"type": "ephemeral"}
 
-// TestCrossFormat_OpenAIToAnthropic_CacheControlInjection pins the prompt-cache
-// breakpoint injection on the OpenAI->Anthropic path: clients like Cursor send
-// no cache_control, so the router marks the last system block (caches the
-// tools+system floor) and the last block of the final message (caches the
-// conversation prefix) — and nothing else.
+// TestCrossFormat_OpenAIToAnthropic_CacheControlInjection pins prompt-cache
+// breakpoint injection: for clients that send no cache_control, the router
+// marks only the last system block and the last block of the final message.
 func TestCrossFormat_OpenAIToAnthropic_CacheControlInjection(t *testing.T) {
 	env, err := translate.ParseOpenAI(openAICacheInjectionConversation)
 	require.NoError(t, err)
@@ -493,12 +490,10 @@ func TestCrossFormat_OpenAIToAnthropic_AssistantTextAndToolCalls(t *testing.T) {
 	assert.Equal(t, "search_prs", toolBlock["name"])
 }
 
-// TestCrossFormat_OpenAIToAnthropic_AssistantArrayContentAndToolCalls guards the
-// regression where an assistant message carrying tool_calls plus parts-array
-// content (the shape Cursor sends) had its content array serialized verbatim into
-// the Anthropic text block via gjson .String(). That produced a stringified
-// {"type":"text",...} block that the model echoed and compounded one level per
-// agentic turn, yielding deeply nested garbage on the client.
+// TestCrossFormat_OpenAIToAnthropic_AssistantArrayContentAndToolCalls guards a
+// regression: an assistant message with tool_calls plus parts-array content
+// (Cursor's shape) got serialized verbatim via gjson .String(), producing a
+// stringified block that compounded into nested garbage each agentic turn.
 func TestCrossFormat_OpenAIToAnthropic_AssistantArrayContentAndToolCalls(t *testing.T) {
 	env, err := translate.ParseOpenAI(openAIAssistantArrayContentAndToolCalls)
 	require.NoError(t, err)
@@ -643,12 +638,9 @@ func TestCrossFormat_OpenAIToGemini_ToolConversation(t *testing.T) {
 	assert.Equal(t, "package main\n\nfunc main() {}", result["result"])
 }
 
-// TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x covers the
-// mirror of the Anthropic→Gemini guard for the OpenAI surface. An OpenAI
-// client whose assistant history was produced by a non-Gemini provider
-// carries `tool_calls` without `thought_signature`. Routed to a Gemini 3.x
-// preview model, the upstream rejects the request with 400 on missing
-// thoughtSignature. The translator must drop the sig-less tool history.
+// TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x mirrors the
+// Anthropic→Gemini guard: tool_calls without thought_signature 400 on Gemini
+// 3.x preview models, so the translator must drop sig-less tool history.
 func TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x(t *testing.T) {
 	env, err := translate.ParseOpenAI(openAIToolConversation)
 	require.NoError(t, err)
@@ -678,11 +670,9 @@ func TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x(t *testing.T) {
 	}
 }
 
-// Multi-tool turns produce one `role:"tool"` message per tool_call_id. When
-// the sig-less drop guard fires, each tool message would naively emit its
-// own user placeholder, producing consecutive `user` entries that Gemini
-// 400s on. Verify a run of consecutive tool messages coalesces into a single
-// placeholder so role alternation is preserved.
+// When the sig-less drop guard fires on multi-tool turns, consecutive
+// `role:"tool"` messages must coalesce into a single user placeholder —
+// otherwise Gemini 400s on non-alternating roles.
 func TestCrossFormat_OpenAIToGemini_MultiToolDropCoalescesPlaceholders(t *testing.T) {
 	body := []byte(`{
 		"model":"gpt-5",
@@ -900,9 +890,8 @@ func TestCrossFormat_AnthropicToOpenAI_ToolConversation(t *testing.T) {
 }
 
 func TestCrossFormat_AnthropicToOpenAI_OverlongToolUseIDClampedAndPaired(t *testing.T) {
-	// OpenAI rejects tool_calls[].id over 64 chars (400 "string too long").
-	// Cross-format round-trips can produce such IDs; the emit must clamp them,
-	// and the tool_use id must stay paired with its tool_result tool_call_id.
+	// OpenAI rejects tool_calls[].id over 64 chars; emit must clamp round-trip
+	// IDs while keeping tool_use paired with its tool_result tool_call_id.
 	longID := "toolu_" + strings.Repeat("a", 1411)
 	body := []byte(`{
 		"model": "claude-opus-4-8",
@@ -1796,9 +1785,9 @@ func TestCrossFormat_OpenAIToAnthropic_ToolMissingFunctionName(t *testing.T) {
 	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
 }
 
-// TestSanitizeToolUseIDs_OpenAIToAnthropic checks that tool call IDs containing
-// dots or colons (e.g. Kimi-k2.6's "functions.Read:0") are sanitized before
-// forwarding to Anthropic, which rejects them with pattern ^[a-zA-Z0-9_-]+$.
+// TestSanitizeToolUseIDs_OpenAIToAnthropic checks tool call IDs with dots or
+// colons (e.g. Kimi-k2.6's "functions.Read:0") are sanitized before forwarding
+// to Anthropic, which requires pattern ^[a-zA-Z0-9_-]+$.
 func TestSanitizeToolUseIDs_OpenAIToAnthropic(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4",
@@ -1865,12 +1854,10 @@ func TestSanitizeToolUseIDs_AnthropicToAnthropic(t *testing.T) {
 	assert.Equal(t, "functions_Grep_11", result["tool_use_id"], "tool_use_id must be sanitized in same-format path")
 }
 
-// TestStripToolUseThoughtSignature_AnthropicToAnthropic checks that a Gemini
-// thought_signature carried on a tool_use block in Anthropic-format history is
-// stripped before forwarding to Anthropic, which rejects the unknown field with
-// a 400 ("tool_use.thought_signature: Extra inputs are not permitted"). The
-// rest of the block — including the id that smuggles the signature for a later
-// switch back to Gemini — must survive untouched.
+// TestStripToolUseThoughtSignature_AnthropicToAnthropic checks a Gemini
+// thought_signature on a tool_use block is stripped before forwarding to
+// Anthropic (which 400s on the unknown field), while the id — which smuggles
+// the signature for a later switch back to Gemini — survives untouched.
 func TestStripToolUseThoughtSignature_AnthropicToAnthropic(t *testing.T) {
 	body := []byte(`{
 		"model": "claude-opus-4-8",

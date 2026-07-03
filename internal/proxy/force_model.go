@@ -19,13 +19,11 @@ import (
 )
 
 // ForceModelHeader pins the session to a specific model, mirroring the
-// /force-model chat command. The header form exists so the directive is usable
-// from headless clients (the eval harness, CI smoke runs) where the slash
-// command is unreliable: Claude Code eats "/force-model …" as a client-side
-// slash command before it ever reaches the router, and a typed two-call pin
-// consumes a turn. A header rides on every request, so the pin is (re)written
-// and served on the same turn. Empty or unrecognized values are ignored and
-// routing proceeds automatically rather than failing the request.
+// /force-model chat command. Needed for headless clients (eval harness, CI
+// smoke runs): Claude Code eats "/force-model …" as a client-side slash
+// command before it reaches the router. The header rides on every request,
+// so the pin is (re)written and served on the same turn. Unrecognized values
+// are ignored; routing proceeds automatically rather than failing.
 const ForceModelHeader = "x-weave-force-model"
 
 var forceModelAliases = map[string]string{
@@ -73,9 +71,8 @@ var forceModelAliases = map[string]string{
 	"kimi":           "moonshotai/kimi-k2.7",
 	"kimi-k2.7":      "moonshotai/kimi-k2.7",
 	"kimi-k2.6":      "moonshotai/kimi-k2.6",
-	// Generic aliases stay on glm-5.1 (DeepInfra + OpenRouter) so they
-	// resolve on managed-prod deploys without a Fireworks key; glm-5.2 is
-	// Fireworks-only day-0. Pin glm-5.2 explicitly to opt into it.
+	// Generic glm/zai aliases stay on 5.1 (DeepInfra+OpenRouter, no Fireworks
+	// key needed); 5.2 is Fireworks-only day-0, so it requires an explicit pin.
 	"glm":          "z-ai/glm-5.1",
 	"zai":          "z-ai/glm-5.1",
 	"z-ai":         "z-ai/glm-5.1",
@@ -89,25 +86,17 @@ var forceModelAliases = map[string]string{
 }
 
 // resolveForceModel maps a user-typed model identifier to its canonical
-// catalog ID and primary provider binding. The catalog is the source of
-// truth — heuristics are only a best-effort provider guess for inputs that
-// are not in it.
+// catalog ID and primary provider. The catalog is the source of truth;
+// naming heuristics are only a best-effort provider guess for inputs not in
+// it. Resolution order: alias -> exact catalog.ByID match -> suffix match
+// (so bare names like `qwen3-235b-a22b-2507` resolve to their real binding,
+// e.g. `qwen/qwen3-235b-a22b-2507`, instead of misclassifying as Anthropic)
+// -> naming heuristic.
 //
-// Resolution order:
-//  1. Alias match for common user-facing shortcuts.
-//  2. Exact match against `catalog.ByID` (the input is already canonical).
-//  3. Suffix match: scan the catalog for any model whose ID ends with
-//     "/" + input. Lets users type bare names like `qwen3-235b-a22b-2507`
-//     and have the pin route to `qwen/qwen3-235b-a22b-2507` on its real
-//     binding (bedrock, in this case) instead of misclassifying it as
-//     Anthropic.
-//  4. Naming heuristic for IDs not in the catalog (provider guess only).
-//
-// The returned `known` flag is true only for catalog matches (1, 2, and 3). A
-// false `known` means the input has no catalog entry, so the router can't
-// confirm it names a real, servable model. Callers must reject the command
-// rather than pin an unservable directive. The heuristic provider is still
-// returned for logging.
+// `known` is true only for catalog matches. False means there's no catalog
+// entry to confirm this is a real, servable model — callers must reject the
+// command rather than pin it; the heuristic provider is still returned for
+// logging.
 func resolveForceModel(model string) (canonicalID, provider string, known bool) {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if alias, ok := forceModelAliases[model]; ok {
@@ -146,11 +135,10 @@ func resolveForceModel(model string) (canonicalID, provider string, known bool) 
 	}
 }
 
-// setForceModelPin upserts an immutable user-forced session pin for the given
-// session/role. It preserves the prior pin's LastServedModel so the next turn
-// can still detect a mid-session model switch and strip stale Anthropic
-// thinking-block signatures. No-op when the pin store is unconfigured or
-// installationID is nil (pin rows require an installation_id).
+// setForceModelPin upserts an immutable user-forced session pin. It preserves
+// the prior pin's LastServedModel so the next turn can detect a mid-session
+// model switch and strip stale Anthropic thinking-block signatures. No-op if
+// the pin store is unconfigured or installationID is nil.
 func (s *Service) setForceModelPin(
 	ctx context.Context,
 	sessionKey [sessionpin.SessionKeyLen]byte,
@@ -180,18 +168,15 @@ func (s *Service) setForceModelPin(
 		PinnedUntil:     pinNeverExpires,
 		LastServedModel: lastServedModel,
 	}
-	// context.Background(): the request ctx may already be canceled by the time
-	// this runs (synthetic response written, or client disconnected). Upserting
-	// on a canceled context would leave Postgres holding the prior pin.
+	// context.Background(): ctx may already be canceled here (response written,
+	// client disconnected); a canceled ctx would leave the prior pin stuck.
 	return s.pinStore.Upsert(context.Background(), forced)
 }
 
-// applyForceModelHeader honors the x-weave-force-model request header by writing
-// a user-forced session pin, the same sticky the /force-model command writes.
-// The pin is (re)written on every request that carries the header, so the turn
-// loop's user-forced branch serves the requested model on this turn and stays on
-// it for the session. Unrecognized models are ignored (routing proceeds
-// automatically); the request is never failed on a bad header value.
+// applyForceModelHeader honors the x-weave-force-model request header,
+// writing the same session pin the /force-model command writes. It's
+// (re)written on every request carrying the header. Unrecognized models are
+// ignored (routing proceeds automatically) rather than failing the request.
 func (s *Service) applyForceModelHeader(
 	ctx context.Context,
 	r *http.Request,
@@ -229,11 +214,11 @@ func (s *Service) applyForceModelHeader(
 	)
 }
 
-// handleForceModelCommand processes a /force-model or /unforce-model directive.
-// It writes (or expires) the session pin and returns a synthetic Anthropic-format
-// acknowledgment response without dispatching to any upstream.
-// inputTokens should reflect the request's RoutingFeatures.Tokens to include the
-// actual turn input in the token counter (not just the synthetic response text).
+// handleForceModelCommand processes a /force-model or /unforce-model directive:
+// writes (or expires) the session pin and returns a synthetic acknowledgment
+// response without dispatching upstream. inputTokens should be the request's
+// RoutingFeatures.Tokens so the token counter reflects actual turn input, not
+// just the synthetic response text.
 func (s *Service) handleForceModelCommand(
 	ctx context.Context,
 	w http.ResponseWriter,
@@ -246,10 +231,9 @@ func (s *Service) handleForceModelCommand(
 	log := observability.FromContext(ctx)
 	role := roleForTier(catalog.TierFor(env.Model()))
 
-	// Acknowledgment text is formatted as a routing marker (✦ **Weave Router** → …\n\n)
-	// so the existing StripRoutingMarkerFromMessages ingress stripper removes it from
-	// subsequent inbound requests. Without this, the text persists in conversation
-	// history and leaks router internals to the upstream on every following turn.
+	// Formatted as a routing marker (✦ **Weave Router** → …\n\n) so
+	// StripRoutingMarkerFromMessages strips it from later inbound requests;
+	// otherwise it'd persist in history and leak router internals upstream.
 	var msg string
 	if cmd.Clear {
 		if s.pinStore != nil && installationID != uuid.Nil {
@@ -263,9 +247,8 @@ func (s *Service) handleForceModelCommand(
 				TurnCount:      1,
 				PinnedUntil:    time.Now().Add(-time.Second),
 			}
-			// context.Background(): the request ctx may be canceled by the
-			// time the synthetic response has been written. Upserting on a
-			// canceled context would leave Postgres holding the prior pin.
+			// context.Background(): ctx may be canceled by the time the
+			// synthetic response is written; a canceled ctx would strand the prior pin.
 			if err := s.pinStore.Upsert(context.Background(), expired); err != nil {
 				log.Error("/unforce-model: pin store upsert failed", "err", err)
 				return err
@@ -275,19 +258,14 @@ func (s *Service) handleForceModelCommand(
 		if env.SourceFormat() == translate.FormatOpenAI {
 			msg = "Weave Router: force-model cleared; resuming automatic model selection"
 		}
-		// Debug (not Info) per router logging rules: session_key_hex is a stable
-		// per-session identifier and this fires on every command use. The Info
-		// signal "a session pin was cleared" isn't a major business event worth
-		// emitting at default verbosity.
+		// Debug not Info: fires on every command use, not a major business event.
 		log.Debug("/unforce-model: session pin cleared",
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
 			"role", role,
 		)
 	} else if canonicalModel, provider, known := resolveForceModel(cmd.Model); !known {
-		// The model isn't in the catalog, so we can't confirm it names a real,
-		// servable model — e.g. a truncated "/force-model gpt-". Reject the
-		// directive rather than pin something we can't honor; the previous pin
-		// (if any) is left untouched.
+		// Not in the catalog (e.g. truncated "/force-model gpt-") — reject
+		// rather than pin something we can't honor; prior pin left untouched.
 		log.Info("/force-model: rejected unknown model",
 			"input_model", cmd.Model,
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
@@ -324,9 +302,8 @@ func (s *Service) handleForceModelCommand(
 }
 
 // writeSyntheticAnthropicResponse writes a minimal Anthropic Messages API
-// response without hitting an upstream. Handles both streaming and
-// non-streaming request shapes. inputTokens is the request's RoutingFeatures.Tokens
-// so the client's token counter reflects the actual turn input.
+// response without hitting an upstream, handling both streaming and
+// non-streaming shapes.
 func writeSyntheticAnthropicResponse(w http.ResponseWriter, env *translate.RequestEnvelope, text string, inputTokens int) error {
 	msgID := fmt.Sprintf("msg_router_cmd_%x", time.Now().UnixNano())
 	if env.Stream() {
@@ -408,9 +385,8 @@ func writeSyntheticAnthropicSSE(w http.ResponseWriter, msgID, text string, input
 }
 
 // writeSyntheticOpenAIResponse writes a minimal OpenAI Chat Completions
-// response without hitting an upstream. Handles both streaming and
-// non-streaming request shapes. inputTokens is the request's RoutingFeatures.Tokens
-// so the client's token counter reflects the actual turn input.
+// response without hitting an upstream, handling both streaming and
+// non-streaming shapes.
 func writeSyntheticOpenAIResponse(w http.ResponseWriter, env *translate.RequestEnvelope, text string, inputTokens int) error {
 	respID := fmt.Sprintf("chatcmpl_router_cmd_%x", time.Now().UnixNano())
 	if env.Stream() {

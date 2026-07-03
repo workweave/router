@@ -20,136 +20,72 @@ import (
 // FlushChunk is the read buffer size used by all streaming provider adapters.
 const FlushChunk = 4 * 1024
 
-// ErrUpstreamIdleTimeout is the sentinel cause set on the request context when
-// the SSE inactivity watchdog fires. Provider adapters can check
-// errors.Is(err, httputil.ErrUpstreamIdleTimeout) (or context.Cause(ctx)) to
-// distinguish a real upstream stall from caller-initiated cancellation, and
-// the proxy's failover logic keys on this to retry against the next binding.
-//
-// Aliases providers.ErrUpstreamIdleTimeout — the sentinel lives there so
-// providers.IsRetryable can classify it explicitly without an import cycle
-// (this package imports providers). errors.Is matches against either name.
+// ErrUpstreamIdleTimeout is the cause set on the request context when the SSE
+// inactivity watchdog fires; the proxy's failover logic retries on it. Aliases
+// providers.ErrUpstreamIdleTimeout so providers.IsRetryable can classify it
+// without an import cycle — errors.Is matches either name.
 var ErrUpstreamIdleTimeout = providers.ErrUpstreamIdleTimeout
 
-// ErrUpstreamOutputStall re-exports providers.ErrUpstreamOutputStall — the
-// cause set when the output-progress watchdog (StartIdleWatchdogCause) trips
-// because the stream stayed byte-alive but produced no output-bearing content.
+// ErrUpstreamOutputStall re-exports providers.ErrUpstreamOutputStall: set when
+// the output-progress watchdog trips because the stream stayed byte-alive but
+// produced no output-bearing content.
 var ErrUpstreamOutputStall = providers.ErrUpstreamOutputStall
 
-// ErrUpstreamSlowThroughput re-exports providers.ErrUpstreamSlowThroughput —
-// the cause set when the minimum-throughput watchdog (StartThroughputWatchdog)
-// trips because the stream IS producing output, but at a sustained rate below
-// the configured floor over the rolling window.
+// ErrUpstreamSlowThroughput re-exports providers.ErrUpstreamSlowThroughput:
+// set when the minimum-throughput watchdog trips because output is flowing
+// but below the configured floor over the rolling window.
 var ErrUpstreamSlowThroughput = providers.ErrUpstreamSlowThroughput
 
 // DefaultSSEIdleTimeout is the per-read inactivity threshold for streaming
-// upstream responses. AWS NAT Gateway / NLB / VPC-endpoint reapers silently
-// drop idle TCP connections at 350s; a watchdog below that surfaces stalls
-// as a clean error within tens of seconds instead of letting the request
-// hang for the full overall deadline.
-//
-// Tunable via ROUTER_SSE_IDLE_TIMEOUT_SECONDS. Healthy generations stream a
-// chunk at least every few seconds, so 45s of silence is unambiguously a stall.
+// upstream responses. AWS NAT/NLB/VPC-endpoint reapers drop idle TCP
+// connections at 350s; a watchdog below that surfaces stalls quickly instead
+// of hanging for the full deadline. Tunable via ROUTER_SSE_IDLE_TIMEOUT_SECONDS.
 var DefaultSSEIdleTimeout = idleTimeoutFromEnv("ROUTER_SSE_IDLE_TIMEOUT_SECONDS", 45*time.Second)
 
 // DefaultResponsesSSEIdleTimeout is the idle-progress threshold for OpenAI
-// Responses API (/v1/responses) streams. More generous than
-// DefaultSSEIdleTimeout because a gpt-5.x reasoning turn can go tens of
-// seconds between SSE frames while the model thinks (reasoning-summary deltas
-// lag the actual reasoning). ANY received bytes count as progress — event
-// frames, reasoning deltas, keepalives — so only a zero-BYTE gap trips it.
-//
-// This catches the byte-silent stall (2026-06-09: two /v1/responses streams
-// produced no bytes at all until the 600s request cap). It does NOT catch a
-// byte-alive/output-silent stall — a stream that keeps dribbling non-output
-// frames (reasoning deltas, keepalives) while producing zero output tokens
-// (2026-06-16: gpt-5.5 sat at zero output for the full 600s, bytes flowing the
-// whole time). DefaultResponsesOutputStallTimeout guards that mode.
-//
+// Responses API streams. More generous than DefaultSSEIdleTimeout because a
+// gpt-5.x reasoning turn can go tens of seconds between SSE frames; any
+// received byte counts as progress, so only a zero-byte gap trips it. Catches
+// the byte-silent stall (2026-06-09 incident); does not catch a byte-alive but
+// output-silent stall — see DefaultResponsesOutputStallTimeout for that.
 // Tunable via ROUTER_RESPONSES_SSE_IDLE_TIMEOUT_SECONDS.
 var DefaultResponsesSSEIdleTimeout = idleTimeoutFromEnv("ROUTER_RESPONSES_SSE_IDLE_TIMEOUT_SECONDS", 90*time.Second)
 
 // DefaultResponsesOutputStallTimeout is the OUTPUT-progress threshold for
-// OpenAI Responses streams: the maximum time the upstream may stay byte-alive
-// (resetting DefaultResponsesSSEIdleTimeout) while producing zero
-// output-bearing content (assistant text, tool-call arguments, or a terminal
-// response envelope). It is deliberately far larger than the idle timeout so a
-// genuinely long reasoning phase that eventually emits output is never clipped
-// — only a turn that thinks/keepalives for minutes without ever producing
-// output is aborted. Set below the 600s request cap so the watchdog (not the
-// cap) surfaces the stall as a retryable error, while staying generous enough
-// to clear realistic worst-case reasoning. The OUTPUT-progress mark is fed by
-// the Responses→Anthropic translator, which alone can tell output frames from
-// reasoning/keepalive frames.
-//
-// Tunable via ROUTER_RESPONSES_OUTPUT_STALL_TIMEOUT_SECONDS.
+// OpenAI Responses streams: max time the upstream may stay byte-alive while
+// producing zero output-bearing content. Set well above the idle timeout so a
+// long-but-real reasoning phase is never clipped, and below the 600s request
+// cap so the watchdog surfaces the stall as retryable first. Fed by the
+// Responses→Anthropic translator, the only place that can tell output frames
+// from reasoning/keepalive frames. Tunable via
+// ROUTER_RESPONSES_OUTPUT_STALL_TIMEOUT_SECONDS.
 var DefaultResponsesOutputStallTimeout = idleTimeoutFromEnv("ROUTER_RESPONSES_OUTPUT_STALL_TIMEOUT_SECONDS", 240*time.Second)
 
-// DefaultOutputStallTimeout is the OUTPUT-progress threshold for the generic
-// OpenAI-compatible Chat Completions adapter (OpenRouter / Fireworks /
-// DeepInfra / Bedrock). It is the Chat-Completions analogue of
-// DefaultResponsesOutputStallTimeout: DefaultSSEIdleTimeout resets on ANY
-// upstream byte, so a provider that keeps the connection byte-alive with SSE
-// keepalive comments (": OPENROUTER PROCESSING") or empty/role-only delta
-// frames while producing zero output content rides to the 600s request cap.
-//
-// Prod incident 2026-06-19: a DeepInfra deepseek-v4-flash stream stayed
-// byte-alive but output-silent for ~10min until the request cap; the client
-// then retried and hit a model-not-found 404. The byte-idle watchdog (45s)
-// cannot catch a byte-alive stall — only a time-since-last-OUTPUT watchdog can.
-// The mark is fed by the OpenAI→Anthropic SSE translator on output-bearing
-// deltas (assistant text, streamed reasoning, tool-call arguments, terminal
-// finish) and never on keepalives or empty deltas. Unlike the Responses budget,
-// streamed reasoning_content DOES count here: OSS reasoning models emit it as
-// real tokens (rendered as a thinking block), not a sparse server-side summary.
-//
-// Set below the 600s request cap so the watchdog (not the cap) surfaces the
-// stall as a retryable error, while staying generous enough that a large-context
-// prefill emitting only keepalives before its first token is never clipped.
-//
-// Tunable via ROUTER_OUTPUT_STALL_TIMEOUT_SECONDS.
+// DefaultOutputStallTimeout is the Chat-Completions analogue of
+// DefaultResponsesOutputStallTimeout, for the generic OpenAI-compatible
+// adapter (OpenRouter/Fireworks/DeepInfra/Bedrock). DefaultSSEIdleTimeout
+// resets on any byte, so a provider that stays byte-alive via keepalive
+// comments or empty/role-only deltas while emitting zero output content would
+// otherwise ride to the request cap (prod incident 2026-06-19: a DeepInfra
+// stream did this for ~10min, then the client retry hit a 404). Fed by the
+// OpenAI→Anthropic SSE translator on output-bearing deltas only; unlike the
+// Responses budget, streamed reasoning_content counts here since OSS models
+// emit it as real rendered tokens. Tunable via ROUTER_OUTPUT_STALL_TIMEOUT_SECONDS.
 var DefaultOutputStallTimeout = idleTimeoutFromEnv("ROUTER_OUTPUT_STALL_TIMEOUT_SECONDS", 240*time.Second)
 
-// Minimum-throughput watchdog defaults. The byte-idle (45s) and output-stall
-// (240s) watchdogs both catch a stream that STOPS producing — bytes or output
-// respectively. Neither catches a stream that keeps producing output but at a
-// crawl: a clean 200 that dribbles output-bearing deltas steadily enough to
-// reset both marks yet so slowly the turn takes minutes and the client appears
-// frozen, riding toward the 600s request cap with no failover.
+// Minimum-throughput watchdog defaults. The byte-idle and output-stall
+// watchdogs catch a stream that STOPS producing; neither catches one that
+// keeps producing but at a crawl (prod incident 2026-06-25: a deepseek stream
+// dribbled ~13 events/s for ~132s, riding to the request cap without ever
+// being classified retryable). This watchdog measures OUTPUT-event throughput
+// over a rolling window, fed by the same mark as the output-stall watchdog,
+// and aborts with ErrUpstreamSlowThroughput once below-floor after warmup.
 //
-// Prod incident 2026-06-25: a deepseek/deepseek-v4-flash stream emitted ~1774
-// output deltas over ~132s (~13 events/s) — a steadily-flowing 200 that tripped
-// none of the existing watchdogs and was never classified retryable. This
-// watchdog measures sustained OUTPUT-event throughput over a rolling window and,
-// once a warmup has passed, aborts with ErrUpstreamSlowThroughput (retryable)
-// when the rate stays below the floor.
-//
-// The mark is the SAME output-progress signal fed to the output-stall watchdog
-// (one mark per output-bearing delta: assistant text, streamed reasoning,
-// tool-call args, terminal finish — never keepalives/empty deltas). One delta
-// is a small chunk of tokens, so delta-rate is a usable proxy for token-rate
-// without threading byte counts through every translator.
-//
-// CONSERVATIVE BY DESIGN — these defaults err strongly on the side of NOT
-// aborting, so a legitimately slow "thinking" model is never killed:
-//
-//   - Floor (DefaultMinThroughputDeltasPerWindow / DefaultThroughputWindow):
-//     fewer than 8 output deltas in a 20s rolling window (~0.4 deltas/s) is the
-//     abort condition. The prod dribble ran ~13 deltas/s — over 30x this floor —
-//     so this would NOT have fired on it on rate alone; it targets the strictly
-//     worse "near-frozen but technically advancing" tail. A healthy generation
-//     streams many deltas per second, orders of magnitude above the floor.
-//   - Window (DefaultThroughputWindow): 20s rolling window. Long enough that a
-//     brief mid-stream pause (a slow tool-arg chunk, a reasoning gap) does not
-//     trip it; the rate is averaged over the window, not instantaneous.
-//   - Warmup (DefaultThroughputMinElapsed): the watchdog is INERT for the first
-//     90s of the stream. A large-context prefill, a long initial reasoning phase,
-//     or a slow-to-warm provider gets a full grace period before throughput is
-//     ever evaluated. Combined with the rolling window, an abort requires the
-//     stream to be both past warmup AND sustaining sub-floor output.
-//
-// All three are tunable via env so the floor can be relaxed (or the watchdog
-// disabled by setting the floor to 0) without a redeploy.
+// Defaults are conservative so a legitimately slow "thinking" model is never
+// killed: floor is <8 deltas/20s (~0.4/s, >30x below the incident's rate, so
+// it targets only the near-frozen tail); the 20s window absorbs brief
+// mid-stream pauses; the 90s warmup exempts prefill/initial reasoning.
+// All three tunable via env (floor 0 disables the watchdog).
 var (
 	// DefaultThroughputWindow is the rolling window over which output-delta
 	// throughput is measured. Tunable via ROUTER_THROUGHPUT_WINDOW_SECONDS.
@@ -160,11 +96,10 @@ var (
 	// a grace period. Tunable via ROUTER_THROUGHPUT_MIN_ELAPSED_SECONDS.
 	DefaultThroughputMinElapsed = idleTimeoutFromEnv("ROUTER_THROUGHPUT_MIN_ELAPSED_SECONDS", 90*time.Second)
 
-	// DefaultMinThroughputDeltasPerWindow is the minimum number of output-bearing
-	// deltas that must arrive within DefaultThroughputWindow once warmup has
-	// passed; below this the stream is aborted as ErrUpstreamSlowThroughput. A
-	// value <= 0 disables the watchdog entirely. Tunable via
-	// ROUTER_MIN_THROUGHPUT_DELTAS_PER_WINDOW.
+	// DefaultMinThroughputDeltasPerWindow is the minimum output-bearing deltas
+	// required within DefaultThroughputWindow post-warmup, else the stream
+	// aborts as ErrUpstreamSlowThroughput. <= 0 disables the watchdog. Tunable
+	// via ROUTER_MIN_THROUGHPUT_DELTAS_PER_WINDOW.
 	DefaultMinThroughputDeltasPerWindow = intFromEnv("ROUTER_MIN_THROUGHPUT_DELTAS_PER_WINDOW", 8)
 )
 
@@ -204,23 +139,19 @@ const DefaultResponseHeaderTimeout = 30 * time.Second
 
 // NewTransport returns a pooled http.Transport sized for sustained traffic to a single upstream host.
 //
-// KeepAlive=30s is the critical setting against AWS NAT-GW / NLB / VPC-endpoint
-// reapers (350s fixed idle): the dialer's TCP keepalives keep the connection
-// live so the zero-byte-stall failure mode can't accumulate at the network layer.
-// ResponseHeaderTimeout only guards time-to-first-byte; per-read inactivity
-// during streaming is enforced by StreamBody's watchdog.
+// KeepAlive=30s guards against AWS NAT-GW/NLB/VPC-endpoint reapers (350s fixed
+// idle) by keeping the TCP connection live at the network layer.
+// ResponseHeaderTimeout only guards time-to-first-byte; per-read inactivity is
+// enforced separately by StreamBody's watchdog.
 func NewTransport(dialTimeout, tlsTimeout time.Duration) *http.Transport {
 	return NewTransportWithResponseHeaderTimeout(dialTimeout, tlsTimeout, DefaultResponseHeaderTimeout)
 }
 
 // NewTransportWithResponseHeaderTimeout is NewTransport with a caller-chosen
-// time-to-first-byte guard. Upstreams whose first byte can legitimately arrive
-// later than the 30s default pass a larger value: the OpenAI Responses API for
-// gpt-5.x high-effort reasoning can take well over 30s to emit its first SSE
-// event, so a 30s header timeout false-trips even when the model is healthy.
-// Per-read inactivity once the stream is flowing is still bounded by
-// StreamBody's idle watchdog (DefaultSSEIdleTimeout), so a generous header
-// timeout does not reintroduce an unbounded hang.
+// time-to-first-byte guard. Pass a larger value for upstreams whose first byte
+// can legitimately arrive later than 30s (e.g. gpt-5.x high-effort reasoning
+// via Responses API). Streaming inactivity is still bounded separately by
+// StreamBody's idle watchdog, so this can't reintroduce an unbounded hang.
 func NewTransportWithResponseHeaderTimeout(dialTimeout, tlsTimeout, responseHeaderTimeout time.Duration) *http.Transport {
 	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
@@ -238,26 +169,18 @@ func NewTransportWithResponseHeaderTimeout(dialTimeout, tlsTimeout, responseHead
 	}
 }
 
-// StartIdleWatchdog starts a goroutine that cancels ctx with ErrUpstreamIdleTimeout
-// when more than idleTimeout has elapsed without a Mark call. The returned mark
-// function should be invoked on every successful upstream read (or other progress
-// signal). The returned stop function terminates the watchdog goroutine and must
-// be called via defer in the caller's scope.
-//
-// idleTimeout <= 0 or cancel == nil disables the watchdog (no-op mark/stop).
+// StartIdleWatchdog cancels ctx with ErrUpstreamIdleTimeout once idleTimeout
+// elapses without a mark() call. Call stop() via defer to terminate the
+// goroutine. idleTimeout <= 0 or cancel == nil disables the watchdog (no-op).
 func StartIdleWatchdog(ctx context.Context, cancel context.CancelCauseFunc, idleTimeout time.Duration) (mark func(), stop func()) {
 	return StartIdleWatchdogCause(ctx, cancel, idleTimeout, ErrUpstreamIdleTimeout)
 }
 
 // StartIdleWatchdogCause is StartIdleWatchdog with a caller-chosen cancel
-// cause. Use it to run a second, independent watchdog on the same request
-// context that measures a different progress signal — e.g. an output-progress
-// watchdog whose mark is fed only on output-bearing events (cause
-// ErrUpstreamOutputStall), running alongside the byte-idle watchdog (cause
-// ErrUpstreamIdleTimeout). Whichever watchdog trips first wins: context cancel
-// causes are set once, so a later cancel from the other watchdog is a no-op.
-//
-// idleTimeout <= 0 or cancel == nil disables the watchdog (no-op mark/stop).
+// cause, letting a second independent watchdog run on the same context for a
+// different progress signal. Whichever trips first wins — cancel causes are
+// set once, so a later cancel from the other watchdog is a no-op.
+// idleTimeout <= 0 or cancel == nil disables the watchdog (no-op).
 func StartIdleWatchdogCause(ctx context.Context, cancel context.CancelCauseFunc, idleTimeout time.Duration, cause error) (mark func(), stop func()) {
 	if idleTimeout <= 0 || cancel == nil {
 		return func() {}, func() {}
@@ -287,44 +210,28 @@ func StartIdleWatchdogCause(ctx context.Context, cancel context.CancelCauseFunc,
 		sync.OnceFunc(func() { close(done) })
 }
 
-// StartThroughputWatchdog starts a goroutine that cancels ctx with cause when
-// the upstream IS producing output but at a sustained rate below minDeltas per
-// window, once minElapsed has passed since the watchdog started. The returned
-// mark must be invoked on every output-bearing delta (the SAME signal fed to
-// the output-progress watchdog); the returned stop terminates the goroutine and
-// must be called via defer.
-//
-// Unlike the idle watchdogs (which measure time-since-last-event), this measures
-// the COUNT of marks within a rolling window: a stream that keeps marking but
-// too slowly is the failure mode here. The watchdog is inert until minElapsed
-// has elapsed, so prefill / initial reasoning is never penalized; thereafter, on
-// each tick it counts marks observed in the trailing window and trips if that
-// count is below minDeltas.
-//
-// minDeltas <= 0, window <= 0, or cancel == nil disables the watchdog
-// (no-op mark/stop). minElapsed <= 0 means evaluate as soon as a full window
-// of data exists.
+// StartThroughputWatchdog cancels ctx with cause when the upstream keeps
+// producing output but at a sustained rate below minDeltas per window (after
+// minElapsed warmup). Unlike the idle watchdogs, which measure time since the
+// last event, this measures the COUNT of mark() calls in a rolling window —
+// call mark() on every output-bearing delta, and stop() via defer.
+// minDeltas <= 0, window <= 0, or cancel == nil disables the watchdog (no-op).
+// minElapsed <= 0 evaluates as soon as a full window of data exists.
 func StartThroughputWatchdog(ctx context.Context, cancel context.CancelCauseFunc, window, minElapsed time.Duration, minDeltas int, cause error) (mark func(), stop func()) {
 	if minDeltas <= 0 || window <= 0 || cancel == nil {
 		return func() {}, func() {}
 	}
 	var count atomic.Int64
 	start := time.Now()
-	// floorRate is the minimum marks-per-second the stream must sustain
-	// (minDeltas spread over one window). Evaluating a normalized RATE rather
-	// than a raw count over the exact window lets the watchdog tick at its own
-	// cadence without the tick interval distorting the measured throughput.
+	// Normalized rate (not raw count) so the tick interval doesn't distort throughput.
 	floorRate := float64(minDeltas) / window.Seconds()
 	done := make(chan struct{})
 	go func() {
-		// Tick several times per window so a sub-floor stretch is caught
-		// promptly; cap small so a short test window still evaluates within it,
-		// and floor so a large production window doesn't spin.
+		// Tick several times per window to catch a sub-floor stretch promptly.
 		interval := min(max(window/4, 50*time.Millisecond), 5*time.Second)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		// windowStartCount / windowStart anchor the trailing measurement window.
-		// Marks-in-window = current - snapshot, over now-windowStart seconds.
+		// Anchors the trailing window: marks-in-window = current - snapshot.
 		var windowStartCount int64
 		windowStart := start
 		for {
@@ -364,14 +271,11 @@ func StartThroughputWatchdog(ctx context.Context, cancel context.CancelCauseFunc
 		sync.OnceFunc(func() { close(done) })
 }
 
-// StreamBody reads r chunk-by-chunk into w, flushing after each write. Returns
-// UpstreamStatusError when status is non-2xx.
-//
-// When idleTimeout > 0 a watchdog goroutine cancels ctx via cancel with
-// ErrUpstreamIdleTimeout if no upstream bytes arrive for idleTimeout. Callers
-// must pass a context wrapped via context.WithCancelCause so the cause survives
-// to the error site. On stall, returns ErrUpstreamIdleTimeout directly so the
-// caller does not need to inspect context.Cause itself.
+// StreamBody reads r chunk-by-chunk into w, flushing after each write.
+// Returns UpstreamStatusError when status is non-2xx. When idleTimeout > 0, a
+// watchdog cancels ctx with ErrUpstreamIdleTimeout on stall and StreamBody
+// returns that error directly; ctx must be wrapped via context.WithCancelCause
+// so the cause survives to the error site.
 func StreamBody(ctx context.Context, cancel context.CancelCauseFunc, idleTimeout time.Duration, r io.Reader, status int, w http.ResponseWriter, t *otel.Timing) error {
 	mark, stop := StartIdleWatchdog(ctx, cancel, idleTimeout)
 	defer stop()
@@ -398,10 +302,8 @@ func StreamBody(ctx context.Context, cancel context.CancelCauseFunc, idleTimeout
 			return nil
 		}
 		if readErr != nil {
-			// A second watchdog (e.g. the OpenAI output-progress watchdog) may
-			// share this ctx and cancel with a different cause; surface whichever
-			// sentinel tripped so the caller classifies it retryable instead of
-			// seeing a bare context.Canceled.
+			// A different watchdog sharing this ctx may have cancelled it; surface
+			// its sentinel so the caller can classify retryable instead of context.Canceled.
 			if cause := context.Cause(ctx); errors.Is(cause, ErrUpstreamIdleTimeout) || errors.Is(cause, ErrUpstreamOutputStall) || errors.Is(cause, ErrUpstreamSlowThroughput) {
 				return cause
 			}

@@ -15,17 +15,13 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// maxToolCallIDLen is OpenAI's limit on a tool-call id — tool_calls[].id on
-// Chat Completions and call_id on Responses; both reject longer ids with a 400
-// ("string too long").
+// maxToolCallIDLen is OpenAI's limit on a tool-call id (tool_calls[].id,
+// call_id) — longer ids get a 400 ("string too long").
 const maxToolCallIDLen = 64
 
-// clampOpenAIToolCallID makes a tool-call id safe for the OpenAI wire format.
-// Any Gemini thoughtSignature smuggled into the id (embedSignatureInID) is
-// dropped first — OpenAI cannot use it, and the bare id is usually within the
-// limit. An id still over 64 chars is replaced with a deterministic hash of the
-// original id, so a tool_use block and its matching tool_result (same original
-// id) map to the same value and stay paired.
+// clampOpenAIToolCallID makes a tool-call id safe for the OpenAI wire format:
+// strips any smuggled Gemini thoughtSignature, then hashes ids still over 64
+// chars so a tool_use block and its tool_result stay paired on the same id.
 func clampOpenAIToolCallID(id string) string {
 	if id == "" {
 		return id
@@ -69,41 +65,24 @@ func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (provi
 }
 
 // applySessionAffinity attaches an upstream-specific prompt-cache routing hint
-// derived from opts.SessionAffinity (a stable per-conversation identifier).
-// Serverless upstreams fan a session's turns across replicas and hold the
-// prefix KV-cache per replica; without a stickiness hint, a turn can land on a
-// cold replica and pay a full prefill (the deepseek-v4-pro/Fireworks incident:
-// 60k-token turn, zero cache read, 26s TTFT). Each upstream exposes a different
-// knob:
-//   - Serverless OpenAI-compat (Fireworks / DeepInfra / Makora / Together / …):
-//     x-session-affinity request header (the default for OpenAI-compat)
-//   - OpenRouter: x-session-id request header (its sticky-routing key, ≤256 chars)
-//   - OpenAI: prompt_cache_key body field
+// from opts.SessionAffinity. Serverless upstreams fan a session across
+// replicas and hold prefix KV-cache per replica; without a stickiness hint a
+// turn can land on a cold replica and pay a full prefill (the
+// deepseek-v4-pro/Fireworks incident: 60k-token turn, zero cache read, 26s
+// TTFT). Each upstream takes a different knob: OpenAI-compat serverless
+// (Fireworks/DeepInfra/Makora/Together/…) gets x-session-affinity (the
+// default for any OpenAI-compat target, so new upstreams need no edit here),
+// OpenRouter gets x-session-id, OpenAI gets the prompt_cache_key body field.
+// Bedrock's explicit cachePoint caching is centrally routed, so it gets nothing.
 //
-// The serverless-affinity *headers* (OpenAI-compat default / OpenRouter) are gated
-// on a real session key: collapsing every keyless request onto one synthetic
-// affinity bucket would herd unrelated conversations onto a single replica,
-// which is worse than letting them load-balance. OpenAI's prompt_cache_key is
-// different — it is a soft cache-routing hint, not a hard replica pin, so it is
-// always set on OpenAI-format cross-format routes (extended beyond the
-// session-affinity-only case): with a session key we use it directly; otherwise
-// we fall back to a stable hash of the request's cacheable prefix (system +
-// tools) — but only when the caller hasn't supplied its own prompt_cache_key
-// (which we preserve) and the request actually has a cacheable prefix (a
-// prefix-less request stays unhinted rather than collapsing onto one synthetic
-// key). Without prompt_cache_key, an Anthropic→OpenAI route carries no cache
-// hint at all and re-bills the full stable prefix every turn (NULL cache_read
-// in prod across all cross-format OpenAI traffic). OpenAI's automatic prompt
-// caching covers prompts >1024 tokens regardless, and the explicit key only
-// raises the hit rate.
-//
-// Bedrock (explicit cachePoint caching, centrally routed — no replica roulette)
-// and any non-OpenAI-compat target get nothing. The x-session-affinity header
-// branch is the DEFAULT for OpenAI-compat providers rather than an enumerated
-// list, so a newly-added serverless OpenAI-compat upstream (Makora, Together, …)
-// gets replica stickiness without editing this switch. OpenRouter and OpenAI are
-// special-cased above it because they expose a different knob (x-session-id and
-// the prompt_cache_key body field, respectively).
+// The header-based hints are gated on a real session key — collapsing keyless
+// requests onto one synthetic bucket would herd unrelated conversations onto
+// a single replica. OpenAI's prompt_cache_key is a soft hint rather than a
+// hard pin, so it's always set on OpenAI-format cross-format routes: a
+// session key is used directly, otherwise we fall back to a hash of the
+// cacheable prefix (system + tools), preserving any caller-supplied key and
+// leaving prefix-less requests unhinted. Without this, an Anthropic→OpenAI
+// route re-bills the full prefix every turn (NULL cache_read in prod).
 func applySessionAffinity(body []byte, headers http.Header, opts EmitOptions) ([]byte, error) {
 	switch opts.TargetProvider {
 	case providers.ProviderOpenRouter:
@@ -119,10 +98,8 @@ func applySessionAffinity(body []byte, headers http.Header, opts EmitOptions) ([
 			if gjson.GetBytes(body, "prompt_cache_key").Exists() {
 				return body, nil
 			}
-			// Fall back to a prefix hash only when there's an actual cacheable
-			// prefix (system and/or tools). With neither, hashing the empty
-			// prefix would collapse every keyless, prefix-less conversation
-			// onto one synthetic key, so leave such requests unhinted.
+			// Only hash if there's an actual prefix; hashing nothing would
+			// collapse every keyless conversation onto one synthetic key.
 			cacheKey = stablePromptCacheKey(body)
 			if cacheKey == "" {
 				return body, nil
@@ -137,27 +114,19 @@ func applySessionAffinity(body []byte, headers http.Header, opts EmitOptions) ([
 		// Explicit cachePoint caching, centrally routed — no replica roulette.
 		return body, nil
 	}
-	// Every other OpenAI-compat serverless upstream (Fireworks, DeepInfra,
-	// Makora, Together, …) exposes the x-session-affinity replica-stickiness
-	// header. Gated on a real session key: collapsing keyless requests onto one
-	// synthetic bucket would herd unrelated conversations onto a single replica.
+	// Other OpenAI-compat serverless upstreams get x-session-affinity, gated
+	// on a real session key (see doc comment above).
 	if providers.IsOpenAICompat(opts.TargetProvider) && opts.SessionAffinity != "" {
 		headers.Set("x-session-affinity", opts.SessionAffinity)
 	}
 	return body, nil
 }
 
-// stablePromptCacheKey derives a deterministic OpenAI prompt_cache_key from the
-// request's cacheable prefix — the system message(s) and tool definitions,
-// which are stable across the turns of a conversation while user/assistant
-// turns grow. Used as a fallback when no session key is available (e.g. the
-// handover summarizer, or requests with no derivable session) so the OpenAI
-// route still carries a consistent cache hint instead of none.
-//
-// Returns "" when the request has no cacheable prefix at all (no system
-// content and no non-empty tools array). Hashing an empty prefix would yield one constant key
-// shared by every prefix-less conversation, herding unrelated keyless requests
-// onto a single synthetic cache bucket; such requests are better left unhinted.
+// stablePromptCacheKey hashes the request's cacheable prefix (system message
+// + tool definitions) into a deterministic prompt_cache_key, used as a
+// fallback when no session key is available. Returns "" when there's no
+// cacheable prefix, so prefix-less requests stay unhinted rather than all
+// hashing to the same synthetic key.
 func stablePromptCacheKey(body []byte) string {
 	h := sha1.New()
 	var hasPrefix bool
@@ -171,11 +140,8 @@ func stablePromptCacheKey(body []byte) string {
 		return true
 	})
 	h.Write([]byte{0x00})
-	// An empty tools array ("tools":[]) is not a cacheable prefix —
-	// gjson's .Exists() is true for it and .Raw is "[]" (non-empty), so
-	// gate on a non-empty array to avoid herding unrelated keyless,
-	// prefix-less requests (common with same-format OpenAI bodies that keep
-	// "tools":[]) onto one synthetic key.
+	// An empty "tools":[] still has .Exists()==true, so gate on non-empty
+	// to avoid treating it as a cacheable prefix.
 	if hasNonEmptyTools(body) {
 		h.Write([]byte(gjson.GetBytes(body, "tools").Raw))
 		hasPrefix = true
@@ -231,13 +197,10 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 	return body, nil
 }
 
-// targetIsOpenRouter reports whether the emit target is the OpenRouter
-// upstream. OpenRouter-specific body fields (`provider`, `reasoning`),
-// system reminders, and tool-turn temperature overrides only belong on
-// the OpenRouter wire; direct upstreams (Fireworks/DeepInfra/Bedrock)
-// reject them. Empty TargetProvider falls back to the model-slug match
-// so the historical single-binding behavior keeps working for callers
-// that haven't been plumbed through yet (the handover summarizer).
+// targetIsOpenRouter reports whether the emit target is OpenRouter — direct
+// upstreams (Fireworks/DeepInfra/Bedrock) reject OpenRouter-only fields like
+// `provider`/`reasoning`. Empty TargetProvider falls back to the model-slug
+// match for callers not yet plumbed through (the handover summarizer).
 func targetIsOpenRouter(opts EmitOptions) bool {
 	if opts.TargetProvider != "" {
 		return opts.TargetProvider == providers.ProviderOpenRouter
@@ -340,24 +303,14 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, pr
 	return body, stats, nil
 }
 
-// applyGLM51FlagsIfNeeded sets the request-body knobs GLM-5.1 needs to behave
-// correctly on tool-heavy turns. Two knobs, both gated on isGLM51:
-//
-//  1. tool_stream=true — opt-in flag per Z.AI docs that switches GLM-5.1 from
-//     "emit tool envelope, send args as one late chunk (or never)" to proper
-//     incremental argument streaming. Without it, GLM-5.1 reproduces the
-//     GLM-5 empty-input loop documented in
-//     docs/investigations/2026-05-26-glm5-empty-tool-loop.md.
-//
-//  2. chat_template_kwargs.enable_thinking=false — DeepInfra serves GLM-5.1
-//     on vLLM, which honors the Jinja template kwarg to disable thinking
-//     mode. Default is on; we don't want reasoning blocks leaking into the
-//     response stream. OpenRouter routes the same disable through its native
-//     reasoning={enabled:false} hint (see openRouterReasoningHint), so the
-//     chat_template_kwargs path only fires for non-OpenRouter targets.
-//
-// Both knobs respect client-set values so a caller forcing thinking-on or
-// tool_stream-off still wins.
+// applyGLM51FlagsIfNeeded sets two GLM-5.1 knobs, both gated on isGLM51 and
+// both leaving client-set values alone:
+//   - tool_stream=true — without it GLM-5.1 reproduces the GLM-5 empty-input
+//     loop (docs/investigations/2026-05-26-glm5-empty-tool-loop.md).
+//   - chat_template_kwargs.enable_thinking=false — disables vLLM/DeepInfra's
+//     default-on thinking mode so reasoning doesn't leak into the response
+//     stream. Skipped for OpenRouter, which disables thinking via its own
+//     reasoning={enabled:false} hint instead.
 func applyGLM51FlagsIfNeeded(body []byte, opts EmitOptions) ([]byte, error) {
 	if !isGLM51(opts.TargetModel) {
 		return body, nil
@@ -379,12 +332,10 @@ func applyGLM51FlagsIfNeeded(body []byte, opts EmitOptions) ([]byte, error) {
 	return body, nil
 }
 
-// applyQwen3SamplersIfNeeded layers the Qwen3 model-card sampling defaults onto
-// the outbound body when the target is a qwen3-family model and the client did
-// not set them. Applied across all OpenAI-compat providers (OpenRouter, Bedrock,
-// DeepInfra, Fireworks) — the recommendation is model-keyed, not provider-keyed,
-// and Qwen3 only routes to OpenAI-compat backends so unknown-field rejection
-// (e.g. OpenAI native strict mode) is not in scope.
+// applyQwen3SamplersIfNeeded layers the Qwen3 model-card sampling defaults
+// onto the body for qwen3-family models, unless the client already set them.
+// The recommendation is model-keyed, not provider-keyed, so it's applied
+// across all OpenAI-compat providers.
 func applyQwen3SamplersIfNeeded(body []byte, model string) ([]byte, error) {
 	if !isQwen3Family(model) {
 		return body, nil
@@ -807,22 +758,12 @@ func writeOpenAIMaxTokensFromAnthropic(jw *jsonWriter, body []byte, opts EmitOpt
 }
 
 // inlineSchemaDefs replaces "$ref" pointers to "#/$defs/<name>" or
-// "#/definitions/<name>" with a deep copy of the referenced definition, then
-// strips the defs maps from the schema. Some OpenAI-compatible upstreams
-// (notably Fireworks) do not dereference $ref themselves and return a 400
-// ("Error resolving schema reference '#/$defs/X': AttributeError('NoneType'
-// object has no attribute 'lookup')") on tool schemas that use $defs. Inlining
-// before forwarding keeps the schema self-contained so it works on every
-// OpenAI-compat backend regardless of how its validator handles $ref.
-//
-// A $ref with sibling keys (e.g. {"$ref": "#/$defs/X", "description": "..."},
-// emitted by Pydantic v2 / OpenAPI 3.1 / many MCP servers including Intuit
-// QuickBooks) is resolved the same way: per JSON Schema Draft 7, siblings to
-// $ref are ignored, so dropping them on substitution is spec-compliant and
-// keeps the upstream from seeing an unresolvable ref after $defs is stripped.
-//
-// Cyclic refs are left intact (no infinite recursion); unresolvable refs are
-// left intact so the upstream can surface its own clearer error.
+// "#/definitions/<name>" with a deep copy of the referenced definition and
+// strips the defs maps. Some upstreams (notably Fireworks) don't dereference
+// $ref themselves and 400 on tool schemas that use $defs, so inlining keeps
+// the schema self-contained. Sibling keys on a $ref (common from Pydantic
+// v2/OpenAPI 3.1/MCP servers) are dropped on substitution — per JSON Schema
+// Draft 7 they're ignored anyway. Cyclic and unresolvable refs are left intact.
 func inlineSchemaDefs(node any) any {
 	root, ok := node.(map[string]any)
 	if !ok {

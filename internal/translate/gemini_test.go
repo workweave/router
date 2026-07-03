@@ -61,9 +61,8 @@ func TestPrepareGemini_MultipleSystemMessagesConcatenated(t *testing.T) {
 }
 
 func TestPrepareGemini_AssistantToolCallsRoundTripsThoughtSignature(t *testing.T) {
-	// Load-bearing test: thought_signature on a prior assistant tool_call must
-	// land as thoughtSignature on the Gemini functionCall part. This is the
-	// whole reason the native adapter exists.
+	// Load-bearing: thought_signature on a prior assistant tool_call must land
+	// as thoughtSignature on the Gemini functionCall part.
 	body := []byte(`{
 		"messages": [
 			{"role": "user", "content": "list /tmp"},
@@ -163,8 +162,8 @@ func TestPrepareGemini_ReasoningEffortMapsToThinkingBudget(t *testing.T) {
 }
 
 func TestPrepareGemini_ReasoningEffortMapsToThinkingLevel_Gemini3x(t *testing.T) {
-	// OpenAI-format ingress (reasoning_effort) → gemini-3.x: string thinkingLevel,
-	// no legacy thinkingBudget. "none" is omitted (3.x cannot disable thinking).
+	// gemini-3.x uses string thinkingLevel, not thinkingBudget. "none" is
+	// omitted — 3.x can't disable thinking.
 	for _, effort := range []string{"low", "medium", "high"} {
 		body := []byte(`{"messages":[{"role":"user","content":"x"}],"reasoning_effort":"` + effort + `"}`)
 		env, _ := translate.ParseOpenAI(body)
@@ -313,8 +312,7 @@ func TestGeminiToOpenAIResponse_TextOnly(t *testing.T) {
 }
 
 func TestGeminiToOpenAIResponse_ToolCallPreservesThoughtSignature(t *testing.T) {
-	// Load-bearing: the response-side signature is smuggled into the tool-call
-	// id (the single SDK-safe carrier), not emitted as an off-spec field.
+	// Signature is smuggled into the tool-call id, not emitted as an off-spec field.
 	body := []byte(`{
 		"candidates":[{"content":{"role":"model","parts":[
 			{"functionCall":{"name":"bash","args":{"command":"ls /tmp"}},
@@ -371,19 +369,16 @@ func TestGeminiToAnthropicResponse_ToolUsePreservesThoughtSignature(t *testing.T
 	assert.Equal(t, "tool_use", tu["type"])
 	assert.NotContains(t, tu, "thought_signature", "off-spec field must not be emitted")
 	assert.Equal(t, "bash", tu["name"])
-	// The id is the sole carrier: a typed string that every client SDK (incl.
-	// Claude Code, which drops unknown content-block fields) round-trips.
+	// The id is a typed string that every client SDK round-trips, incl.
+	// Claude Code, which drops unknown content-block fields.
 	assert.Contains(t, tu["id"].(string), "__thought__")
 }
 
-// TestPrepareGemini_FromAnthropic_ToolUseSignatureSurvivesUnknownFieldStripping
-// is the load-bearing regression test for Gemini 3.x multi-turn tool use
-// when the client (Claude Code) drops the off-spec thought_signature field
-// from a tool_use content block on deserialization. The signature must still
-// be smuggled back to Gemini via the id channel.
+// Load-bearing regression: Gemini 3.x multi-turn tool use when the client
+// drops the off-spec thought_signature field on deserialization — the
+// signature must still be smuggled back via the id channel.
 func TestPrepareGemini_FromAnthropic_ToolUseSignatureSurvivesUnknownFieldStripping(t *testing.T) {
-	// Turn 1: Gemini → Anthropic response embeds the signature into the
-	// synthesized tool_use.id.
+	// Turn 1: embed the signature into the synthesized tool_use.id.
 	geminiResp := []byte(`{
 		"candidates":[{"content":{"role":"model","parts":[
 			{"functionCall":{"name":"bash","args":{"command":"ls"}},
@@ -562,9 +557,8 @@ func must(t *testing.T, m map[string]any, k string) any {
 }
 
 func TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects(t *testing.T) {
-	// Regression: Claude Code tool definitions include JSON Schema fields
-	// ($schema, additionalProperties, propertyNames) that Google rejects with
-	// 400. Hit production on every tools-bearing Gemini request.
+	// Regression: Claude Code tool defs include JSON Schema fields (`$schema`,
+	// `additionalProperties`, `propertyNames`) Google rejects with 400.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -621,10 +615,8 @@ func TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects(t *testing.T) {
 }
 
 func TestPrepareGemini_PrunesDanglingRequired(t *testing.T) {
-	// Regression: Gemini's strict function-calling validator 400s
-	// ("Request contains an invalid argument") when "required" names a
-	// property that isn't in "properties". Well-formed JSON Schema permits
-	// it, so an inbound MCP tool schema can carry one; prune it.
+	// Regression: Gemini 400s when "required" names a property not in
+	// "properties" — valid JSON Schema, so MCP tool schemas can carry it; prune it.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -663,10 +655,8 @@ func TestPrepareGemini_PrunesDanglingRequired(t *testing.T) {
 }
 
 func TestPrepareGemini_PreservesPropertyNamedRequired(t *testing.T) {
-	// Pruning must run only in schema-node context: inside a "properties"
-	// map the keys are user-defined parameter names, so a parameter literally
-	// named "required" is a property schema, not the "required" keyword, and
-	// must survive untouched (incl. its own nested "required" keyword).
+	// A parameter literally named "required" is a property schema, not the
+	// "required" keyword, and must survive pruning untouched.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -705,11 +695,9 @@ func TestPrepareGemini_PreservesPropertyNamedRequired(t *testing.T) {
 }
 
 func TestPrepareGemini_StripsVendorExtensionAndDollarPrefixedKeys(t *testing.T) {
-	// Regression: MCP tool schemas derived from Google APIs (and friends)
-	// embed vendor extensions like `x-google-enum-descriptions` at every
-	// nesting level. Gemini's proto validator rejects any unknown field
-	// with 400 "Cannot find field". Strip anything with an "x-" or "$"
-	// prefix instead of maintaining a moving allowlist.
+	// Regression: MCP schemas derived from Google APIs embed vendor extensions
+	// (`x-google-*`) at every level; Gemini 400s on unknown fields. Strip any
+	// "x-" or "$" prefixed key instead of maintaining an allowlist.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -795,13 +783,10 @@ func TestSanitizeSchemaForGemini_PreservesSupportedFields(t *testing.T) {
 }
 
 func TestPrepareGemini_DropsUnsupportedFormatValues(t *testing.T) {
-	// Regression: Gemini's function-calling Schema accepts "format" only with a
-	// narrow value set (strings: enum, date-time; numbers: float/double/int32/
-	// int64). Tool schemas from MCP servers and SDKs routinely carry "uri",
-	// "email", "uuid" etc., which Google rejects with a generic 400
-	// INVALID_ARGUMENT — observed on every tools-bearing Gemini request from
-	// tool-heavy clients. The sanitizer must drop unsupported format values
-	// while keeping supported ones and the rest of the property schema intact.
+	// Regression: Gemini's Schema only accepts a narrow "format" set (strings:
+	// enum, date-time; numbers: float/double/int32/int64). MCP schemas routinely
+	// carry "uri"/"email"/"uuid" etc., which Gemini 400s on; drop unsupported
+	// values but keep the rest of the property schema intact.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -837,9 +822,8 @@ func TestPrepareGemini_DropsUnsupportedFormatValues(t *testing.T) {
 }
 
 func TestPrepareGemini_CollapsesItemsBool(t *testing.T) {
-	// Regression: MCP tool schemas (e.g. SigNoz) use `"items": true` (JSON Schema:
-	// any items allowed). Gemini's proto Schema.items is optional Schema and
-	// rejects boolean values with "Invalid value at ... (Schema), true".
+	// Regression: MCP schemas (e.g. SigNoz) use `"items": true` (JSON Schema:
+	// any items allowed); Gemini's proto Schema.items rejects boolean values.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -887,10 +871,8 @@ func TestPrepareGemini_CollapsesItemsBool(t *testing.T) {
 }
 
 func TestPrepareGemini_CollapsesArrayTypeField(t *testing.T) {
-	// Regression: MCP tool schemas (e.g. Pylon) use JSON Schema array-typed
-	// "type" like ["array","null"]. Gemini's proto Schema expects type to be a
-	// single enum value with a separate "nullable" boolean. Without collapsing,
-	// Gemini rejects with "Proto field is not repeating, cannot start list."
+	// Regression: MCP schemas (e.g. Pylon) use array-typed "type" like
+	// ["array","null"]; Gemini expects a single type plus a "nullable" bool.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -931,11 +913,8 @@ func TestPrepareGemini_CollapsesArrayTypeField(t *testing.T) {
 }
 
 func TestPrepareGemini_RepairsArrayMissingItems(t *testing.T) {
-	// Regression: production Claude Code traffic includes MCP tools whose schemas
-	// declare `{"type":"array"}` with no `items` field (valid JSON Schema, invalid
-	// Gemini function-call schema). Gemini rejected the whole request with
-	// "GenerateContentRequest.tools[0].function_declarations[N].parameters.
-	// properties[X].items: missing field". Inject a permissive default instead.
+	// Regression: MCP tools declare `{"type":"array"}` with no `items` field
+	// (valid JSON Schema, invalid for Gemini); inject a permissive default.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -975,10 +954,9 @@ func TestPrepareGemini_RepairsArrayMissingItems(t *testing.T) {
 }
 
 func TestPrepareGemini_DropsEmptyStringEnumEntries(t *testing.T) {
-	// Regression: MCP tool schemas occasionally include `""` as an enum value
-	// (e.g. an "operator" field that allows "no filter"). Gemini rejects with
-	// "function_declarations[N].parameters.properties[X].enum[0]: cannot be
-	// empty". Drop empty strings; drop the enum entirely when nothing remains.
+	// Regression: MCP schemas sometimes include `""` as an enum value (e.g. an
+	// "operator" allowing "no filter"), which Gemini rejects; drop empty
+	// strings, and the enum entirely if nothing remains.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{

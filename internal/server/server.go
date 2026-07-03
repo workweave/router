@@ -36,9 +36,8 @@ const (
 )
 
 // DeploymentMode gates whether the self-hoster admin dashboard and its
-// /admin/v1/* API are mounted. In Weave-managed (SaaS) deployments the
-// dashboard is redundant attack surface — keys, BYOK secrets, and config
-// are owned by the Weave control plane.
+// /admin/v1/* API are mounted. Managed (SaaS) deployments skip it since
+// keys, BYOK secrets, and config are owned by the Weave control plane.
 type DeploymentMode string
 
 const (
@@ -51,45 +50,33 @@ const (
 // Register wires routes onto the engine. In managed mode the dashboard +
 // /admin/v1/* routes are not registered at all.
 //
-// deployedModels is the source for the admin model-selection checklist. May
-// be nil in tests; required in selfhosted production so the dashboard can
-// render the universe of routable models.
+// deployedModels may be nil in tests; required in selfhosted prod so the
+// dashboard can render the universe of routable models.
 //
-// billingSvc is non-nil only in managed mode when the credit-billing tables
-// are present; when set, every inference route is gated on prepaid balance
-// via middleware.WithBalanceCheck. nil leaves inference routes open (BYOK
-// or platform key still controls upstream auth).
+// billingSvc is set only in managed mode when credit-billing is enabled; it
+// gates every inference route on prepaid balance via WithBalanceCheck. nil
+// leaves inference routes open (BYOK/platform key still controls upstream auth).
 func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service) {
-	// Managed mode bills via prepaid credits against the platform key; any
-	// BYOK row left over in router.model_router_external_api_keys would
-	// silently double-charge the customer (upstream provider + Weave credits).
-	// Drop BYOK at the middleware boundary so no downstream consumer can see it.
+	// Managed mode bills via platform-key credits; a leftover BYOK row would
+	// double-charge (upstream provider + Weave credits), so drop it here.
 	byokDisabled := mode == DeploymentModeManaged
 
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
 
-	// /v1/version reports the running binary's git commit + build time (stamped
-	// via -ldflags) so operators and the README's managed-deployment badge can
-	// tell which router commit is live. Unauthed + mounted in both modes, like
-	// /health — the fields are public build metadata with no leak risk.
+	// /v1/version reports the binary's git commit + build time (via -ldflags),
+	// used by the README's managed-deployment badge. Public build metadata, unauthed like /health.
 	engine.GET("/v1/version", middleware.WithTimeout(healthTimeout), admin.VersionHandler)
 
-	// /v1/router/models surfaces the active artifact's deployed-models list so
-	// the Weave control plane can validate per-org exclusion submissions
-	// against the live universe instead of hand-copying it on every gitlink
-	// bump. Read-only metadata — unauthed so managed mode (no admin keys
-	// issuable on-router) can call it; the list is published publicly on the
-	// RouterArena leaderboard so there is no leak risk. nil source skips the
-	// route in tests that don't wire a cluster scorer.
+	// /v1/router/models lets the Weave control plane validate per-org exclusion
+	// submissions against the live deployed-models universe instead of
+	// hand-copying it per gitlink bump. Unauthed: read-only, and the list is
+	// already public on the RouterArena leaderboard.
 	if deployedModels != nil {
 		engine.GET("/v1/router/models", middleware.WithTimeout(healthTimeout), admin.CatalogModelsHandler(deployedModels))
 
-		// /v1/router/routing-distribution projects the per-installation "quality
-		// vs price" dial's model mix across a grid of dial positions, so the
-		// dashboard can render the live distribution preview and calibrate the
-		// slider. Same read-only/unauthed rationale as /v1/router/models. The
-		// source is the same *cluster.Multiversion; the assertion skips the
-		// route for a deployedModels source that can't project a distribution.
+		// Projects the quality-vs-price dial's model mix across dial positions
+		// for the dashboard's distribution preview. Same unauthed rationale as
+		// /v1/router/models; the assertion skips sources that can't project one.
 		if dist, ok := deployedModels.(admin.RoutingDistributionSource); ok {
 			engine.GET("/v1/router/routing-distribution", middleware.WithTimeout(healthTimeout), admin.RoutingDistributionHandler(dist))
 		}
@@ -175,11 +162,9 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	// Action suffix (:generateContent or :streamGenerateContent) lives inside modelAction because Gin treats `:` outside the leading position as a literal.
 	chatCompletionGroup.POST("/v1beta/models/:modelAction", geminiapi.GenerateContentHandler(proxySvc, authSvc))
 
-	// Passthrough endpoints (count_tokens, model list) do not consume
-	// upstream tokens beyond a metadata lookup, so we leave them open
-	// even when billing is enabled. count_tokens in particular is the
-	// SDK's first call before /v1/messages — gating it on balance would
-	// make clients fail to negotiate before any inference happens.
+	// Passthrough endpoints cost no upstream tokens, so they stay open even
+	// with billing enabled — count_tokens is the SDK's pre-flight call before
+	// /v1/messages, and gating it would break client negotiation.
 	passthroughGroup := engine.Group("",
 		middleware.WithTimeout(passthroughTimeout),
 		middleware.WithAuth(authSvc, byokDisabled),
@@ -204,10 +189,9 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	routeGroup := engine.Group("", routeMiddleware...)
 	routeGroup.POST("/v1/route", anthropicapi.RouteHandler(proxySvc))
 
-	// No-login feedback link (product surface, both modes). The signed HMAC
-	// token in the URL / body is the sole credential, so these routes carry no
-	// auth middleware. Mounted only when a feedback signer is configured
-	// (ROUTER_FEEDBACK_LINK_SECRET set); otherwise the surface stays absent.
+	// No-login feedback link: the signed HMAC token in the URL/body is the
+	// sole credential, so no auth middleware. Mounted only when
+	// ROUTER_FEEDBACK_LINK_SECRET is configured.
 	if proxySvc.FeedbackEnabled() {
 		feedbackGroup := engine.Group("/v1/feedback", middleware.WithTimeout(feedbackTimeout))
 		feedbackGroup.GET("/link/:token", feedbackapi.GetContextHandler(proxySvc))
@@ -220,23 +204,18 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 }
 
 // registerUIStatic mounts the exported Next.js dashboard at /ui with
-// clean-URL semantics (no trailing slash, no .html extension visible).
+// clean-URL semantics (no trailing slash, no .html extension).
 //
-// Next is configured with trailingSlash:false, so its static export writes
-// files as `settings.html` rather than `settings/index.html`. We can't use
-// gin.Static / http.FileServer directly: FileServer would either 404 on
-// `/ui/settings` or redirect `/ui/settings` → `/ui/settings/` (when
-// `settings/index.html` exists), neither of which is what we want here.
-//
-// Resolution order for a request to `/ui/<path>`:
-//  1. If <path> ends with `/`, redirect to the slashless form (308).
-//  2. If <path> is empty or `index`, serve `index.html`.
-//  3. If `<path>` exists as a regular file under assets/ui, serve it.
-//  4. If `<path>.html` exists, serve that.
+// Next's static export (trailingSlash:false) writes `settings.html`, not
+// `settings/index.html`, so plain gin.Static/http.FileServer would 404 or
+// redirect wrong on `/ui/settings`. Resolution order for `/ui/<path>`:
+//  1. Trailing slash -> redirect to slashless form (308).
+//  2. Empty or `index` -> serve index.html.
+//  3. `<path>` exists as a file -> serve it.
+//  4. `<path>.html` exists -> serve that.
 //  5. Otherwise 404.
 //
-// All resolved paths are clamped under `root` via filepath.Clean to block
-// `..` traversal regardless of what gin's wildcard captures.
+// Resolved paths are clamped under `root` via filepath.Clean against `..` traversal.
 func registerUIStatic(engine *gin.Engine, root string) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {

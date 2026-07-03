@@ -8,17 +8,13 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// ReasonUserForceModel is the decision_reason stored in the session pin when a
-// user has forced a specific model via /force-model. The turn loop treats this
-// as an immutable sticky: scorer and planner are bypassed for the session's
-// lifetime until /unforce-model clears it.
+// ReasonUserForceModel marks a session pin from /force-model. It's an
+// immutable sticky: scorer/planner are bypassed until /unforce-model clears it.
 const ReasonUserForceModel = "user_forced"
 
-// ReasonLoopEscalation is the decision_reason stored in the session pin when the
-// router detects a cyclic tool-call loop on a cheap/mid model and escalates the
-// session to opus. The turn loop treats it as an immutable sticky (same as
-// ReasonUserForceModel) so the rescued session stays on the strong model for the
-// rest of its life rather than re-routing back into the loop.
+// ReasonLoopEscalation marks a session pin created when the router detects a
+// tool-call loop and escalates to opus. Immutable sticky like
+// ReasonUserForceModel, so the session doesn't re-route back into the loop.
 const ReasonLoopEscalation = "loop_escalation"
 
 // ForceModelResult holds the parsed outcome of a force-model command.
@@ -30,9 +26,8 @@ type ForceModelResult struct {
 }
 
 // ExtractForceModelCommand scans the last user-role message in env for a
-// /force-model <model> or /unforce-model directive. When found, it strips the
-// command line from env.body and returns the parsed result.
-// Returns (zero, false) when no command is present.
+// /force-model <model> or /unforce-model directive, stripping it from
+// env.body. Returns (zero, false) when no command is present.
 func (env *RequestEnvelope) ExtractForceModelCommand() (ForceModelResult, bool) {
 	var res ForceModelResult
 	found := env.extractLeadingCommand(func(text string) (bool, string) {
@@ -45,11 +40,10 @@ func (env *RequestEnvelope) ExtractForceModelCommand() (ForceModelResult, bool) 
 	return res, found
 }
 
-// extractLeadingCommand scans the last user-role message for a router
-// directive recognized by parse, which receives each candidate text and
-// returns (found, strippedText). On a match the matched content (string body
-// or text block) is replaced in env.body with the stripped remainder. Only
-// Anthropic / OpenAI message shapes are scanned.
+// extractLeadingCommand scans the last user-role message (Anthropic/OpenAI
+// shapes only) for a directive recognized by parse, which receives candidate
+// text and returns (found, strippedText). On a match, the matched content is
+// replaced in env.body with the stripped remainder.
 func (env *RequestEnvelope) extractLeadingCommand(parse func(text string) (found bool, stripped string)) bool {
 	switch env.format {
 	case FormatAnthropic, FormatOpenAI:
@@ -88,11 +82,9 @@ func (env *RequestEnvelope) extractLeadingCommand(parse func(text string) (found
 		return true
 
 	case lastContent.Type == gjson.JSON && lastContent.IsArray():
-		// Scan every text block in order. Claude Code clients sometimes split
-		// the user turn into multiple text parts (one carrying injected
-		// <command-name>/<command-args> tags, another carrying the typed
-		// directive), so inspecting only the first block silently lets
-		// the directive fall through to upstream routing.
+		// Scan every text block: Claude Code sometimes splits the user turn
+		// into multiple parts (injected tags in one, typed directive in
+		// another), so checking only the first block could miss it.
 		type textBlock struct {
 			idx  int
 			text string
@@ -124,18 +116,15 @@ func (env *RequestEnvelope) extractLeadingCommand(parse func(text string) (found
 
 // parseForceModelCommand scans text for a /force-model (alias /fm) or
 // /unforce-model (alias /ufm) directive on the first non-empty line.
-// Restricting to the leading line is a deliberate guard: pasted content
-// (snippets, transcripts) frequently contains strings starting with "/" that
-// would otherwise silently rewrite session routing without explicit user
-// intent. The short aliases exist for clients without local slash-command
-// expansion (pi, opencode, raw API callers) — Claude Code and Codex installs
-// ship alias .md files that expand to the canonical form client-side, so the
-// router-side aliases are the fallback path, not the primary one.
+// Restricted to the leading line so pasted content (snippets, transcripts)
+// starting with "/" can't silently rewrite session routing. The short
+// aliases are a fallback for clients without local slash-command expansion
+// (pi, opencode, raw API); Claude Code/Codex expand to the canonical form
+// client-side.
 //
-// Complete leading <tag>...</tag> blocks (Claude Code injects <system-reminder>,
-// <command-name>, <local-command-stdout>, etc. ahead of the user's typed text)
-// are skipped before the leading-line check is applied. Skipped blocks are
-// preserved in the stripped output so downstream prompt context is intact.
+// Leading <tag>...</tag> blocks (e.g. <system-reminder>, <command-name>
+// injected by Claude Code) are skipped before the leading-line check, and
+// preserved in the stripped output.
 func parseForceModelCommand(text string) (res ForceModelResult, found bool, stripped string) {
 	prefixEnd := leadingInjectedPrefixEnd(text)
 	prefix := text[:prefixEnd]
@@ -192,11 +181,10 @@ func cutAnyPrefix(text string, prefixes ...string) (after string, ok bool) {
 	return text, false
 }
 
-// leadingInjectedPrefixEnd returns the byte offset in text after any leading
-// whitespace and complete <tag>...</tag> blocks. Only simple tag names (letters,
-// digits, '-', '_') with no attributes are recognized so that arbitrary pasted
-// XML/HTML — which may contain a stray /force-model line — does not satisfy the
-// guard. Unclosed or attribute-bearing tags terminate the prefix scan.
+// leadingInjectedPrefixEnd returns the byte offset after leading whitespace
+// and complete <tag>...</tag> blocks. Only simple attribute-free tag names are
+// recognized, so pasted XML/HTML containing a stray /force-model line can't
+// satisfy the guard; unclosed or attribute-bearing tags stop the scan.
 func leadingInjectedPrefixEnd(text string) int {
 	i := 0
 	for i < len(text) {

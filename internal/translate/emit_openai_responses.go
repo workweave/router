@@ -14,16 +14,12 @@ import (
 )
 
 // PrepareOpenAIResponses builds an OpenAI Responses API (`POST /v1/responses`)
-// request from an Anthropic Messages envelope. Reasoning-capable OpenAI models
-// (gpt-5.x) reject `reasoning_effort` + tools on `/v1/chat/completions`, so an
-// agentic Anthropic client (Claude Code) that wants the model to reason must go
-// through the Responses API instead. The upstream call streams (`stream:true`):
-// a non-streaming Responses call buffers the entire reasoning+output before
-// emitting any response headers, which for gpt-5.x at high effort routinely
-// exceeds the transport's response-header timeout and fails the turn with
-// "http2: timeout awaiting response headers". Streaming returns headers + the
-// first event immediately; ResponsesToAnthropicWriter translates the event
-// stream into Anthropic SSE on the fly.
+// request from an Anthropic Messages envelope. Reasoning gpt-5.x models reject
+// `reasoning_effort` + tools on /v1/chat/completions, so agentic clients must
+// use Responses instead. We always stream: a non-streaming Responses call
+// buffers all reasoning+output before headers, which at high effort routinely
+// exceeds the header timeout ("http2: timeout awaiting response headers").
+
 func (e *RequestEnvelope) PrepareOpenAIResponses(in http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
 	if e.format != FormatAnthropic {
 		return providers.PreparedRequest{}, fmt.Errorf("PrepareOpenAIResponses: only Anthropic ingress is supported, got format %d", e.format)
@@ -36,10 +32,8 @@ func (e *RequestEnvelope) PrepareOpenAIResponses(in http.Header, opts EmitOption
 }
 
 // ResponseTranslator is the common surface the proxy's cross-format OpenAI
-// dispatch drives: an http.ResponseWriter the provider writes the upstream
-// response into, plus the Prelude/Finalize/Summary lifecycle. Both
-// AnthropicSSETranslator (chat/completions) and ResponsesToAnthropicWriter
-// (Responses API) implement it, so the dispatch closure can pick either.
+// dispatch drives. AnthropicSSETranslator (chat/completions) and
+// ResponsesToAnthropicWriter (Responses API) both implement it.
 type ResponseTranslator interface {
 	http.ResponseWriter
 	Prelude(streaming bool) error
@@ -61,18 +55,16 @@ func (e *RequestEnvelope) ReasoningRequested() bool {
 
 // UseOpenAIResponsesAPI reports whether an Anthropic ingress dispatch to the
 // direct OpenAI provider should use POST /v1/responses instead of
-// /v1/chat/completions. Reasoning OpenAI models (gpt-5.x) reject tools,
-// stop, and reasoning_effort on chat/completions, so any agentic turn with
-// tools must go through the Responses API.
+// /v1/chat/completions: reasoning gpt-5.x models reject tools/stop/
+// reasoning_effort on chat/completions.
 func UseOpenAIResponsesAPI(provider string, caps router.ModelSpec, hasTools bool) bool {
 	return provider == providers.ProviderOpenAI &&
 		caps.Supports(router.CapReasoning) &&
 		hasTools
 }
 
-// reasoningEffortFromAnthropic resolves the Responses `reasoning.effort` from an
-// Anthropic body: the `thinking` budget (Claude Code) via effortForBudget, or an
-// explicit `reasoning_effort` if an OpenAI-format field rode along. "" = none.
+// reasoningEffortFromAnthropic resolves the Responses `reasoning.effort` from
+// the `thinking` budget or an explicit `reasoning_effort` field. "" = none.
 func reasoningEffortFromAnthropic(body []byte) string {
 	if t := gjson.GetBytes(body, "thinking"); t.Exists() && t.Get("type").String() != "disabled" {
 		return effortForBudget(t.Get("budget_tokens").Int())
@@ -83,12 +75,9 @@ func reasoningEffortFromAnthropic(body []byte) string {
 	return ""
 }
 
-// responsesReasoningEffort applies model-specific effort policy on top of the
-// budget-derived effort. gpt-5.x has a measured "medium" dead-zone on hard
-// agentic coding (SWE-bench Pro: low 16%, medium 0%, high 41% ≈ opus) — medium
-// is strictly dominated by both neighbors, so never serve it to a gpt-5.x
-// reasoning model; promote to high. Small budgets still resolve to low via
-// effortForBudget, so easy traffic is untouched. Other models pass through.
+// responsesReasoningEffort promotes "medium" to "high" for gpt-5.x: measured
+// SWE-bench Pro scores (low 16%, medium 0%, high 41%) show medium is strictly
+// dominated, so never serve it to a gpt-5.x reasoning model.
 func responsesReasoningEffort(eff, model string) string {
 	if eff == "medium" && strings.HasPrefix(model, "gpt-5") {
 		return "high"
@@ -110,10 +99,8 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 	jw.Str(opts.TargetModel)
 	jw.Key("stream")
 	jw.Bool(true)
-	// Stateless: we send the full history each turn and don't rely on
-	// server-side state. Prior OpenAI reasoning items are round-tripped through
-	// signed Anthropic thinking blocks and replayed below when the client echoes
-	// them back.
+	// Stateless: prior reasoning items round-trip through signed Anthropic
+	// thinking blocks and are replayed below when the client echoes them back.
 	jw.Key("store")
 	jw.Bool(false)
 
@@ -161,10 +148,8 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 	return jw.Bytes(), stats, nil
 }
 
-// writeResponsesInputFromAnthropic emits the `input` array: Anthropic messages
-// become Responses input items — user/assistant text as typed messages,
-// signed OpenAI thinking as reasoning, tool_use as function_call, tool_result as
-// function_call_output.
+// writeResponsesInputFromAnthropic converts Anthropic messages into Responses
+// input items (text messages, reasoning, function_call, function_call_output).
 func writeResponsesInputFromAnthropic(jw *jsonWriter, body []byte) {
 	jw.Key("input")
 	jw.Arr()
@@ -206,9 +191,8 @@ func writeResponsesInputFromAnthropic(jw *jsonWriter, body []byte) {
 					writeResponsesTextMessage(jw, role, joinNonEmpty(textParts))
 					textParts = nil
 				}
-				// Replay the reasoning item carried on the tool id (the
-				// Claude Code round-trip drops the thinking block but keeps the
-				// tool_use id) when it wasn't already emitted from a thinking block.
+				// Claude Code's round-trip drops the thinking block but keeps
+				// the tool_use id, so replay the reasoning item carried on it.
 				if sig != "" {
 					if _, emitted := emittedReasoningSignatures[sig]; !emitted && emitResponsesReasoningItem(jw, sig) {
 						emittedReasoningSignatures[sig] = struct{}{}
@@ -327,18 +311,15 @@ func flattenAnthropicToolResultContent(content gjson.Result) string {
 	}
 }
 
-// writeResponsesToolsFromAnthropic emits the Responses flat function-tool shape
-// (`{type:"function", name, description, parameters}` — no nested wrapper).
+// writeResponsesToolsFromAnthropic emits the Responses flat function-tool
+// shape (`{type:"function", name, description, parameters}`, no wrapper).
 //
-// Each tool whose schema survives strictifyOpenAISchema is emitted with
-// `strict:true` + the strictified parameters, turning on grammar-constrained
-// decoding so gpt-5.x cannot emit out-of-schema arguments at all (the
-// prevention layer in front of toolcheck's detect/repair). Tools whose
-// schemas can't be faithfully strictified fall back to non-strict emission of
-// the original schema — never fail the request over strictness. Note the
-// proxy-side validator (toolcheck) still checks against the ORIGINAL schema:
-// strict mode makes optionals nullable, and the explicit nulls gpt-5.x then
-// emits are dropped by toolcheck's normalize pass before reaching the client.
+// Tools whose schema survives strictifyOpenAISchema get `strict:true`, which
+// turns on grammar-constrained decoding so gpt-5.x can't emit out-of-schema
+// args. Schemas that can't be strictified fall back to non-strict emission
+// rather than failing the request. toolcheck still validates against the
+// ORIGINAL schema downstream — strict mode's nullable optionals produce
+// explicit nulls that toolcheck's normalize pass strips before the client sees them.
 func writeResponsesToolsFromAnthropic(jw *jsonWriter, body []byte) {
 	tools := gjson.GetBytes(body, "tools")
 	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {

@@ -17,10 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// evictionStubPinStore records every call to IncrementUpstreamErrors /
-// ResetUpstreamErrors / Upsert so each two-strike branch can be
-// asserted independently. The increment counter is configurable to
-// drive the threshold path without re-running the whole turn loop.
+// evictionStubPinStore records calls so each two-strike branch can be
+// asserted independently; incrementNext drives the threshold directly.
 type evictionStubPinStore struct {
 	mu             sync.Mutex
 	incrementCalls int
@@ -87,12 +85,8 @@ func nonZeroSessionKey() [sessionpin.SessionKeyLen]byte {
 	return k
 }
 
-// TestMaybeEvictPin_FirstStrikeOnlyIncrements pins the two-strike
-// invariant: a SINGLE 400 must increment the counter but NOT expire
-// the pin. The eviction must wait for the second consecutive strike,
-// so an isolated bad request (a one-off malformed prompt, brief
-// upstream schema validation hiccup) doesn't flush an otherwise-warm
-// session's cache.
+// A single 400 must increment the counter but not evict — eviction waits for
+// a second consecutive strike so one-off bad requests don't flush a warm pin.
 func TestMaybeEvictPin_FirstStrikeOnlyIncrements(t *testing.T) {
 	store := &evictionStubPinStore{incrementNext: []int{1}}
 	svc := newEvictionTestService(store)
@@ -113,10 +107,7 @@ func TestMaybeEvictPin_FirstStrikeOnlyIncrements(t *testing.T) {
 	assert.Empty(t, store.upserts, "first strike must not expire the pin — eviction waits for strike #2")
 }
 
-// TestMaybeEvictPin_SecondStrikeExpires guards the actual eviction
-// path. The session 93e918bf wedge happened because there was NO
-// eviction path at all; this test fails the moment that regression
-// returns.
+// Guards against the session 93e918bf regression, where no eviction path existed.
 func TestMaybeEvictPin_SecondStrikeExpires(t *testing.T) {
 	store := &evictionStubPinStore{incrementNext: []int{pinEvictionStrikeThreshold}}
 	svc := newEvictionTestService(store)
@@ -147,11 +138,8 @@ func TestMaybeEvictPin_SecondStrikeExpires(t *testing.T) {
 		"eviction reason is the audit trail that distinguishes this path from force-model / loop-break")
 }
 
-// TestMaybeEvictPin_SuccessResets verifies that a successful turn
-// clears the counter so the strike count truly tracks CONSECUTIVE
-// failures (not lifetime failures). Without this, a session could
-// accumulate strikes across hours of healthy turns and trigger a
-// stale eviction on a single bad request.
+// A successful turn must clear the counter so strikes track consecutive
+// failures, not lifetime ones.
 func TestMaybeEvictPin_SuccessResets(t *testing.T) {
 	store := &evictionStubPinStore{}
 	svc := newEvictionTestService(store)
@@ -171,11 +159,8 @@ func TestMaybeEvictPin_SuccessResets(t *testing.T) {
 	assert.Empty(t, store.upserts)
 }
 
-// TestMaybeEvictPin_RetryableStatusIgnored guards the IsRetryableStatus
-// gate. 429 / 408 / 5xx are upstream-transient and handled by
-// dispatchWithFallback; they must not drain the strike counter, since
-// a rate-limited request says nothing about whether the model itself
-// is wedged.
+// 429/408/5xx are transient and handled by dispatchWithFallback; they must
+// not touch the strike counter since they say nothing about model health.
 func TestMaybeEvictPin_RetryableStatusIgnored(t *testing.T) {
 	for _, status := range []int{http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable} {
 		store := &evictionStubPinStore{incrementNext: []int{99}}
@@ -196,11 +181,8 @@ func TestMaybeEvictPin_RetryableStatusIgnored(t *testing.T) {
 	}
 }
 
-// TestMaybeEvictPin_UserForcedSkipped pins the user-command override:
-// a force-model'd session is the user explicitly choosing this
-// provider/model, and auto-eviction would silently revert that
-// command on the next turn. /unforce-model remains the escape hatch.
-// Covers both the plain reason and the "+tier_clamp" suffix variant.
+// A force-model'd session must never auto-evict — that would silently revert
+// the user's explicit choice; /unforce-model is the intended escape hatch.
 func TestMaybeEvictPin_UserForcedSkipped(t *testing.T) {
 	for _, reason := range []string{translate.ReasonUserForceModel, translate.ReasonUserForceModel + "+tier_clamp"} {
 		store := &evictionStubPinStore{incrementNext: []int{pinEvictionStrikeThreshold}}
@@ -222,11 +204,8 @@ func TestMaybeEvictPin_UserForcedSkipped(t *testing.T) {
 	}
 }
 
-// TestMaybeEvictPin_NoStickyHitSkipped verifies the cheap fast-path:
-// when this turn freshly routed via the scorer (no sticky pin), there
-// is no prior decision to second-guess. The Upsert that just wrote
-// this turn's pin already resets the counter via the SQL CASE clause,
-// so any reset call here would be redundant work.
+// A freshly-scored turn (no sticky pin) has no prior decision to reconsider;
+// the Upsert already reset the counter via its SQL CASE clause.
 func TestMaybeEvictPin_NoStickyHitSkipped(t *testing.T) {
 	store := &evictionStubPinStore{incrementNext: []int{pinEvictionStrikeThreshold}}
 	svc := newEvictionTestService(store)
@@ -246,9 +225,8 @@ func TestMaybeEvictPin_NoStickyHitSkipped(t *testing.T) {
 	assert.Empty(t, store.upserts)
 }
 
-// TestMaybeEvictPin_ZeroSessionKeySkipped guards against a corrupted
-// pin row shared by every zero-keyed caller — mirrors the same guard
-// in no_progress.go.
+// Guards against a corrupted pin row shared by every zero-keyed caller —
+// mirrors the guard in no_progress.go.
 func TestMaybeEvictPin_ZeroSessionKeySkipped(t *testing.T) {
 	store := &evictionStubPinStore{incrementNext: []int{pinEvictionStrikeThreshold}}
 	svc := newEvictionTestService(store)
@@ -267,9 +245,7 @@ func TestMaybeEvictPin_ZeroSessionKeySkipped(t *testing.T) {
 	assert.Empty(t, store.upserts)
 }
 
-// TestMaybeEvictPin_NilInstallationSkipped covers the unauthenticated
-// path (no installation_id resolved). Selfhosted / fakes / dev
-// scenarios hit this; the eviction must no-op rather than write a
+// Unauthenticated path (no installation_id) must no-op rather than write a
 // uuid.Nil-installed row to Postgres.
 func TestMaybeEvictPin_NilInstallationSkipped(t *testing.T) {
 	store := &evictionStubPinStore{incrementNext: []int{pinEvictionStrikeThreshold}}
@@ -289,10 +265,8 @@ func TestMaybeEvictPin_NilInstallationSkipped(t *testing.T) {
 	assert.Empty(t, store.upserts)
 }
 
-// TestMaybeEvictPin_NonUpstreamErrorIgnored guards the upstreamStatus
-// gate: a generic transport / build / context-cancel error has no
-// upstream status and is not a model-quality signal, so the counter
-// must NOT advance.
+// A generic transport/build/context-cancel error has no upstream status and
+// is not a model-quality signal, so the counter must not advance.
 func TestMaybeEvictPin_NonUpstreamErrorIgnored(t *testing.T) {
 	store := &evictionStubPinStore{incrementNext: []int{pinEvictionStrikeThreshold}}
 	svc := newEvictionTestService(store)

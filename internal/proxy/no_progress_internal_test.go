@@ -49,9 +49,7 @@ func TestComputeNoProgressFingerprint_PromptPrefixOnly(t *testing.T) {
 
 func TestComputeNoProgressFingerprint_DistinguishesMessageCount(t *testing.T) {
 	d := router.Decision{Model: "gemini-3.1-pro-preview", Provider: "google"}
-	// Same model/provider/prompt-prefix/tool-progress, different message count:
-	// a tool-free loop grows its transcript each turn, so the fingerprints must
-	// diverge even though the user's typed task (the prompt prefix) is constant.
+	// A growing transcript must change the fingerprint even with a constant prompt prefix.
 	a := computeNoProgressFingerprint(d, "explore RSVP files", 10, "")
 	b := computeNoProgressFingerprint(d, "explore RSVP files", 12, "")
 	assert.NotEqual(t, a, b, "a growing message count must change the fingerprint")
@@ -59,23 +57,17 @@ func TestComputeNoProgressFingerprint_DistinguishesMessageCount(t *testing.T) {
 
 func TestComputeNoProgressFingerprint_DistinguishesToolProgress(t *testing.T) {
 	d := router.Decision{Model: "deepseek/deepseek-v4-flash", Provider: "deepinfra"}
-	// Everything constant except the tool-progress marker — the case Claude
-	// Code's Explore sub-agent hits, where model/provider/message_count and the
-	// user's task prompt are all flat but the tool-call history advances. The
-	// fingerprint must diverge so the detector does not mistake progress for a
-	// loop.
+	// Explore sub-agent case: message count and prompt stay flat but tool-call
+	// history advances — the fingerprint must still diverge.
 	a := computeNoProgressFingerprint(d, "investigate the bug", 5, "42\x00Read\x00hash-a")
 	b := computeNoProgressFingerprint(d, "investigate the bug", 5, "43\x00Read\x00hash-b")
 	assert.NotEqual(t, a, b, "an advancing tool-progress marker must change the fingerprint")
 }
 
 func TestNoProgressTracker_DoesNotTripWhenMessageCountGrows(t *testing.T) {
-	// Regression: a fast Claude Code tool-call loop fires well over the
-	// threshold of dispatches to one model within the window, all sharing the
-	// same routed (model, provider) and the same user-task prompt prefix
-	// (tool_result turns are stripped from promptText in embed-only mode). It
-	// must NOT trip, because the transcript grows by an assistant + tool_result
-	// turn each iteration.
+	// Regression: a fast tool-call loop can exceed the dispatch threshold for
+	// one (model, provider) while the prompt prefix stays constant, but must
+	// not trip since the transcript keeps growing each iteration.
 	tr := newNoProgressTracker()
 	key := sessionKeyFromString("session-healthy-loop")
 	install := uuid.New()
@@ -90,12 +82,9 @@ func TestNoProgressTracker_DoesNotTripWhenMessageCountGrows(t *testing.T) {
 }
 
 func TestNoProgressTracker_DoesNotTripWhenToolProgressGrows(t *testing.T) {
-	// Regression (Claude Code Explore sub-agent): the top-level message count
-	// stays flat across turns — tool_use blocks accrete inside a handful of
-	// messages — and tool_result turns are stripped from promptText in
-	// embed-only mode, so model/provider/message_count/prompt-prefix are all
-	// constant. It must NOT trip, because the agent appends a new, distinct tool
-	// call each turn, so the tool-progress marker advances.
+	// Regression (Explore sub-agent): message count/prompt/model/provider stay
+	// flat but each turn appends a distinct tool call, so the tool-progress
+	// marker advances and the detector must not trip.
 	tr := newNoProgressTracker()
 	key := sessionKeyFromString("session-explore")
 	install := uuid.New()
@@ -103,9 +92,7 @@ func TestNoProgressTracker_DoesNotTripWhenToolProgressGrows(t *testing.T) {
 	now := time.Now()
 
 	for i := 0; i < noProgressMatchThreshold*2; i++ {
-		// Flat message count (5) and constant task prompt, but a growing
-		// tool-call history: the count climbs and the last call differs (a Read
-		// of a different file) each turn.
+		// Flat message count, growing tool-call history (differs each turn).
 		progress := strconv.Itoa(40+i) + "\x00Read\x00hash-" + strconv.Itoa(i)
 		fp := computeNoProgressFingerprint(d, "investigate the stuck name", 5, progress)
 		looped, _ := tr.recordAndDetect(key, install, "low", fp, now)
@@ -114,11 +101,8 @@ func TestNoProgressTracker_DoesNotTripWhenToolProgressGrows(t *testing.T) {
 }
 
 func TestNoProgressTracker_TripsWhenMessageCountAndToolProgressFlat(t *testing.T) {
-	// A genuine stuck loop — a sub-agent spawn loop replaying independent
-	// envelope-1 requests, or a model re-issuing one identical tool call — never
-	// advances: the transcript stays flat and the same single tool call repeats,
-	// so both the message count and the tool-progress marker are constant. The
-	// detector must still fire.
+	// A genuine stuck loop (e.g. a model re-issuing one identical tool call)
+	// keeps message count and tool-progress marker both constant — must fire.
 	tr := newNoProgressTracker()
 	key := sessionKeyFromString("session-spawn-loop")
 	install := uuid.New()
@@ -134,9 +118,7 @@ func TestNoProgressTracker_TripsWhenMessageCountAndToolProgressFlat(t *testing.T
 }
 
 func TestToolProgressMarker_AdvancesWithToolCalls(t *testing.T) {
-	// Two consecutive turns of a healthy Explore-style loop: the second appends
-	// a new, distinct tool call (a Read of a different file). The marker must
-	// change so the no-progress fingerprint diverges between turns.
+	// Second turn appends a distinct tool call; the marker must change.
 	turn1 := []byte(`{"model":"claude-haiku-4-5","max_tokens":256,"messages":[` +
 		`{"role":"user","content":"find the bug"},` +
 		`{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Grep","input":{"pattern":"scim","path":"/a"}}]},` +
@@ -220,10 +202,8 @@ func TestNoProgressTracker_AgesOutOldEntries(t *testing.T) {
 }
 
 func TestNoProgressTracker_ZeroSessionKeyWithInstallationFallsBack(t *testing.T) {
-	// Hard-pin paths (Explore SubAgentDispatch when hardPinExplore is on)
-	// and routing with pinStore nil leave SessionKey at zero. The detector
-	// must still cover them — bucketing by installationID keeps the
-	// per-installation isolation while restoring detection coverage.
+	// Hard-pin/pinStore-nil paths leave SessionKey at zero; falling back to
+	// installationID must still detect loops while keeping isolation.
 	tr := newNoProgressTracker()
 	var zero [sessionpin.SessionKeyLen]byte
 	install := uuid.New()
@@ -241,9 +221,7 @@ func TestNoProgressTracker_ZeroSessionKeyWithInstallationFallsBack(t *testing.T)
 }
 
 func TestNoProgressTracker_ZeroSessionKeyAndZeroInstallationIsSkipped(t *testing.T) {
-	// Unauthenticated/test paths can have neither anchor — must skip rather
-	// than fall back to a global zero-keyed bucket that unrelated traffic
-	// would share.
+	// No anchor at all must skip rather than share a global zero-keyed bucket.
 	tr := newNoProgressTracker()
 	var zero [sessionpin.SessionKeyLen]byte
 	d := router.Decision{Model: "qwen/qwen3-235b-a22b-2507", Provider: "bedrock"}
@@ -359,10 +337,8 @@ func TestCompactionTracker_DetectsMessageCountDrop(t *testing.T) {
 }
 
 func TestCompactionTracker_DetectsRollingWindowTrimming(t *testing.T) {
-	// Rolling-window trimming (the pattern observed in session 543151ce):
-	// messageCount stays flat because old message pairs are swapped for new
-	// ones, but the assistant tool-call count shrinks by one per turn as the
-	// oldest tool call drops out of the visible window.
+	// Rolling-window trim: messageCount stays flat (old pairs swapped for new)
+	// but tool-call count shrinks as the oldest call drops out of view.
 	ct := newCompactionTracker()
 	key := sessionKeyFromString("session-rolling")
 	install := uuid.New()
@@ -376,11 +352,9 @@ func TestCompactionTracker_DetectsRollingWindowTrimming(t *testing.T) {
 }
 
 func TestCompactionTracker_NoFalsePositiveOnFreshSubAgentDispatch(t *testing.T) {
-	// A sub-agent shares the (session, role) bucket with the previous sub-agent
-	// of the same tier. When a new sub-agent is spawned its opening turn carries
-	// messageCount=1, which is a drop relative to the prior sub-agent's small
-	// count — but it is a fresh dispatch, not history trimming, so it must not
-	// fire (the prior conversation was too small to have lost anything).
+	// A new sub-agent shares the (session, role) bucket with the prior one, so
+	// its opening messageCount=1 looks like a drop — but it's a fresh dispatch,
+	// not trimming, and must not fire.
 	ct := newCompactionTracker()
 	key := sessionKeyFromString("session-subagent")
 	install := uuid.New()
@@ -394,10 +368,8 @@ func TestCompactionTracker_NoFalsePositiveOnFreshSubAgentDispatch(t *testing.T) 
 }
 
 func TestCompactionTracker_NoFalsePositiveOnExploreToolCallSwing(t *testing.T) {
-	// Claude Code's Explore sub-agent holds a flat ~3-message window and varies
-	// its per-turn assistant tool-call count widely. A decrease in that count is
-	// natural model behavior, not rolling-window trimming, and must not fire
-	// because the window is too small to be a real rolling window.
+	// Explore holds a flat ~3-message window with widely varying tool-call
+	// counts; a decrease here is natural, not trimming, and must not fire.
 	ct := newCompactionTracker()
 	key := sessionKeyFromString("session-explore")
 	install := uuid.New()

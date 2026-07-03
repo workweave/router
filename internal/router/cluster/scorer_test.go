@@ -13,9 +13,8 @@ import (
 	"workweave/router/internal/router"
 )
 
-// fakeEmbedder returns a fixed vector or error; captures last text so
-// tests can assert tail-truncation happened upstream. Zero-value id/dim
-// default to the Jina identity so legacy-shaped fixtures keep working.
+// fakeEmbedder returns a fixed vector or error; captures last text for
+// tail-truncation assertions. Zero-value id/dim default to Jina.
 type fakeEmbedder struct {
 	vec      []float32
 	err      error
@@ -165,12 +164,8 @@ func TestScorer_PicksClusterAlignedModel(t *testing.T) {
 	assert.Contains(t, got.Reason, "model=claude-opus-4-7")
 }
 
-// TestScorer_SubscriptionCostFactorNoop guards the feature-off path on the V1
-// fallback bundle (no model_axes → no cost axis), where the subscription signal
-// never applies: nil and a 1.0 factor must both leave routing byte-identical to
-// no subsidy. The directional V2 behavior — the headroom bonus flipping the pick
-// and the intra-family choice — is covered by TestScorer_SubscriptionPreference-
-// FlipsAndSpills and TestScorer_SubscriptionPicksCheapestSufficientWithinFamily.
+// TestScorer_SubscriptionCostFactorNoop: on the V1 fallback bundle (no
+// model_axes), a 1.0 subsidy factor must be a no-op on routing and score.
 func TestScorer_SubscriptionCostFactorNoop(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	s := newScorerForTest(t, emb, cfgForTest())
@@ -200,13 +195,10 @@ func subscriptionKnobs() *DefaultRoutingKnobs {
 	}
 }
 
-// TestScorer_SubscriptionPreferenceFlipsAndSpills exercises the plan-vs-cash half
-// of subscription-aware routing. In the hard cluster 0, opus is the quality-
-// favored pick with no subsidy. Treating haiku as the subscription-covered/plan
-// model and opus as the uncovered/cash alternative: a slack plan (f≈epsilon) adds
-// the headroom bonus and flips the pick to the covered model; a bound plan (f=1)
-// zeroes the bonus and the pick spills back to cash. The scorer is family-
-// agnostic — it applies the bonus to whatever subsidyFactors lists.
+// TestScorer_SubscriptionPreferenceFlipsAndSpills: in the hard cluster 0
+// (opus quality-favored), a slack plan factor (f≈epsilon) on haiku adds a
+// headroom bonus that flips the pick to haiku; a bound factor (f=1) zeroes
+// the bonus and it spills back to opus.
 func TestScorer_SubscriptionPreferenceFlipsAndSpills(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	s := newV2BundleForTest(t, emb, v2BundleOpts{defaultKnobs: subscriptionKnobs()})
@@ -231,13 +223,10 @@ func TestScorer_SubscriptionPreferenceFlipsAndSpills(t *testing.T) {
 		"a bound plan (f=1) zeroes the bonus; routing spills back to the cash model")
 }
 
-// TestScorer_SubscriptionPicksCheapestSufficientWithinFamily is the headline
-// property: with BOTH covered models subsidized at the same slack factor, the
-// uniform bonus cannot reorder them, so the per-cluster quality/cost blend still
-// decides which covered model wins — the strong one on a hard (quality-favored)
-// cluster, the cheap one on an easy (cost-favored) cluster. This is exactly the
-// intra-family discrimination the old cost-multiply washed out (it compressed
-// Haiku and Opus together and over-picked Opus even for trivial turns).
+// TestScorer_SubscriptionPicksCheapestSufficientWithinFamily: with both
+// covered models subsidized at the same factor, the uniform bonus can't
+// reorder them, so the per-cluster quality/cost blend still picks the
+// strong model on a hard cluster and the cheap one on an easy cluster.
 func TestScorer_SubscriptionPicksCheapestSufficientWithinFamily(t *testing.T) {
 	covered := map[string]float64{"claude-opus-4-7": 0.05, "claude-haiku-4-5": 0.05}
 
@@ -258,12 +247,9 @@ func TestScorer_SubscriptionPicksCheapestSufficientWithinFamily(t *testing.T) {
 		"easy cluster: a subscribed family routes to the cheap sufficient model (Haiku, not Opus)")
 }
 
-// TestScorer_PreferredModelSoftNudge exercises the per-installation model
-// priority bonus. It must behave as a soft "finger on the scale": a preferred
-// model wins a close call but never overrides a clearly-better model for the
-// cluster, and a stale/unknown preference is a no-op. makeOpusVec aligns with
-// cluster 0, where Opus is quality-favored; the alpha override sets the blend's
-// quality weight so the Opus↔Haiku margin is tunable.
+// TestScorer_PreferredModelSoftNudge: a preferred model wins a close call
+// but never overrides a clearly-better model, and a stale/unknown
+// preference is a no-op.
 func TestScorer_PreferredModelSoftNudge(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	s := newV2BundleForTest(t, emb, v2BundleOpts{})
@@ -319,10 +305,8 @@ func TestScorer_PopulatesRoutingMetadata(t *testing.T) {
 		"with cfgForTest TopP=1, only the closest cluster (Opus-aligned) is summed")
 }
 
-// Stage 1 band pair: the scorer must surface the runner-up (second-best
-// eligible model) alongside the chosen model so the turn loop can freeze the
-// {chosen, paired} pair into the session pin. On the Opus-aligned cluster 0
-// (opus 0.9 > haiku 0.1), chosen=opus and paired must be haiku, scored below.
+// The scorer must surface the runner-up alongside the chosen model so the
+// turn loop can freeze the {chosen, paired} pair into the session pin.
 func TestScorer_PopulatesBandPair(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	s := newScorerForTest(t, emb, cfgForTest())
@@ -372,10 +356,8 @@ func TestScorer_PicksOtherClusterWhenAligned(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", got.Model)
 }
 
-// imageFilterArtifacts: K=1 fixture whose single cluster ranks the text-only
-// z-ai/glm-5.1 above the image-capable claude-opus-4-7. Without an image in the
-// request the scorer picks glm-5.1; with one it must drop glm-5.1 and fall to
-// opus.
+// imageFilterArtifacts: K=1 fixture ranking text-only glm-5.1 above
+// image-capable opus; an image in the request must drop glm-5.1.
 func imageFilterArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBlob []byte) {
 	t.Helper()
 	dim := EmbedDim
@@ -427,9 +409,8 @@ func TestScorer_KeepsTextOnlyPoolWhenNoImageCapableCandidate(t *testing.T) {
 	s, err := NewScorer(bundle, cfgForTest(), &fakeEmbedder{vec: makeOpusVec()}, map[string]struct{}{"deepinfra": {}})
 	require.NoError(t, err)
 
-	// Soft fallback: no image-capable candidate deployed, so the scorer still
-	// returns a decision rather than erroring — the upstream reports the
-	// rejection instead.
+	// No image-capable candidate deployed: the scorer still returns a
+	// decision rather than erroring; upstream reports the rejection.
 	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100), HasImages: true})
 	require.NoError(t, err)
 	assert.Equal(t, "z-ai/glm-5.1", got.Model)
@@ -678,11 +659,9 @@ func TestScorer_FiltersOutUnregisteredProvider(t *testing.T) {
 	assert.Contains(t, got.Reason, "provider=openai")
 }
 
-// Multi-binding regression: kimi-k2.5 has catalog bindings [bedrock,
-// openrouter] (primary, fallback). A self-hoster wiring only OpenRouter
-// must still route to kimi-k2.5 — the scorer should resolve via the
-// trailing binding and emit Decision.Provider="openrouter", not drop the
-// row because the registry's Provider field says "bedrock".
+// kimi-k2.5's catalog bindings are [bedrock, openrouter]. A self-hoster
+// wiring only OpenRouter must still route to it via the trailing binding,
+// not drop it because the registry's Provider field says "bedrock".
 func TestScorer_MultiBindingResolvesFallbackProviderAtBoot(t *testing.T) {
 	dim := EmbedDim
 	c0 := make([]float32, dim)
@@ -714,9 +693,8 @@ func TestScorer_MultiBindingResolvesFallbackProviderAtBoot(t *testing.T) {
 	assert.Contains(t, got.Reason, "provider=openrouter")
 }
 
-// Multi-binding regression: when both primary and fallback are wired,
-// the primary (first in catalog order) wins. Verifies catalog's ordered
-// fallback list semantics.
+// When both primary and fallback bindings are wired, the primary (first
+// in catalog order) wins.
 func TestScorer_MultiBindingPrefersPrimaryWhenBothAvailable(t *testing.T) {
 	dim := EmbedDim
 	c0 := make([]float32, dim)
@@ -744,9 +722,8 @@ func TestScorer_MultiBindingPrefersPrimaryWhenBothAvailable(t *testing.T) {
 	assert.Equal(t, "bedrock", got.Provider, "with both providers wired, the primary binding wins")
 }
 
-// Per-request EnabledProviders re-resolves the binding: a deploy with
-// both bedrock + openrouter wired can still serve a per-request BYOK
-// constraint of openrouter-only by walking down the fallback list.
+// Per-request EnabledProviders re-resolves the binding: openrouter-only
+// walks down the fallback list even though bedrock is also wired.
 func TestScorer_MultiBindingPerRequestResolvesNarrowedSet(t *testing.T) {
 	dim := EmbedDim
 	c0 := make([]float32, dim)
@@ -882,9 +859,8 @@ func TestArgmax_TiebreakUsesOrderSlice(t *testing.T) {
 	assert.Equal(t, "B", gotB)
 }
 
-// twoProviderArtifacts: 2 clusters, one candidate per provider. OpenAI
-// outscores Anthropic on the aligned cluster — exercises per-request
-// EnabledProviders gating.
+// twoProviderArtifacts: 2 clusters, one candidate per provider; OpenAI
+// outscores Anthropic on the aligned cluster.
 func twoProviderArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBlob []byte) {
 	t.Helper()
 	dim := EmbedDim
@@ -1002,8 +978,7 @@ func TestScorer_ExcludedModelsEmptyingPoolReturnsErrNoEligibleProvider(t *testin
 }
 
 // has_tools=true must subtract catalog.ToolUseLowSet from the argmax pool
-// so qwen3-235b-Instruct (and other instruct-only weak tool callers) cannot
-// be picked for agentic workloads.
+// so weak tool-callers like qwen3-235b-Instruct aren't picked for agentic work.
 func TestScorer_HasToolsExcludesToolUseLowFromArgmax(t *testing.T) {
 	dim := EmbedDim
 	c0 := make([]float32, dim)
@@ -1038,11 +1013,10 @@ func TestScorer_HasToolsExcludesToolUseLowFromArgmax(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", got.Model, "has_tools=true must drop ToolUseLow models from argmax")
 }
 
-// has_tools=true must subtract catalog.AgenticLowSet from the argmax pool so a
-// model that emits valid tool calls but can't drive the agentic harness
-// (minimax-m3) cannot win an agentic turn — this is what lets a price-leaning
-// dial demote Opus to a cheaper HARNESS-CAPABLE model instead of collapsing onto
-// the cheapest model in the pool.
+// has_tools=true must subtract catalog.AgenticLowSet from the argmax pool
+// so a model that emits valid tool calls but can't drive the agentic
+// harness (minimax-m3) can't win — a price-leaning dial should demote to
+// a cheaper harness-capable model, not the cheapest model overall.
 func TestScorer_HasToolsExcludesAgenticLowFromArgmax(t *testing.T) {
 	dim := EmbedDim
 	c0 := make([]float32, dim)
@@ -1077,9 +1051,8 @@ func TestScorer_HasToolsExcludesAgenticLowFromArgmax(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", got.Model, "has_tools=true must drop AgenticLow models from argmax")
 }
 
-// Soft-filter regression: if the AgenticLow filter would empty the eligible
-// pool, fall back to the unfiltered set rather than 4xx-ing — a decision is
-// always returned even on an OSS-only deploy.
+// If the AgenticLow filter would empty the eligible pool, fall back to
+// the unfiltered set rather than 4xx-ing.
 func TestScorer_HasToolsFallsBackWhenAgenticFilterEmptiesPool(t *testing.T) {
 	dim := EmbedDim
 	c0 := make([]float32, dim)
@@ -1106,9 +1079,8 @@ func TestScorer_HasToolsFallsBackWhenAgenticFilterEmptiesPool(t *testing.T) {
 	assert.Equal(t, "minimax/minimax-m3", got.Model, "filter must fall back when it would empty the pool")
 }
 
-// Soft-filter regression: if the ToolUseLow filter would empty the eligible
-// pool, fall back to the unfiltered set rather than 4xx-ing — this is a
-// quality preference, not a correctness gate.
+// If the ToolUseLow filter would empty the eligible pool, fall back to
+// the unfiltered set — this is a quality preference, not a correctness gate.
 func TestScorer_HasToolsFallsBackWhenFilterEmptiesPool(t *testing.T) {
 	dim := EmbedDim
 	c0 := make([]float32, dim)
@@ -1292,10 +1264,8 @@ type v2BundleOpts struct {
 	defaultKnobs    *DefaultRoutingKnobs
 }
 
-// newV2BundleForTest builds a synthetic two-cluster v2 bundle that
-// matches twoClusterArtifacts (Opus + Haiku across clusters 0 and 1),
-// with per-axis overrides via opts. Returns a Scorer wired against
-// fakeEmbedder.
+// newV2BundleForTest builds a synthetic two-cluster v2 bundle (Opus +
+// Haiku across clusters 0/1) with per-axis overrides via opts.
 func newV2BundleForTest(t *testing.T, emb Embedder, opts v2BundleOpts) *Scorer {
 	t.Helper()
 	dim := EmbedDim
@@ -1393,9 +1363,8 @@ func newV2BundleForTest(t *testing.T, emb Embedder, opts v2BundleOpts) *Scorer {
 	return scorer
 }
 
-// TestDegenerateRangeFallthrough confirms that when every model ties on
-// quality in a cluster (q_range==0), the blend collapses to cost (+ speed
-// when enabled) only — matching the trainer's behavior at line 597/623.
+// When every model ties on quality (q_range==0), the blend must collapse
+// to cost (+ speed) only, matching the trainer's behavior.
 func TestDegenerateRangeFallthrough(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	tied := Rankings{
@@ -1417,9 +1386,8 @@ func TestDegenerateRangeFallthrough(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", dec.Model, "tied quality should let cost decide")
 }
 
-// TestSpeedRangeZeroFallsBackToTwoAxis covers the case where exactly one
-// deployed model has AA timing data, so s_range==0. The blend must fall
-// back to (quality + cost) with w_s redistributed.
+// When exactly one deployed model has AA timing data (s_range==0), the
+// blend must fall back to (quality + cost) with w_s redistributed.
 func TestSpeedRangeZeroFallsBackToTwoAxis(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	opusInputP := 0.015
@@ -1457,10 +1425,8 @@ func TestSpeedRangeZeroFallsBackToTwoAxis(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", dec.Model, "s_range==0 must not crash; quality still decides")
 }
 
-// TestKnobOverrideOnlyReweights verifies that supplying explicit
-// overrides equal to the bundle defaults yields the same decision as
-// not supplying overrides — proves overrides reweight, they don't
-// silently change anything else.
+// Overrides equal to the bundle defaults must yield the same decision as
+// no overrides at all.
 func TestKnobOverrideOnlyReweights(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	scorer := newV2BundleForTest(t, emb, v2BundleOpts{})
@@ -1489,10 +1455,8 @@ func TestKnobOverrideOnlyReweights(t *testing.T) {
 	assert.Equal(t, decDefault.Metadata.EffectiveKnobsHash, decOverride.Metadata.EffectiveKnobsHash, "matching knobs must hash identically")
 }
 
-// TestAlphaScalarReplacesVector confirms the sledgehammer behavior:
-// a scalar alpha override uniformly overwrites every per-cluster alpha,
-// discarding calibration. Set distinct per-cluster alphas and verify
-// they're gone after override.
+// A scalar alpha override uniformly overwrites every per-cluster alpha,
+// discarding calibration.
 func TestAlphaScalarReplacesVector(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 
@@ -1520,9 +1484,8 @@ func TestAlphaScalarReplacesVector(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", decOverride.Model, "scalar alpha=0 must overwrite per-cluster 0.9, letting cost decide")
 }
 
-// TestZeroAATimingFallback covers the case where w_s > 0 but no model
-// has AA timing data. The blend should fall to (quality + cost) across
-// the board with w_s proportionally redistributed.
+// When w_s > 0 but no model has AA timing data, the blend must fall back
+// to (quality + cost) with w_s redistributed.
 func TestZeroAATimingFallback(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	opusInputP := 0.015
@@ -1555,10 +1518,8 @@ func TestZeroAATimingFallback(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", dec.Model)
 }
 
-// TestPureSpeedMissingTimingFallsBackToQuality covers the extreme
-// configuration where alpha=0, w_s=1 (pure speed). For a model with no
-// AA timing, total = alpha + (1-alpha-w_s) = 0, so the fallback returns
-// the raw qNorm — preventing a NaN or panic.
+// With alpha=0, w_s=1 (pure speed) and no AA timing data, total weight
+// is 0; the fallback must return raw qNorm rather than NaN/panic.
 func TestPureSpeedMissingTimingFallsBackToQuality(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	haikuInputP := 0.00025

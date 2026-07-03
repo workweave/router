@@ -21,18 +21,16 @@ import (
 
 // Cross-envelope tool-call loop detection.
 //
-// The within-envelope detector in loop_detection.go catches one assistant
-// looping inside a single request body. Claude Code's sub-agent failure
-// mode is different: the parent agent keeps spawning fresh sub-conversations
-// that each make one tool call, get back an identical empty result, and the
-// router only sees N independent envelope-1 requests. To the per-envelope
-// detector each envelope looks fine in isolation.
+// loop_detection.go catches loops within one request body. This catches a
+// different failure mode: Claude Code's parent agent spawning fresh
+// sub-agents that each make one tool call and get an identical empty
+// result — each envelope-1 request looks fine on its own, so the
+// per-envelope detector misses it.
 //
-// noProgressTracker keys an in-process LRU on the inbound session key and
-// holds a ring of recent dispatch fingerprints. When the same fingerprint
-// appears noProgressMatchThreshold times within noProgressTimeWindow the
-// session is declared stuck; the proxy emits a synthetic stop and expires
-// the pin so the next user turn re-routes fresh.
+// noProgressTracker keys an LRU on the session key and rings recent dispatch
+// fingerprints; noProgressMatchThreshold repeats within noProgressTimeWindow
+// mark the session stuck, so the proxy emits a synthetic stop and expires
+// the pin.
 
 const (
 	noProgressCacheSize      = 4096
@@ -43,21 +41,16 @@ const (
 	noProgressPromptPrefix   = 512
 )
 
-// noProgressFingerprint identifies one dispatch attempt by routed model,
-// provider, message count, tool-call progress, and a stable hash of the
-// prompt prefix.
+// noProgressFingerprint identifies one dispatch by model, provider, message
+// count, tool-call progress, and a hash of the prompt prefix.
 type noProgressFingerprint [32]byte
 
-// toolProgressMarker summarizes how far an agent's tool-call history has
-// advanced this turn: the count of meaningful assistant tool calls plus the
-// signature (name + canonical-arg hash) of the most recent one. Empty when the
-// envelope carries no assistant tool calls (e.g. a tool-free chat turn) or for
-// Gemini-format requests, which AssistantToolCallSignatures does not parse.
-//
-// Feeding this into the no-progress fingerprint is what lets the detector tell
-// a progressing tool-call loop (count climbs / last call changes each turn)
-// apart from a stuck one (count and last call constant) without relying on the
-// top-level message count, which Claude Code sub-agents hold flat.
+// toolProgressMarker summarizes tool-call progress this turn: count of
+// assistant tool calls plus the last call's signature (name + arg hash).
+// Empty for tool-free turns or Gemini requests (unparsed). Lets the
+// no-progress fingerprint tell a progressing loop (marker changes each turn)
+// from a stuck one (marker constant), without relying on top-level message
+// count, which Claude Code sub-agents hold flat.
 func toolProgressMarker(env *translate.RequestEnvelope) string {
 	if env == nil {
 		return ""
@@ -70,31 +63,17 @@ func toolProgressMarker(env *translate.RequestEnvelope) string {
 	return strconv.Itoa(len(sigs)) + "\x00" + last.Name + "\x00" + last.InputHash
 }
 
-// computeNoProgressFingerprint hashes the routed (model, provider), the
-// conversation's message count, a tool-call progress marker, and the prompt
-// prefix into a single fingerprint.
+// computeNoProgressFingerprint hashes routed (model, provider), message
+// count, a tool-call progress marker, and the prompt prefix.
 //
-// The prompt prefix alone is constant across a single agentic task: in the
-// default embed-only-user-message mode promptText is the user's typed task
-// (tool results are stripped), so every iteration of a healthy tool-call loop
-// shares the same prefix and the bare (model, provider, prefix) fingerprint
-// would collide on every dispatch — tripping the detector on any session that
-// fires >= noProgressMatchThreshold turns to one model within the window.
-//
-// progressMarker is the primary false-positive guard. A progressing agent
-// appends a new, distinct tool call each turn, so toolProgressMarker advances
-// (its count climbs and the last-call signature changes) and each dispatch
-// yields a distinct fingerprint that never accumulates to the threshold. A
-// genuinely stuck agent — a sub-agent spawn loop replaying independent
-// envelope-1 requests, or a model re-issuing one identical call — keeps the
-// marker constant, so the fingerprints still collide and the detector fires.
-//
-// messageCount is folded in as a secondary signal for tool-free loops, where a
-// growing transcript is the only progress signal available. It is NOT
-// sufficient on its own: Claude Code's Explore sub-agent holds the top-level
-// message count flat (tool_use blocks accrete inside a handful of messages)
-// while genuinely progressing, which the message-count guard alone mistook for
-// a loop.
+// The prompt prefix alone is constant across a healthy agentic task (it's
+// just the user's typed task, tool results stripped), so it can't be the
+// sole key — every dispatch would collide. progressMarker is the main
+// guard: it advances on real progress and stays constant when stuck, so
+// only stuck loops accumulate matching fingerprints. messageCount is a
+// secondary signal for tool-free loops, but not sufficient alone: Claude
+// Code's Explore sub-agent holds message count flat while genuinely
+// progressing.
 func computeNoProgressFingerprint(decision router.Decision, promptText string, messageCount int, progressMarker string) noProgressFingerprint {
 	p := promptText
 	if len(p) > noProgressPromptPrefix {
@@ -142,56 +121,36 @@ func newNoProgressTracker() *noProgressTracker {
 	}
 }
 
-// compactionState is what compactionTracker stores per session: the last-seen
-// top-level message count and the last-seen assistant tool-call count.
-// Both can independently signal that the client trimmed its history window.
+// compactionState is per-session state: last-seen message count and
+// assistant tool-call count. Either dropping can signal history trimming.
 type compactionState struct {
 	msgCount      int
 	toolCallCount int
 }
 
-// compactionMinHistoryMessages is the smallest conversation size for which a
-// count drop is read as real history trimming. Below it there is no substantial
-// history to lose, so a drop is some other (benign) shape:
-//   - A freshly spawned sub-agent opens its turn at messageCount=1, which looks
-//     like a sharp drop relative to the prior sub-agent that shared the same
-//     (session, role) bucket and left it at ~3.
-//   - Claude Code's Explore sub-agent holds a flat ~3-message window and varies
-//     its per-turn assistant tool-call count widely (e.g. 11→6→3); every such
-//     decrease would otherwise false-trip the rolling-window signal.
-//
-// Real full compaction comes from a large conversation (the client compacts on
-// token pressure, so the prior message count is in the dozens-plus), and real
-// rolling-window trimming keeps a correspondingly large flat window — both stay
-// well above this floor. Erring toward fewer fires is the safe bias: skipping
-// the handover passes the body (including Claude Code's own compaction summary)
-// through unchanged, whereas a false fire replaces live context with a lossy
-// summary and corrupts an in-flight sub-agent.
+// compactionMinHistoryMessages is the floor below which a count drop is
+// benign, not real trimming: fresh sub-agents open at messageCount=1 (looks
+// like a drop vs. a prior sub-agent in the same bucket), and Claude Code's
+// Explore sub-agent swings its tool-call count widely on a flat ~3-message
+// window. Real compaction/trimming only happens on large conversations,
+// well above this floor. Bias toward fewer fires: a missed detection just
+// passes the body through unchanged, but a false one corrupts an in-flight
+// sub-agent with a lossy summary.
 const compactionMinHistoryMessages = 8
 
-// compactionTracker detects Claude Code context window trimming by comparing
-// each turn's message count and assistant tool-call count against the last
-// seen values for the same session. Either count dropping is a signal that the
-// client elided old turns, which can leave a non-Anthropic model unaware of
-// completed work (edits, decisions) that were only visible in the now-elided
-// turns.
+// compactionTracker detects Claude Code context-window trimming by comparing
+// each turn's message count and tool-call count to the last seen values,
+// which can leave a non-Anthropic model unaware of work done in elided turns.
 //
-// Two independent signals are needed because Claude Code can trim history in
-// two distinct ways:
-//   - Full compaction: replaces all old messages with a summary block, so
-//     messageCount drops sharply (e.g. 20 → 3).
-//   - Rolling-window trimming: drops the oldest message pair each turn to
-//     keep a roughly fixed window, so messageCount stays flat while the
-//     assistant tool-call count shrinks by one per turn (the pattern
-//     observed in session 543151ce: 9 → 8 → 7 → 6 → 5).
+// Two independent signals catch two trimming shapes: full compaction (message
+// count drops sharply, e.g. 20→3) and rolling-window trimming (message count
+// stays flat while tool-call count shrinks by one per turn, e.g. 9→8→7→6→5).
+// Checking only message count misses the rolling-window case.
 //
-// Detecting only messageCount drops misses the rolling-window case.
+// Both signals are gated by compactionMinHistoryMessages (see that constant)
+// to avoid false-firing on sub-agent startup and Explore's flat window.
 //
-// Both signals are gated by compactionMinHistoryMessages so the small flat
-// windows of freshly spawned sub-agents and Claude Code's Explore sub-agent are
-// not mistaken for trimming (see that constant's doc).
-//
-// nil receivers are valid (no-op), matching noProgressTracker semantics.
+// nil receivers are valid (no-op), matching noProgressTracker.
 type compactionTracker struct {
 	cache *lru.LRU[string, compactionState]
 }
@@ -202,11 +161,9 @@ func newCompactionTracker() *compactionTracker {
 	}
 }
 
-// checkAndRecord records the session's current message count and tool-call
-// count, then reports whether either dropped versus the prior observation
-// (history-trimming event). Returns false on the first observation for a
-// session (no prior state to compare against) and when no bucket anchor is
-// available.
+// checkAndRecord records the session's current counts and reports whether
+// either dropped vs. the prior observation. Returns false on first
+// observation or when no bucket anchor is available.
 func (t *compactionTracker) checkAndRecord(sessionKey [sessionpin.SessionKeyLen]byte, installationID uuid.UUID, role string, messageCount, toolCallCount int) bool {
 	if t == nil || t.cache == nil {
 		return false
@@ -220,40 +177,30 @@ func (t *compactionTracker) checkAndRecord(sessionKey [sessionpin.SessionKeyLen]
 	if !found {
 		return false
 	}
-	// Full compaction: a messageCount drop from a substantial prior conversation.
-	// Gating on the prior size rejects the fresh-sub-agent case (a new dispatch
-	// opening at messageCount=1 against a prior sub-agent's small count in the
-	// shared bucket), which is not history loss.
+	// Full compaction: messageCount dropped from a substantial prior
+	// conversation (gated to reject the fresh-sub-agent-at-1 case).
 	if messageCount < last.msgCount && last.msgCount >= compactionMinHistoryMessages {
 		return true
 	}
-	// Rolling-window trimming: messageCount stays flat while the assistant
-	// tool-call count shrinks. Gating on a substantial current window rejects
-	// Claude Code's Explore sub-agent, which holds a flat ~3-message window and
-	// swings its per-turn tool-call count widely without any trimming.
+	// Rolling-window trimming: messageCount flat, tool-call count shrinks
+	// (gated to reject Explore's flat ~3-message window).
 	if toolCallCount < last.toolCallCount && messageCount >= compactionMinHistoryMessages {
 		return true
 	}
 	return false
 }
 
-// recordAndDetect records the fingerprint against a bucket keyed by
-// sessionKey (preferred) or installationID (fallback) and reports whether
-// the burst now exceeds the loop threshold. A nil tracker returns (false, 0)
-// so production-style construction can stay optional in tests and
-// selfhosted deploys.
+// recordAndDetect records the fingerprint in a bucket keyed by sessionKey
+// (preferred) or installationID (fallback), and reports whether the burst
+// exceeds the loop threshold. nil tracker returns (false, 0).
 //
 // Bucket selection:
-//   - non-zero sessionKey → per-session bucket (normal path)
-//   - zero sessionKey + non-nil installationID → per-installation bucket,
-//     used by hard-pin paths (Explore SubAgentDispatch under hardPinExplore)
-//     and routing with pinStore nil. Coarser than per-session but still
-//     keeps detection coverage; the fingerprint's (model, provider, prompt)
-//     tuple distinguishes unrelated work in the same installation from a
-//     real loop.
-//   - zero sessionKey + nil installationID → no anchor available; skipped
-//     to avoid one global zero-key bucket false-positive-tripping across
-//     unrelated unauthenticated traffic.
+//   - sessionKey set → per-session bucket
+//   - sessionKey zero, installationID set → per-installation bucket
+//     (hard-pin paths, pinStore nil); coarser, but the fingerprint tuple
+//     still distinguishes unrelated work
+//   - neither set → skipped, to avoid one global bucket false-tripping
+//     across unrelated traffic
 func (t *noProgressTracker) recordAndDetect(sessionKey [sessionpin.SessionKeyLen]byte, installationID uuid.UUID, role string, fp noProgressFingerprint, now time.Time) (looped bool, count int) {
 	if t == nil || t.cache == nil {
 		return false, 0
@@ -270,9 +217,8 @@ func (t *noProgressTracker) recordAndDetect(sessionKey [sessionpin.SessionKeyLen
 	return ring.recordAndDetect(fp, now)
 }
 
-// noProgressBucketKey picks the LRU bucket for a dispatch. Returns ok=false
-// when neither anchor is available — the caller must skip detection rather
-// than falling back to a global zero-keyed bucket.
+// noProgressBucketKey picks the LRU bucket key. ok=false means no anchor is
+// available and the caller must skip detection.
 func noProgressBucketKey(sessionKey [sessionpin.SessionKeyLen]byte, installationID uuid.UUID, role string) (string, bool) {
 	if sessionKey != ([sessionpin.SessionKeyLen]byte{}) {
 		return "session:" + hex.EncodeToString(sessionKey[:]) + ":" + role, true
@@ -283,14 +229,10 @@ func noProgressBucketKey(sessionKey [sessionpin.SessionKeyLen]byte, installation
 	return "", false
 }
 
-// shortSessionKey returns the first 16 hex chars (64 bits) of a session key
-// for use in Info-level logs. Mirrors the auth.APIKey "KeyPrefix" convention
-// (8-char prefix is considered safe) at a wider bit margin so an incident
-// triager can still correlate two log lines from the same break event,
-// while limiting long-window cross-request correlation across retained logs.
-//
-// "" for an all-zero key so logs visibly distinguish missing-anchor breaks
-// from real-session breaks.
+// shortSessionKey returns the first 8 bytes of a session key hex-encoded, for
+// safe use in logs (wider margin than auth.APIKey's 8-char KeyPrefix, still
+// short enough to limit cross-request correlation). Empty for an all-zero
+// key so logs distinguish missing-anchor breaks from real-session ones.
 func shortSessionKey(sessionKey [sessionpin.SessionKeyLen]byte) string {
 	if sessionKey == ([sessionpin.SessionKeyLen]byte{}) {
 		return ""
@@ -299,13 +241,9 @@ func shortSessionKey(sessionKey [sessionpin.SessionKeyLen]byte) string {
 }
 
 // handleNoProgressBreak writes a synthetic end_turn response, expires the
-// session pin, and returns a non-nil error so caller error-handling
-// (telemetry, billing skip) treats it as a failed dispatch.
-//
-// Mirrors handleToolCallLoopBreak's mechanics — same pin-expiry contract,
-// same synthetic-response writer paths — but the message explains the
-// cross-envelope nature so a human reading the chat history can tell the
-// two break modes apart.
+// session pin, and returns a non-nil error so callers treat it as a failed
+// dispatch (skips billing/telemetry). Mirrors handleToolCallLoopBreak's
+// mechanics but with a message that names the cross-envelope loop mode.
 func (s *Service) handleNoProgressBreak(
 	ctx context.Context,
 	w http.ResponseWriter,
@@ -341,10 +279,8 @@ func (s *Service) handleNoProgressBreak(
 		"role", role,
 	)
 
-	// Skip pin upsert when sessionKey is zero — writing a zero-keyed pin row
-	// would create a zombie entry shared by every zero-keyed session in the
-	// pin store. Hard-pin paths and selfhosted deploys without a pinStore
-	// hit this path and don't need persisted pin expiry anyway.
+	// Skip when sessionKey is zero: a zero-keyed pin row would be a zombie
+	// entry shared by every zero-keyed session.
 	if s.pinStore != nil && installationID != uuid.Nil && sessionKey != ([sessionpin.SessionKeyLen]byte{}) {
 		expired := sessionpin.Pin{
 			SessionKey:     sessionKey,

@@ -1,22 +1,16 @@
 // Package toolcheck validates model-emitted tool_use blocks against the
-// tool JSON Schemas carried on the inbound Anthropic request
-// (tools[].input_schema), and deterministically repairs the failure modes
-// that are safe to fix without changing the call's meaning.
+// tools[].input_schema on the inbound request and deterministically repairs
+// safe failure modes, replacing prior per-failure patches (#284, #293,
+// #327/#333, #339) with one layered pipeline:
 //
-// It replaces the accreted per-failure patches (#284 nudge, #293 degenerate
-// demote, #327/#333 tool-id fixes, #339 empty-optional strip) with one
-// layered pipeline:
+//  1. normalize — drop empty-string/null OPTIONAL params (gpt-5.x Responses
+//     failure mode; required params untouched)
+//  2. parse     — minimal repair for malformed argument JSON
+//  3. validate  — Draft-7 validation against the original schema
+//  4. repair    — validation-error-driven safe coercions, re-validated
 //
-//  1. normalize  — drop empty-string / null OPTIONAL params (the gpt-5.x
-//     Responses failure mode; required params are never touched)
-//  2. parse      — minimal JSON repair for truncated/malformed argument JSON
-//  3. validate   — Draft-7 schema validation against the ORIGINAL schema
-//  4. repair     — validation-error-driven safe coercions, re-validated
-//
-// Everything is fail-open: a schema that won't compile, a panic in the
-// validator, or a nil *Validator must never break a request — the block is
-// forwarded as-is and the failure is only reported via the returned Issue
-// so the proxy can log it (router.tool_call_invalid).
+// Fail-open throughout: an uncompilable schema, validator panic, or nil
+// *Validator forwards the block as-is and reports via the returned Issue.
 package toolcheck
 
 import (
@@ -56,9 +50,8 @@ const maxDetailBytes = 300
 // compiled and the tool is treated as uncheckable.
 const maxSchemaBytes = 256 * 1024
 
-// maxArgsBytes bounds how much argument JSON the repair pipeline will touch.
-// Larger payloads (e.g. a Write call carrying a huge file) are validated but
-// never run through jsonfix.
+// maxArgsBytes bounds how much argument JSON the repair pipeline touches;
+// larger payloads (e.g. a huge Write) are validated but not repaired.
 const maxArgsBytes = 4 * 1024 * 1024
 
 // Issue describes one offending tool_use block. It is carried on the
@@ -78,13 +71,11 @@ type Issue struct {
 
 // Verdict is the outcome of checking one tool_use block.
 type Verdict struct {
-	// OK is true when the block was valid exactly as the model emitted it
-	// (normalize-only cleanups do not clear OK=true; they preserve the #339
-	// silent-strip semantics).
+	// OK is true when the block was valid as emitted; normalize-only
+	// cleanups do not clear it (preserves #339 silent-strip semantics).
 	OK bool
-	// Args is the argument JSON to forward: repaired when repair succeeded,
-	// otherwise the normalized original. "{}" is the last resort for
-	// unparseable JSON only — never for a schema mismatch.
+	// Args is the JSON to forward: repaired on success, else the normalized
+	// original. "{}" is the last resort for unparseable JSON only.
 	Args string
 	// Issue is nil when OK.
 	Issue *Issue
@@ -102,15 +93,14 @@ type toolSchema struct {
 
 // Validator holds compiled schemas for one request's tool set. A nil
 // *Validator is valid and checks nothing. Safe for concurrent use after
-// Compile (compiled schemas and sets are read-only).
+// Compile — schemas and sets are read-only.
 type Validator struct {
 	tools map[string]*toolSchema
 }
 
-// Compile parses an Anthropic `tools` array (the raw JSON of the request's
-// "tools" field) into a Validator. It never returns an error: any per-tool
-// compile failure marks that tool uncheckable and is logged once at WARN.
-// Returns nil when toolsRaw carries no usable tools.
+// Compile parses an Anthropic `tools` array into a Validator. It never
+// returns an error: a per-tool compile failure marks that tool uncheckable
+// (logged at WARN). Returns nil when toolsRaw carries no usable tools.
 func Compile(toolsRaw []byte) *Validator {
 	parsed := gjson.ParseBytes(toolsRaw)
 	if !parsed.IsArray() {
@@ -139,8 +129,8 @@ func Compile(toolsRaw []byte) *Validator {
 }
 
 // compileSchema compiles one tool's input_schema, returning nil (uncheckable)
-// on any failure or panic. Anthropic input_schemas rarely declare $schema, so
-// Draft-7 is the default dialect.
+// on failure or panic. Draft-7 is the default dialect since Anthropic
+// input_schemas rarely declare $schema.
 func compileSchema(name string, schema gjson.Result) (compiled *jsonschema.Schema) {
 	if !schema.IsObject() || len(schema.Raw) > maxSchemaBytes {
 		return nil
@@ -181,11 +171,9 @@ func (v *Validator) KnownTool(name string) bool {
 	return ok
 }
 
-// Check validates argsJSON for the named tool, attempting deterministic
-// repair on failure and re-validating the result. A nil receiver still runs
-// the parse tier — malformed JSON is invalid regardless of schema, and the
-// translators previously syntax-checked unconditionally — but skips the
-// schema-aware tiers.
+// Check validates argsJSON for the named tool, repairing on failure and
+// re-validating. A nil receiver still runs the parse tier (malformed JSON
+// is invalid regardless of schema) but skips the schema-aware tiers.
 func (v *Validator) Check(name, argsJSON string) Verdict {
 	// Models commonly emit no argument payload for zero-param tools.
 	if strings.TrimSpace(argsJSON) == "" {
@@ -195,9 +183,8 @@ func (v *Validator) Check(name, argsJSON string) Verdict {
 	args := argsJSON
 	var actions []string
 
-	// Parse tier: unparseable JSON gets one minimal-repair attempt; if that
-	// fails too, "{}" is the last resort (the pre-existing translator
-	// behavior — now bucketed and reported instead of silent).
+	// Unparseable JSON gets one minimal-repair attempt; "{}" is the last
+	// resort (matches prior translator behavior, now reported not silent).
 	if !gjson.Valid(args) {
 		fixed, fixActions := repairJSON(args)
 		actions = append(actions, fixActions...)
@@ -222,9 +209,8 @@ func (v *Validator) Check(name, argsJSON string) Verdict {
 
 	ts, known := v.tools[name]
 	if !known {
-		// The name is typically already committed to the wire when this runs
-		// (streaming emits it at content_block_start), so unknown_tool is
-		// telemetry-only: forward and report.
+		// Streaming already emits the name at content_block_start, so
+		// unknown_tool is telemetry-only: forward and report.
 		return Verdict{
 			Args: args,
 			Issue: &Issue{
@@ -237,9 +223,8 @@ func (v *Validator) Check(name, argsJSON string) Verdict {
 		}
 	}
 
-	// Normalize tier: runs even when the args are schema-valid, because the
-	// client's own tool validation is stricter than JSON Schema (e.g. Read
-	// rejects pages:"" which a {type:string} schema accepts).
+	// Runs even when schema-valid: the client's own tool validation is
+	// stricter than JSON Schema (e.g. Read rejects pages:"" that {type:string} accepts).
 	args, normActions := normalizeArgs(args, ts.required)
 	actions = append(actions, normActions...)
 
@@ -254,9 +239,8 @@ func (v *Validator) Check(name, argsJSON string) Verdict {
 		return verdictAfterValidation(name, args, jsonRepaired, actions, nil)
 	}
 
-	// Repair tier: drive safe coercions off the validation errors, then
-	// re-validate. On failure forward the normalized ORIGINAL args — a
-	// half-repaired payload is worse than the model's own.
+	// Drive safe coercions off the validation errors, then re-validate. On
+	// failure forward the normalized original — half-repaired is worse.
 	repaired, repairActions := repairArgs(ts.compiled, args, verr)
 	if len(repairActions) > 0 {
 		if rerr := validate(ts.compiled, repaired); rerr == nil {
@@ -285,8 +269,7 @@ func (v *Validator) Check(name, argsJSON string) Verdict {
 }
 
 // verdictAfterValidation builds the verdict for args that pass (or skip)
-// schema validation: clean unless an earlier JSON repair already made this
-// block report-worthy.
+// validation: clean unless an earlier JSON repair made it report-worthy.
 func verdictAfterValidation(name, args string, jsonRepaired bool, actions []string, _ error) Verdict {
 	if !jsonRepaired {
 		return Verdict{OK: true, Args: args}
@@ -304,8 +287,8 @@ func verdictAfterValidation(name, args string, jsonRepaired bool, actions []stri
 }
 
 // validate runs the compiled schema over args, recovering from validator
-// panics (fail-open). The instance is decoded with jsonschema.UnmarshalJSON
-// so large integers don't false-fail float comparisons.
+// panics (fail-open). Decoded via jsonschema.UnmarshalJSON so large
+// integers don't false-fail float comparisons.
 func validate(schema *jsonschema.Schema, args string) (verr error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -324,10 +307,9 @@ func validate(schema *jsonschema.Schema, args string) (verr error) {
 
 // normalizeArgs drops top-level OPTIONAL params whose value is "" or null.
 // Empty-string optionals are the gpt-5.x /chat-era failure mode (#339);
-// null optionals are the strict-mode artifact (strictified schemas force
-// every param to be present, so the model emits explicit nulls). Required
-// params are never touched: a genuinely-missing required arg must surface
-// its error downstream.
+// null optionals come from strictified schemas that force every param
+// present. Required params are never touched, so a genuinely-missing one
+// still surfaces downstream.
 func normalizeArgs(args string, required map[string]struct{}) (out string, actions []string) {
 	parsed := gjson.Parse(args)
 	if !parsed.IsObject() {

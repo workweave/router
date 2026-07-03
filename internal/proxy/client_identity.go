@@ -9,9 +9,8 @@ import (
 	"workweave/router/internal/observability"
 )
 
-// ClientIdentity holds per-request user identification signals. Email is the
-// cross-protocol identity persisted to router.model_router_users.email;
-// DisplayName is the optional free-form label persisted to display_name.
+// ClientIdentity holds per-request user identification signals, persisted to
+// router.model_router_users (Email, DisplayName).
 type ClientIdentity struct {
 	DeviceID    string
 	AccountID   string
@@ -20,9 +19,8 @@ type ClientIdentity struct {
 	DisplayName string
 	UserAgent   string
 	ClientApp   string
-	// RolloutID is the eval/training-harness correlation id from the
-	// x-weave-rollout-id header. Joins a sandbox rollout's graded reward
-	// onto every routing decision made inside it. Empty for normal traffic.
+	// RolloutID is the x-weave-rollout-id eval/training-harness correlation
+	// id; joins a sandbox rollout's graded reward to its routing decisions.
 	RolloutID string
 }
 
@@ -35,10 +33,10 @@ func ClientIdentityFrom(ctx context.Context) ClientIdentity {
 	return id
 }
 
-// ResolveUserFromContext pulls identity signals from ctx and hands them to
-// auth.Service.ResolveAndStashUser. No-op when deps are missing or both
-// email and account_uuid are empty. Claude CLI v2.1.x packs only
-// account_uuid (no email), so guarding on email alone would defeat that path.
+// ResolveUserFromContext dispatches identity signals from ctx to
+// auth.Service.ResolveAndStashUser. No-op if deps are missing or both email
+// and account_uuid are empty — Claude CLI v2.1.x sends account_uuid only, so
+// gating on email alone would break that path.
 func ResolveUserFromContext(ctx context.Context, authSvc *auth.Service, installation *auth.Installation) context.Context {
 	log := observability.Get()
 	if authSvc == nil || installation == nil {
@@ -92,12 +90,11 @@ func ParseClaudeCodeMetadata(raw string) ClaudeCodeMetadata {
 const MaxEmailLen = 254
 
 // MaxClientIdentifierLen bounds caller-controlled opaque identifiers.
-// Claude Code emits ~36-char UUIDs; 128 is overhead with flood-protection.
+// Claude Code emits ~36-char UUIDs; 128 leaves flood-protection headroom.
 const MaxClientIdentifierLen = 128
 
-// NormalizeClientIdentifier returns input unchanged when within bounds, else "".
-// Rejection (not truncation) keeps shape honest: a truncated identifier looks
-// valid but no longer correlates.
+// NormalizeClientIdentifier returns s unchanged if within bounds, else "".
+// Rejects rather than truncates: a truncated id looks valid but no longer correlates.
 func NormalizeClientIdentifier(s string) string {
 	if len(s) > MaxClientIdentifierLen {
 		return ""
@@ -109,13 +106,11 @@ func NormalizeClientIdentifier(s string) string {
 const RolloutIDHeader = "X-Weave-Rollout-Id"
 
 // MaxRolloutIDLen bounds the rollout correlation id. Harness ids compose
-// run_id/condition/seed/instance_id and can exceed the 128-byte client
-// identifier cap; 256 covers them with flood-protection headroom.
+// run_id/condition/seed/instance_id, exceeding the 128-byte client id cap.
 const MaxRolloutIDLen = 256
 
-// NormalizeRolloutID trims and bounds a rollout id. Rejection (not
-// truncation) for the same reason as NormalizeClientIdentifier: a truncated
-// id looks valid but no longer joins.
+// NormalizeRolloutID trims and bounds a rollout id, rejecting (not
+// truncating) oversized values — same reasoning as NormalizeClientIdentifier.
 func NormalizeRolloutID(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) > MaxRolloutIDLen {
@@ -124,11 +119,10 @@ func NormalizeRolloutID(s string) string {
 	return s
 }
 
-// NormalizeEmail trims, lower-cases, and structurally validates an email
-// to match the case-sensitive unique index on (installation_id, email).
-// Returns "" when empty, oversized, or malformed. Deliverability is not
-// checked: email is an opaque identifier, and the shape check is
-// flood-protection.
+// NormalizeEmail trims, lower-cases, and structurally validates an email to
+// match the case-sensitive unique index on (installation_id, email).
+// Returns "" when empty, oversized, or malformed. Deliverability isn't
+// checked — email is treated as an opaque identifier.
 func NormalizeEmail(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if s == "" || len(s) > MaxEmailLen {
@@ -163,14 +157,12 @@ var clientAppAliases = map[string]string{
 }
 
 // MaxClientAppLen bounds the X-App header. Canonical values are short
-// (claude-code, codex, cursor); longer values are header smuggling attempts.
+// (claude-code, codex, cursor); longer values suggest header smuggling.
 const MaxClientAppLen = 32
 
-// NormalizeClientApp returns the canonical client_app for a request. If the
-// caller sent an explicit X-App header within length bounds, we trust it
-// (lower-cased). Otherwise we fall back to a coarse User-Agent classifier so
-// older installs that don't yet send X-App still get attributed. Returns ""
-// when neither signal is recognized — telemetry leaves the column NULL.
+// NormalizeClientApp trusts an explicit, in-bounds X-App header (lower-cased);
+// otherwise falls back to a coarse User-Agent classifier for older installs
+// that don't send X-App. Returns "" when neither signal is recognized.
 func NormalizeClientApp(xApp, userAgent string) string {
 	xApp = strings.ToLower(strings.TrimSpace(xApp))
 	if xApp != "" && len(xApp) <= MaxClientAppLen {
@@ -197,15 +189,13 @@ func NormalizeClientApp(xApp, userAgent string) string {
 	return ""
 }
 
-// MaxDisplayNameLen bounds the free-form display name. 128 mirrors the
-// installer-side cap; longer values almost certainly indicate a header
-// smuggling attempt rather than a real name.
+// MaxDisplayNameLen bounds the free-form display name, mirroring the
+// installer-side cap; longer values suggest header smuggling, not a real name.
 const MaxDisplayNameLen = 128
 
-// NormalizeDisplayName trims and strips control characters from a free-form
-// display name. Returns "" when empty or oversized. We don't case-fold —
-// names are free-form, not lookup keys — but we do drop control bytes a
-// malicious header could carry so the value is safe to persist and render.
+// NormalizeDisplayName trims and strips control characters (so a malicious
+// header can't smuggle bytes) from a display name. Returns "" if empty or
+// oversized. Not case-folded — names are free-form, not lookup keys.
 func NormalizeDisplayName(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" || len(s) > MaxDisplayNameLen {
