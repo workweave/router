@@ -16,7 +16,6 @@ import (
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/server/middleware"
-	"workweave/router/internal/translate"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -95,7 +94,7 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 				writeAnthropicError(c, http.StatusNotImplemented, "api_error", "Provider not implemented.")
 				return
 			}
-			if errors.Is(err, translate.ErrNotJSONObject) {
+			if errors.Is(err, proxy.ErrRequestNotJSONObject) {
 				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Request body must be a JSON object.")
 				return
 			}

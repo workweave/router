@@ -16,7 +16,6 @@ import (
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/server/middleware"
-	"workweave/router/internal/translate"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/sjson"
@@ -91,7 +90,7 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 				writeGeminiError(c, http.StatusBadGateway, "FAILED_PRECONDITION", "Provider not configured.")
 				return
 			}
-			if errors.Is(err, translate.ErrNotJSONObject) {
+			if errors.Is(err, proxy.ErrRequestNotJSONObject) {
 				writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "Request body must be a JSON object.")
 				return
 			}
