@@ -1348,52 +1348,20 @@ func (s *Service) PassthroughToNamedProvider(ctx context.Context, providerName s
 	return proxyErr
 }
 
-// upstreamBodyLogHead and upstreamBodyLogTail bound the bytes attached to
-// each "upstream prepared body" log entry. Claude Code turns routinely hit
-// 50-400KB; logging whole at Info would blow up GCP ingest cost and hit the
-// 256KB per-entry cap. Head (4KB) shows request shape (envelope, sampling
-// params, tool defs); tail (4KB) shows what the model just saw (end of
-// messages, last tool_result/turn). Middle is dropped with a
-// "…<n bytes omitted>…" marker; bodies that fit go through whole.
-const (
-	upstreamBodyLogHead = 4 * 1024
-	upstreamBodyLogTail = 4 * 1024
-)
-
-// logUpstreamBody emits the prepared upstream request body at Info so it
-// shows up in GCP without flipping LOG_LEVEL, for per-turn investigation of
-// "what did we actually send". Bodies over the head+tail limit are truncated;
-// body_truncated + body_omitted_bytes make the cut obvious.
+// logUpstreamBody emits per-attempt dispatch metadata at Info so it shows up
+// in GCP without flipping LOG_LEVEL. It intentionally does NOT include the
+// raw request body — that would violate the "never log full request bodies"
+// rule regardless of truncation, and duplicates the purpose-built, opt-in,
+// redactable captureMode/Redactor pipeline (see turn_logs.go / recordCallLog)
+// which already exists for "what did we actually send" debugging.
 func logUpstreamBody(log *slog.Logger, sessionKey [sessionpin.SessionKeyLen]byte, decision router.Decision, feats translate.RoutingFeatures, body []byte) {
-	bodyStr, truncated, omitted := truncateBodyForLog(body, upstreamBodyLogHead, upstreamBodyLogTail)
-	log.Info("upstream prepared body",
+	log.Info("upstream prepared request",
 		"session_key", hex.EncodeToString(sessionKey[:8]),
 		"decision_model", decision.Model,
 		"decision_provider", decision.Provider,
 		"message_count", feats.MessageCount,
 		"body_len", len(body),
-		"body_truncated", truncated,
-		"body_omitted_bytes", omitted,
-		"body_head_limit", upstreamBodyLogHead,
-		"body_tail_limit", upstreamBodyLogTail,
-		"body", bodyStr,
 	)
-}
-
-// truncateBodyForLog returns the body unchanged when it fits in head+tail,
-// otherwise concatenates the first `head` bytes, an "…<n omitted>…" marker,
-// and the last `tail` bytes. Returns (output, wasTruncated, omittedBytes).
-func truncateBodyForLog(body []byte, head, tail int) (string, bool, int) {
-	if len(body) <= head+tail {
-		return string(body), false, 0
-	}
-	omitted := len(body) - head - tail
-	var b strings.Builder
-	b.Grow(head + tail + 32)
-	b.Write(body[:head])
-	fmt.Fprintf(&b, "\n…<%d bytes omitted>…\n", omitted)
-	b.Write(body[len(body)-tail:])
-	return b.String(), true, omitted
 }
 
 // ProxyMessages routes a raw Anthropic-Messages request body and streams the
