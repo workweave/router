@@ -27,14 +27,39 @@ const replicaSubscriptionTTL = 24 * time.Hour
 // Pub/Sub admin API can't hold up termination indefinitely.
 const subscriptionDeleteTimeout = 10 * time.Second
 
+// publisher is the narrow seam NotifyInstallationChanged needs from a GCP
+// Pub/Sub Publisher: publish installationID and synchronously wait for the
+// result. Abstracting it behind an interface (rather than the concrete
+// *gcppubsub.Publisher, whose Publish returns a SDK-internal PublishResult
+// future) lets tests exercise the guard/retry logic with an in-memory fake
+// instead of a real Pub/Sub connection.
+type publisher interface {
+	Publish(ctx context.Context, installationID string) error
+}
+
+// gcpPublisher adapts a real *gcppubsub.Publisher to the publisher interface.
+type gcpPublisher struct {
+	inner *gcppubsub.Publisher
+}
+
+func (p gcpPublisher) Publish(ctx context.Context, installationID string) error {
+	result := p.inner.Publish(ctx, &gcppubsub.Message{Data: []byte(installationID)})
+	_, err := result.Get(ctx)
+	return err
+}
+
 // InvalidationNotifier publishes installation invalidation events over GCP Pub/Sub.
 type InvalidationNotifier struct {
-	publisher *gcppubsub.Publisher
+	publisher publisher
+	stop      func()
 }
 
 // NewInvalidationNotifier constructs a notifier backed by the supplied Publisher.
-func NewInvalidationNotifier(publisher *gcppubsub.Publisher) *InvalidationNotifier {
-	return &InvalidationNotifier{publisher: publisher}
+func NewInvalidationNotifier(publisherClient *gcppubsub.Publisher) *InvalidationNotifier {
+	return &InvalidationNotifier{
+		publisher: gcpPublisher{inner: publisherClient},
+		stop:      publisherClient.Stop,
+	}
 }
 
 // NotifyInstallationChanged publishes installationID on the invalidation topic.
@@ -45,8 +70,7 @@ func (n *InvalidationNotifier) NotifyInstallationChanged(installationID string) 
 	}
 	log := observability.Get().With("installation_id", installationID)
 	observability.SafeGo(log, notifyTimeout, "NotifyInstallationChanged", func(ctx context.Context) {
-		result := n.publisher.Publish(ctx, &gcppubsub.Message{Data: []byte(installationID)})
-		if _, err := result.Get(ctx); err != nil {
+		if err := n.publisher.Publish(ctx, installationID); err != nil {
 			log.Warn("Failed to publish installation invalidation", "err", err)
 		}
 	})
@@ -55,13 +79,22 @@ func (n *InvalidationNotifier) NotifyInstallationChanged(installationID string) 
 // Stop flushes buffered messages and shuts the publisher down. Must be
 // called on graceful shutdown — Client.Close() does not stop publishers.
 func (n *InvalidationNotifier) Stop() {
-	n.publisher.Stop()
+	n.stop()
+}
+
+// subscriberReceiver is the narrow seam Run needs from a GCP Pub/Sub
+// Subscriber. *gcppubsub.Subscriber already implements this directly, so no
+// adapter is required in production; the interface exists purely so tests can
+// substitute an in-memory fake for Run's message-handling logic.
+type subscriberReceiver interface {
+	Receive(ctx context.Context, f func(context.Context, *gcppubsub.Message)) error
+	String() string
 }
 
 // InvalidationListener subscribes to the invalidation topic and forwards every
 // payload to the local cache; cache TTL is the fallback under sustained outages.
 type InvalidationListener struct {
-	subscriber *gcppubsub.Subscriber
+	subscriber subscriberReceiver
 	cache      auth.APIKeyCache
 	done       chan struct{}
 }
