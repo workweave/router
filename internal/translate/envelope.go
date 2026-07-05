@@ -478,9 +478,17 @@ func clampFieldBytes(body []byte, key string, maxVal int64) []byte {
 	return out
 }
 
-// stripThinkingBlocksBytes removes thinking/redacted_thinking blocks from
-// messages[*].content[*]. Uses two-phase reconstruction for O(B) work.
-func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
+// rewriteMessageBlocks walks messages[*].content[*], rewriting each block for
+// which needsRewrite reports true by calling rewrite with that block's raw
+// JSON. rewrite returning "" drops the block from its message's content array.
+// Uses two-phase reconstruction per message (cheap predicate scan, then
+// rebuild only messages that actually matched) for O(B) work. Returns body
+// unchanged if nothing matched.
+func rewriteMessageBlocks(
+	body []byte,
+	needsRewrite func(block gjson.Result) bool,
+	rewrite func(blockRaw string) (string, error),
+) ([]byte, error) {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.Exists() || !messages.IsArray() {
 		return body, nil
@@ -497,17 +505,16 @@ func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
 			return true
 		}
 
-		hasThinking := false
+		msgNeedsRewrite := false
 		content.ForEach(func(_, block gjson.Result) bool {
-			blockType := block.Get("type").String()
-			if blockType == "thinking" || blockType == "redacted_thinking" {
-				hasThinking = true
+			if needsRewrite(block) {
+				msgNeedsRewrite = true
 				return false
 			}
 			return true
 		})
 
-		if !hasThinking {
+		if !msgNeedsRewrite {
 			msgRaws = append(msgRaws, msg.Raw)
 			return true
 		}
@@ -515,16 +522,25 @@ func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
 		anyChanged = true
 		var kept []string
 		content.ForEach(func(_, block gjson.Result) bool {
-			blockType := block.Get("type").String()
-			if blockType != "thinking" && blockType != "redacted_thinking" {
-				kept = append(kept, block.Raw)
+			raw := block.Raw
+			if needsRewrite(block) {
+				var err error
+				raw, err = rewrite(raw)
+				if err != nil {
+					walkErr = err
+					return false
+				}
+			}
+			if raw != "" {
+				kept = append(kept, raw)
 			}
 			return true
 		})
+		if walkErr != nil {
+			return false
+		}
 
-		filteredContent := "[" + strings.Join(kept, ",") + "]"
-
-		newMsg, err := sjson.SetRaw(msg.Raw, "content", filteredContent)
+		newMsg, err := sjson.SetRaw(msg.Raw, "content", "["+strings.Join(kept, ",")+"]")
 		if err != nil {
 			walkErr = fmt.Errorf("replace content in message: %w", err)
 			return false
@@ -540,170 +556,83 @@ func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
 		return body, nil
 	}
 
-	newMessagesArray := "[" + strings.Join(msgRaws, ",") + "]"
-	return sjson.SetRawBytes(body, "messages", []byte(newMessagesArray))
+	return sjson.SetRawBytes(body, "messages", []byte("["+strings.Join(msgRaws, ",")+"]"))
 }
+
+// stripThinkingBlocksBytes removes thinking/redacted_thinking blocks from
+// messages[*].content[*].
+func stripThinkingBlocksBytes(body []byte) ([]byte, error) {
+	return rewriteMessageBlocks(body, isThinkingBlock, dropMatchedBlock)
+}
+
+func isThinkingBlock(block gjson.Result) bool {
+	blockType := block.Get("type").String()
+	return blockType == "thinking" || blockType == "redacted_thinking"
+}
+
+// dropMatchedBlock drops any block that matched needsRewrite by returning "".
+func dropMatchedBlock(string) (string, error) { return "", nil }
 
 // sanitizeToolUseIDsBytes rewrites tool_use.id and tool_use_id in
 // messages[*].content[*] that contain characters outside ^[a-zA-Z0-9_-]+$.
 // Non-Anthropic upstreams (e.g. Kimi-k2.6) emit IDs like "functions.Read:0";
 // Anthropic rejects those with a 400 when the history is forwarded back to it.
 func sanitizeToolUseIDsBytes(body []byte) ([]byte, error) {
-	messages := gjson.GetBytes(body, "messages")
-	if !messages.Exists() || !messages.IsArray() {
-		return body, nil
+	return rewriteMessageBlocks(body, blockNeedsToolUseIDSanitize, sanitizeBlockToolUseID)
+}
+
+func blockNeedsToolUseIDSanitize(block gjson.Result) bool {
+	switch block.Get("type").String() {
+	case "tool_use":
+		id := block.Get("id").String()
+		return sanitizeToolUseID(id) != id
+	case "tool_result":
+		id := block.Get("tool_use_id").String()
+		return sanitizeToolUseID(id) != id
+	default:
+		return false
 	}
+}
 
-	anyChanged := false
-	var msgRaws []string
-	var walkErr error
-
-	messages.ForEach(func(_, msg gjson.Result) bool {
-		content := msg.Get("content")
-		if !content.Exists() || !content.IsArray() {
-			msgRaws = append(msgRaws, msg.Raw)
-			return true
-		}
-
-		needsRewrite := false
-		content.ForEach(func(_, block gjson.Result) bool {
-			switch block.Get("type").String() {
-			case "tool_use":
-				if id := block.Get("id").String(); sanitizeToolUseID(id) != id {
-					needsRewrite = true
-					return false
-				}
-			case "tool_result":
-				if id := block.Get("tool_use_id").String(); sanitizeToolUseID(id) != id {
-					needsRewrite = true
-					return false
-				}
-			}
-			return true
-		})
-
-		if !needsRewrite {
-			msgRaws = append(msgRaws, msg.Raw)
-			return true
-		}
-
-		anyChanged = true
-		var rewritten []string
-		content.ForEach(func(_, block gjson.Result) bool {
-			raw := block.Raw
-			var err error
-			switch block.Get("type").String() {
-			case "tool_use":
-				if id := block.Get("id").String(); sanitizeToolUseID(id) != id {
-					raw, err = sjson.Set(raw, "id", sanitizeToolUseID(id))
-					if err != nil {
-						walkErr = fmt.Errorf("rewrite tool_use id: %w", err)
-						return false
-					}
-				}
-			case "tool_result":
-				if id := block.Get("tool_use_id").String(); sanitizeToolUseID(id) != id {
-					raw, err = sjson.Set(raw, "tool_use_id", sanitizeToolUseID(id))
-					if err != nil {
-						walkErr = fmt.Errorf("rewrite tool_use_id: %w", err)
-						return false
-					}
-				}
-			}
-			rewritten = append(rewritten, raw)
-			return true
-		})
-		if walkErr != nil {
-			return false
-		}
-
-		newMsg, err := sjson.SetRaw(msg.Raw, "content", "["+strings.Join(rewritten, ",")+"]")
+func sanitizeBlockToolUseID(raw string) (string, error) {
+	block := gjson.Parse(raw)
+	switch block.Get("type").String() {
+	case "tool_use":
+		id := block.Get("id").String()
+		out, err := sjson.Set(raw, "id", sanitizeToolUseID(id))
 		if err != nil {
-			walkErr = fmt.Errorf("replace content in message: %w", err)
-			return false
+			return "", fmt.Errorf("rewrite tool_use id: %w", err)
 		}
-		msgRaws = append(msgRaws, newMsg)
-		return true
-	})
-
-	if walkErr != nil {
-		return nil, walkErr
+		return out, nil
+	case "tool_result":
+		id := block.Get("tool_use_id").String()
+		out, err := sjson.Set(raw, "tool_use_id", sanitizeToolUseID(id))
+		if err != nil {
+			return "", fmt.Errorf("rewrite tool_use_id: %w", err)
+		}
+		return out, nil
+	default:
+		return raw, nil
 	}
-	if !anyChanged {
-		return body, nil
-	}
-	return sjson.SetRawBytes(body, "messages", []byte("["+strings.Join(msgRaws, ",")+"]"))
 }
 
 // stripThoughtSignatureBytes removes the `thought_signature` field from every
 // messages[*].content[*] block. Anthropic rejects this Gemini-only field; tool
 // signatures still survive through the id carrier.
 func stripThoughtSignatureBytes(body []byte) ([]byte, error) {
-	messages := gjson.GetBytes(body, "messages")
-	if !messages.Exists() || !messages.IsArray() {
-		return body, nil
+	return rewriteMessageBlocks(body, hasThoughtSignature, deleteThoughtSignature)
+}
+
+func hasThoughtSignature(block gjson.Result) bool {
+	return block.Get("thought_signature").Exists()
+}
+
+func deleteThoughtSignature(raw string) (string, error) {
+	out, err := sjson.Delete(raw, "thought_signature")
+	if err != nil {
+		return "", fmt.Errorf("delete thought_signature: %w", err)
 	}
-
-	anyChanged := false
-	var msgRaws []string
-	var walkErr error
-
-	messages.ForEach(func(_, msg gjson.Result) bool {
-		content := msg.Get("content")
-		if !content.Exists() || !content.IsArray() {
-			msgRaws = append(msgRaws, msg.Raw)
-			return true
-		}
-
-		needsStrip := false
-		content.ForEach(func(_, block gjson.Result) bool {
-			if block.Get("thought_signature").Exists() {
-				needsStrip = true
-				return false
-			}
-			return true
-		})
-
-		if !needsStrip {
-			msgRaws = append(msgRaws, msg.Raw)
-			return true
-		}
-
-		anyChanged = true
-		var rewritten []string
-		content.ForEach(func(_, block gjson.Result) bool {
-			raw := block.Raw
-			if block.Get("thought_signature").Exists() {
-				var err error
-				raw, err = sjson.Delete(raw, "thought_signature")
-				if err != nil {
-					walkErr = fmt.Errorf("delete thought_signature: %w", err)
-					return false
-				}
-			}
-			rewritten = append(rewritten, raw)
-			return true
-		})
-		if walkErr != nil {
-			return false
-		}
-
-		newMsg, err := sjson.SetRaw(msg.Raw, "content", "["+strings.Join(rewritten, ",")+"]")
-		if err != nil {
-			walkErr = fmt.Errorf("replace content in message: %w", err)
-			return false
-		}
-		msgRaws = append(msgRaws, newMsg)
-		return true
-	})
-
-	if walkErr != nil {
-		return nil, walkErr
-	}
-	if !anyChanged {
-		return body, nil
-	}
-	return sjson.SetRawBytes(body, "messages", []byte("["+strings.Join(msgRaws, ",")+"]"))
+	return out, nil
 }
 
 // encodeJSONStringNoHTMLEscape marshals s without HTML-escaping <, >, or &.
