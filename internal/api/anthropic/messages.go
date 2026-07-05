@@ -103,24 +103,20 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 func stashClientIdentity(ctx context.Context, h http.Header, body []byte) context.Context {
 	metaRaw := gjson.GetBytes(body, "metadata.user_id").String()
 	meta := proxy.ParseClaudeCodeMetadata(metaRaw)
-	sessionID := meta.SessionID
-	if sessionID == "" {
-		sessionID = h.Get("X-Claude-Code-Session-Id")
+
+	// Start from the header-only identity, then overlay the body-derived
+	// fields Claude Code's metadata.user_id carries that no other surface
+	// sends: DeviceID/AccountID always win; SessionID/Email only override
+	// when the body actually has a value, else the header-derived one from
+	// ClientIdentityFromHeaders stands.
+	id := proxy.ClientIdentityFromHeaders(h)
+	id.DeviceID = proxy.NormalizeClientIdentifier(meta.DeviceID)
+	id.AccountID = proxy.NormalizeClientIdentifier(meta.AccountID)
+	if meta.SessionID != "" {
+		id.SessionID = proxy.NormalizeClientIdentifier(meta.SessionID)
 	}
-	email := proxy.NormalizeEmail(meta.Email)
-	if email == "" {
-		email = proxy.NormalizeEmail(h.Get("X-Weave-User-Email"))
-	}
-	displayName := proxy.NormalizeDisplayName(h.Get("X-Weave-User-Name"))
-	id := proxy.ClientIdentity{
-		DeviceID:    proxy.NormalizeClientIdentifier(meta.DeviceID),
-		AccountID:   proxy.NormalizeClientIdentifier(meta.AccountID),
-		SessionID:   proxy.NormalizeClientIdentifier(sessionID),
-		Email:       email,
-		DisplayName: displayName,
-		UserAgent:   h.Get("User-Agent"),
-		ClientApp:   proxy.NormalizeClientApp(h.Get("X-App"), h.Get("User-Agent")),
-		RolloutID:   proxy.NormalizeRolloutID(h.Get(proxy.RolloutIDHeader)),
+	if metaEmail := proxy.NormalizeEmail(meta.Email); metaEmail != "" {
+		id.Email = metaEmail
 	}
 	observability.Get().Debug("anthropic stashClientIdentity",
 		"meta_raw_len", len(metaRaw),

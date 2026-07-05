@@ -31,7 +31,7 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 			return
 		}
 
-		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header)
+		ctx := context.WithValue(c.Request.Context(), proxy.ClientIdentityContextKey{}, proxy.ClientIdentityFromHeaders(c.Request.Header))
 		ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		c.Request = c.Request.WithContext(ctx)
 
@@ -61,18 +61,6 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 			return
 		}
 	}
-}
-
-func stashClientIdentity(ctx context.Context, h http.Header) context.Context {
-	id := proxy.ClientIdentity{
-		SessionID:   proxy.NormalizeClientIdentifier(h.Get("X-Claude-Code-Session-Id")),
-		Email:       proxy.NormalizeEmail(h.Get("X-Weave-User-Email")),
-		DisplayName: proxy.NormalizeDisplayName(h.Get("X-Weave-User-Name")),
-		UserAgent:   h.Get("User-Agent"),
-		ClientApp:   proxy.NormalizeClientApp(h.Get("X-App"), h.Get("User-Agent")),
-		RolloutID:   proxy.NormalizeRolloutID(h.Get(proxy.RolloutIDHeader)),
-	}
-	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
 }
 
 // openAIErrorType maps a classified dispatch error to the OpenAI Chat

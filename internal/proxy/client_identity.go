@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 
 	"workweave/router/internal/auth"
@@ -31,6 +32,22 @@ type ClientIdentityContextKey struct{}
 func ClientIdentityFrom(ctx context.Context) ClientIdentity {
 	id, _ := ctx.Value(ClientIdentityContextKey{}).(ClientIdentity)
 	return id
+}
+
+// ClientIdentityFromHeaders builds a ClientIdentity from the headers common
+// to every surface (OpenAI, Gemini, and the Anthropic header-only fields).
+// DeviceID and AccountID are left zero — only Claude Code's
+// metadata.user_id body field carries them; callers with a body (see
+// anthropic.stashClientIdentity) overlay those after calling this.
+func ClientIdentityFromHeaders(h http.Header) ClientIdentity {
+	return ClientIdentity{
+		SessionID:   NormalizeClientIdentifier(h.Get("X-Claude-Code-Session-Id")),
+		Email:       NormalizeEmail(h.Get("X-Weave-User-Email")),
+		DisplayName: NormalizeDisplayName(h.Get("X-Weave-User-Name")),
+		UserAgent:   h.Get("User-Agent"),
+		ClientApp:   NormalizeClientApp(h.Get("X-App"), h.Get("User-Agent")),
+		RolloutID:   NormalizeRolloutID(h.Get(RolloutIDHeader)),
+	}
 }
 
 // ResolveUserFromContext dispatches identity signals from ctx to

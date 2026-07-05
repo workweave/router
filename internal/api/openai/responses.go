@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"context"
 	"io"
 	"net/http"
 
@@ -32,7 +33,7 @@ func ResponsesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc
 			return
 		}
 
-		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header)
+		ctx := context.WithValue(c.Request.Context(), proxy.ClientIdentityContextKey{}, proxy.ClientIdentityFromHeaders(c.Request.Header))
 		ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		c.Request = c.Request.WithContext(ctx)
 
