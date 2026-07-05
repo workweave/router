@@ -110,6 +110,16 @@ func (r turnLoopResult) modelSwitched() bool {
 	return transition || r.SessionEverSwitched
 }
 
+// switchPrefillPaid reports whether this turn actually paid a cold-cache prefill
+// from a mid-session switch — the single transition turn, unlike modelSwitched's
+// session-lifetime latch. Excludes the first turn and client-trim windows
+// (PrefixTrimmed): a no-switch baseline pays a prefill there too, so there is
+// nothing to correct. Gates the savings counterfactual (CounterfactualInputCost).
+func (r turnLoopResult) switchPrefillPaid() bool {
+	transition := r.PriorServedModel != "" && r.PriorServedModel != r.Decision.Model
+	return transition && !r.PrefixTrimmed
+}
+
 // handoverOutcome describes the synchronous handover step.
 type handoverOutcome struct {
 	Invoked       bool
