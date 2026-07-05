@@ -1887,10 +1887,8 @@ func TestStripToolUseThoughtSignature_AnthropicToAnthropic(t *testing.T) {
 	assert.Equal(t, map[string]any{"path": "x"}, block["input"], "tool_use.input must be preserved")
 }
 
-// TestCrossFormat_OpenAIToAnthropic_ToolChoiceVariants covers the OpenAI ->
-// Anthropic tool_choice mapping for every mode except "none" (which suppresses
-// tools entirely and is covered by
-// TestCrossFormat_OpenAIToAnthropic_ToolChoiceNoneSuppressesTools).
+// TestCrossFormat_OpenAIToAnthropic_ToolChoiceVariants covers auto/required/named modes;
+// "none" (suppresses tools) is covered by TestCrossFormat_OpenAIToAnthropic_ToolChoiceNoneSuppressesTools.
 func TestCrossFormat_OpenAIToAnthropic_ToolChoiceVariants(t *testing.T) {
 	cases := []struct {
 		name       string

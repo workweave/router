@@ -2,9 +2,8 @@ package translate
 
 import "github.com/tidwall/gjson"
 
-// toolChoiceKind is the source-format-neutral shape of an inbound tool_choice
-// value, decoupling the four `emit_*.go` renderers from the two inbound wire
-// shapes (Anthropic object vs. OpenAI string-or-object).
+// toolChoiceKind is the source-format-neutral tool_choice value shared by
+// the four emit_*.go renderers.
 type toolChoiceKind int
 
 const (
@@ -46,9 +45,7 @@ func anthropicToolChoice(body []byte) (toolChoiceKind, string) {
 	}
 }
 
-// openAIToolChoice parses an OpenAI-shape tool_choice field (the string
-// "auto"|"required"|"none", or {"type":"function","function":{"name":...}})
-// into a neutral kind.
+// openAIToolChoice parses an OpenAI-shape tool_choice field into a neutral kind.
 func openAIToolChoice(body []byte) (toolChoiceKind, string) {
 	r := gjson.GetBytes(body, "tool_choice")
 	if !r.Exists() {
