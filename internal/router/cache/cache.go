@@ -12,6 +12,8 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+
+	"workweave/router/internal/observability"
 )
 
 // CachedResponse captures the upstream response in the inbound wire format.
@@ -210,7 +212,8 @@ func (c *Cache) bucket(installationID string, format Format, clusterID int, clus
 		}
 		buckets, err := lru.New[bucketKey, *lru.Cache[entryKey, *entry]](c.cfg.MaxBucketsPerInstallation)
 		if err != nil {
-			panic(err)
+			observability.Get().Error("cache: failed to allocate installation bucket LRU; treating as cache miss", "err", err)
+			return nil
 		}
 		ic = &installationCache{buckets: buckets}
 		c.installations.Add(installationID, ic)
@@ -222,7 +225,8 @@ func (c *Cache) bucket(installationID string, format Format, clusterID int, clus
 		}
 		b, err := lru.New[entryKey, *entry](c.cfg.BucketSize)
 		if err != nil {
-			panic(err)
+			observability.Get().Error("cache: failed to allocate entry LRU; treating as cache miss", "err", err)
+			return nil
 		}
 		ic.buckets.Add(key, b)
 		return b
