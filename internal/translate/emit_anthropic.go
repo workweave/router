@@ -126,7 +126,8 @@ func (e *RequestEnvelope) buildAnthropicFromOpenAI(opts EmitOptions) ([]byte, er
 
 	// tool_choice "none" suppresses tools entirely — Anthropic has no direct
 	// equivalent, so omitting tools is the only way to prevent tool calls.
-	suppressTools := gjson.GetBytes(e.body, "tool_choice").String() == "none"
+	kind, _ := openAIToolChoice(e.body)
+	suppressTools := kind == toolChoiceNone
 	if !suppressTools {
 		writeAnthropicTools(jw, e.body)
 		writeAnthropicToolChoice(jw, e.body)
@@ -591,35 +592,26 @@ func writeAnthropicTools(jw *jsonWriter, body []byte) {
 }
 
 func writeAnthropicToolChoice(jw *jsonWriter, body []byte) {
-	r := gjson.GetBytes(body, "tool_choice")
-	if !r.Exists() {
-		return
-	}
-	if r.Type == gjson.String {
-		switch r.String() {
-		case "auto":
-			jw.Key("tool_choice")
-			jw.Raw(`{"type":"auto"}`)
-		case "required":
-			jw.Key("tool_choice")
-			jw.Raw(`{"type":"any"}`)
-		case "none":
-			// Handled upstream — tools and tool_choice both suppressed.
-		}
-		return
-	}
-	if r.IsObject() {
-		if name := r.Get("function.name").String(); name != "" {
-			tw := newJSONWriter()
-			tw.Obj()
-			tw.Key("type")
-			tw.Str("tool")
-			tw.Key("name")
-			tw.Str(name)
-			tw.EndObj()
-			jw.Key("tool_choice")
-			jw.Raw(string(tw.Bytes()))
-		}
+	kind, name := openAIToolChoice(body)
+	switch kind {
+	case toolChoiceAuto:
+		jw.Key("tool_choice")
+		jw.Raw(`{"type":"auto"}`)
+	case toolChoiceRequired:
+		jw.Key("tool_choice")
+		jw.Raw(`{"type":"any"}`)
+	case toolChoiceNone:
+		// Handled upstream — tools and tool_choice both suppressed.
+	case toolChoiceNamed:
+		tw := newJSONWriter()
+		tw.Obj()
+		tw.Key("type")
+		tw.Str("tool")
+		tw.Key("name")
+		tw.Str(name)
+		tw.EndObj()
+		jw.Key("tool_choice")
+		jw.Raw(string(tw.Bytes()))
 	}
 }
 

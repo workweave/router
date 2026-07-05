@@ -125,6 +125,41 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	assert.Equal(t, providers.EndpointResponses, prep.Endpoint)
 }
 
+// TestPrepareOpenAIResponses_ToolChoiceVariants covers the Anthropic ->
+// Responses tool_choice mapping for "any" and named-tool; "auto" is covered
+// by TestPrepareOpenAIResponses_RequestShape.
+func TestPrepareOpenAIResponses_ToolChoiceVariants(t *testing.T) {
+	cases := []struct {
+		name       string
+		toolChoice string
+		want       any
+	}{
+		{"any", `{"type":"any"}`, "required"},
+		{"tool", `{"type":"tool","name":"bash"}`, map[string]any{"type": "function", "name": "bash"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{
+				"model":"claude-opus-4-8","max_tokens":4096,
+				"tools":[{"name":"bash","input_schema":{"type":"object"}}],
+				"tool_choice":` + tc.toolChoice + `,
+				"messages":[{"role":"user","content":"fix the bug"}]
+			}`)
+			env, err := translate.ParseAnthropic(body)
+			require.NoError(t, err)
+			prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{
+				TargetModel:  "gpt-5.5",
+				Capabilities: router.Lookup("gpt-5.5"),
+			})
+			require.NoError(t, err)
+
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(prep.Body, &out))
+			assert.Equal(t, tc.want, out["tool_choice"])
+		})
+	}
+}
+
 // A tiny client max_tokens (Claude Code sends 1 for a probe, 64 for a
 // title/topic turn) must be floored to the reasoning output budget: a reasoning
 // model burns the budget on hidden reasoning before any visible token, so the

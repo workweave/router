@@ -146,6 +146,24 @@ func TestPrepareGemini_ToolChoiceVariants(t *testing.T) {
 	}
 }
 
+func TestPrepareGemini_FromAnthropic_ToolChoiceVariants(t *testing.T) {
+	cases := map[string]string{
+		`"tool_choice":{"type":"auto"}`:               "AUTO",
+		`"tool_choice":{"type":"none"}`:               "NONE",
+		`"tool_choice":{"type":"any"}`:                "ANY",
+		`"tool_choice":{"type":"tool","name":"bash"}`: "ANY",
+	}
+	for tc, mode := range cases {
+		body := []byte(`{"messages":[{"role":"user","content":"x"}],` + tc + `}`)
+		env, _ := translate.ParseAnthropic(body)
+		prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+		require.NoError(t, err, tc)
+		out := mustUnmarshal(t, prep.Body)
+		got := out["toolConfig"].(map[string]any)["functionCallingConfig"].(map[string]any)["mode"]
+		assert.Equal(t, mode, got, tc)
+	}
+}
+
 func TestPrepareGemini_ReasoningEffortMapsToThinkingBudget(t *testing.T) {
 	// No target model => legacy (gemini-2.5) path: numeric thinkingBudget.
 	cases := map[string]int{"low": 1024, "medium": 8192, "high": 24576, "none": 0}

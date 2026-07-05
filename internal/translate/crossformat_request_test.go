@@ -1886,3 +1886,74 @@ func TestStripToolUseThoughtSignature_AnthropicToAnthropic(t *testing.T) {
 	assert.Equal(t, "Read", block["name"], "tool_use.name must be preserved")
 	assert.Equal(t, map[string]any{"path": "x"}, block["input"], "tool_use.input must be preserved")
 }
+
+// TestCrossFormat_OpenAIToAnthropic_ToolChoiceVariants covers the OpenAI ->
+// Anthropic tool_choice mapping for every mode except "none" (which suppresses
+// tools entirely and is covered by
+// TestCrossFormat_OpenAIToAnthropic_ToolChoiceNoneSuppressesTools).
+func TestCrossFormat_OpenAIToAnthropic_ToolChoiceVariants(t *testing.T) {
+	cases := []struct {
+		name       string
+		toolChoice string
+		want       map[string]any
+	}{
+		{"auto", `"auto"`, map[string]any{"type": "auto"}},
+		{"required", `"required"`, map[string]any{"type": "any"}},
+		{"named", `{"type":"function","function":{"name":"Bash"}}`, map[string]any{"type": "tool", "name": "Bash"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{
+				"model": "gpt-4",
+				"messages": [{"role": "user", "content": "hi"}],
+				"tools": [{"type": "function", "function": {"name": "Bash", "parameters": {"type": "object"}}}],
+				"tool_choice": ` + tc.toolChoice + `
+			}`)
+			env, err := translate.ParseOpenAI(body)
+			require.NoError(t, err)
+			prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{
+				TargetModel: "claude-sonnet-4-20250514",
+			})
+			require.NoError(t, err)
+
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal(prep.Body, &doc))
+			assert.Equal(t, tc.want, doc["tool_choice"])
+		})
+	}
+}
+
+// TestCrossFormat_AnthropicToOpenAI_ToolChoiceVariants covers the Anthropic ->
+// OpenAI chat-completions tool_choice mapping. Anthropic's "none" has no
+// direct chat-completions equivalent and is intentionally left unmapped.
+func TestCrossFormat_AnthropicToOpenAI_ToolChoiceVariants(t *testing.T) {
+	cases := []struct {
+		name       string
+		toolChoice string
+		want       any
+	}{
+		{"auto", `{"type":"auto"}`, "auto"},
+		{"any", `{"type":"any"}`, "required"},
+		{"tool", `{"type":"tool","name":"Bash"}`, map[string]any{"type": "function", "function": map[string]any{"name": "Bash"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{
+				"model": "claude-sonnet-4-20250514",
+				"messages": [{"role": "user", "content": "hi"}],
+				"tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+				"tool_choice": ` + tc.toolChoice + `
+			}`)
+			env, err := translate.ParseAnthropic(body)
+			require.NoError(t, err)
+			prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{
+				TargetModel:    "gpt-4",
+				TargetProvider: "openai",
+			})
+			require.NoError(t, err)
+
+			doc := unmarshalBody(t, prep.Body)
+			assert.Equal(t, tc.want, doc["tool_choice"])
+		})
+	}
+}

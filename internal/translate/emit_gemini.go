@@ -466,66 +466,8 @@ func writeGeminiToolsFromOpenAI(jw *jsonWriter, body []byte) {
 // "auto") on Gemini 3.x gets mode=VALIDATED for schema-constrained decoding;
 // explicit none/required/function choices pass through untouched.
 func writeGeminiToolChoiceFromOpenAI(jw *jsonWriter, body []byte, model string, downgradeValidated bool) {
-	r := gjson.GetBytes(body, "tool_choice")
-	choice := ""
-	if r.Type == gjson.String {
-		choice = r.String()
-	}
-	if (!r.Exists() || choice == "auto") && hasNonEmptyTools(body) && isGemini3xModel(model) {
-		jw.Key("toolConfig")
-		jw.Obj()
-		jw.Key("functionCallingConfig")
-		jw.Obj()
-		jw.Key("mode")
-		jw.Str(geminiToolMode(downgradeValidated))
-		jw.EndObj()
-		jw.EndObj()
-		return
-	}
-	if !r.Exists() {
-		return
-	}
-	if r.Type == gjson.String {
-		var mode string
-		switch choice {
-		case "auto":
-			mode = "AUTO"
-		case "none":
-			mode = "NONE"
-		case "required":
-			mode = "ANY"
-		}
-		if mode == "" {
-			return
-		}
-		jw.Key("toolConfig")
-		jw.Obj()
-		jw.Key("functionCallingConfig")
-		jw.Obj()
-		jw.Key("mode")
-		jw.Str(mode)
-		jw.EndObj()
-		jw.EndObj()
-		return
-	}
-	if r.IsObject() && r.Get("type").String() == "function" {
-		name := r.Get("function.name").String()
-		if name == "" {
-			return
-		}
-		jw.Key("toolConfig")
-		jw.Obj()
-		jw.Key("functionCallingConfig")
-		jw.Obj()
-		jw.Key("mode")
-		jw.Str("ANY")
-		jw.Key("allowedFunctionNames")
-		jw.Arr()
-		jw.Str(name)
-		jw.EndArr()
-		jw.EndObj()
-		jw.EndObj()
-	}
+	kind, name := openAIToolChoice(body)
+	writeGeminiToolChoice(jw, body, model, downgradeValidated, kind, name)
 }
 
 // writeGeminiGenerationConfigFromOpenAI writes generationConfig into jw from an OpenAI body.
@@ -818,23 +760,16 @@ func geminiEmitsValidatedToolMode(body []byte, model string, format Format) bool
 	if !hasNonEmptyTools(body) || !isGemini3xModel(model) {
 		return false
 	}
-	r := gjson.GetBytes(body, "tool_choice")
+	var kind toolChoiceKind
 	switch format {
 	case FormatAnthropic:
-		choice := ""
-		if r.Exists() && r.IsObject() {
-			choice = r.Get("type").String()
-		}
-		return choice == "" || choice == "auto"
+		kind, _ = anthropicToolChoice(body)
 	case FormatOpenAI:
-		choice := ""
-		if r.Type == gjson.String {
-			choice = r.String()
-		}
-		return !r.Exists() || choice == "auto"
+		kind, _ = openAIToolChoice(body)
 	default:
 		return false
 	}
+	return kind == toolChoiceAbsent || kind == toolChoiceAuto
 }
 
 // filterOutGeminiFunctionCallParts strips functionCall parts; used when
@@ -1062,68 +997,50 @@ func writeGeminiToolsFromAnthropic(jw *jsonWriter, body []byte) {
 // mode=VALIDATED — schema-constrained decoding without forcing a tool call.
 // Explicit any/none/tool choices pass through untouched.
 func writeGeminiToolChoiceFromAnthropic(jw *jsonWriter, body []byte, model string, downgradeValidated bool) {
-	r := gjson.GetBytes(body, "tool_choice")
-	choice := ""
-	if r.Exists() && r.IsObject() {
-		choice = r.Get("type").String()
-	}
-	if (choice == "" || choice == "auto") && hasNonEmptyTools(body) && isGemini3xModel(model) {
-		jw.Key("toolConfig")
-		jw.Obj()
-		jw.Key("functionCallingConfig")
-		jw.Obj()
-		jw.Key("mode")
-		jw.Str(geminiToolMode(downgradeValidated))
-		jw.EndObj()
-		jw.EndObj()
+	kind, name := anthropicToolChoice(body)
+	writeGeminiToolChoice(jw, body, model, downgradeValidated, kind, name)
+}
+
+// writeGeminiToolChoice writes toolConfig into jw from a source-neutral
+// tool_choice kind. Unforced tool_choice (absent or auto) on Gemini 3.x gets
+// mode=VALIDATED for schema-constrained decoding; explicit
+// none/required/named choices map straight to a functionCallingConfig mode.
+func writeGeminiToolChoice(jw *jsonWriter, body []byte, model string, downgradeValidated bool, kind toolChoiceKind, name string) {
+	if (kind == toolChoiceAbsent || kind == toolChoiceAuto) && hasNonEmptyTools(body) && isGemini3xModel(model) {
+		writeGeminiFunctionCallingMode(jw, geminiToolMode(downgradeValidated), "")
 		return
 	}
-	switch choice {
-	case "auto":
-		jw.Key("toolConfig")
-		jw.Obj()
-		jw.Key("functionCallingConfig")
-		jw.Obj()
-		jw.Key("mode")
-		jw.Str("AUTO")
-		jw.EndObj()
-		jw.EndObj()
-	case "any":
-		jw.Key("toolConfig")
-		jw.Obj()
-		jw.Key("functionCallingConfig")
-		jw.Obj()
-		jw.Key("mode")
-		jw.Str("ANY")
-		jw.EndObj()
-		jw.EndObj()
-	case "none":
-		jw.Key("toolConfig")
-		jw.Obj()
-		jw.Key("functionCallingConfig")
-		jw.Obj()
-		jw.Key("mode")
-		jw.Str("NONE")
-		jw.EndObj()
-		jw.EndObj()
-	case "tool":
-		name := r.Get("name").String()
-		if name == "" {
-			return
-		}
-		jw.Key("toolConfig")
-		jw.Obj()
-		jw.Key("functionCallingConfig")
-		jw.Obj()
-		jw.Key("mode")
-		jw.Str("ANY")
+	switch kind {
+	case toolChoiceAuto:
+		writeGeminiFunctionCallingMode(jw, "AUTO", "")
+	case toolChoiceRequired:
+		writeGeminiFunctionCallingMode(jw, "ANY", "")
+	case toolChoiceNone:
+		writeGeminiFunctionCallingMode(jw, "NONE", "")
+	case toolChoiceNamed:
+		writeGeminiFunctionCallingMode(jw, "ANY", name)
+	}
+}
+
+// writeGeminiFunctionCallingMode writes a toolConfig.functionCallingConfig
+// object with the given mode, optionally pinning a single allowed function
+// name (used for the named-tool choice, which Gemini expresses as ANY mode
+// plus an allowedFunctionNames allowlist of one).
+func writeGeminiFunctionCallingMode(jw *jsonWriter, mode, name string) {
+	jw.Key("toolConfig")
+	jw.Obj()
+	jw.Key("functionCallingConfig")
+	jw.Obj()
+	jw.Key("mode")
+	jw.Str(mode)
+	if name != "" {
 		jw.Key("allowedFunctionNames")
 		jw.Arr()
 		jw.Str(name)
 		jw.EndArr()
-		jw.EndObj()
-		jw.EndObj()
 	}
+	jw.EndObj()
+	jw.EndObj()
 }
 
 // writeGeminiGenerationConfigFromAnthropic writes generationConfig into jw from an Anthropic body.

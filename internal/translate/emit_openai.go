@@ -698,26 +698,15 @@ func writeOpenAIToolsFromAnthropic(jw *jsonWriter, body []byte) {
 // writeOpenAIToolChoiceFromAnthropic emits the "tool_choice" key into jw by
 // converting the Anthropic tool_choice field to OpenAI format.
 func writeOpenAIToolChoiceFromAnthropic(jw *jsonWriter, body []byte) {
-	r := gjson.GetBytes(body, "tool_choice")
-	if !r.Exists() || !r.IsObject() {
-		return
-	}
-	switch r.Get("type").String() {
-	case "auto":
+	kind, name := anthropicToolChoice(body)
+	switch kind {
+	case toolChoiceAuto:
 		jw.Key("tool_choice")
 		jw.Str("auto")
-	case "any":
+	case toolChoiceRequired:
 		jw.Key("tool_choice")
 		jw.Str("required")
-	case "tool":
-		nameRes := r.Get("name")
-		if nameRes.Type != gjson.String {
-			return
-		}
-		name := nameRes.String()
-		if name == "" {
-			return
-		}
+	case toolChoiceNamed:
 		inner := newJSONWriter()
 		inner.Obj()
 		inner.Key("type")

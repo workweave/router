@@ -387,27 +387,22 @@ func writeResponsesToolsFromAnthropic(jw *jsonWriter, body []byte) {
 // writeResponsesToolChoiceFromAnthropic maps the Anthropic tool_choice to the
 // Responses tool_choice shape.
 func writeResponsesToolChoiceFromAnthropic(jw *jsonWriter, body []byte) {
-	tc := gjson.GetBytes(body, "tool_choice")
-	if !tc.Exists() {
-		return
-	}
-	switch tc.Get("type").String() {
-	case "auto":
+	kind, name := anthropicToolChoice(body)
+	switch kind {
+	case toolChoiceAuto:
 		jw.Key("tool_choice")
 		jw.Str("auto")
-	case "any":
+	case toolChoiceRequired:
 		jw.Key("tool_choice")
 		jw.Str("required")
-	case "tool":
-		if name := tc.Get("name").String(); name != "" {
-			jw.Key("tool_choice")
-			jw.Obj()
-			jw.Key("type")
-			jw.Str("function")
-			jw.Key("name")
-			jw.Str(name)
-			jw.EndObj()
-		}
+	case toolChoiceNamed:
+		jw.Key("tool_choice")
+		jw.Obj()
+		jw.Key("type")
+		jw.Str("function")
+		jw.Key("name")
+		jw.Str(name)
+		jw.EndObj()
 	}
 }
 
