@@ -1,4 +1,10 @@
-package otel
+// Package timing carries per-request latency timestamps stamped by
+// middleware and provider adapters and read back by proxy.Service. It is a
+// pure value-type package (no I/O, no otel SDK dependency) so it can be
+// imported by adapters (internal/server/middleware, internal/providers/*)
+// without those adapters reaching into the internal/observability/otel
+// exporter adapter for a concrete type.
+package timing
 
 import (
 	"context"

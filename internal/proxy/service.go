@@ -29,6 +29,7 @@ import (
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/router/turntype"
+	"workweave/router/internal/timing"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -3017,7 +3018,7 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 
 // addTimingAttrs appends derived latency attributes from the request Timing.
 func addTimingAttrs(ctx context.Context, b *otel.AttrBuilder) {
-	t := otel.TimingFrom(ctx)
+	t := timing.TimingFrom(ctx)
 	if t == nil {
 		return
 	}

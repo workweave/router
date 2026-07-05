@@ -75,6 +75,8 @@ Three concentric layers. Imports flow inward only.
 |  |  |                      conversion: OpenAI <-> Anthropic |  |  |
 |  |  |                      <-> Gemini; pure, no I/O)        |  |  |
 |  |  |  internal/sse       (zero-alloc SSE framing helpers)  |  |  |
+|  |  |  internal/timing    (Timing value type: per-request   |  |  |
+|  |  |                      latency stamps, no otel dep)     |  |  |
 |  |  +-------------------------------------------------------+  |  |
 |  +-------------------------------------------------------------+  |
 |                                                                   |
@@ -87,8 +89,8 @@ Three concentric layers. Imports flow inward only.
 
 - **Layering is load-bearing.** Imports flow inward only. Inner-ring packages must not import adapter or presentation packages; adapters never import each other; only `cmd/router/main.go` constructs concrete things. Inner-ring packages may import each other (e.g. `proxy.Service.Route` returns `router.Decision`; `proxy.Service` calls `translate`, `sessionpin`, `planner`, `handover`, `cache`, `pricing`, `capability`, `turntype`, `usage` to compose a turn).
 - **Small utility third-party libs allowed at every layer.** Layering = about *where I/O and behavior live*, not banning go.mod entries. Reach for vetted small lib (`golang-lru`, `uuid`, error helpers) before rolling own. Reject heavyweight frameworks (DI containers, ORMs, metaprogramming kits).
-- **Inner-ring packages are I/O-free.** `internal/router`, `internal/providers`, `internal/translate`, `internal/sse`, `internal/router/{cache,capability,handover,planner,pricing,sessionpin,turntype}`, `internal/proxy/usage` define interfaces, value types, pure functions only. Adding I/O method (HTTP, DB, queue, FS) = layering violation; put on `auth.Service` / `proxy.Service` or adapter subpackage. Pure-Go utility libs fine.
-- **Adapters depend only on inner ring.** `internal/postgres` may also import `internal/sqlc`. Adapters never import each other — `internal/postgres` doesn't know `internal/api/admin` etc. Note: provider adapters (`internal/providers/<name>/`) import `internal/proxy` for `OnUpstreamMeta` callback so streaming responses record usage/headers back to proxy — one of few inward-pointing adapter→inner-ring imports, intentional.
+- **Inner-ring packages are I/O-free.** `internal/router`, `internal/providers`, `internal/translate`, `internal/sse`, `internal/timing`, `internal/router/{cache,capability,handover,planner,pricing,sessionpin,turntype}`, `internal/proxy/usage` define interfaces, value types, pure functions only. Adding I/O method (HTTP, DB, queue, FS) = layering violation; put on `auth.Service` / `proxy.Service` or adapter subpackage. Pure-Go utility libs fine.
+- **Adapters depend only on inner ring.** `internal/postgres` may also import `internal/sqlc`. Adapters never import each other — `internal/postgres` doesn't know `internal/api/admin` etc. Note: provider adapters (`internal/providers/<name>/`) import `internal/proxy` for `OnUpstreamMeta` callback so streaming responses record usage/headers back to proxy — one of few inward-pointing adapter→inner-ring imports, intentional. `internal/server/middleware` and `internal/providers/httputil` (both adapters) stamp/read request latency via `internal/timing`'s `Timing` value type instead of importing `internal/observability/otel` directly — `Timing` used to live in `otel` and was pulled out specifically so these adapters (and `internal/providers/{anthropic,openai,google,openaicompat}`) don't need a concrete dependency on the OTel exporter adapter just to stamp a timestamp. `internal/proxy` also imports `internal/timing` (an inner-ring package importing another inner-ring package, which is allowed) to read timing back into span attributes.
 - **`internal/api/*` and `internal/server`** depend on `internal/auth` (Service handle + middleware-context types) and `internal/proxy` (routing/dispatch service handle). May import `internal/observability` for logging, `internal/providers` for shared sentinel errors, `internal/router/cluster` for `ErrClusterUnavailable` sentinel + `DeployedModelsSource` interface (API handlers map sentinel → HTTP 503). Must not import `internal/postgres`, any concrete `internal/providers/*` adapter, or `internal/translate` directly. Concrete instances reach presentation only via constructor params from composition root.
 - **`internal/config` and `internal/observability` are leaf utilities** — must not import any other package under `internal/`. Third-party utility deps fine; today pull only stdlib + gin (request-scoped logger middleware). `internal/observability/otel` subpackage *is* an adapter (builds real OTLP exporter) and can import other internal packages; parent `internal/observability` stays a leaf.
 - **Composition happens in `cmd/router/main.go`.** Only file that constructs concrete adapters + injects them. No other place wires things. See [`cmd/CLAUDE.md`](cmd/CLAUDE.md).
@@ -113,7 +115,7 @@ Pick by responsibility, then read that package's `CLAUDE.md`:
 | New column / SQL query | `db/queries/` + `internal/postgres/` | [db/CLAUDE.md](db/CLAUDE.md), [internal/postgres/CLAUDE.md](internal/postgres/CLAUDE.md) |
 | Doc under `docs/` | `docs/` | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
 
-**Default rule:** put logic in the package that uses it. Only promote to a shared home (`auth`, `proxy`, `translate`, `config`, `observability`, `sse`) when 3+ packages need the same logic.
+**Default rule:** put logic in the package that uses it. Only promote to a shared home (`auth`, `proxy`, `translate`, `config`, `observability`, `sse`, `timing`) when 3+ packages need the same logic.
 
 ## Adding a new helper
 
@@ -123,6 +125,7 @@ Don't, unless same logic needed in 3+ places and no plausible existing home. Can
 - **Env parsing** → [`internal/config`](internal/config).
 - **Logging / tracing** → [`internal/observability`](internal/observability) (OTel exporter in `otel` subpackage).
 - **SSE framing** → [`internal/sse`](internal/sse).
+- **Per-request latency stamps** → [`internal/timing`](internal/timing) — pure value type shared by adapters (`server/middleware`, `providers/*`) and `proxy.Service`; deliberately has zero otel dependency so those adapters don't need one just to stamp a timestamp.
 
 If new helper doesn't fit, justify new package in code comment before creating.
 

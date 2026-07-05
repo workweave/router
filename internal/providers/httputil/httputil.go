@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"workweave/router/internal/auth"
-	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
+	"workweave/router/internal/timing"
 )
 
 // FlushChunk is the read buffer size used by all streaming provider adapters.
@@ -292,7 +292,7 @@ func StartThroughputWatchdog(ctx context.Context, cancel context.CancelCauseFunc
 // watchdog cancels ctx with ErrUpstreamIdleTimeout on stall and StreamBody
 // returns that error directly; ctx must be wrapped via context.WithCancelCause
 // so the cause survives to the error site.
-func StreamBody(ctx context.Context, cancel context.CancelCauseFunc, idleTimeout time.Duration, r io.Reader, status int, w http.ResponseWriter, t *otel.Timing) error {
+func StreamBody(ctx context.Context, cancel context.CancelCauseFunc, idleTimeout time.Duration, r io.Reader, status int, w http.ResponseWriter, t *timing.Timing) error {
 	mark, stop := StartIdleWatchdog(ctx, cancel, idleTimeout)
 	defer stop()
 

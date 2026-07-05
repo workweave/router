@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
+	"workweave/router/internal/timing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,7 +59,7 @@ func TestStreamBody_NoWatchdogPath(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 
-	err := StreamBody(ctx, nil, 0, r, 200, w, &otel.Timing{})
+	err := StreamBody(ctx, nil, 0, r, 200, w, &timing.Timing{})
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", w.Body.String())
 }
@@ -74,7 +74,7 @@ func TestStreamBody_WatchdogDoesNotFireOnLivelyStream(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 
-	err := StreamBody(ctx, cancel, 200*time.Millisecond, r, 200, w, &otel.Timing{})
+	err := StreamBody(ctx, cancel, 200*time.Millisecond, r, 200, w, &timing.Timing{})
 	require.NoError(t, err)
 	assert.Equal(t, "abcd", w.Body.String())
 }
@@ -93,7 +93,7 @@ func TestStreamBody_WatchdogFiresOnStall(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	start := time.Now()
-	err := StreamBody(ctx, cancel, 150*time.Millisecond, r, 200, w, &otel.Timing{})
+	err := StreamBody(ctx, cancel, 150*time.Millisecond, r, 200, w, &timing.Timing{})
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
@@ -114,7 +114,7 @@ func TestStreamBody_WatchdogFiresWithZeroPriorBytes(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 
-	err := StreamBody(ctx, cancel, 100*time.Millisecond, r, 200, w, &otel.Timing{})
+	err := StreamBody(ctx, cancel, 100*time.Millisecond, r, 200, w, &timing.Timing{})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrUpstreamIdleTimeout)
 }
@@ -125,7 +125,7 @@ func TestStreamBody_NonStreamingStatus(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 
-	err := StreamBody(ctx, cancel, 200*time.Millisecond, r, 500, w, &otel.Timing{})
+	err := StreamBody(ctx, cancel, 200*time.Millisecond, r, 500, w, &timing.Timing{})
 	var statusErr *providers.UpstreamStatusError
 	require.ErrorAs(t, err, &statusErr)
 	assert.Equal(t, 500, statusErr.Status)

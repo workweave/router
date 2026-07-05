@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"workweave/router/internal/observability"
-	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/providers/httputil"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/timing"
 )
 
 const DefaultBaseURL = "https://api.anthropic.com"
@@ -176,7 +176,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		upstream.Header.Set("accept", v)
 	}
 
-	t := otel.TimingFrom(ctx)
+	t := timing.TimingFrom(ctx)
 	t.StampUpstreamRequest()
 	resp, err := c.http.Do(upstream)
 	if err != nil {

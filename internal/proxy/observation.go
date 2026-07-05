@@ -7,6 +7,7 @@ import (
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/router"
+	"workweave/router/internal/timing"
 )
 
 // observationContext bundles per-request routing values shared by the OTel
@@ -87,7 +88,7 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 			}
 		}
 	}
-	if t := otel.TimingFrom(ctx); t != nil {
+	if t := timing.TimingFrom(ctx); t != nil {
 		if ms := t.Ms(&t.UpstreamRequestNanos, &t.UpstreamFirstByteNanos); ms > 0 {
 			obs.TTFTMs = &ms
 		}

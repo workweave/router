@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/providers/google"
 	"workweave/router/internal/router"
+	"workweave/router/internal/timing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,7 +62,7 @@ func TestProxy_StampsTimingMilestones(t *testing.T) {
 	defer upstream.Close()
 
 	c := google.NewClient("k", upstream.URL)
-	ctx, tm := otel.WithTiming(context.Background())
+	ctx, tm := timing.WithTiming(context.Background())
 	rec := httptest.NewRecorder()
 	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
 
