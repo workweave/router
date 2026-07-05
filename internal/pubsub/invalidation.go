@@ -43,27 +43,13 @@ func (n *InvalidationNotifier) NotifyInstallationChanged(installationID string) 
 	if installationID == "" {
 		return
 	}
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				observability.Get().Error(
-					"Panic publishing installation invalidation",
-					"installation_id", installationID,
-					"panic", r,
-				)
-			}
-		}()
-		ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
-		defer cancel()
+	log := observability.Get().With("installation_id", installationID)
+	observability.SafeGo(log, notifyTimeout, "NotifyInstallationChanged", func(ctx context.Context) {
 		result := n.publisher.Publish(ctx, &gcppubsub.Message{Data: []byte(installationID)})
 		if _, err := result.Get(ctx); err != nil {
-			observability.Get().Warn(
-				"Failed to publish installation invalidation",
-				"installation_id", installationID,
-				"err", err,
-			)
+			log.Warn("Failed to publish installation invalidation", "err", err)
 		}
-	}()
+	})
 }
 
 // Stop flushes buffered messages and shuts the publisher down. Must be

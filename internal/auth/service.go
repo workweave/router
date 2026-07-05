@@ -414,20 +414,10 @@ func userIdentityKey(email, claudeAccountUUID string) string {
 // fireMarkUsed runs the last_used_at update off the request path. Uses context.Background because
 // the parent ctx is often canceled (response written) before the UPDATE completes.
 func (s *Service) fireMarkUsed(apiKeyID string) {
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				observability.Get().Error("panic in fireMarkUsed", "panic", r, "api_key_id", apiKeyID)
-			}
-		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
+	log := observability.Get().With("api_key_id", apiKeyID)
+	observability.SafeGo(log, 2*time.Second, "fireMarkUsed", func(ctx context.Context) {
 		if err := s.apiKeys.MarkUsed(ctx, apiKeyID); err != nil {
-			observability.Get().Warn(
-				"Failed to mark router api key used",
-				"api_key_id", apiKeyID,
-				"err", err,
-			)
+			log.Warn("Failed to mark router api key used", "err", err)
 		}
-	}()
+	})
 }

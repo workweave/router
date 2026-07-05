@@ -64,12 +64,13 @@ func TestFireTelemetryRecoversFromPanic(t *testing.T) {
 		// fireTelemetry launches a goroutine; give it a moment to run and recover.
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {
-			if strings.Contains(buf.String(), "telemetry insert panicked") {
+			if strings.Contains(buf.String(), "Background goroutine panicked") {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
 	})
 
-	assert.Contains(t, buf.String(), "telemetry insert panicked")
+	assert.Contains(t, buf.String(), "Background goroutine panicked")
+	assert.Contains(t, buf.String(), "fireTelemetry")
 }

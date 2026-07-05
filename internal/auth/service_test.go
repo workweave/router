@@ -444,7 +444,8 @@ func TestService_VerifyAPIKey_RecoversFromMarkUsedPanic(t *testing.T) {
 	}, "a panicking MarkUsed must not crash the request path")
 
 	require.Eventually(t, func() bool {
-		return strings.Contains(buf.String(), "panic in fireMarkUsed")
+		return strings.Contains(buf.String(), "Background goroutine panicked") &&
+			strings.Contains(buf.String(), "fireMarkUsed")
 	}, 500*time.Millisecond, 10*time.Millisecond,
 		"the async fireMarkUsed goroutine must recover and log the panic")
 }

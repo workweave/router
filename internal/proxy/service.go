@@ -2654,19 +2654,16 @@ func (s *Service) reportHMMOutcome(ctx context.Context, res turnLoopResult, deci
 	if proxyErr != nil {
 		payload["error"] = proxyErr.Error()
 	}
-	log := observability.FromContext(ctx)
+	log := observability.FromContext(ctx).With("route_id", routeMetadata.RouteID)
 	if err := ctx.Err(); err != nil {
-		log.Debug("Skipping HMM outcome report for canceled request", "err", err, "route_id", routeMetadata.RouteID)
+		log.Debug("Skipping HMM outcome report for canceled request", "err", err)
 		return
 	}
-	routeID := routeMetadata.RouteID
-	go func() {
-		reportCtx, cancel := context.WithTimeout(context.Background(), hmmOutcomeReportTimeout)
-		defer cancel()
+	observability.SafeGo(log, hmmOutcomeReportTimeout, "reportHMMOutcome", func(reportCtx context.Context) {
 		if err := s.hmmOutcomeReporter.ReportOutcome(reportCtx, payload); err != nil {
-			log.Error("HMM outcome report failed", "err", err, "route_id", routeID)
+			log.Error("HMM outcome report failed", "err", err)
 		}
-	}()
+	})
 }
 
 // pinDecision rehydrates a router.Decision from a stored pin. Metadata is nil
@@ -3134,18 +3131,12 @@ func (s *Service) fireTelemetry(p InsertTelemetryParams) {
 	if s.telemetry == nil {
 		return
 	}
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				observability.Get().Error("telemetry insert panicked", "panic", r)
-			}
-		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	log := observability.Get().With("request_id", p.RequestID)
+	observability.SafeGo(log, 5*time.Second, "fireTelemetry", func(ctx context.Context) {
 		if err := s.telemetry.InsertRequestTelemetry(ctx, p); err != nil {
-			observability.Get().Debug("Telemetry insert failed", "err", err, "request_id", p.RequestID)
+			log.Debug("Telemetry insert failed", "err", err)
 		}
-	}()
+	})
 }
 
 // emitBilling debits the customer for one upstream call and, on switch turns
