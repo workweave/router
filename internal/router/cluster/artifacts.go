@@ -292,23 +292,29 @@ func LoadBundleFromDir(dir string, version string) (*Bundle, error) {
 	return loadBundleFromPath(os.DirFS(dir), version, ".")
 }
 
-func loadBundleFromPath(fsys fs.FS, version, dir string) (*Bundle, error) {
+// loadCoreArtifacts reads the three files common to every bundle format —
+// centroids.bin, model_registry.json, and the best-effort metadata.yaml —
+// and validates the declared embedding dimension. Shared by
+// loadBundleFromPath and loadBundleV1Only so a future fix to loading or
+// error-wrapping can't silently diverge between the production path and
+// the release-gate diff test.
+func loadCoreArtifacts(fsys fs.FS, version, dir string) (*Centroids, *ModelRegistry, *ArtifactMetadata, error) {
 	rawCentroids, err := fs.ReadFile(fsys, path.Join(dir, "centroids.bin"))
 	if err != nil {
-		return nil, fmt.Errorf("artifacts %s: read centroids.bin: %w", version, err)
+		return nil, nil, nil, fmt.Errorf("artifacts %s: read centroids.bin: %w", version, err)
 	}
 	centroids, err := loadCentroids(rawCentroids)
 	if err != nil {
-		return nil, fmt.Errorf("artifacts %s: %w", version, err)
+		return nil, nil, nil, fmt.Errorf("artifacts %s: %w", version, err)
 	}
 
 	rawRegistry, err := fs.ReadFile(fsys, path.Join(dir, "model_registry.json"))
 	if err != nil {
-		return nil, fmt.Errorf("artifacts %s: read model_registry.json: %w", version, err)
+		return nil, nil, nil, fmt.Errorf("artifacts %s: read model_registry.json: %w", version, err)
 	}
 	registry, err := loadRegistry(rawRegistry)
 	if err != nil {
-		return nil, fmt.Errorf("artifacts %s: %w", version, err)
+		return nil, nil, nil, fmt.Errorf("artifacts %s: %w", version, err)
 	}
 
 	// metadata.yaml is best-effort: a bundle without one still routes.
@@ -316,12 +322,21 @@ func loadBundleFromPath(fsys fs.FS, version, dir string) (*Bundle, error) {
 	if rawMeta, err := fs.ReadFile(fsys, path.Join(dir, "metadata.yaml")); err == nil {
 		var m ArtifactMetadata
 		if err := yaml.Unmarshal(rawMeta, &m); err != nil {
-			return nil, fmt.Errorf("artifacts %s: parse metadata.yaml: %w", version, err)
+			return nil, nil, nil, fmt.Errorf("artifacts %s: parse metadata.yaml: %w", version, err)
 		}
 		meta = &m
 	}
 
 	if err := validateDeclaredDim(version, centroids, meta); err != nil {
+		return nil, nil, nil, err
+	}
+
+	return centroids, registry, meta, nil
+}
+
+func loadBundleFromPath(fsys fs.FS, version, dir string) (*Bundle, error) {
+	centroids, registry, meta, err := loadCoreArtifacts(fsys, version, dir)
+	if err != nil {
 		return nil, err
 	}
 
@@ -417,21 +432,9 @@ func loadBundleFromPath(fsys fs.FS, version, dir string) (*Bundle, error) {
 // directory that also contains quality_means.json. Used by the diff
 // test to construct a v1-shaped Scorer from a dual-format bundle.
 func loadBundleV1Only(fsys fs.FS, version, dir string) (*Bundle, error) {
-	rawCentroids, err := fs.ReadFile(fsys, path.Join(dir, "centroids.bin"))
+	centroids, registry, meta, err := loadCoreArtifacts(fsys, version, dir)
 	if err != nil {
-		return nil, fmt.Errorf("artifacts %s: read centroids.bin: %w", version, err)
-	}
-	centroids, err := loadCentroids(rawCentroids)
-	if err != nil {
-		return nil, fmt.Errorf("artifacts %s: %w", version, err)
-	}
-	rawRegistry, err := fs.ReadFile(fsys, path.Join(dir, "model_registry.json"))
-	if err != nil {
-		return nil, fmt.Errorf("artifacts %s: read model_registry.json: %w", version, err)
-	}
-	registry, err := loadRegistry(rawRegistry)
-	if err != nil {
-		return nil, fmt.Errorf("artifacts %s: %w", version, err)
+		return nil, err
 	}
 	rawRankings, err := fs.ReadFile(fsys, path.Join(dir, "rankings.json"))
 	if err != nil {
@@ -440,17 +443,6 @@ func loadBundleV1Only(fsys fs.FS, version, dir string) (*Bundle, error) {
 	rankings, err := loadRankings(rawRankings)
 	if err != nil {
 		return nil, fmt.Errorf("artifacts %s: %w", version, err)
-	}
-	var meta *ArtifactMetadata
-	if rawMeta, err := fs.ReadFile(fsys, path.Join(dir, "metadata.yaml")); err == nil {
-		var m ArtifactMetadata
-		if err := yaml.Unmarshal(rawMeta, &m); err != nil {
-			return nil, fmt.Errorf("artifacts %s: parse metadata.yaml: %w", version, err)
-		}
-		meta = &m
-	}
-	if err := validateDeclaredDim(version, centroids, meta); err != nil {
-		return nil, err
 	}
 	return &Bundle{
 		Version:   version,
