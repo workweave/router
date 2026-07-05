@@ -420,6 +420,13 @@ type AnthropicSSETranslator struct {
 	thinkTagReasoning bool
 	splitter          thinkTagSplitter
 
+	// escapeNormalize repairs literal `\n`/`\t`/`\r` sequences that upstream
+	// models occasionally double-escape (`\\n` on the wire) in file-edit tool
+	// args (Edit/Write/MultiEdit). Off by default: the transform can corrupt
+	// legitimate source containing literal `\n`/`\t` (e.g. a Python string
+	// `"\\n"`).
+	escapeNormalize bool
+
 	// nudgeEmitted latches when finishStream emits the text-only recovery
 	// nudge, surfaced via Summary.
 	nudgeEmitted bool
@@ -509,6 +516,13 @@ func (t *AnthropicSSETranslator) WithRequestHadTools(hadTools bool) *AnthropicSS
 // chain-of-thought as inline content tags rather than reasoning_content.
 func (t *AnthropicSSETranslator) WithThinkTagReasoning(on bool) *AnthropicSSETranslator {
 	t.thinkTagReasoning = on
+	return t
+}
+
+// WithEscapeNormalize enables the escape-repair pass on file-edit tool
+// (Edit/Write/MultiEdit) args for the buffered non-streaming response path.
+func (t *AnthropicSSETranslator) WithEscapeNormalize(on bool) *AnthropicSSETranslator {
+	t.escapeNormalize = on
 	return t
 }
 
@@ -722,7 +736,7 @@ func (t *AnthropicSSETranslator) Finalize() error {
 		}
 	}
 
-	translated, issues, err := openAIToAnthropicResponse(body, t.requestModel, t.toolValidator, t.thinkTagReasoning)
+	translated, issues, err := openAIToAnthropicResponse(body, t.requestModel, t.toolValidator, t.thinkTagReasoning, t.escapeNormalize)
 	t.toolCallIssues = append(t.toolCallIssues, issues...)
 	if err != nil {
 		t.inner.Header().Set("Content-Type", "application/json")

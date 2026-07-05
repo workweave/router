@@ -5,7 +5,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"runtime/debug"
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
@@ -15,30 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
-
-type tracingWriter struct {
-	gin.ResponseWriter
-}
-
-func (t *tracingWriter) WriteHeader(code int) {
-	observability.Get().Debug("ResponseWriter WriteHeader called",
-		"code", code,
-		"already_written", t.ResponseWriter.Written(),
-		"current_status", t.ResponseWriter.Status(),
-		"stack", string(debug.Stack()),
-	)
-	t.ResponseWriter.WriteHeader(code)
-}
-
-func (t *tracingWriter) Write(b []byte) (int, error) {
-	if !t.ResponseWriter.Written() {
-		observability.Get().Debug("ResponseWriter implicit-200 via Write",
-			"bytes", len(b),
-			"stack", string(debug.Stack()),
-		)
-	}
-	return t.ResponseWriter.Write(b)
-}
 
 const maxBodyBytes = 10 * 1024 * 1024
 
@@ -71,8 +46,7 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 		ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		c.Request = c.Request.WithContext(ctx)
 
-		w := &tracingWriter{ResponseWriter: c.Writer}
-		if err := svc.ProxyMessages(c.Request.Context(), body, w, c.Request); err != nil {
+		if err := svc.ProxyMessages(c.Request.Context(), body, c.Writer, c.Request); err != nil {
 			cls, ok := proxy.ClassifyDispatchError(err)
 			if ok && cls.Kind == proxy.DispatchErrorUpstreamStatus {
 				if c.Writer.Written() {

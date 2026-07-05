@@ -46,7 +46,6 @@ import (
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/server"
-	"workweave/router/internal/translate"
 
 	_ "time/tzdata"
 
@@ -442,8 +441,8 @@ func main() {
 	} else {
 		logger.Info("Cluster scorer embedding concatenated stream (ROUTER_EMBED_ONLY_USER_MESSAGE=false)")
 	}
-	if config.GetOr("ROUTER_DEEPSEEK_ESCAPE_NORMALIZE", "false") == "true" {
-		translate.EnableEditEscapeNormalize = true
+	escapeNormalize := config.GetOr("ROUTER_DEEPSEEK_ESCAPE_NORMALIZE", "false") == "true"
+	if escapeNormalize {
 		logger.Info("Edit-tool escape-sequence repair enabled (ROUTER_DEEPSEEK_ESCAPE_NORMALIZE=true)")
 	}
 	emitter, err := buildOtelEmitter(string(deploymentMode))
@@ -658,6 +657,7 @@ func main() {
 		WithHardPinResolver(hardPinResolver).
 		WithPlannerEnabled(plannerEnabled).
 		WithPrefixTrimFreeSwitch(prefixTrimFreeSwitch).
+		WithEscapeNormalize(escapeNormalize).
 		WithEffortEscalation(effortEscalation).
 		WithBandSwap(bandSwapEnabled).
 		WithLoopEscalationConfig(loopEscalationEnabled, loopEscalationHoldoutPct).

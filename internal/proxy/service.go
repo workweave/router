@@ -79,6 +79,10 @@ type Service struct {
 	// turn and the switch handover is skipped. Kill switch:
 	// ROUTER_PREFIX_TRIM_FREE_SWITCH.
 	prefixTrimFreeSwitch bool
+	// escapeNormalize enables the escape-repair pass on file-edit tool
+	// (Edit/Write/MultiEdit) args for cross-format OpenAI-upstream responses.
+	// Off by default. Kill switch: ROUTER_DEEPSEEK_ESCAPE_NORMALIZE.
+	escapeNormalize bool
 	// hardPinExplore gates the Explore sub-agent hard-pin.
 	hardPinExplore bool
 	// hardPinProvider/hardPinModel route compaction (and, when hardPinExplore is
@@ -881,6 +885,14 @@ func (s *Service) WithPlannerEnabled(enabled bool) *Service {
 // window. Detection and the post-routing compaction handover are unaffected.
 func (s *Service) WithPrefixTrimFreeSwitch(enabled bool) *Service {
 	s.prefixTrimFreeSwitch = enabled
+	return s
+}
+
+// WithEscapeNormalize is the kill switch for the file-edit tool escape-repair
+// pass on cross-format OpenAI-upstream responses (see
+// translate.AnthropicSSETranslator.WithEscapeNormalize).
+func (s *Service) WithEscapeNormalize(enabled bool) *Service {
+	s.escapeNormalize = enabled
 	return s
 }
 
@@ -2007,6 +2019,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 					WithEstimatedInputTokens(feats.Tokens).
 					WithRequestHadTools(feats.HasTools).
 					WithThinkTagReasoning(catalog.ThinkTagReasoningFor(d.Model)).
+					WithEscapeNormalize(s.escapeNormalize).
 					WithToolValidator(toolValidator)
 			}
 			if err := translator.Prelude(env.Stream()); err != nil {
@@ -2058,6 +2071,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
 				WithEstimatedInputTokens(feats.Tokens).
 				WithRequestHadTools(feats.HasTools).
+				WithEscapeNormalize(s.escapeNormalize).
 				WithToolValidator(toolValidator)
 			if err := anthropicTr.Prelude(env.Stream()); err != nil {
 				log.Error("Anthropic SSE prelude failed (Gemini upstream)", "err", err)

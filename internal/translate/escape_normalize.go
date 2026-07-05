@@ -2,11 +2,6 @@ package translate
 
 import "strings"
 
-// EnableEditEscapeNormalize gates the escape-repair pass on file-edit tool
-// args. Off by default: the transform can corrupt legitimate source
-// containing literal `\n`/`\t` (e.g. a Python string `"\\n"`).
-var EnableEditEscapeNormalize bool
-
 // editToolNames is the set of tools whose args carry file content needing
 // exact whitespace round-tripping. Matched case-insensitively.
 var editToolNames = map[string]struct{}{
@@ -27,9 +22,11 @@ var editEscapableFields = map[string]struct{}{
 // models occasionally double-escape (`\\n` on the wire) in file-edit tool
 // args. Mutates `input` in place; no-op unless enabled, toolName is a
 // file-edit tool, and input is a JSON object. MultiEdit's nested `edits`
-// array entries are walked too.
-func normalizeEditEscapes(toolName string, input any) {
-	if !EnableEditEscapeNormalize {
+// array entries are walked too. The transform can corrupt legitimate source
+// containing literal `\n`/`\t` (e.g. a Python string `"\\n"`), so callers
+// must gate `enabled` behind an explicit opt-in.
+func normalizeEditEscapes(enabled bool, toolName string, input any) {
+	if !enabled {
 		return
 	}
 	if _, ok := editToolNames[strings.ToLower(toolName)]; !ok {

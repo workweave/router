@@ -165,14 +165,14 @@ func AnthropicToOpenAIError(body []byte) []byte {
 // OpenAIToAnthropicResponse converts a non-streaming OpenAI response to
 // Anthropic Messages format.
 func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
-	out, _, err := openAIToAnthropicResponse(body, requestModel, nil, false)
+	out, _, err := openAIToAnthropicResponse(body, requestModel, nil, false, false)
 	return out, err
 }
 
 // openAIToAnthropicResponse is the validator-aware variant: tool_use inputs
 // are checked/repaired against the request's tool schemas, returning one
 // toolcheck.Issue per offending block. A nil validator is syntax-check-only.
-func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *toolcheck.Validator, thinkTagReasoning bool) ([]byte, []toolcheck.Issue, error) {
+func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *toolcheck.Validator, thinkTagReasoning, escapeNormalize bool) ([]byte, []toolcheck.Issue, error) {
 	if !gjson.ValidBytes(body) {
 		return nil, nil, fmt.Errorf("unmarshal openai response: invalid JSON")
 	}
@@ -213,7 +213,7 @@ func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *
 	jw.Key("model")
 	jw.Str(model)
 	jw.Key("content")
-	issues := writeAnthropicContentFromOpenAI(jw, message, toolValidator, thinkTagReasoning)
+	issues := writeAnthropicContentFromOpenAI(jw, message, toolValidator, thinkTagReasoning, escapeNormalize)
 	jw.Key("stop_reason")
 	jw.Str(openAIFinishToAnthropicStopReason(finishReason))
 	jw.Key("stop_sequence")
@@ -233,7 +233,7 @@ func writeAnthropicThinkingBlock(jw *jsonWriter, thinking string) {
 	jw.EndObj()
 }
 
-func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolValidator *toolcheck.Validator, thinkTagReasoning bool) (issues []toolcheck.Issue) {
+func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolValidator *toolcheck.Validator, thinkTagReasoning, escapeNormalize bool) (issues []toolcheck.Issue) {
 	jw.Arr()
 	reasoning := message.Get("reasoning_content").String()
 	if reasoning == "" {
@@ -279,10 +279,10 @@ func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolV
 		}
 		argsStr := tc.Get("function.arguments").String()
 
-		if EnableEditEscapeNormalize && isEditToolName(name) {
+		if escapeNormalize && isEditToolName(name) {
 			var inputMap map[string]any
 			if json.Unmarshal([]byte(argsStr), &inputMap) == nil {
-				normalizeEditEscapes(name, inputMap)
+				normalizeEditEscapes(escapeNormalize, name, inputMap)
 				if b, err := json.Marshal(inputMap); err == nil {
 					argsStr = string(b)
 				}
