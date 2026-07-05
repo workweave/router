@@ -7,9 +7,10 @@ import "github.com/tidwall/gjson"
 type toolChoiceKind int
 
 const (
-	// toolChoiceAbsent covers a missing tool_choice as well as any shape this
-	// package doesn't recognize (unknown string, malformed object, empty
-	// named-tool name) — all of which every renderer treats as a no-op.
+	// toolChoiceAbsent means the tool_choice key is not present at all.
+	// Distinct from toolChoiceUnrecognized: Gemini 3.x treats true absence
+	// (and explicit auto) as "unforced" and upgrades to VALIDATED mode; a
+	// present-but-malformed value must not get the same upgrade.
 	toolChoiceAbsent toolChoiceKind = iota
 	toolChoiceAuto
 	// toolChoiceRequired is Anthropic's "any" / OpenAI's "required".
@@ -18,14 +19,22 @@ const (
 	// toolChoiceNamed pins a single tool by name (Anthropic's {"type":"tool"},
 	// OpenAI's {"type":"function"}); the name is returned alongside the kind.
 	toolChoiceNamed
+	// toolChoiceUnrecognized is a present tool_choice this package can't parse
+	// (unknown string/type, malformed object, empty named-tool name). Every
+	// renderer treats it as a no-op, same as toolChoiceAbsent, except the
+	// Gemini VALIDATED-mode gate, which must not treat it as unforced.
+	toolChoiceUnrecognized
 )
 
 // anthropicToolChoice parses an Anthropic-shape tool_choice field
 // ({"type":"auto"|"any"|"none"|"tool","name":"..."}) into a neutral kind.
 func anthropicToolChoice(body []byte) (toolChoiceKind, string) {
 	r := gjson.GetBytes(body, "tool_choice")
-	if !r.Exists() || !r.IsObject() {
+	if !r.Exists() {
 		return toolChoiceAbsent, ""
+	}
+	if !r.IsObject() {
+		return toolChoiceUnrecognized, ""
 	}
 	switch r.Get("type").String() {
 	case "auto":
@@ -37,11 +46,11 @@ func anthropicToolChoice(body []byte) (toolChoiceKind, string) {
 	case "tool":
 		name := r.Get("name")
 		if name.Type != gjson.String || name.String() == "" {
-			return toolChoiceAbsent, ""
+			return toolChoiceUnrecognized, ""
 		}
 		return toolChoiceNamed, name.String()
 	default:
-		return toolChoiceAbsent, ""
+		return toolChoiceUnrecognized, ""
 	}
 }
 
@@ -60,15 +69,15 @@ func openAIToolChoice(body []byte) (toolChoiceKind, string) {
 		case "none":
 			return toolChoiceNone, ""
 		default:
-			return toolChoiceAbsent, ""
+			return toolChoiceUnrecognized, ""
 		}
 	}
 	if r.IsObject() && r.Get("type").String() == "function" {
 		name := r.Get("function.name")
 		if name.Type != gjson.String || name.String() == "" {
-			return toolChoiceAbsent, ""
+			return toolChoiceUnrecognized, ""
 		}
 		return toolChoiceNamed, name.String()
 	}
-	return toolChoiceAbsent, ""
+	return toolChoiceUnrecognized, ""
 }

@@ -164,6 +164,38 @@ func TestPrepareGemini_FromAnthropic_ToolChoiceVariants(t *testing.T) {
 	}
 }
 
+// TestPrepareGemini_UnrecognizedToolChoiceDoesNotEnableValidatedMode guards a
+// regression from the tool_choice normalization: a present-but-malformed
+// tool_choice (unknown string, or an Anthropic object with an unknown type)
+// must NOT be treated the same as a truly absent tool_choice. On Gemini 3.x,
+// absent/auto upgrades to mode=VALIDATED; a malformed value must fall back to
+// legacy no-toolConfig behavior instead of silently getting that upgrade.
+func TestPrepareGemini_UnrecognizedToolChoiceDoesNotEnableValidatedMode(t *testing.T) {
+	tools := `"tools":[{"name":"bash","description":"b","input_schema":{"type":"object"}}]`
+
+	t.Run("openai_source_unknown_string", func(t *testing.T) {
+		body := []byte(`{"messages":[{"role":"user","content":"x"}],` + tools + `,"tool_choice":"bogus"}`)
+		env, err := translate.ParseOpenAI(body)
+		require.NoError(t, err)
+		prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+		require.NoError(t, err)
+		out := mustUnmarshal(t, prep.Body)
+		_, hasToolConfig := out["toolConfig"]
+		assert.False(t, hasToolConfig, "malformed tool_choice must not trigger VALIDATED mode")
+	})
+
+	t.Run("anthropic_source_unknown_type", func(t *testing.T) {
+		body := []byte(`{"messages":[{"role":"user","content":"x"}],` + tools + `,"tool_choice":{"type":"bogus"}}`)
+		env, err := translate.ParseAnthropic(body)
+		require.NoError(t, err)
+		prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+		require.NoError(t, err)
+		out := mustUnmarshal(t, prep.Body)
+		_, hasToolConfig := out["toolConfig"]
+		assert.False(t, hasToolConfig, "malformed tool_choice must not trigger VALIDATED mode")
+	})
+}
+
 func TestPrepareGemini_ReasoningEffortMapsToThinkingBudget(t *testing.T) {
 	// No target model => legacy (gemini-2.5) path: numeric thinkingBudget.
 	cases := map[string]int{"low": 1024, "medium": 8192, "high": 24576, "none": 0}
