@@ -1230,6 +1230,11 @@ var ErrProviderNotConfigured = errors.New("provider not configured")
 // avoid importing internal/translate directly (layering rule, root CLAUDE.md).
 var ErrRequestNotJSONObject = translate.ErrNotJSONObject
 
+// stripRoutingMarkerFromMessages is a seam over translate.StripRoutingMarkerFromMessages
+// so tests can force a strip failure without depending on a real reproducer;
+// prod code never overrides it.
+var stripRoutingMarkerFromMessages = translate.StripRoutingMarkerFromMessages
+
 // semanticCacheMaxBodyBytes caps how large a response the cache will store;
 // larger bodies stream through but skip the Store call to bound peak memory.
 const semanticCacheMaxBodyBytes = 1 << 20
@@ -1527,7 +1532,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Strip the routing marker prior responses injected as assistant text —
 	// clients echo it back verbatim, so left in place it accumulates in
 	// upstream context every turn.
-	body, stripErr := translate.StripRoutingMarkerFromMessages(body)
+	body, stripErr := stripRoutingMarkerFromMessages(body)
 	if stripErr != nil {
 		log.Error("Failed to strip routing marker from inbound messages", "err", stripErr)
 		return fmt.Errorf("strip routing marker: %w", stripErr)
@@ -3297,14 +3302,17 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
 
-	// Keep original bytes on strip failure: strippers return a nil body
-	// alongside the error, and this path logs-and-continues rather than aborts.
-	strippedBody, stripErr := translate.StripRoutingMarkerFromMessages(body)
+	strippedBody, stripErr := stripRoutingMarkerFromMessages(body)
 	if stripErr != nil {
 		log.Error("Failed to strip routing marker from OpenAI messages", "err", stripErr)
-	} else {
-		body = strippedBody
+		return fmt.Errorf("strip routing marker: %w", stripErr)
 	}
+	body = strippedBody
+
+	// Same for the one-click thumbs footer (and its signed rate URLs), which
+	// would otherwise shift assistant prefixes off the prompt cache.
+	// Best-effort: log-and-continue on failure rather than abort over cosmetic
+	// cleanup, matching the Anthropic Messages path.
 	strippedBody, stripErr = translate.StripFeedbackFooterFromMessages(body)
 	if stripErr != nil {
 		log.Error("Failed to strip feedback footer from OpenAI messages", "err", stripErr)
