@@ -224,60 +224,33 @@ func main() {
 
 	{
 		fireworksBaseURL := config.GetOr("FIREWORKS_BASE_URL", openaiCompatProvider.FireworksBaseURL)
-		fireworksKey := ""
-		if !byokOnly {
-			fireworksKey = config.GetOr("FIREWORKS_API_KEY", "")
-		}
-		providerMap[providers.ProviderFireworks] = openaiCompatProvider.NewClientWithModelIDMap(fireworksKey, fireworksBaseURL, upstreamIDsForProvider(providers.ProviderFireworks))
-		switch {
-		case byokOnly:
-			logger.Info("Fireworks provider enabled (BYOK only)", "base_url", fireworksBaseURL)
-		case fireworksKey != "":
-			envKeyedProviders[providers.ProviderFireworks] = struct{}{}
-			logger.Info("Fireworks provider enabled", "base_url", fireworksBaseURL)
-		default:
-			logger.Info("Fireworks provider registered (BYOK only — set FIREWORKS_API_KEY for deployment-level use)", "base_url", fireworksBaseURL)
-		}
+		registerDeploymentKeyedProvider(providerMap, envKeyedProviders, logger,
+			providers.ProviderFireworks, "Fireworks", "FIREWORKS_API_KEY", fireworksBaseURL, byokOnly,
+			func(key, baseURL string) providers.Client {
+				return openaiCompatProvider.NewClientWithModelIDMap(key, baseURL, upstreamIDsForProvider(providers.ProviderFireworks))
+			})
 	}
 
 	{
 		// DeepInfra uses HuggingFace-form model IDs vs. the router's slash-form
 		// slugs; modelIDMap comes from the catalog's per-binding UpstreamID.
 		deepInfraBaseURL := config.GetOr("DEEPINFRA_BASE_URL", openaiCompatProvider.DeepInfraBaseURL)
-		deepInfraKey := ""
-		if !byokOnly {
-			deepInfraKey = config.GetOr("DEEPINFRA_API_KEY", "")
-		}
-		providerMap[providers.ProviderDeepInfra] = openaiCompatProvider.NewClientWithModelIDMap(deepInfraKey, deepInfraBaseURL, upstreamIDsForProvider(providers.ProviderDeepInfra))
-		switch {
-		case byokOnly:
-			logger.Info("DeepInfra provider enabled (BYOK only)", "base_url", deepInfraBaseURL)
-		case deepInfraKey != "":
-			envKeyedProviders[providers.ProviderDeepInfra] = struct{}{}
-			logger.Info("DeepInfra provider enabled", "base_url", deepInfraBaseURL)
-		default:
-			logger.Info("DeepInfra provider registered (BYOK only — set DEEPINFRA_API_KEY for deployment-level use)", "base_url", deepInfraBaseURL)
-		}
+		registerDeploymentKeyedProvider(providerMap, envKeyedProviders, logger,
+			providers.ProviderDeepInfra, "DeepInfra", "DEEPINFRA_API_KEY", deepInfraBaseURL, byokOnly,
+			func(key, baseURL string) providers.Client {
+				return openaiCompatProvider.NewClientWithModelIDMap(key, baseURL, upstreamIDsForProvider(providers.ProviderDeepInfra))
+			})
 	}
 
 	{
 		// Makora uses DeepSeek-canonical model IDs vs. the router's slash-form
 		// slugs; modelIDMap comes from the catalog's per-binding UpstreamID.
 		makoraBaseURL := config.GetOr("MAKORA_BASE_URL", openaiCompatProvider.MakoraBaseURL)
-		makoraKey := ""
-		if !byokOnly {
-			makoraKey = config.GetOr("MAKORA_API_KEY", "")
-		}
-		providerMap[providers.ProviderMakora] = openaiCompatProvider.NewClientWithModelIDMap(makoraKey, makoraBaseURL, upstreamIDsForProvider(providers.ProviderMakora))
-		switch {
-		case byokOnly:
-			logger.Info("Makora provider enabled (BYOK only)", "base_url", makoraBaseURL)
-		case makoraKey != "":
-			envKeyedProviders[providers.ProviderMakora] = struct{}{}
-			logger.Info("Makora provider enabled", "base_url", makoraBaseURL)
-		default:
-			logger.Info("Makora provider registered (BYOK only — set MAKORA_API_KEY for deployment-level use)", "base_url", makoraBaseURL)
-		}
+		registerDeploymentKeyedProvider(providerMap, envKeyedProviders, logger,
+			providers.ProviderMakora, "Makora", "MAKORA_API_KEY", makoraBaseURL, byokOnly,
+			func(key, baseURL string) providers.Client {
+				return openaiCompatProvider.NewClientWithModelIDMap(key, baseURL, upstreamIDsForProvider(providers.ProviderMakora))
+			})
 	}
 
 	{
@@ -286,20 +259,11 @@ func main() {
 		// ordered fallbacks. Uses "Org/Model" IDs vs. the router's slash-form
 		// slugs; modelIDMap comes from the catalog's per-binding UpstreamID.
 		togetherBaseURL := config.GetOr("TOGETHER_BASE_URL", openaiCompatProvider.TogetherBaseURL)
-		togetherKey := ""
-		if !byokOnly {
-			togetherKey = config.GetOr("TOGETHER_API_KEY", "")
-		}
-		providerMap[providers.ProviderTogether] = openaiCompatProvider.NewClientWithModelIDMap(togetherKey, togetherBaseURL, upstreamIDsForProvider(providers.ProviderTogether))
-		switch {
-		case byokOnly:
-			logger.Info("Together provider enabled (BYOK only)", "base_url", togetherBaseURL)
-		case togetherKey != "":
-			envKeyedProviders[providers.ProviderTogether] = struct{}{}
-			logger.Info("Together provider enabled", "base_url", togetherBaseURL)
-		default:
-			logger.Info("Together provider registered (BYOK only — set TOGETHER_API_KEY for deployment-level use)", "base_url", togetherBaseURL)
-		}
+		registerDeploymentKeyedProvider(providerMap, envKeyedProviders, logger,
+			providers.ProviderTogether, "Together", "TOGETHER_API_KEY", togetherBaseURL, byokOnly,
+			func(key, baseURL string) providers.Client {
+				return openaiCompatProvider.NewClientWithModelIDMap(key, baseURL, upstreamIDsForProvider(providers.ProviderTogether))
+			})
 	}
 
 	{
@@ -309,40 +273,23 @@ func main() {
 		// applies. Expects dot-form model IDs; modelIDMap comes from the catalog.
 		bedrockRegion := config.GetOr("AWS_REGION", "us-east-1")
 		bedrockBaseURL := config.GetOr("BEDROCK_BASE_URL", openaiCompatProvider.BedrockMantleBaseURL(bedrockRegion))
-		bedrockKey := ""
-		if !byokOnly {
-			bedrockKey = config.GetOr("AWS_BEARER_TOKEN_BEDROCK", "")
-		}
-		providerMap[providers.ProviderBedrock] = openaiCompatProvider.NewClientWithModelIDMap(bedrockKey, bedrockBaseURL, upstreamIDsForProvider(providers.ProviderBedrock))
-		switch {
-		case byokOnly:
-			logger.Info("Bedrock provider enabled (BYOK only)", "base_url", bedrockBaseURL)
-		case bedrockKey != "":
-			envKeyedProviders[providers.ProviderBedrock] = struct{}{}
-			logger.Info("Bedrock provider enabled", "base_url", bedrockBaseURL, "region", bedrockRegion)
-		default:
-			logger.Info("Bedrock provider registered (BYOK only — set AWS_BEARER_TOKEN_BEDROCK for deployment-level use)", "base_url", bedrockBaseURL)
-		}
+		registerDeploymentKeyedProvider(providerMap, envKeyedProviders, logger,
+			providers.ProviderBedrock, "Bedrock", "AWS_BEARER_TOKEN_BEDROCK", bedrockBaseURL, byokOnly,
+			func(key, baseURL string) providers.Client {
+				return openaiCompatProvider.NewClientWithModelIDMap(key, baseURL, upstreamIDsForProvider(providers.ProviderBedrock))
+			},
+			"region", bedrockRegion)
 	}
 
 	{
 		// Native REST surface, required for multi-turn tool use against Gemini
 		// 3.x's opaque thought_signature field (not exposed via OpenAI-compat).
 		googleBaseURL := config.GetOr("GOOGLE_BASE_URL", googleProvider.NativeBaseURL)
-		googleKey := ""
-		if !byokOnly {
-			googleKey = config.GetOr("GOOGLE_API_KEY", "")
-		}
-		providerMap[providers.ProviderGoogle] = googleProvider.NewNativeClient(googleKey, googleBaseURL)
-		switch {
-		case byokOnly:
-			logger.Info("Google (Gemini) native provider enabled (BYOK only)", "base_url", googleBaseURL)
-		case googleKey != "":
-			envKeyedProviders[providers.ProviderGoogle] = struct{}{}
-			logger.Info("Google (Gemini) native provider enabled", "base_url", googleBaseURL)
-		default:
-			logger.Info("Google (Gemini) native provider registered (BYOK only — set GOOGLE_API_KEY for deployment-level use)", "base_url", googleBaseURL)
-		}
+		registerDeploymentKeyedProvider(providerMap, envKeyedProviders, logger,
+			providers.ProviderGoogle, "Google (Gemini) native", "GOOGLE_API_KEY", googleBaseURL, byokOnly,
+			func(key, baseURL string) providers.Client {
+				return googleProvider.NewNativeClient(key, baseURL)
+			})
 	}
 
 	availableProviders := make(map[string]struct{}, len(providerMap))
@@ -1333,6 +1280,39 @@ func envVarHint(provider string) string {
 // upstreamIDsForProvider maps public model ID -> upstream model ID for a
 // provider's bindings with a non-empty UpstreamID; nil if no rewriting is
 // needed (e.g. OpenRouter, where the slug IS the upstream ID).
+// registerDeploymentKeyedProvider resolves a provider's deployment-level API
+// key (respecting byokOnly), constructs its client via newClient, registers
+// it in providerMap, and logs its BYOK/keyed/passthrough state. Shared by the
+// providers whose registration collapses to "resolve key -> build client ->
+// three-way log switch" (Fireworks, DeepInfra, Makora, Together, Bedrock,
+// Google); OpenRouter and Anthropic/OpenAI have genuinely different gating
+// logic and stay bespoke. extraLogAttrs are appended only to the
+// deployment-keyed log line (e.g. Bedrock's region).
+func registerDeploymentKeyedProvider(
+	providerMap map[string]providers.Client,
+	envKeyedProviders map[string]struct{},
+	logger *slog.Logger,
+	name, displayName, keyEnvVar, baseURL string,
+	byokOnly bool,
+	newClient func(key, baseURL string) providers.Client,
+	extraLogAttrs ...any,
+) {
+	key := ""
+	if !byokOnly {
+		key = config.GetOr(keyEnvVar, "")
+	}
+	providerMap[name] = newClient(key, baseURL)
+	switch {
+	case byokOnly:
+		logger.Info(displayName+" provider enabled (BYOK only)", "base_url", baseURL)
+	case key != "":
+		envKeyedProviders[name] = struct{}{}
+		logger.Info(displayName+" provider enabled", append([]any{"base_url", baseURL}, extraLogAttrs...)...)
+	default:
+		logger.Info(displayName+" provider registered (BYOK only — set "+keyEnvVar+" for deployment-level use)", "base_url", baseURL)
+	}
+}
+
 func upstreamIDsForProvider(provider string) map[string]string {
 	out := make(map[string]string)
 	for _, m := range catalog.Models {
