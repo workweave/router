@@ -237,19 +237,7 @@ func (s *Service) handleForceModelCommand(
 	var msg string
 	if cmd.Clear {
 		if s.pinStore != nil && installationID != uuid.Nil {
-			expired := sessionpin.Pin{
-				SessionKey:     sessionKey,
-				Role:           role,
-				InstallationID: installationID,
-				Provider:       "",
-				Model:          "",
-				Reason:         "user_unforced",
-				TurnCount:      1,
-				PinnedUntil:    time.Now().Add(-time.Second),
-			}
-			// context.Background(): ctx may be canceled by the time the
-			// synthetic response is written; a canceled ctx would strand the prior pin.
-			if err := s.pinStore.Upsert(context.Background(), expired); err != nil {
+			if err := s.expireSessionPin(ctx, installationID, sessionKey, role, "user_unforced"); err != nil {
 				log.Error("/unforce-model: pin store upsert failed", "err", err)
 				return err
 			}

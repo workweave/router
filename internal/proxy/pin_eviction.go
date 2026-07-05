@@ -18,6 +18,36 @@ import (
 // without flushing a working pin's prompt cache.
 const pinEvictionStrikeThreshold = 2
 
+// expireSessionPin writes an already-expired sessionpin.Pin so the next
+// turn's loadPin discards it and the session re-routes via the cluster
+// scorer. Shared by force-model clear, loop-break/no-progress/
+// degenerate-response eviction, and the upstream-error strike threshold —
+// call sites differ only in the Reason string recorded for observability.
+//
+// context.Background(): callers invoke this once the response has already
+// streamed or is about to be written, so the request ctx may already be
+// canceled; the eviction write must still land or the next turn inherits
+// the stale pin.
+func (s *Service) expireSessionPin(
+	ctx context.Context,
+	installationID uuid.UUID,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+	role string,
+	reason string,
+) error {
+	expired := sessionpin.Pin{
+		SessionKey:     sessionKey,
+		Role:           role,
+		InstallationID: installationID,
+		Provider:       "",
+		Model:          "",
+		Reason:         reason,
+		TurnCount:      1,
+		PinnedUntil:    time.Now().Add(-time.Second),
+	}
+	return s.pinStore.Upsert(context.Background(), expired)
+}
+
 // evictPinAfterDegenerateResponse expires the session pin after a degenerate
 // response (end_turn, no tool calls, too few output tokens). The current
 // turn already streamed and can't be retried, but evicting ensures the next
@@ -47,17 +77,7 @@ func (s *Service) evictPinAfterDegenerateResponse(
 
 	log := observability.FromContext(ctx)
 
-	expired := sessionpin.Pin{
-		SessionKey:     sessionKey,
-		Role:           role,
-		InstallationID: installationID,
-		Provider:       "",
-		Model:          "",
-		Reason:         "degenerate_response",
-		TurnCount:      1,
-		PinnedUntil:    time.Now().Add(-time.Second),
-	}
-	if err := s.pinStore.Upsert(context.Background(), expired); err != nil {
+	if err := s.expireSessionPin(ctx, installationID, sessionKey, role, "degenerate_response"); err != nil {
 		log.Error("pin eviction after degenerate response failed", "err", err, "role", role)
 		return
 	}
@@ -136,17 +156,7 @@ func (s *Service) maybeEvictPinAfterUpstreamErr(
 
 	// Expire via a PinnedUntil in the past, same pattern as loop-break /
 	// no-progress / force-model, so loadPin discards it next turn.
-	expired := sessionpin.Pin{
-		SessionKey:     sessionKey,
-		Role:           role,
-		InstallationID: installationID,
-		Provider:       "",
-		Model:          "",
-		Reason:         "upstream_error_strike_threshold",
-		TurnCount:      1,
-		PinnedUntil:    time.Now().Add(-time.Second),
-	}
-	if err := s.pinStore.Upsert(context.Background(), expired); err != nil {
+	if err := s.expireSessionPin(ctx, installationID, sessionKey, role, "upstream_error_strike_threshold"); err != nil {
 		log.Error("pin eviction upsert failed", "err", err, "role", role)
 		return
 	}
