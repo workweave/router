@@ -2,6 +2,8 @@ package translate_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"workweave/router/internal/translate"
@@ -237,6 +239,98 @@ func TestAssistantToolCallSignatures_IncludesRouterNudgeEntries(t *testing.T) {
 	assert.Equal(t, "Bash", sigs[1].Name)
 	assert.Equal(t, "Read", sigs[2].Name)
 	assert.Equal(t, sigs[0].InputHash, sigs[1].InputHash, "identical nudge args produce identical hash")
+}
+
+// TestAssistantToolCallArgsPreview_AlignsWithSignatures_Anthropic reproduces
+// proxy.detectToolCallLoop's exact usage: window the trailing N entries of
+// AssistantToolCallSignatures(), find the offending index within that window,
+// then fetch AssistantToolCallArgsPreview(start, ...) — start expressed as an
+// index into the SAME sequence AssistantToolCallSignatures walked — and check
+// the preview entries line up name-for-name with sigs[start:]. The body
+// interleaves empty-input tool_use blocks (filtered out of the signature
+// sequence) among the real ones. Before the fix, ArgsPreview only skipped
+// nameless blocks (not empty-input ones), so it walked a longer, differently
+// filtered sequence: an offset valid against sigs pointed at the wrong
+// entries in the preview.
+func TestAssistantToolCallArgsPreview_AlignsWithSignatures_Anthropic(t *testing.T) {
+	const windowSize = 10
+	const maxRepeats = 5
+
+	var content []any
+	id := 0
+	nextID := func() string {
+		id++
+		return fmt.Sprintf("%d", id)
+	}
+	// 3 "Setup" calls with distinct args, then 5 identical "Loop" calls — each
+	// immediately followed by an empty-input tool_use, which Signatures
+	// filters out but the pre-fix ArgsPreview did not.
+	for i := 0; i < 3; i++ {
+		content = append(content,
+			map[string]any{"type": "tool_use", "id": nextID(), "name": "Setup", "input": map[string]any{"step": i}},
+			map[string]any{"type": "tool_use", "id": nextID(), "name": "Read", "input": map[string]any{}},
+		)
+	}
+	for i := 0; i < 5; i++ {
+		content = append(content,
+			map[string]any{"type": "tool_use", "id": nextID(), "name": "Loop", "input": map[string]any{"n": 1}},
+			map[string]any{"type": "tool_use", "id": nextID(), "name": "Read", "input": map[string]any{}},
+		)
+	}
+	body := mustMarshalJSON(t, map[string]any{
+		"model":      "claude-sonnet-4-6",
+		"messages":   []any{map[string]any{"role": "assistant", "content": content}},
+		"max_tokens": 256,
+	})
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 8, "the 8 empty-input Read blocks must be filtered out of the signature sequence")
+
+	// Mirror proxy.detectToolCallLoop's windowing exactly.
+	start := 0
+	if len(sigs) > windowSize {
+		start = len(sigs) - windowSize
+	}
+	require.Equal(t, 0, start, "8 sigs fits within the 10-wide window, so detectToolCallLoop windows from the start")
+	window := sigs[start:]
+	counts := make(map[string]int, len(window))
+	offendingIdx := -1
+	for i, s := range window {
+		key := s.Name + "\x00" + s.InputHash
+		counts[key]++
+		if counts[key] >= maxRepeats {
+			offendingIdx = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, offendingIdx, "the 5 identical Loop calls must trip the repeat threshold")
+	require.Equal(t, "Loop", window[offendingIdx].Name)
+
+	// detectToolCallLoop passes `start` (not offendingIdx) as the offset — it
+	// wants the whole window dumped, not just the tail from the trip point.
+	preview := env.AssistantToolCallArgsPreview(start, 200)
+	require.Len(t, preview, len(sigs)-start,
+		"preview window must contain exactly as many entries as the aligned signature window")
+	for i, s := range sigs[start:] {
+		require.True(t, strings.HasPrefix(preview[i], s.Name+":"),
+			"preview[%d] = %q must describe the same tool call as sigs[%d] = %q (index alignment)", i, preview[i], start+i, s.Name)
+	}
+	// Pin down the exact entries the loop-detector log line cares about: 3
+	// distinct Setup previews followed by 5 identical Loop previews, in
+	// order — proving the empty-input Read blocks did not shift ArgsPreview's
+	// output relative to Signatures'.
+	require.Equal(t, []string{
+		`Setup:{"step":0}`,
+		`Setup:{"step":1}`,
+		`Setup:{"step":2}`,
+		`Loop:{"n":1}`,
+		`Loop:{"n":1}`,
+		`Loop:{"n":1}`,
+		`Loop:{"n":1}`,
+		`Loop:{"n":1}`,
+	}, preview)
 }
 
 // mustMarshalJSON is shared with force_model_test.go; redeclared here would be

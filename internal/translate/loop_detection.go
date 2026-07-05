@@ -19,103 +19,34 @@ type ToolCallSig struct {
 // AssistantToolCallArgsPreview returns short previews of the raw argument
 // JSON for each assistant tool call, in order, starting at offset. Used to
 // log the window when a loop trips, so real loops (identical args) can be
-// told apart from false positives (distinct args, colliding hash).
+// told apart from false positives (distinct args, colliding hash). offset is
+// an index into the same filtered sequence AssistantToolCallSignatures
+// produces (see assistantToolCallEntry) — the two must never filter
+// differently, or an offset computed against one is meaningless against the
+// other.
 func (e *RequestEnvelope) AssistantToolCallArgsPreview(offset, maxLen int) []string {
 	switch e.format {
 	case FormatAnthropic:
-		return anthropicAssistantToolCallArgsPreview(e.body, offset, maxLen)
+		return assistantToolCallArgsPreview(anthropicAssistantToolCallEntries(e.body), offset, maxLen)
 	case FormatOpenAI:
-		return openAIAssistantToolCallArgsPreview(e.body, offset, maxLen)
+		return assistantToolCallArgsPreview(openAIAssistantToolCallEntries(e.body), offset, maxLen)
 	default:
 		return nil
 	}
 }
 
-func anthropicAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []string {
+func assistantToolCallArgsPreview(entries []assistantToolCallEntry, offset, maxLen int) []string {
 	var out []string
-	idx := 0
-	msgs := gjson.GetBytes(body, "messages")
-	if !msgs.IsArray() {
-		return nil
+	for i, entry := range entries {
+		if i < offset {
+			continue
+		}
+		preview := entry.InputRaw
+		if len(preview) > maxLen {
+			preview = preview[:maxLen] + "…"
+		}
+		out = append(out, entry.Name+":"+preview)
 	}
-	msgs.ForEach(func(_, msg gjson.Result) bool {
-		role := msg.Get("role").String()
-		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
-			out = nil
-			idx = 0
-			return true
-		}
-		if role != "assistant" {
-			return true
-		}
-		content := msg.Get("content")
-		if !content.IsArray() {
-			return true
-		}
-		content.ForEach(func(_, block gjson.Result) bool {
-			if block.Get("type").String() != "tool_use" {
-				return true
-			}
-			name := block.Get("name").String()
-			if name == "" {
-				return true
-			}
-			if idx >= offset {
-				preview := block.Get("input").Raw
-				if len(preview) > maxLen {
-					preview = preview[:maxLen] + "…"
-				}
-				out = append(out, name+":"+preview)
-			}
-			idx++
-			return true
-		})
-		return true
-	})
-	return out
-}
-
-func openAIAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []string {
-	var out []string
-	idx := 0
-	msgs := gjson.GetBytes(body, "messages")
-	if !msgs.IsArray() {
-		return nil
-	}
-	msgs.ForEach(func(_, msg gjson.Result) bool {
-		role := msg.Get("role").String()
-		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
-			out = nil
-			idx = 0
-			return true
-		}
-		if role != "assistant" {
-			return true
-		}
-		toolCalls := msg.Get("tool_calls")
-		if !toolCalls.IsArray() {
-			return true
-		}
-		toolCalls.ForEach(func(_, tc gjson.Result) bool {
-			if tc.Get("type").String() != "function" {
-				return true
-			}
-			name := tc.Get("function.name").String()
-			if name == "" {
-				return true
-			}
-			if idx >= offset {
-				preview := tc.Get("function.arguments").String()
-				if len(preview) > maxLen {
-					preview = preview[:maxLen] + "…"
-				}
-				out = append(out, name+":"+preview)
-			}
-			idx++
-			return true
-		})
-		return true
-	})
 	return out
 }
 
@@ -136,12 +67,23 @@ func (e *RequestEnvelope) AssistantToolCallSignatures() []ToolCallSig {
 	}
 }
 
-func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
+// assistantToolCallEntry is one filtered assistant tool invocation: a callee
+// name plus its raw argument JSON. AssistantToolCallSignatures and
+// AssistantToolCallArgsPreview both derive from the same
+// {anthropic,openAI}AssistantToolCallEntries walk, so they can never diverge
+// on which entries survive filtering — an index into one is always valid
+// against the other.
+type assistantToolCallEntry struct {
+	Name     string
+	InputRaw string
+}
+
+func anthropicAssistantToolCallEntries(body []byte) []assistantToolCallEntry {
 	msgs := gjson.GetBytes(body, "messages")
 	if !msgs.IsArray() {
 		return nil
 	}
-	var sigs []ToolCallSig
+	var entries []assistantToolCallEntry
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
 		// A genuine user-typed prompt breaks the loop (human intervened).
@@ -149,7 +91,7 @@ func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
 		// Claude Code's injected wrapper blocks, so normal tool rounds
 		// don't reset the window.
 		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
-			sigs = nil
+			entries = nil
 			return true
 		}
 		if role != "assistant" {
@@ -175,26 +117,26 @@ func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
 			if !isMeaningfulInput(input) {
 				return true
 			}
-			sigs = append(sigs, ToolCallSig{Name: name, InputHash: hashCanonicalJSON(input.Raw)})
+			entries = append(entries, assistantToolCallEntry{Name: name, InputRaw: input.Raw})
 			return true
 		})
 		return true
 	})
-	return sigs
+	return entries
 }
 
-func openAIAssistantToolCallSigs(body []byte) []ToolCallSig {
+func openAIAssistantToolCallEntries(body []byte) []assistantToolCallEntry {
 	msgs := gjson.GetBytes(body, "messages")
 	if !msgs.IsArray() {
 		return nil
 	}
-	var sigs []ToolCallSig
+	var entries []assistantToolCallEntry
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
-		// See anthropicAssistantToolCallSigs: a genuine user-typed prompt
+		// See anthropicAssistantToolCallEntries: a genuine user-typed prompt
 		// resets the window; injected wrappers and tool_result turns do not.
 		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
-			sigs = nil
+			entries = nil
 			return true
 		}
 		if role != "assistant" {
@@ -219,11 +161,30 @@ func openAIAssistantToolCallSigs(body []byte) []ToolCallSig {
 			if !isMeaningfulInputRaw(argsRaw) {
 				return true
 			}
-			sigs = append(sigs, ToolCallSig{Name: name, InputHash: hashCanonicalJSON(argsRaw)})
+			entries = append(entries, assistantToolCallEntry{Name: name, InputRaw: argsRaw})
 			return true
 		})
 		return true
 	})
+	return entries
+}
+
+func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
+	return sigsFromEntries(anthropicAssistantToolCallEntries(body))
+}
+
+func openAIAssistantToolCallSigs(body []byte) []ToolCallSig {
+	return sigsFromEntries(openAIAssistantToolCallEntries(body))
+}
+
+func sigsFromEntries(entries []assistantToolCallEntry) []ToolCallSig {
+	if entries == nil {
+		return nil
+	}
+	sigs := make([]ToolCallSig, len(entries))
+	for i, entry := range entries {
+		sigs[i] = ToolCallSig{Name: entry.Name, InputHash: hashCanonicalJSON(entry.InputRaw)}
+	}
 	return sigs
 }
 
