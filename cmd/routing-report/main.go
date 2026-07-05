@@ -31,7 +31,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cluster"
@@ -85,7 +84,7 @@ type staticEmbedder struct {
 func buildEmbedder(hdr embHeader, probes []probe, vecs [][]float32) *staticEmbedder {
 	byText := make(map[string][]float32, len(probes))
 	for i, p := range probes {
-		byText[tailTruncate(p.Text, maxPromptChars)] = vecs[i]
+		byText[cluster.TailTruncate(p.Text, maxPromptChars)] = vecs[i]
 	}
 	return &staticEmbedder{id: hdr.EmbedderID, dim: hdr.EmbedDim, byText: byText}
 }
@@ -99,19 +98,6 @@ func (s *staticEmbedder) Embed(_ context.Context, text string) ([]float32, error
 }
 func (s *staticEmbedder) ID() string { return s.id }
 func (s *staticEmbedder) Dim() int   { return s.dim }
-
-// tailTruncate keeps the last maxChars bytes of s, skipping any partial UTF-8
-// continuation byte. Must match the Scorer's helper byte-for-byte.
-func tailTruncate(s string, maxChars int) string {
-	if len(s) <= maxChars {
-		return s
-	}
-	cut := len(s) - maxChars
-	for cut < len(s) && (s[cut]&0xC0) == 0x80 {
-		cut++
-	}
-	return s[cut:]
-}
 
 func truncForErr(s string) string {
 	if len(s) > 60 {
@@ -227,7 +213,8 @@ func routeCorpus(artifactsDir, version string, probes []probe, embedder *staticE
 			bundle.EmbedderID(), embedder.id)
 	}
 	providers := availableProviders(bundle)
-	cfg := cluster.Config{TopP: topP, MaxPromptChars: 1024, EmbedTimeout: 5 * time.Second}
+	cfg := cluster.DefaultConfig()
+	cfg.TopP = topP
 	scorer, err := cluster.NewScorer(bundle, cfg, embedder, providers)
 	if err != nil {
 		return nil, fmt.Errorf("new scorer: %w", err)

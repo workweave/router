@@ -431,7 +431,7 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	start := time.Now()
 	log := observability.Get()
 
-	text := tailTruncate(req.PromptText, s.cfg.MaxPromptChars)
+	text := TailTruncate(req.PromptText, s.cfg.MaxPromptChars)
 	truncated := len(req.PromptText) > s.cfg.MaxPromptChars
 
 	embedCtx, cancel := context.WithTimeout(ctx, s.cfg.EmbedTimeout)
@@ -982,8 +982,8 @@ func runnerUp(scores map[string]float32, order []string, exclude string) (string
 	return bestModel, bestScore
 }
 
-// tailTruncate keeps the last maxChars bytes, snapping to a UTF-8 boundary.
-func tailTruncate(s string, maxChars int) string {
+// TailTruncate keeps the last maxChars bytes, snapping to a UTF-8 boundary.
+func TailTruncate(s string, maxChars int) string {
 	if len(s) <= maxChars {
 		return s
 	}

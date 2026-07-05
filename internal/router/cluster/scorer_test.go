@@ -844,13 +844,13 @@ func (s *slowEmbedder) ID() string { return EmbedderJinaV2 }
 func (s *slowEmbedder) Dim() int { return EmbedDim }
 
 func TestTailTruncate(t *testing.T) {
-	got := tailTruncate("abcdef", 3)
+	got := TailTruncate("abcdef", 3)
 	assert.Equal(t, "def", got)
 
-	assert.Equal(t, "ab", tailTruncate("ab", 5))
+	assert.Equal(t, "ab", TailTruncate("ab", 5))
 
 	in := "héllo"
-	got = tailTruncate(in, 4)
+	got = TailTruncate(in, 4)
 	assert.True(t, len(got) <= 4)
 	assert.True(t, strings.HasSuffix(in, got))
 	for _, r := range got {
