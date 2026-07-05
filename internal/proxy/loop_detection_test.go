@@ -111,6 +111,7 @@ func TestDetectToolCallLoop_AlternatingPairStillTripsOnRepeats(t *testing.T) {
 type toolCall struct {
 	name  string
 	input map[string]any
+	id    string // optional; auto-generated as toolu_N when empty
 }
 
 func buildBodyWithToolCalls(t *testing.T, calls []toolCall) []byte {
@@ -120,6 +121,9 @@ func buildBodyWithToolCalls(t *testing.T, calls []toolCall) []byte {
 	}
 	for i, c := range calls {
 		id := "toolu_" + itoa(i)
+		if c.id != "" {
+			id = c.id
+		}
 		msgs = append(msgs,
 			map[string]any{"role": "assistant", "content": []any{
 				map[string]any{"type": "tool_use", "id": id, "name": c.name, "input": c.input},
@@ -400,4 +404,43 @@ func TestHandleLoopEscalation_NilInstallationSkipsHoldout(t *testing.T) {
 
 	assert.Empty(t, events.events, "nil installation cannot record an event row")
 	assert.Empty(t, pins.upserts, "nil installation cannot pin either — but it must not be counted as holdout")
+}
+
+func TestDetectToolCallLoop_NudgeFalsePositive(t *testing.T) {
+	// Regression test for PR #531: nudge sigs now count toward loop detection.
+	// A model that alternates text-only turns (each producing a nudge) with
+	// real distinct tool calls should NOT trip the loop detector — it is making
+	// genuine progress. But with nudges counted and the frequency-based algorithm,
+	// 5 nudge sigs in a 9-call window fires the break incorrectly.
+	//
+	// The nudge always emits:
+	//   Name: "Bash"
+	//   Input: {"command": routerNudgeCommand, "description": "router recovery nudge..."}
+	// routerNudgeCommand is a const so the InputHash is always the same.
+	nudgeInput := map[string]any{
+		"command":     "echo '[router] previous turn produced no tool_use; use Edit/Write/Read/Bash/Grep — do not respond with prose or thinking tags only.'",
+		"description": "router recovery nudge: previous turn had no tool_use",
+	}
+	calls := []toolCall{
+		{name: "Bash", input: nudgeInput, id: "toolu_router_nudge_1"},                                     // nudge 1
+		{name: "Read", input: map[string]any{"file_path": "/a.go"}},                                       // real progress
+		{name: "Bash", input: nudgeInput, id: "toolu_router_nudge_2"},                                     // nudge 2
+		{name: "Edit", input: map[string]any{"file_path": "/b.go", "old_string": "x", "new_string": "y"}}, // real progress
+		{name: "Bash", input: nudgeInput, id: "toolu_router_nudge_3"},                                     // nudge 3
+		{name: "Bash", input: map[string]any{"command": "go test ./..."}},                                 // real Bash
+		{name: "Bash", input: nudgeInput, id: "toolu_router_nudge_4"},                                     // nudge 4
+		{name: "Read", input: map[string]any{"file_path": "/c.go"}},                                       // real progress
+		{name: "Bash", input: nudgeInput, id: "toolu_router_nudge_5"},                                     // nudge 5 — no false positive with fix
+	}
+	body := buildBodyWithToolCalls(t, calls)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	loop, sig, _ := detectToolCallLoop(env)
+	// This SHOULD be false — the model made real progress between every nudge.
+	// Currently it fires as true because nudge sigs count toward the frequency
+	// detector and 5 identical (Bash, H_nudge) sigs appear in the 9-call window.
+	assert.False(t, loop,
+		"a model alternating nudges with distinct real tool calls must not trip the loop detector; "+
+			"got sig=%+v", sig)
 }

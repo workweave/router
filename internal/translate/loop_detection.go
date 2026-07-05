@@ -106,6 +106,17 @@ func anthropicAssistantToolCallEntries(body []byte) []assistantToolCallEntry {
 				return true
 			}
 			name := block.Get("name").String()
+			// Skip router-synthesized recovery nudges. Nudges carry a constant
+			// command string (routerNudgeCommand), so their InputHash never
+			// changes. Including them in the frequency-based detectToolCallLoop
+			// causes false positives: a model that alternates text-only turns
+			// (each producing a nudge) with real distinct tool calls accumulates
+			// 5 identical nudge sigs in the window and trips the break despite
+			// making genuine progress. Consecutive nudges (stuck session) are
+			// caught separately by detectConsecutiveNudgeLoop in the proxy layer.
+			if strings.HasPrefix(block.Get("id").String(), "toolu_router_nudge_") {
+				return true
+			}
 			if name == "" {
 				return true
 			}
