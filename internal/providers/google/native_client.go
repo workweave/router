@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/providers/httputil"
 	"workweave/router/internal/proxy"
@@ -121,31 +120,8 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 	w.WriteHeader(resp.StatusCode)
 
 	if resp.StatusCode >= 400 {
-		var snip [1024]byte
-		n, _ := io.ReadFull(resp.Body, snip[:])
-		if n > 0 {
-			t.StampUpstreamFirstByte()
-		}
-		_, snipWriteErr := w.Write(snip[:n])
-		rest, copyErr := io.Copy(w, resp.Body)
-		if copyErr == nil {
-			t.StampUpstreamEOF()
-		}
-		logUpstreamStatus(
-			"Upstream Google returned error status",
-			resp.StatusCode,
-			"routed_model", decision.Model,
-			"streaming", stream,
-			"body_preview", string(snip[:n]),
-			"body_total_bytes", int64(n)+rest,
-		)
-		if snipWriteErr != nil {
-			return snipWriteErr
-		}
-		if copyErr != nil {
-			return copyErr
-		}
-		return &providers.UpstreamStatusError{Status: resp.StatusCode}
+		return httputil.WritePassthroughError(w, resp, t.StampUpstreamFirstByte, t.StampUpstreamEOF,
+			"Upstream Google returned error status", "routed_model", decision.Model, "streaming", stream)
 	}
 
 	// Output-progress watchdog: StreamBody's byte-idle watchdog resets on ANY
@@ -207,37 +183,10 @@ func (c *NativeClient) Passthrough(ctx context.Context, prep providers.PreparedR
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 	if resp.StatusCode >= 400 {
-		var snip [1024]byte
-		n, _ := io.ReadFull(resp.Body, snip[:])
-		_, snipWriteErr := w.Write(snip[:n])
-		rest, copyErr := io.Copy(w, resp.Body)
-		logUpstreamStatus(
-			"Upstream Google returned error status (passthrough)",
-			resp.StatusCode,
-			"path", r.URL.Path,
-			"body_preview", string(snip[:n]),
-			"body_total_bytes", int64(n)+rest,
-		)
-		if snipWriteErr != nil {
-			return snipWriteErr
-		}
-		if copyErr != nil {
-			return copyErr
-		}
-		return &providers.UpstreamStatusError{Status: resp.StatusCode}
+		return httputil.WritePassthroughError(w, resp, nil, nil, "Upstream Google returned error status (passthrough)", "path", r.URL.Path)
 	}
 	_, err = io.Copy(w, resp.Body)
 	return err
-}
-
-// logUpstreamStatus logs non-2xx upstream responses with a body preview.
-func logUpstreamStatus(msg string, status int, attrs ...any) {
-	merged := append([]any{"status", status}, attrs...)
-	if status >= 500 || (status >= 400 && status != http.StatusTooManyRequests) {
-		observability.Get().Error(msg, merged...)
-		return
-	}
-	observability.Get().Warn(msg, merged...)
 }
 
 // applyAPIKey sets x-goog-api-key, preferring BYOK credentials over the deployment-level key.

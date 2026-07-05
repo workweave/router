@@ -235,7 +235,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		// headers then stalls the body (header timeout no longer applies).
 		mark, stop := httputil.StartIdleWatchdog(ctx, cancel, idleTimeout)
 		body := &progressReader{r: resp.Body, mark: mark}
-		bufBody, totalRead, drainErr := readCapped(body, providers.MaxBufferedErrorBytes)
+		bufBody, totalRead, drainErr := httputil.ReadCapped(body, providers.MaxBufferedErrorBytes)
 		stop()
 		if errors.Is(context.Cause(ctx), httputil.ErrUpstreamIdleTimeout) {
 			logStreamStall(decision.Model, path, idleTimeout, totalRead, httputil.ErrUpstreamIdleTimeout)
@@ -246,16 +246,16 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		if drainErr == nil {
 			t.StampUpstreamEOF()
 		}
-		logUpstreamStatus(
+		httputil.LogUpstreamStatus(
 			"Upstream OpenAI returned error status",
 			resp.StatusCode,
 			"base_url", c.baseURL,
 			"routed_model", decision.Model,
-			"body_preview", previewBytes(bufBody),
+			"body_preview", httputil.PreviewBytes(bufBody),
 			"body_total_bytes", totalRead,
 		)
 		errHeaders := http.Header{}
-		providers.CopyUpstreamHeaders(headerCapture{errHeaders}, resp)
+		providers.CopyUpstreamHeaders(httputil.HeaderCapture{H: errHeaders}, resp)
 		return &providers.UpstreamErrorResponse{
 			Status:  resp.StatusCode,
 			Headers: errHeaders,
@@ -419,70 +419,10 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 	if resp.StatusCode >= 400 {
-		var snip [1024]byte
-		n, _ := io.ReadFull(resp.Body, snip[:])
-		_, snipWriteErr := w.Write(snip[:n])
-		rest, copyErr := io.Copy(w, resp.Body)
-		logUpstreamStatus(
-			"Upstream OpenAI returned error status (passthrough)",
-			resp.StatusCode,
-			"base_url", c.baseURL,
-			"path", r.URL.Path,
-			"body_preview", string(snip[:n]),
-			"body_total_bytes", int64(n)+rest,
-		)
-		if snipWriteErr != nil {
-			return snipWriteErr
-		}
-		if copyErr != nil {
-			return copyErr
-		}
-		return &providers.UpstreamStatusError{Status: resp.StatusCode}
+		return httputil.WritePassthroughError(w, resp, nil, nil, "Upstream OpenAI returned error status (passthrough)", "base_url", c.baseURL, "path", r.URL.Path)
 	}
 	_, err = io.Copy(w, resp.Body)
 	return err
-}
-
-// readCapped reads up to limit bytes into a buffer, then drains the rest
-// (up to maxDrain, discarded) to bound failover latency on a large error body.
-func readCapped(r io.Reader, limit int) ([]byte, int64, error) {
-	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
-	totalRead := int64(len(prefix))
-	if err != nil {
-		return prefix, totalRead, err
-	}
-	const maxDrain = 1 << 20 // 1 MiB
-	rest, drainErr := io.Copy(io.Discard, io.LimitReader(r, maxDrain))
-	totalRead += rest
-	return prefix, totalRead, drainErr
-}
-
-// previewBytes returns the first 1KB of body as a string for logging.
-func previewBytes(body []byte) string {
-	const previewLimit = 1024
-	if len(body) > previewLimit {
-		return string(body[:previewLimit])
-	}
-	return string(body)
-}
-
-// headerCapture is a minimal http.ResponseWriter used to reuse
-// providers.CopyUpstreamHeaders against an http.Header we own.
-type headerCapture struct{ h http.Header }
-
-func (c headerCapture) Header() http.Header       { return c.h }
-func (c headerCapture) Write([]byte) (int, error) { return 0, nil }
-func (c headerCapture) WriteHeader(int)           {}
-
-// logUpstreamStatus logs non-2xx responses at ERROR, except 429 (routine
-// rate-limit signal handled via failover), logged at WARN.
-func logUpstreamStatus(msg string, status int, attrs ...any) {
-	merged := append([]any{"status", status}, attrs...)
-	if status >= 500 || (status >= 400 && status != http.StatusTooManyRequests) {
-		observability.Get().Error(msg, merged...)
-		return
-	}
-	observability.Get().Warn(msg, merged...)
 }
 
 var _ providers.Client = (*Client)(nil)
