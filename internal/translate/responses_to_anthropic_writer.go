@@ -318,7 +318,7 @@ func (t *ResponsesToAnthropicWriter) handleOutputItemAdded(data []byte) error {
 		// reconciledStopReason demotes a terminal tool_use claim with no
 		// surviving block to end_turn.
 		t.suppressed[oi] = struct{}{}
-		observability.Get().Error(
+		observability.Get().Warn(
 			"ResponsesToAnthropic dropping nameless function_call",
 			"request_model", t.requestModel,
 			"call_id", item.Get("call_id").String(),
@@ -912,7 +912,7 @@ func (t *ResponsesToAnthropicWriter) emitValidatedToolArgsDelta(oi, index int, f
 			if len(preview) > previewMax {
 				preview = preview[:previewMax]
 			}
-			observability.Get().Error(
+			observability.Get().Warn(
 				"ResponsesToAnthropic tool_use args failed JSON validation — substituting empty args",
 				"block_index", index,
 				"request_model", t.requestModel,

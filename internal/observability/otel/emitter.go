@@ -3,7 +3,6 @@ package otel
 import (
 	"bytes"
 	"context"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,6 +17,8 @@ import (
 	logsv1 "go.opentelemetry.io/proto/otlp/logs/v1"
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
+
+	"workweave/router/internal/observability"
 )
 
 // EmitterConfig controls the emitter's async export pipeline.
@@ -175,7 +176,7 @@ func (e *Emitter) Shutdown(c context.Context) error {
 	}
 
 	if n := e.dropped.Load(); n > 0 {
-		slog.Warn("Dropped spans during emitter lifetime", "count", n)
+		observability.Get().Warn("Dropped spans during emitter lifetime", "count", n)
 	}
 
 	return nil
@@ -263,7 +264,7 @@ func (e *Emitter) exportBatch(spans []*tracev1.Span) {
 
 	body, err := proto.Marshal(req)
 	if err != nil {
-		slog.Warn("Failed to marshal OTLP export request", "err", err)
+		observability.Get().Warn("Failed to marshal OTLP export request", "err", err)
 		return
 	}
 	e.post(e.endpoint, body)
@@ -282,7 +283,7 @@ func (e *Emitter) exportLogBatch(records []*logsv1.LogRecord) {
 
 	body, err := proto.Marshal(req)
 	if err != nil {
-		slog.Warn("Failed to marshal OTLP log export request", "err", err)
+		observability.Get().Warn("Failed to marshal OTLP log export request", "err", err)
 		return
 	}
 	e.post(e.logEndpoint, body)
@@ -293,7 +294,7 @@ func (e *Emitter) exportLogBatch(records []*logsv1.LogRecord) {
 func (e *Emitter) post(endpoint string, body []byte) {
 	httpReq, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		slog.Warn("Failed to create OTLP export HTTP request", "err", err)
+		observability.Get().Warn("Failed to create OTLP export HTTP request", "err", err)
 		return
 	}
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
@@ -303,12 +304,12 @@ func (e *Emitter) post(endpoint string, body []byte) {
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		slog.Warn("OTLP export request failed", "err", err)
+		observability.Get().Warn("OTLP export request failed", "err", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		slog.Warn("OTLP export returned non-2xx status", "status", resp.StatusCode)
+		observability.Get().Warn("OTLP export returned non-2xx status", "status", resp.StatusCode)
 	}
 }

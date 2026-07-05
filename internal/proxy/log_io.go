@@ -46,7 +46,7 @@ func logInboundToolTraffic(log *slog.Logger, env *translate.RequestEnvelope) {
 	for _, s := range sigs {
 		names = append(names, s.Name)
 	}
-	log.Info("inbound tool_use history",
+	log.Debug("inbound tool_use history",
 		"total_tool_calls", len(sigs),
 		"tool_names", names,
 		"tail_window_args", args,
@@ -136,7 +136,7 @@ func logAssistantOutputSummary(
 		names = append(names, tc.Name)
 		args = append(args, preview(tc.ArgsJSON, 160))
 	}
-	log.Info("assistant output summary",
+	log.Debug("assistant output summary",
 		"text_blocks", textBlocks,
 		"thinking_blocks", thinkingBlocks,
 		"tool_use_count", len(toolCalls),
