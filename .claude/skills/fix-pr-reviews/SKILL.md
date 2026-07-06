@@ -150,6 +150,7 @@ For each thread where `isResolved: false` AND `isOutdated: false`, classify into
 | Fix | Code style/convention | Apply consistently |
 | Fix | Refactoring suggestion (clear, single obvious approach) | Implement if clear |
 | Fix | Nitpicks | Fix if straightforward |
+| Fix | Bot comments about comment length / doc brevity | Apply as-is — the bot's suggested replacement text is authoritative; these are objective conciseness improvements, not subjective style calls |
 | Decline | False positive / incorrect suggestion | Reply with explanation, don't change code |
 | Decline | Already handled elsewhere | Reply pointing to where it's handled |
 | Decline | Would make code worse | Reply explaining the trade-off |
