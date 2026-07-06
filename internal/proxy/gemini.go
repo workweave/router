@@ -92,6 +92,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		HasTools:             feats.HasTools,
 		HasImages:            feats.HasImages,
 		PromptText:           promptText,
+		ConversationMessages: env.ConversationMessages(),
 		EnabledProviders:     s.enabledProvidersForRequest(ctx, providers.ProviderGoogle, r.Header),
 		ExcludedModels:       s.excludedModelsForRequest(ctx),
 		PreferredModels:      s.preferredModelsForRequest(ctx),

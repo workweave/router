@@ -26,7 +26,7 @@ type Candidate struct {
 type Query struct {
 	RouteID              string
 	PromptText           string
-	TurnIndex            int
+	ConversationMessages []router.ConversationMessage
 	EstimatedInputTokens int
 	HasTools             bool
 	HasImages            bool
@@ -161,7 +161,7 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 	res, err := r.decider.Decide(ctx, Query{
 		RouteID:              requestRouteID,
 		PromptText:           req.PromptText,
-		TurnIndex:            0,
+		ConversationMessages: req.ConversationMessages,
 		EstimatedInputTokens: req.EstimatedInputTokens,
 		HasTools:             req.HasTools,
 		HasImages:            req.HasImages,

@@ -9,10 +9,20 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"workweave/router/internal/router"
 )
 
 // DefaultTimeout bounds a single delegated policy decision.
 const DefaultTimeout = 3 * time.Second
+
+const (
+	maxRouteMessages           = 96
+	maxRouteMessageTextChars   = 3000
+	maxRouteMessageTotalChars  = 48000
+	maxRouteToolCallInputKeys  = 24
+	maxRouteToolCallInputChars = 80
+)
 
 type HTTPDecider struct {
 	baseURL string
@@ -68,12 +78,25 @@ func (d *HTTPDecider) ReportOutcome(ctx context.Context, payload map[string]inte
 type routeRequest struct {
 	RouteID              string            `json:"route_id"`
 	PromptText           string            `json:"prompt_text"`
+	LatestUserText       string            `json:"latest_user_text,omitempty"`
 	TurnIndex            int               `json:"turn_index"`
+	ConversationMessages []routeMessage    `json:"conversation_messages,omitempty"`
 	EstimatedInputTokens int               `json:"estimated_input_tokens"`
 	HasTools             bool              `json:"has_tools"`
 	HasImages            bool              `json:"has_images"`
 	CandidateModels      []string          `json:"candidate_models"`
 	CandidateProviders   map[string]string `json:"candidate_providers"`
+}
+
+type routeMessage struct {
+	Role      string          `json:"role"`
+	Text      string          `json:"text,omitempty"`
+	ToolCalls []routeToolCall `json:"tool_calls,omitempty"`
+}
+
+type routeToolCall struct {
+	Name      string   `json:"name,omitempty"`
+	InputKeys []string `json:"input_keys,omitempty"`
 }
 
 type routeResponse struct {
@@ -100,10 +123,13 @@ func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
 		models = append(models, c.RosterID)
 		providers[c.RosterID] = c.Provider
 	}
+	messages := routeMessages(q.ConversationMessages)
 	body, err := json.Marshal(routeRequest{
 		RouteID:              q.RouteID,
 		PromptText:           q.PromptText,
-		TurnIndex:            q.TurnIndex,
+		LatestUserText:       latestUserText(messages),
+		TurnIndex:            turnIndex(messages),
+		ConversationMessages: messages,
 		EstimatedInputTokens: q.EstimatedInputTokens,
 		HasTools:             q.HasTools,
 		HasImages:            q.HasImages,
@@ -159,6 +185,106 @@ func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
 		DisplayMarker: parsed.DisplayMarker,
 		Debug:         parsed.Debug,
 	}, nil
+}
+
+func routeMessages(messages []router.ConversationMessage) []routeMessage {
+	if len(messages) == 0 {
+		return nil
+	}
+	start := 0
+	if len(messages) > maxRouteMessages {
+		start = len(messages) - maxRouteMessages
+	}
+	reversed := make([]routeMessage, 0, len(messages)-start)
+	totalText := 0
+	for i := len(messages) - 1; i >= start; i-- {
+		msg := messages[i]
+		role := routeRole(msg.Role)
+		if role == "" {
+			continue
+		}
+		text := clipRouteText(msg.Text, maxRouteMessageTextChars)
+		if totalText+len(text) > maxRouteMessageTotalChars {
+			remaining := maxRouteMessageTotalChars - totalText
+			if remaining <= 0 {
+				text = ""
+			} else {
+				text = clipRouteText(text, remaining)
+			}
+		}
+		totalText += len(text)
+		calls := make([]routeToolCall, 0, len(msg.ToolCalls))
+		for _, call := range msg.ToolCalls {
+			keys := call.InputKeys
+			if len(keys) > maxRouteToolCallInputKeys {
+				keys = keys[:maxRouteToolCallInputKeys]
+			}
+			inputKeys := make([]string, 0, len(keys))
+			for _, key := range keys {
+				if clipped := clipRouteText(key, maxRouteToolCallInputChars); clipped != "" {
+					inputKeys = append(inputKeys, clipped)
+				}
+			}
+			calls = append(calls, routeToolCall{
+				Name:      clipRouteText(call.Name, maxRouteToolCallInputChars),
+				InputKeys: inputKeys,
+			})
+		}
+		if text == "" && len(calls) == 0 {
+			continue
+		}
+		reversed = append(reversed, routeMessage{
+			Role:      role,
+			Text:      text,
+			ToolCalls: calls,
+		})
+	}
+	out := make([]routeMessage, 0, len(reversed))
+	for i := len(reversed) - 1; i >= 0; i-- {
+		out = append(out, reversed[i])
+	}
+	return out
+}
+
+func routeRole(role string) string {
+	switch strings.TrimSpace(strings.ToLower(role)) {
+	case "system", "developer", "user", "assistant":
+		return strings.TrimSpace(strings.ToLower(role))
+	case "model":
+		return "assistant"
+	default:
+		return ""
+	}
+}
+
+func clipRouteText(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	return strings.TrimSpace(text[:limit])
+}
+
+func latestUserText(messages []routeMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" && strings.TrimSpace(messages[i].Text) != "" {
+			return strings.TrimSpace(messages[i].Text)
+		}
+	}
+	return ""
+}
+
+func turnIndex(messages []routeMessage) int {
+	count := 0
+	for _, msg := range messages {
+		if msg.Role == "user" {
+			count++
+		}
+	}
+	if count <= 1 {
+		return 0
+	}
+	return count - 1
 }
 
 var _ Decider = (*HTTPDecider)(nil)
