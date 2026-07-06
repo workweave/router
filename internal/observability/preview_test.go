@@ -25,7 +25,21 @@ func TestPreview_ZeroOrNegativeLimit(t *testing.T) {
 func TestPreview_TruncatesWithEllipsis(t *testing.T) {
 	got := observability.Preview("abcdefghij", 5)
 	assert.True(t, strings.HasSuffix(got, "…"), "expected ellipsis suffix, got %q", got)
-	assert.LessOrEqual(t, len(got), 5+len("…"))
+	assert.LessOrEqual(t, len(got), 5, "ellipsis must be reserved out of n, not appended on top of it")
+}
+
+// TestPreview_NeverExceedsHardCap pins the fix for a real regression caught
+// in review: migrated callers like toolcheck.truncateDetail(maxDetailBytes)
+// and the Anthropic meta-preview log field previously had a strict n-byte
+// cap with no ellipsis. Preview must reserve room for the ellipsis inside n
+// rather than appending it on top, or those callers silently overshoot
+// their documented limit.
+func TestPreview_NeverExceedsHardCap(t *testing.T) {
+	long := strings.Repeat("x", 10_000)
+	for _, n := range []int{1, 2, 3, 4, 5, 48, 160, 200, 300, 320, 500, 1000} {
+		got := observability.Preview(long, n)
+		assert.LessOrEqualf(t, len(got), n, "Preview(%d) produced %d bytes, exceeding the hard cap", n, len(got))
+	}
 }
 
 func TestPreview_DoesNotSplitMultiByteRune(t *testing.T) {
