@@ -1,0 +1,32 @@
+cmd/router/main.go
+  s_ad266a1f33b81c::t_788ff0ed6e2f61 620-621
+  s_ad266a1f33b81c::t_5fbee7d492b1b0 484-488
+.env.example
+  s_ad266a1f33b81c::t_7283305be191d5 127-136
+internal/proxy/service.go
+  s_ad266a1f33b81c::t_449ac292dfbeba 2739-2743
+  s_ad266a1f33b81c::t_fdf1fc592a2c31 4
+  s_ad266a1f33b81c::t_78c3e7b63328c5 141-151
+  s_ad266a1f33b81c::t_c3f23f6e5dc00f 1603-1716
+  s_ad266a1f33b81c::t_24ebc5ce3e6d82 886-890
+  s_ad266a1f33b81c::t_d49019b4064755 920-935
+  s_ad266a1f33b81c::t_9052e95d67aa87 2150-2159
+internal/proxy/cyber_refusal_internal_test.go
+  s_ad266a1f33b81c::t_a654bfe24a508b 1-199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "284ff990108847bb088c035fb6a110fdb1126c19",
+  "prompts": {},
+  "sessions": {
+    "s_ad266a1f33b81c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "38da743a-ec24-4e46-9146-bce9c32e91cc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
