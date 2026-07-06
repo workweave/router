@@ -1,0 +1,48 @@
+internal/router/planner/policy_test.go
+  s_035d3d44682683::t_cfc4415815ab7b 88-129
+internal/sqlc/models.go
+  s_035d3d44682683::t_25fe24ca657e0b 154-167,232-295
+internal/router/planner/policy.go
+  s_035d3d44682683::t_29bd9f102dd8d2 70-80
+  s_035d3d44682683::t_392a986debf773 146-151
+internal/proxy/planner_telemetry_internal_test.go
+  s_035d3d44682683::t_633df900b284a7 1-83
+internal/postgres/telemetry.go
+  s_035d3d44682683::t_a37f3602c1c92a 109-116
+db/queries/model_router_request_telemetry.sql
+  s_035d3d44682683::t_b653f854f801ca 146-153
+  s_035d3d44682683::t_abc37a77eac0b2 83-90
+  s_035d3d44682683::t_ec3e41c3517e61 23-26
+internal/proxy/service.go
+  s_035d3d44682683::t_90c3bfa44c11e1 2495
+  s_035d3d44682683::t_bef40100e974fc 2572-2578
+  s_035d3d44682683::t_849454686dba0f 4070
+  s_035d3d44682683::t_6b095f5ab36abb 4126-4129
+  s_035d3d44682683::t_e24efaac79f453 2656-2677
+db/migrations/0032_telemetry-planner-ev-shadow.up.sql
+  s_035d3d44682683::t_81a76732693c23 1-45
+internal/proxy/telemetry.go
+  s_035d3d44682683::t_18d2835c2e9fe8 105-119
+db/migrations/0032_telemetry-planner-ev-shadow.down.sql
+  s_035d3d44682683::t_385873ef9ea875 1-21
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_035d3d44682683::t_25fe24ca657e0b 866-873,929-936,942-1003,1028-1031,1088-1095,1151-1158,1218-1224
+internal/proxy/turnloop.go
+  s_035d3d44682683::t_4b7efe9671f01b 620-628,633
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "46b254788397125799ea5a28de47cff47dd6d3c3",
+  "prompts": {},
+  "sessions": {
+    "s_035d3d44682683": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5c55d20d-8d65-432d-a371-d871e40baee0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

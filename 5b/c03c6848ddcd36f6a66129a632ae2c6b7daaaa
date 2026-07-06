@@ -1,0 +1,22 @@
+internal/router/percallband/state_snapshot_test.go
+  s_e314738a9195df::t_0a98d1e51b25fe 1-11,16-109
+  s_e314738a9195df::t_882707913c8493 12-15
+internal/router/percallband/state_snapshot.go
+  s_e314738a9195df::t_953007bd8b1323 1-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "5bc03c6848ddcd36f6a66129a632ae2c6b7daaaa",
+  "prompts": {},
+  "sessions": {
+    "s_e314738a9195df": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "17bb5105-1a4b-4d8b-8633-f796bbc7df06",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
