@@ -654,10 +654,8 @@ func TestService_SessionPin_OpenAI_ForceModelCommandStreamShape(t *testing.T) {
 }
 
 func TestService_SessionPin_OpenAI_ToolResultShortCircuit(t *testing.T) {
-	// Trailing role=="tool" → turntype.ToolResult. With the tool-result scoring
-	// kill switch OFF, a pinned tool_result turn short-circuits the scorer and
-	// reuses the pin verbatim (the legacy #82 hot path). The default (scorer
-	// runs, MainLoop parity) is covered by the turnloop_test.go cases.
+	// Kill switch OFF: pinned tool_result reuses the pin verbatim (legacy #82 path).
+	// Default (scorer runs) is covered by turnloop_test.go.
 	const toolResultBody = `{
 		"model":"gpt-4o",
 		"messages":[
