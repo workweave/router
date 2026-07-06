@@ -1667,8 +1667,7 @@ func detectRefusalSignal(b []byte) bool {
 }
 
 // maybeRepinOnRefusal re-pins the session off the refusing model post-turn
-// so subsequent turns route to a non-refusing model. No-op when the flag is
-// off, no refusal was observed, or no fallback model can be resolved.
+// so subsequent turns route to a non-refusing model.
 func (s *Service) maybeRepinOnRefusal(ctx context.Context, obs *refusalObserver, sessionKey [sessionpin.SessionKeyLen]byte, role string, served router.Decision) {
 	if obs == nil || !obs.refused || s.pinStore == nil {
 		return
