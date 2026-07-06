@@ -1690,9 +1690,8 @@ func (s *Service) maybeRepinOnRefusal(ctx context.Context, obs *refusalObserver,
 		return
 	}
 	log := observability.FromContext(ctx)
-	// Prefer the scorer's runner-up (PairedModel) as the re-pin target; else the
-	// configured fallback, resolving its provider from the catalog. context.Background():
-	// the request ctx may already be canceled here (response written, client gone).
+	// Prefer the scorer's runner-up (PairedModel); use context.Background() because
+	// the request ctx may already be canceled when the response has been written.
 	fbModel, fbProvider := s.cyberRefusalFallbackModel, ""
 	if existing, found, err := s.pinStore.Get(context.Background(), sessionKey, role); err == nil && found && existing.PairedModel != "" {
 		fbModel, fbProvider = existing.PairedModel, existing.PairedProvider
