@@ -1,0 +1,19 @@
+.claude/skills/fix-pr-reviews/SKILL.md
+  s_ca193d6cfeab4a::t_4263377e660c8b 153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "94b2bbf643a6674415952bb20ef90fe3a8f28c7f",
+  "prompts": {},
+  "sessions": {
+    "s_ca193d6cfeab4a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "942a65d8-2cbc-4d61-9502-bbb89526d81e",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
