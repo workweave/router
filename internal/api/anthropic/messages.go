@@ -94,7 +94,7 @@ func stashClientIdentity(ctx context.Context, h http.Header, body []byte) contex
 	}
 	observability.Get().Debug("anthropic stashClientIdentity",
 		"meta_raw_len", len(metaRaw),
-		"meta_raw_preview", truncate(metaRaw, 200),
+		"meta_raw_preview", observability.Preview(metaRaw, 200),
 		"parsed_email_present", meta.Email != "",
 		"parsed_account_present", meta.AccountID != "",
 		"parsed_device_present", meta.DeviceID != "",
@@ -106,13 +106,6 @@ func stashClientIdentity(ctx context.Context, h http.Header, body []byte) contex
 		"header_name_present", h.Get("X-Weave-User-Name") != "",
 	)
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
 }
 
 // anthropicErrorType maps a classified dispatch error to the Anthropic

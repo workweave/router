@@ -2,10 +2,10 @@ package postgres
 
 import (
 	"context"
-	"math"
 	"time"
 
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/sqlc"
 
 	"github.com/google/uuid"
@@ -17,17 +17,8 @@ import (
 // micros is the storage representation only.
 const usdPerMicro = 1.0 / 1_000_000.0
 
-// usdToMicros rounds a float64 USD value to BIGINT micros (USD x 1e6) for
-// persistence. NaN/Inf collapse to 0 — we never want to write nonsense.
-func usdToMicros(f float64) int64 {
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0
-	}
-	return int64(math.Round(f * 1_000_000))
-}
-
-// microsToUSD is the inverse of usdToMicros, used when projecting stored
-// telemetry rows back into the proxy domain types.
+// microsToUSD is the inverse of catalog.USDToMicros, used when projecting
+// stored telemetry rows back into the proxy domain types.
 func microsToUSD(micros int64) float64 {
 	return float64(micros) * usdPerMicro
 }
@@ -66,10 +57,10 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		EmbedInput:             p.EmbedInput,
 		InputTokens:            p.InputTokens,
 		OutputTokens:           p.OutputTokens,
-		RequestedInputCostUsd:  usdToMicros(p.RequestedInputCostUSD),
-		RequestedOutputCostUsd: usdToMicros(p.RequestedOutputCostUSD),
-		ActualInputCostUsd:     usdToMicros(p.ActualInputCostUSD),
-		ActualOutputCostUsd:    usdToMicros(p.ActualOutputCostUSD),
+		RequestedInputCostUsd:  catalog.USDToMicros(p.RequestedInputCostUSD),
+		RequestedOutputCostUsd: catalog.USDToMicros(p.RequestedOutputCostUSD),
+		ActualInputCostUsd:     catalog.USDToMicros(p.ActualInputCostUSD),
+		ActualOutputCostUsd:    catalog.USDToMicros(p.ActualOutputCostUSD),
 		RouteLatencyMs:         p.RouteLatencyMs,
 		UpstreamLatencyMs:      p.UpstreamLatencyMs,
 		TotalLatencyMs:         p.TotalLatencyMs,

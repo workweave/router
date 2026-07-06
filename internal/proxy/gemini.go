@@ -78,7 +78,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		"message_count", feats.MessageCount,
 		"has_tools", feats.HasTools,
 		"total_input_tokens", feats.Tokens,
-		"prompt_preview", preview(promptText, 200),
+		"prompt_preview", observability.Preview(promptText, 200),
 	)
 
 	logInboundRequestDiagnostics(log, env)

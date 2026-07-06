@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 
+	"workweave/router/internal/observability"
+
 	"github.com/tidwall/gjson"
 )
 
@@ -229,17 +231,12 @@ func classifyLastMessageOpenAI(role string) string {
 	}
 }
 
-// previewText returns the first previewMaxChars with newlines collapsed to spaces.
+// previewText collapses newlines to spaces, then truncates to previewMaxChars.
 func previewText(text string) string {
 	if text == "" {
 		return ""
 	}
-	text = strings.Join(strings.Fields(text), " ")
-	runes := []rune(text)
-	if len(runes) <= previewMaxChars {
-		return text
-	}
-	return string(runes[:previewMaxChars]) + "…"
+	return observability.Preview(strings.Join(strings.Fields(text), " "), previewMaxChars)
 }
 
 // anthropicLastUserMessage walks messages backwards for the last user entry.

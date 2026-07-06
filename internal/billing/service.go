@@ -2,7 +2,6 @@ package billing
 
 import (
 	"context"
-	"math"
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router/catalog"
@@ -226,9 +225,5 @@ func warnOnUnknownPricing(p DebitInferenceParams) {
 func computeNotionalMicros(p DebitInferenceParams) int64 {
 	inUSD := catalog.EffectiveInputCost(p.InputTokens, p.CacheCreation, p.CacheRead, p.Pricing.InputUSDPer1M, p.Pricing, p.Provider)
 	outUSD := catalog.EffectiveOutputCost(p.OutputTokens, p.Pricing.OutputUSDPer1M)
-	total := inUSD + outUSD
-	if math.IsNaN(total) || math.IsInf(total, 0) || total < 0 {
-		return 0
-	}
-	return int64(math.Round(total * 1_000_000))
+	return catalog.USDToMicros(inUSD + outUSD)
 }

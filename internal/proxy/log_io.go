@@ -7,23 +7,6 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// preview returns a log-safe excerpt of s, truncated to n bytes with an
-// ellipsis suffix. Full bodies stay behind LOG_LEVEL=debug.
-func preview(s string, n int) string {
-	if s == "" || n <= 0 {
-		return ""
-	}
-	if len(s) <= n {
-		return s
-	}
-	// Trim on a rune boundary so we don't slice a multi-byte codepoint.
-	cut := s[:n]
-	if i := strings.LastIndexAny(cut, " \n\t"); i > n/2 {
-		cut = cut[:i]
-	}
-	return cut + "…"
-}
-
 // logInboundToolTraffic logs names + short arg previews of the last few
 // assistant tool_use calls, to correlate a broken turn without dumping the
 // full body. Gemini envelopes are skipped — preview only knows Anthropic +

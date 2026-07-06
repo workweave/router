@@ -353,10 +353,7 @@ func detailFromError(err error) string {
 }
 
 func truncateDetail(s string) string {
-	if len(s) <= maxDetailBytes {
-		return s
-	}
-	return s[:maxDetailBytes]
+	return observability.Preview(s, maxDetailBytes)
 }
 
 // firstLeaf walks Causes to the first leaf error.

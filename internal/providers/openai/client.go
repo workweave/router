@@ -285,59 +285,35 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		}
 	}
 
-	// Manual stream loop for per-chunk diagnostics; non-debug takes the fast path.
-	if !log.Enabled(ctx, slog.LevelDebug) {
-		body := &progressReader{r: resp.Body}
-		streamErr := httputil.StreamBody(ctx, cancel, idleTimeout, body, status, w, t)
-		if errors.Is(streamErr, httputil.ErrUpstreamIdleTimeout) || errors.Is(streamErr, httputil.ErrUpstreamOutputStall) {
-			logStreamStall(decision.Model, path, c.stallBudgetFor(prep.Endpoint, streamErr), body.n, streamErr)
-		}
-		return streamErr
-	}
-
-	mark, stop := httputil.StartIdleWatchdog(ctx, cancel, idleTimeout)
-	defer stop()
-
-	flusher, _ := w.(http.Flusher)
-	buf := make([]byte, httputil.FlushChunk)
-	bytesRead := 0
-	for {
-		n, readErr := resp.Body.Read(buf)
-		if n > 0 {
-			mark()
-			t.StampUpstreamFirstByte()
-			if bytesRead == 0 {
+	// Debug builds get per-chunk visibility (first-chunk preview, plus a
+	// completion/error log) via StreamBody's onChunk hook, so the
+	// watchdog/stall/EOF handling stays shared with the non-debug path
+	// instead of being reimplemented by hand here.
+	body := &progressReader{r: resp.Body}
+	debug := log.Enabled(ctx, slog.LevelDebug)
+	var opts []httputil.StreamOption
+	if debug {
+		opts = append(opts, httputil.WithOnChunk(func(chunk []byte, first bool) {
+			if first {
 				log.Debug("OpenAI upstream first chunk",
-					"bytes", n,
-					"preview", truncateBytes(buf[:n], 320),
+					"bytes", len(chunk),
+					"preview", observability.Preview(string(chunk), 320),
 				)
 			}
-			bytesRead += n
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				log.Debug("OpenAI upstream write failed", "err", writeErr, "bytes_read", bytesRead)
-				return writeErr
-			}
-			if flusher != nil {
-				flusher.Flush()
-			}
-		}
-		if readErr == io.EOF {
-			t.StampUpstreamEOF()
-			log.Debug("OpenAI upstream stream complete", "bytes_total", bytesRead)
-			if status < 200 || status >= 300 {
-				return &providers.UpstreamStatusError{Status: status}
-			}
-			return nil
-		}
-		if readErr != nil {
-			if cause := context.Cause(ctx); errors.Is(cause, httputil.ErrUpstreamIdleTimeout) || errors.Is(cause, httputil.ErrUpstreamOutputStall) {
-				logStreamStall(decision.Model, path, c.stallBudgetFor(prep.Endpoint, cause), int64(bytesRead), cause)
-				return cause
-			}
-			log.Debug("OpenAI upstream read failed", "err", readErr, "bytes_read", bytesRead)
-			return readErr
-		}
+		}))
 	}
+	streamErr := httputil.StreamBody(ctx, cancel, idleTimeout, body, status, w, t, opts...)
+	switch {
+	case errors.Is(streamErr, httputil.ErrUpstreamIdleTimeout), errors.Is(streamErr, httputil.ErrUpstreamOutputStall):
+		logStreamStall(decision.Model, path, c.stallBudgetFor(prep.Endpoint, streamErr), body.n, streamErr)
+	case streamErr != nil:
+		if debug {
+			log.Debug("OpenAI upstream stream ended with error", "err", streamErr, "bytes_read", body.n)
+		}
+	case debug:
+		log.Debug("OpenAI upstream stream complete", "bytes_total", body.n)
+	}
+	return streamErr
 }
 
 // progressReader counts upstream bytes for the stall log's bytes_received
@@ -378,13 +354,6 @@ func logStreamStall(model, path string, budget time.Duration, bytesReceived int6
 		"budget_ms", budget.Milliseconds(),
 		"bytes_received", bytesReceived,
 	)
-}
-
-func truncateBytes(b []byte, n int) string {
-	if len(b) <= n {
-		return string(b)
-	}
-	return string(b[:n]) + "…"
 }
 
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {

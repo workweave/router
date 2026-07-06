@@ -1607,7 +1607,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		"message_count", feats.MessageCount,
 		"has_tools", feats.HasTools,
 		"total_input_tokens", feats.Tokens,
-		"prompt_preview", preview(promptText, 200),
+		"prompt_preview", observability.Preview(promptText, 200),
 	)
 
 	// Handle /force-model and /unforce-model before routing (stripped from
@@ -3354,7 +3354,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		"message_count", feats.MessageCount,
 		"has_tools", feats.HasTools,
 		"total_input_tokens", feats.Tokens,
-		"prompt_preview", preview(promptText, 200),
+		"prompt_preview", observability.Preview(promptText, 200),
 	)
 
 	// Handle /force-model and /unforce-model before routing (stripped from

@@ -64,6 +64,43 @@ func TestStreamBody_NoWatchdogPath(t *testing.T) {
 	assert.Equal(t, "hello world", w.Body.String())
 }
 
+func TestStreamBody_OnChunkFiresFirstOnlyOnFirstNonEmptyRead(t *testing.T) {
+	ctx := context.Background()
+	r := &pacedReader{
+		ctx:    ctx,
+		chunks: []string{"hello ", "world"},
+		delays: []time.Duration{1 * time.Millisecond, 1 * time.Millisecond},
+	}
+	w := httptest.NewRecorder()
+
+	var seen []string
+	var firstFlags []bool
+	onChunk := func(chunk []byte, first bool) {
+		seen = append(seen, string(chunk))
+		firstFlags = append(firstFlags, first)
+	}
+
+	err := StreamBody(ctx, nil, 0, r, 200, w, &timing.Timing{}, WithOnChunk(onChunk))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"hello ", "world"}, seen)
+	assert.Equal(t, []bool{true, false}, firstFlags)
+}
+
+func TestStreamBody_NilOnChunkIsSafe(t *testing.T) {
+	ctx := context.Background()
+	r := &pacedReader{
+		ctx:    ctx,
+		chunks: []string{"hello"},
+		delays: []time.Duration{0},
+	}
+	r.delays[0] = 1 * time.Millisecond
+	w := httptest.NewRecorder()
+
+	err := StreamBody(ctx, nil, 0, r, 200, w, &timing.Timing{})
+	require.NoError(t, err)
+	assert.Equal(t, "hello", w.Body.String())
+}
+
 func TestStreamBody_WatchdogDoesNotFireOnLivelyStream(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)

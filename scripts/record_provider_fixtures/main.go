@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/translate"
@@ -137,7 +138,7 @@ func record(client *http.Client, c recordCase, apiKey string) (err error) {
 		return fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("upstream status %d: %s", resp.StatusCode, truncate(body, 400))
+		return fmt.Errorf("upstream status %d: %s", resp.StatusCode, observability.Preview(string(body), 400))
 	}
 
 	path := filepath.Join(fixtureRoot, c.fixture)
@@ -197,11 +198,4 @@ func apiKeyFor(f format) (key, env string) {
 	default:
 		return "", ""
 	}
-}
-
-func truncate(b []byte, n int) string {
-	if len(b) <= n {
-		return string(b)
-	}
-	return string(b[:n]) + "…"
 }

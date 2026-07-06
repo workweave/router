@@ -17,8 +17,6 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-const maxBodyBytes = 10 * 1024 * 1024
-
 const (
 	generateContentSuffix       = ":generateContent"
 	streamGenerateContentSuffix = ":streamGenerateContent"
@@ -39,13 +37,13 @@ func GenerateContentHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handl
 			return
 		}
 
-		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes+1))
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, proxy.MaxRequestBodyBytes+1))
 		if err != nil {
 			log.Debug("Failed to read request body", "err", err)
 			writeGeminiError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "Failed to read request body.")
 			return
 		}
-		if len(body) > maxBodyBytes {
+		if len(body) > proxy.MaxRequestBodyBytes {
 			writeGeminiError(c, http.StatusRequestEntityTooLarge, "INVALID_ARGUMENT", "Request body too large.")
 			return
 		}

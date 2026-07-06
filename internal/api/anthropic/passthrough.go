@@ -14,13 +14,13 @@ func PassthroughHandler(svc *proxy.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)
 
-		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes+1))
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, proxy.MaxRequestBodyBytes+1))
 		if err != nil {
 			log.Debug("Failed to read passthrough request body", "err", err)
 			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body.")
 			return
 		}
-		if len(body) > maxBodyBytes {
+		if len(body) > proxy.MaxRequestBodyBytes {
 			writeAnthropicError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "Request body too large.")
 			return
 		}

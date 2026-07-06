@@ -1,14 +1,17 @@
 package openai_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/providers/openai"
 	"workweave/router/internal/router"
@@ -195,6 +198,43 @@ func TestProxy_5xxIsBufferedToo(t *testing.T) {
 	assert.Equal(t, http.StatusBadGateway, buffered.Status)
 	assert.True(t, providers.IsRetryable(err),
 		"5xx must remain retryable so multi-binding models can fail over")
+}
+
+// TestProxy_DebugLogsFirstChunkPreview pins finding [50]'s consolidation: the
+// debug-mode per-chunk logging path shares StreamBody's read loop via the
+// onChunk hook rather than a hand-rolled duplicate, and still emits the
+// first-chunk preview + completion log slog.Debug used to log directly.
+func TestProxy_DebugLogsFirstChunkPreview(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl-1\"}\n\n"))
+		flusher.Flush()
+	}))
+	defer upstream.Close()
+
+	// observability.Get() lazily installs its own default handler exactly
+	// once; force that one-time init first so our buffer handler below is
+	// the one that sticks (see billing/service_test.go's captureLogs).
+	observability.Get()
+	prev := slog.Default()
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	c := openai.NewClient("k", upstream.URL)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"x"}`), Headers: make(http.Header)}
+	err := c.Proxy(context.Background(), router.Decision{Model: "gpt-4o-mini"}, prep, rec, clientReq)
+	require.NoError(t, err)
+
+	logged := buf.String()
+	assert.Contains(t, logged, "OpenAI upstream first chunk")
+	assert.Contains(t, logged, "chatcmpl-1", "first-chunk preview must carry the upstream bytes")
+	assert.Contains(t, logged, "OpenAI upstream stream complete")
 }
 
 func TestPassthrough_ForwardsPathAndAuth(t *testing.T) {

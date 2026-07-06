@@ -287,22 +287,51 @@ func StartThroughputWatchdog(ctx context.Context, cancel context.CancelCauseFunc
 		sync.OnceFunc(func() { close(done) })
 }
 
+// StreamOption configures optional StreamBody behavior.
+type StreamOption func(*streamConfig)
+
+type streamConfig struct {
+	onChunk func(chunk []byte, first bool)
+}
+
+// WithOnChunk registers fn to be called synchronously for every non-empty
+// read, before the chunk is written to w. first is true only for the
+// stream's first non-empty chunk. chunk is only valid for the duration of
+// the call — copy it (e.g. via a string conversion) if it must outlive fn.
+//
+// Exists so debug-mode per-chunk logging (first-chunk preview, byte
+// counting) can share StreamBody's watchdog/stall/EOF handling instead of
+// reimplementing the read loop by hand.
+func WithOnChunk(fn func(chunk []byte, first bool)) StreamOption {
+	return func(c *streamConfig) { c.onChunk = fn }
+}
+
 // StreamBody reads r chunk-by-chunk into w, flushing after each write.
 // Returns UpstreamStatusError when status is non-2xx. When idleTimeout > 0, a
 // watchdog cancels ctx with ErrUpstreamIdleTimeout on stall and StreamBody
 // returns that error directly; ctx must be wrapped via context.WithCancelCause
 // so the cause survives to the error site.
-func StreamBody(ctx context.Context, cancel context.CancelCauseFunc, idleTimeout time.Duration, r io.Reader, status int, w http.ResponseWriter, t *timing.Timing) error {
+func StreamBody(ctx context.Context, cancel context.CancelCauseFunc, idleTimeout time.Duration, r io.Reader, status int, w http.ResponseWriter, t *timing.Timing, opts ...StreamOption) error {
+	var cfg streamConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	mark, stop := StartIdleWatchdog(ctx, cancel, idleTimeout)
 	defer stop()
 
 	flusher, _ := w.(http.Flusher)
 	buf := make([]byte, FlushChunk)
+	first := true
 	for {
 		n, readErr := r.Read(buf)
 		if n > 0 {
 			mark()
 			t.StampUpstreamFirstByte()
+			if cfg.onChunk != nil {
+				cfg.onChunk(buf[:n], first)
+				first = false
+			}
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
 				return writeErr
 			}
