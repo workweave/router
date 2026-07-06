@@ -28,6 +28,7 @@ const (
 	DispatchErrorProviderNotConfigured
 	DispatchErrorRequestNotJSONObject
 	DispatchErrorNoEligibleProvider
+	DispatchErrorContextWindowExceeded
 	DispatchErrorInvalidRoutingKnobs
 	DispatchErrorRLPolicyUnavailable
 	DispatchErrorBanditUnavailable
@@ -97,6 +98,14 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 			LogLevel:   "warn",
 			LogMessage: "No eligible provider for request",
 		}, true
+	case errors.Is(err, ErrContextWindowExceeded):
+		return DispatchErrorClass{
+			Kind:       DispatchErrorContextWindowExceeded,
+			Status:     http.StatusRequestEntityTooLarge,
+			Message:    "Request context exceeds the largest available model's context window even after compaction. Reduce the conversation (e.g. /compact or start a new session).",
+			LogLevel:   "warn",
+			LogMessage: "Request context exceeds every eligible model's window after compaction",
+		}, true
 	case errors.Is(err, cluster.ErrInvalidRoutingKnobs):
 		return DispatchErrorClass{
 			Kind:       DispatchErrorInvalidRoutingKnobs,
@@ -152,7 +161,7 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 // rather than "api_error".
 func (k DispatchErrorKind) IsClientError() bool {
 	switch k {
-	case DispatchErrorRequestNotJSONObject, DispatchErrorNoEligibleProvider, DispatchErrorInvalidRoutingKnobs:
+	case DispatchErrorRequestNotJSONObject, DispatchErrorNoEligibleProvider, DispatchErrorContextWindowExceeded, DispatchErrorInvalidRoutingKnobs:
 		return true
 	default:
 		return false

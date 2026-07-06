@@ -124,6 +124,22 @@ type handoverOutcome struct {
 	SummaryUsage handover.Usage
 }
 
+// isHardPinnedTurn reports whether a turn type bypasses pin lookup/write,
+// planner, and scorer entirely via the boot-time hard pin. These turns are
+// also skipped by proactive compaction: they are either tiny (probe/title-gen/
+// classifier) or carry their own dedicated flow (Claude Code's compaction turn,
+// whose request the router must not rewrite).
+func (s *Service) isHardPinnedTurn(tt turntype.TurnType) bool {
+	switch tt {
+	case turntype.Compaction, turntype.Probe, turntype.TitleGen, turntype.Classifier:
+		return true
+	case turntype.SubAgentDispatch:
+		return s.hardPinExplore
+	default:
+		return false
+	}
+}
+
 // runTurnLoop is the format-agnostic routing orchestrator: detect turn type,
 // short-circuit hard pins, load pin, run scorer, hand to planner, and on
 // switch attempt bounded-cost handover.
@@ -163,11 +179,7 @@ func (s *Service) runTurnLoop(
 	// probes before the first real turn, and Claude Code fires title-gen
 	// ~25ms before the real-conv call — an anchored pin would leak the
 	// cheap-model decision into the conversation that follows.
-	if res.TurnType == turntype.Compaction ||
-		res.TurnType == turntype.Probe ||
-		res.TurnType == turntype.TitleGen ||
-		res.TurnType == turntype.Classifier ||
-		(res.TurnType == turntype.SubAgentDispatch && s.hardPinExplore) {
+	if s.isHardPinnedTurn(res.TurnType) {
 		provider, model := s.hardPinProvider, s.hardPinModel
 		// The boot-time hard-pin was computed over every registered provider,
 		// but a BYOK request may only authenticate to a subset. Resolve

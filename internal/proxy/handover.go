@@ -38,6 +38,31 @@ const handoverInstruction = "Summarize the conversation so far in <= 800 tokens.
 	"Preserve all decisions, file paths, code snippets, and the user's latest intent. " +
 	"Output only the summary text — no preamble, no closing remark."
 
+// DefaultCompactionMaxTokens caps the structured compaction summary. Larger
+// than the switch handover cap because the compaction summary is the ONLY
+// record of the elided history the model keeps — it must carry task state, not
+// just a gist.
+const DefaultCompactionMaxTokens = 4000
+
+// compactionInstruction elicits Claude Code's 9-section structured summary used
+// when a long session is compacted to fit a context window. Unlike the terse
+// switch-handover instruction, this preserves enough task state (pending work,
+// current file, next step) that the model can continue seamlessly, and quotes
+// user-stated constraints verbatim so they keep applying after the elision.
+const compactionInstruction = "The conversation is being compacted to fit the model's context window. " +
+	"Produce a detailed structured summary of everything above under these numbered sections, " +
+	"prioritizing technical accuracy and completeness:\n" +
+	"1. Primary Request and Intent — every explicit user request, in detail.\n" +
+	"2. Key Technical Concepts — technologies, frameworks, and patterns in play.\n" +
+	"3. Files and Code Sections — files examined/modified, with key snippets and why they matter.\n" +
+	"4. Errors and Fixes — problems hit, fixes applied, and user feedback received.\n" +
+	"5. Problem Solving — approaches tried and reasoning, not just outcomes.\n" +
+	"6. All User Messages (verbatim) — quote every non-tool user message exactly, especially any stated constraints or policies; do not paraphrase.\n" +
+	"7. Pending Tasks — requested work not yet completed.\n" +
+	"8. Current Work — precisely what was being done just before this summary, with filenames and state.\n" +
+	"9. Next Step — the immediate next action, aligned to the user's most recent request.\n" +
+	"Output only the summary text — no preamble, no closing remark."
+
 // ProviderSummarizer adapts a providers.Client to handover.Summarizer by
 // building a small Anthropic Messages request from the prior conversation.
 type ProviderSummarizer struct {
@@ -87,6 +112,29 @@ var ErrEmptySummary = errors.New("handover: upstream returned no summary text")
 // usage for a separate ledger row. On failure returns ("", zero Usage, err)
 // so the caller falls back to the full prior history.
 func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.RequestEnvelope) (string, handover.Usage, error) {
+	return s.summarize(ctx, env, s.model, handoverInstruction, s.maxTokens, "handover")
+}
+
+// SummarizeForCompaction summarizes env with the structured 9-section
+// compaction prompt, targeting an explicit model (the window-aware selection
+// happens in the caller) and a larger output cap. Used by the context-window
+// compaction cascade, not the switch-handover path. Same failure contract as
+// Summarize.
+func (s *ProviderSummarizer) SummarizeForCompaction(ctx context.Context, env *translate.RequestEnvelope, model string, maxTokens int) (string, handover.Usage, error) {
+	if model == "" {
+		model = s.model
+	}
+	if maxTokens <= 0 {
+		maxTokens = DefaultCompactionMaxTokens
+	}
+	return s.summarize(ctx, env, model, compactionInstruction, maxTokens, "compaction")
+}
+
+// summarize builds an Anthropic Messages call from env with the given
+// instruction/model/cap and dispatches it under a hard timeout. kind is a log
+// label ("handover" or "compaction"). On any failure returns ("", zero, err)
+// so callers fall back to the full history.
+func (s *ProviderSummarizer) summarize(ctx context.Context, env *translate.RequestEnvelope, model, instruction string, maxTokens int, kind string) (string, handover.Usage, error) {
 	log := observability.FromContext(ctx)
 	if env == nil {
 		return "", handover.Usage{}, errors.New("handover: nil envelope")
@@ -95,9 +143,9 @@ func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.Reque
 		return "", handover.Usage{}, errors.New("handover: nil provider client")
 	}
 
-	body, err := buildHandoverRequestBody(env, s.model, s.maxTokens)
+	body, err := buildSummaryRequestBody(env, model, instruction, maxTokens)
 	if err != nil {
-		return "", handover.Usage{}, fmt.Errorf("build handover request: %w", err)
+		return "", handover.Usage{}, fmt.Errorf("build %s request: %w", kind, err)
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, s.timeout)
@@ -115,36 +163,36 @@ func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.Reque
 
 	decision := router.Decision{
 		Provider: providers.ProviderAnthropic,
-		Model:    s.model,
-		Reason:   "handover_summary",
+		Model:    model,
+		Reason:   kind + "_summary",
 	}
 
 	proxyErr := s.client.Proxy(callCtx, decision, prep, rec, req)
 	if proxyErr != nil {
-		log.Warn("Handover summarizer upstream call failed", "err", proxyErr, "model", s.model)
+		log.Warn("Summarizer upstream call failed", "kind", kind, "err", proxyErr, "model", model)
 		return "", handover.Usage{}, proxyErr
 	}
 	if callCtx.Err() != nil {
-		log.Warn("Handover summarizer timed out", "err", callCtx.Err(), "model", s.model)
+		log.Warn("Summarizer timed out", "kind", kind, "err", callCtx.Err(), "model", model)
 		return "", handover.Usage{}, callCtx.Err()
 	}
 	if rec.Code >= 400 {
 		err := fmt.Errorf("handover: upstream status %d", rec.Code)
-		log.Warn("Handover summarizer non-2xx", "status", rec.Code, "model", s.model)
+		log.Warn("Summarizer non-2xx", "kind", kind, "status", rec.Code, "model", model)
 		return "", handover.Usage{}, err
 	}
 
 	respBody, err := io.ReadAll(rec.Body)
 	if err != nil {
-		return "", handover.Usage{}, fmt.Errorf("read handover response: %w", err)
+		return "", handover.Usage{}, fmt.Errorf("read %s response: %w", kind, err)
 	}
 	text := extractAnthropicAssistantText(respBody)
 	if text == "" {
-		log.Warn("Handover summarizer extracted no text", "model", s.model, "body_bytes", len(respBody))
+		log.Warn("Summarizer extracted no text", "kind", kind, "model", model, "body_bytes", len(respBody))
 		return "", handover.Usage{}, ErrEmptySummary
 	}
 	usage := extractAnthropicUsage(respBody)
-	usage.Model = s.model
+	usage.Model = model
 	usage.Provider = providers.ProviderAnthropic
 	return text, usage, nil
 }
@@ -167,10 +215,10 @@ func extractAnthropicUsage(body []byte) handover.Usage {
 	}
 }
 
-// buildHandoverRequestBody builds a non-streaming Anthropic Messages request
-// from the envelope's prior conversation, injecting the summary instruction
-// and overriding model/max_tokens/stream.
-func buildHandoverRequestBody(env *translate.RequestEnvelope, model string, maxTokens int) ([]byte, error) {
+// buildSummaryRequestBody builds a non-streaming Anthropic Messages request
+// from the envelope's prior conversation, injecting the given summary
+// instruction and overriding model/max_tokens/stream.
+func buildSummaryRequestBody(env *translate.RequestEnvelope, model, instruction string, maxTokens int) ([]byte, error) {
 	prep, err := env.PrepareAnthropic(nil, translate.EmitOptions{TargetModel: model})
 	if err != nil {
 		return nil, fmt.Errorf("prepare anthropic body: %w", err)
@@ -190,7 +238,7 @@ func buildHandoverRequestBody(env *translate.RequestEnvelope, model string, maxT
 		return nil, fmt.Errorf("set max_tokens: %w", err)
 	}
 
-	body, err = appendUserInstruction(body, handoverInstruction)
+	body, err = appendUserInstruction(body, instruction)
 	if err != nil {
 		return nil, fmt.Errorf("append instruction: %w", err)
 	}
