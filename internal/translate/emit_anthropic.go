@@ -1,6 +1,7 @@
 package translate
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -583,7 +584,7 @@ func writeAnthropicTools(jw *jsonWriter, body []byte) {
 		}
 		if params := fn.Get("parameters"); params.Exists() {
 			jw.Key("input_schema")
-			jw.Raw(params.Raw)
+			jw.Raw(anthropicToolSchemaRaw(params))
 		}
 		jw.EndObj()
 		return true
@@ -685,6 +686,73 @@ func hoistAnthropicSystemMessages(body []byte) ([]byte, error) {
 		return nil, fmt.Errorf("set system: %w", err)
 	}
 	return out, nil
+}
+
+func sanitizeAnthropicToolSchemasBytes(body []byte) ([]byte, error) {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {
+		return body, nil
+	}
+	raw, err := json.Marshal(sanitizeAnthropicTools(tools.Value()))
+	if err != nil {
+		return nil, err
+	}
+	return sjson.SetRawBytes(body, "tools", raw)
+}
+
+func anthropicToolSchemaRaw(schema gjson.Result) string {
+	raw, err := json.Marshal(sanitizeAnthropicSchema(schema.Value()))
+	if err != nil {
+		return schema.Raw
+	}
+	return string(raw)
+}
+
+func sanitizeAnthropicTools(v any) any {
+	tools, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	out := make([]any, 0, len(tools))
+	for _, item := range tools {
+		tool, ok := item.(map[string]any)
+		if !ok {
+			out = append(out, item)
+			continue
+		}
+		copied := make(map[string]any, len(tool))
+		for k, child := range tool {
+			if k == "input_schema" {
+				copied[k] = sanitizeAnthropicSchema(child)
+				continue
+			}
+			copied[k] = child
+		}
+		out = append(out, copied)
+	}
+	return out
+}
+
+func sanitizeAnthropicSchema(v any) any {
+	switch node := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(node))
+		for k, child := range node {
+			if k == "pattern" {
+				continue
+			}
+			out[k] = sanitizeAnthropicSchema(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(node))
+		for i, child := range node {
+			out[i] = sanitizeAnthropicSchema(child)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // anthropicSystemTexts extracts text strings from a system message's content,

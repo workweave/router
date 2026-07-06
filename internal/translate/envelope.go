@@ -346,6 +346,9 @@ type EmitOverrides struct {
 	// Set for Anthropic targets: the field is Gemini-only and Anthropic 400s
 	// on unknown block fields.
 	StripThoughtSignature bool
+	// SanitizeAnthropicToolSchemas removes schema constraints Anthropic rejects
+	// from tools[].input_schema on same-format Anthropic requests.
+	SanitizeAnthropicToolSchemas bool
 	// RewriteThinkingAdaptive replaces the inbound thinking block with
 	// {"type":"adaptive"} and sets output_config.effort. Used when the target
 	// model only accepts adaptive thinking (claude-opus-4-6+ / sonnet-4-6+).
@@ -385,6 +388,13 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 		out, err = sanitizeToolUseIDsBytes(out)
 		if err != nil {
 			return nil, fmt.Errorf("sanitize tool_use ids: %w", err)
+		}
+	}
+
+	if ov.SanitizeAnthropicToolSchemas {
+		out, err = sanitizeAnthropicToolSchemasBytes(out)
+		if err != nil {
+			return nil, fmt.Errorf("sanitize anthropic tool schemas: %w", err)
 		}
 	}
 
@@ -942,9 +952,10 @@ func effortForBudget(budgetTokens int64) string {
 
 func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	ov := EmitOverrides{
-		Model:                 opts.TargetModel,
-		SanitizeToolUseIDs:    true,
-		StripThoughtSignature: true,
+		Model:                        opts.TargetModel,
+		SanitizeToolUseIDs:           true,
+		StripThoughtSignature:        true,
+		SanitizeAnthropicToolSchemas: true,
 	}
 
 	thinkingResult := gjson.GetBytes(body, "thinking")

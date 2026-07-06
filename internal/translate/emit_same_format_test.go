@@ -196,6 +196,72 @@ func TestAnthropicSameFormat_ModelRewrite(t *testing.T) {
 	require.Len(t, msgs, 1)
 }
 
+func TestAnthropicSameFormat_StripsUnsupportedToolSchemaPattern(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hello"}],"max_tokens":1024,"tools":[{
+		"name":"DecimalTool",
+		"description":"uses a pydantic decimal schema",
+		"input_schema":{
+			"type":"object",
+			"properties":{
+				"amount":{"type":"string","pattern":"^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$","description":"decimal"}
+			},
+			"required":["amount"]
+		}
+	}]}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-7",
+		Capabilities: router.Lookup("claude-opus-4-7"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+
+	tools, _ := out["tools"].([]any)
+	require.Len(t, tools, 1)
+	tool, _ := tools[0].(map[string]any)
+	inputSchema, _ := tool["input_schema"].(map[string]any)
+	props, _ := inputSchema["properties"].(map[string]any)
+	amount, _ := props["amount"].(map[string]any)
+	assert.NotContains(t, amount, "pattern", "Anthropic rejects regex lookahead in JSON Schema patterns")
+	assert.Equal(t, "string", amount["type"])
+	assert.Equal(t, "decimal", amount["description"])
+}
+
+func TestOpenAIToAnthropic_StripsUnsupportedToolSchemaPattern(t *testing.T) {
+	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}],"tools":[{
+		"type":"function",
+		"function":{
+			"name":"DecimalTool",
+			"description":"uses a pydantic decimal schema",
+			"parameters":{
+				"type":"object",
+				"properties":{
+					"amount":{"type":"string","pattern":"^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$","description":"decimal"}
+				},
+				"required":["amount"]
+			}
+		}
+	}]}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-7",
+		Capabilities: router.Lookup("claude-opus-4-7"),
+	}
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareAnthropic(http.Header{}, opts)
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+
+	tools, _ := out["tools"].([]any)
+	require.Len(t, tools, 1)
+	tool, _ := tools[0].(map[string]any)
+	inputSchema, _ := tool["input_schema"].(map[string]any)
+	props, _ := inputSchema["properties"].(map[string]any)
+	amount, _ := props["amount"].(map[string]any)
+	assert.NotContains(t, amount, "pattern", "Anthropic rejects regex lookahead in JSON Schema patterns")
+	assert.Equal(t, "string", amount["type"])
+	assert.Equal(t, "decimal", amount["description"])
+}
+
 func TestAnthropicSameFormat_SystemMessageHoistedWhenNoSystemField(t *testing.T) {
 	// A role:"system" message inside the messages array is invalid for the
 	// Anthropic Messages API; it must be hoisted to the top-level system field.
