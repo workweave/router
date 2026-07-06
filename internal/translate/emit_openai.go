@@ -828,6 +828,10 @@ func sanitizeOpenAIToolSchema(node any) {
 	if !ok {
 		return
 	}
+	if pattern, hasPattern := m["pattern"]; hasPattern {
+		appendSchemaConstraintDescription(m, "pattern", pattern)
+		delete(m, "pattern")
+	}
 	if t, _ := m["type"].(string); t == "array" {
 		if _, hasItems := m["items"]; !hasItems {
 			m["items"] = map[string]any{}
@@ -840,6 +844,7 @@ func sanitizeOpenAIToolSchema(node any) {
 	}
 	sanitizeOpenAIToolSchema(m["items"])
 	sanitizeOpenAIToolSchema(m["additionalProperties"])
+	sanitizeOpenAIToolSchema(m["propertyNames"])
 	for _, key := range []string{"anyOf", "oneOf", "allOf"} {
 		if arr, ok := m[key].([]any); ok {
 			for _, v := range arr {
@@ -848,4 +853,13 @@ func sanitizeOpenAIToolSchema(node any) {
 		}
 	}
 	sanitizeOpenAIToolSchema(m["not"])
+}
+
+func appendSchemaConstraintDescription(node map[string]any, key string, value any) {
+	note := fmt.Sprintf("(%s: %v)", key, compactJSONValue(value))
+	if desc, _ := node["description"].(string); desc != "" {
+		node["description"] = desc + " " + note
+		return
+	}
+	node["description"] = note
 }
