@@ -2163,9 +2163,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		captureW = newCaptureWriter(rootSink, semanticCacheMaxBodyBytes)
 		sink = captureW
 	}
-	// Cyber-refusal backstop (ROUTER_CYBER_REFUSAL_REPIN, default off): wrap
-	// sink to detect a refusal on the native path (no translator Summary here)
-	// and re-pin the session off the refusing model after the turn.
+	// Wrap sink to observe refusals on the native path (no translator Summary here).
 	var refusalObs *refusalObserver
 	if s.cyberRefusalRepin {
 		refusalObs = newRefusalObserver(sink)
