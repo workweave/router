@@ -444,13 +444,19 @@ elif [[ -n "$routed" ]]; then
   # or a hard turn escalated to opus). "saved -$X" would mislead, so clamp
   # the display to $0.00 rather than dropping the clause — a $0.00 readout
   # tells the user the router ran and simply didn't beat their selection.
+  # When the CC selection is unknown ("?" or empty) there's nothing to
+  # compare against, so drop the "← selection" arrow and just show routed.
   display_savings="$session_savings"
   if [[ -z "$display_savings" ]] \
      || awk -v v="$display_savings" 'BEGIN{exit !(v+0 < 0)}'; then
     display_savings="0"
   fi
-  printf '%s — %s ← %s · saved %s%s' \
-    "$brand" "$routed" "$selected_display" "$(fmt_money "$display_savings")" "$tokens_clause"
+  if [[ -n "$selected_display" && "$selected_display" != "?" ]]; then
+    printf '%s — %s ← %s · saved %s%s' \
+      "$brand" "$routed" "$selected_display" "$(fmt_money "$display_savings")" "$tokens_clause"
+  else
+    printf '%s — %s%s' "$brand" "$routed" "$tokens_clause"
+  fi
 else
   printf '%s — %s%s' "$brand" "$selected_display" "$tokens_clause"
 fi

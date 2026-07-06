@@ -2378,20 +2378,23 @@ elif [[ "$routed" == "failure" ]]; then
   # swap or compute savings against a non-model.
   printf '%s — %s%s' "$brand" "$routed" "$tokens_clause"
 elif [[ -n "$routed" ]]; then
-  # Show the savings clause only when the session is genuinely net-saving.
+  # Always show the savings clause, flooring a non-positive total at $0.00.
   # session_savings is "0.0000" on fresh sessions or sessions where every
-  # turn routed back to the selected model; it can also go negative when
-  # sticky routing forces a haiku-tagged side-call up to a cached
-  # sonnet/opus decision. In both cases the word "saved" would mislead,
-  # so drop the savings clause but keep the token totals.
-  has_savings="false"
-  if [[ -n "$session_savings" ]] \
-     && awk -v v="$session_savings" 'BEGIN{exit !(v+0 > 0.005)}'; then
-    has_savings="true"
+  # turn routed back to the selected model, and can go negative when routing
+  # upgrades a turn to a pricier model (e.g. a sticky/hard-pinned side-call,
+  # or a hard turn escalated to opus). "saved -$X" would mislead, so clamp
+  # the display to $0.00 rather than dropping the clause — a $0.00 readout
+  # tells the user the router ran and simply didn't beat their selection.
+  # When the CC selection is unknown ("?" or empty) there's nothing to
+  # compare against, so drop the "← selection" arrow and just show routed.
+  display_savings="$session_savings"
+  if [[ -z "$display_savings" ]] \
+     || awk -v v="$display_savings" 'BEGIN{exit !(v+0 < 0)}'; then
+    display_savings="0"
   fi
-  if [[ "$has_savings" == "true" ]]; then
+  if [[ -n "$selected_display" && "$selected_display" != "?" ]]; then
     printf '%s — %s ← %s · saved %s%s' \
-      "$brand" "$routed" "$selected_display" "$(fmt_money "$session_savings")" "$tokens_clause"
+      "$brand" "$routed" "$selected_display" "$(fmt_money "$display_savings")" "$tokens_clause"
   else
     printf '%s — %s%s' "$brand" "$routed" "$tokens_clause"
   fi
