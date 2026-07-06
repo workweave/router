@@ -1602,10 +1602,8 @@ func (s *Service) anthropicNativeAttempt(
 // events, so a small window catches it without buffering a whole response.
 const refusalScanCap = 64 * 1024
 
-// refusalScanOverlap is the trailing window each Write re-scans so a signal
-// split across two chunks is still caught, without re-scanning (and re-lowering)
-// the whole accumulated buffer every write. Must exceed the longest signal in
-// detectRefusalSignal (`"stop_reason":"refusal"`, 23 bytes).
+// refusalScanOverlap is the overlap window kept so signals split across Write
+// calls are still caught. Must exceed the longest detectRefusalSignal pattern (23 bytes).
 const refusalScanOverlap = 32
 
 // refusalObserver tees the anthropic-native passthrough to inner unchanged
