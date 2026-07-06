@@ -1706,7 +1706,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// fit the largest eligible model BEFORE routing, so a genuinely huge
 	// session is compacted (à la Claude Code) instead of dead-ending in the
 	// scorer with no eligible provider. Mutates env; feats is recomputed after.
-	maxEligibleWindow := s.maxEligibleContextWindow(baseExcluded)
+	maxEligibleWindow := s.maxEligibleContextWindow(baseExcluded, env.SignatureTokenSavings())
 	compRes, compErr := s.maybeCompact(ctx, env, turntype.DetectFromEnvelope(env, feats, ""), outputReserve, maxEligibleWindow, r.Header)
 	if compErr != nil {
 		log.Warn("Compaction could not fit request to any eligible model",
@@ -3471,7 +3471,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// Codex passthrough bodies, which are forwarded verbatim.
 	var compResOAI compactionResult
 	if !codexPassthrough {
-		maxEligibleWindowOAI := s.maxEligibleContextWindow(baseExcludedOAI)
+		maxEligibleWindowOAI := s.maxEligibleContextWindow(baseExcludedOAI, env.SignatureTokenSavings())
 		var compErrOAI error
 		compResOAI, compErrOAI = s.maybeCompact(ctx, env, turntype.DetectFromEnvelope(env, feats, subAgentHint), outputReserveOAI, maxEligibleWindowOAI, r.Header)
 		if compErrOAI != nil {

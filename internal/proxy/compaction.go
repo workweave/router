@@ -67,15 +67,24 @@ type compactionResult struct {
 }
 
 // maxEligibleContextWindow returns the largest effective context window among
-// available routing models that are not policy-excluded. Zero when none are
-// known (availableModels unset), which disables compaction.
-func (s *Service) maxEligibleContextWindow(policyExcluded map[string]struct{}) int {
+// available routing models that are not policy-excluded. A signature-stripping
+// (non-Anthropic) target gets sigSavings added to its window: the translator
+// drops base64 thought-signature blocks before dispatch, so that model can
+// serve sigSavings more of this request's estimated tokens — mirroring the
+// per-model discount in excludeContextOverflowModels, so a signature-heavy
+// session isn't falsely 413'd when a stripping model would still fit. Zero when
+// none are known (availableModels unset), which disables compaction.
+func (s *Service) maxEligibleContextWindow(policyExcluded map[string]struct{}, sigSavings int) int {
 	maxWindow := 0
 	for model := range s.availableModels {
 		if _, excluded := policyExcluded[model]; excluded {
 			continue
 		}
-		if w := contextWindowForRequest(model); w > maxWindow {
+		w := contextWindowForRequest(model)
+		if sigSavings > 0 && modelStripsAnthropicSignatures(model) {
+			w += sigSavings
+		}
+		if w > maxWindow {
 			maxWindow = w
 		}
 	}

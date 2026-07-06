@@ -172,8 +172,15 @@ func TestSelectCompactionSummarizer_WindowAware(t *testing.T) {
 
 func TestMaxEligibleContextWindow(t *testing.T) {
 	s := &Service{availableModels: map[string]struct{}{"claude-haiku-4-5": {}}}
-	assert.Equal(t, 200_000, s.maxEligibleContextWindow(nil))
-	assert.Equal(t, 0, s.maxEligibleContextWindow(map[string]struct{}{"claude-haiku-4-5": {}}), "policy-excluding the only model leaves no window")
+	assert.Equal(t, 200_000, s.maxEligibleContextWindow(nil, 0))
+	assert.Equal(t, 200_000, s.maxEligibleContextWindow(nil, 5_000), "Anthropic (signature-keeping) models ignore signature savings")
+	assert.Equal(t, 0, s.maxEligibleContextWindow(map[string]struct{}{"claude-haiku-4-5": {}}, 0), "policy-excluding the only model leaves no window")
+
+	// A signature-stripping (non-Anthropic) model gets sigSavings added to its
+	// effective window, matching the context-overflow pre-filter's discount.
+	sStrip := &Service{availableModels: map[string]struct{}{"gpt-5.5": {}}}
+	assert.Equal(t, 1_050_000, sStrip.maxEligibleContextWindow(nil, 0))
+	assert.Equal(t, 1_050_000+5_000, sStrip.maxEligibleContextWindow(nil, 5_000), "stripping model gains signature savings as headroom")
 }
 
 func TestClassifyDispatchError_ContextWindowExceeded(t *testing.T) {
