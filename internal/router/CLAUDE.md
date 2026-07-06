@@ -16,7 +16,7 @@ Inner-ring `Router` interface + `Request`/`Decision`/`ModelSpec`/`ModelRegistry`
 | [`sessionpin/`](sessionpin) | Sticky per-session routing pin | [sessionpin/CLAUDE.md](sessionpin/CLAUDE.md) |
 | [`turntype/`](turntype) | Inbound turn-type classifier | [turntype/CLAUDE.md](turntype/CLAUDE.md) |
 
-All inner-ring, all I/O-free.
+All inner-ring — except `cluster/`, which is the adapter-tier exception: it does real filesystem I/O to load model artifacts (embedder weights, cluster bundles) at boot. See the [root layer diagram](../../CLAUDE.md), which places `internal/router/cluster` in the adapter tier alongside `internal/postgres` and `internal/providers/*`. Every other subpackage above is I/O-free.
 
 ## Adding a new `router.Router` implementation
 

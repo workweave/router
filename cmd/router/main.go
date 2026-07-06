@@ -519,7 +519,7 @@ func main() {
 		summarizer = proxy.NewProviderSummarizer(client, handoverModel, handoverTimeout)
 		logger.Info("Handover summarizer wired", "provider", handoverProviderName, "model", handoverModel, "timeout_ms", handoverTimeout.Milliseconds())
 	} else {
-		logger.Info("Handover summarizer disabled (provider not registered); switch turns will fall back to TrimLastN", "requested_provider", handoverProviderName)
+		logger.Info("Handover summarizer disabled (provider not registered); switch turns will preserve full history instead", "requested_provider", handoverProviderName)
 	}
 
 	// Lets the planner force a switch when a pinned model's provider is

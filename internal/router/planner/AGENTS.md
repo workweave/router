@@ -1,6 +1,6 @@
-# internal/router/planner — CLAUDE
+# internal/router/planner — AGENTS
 
-> **Mirror notice.** Verbatim sync with [AGENTS.md](AGENTS.md). **Update both together** — divergence = bug.
+> **Mirror notice.** Verbatim sync with [CLAUDE.md](CLAUDE.md). **Update both together** — divergence = bug.
 
 Prism-style cache-aware EV policy. Decides STAY (preserve pinned model's upstream prompt cache) vs SWITCH (take cluster scorer's fresh decision + eat one-time cache miss) per turn. Read [root CLAUDE.md](../../../CLAUDE.md) first.
 

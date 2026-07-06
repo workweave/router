@@ -2,7 +2,7 @@
 
 > **Mirror notice.** Verbatim sync with [AGENTS.md](AGENTS.md). **Update both together** — divergence = bug.
 
-Routing/dispatch service. Per-turn orchestrator that composes scorer, planner, handover, cache, sessionpin, pricing, capability, turntype, usage, providers, and translate. Read [root CLAUDE.md](../../CLAUDE.md) first.
+Routing/dispatch service. Per-turn orchestrator that composes scorer, planner, handover, cache, sessionpin, catalog, turntype, usage, billing, providers, and translate. Read [root CLAUDE.md](../../CLAUDE.md) first.
 
 ## Surface
 
@@ -63,7 +63,7 @@ Per-attempt body rebuild: each closure constructs `EmitOptions` with `TargetProv
 
 ## `OnUpstreamMeta` callbacks
 
-Provider adapters call back into `proxy.OnUpstreamMeta` so streaming responses record usage/headers back to proxy without coupling provider packages to proxy internals. The pricing / planner stack depends on per-turn token counts being recorded promptly — **don't add a provider that forgets to call the callback.**
+Provider adapters call back into `proxy.OnUpstreamMeta` so streaming responses record usage/headers back to proxy without coupling provider packages to proxy internals. The catalog / planner stack depends on per-turn token counts being recorded promptly — **don't add a provider that forgets to call the callback.**
 
 ## What NOT to do
 

@@ -1,6 +1,6 @@
-# router — CLAUDE
+# router — AGENTS
 
-> **Mirror notice.** Verbatim sync with [AGENTS.md](AGENTS.md). Claude Code reads `CLAUDE.md`; Cursor + generic agents read `AGENTS.md`. **Update both together** — divergence = bug.
+> **Mirror notice.** Verbatim sync with [CLAUDE.md](CLAUDE.md). Claude Code reads `CLAUDE.md`; Cursor + generic agents read `AGENTS.md`. **Update both together** — divergence = bug.
 
 Root guide for AI agents in the `router/` subproject. Covers cross-cutting design + the layer model. **First read for any task:** [README](README.md), then this file. Then read the `CLAUDE.md` inside the package you're editing — each subpackage has its own with focused recipes + invariants.
 
@@ -30,25 +30,43 @@ Three concentric layers. Imports flow inward only.
 |  |                            /v1/route)                       |  |
 |  |  internal/api/openai      (/v1/chat/completions)            |  |
 |  |  internal/api/gemini      (/v1beta/models/:modelAction)     |  |
+|  |  internal/api/feedback    (/f/<token> no-login feedback     |  |
+|  |                            page; deliberately no auth       |  |
+|  |                            middleware)                      |  |
 |  |  internal/server          (route registration)              |  |
 |  |  internal/server/middleware (auth, timeout, cluster/embed   |  |
 |  |                              overrides, OTel timing)        |  |
 |  |  internal/postgres        (adapter: SQLC over pgx; also     |  |
-|  |                            session-pin store impl)          |  |
+|  |                            session-pin store + billing repo |  |
+|  |                            impls)                            |  |
 |  |  internal/sqlc            (generated; regenerate via        |  |
 |  |                            `make generate`)                 |  |
 |  |  internal/router/cluster  (Router impl: AvengersPro,        |  |
 |  |                            Multiversion)                    |  |
 |  |  internal/providers/*     (Client impls: anthropic, openai, |  |
 |  |                            google native, openaicompat,     |  |
-|  |                            noop, httputil)                  |  |
+|  |                            httputil)                        |  |
 |  |  internal/observability/otel (span emitter; adapter)        |  |
+|  |  internal/observability/apm  (second OTel/SigNoz adapter:   |  |
+|  |                            gin HTTP spans + Go runtime      |  |
+|  |                            metrics; independent of otel's   |  |
+|  |                            per-decision span emitter)       |  |
+|  |  internal/pubsub          (adapter: GCP Pub/Sub cache-      |  |
+|  |                            invalidation + recharge-needed   |  |
+|  |                            notify)                           |  |
 |  |                                                             |  |
 |  |  +-------------------------------------------------------+  |  |
 |  |  |  internal/auth      (identity domain: types,          |  |  |
 |  |  |                      repos, Service.VerifyAPIKey,     |  |  |
 |  |  |                      APIKeyCache, id/hashing, Tink    |  |  |
 |  |  |                      encryptor)                       |  |  |
+|  |  |  internal/billing   (balance checks + inference       |  |  |
+|  |  |                      debits: Service + Repo iface;    |  |  |
+|  |  |                      Postgres impl in                 |  |  |
+|  |  |                      internal/postgres)                |  |  |
+|  |  |  internal/feedback  (pure HMAC signer for the         |  |  |
+|  |  |                      no-login feedback-link token;    |  |  |
+|  |  |                      no I/O)                            |  |  |
 |  |  |  internal/proxy     (routing/dispatch service:        |  |  |
 |  |  |                      Route, ProxyMessages,            |  |  |
 |  |  |                      ProxyOpenAIChatCompletion,       |  |  |
@@ -69,6 +87,10 @@ Three concentric layers. Imports flow inward only.
 |  |  |  internal/router/planner    (cache-aware EV policy)   |  |  |
 |  |  |  internal/router/sessionpin (Pin types + Store iface) |  |  |
 |  |  |  internal/router/turntype   (turn-type detector)      |  |  |
+|  |  |  internal/router/banditexplore (Router decorator:     |  |  |
+|  |  |                              bounded quality-tie-band |  |  |
+|  |  |                              exploration, env-flag    |  |  |
+|  |  |                              gated)                    |  |  |
 |  |  |  internal/providers (Client iface + types + canonical |  |  |
 |  |  |                      Provider* name constants)        |  |  |
 |  |  |  internal/translate (cross-format wire-format         |  |  |
@@ -87,11 +109,11 @@ Three concentric layers. Imports flow inward only.
 
 ### Hard rules
 
-- **Layering is load-bearing.** Imports flow inward only. Inner-ring packages must not import adapter or presentation packages; adapters never import each other; only `cmd/router/main.go` constructs concrete things. Inner-ring packages may import each other (e.g. `proxy.Service.Route` returns `router.Decision`; `proxy.Service` calls `translate`, `sessionpin`, `planner`, `handover`, `cache`, `pricing`, `capability`, `turntype`, `usage` to compose a turn).
+- **Layering is load-bearing.** Imports flow inward only. Inner-ring packages must not import adapter or presentation packages; adapters never import each other; only `cmd/router/main.go` constructs concrete things. Inner-ring packages may import each other (e.g. `proxy.Service.Route` returns `router.Decision`; `proxy.Service` calls `translate`, `sessionpin`, `planner`, `handover`, `cache`, `catalog`, `turntype`, `usage`, `billing` to compose a turn).
 - **Small utility third-party libs allowed at every layer.** Layering = about *where I/O and behavior live*, not banning go.mod entries. Reach for vetted small lib (`golang-lru`, `uuid`, error helpers) before rolling own. Reject heavyweight frameworks (DI containers, ORMs, metaprogramming kits).
-- **Inner-ring packages are I/O-free.** `internal/router`, `internal/providers`, `internal/translate`, `internal/sse`, `internal/timing`, `internal/router/{cache,capability,handover,planner,pricing,sessionpin,turntype}`, `internal/proxy/usage` define interfaces, value types, pure functions only. Adding I/O method (HTTP, DB, queue, FS) = layering violation; put on `auth.Service` / `proxy.Service` or adapter subpackage. Pure-Go utility libs fine.
+- **Inner-ring packages are I/O-free.** `internal/router`, `internal/providers`, `internal/translate`, `internal/sse`, `internal/timing`, `internal/feedback`, `internal/router/{cache,catalog,handover,planner,sessionpin,turntype,banditexplore}`, `internal/proxy/usage` define interfaces, value types, pure functions only. Adding I/O method (HTTP, DB, queue, FS) = layering violation; put on `auth.Service` / `proxy.Service` / `billing.Service` or adapter subpackage. Pure-Go utility libs fine.
 - **Adapters depend only on inner ring.** `internal/postgres` may also import `internal/sqlc`. Adapters never import each other — `internal/postgres` doesn't know `internal/api/admin` etc. Note: provider adapters (`internal/providers/<name>/`) import `internal/proxy` for `OnUpstreamMeta` callback so streaming responses record usage/headers back to proxy — one of few inward-pointing adapter→inner-ring imports, intentional. `internal/server/middleware` and `internal/providers/httputil` (both adapters) stamp/read request latency via `internal/timing`'s `Timing` value type instead of importing `internal/observability/otel` directly — `Timing` used to live in `otel` and was pulled out specifically so these adapters (and `internal/providers/{anthropic,openai,google,openaicompat}`) don't need a concrete dependency on the OTel exporter adapter just to stamp a timestamp. `internal/proxy` also imports `internal/timing` (an inner-ring package importing another inner-ring package, which is allowed) to read timing back into span attributes.
-- **`internal/api/*` and `internal/server`** depend on `internal/auth` (Service handle + middleware-context types) and `internal/proxy` (routing/dispatch service handle). May import `internal/observability` for logging, `internal/providers` for shared sentinel errors, `internal/router/cluster` for `ErrClusterUnavailable` sentinel + `DeployedModelsSource` interface (API handlers map sentinel → HTTP 503). Must not import `internal/postgres`, any concrete `internal/providers/*` adapter, or `internal/translate` directly. Concrete instances reach presentation only via constructor params from composition root.
+- **`internal/api/*` and `internal/server`** depend on `internal/auth` (Service handle + middleware-context types), `internal/proxy` (routing/dispatch service handle), and `internal/router` (`Router` interface + `Request`/`Decision` types — `internal/server/middleware/auth.go` and `routing_knobs_override.go` construct/read `router.Request`/`router.Decision` for header-driven overrides). May import `internal/observability` for logging, `internal/providers` for shared sentinel errors, `internal/router/cluster` for `ErrClusterUnavailable` sentinel + `DeployedModelsSource` interface (API handlers map sentinel → HTTP 503). Must not import `internal/postgres`, any concrete `internal/providers/*` adapter, or `internal/translate` directly. Concrete instances reach presentation only via constructor params from composition root.
 - **`internal/config` and `internal/observability` are leaf utilities** — must not import any other package under `internal/`. Third-party utility deps fine; today pull only stdlib + gin (request-scoped logger middleware). `internal/observability/otel` subpackage *is* an adapter (builds real OTLP exporter) and can import other internal packages; parent `internal/observability` stays a leaf.
 - **Composition happens in `cmd/router/main.go`.** Only file that constructs concrete adapters + injects them. No other place wires things. See [`cmd/CLAUDE.md`](cmd/CLAUDE.md).
 
@@ -106,13 +128,18 @@ Pick by responsibility, then read that package's `CLAUDE.md`:
 | HTTP endpoint (handler + route) | `internal/api/<group>/` | [internal/api/CLAUDE.md](internal/api/CLAUDE.md) |
 | Identity / API-key logic | `internal/auth` (method on `*Service`) | [internal/auth/CLAUDE.md](internal/auth/CLAUDE.md) |
 | Routing / dispatch / per-turn orchestration | `internal/proxy` (method on `*Service`) | [internal/proxy/CLAUDE.md](internal/proxy/CLAUDE.md) |
+| Balance check / inference debit | `internal/billing` (method on `*Service`) | — |
+| Feedback-link token signing (no I/O) | `internal/feedback` | — |
 | Cross-format wire conversion (no I/O) | `internal/translate` | [internal/translate/CLAUDE.md](internal/translate/CLAUDE.md) |
 | New upstream provider | `internal/providers/<name>/` | [internal/providers/CLAUDE.md](internal/providers/CLAUDE.md) |
 | New `Router` implementation | `internal/router/<name>/` | [internal/router/CLAUDE.md](internal/router/CLAUDE.md) |
 | Cluster scorer / artifacts | `internal/router/cluster/` | [internal/router/cluster/CLAUDE.md](internal/router/cluster/CLAUDE.md) |
-| Cache-aware turn routing internals | `internal/router/{planner,handover,cache,sessionpin,pricing,capability,turntype}/` | each has its own CLAUDE.md |
+| New model / per-model pricing data | `internal/router/catalog/` | [internal/router/catalog/CLAUDE.md](internal/router/catalog/CLAUDE.md) |
+| Cache-aware turn routing internals | `internal/router/{planner,handover,cache,sessionpin,turntype}/` | each has its own CLAUDE.md |
+| Bounded quality-tie-band exploration | `internal/router/banditexplore/` | — |
 | Anthropic usage-bypass gate | `internal/proxy/usage` | [internal/proxy/usage/CLAUDE.md](internal/proxy/usage/CLAUDE.md) |
 | New column / SQL query | `db/queries/` + `internal/postgres/` | [db/CLAUDE.md](db/CLAUDE.md), [internal/postgres/CLAUDE.md](internal/postgres/CLAUDE.md) |
+| Cross-instance cache invalidation / recharge notify | `internal/pubsub` | — |
 | Doc under `docs/` | `docs/` | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
 
 **Default rule:** put logic in the package that uses it. Only promote to a shared home (`auth`, `proxy`, `translate`, `config`, `observability`, `sse`, `timing`) when 3+ packages need the same logic.
@@ -137,7 +164,7 @@ If new helper doesn't fit, justify new package in code comment before creating.
 - Keep files small. Split distinct logic into separate files, especially when shared between multiple places.
 - Avoid unnecessary nesting — flatten conditionals with early returns + combined conditions.
 - All exported symbols carry godoc starting with symbol name (`Foo does X` or `// Foo is …`).
-- Errors flow up. Don't swallow; don't log-and-continue on request path. `fireMarkUsed` in [service.go](internal/auth/service.go) is the one documented exception (best-effort, off request path).
+- Errors flow up. Don't swallow; don't log-and-continue on request path. The one documented exception is a **best-effort, off-request-path fire-and-forget** — always wrapped in [`observability.SafeGo`](internal/observability/safego.go) (bounded timeout, panic-recovering, logs its own failure), never a raw `go func(){}()`. Current call sites: `fireMarkUsed` ([auth/service.go](internal/auth/service.go)), `fireTelemetry` + `reportHMMOutcome` ([proxy/service.go](internal/proxy/service.go)), `NotifyInstallationChanged` + `NotifyRechargeNeeded` ([pubsub](internal/pubsub)).
 - Use `errors.Is` / `errors.As`, never `==` or `!=` on errors. For no-rows checks: `errors.Is(err, sql.ErrNoRows)`.
 - Use `slog` (via `observability.Get` / `observability.FromGin`), not `fmt.Println` or `log.Print*`.
 - Sentinel errors typed (`var ErrFoo = errors.New(...)`) + live in same package as function that returns them. HTTP layer maps to status codes; do not export HTTP semantics from inner-ring packages.

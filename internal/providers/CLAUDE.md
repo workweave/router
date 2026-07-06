@@ -8,7 +8,6 @@ Provider `Client` interface + canonical `Provider*` name constants + concrete ad
 
 - `provider.go` — `Client` interface, `Provider*` constants, `APIKeyEnvVars` map (single source of truth for provider→env-var mapping).
 - `anthropic/`, `openai/`, `google/`, `openaicompat/` — concrete adapters.
-- `noop/` — placeholder client returning `providers.ErrNotImplemented`. Use when wiring a new `availableProviders` key whose adapter hasn't landed yet so the cluster scorer can already filter against it.
 - `httputil/` — shared transport + streaming helpers.
 
 ## Inward-pointing import (intentional)

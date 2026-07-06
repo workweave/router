@@ -365,7 +365,9 @@ func TestTrimLastN_ThenPrepareGemini_NoEmptyFunctionResponseName(t *testing.T) {
 	env, err := translate.ParseAnthropic([]byte(body))
 	require.NoError(t, err)
 
-	// Simulate the handover switch path (summarizer not wired → TrimLastN).
+	// Exercise TrimLastN directly as a bounded-trim primitive (it is no
+	// longer the live handover-failure fallback — proxy now preserves full
+	// history unchanged when the summarizer is unavailable or fails).
 	handover.TrimLastN(env, 3)
 
 	// Now translate to Gemini — this is the path that produced the 400.
