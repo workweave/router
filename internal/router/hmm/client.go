@@ -221,6 +221,10 @@ func routeMessages(messages []router.ConversationMessage) []routeMessage {
 		totalText += len(text)
 		calls := make([]routeToolCall, 0, len(msg.ToolCalls))
 		for _, call := range msg.ToolCalls {
+			name := clipRouteText(call.Name, maxRouteToolCallInputChars)
+			if name == "" {
+				continue
+			}
 			keys := call.InputKeys
 			if len(keys) > maxRouteToolCallInputKeys {
 				keys = keys[:maxRouteToolCallInputKeys]
@@ -232,7 +236,7 @@ func routeMessages(messages []router.ConversationMessage) []routeMessage {
 				}
 			}
 			calls = append(calls, routeToolCall{
-				Name:      clipRouteText(call.Name, maxRouteToolCallInputChars),
+				Name:      name,
 				InputKeys: inputKeys,
 			})
 		}
@@ -281,7 +285,7 @@ func clipRouteText(text string, limit int) string {
 
 func latestUserText(messages []routeMessage) string {
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" && strings.TrimSpace(messages[i].Text) != "" {
+		if isPromptTextRole(messages[i].Role) && strings.TrimSpace(messages[i].Text) != "" {
 			return strings.TrimSpace(messages[i].Text)
 		}
 	}
@@ -291,7 +295,7 @@ func latestUserText(messages []routeMessage) string {
 func turnIndex(messages []routeMessage) int {
 	count := 0
 	for _, msg := range messages {
-		if msg.Role == "user" && strings.TrimSpace(msg.Text) != "" {
+		if isPromptTextRole(msg.Role) && strings.TrimSpace(msg.Text) != "" {
 			count++
 		}
 	}
@@ -299,6 +303,10 @@ func turnIndex(messages []routeMessage) int {
 		return 0
 	}
 	return count - 1
+}
+
+func isPromptTextRole(role string) bool {
+	return role == "user" || role == "developer"
 }
 
 var _ Decider = (*HTTPDecider)(nil)

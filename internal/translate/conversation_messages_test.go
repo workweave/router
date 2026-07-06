@@ -109,3 +109,41 @@ func TestConversationMessagesPreservesGeminiToolResultMarker(t *testing.T) {
 	require.Len(t, messages[1].ToolResults, 1)
 	assert.Equal(t, "Bash", messages[1].ToolResults[0].ToolUseID)
 }
+
+func TestConversationMessagesDropsNamelessOpenAIToolCalls(t *testing.T) {
+	env, err := translate.ParseOpenAI([]byte(`{
+		"model":"gpt-4o",
+		"messages":[{
+			"role":"assistant",
+			"content":null,
+			"tool_calls":[
+				{"id":"call_empty","type":"function","function":{"name":"","arguments":"{\"path\":\"a\"}"}},
+				{"id":"call_read","type":"function","function":{"name":"Read","arguments":"{\"file_path\":\"README.md\"}"}}
+			]
+		}]
+	}`))
+	require.NoError(t, err)
+
+	messages := env.ConversationMessages()
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].ToolCalls, 1)
+	assert.Equal(t, "Read", messages[0].ToolCalls[0].Name)
+}
+
+func TestConversationMessagesDropsNamelessGeminiToolCalls(t *testing.T) {
+	env, err := translate.ParseGemini([]byte(`{
+		"contents":[{
+			"role":"model",
+			"parts":[
+				{"functionCall":{"name":"","args":{"path":"a"}}},
+				{"functionCall":{"name":"Read","args":{"file_path":"README.md"}}}
+			]
+		}]
+	}`))
+	require.NoError(t, err)
+
+	messages := env.ConversationMessages()
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].ToolCalls, 1)
+	assert.Equal(t, "Read", messages[0].ToolCalls[0].Name)
+}

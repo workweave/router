@@ -100,6 +100,24 @@ func TestRouteMessagesPreservesLatestUserWhenPayloadIsCapped(t *testing.T) {
 	}
 }
 
+func TestRouteMessagesTreatsDeveloperTextAsPromptText(t *testing.T) {
+	messages := routeMessages([]router.ConversationMessage{
+		{Role: "user", Text: "earlier user request"},
+		{Role: "assistant", Text: "earlier answer"},
+		{Role: "developer", Text: "latest developer prompt"},
+		{Role: "assistant", ToolCalls: []router.ConversationToolCall{
+			{Name: "", InputKeys: []string{"ignored"}},
+			{Name: "Read", InputKeys: []string{"file_path"}},
+		}},
+	})
+
+	assert.Equal(t, "latest developer prompt", latestUserText(messages))
+	assert.Equal(t, 1, turnIndex(messages))
+	require.Len(t, messages, 4)
+	require.Len(t, messages[3].ToolCalls, 1)
+	assert.Equal(t, "Read", messages[3].ToolCalls[0].Name)
+}
+
 func TestHTTPDeciderReportsOutcome(t *testing.T) {
 	var got map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

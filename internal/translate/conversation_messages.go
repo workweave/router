@@ -129,8 +129,12 @@ func anthropicToolCalls(content gjson.Result) []ConversationToolCall {
 		if block.Get("type").String() != "tool_use" {
 			return true
 		}
+		name := strings.TrimSpace(block.Get("name").String())
+		if name == "" {
+			return true
+		}
 		calls = append(calls, ConversationToolCall{
-			Name:      strings.TrimSpace(block.Get("name").String()),
+			Name:      name,
 			InputKeys: objectKeys(block.Get("input")),
 		})
 		return true
@@ -166,8 +170,12 @@ func openAIToolCalls(value gjson.Result) []ConversationToolCall {
 		if !function.Exists() {
 			return true
 		}
+		name := strings.TrimSpace(function.Get("name").String())
+		if name == "" {
+			return true
+		}
 		calls = append(calls, ConversationToolCall{
-			Name:      strings.TrimSpace(function.Get("name").String()),
+			Name:      name,
 			InputKeys: jsonObjectKeys(function.Get("arguments").String()),
 		})
 		return true
@@ -200,8 +208,12 @@ func geminiToolCalls(parts gjson.Result) []ConversationToolCall {
 		if !args.Exists() {
 			args = call.Get("arguments")
 		}
+		name := strings.TrimSpace(call.Get("name").String())
+		if name == "" {
+			return true
+		}
 		calls = append(calls, ConversationToolCall{
-			Name:      strings.TrimSpace(call.Get("name").String()),
+			Name:      name,
 			InputKeys: objectKeys(args),
 		})
 		return true
