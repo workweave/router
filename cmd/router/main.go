@@ -515,12 +515,19 @@ func main() {
 	// Kept as the interface type: a typed-nil *ProviderSummarizer would defeat
 	// the orchestrator's `!= nil` check.
 	var summarizer handover.Summarizer
+	// compactionSz stays a true-nil interface unless the summarizer provider is
+	// registered, so the Service's nil-check disables Tier-3 correctly (a
+	// typed-nil concrete pointer would defeat it).
+	var compactionSz proxy.CompactionSummarizer
 	if client, ok := providerMap[handoverProviderName]; ok {
-		summarizer = proxy.NewProviderSummarizer(client, handoverModel, handoverTimeout)
+		ps := proxy.NewProviderSummarizer(client, handoverModel, handoverTimeout)
+		summarizer = ps
+		compactionSz = ps
 		logger.Info("Handover summarizer wired", "provider", handoverProviderName, "model", handoverModel, "timeout_ms", handoverTimeout.Milliseconds())
 	} else {
 		logger.Info("Handover summarizer disabled (provider not registered); switch turns will preserve full history instead", "requested_provider", handoverProviderName)
 	}
+	compactionPct := parseEnvFloat("ROUTER_COMPACTION_PCT", proxy.DefaultCompactionTriggerPct)
 
 	// Lets the planner force a switch when a pinned model's provider is
 	// removed. nil on a missing/unloadable bundle treats every pin as routable.
@@ -614,6 +621,7 @@ func main() {
 		WithRouterFeedbackStore(repo.Telemetry).
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
+		WithCompaction(compactionSz, compactionPct).
 		WithAvailableModels(availableModels).
 		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
 		WithBillingService(billingSvc)

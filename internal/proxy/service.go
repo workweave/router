@@ -170,6 +170,14 @@ type Service struct {
 	// summarizer produces a bounded-cost handover summary on switch turns.
 	// nil passes the full prior history through unchanged.
 	summarizer handover.Summarizer
+	// compactionSummarizer produces the structured summary for the proactive
+	// context-window compaction cascade (maybeCompact). nil disables Tier-3
+	// summarization (the cascade still runs Tier-1 cleanup + trim rescue).
+	compactionSummarizer CompactionSummarizer
+	// compactionTriggerPct is the fraction of the largest eligible model's
+	// context window at which the compaction cascade engages. Zero disables
+	// compaction entirely.
+	compactionTriggerPct float64
 	// availableModels is the boot-time set of model names whose providers are
 	// registered. Read by the planner to decide whether a pin's model is still
 	// routable.
@@ -1013,6 +1021,19 @@ func (s *Service) WithSummarizer(sz handover.Summarizer) *Service {
 	return s
 }
 
+// WithCompaction installs the summarizer and trigger threshold for the
+// proactive context-window compaction cascade (maybeCompact). A zero or
+// out-of-range pct falls back to compactionTriggerPctDefault; a nil summarizer
+// leaves Tier-3 summarization off (Tier-1 cleanup + trim rescue still run).
+func (s *Service) WithCompaction(cs CompactionSummarizer, pct float64) *Service {
+	s.compactionSummarizer = cs
+	if pct <= 0 || pct > 1 {
+		pct = DefaultCompactionTriggerPct
+	}
+	s.compactionTriggerPct = pct
+	return s
+}
+
 // WithAvailableModels installs the boot-time set of routable model names.
 // The planner consults this set so a pin whose model is no longer
 // available forces a switch. nil treats every model as available.
@@ -1667,6 +1688,40 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		outputReserve = feats.MaxTokens
 	}
 	baseExcluded := s.excludedModelsForRequest(ctx)
+
+	// Snapshot inbound (client-sent) state BEFORE any env rewrite. The
+	// compaction tracker, spiral scan, and tool-output telemetry must compare
+	// what the client actually sent, not a router-shortened body — either the
+	// proactive compaction just below or runTurnLoop's switch-handover rewrite.
+	inboundToolCallCount := len(env.AssistantToolCallSignatures())
+	var inboundSpiralSignals spiralSignals
+	if s.spiralShadowEnabled {
+		inboundSpiralSignals = computeSpiralSignals(env, feats.MessageCount)
+	}
+	inboundLastUser := env.LastUserMessage()
+
+	// Proactive context-window compaction: shrink an over-long conversation to
+	// fit the largest eligible model BEFORE routing, so a genuinely huge
+	// session is compacted (à la Claude Code) instead of dead-ending in the
+	// scorer with no eligible provider. Mutates env; feats is recomputed after.
+	maxEligibleWindow := s.maxEligibleContextWindow(baseExcluded)
+	compRes, compErr := s.maybeCompact(ctx, env, outputReserve, maxEligibleWindow, r.Header)
+	if compErr != nil {
+		log.Warn("Compaction could not fit request to any eligible model",
+			"err", compErr, "final_estimate", compRes.FinalEstimate, "max_window", maxEligibleWindow, "requested_model", feats.Model)
+		return compErr
+	}
+	if compRes.Applied {
+		feats = env.RoutingFeatures(embedFlag)
+		log.Info("Proactive compaction applied",
+			"tool_results_cleared", compRes.ToolResultsCleared,
+			"summarized", compRes.Summarized,
+			"summary_model", compRes.SummaryModel,
+			"trimmed_to_recent", compRes.TrimmedToRecent,
+			"final_estimate", compRes.FinalEstimate,
+		)
+	}
+
 	overflowEstimate := env.ContextOverflowTokenEstimate()
 	excluded, ctxOverflowed := excludeContextOverflowModels(overflowEstimate, env.SignatureTokenSavings(), outputReserve, baseExcluded, s.availableModels)
 	if len(ctxOverflowed) > 0 {
@@ -1683,25 +1738,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			"excluded_models", strings.Join(geminiUnsigned, ","),
 		)
 	}
-
-	// Snapshot inbound tool-call count before runTurnLoop, which may mutate env
-	// via a model-switch handover's RewriteForHandover. The compaction tracker
-	// must compare what the client actually sent, not the post-rewrite count,
-	// to avoid false-positives when the router itself shortened the window.
-	inboundToolCallCount := len(env.AssistantToolCallSignatures())
-
-	// Same reasoning for spiral signals: a handover-rewritten history would
-	// wipe error streaks / thrash / repetition on exactly the turns that cross
-	// threshold.
-	var inboundSpiralSignals spiralSignals
-	if s.spiralShadowEnabled {
-		inboundSpiralSignals = computeSpiralSignals(env, feats.MessageCount)
-	}
-
-	// Same reasoning for tool-output size: a handover rewrite strips
-	// tool_result blocks from env, which would zero out tool_result_bytes for
-	// a genuine tool_result turn at telemetry time.
-	inboundLastUser := env.LastUserMessage()
 
 	routeStart := time.Now()
 	req := router.Request{
@@ -2497,6 +2533,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// upstream call since the cache-hit branch above already returned.
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
+		if compRes.Summarized {
+			s.billCompactionSummary(ctx, requestID, externalID, compRes.SummaryUsage)
+		}
 		if compactionHandoverOutcome.Invoked && !compactionHandoverOutcome.FallbackToFullHistory {
 			sumUsage := compactionHandoverOutcome.SummaryUsage
 			if sumUsage.Model != "" && (sumUsage.InputTokens > 0 || sumUsage.OutputTokens > 0) {
@@ -3421,6 +3460,35 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		outputReserveOAI = feats.MaxTokens
 	}
 	baseExcludedOAI := s.excludedModelsForRequest(ctx)
+
+	// Snapshot the inbound tool-output size before any env rewrite (proactive
+	// compaction below, or runTurnLoop's switch handover); see toolResultBytesPtr.
+	inboundLastUser := env.LastUserMessage()
+
+	// Proactive context-window compaction, as in ProxyMessages. Skipped for
+	// Codex passthrough bodies, which are forwarded verbatim.
+	var compResOAI compactionResult
+	if !codexPassthrough {
+		maxEligibleWindowOAI := s.maxEligibleContextWindow(baseExcludedOAI)
+		var compErrOAI error
+		compResOAI, compErrOAI = s.maybeCompact(ctx, env, outputReserveOAI, maxEligibleWindowOAI, r.Header)
+		if compErrOAI != nil {
+			log.Warn("Compaction could not fit request to any eligible model",
+				"err", compErrOAI, "final_estimate", compResOAI.FinalEstimate, "max_window", maxEligibleWindowOAI, "requested_model", feats.Model)
+			return compErrOAI
+		}
+		if compResOAI.Applied {
+			feats = env.RoutingFeatures(embedFlag)
+			log.Info("Proactive compaction applied",
+				"tool_results_cleared", compResOAI.ToolResultsCleared,
+				"summarized", compResOAI.Summarized,
+				"summary_model", compResOAI.SummaryModel,
+				"trimmed_to_recent", compResOAI.TrimmedToRecent,
+				"final_estimate", compResOAI.FinalEstimate,
+			)
+		}
+	}
+
 	overflowEstimateOAI := env.ContextOverflowTokenEstimate()
 	excludedOAI, ctxOverflowedOAI := excludeContextOverflowModels(overflowEstimateOAI, env.SignatureTokenSavings(), outputReserveOAI, baseExcludedOAI, s.availableModels)
 	if len(ctxOverflowedOAI) > 0 {
@@ -3437,10 +3505,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			"excluded_models", strings.Join(geminiUnsignedOAI, ","),
 		)
 	}
-
-	// Snapshot the inbound tool-output size before runTurnLoop (which may rewrite
-	// env via switch handover); see toolResultBytesPtr.
-	inboundLastUser := env.LastUserMessage()
 
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
@@ -3881,6 +3945,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
+		if compResOAI.Summarized {
+			s.billCompactionSummary(ctx, requestID, externalID, compResOAI.SummaryUsage)
+		}
 	}
 
 	// See ProxyMessages for the two-strike eviction rationale.
