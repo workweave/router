@@ -331,7 +331,7 @@ func anyNamedToolCall(toolCalls gjson.Result) bool {
 
 // isEditToolName reports whether name is a file-edit tool subject to escape normalization.
 func isEditToolName(name string) bool {
-	_, ok := editToolNames[strings.ToLower(name)]
+	_, ok := escapeNormalizeToolNames[strings.ToLower(name)]
 	return ok
 }
 

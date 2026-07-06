@@ -6,15 +6,8 @@ import (
 
 	"github.com/tidwall/gjson"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/sse"
-)
-
-// Mirrors providers.Provider* constants; duplicated (not imported) to avoid a
-// circular import since this is a leaf package. Keep in sync with internal/providers/provider.go.
-const (
-	providerAnthropic = "anthropic"
-	providerOpenAI    = "openai"
-	providerGoogle    = "google"
 )
 
 // UsageSink receives extracted token usage. Translators call it directly when
@@ -168,9 +161,9 @@ func (u *UsageExtractor) scanBuffer() {
 
 func (u *UsageExtractor) extractFromSSEEvent(eventType []byte, data []byte) {
 	switch u.provider {
-	case providerAnthropic:
+	case providers.ProviderAnthropic:
 		u.extractAnthropicSSE(eventType, data)
-	case providerOpenAI, providerGoogle:
+	case providers.ProviderOpenAI, providers.ProviderGoogle:
 		u.extractOpenAISSE(data)
 	}
 }
@@ -181,7 +174,7 @@ func (u *UsageExtractor) extractAnthropicSSE(eventType []byte, data []byte) {
 		return
 	}
 
-	input, output, cacheCreation, cacheRead, found := extractUsageGJSON(data, providerAnthropic)
+	input, output, cacheCreation, cacheRead, found := extractUsageGJSON(data, providers.ProviderAnthropic)
 	if !found {
 		return
 	}
@@ -253,7 +246,7 @@ func (u *UsageExtractor) tryExtractFromJSON() {
 // Google's native :generateContent uses usageMetadata; its OpenAI-compat surface
 // uses the OpenAI shape instead.
 func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreation, cacheRead int, found bool) {
-	if provider == providerGoogle {
+	if provider == providers.ProviderGoogle {
 		if meta := gjson.GetBytes(data, "usageMetadata"); meta.Exists() {
 			input = int(meta.Get("promptTokenCount").Int())
 			output = int(meta.Get("candidatesTokenCount").Int())
@@ -263,12 +256,12 @@ func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreati
 	}
 
 	usage := gjson.GetBytes(data, "usage")
-	if !usage.Exists() && provider == providerAnthropic {
+	if !usage.Exists() && provider == providers.ProviderAnthropic {
 		usage = gjson.GetBytes(data, "message.usage")
 	}
 	// OpenAI Responses streaming nests usage under the terminal response event
 	// (response.completed); the non-streaming body carries it at the top level.
-	if !usage.Exists() && provider == providerOpenAI {
+	if !usage.Exists() && provider == providers.ProviderOpenAI {
 		usage = gjson.GetBytes(data, "response.usage")
 	}
 	if !usage.Exists() {
@@ -276,12 +269,12 @@ func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreati
 	}
 
 	switch provider {
-	case providerAnthropic:
+	case providers.ProviderAnthropic:
 		input = int(usage.Get("input_tokens").Int())
 		output = int(usage.Get("output_tokens").Int())
 		cacheCreation = int(usage.Get("cache_creation_input_tokens").Int())
 		cacheRead = int(usage.Get("cache_read_input_tokens").Int())
-	case providerOpenAI, providerGoogle:
+	case providers.ProviderOpenAI, providers.ProviderGoogle:
 		// Chat Completions uses prompt_tokens/completion_tokens; Responses API
 		// (Codex passthrough) uses input_tokens/output_tokens. Probe both.
 		if pt := usage.Get("prompt_tokens"); pt.Exists() {

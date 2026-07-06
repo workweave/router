@@ -731,13 +731,7 @@ func writeOpenAIMaxTokensFromAnthropic(jw *jsonWriter, body []byte, opts EmitOpt
 	if r.Exists() {
 		val = r.Int()
 	}
-	cap := modelMaxOutputTokens[opts.TargetModel]
-	if cap == 0 {
-		cap = defaultMaxOutputTokenCap
-	}
-	if val > int64(cap) {
-		val = int64(cap)
-	}
+	val = clampToModelOutputCap(val, opts.TargetModel)
 	if opts.Capabilities.Supports(router.CapReasoning) {
 		jw.Key("max_completion_tokens")
 	} else {

@@ -2,9 +2,9 @@ package translate
 
 import "strings"
 
-// editToolNames is the set of tools whose args carry file content needing
-// exact whitespace round-tripping. Matched case-insensitively.
-var editToolNames = map[string]struct{}{
+// escapeNormalizeToolNames is the set of tools whose args carry file content
+// needing exact whitespace round-tripping. Matched case-insensitively.
+var escapeNormalizeToolNames = map[string]struct{}{
 	"edit":      {},
 	"write":     {},
 	"multiedit": {},
@@ -29,7 +29,7 @@ func normalizeEditEscapes(enabled bool, toolName string, input any) {
 	if !enabled {
 		return
 	}
-	if _, ok := editToolNames[strings.ToLower(toolName)]; !ok {
+	if _, ok := escapeNormalizeToolNames[strings.ToLower(toolName)]; !ok {
 		return
 	}
 	m, ok := input.(map[string]any)

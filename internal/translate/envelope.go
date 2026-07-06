@@ -888,17 +888,17 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		ov.DeleteKeys = append(ov.DeleteKeys, "max_tokens")
 	}
 
-	cap := modelMaxOutputTokens[opts.TargetModel]
-	if cap == 0 {
-		cap = defaultMaxOutputTokenCap
+	tokenCap := modelMaxOutputTokens[opts.TargetModel]
+	if tokenCap == 0 {
+		tokenCap = defaultMaxOutputTokenCap
 	}
 	maxTokensDeleted := hasMaxTokens && supportsReasoning
 	if hasMaxTokens && !maxTokensDeleted {
 		ov.ClampMaxTokensKey = "max_tokens"
-		ov.ClampMaxTokensValue = int64(cap)
+		ov.ClampMaxTokensValue = int64(tokenCap)
 	}
 	if hasMaxComp || ov.SetMaxCompletionTokens != nil {
-		ov.ClampMaxCompTokensValue = int64(cap)
+		ov.ClampMaxCompTokensValue = int64(tokenCap)
 	}
 
 	if !hasMaxTokens && !hasMaxComp {
@@ -1048,8 +1048,8 @@ const defaultMaxOutputTokenCap = 8192
 // defaultOutputTokens returns the default max output tokens for a model,
 // floored by the model's own cap and globally at defaultMaxOutputTokenCap.
 func defaultOutputTokens(model string) int64 {
-	if cap, ok := modelMaxOutputTokens[model]; ok && cap < defaultMaxOutputTokenCap {
-		return int64(cap)
+	if tokenCap, ok := modelMaxOutputTokens[model]; ok && tokenCap < defaultMaxOutputTokenCap {
+		return int64(tokenCap)
 	}
 	return defaultMaxOutputTokenCap
 }

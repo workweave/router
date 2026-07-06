@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"strings"
+
+	"workweave/router/internal/providers"
 )
 
 type openAIReasoningSignatureEnvelope struct {
@@ -19,7 +21,7 @@ func encodeOpenAIReasoningSignature(id, enc string) string {
 	}
 	b, err := json.Marshal(openAIReasoningSignatureEnvelope{
 		Version:  1,
-		Provider: "openai",
+		Provider: providers.ProviderOpenAI,
 		ID:       id,
 		Enc:      enc,
 	})
@@ -41,7 +43,7 @@ func decodeOpenAIReasoningSignature(sig string) (id, enc string, ok bool) {
 	if err := json.Unmarshal(b, &env); err != nil {
 		return "", "", false
 	}
-	if env.Version != 1 || env.Provider != "openai" || env.ID == "" || env.Enc == "" {
+	if env.Version != 1 || env.Provider != providers.ProviderOpenAI || env.ID == "" || env.Enc == "" {
 		return "", "", false
 	}
 	return env.ID, env.Enc, true

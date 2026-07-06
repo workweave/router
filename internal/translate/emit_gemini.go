@@ -1097,12 +1097,12 @@ func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model
 
 // clampToModelOutputCap caps v to the model's max output token limit.
 func clampToModelOutputCap(v int64, model string) int64 {
-	cap := modelMaxOutputTokens[model]
-	if cap == 0 {
-		cap = defaultMaxOutputTokenCap
+	outputCap := modelMaxOutputTokens[model]
+	if outputCap == 0 {
+		outputCap = defaultMaxOutputTokenCap
 	}
-	if v > int64(cap) {
-		return int64(cap)
+	if v > int64(outputCap) {
+		return int64(outputCap)
 	}
 	return v
 }
