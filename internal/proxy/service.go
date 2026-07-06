@@ -135,7 +135,6 @@ type Service struct {
 	// scoreToolResultTurns is the kill switch (ROUTER_SCORE_TOOL_RESULT_TURNS).
 	// When true (default), ToolResult turns run the cluster scorer + planner
 	// for MainLoop parity; when false, the pin is reused verbatim (#82 path).
-	// Runs the embedder on ToolResult traffic (majority of turns).
 	scoreToolResultTurns bool
 	// effortEscalation enables the escalate-on-failure reasoning-effort policy:
 	// gpt-5.x serves low effort by default and high after an observed
