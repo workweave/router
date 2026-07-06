@@ -28,3 +28,19 @@ func TestConversationMessagesStripsClaudeInjectedBlocks(t *testing.T) {
 	assert.Equal(t, "user", messages[0].Role)
 	assert.Equal(t, "can you help me brainstorm a bit", messages[0].Text)
 }
+
+func TestConversationMessagesGeminiMissingRoleDefaultsToUser(t *testing.T) {
+	env, err := translate.ParseGemini([]byte(`{
+		"contents":[
+			{"parts":[{"text":"can you help me brainstorm a bit"}]},
+			{"role":"model","parts":[{"text":"sure"}]}
+		]
+	}`))
+	require.NoError(t, err)
+
+	messages := env.ConversationMessages()
+	require.Len(t, messages, 2)
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "can you help me brainstorm a bit", messages[0].Text)
+	assert.Equal(t, "assistant", messages[1].Role)
+}

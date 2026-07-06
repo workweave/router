@@ -6,12 +6,21 @@ import (
 	"strings"
 
 	"github.com/tidwall/gjson"
-
-	"workweave/router/internal/router"
 )
 
-// ConversationMessages returns a provider-neutral message history for routing.
-func (e *RequestEnvelope) ConversationMessages() []router.ConversationMessage {
+type ConversationMessage struct {
+	Role      string
+	Text      string
+	ToolCalls []ConversationToolCall
+}
+
+type ConversationToolCall struct {
+	Name      string
+	InputKeys []string
+}
+
+// ConversationMessages returns provider-neutral visible message history.
+func (e *RequestEnvelope) ConversationMessages() []ConversationMessage {
 	if e == nil {
 		return nil
 	}
@@ -27,10 +36,10 @@ func (e *RequestEnvelope) ConversationMessages() []router.ConversationMessage {
 	}
 }
 
-func (e *RequestEnvelope) anthropicConversationMessages() []router.ConversationMessage {
-	out := make([]router.ConversationMessage, 0)
+func (e *RequestEnvelope) anthropicConversationMessages() []ConversationMessage {
+	out := make([]ConversationMessage, 0)
 	if text := strings.TrimSpace(systemTextGJSON(gjson.GetBytes(e.body, "system"))); text != "" {
-		out = append(out, router.ConversationMessage{Role: "system", Text: text})
+		out = append(out, ConversationMessage{Role: "system", Text: text})
 	}
 	gjson.GetBytes(e.body, "messages").ForEach(func(_, msg gjson.Result) bool {
 		role := strings.TrimSpace(msg.Get("role").String())
@@ -38,7 +47,7 @@ func (e *RequestEnvelope) anthropicConversationMessages() []router.ConversationM
 			return true
 		}
 		content := msg.Get("content")
-		out = append(out, router.ConversationMessage{
+		out = append(out, ConversationMessage{
 			Role:      role,
 			Text:      textForRole(role, content),
 			ToolCalls: anthropicToolCalls(content),
@@ -48,14 +57,14 @@ func (e *RequestEnvelope) anthropicConversationMessages() []router.ConversationM
 	return compactConversationMessages(out)
 }
 
-func (e *RequestEnvelope) openAIConversationMessages() []router.ConversationMessage {
-	out := make([]router.ConversationMessage, 0)
+func (e *RequestEnvelope) openAIConversationMessages() []ConversationMessage {
+	out := make([]ConversationMessage, 0)
 	gjson.GetBytes(e.body, "messages").ForEach(func(_, msg gjson.Result) bool {
 		role := strings.TrimSpace(msg.Get("role").String())
 		if role == "" {
 			return true
 		}
-		out = append(out, router.ConversationMessage{
+		out = append(out, ConversationMessage{
 			Role:      role,
 			Text:      strings.TrimSpace(openAIContentTextGJSON(msg.Get("content"))),
 			ToolCalls: openAIToolCalls(msg.Get("tool_calls")),
@@ -65,10 +74,10 @@ func (e *RequestEnvelope) openAIConversationMessages() []router.ConversationMess
 	return compactConversationMessages(out)
 }
 
-func (e *RequestEnvelope) geminiConversationMessages() []router.ConversationMessage {
-	out := make([]router.ConversationMessage, 0)
+func (e *RequestEnvelope) geminiConversationMessages() []ConversationMessage {
+	out := make([]ConversationMessage, 0)
 	if text := strings.TrimSpace(geminiSystemText(e.body)); text != "" {
-		out = append(out, router.ConversationMessage{Role: "system", Text: text})
+		out = append(out, ConversationMessage{Role: "system", Text: text})
 	}
 	gjson.GetBytes(e.body, "contents").ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
@@ -76,16 +85,16 @@ func (e *RequestEnvelope) geminiConversationMessages() []router.ConversationMess
 		case "model":
 			role = "assistant"
 		case "":
-			role = "unknown"
+			role = "user"
 		}
 		parts := msg.Get("parts")
-		out = append(out, router.ConversationMessage{
+		out = append(out, ConversationMessage{
 			Role:      role,
 			Text:      strings.TrimSpace(geminiPartsText(parts)),
 			ToolCalls: geminiToolCalls(parts),
 		})
 		if toolText := strings.TrimSpace(geminiFunctionResponseText(parts)); toolText != "" {
-			out = append(out, router.ConversationMessage{Role: "tool", Text: toolText})
+			out = append(out, ConversationMessage{Role: "tool", Text: toolText})
 		}
 		return true
 	})
@@ -99,16 +108,16 @@ func textForRole(role string, content gjson.Result) string {
 	return strings.TrimSpace(contentTextGJSON(content))
 }
 
-func anthropicToolCalls(content gjson.Result) []router.ConversationToolCall {
+func anthropicToolCalls(content gjson.Result) []ConversationToolCall {
 	if !content.IsArray() {
 		return nil
 	}
-	calls := make([]router.ConversationToolCall, 0)
+	calls := make([]ConversationToolCall, 0)
 	content.ForEach(func(_, block gjson.Result) bool {
 		if block.Get("type").String() != "tool_use" {
 			return true
 		}
-		calls = append(calls, router.ConversationToolCall{
+		calls = append(calls, ConversationToolCall{
 			Name:      strings.TrimSpace(block.Get("name").String()),
 			InputKeys: objectKeys(block.Get("input")),
 		})
@@ -117,17 +126,17 @@ func anthropicToolCalls(content gjson.Result) []router.ConversationToolCall {
 	return calls
 }
 
-func openAIToolCalls(value gjson.Result) []router.ConversationToolCall {
+func openAIToolCalls(value gjson.Result) []ConversationToolCall {
 	if !value.IsArray() {
 		return nil
 	}
-	calls := make([]router.ConversationToolCall, 0)
+	calls := make([]ConversationToolCall, 0)
 	value.ForEach(func(_, toolCall gjson.Result) bool {
 		function := toolCall.Get("function")
 		if !function.Exists() {
 			return true
 		}
-		calls = append(calls, router.ConversationToolCall{
+		calls = append(calls, ConversationToolCall{
 			Name:      strings.TrimSpace(function.Get("name").String()),
 			InputKeys: jsonObjectKeys(function.Get("arguments").String()),
 		})
@@ -136,11 +145,11 @@ func openAIToolCalls(value gjson.Result) []router.ConversationToolCall {
 	return calls
 }
 
-func geminiToolCalls(parts gjson.Result) []router.ConversationToolCall {
+func geminiToolCalls(parts gjson.Result) []ConversationToolCall {
 	if !parts.IsArray() {
 		return nil
 	}
-	calls := make([]router.ConversationToolCall, 0)
+	calls := make([]ConversationToolCall, 0)
 	parts.ForEach(func(_, part gjson.Result) bool {
 		call := part.Get("functionCall")
 		if !call.Exists() {
@@ -153,7 +162,7 @@ func geminiToolCalls(parts gjson.Result) []router.ConversationToolCall {
 		if !args.Exists() {
 			args = call.Get("arguments")
 		}
-		calls = append(calls, router.ConversationToolCall{
+		calls = append(calls, ConversationToolCall{
 			Name:      strings.TrimSpace(call.Get("name").String()),
 			InputKeys: objectKeys(args),
 		})
@@ -214,8 +223,8 @@ func jsonObjectKeys(raw string) []string {
 	return keys
 }
 
-func compactConversationMessages(messages []router.ConversationMessage) []router.ConversationMessage {
-	out := make([]router.ConversationMessage, 0, len(messages))
+func compactConversationMessages(messages []ConversationMessage) []ConversationMessage {
+	out := make([]ConversationMessage, 0, len(messages))
 	for _, msg := range messages {
 		msg.Role = strings.TrimSpace(msg.Role)
 		msg.Text = strings.TrimSpace(msg.Text)

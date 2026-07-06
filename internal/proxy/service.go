@@ -1423,7 +1423,7 @@ func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte) (decis
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		PromptText:           promptText,
-		ConversationMessages: env.ConversationMessages(),
+		ConversationMessages: conversationMessagesForRouting(env),
 		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
 	return decision, err
@@ -1711,7 +1711,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		HasTools:             feats.HasTools,
 		HasImages:            feats.HasImages,
 		PromptText:           promptText,
-		ConversationMessages: env.ConversationMessages(),
+		ConversationMessages: conversationMessagesForRouting(env),
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excluded,
 		PreferredModels:      s.preferredModelsForRequest(ctx),
@@ -3451,7 +3451,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		HasTools:             feats.HasTools,
 		HasImages:            feats.HasImages,
 		PromptText:           promptText,
-		ConversationMessages: env.ConversationMessages(),
+		ConversationMessages: conversationMessagesForRouting(env),
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excludedOAI,
 		PreferredModels:      s.preferredModelsForRequest(ctx),
