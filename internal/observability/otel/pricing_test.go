@@ -22,19 +22,19 @@ func TestLookup(t *testing.T) {
 		{name: "claude-opus-4-6", model: "claude-opus-4-6", wantInput: 5.00, wantOutput: 25.00},
 		{name: "claude-sonnet-5", model: "claude-sonnet-5", wantInput: 3.00, wantOutput: 15.00},
 		{name: "claude-sonnet-4-5", model: "claude-sonnet-4-5", wantInput: 3.00, wantOutput: 15.00},
-		{name: "claude-haiku-4-5", model: "claude-haiku-4-5", wantInput: 0.80, wantOutput: 4.00},
+		{name: "claude-haiku-4-5", model: "claude-haiku-4-5", wantInput: 1.00, wantOutput: 5.00},
 
 		// ── OpenAI GPT-5.5 ─────────────────────────────────────
-		{name: "gpt-5.5", model: "gpt-5.5", wantInput: 5.00, wantOutput: 40.00},
-		{name: "gpt-5.5-pro", model: "gpt-5.5-pro", wantInput: 30.00, wantOutput: 120.00},
+		{name: "gpt-5.5", model: "gpt-5.5", wantInput: 5.00, wantOutput: 30.00},
+		{name: "gpt-5.5-pro", model: "gpt-5.5-pro", wantInput: 30.00, wantOutput: 180.00},
 		{name: "gpt-5.5-mini", model: "gpt-5.5-mini", wantInput: 0.50, wantOutput: 2.50},
 		{name: "gpt-5.5-nano", model: "gpt-5.5-nano", wantInput: 0.15, wantOutput: 0.60},
 
 		// ── OpenAI GPT-5.4 ─────────────────────────────────────
-		{name: "gpt-5.4", model: "gpt-5.4", wantInput: 3.00, wantOutput: 12.00},
-		{name: "gpt-5.4-pro", model: "gpt-5.4-pro", wantInput: 20.00, wantOutput: 80.00},
-		{name: "gpt-5.4-mini", model: "gpt-5.4-mini", wantInput: 0.40, wantOutput: 1.60},
-		{name: "gpt-5.4-nano", model: "gpt-5.4-nano", wantInput: 0.10, wantOutput: 0.40},
+		{name: "gpt-5.4", model: "gpt-5.4", wantInput: 2.50, wantOutput: 15.00},
+		{name: "gpt-5.4-pro", model: "gpt-5.4-pro", wantInput: 30.00, wantOutput: 180.00},
+		{name: "gpt-5.4-mini", model: "gpt-5.4-mini", wantInput: 0.75, wantOutput: 4.50},
+		{name: "gpt-5.4-nano", model: "gpt-5.4-nano", wantInput: 0.20, wantOutput: 1.25},
 
 		// ── OpenAI GPT-5 ───────────────────────────────────────
 		{name: "gpt-5", model: "gpt-5", wantInput: 2.50, wantOutput: 10.00},
@@ -63,7 +63,7 @@ func TestLookup(t *testing.T) {
 		{name: "gemini-2.0-flash-lite", model: "gemini-2.0-flash-lite", wantInput: 0.075, wantOutput: 0.30},
 
 		// ── Dated variants (8-digit suffix normalization) ──────
-		{name: "claude-haiku-4-5-20251001", model: "claude-haiku-4-5-20251001", wantInput: 0.80, wantOutput: 4.00},
+		{name: "claude-haiku-4-5-20251001", model: "claude-haiku-4-5-20251001", wantInput: 1.00, wantOutput: 5.00},
 		{name: "claude-sonnet-4-5-20260315", model: "claude-sonnet-4-5-20260315", wantInput: 3.00, wantOutput: 15.00},
 		{name: "claude-opus-4-7-20260101", model: "claude-opus-4-7-20260101", wantInput: 5.00, wantOutput: 25.00},
 		{name: "claude-opus-4-8-20260528", model: "claude-opus-4-8-20260528", wantInput: 5.00, wantOutput: 25.00},
