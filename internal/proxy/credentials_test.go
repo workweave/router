@@ -163,13 +163,6 @@ func TestExtractClientCredentials_RejectsRouterKeyForAnthropic(t *testing.T) {
 		"router-issued tokens (rk_...) supplied via x-api-key must never be forwarded as upstream Anthropic credentials")
 }
 
-func TestResolveCredentials_RouterKeyDoesNotLeakWhenBYOKAbsent(t *testing.T) {
-	headers := http.Header{"Authorization": []string{"Bearer rk_authed_router_key"}}
-	creds := proxy.ResolveCredentials("openai", nil, headers)
-	assert.Nil(t, creds,
-		"when no BYOK is configured and the inbound bearer is a router key, ResolveCredentials must NOT fall back to forwarding it upstream")
-}
-
 func TestExtractClientCredentials_RejectsRouterBearerWithLeadingWhitespace(t *testing.T) {
 	headers := http.Header{"Authorization": []string{"Bearer  rk_whitespace_bypass"}}
 	creds := proxy.ExtractClientCredentials("openai", headers)
@@ -190,33 +183,6 @@ func TestExtractClientCredentials_TrimsWhitespaceFromForwardedKey(t *testing.T) 
 	require.NotNil(t, creds)
 	assert.Equal(t, []byte("sk-oai-client"), creds.APIKey,
 		"the forwarded credential must be canonicalized; passing through embedded whitespace risks confusing upstream providers and inviting normalization-bypass bugs")
-}
-
-func TestResolveCredentials_BYOKTakesPrecedence(t *testing.T) {
-	byok := map[string]*proxy.Credentials{
-		"anthropic": {APIKey: []byte("sk-ant-byok"), Source: "byok"},
-	}
-	headers := http.Header{"X-Api-Key": []string{"sk-ant-client"}}
-	creds := proxy.ResolveCredentials("anthropic", byok, headers)
-	require.NotNil(t, creds)
-	assert.Equal(t, "byok", creds.Source,
-		"when BYOK key is configured for a provider it must take precedence over client headers")
-	assert.Equal(t, []byte("sk-ant-byok"), creds.APIKey)
-}
-
-func TestResolveCredentials_FallsBackToClientHeaders(t *testing.T) {
-	headers := http.Header{"X-Api-Key": []string{"sk-ant-client"}}
-	creds := proxy.ResolveCredentials("anthropic", nil, headers)
-	require.NotNil(t, creds,
-		"when no BYOK key is configured, client header credentials must be used")
-	assert.Equal(t, "client", creds.Source)
-	assert.Equal(t, []byte("sk-ant-client"), creds.APIKey)
-}
-
-func TestResolveCredentials_NilWhenNeitherAvailable(t *testing.T) {
-	creds := proxy.ResolveCredentials("anthropic", nil, http.Header{})
-	assert.Nil(t, creds,
-		"ResolveCredentials must return nil when neither BYOK nor client headers supply credentials")
 }
 
 func TestCredentialsFromContext_ReturnsNilWhenAbsent(t *testing.T) {
@@ -261,19 +227,6 @@ func TestExtractClientCredentials_RejectsSubscriptionForNonAnthropic(t *testing.
 		creds := proxy.ExtractClientCredentials(provider, headers)
 		assert.Nilf(t, creds, "a Claude subscription bearer must never be forwarded to %s", provider)
 	}
-}
-
-func TestResolveCredentials_SubscriptionBeatsBYOK(t *testing.T) {
-	byok := map[string]*proxy.Credentials{
-		"anthropic": {APIKey: []byte("sk-ant-api-byok"), Source: "byok"},
-	}
-	headers := http.Header{"Authorization": []string{"Bearer sk-ant-oat01-subscription-token"}}
-	creds := proxy.ResolveCredentials("anthropic", byok, headers)
-	require.NotNil(t, creds)
-	assert.Equal(t, "subscription", creds.Source,
-		"a caller's subscription token must take precedence over an installation BYOK key for Anthropic")
-	assert.True(t, creds.OAuth)
-	assert.Equal(t, []byte("sk-ant-oat01-subscription-token"), creds.APIKey)
 }
 
 const codexJWT = "eyJhbGciOiJSUzI1NiJ9.codex-access-token.signature"

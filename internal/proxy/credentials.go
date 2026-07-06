@@ -129,20 +129,6 @@ func ExtractClientCredentials(provider string, headers http.Header) *Credentials
 	return nil
 }
 
-// ResolveCredentials picks credentials for provider in precedence order:
-// caller's Claude subscription token first (so it pays even when BYOK
-// Anthropic is configured), then BYOK, then other client-header creds.
-func ResolveCredentials(provider string, byok map[string]*Credentials, headers http.Header) *Credentials {
-	client := ExtractClientCredentials(provider, headers)
-	if client != nil && client.OAuth {
-		return client
-	}
-	if creds, ok := byok[provider]; ok {
-		return creds
-	}
-	return client
-}
-
 // subscriptionCredsFromToken returns subscription credentials for a bare
 // token, or nil if it isn't a Claude subscription bearer. Anthropic-only.
 func subscriptionCredsFromToken(token string) *Credentials {

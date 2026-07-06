@@ -119,37 +119,3 @@ func logInboundSystemTail(log *slog.Logger, env *translate.RequestEnvelope) {
 		"system_tail", tail,
 	)
 }
-
-// logAssistantOutputSummary logs counts of text/tool_use/thinking blocks and
-// tool_use previews for the assistant's turn. Streaming providers call it
-// once the stream closes; non-streaming callers pass the parsed body directly.
-func logAssistantOutputSummary(
-	log *slog.Logger,
-	textBlocks, thinkingBlocks int,
-	toolCalls []ToolCallPreview,
-	stopReason string,
-	outputTokens int,
-) {
-	names := make([]string, 0, len(toolCalls))
-	args := make([]string, 0, len(toolCalls))
-	for _, tc := range toolCalls {
-		names = append(names, tc.Name)
-		args = append(args, preview(tc.ArgsJSON, 160))
-	}
-	log.Debug("assistant output summary",
-		"text_blocks", textBlocks,
-		"thinking_blocks", thinkingBlocks,
-		"tool_use_count", len(toolCalls),
-		"tool_names", names,
-		"tool_args_preview", args,
-		"stop_reason", stopReason,
-		"output_tokens", outputTokens,
-	)
-}
-
-// ToolCallPreview is a log-friendly snapshot of one assistant tool_use block,
-// kept here to avoid coupling translate/providers to a logging type.
-type ToolCallPreview struct {
-	Name     string
-	ArgsJSON string
-}

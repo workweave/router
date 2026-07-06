@@ -33,14 +33,6 @@ func TestShutdownWithContext_SafeWhenInitNeverCalled(t *testing.T) {
 	}, "ShutdownWithContext must be safe to call even if the SDK was never wired up")
 }
 
-func TestShutdown_IdempotentAcrossRepeatedCalls(t *testing.T) {
-	assert.NotPanics(t, func() {
-		apm.Shutdown()
-		apm.Shutdown()
-		apm.Shutdown()
-	}, "Shutdown must be safe to call repeatedly")
-}
-
 func TestShutdownWithContext_IdempotentAcrossRepeatedCalls(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

@@ -157,108 +157,6 @@ func writeOpenAIUsageFromGemini(jw *jsonWriter, meta gjson.Result) {
 	jw.EndObj()
 }
 
-// GeminiToAnthropicResponse converts a non-streaming Gemini response to
-// Anthropic Messages format.
-func GeminiToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
-	if !gjson.ValidBytes(body) {
-		return nil, fmt.Errorf("unmarshal gemini response: invalid JSON")
-	}
-	hasToolUse, content := buildAnthropicContent(gjson.GetBytes(body, "candidates.0"))
-	stopReason := mapGeminiFinishReasonToAnthropic(
-		gjson.GetBytes(body, "candidates.0.finishReason").String(),
-		hasToolUse,
-	)
-
-	jw := newJSONWriter()
-	jw.Obj()
-	jw.Key("id")
-	jw.Str(generateAnthropicMsgID())
-	jw.Key("type")
-	jw.Str("message")
-	jw.Key("role")
-	jw.Str("assistant")
-	jw.Key("model")
-	jw.Str(requestModel)
-	jw.Key("content")
-	jw.RawBytes(content)
-	jw.Key("stop_reason")
-	jw.Str(stopReason)
-	jw.Key("stop_sequence")
-	jw.Null()
-	jw.Key("usage")
-	writeAnthropicUsageFromGemini(jw, gjson.GetBytes(body, "usageMetadata"))
-	jw.EndObj()
-	return jw.Bytes(), nil
-}
-
-// buildAnthropicContent walks candidate parts and returns the serialised content
-// array plus whether any tool_use block was emitted.
-func buildAnthropicContent(candidate gjson.Result) (hasToolUse bool, content []byte) {
-	jw := newJSONWriter()
-	jw.Arr()
-	// Capture any thoughtSignature in the candidate (usually on the leading
-	// text or first functionCall) so other functionCall parts can inherit it.
-	// Gemini 3.x rejects next-turn requests with missing thoughtSignature on
-	// any functionCall part — only one part in a turn carries the sig.
-	var inheritedSig string
-	candidate.Get("content.parts").ForEach(func(_, part gjson.Result) bool {
-		if sig := part.Get("thoughtSignature").String(); sig != "" {
-			inheritedSig = sig
-			return false
-		}
-		return true
-	})
-	candidate.Get("content.parts").ForEach(func(_, part gjson.Result) bool {
-		if fc := part.Get("functionCall"); fc.Exists() {
-			sig := part.Get("thoughtSignature").String()
-			if sig == "" {
-				sig = inheritedSig
-			}
-			args := fc.Get("args").Raw
-			if args == "" || args == "null" {
-				args = "{}"
-			}
-			jw.Obj()
-			jw.Key("type")
-			jw.Str("tool_use")
-			jw.Key("id")
-			jw.Str(embedSignatureInID(generateToolUseID(), sig))
-			jw.Key("name")
-			jw.Str(fc.Get("name").String())
-			jw.Key("input")
-			jw.Raw(args)
-			jw.EndObj()
-			hasToolUse = true
-			return true
-		}
-		if t := part.Get("text").String(); t != "" {
-			jw.Obj()
-			jw.Key("type")
-			jw.Str("text")
-			jw.Key("text")
-			jw.Str(t)
-			if sig := part.Get("thoughtSignature").String(); sig != "" {
-				jw.Key("thought_signature")
-				jw.Str(sig)
-			}
-			jw.EndObj()
-		}
-		return true
-	})
-	jw.EndArr()
-	return hasToolUse, jw.Bytes()
-}
-
-// writeAnthropicUsageFromGemini writes the "usage" object in Anthropic format.
-func writeAnthropicUsageFromGemini(jw *jsonWriter, meta gjson.Result) {
-	jw.Obj()
-	jw.Key("input_tokens")
-	jw.Int(meta.Get("promptTokenCount").Int())
-	jw.Key("output_tokens")
-	jw.Int(meta.Get("candidatesTokenCount").Int())
-	jw.EndObj()
-}
-
 // GeminiToOpenAIError re-wraps a Gemini error envelope as an OpenAI error.
 func GeminiToOpenAIError(body []byte) []byte {
 	code := gjson.GetBytes(body, "error.code")
@@ -303,22 +201,6 @@ func mapGeminiFinishReason(reason string, hasToolCalls bool) string {
 	}
 }
 
-func mapGeminiFinishReasonToAnthropic(reason string, hasToolUse bool) string {
-	switch reason {
-	case "STOP":
-		if hasToolUse {
-			return "tool_use"
-		}
-		return "end_turn"
-	case "MAX_TOKENS":
-		return "max_tokens"
-	case "SAFETY", "RECITATION", "OTHER", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
-		return "stop_sequence"
-	default:
-		return "end_turn"
-	}
-}
-
 func generateChatCmplID() string {
 	return "chatcmpl-" + randomHex(8)
 }
@@ -329,10 +211,6 @@ func generateToolCallID() string {
 
 func generateAnthropicMsgID() string {
 	return "msg_" + randomHex(8)
-}
-
-func generateToolUseID() string {
-	return "toolu_" + randomHex(8)
 }
 
 func randomHex(n int) string {

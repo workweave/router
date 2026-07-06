@@ -154,15 +154,6 @@ func Middleware() gin.HandlerFunc {
 	)
 }
 
-// Shutdown flushes the trace + metric pipelines with a 5s default budget.
-// Safe to call multiple times or when Init was never called. Prefer
-// ShutdownWithContext when the caller has its own SIGTERM budget to enforce.
-func Shutdown() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	ShutdownWithContext(ctx)
-}
-
 // ShutdownWithContext flushes the trace + metric pipelines under the
 // caller's deadline.
 func ShutdownWithContext(ctx context.Context) {

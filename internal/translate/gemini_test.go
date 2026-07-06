@@ -403,47 +403,20 @@ func TestGeminiToOpenAIResponse_FinishReasonMapping(t *testing.T) {
 
 // ----- Gemini → Anthropic response -----
 
-func TestGeminiToAnthropicResponse_ToolUsePreservesThoughtSignature(t *testing.T) {
-	body := []byte(`{
-		"candidates":[{"content":{"role":"model","parts":[
-			{"functionCall":{"name":"bash","args":{"command":"ls"}},
-			 "thoughtSignature":"GS"}
-		]},"finishReason":"STOP"}]
-	}`)
-	out, err := translate.GeminiToAnthropicResponse(body, "gemini-x")
-	require.NoError(t, err)
-	resp := mustUnmarshal(t, out)
-	assert.Equal(t, "tool_use", resp["stop_reason"])
-	blocks := resp["content"].([]any)
-	tu := blocks[0].(map[string]any)
-	assert.Equal(t, "tool_use", tu["type"])
-	assert.NotContains(t, tu, "thought_signature", "off-spec field must not be emitted")
-	assert.Equal(t, "bash", tu["name"])
-	// The id is a typed string that every client SDK round-trips, incl.
-	// Claude Code, which drops unknown content-block fields.
-	assert.Contains(t, tu["id"].(string), "__thought__")
-}
-
 // Load-bearing regression: Gemini 3.x multi-turn tool use when the client
 // drops the off-spec thought_signature field on deserialization — the
 // signature must still be smuggled back via the id channel.
 func TestPrepareGemini_FromAnthropic_ToolUseSignatureSurvivesUnknownFieldStripping(t *testing.T) {
-	// Turn 1: embed the signature into the synthesized tool_use.id.
-	geminiResp := []byte(`{
-		"candidates":[{"content":{"role":"model","parts":[
-			{"functionCall":{"name":"bash","args":{"command":"ls"}},
-			 "thoughtSignature":"OPAQUE_GEMINI_SIG"}
-		]},"finishReason":"STOP"}]
-	}`)
-	anthropicOut, err := translate.GeminiToAnthropicResponse(geminiResp, "gemini-3.1-pro-preview")
-	require.NoError(t, err)
-	resp := mustUnmarshal(t, anthropicOut)
-	tu := resp["content"].([]any)[0].(map[string]any)
-	smuggledID := tu["id"].(string)
-	require.Contains(t, smuggledID, "__thought__")
-
-	// Simulate Claude Code stripping the off-spec field on deserialization.
-	delete(tu, "thought_signature")
+	// Turn 1: build the Anthropic-shaped tool_use block a real response
+	// translator would have produced, with the signature smuggled into the
+	// id the same way embedSignatureInID does (id + "__thought__" + base64).
+	smuggledID := "toolu_test__thought__" + base64.RawURLEncoding.EncodeToString([]byte("OPAQUE_GEMINI_SIG"))
+	tu := map[string]any{
+		"type":  "tool_use",
+		"id":    smuggledID,
+		"name":  "bash",
+		"input": map[string]any{"command": "ls"},
+	}
 
 	// Turn 3: client sends history back. Router translates Anthropic → Gemini.
 	req := map[string]any{
