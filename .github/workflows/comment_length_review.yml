@@ -1,11 +1,12 @@
 name: Comment Length Review
 
 # Advisory-only: flags overly long comments on new/changed Go code and leaves
-# INLINE review comments (anchored to the offending lines) whose body is a
-# committable GitHub ```suggestion``` with the shortened comment. Comments are
-# posted by the action's own GitHub tooling, so they come from the Claude app,
-# not github-actions[bot]. Never blocks merge (no required status check, and
-# these are plain review comments, not a REQUEST_CHANGES review).
+# INLINE review comments whose body is a committable GitHub ```suggestion``` with
+# the shortened comment. Never blocks merge (no required status check, and the
+# review is posted as event=COMMENT, not REQUEST_CHANGES).
+#
+# Comments are authored by the workweave-bot account (WEAVE_BOT_TOKEN PAT), not
+# github-actions[bot]: the gh api reviews call below runs under that token.
 
 on:
   pull_request:
@@ -37,9 +38,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           model: "claude-sonnet-4-6"
-          # Post via the action's own inline-comment tool (authored by the Claude
-          # app), not `gh api` under GITHUB_TOKEN (which stamps github-actions[bot]).
-          allowed_tools: "Bash(git diff:*),Bash(git log:*),mcp__github_inline_comment__create_inline_comment"
+          allowed_tools: "Bash(git diff:*),Bash(git log:*),Bash(gh api:*)"
           direct_prompt: |
             You are a lightweight, advisory-only comment-style linter for a Go
             codebase. You are NOT a general code reviewer — do not comment on
@@ -59,26 +58,39 @@ jobs:
                if it explains it verbosely — judge concision, not just presence.
             4. If nothing is worth flagging, exit silently — do NOT post anything.
                Never post a "no issues found" message.
-            5. For EACH flagged block, post one inline review comment with the
-               `mcp__github_inline_comment__create_inline_comment` tool:
+            5. Otherwise post ONE pull-request review whose comments are
+               committable GitHub suggestions. For each flagged block work out,
+               from the diff hunk headers (`@@ -a,b +c,d @@`, where `c` is the
+               hunk's new-file start line; count `+` and context lines, ignore `-`
+               lines), the block's first and last NEW-FILE line numbers. Each
+               review comment:
                - `path`: the file.
-               - `startLine` and `line`: the first and last NEW-FILE line numbers
-                 of the entire comment block. Derive them from the diff hunk
-                 header `@@ -a,b +c,d @@` — `c` is the hunk's new-file start line;
-                 count `+` and context lines down to the block, ignoring `-`
-                 lines. Span the whole block so the suggestion replaces all of it.
-               - `side`: `RIGHT`. `confirmed`: true.
-               - `body`: a committable GitHub suggestion that IS the shortened
-                 comment. The ```suggestion``` block must contain the COMPLETE
-                 replacement for lines startLine..line, each line carrying the
-                 SAME leading indentation (tabs) as the original so it commits
-                 cleanly. Prefix the body with
-                 `Comment-length nit (advisory, won't block):` and follow the
-                 suggestion with one short sentence on why it was too long. Shape:
+               - `start_line` + `line`: first and last new-file lines of the whole
+                 block (omit `start_line` for a single-line block). Both must be
+                 `+` (added) lines so they exist on the RIGHT side of the diff.
+               - `start_side` + `side`: both `RIGHT`.
+               - `body`: a ```suggestion block containing the COMPLETE replacement
+                 for lines start_line..line — each line carrying the SAME leading
+                 indentation (tabs) as the original so it commits cleanly — then
+                 one short sentence on why it was too long.
+               Post via stdin heredoc (JSON needs \n-escaped bodies):
 
-                 Comment-length nit (advisory, won't block):
-                 ```suggestion
-                 // shortened line 1
-                 // shortened line 2
-                 ```
-                 Was 8 lines restating the code; the WHY fits in two.
+               ```
+               gh api --method POST \
+                 repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
+                 --input - <<'JSON'
+               {
+                 "event": "COMMENT",
+                 "body": "Advisory only — comment-length nits. Won't block merge.",
+                 "comments": [
+                   {"path": "internal/foo/bar.go", "start_line": 40, "line": 47,
+                    "start_side": "RIGHT", "side": "RIGHT",
+                    "body": "```suggestion\n\t// bar does X because Y.\n```\nWas 8 lines restating the code; the WHY fits in one."}
+                 ]
+               }
+               JSON
+               ```
+        env:
+          # workweave-bot PAT so review comments come from that account, not
+          # github-actions[bot]. Needs pull_requests: write on this repo.
+          GH_TOKEN: ${{ secrets.WEAVE_BOT_TOKEN }}
