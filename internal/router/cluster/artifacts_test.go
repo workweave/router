@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"math"
 	"testing"
 
@@ -219,6 +220,25 @@ func TestEmbeddedArtifacts_AllVersionsLoadable(t *testing.T) {
 			assert.NotEmpty(t, bundle.Registry.DeployedModels)
 		})
 	}
+}
+
+// Enforces one deployed model per family on the latest bundle only; frozen
+// historical bundles intentionally retain predecessors (BYOK, /force-model).
+func TestLatestBundle_OneDeployedModelPerFamily(t *testing.T) {
+	version, err := ResolveVersion(LatestVersion)
+	require.NoError(t, err)
+	bundle, err := LoadBundle(version)
+	require.NoError(t, err)
+
+	dups := catalog.FamilyDuplicates(bundle.Registry.Models())
+	if len(dups) == 0 {
+		return
+	}
+	msg := fmt.Sprintf("latest bundle %s deploys more than one model per family — see docs/plans/ROUTER_MODEL_LIFECYCLE.md and the add-router-model skill for how to retire a superseded model from deployed_models:", version)
+	for _, d := range dups {
+		msg += "\n  - " + d.String()
+	}
+	t.Error(msg)
 }
 
 // Catches a typo'd latest pointer.
