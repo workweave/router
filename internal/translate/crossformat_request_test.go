@@ -1659,6 +1659,19 @@ func TestCrossFormat_AnthropicToOpenAI_ToolUseWithMissingName(t *testing.T) {
 
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
+
+	msgs := getArray(t, doc, "messages")
+	require.Len(t, msgs, 2)
+	assistant := msgs[1].(map[string]any)
+	toolCalls, ok := assistant["tool_calls"].([]any)
+	require.True(t, ok, "assistant message must still carry tool_calls; got: %s", string(prep.Body))
+	require.Len(t, toolCalls, 1, "the tool call must not be silently dropped")
+
+	call := toolCalls[0].(map[string]any)
+	assert.Equal(t, "toolu_123", call["id"], "the original tool_use id must be preserved, not replaced with a garbage id")
+	fn := call["function"].(map[string]any)
+	assert.Equal(t, "", fn["name"], "a missing name must pass through as empty, not a fabricated placeholder name")
+	assert.JSONEq(t, `{"x":1}`, fn["arguments"].(string), "arguments must survive untouched")
 }
 
 func TestCrossFormat_AnthropicToOpenAI_ToolResultMissingToolUseID(t *testing.T) {
@@ -1678,6 +1691,13 @@ func TestCrossFormat_AnthropicToOpenAI_ToolResultMissingToolUseID(t *testing.T) 
 
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
+
+	msgs := getArray(t, doc, "messages")
+	require.Len(t, msgs, 1, "the tool_result message must not be silently dropped")
+	toolMsg := msgs[0].(map[string]any)
+	assert.Equal(t, "tool", toolMsg["role"])
+	assert.Equal(t, "", toolMsg["tool_call_id"], "a missing tool_use_id must pass through as empty, not a fabricated id")
+	assert.Equal(t, "done", toolMsg["content"])
 }
 
 func TestCrossFormat_OpenAIToGemini_SchemaRefsInlined(t *testing.T) {

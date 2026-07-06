@@ -327,6 +327,122 @@ func TestRewriteEnvelope_StripsToolResultsFromLatestUser(t *testing.T) {
 	assert.Equal(t, "assistant", msgs[0].Get("role").String())
 }
 
+func TestRewriteEnvelope_GeminiCollapsesToSummaryPlusLastUser(t *testing.T) {
+	t.Parallel()
+
+	const geminiConversation = `{
+  "contents": [
+    {"role": "user", "parts": [{"text": "Plan a refactor of pkg/foo."}]},
+    {"role": "model", "parts": [{"text": "Sure — I will start with renames."}]},
+    {"role": "user", "parts": [{"text": "Now apply step 1."}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {}}}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "edit applied"}}}]},
+    {"role": "user", "parts": [{"text": "Continue with step 2."}]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(geminiConversation))
+	require.NoError(t, err)
+
+	elided := handover.RewriteEnvelope(env, "Refactor of pkg/foo in progress; step 1 applied.")
+
+	// 6 original entries, only the trailing user is preserved → 5 elided.
+	assert.Equal(t, 5, elided)
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+
+	contents := gjson.GetBytes(prep.Body, "contents").Array()
+	require.Len(t, contents, 2, "expect [summary, lastUser]")
+
+	assert.Equal(t, "model", contents[0].Get("role").String())
+	summaryText := contents[0].Get("parts.0.text").String()
+	assert.True(t, strings.HasPrefix(summaryText, translate.HandoverSummaryTag), "summary must carry the tag prefix; got %q", summaryText)
+	assert.Contains(t, summaryText, "Refactor of pkg/foo")
+
+	assert.Equal(t, "user", contents[1].Get("role").String())
+	assert.Equal(t, "Continue with step 2.", contents[1].Get("parts.0.text").String())
+}
+
+func TestRewriteEnvelope_GeminiNoUserMessagesYieldsSummaryOnlyContents(t *testing.T) {
+	t.Parallel()
+
+	const body = `{
+  "contents": [
+    {"role": "model", "parts": [{"text": "hello"}]},
+    {"role": "model", "parts": [{"text": "still talking to myself"}]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.RewriteEnvelope(env, "Brief recap.")
+
+	// Both original model turns dropped; no user turn to keep.
+	assert.Equal(t, 2, elided)
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+	contents := gjson.GetBytes(prep.Body, "contents").Array()
+	require.Len(t, contents, 1, "expect summary-only contents when no user turn is present")
+	assert.Equal(t, "model", contents[0].Get("role").String())
+}
+
+func TestTrimLastN_GeminiKeepsLastNAndSystemInstruction(t *testing.T) {
+	t.Parallel()
+
+	const tenEntryBody = `{
+  "systemInstruction": {"parts": [{"text": "sys"}]},
+  "contents": [
+    {"role": "user", "parts": [{"text": "m1"}]},
+    {"role": "model", "parts": [{"text": "m2"}]},
+    {"role": "user", "parts": [{"text": "m3"}]},
+    {"role": "model", "parts": [{"text": "m4"}]},
+    {"role": "user", "parts": [{"text": "m5"}]},
+    {"role": "model", "parts": [{"text": "m6"}]},
+    {"role": "user", "parts": [{"text": "m7"}]},
+    {"role": "model", "parts": [{"text": "m8"}]},
+    {"role": "user", "parts": [{"text": "m9"}]},
+    {"role": "model", "parts": [{"text": "m10"}]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(tenEntryBody))
+	require.NoError(t, err)
+
+	elided := handover.TrimLastN(env, 3)
+	assert.Equal(t, 7, elided)
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+	assert.Equal(t, "sys", gjson.GetBytes(prep.Body, "systemInstruction.parts.0.text").String(),
+		"systemInstruction is untouched by TrimLastN on the Gemini path")
+	contents := gjson.GetBytes(prep.Body, "contents").Array()
+	require.Len(t, contents, 3)
+	assert.Equal(t, "m8", contents[0].Get("parts.0.text").String())
+	assert.Equal(t, "m9", contents[1].Get("parts.0.text").String())
+	assert.Equal(t, "m10", contents[2].Get("parts.0.text").String())
+}
+
+func TestTrimLastN_GeminiNoOpWhenUnderLimit(t *testing.T) {
+	t.Parallel()
+
+	const body = `{
+  "contents": [
+    {"role": "user", "parts": [{"text": "m1"}]},
+    {"role": "model", "parts": [{"text": "m2"}]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.TrimLastN(env, 5)
+	assert.Equal(t, 0, elided, "fewer entries than n must elide nothing")
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+	contents := gjson.GetBytes(prep.Body, "contents").Array()
+	require.Len(t, contents, 2)
+}
+
 // Regression: mid-session model switch + TrimLastN can orphan tool_result
 // blocks, which the Anthropic→Gemini translation turned into an empty
 // functionResponse.name (Gemini 400).
