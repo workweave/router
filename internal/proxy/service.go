@@ -132,15 +132,10 @@ type Service struct {
 	// plannerEnabled is the kill switch. When false, the orchestrator falls
 	// back to first-decision-wins behavior.
 	plannerEnabled bool
-	// scoreToolResultTurns controls whether ToolResult turns with an existing
-	// pin run the cluster scorer + planner (MainLoop parity) or reuse the pin
-	// verbatim (the legacy #82 behavior). When true, the fresh cluster decision
-	// is computed and logged on every ToolResult turn and the planner may switch
-	// on EV grounds, exactly as on MainLoop; when false, ToolResult turns
-	// short-circuit to the pin with no scorer call. Defaults to true; set from
-	// ROUTER_SCORE_TOOL_RESULT_TURNS as the kill switch. Note this runs the
-	// embedder on ToolResult traffic (the majority of turns), so a deploy that
-	// disables it reverts to the cheaper verbatim-reuse hot path.
+	// scoreToolResultTurns is the kill switch (ROUTER_SCORE_TOOL_RESULT_TURNS).
+	// When true (default), ToolResult turns run the cluster scorer + planner
+	// for MainLoop parity; when false, the pin is reused verbatim (#82 path).
+	// Runs the embedder on ToolResult traffic (majority of turns).
 	scoreToolResultTurns bool
 	// effortEscalation enables the escalate-on-failure reasoning-effort policy:
 	// gpt-5.x serves low effort by default and high after an observed
@@ -902,10 +897,7 @@ func (s *Service) WithPlannerEnabled(enabled bool) *Service {
 	return s
 }
 
-// WithScoreToolResultTurns toggles whether pinned ToolResult turns run the
-// scorer + planner (MainLoop parity, the default) or reuse the pin verbatim
-// with no scorer call (the legacy #82 hot path). Set from
-// ROUTER_SCORE_TOOL_RESULT_TURNS.
+// WithScoreToolResultTurns sets ROUTER_SCORE_TOOL_RESULT_TURNS; see scoreToolResultTurns.
 func (s *Service) WithScoreToolResultTurns(enabled bool) *Service {
 	s.scoreToolResultTurns = enabled
 	return s

@@ -180,11 +180,8 @@ func TestTurnLoop_ToolResultScoringDisabledSkipsScorer(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
-// TestTurnLoop_ToolResultScoringEnabledRunsScorerAndStays verifies the default
-// (WithScoreToolResultTurns(true)): a pinned tool_result turn now runs the
-// scorer for MainLoop parity — the fresh decision is computed (and logged) —
-// but when the planner agrees it STAYs on the pinned model, so the served
-// model is unchanged from the verbatim-reuse behavior.
+// TestTurnLoop_ToolResultScoringEnabledRunsScorerAndStays verifies the default path:
+// scorer runs (routeCalls==1) but planner STAYs, so the served model is unchanged.
 func TestTurnLoop_ToolResultScoringEnabledRunsScorerAndStays(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
@@ -208,12 +205,8 @@ func TestTurnLoop_ToolResultScoringEnabledRunsScorerAndStays(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "planner agreement STAYs on the pinned model")
 }
 
-// TestTurnLoop_ToolResultScoringEnabledSwitchesSafely exercises the genuinely
-// new path: a positive-EV switch triggered ON a tool_result turn. The planner
-// switches off the pinned opus model and the handover rewrite must strip the
-// orphaned tool_result (the summary carries no matching tool_use), so the body
-// forwarded to the switched-to model is well-formed rather than a 400-inducing
-// tool_result-without-tool_use sequence.
+// TestTurnLoop_ToolResultScoringEnabledSwitchesSafely verifies a positive-EV switch
+// on a tool_result turn: handover strips the orphaned tool_result from the forwarded body.
 func TestTurnLoop_ToolResultScoringEnabledSwitchesSafely(t *testing.T) {
 	chunk := strings.Repeat("aaaa ", 4000) // ~5k tokens each, positive EV
 	toolResultLargeBody := []byte(`{
@@ -256,13 +249,8 @@ func TestTurnLoop_ToolResultScoringEnabledSwitchesSafely(t *testing.T) {
 		"handover must strip the orphaned tool_result on a mid-tool-use switch")
 }
 
-// TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer guards the
-// provider-eligibility pin guard: a session pinned to a provider that has
-// since been excluded (installation list, env override, or BYOK narrowing)
-// must NOT be served through the sticky branches — the turn falls through to
-// the scorer, which routes within the remaining enabled set. Without the
-// guard, ordinary stickies (unlike user-forced pins) kept hitting the
-// excluded provider until the pin expired.
+// TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer verifies that a pin
+// on an excluded provider falls through to the scorer rather than being served sticky.
 func TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer(t *testing.T) {
 	const toolResultBody = `{
 		"model":"claude-opus-4-7",
