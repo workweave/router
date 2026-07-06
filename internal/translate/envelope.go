@@ -398,9 +398,11 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 		}
 	}
 
-	out, err = sjson.SetBytes(out, "model", ov.Model)
-	if err != nil {
-		return nil, fmt.Errorf("set model: %w", err)
+	if ov.Model != "" {
+		out, err = sjson.SetBytes(out, "model", ov.Model)
+		if err != nil {
+			return nil, fmt.Errorf("set model: %w", err)
+		}
 	}
 
 	if ov.SetMaxCompletionTokens != nil {

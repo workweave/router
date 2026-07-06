@@ -527,6 +527,36 @@ func TestPassthroughSameFormat_NoScrubNeeded(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-20250514", out["model"])
 }
 
+func TestPassthroughSameFormat_StripsUnsupportedToolSchemaPattern(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hello"}],"max_tokens":1024,"tools":[{
+		"name":"DecimalTool",
+		"description":"uses a pydantic decimal schema",
+		"input_schema":{
+			"type":"object",
+			"properties":{
+				"amount":{"type":"string","pattern":"^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$","description":"decimal"}
+			},
+			"required":["amount"]
+		}
+	}]}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareAnthropicPassthrough(http.Header{})
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+
+	tools, _ := out["tools"].([]any)
+	require.Len(t, tools, 1)
+	tool, _ := tools[0].(map[string]any)
+	inputSchema, _ := tool["input_schema"].(map[string]any)
+	props, _ := inputSchema["properties"].(map[string]any)
+	amount, _ := props["amount"].(map[string]any)
+	assert.NotContains(t, amount, "pattern", "Anthropic rejects regex lookahead in JSON Schema patterns")
+	assert.Equal(t, "string", amount["type"])
+	assert.Equal(t, "decimal", amount["description"])
+}
+
 func TestOpenAISameFormat_ComplexRequestPreservesStructure(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4o",
