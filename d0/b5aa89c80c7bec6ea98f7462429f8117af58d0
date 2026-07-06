@@ -1,0 +1,44 @@
+internal/router/cluster/scorer.go
+  s_c4ecee41717be0::t_feb4aa72993ec7 249
+internal/sse/json.go
+  s_c4ecee41717be0::t_0d8ca9de52f685 8-21,34
+internal/config/config.go
+  s_c4ecee41717be0::t_08bcbce4fa8b91 9,18
+cmd/router/main.go
+  s_c4ecee41717be0::t_863a1e0d03c07e 839-842
+  s_c4ecee41717be0::t_4b508f6dffb2de 944,950
+  s_c4ecee41717be0::t_50bfe4e6412c90 859,867
+  s_c4ecee41717be0::t_92a2c1e05431eb 310,316
+  s_c4ecee41717be0::t_588f116c06ceae 848
+  s_c4ecee41717be0::t_61748cb54adcb4 926
+  s_c4ecee41717be0::t_69645d3172bae1 891,896-899
+  s_c4ecee41717be0::t_49c6ad7916b079 113
+  s_c4ecee41717be0::t_9f2e18fc24fcb4 975,983,988
+internal/observability/otel/pricing_statusline_test.go
+  s_c4ecee41717be0::t_93f3da4908324f 1,11
+  s_c4ecee41717be0::t_8afd515082d383 36
+  s_c4ecee41717be0::t_61bddd50200132 12
+internal/api/admin/catalog_test.go
+  s_c4ecee41717be0::t_5679197200fedd 47,49,51,53
+  s_c4ecee41717be0::t_ca6ba5e9dae272 28-31
+  s_c4ecee41717be0::t_8bc408f0d40416 10
+internal/router/cluster/distribution.go
+  s_c4ecee41717be0::t_4a4fa832bad7a1 47-59
+  s_c4ecee41717be0::t_375dee5bccf0d5 93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d0b5aa89c80c7bec6ea98f7462429f8117af58d0",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

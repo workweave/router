@@ -1,0 +1,23 @@
+install/commands/fm.md
+  s_d3fc1c517ba243::t_32b587e1e4cf32 2
+install/commands/rf.md
+  s_d3fc1c517ba243::t_698411cf4077b2 2
+install/commands/ufm.md
+  s_d3fc1c517ba243::t_55d807e001078b 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "e9e5698fafff3acbc6f89982ebdb0a2227fb56aa",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

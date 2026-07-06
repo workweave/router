@@ -1,0 +1,41 @@
+Dockerfile
+  s_a04c807f6b101d::t_e838b93af22f85 203
+  s_a04c807f6b101d::t_69223886c561a8 60
+internal/api/admin/version.go
+  s_a04c807f6b101d::t_8af19b86e80b19 15-16
+  s_a04c807f6b101d::t_8a65d58937f3d1 30-31
+internal/version/version.go
+  s_a04c807f6b101d::t_cc68ee9625aaac 16-19,30-38
+  s_aecd78accbc7f8::t_0566047fdce200 39
+internal/version/version_test.go
+  s_a04c807f6b101d::t_284fb6465fb5c4 31-51
+internal/api/admin/version_test.go
+  s_a04c807f6b101d::t_9feb71343f5862 20-21,23
+  s_a04c807f6b101d::t_73cb8bcd1269ae 38-39,47-48
+README.md
+  s_a04c807f6b101d::t_bb2678f18d9a05 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "f909ee70650efd9ed6fc5c0f4279097c81dad889",
+  "prompts": {},
+  "sessions": {
+    "s_a04c807f6b101d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69cca121-ecb7-4a53-8a71-ca0107fed063",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_aecd78accbc7f8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "252af159-5145-4be8-9379-514238aef959",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
