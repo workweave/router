@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -137,6 +138,17 @@ type Service struct {
 	// for MainLoop parity; when false, the pin is reused verbatim (#82 path).
 	// Runs the embedder on ToolResult traffic (majority of turns).
 	scoreToolResultTurns bool
+	// cyberRefusalRepin is the kill switch (ROUTER_CYBER_REFUSAL_REPIN, default
+	// false). When true, a detected safety refusal on the anthropic-native path
+	// (opus's cyber classifier declines ~45% of security-adjacent coding;
+	// sonnet 0%) re-pins the session off the refusing model to a non-refusing
+	// one so the rest of the session routes around it. Observe-only detection —
+	// the forwarded response bytes are never modified.
+	cyberRefusalRepin bool
+	// cyberRefusalFallbackModel is the model to re-pin to on a cyber refusal
+	// when the session pin carries no runner-up (PairedModel). Set from
+	// ROUTER_CYBER_REFUSAL_FALLBACK_MODEL; defaults to claude-sonnet-5.
+	cyberRefusalFallbackModel string
 	// effortEscalation enables the escalate-on-failure reasoning-effort policy:
 	// gpt-5.x serves low effort by default and high after an observed
 	// failed/no-progress turn; gemini is pinned low. Off by default (set from
@@ -871,9 +883,11 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 			ExpectedRemainingTurns: DefaultPlannerExpectedRemainingTurns,
 			TierUpgradeEnabled:     DefaultPlannerTierUpgradeEnabled,
 		},
-		plannerEnabled:        true,
-		scoreToolResultTurns:  true,
-		loopEscalationEnabled: true,
+		plannerEnabled:            true,
+		scoreToolResultTurns:      true,
+		loopEscalationEnabled:     true,
+		cyberRefusalRepin:         false,
+		cyberRefusalFallbackModel: "claude-sonnet-5",
 	}
 }
 
@@ -900,6 +914,22 @@ func (s *Service) WithPlannerEnabled(enabled bool) *Service {
 // WithScoreToolResultTurns sets ROUTER_SCORE_TOOL_RESULT_TURNS; see scoreToolResultTurns.
 func (s *Service) WithScoreToolResultTurns(enabled bool) *Service {
 	s.scoreToolResultTurns = enabled
+	return s
+}
+
+// WithCyberRefusalRepin is the kill switch for the cyber-refusal re-pin backstop
+// (ROUTER_CYBER_REFUSAL_REPIN); see cyberRefusalRepin.
+func (s *Service) WithCyberRefusalRepin(enabled bool) *Service {
+	s.cyberRefusalRepin = enabled
+	return s
+}
+
+// WithCyberRefusalFallbackModel sets the re-pin target used when the session pin
+// carries no runner-up (ROUTER_CYBER_REFUSAL_FALLBACK_MODEL). Empty is ignored.
+func (s *Service) WithCyberRefusalFallbackModel(model string) *Service {
+	if strings.TrimSpace(model) != "" {
+		s.cyberRefusalFallbackModel = strings.TrimSpace(model)
+	}
 	return s
 }
 
@@ -1570,6 +1600,120 @@ func (s *Service) anthropicNativeAttempt(
 	}
 }
 
+// refusalScanCap bounds how many response bytes a refusalObserver accumulates
+// while scanning for a safety-refusal signal. A refusal surfaces in the opening
+// events, so a small window catches it without buffering a whole response.
+const refusalScanCap = 64 * 1024
+
+// refusalObserver tees the anthropic-native passthrough response to inner
+// UNCHANGED while scanning a bounded prefix for a safety-refusal signal. It is
+// observe-only: it never modifies, drops, or delays forwarded bytes, so it
+// stays entirely off the risky path (the client always receives the raw
+// upstream stream). The native passthrough has no translator Summary to read,
+// so this is how a refusal is detected there. See detectRefusalSignal.
+type refusalObserver struct {
+	inner   http.ResponseWriter
+	buf     []byte
+	refused bool
+}
+
+func newRefusalObserver(inner http.ResponseWriter) *refusalObserver {
+	return &refusalObserver{inner: inner}
+}
+
+func (o *refusalObserver) Header() http.Header { return o.inner.Header() }
+
+func (o *refusalObserver) WriteHeader(status int) { o.inner.WriteHeader(status) }
+
+func (o *refusalObserver) Write(p []byte) (int, error) {
+	// Accumulate a bounded prefix (so a signal split across SSE chunks is still
+	// caught) and re-scan until the signal is found or the cap is reached. Never
+	// alters the bytes forwarded to the client.
+	if !o.refused && len(o.buf) < refusalScanCap {
+		room := refusalScanCap - len(o.buf)
+		if room > len(p) {
+			room = len(p)
+		}
+		o.buf = append(o.buf, p[:room]...)
+		if detectRefusalSignal(o.buf) {
+			o.refused = true
+		}
+	}
+	return o.inner.Write(p)
+}
+
+func (o *refusalObserver) Flush() {
+	if f, ok := o.inner.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// detectRefusalSignal is a multi-signal (over-detecting-is-safe) check for an
+// Anthropic safety refusal, robust to the exact wire shape: the documented
+// stop_reason "refusal" (HTTP 200), a refusal content block, the
+// api_refusal_category field, or the safeguard text signature.
+func detectRefusalSignal(b []byte) bool {
+	if bytes.Contains(b, []byte(`"stop_reason":"refusal"`)) ||
+		bytes.Contains(b, []byte(`"type":"refusal"`)) ||
+		bytes.Contains(b, []byte("api_refusal_category")) {
+		return true
+	}
+	return bytes.Contains(bytes.ToLower(b), []byte("safeguards flagged"))
+}
+
+// maybeRepinOnRefusal re-pins the session off a cyber-refusing model after the
+// turn completes, so subsequent turns route to a non-refusing model instead of
+// hitting the refusal again. Post-turn + observe-only: it never touches the
+// forwarded response. No-op when the flag is off, no refusal was observed, or
+// no distinct fallback model can be resolved.
+func (s *Service) maybeRepinOnRefusal(ctx context.Context, obs *refusalObserver, sessionKey [sessionpin.SessionKeyLen]byte, role string, served router.Decision) {
+	if obs == nil || !obs.refused || s.pinStore == nil {
+		return
+	}
+	log := observability.FromContext(ctx)
+	installationID := installationIDFromContext(ctx)
+	if installationID == uuid.Nil {
+		return
+	}
+	// Prefer the scorer's runner-up (PairedModel) as the re-pin target; else the
+	// configured fallback, resolving its provider from the catalog.
+	fbModel, fbProvider := s.cyberRefusalFallbackModel, ""
+	if existing, found, err := s.pinStore.Get(ctx, sessionKey, role); err == nil && found && existing.PairedModel != "" {
+		fbModel, fbProvider = existing.PairedModel, existing.PairedProvider
+	}
+	if fbProvider == "" {
+		if m, ok := catalog.ByID(fbModel); ok && len(m.Providers) > 0 {
+			fbProvider = m.Providers[0].Provider
+		}
+	}
+	if fbModel == "" || fbProvider == "" || fbModel == served.Model {
+		log.Warn("cyber refusal observed but no distinct fallback model available; not re-pinning",
+			"from_model", served.Model, "fallback_model", fbModel)
+		return
+	}
+	pin := sessionpin.Pin{
+		SessionKey:     sessionKey,
+		Role:           role,
+		InstallationID: installationID,
+		Provider:       fbProvider,
+		Model:          fbModel,
+		Reason:         "cyber-refusal-repin",
+		TurnCount:      1,
+		PinnedUntil:    pinExpiry("cyber-refusal-repin"),
+	}
+	// context.Background(): ctx may already be canceled here (response written,
+	// client disconnected); a canceled ctx would drop the re-pin write.
+	if err := s.pinStore.Upsert(context.Background(), pin); err != nil {
+		log.Error("cyber-refusal re-pin: pin upsert failed", "err", err, "from_model", served.Model, "to_model", fbModel)
+		return
+	}
+	log.Info("cyber refusal — re-pinned session off refusing model",
+		"session_key", shortSessionKey(sessionKey),
+		"from_model", served.Model,
+		"to_model", fbModel,
+		"to_provider", fbProvider)
+}
+
 func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
 	ctx = s.withUsageObserver(ctx, r.Header)
 	log := observability.FromContext(ctx)
@@ -2002,6 +2146,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if cacheEligible {
 		captureW = newCaptureWriter(rootSink, semanticCacheMaxBodyBytes)
 		sink = captureW
+	}
+	// Cyber-refusal backstop (ROUTER_CYBER_REFUSAL_REPIN, default off): observe
+	// the response stream for a safety refusal so a refused session is re-pinned
+	// off the refusing model post-turn (opus's cyber classifier declines ~45% of
+	// security-adjacent coding; sonnet 0%). Observe-only — forwarded bytes are
+	// never modified. Detection is here because the native path has no Summary.
+	var refusalObs *refusalObserver
+	if s.cyberRefusalRepin {
+		refusalObs = newRefusalObserver(sink)
+		sink = refusalObs
 	}
 
 	proxyStart := time.Now()
@@ -2581,6 +2735,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// 4xx wedges until manually /force-model'd out. Expires the pin after a
 	// persistent counter hits threshold; successful turns reset it.
 	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, routeRes.PinRole)
+
+	// Cyber-refusal backstop: if the observer saw a safety refusal on this turn,
+	// re-pin the session off the refusing model so subsequent turns route around
+	// it. No-op when the flag is off (refusalObs is nil) or no refusal was seen.
+	s.maybeRepinOnRefusal(ctx, refusalObs, routeRes.SessionKey, routeRes.PinRole, decision)
 
 	// One event per tool_use block that failed toolcheck validation, including
 	// repaired ones — doubles as a per-model×provider tool-calling-quality signal.
