@@ -85,9 +85,8 @@ var openAIAssistantTextAndToolCalls = []byte(`{
 }`)
 
 // openAIAssistantArrayContentAndToolCalls mirrors openAIAssistantTextAndToolCalls
-// but carries assistant content as an OpenAI parts array (the shape Cursor sends)
-// rather than a plain string. The array form must flatten to the inner text, not
-// be serialized verbatim into the Anthropic text block.
+// but with assistant content as an OpenAI parts array (Cursor's shape); it must
+// flatten to inner text, not serialize verbatim.
 var openAIAssistantArrayContentAndToolCalls = []byte(`{
 	"model": "gpt-4",
 	"messages": [
@@ -356,11 +355,9 @@ var openAICacheInjectionConversation = []byte(`{
 
 var ephemeral = map[string]any{"type": "ephemeral"}
 
-// TestCrossFormat_OpenAIToAnthropic_CacheControlInjection pins the prompt-cache
-// breakpoint injection on the OpenAI->Anthropic path: clients like Cursor send
-// no cache_control, so the router marks the last system block (caches the
-// tools+system floor) and the last block of the final message (caches the
-// conversation prefix) — and nothing else.
+// TestCrossFormat_OpenAIToAnthropic_CacheControlInjection pins prompt-cache
+// breakpoint injection: for clients that send no cache_control, the router
+// marks only the last system block and the last block of the final message.
 func TestCrossFormat_OpenAIToAnthropic_CacheControlInjection(t *testing.T) {
 	env, err := translate.ParseOpenAI(openAICacheInjectionConversation)
 	require.NoError(t, err)
@@ -493,12 +490,10 @@ func TestCrossFormat_OpenAIToAnthropic_AssistantTextAndToolCalls(t *testing.T) {
 	assert.Equal(t, "search_prs", toolBlock["name"])
 }
 
-// TestCrossFormat_OpenAIToAnthropic_AssistantArrayContentAndToolCalls guards the
-// regression where an assistant message carrying tool_calls plus parts-array
-// content (the shape Cursor sends) had its content array serialized verbatim into
-// the Anthropic text block via gjson .String(). That produced a stringified
-// {"type":"text",...} block that the model echoed and compounded one level per
-// agentic turn, yielding deeply nested garbage on the client.
+// TestCrossFormat_OpenAIToAnthropic_AssistantArrayContentAndToolCalls guards a
+// regression: an assistant message with tool_calls plus parts-array content
+// (Cursor's shape) got serialized verbatim via gjson .String(), producing a
+// stringified block that compounded into nested garbage each agentic turn.
 func TestCrossFormat_OpenAIToAnthropic_AssistantArrayContentAndToolCalls(t *testing.T) {
 	env, err := translate.ParseOpenAI(openAIAssistantArrayContentAndToolCalls)
 	require.NoError(t, err)
@@ -643,12 +638,9 @@ func TestCrossFormat_OpenAIToGemini_ToolConversation(t *testing.T) {
 	assert.Equal(t, "package main\n\nfunc main() {}", result["result"])
 }
 
-// TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x covers the
-// mirror of the Anthropic→Gemini guard for the OpenAI surface. An OpenAI
-// client whose assistant history was produced by a non-Gemini provider
-// carries `tool_calls` without `thought_signature`. Routed to a Gemini 3.x
-// preview model, the upstream rejects the request with 400 on missing
-// thoughtSignature. The translator must drop the sig-less tool history.
+// TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x mirrors the
+// Anthropic→Gemini guard: tool_calls without thought_signature 400 on Gemini
+// 3.x preview models, so the translator must drop sig-less tool history.
 func TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x(t *testing.T) {
 	env, err := translate.ParseOpenAI(openAIToolConversation)
 	require.NoError(t, err)
@@ -678,11 +670,9 @@ func TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x(t *testing.T) {
 	}
 }
 
-// Multi-tool turns produce one `role:"tool"` message per tool_call_id. When
-// the sig-less drop guard fires, each tool message would naively emit its
-// own user placeholder, producing consecutive `user` entries that Gemini
-// 400s on. Verify a run of consecutive tool messages coalesces into a single
-// placeholder so role alternation is preserved.
+// When the sig-less drop guard fires on multi-tool turns, consecutive
+// `role:"tool"` messages must coalesce into a single user placeholder —
+// otherwise Gemini 400s on non-alternating roles.
 func TestCrossFormat_OpenAIToGemini_MultiToolDropCoalescesPlaceholders(t *testing.T) {
 	body := []byte(`{
 		"model":"gpt-5",
@@ -900,9 +890,8 @@ func TestCrossFormat_AnthropicToOpenAI_ToolConversation(t *testing.T) {
 }
 
 func TestCrossFormat_AnthropicToOpenAI_OverlongToolUseIDClampedAndPaired(t *testing.T) {
-	// OpenAI rejects tool_calls[].id over 64 chars (400 "string too long").
-	// Cross-format round-trips can produce such IDs; the emit must clamp them,
-	// and the tool_use id must stay paired with its tool_result tool_call_id.
+	// OpenAI rejects tool_calls[].id over 64 chars; emit must clamp round-trip
+	// IDs while keeping tool_use paired with its tool_result tool_call_id.
 	longID := "toolu_" + strings.Repeat("a", 1411)
 	body := []byte(`{
 		"model": "claude-opus-4-8",
@@ -1670,6 +1659,19 @@ func TestCrossFormat_AnthropicToOpenAI_ToolUseWithMissingName(t *testing.T) {
 
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
+
+	msgs := getArray(t, doc, "messages")
+	require.Len(t, msgs, 2)
+	assistant := msgs[1].(map[string]any)
+	toolCalls, ok := assistant["tool_calls"].([]any)
+	require.True(t, ok, "assistant message must still carry tool_calls; got: %s", string(prep.Body))
+	require.Len(t, toolCalls, 1, "the tool call must not be silently dropped")
+
+	call := toolCalls[0].(map[string]any)
+	assert.Equal(t, "toolu_123", call["id"], "the original tool_use id must be preserved, not replaced with a garbage id")
+	fn := call["function"].(map[string]any)
+	assert.Equal(t, "", fn["name"], "a missing name must pass through as empty, not a fabricated placeholder name")
+	assert.JSONEq(t, `{"x":1}`, fn["arguments"].(string), "arguments must survive untouched")
 }
 
 func TestCrossFormat_AnthropicToOpenAI_ToolResultMissingToolUseID(t *testing.T) {
@@ -1689,6 +1691,13 @@ func TestCrossFormat_AnthropicToOpenAI_ToolResultMissingToolUseID(t *testing.T) 
 
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
+
+	msgs := getArray(t, doc, "messages")
+	require.Len(t, msgs, 1, "the tool_result message must not be silently dropped")
+	toolMsg := msgs[0].(map[string]any)
+	assert.Equal(t, "tool", toolMsg["role"])
+	assert.Equal(t, "", toolMsg["tool_call_id"], "a missing tool_use_id must pass through as empty, not a fabricated id")
+	assert.Equal(t, "done", toolMsg["content"])
 }
 
 func TestCrossFormat_OpenAIToGemini_SchemaRefsInlined(t *testing.T) {
@@ -1796,9 +1805,9 @@ func TestCrossFormat_OpenAIToAnthropic_ToolMissingFunctionName(t *testing.T) {
 	require.NoError(t, json.Unmarshal(prep.Body, &doc), "output must be valid JSON; got: %s", string(prep.Body))
 }
 
-// TestSanitizeToolUseIDs_OpenAIToAnthropic checks that tool call IDs containing
-// dots or colons (e.g. Kimi-k2.6's "functions.Read:0") are sanitized before
-// forwarding to Anthropic, which rejects them with pattern ^[a-zA-Z0-9_-]+$.
+// TestSanitizeToolUseIDs_OpenAIToAnthropic checks tool call IDs with dots or
+// colons (e.g. Kimi-k2.6's "functions.Read:0") are sanitized before forwarding
+// to Anthropic, which requires pattern ^[a-zA-Z0-9_-]+$.
 func TestSanitizeToolUseIDs_OpenAIToAnthropic(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4",
@@ -1865,12 +1874,10 @@ func TestSanitizeToolUseIDs_AnthropicToAnthropic(t *testing.T) {
 	assert.Equal(t, "functions_Grep_11", result["tool_use_id"], "tool_use_id must be sanitized in same-format path")
 }
 
-// TestStripToolUseThoughtSignature_AnthropicToAnthropic checks that a Gemini
-// thought_signature carried on a tool_use block in Anthropic-format history is
-// stripped before forwarding to Anthropic, which rejects the unknown field with
-// a 400 ("tool_use.thought_signature: Extra inputs are not permitted"). The
-// rest of the block — including the id that smuggles the signature for a later
-// switch back to Gemini — must survive untouched.
+// TestStripToolUseThoughtSignature_AnthropicToAnthropic checks a Gemini
+// thought_signature on a tool_use block is stripped before forwarding to
+// Anthropic (which 400s on the unknown field), while the id — which smuggles
+// the signature for a later switch back to Gemini — survives untouched.
 func TestStripToolUseThoughtSignature_AnthropicToAnthropic(t *testing.T) {
 	body := []byte(`{
 		"model": "claude-opus-4-8",
@@ -1898,4 +1905,73 @@ func TestStripToolUseThoughtSignature_AnthropicToAnthropic(t *testing.T) {
 	assert.Equal(t, "toolu_01__thought__c2ln", block["id"], "tool_use.id (signature round-trip channel) must be preserved")
 	assert.Equal(t, "Read", block["name"], "tool_use.name must be preserved")
 	assert.Equal(t, map[string]any{"path": "x"}, block["input"], "tool_use.input must be preserved")
+}
+
+// TestCrossFormat_OpenAIToAnthropic_ToolChoiceVariants covers auto/required/named modes;
+// "none" (suppresses tools) is covered by TestCrossFormat_OpenAIToAnthropic_ToolChoiceNoneSuppressesTools.
+func TestCrossFormat_OpenAIToAnthropic_ToolChoiceVariants(t *testing.T) {
+	cases := []struct {
+		name       string
+		toolChoice string
+		want       map[string]any
+	}{
+		{"auto", `"auto"`, map[string]any{"type": "auto"}},
+		{"required", `"required"`, map[string]any{"type": "any"}},
+		{"named", `{"type":"function","function":{"name":"Bash"}}`, map[string]any{"type": "tool", "name": "Bash"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{
+				"model": "gpt-4",
+				"messages": [{"role": "user", "content": "hi"}],
+				"tools": [{"type": "function", "function": {"name": "Bash", "parameters": {"type": "object"}}}],
+				"tool_choice": ` + tc.toolChoice + `
+			}`)
+			env, err := translate.ParseOpenAI(body)
+			require.NoError(t, err)
+			prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{
+				TargetModel: "claude-sonnet-4-20250514",
+			})
+			require.NoError(t, err)
+
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal(prep.Body, &doc))
+			assert.Equal(t, tc.want, doc["tool_choice"])
+		})
+	}
+}
+
+// TestCrossFormat_AnthropicToOpenAI_ToolChoiceVariants covers the Anthropic ->
+// OpenAI chat-completions tool_choice mapping. Anthropic's "none" has no
+// direct chat-completions equivalent and is intentionally left unmapped.
+func TestCrossFormat_AnthropicToOpenAI_ToolChoiceVariants(t *testing.T) {
+	cases := []struct {
+		name       string
+		toolChoice string
+		want       any
+	}{
+		{"auto", `{"type":"auto"}`, "auto"},
+		{"any", `{"type":"any"}`, "required"},
+		{"tool", `{"type":"tool","name":"Bash"}`, map[string]any{"type": "function", "function": map[string]any{"name": "Bash"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{
+				"model": "claude-sonnet-4-20250514",
+				"messages": [{"role": "user", "content": "hi"}],
+				"tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+				"tool_choice": ` + tc.toolChoice + `
+			}`)
+			env, err := translate.ParseAnthropic(body)
+			require.NoError(t, err)
+			prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{
+				TargetModel:    "gpt-4",
+				TargetProvider: "openai",
+			})
+			require.NoError(t, err)
+
+			doc := unmarshalBody(t, prep.Body)
+			assert.Equal(t, tc.want, doc["tool_choice"])
+		})
+	}
 }

@@ -1,6 +1,6 @@
-# internal/router/rl — CLAUDE
+# internal/router/rl — AGENTS
 
-> **Mirror notice.** Verbatim sync with [AGENTS.md](AGENTS.md). **Update both together** — divergence = bug.
+> **Mirror notice.** Verbatim sync with [CLAUDE.md](CLAUDE.md). **Update both together** — divergence = bug.
 
 Opt-in `router.Router` that delegates model selection to a trained RL/DPO policy served by the out-of-process **router-rl-sidecar** Cloud Run service (`ml_dev/rl_router/router_policy_server.py`). Read [root CLAUDE.md](../../../CLAUDE.md) and [internal/router/CLAUDE.md](../CLAUDE.md) first.
 

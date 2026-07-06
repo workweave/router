@@ -10,12 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestEnabledProvidersForRequest_PassthroughIsSurfaceScoped guards the fix for
-// PR #159's cross-provider credential-leak review: a passthrough-eligible
-// provider must join the eligible set only when the inbound surface matches
-// its own. Without this, an Anthropic-surface request could route to OpenAI
-// in a passthrough deployment and forward the inbound `x-api-key` (an
-// Anthropic token) to api.openai.com.
+// TestEnabledProvidersForRequest_PassthroughIsSurfaceScoped guards PR #159's
+// credential-leak fix: a passthrough-eligible provider is only eligible when
+// the inbound surface matches its own, or e.g. an Anthropic x-api-key could
+// leak to api.openai.com.
 func TestEnabledProvidersForRequest_PassthroughIsSurfaceScoped(t *testing.T) {
 	s := &Service{
 		// Mimic selfhosted with no env keys, both passthrough-eligible.
@@ -53,10 +51,8 @@ func TestEnabledProvidersForRequest_PassthroughIsSurfaceScoped(t *testing.T) {
 }
 
 // TestEnabledProvidersForRequest_ExcludedProvidersSubtracted confirms the
-// per-installation provider exclusion list removes providers from the
-// eligible set even when their credentials are wired — the single seam
-// through which the scorer, hard pins, session pins, and tier clamp all
-// inherit the exclusion.
+// per-installation exclusion list removes providers even when credentials
+// are wired — the single seam scorer, pins, and tier clamp all inherit from.
 func TestEnabledProvidersForRequest_ExcludedProvidersSubtracted(t *testing.T) {
 	makeService := func() *Service {
 		return &Service{
@@ -100,11 +96,9 @@ func TestEnabledProvidersForRequest_ExcludedProvidersSubtracted(t *testing.T) {
 }
 
 // TestEnabledProvidersForRequest_SubscriptionEnrollsAnthropic guards the
-// managed-mode primary path: a router-keyed (installation set) byokOnly request
-// carrying only the dedicated subscription header — no BYOK, no deployment key —
-// must enroll Anthropic so the scorer can pick a Claude model. Without it the
-// enabled set is empty and the scorer fails with ErrNoEligibleProvider before
-// any Claude turn runs.
+// managed-mode path: a router-keyed byokOnly request carrying only the
+// subscription header must enroll Anthropic, or the scorer fails with
+// ErrNoEligibleProvider before any Claude turn runs.
 func TestEnabledProvidersForRequest_SubscriptionEnrollsAnthropic(t *testing.T) {
 	makeService := func() *Service {
 		return &Service{
@@ -131,10 +125,8 @@ func TestEnabledProvidersForRequest_SubscriptionEnrollsAnthropic(t *testing.T) {
 	})
 
 	t.Run("inbound Authorization subscription bearer enrolls anthropic on a router-keyed request", func(t *testing.T) {
-		// The managed Claude Code path: router key in X-Weave-Router-Key
-		// (installation set), the subscription OAuth token left in Authorization.
-		// Anthropic must be enrolled off the inbound bearer so the scorer can
-		// route a Claude turn the subscription will pay for.
+		// Managed Claude Code path: router key in X-Weave-Router-Key, OAuth
+		// token in Authorization — Anthropic must enroll off the inbound bearer.
 		headers := http.Header{"Authorization": []string{"Bearer sk-ant-oat01-subscription-token"}}
 		got := makeService().enabledProvidersForRequest(routerKeyed(), providers.ProviderAnthropic, headers)
 		assert.Contains(t, got, providers.ProviderAnthropic,
@@ -144,9 +136,7 @@ func TestEnabledProvidersForRequest_SubscriptionEnrollsAnthropic(t *testing.T) {
 	})
 
 	t.Run("inbound API-key bearer does NOT enroll anthropic on a router-keyed request", func(t *testing.T) {
-		// Only the sk-ant-oat OAuth subset enrolls off the inbound bearer; a real
-		// client API key must not, mirroring resolveAndInjectCredentials and
-		// preserving the cross-provider-leak guard.
+		// Only the sk-ant-oat OAuth subset enrolls off the bearer; a real API key must not.
 		headers := http.Header{"Authorization": []string{"Bearer sk-ant-api-real-client-key"}}
 		got := makeService().enabledProvidersForRequest(routerKeyed(), providers.ProviderAnthropic, headers)
 		assert.NotContains(t, got, providers.ProviderAnthropic,
@@ -170,10 +160,8 @@ func TestEnabledProvidersForRequest_SubscriptionEnrollsAnthropic(t *testing.T) {
 }
 
 // TestEnabledProvidersForRequest_CodexSubscriptionEnrollsOpenAI mirrors the
-// Anthropic enrollment for the Codex (ChatGPT) subscription: a router-keyed
-// byokOnly request carrying the dedicated Codex header pair — no BYOK, no
-// deployment key — must enroll OpenAI (and only OpenAI) so the scorer can pick
-// a Codex-eligible model. Enrollment requires BOTH token and account-id.
+// Anthropic subscription test for Codex: enrolling OpenAI requires BOTH the
+// JWT and account-id.
 func TestEnabledProvidersForRequest_CodexSubscriptionEnrollsOpenAI(t *testing.T) {
 	const codexJWT = "eyJhbGciOiJSUzI1NiJ9.codex.sig"
 	makeService := func() *Service {
@@ -202,9 +190,8 @@ func TestEnabledProvidersForRequest_CodexSubscriptionEnrollsOpenAI(t *testing.T)
 	})
 
 	t.Run("inbound Authorization Codex bearer enrolls openai on a router-keyed request", func(t *testing.T) {
-		// The managed Codex CLI path: router key in X-Weave-Router-Key, the
-		// ChatGPT JWT + account-id left in Authorization. OpenAI must be enrolled
-		// off the inbound bearer so the scorer can route a Codex turn.
+		// Managed Codex CLI path: router key in X-Weave-Router-Key, JWT+account-id
+		// in Authorization — OpenAI must enroll off the inbound bearer.
 		headers := http.Header{
 			"Authorization":      []string{"Bearer " + codexJWT},
 			"Chatgpt-Account-Id": []string{"acct-123"},
@@ -244,8 +231,7 @@ func TestEnabledProvidersForRequest_CodexSubscriptionEnrollsOpenAI(t *testing.T)
 }
 
 // TestEnabledProvidersForRequest_DeploymentKeyedStillCrossSurface confirms
-// that env-keyed providers stay eligible regardless of surface (their keys
-// are trusted and don't depend on inbound headers).
+// env-keyed providers stay eligible regardless of surface.
 func TestEnabledProvidersForRequest_DeploymentKeyedStillCrossSurface(t *testing.T) {
 	s := &Service{
 		providers: map[string]providers.Client{

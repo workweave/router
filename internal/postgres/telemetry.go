@@ -2,10 +2,10 @@ package postgres
 
 import (
 	"context"
-	"math"
 	"time"
 
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/sqlc"
 
 	"github.com/google/uuid"
@@ -17,17 +17,8 @@ import (
 // micros is the storage representation only.
 const usdPerMicro = 1.0 / 1_000_000.0
 
-// usdToMicros rounds a float64 USD value to BIGINT micros (USD x 1e6) for
-// persistence. NaN/Inf collapse to 0 — we never want to write nonsense.
-func usdToMicros(f float64) int64 {
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0
-	}
-	return int64(math.Round(f * 1_000_000))
-}
-
-// microsToUSD is the inverse of usdToMicros, used when projecting stored
-// telemetry rows back into the proxy domain types.
+// microsToUSD is the inverse of catalog.USDToMicros, used when projecting
+// stored telemetry rows back into the proxy domain types.
 func microsToUSD(micros int64) float64 {
 	return float64(micros) * usdPerMicro
 }
@@ -66,10 +57,10 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		EmbedInput:             p.EmbedInput,
 		InputTokens:            p.InputTokens,
 		OutputTokens:           p.OutputTokens,
-		RequestedInputCostUsd:  usdToMicros(p.RequestedInputCostUSD),
-		RequestedOutputCostUsd: usdToMicros(p.RequestedOutputCostUSD),
-		ActualInputCostUsd:     usdToMicros(p.ActualInputCostUSD),
-		ActualOutputCostUsd:    usdToMicros(p.ActualOutputCostUSD),
+		RequestedInputCostUsd:  catalog.USDToMicros(p.RequestedInputCostUSD),
+		RequestedOutputCostUsd: catalog.USDToMicros(p.RequestedOutputCostUSD),
+		ActualInputCostUsd:     catalog.USDToMicros(p.ActualInputCostUSD),
+		ActualOutputCostUsd:    catalog.USDToMicros(p.ActualOutputCostUSD),
 		RouteLatencyMs:         p.RouteLatencyMs,
 		UpstreamLatencyMs:      p.UpstreamLatencyMs,
 		TotalLatencyMs:         p.TotalLatencyMs,
@@ -226,63 +217,44 @@ func (r *TelemetryRepo) GetTelemetryTimeseries(ctx context.Context, installation
 		return nil, err
 	}
 	q := sqlc.New(r.tx)
+	fromTs := pgtype.Timestamptz{Time: from, Valid: true}
+	toTs := pgtype.Timestamptz{Time: to, Valid: true}
 
-	switch granularity {
-	case "week":
-		rows, err := q.GetTelemetryTimeseriesWeekly(ctx, sqlc.GetTelemetryTimeseriesWeeklyParams{
-			InstallationID: id,
-			FromTime:       pgtype.Timestamptz{Time: from, Valid: true},
-			ToTime:         pgtype.Timestamptz{Time: to, Valid: true},
-		})
-		if err != nil {
-			return nil, err
-		}
-		out := make([]proxy.TelemetryBucket, 0, len(rows))
-		for _, row := range rows {
-			out = append(out, proxy.TelemetryBucket{
-				Bucket:           row.Bucket.Time,
-				RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
-				ActualCostUSD:    microsToUSD(row.ActualCostUsd),
+	return selectTimeseriesGranularity(granularity,
+		func() ([]proxy.TelemetryBucket, error) {
+			rows, err := q.GetTelemetryTimeseriesWeekly(ctx, sqlc.GetTelemetryTimeseriesWeeklyParams{
+				InstallationID: id,
+				FromTime:       fromTs,
+				ToTime:         toTs,
 			})
-		}
-		return out, nil
-	case "day":
-		rows, err := q.GetTelemetryTimeseriesDaily(ctx, sqlc.GetTelemetryTimeseriesDailyParams{
-			InstallationID: id,
-			FromTime:       pgtype.Timestamptz{Time: from, Valid: true},
-			ToTime:         pgtype.Timestamptz{Time: to, Valid: true},
-		})
-		if err != nil {
-			return nil, err
-		}
-		out := make([]proxy.TelemetryBucket, 0, len(rows))
-		for _, row := range rows {
-			out = append(out, proxy.TelemetryBucket{
-				Bucket:           row.Bucket.Time,
-				RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
-				ActualCostUSD:    microsToUSD(row.ActualCostUsd),
+			if err != nil {
+				return nil, err
+			}
+			return mapRows(rows, telemetryBucketFromWeeklyRow), nil
+		},
+		func() ([]proxy.TelemetryBucket, error) {
+			rows, err := q.GetTelemetryTimeseriesDaily(ctx, sqlc.GetTelemetryTimeseriesDailyParams{
+				InstallationID: id,
+				FromTime:       fromTs,
+				ToTime:         toTs,
 			})
-		}
-		return out, nil
-	}
-
-	rows, err := q.GetTelemetryTimeseriesHourly(ctx, sqlc.GetTelemetryTimeseriesHourlyParams{
-		InstallationID: id,
-		FromTime:       pgtype.Timestamptz{Time: from, Valid: true},
-		ToTime:         pgtype.Timestamptz{Time: to, Valid: true},
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]proxy.TelemetryBucket, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, proxy.TelemetryBucket{
-			Bucket:           row.Bucket.Time,
-			RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
-			ActualCostUSD:    microsToUSD(row.ActualCostUsd),
-		})
-	}
-	return out, nil
+			if err != nil {
+				return nil, err
+			}
+			return mapRows(rows, telemetryBucketFromDailyRow), nil
+		},
+		func() ([]proxy.TelemetryBucket, error) {
+			rows, err := q.GetTelemetryTimeseriesHourly(ctx, sqlc.GetTelemetryTimeseriesHourlyParams{
+				InstallationID: id,
+				FromTime:       fromTs,
+				ToTime:         toTs,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return mapRows(rows, telemetryBucketFromHourlyRow), nil
+		},
+	)
 }
 
 // GetTelemetrySummaryAll aggregates across every installation for the admin dashboard.
@@ -307,60 +279,115 @@ func (r *TelemetryRepo) GetTelemetrySummaryAll(ctx context.Context, from, to tim
 // GetTelemetryTimeseriesAll is the admin-only counterpart to GetTelemetryTimeseries.
 func (r *TelemetryRepo) GetTelemetryTimeseriesAll(ctx context.Context, from, to time.Time, granularity string) ([]proxy.TelemetryBucket, error) {
 	q := sqlc.New(r.tx)
+	fromTs := pgtype.Timestamptz{Time: from, Valid: true}
+	toTs := pgtype.Timestamptz{Time: to, Valid: true}
 
+	return selectTimeseriesGranularity(granularity,
+		func() ([]proxy.TelemetryBucket, error) {
+			rows, err := q.GetTelemetryTimeseriesWeeklyAll(ctx, sqlc.GetTelemetryTimeseriesWeeklyAllParams{
+				FromTime: fromTs,
+				ToTime:   toTs,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return mapRows(rows, telemetryBucketFromWeeklyAllRow), nil
+		},
+		func() ([]proxy.TelemetryBucket, error) {
+			rows, err := q.GetTelemetryTimeseriesDailyAll(ctx, sqlc.GetTelemetryTimeseriesDailyAllParams{
+				FromTime: fromTs,
+				ToTime:   toTs,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return mapRows(rows, telemetryBucketFromDailyAllRow), nil
+		},
+		func() ([]proxy.TelemetryBucket, error) {
+			rows, err := q.GetTelemetryTimeseriesHourlyAll(ctx, sqlc.GetTelemetryTimeseriesHourlyAllParams{
+				FromTime: fromTs,
+				ToTime:   toTs,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return mapRows(rows, telemetryBucketFromHourlyAllRow), nil
+		},
+	)
+}
+
+// selectTimeseriesGranularity dispatches to the query closure matching
+// granularity, defaulting to hourly — the shared switch behind both
+// GetTelemetryTimeseries and GetTelemetryTimeseriesAll.
+func selectTimeseriesGranularity(
+	granularity string,
+	weekly, daily, hourly func() ([]proxy.TelemetryBucket, error),
+) ([]proxy.TelemetryBucket, error) {
 	switch granularity {
 	case "week":
-		rows, err := q.GetTelemetryTimeseriesWeeklyAll(ctx, sqlc.GetTelemetryTimeseriesWeeklyAllParams{
-			FromTime: pgtype.Timestamptz{Time: from, Valid: true},
-			ToTime:   pgtype.Timestamptz{Time: to, Valid: true},
-		})
-		if err != nil {
-			return nil, err
-		}
-		out := make([]proxy.TelemetryBucket, 0, len(rows))
-		for _, row := range rows {
-			out = append(out, proxy.TelemetryBucket{
-				Bucket:           row.Bucket.Time,
-				RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
-				ActualCostUSD:    microsToUSD(row.ActualCostUsd),
-			})
-		}
-		return out, nil
+		return weekly()
 	case "day":
-		rows, err := q.GetTelemetryTimeseriesDailyAll(ctx, sqlc.GetTelemetryTimeseriesDailyAllParams{
-			FromTime: pgtype.Timestamptz{Time: from, Valid: true},
-			ToTime:   pgtype.Timestamptz{Time: to, Valid: true},
-		})
-		if err != nil {
-			return nil, err
-		}
-		out := make([]proxy.TelemetryBucket, 0, len(rows))
-		for _, row := range rows {
-			out = append(out, proxy.TelemetryBucket{
-				Bucket:           row.Bucket.Time,
-				RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
-				ActualCostUSD:    microsToUSD(row.ActualCostUsd),
-			})
-		}
-		return out, nil
+		return daily()
+	default:
+		return hourly()
 	}
+}
 
-	rows, err := q.GetTelemetryTimeseriesHourlyAll(ctx, sqlc.GetTelemetryTimeseriesHourlyAllParams{
-		FromTime: pgtype.Timestamptz{Time: from, Valid: true},
-		ToTime:   pgtype.Timestamptz{Time: to, Valid: true},
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]proxy.TelemetryBucket, 0, len(rows))
+// mapRows converts a slice of SQLC rows to a slice of domain values via convert.
+func mapRows[T, U any](rows []T, convert func(T) U) []U {
+	out := make([]U, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, proxy.TelemetryBucket{
-			Bucket:           row.Bucket.Time,
-			RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
-			ActualCostUSD:    microsToUSD(row.ActualCostUsd),
-		})
+		out = append(out, convert(row))
 	}
-	return out, nil
+	return out
+}
+
+func telemetryBucketFromWeeklyRow(row sqlc.GetTelemetryTimeseriesWeeklyRow) proxy.TelemetryBucket {
+	return proxy.TelemetryBucket{
+		Bucket:           row.Bucket.Time,
+		RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+		ActualCostUSD:    microsToUSD(row.ActualCostUsd),
+	}
+}
+
+func telemetryBucketFromDailyRow(row sqlc.GetTelemetryTimeseriesDailyRow) proxy.TelemetryBucket {
+	return proxy.TelemetryBucket{
+		Bucket:           row.Bucket.Time,
+		RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+		ActualCostUSD:    microsToUSD(row.ActualCostUsd),
+	}
+}
+
+func telemetryBucketFromHourlyRow(row sqlc.GetTelemetryTimeseriesHourlyRow) proxy.TelemetryBucket {
+	return proxy.TelemetryBucket{
+		Bucket:           row.Bucket.Time,
+		RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+		ActualCostUSD:    microsToUSD(row.ActualCostUsd),
+	}
+}
+
+func telemetryBucketFromWeeklyAllRow(row sqlc.GetTelemetryTimeseriesWeeklyAllRow) proxy.TelemetryBucket {
+	return proxy.TelemetryBucket{
+		Bucket:           row.Bucket.Time,
+		RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+		ActualCostUSD:    microsToUSD(row.ActualCostUsd),
+	}
+}
+
+func telemetryBucketFromDailyAllRow(row sqlc.GetTelemetryTimeseriesDailyAllRow) proxy.TelemetryBucket {
+	return proxy.TelemetryBucket{
+		Bucket:           row.Bucket.Time,
+		RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+		ActualCostUSD:    microsToUSD(row.ActualCostUsd),
+	}
+}
+
+func telemetryBucketFromHourlyAllRow(row sqlc.GetTelemetryTimeseriesHourlyAllRow) proxy.TelemetryBucket {
+	return proxy.TelemetryBucket{
+		Bucket:           row.Bucket.Time,
+		RequestedCostUSD: microsToUSD(row.RequestedCostUsd),
+		ActualCostUSD:    microsToUSD(row.ActualCostUsd),
+	}
 }
 
 // GetTelemetryRows returns individual telemetry rows for an installation in [from, to) for the drill-down modal.
@@ -379,30 +406,7 @@ func (r *TelemetryRepo) GetTelemetryRows(ctx context.Context, installationID str
 	if err != nil {
 		return nil, err
 	}
-	out := make([]proxy.TelemetryRow, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, telemetryRowFromRow(
-			row.Timestamp.Time,
-			row.RequestID,
-			row.RequestedModel,
-			row.DecisionModel,
-			row.DecisionProvider,
-			row.DecisionReason,
-			row.StickyHit,
-			row.InputTokens,
-			row.OutputTokens,
-			row.CacheCreationTokens,
-			row.CacheReadTokens,
-			row.RequestedCostUsd,
-			row.ActualCostUsd,
-			row.TotalLatencyMs,
-			row.UpstreamStatusCode,
-			uuidString(row.RouterUserID),
-			row.ClientApp,
-			row.TurnType,
-			row.UserEmail,
-		))
-	}
+	out := mapRows(rows, telemetryRowFromRowsRow)
 	return out, nil
 }
 
@@ -417,30 +421,7 @@ func (r *TelemetryRepo) GetTelemetryRowsAll(ctx context.Context, from, to time.T
 	if err != nil {
 		return nil, err
 	}
-	out := make([]proxy.TelemetryRow, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, telemetryRowFromRow(
-			row.Timestamp.Time,
-			row.RequestID,
-			row.RequestedModel,
-			row.DecisionModel,
-			row.DecisionProvider,
-			row.DecisionReason,
-			row.StickyHit,
-			row.InputTokens,
-			row.OutputTokens,
-			row.CacheCreationTokens,
-			row.CacheReadTokens,
-			row.RequestedCostUsd,
-			row.ActualCostUsd,
-			row.TotalLatencyMs,
-			row.UpstreamStatusCode,
-			uuidString(row.RouterUserID),
-			row.ClientApp,
-			row.TurnType,
-			row.UserEmail,
-		))
-	}
+	out := mapRows(rows, telemetryRowFromRowsAllRow)
 	return out, nil
 }
 
@@ -507,4 +488,52 @@ func telemetryRowFromRow(
 		TurnType:            turnType,
 		UserEmail:           deref(userEmail),
 	}
+}
+
+func telemetryRowFromRowsRow(row sqlc.GetTelemetryRowsRow) proxy.TelemetryRow {
+	return telemetryRowFromRow(
+		row.Timestamp.Time,
+		row.RequestID,
+		row.RequestedModel,
+		row.DecisionModel,
+		row.DecisionProvider,
+		row.DecisionReason,
+		row.StickyHit,
+		row.InputTokens,
+		row.OutputTokens,
+		row.CacheCreationTokens,
+		row.CacheReadTokens,
+		row.RequestedCostUsd,
+		row.ActualCostUsd,
+		row.TotalLatencyMs,
+		row.UpstreamStatusCode,
+		uuidString(row.RouterUserID),
+		row.ClientApp,
+		row.TurnType,
+		row.UserEmail,
+	)
+}
+
+func telemetryRowFromRowsAllRow(row sqlc.GetTelemetryRowsAllRow) proxy.TelemetryRow {
+	return telemetryRowFromRow(
+		row.Timestamp.Time,
+		row.RequestID,
+		row.RequestedModel,
+		row.DecisionModel,
+		row.DecisionProvider,
+		row.DecisionReason,
+		row.StickyHit,
+		row.InputTokens,
+		row.OutputTokens,
+		row.CacheCreationTokens,
+		row.CacheReadTokens,
+		row.RequestedCostUsd,
+		row.ActualCostUsd,
+		row.TotalLatencyMs,
+		row.UpstreamStatusCode,
+		uuidString(row.RouterUserID),
+		row.ClientApp,
+		row.TurnType,
+		row.UserEmail,
+	)
 }

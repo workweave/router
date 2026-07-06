@@ -19,16 +19,14 @@ const (
 	modelUnknown = "fictional-foo-1.0" // intentionally absent from the pricing table
 )
 
-// defaultCfg matches the documented planner defaults (threshold $0.001,
-// horizon 3 turns) so the table below mirrors what production sees.
+// defaultCfg mirrors production defaults (threshold $0.001, horizon 3 turns).
 var defaultCfg = planner.EVConfig{
 	ThresholdUSD:           0.001,
 	ExpectedRemainingTurns: 3,
 }
 
-// availableAll covers every model the EV cases reference (Anthropic + the
-// cross-provider GPT-5 entry). Used everywhere except the pin_model_missing
-// case.
+// availableAll covers every model the EV cases reference; used everywhere
+// except pin_model_missing.
 var availableAll = map[string]struct{}{
 	modelOpus:   {},
 	modelSonnet: {},
@@ -58,17 +56,16 @@ func pinWithUsage(model string) sessionpin.Pin {
 func TestDecide_SubscriptionDiscountFlipsSwitch(t *testing.T) {
 	t.Parallel()
 	base := planner.Inputs{
-		Pin:                  pinWithUsage(modelHaiku),          // cheap pin ($0.80 in)
-		Fresh:                router.Decision{Model: modelOpus}, // expensive fresh ($5.00 in)
+		Pin:                  pinWithUsage(modelHaiku),
+		Fresh:                router.Decision{Model: modelOpus},
 		EstimatedInputTokens: 100_000,
 		AvailableModels:      availableAll,
 	}
 
-	// Full catalog economics: switching cheap→expensive is EV-negative → stay.
 	stay := planner.Decide(base, defaultCfg)
 	assert.Equal(t, planner.OutcomeStay, stay.Outcome, "no subsidy: keep the cheap pin")
 
-	// Subsidize the fresh (covered) model to ~free → switching now saves → switch.
+	// Subsidize the fresh model to ~free -> switching now saves.
 	sub := base
 	sub.SubsidizedCostFactor = map[string]float64{modelOpus: 0.01}
 	switched := planner.Decide(sub, defaultCfg)
@@ -76,8 +73,7 @@ func TestDecide_SubscriptionDiscountFlipsSwitch(t *testing.T) {
 		"subsidized covered model must win the stay-vs-switch EV")
 	assert.Equal(t, planner.ReasonEVPositive, switched.Reason)
 
-	// A 0.0 factor (epsilon=0) is a real "free" covered model, not "uncovered":
-	// membership in the map, not the sign, decides — matching the scorer.
+	// A 0.0 factor is still "covered" (map membership decides, not sign).
 	zeroFactor := base
 	zeroFactor.SubsidizedCostFactor = map[string]float64{modelOpus: 0.0}
 	zero := planner.Decide(zeroFactor, defaultCfg)
@@ -216,13 +212,9 @@ func TestDecide(t *testing.T) {
 			want: planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonPricingMissing},
 		},
 		{
-			// EV math for switch from opus -> haiku, 50k input, 3 turns.
-			// Savings are multiplied by CacheReadMultiplier (0.1) because in
-			// steady state most input tokens come from cache on both models:
-			//   savingsPerTurn = (5.00 - 0.80) * 0.1 * 50000 / 1e6 = $0.021
-			//   evictionCost   = 0.80 * 50000 * 0.9 / 1e6          = $0.036
-			//   expectedSavings = 0.021 * 3 = $0.063
-			//   delta = 0.063 - 0.036 = $0.027 > $0.001 -> Switch.
+			// opus -> haiku, 50k tokens, 3 turns; cache-read multiplier 0.1 applies.
+			//   savingsPerTurn=$0.021 evictionCost=$0.036
+			//   expectedSavings=$0.063 -> delta=$0.027 -> Switch.
 			name: "ev_positive: opus -> haiku on a large prompt",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
@@ -237,11 +229,8 @@ func TestDecide(t *testing.T) {
 			wantEvictionCostUSD:    0.036,
 		},
 		{
-			// Symmetric flip: pinning haiku, fresh recommends opus.
-			//   savingsPerTurn = (0.80 - 5.00) * 0.1 * 50000 / 1e6 = -$0.021
-			//   evictionCost   = 5.00 * 50000 * 0.9 / 1e6          = $0.225
-			//   expectedSavings = -0.021 * 3 = -$0.063
-			//   delta = -0.063 - 0.225 = -$0.288 < $0.001 -> Stay.
+			// Symmetric flip: haiku pin, opus fresh.
+			//   expectedSavings=-$0.063 evictionCost=$0.225 -> delta=-$0.288 -> Stay.
 			name: "ev_negative: haiku -> opus is a huge net loss",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelHaiku),
@@ -256,18 +245,8 @@ func TestDecide(t *testing.T) {
 			wantEvictionCostUSD:    0.225,
 		},
 		{
-			// Opus -> haiku, tuned to land just BELOW threshold under the
-			// corrected (cache-read-aware) EV math at the new $5/$25 opus
-			// pricing (was $15/$75; the old opus->sonnet boundary case no
-			// longer straddles — sonnet's $3 input dominates opus's $0.50
-			// cache-read at every horizon).
-			//   per-token net = (3 * 0.1 * (5.00 - 0.80) - 0.9 * 0.80) / 1e6
-			//                 = (1.26 - 0.72) / 1e6 = 0.54 / 1e6
-			//   at tokens = 1851: net = 0.54 * 1851 / 1e6 = $0.00099954
-			//   threshold = $0.001 -> net is 0.05% below.
-			//   expectedSavings = (5.00 - 0.80) * 0.1 * 1851 / 1e6 * 3 = $0.00233226
-			//   evictionCost    = 0.80 * 1851 * 0.9 / 1e6              = $0.00133272
-			//   delta = 0.00233226 - 0.00133272 = $0.00099954 -> Stay.
+			// opus -> haiku, tuned to land just below threshold (net $0.00099954
+			// at 1851 tokens vs $0.001 threshold, 0.05% below) -> Stay.
 			name: "ev_near_threshold: just below threshold stays stable",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
@@ -282,12 +261,8 @@ func TestDecide(t *testing.T) {
 			wantEvictionCostUSD:    0.00133272,
 		},
 		{
-			// Same opus -> haiku math, two extra tokens nudge across:
-			//   at tokens = 1853: net = 0.54 * 1853 / 1e6 = $0.00100062
-			//   threshold = $0.001 -> net is 0.06% above.
-			//   expectedSavings = (5.00 - 0.80) * 0.1 * 1853 / 1e6 * 3 = $0.00233478
-			//   evictionCost    = 0.80 * 1853 * 0.9 / 1e6              = $0.00133416
-			//   delta = 0.00233478 - 0.00133416 = $0.00100062 -> Switch.
+			// Same math, two extra tokens (1853) nudges net to $0.00100062,
+			// 0.06% above threshold -> Switch.
 			name: "ev_near_threshold: just above threshold flips to switch",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
@@ -302,21 +277,10 @@ func TestDecide(t *testing.T) {
 			wantEvictionCostUSD:    0.00133416,
 		},
 		{
-			// Cross-provider regression: opus (Anthropic, mult 0.10) ->
-			// gpt-5 (OpenAI, mult 0.10) on a 50k prompt at the new $5/$25
-			// opus pricing.
-			//   savingsPerTurn  = (5.00 * 0.10 - 2.50 * 0.10) * 50000 / 1e6
-			//                   = (0.50 - 0.25) * 0.05 = $0.0125
-			//   expectedSavings = 0.0125 * 3 = $0.0375
-			//   evictionCost    = 2.50 * 50000 * (1 - 0.10) / 1e6 = $0.1125
-			//   delta = 0.0375 - 0.1125 = -$0.075 -> Stay.
-			//
-			// In cache steady-state gpt-5 is actually cheaper per token than
-			// opus (half the nominal input price, same 0.10 cache-read
-			// multiplier), so the per-turn EV is positive. But abandoning
-			// opus's warm cache to refill gpt-5's cold cache costs more than
-			// the modest steady-state savings buy back over the horizon, so
-			// the planner stays on opus.
+			// Cross-provider: opus -> gpt-5, 50k prompt. gpt-5 is cheaper
+			// per-token in cache steady-state (expectedSavings=$0.0375), but
+			// evicting opus's warm cache to refill gpt-5's cold one costs more
+			// (evictionCost=$0.1125) -> Stay.
 			name: "ev_cross_provider: opus -> gpt-5 stays under per-model math",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
@@ -347,8 +311,7 @@ func TestDecide(t *testing.T) {
 			wantEvictionCostUSD:    0.225,
 		},
 		{
-			// Same EV-loss as above; guard on flips it because opus is
-			// strictly higher tier than haiku. USD fields still populated.
+			// Same EV-loss as above; tier guard flips it since opus outranks haiku.
 			name: "tier_upgrade: low -> high flips stay into switch",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelHaiku),
@@ -375,21 +338,14 @@ func TestDecide(t *testing.T) {
 			cfg:          tierUpgradeCfg,
 			want:         planner.Decision{Outcome: planner.OutcomeStay, Reason: planner.ReasonEVNegative},
 			expectEVMath: true,
-			// savingsPerTurn = (3.00 - 0.80) * 0.1 * 1000 / 1e6 = $0.00022
-			// expectedSavings = 0.00022 * 3 = $0.00066
-			// evictionCost   = 0.80 * 1000 * 0.9 / 1e6 = $0.00072
+			// expectedSavings=$0.00066 evictionCost=$0.00072
 			wantExpectedSavingsUSD: 0.00066,
 			wantEvictionCostUSD:    0.00072,
 		},
 		{
-			// Cold pin: the provider's cache TTL lapsed, so neither the pin's
-			// cache-read discount nor the eviction cost applies — both sides are
-			// priced uncached. opus -> haiku still switches, but on raw input
-			// price rather than the cache-read delta.
-			//   savingsPerTurn  = (5.00 - 0.80) * 50000 / 1e6 = $0.21
-			//   expectedSavings = 0.21 * 3 = $0.63
-			//   evictionCost    = 0 (nothing warm to evict)
-			//   delta = 0.63 - 0 = $0.63 > $0.001 -> Switch.
+			// Cold pin: cache TTL lapsed, both sides price uncached, so this
+			// switches on raw input price rather than the cache-read delta.
+			// expectedSavings=$0.63 evictionCost=$0 (nothing warm to evict).
 			name: "cold_ev_positive: opus -> haiku prices uncached",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
@@ -405,16 +361,8 @@ func TestDecide(t *testing.T) {
 			wantEvictionCostUSD:    0,
 		},
 		{
-			// Regression guard: the warm twin of this case (ev_cross_provider)
-			// STAYS because abandoning opus's warm cache to refill gpt-5's cold
-			// cache costs more than the steady-state savings buy back. Once the
-			// pin's cache is cold there is nothing warm to preserve, so the raw
-			// $2.50 vs $5.00 input price wins and the planner correctly switches
-			// instead of clinging to a stale pin.
-			//   savingsPerTurn  = (5.00 - 2.50) * 50000 / 1e6 = $0.125
-			//   expectedSavings = 0.125 * 3 = $0.375
-			//   evictionCost    = 0
-			//   delta = 0.375 > $0.001 -> Switch.
+			// Cold twin of ev_cross_provider (which STAYS): with no warm cache
+			// to preserve, raw $2.50 vs $5.00 input price wins and it switches.
 			name: "cold_cross_provider: opus -> gpt-5 switches once cache is cold",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelOpus),
@@ -430,12 +378,8 @@ func TestDecide(t *testing.T) {
 			wantEvictionCostUSD:    0,
 		},
 		{
-			// Cold pin but the pin is the cheaper model: no cache to preserve,
-			// yet switching to the pricier fresh model is a raw-price loss, so
-			// the planner stays. evictionCost is still zero.
-			//   savingsPerTurn  = (0.80 - 5.00) * 50000 / 1e6 = -$0.21
-			//   expectedSavings = -0.21 * 3 = -$0.63
-			//   delta = -0.63 < $0.001 -> Stay.
+			// Cold pin on the cheaper model: no cache to preserve, but switching
+			// to the pricier fresh model is still a raw-price loss -> Stay.
 			name: "cold_ev_negative: haiku -> opus stays on raw price",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelHaiku),
@@ -451,9 +395,8 @@ func TestDecide(t *testing.T) {
 			wantEvictionCostUSD:    0,
 		},
 		{
-			// Cold pin does not disable the tier-upgrade guard: haiku -> opus is
-			// a raw-price loss (would stay on EV alone) but opus is strictly
-			// higher tier, so the guard still flips it to switch.
+			// Cold pin does not disable the tier-upgrade guard: EV alone would
+			// stay, but opus outranks haiku so it still switches.
 			name: "cold_tier_upgrade: guard still fires when cache is cold",
 			in: planner.Inputs{
 				Pin:                  pinWithUsage(modelHaiku),

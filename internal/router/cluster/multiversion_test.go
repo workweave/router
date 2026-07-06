@@ -87,3 +87,73 @@ func TestWithVersion_EmptyStringIsNoOp(t *testing.T) {
 	ctx := WithVersion(context.Background(), "")
 	assert.Empty(t, VersionFromContext(ctx))
 }
+
+// DefaultDeployedModels must read the DEFAULT version's candidates — two
+// fixture scorers carry different registries so the assertion breaks if wrong.
+func TestMultiversion_DefaultDeployedModels_ReadsDefaultVersionOnly(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	v01 := scorerForVersion(t, "v0.1", emb) // twoClusterArtifacts: opus + haiku
+
+	cb, rb, regb := twoProviderArtifacts(t) // gpt-5 + opus
+	v02 := bundleFromBlobs(t, "v0.2", cb, rb, regb)
+	v02Scorer, err := NewScorer(v02, cfgForTest(), emb, allProviders())
+	require.NoError(t, err)
+
+	multi, err := NewMultiversion("v0.2", map[string]*Scorer{"v0.1": v01, "v0.2": v02Scorer})
+	require.NoError(t, err)
+
+	got := multi.DefaultDeployedModels()
+	models := make([]string, 0, len(got))
+	for _, e := range got {
+		models = append(models, e.Model)
+	}
+	assert.ElementsMatch(t, []string{"claude-opus-4-7", "gpt-5"}, models,
+		"DefaultDeployedModels must return the default version's (v0.2) candidates, not v0.1's opus+haiku pair")
+}
+
+// DefaultRoutingDistribution must delegate to the default Scorer and match its output.
+func TestMultiversion_DefaultRoutingDistribution_DelegatesToDefaultScorer(t *testing.T) {
+	bundle, err := LoadBundle("v0.67")
+	require.NoError(t, err)
+	require.True(t, bundle.IsV2, "test needs a v2 bundle; v1 bundles error out of RoutingDistribution")
+	s, err := NewScorer(bundle, DefaultConfig(), &fakeEmbedder{dim: bundle.Centroids.Dim}, allProviders())
+	require.NoError(t, err)
+
+	multi, err := NewMultiversion("v0.67", map[string]*Scorer{"v0.67": s})
+	require.NoError(t, err)
+
+	const grid = 11
+	want, err := s.RoutingDistribution(grid, nil, nil)
+	require.NoError(t, err)
+
+	got, err := multi.DefaultRoutingDistribution(grid, nil, nil)
+	require.NoError(t, err)
+
+	// Use InDelta: map iteration order means two RoutingDistribution calls can
+	// accumulate the same floats in different order, differing by a ULP.
+	require.Len(t, got, len(want))
+	for i := range want {
+		assert.Equal(t, want[i].QualityBias, got[i].QualityBias, "point %d dial position", i)
+		assert.InDelta(t, want[i].ProjectedCostPer1KInputUSD, got[i].ProjectedCostPer1KInputUSD, 1e-9, "point %d projected cost", i)
+		require.Len(t, got[i].Models, len(want[i].Models), "point %d model mix", i)
+		for j := range want[i].Models {
+			assert.Equal(t, want[i].Models[j].Model, got[i].Models[j].Model, "point %d model %d", i, j)
+			assert.InDelta(t, want[i].Models[j].Share, got[i].Models[j].Share, 1e-9, "point %d model %d share", i, j)
+		}
+	}
+}
+
+// Scorer removed after construction (violates NewMultiversion's invariant) must
+// return ErrClusterUnavailable, not a generic error or panic.
+func TestMultiversion_DefaultRoutingDistribution_MissingDefaultReturnsClusterUnavailable(t *testing.T) {
+	emb := &fakeEmbedder{vec: makeOpusVec()}
+	v01 := scorerForVersion(t, "v0.1", emb)
+	multi, err := NewMultiversion("v0.1", map[string]*Scorer{"v0.1": v01})
+	require.NoError(t, err)
+
+	delete(multi.Versions, "v0.1")
+
+	_, err = multi.DefaultRoutingDistribution(21, nil, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrClusterUnavailable)
+}

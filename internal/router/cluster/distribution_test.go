@@ -51,9 +51,7 @@ func TestDialToAlpha_NoCalibrationIsIdentity(t *testing.T) {
 }
 
 func TestComputeDialCalibration_AscendingPinnedEndpoints(t *testing.T) {
-	// On the real bundle the calibration must be a strictly ascending sequence
-	// pinned at 0 and 1, with several interior breakpoints (the bundle has many
-	// distinct routed mixes between the cheapest and the saturated end).
+	// Real bundle: breakpoints must be strictly ascending, pinned at 0 and 1.
 	s := loadV0_67(t)
 	bp := s.dialAlphaBreakpoints
 	require.GreaterOrEqual(t, len(bp), 4, "expected several mix breakpoints on the real bundle")
@@ -64,9 +62,9 @@ func TestComputeDialCalibration_AscendingPinnedEndpoints(t *testing.T) {
 	}
 }
 
-// loadV0_67 loads the committed v0.67 bundle through a fake embedder (matching
-// its jina-v2 id / 768 dim). RoutingDistribution never embeds, so no ONNX
-// runtime is needed; this keeps the test hermetic and in the default matrix.
+// loadV0_67 loads the committed v0.67 bundle via a fake embedder (matching
+// its jina-v2 id/dim) — RoutingDistribution never embeds, so no ONNX runtime
+// is needed and the test stays hermetic.
 func loadV0_67(t *testing.T) *Scorer {
 	t.Helper()
 	bundle, err := LoadBundle("v0.67")
@@ -107,9 +105,8 @@ func TestRoutingDistribution_EndpointsAndGradient(t *testing.T) {
 	assert.Equal(t, maxCost, points[len(points)-1].ProjectedCostPer1KInputUSD, "quality end should be the priciest point")
 	assert.Greater(t, maxCost, minCost, "the dial must actually move projected cost")
 
-	// Gradient, not cliff: several interior dial positions land strictly
-	// between the two cost extremes (a cliff would jump from min to max with
-	// nothing in between).
+	// Gradient, not cliff: several interior positions must land strictly
+	// between the cost extremes.
 	span := maxCost - minCost
 	interiorBetween := 0
 	for _, p := range points[1 : len(points)-1] {
@@ -129,10 +126,8 @@ func TestRoutingDistribution_DefaultGridAndV1Guard(t *testing.T) {
 }
 
 func TestRoutingDistribution_NoDeadZone(t *testing.T) {
-	// Regression guard for the reported bug: every adjacent pair of dial
-	// positions should differ in either the routed mix or its projected cost.
-	// A dead zone (a run of identical mixes) is exactly what made "50% look like
-	// 20%"; the calibration must keep all but a small number of steps live.
+	// Regression guard: a run of identical mixes across adjacent dial steps is
+	// what made "50% look like 20%" — the calibration must keep steps live.
 	s := loadV0_67(t)
 	points, err := s.RoutingDistribution(21, nil, nil)
 	require.NoError(t, err)
@@ -144,16 +139,14 @@ func TestRoutingDistribution_NoDeadZone(t *testing.T) {
 			identicalRuns++
 		}
 	}
-	// A few coincidental repeats are fine (21 dial samples vs a finite set of
-	// distinct mixes); a dead zone would repeat across many steps in a row.
+	// A few coincidental repeats are fine; a dead zone repeats many in a row.
 	assert.LessOrEqual(t, identicalRuns, 3,
 		"too many adjacent dial positions route an identical mix (%d) — dial has a dead zone", identicalRuns)
 }
 
 func TestRoutingDistribution_MidDialIsPricierThanLowDial(t *testing.T) {
-	// The reported symptom in user terms: a mid dial (0.5) used to route the
-	// same all-cheapest mix as a low dial (0.2). After calibration the mid dial
-	// must route a meaningfully pricier (higher-quality) mix.
+	// Reported bug: mid dial (0.5) used to route the same all-cheapest mix as
+	// low dial (0.2); it must now route a meaningfully pricier mix.
 	s := loadV0_67(t)
 	points, err := s.RoutingDistribution(21, nil, nil)
 	require.NoError(t, err)
@@ -173,10 +166,8 @@ func TestRoutingDistribution_MidDialIsPricierThanLowDial(t *testing.T) {
 		"the 50%% dial must route a meaningfully pricier (higher-quality) mix than the 20%% dial")
 }
 
-// loadV0_70 loads the committed v0.70 bundle (the first shaped bundle whose
-// default alpha protects agentic/code clusters at 0.96 and lets conversational
-// clusters cheapen at 0.8). Like loadV0_67 it uses a fake embedder; the dial
-// tests below never embed a prompt — they score cluster centroids directly.
+// loadV0_70 loads the committed v0.70 bundle (default alpha protects
+// agentic/code clusters at 0.96, lets conversational cheapen at 0.8).
 func loadV0_70(t *testing.T) *Scorer {
 	t.Helper()
 	bundle, err := LoadBundle("v0.70")
@@ -223,15 +214,12 @@ func TestApplyDialAlpha_NilFloorIsUniformDial(t *testing.T) {
 }
 
 func TestApplyDialAlpha_AgenticStaysOnCapableModelAtLowDial(t *testing.T) {
-	// The reported bug, end to end: under a price-leaning dial the agentic
-	// cluster routed to a model that can't drive the Claude Code skill/tool
-	// protocol (minimax-m3 grepping for a skill instead of running it). Cluster 0
-	// is the agentic catch-all. The fix moved the guard off the quality WEIGHT
-	// (the old 0.88 floor pinned Opus and killed the dial) and onto the candidate
-	// POOL: on has_tools turns the scorer drops catalog.AgenticLowSet, so a low
-	// dial demotes Opus to the cheapest HARNESS-CAPABLE model instead of
-	// stranding the turn on an incapable one. The low alpha_floor only sets how
-	// far down the capable ladder the dial may travel.
+	// Reported bug: a price-leaning dial routed the agentic cluster (0) to a
+	// model that can't drive the Claude Code tool protocol (minimax-m3 grepping
+	// for a skill instead of running it). Fix moved the guard off the quality
+	// weight (old 0.88 floor pinned Opus, killing the dial) and onto the
+	// candidate pool: has_tools turns drop catalog.AgenticLowSet, so a low dial
+	// demotes to the cheapest harness-capable model instead of an incapable one.
 	s := loadV0_70(t)
 
 	// Realized agentic alpha at the price extreme = the declared floor.
@@ -241,9 +229,8 @@ func TestApplyDialAlpha_AgenticStaysOnCapableModelAtLowDial(t *testing.T) {
 
 	low := catalog.AgenticLowSet()
 
-	// Precondition: WITHOUT the gate (full pool) the price-extreme dial falls
-	// through to an agentic-incapable cheap model — the bug the gate exists to
-	// fix. If this stops holding, the floor got too high to exercise the gate.
+	// Precondition: without the gate, the price extreme falls through to an
+	// agentic-incapable model — the bug the gate exists to fix.
 	full, _ := argmax(s.blendScoresV2(top, knobs, s.models, nil, nil), s.models)
 	_, fullIncapable := low[full]
 	require.Truef(t, fullIncapable,
@@ -266,10 +253,9 @@ func TestApplyDialAlpha_AgenticStaysOnCapableModelAtLowDial(t *testing.T) {
 }
 
 func TestRoutingDistribution_ExcludedModelNeverAppears(t *testing.T) {
-	// The dial preview must agree with what Route would actually do: an excluded
-	// model never shows up in the mix, and the clusters it would have won fall
-	// through to the next-best eligible model rather than vanishing (shares still
-	// sum to 1). Excluding the quality-extreme winner is the load-bearing case.
+	// Preview must agree with Route: an excluded model never appears, and its
+	// clusters fall through to the next-best eligible model (shares still sum
+	// to 1). Excludes the quality-extreme winner as the load-bearing case.
 	s := loadV0_70(t)
 
 	full, err := s.RoutingDistribution(21, nil, nil)
@@ -304,9 +290,8 @@ func TestRoutingDistribution_ExcludedModelNeverAppears(t *testing.T) {
 }
 
 func TestRoutingDistribution_EmptyPoolErrors(t *testing.T) {
-	// Excluding every deployed model empties the eligible pool. Route returns
-	// ErrNoEligibleProvider in that case, so the preview must too rather than
-	// emit points whose shares sum to 0.
+	// Excluding every deployed model empties the pool; the preview must return
+	// ErrNoEligibleProvider like Route does, not points summing to 0.
 	s := loadV0_70(t)
 	all := make(map[string]struct{}, len(s.models))
 	for _, m := range s.models {
@@ -320,8 +305,7 @@ func TestRoutingDistribution_EmptyPoolErrors(t *testing.T) {
 
 func TestRoutingDistribution_ExcludedProviderDropsSingleBindingModels(t *testing.T) {
 	// Excluding a provider must drop every model whose only binding is that
-	// provider, mirroring Route's EnabledProviders gate. Pick a single-binding
-	// model that appears in the mix so the assertion is unambiguous.
+	// provider, mirroring Route's EnabledProviders gate.
 	s := loadV0_70(t)
 
 	full, err := s.RoutingDistribution(21, nil, nil)

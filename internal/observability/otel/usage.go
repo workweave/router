@@ -6,22 +6,12 @@ import (
 
 	"github.com/tidwall/gjson"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/sse"
 )
 
-// Local mirrors of the providers.Provider* constants. This package is a leaf
-// utility (must not import internal/providers), so we duplicate the short
-// strings rather than introduce a circular import. Keep in sync with
-// internal/providers/provider.go.
-const (
-	providerAnthropic = "anthropic"
-	providerOpenAI    = "openai"
-	providerGoogle    = "google"
-)
-
-// UsageSink receives extracted token usage. Translators call RecordUsage /
-// RecordCacheUsage when they encounter usage data in already-parsed events,
-// eliminating the need for a separate parse pass.
+// UsageSink receives extracted token usage. Translators call it directly when
+// they've already parsed usage from an event, skipping a separate parse pass.
 type UsageSink interface {
 	RecordUsage(inputTokens, outputTokens int)
 	RecordCacheUsage(cacheCreationTokens, cacheReadTokens int)
@@ -33,10 +23,8 @@ var (
 	_ UsageSink           = (*UsageExtractor)(nil)
 )
 
-// UsageExtractor wraps an http.ResponseWriter and sniffs token usage from
-// upstream responses (SSE and JSON) as bytes flow through. Only the unconsumed
-// tail of the most recent Write is retained; complete SSE events are parsed
-// and discarded immediately.
+// UsageExtractor wraps an http.ResponseWriter and sniffs token usage (SSE or
+// JSON) as bytes flow through. Only the unconsumed tail is retained between writes.
 type UsageExtractor struct {
 	inner    http.ResponseWriter
 	provider string
@@ -49,10 +37,9 @@ type UsageExtractor struct {
 	leftover []byte
 }
 
-// NewUsageExtractor creates a usage-extracting writer. Provider determines the
-// response format to parse. When inner is nil the extractor operates in sink-only
-// mode: only RecordUsage and Tokens are valid; the ResponseWriter methods must
-// not be called.
+// NewUsageExtractor creates a usage-extracting writer for the given provider's
+// response format. If inner is nil, only RecordUsage/Tokens are valid — the
+// ResponseWriter methods must not be called.
 func NewUsageExtractor(inner http.ResponseWriter, provider string) *UsageExtractor {
 	return &UsageExtractor{
 		inner:    inner,
@@ -93,13 +80,9 @@ func (u *UsageExtractor) Flush() {
 	}
 }
 
-// ArmOutputProgress forwards the output-progress watchdog mark to the inner
-// writer when it supports it. UsageExtractor sniffs usage but cannot itself tell
-// an output-bearing frame from a keepalive; the wrapped marker writer (or
-// translator) can. Without this forward, wrapping the marker writer in a
-// UsageExtractor would hide ArmOutputProgress from the provider client and leave
-// the OpenAI→openaicompat passthrough byte-idle-guarded only. Returns false when
-// inner is nil (sink-only mode) or doesn't implement the hook.
+// ArmOutputProgress forwards the watchdog arm call to inner if it supports it.
+// UsageExtractor can't itself distinguish an output frame from a keepalive, so
+// this must pass through or wrapping would hide the hook from the provider client.
 func (u *UsageExtractor) ArmOutputProgress(mark func()) (armed bool) {
 	if u.inner == nil {
 		return false
@@ -122,9 +105,8 @@ func (u *UsageExtractor) RecordUsage(inputTokens, outputTokens int) {
 	}
 }
 
-// RecordCacheUsage sets cache token counts directly. OpenAI has no creation
-// concept, so it passes cacheCreationTokens=0 with prompt_tokens_details.cached_tokens
-// as cacheReadTokens.
+// RecordCacheUsage sets cache token counts directly. OpenAI has no cache-creation
+// concept, so callers pass 0 for cacheCreationTokens.
 func (u *UsageExtractor) RecordCacheUsage(cacheCreationTokens, cacheReadTokens int) {
 	if cacheCreationTokens > 0 {
 		u.cacheCreation = cacheCreationTokens
@@ -142,9 +124,8 @@ func (u *UsageExtractor) Tokens() (input, output int) {
 	return u.input, u.output
 }
 
-// CacheTokens returns the extracted cache creation and cache read token counts.
-// Zero values indicate the provider does not emit cache tokens (Google) or the
-// response had no cache hits.
+// CacheTokens returns the extracted cache creation/read counts. Zero means the
+// provider doesn't emit cache tokens (Google) or there were no cache hits.
 func (u *UsageExtractor) CacheTokens() (creation, read int) {
 	if u == nil {
 		return 0, 0
@@ -180,9 +161,9 @@ func (u *UsageExtractor) scanBuffer() {
 
 func (u *UsageExtractor) extractFromSSEEvent(eventType []byte, data []byte) {
 	switch u.provider {
-	case providerAnthropic:
+	case providers.ProviderAnthropic:
 		u.extractAnthropicSSE(eventType, data)
-	case providerOpenAI, providerGoogle:
+	case providers.ProviderOpenAI, providers.ProviderGoogle:
 		u.extractOpenAISSE(data)
 	}
 }
@@ -193,7 +174,7 @@ func (u *UsageExtractor) extractAnthropicSSE(eventType []byte, data []byte) {
 		return
 	}
 
-	input, output, cacheCreation, cacheRead, found := extractUsageGJSON(data, providerAnthropic)
+	input, output, cacheCreation, cacheRead, found := extractUsageGJSON(data, providers.ProviderAnthropic)
 	if !found {
 		return
 	}
@@ -260,13 +241,12 @@ func (u *UsageExtractor) tryExtractFromJSON() {
 	}
 }
 
-// extractUsageGJSON probes for token usage fields using gjson, avoiding
-// json.Unmarshal and map[string]any allocations entirely. OpenAI has no
-// cache-creation concept (cacheRead maps to prompt_tokens_details.cached_tokens).
-// Google's native :generateContent surface uses usageMetadata with
-// cachedContentTokenCount; the OpenAI-compat surface uses the OpenAI shape.
+// extractUsageGJSON probes usage fields via gjson (no json.Unmarshal/map allocs).
+// OpenAI has no cache-creation field; cacheRead maps from cached_tokens.
+// Google's native :generateContent uses usageMetadata; its OpenAI-compat surface
+// uses the OpenAI shape instead.
 func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreation, cacheRead int, found bool) {
-	if provider == providerGoogle {
+	if provider == providers.ProviderGoogle {
 		if meta := gjson.GetBytes(data, "usageMetadata"); meta.Exists() {
 			input = int(meta.Get("promptTokenCount").Int())
 			output = int(meta.Get("candidatesTokenCount").Int())
@@ -276,12 +256,12 @@ func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreati
 	}
 
 	usage := gjson.GetBytes(data, "usage")
-	if !usage.Exists() && provider == providerAnthropic {
+	if !usage.Exists() && provider == providers.ProviderAnthropic {
 		usage = gjson.GetBytes(data, "message.usage")
 	}
 	// OpenAI Responses streaming nests usage under the terminal response event
 	// (response.completed); the non-streaming body carries it at the top level.
-	if !usage.Exists() && provider == providerOpenAI {
+	if !usage.Exists() && provider == providers.ProviderOpenAI {
 		usage = gjson.GetBytes(data, "response.usage")
 	}
 	if !usage.Exists() {
@@ -289,16 +269,14 @@ func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreati
 	}
 
 	switch provider {
-	case providerAnthropic:
+	case providers.ProviderAnthropic:
 		input = int(usage.Get("input_tokens").Int())
 		output = int(usage.Get("output_tokens").Int())
 		cacheCreation = int(usage.Get("cache_creation_input_tokens").Int())
 		cacheRead = int(usage.Get("cache_read_input_tokens").Int())
-	case providerOpenAI, providerGoogle:
-		// Chat Completions uses prompt_tokens/completion_tokens; the Responses
-		// API (Codex backend passthrough) uses input_tokens/output_tokens with
-		// input_tokens_details.cached_tokens. Probe both so one extractor serves
-		// both OpenAI surfaces.
+	case providers.ProviderOpenAI, providers.ProviderGoogle:
+		// Chat Completions uses prompt_tokens/completion_tokens; Responses API
+		// (Codex passthrough) uses input_tokens/output_tokens. Probe both.
 		if pt := usage.Get("prompt_tokens"); pt.Exists() {
 			input = int(pt.Int())
 			output = int(usage.Get("completion_tokens").Int())

@@ -13,17 +13,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// DeployedModelsSource exposes the universe of routable models the cluster
-// scorer knows about. The admin endpoint surfaces this so the UI can render
-// a checkbox per model. Implemented by *cluster.Multiversion in production;
-// callers can pass a fake in tests.
+// DeployedModelsSource exposes the routable models the cluster scorer knows
+// about. Implemented by *cluster.Multiversion; tests can pass a fake.
 type DeployedModelsSource interface {
 	DefaultDeployedModels() []cluster.DeployedEntry
 }
 
-// ExclusionOverrideSource reports whether ROUTER_EXCLUDED_MODELS (or an
-// equivalent deployment-wide override) is in effect, and what its contents
-// are. Implemented by *proxy.Service.
+// ExclusionOverrideSource reports the deployment-wide ROUTER_EXCLUDED_MODELS
+// override, if active. Implemented by *proxy.Service.
 type ExclusionOverrideSource interface {
 	HasExcludedModelsOverride() bool
 	ExcludedModelsOverride() []string
@@ -61,9 +58,8 @@ func deployedModelsDTO(models DeployedModelsSource) []deployedModelDTO {
 	return out
 }
 
-// GetExcludedModelsHandler returns deployed models and the installation's exclusion list.
-// When a deployment-wide env override is active, `env_override_active` is true and the
-// UI must render the checklist read-only.
+// GetExcludedModelsHandler returns deployed models and the installation's
+// exclusion list. `env_override_active` tells the UI to render read-only.
 func GetExcludedModelsHandler(authSvc *auth.Service, models DeployedModelsSource, override ExclusionOverrideSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -94,8 +90,7 @@ func GetExcludedModelsHandler(authSvc *auth.Service, models DeployedModelsSource
 }
 
 // UpdateExcludedModelsHandler replaces the installation's exclusion list.
-// Rejects unknown model IDs with 400. Returns 403 when the env override is
-// active so the UI never silently loses a save.
+// 400 on unknown model IDs; 403 if the env override is active.
 func UpdateExcludedModelsHandler(authSvc *auth.Service, models DeployedModelsSource, override ExclusionOverrideSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)

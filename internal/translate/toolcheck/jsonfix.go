@@ -2,14 +2,11 @@ package toolcheck
 
 import "strings"
 
-// repairJSON attempts a minimal, conservative repair of malformed tool
-// argument JSON. It handles the observed model failure modes — markdown
-// fences around the payload, trailing commas, and truncation mid-stream —
-// and nothing speculative. Returns "" when no repair applied (caller falls
-// back to "{}").
+// repairJSON conservatively repairs malformed tool-argument JSON: markdown
+// fences, trailing commas, and mid-stream truncation. Returns "" if no
+// repair applied (caller falls back to "{}").
 //
-// A full LLM-output JSON repairer (e.g. kaptinlin/jsonrepair) is the upgrade
-// path once the module toolchain moves to go 1.26.
+// TODO: switch to a full repairer (kaptinlin/jsonrepair) once go 1.26 lands.
 func repairJSON(raw string) (out string, actions []string) {
 	if len(raw) > maxArgsBytes {
 		return "", nil
@@ -47,19 +44,15 @@ func stripMarkdownFence(s string) (out string, ok bool) {
 	return body, true
 }
 
-// balanceJSON walks the input tracking string/escape state, drops trailing
-// commas, truncates anything after the top-level value closes, and closes
-// whatever a truncation left open (string, then brackets/braces). A dangling
-// partial member like `,"key":` is stripped back to the last complete value
-// before closing.
+// balanceJSON tracks string/escape state to drop trailing commas, truncate
+// content after the top-level value closes, and close whatever truncation
+// left open — stripping a dangling partial member like `,"key":` first.
 func balanceJSON(s string) (out string, actions []string) {
 	var stack []byte
 	inString := false
 	escaped := false
-	// expectKey tracks whether a string at the current position would be an
-	// object KEY rather than a value — a closing quote on a key must not
-	// count as "last complete value" or a dangling `"key":` would survive
-	// the cut.
+	// expectKey marks whether the next string is an object KEY, not a value:
+	// a key's closing quote must not count as "last complete value".
 	expectKey := false
 	stringIsKey := false
 	lastComplete := -1 // index AFTER the last byte that ends a complete value
@@ -136,9 +129,8 @@ func balanceJSON(s string) (out string, actions []string) {
 		return "", nil // already balanced; the syntax error is something else
 	}
 
-	// Truncated input: close an open VALUE string, cut back to the last
-	// complete value (dropping any dangling partial member), then close the
-	// open scopes in reverse order.
+	// Truncated input: close an open value string, cut back to the last
+	// complete value, then close remaining open scopes in reverse order.
 	out = b.String()
 	if inString && !stringIsKey {
 		out += `"`

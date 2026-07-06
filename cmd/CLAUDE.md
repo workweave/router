@@ -9,11 +9,13 @@ Composition root. Only place that constructs concrete adapters + wires them toge
 - **`cmd/router/main.go` is the only file that imports concrete `internal/providers/*` adapters and `internal/postgres`.** No other place wires things.
 - Keep `main.go` focused on wiring. Today's helpers:
   - `buildClusterScorer` — per-version Scorer assembly + embedder warmup
+  - `buildExploringRouter` — optionally wraps the cluster router in `banditexplore` (env-flag gated; off by default)
   - `buildSemanticCache` — response-cache assembly
   - `buildOtelEmitter` — OTel span exporter
   - `runSessionPinSweep` — TTL sweep loop
   - `resolveHardPinModel` / `resolveDefaultBaselineModel` / `resolveAvailableModels` — boot-time model resolution
-  - small env parsers
+  - `registerDeploymentKeyedProvider` — shared "resolve key → build client → log" registration for the providers whose gating collapses to that shape (Fireworks, DeepInfra, Makora, Together, Bedrock, Google); OpenRouter and Anthropic/OpenAI stay bespoke
+  - small env parsers (e.g. `envVarHint`, `parseEnvInt`, `parseEnvFloat`, `parseEnvDurationMs`)
 - **No more heuristic-fallback router.** If cluster routing fails to boot, `main.go` panics. Misconfiguration must abort the process rather than silently degrade.
 - **Never introduce DI container, reflection-based wiring, or service locator.** Composition = plain Go function calls.
 - **`panic` is reserved for startup-time fail-fast** (`config.MustGet`, cluster-scorer boot failure, invalid `ROUTER_DEPLOYMENT_MODE`). Never panic on request path.

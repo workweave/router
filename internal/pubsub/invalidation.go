@@ -19,59 +19,82 @@ import (
 // stall the request that triggered the settings change.
 const notifyTimeout = 2 * time.Second
 
-// replicaSubscriptionTTL is the expiration policy applied to per-replica
-// subscriptions. If a replica crashes without running its deferred cleanup,
-// the subscription is reclaimed by GCP after this idle window so leaked
-// subscriptions can't accumulate forever.
+// replicaSubscriptionTTL reclaims subscriptions leaked by replicas that
+// crash before running their deferred cleanup.
 const replicaSubscriptionTTL = 24 * time.Hour
 
 // subscriptionDeleteTimeout bounds the cleanup call during shutdown so a slow
 // Pub/Sub admin API can't hold up termination indefinitely.
 const subscriptionDeleteTimeout = 10 * time.Second
 
+// publisher is the narrow seam NotifyInstallationChanged needs from a GCP
+// Pub/Sub Publisher: publish installationID and synchronously wait for the
+// result. Abstracting it behind an interface (rather than the concrete
+// *gcppubsub.Publisher, whose Publish returns a SDK-internal PublishResult
+// future) lets tests exercise the guard/retry logic with an in-memory fake
+// instead of a real Pub/Sub connection.
+type publisher interface {
+	Publish(ctx context.Context, installationID string) error
+}
+
+// gcpPublisher adapts a real *gcppubsub.Publisher to the publisher interface.
+type gcpPublisher struct {
+	inner *gcppubsub.Publisher
+}
+
+func (p gcpPublisher) Publish(ctx context.Context, installationID string) error {
+	result := p.inner.Publish(ctx, &gcppubsub.Message{Data: []byte(installationID)})
+	_, err := result.Get(ctx)
+	return err
+}
+
 // InvalidationNotifier publishes installation invalidation events over GCP Pub/Sub.
 type InvalidationNotifier struct {
-	publisher *gcppubsub.Publisher
+	publisher publisher
+	stop      func()
 }
 
 // NewInvalidationNotifier constructs a notifier backed by the supplied Publisher.
-func NewInvalidationNotifier(publisher *gcppubsub.Publisher) *InvalidationNotifier {
-	return &InvalidationNotifier{publisher: publisher}
+func NewInvalidationNotifier(publisherClient *gcppubsub.Publisher) *InvalidationNotifier {
+	return &InvalidationNotifier{
+		publisher: gcpPublisher{inner: publisherClient},
+		stop:      publisherClient.Stop,
+	}
 }
 
 // NotifyInstallationChanged publishes installationID on the invalidation topic.
-// Fire-and-forget: errors are logged and dropped because the write has already
-// committed and TTL is the cross-replica safety net.
+// Fire-and-forget: the write already committed, so failures just log and rely on cache TTL.
 func (n *InvalidationNotifier) NotifyInstallationChanged(installationID string) {
 	if installationID == "" {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
-		defer cancel()
-		result := n.publisher.Publish(ctx, &gcppubsub.Message{Data: []byte(installationID)})
-		if _, err := result.Get(ctx); err != nil {
-			observability.Get().Warn(
-				"Failed to publish installation invalidation",
-				"installation_id", installationID,
-				"err", err,
-			)
+	log := observability.Get().With("installation_id", installationID)
+	observability.SafeGo(log, notifyTimeout, "NotifyInstallationChanged", func(ctx context.Context) {
+		if err := n.publisher.Publish(ctx, installationID); err != nil {
+			log.Warn("Failed to publish installation invalidation", "err", err)
 		}
-	}()
+	})
 }
 
-// Stop flushes any buffered messages and shuts the publisher's background
-// goroutines down. Must be called during graceful shutdown — Client.Close()
-// does not stop publishers.
+// Stop flushes buffered messages and shuts the publisher down. Must be
+// called on graceful shutdown — Client.Close() does not stop publishers.
 func (n *InvalidationNotifier) Stop() {
-	n.publisher.Stop()
+	n.stop()
+}
+
+// subscriberReceiver is the narrow seam Run needs from a GCP Pub/Sub
+// Subscriber. *gcppubsub.Subscriber already implements this directly, so no
+// adapter is required in production; the interface exists purely so tests can
+// substitute an in-memory fake for Run's message-handling logic.
+type subscriberReceiver interface {
+	Receive(ctx context.Context, f func(context.Context, *gcppubsub.Message)) error
+	String() string
 }
 
 // InvalidationListener subscribes to the invalidation topic and forwards every
-// payload to the local cache. Pub/Sub's built-in retry handles transient failures;
-// under a sustained outage the cache TTL acts as the safety net.
+// payload to the local cache; cache TTL is the fallback under sustained outages.
 type InvalidationListener struct {
-	subscriber *gcppubsub.Subscriber
+	subscriber subscriberReceiver
 	cache      auth.APIKeyCache
 	done       chan struct{}
 }
@@ -87,7 +110,10 @@ func NewInvalidationListener(subscriber *gcppubsub.Subscriber, cache auth.APIKey
 }
 
 // Run blocks until ctx is canceled, forwarding invalidation messages to cache.
+// done is closed via defer so Wait() can't hang if a caller wraps Run with
+// panic recovery (e.g. safeGo) — the defer still fires as the panic unwinds.
 func (l *InvalidationListener) Run(ctx context.Context) {
+	defer close(l.done)
 	log := observability.Get()
 	log.Info("Invalidation listener active", "subscription", l.subscriber.String())
 	err := l.subscriber.Receive(ctx, func(_ context.Context, msg *gcppubsub.Message) {
@@ -100,24 +126,16 @@ func (l *InvalidationListener) Run(ctx context.Context) {
 	if err != nil && ctx.Err() == nil {
 		log.Warn("Invalidation listener receive loop ended unexpectedly", "err", err)
 	}
-	close(l.done)
 }
 
 // Wait blocks until Run has returned. Intended for shutdown coordination.
 func (l *InvalidationListener) Wait() { <-l.done }
 
 // CreateReplicaSubscription provisions a per-replica subscription on topicID so
-// every replica receives every invalidation message. A shared subscription
-// would load-balance — only one replica would see each message — defeating
-// the cross-fleet broadcast we need for cache invalidation.
-//
-// The subscription name is "<prefix>-<uuid>" so concurrent replicas don't
-// collide. An expiration policy is set so subscriptions leaked by crashed
-// replicas are reclaimed automatically.
-//
-// Returns the fully-qualified subscription name and a cleanup func that
-// deletes the subscription. Cleanup uses context.Background() internally so
-// shutdown completes even when the parent context is already canceled.
+// every replica sees every invalidation message — a shared subscription would
+// load-balance and defeat the broadcast. Returns the subscription name and a
+// cleanup func; cleanup uses context.Background() so it still runs if the
+// caller's context is already canceled at shutdown.
 func CreateReplicaSubscription(
 	ctx context.Context,
 	client *gcppubsub.Client,

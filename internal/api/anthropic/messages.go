@@ -3,48 +3,17 @@ package anthropic
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
-	"runtime/debug"
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
-	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
-	"workweave/router/internal/router/bandit"
-	"workweave/router/internal/router/cluster"
-	"workweave/router/internal/router/rl"
 	"workweave/router/internal/server/middleware"
-	"workweave/router/internal/translate"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
-
-type tracingWriter struct {
-	gin.ResponseWriter
-}
-
-func (t *tracingWriter) WriteHeader(code int) {
-	observability.Get().Debug("ResponseWriter WriteHeader called",
-		"code", code,
-		"already_written", t.ResponseWriter.Written(),
-		"current_status", t.ResponseWriter.Status(),
-		"stack", string(debug.Stack()),
-	)
-	t.ResponseWriter.WriteHeader(code)
-}
-
-func (t *tracingWriter) Write(b []byte) (int, error) {
-	if !t.ResponseWriter.Written() {
-		observability.Get().Debug("ResponseWriter implicit-200 via Write",
-			"bytes", len(b),
-			"stack", string(debug.Stack()),
-		)
-	}
-	return t.ResponseWriter.Write(b)
-}
 
 const maxBodyBytes = 10 * 1024 * 1024
 
@@ -71,61 +40,31 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 			"model", gjson.GetBytes(body, "model").String(),
 			"max_tokens", gjson.GetBytes(body, "max_tokens").Int(),
 			"session_id", c.Request.Header.Get("X-Claude-Code-Session-Id"),
-			"body", string(body),
 		)
 
 		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header, body)
 		ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		c.Request = c.Request.WithContext(ctx)
 
-		w := &tracingWriter{ResponseWriter: c.Writer}
-		if err := svc.ProxyMessages(c.Request.Context(), body, w, c.Request); err != nil {
-			var statusErr *providers.UpstreamStatusError
-			if errors.As(err, &statusErr) {
+		if err := svc.ProxyMessages(c.Request.Context(), body, c.Writer, c.Request); err != nil {
+			cls, ok := proxy.ClassifyDispatchError(err)
+			if ok && cls.Kind == proxy.DispatchErrorUpstreamStatus {
 				if c.Writer.Written() {
 					return
 				}
-				writeAnthropicError(c, statusErr.Status, "api_error", "Upstream call failed.")
+				writeAnthropicError(c, cls.Status, "api_error", cls.Message)
 				return
 			}
 			if c.Writer.Written() {
 				log.Error("Proxy failed mid-stream", "err", err)
 				return
 			}
-			if errors.Is(err, providers.ErrNotImplemented) {
-				writeAnthropicError(c, http.StatusNotImplemented, "api_error", "Provider not implemented.")
-				return
-			}
-			if errors.Is(err, translate.ErrNotJSONObject) {
-				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Request body must be a JSON object.")
-				return
-			}
-			if errors.Is(err, cluster.ErrNoEligibleProvider) {
-				log.Warn("No eligible provider for request", "err", err)
-				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "No provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header.")
-				return
-			}
-			if errors.Is(err, cluster.ErrInvalidRoutingKnobs) {
-				log.Warn("Invalid routing knobs supplied", "err", err)
-				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Invalid routing knobs supplied.")
-				return
-			}
-			if errors.Is(err, rl.ErrPolicyUnavailable) {
-				log.Error("RL routing unavailable", "err", err)
-				c.Header("Retry-After", "1")
-				writeAnthropicError(c, http.StatusServiceUnavailable, "api_error", "Router unavailable: RL policy router failed and no fallback is configured.")
-				return
-			}
-			if errors.Is(err, bandit.ErrBanditUnavailable) {
-				log.Error("Bandit routing unavailable", "err", err)
-				c.Header("Retry-After", "1")
-				writeAnthropicError(c, http.StatusServiceUnavailable, "api_error", "Router unavailable: bandit router failed and no fallback is configured.")
-				return
-			}
-			if errors.Is(err, cluster.ErrClusterUnavailable) {
-				log.Error("Cluster routing unavailable", "err", err)
-				c.Header("Retry-After", "1")
-				writeAnthropicError(c, http.StatusServiceUnavailable, "api_error", "Router unavailable: cluster scorer failed and no fallback is configured.")
+			if ok {
+				proxy.LogDispatchErrorClass(log, cls, err)
+				if cls.RetryAfter {
+					c.Header("Retry-After", "1")
+				}
+				writeAnthropicError(c, cls.Status, anthropicErrorType(cls.Kind), cls.Message)
 				return
 			}
 			log.Error("Proxy failed", "err", err)
@@ -138,28 +77,24 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 func stashClientIdentity(ctx context.Context, h http.Header, body []byte) context.Context {
 	metaRaw := gjson.GetBytes(body, "metadata.user_id").String()
 	meta := proxy.ParseClaudeCodeMetadata(metaRaw)
-	sessionID := meta.SessionID
-	if sessionID == "" {
-		sessionID = h.Get("X-Claude-Code-Session-Id")
+
+	// Start from the header-only identity, then overlay the body-derived
+	// fields Claude Code's metadata.user_id carries that no other surface
+	// sends: DeviceID/AccountID always win; SessionID/Email only override
+	// when the body actually has a value, else the header-derived one from
+	// ClientIdentityFromHeaders stands.
+	id := proxy.ClientIdentityFromHeaders(h)
+	id.DeviceID = proxy.NormalizeClientIdentifier(meta.DeviceID)
+	id.AccountID = proxy.NormalizeClientIdentifier(meta.AccountID)
+	if meta.SessionID != "" {
+		id.SessionID = proxy.NormalizeClientIdentifier(meta.SessionID)
 	}
-	email := proxy.NormalizeEmail(meta.Email)
-	if email == "" {
-		email = proxy.NormalizeEmail(h.Get("X-Weave-User-Email"))
-	}
-	displayName := proxy.NormalizeDisplayName(h.Get("X-Weave-User-Name"))
-	id := proxy.ClientIdentity{
-		DeviceID:    proxy.NormalizeClientIdentifier(meta.DeviceID),
-		AccountID:   proxy.NormalizeClientIdentifier(meta.AccountID),
-		SessionID:   proxy.NormalizeClientIdentifier(sessionID),
-		Email:       email,
-		DisplayName: displayName,
-		UserAgent:   h.Get("User-Agent"),
-		ClientApp:   proxy.NormalizeClientApp(h.Get("X-App"), h.Get("User-Agent")),
-		RolloutID:   proxy.NormalizeRolloutID(h.Get(proxy.RolloutIDHeader)),
+	if metaEmail := proxy.NormalizeEmail(meta.Email); metaEmail != "" {
+		id.Email = metaEmail
 	}
 	observability.Get().Debug("anthropic stashClientIdentity",
 		"meta_raw_len", len(metaRaw),
-		"meta_raw_preview", truncate(metaRaw, 200),
+		"meta_raw_preview", observability.Preview(metaRaw, 200),
 		"parsed_email_present", meta.Email != "",
 		"parsed_account_present", meta.AccountID != "",
 		"parsed_device_present", meta.DeviceID != "",
@@ -173,11 +108,15 @@ func stashClientIdentity(ctx context.Context, h http.Header, body []byte) contex
 	return context.WithValue(ctx, proxy.ClientIdentityContextKey{}, id)
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+// anthropicErrorType maps a classified dispatch error to the Anthropic
+// Messages error envelope's "type" field. Anthropic only distinguishes
+// client-input problems ("invalid_request_error") from everything else
+// ("api_error").
+func anthropicErrorType(kind proxy.DispatchErrorKind) string {
+	if kind.IsClientError() {
+		return "invalid_request_error"
 	}
-	return s[:n]
+	return "api_error"
 }
 
 func writeAnthropicError(c *gin.Context, status int, errType, message string) {

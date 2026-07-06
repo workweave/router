@@ -41,10 +41,8 @@ func TestSubscriptionCredsFromHeaderValue(t *testing.T) {
 }
 
 func TestResolveAndInjectCredentials_SubscriptionHeaderBeatsBYOK(t *testing.T) {
-	// Router-keyed request (non-nil installation) carrying both a BYOK Anthropic
-	// key and the dedicated subscription header. The subscription must win, and
-	// it must be read past the router-key guard that normally skips inbound
-	// header extraction.
+	// Router-keyed request with both a BYOK key and the dedicated subscription
+	// header: subscription must win, read past the router-key guard.
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, InstallationIDContextKey{}, testInstallationID)
 	ctx = context.WithValue(ctx, ExternalAPIKeysContextKey{}, []*auth.ExternalAPIKey{
@@ -79,10 +77,8 @@ func TestResolveAndInjectCredentials_SubscriptionHeaderIgnoredForNonAnthropic(t 
 }
 
 func TestResolveAndInjectCredentials_InboundSubscriptionBeatsBYOK(t *testing.T) {
-	// Self-hosted (no router key): an inbound Authorization subscription bearer
-	// must beat a present BYOK key so the turn bills at the 5% subscription fee,
-	// honoring the subscription -> BYOK -> deployment precedence explicitly
-	// rather than by coincidence of BYOK being absent off the router-key path.
+	// Self-hosted: inbound subscription bearer must beat BYOK (subscription ->
+	// BYOK -> deployment precedence), not just because BYOK happens to be absent.
 	ctx := context.WithValue(context.Background(), ExternalAPIKeysContextKey{}, []*auth.ExternalAPIKey{
 		{Provider: providers.ProviderAnthropic, Plaintext: []byte("sk-ant-api-byok")},
 	})
@@ -107,11 +103,9 @@ func TestResolveAndInjectCredentials_SelfHostedInboundSubscription(t *testing.T)
 }
 
 func TestResolveAndInjectCredentials_RouterKeyedInboundSubscription(t *testing.T) {
-	// Claude Code routed through the Weave Router: the router key authenticates
-	// via X-Weave-Router-Key (installation set), while CC leaves its own
-	// subscription OAuth token in Authorization. No dedicated header, no BYOK.
-	// The inbound bearer must resolve as the subscription credential so the turn
-	// bills at the 5% fee — the managed-CC case this path exists for.
+	// Managed CC: router key auth via X-Weave-Router-Key, CC's own subscription
+	// OAuth token in Authorization, no dedicated header, no BYOK. Inbound bearer
+	// must still resolve as the subscription credential.
 	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
 	headers := http.Header{"Authorization": []string{"Bearer sk-ant-oat01-subscription-token"}}
 	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
@@ -124,11 +118,8 @@ func TestResolveAndInjectCredentials_RouterKeyedInboundSubscription(t *testing.T
 }
 
 func TestResolveAndInjectCredentials_RouterKeyedInboundApiKeyNotForwarded(t *testing.T) {
-	// The router-key path still must NOT forward a general inbound API key: only
-	// the sk-ant-oat OAuth subset is honored. A real client API key in
-	// Authorization must resolve to no credential, so the deployment key (not the
-	// client's key) is the upstream fallback — preserving the cross-provider-leak
-	// guard the OAuth carve-out is careful not to widen.
+	// Router-key path must not forward a general inbound API key, only the
+	// sk-ant-oat OAuth subset — otherwise it'd widen the cross-provider-leak guard.
 	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
 	headers := http.Header{"Authorization": []string{"Bearer sk-ant-api-real-client-key"}}
 	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
@@ -139,9 +130,8 @@ func TestResolveAndInjectCredentials_RouterKeyedInboundApiKeyNotForwarded(t *tes
 const codexTestJWT = "eyJhbGciOiJSUzI1NiJ9.codex-access.signature"
 
 func TestResolveAndInjectCredentials_CodexDedicatedHeadersBeatBYOK(t *testing.T) {
-	// Router-keyed request with a BYOK OpenAI key and the dedicated Codex
-	// subscription headers. The subscription must win and be read past the
-	// router-key guard, mirroring the Anthropic dedicated-header path.
+	// Dedicated Codex headers must win over BYOK, read past the router-key
+	// guard — mirrors the Anthropic dedicated-header path.
 	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
 	ctx = context.WithValue(ctx, ExternalAPIKeysContextKey{}, []*auth.ExternalAPIKey{
 		{Provider: providers.ProviderOpenAI, Plaintext: []byte("sk-oai-byok")},
@@ -177,11 +167,9 @@ func TestResolveAndInjectCredentials_CodexInboundBeatsBYOK(t *testing.T) {
 }
 
 func TestResolveAndInjectCredentials_RouterKeyedInboundCodexSubscription(t *testing.T) {
-	// Codex CLI routed through the Weave Router: the router key authenticates via
-	// X-Weave-Router-Key (installation set), while Codex leaves its own ChatGPT
-	// auth in Authorization + ChatGPT-Account-ID. No dedicated header, no BYOK.
-	// The inbound bearer must resolve as the Codex subscription credential so the
-	// turn bills at the 5% fee — the managed-Codex case mirroring #460.
+	// Managed Codex: router key auth via X-Weave-Router-Key, Codex's own ChatGPT
+	// auth in Authorization + ChatGPT-Account-ID, no dedicated header, no BYOK.
+	// Inbound bearer must still resolve as Codex subscription (mirrors #460).
 	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
 	headers := http.Header{
 		"Authorization":      []string{"Bearer " + codexTestJWT},
@@ -197,10 +185,8 @@ func TestResolveAndInjectCredentials_RouterKeyedInboundCodexSubscription(t *test
 }
 
 func TestResolveAndInjectCredentials_RouterKeyedInboundOpenAIApiKeyNotForwarded(t *testing.T) {
-	// The router-key path still must NOT forward a general inbound OpenAI API key:
-	// only the Codex OAuth subset (JWT + ChatGPT-Account-ID) is honored. A plain
-	// client key in Authorization, with no account-id, must resolve to no
-	// credential so the deployment key is the upstream fallback.
+	// Router-key path must not forward a general inbound OpenAI key — only the
+	// Codex OAuth subset (JWT + ChatGPT-Account-ID) is honored.
 	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
 	headers := http.Header{"Authorization": []string{"Bearer sk-proj-real-client-key"}}
 	out := resolveAndInjectCredentials(ctx, providers.ProviderOpenAI, headers)
@@ -241,11 +227,8 @@ func TestCodexResponsesRequest(t *testing.T) {
 		assert.True(t, codexResponsesRequest(context.Background(), headers))
 	})
 	t.Run("inbound bearer + account-id on a router-keyed request", func(t *testing.T) {
-		// Managed Codex: the router key authenticates via X-Weave-Router-Key
-		// (installation set) while Codex CLI leaves its ChatGPT auth in
-		// Authorization, with no dedicated header. resolveAndInjectCredentials
-		// resolves this as the Codex subscription, so detection must agree and
-		// route to the Codex backend — not be gated on the installation's absence.
+		// Detection must agree with resolveAndInjectCredentials here: not
+		// gated on the installation's absence.
 		ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, testInstallationID)
 		headers := http.Header{
 			"Authorization":      []string{"Bearer " + codexTestJWT},

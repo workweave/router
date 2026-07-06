@@ -3,6 +3,7 @@ package translate_test
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,9 +42,8 @@ func decodeOpenAIReasoningTestSignature(t *testing.T, sig string) map[string]any
 	return out
 }
 
-// Anthropic (Claude Code) → OpenAI Responses request: the thinking budget must
-// become reasoning.effort, messages must become typed input items, tool_use →
-// function_call, tool_result → function_call_output, tools the flat shape.
+// Anthropic → OpenAI Responses request shape: thinking budget, typed input
+// items, tool_use/tool_result mapping, flat tools.
 func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	body := []byte(`{
       "model":"claude-opus-4-8","max_tokens":4096,
@@ -78,7 +78,10 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	reasoning, _ := out["reasoning"].(map[string]any)
 	require.NotNil(t, reasoning, "reasoning must be set from thinking budget")
 	assert.Equal(t, "high", reasoning["effort"], "31999 budget -> high")
-	assert.EqualValues(t, 4096, out["max_output_tokens"])
+	// max_tokens 4096 is floored to minResponsesOutputTokens (16000): a reasoning
+	// model needs output-budget headroom for hidden reasoning before any visible
+	// token, so the requested 4096 is lifted to the reasoning floor.
+	assert.EqualValues(t, 16000, out["max_output_tokens"])
 	assert.Equal(t, "auto", out["tool_choice"])
 
 	// tools: FLAT function shape (no nested "function" wrapper)
@@ -122,12 +125,82 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	assert.Equal(t, providers.EndpointResponses, prep.Endpoint)
 }
 
-// A session that ran on Gemini accumulates tool_use ids with a base64
-// thoughtSignature smuggled in (call_xxx__thought__<sig>, often >1KB). When a
-// later turn re-routes to a gpt-5.x Responses model, the call_id must be
-// stripped of the signature and clamped to OpenAI's 64-char limit, or the
-// upstream 400s ("input[N].call_id: string too long, max 64"). The tool_use
-// and its tool_result must still map to the same clamped call_id so they pair.
+// TestPrepareOpenAIResponses_ToolChoiceVariants covers the Anthropic ->
+// Responses tool_choice mapping for "any" and named-tool; "auto" is covered
+// by TestPrepareOpenAIResponses_RequestShape.
+func TestPrepareOpenAIResponses_ToolChoiceVariants(t *testing.T) {
+	cases := []struct {
+		name       string
+		toolChoice string
+		want       any
+	}{
+		{"any", `{"type":"any"}`, "required"},
+		{"tool", `{"type":"tool","name":"bash"}`, map[string]any{"type": "function", "name": "bash"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{
+				"model":"claude-opus-4-8","max_tokens":4096,
+				"tools":[{"name":"bash","input_schema":{"type":"object"}}],
+				"tool_choice":` + tc.toolChoice + `,
+				"messages":[{"role":"user","content":"fix the bug"}]
+			}`)
+			env, err := translate.ParseAnthropic(body)
+			require.NoError(t, err)
+			prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{
+				TargetModel:  "gpt-5.5",
+				Capabilities: router.Lookup("gpt-5.5"),
+			})
+			require.NoError(t, err)
+
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(prep.Body, &out))
+			assert.Equal(t, tc.want, out["tool_choice"])
+		})
+	}
+}
+
+// A tiny client max_tokens (Claude Code sends 1 for a probe, 64 for a
+// title/topic turn) must be floored to the reasoning output budget: a reasoning
+// model burns the budget on hidden reasoning before any visible token, so the
+// raw tiny value 400s ("max_tokens or model output limit was reached"). A budget
+// already above the floor is passed through unchanged (clamped only to the cap).
+func TestPrepareOpenAIResponses_FloorsMaxOutputTokensForReasoning(t *testing.T) {
+	cases := []struct {
+		name       string
+		maxTokens  int
+		wantMaxOut int64
+	}{
+		{name: "probe max_tokens=1 floored", maxTokens: 1, wantMaxOut: 16000},
+		{name: "title-turn max_tokens=64 floored", maxTokens: 64, wantMaxOut: 16000},
+		{name: "at floor unchanged", maxTokens: 16000, wantMaxOut: 16000},
+		{name: "large budget passes through", maxTokens: 32000, wantMaxOut: 32000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(fmt.Sprintf(`{
+				"model":"claude-opus-4-8","max_tokens":%d,
+				"tools":[{"name":"bash","description":"run","input_schema":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}],
+				"messages":[{"role":"user","content":"hi"}]
+			}`, tc.maxTokens))
+			env, err := translate.ParseAnthropic(body)
+			require.NoError(t, err)
+			prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{
+				TargetModel:  "gpt-5.4-mini",
+				Capabilities: router.Lookup("gpt-5.4-mini"),
+			})
+			require.NoError(t, err)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(prep.Body, &out))
+			assert.EqualValues(t, tc.wantMaxOut, out["max_output_tokens"])
+		})
+	}
+}
+
+// Gemini sessions smuggle a thoughtSignature into tool_use ids
+// (call_xxx__thought__<sig>, often >1KB). On re-route to a gpt-5.x Responses
+// model, call_id must be stripped and clamped to 64 chars or the upstream
+// 400s; tool_use and tool_result must still share the clamped call_id.
 func TestPrepareOpenAIResponses_ClampsGeminiThoughtSignatureCallID(t *testing.T) {
 	longSig := strings.Repeat("A", 1300) // valid base64url, > 64 chars
 	id := "call_abc123__thought__" + longSig
@@ -242,9 +315,8 @@ func TestPrepareOpenAIResponses_ReplaysSignedReasoningAfterModelSwitch(t *testin
 
 // budget→effort ladder.
 func TestPrepareOpenAIResponses_EffortLadder(t *testing.T) {
-	// gpt-5.x has a measured "medium" dead-zone on hard agentic coding (Pro:
-	// low 16%, medium 0%, high 41%), so the medium band (budget ≤16384) is
-	// promoted to high. Small budgets still resolve to low — easy stays cheap.
+	// gpt-5.x has a measured "medium" dead-zone on hard agentic coding, so the
+	// medium band (budget ≤16384) is promoted to high; small budgets stay low.
 	for _, tc := range []struct {
 		budget int
 		want   string
@@ -296,9 +368,8 @@ func TestResponsesToAnthropicResponse(t *testing.T) {
 	assert.Equal(t, "here is the fix", b1["text"])
 	b2, _ := content[2].(map[string]any)
 	assert.Equal(t, "tool_use", b2["type"])
-	// The preceding reasoning item's signature is also carried on the tool_use id
-	// (the Claude Code round-trip drops the thinking block but preserves the id),
-	// so the id is the call_id plus an opaque reasoning-signature suffix.
+	// The tool_use id also carries the preceding reasoning item's signature,
+	// since Claude Code drops the thinking block on round-trip but keeps the id.
 	toolID, _ := b2["id"].(string)
 	assert.True(t, strings.HasPrefix(toolID, "call_9"), "tool id keeps the call_id prefix, got %q", toolID)
 	assert.Contains(t, toolID, "__openai_reasoning__", "tool id carries the reasoning signature for replay")
@@ -324,9 +395,8 @@ func TestResponsesToAnthropicResponse_StopReasons(t *testing.T) {
 	assert.Equal(t, "end_turn", gjsonStopReason(out))
 }
 
-// gemini-3.x (native) must receive a thinkingConfig derived from the Anthropic
-// thinking budget so it reasons. Gemini 3.x uses the string `thinkingLevel`;
-// the legacy numeric `thinkingBudget` is suboptimal for 3.x and mixing both 400s.
+// gemini-3.x uses string `thinkingLevel`, not the legacy numeric `thinkingBudget`
+// (sending both 400s).
 func TestPrepareGemini_ThinkingBudgetToThinkingConfig(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":31999}}`)
 	env, err := translate.ParseAnthropic(body)

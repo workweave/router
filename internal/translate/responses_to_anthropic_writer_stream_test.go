@@ -30,10 +30,8 @@ func firstSignatureDelta(t *testing.T, body string) string {
 	return ""
 }
 
-// responsesStreamFixture is a representative OpenAI Responses streaming SSE
-// sequence: a reasoning summary, an output_text message, and one function_call
-// whose arguments arrive split across two deltas, terminated by
-// response.completed carrying usage + status.
+// responsesStreamFixture: reasoning summary + output_text message + one
+// function_call with args split across two deltas, then response.completed.
 const responsesStreamFixture = `event: response.created
 data: {"type":"response.created","response":{"id":"resp_abc","status":"in_progress","model":"gpt-5.5","output":[]}}
 
@@ -78,9 +76,8 @@ data: {"type":"response.completed","response":{"id":"resp_abc","status":"complet
 
 `
 
-// A streaming client gets the Responses event stream translated to Anthropic SSE
-// incrementally: thinking → text → tool_use blocks in order, then a
-// message_delta carrying stop_reason=tool_use and the upstream usage.
+// Streaming: thinking → text → tool_use blocks in order, then message_delta
+// with stop_reason=tool_use and upstream usage.
 func TestResponsesToAnthropicWriter_StreamingClient(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
@@ -140,10 +137,8 @@ func TestResponsesToAnthropicWriter_StreamingClient(t *testing.T) {
 	assert.Contains(t, body, `"content_block_start","index":2`)
 }
 
-// message_start ids must be unique per response. Clients (notably ccusage)
-// dedupe usage records by message id, so the old constant "msg_responses" id
-// collapsed every turn of a session into one record and massively undercounted
-// tokens/cost. The "msg_responses_" prefix is kept as a route marker.
+// message_start ids must be unique per response: clients (e.g. ccusage)
+// dedupe usage by message id, so a constant id undercounted tokens/cost.
 func TestResponsesToAnthropicWriter_MessageStartIDUniquePerResponse(t *testing.T) {
 	startID := func() string {
 		rec := httptest.NewRecorder()
@@ -173,8 +168,7 @@ func TestResponsesToAnthropicWriter_MessageStartIDUniquePerResponse(t *testing.T
 	assert.NotEqual(t, first, second, "message ids must differ across responses")
 }
 
-// A non-streaming client gets a one-shot Anthropic JSON body reconstructed from
-// the terminal response.completed event in the (still-streamed) upstream.
+// Non-streaming: one-shot Anthropic JSON reconstructed from response.completed.
 func TestResponsesToAnthropicWriter_NonStreamingClient(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
@@ -221,9 +215,7 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","mo
 	assert.Equal(t, 800, got.CacheReadTokens)
 }
 
-// A function_call that streams no argument deltas still delivers its real
-// arguments: the translator falls back to the authoritative item.arguments on
-// the terminal output_item.done rather than emitting {}.
+// No delta events: falls back to item.arguments on output_item.done, not {}.
 func TestResponsesToAnthropicWriter_ToolArgsFromDoneEvent(t *testing.T) {
 	const fixture = `event: response.output_item.added
 data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"","status":"in_progress"}}
@@ -267,11 +259,9 @@ func writeToolValidator(t *testing.T) *toolcheck.Validator {
 	return v
 }
 
-// gpt-5.x reasoning models emit optional string params (e.g. Read.pages) as ""
-// rather than omitting them, which fails the client's tool validation and loops
-// the model. With the tool's schema validator installed, the writer strips the
-// empty optional arg so the client receives a valid call; the required file_path
-// is preserved.
+// gpt-5.x emits optional string params (e.g. Read.pages) as "" instead of
+// omitting them, which fails client tool validation. With a schema validator
+// installed, the writer strips the empty optional arg.
 func TestResponsesToAnthropicWriter_StripsEmptyOptionalArg(t *testing.T) {
 	const fixture = `event: response.output_item.added
 data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Read","arguments":"","status":"in_progress"}}
@@ -398,9 +388,8 @@ data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","
 		"schema for a different tool must not authorize stripping this tool's args")
 }
 
-// A stream truncated before response.completed still reconciles to
-// stop_reason=tool_use (a tool block was emitted) and flushes the partial
-// tool args, rather than defaulting to end_turn with a dropped input_json_delta.
+// Truncated before response.completed: still reconciles to stop_reason=tool_use
+// and flushes the partial tool args.
 func TestResponsesToAnthropicWriter_TruncatedToolStream(t *testing.T) {
 	const fixture = `event: response.output_item.added
 data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Bash","arguments":"","status":"in_progress"}}
@@ -427,9 +416,8 @@ data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_
 	assert.Contains(t, body, "event: message_stop")
 }
 
-// An upstream that delivers a reasoning summary and message text only on
-// output_item.done (no *.delta events) still produces visible thinking + text
-// blocks on the streaming path, rather than an empty assistant turn.
+// Content delivered only on output_item.done (no *.delta) still produces
+// visible thinking + text blocks.
 func TestResponsesToAnthropicWriter_DoneOnlyContent(t *testing.T) {
 	const fixture = `event: response.output_item.added
 data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","encrypted_content":"enc_stream","summary":[],"status":"in_progress"}}
@@ -462,9 +450,8 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","ou
 	assert.Contains(t, body, `"stop_reason":"end_turn"`)
 }
 
-// A function_call with no name is dropped (never opened as a tool_use block),
-// so the client can't be sent on an invoke-"" loop; the turn demotes to
-// end_turn since no tool_use block survives.
+// A function_call with no name is dropped, never opened as a tool_use block;
+// the turn demotes to end_turn.
 func TestResponsesToAnthropicWriter_NamelessToolDropped(t *testing.T) {
 	const fixture = `event: response.output_item.added
 data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_x","type":"function_call","call_id":"call_x","name":"","arguments":"","status":"in_progress"}}
@@ -493,9 +480,8 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","ou
 	assert.Contains(t, body, "event: message_stop")
 }
 
-// On the non-streaming path, an upstream stream that ends without a terminal
-// response event but carries an `error` event yields a real Anthropic error
-// envelope — not an empty 502 from feeding raw SSE to the JSON error mapper.
+// Non-streaming: an `error` event with no terminal response event still
+// yields a real Anthropic error envelope, not an empty 502.
 func TestResponsesToAnthropicWriter_NonStreamingErrorFromStream(t *testing.T) {
 	const fixture = `event: error
 data: {"type":"error","code":"server_error","message":"upstream exploded"}
@@ -587,9 +573,8 @@ data: {"type":"response.completed","response":{"id":"r","status":"completed","ou
 	assert.Contains(t, body, `"stop_reason":"tool_use"`)
 }
 
-// A non-streaming client also gets an error envelope (not empty success JSON)
-// when the buffered stream ends in response.failed — symmetric with the
-// streaming path's event: error.
+// Non-streaming also gets an error envelope, not empty success JSON, when
+// the buffered stream ends in response.failed.
 func TestResponsesToAnthropicWriter_NonStreamingFailedResponse(t *testing.T) {
 	const fixture = `event: response.failed
 data: {"type":"response.failed","response":{"id":"r","status":"failed","error":{"code":"server_error","message":"boom"},"output":[]}}
@@ -610,9 +595,8 @@ data: {"type":"response.failed","response":{"id":"r","status":"failed","error":{
 	assert.Contains(t, e["message"], "boom")
 }
 
-// A response.incomplete terminal carrying an error object is a failure
-// (finalizeBuffered rejects it) and its error text must survive the buffer
-// scan — not fall through to the generic no-terminal message.
+// response.incomplete with an error object is a failure; its error text
+// must survive the buffer scan.
 func TestResponsesToAnthropicWriter_NonStreamingIncompleteWithError(t *testing.T) {
 	const fixture = `event: response.incomplete
 data: {"type":"response.incomplete","response":{"id":"r","status":"incomplete","error":{"code":"server_error","message":"ran out of juice"},"output":[]}}

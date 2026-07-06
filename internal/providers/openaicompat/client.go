@@ -14,31 +14,26 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"workweave/router/internal/observability"
-	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/providers/httputil"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/timing"
 )
 
 const (
 	DefaultBaseURL   = "https://openrouter.ai/api/v1"
 	FireworksBaseURL = "https://api.fireworks.ai/inference/v1"
-	// DeepInfraBaseURL is DeepInfra's OpenAI-compatible surface. DeepInfra uses
-	// HuggingFace-form model IDs; pair with NewClientWithModelIDMap to rewrite
-	// the router's public slash-form slugs on the wire.
+	// DeepInfraBaseURL uses HuggingFace-form model IDs; pair with
+	// NewClientWithModelIDMap to rewrite the router's slash-form slugs.
 	DeepInfraBaseURL = "https://api.deepinfra.com/v1/openai"
-	// MakoraBaseURL is Makora's OpenAI-compatible surface. Makora is an
-	// agent-optimized inference platform serving DeepSeek V4 (and other OSS
-	// models) at notably higher throughput than the commodity providers; pair
-	// with NewClientWithModelIDMap to rewrite the router's public slash-form
-	// slugs to Makora's upstream IDs on the wire.
+	// MakoraBaseURL serves DeepSeek V4 (and other OSS models) at higher
+	// throughput than commodity providers; pair with NewClientWithModelIDMap
+	// to rewrite slugs to Makora's upstream IDs.
 	MakoraBaseURL = "https://inference.makora.com/v1"
-	// TogetherBaseURL is Together AI's OpenAI-compatible surface. Together
-	// serves the OSS pool (DeepSeek, GLM, MiniMax, Qwen, Kimi, …) and is the
-	// fastest provider on artificialanalysis.ai for several of the models we
-	// route; pair with NewClientWithModelIDMap to rewrite the router's public
-	// slash-form slugs to Together's "Org/Model" upstream IDs on the wire.
+	// TogetherBaseURL serves the OSS pool (DeepSeek, GLM, MiniMax, Qwen, Kimi)
+	// and is fastest on artificialanalysis.ai for several routed models; pair
+	// with NewClientWithModelIDMap to rewrite slugs to Together's "Org/Model" IDs.
 	TogetherBaseURL = "https://api.together.xyz/v1"
 )
 
@@ -60,25 +55,19 @@ type Client struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
-	// modelIDMap rewrites the request body's "model" field before sending.
-	// Empty map (or nil) = no rewrite. Used when the router's public slash-form
-	// slug differs from the upstream's canonical ID (Bedrock dot-form,
-	// DeepInfra HuggingFace-form).
+	// modelIDMap rewrites the request body's "model" field before sending, when
+	// the router's public slug differs from the upstream's canonical ID
+	// (Bedrock dot-form, DeepInfra HuggingFace-form). Nil/empty = no rewrite.
 	modelIDMap map[string]string
-	// sseIdleTimeout, when > 0, overrides httputil.DefaultSSEIdleTimeout for the
-	// byte-idle watchdog. Production uses the default; tests inject a small value
-	// so the output-stall watchdog can be exercised without the byte-idle one
-	// firing first.
+	// sseIdleTimeout overrides httputil.DefaultSSEIdleTimeout when > 0; tests
+	// set it small so the output-stall watchdog fires before this one.
 	sseIdleTimeout time.Duration
-	// outputStall, when > 0, overrides httputil.DefaultOutputStallTimeout for the
-	// output-progress watchdog. Production uses the default via NewClient; tests
-	// inject a small value to drive the output-stall trip without waiting out the
-	// real budget.
+	// outputStall overrides httputil.DefaultOutputStallTimeout when > 0; used
+	// by tests to trip output-stall without waiting out the real budget.
 	outputStall time.Duration
-	// throughputWindow / throughputMinElapsed / throughputMinDeltas, when > 0
-	// (and >= 0 for the delta count), override the minimum-throughput watchdog
-	// budgets. Production uses the httputil defaults; tests inject small values
-	// to drive a slow-throughput trip without waiting out the real warmup.
+	// throughputWindow/MinElapsed/MinDeltas override the minimum-throughput
+	// watchdog budgets when set; used by tests to trip slow-throughput without
+	// waiting out the real warmup.
 	throughputWindow     time.Duration
 	throughputMinElapsed time.Duration
 	throughputMinDeltas  int
@@ -203,7 +192,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		upstream.Header.Set("Accept", v)
 	}
 
-	t := otel.TimingFrom(ctx)
+	t := timing.TimingFrom(ctx)
 	t.StampUpstreamRequest()
 	resp, err := c.http.Do(upstream)
 	if err != nil {
@@ -213,26 +202,25 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	t.StampUpstreamHeaders()
 
 	if resp.StatusCode >= 400 {
-		// Buffer the upstream error response — do NOT touch w. The proxy's
-		// failover loop decides whether to retry on the next binding or
-		// flush this buffer to the client.
-		bufBody, totalRead, drainErr := readCapped(resp.Body, providers.MaxBufferedErrorBytes)
+		// Buffer the error — do NOT touch w; the failover loop decides whether
+		// to retry or flush this buffer to the client.
+		bufBody, totalRead, drainErr := httputil.ReadCapped(resp.Body, providers.MaxBufferedErrorBytes)
 		if len(bufBody) > 0 {
 			t.StampUpstreamFirstByte()
 		}
 		if drainErr == nil {
 			t.StampUpstreamEOF()
 		}
-		logUpstreamStatus(
+		httputil.LogUpstreamStatus(
 			"Upstream OpenAI-compatible provider returned error status",
 			resp.StatusCode,
 			"base_url", c.baseURL,
 			"routed_model", decision.Model,
-			"body_preview", previewBytes(bufBody),
+			"body_preview", httputil.PreviewBytes(bufBody),
 			"body_total_bytes", totalRead,
 		)
 		errHeaders := http.Header{}
-		providers.CopyUpstreamHeaders(headerCapture{errHeaders}, resp)
+		providers.CopyUpstreamHeaders(httputil.HeaderCapture{H: errHeaders}, resp)
 		return &providers.UpstreamErrorResponse{
 			Status:  resp.StatusCode,
 			Headers: errHeaders,
@@ -243,27 +231,17 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 
-	// Output-progress watchdog. StreamBody's byte-idle watchdog below resets on
-	// ANY upstream byte, so a stream that stays byte-alive with SSE keepalive
-	// comments or empty/role-only delta frames while producing zero output rides
-	// to the 600s request cap (2026-06-19 DeepInfra incident). This second
-	// watchdog measures time-since-last-OUTPUT: its mark is fed by the
-	// OpenAI→Anthropic SSE translator only on output-bearing deltas (text,
-	// reasoning, tool-call args, terminal finish). On trip it cancels ctx with
-	// ErrUpstreamOutputStall (retryable; fails over while the preludeBuffer is
-	// still uncommitted). Only the translator can tell output frames from
-	// keepalives, so it is wired via ArmOutputProgress; a non-streaming client
-	// (or a writer without the hook) returns armed=false and is byte-idle-guarded
-	// only.
-	// A third watchdog runs on the same output-progress mark: the
-	// minimum-throughput guard. The output-stall watchdog above only catches a
-	// stream that stops producing output entirely; it never trips on a clean 200
-	// that keeps dribbling output-bearing deltas (resetting outMark on each one)
-	// but at a crawl. The throughput watchdog measures the COUNT of those deltas
-	// over a rolling window and, once warmup has passed, aborts with
-	// ErrUpstreamSlowThroughput (retryable) when the rate stays below the floor
-	// (2026-06-25 deepseek-v4-flash ~132s dribble). Both are fed by the single
-	// ArmOutputProgress mark, so the installed mark fans out to both.
+	// Output-progress watchdog: StreamBody's byte-idle watchdog resets on ANY
+	// byte, so keepalive/empty-delta frames with zero real output ride to the
+	// request cap (2026-06-19 DeepInfra incident). This one is marked only on
+	// output-bearing deltas by the SSE translator (via ArmOutputProgress) and
+	// trips ErrUpstreamOutputStall (retryable). Non-streaming/no-hook writers
+	// stay byte-idle-guarded only.
+	//
+	// A second watchdog shares the same mark: minimum-throughput. It catches a
+	// clean 200 that keeps dribbling output at a crawl (2026-06-25
+	// deepseek-v4-flash ~132s dribble) by counting deltas over a rolling window
+	// and tripping ErrUpstreamSlowThroughput once warmup passes.
 	if arm, ok := w.(providers.OutputProgressArmer); ok {
 		outMark, outStop := httputil.StartIdleWatchdogCause(ctx, cancel, c.outputStallTimeout(), httputil.ErrUpstreamOutputStall)
 		tpWindow, tpMinElapsed, tpMinDeltas := c.throughputParams()
@@ -288,12 +266,9 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	return streamErr
 }
 
-// logStreamStall reports a watchdog trip at ERROR: the upstream returned 200 +
-// headers, then stalled for the full budget. byte_idle = zero bytes for the
-// idle budget; output_idle = stream stayed byte-alive on keepalive/empty frames
-// but produced zero output content for the output-stall budget (the 2026-06-19
-// DeepInfra mode). Both classify retryable, so dispatchWithFallback re-attempts
-// when nothing reached the client; this log is the per-model paper trail.
+// logStreamStall reports a watchdog trip at ERROR after upstream returned
+// 200 + headers then stalled for the full budget. Both stall kinds are
+// retryable (dispatchWithFallback re-attempts); this is the paper trail.
 func logStreamStall(model, baseURL string, cause error) {
 	stallKind := "byte_idle"
 	switch {
@@ -308,42 +283,6 @@ func logStreamStall(model, baseURL string, cause error) {
 		"stall_kind", stallKind,
 	)
 }
-
-// readCapped reads up to limit bytes from r into a buffer, then drains the
-// rest without retention up to maxDrain to bound failover latency on a
-// slow upstream returning a large error body. The connection is closed by
-// the caller's defer regardless, so the unread tail is discarded by Close.
-// Returns the buffered prefix, total bytes read, and any read error
-// (io.EOF mapped to nil).
-func readCapped(r io.Reader, limit int) ([]byte, int64, error) {
-	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
-	totalRead := int64(len(prefix))
-	if err != nil {
-		return prefix, totalRead, err
-	}
-	const maxDrain = 1 << 20 // 1 MiB
-	rest, drainErr := io.Copy(io.Discard, io.LimitReader(r, maxDrain))
-	totalRead += rest
-	return prefix, totalRead, drainErr
-}
-
-// previewBytes returns the first 1KB of body as a string for logging.
-func previewBytes(body []byte) string {
-	const previewLimit = 1024
-	if len(body) > previewLimit {
-		return string(body[:previewLimit])
-	}
-	return string(body)
-}
-
-// headerCapture is a minimal http.ResponseWriter that captures headers
-// only, used to reuse providers.CopyUpstreamHeaders against an http.Header
-// we own. Write/WriteHeader are no-ops.
-type headerCapture struct{ h http.Header }
-
-func (c headerCapture) Header() http.Header       { return c.h }
-func (c headerCapture) Write([]byte) (int, error) { return 0, nil }
-func (c headerCapture) WriteHeader(int)           {}
 
 // Passthrough strips the inbound /v1 prefix to avoid double-prefixing with the configured baseURL.
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
@@ -377,38 +316,10 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 	if resp.StatusCode >= 400 {
-		var snip [1024]byte
-		n, _ := io.ReadFull(resp.Body, snip[:])
-		_, snipWriteErr := w.Write(snip[:n])
-		rest, copyErr := io.Copy(w, resp.Body)
-		logUpstreamStatus(
-			"Upstream OpenAI-compatible provider returned error status (passthrough)",
-			resp.StatusCode,
-			"base_url", c.baseURL,
-			"path", r.URL.Path,
-			"body_preview", string(snip[:n]),
-			"body_total_bytes", int64(n)+rest,
-		)
-		if snipWriteErr != nil {
-			return snipWriteErr
-		}
-		if copyErr != nil {
-			return copyErr
-		}
-		return &providers.UpstreamStatusError{Status: resp.StatusCode}
+		return httputil.WritePassthroughError(w, resp, nil, nil, "Upstream OpenAI-compatible provider returned error status (passthrough)", "base_url", c.baseURL, "path", r.URL.Path)
 	}
 	_, err = io.Copy(w, resp.Body)
 	return err
-}
-
-// logUpstreamStatus logs non-2xx upstream responses with a body preview.
-func logUpstreamStatus(msg string, status int, attrs ...any) {
-	merged := append([]any{"status", status}, attrs...)
-	if status >= 500 || (status >= 400 && status != http.StatusTooManyRequests) {
-		observability.Get().Error(msg, merged...)
-		return
-	}
-	observability.Get().Warn(msg, merged...)
 }
 
 var _ providers.Client = (*Client)(nil)

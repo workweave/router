@@ -4,19 +4,18 @@ import (
 	"bytes"
 	"strings"
 
+	"workweave/router/internal/observability"
+
 	"github.com/tidwall/gjson"
 )
 
 const previewMaxChars = 120
 
-// contentBytesPerToken is the byte-to-token ratio for the dense JSON + code +
-// tool-result content that dominates a Claude Code request body, measured
-// against real upstream token counts (~4.2 bytes/token). Used by
-// ContextOverflowTokenEstimate. Deliberately lower than FullTokenEstimate's ÷6:
-// that divisor is tuned so base64 thought-signatures don't over-count and evict
-// the 1M Anthropic models; the overflow estimate instead subtracts the
-// signature bytes explicitly, so the remaining content divides at its true
-// ratio.
+// contentBytesPerToken is the measured bytes/token ratio (~4.2) for dense
+// Claude Code request bodies, used by ContextOverflowTokenEstimate. Lower
+// than FullTokenEstimate's ÷6 because that divisor is tuned to avoid
+// over-counting base64 thought-signatures; here we subtract signature bytes
+// explicitly instead, so the rest can divide at its true ratio.
 const contentBytesPerToken = 4
 
 // signatureFieldMarker precedes a base64 thought-signature payload in an
@@ -42,39 +41,30 @@ type RoutingFeatures struct {
 	OnlyUserMessageText string
 }
 
-// FullTokenEstimate returns a conservative token estimate for the entire
-// request body, including tool definitions, tool calls, and tool results
-// that the text-only RoutingFeatures.Tokens estimate misses. Divides raw
-// body bytes by 6 to account for JSON overhead and base64 thought-signature
-// relative to actual tokens. Used only for context-window pre-filtering;
-// RoutingFeatures.Tokens remains the routing signal.
+// FullTokenEstimate estimates tokens for the whole request body — including
+// tool defs/calls/results that RoutingFeatures.Tokens (text-only) misses.
+// Used only for context-window pre-filtering, not routing.
 func (e *RequestEnvelope) FullTokenEstimate() int {
-	// Base64 thought signatures heavily inflate the byte length, often leading
-	// to false context-window evictions for Opus. Divide by 6 to account for this.
+	// ÷6, not ÷4: base64 thought signatures otherwise inflate byte length and
+	// falsely evict Opus for exceeding its context window.
 	return len(e.body) / 6
 }
 
-// ContextOverflowTokenEstimate estimates the token count of the full body for
-// context-window overflow pre-filtering — the count a signature-KEEPING target
-// (an Anthropic-family upstream) receives. Divides raw body bytes by
-// contentBytesPerToken (~4.2 real bytes/token on dense Claude Code bodies),
-// deliberately lower than FullTokenEstimate's ÷6 so a genuinely large,
-// signature-light body is no longer undercounted onto a too-small window (the
-// bug: a ~263K prompt estimated ~175K under ÷6 and 400'd on a 256K OSS model).
-// FullTokenEstimate stays ÷6 so the extended-context beta trigger keeps its
-// existing calibration. Signature-STRIPPING targets subtract
-// SignatureTokenSavings from this figure — see excludeContextOverflowModels.
+// ContextOverflowTokenEstimate estimates tokens for context-window overflow
+// pre-filtering, for a signature-KEEPING (Anthropic-family) target. Uses
+// contentBytesPerToken rather than FullTokenEstimate's ÷6: ÷6 undercounted a
+// genuinely large, signature-light ~263K-token body to ~175K and 400'd on a
+// 256K OSS model. FullTokenEstimate stays ÷6 for its own (extended-context
+// beta) calibration. Signature-STRIPPING targets subtract
+// SignatureTokenSavings from this — see excludeContextOverflowModels.
 func (e *RequestEnvelope) ContextOverflowTokenEstimate() int {
 	return len(e.body) / contentBytesPerToken
 }
 
 // SignatureTokenSavings returns the tokens a signature-STRIPPING target saves
-// versus ContextOverflowTokenEstimate: the translator drops base64
-// thought-signature blocks before dispatch to any non-Anthropic model, so those
-// bytes never occupy that target's window. Zero for non-Anthropic inbound
-// formats — they carry no Anthropic thought-signatures, so a stray "signature"
-// field there is caller data, not a block to strip (which would falsely
-// undercount an OpenAI/Gemini request).
+// vs ContextOverflowTokenEstimate, since we drop thought-signature blocks
+// before dispatch to non-Anthropic models. Zero for non-Anthropic inbound
+// formats: a stray "signature" field there is caller data, not ours to strip.
 func (e *RequestEnvelope) SignatureTokenSavings() int {
 	if e.format != FormatAnthropic {
 		return 0
@@ -83,11 +73,8 @@ func (e *RequestEnvelope) SignatureTokenSavings() int {
 }
 
 // base64SignatureBytes sums the byte length of every base64 thought-signature
-// payload in body. Signatures are pure base64 ([A-Za-z0-9+/=], no quotes or
-// backslashes), so each payload runs from its field marker to the next double
-// quote. These bytes inflate the raw body length far out of proportion to their
-// token cost and are stripped before dispatch to any non-Anthropic model, so
-// the overflow estimate excludes them.
+// payload in body. Signatures contain no quotes/backslashes, so each payload
+// runs from its field marker to the next double quote.
 func base64SignatureBytes(body []byte) int {
 	total := 0
 	for i := 0; ; {
@@ -244,17 +231,12 @@ func classifyLastMessageOpenAI(role string) string {
 	}
 }
 
-// previewText returns the first previewMaxChars with newlines collapsed to spaces.
+// previewText collapses newlines to spaces, then truncates to previewMaxChars.
 func previewText(text string) string {
 	if text == "" {
 		return ""
 	}
-	text = strings.Join(strings.Fields(text), " ")
-	runes := []rune(text)
-	if len(runes) <= previewMaxChars {
-		return text
-	}
-	return string(runes[:previewMaxChars]) + "…"
+	return observability.Preview(strings.Join(strings.Fields(text), " "), previewMaxChars)
 }
 
 // anthropicLastUserMessage walks messages backwards for the last user entry.
@@ -399,13 +381,11 @@ func contentTextGJSON(v gjson.Result) string {
 	return b.String()
 }
 
-// classifyLastMessageGJSON maps an Anthropic message's role + content to the
-// shared LastKind enum. Any user message carrying at least one tool_result
-// block is a continuation of an in-flight tool flow, even when the client
-// wraps the result with accompanying text (Claude Code emits <system-reminder>
-// text blocks alongside tool_results). Switching models on these turns would
-// hand the new model a tool_result destined for the previous model's tool_use,
-// so they must short-circuit to the session pin.
+// classifyLastMessageGJSON maps an Anthropic message to the shared LastKind
+// enum. Any user message with a tool_result block classifies as "tool_result"
+// even alongside other text (e.g. Claude Code's <system-reminder> blocks) —
+// switching models mid tool-flow would hand the new model a tool_result meant
+// for the old model's tool_use, so these must stay pinned to the session.
 func classifyLastMessageGJSON(role string, content gjson.Result) string {
 	if role == "assistant" {
 		return "assistant"
@@ -463,8 +443,7 @@ func userPromptTextGJSON(content gjson.Result) string {
 }
 
 // claudeCodeInjectedBlockPrefixes are wrapper tags Claude Code injects into
-// user-message content arrays. They carry no routing signal and dwarf the
-// user's typed text, so we skip them when building the embed input.
+// user messages; skipped since they dwarf the user's typed text and add no signal.
 var claudeCodeInjectedBlockPrefixes = []string{
 	"<system-reminder>",
 	"<command-name>",
@@ -523,9 +502,8 @@ func appendText(b *strings.Builder, s string) {
 	b.WriteString(s)
 }
 
-// anthropicHasImages reports whether any message content block is an "image"
-// block. Anthropic carries images as {"type":"image","source":{...}} entries in
-// a message's content array; string content never has an image.
+// anthropicHasImages reports whether any content block is
+// {"type":"image",...}. String content never has an image.
 func anthropicHasImages(body []byte) bool {
 	found := false
 	gjson.GetBytes(body, "messages").ForEach(func(_, msg gjson.Result) bool {
@@ -545,9 +523,8 @@ func anthropicHasImages(body []byte) bool {
 	return found
 }
 
-// openAIHasImages reports whether any message content part is an "image_url"
-// part. OpenAI carries images as {"type":"image_url","image_url":{...}} entries
-// in a message's content array; string content never has an image.
+// openAIHasImages reports whether any content part is
+// {"type":"image_url",...}. String content never has an image.
 func openAIHasImages(body []byte) bool {
 	found := false
 	gjson.GetBytes(body, "messages").ForEach(func(_, msg gjson.Result) bool {

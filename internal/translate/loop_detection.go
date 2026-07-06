@@ -16,122 +16,46 @@ type ToolCallSig struct {
 	InputHash string
 }
 
-// AssistantToolCallArgsPreview returns short string previews of the raw
-// argument JSON for each assistant tool call, in order, starting at offset.
-// Used by the proxy's loop detector to log what was actually in the window
-// when a loop trips, so a real loop (5 identical args) can be told apart
-// from a false positive (5 distinct args sharing a canonicalize hash) at a
-// glance in the logs. Names are included so multi-tool windows are readable.
+// AssistantToolCallArgsPreview returns short previews of the raw argument
+// JSON for each assistant tool call, in order, starting at offset. Used to
+// log the window when a loop trips, so real loops (identical args) can be
+// told apart from false positives (distinct args, colliding hash). offset is
+// an index into the same filtered sequence AssistantToolCallSignatures
+// produces (see assistantToolCallEntry) — the two must never filter
+// differently, or an offset computed against one is meaningless against the
+// other.
 func (e *RequestEnvelope) AssistantToolCallArgsPreview(offset, maxLen int) []string {
 	switch e.format {
 	case FormatAnthropic:
-		return anthropicAssistantToolCallArgsPreview(e.body, offset, maxLen)
+		return assistantToolCallArgsPreview(anthropicAssistantToolCallEntries(e.body), offset, maxLen)
 	case FormatOpenAI:
-		return openAIAssistantToolCallArgsPreview(e.body, offset, maxLen)
+		return assistantToolCallArgsPreview(openAIAssistantToolCallEntries(e.body), offset, maxLen)
 	default:
 		return nil
 	}
 }
 
-func anthropicAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []string {
+func assistantToolCallArgsPreview(entries []assistantToolCallEntry, offset, maxLen int) []string {
 	var out []string
-	idx := 0
-	msgs := gjson.GetBytes(body, "messages")
-	if !msgs.IsArray() {
-		return nil
+	for i, entry := range entries {
+		if i < offset {
+			continue
+		}
+		preview := entry.InputRaw
+		if len(preview) > maxLen {
+			preview = preview[:maxLen] + "…"
+		}
+		out = append(out, entry.Name+":"+preview)
 	}
-	msgs.ForEach(func(_, msg gjson.Result) bool {
-		role := msg.Get("role").String()
-		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
-			out = nil
-			idx = 0
-			return true
-		}
-		if role != "assistant" {
-			return true
-		}
-		content := msg.Get("content")
-		if !content.IsArray() {
-			return true
-		}
-		content.ForEach(func(_, block gjson.Result) bool {
-			if block.Get("type").String() != "tool_use" {
-				return true
-			}
-			name := block.Get("name").String()
-			if name == "" {
-				return true
-			}
-			if idx >= offset {
-				preview := block.Get("input").Raw
-				if len(preview) > maxLen {
-					preview = preview[:maxLen] + "…"
-				}
-				out = append(out, name+":"+preview)
-			}
-			idx++
-			return true
-		})
-		return true
-	})
 	return out
 }
 
-func openAIAssistantToolCallArgsPreview(body []byte, offset, maxLen int) []string {
-	var out []string
-	idx := 0
-	msgs := gjson.GetBytes(body, "messages")
-	if !msgs.IsArray() {
-		return nil
-	}
-	msgs.ForEach(func(_, msg gjson.Result) bool {
-		role := msg.Get("role").String()
-		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
-			out = nil
-			idx = 0
-			return true
-		}
-		if role != "assistant" {
-			return true
-		}
-		toolCalls := msg.Get("tool_calls")
-		if !toolCalls.IsArray() {
-			return true
-		}
-		toolCalls.ForEach(func(_, tc gjson.Result) bool {
-			if tc.Get("type").String() != "function" {
-				return true
-			}
-			name := tc.Get("function.name").String()
-			if name == "" {
-				return true
-			}
-			if idx >= offset {
-				preview := tc.Get("function.arguments").String()
-				if len(preview) > maxLen {
-					preview = preview[:maxLen] + "…"
-				}
-				out = append(out, name+":"+preview)
-			}
-			idx++
-			return true
-		})
-		return true
-	})
-	return out
-}
-
-// AssistantToolCallSignatures returns the ordered list of tool invocations
-// emitted by assistant messages in the request body. Order matches message
-// order, and within a message, content-block order.
-//
-// Used by the proxy's loop detector to identify runaway tool-call cycles. An
-// OSS model (notably qwen3 variants) that fails to recognize when a task is
-// complete will alternate or repeat the same tool calls indefinitely; counting
-// signature occurrences in a recent window catches both patterns.
-//
-// Returns nil for Gemini-format requests (not currently supported) and for
-// requests with no assistant tool calls.
+// AssistantToolCallSignatures returns the ordered list of tool invocations in
+// the request body (message order, then content-block order). Used by the
+// loop detector: some OSS models (notably qwen3) fail to recognize task
+// completion and alternate/repeat calls indefinitely, which counting
+// signature occurrences in a recent window catches. Returns nil for
+// Gemini-format requests (unsupported) or no assistant tool calls.
 func (e *RequestEnvelope) AssistantToolCallSignatures() []ToolCallSig {
 	switch e.format {
 	case FormatAnthropic:
@@ -143,21 +67,31 @@ func (e *RequestEnvelope) AssistantToolCallSignatures() []ToolCallSig {
 	}
 }
 
-func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
+// assistantToolCallEntry is one filtered assistant tool invocation: a callee
+// name plus its raw argument JSON. AssistantToolCallSignatures and
+// AssistantToolCallArgsPreview both derive from the same
+// {anthropic,openAI}AssistantToolCallEntries walk, so they can never diverge
+// on which entries survive filtering — an index into one is always valid
+// against the other.
+type assistantToolCallEntry struct {
+	Name     string
+	InputRaw string
+}
+
+func anthropicAssistantToolCallEntries(body []byte) []assistantToolCallEntry {
 	msgs := gjson.GetBytes(body, "messages")
 	if !msgs.IsArray() {
 		return nil
 	}
-	var sigs []ToolCallSig
+	var entries []assistantToolCallEntry
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
-		// A genuine user-typed prompt breaks the loop: the human has
-		// intervened, so the calls before it are no longer part of any
-		// runaway cycle. userPromptTextGJSON returns "" for tool_result-only
-		// turns and for Claude Code's injected <system-reminder> /
-		// <command-*> wrapper blocks, so a normal tool round does NOT reset.
+		// A genuine user-typed prompt breaks the loop (human intervened).
+		// userPromptTextGJSON returns "" for tool_result-only turns and
+		// Claude Code's injected wrapper blocks, so normal tool rounds
+		// don't reset the window.
 		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
-			sigs = nil
+			entries = nil
 			return true
 		}
 		if role != "assistant" {
@@ -175,37 +109,34 @@ func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
 			if name == "" {
 				return true
 			}
-			// Skip entries with empty input. Cross-format translation of a
-			// stream-incomplete tool call (OpenAI/openaicompat upstream →
-			// Anthropic inbound) can emit `input:{}` to satisfy the schema.
-			// Claude Code echoes those back in the assistant history; with no
-			// real args every empty-input call collides to the same hash and
-			// 5 of them in a window false-positive trip the loop detector.
-			// Real tool calls always carry at least one argument.
+			// Skip empty input: cross-format translation of a stream-incomplete
+			// tool call can emit `input:{}`, and Claude Code echoes those back,
+			// so several would collide to the same hash and false-positive trip
+			// the loop detector. Real tool calls always carry an argument.
 			input := block.Get("input")
 			if !isMeaningfulInput(input) {
 				return true
 			}
-			sigs = append(sigs, ToolCallSig{Name: name, InputHash: hashCanonicalJSON(input.Raw)})
+			entries = append(entries, assistantToolCallEntry{Name: name, InputRaw: input.Raw})
 			return true
 		})
 		return true
 	})
-	return sigs
+	return entries
 }
 
-func openAIAssistantToolCallSigs(body []byte) []ToolCallSig {
+func openAIAssistantToolCallEntries(body []byte) []assistantToolCallEntry {
 	msgs := gjson.GetBytes(body, "messages")
 	if !msgs.IsArray() {
 		return nil
 	}
-	var sigs []ToolCallSig
+	var entries []assistantToolCallEntry
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
-		// See anthropicAssistantToolCallSigs: a genuine user-typed prompt
+		// See anthropicAssistantToolCallEntries: a genuine user-typed prompt
 		// resets the window; injected wrappers and tool_result turns do not.
 		if role == "user" && userPromptTextGJSON(msg.Get("content")) != "" {
-			sigs = nil
+			entries = nil
 			return true
 		}
 		if role != "assistant" {
@@ -223,26 +154,43 @@ func openAIAssistantToolCallSigs(body []byte) []ToolCallSig {
 			if name == "" {
 				return true
 			}
-			// OpenAI delivers arguments as a JSON-encoded string. Skip
-			// empty/object-empty values for the same reason the Anthropic
-			// path does — stream-incomplete tool_calls produce hash
-			// collisions that aren't real loops.
+			// Skip empty/object-empty args (JSON-encoded string here) for the
+			// same reason as the Anthropic path: stream-incomplete tool_calls
+			// produce hash collisions that aren't real loops.
 			argsRaw := tc.Get("function.arguments").String()
 			if !isMeaningfulInputRaw(argsRaw) {
 				return true
 			}
-			sigs = append(sigs, ToolCallSig{Name: name, InputHash: hashCanonicalJSON(argsRaw)})
+			entries = append(entries, assistantToolCallEntry{Name: name, InputRaw: argsRaw})
 			return true
 		})
 		return true
 	})
+	return entries
+}
+
+func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
+	return sigsFromEntries(anthropicAssistantToolCallEntries(body))
+}
+
+func openAIAssistantToolCallSigs(body []byte) []ToolCallSig {
+	return sigsFromEntries(openAIAssistantToolCallEntries(body))
+}
+
+func sigsFromEntries(entries []assistantToolCallEntry) []ToolCallSig {
+	if entries == nil {
+		return nil
+	}
+	sigs := make([]ToolCallSig, len(entries))
+	for i, entry := range entries {
+		sigs[i] = ToolCallSig{Name: entry.Name, InputHash: hashCanonicalJSON(entry.InputRaw)}
+	}
 	return sigs
 }
 
-// isMeaningfulInput reports whether a tool_use input field carries any real
-// arguments. Missing, null, empty-string, and empty-object inputs are
-// rejected — they're artifacts of stream-incomplete tool calls bouncing
-// through cross-format translation, not real model invocations.
+// isMeaningfulInput reports whether a tool_use input carries real arguments.
+// Missing, null, empty-string, and empty-object inputs are artifacts of
+// stream-incomplete tool calls, not real model invocations.
 func isMeaningfulInput(r gjson.Result) bool {
 	if !r.Exists() {
 		return false
@@ -278,11 +226,9 @@ func isMeaningfulInputRaw(raw string) bool {
 	return !empty
 }
 
-// hashCanonicalJSON returns a stable hex sha256 of the canonical form of a
-// JSON document. Whitespace and key order are normalized via gjson's parsed
-// representation so equivalent JSON values produce identical hashes. Invalid
-// JSON is hashed verbatim — same-string inputs still collide, which is the
-// property the loop detector relies on.
+// hashCanonicalJSON returns a stable hex sha256 of a JSON document with
+// whitespace/key-order normalized, so equivalent values hash identically.
+// Invalid JSON is hashed verbatim; same-string inputs still collide.
 func hashCanonicalJSON(raw string) string {
 	if raw == "" {
 		h := sha256.Sum256(nil)

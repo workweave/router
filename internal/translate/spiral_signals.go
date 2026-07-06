@@ -6,24 +6,17 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// Spiral-signal extraction: cheap, per-request scans of the message history
-// that feed the proxy's shadow-mode spiral detector (see
-// internal/proxy/spiral_detection.go). Like the loop-detection extractors in
-// this package, everything here is a pure function of the request body — the
-// full history arrives on every turn, so no cross-turn state is needed.
+// Spiral-signal extraction: cheap per-request scans of message history feeding
+// the proxy's shadow-mode spiral detector (internal/proxy/spiral_detection.go).
+// Pure functions of the request body — no cross-turn state needed.
 
-// toolResultErrorScanLimit caps how many bytes of a tool_result's string
-// content are scanned for error markers. Tool results can be hundreds of KB
-// (full test logs); errors announce themselves early.
+// toolResultErrorScanLimit caps bytes of tool_result content scanned for error
+// markers; results can be hundreds of KB but errors show up early.
 const toolResultErrorScanLimit = 2048
 
-// toolResultErrorMarkers are substrings in a tool_result's content that mark
-// the result as errored even when the client did not set is_error. Claude
-// Code sets is_error for tool-level failures (bad Edit old_string, command
-// not found) but a Bash tool call that ran a test suite to a red result is a
-// successful tool call carrying a failure payload — the marker scan catches
-// those. Kept deliberately short and high-precision; the offline trajectory
-// audit graded the combined flag+marker signal at AUC 0.73-0.86.
+// toolResultErrorMarkers catch errored tool_results where is_error wasn't set
+// (e.g. a test suite that ran fine but returned red). Kept short/high-precision;
+// offline audit graded the combined flag+marker signal at AUC 0.73-0.86.
 var toolResultErrorMarkers = []string{
 	"Traceback (most recent call last)",
 	"FAILED",
@@ -31,10 +24,9 @@ var toolResultErrorMarkers = []string{
 	"error:",
 }
 
-// ToolResultErrorStats summarizes tool_result error evidence in the message
-// history. TrailingErrStreak counts consecutive errored results from the end
-// of the history backwards — the "agent keeps trying things that fail" shape;
-// one healthy result resets it.
+// ToolResultErrorStats summarizes tool_result error evidence. TrailingErrStreak
+// counts consecutive errored results from the end of history; one healthy
+// result resets it.
 type ToolResultErrorStats struct {
 	Total             int
 	Errored           int
@@ -42,10 +34,8 @@ type ToolResultErrorStats struct {
 }
 
 // ToolResultErrors scans user-role tool_result blocks (Anthropic format) for
-// error evidence: the is_error flag, or a high-precision error marker within
-// the first toolResultErrorScanLimit bytes of string content. Returns zero
-// stats for non-Anthropic formats — OpenAI tool-role messages carry no error
-// flag and the Claude Code traffic this detector targets is Anthropic-format.
+// error evidence: the is_error flag, or an error marker in the first
+// toolResultErrorScanLimit bytes. Returns zero stats for non-Anthropic formats.
 func (e *RequestEnvelope) ToolResultErrors() ToolResultErrorStats {
 	if e.format != FormatAnthropic {
 		return ToolResultErrorStats{}
@@ -81,10 +71,8 @@ func (e *RequestEnvelope) ToolResultErrors() ToolResultErrorStats {
 	return stats
 }
 
-// toolResultIsErrored reports whether a single tool_result block carries
-// error evidence: the is_error flag, or an error marker early in its string
-// content. Content can be a plain string or an array of text blocks; only
-// the first toolResultErrorScanLimit bytes are scanned either way.
+// toolResultIsErrored checks the is_error flag or an early error marker.
+// Content may be a plain string or an array of text blocks.
 func toolResultIsErrored(block gjson.Result) bool {
 	if block.Get("is_error").Bool() {
 		return true
@@ -124,10 +112,9 @@ type ToolCallFilePath struct {
 	Path string
 }
 
-// AssistantToolCallFilePaths returns, in message order, every assistant
-// tool_use invocation that carries a file_path or notebook_path argument.
-// The proxy's spiral detector counts repeat edits to the same path (the
-// same-file-thrash death-march shape). Anthropic format only.
+// AssistantToolCallFilePaths returns, in order, every assistant tool_use call
+// carrying a file_path or notebook_path arg. Used to detect same-file-thrash.
+// Anthropic format only.
 func (e *RequestEnvelope) AssistantToolCallFilePaths() []ToolCallFilePath {
 	if e.format != FormatAnthropic {
 		return nil
@@ -168,12 +155,10 @@ func (e *RequestEnvelope) AssistantToolCallFilePaths() []ToolCallFilePath {
 	return out
 }
 
-// TrailingAssistantMonologue counts consecutive assistant messages at the
-// tail of the history that carry no tool_use block. The walk stops at the first
-// assistant message WITH a tool call (including router-synthesized nudges) or
-// the first user message carrying non-tool_result content — i.e. it measures
-// "assistant turns since the last real progress or real user input", the
-// OpenHands monologue shape.
+// TrailingAssistantMonologue counts consecutive tool-less assistant messages
+// at the tail of history — "turns since the last real progress or user input"
+// (the OpenHands monologue shape). Stops at an assistant tool call (including
+// router-synthesized nudges) or a user message with non-tool_result content.
 func (e *RequestEnvelope) TrailingAssistantMonologue() int {
 	if e.format != FormatAnthropic {
 		return 0
@@ -201,9 +186,8 @@ func (e *RequestEnvelope) TrailingAssistantMonologue() int {
 	return streak
 }
 
-// assistantHasRealToolUse reports whether an assistant message carries at
-// least one tool_use block. Router-synthesized nudges now count as tool
-// activity since they are included in loop detection.
+// assistantHasRealToolUse reports whether msg carries a tool_use block.
+// Router-synthesized nudges count as tool activity too.
 func assistantHasRealToolUse(msg gjson.Result) bool {
 	content := msg.Get("content")
 	if !content.IsArray() {
@@ -220,9 +204,8 @@ func assistantHasRealToolUse(msg gjson.Result) bool {
 	return has
 }
 
-// userHasNonToolResultContent reports whether a user message carries real
-// user input (anything other than tool_result blocks). A plain-string user
-// message is always real input.
+// userHasNonToolResultContent reports whether msg carries real user input
+// (anything besides tool_result blocks).
 func userHasNonToolResultContent(msg gjson.Result) bool {
 	content := msg.Get("content")
 	if content.Type == gjson.String {

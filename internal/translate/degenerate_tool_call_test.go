@@ -9,23 +9,18 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// The degenerate tool-call turn: an OpenAI-compat upstream (GLM-5.1 on
-// DeepInfra is the repeat offender) closes with finish_reason="tool_calls" but
-// no usable tool_use block ever materializes — every call was nameless and
-// dropped, or the call leaked into plain text the parser never structured.
-// finish_reason="tool_calls" maps to stop_reason="tool_use", so without a
-// demote the client receives stop_reason="tool_use" alongside zero tool_use
-// blocks. Agent clients (Claude Code, pi) then wait for a tool call that never
-// arrives and the turn dead-ends, which surfaces to the user as the agent
-// "stopping instead of going". The translators must demote to end_turn.
+// Degenerate tool-call turn: an OpenAI-compat upstream (GLM-5.1 on DeepInfra
+// is the repeat offender) closes finish_reason="tool_calls" with no surviving
+// tool_use block (nameless/dropped call, or leaked into plain text). Without
+// a demote to end_turn, agent clients wait forever for a tool call that never
+// arrives.
 
 // driveAnthropicSSEWithTools (declared in tool_args_validation_test.go) feeds
 // OpenAI chunks through the translator and returns the body plus the summary.
 
 func TestAnthropicSSETranslator_DemotesToolCallsFinishWithNamelessCall(t *testing.T) {
-	// finish_reason="tool_calls" + a nameless (dropped) call. requestHadTools
-	// is false so the text-only nudge cannot mask the demote: this is the
-	// no-tools path the nudge deliberately skips.
+	// Nameless (dropped) call; requestHadTools=false so the text-only nudge
+	// can't mask the demote.
 	body, summary := driveAnthropicSSEWithTools(t, "z-ai/glm-5.1", false, []string{
 		`data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"Let me run that for you."},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"","arguments":"{}"}}]},"finish_reason":null}]}` + "\n\n",
@@ -45,14 +40,10 @@ func TestAnthropicSSETranslator_DemotesToolCallsFinishWithNamelessCall(t *testin
 }
 
 func TestAnthropicSSETranslator_SuppressedToolCallFinishDoesNotNudge(t *testing.T) {
-	// The prod loop (session 081e0a3d, model z-ai/glm-5.1 on DeepInfra): the
-	// upstream closes finish_reason="tool_calls" with a nameless call that gets
-	// dropped, AND the request HAD tools available. Without the suppressed-call
-	// guard, synthesizeTextOnlyTurnNudge fires (its switch has no "tool_calls"
-	// case), stapling a synthetic Bash call onto every such turn. Because the
-	// degenerate shape recurs each turn, the nudge loops to the turn ceiling.
-	// The model already emitted a (malformed) tool call; the drop handled it, so
-	// the nudge must stay silent.
+	// Prod loop (session 081e0a3d, glm-5.1/DeepInfra): nameless call dropped,
+	// but request HAD tools. Without the suppressed-call guard,
+	// synthesizeTextOnlyTurnNudge fires and staples a synthetic Bash call onto
+	// every turn, looping to the turn ceiling since the shape recurs each turn.
 	body, summary := driveAnthropicSSEWithTools(t, "z-ai/glm-5.1", true, []string{
 		`data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"","arguments":"{}"}}]},"finish_reason":null}]}` + "\n\n",
@@ -87,9 +78,8 @@ func TestAnthropicSSETranslator_DemotesToolCallsFinishWithNoStructuredCall(t *te
 }
 
 func TestAnthropicSSETranslator_NamedToolCallWithToolCallsFinishStillToolUse(t *testing.T) {
-	// Regression guard: a legitimate named tool_call closing with
-	// finish_reason="tool_calls" must keep stop_reason="tool_use" and never
-	// demote.
+	// Regression guard: a real named tool_call must keep stop_reason="tool_use"
+	// and never demote.
 	body, summary := driveAnthropicSSEWithTools(t, "z-ai/glm-5.1", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_ok","type":"function","function":{"name":"Bash","arguments":"{\"command\":\"git status\"}"}}]},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":20,"completion_tokens":7}}` + "\n\n",
@@ -105,14 +95,11 @@ func TestAnthropicSSETranslator_NamedToolCallWithToolCallsFinishStillToolUse(t *
 }
 
 func TestAnthropicSSETranslator_NullToolCallsOnTextDeltasDoNotSuppressRealCall(t *testing.T) {
-	// Prod loop (session ba584c9d, z-ai/glm-5.1 on DeepInfra): GLM-5.1 streams
-	// `"tool_calls": null` on every plain-text delta, THEN emits the real named
-	// tool_call in a later frame. gjson's ForEach over a JSON null yields one
-	// zero-value iteration (index=0, name=""), which used to trip the
-	// nameless-call guard and latch suppressedTools[0]; the real Bash call (also
-	// index 0) was then dropped as a "fragment of a suppressed call", so the
-	// client got an empty end_turn and the agent idled. The real call must
-	// survive as a tool_use block.
+	// Prod loop (session ba584c9d, glm-5.1/DeepInfra): GLM-5.1 streams
+	// `"tool_calls": null` on text deltas, then emits the real named call later.
+	// gjson's ForEach over a JSON null yields one zero-value iteration
+	// (index=0, name=""), which used to trip the nameless-call guard and drop
+	// the real Bash call (same index) as a suppressed-call fragment.
 	body, summary := driveAnthropicSSEWithTools(t, "z-ai/glm-5.1", true, []string{
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","content":"I'll run that.","tool_calls":null},"finish_reason":null}]}` + "\n\n",
 		`data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","content":" One sec.","tool_calls":null},"finish_reason":null}]}` + "\n\n",

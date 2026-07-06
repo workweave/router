@@ -1,8 +1,7 @@
 package proxy_test
 
-// OpenAI /v1/chat/completions conformance cases (the format every OpenAI-compat
-// upstream shares: OpenAI, OpenRouter, Fireworks, DeepInfra, Bedrock). Each
-// pins a known translation behavior or past regression.
+// OpenAI /v1/chat/completions conformance cases, shared by every OpenAI-compat
+// upstream. Each pins a known translation behavior or past regression.
 
 import (
 	"net/http"
@@ -22,9 +21,8 @@ func openRouterClient(baseURL string) providers.Client {
 
 const weatherTool = `[{"name":"get_weather","description":"Get the weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]`
 
-// readTool mirrors the Claude Code Read tool shape: a required param, an
-// optional string, an integer, and a closed schema — enough surface for the
-// toolcheck validate/repair conformance cases.
+// readTool mirrors the Claude Code Read tool shape: required param, optional
+// string, integer, closed schema — for toolcheck validate/repair cases.
 const readTool = `[{"name":"Read","description":"Read a file","input_schema":{"type":"object","properties":{"file_path":{"type":"string"},"pages":{"type":"string"},"limit":{"type":"integer"}},"required":["file_path"],"additionalProperties":false}}]`
 
 func TestConformance_OpenAIChat(t *testing.T) {
@@ -69,9 +67,8 @@ func TestConformance_OpenAIChat(t *testing.T) {
 			},
 		},
 		{
-			// Guards router #293: an upstream that closes finish_reason="tool_calls"
-			// but emits no usable (named) tool_use block must demote stop_reason to
-			// end_turn, not strand the agent waiting for a tool call that never comes.
+			// Guards #293: finish_reason="tool_calls" with no usable tool_use
+			// block must demote stop_reason to end_turn, not strand the agent.
 			name:            "openai_chat/degenerate_toolcall_demotes",
 			provider:        providers.ProviderOpenRouter,
 			model:           "deepseek/deepseek-v4-pro",
@@ -81,9 +78,9 @@ func TestConformance_OpenAIChat(t *testing.T) {
 			upstreamFixture: "openai_chat/degenerate_toolcall.upstream.sse",
 		},
 		{
-			// Guards the OpenRouter-only request gates: deepseek/* must carry the
-			// provider-pin hint and reasoning:{enabled:false} so OpenRouter pins a
-			// prefix-caching host and doesn't burn max_tokens on hidden thinking.
+			// deepseek/* must carry the provider-pin hint and
+			// reasoning:{enabled:false} to pin a caching host and avoid
+			// burning max_tokens on hidden thinking.
 			name:            "openai_chat/openrouter_gates",
 			provider:        providers.ProviderOpenRouter,
 			model:           "deepseek/deepseek-v4-pro",
@@ -110,10 +107,8 @@ func TestConformance_OpenAIChat(t *testing.T) {
 			},
 		},
 		{
-			// toolcheck unrepairable tier: a mismatched closer can't be fixed
-			// deterministically, so the args degrade to `{}` (never the raw
-			// malformed bytes) and the tool_use block stays dispatchable. The
-			// golden pins the `{}` substitution.
+			// Unrepairable args degrade to `{}` (never raw malformed bytes)
+			// so the tool_use block stays dispatchable.
 			name:            "openai_chat/invalid_toolcall_args",
 			provider:        providers.ProviderOpenRouter,
 			model:           "deepseek/deepseek-v4-pro",
@@ -123,10 +118,8 @@ func TestConformance_OpenAIChat(t *testing.T) {
 			upstreamFixture: "openai_chat/invalid_toolcall_args.upstream.sse",
 		},
 		{
-			// toolcheck normalize+repair tier on one call: empty-string optional
-			// dropped (#339 semantics), hallucinated param dropped (schema closes
-			// additionalProperties), "5"-for-integer losslessly coerced. The
-			// golden pins the cleaned input reaching the client.
+			// Normalize+repair: empty-string optional dropped (#339),
+			// hallucinated param dropped, "5"-for-integer coerced.
 			name:            "openai_chat/toolcall_repaired_args",
 			provider:        providers.ProviderOpenRouter,
 			model:           "deepseek/deepseek-v4-pro",

@@ -17,28 +17,20 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// ResponsesToChatCompletions converts an OpenAI Responses API request body into
-// an equivalent Chat Completions request body so the existing chat-completions
-// proxy path can dispatch it unchanged. Returns the rewritten body, whether the
-// caller asked to stream, and the requested model (empty if absent).
+// ResponsesToChatCompletions converts an OpenAI Responses API request into a
+// Chat Completions request so the existing proxy path can dispatch it
+// unchanged. Returns the rewritten body, whether streaming was requested, and
+// the requested model (empty if absent). Handles only the subset of the
+// Responses spec Codex actually emits: instructions, input items (message /
+// function_call / function_call_output), tools, tool_choice,
+// max_output_tokens, temperature, top_p, parallel_tool_calls, metadata.
 //
-// Only the subset of the Responses spec that Codex actually emits is handled:
-// instructions, input items (message / function_call / function_call_output),
-// tools (flat shape → nested function shape), tool_choice, max_output_tokens,
-// temperature, top_p, parallel_tool_calls, metadata.
-//
-// Codex's `reasoning` field is intentionally NOT propagated. This translation
-// runs before routing, so it can't know the served provider and can't map the
-// effort onto that provider's native thinking knob. Forwarding it as a Chat
-// Completions `reasoning_effort` broke every non-Gemini served model: Codex
-// always sends `reasoning` (even `effort:"none"`, which is not a valid
-// `reasoning_effort` value), and reasoning OpenAI models (gpt-5.x) reject
-// `reasoning_effort` alongside tools on /v1/chat/completions — both surface as
-// an upstream 400 after response.created, so the stream closes without
-// response.completed. Per-provider reasoning is still driven downstream from
-// the request's own signals (Gemini maps it natively, Anthropic via thinking);
-// dropping Codex's advisory effort here matches the "reasoning removed → works"
-// behavior and keeps every served model completing.
+// Codex's `reasoning` field is dropped intentionally: this runs before
+// routing, so the served provider (and its native thinking knob) is unknown.
+// Forwarding it as `reasoning_effort` broke every non-Gemini model — Codex
+// sends invalid values (e.g. "none"), and gpt-5.x rejects `reasoning_effort`
+// alongside tools, both causing an upstream 400 mid-stream. Per-provider
+// reasoning is still driven downstream from the request's own signals.
 func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 	if err := validateJSONObject(body); err != nil {
 		return nil, false, "", err
@@ -213,10 +205,9 @@ func responsesInputItemToMessages(item gjson.Result) ([]map[string]any, error) {
 }
 
 // responsesBadgePattern matches the routing badge ResponsesWriter prepends to
-// the first assistant text delta. Stripped on ingress so prior assistant turns
-// don't accumulate per-turn variable badge text (which would defeat
-// prompt-cache reuse and waste tokens), and so the upstream provider never
-// sees router-injected content as part of the model's history.
+// the first assistant text delta. Stripped on ingress so it doesn't accumulate
+// in history (defeats prompt-cache reuse) or leak router-injected content
+// upstream.
 var responsesBadgePattern = regexp.MustCompile(`(?im)\A\*\*WEAVE ROUTER\*\* — [^\n]*\n\n`)
 
 // responsesContentToChatContent flattens a content array. For assistant
@@ -239,10 +230,8 @@ func responsesContentToChatContent(content gjson.Result, role string) (string, [
 		switch part.Get("type").Str {
 		case "input_text", "output_text", "text":
 			s := part.Get("text").Str
-			// Strip the badge only from the assistant's first output_text part
-			// (where ResponsesWriter prepends it). Doing this once per message
-			// keeps user/system text untouched even if it happens to start
-			// with the marker bytes for some reason.
+			// Strip only the assistant's first output_text part, so user/system
+			// text is never touched even if it happens to start with marker bytes.
 			if role == "assistant" && !firstAssistantTextStripped {
 				s = responsesBadgePattern.ReplaceAllString(s, "")
 				firstAssistantTextStripped = true
@@ -344,11 +333,9 @@ func NewResponsesWriter(w http.ResponseWriter, model string) *ResponsesWriter {
 	}
 }
 
-// WrapInner inserts fn between this writer and the underlying client writer,
-// rebinding both the raw inner and the buffered writer so every emitted byte —
-// eager prelude, SSE events, and the final JSON envelope — flows through fn.
-// Used to splice in a content-capture writer at the true client boundary for
-// high-fidelity telemetry. Must be called before any bytes are written.
+// WrapInner splices fn between this writer and the client writer, rebinding
+// inner and bw so every byte (prelude, SSE events, final envelope) flows
+// through fn — used for content-capture telemetry. Call before any writes.
 func (t *ResponsesWriter) WrapInner(fn func(http.ResponseWriter) http.ResponseWriter) {
 	wrapped := fn(t.inner)
 	t.inner = wrapped
@@ -358,14 +345,11 @@ func (t *ResponsesWriter) WrapInner(fn func(http.ResponseWriter) http.ResponseWr
 
 func (t *ResponsesWriter) Header() http.Header { return t.inner.Header() }
 
-// SetPassthrough switches the writer to verbatim mode: upstream bytes are
-// forwarded to the client unchanged, the chat->Responses translation is
-// skipped, and the response.created prelude is suppressed. Use it when the
-// upstream already speaks the Responses wire format natively (the Codex
-// backend), so re-translating would corrupt the stream. A turn that resolves a
-// Codex subscription but routes to a non-OpenAI model leaves this off and gets
-// the normal chat->Responses translation. Must be called before the first
-// write (i.e. right after routing, before Prelude).
+// SetPassthrough switches to verbatim mode: bytes forwarded unchanged, no
+// chat->Responses translation, no response.created prelude. Use when upstream
+// already speaks Responses natively (Codex backend) — re-translating would
+// corrupt the stream. Must be called before the first write (right after
+// routing, before Prelude).
 func (t *ResponsesWriter) SetPassthrough() { t.passthrough = true }
 
 func (t *ResponsesWriter) WriteHeader(code int) {
@@ -374,20 +358,15 @@ func (t *ResponsesWriter) WriteHeader(code int) {
 			return
 		}
 		t.statusCode = code
-		// Forward the upstream's own headers (the Codex backend already sets
-		// text/event-stream); only drop length/encoding which no longer apply
-		// once the proxy re-frames the stream.
+		// Codex backend already sets text/event-stream; only drop length/encoding.
 		t.inner.Header().Del("Content-Length")
 		t.inner.Header().Del("Content-Encoding")
 		t.inner.WriteHeader(code)
 		t.httpHeadersSent = true
 		return
 	}
-	// Always pick up the routed model when upstream calls WriteHeader, even if
-	// Prelude already committed the HTTP status. Prelude fires before routing
-	// completes, so the x-router-model header hasn't been stamped yet; the
-	// later upstream call is our only chance to learn the routed name for the
-	// badge and response.completed event.
+	// Prelude fires before routing completes (x-router-model unset yet), so
+	// this later call is our only chance to learn the routed name.
 	if routed := t.inner.Header().Get("x-router-model"); routed != "" {
 		t.model = routed
 	}
@@ -440,13 +419,11 @@ func (t *ResponsesWriter) Write(data []byte) (int, error) {
 }
 
 // Prelude commits headers and emits response.created immediately so Codex
-// stops waiting on upstream prefill before showing any feedback. Call right
-// after routing decides when the client requested streaming (streaming=true).
-// Safe to call once; the headersEmitted guard prevents duplicate creation
-// when upstream Write later runs.
+// stops waiting on upstream prefill. Call right after routing when streaming
+// was requested; the headersEmitted guard makes it safe to call once, with
+// upstream Write emitting created later if this hasn't run yet.
 func (t *ResponsesWriter) Prelude(streaming bool) error {
-	// In passthrough mode the upstream emits its own response.created; emitting
-	// ours too would duplicate it. Suppress the prelude entirely.
+	// Upstream emits its own response.created in passthrough mode.
 	if t.passthrough {
 		return nil
 	}
@@ -477,13 +454,11 @@ func (t *ResponsesWriter) Flush() {
 // Finalize handles non-streaming bodies and end-of-stream completion events.
 func (t *ResponsesWriter) Finalize() error {
 	if t.passthrough {
-		// Verbatim mode: nothing to synthesize, just flush whatever's buffered.
-		// Non-streaming Codex-backend bodies were forwarded as-is in Write.
+		// Nothing to synthesize; bodies were already forwarded as-is in Write.
 		return t.bw.Flush()
 	}
 	if t.streaming {
-		// In the rare case the upstream produced no chunks at all, still
-		// emit a completed envelope so the client sees a clean termination.
+		// Upstream may have produced zero chunks; still emit a clean completed envelope.
 		if !t.headersEmitted {
 			if err := t.emitCreated(); err != nil {
 				return err
@@ -521,13 +496,10 @@ func (t *ResponsesWriter) Finalize() error {
 	return err
 }
 
-// FinalizeError terminates a streaming Responses turn whose upstream failed
-// AFTER response.created was already emitted (the client is mid-stream). It
-// emits a response.failed terminal event so the client (Codex) sees a clean
-// failure instead of "stream closed before response.completed". It is a no-op
-// when nothing has been streamed yet (the caller still writes a JSON error
-// envelope in that case), in passthrough mode, or once a terminal event has
-// already been emitted. Returns nil when there was nothing to do.
+// FinalizeError emits a response.failed terminal event when upstream fails
+// mid-stream (after response.created), so Codex sees a clean failure instead
+// of a truncated stream. No-op if nothing streamed yet (caller writes a JSON
+// error instead), in passthrough mode, or after a terminal event already fired.
 func (t *ResponsesWriter) FinalizeError(_ error) error {
 	if t.passthrough || !t.streaming || !t.headersEmitted || t.completedEmitted {
 		return nil
@@ -617,9 +589,8 @@ func (t *ResponsesWriter) appendText(s string) error {
 		t.textItem = &responsesTextItem{
 			itemID: newResponsesID("msg"),
 		}
-		// Assign outputIndex after t.textItem is reachable so nextOutputIndex
-		// counts it. The struct-literal form is order-of-evaluation-dependent
-		// in Go (RHS resolves before assignment), which produced an off-by-one.
+		// Must assign after t.textItem is reachable, else nextOutputIndex
+		// undercounts it (Go evaluates struct-literal RHS before assignment).
 		t.textItem.outputIndex = t.nextOutputIndex()
 		if err := t.emitMessageItemAdded(t.textItem); err != nil {
 			return err
@@ -630,11 +601,9 @@ func (t *ResponsesWriter) appendText(s string) error {
 		t.textItem.openedPart = true
 	}
 
-	// Prepend the routing badge to the very first text delta. Codex desktop
-	// drops reasoning-summary items from custom providers, so the text stream
-	// is the only surface that's guaranteed to render. Format mirrors the
-	// Claude Code statusline (router/install/cc-statusline.sh): brand chip,
-	// routed model, optional "← requested" if the router swapped models.
+	// Prepend the badge to the first text delta: Codex desktop drops
+	// reasoning-summary items from custom providers, so text is the only
+	// surface guaranteed to render.
 	if !t.badgePrepended {
 		t.badgePrepended = true
 		if line := t.computeBadgeText(); line != "" {
@@ -692,14 +661,9 @@ func (t *ResponsesWriter) nextOutputIndex() int {
 	return count - 1
 }
 
-// computeBadgeText builds the routing badge that's prepended to the
-// assistant's first text delta. Format mirrors the Claude Code statusline:
-//
-//	**Weave Router** — <routed>
-//	**Weave Router** — <routed> ← <requested>   (when the router swapped)
-//
-// Returns the badge line including trailing blank line, or empty when there
-// is no routed model to surface yet.
+// computeBadgeText builds the badge prepended to the assistant's first text
+// delta, e.g. "**Weave Router** — <routed> ← <requested>" (arrow only when
+// swapped). Returns "" if no routed model is known yet.
 func (t *ResponsesWriter) computeBadgeText() string {
 	if t.model == "" {
 		return ""
@@ -917,10 +881,9 @@ func (t *ResponsesWriter) emitCompleted() error {
 	})
 }
 
-// emitFailed writes a response.failed terminal event carrying whatever output
-// was assembled before the upstream error, plus a generic error object (no
-// upstream internals leak through). Usage is omitted because a failed turn has
-// no trustworthy token accounting.
+// emitFailed writes response.failed with whatever output was assembled so far
+// plus a generic error (no upstream internals leak). Usage omitted: no
+// trustworthy accounting for a failed turn.
 func (t *ResponsesWriter) emitFailed() error {
 	env := t.responseEnvelope("failed")
 	env["output"] = t.assembleOutput()

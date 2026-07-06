@@ -1,17 +1,10 @@
 // Package apm wires the OpenTelemetry SDK against an OTLP/gRPC collector so
-// HTTP request spans and Go runtime metrics show up in the shared SigNoz
-// instance at apm.app.workweave.ai alongside the rest of the Weave services.
+// HTTP spans and Go runtime metrics show up in the shared SigNoz instance
+// alongside the rest of Weave's services. It's independent of the router's
+// own custom OTLP/HTTP emitter (internal/observability/otel), which keeps
+// publishing high-cardinality per-decision spans separately.
 //
-// This sits alongside the router's own custom OTLP/HTTP emitter (which keeps
-// emitting the per-decision spans defined in internal/observability/otel).
-// The two pipelines are independent and can both be enabled — the custom
-// emitter publishes high-cardinality routing spans; this package publishes
-// the standard gin HTTP spans + runtime metrics that the rest of Weave's
-// services already publish in the same shape.
-//
-// Enable by setting WV_APM_OTLP_ENDPOINT to the SigNoz OTLP/gRPC host:port.
-// Unset = no-op (same convention as the custom emitter on
-// OTEL_EXPORTER_OTLP_ENDPOINT).
+// Enable via WV_APM_OTLP_ENDPOINT (SigNoz OTLP/gRPC host:port); unset = no-op.
 package apm
 
 import (
@@ -47,12 +40,10 @@ var (
 	meterProvider  *sdkmetric.MeterProvider
 )
 
-// Init wires the OTel SDK against the SigNoz collector. Reads
+// Init wires the OTel SDK against the SigNoz collector using
 // WV_APM_OTLP_ENDPOINT (host:port for OTLP/gRPC). Empty = no-op. Idempotent.
-//
-// Mirrors backend/internal/app/telemetry/otel.go's init() in shape so the
-// router shows up in apm.app.workweave.ai with the same resource attributes
-// as the rest of Weave.
+// Mirrors backend/internal/app/telemetry/otel.go's init() so the router
+// reports the same resource attribute shape as the rest of Weave.
 func Init() {
 	initOnce.Do(initLocked)
 }
@@ -83,12 +74,10 @@ func initLocked() {
 		return
 	}
 
-	// TLS by default. The router runs outside the cluster the SigNoz
-	// collector is on for some deployments, so silently shipping spans over
-	// plaintext gRPC would leak whatever's in attributes (api_key_id, model
-	// names, decision reasons) to anyone on-path. Operators opt into insecure
-	// transport explicitly via WV_APM_OTLP_INSECURE=true when the collector
-	// is reachable only over a trusted internal network.
+	// TLS by default: some deployments run the router outside the SigNoz
+	// collector's cluster, and plaintext gRPC would leak span attributes
+	// (api_key_id, model names, decision reasons) on-path. Opt into insecure
+	// transport explicitly via WV_APM_OTLP_INSECURE=true on trusted networks.
 	insecure := config.GetOr("WV_APM_OTLP_INSECURE", "false") == "true"
 
 	traceExporter, err := newTraceExporter(ctx, endpoint, insecure)
@@ -121,10 +110,8 @@ func initLocked() {
 	)
 	otel.SetMeterProvider(meterProvider)
 
-	// Without this the MeterProvider has no instruments registered against
-	// it and the only metric SigNoz receives is the empty resource heartbeat.
-	// otelruntime.Start hooks runtime/metrics (goroutines, heap, GC pauses,
-	// cgo calls) into the global MeterProvider just set above.
+	// Hooks runtime/metrics (goroutines, heap, GC, cgo calls) into the
+	// MeterProvider just set above — without it SigNoz gets no metrics at all.
 	if err := otelruntime.Start(otelruntime.WithMinimumReadMemStatsInterval(15 * time.Second)); err != nil {
 		log.Warn("APM init: runtime instrumentation failed; SDK traces still active", "err", err)
 	}
@@ -154,10 +141,9 @@ func metricGRPCOpts(endpoint string, insecure bool) []otlpmetricgrpc.Option {
 	return opts
 }
 
-// Middleware returns a gin middleware that wraps each request in an HTTP
-// server span tagged with method/route/status. Routes /health and /validate
-// are excluded — they're polled by infra and would swamp the trace volume.
-// No-op when Init was never called or the SDK is disabled.
+// Middleware wraps each request in an HTTP server span tagged with
+// method/route/status, excluding /health and /validate (infra polling would
+// swamp trace volume). No-op when Init was never called.
 func Middleware() gin.HandlerFunc {
 	return otelgin.Middleware(
 		serviceName,
@@ -168,20 +154,8 @@ func Middleware() gin.HandlerFunc {
 	)
 }
 
-// Shutdown flushes the trace + metric pipelines with a 5s default budget.
-// Safe to call multiple times and safe when Init was never called.
-//
-// Most callers should prefer ShutdownWithContext so the parent process can
-// budget the flush against its own SIGTERM window.
-func Shutdown() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	ShutdownWithContext(ctx)
-}
-
-// ShutdownWithContext flushes the trace + metric pipelines under the caller's
-// deadline. Use this from a process-level shutdown handler that's already
-// budgeting its remaining SIGTERM time across multiple flush stages.
+// ShutdownWithContext flushes the trace + metric pipelines under the
+// caller's deadline.
 func ShutdownWithContext(ctx context.Context) {
 	if tracerProvider != nil {
 		_ = tracerProvider.Shutdown(ctx)

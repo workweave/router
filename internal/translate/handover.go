@@ -8,14 +8,13 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// HandoverSummaryTag prefixes the synthesized assistant message inserted by
-// RewriteForHandover so a reader can tell the bounded-cost handover summary
-// apart from real assistant output.
+// HandoverSummaryTag prefixes the synthesized summary message inserted by
+// RewriteForHandover so it's distinguishable from real assistant output.
 const HandoverSummaryTag = "[handover summary] "
 
-// RewriteForHandover replaces all non-system messages with [assistantSummary, latestUserMessage].
-// Returns the count of elided messages. No-ops when the envelope has no messages.
-// Used to bound input-token cost on mid-session model switches.
+// RewriteForHandover replaces all non-system messages with [assistantSummary,
+// latestUserMessage] to bound input-token cost on mid-session model switches.
+// Returns the count of elided messages; no-ops if there are none.
 func (e *RequestEnvelope) RewriteForHandover(summary string) int {
 	if e == nil {
 		return 0
@@ -317,10 +316,9 @@ func (e *RequestEnvelope) trimGeminiLastN(n int) int {
 	return len(all) - len(keep)
 }
 
-// stripOrphanedAnthropicToolResults removes tool_result content blocks from
-// Anthropic-format user messages when the referenced tool_use_id has no
-// matching tool_use block in any assistant message in the set. User messages
-// left with no content blocks after stripping are omitted entirely.
+// stripOrphanedAnthropicToolResults drops tool_result blocks whose tool_use_id
+// has no matching tool_use among the set's assistant messages; user messages
+// left empty afterward are omitted entirely.
 func stripOrphanedAnthropicToolResults(msgs []gjson.Result) []string {
 	knownIDs := collectAnthropicToolUseIDs(msgs)
 	result := make([]string, 0, len(msgs))
@@ -357,9 +355,8 @@ func collectAnthropicToolUseIDs(msgs []gjson.Result) map[string]struct{} {
 	return ids
 }
 
-// stripAnthropicToolResultMsg removes tool_result blocks from a user message
-// whose tool_use_id is not in knownIDs. A nil knownIDs strips all
-// tool_results. Returns "" if the message is left with no content.
+// stripAnthropicToolResultMsg removes tool_result blocks not in knownIDs (nil
+// strips all). Returns "" if the message is left with no content.
 func stripAnthropicToolResultMsg(msg gjson.Result, knownIDs map[string]struct{}) string {
 	content := msg.Get("content")
 	if !content.IsArray() {

@@ -1,9 +1,7 @@
 package translate
 
 import (
-	"bufio"
 	"net/http"
-	"strings"
 	"time"
 
 	"workweave/router/internal/providers"
@@ -16,16 +14,12 @@ import (
 // routing-marker chunk at the start of an OpenAI-format SSE stream.
 // Non-streaming responses pass through unmodified.
 type OpenAIRoutingMarkerWriter struct {
-	inner   http.ResponseWriter
-	flusher http.Flusher
-	bw      *bufio.Writer
+	sse.ChunkedWriter
 
 	marker string
 	model  string
 
-	streaming      bool
-	headersEmitted bool
-	markerEmitted  bool
+	markerEmitted bool
 
 	// onOutputProgress, when set via ArmOutputProgress, is invoked whenever a
 	// written upstream chunk carries an output-bearing delta (content,
@@ -46,32 +40,15 @@ type OpenAIRoutingMarkerWriter struct {
 // chat.completion.chunk before any upstream data. If marker is empty, all
 // writes pass through unchanged.
 func NewOpenAIRoutingMarkerWriter(w http.ResponseWriter, model, marker string) *OpenAIRoutingMarkerWriter {
-	flusher, _ := w.(http.Flusher)
 	return &OpenAIRoutingMarkerWriter{
-		inner:   w,
-		flusher: flusher,
-		bw:      bufio.NewWriterSize(w, 4096),
-		marker:  marker,
-		model:   model,
+		ChunkedWriter: sse.NewChunkedWriter(w, 4096),
+		marker:        marker,
+		model:         model,
 	}
-}
-
-func (w *OpenAIRoutingMarkerWriter) Header() http.Header {
-	return w.inner.Header()
-}
-
-func (w *OpenAIRoutingMarkerWriter) WriteHeader(code int) {
-	if w.headersEmitted {
-		return
-	}
-	ct := w.inner.Header().Get("Content-Type")
-	w.streaming = strings.Contains(ct, "text/event-stream") && code < 400
-	w.headersEmitted = true
-	w.inner.WriteHeader(code)
 }
 
 func (w *OpenAIRoutingMarkerWriter) Write(data []byte) (int, error) {
-	if w.streaming && !w.markerEmitted {
+	if w.Streaming && !w.markerEmitted {
 		w.markerEmitted = true
 		if w.marker != "" {
 			if err := w.emitMarkerChunk(); err != nil {
@@ -79,10 +56,10 @@ func (w *OpenAIRoutingMarkerWriter) Write(data []byte) (int, error) {
 			}
 		}
 	}
-	if w.streaming && w.onOutputProgress != nil {
+	if w.Streaming && w.onOutputProgress != nil {
 		w.scanOutputProgress(data)
 	}
-	return w.inner.Write(data)
+	return w.Inner.Write(data)
 }
 
 // ArmOutputProgress installs the output-progress watchdog mark. The writer
@@ -93,7 +70,7 @@ func (w *OpenAIRoutingMarkerWriter) Write(data []byte) (int, error) {
 // streaming: a non-streaming passthrough has nothing to mark mid-stream. Call
 // after WriteHeader / Prelude, which set the streaming flag.
 func (w *OpenAIRoutingMarkerWriter) ArmOutputProgress(mark func()) (armed bool) {
-	if !w.streaming {
+	if !w.Streaming {
 		return false
 	}
 	w.onOutputProgress = mark
@@ -165,52 +142,33 @@ func (w *OpenAIRoutingMarkerWriter) Prelude(streaming bool) error {
 	if !streaming || w.markerEmitted {
 		return nil
 	}
-	w.inner.Header().Set("Content-Type", "text/event-stream")
-	w.streaming = true
-	if !w.headersEmitted {
-		w.headersEmitted = true
-		w.inner.WriteHeader(http.StatusOK)
+	w.Inner.Header().Set("Content-Type", "text/event-stream")
+	w.Streaming = true
+	if !w.HeadersEmitted {
+		w.HeadersEmitted = true
+		w.Inner.WriteHeader(http.StatusOK)
 	}
 	w.markerEmitted = true
 	if w.marker == "" {
 		// Still flush a comment so TCP gets a packet — TTFB is what we're optimizing for.
-		w.bw.WriteString(": routing complete\n\n")
-		if err := w.bw.Flush(); err != nil {
-			return err
-		}
-		if w.flusher != nil {
-			w.flusher.Flush()
-		}
-		return nil
+		w.BW.WriteString(": routing complete\n\n")
+		return w.FlushEvent()
 	}
 	return w.emitMarkerChunk()
 }
 
-// Flush implements http.Flusher.
-func (w *OpenAIRoutingMarkerWriter) Flush() {
-	if w.flusher != nil {
-		w.flusher.Flush()
-	}
-}
-
 func (w *OpenAIRoutingMarkerWriter) emitMarkerChunk() error {
-	w.bw.WriteString(`data: {"id":`)
-	sse.WriteJSONString(w.bw, generateChatCmplID())
-	w.bw.WriteString(`,"object":"chat.completion.chunk","created":`)
-	sse.WriteJSONInt(w.bw, time.Now().Unix())
-	w.bw.WriteString(`,"model":`)
-	sse.WriteJSONString(w.bw, w.model)
-	w.bw.WriteString(`,"choices":[{"index":0,"delta":{"role":"assistant","content":`)
-	sse.WriteJSONString(w.bw, w.marker)
-	w.bw.WriteString(`},"finish_reason":null}]}`)
-	w.bw.WriteString("\n\n")
-	if err := w.bw.Flush(); err != nil {
-		return err
-	}
-	if w.flusher != nil {
-		w.flusher.Flush()
-	}
-	return nil
+	w.BW.WriteString(`data: {"id":`)
+	sse.WriteJSONString(w.BW, generateChatCmplID())
+	w.BW.WriteString(`,"object":"chat.completion.chunk","created":`)
+	sse.WriteJSONInt(w.BW, time.Now().Unix())
+	w.BW.WriteString(`,"model":`)
+	sse.WriteJSONString(w.BW, w.model)
+	w.BW.WriteString(`,"choices":[{"index":0,"delta":{"role":"assistant","content":`)
+	sse.WriteJSONString(w.BW, w.marker)
+	w.BW.WriteString(`},"finish_reason":null}]}`)
+	w.BW.WriteString("\n\n")
+	return w.FlushEvent()
 }
 
 var _ http.ResponseWriter = (*OpenAIRoutingMarkerWriter)(nil)

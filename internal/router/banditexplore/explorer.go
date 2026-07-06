@@ -1,22 +1,13 @@
-// Package banditexplore wraps a content-aware router.Router with bounded
-// exploration over the quality-tie band, for collecting the propensity-logged
-// trajectories an off-policy estimator (and, later, a contextual bandit)
-// needs. It is OFF by default and ships behind an env flag — prod keeps
-// serving the wrapped router's deterministic argmax until a bake-off proves
-// exploration helps.
+// Package banditexplore wraps a router.Router with bounded exploration over
+// the quality-tie band, collecting the propensity-logged trajectories an
+// off-policy estimator needs. OFF by default behind an env flag until a
+// bake-off proves it helps.
 //
-// The exploration rule is deliberately the lowest-risk one: among the models
-// whose blended score is within `bandWidth` of the argmax (the "quality-tie
-// band" — models the scorer considers near-equivalent), pick uniformly at
-// random. Models clearly below the band are never touched, so a hard query is
-// never gambled on an inferior model. The probability the chosen model was
-// selected (1/|band|) is recorded as the decision's Propensity, which is the
-// importance weight Phase 2's IPS / doubly-robust estimator requires.
-//
-// This package depends only on the inner `router` interface and a provider
-// resolver injected at construction — it knows nothing about clustering,
-// artifacts, or the proxy. The wrapped router is unchanged; this is pure
-// composition.
+// Exploration only picks uniformly among models within `bandWidth` of the
+// argmax score (near-equivalent per the scorer); models clearly below the
+// band are never gambled on. The chosen model's selection probability
+// (1/|band|) is recorded as Propensity, the importance weight the IPS /
+// doubly-robust estimator requires.
 package banditexplore
 
 import (
@@ -31,8 +22,7 @@ import (
 )
 
 // ProviderForModel is a boot-time fallback resolver for a model's provider,
-// used only when the decision metadata carries no per-request binding. ok is
-// false when the model has no known deployment binding.
+// used when decision metadata carries no per-request binding.
 type ProviderForModel func(model string) (provider string, ok bool)
 
 // bandEntry is an in-band model paired with the provider that serves it.
@@ -45,19 +35,17 @@ type bandEntry struct {
 type Explorer struct {
 	inner       router.Router
 	providerFor ProviderForModel
-	// bandWidth is the score-unit half-width of the quality-tie band. A model
-	// is in-band iff score >= maxScore - bandWidth. <= 0 disables exploration.
+	// bandWidth: a model is in-band iff score >= maxScore - bandWidth. <= 0 disables exploration.
 	bandWidth float32
-	// intn returns a pseudo-random int in [0, n). Injected for deterministic
-	// tests; defaults to the concurrency-safe top-level rand/v2 generator.
+	// intn returns a pseudo-random int in [0, n); injected for deterministic tests.
 	intn func(n int) int
 }
 
 var _ router.Router = (*Explorer)(nil)
 
-// New constructs an Explorer. A non-positive bandWidth makes the explorer a
-// pure pass-through. providerFor is an optional boot-time fallback: when nil,
-// the explorer relies solely on the per-request bindings in decision metadata.
+// New constructs an Explorer. A non-positive bandWidth makes it a pure
+// pass-through. providerFor is optional; when nil, only per-request bindings
+// in decision metadata are used.
 func New(inner router.Router, providerFor ProviderForModel, bandWidth float32) *Explorer {
 	return &Explorer{
 		inner:       inner,
@@ -67,10 +55,9 @@ func New(inner router.Router, providerFor ProviderForModel, bandWidth float32) *
 	}
 }
 
-// Route delegates to the inner router, then — when exploration is enabled and
-// the decision exposes a multi-model score vector — may substitute an in-band
-// peer of the argmax pick. Any condition that makes exploration unsafe or
-// undefined returns the inner decision verbatim.
+// Route delegates to the inner router, then may substitute an in-band peer of
+// the argmax pick when exploration is enabled and safe. Otherwise returns the
+// inner decision verbatim.
 func (e *Explorer) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	dec, err := e.inner.Route(ctx, req)
 	if err != nil {
@@ -80,9 +67,8 @@ func (e *Explorer) Route(ctx context.Context, req router.Request) (router.Decisi
 		return dec, nil
 	}
 
-	// Restrict the band to servable peers before sampling so the logged
-	// propensity (1/|band|) is exact and a peer is only ever served via a
-	// request-valid provider binding. A singleton band has no peer to explore.
+	// Restrict to servable peers first so the logged propensity (1/|band|) is
+	// exact and every peer has a request-valid provider binding.
 	band := e.servableBand(dec)
 	if len(band) < 2 {
 		return dec, nil
@@ -91,17 +77,13 @@ func (e *Explorer) Route(ctx context.Context, req router.Request) (router.Decisi
 	argmaxModel := dec.Model
 	pick := band[e.intn(len(band))]
 	e.annotate(&dec, pick.model, pick.provider, len(band))
-	// When exploration changes the served model, isolate the semantic-cache
-	// key so a hit can't return another model's cached body. The cache keys on
-	// EffectiveKnobsHash (among embedding/cluster/version); mixing the model in
-	// only on a real switch keeps argmax-cache reuse intact when we draw it.
+	// On a real model switch, mix the model into the semantic-cache key so a
+	// hit can't return another model's cached body (leave it untouched when we
+	// draw the argmax, to preserve argmax-cache reuse).
 	if pick.model != argmaxModel && dec.Metadata != nil {
 		dec.Metadata.EffectiveKnobsHash = mixModel(dec.Metadata.EffectiveKnobsHash, pick.model)
-		// Only a real switch can collapse the band pair: the scorer's runner-up
-		// was computed against the argmax, so it may equal the now-served peer.
-		// Recompute it against the served model. When we draw the argmax the
-		// scorer's pair is already distinct, so leave its metadata untouched
-		// rather than overwrite it with our own tie-break.
+		// The scorer's runner-up was computed against the argmax and may now
+		// equal the served peer; recompute it against the served model.
 		e.repairBandPair(&dec.Metadata.PairedModel, &dec.Metadata.PairedProvider, &dec.Metadata.PairedScore, dec, pick.model)
 	}
 	return dec, nil
@@ -129,9 +111,9 @@ func (e *Explorer) shouldExplore(dec router.Decision) bool {
 	return md != nil && len(md.CandidateScores) >= 2
 }
 
-// servableBand returns in-band models (score >= max - bandWidth) paired with a
-// request-valid provider, sorted by name for reproducible sampling. The argmax
-// is always included; peers only when their provider resolves.
+// servableBand returns in-band models paired with a request-valid provider,
+// sorted by name for reproducible sampling. The argmax is always included;
+// peers only when their provider resolves.
 func (e *Explorer) servableBand(dec router.Decision) []bandEntry {
 	scores := dec.Metadata.CandidateScores
 	maxScore, ok := maxScore(scores)
@@ -194,8 +176,8 @@ func maxScore(scores map[string]float32) (float32, bool) {
 }
 
 // annotate rewrites the served model/provider and records the exploration
-// propensity (1/bandSize) and the chosen model's score on the metadata. The
-// scorer allocates Metadata fresh per call, so in-place mutation is safe.
+// propensity (1/bandSize) and chosen score on the metadata (safe to mutate
+// in place: the scorer allocates Metadata fresh per call).
 func (e *Explorer) annotate(dec *router.Decision, model, provider string, bandSize int) {
 	dec.Model = model
 	dec.Provider = provider
@@ -208,11 +190,10 @@ func (e *Explorer) annotate(dec *router.Decision, model, provider string, bandSi
 	}
 }
 
-// repairBandPair recomputes the band pair's runner-up after exploration has
-// rewritten the served model, writing it back through the metadata pointers.
-// It picks the highest-scoring servable peer other than served (tie-broken by
-// name for reproducibility), and clears the pair when no other model has a
-// resolvable provider — never leaving a runner-up equal to the served model.
+// repairBandPair recomputes the band pair's runner-up against the served
+// model, writing it back through the metadata pointers. Picks the
+// highest-scoring servable peer other than served (ties broken by name);
+// clears the pair if none has a resolvable provider.
 func (e *Explorer) repairBandPair(outModel, outProvider *string, outScore *float32, dec router.Decision, served string) {
 	scores := dec.Metadata.CandidateScores
 	models := make([]string, 0, len(scores))

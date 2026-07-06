@@ -1,66 +1,43 @@
 package translate
 
 import (
-	"bufio"
 	"bytes"
 	"net/http"
-	"strings"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/sse"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
-// AnthropicRoutingMarkerWriter wraps an http.ResponseWriter and injects a
-// routing-marker text block at index 0 of an Anthropic-format SSE stream.
-// Upstream content_block_* indices are shifted by +1 to accommodate the
-// injected block. Non-streaming responses pass through unmodified.
+// AnthropicRoutingMarkerWriter injects a routing-marker text block at index 0
+// of an Anthropic SSE stream, shifting upstream content_block_* indices by +1.
 type AnthropicRoutingMarkerWriter struct {
-	inner   http.ResponseWriter
-	flusher http.Flusher
-	bw      *bufio.Writer
+	sse.ChunkedWriter
 
 	marker string
 	model  string
 
 	buf bytes.Buffer
 
-	streaming      bool
-	headersEmitted bool
-	markerEmitted  bool
+	markerEmitted bool
+
+	onOutputProgress func()
 }
 
-// NewAnthropicRoutingMarkerWriter creates a writer that injects marker as a
-// standalone text block at index 0 before any upstream data. If marker is
-// empty, all writes pass through unchanged.
+// NewAnthropicRoutingMarkerWriter injects marker as a text block at index 0.
+// If marker is empty, writes pass through unchanged.
 func NewAnthropicRoutingMarkerWriter(w http.ResponseWriter, model, marker string) *AnthropicRoutingMarkerWriter {
-	flusher, _ := w.(http.Flusher)
 	return &AnthropicRoutingMarkerWriter{
-		inner:   w,
-		flusher: flusher,
-		bw:      bufio.NewWriterSize(w, 4096),
-		marker:  marker,
-		model:   model,
+		ChunkedWriter: sse.NewChunkedWriter(w, 4096),
+		marker:        marker,
+		model:         model,
 	}
-}
-
-func (w *AnthropicRoutingMarkerWriter) Header() http.Header {
-	return w.inner.Header()
-}
-
-func (w *AnthropicRoutingMarkerWriter) WriteHeader(code int) {
-	if w.headersEmitted {
-		return
-	}
-	ct := w.inner.Header().Get("Content-Type")
-	w.streaming = strings.Contains(ct, "text/event-stream") && code < 400
-	w.headersEmitted = true
-	w.inner.WriteHeader(code)
 }
 
 func (w *AnthropicRoutingMarkerWriter) Write(data []byte) (int, error) {
-	if w.streaming && !w.markerEmitted {
+	if w.Streaming && !w.markerEmitted {
 		w.markerEmitted = true
 		if w.marker != "" {
 			if err := w.emitPreludeEvents(); err != nil {
@@ -68,9 +45,9 @@ func (w *AnthropicRoutingMarkerWriter) Write(data []byte) (int, error) {
 			}
 		}
 	}
-	if !w.streaming || w.marker == "" {
+	if !w.Streaming || w.marker == "" {
 		// Non-streaming or empty marker: fully transparent passthrough.
-		return w.inner.Write(data)
+		return w.Inner.Write(data)
 	}
 	// Streaming with a configured marker: parse upstream SSE, drop message_start,
 	// shift content_block_* indices, pass everything else through.
@@ -81,80 +58,57 @@ func (w *AnthropicRoutingMarkerWriter) Write(data []byte) (int, error) {
 	return n, nil
 }
 
-// Prelude commits headers and emits the routing marker immediately, before the
-// upstream provider has returned a single byte. Call this right after the
-// routing decision is made when the client requested streaming (streaming=true)
-// so first-byte latency drops to ~routing time rather than upstream prefill +
-// first decode. Safe to call once; subsequent Write/WriteHeader calls are
-// idempotent. No-op when streaming is false or marker is empty.
+// Prelude commits headers and emits the marker before upstream responds, so
+// first-byte latency is ~routing time instead of upstream prefill+decode. Call
+// once right after the routing decision; later Write/WriteHeader calls are
+// idempotent. No-op if streaming is false or marker is empty.
 func (w *AnthropicRoutingMarkerWriter) Prelude(streaming bool) error {
 	if !streaming || w.markerEmitted {
 		return nil
 	}
-	w.inner.Header().Set("Content-Type", "text/event-stream")
-	w.streaming = true
-	if !w.headersEmitted {
-		w.headersEmitted = true
-		w.inner.WriteHeader(http.StatusOK)
+	w.Inner.Header().Set("Content-Type", "text/event-stream")
+	w.Streaming = true
+	if !w.HeadersEmitted {
+		w.HeadersEmitted = true
+		w.Inner.WriteHeader(http.StatusOK)
 	}
 	w.markerEmitted = true
 	if w.marker == "" {
-		w.bw.WriteString(": routing complete\n\n")
-		if err := w.bw.Flush(); err != nil {
-			return err
-		}
-		if w.flusher != nil {
-			w.flusher.Flush()
-		}
-		return nil
+		w.BW.WriteString(": routing complete\n\n")
+		return w.FlushEvent()
 	}
 	return w.emitPreludeEvents()
-}
-
-// Flush implements http.Flusher.
-func (w *AnthropicRoutingMarkerWriter) Flush() {
-	if w.flusher != nil {
-		w.flusher.Flush()
-	}
 }
 
 // emitPreludeEvents writes message_start followed by the routing marker as a
 // text content block at index 0.
 func (w *AnthropicRoutingMarkerWriter) emitPreludeEvents() error {
 	// message_start — mirrors the envelope shape from AnthropicSSETranslator.
-	w.bw.WriteString("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":")
-	sse.WriteJSONString(w.bw, generateAnthropicMsgID())
-	w.bw.WriteString(",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":")
-	sse.WriteJSONString(w.bw, w.model)
-	w.bw.WriteString(",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\n")
+	w.BW.WriteString("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":")
+	sse.WriteJSONString(w.BW, generateAnthropicMsgID())
+	w.BW.WriteString(",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":")
+	sse.WriteJSONString(w.BW, w.model)
+	w.BW.WriteString(",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\n")
 
 	// content_block_start at index 0 (text block).
-	w.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+	w.BW.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
 
 	// content_block_delta (text_delta) at index 0.
-	w.bw.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":")
-	sse.WriteJSONString(w.bw, w.marker)
-	w.bw.WriteString("}}\n\n")
+	w.BW.WriteString("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":")
+	sse.WriteJSONString(w.BW, w.marker)
+	w.BW.WriteString("}}\n\n")
 
 	// content_block_stop at index 0.
-	w.bw.WriteString("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+	w.BW.WriteString("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
 
-	if err := w.bw.Flush(); err != nil {
-		return err
-	}
-	if w.flusher != nil {
-		w.flusher.Flush()
-	}
-	return nil
+	return w.FlushEvent()
 }
 
 // processUpstream parses upstream SSE events, drops message_start, and shifts
-// content_block_* indices by +1. Non-indexed events (message_delta,
-// message_stop, ping, error) pass through unchanged.
+// content_block_* indices by +1; other events pass through unchanged.
 func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error) {
-	// Accumulate into a persistent buffer so an SSE event split across two
-	// Write calls is held until its terminating blank line arrives, rather
-	// than being parsed as a truncated (and silently dropped) event.
+	// Buffer across Write calls so an SSE event split mid-stream isn't parsed
+	// as truncated (and silently dropped) before its terminating blank line.
 	w.buf.Write(data)
 	for {
 		event, n := sse.SplitNext(w.buf.Bytes())
@@ -165,7 +119,7 @@ func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error)
 
 		if len(eventType) == 0 && len(eventData) == 0 {
 			// Comment or empty — pass through as-is.
-			if _, err := w.inner.Write(event[:n]); err != nil {
+			if _, err := w.Inner.Write(event[:n]); err != nil {
 				return 0, err
 			}
 			w.buf.Next(n)
@@ -179,30 +133,34 @@ func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error)
 			continue
 
 		case "content_block_start", "content_block_delta", "content_block_stop":
+			// Mark on output-bearing content_block_delta only; start/stop are structural.
+			if string(eventType) == "content_block_delta" && w.onOutputProgress != nil {
+				w.onOutputProgress()
+			}
 			// Rewrite the index field: shift by +1.
 			currentIdx := gjson.GetBytes(eventData, "index").Int()
 			rewritten, err := sjson.SetBytes(eventData, "index", currentIdx+1)
 			if err != nil {
 				// Fall through: emit original event if rewrite fails.
-				if _, err := w.inner.Write(event[:n]); err != nil {
+				if _, err := w.Inner.Write(event[:n]); err != nil {
 					return 0, err
 				}
 				w.buf.Next(n)
 				continue
 			}
-			w.bw.WriteString("event: ")
-			w.bw.Write(eventType)
-			w.bw.WriteString("\ndata: ")
-			w.bw.Write(rewritten)
-			w.bw.WriteString("\n\n")
-			if err := w.bw.Flush(); err != nil {
+			w.BW.WriteString("event: ")
+			w.BW.Write(eventType)
+			w.BW.WriteString("\ndata: ")
+			w.BW.Write(rewritten)
+			w.BW.WriteString("\n\n")
+			if err := w.BW.Flush(); err != nil {
 				return 0, err
 			}
 			w.buf.Next(n)
 
 		default:
 			// message_delta, message_stop, ping, error, etc. — pass through untouched.
-			if _, err := w.inner.Write(event[:n]); err != nil {
+			if _, err := w.Inner.Write(event[:n]); err != nil {
 				return 0, err
 			}
 			w.buf.Next(n)
@@ -211,5 +169,17 @@ func (w *AnthropicRoutingMarkerWriter) processUpstream(data []byte) (int, error)
 	return len(data), nil
 }
 
+// ArmOutputProgress fires mark on output-bearing content_block_delta frames only
+// (not pings or structural frames) so the native output-stall watchdog tracks
+// time-since-last-output. Returns false when not streaming or without a marker.
+func (w *AnthropicRoutingMarkerWriter) ArmOutputProgress(mark func()) (armed bool) {
+	if !w.Streaming || w.marker == "" {
+		return false
+	}
+	w.onOutputProgress = mark
+	return true
+}
+
 var _ http.ResponseWriter = (*AnthropicRoutingMarkerWriter)(nil)
 var _ http.Flusher = (*AnthropicRoutingMarkerWriter)(nil)
+var _ providers.OutputProgressArmer = (*AnthropicRoutingMarkerWriter)(nil)

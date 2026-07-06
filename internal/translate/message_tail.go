@@ -3,6 +3,8 @@ package translate
 import (
 	"strings"
 
+	"workweave/router/internal/observability"
+
 	"github.com/tidwall/gjson"
 )
 
@@ -62,7 +64,7 @@ func anthropicMessageTailPreview(body []byte, n, maxLen int) []MessagePreview {
 		case content.Type == gjson.String:
 			mp.Blocks = append(mp.Blocks, MessageBlockPreview{
 				Type:    "text",
-				Preview: truncatePreview(content.String(), maxLen),
+				Preview: observability.Preview(content.String(), maxLen),
 			})
 		case content.IsArray():
 			content.ForEach(func(_, block gjson.Result) bool {
@@ -79,18 +81,18 @@ func anthropicBlockPreview(block gjson.Result, maxLen int) MessageBlockPreview {
 	t := block.Get("type").String()
 	switch t {
 	case "text":
-		return MessageBlockPreview{Type: t, Preview: truncatePreview(block.Get("text").String(), maxLen)}
+		return MessageBlockPreview{Type: t, Preview: observability.Preview(block.Get("text").String(), maxLen)}
 	case "tool_use":
 		return MessageBlockPreview{
 			Type:    t,
-			Name:    truncatePreview(block.Get("name").String(), blockNameMaxLen),
-			Preview: truncatePreview(block.Get("input").Raw, maxLen),
+			Name:    observability.Preview(block.Get("name").String(), blockNameMaxLen),
+			Preview: observability.Preview(block.Get("input").Raw, maxLen),
 		}
 	case "tool_result":
 		return MessageBlockPreview{
 			Type:    t,
-			Name:    truncatePreview(block.Get("tool_use_id").String(), blockNameMaxLen),
-			Preview: truncatePreview(toolResultContentText(block.Get("content")), maxLen),
+			Name:    observability.Preview(block.Get("tool_use_id").String(), blockNameMaxLen),
+			Preview: observability.Preview(toolResultContentText(block.Get("content")), maxLen),
 		}
 	default:
 		// thinking / redacted_thinking / image / etc — record presence only.
@@ -143,7 +145,7 @@ func openAIMessageTailPreview(body []byte, n, maxLen int) []MessagePreview {
 		if text := openAIContentTextGJSON(msg.Get("content")); text != "" {
 			mp.Blocks = append(mp.Blocks, MessageBlockPreview{
 				Type:    "text",
-				Preview: truncatePreview(text, maxLen),
+				Preview: observability.Preview(text, maxLen),
 			})
 		}
 		switch role {
@@ -153,15 +155,15 @@ func openAIMessageTailPreview(body []byte, n, maxLen int) []MessagePreview {
 				toolCalls.ForEach(func(_, tc gjson.Result) bool {
 					mp.Blocks = append(mp.Blocks, MessageBlockPreview{
 						Type:    "tool_use",
-						Name:    truncatePreview(tc.Get("function.name").String(), blockNameMaxLen),
-						Preview: truncatePreview(tc.Get("function.arguments").String(), maxLen),
+						Name:    observability.Preview(tc.Get("function.name").String(), blockNameMaxLen),
+						Preview: observability.Preview(tc.Get("function.arguments").String(), maxLen),
 					})
 					return true
 				})
 			}
 		case "tool":
 			// Surface as tool_result for symmetry with the Anthropic shape.
-			id := truncatePreview(msg.Get("tool_call_id").String(), blockNameMaxLen)
+			id := observability.Preview(msg.Get("tool_call_id").String(), blockNameMaxLen)
 			if len(mp.Blocks) > 0 {
 				mp.Blocks[0].Type = "tool_result"
 				mp.Blocks[0].Name = id
@@ -208,29 +210,29 @@ func geminiMessageTailPreview(body []byte, n, maxLen int) []MessagePreview {
 func geminiPartPreview(part gjson.Result, maxLen int) MessageBlockPreview {
 	if text := part.Get("text").String(); text != "" {
 		if part.Get("thought").Bool() {
-			return MessageBlockPreview{Type: "thinking", Preview: truncatePreview(text, maxLen)}
+			return MessageBlockPreview{Type: "thinking", Preview: observability.Preview(text, maxLen)}
 		}
-		return MessageBlockPreview{Type: "text", Preview: truncatePreview(text, maxLen)}
+		return MessageBlockPreview{Type: "text", Preview: observability.Preview(text, maxLen)}
 	}
 	if fc := part.Get("functionCall"); fc.Exists() {
 		return MessageBlockPreview{
 			Type:    "tool_use",
-			Name:    truncatePreview(fc.Get("name").String(), blockNameMaxLen),
-			Preview: truncatePreview(fc.Get("args").Raw, maxLen),
+			Name:    observability.Preview(fc.Get("name").String(), blockNameMaxLen),
+			Preview: observability.Preview(fc.Get("args").Raw, maxLen),
 		}
 	}
 	if fr := part.Get("functionResponse"); fr.Exists() {
 		return MessageBlockPreview{
 			Type:    "tool_result",
-			Name:    truncatePreview(fr.Get("name").String(), blockNameMaxLen),
-			Preview: truncatePreview(fr.Get("response").Raw, maxLen),
+			Name:    observability.Preview(fr.Get("name").String(), blockNameMaxLen),
+			Preview: observability.Preview(fr.Get("response").Raw, maxLen),
 		}
 	}
 	if inlineData := part.Get("inlineData"); inlineData.Exists() {
-		return MessageBlockPreview{Type: "image", Name: truncatePreview(inlineData.Get("mimeType").String(), blockNameMaxLen)}
+		return MessageBlockPreview{Type: "image", Name: observability.Preview(inlineData.Get("mimeType").String(), blockNameMaxLen)}
 	}
 	if fileData := part.Get("fileData"); fileData.Exists() {
-		return MessageBlockPreview{Type: "file", Name: truncatePreview(fileData.Get("mimeType").String(), blockNameMaxLen)}
+		return MessageBlockPreview{Type: "file", Name: observability.Preview(fileData.Get("mimeType").String(), blockNameMaxLen)}
 	}
 	return MessageBlockPreview{Type: "part"}
 }
@@ -256,10 +258,3 @@ func (e *RequestEnvelope) SystemTextTail(maxLen int) (length int, head, tail str
 // tool_use_ids and the resulting base64 string can exceed 4 KB, dwarfing
 // every other block in the log line.
 const blockNameMaxLen = 48
-
-func truncatePreview(s string, maxLen int) string {
-	if maxLen <= 0 || len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "…"
-}

@@ -71,16 +71,11 @@ func (m ContentCaptureMode) String() string {
 }
 
 // maybeCaptureResponse wraps w with a content-capturing writer when capture is
-// enabled. The returned captureWriter (nil when off) mirrors the exact bytes
-// delivered to the client, so the captured response is in the client's native
-// wire format regardless of which upstream served it.
+// enabled, mirroring the exact bytes sent to the client (nil when off).
 //
-// The /v1/responses surface hands us a *translate.ResponsesWriter that performs
-// its own surface translation and emits an eager prelude straight to its inner
-// writer. Wrapping it externally would capture the pre-translation event stream
-// and miss the prelude, so for that case we splice the capture writer in at the
-// ResponsesWriter's true client boundary instead — yielding the exact Responses
-// wire, prelude included — and return the ResponsesWriter unchanged as the sink.
+// ResponsesWriter translates and emits an eager prelude to its inner writer, so
+// wrapping it externally would miss the prelude and capture pre-translation
+// bytes; instead we splice the capture writer at its true client boundary.
 func (s *Service) maybeCaptureResponse(w http.ResponseWriter) (http.ResponseWriter, *captureWriter) {
 	if s.captureMode == CaptureOff {
 		return w, nil
@@ -110,19 +105,15 @@ func capturedResponse(c *captureWriter) (body []byte, truncated bool) {
 	return b, false
 }
 
-// deferredCallLog lets a wrapping handler run the call-log emission after the
-// response body is fully written. The /v1/responses surface wraps the client
-// in a translate.ResponsesWriter and calls Finalize only after
-// ProxyOpenAIChatCompletion returns; reading the captured body before Finalize
-// would yield empty/partial content. When a holder is present on the context,
-// ProxyOpenAIChatCompletion stores its emit closure here instead of running it
-// inline, and the wrapper invokes run() post-Finalize.
+// deferredCallLog lets a wrapping handler run call-log emission after the
+// response body is fully written, since /v1/responses' ResponsesWriter only
+// calls Finalize after ProxyOpenAIChatCompletion returns (reading the
+// captured body earlier would yield empty/partial content).
 type deferredCallLog struct {
 	fn func()
-	// requestBody, when set, overrides the captured request body for the call
-	// log. ProxyOpenAIResponses sets it to the client's original Responses JSON
-	// so io.request_body matches the Responses-format response body, rather than
-	// the translated Chat Completions payload ProxyOpenAIChatCompletion sees.
+	// requestBody overrides the captured request body: ProxyOpenAIResponses
+	// sets it to the client's original Responses JSON so io.request_body
+	// matches, instead of the translated Chat Completions payload.
 	requestBody []byte
 }
 
@@ -159,13 +150,9 @@ func sha256Hex(b []byte) string {
 }
 
 // recordCallLog emits a high-fidelity `router.call` OTLP log record for one
-// upstream call. It reuses the upstream span's already-built attributes as the
-// metadata base (decision, tokens, cost, latency, cluster scoring) and appends
-// content attributes per the capture mode. No-op when capture is off, when the
-// emitter is disabled (RecordLog finds no buffer), so callers need not guard.
-//
-// base is the slice returned by the upstream span's AttrBuilder.Build(); it is
-// cloned before appending so the span's attributes are never mutated.
+// upstream call, reusing the upstream span's attributes as the metadata base
+// and appending content attributes per capture mode. No-op when capture is
+// off. base is cloned before appending so the span's attributes aren't mutated.
 func (s *Service) recordCallLog(ctx context.Context, base []*commonv1.KeyValue, isErr bool, reqBody, respBody []byte, respTruncated bool) {
 	if s.captureMode == CaptureOff {
 		return

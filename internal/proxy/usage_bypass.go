@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -136,6 +137,29 @@ func (s *Service) anthropicFallbackKeyAvailable(ctx context.Context) bool {
 		}
 	}
 	return false
+}
+
+// anthropicOAuthCredentialRejected reports whether err is a buffered Anthropic
+// 401 authentication_error or 403 permission_error — a rejected subscription
+// OAuth token that gates the failover onto the BYOK/deployment key. Narrow by
+// design so an unrelated 403 (e.g. content policy) stays terminal.
+func anthropicOAuthCredentialRejected(err error) bool {
+	var buffered *providers.UpstreamErrorResponse
+	if !errors.As(err, &buffered) {
+		return false
+	}
+	if buffered.Status != http.StatusUnauthorized && buffered.Status != http.StatusForbidden {
+		return false
+	}
+	var env struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if jsonErr := json.Unmarshal(buffered.Body, &env); jsonErr != nil {
+		return false
+	}
+	return env.Error.Type == "authentication_error" || env.Error.Type == "permission_error"
 }
 
 // errBypassRetryable is returned by bypassToAnthropic when the bypass attempt

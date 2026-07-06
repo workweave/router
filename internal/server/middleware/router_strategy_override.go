@@ -20,7 +20,7 @@ const RouterStrategyOverrideHeader = "x-weave-router-strategy"
 // request context when the header is set to a recognized value. Like the
 // cluster-version override it gates on a resolved installation so anonymous
 // traffic can't flip strategies, and it never silently picks a model — the rl
-// strategy fails closed (HTTP 503) when no policy sidecar is wired.
+// and hmm strategies fail closed (HTTP 503) when no policy sidecar is wired.
 func WithRouterStrategyOverride() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw := strings.ToLower(strings.TrimSpace(c.GetHeader(RouterStrategyOverrideHeader)))
@@ -34,7 +34,7 @@ func WithRouterStrategyOverride() gin.HandlerFunc {
 			return
 		}
 		strategy := router.Strategy(raw)
-		if strategy != router.StrategyCluster && strategy != router.StrategyRL && strategy != router.StrategyBandit {
+		if strategy != router.StrategyCluster && strategy != router.StrategyRL && strategy != router.StrategyHMM && strategy != router.StrategyBandit {
 			observability.FromGin(c).Warn(
 				"Router-strategy override ignored: unrecognized value",
 				"installation_id", installation.ID,

@@ -16,14 +16,11 @@ import (
 
 const ginContextKey = "router_logger"
 
-// loggerContextKey is the private key used to stash a request-scoped
-// *slog.Logger on a context.Context. Private type prevents collisions with
-// other packages' context values.
+// loggerContextKey is a private type so context values don't collide with
+// other packages'.
 type loggerContextKey struct{}
 
-// WithLogger returns a new context that carries the given logger. Downstream
-// code reading the logger with FromContext sees this logger (with all its
-// pre-bound attributes) instead of the global default.
+// WithLogger attaches a logger to ctx for downstream FromContext calls.
 func WithLogger(ctx context.Context, log *slog.Logger) context.Context {
 	if log == nil {
 		return ctx
@@ -31,9 +28,8 @@ func WithLogger(ctx context.Context, log *slog.Logger) context.Context {
 	return context.WithValue(ctx, loggerContextKey{}, log)
 }
 
-// FromContext returns the request-scoped logger stashed by WithLogger, or the
-// global default logger if none is set. Always non-nil. Initializes the
-// LOG_LEVEL-honoring handler on first call, matching Get().
+// FromContext returns the logger stashed by WithLogger, or the global default
+// if none is set. Always non-nil.
 func FromContext(ctx context.Context) *slog.Logger {
 	initOnce.Do(initLogger)
 	if ctx != nil {
@@ -46,9 +42,8 @@ func FromContext(ctx context.Context) *slog.Logger {
 	return slog.Default()
 }
 
-// initOnce installs a slog handler honoring LOG_LEVEL on first Get(). Without
-// this, slog.Default() falls back to Go's stdlib handler at INFO, silently
-// dropping Debug lines emitted elsewhere in the codebase.
+// initOnce installs the LOG_LEVEL-honoring handler on first use; without it
+// slog.Default() defaults to INFO and silently drops Debug lines.
 var initOnce sync.Once
 
 func initLogger() {
@@ -64,10 +59,9 @@ func initLogger() {
 	slog.SetDefault(slog.New(newHandler(level)))
 }
 
-// newHandler builds the slog handler for the resolved format. JSON output maps
-// attributes to GCP Cloud Logging fields (severity/time/message) via
-// sloggcp.ReplaceAttr so lines render correctly when the router runs on Cloud
-// Run; tint gives a colorized human-readable stream for local dev.
+// newHandler builds the slog handler for the resolved format. JSON uses
+// sloggcp.ReplaceAttr so lines render correctly in GCP Cloud Logging; tint
+// gives colorized output for local dev.
 func newHandler(level slog.Level) slog.Handler {
 	switch logFormat() {
 	case "json":
@@ -80,9 +74,8 @@ func newHandler(level slog.Level) slog.Handler {
 	case "tint":
 		return tint.NewHandler(os.Stderr, &tint.Options{Level: level, TimeFormat: time.Kitchen})
 	}
-	// Auto: a TTY (local dev) gets human-readable output — colorized when color
-	// is enabled, plain text when NO_COLOR/LOG_COLOR disables it. Only non-TTY
-	// streams (Cloud Run, piped, redirected) get structured GCP JSON.
+	// Auto: TTY gets human-readable output (colorized unless disabled); non-TTY
+	// gets structured GCP JSON.
 	if useColor() {
 		return tint.NewHandler(os.Stderr, &tint.Options{Level: level, TimeFormat: time.Kitchen})
 	}
@@ -95,9 +88,8 @@ func newHandler(level slog.Level) slog.Handler {
 	})
 }
 
-// logFormat returns the explicitly requested handler format, or "" to let the
-// handler auto-detect based on whether stderr is a TTY. Honors
-// LOG_FORMAT={json,text,color,tint}.
+// logFormat returns the requested handler format from LOG_FORMAT
+// ({json,text,color,tint}), or "" to auto-detect.
 func logFormat() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("LOG_FORMAT"))) {
 	case "json":
@@ -110,10 +102,9 @@ func logFormat() string {
 	return ""
 }
 
-// useColor reports whether the auto format should pick tint's ANSI-colored
-// handler (vs structured JSON). Respects LOG_COLOR={1,true,yes,on} /
-// {0,false,no,off}; otherwise auto-detects based on whether stderr is a TTY and
-// NO_COLOR is unset (https://no-color.org).
+// useColor reports whether auto format should use tint's colorized handler.
+// Respects LOG_COLOR={1,true,yes,on}/{0,false,no,off}; otherwise auto-detects
+// via TTY + NO_COLOR (https://no-color.org).
 func useColor() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("LOG_COLOR"))) {
 	case "1", "true", "yes", "on":
@@ -127,9 +118,8 @@ func useColor() bool {
 	return isTerminal()
 }
 
-// isTerminal reports whether stderr is an interactive terminal, independent of
-// any color preference. The auto format uses this to keep TTY output
-// human-readable (text) rather than JSON when color is disabled.
+// isTerminal reports whether stderr is an interactive terminal, independent
+// of color preference.
 func isTerminal() bool {
 	return isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())
 }
@@ -160,9 +150,8 @@ func Middleware() gin.HandlerFunc {
 	}
 }
 
-// AccessLog logs one INFO line per request after handlers run. Without this,
-// a 401 from WithAuth produces zero output at LOG_LEVEL=info, making "no logs"
-// look like "the server isn't being hit" when it actually is.
+// AccessLog logs one INFO line per request after handlers run — without it, a
+// 401 from WithAuth produces zero output at LOG_LEVEL=info, masking traffic.
 func AccessLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()

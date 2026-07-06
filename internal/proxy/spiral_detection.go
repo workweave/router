@@ -14,57 +14,43 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
 )
 
-// Shadow-mode spiral detector: per-turn signals that a session is
-// death-marching (error grind, same-file thrash, fuzzy action repetition,
-// monologue) on the model it is routed to. Shadow mode means LOG ONLY — the
-// detector records a durable event the first time each signal class fires
-// for a session and changes nothing about routing. The events are joined
-// offline by session_key against telemetry/session outcomes to measure fire
-// rates, precision, and lead time on real traffic before any escalation
-// action is armed (see docs/plans/ — the offline trajectory audit found
-// ~35% of failures have no behavioral tell, so live measurement, not
-// benchmarks, decides the operating point).
+// Shadow-mode spiral detector: flags sessions death-marching (error grind,
+// same-file thrash, fuzzy repetition, monologue) on their routed model.
+// LOG ONLY — records one durable event per signal class per session, no
+// routing change. Events are joined offline against outcomes to pick fire
+// rate/precision/lead-time before any escalation is armed (~35% of failures
+// have no behavioral tell per the offline trajectory audit, so live
+// measurement decides the operating point, not benchmarks).
 //
-// Signal provenance (offline audit of 186 full bake-off trajectories +
-// 8.5k outcome shards):
-//   - trailing tool_result error streak: AUC 0.73 pooled deep-session,
-//     0.86 on deepseek-v4-flash;
-//   - same-file edit thrash (>=5 edits to one path): present in 9 of the 20
-//     costliest death marches;
-//   - recent-window action repetition (repeat fraction >=~0.3 in the last 12
-//     calls at >=20 total): +8-11pp recall over a depth cap at matched FPR;
-//   - monologue: industry-convergent (OpenHands stuck detector), unmeasured
-//     on our traffic — shadow mode is how it gets measured.
+// Thresholds from an offline audit of 186 bake-off trajectories + 8.5k
+// outcome shards: err streak AUC 0.73 pooled (0.86 on deepseek-v4-flash);
+// same-file thrash (>=5 edits) present in 9/20 costliest death marches;
+// repeat-window fraction >=~0.3 over last 12 calls: +8-11pp recall over a
+// depth cap at matched FPR; monologue is industry-convergent (OpenHands)
+// but unmeasured here — shadow mode measures it.
 //
 // Unlike the cyclic-loop detector (exact-signature, no-edit windows), these
-// signals tolerate "rhyming" spirals: the same file edited with slightly
-// different args, test reruns with tiny variations.
+// tolerate "rhyming" spirals — same file, slightly different args.
 const (
-	// spiralMinToolCalls is the arming floor: no signal is evaluated before
-	// this many assistant tool calls exist in the history. Early-session
-	// intervention is the documented false-positive mode (the Explore
-	// sub-agent lesson generalizes).
+	// Arming floor: no signal evaluated before this many tool calls exist.
+	// Early-session intervention is the documented false-positive mode.
 	spiralMinToolCalls = 12
 	// spiralErrStreakThreshold: consecutive errored tool_results at the tail.
 	spiralErrStreakThreshold = 3
 	// spiralSameFileEditThreshold: edits targeting one file path.
 	spiralSameFileEditThreshold = 5
-	// spiralRepeatWindow / spiralRepeatMinCalls / spiralRepeatFracThreshold:
-	// fraction of the last spiralRepeatWindow tool-call signatures that are
-	// duplicates within that window, evaluated only once the session has
-	// spiralRepeatMinCalls total calls.
+	// Repetition: fraction of the last spiralRepeatWindow signatures that
+	// are duplicates, evaluated once spiralRepeatMinCalls is reached.
 	spiralRepeatWindow        = 12
 	spiralRepeatMinCalls      = 20
 	spiralRepeatFracThreshold = 0.34
-	// spiralMonologueThreshold: consecutive assistant messages with no real
-	// tool activity since the last real user input. Set above the text-only
-	// nudge machinery's territory so the two don't double-report.
+	// Consecutive assistant messages with no tool activity since the last
+	// real user input. Set above the text-only nudge threshold to avoid
+	// double-reporting.
 	spiralMonologueThreshold = 4
 )
 
-// Spiral signal-class taxonomy, recorded per event. One event per
-// (session, role, reason) — a session that error-grinds at turn 20 and
-// same-file-thrashes at turn 50 records two events.
+// Spiral signal-class taxonomy. One event per (session, role, reason).
 const (
 	spiralReasonErrStreak      = "err_streak"
 	spiralReasonSameFileThrash = "same_file_thrash"
@@ -72,17 +58,16 @@ const (
 	spiralReasonMonologue      = "monologue"
 )
 
-// SpiralShadowStore persists shadow-mode spiral detections durably (the
-// router.spiral_shadow_events table). The count query enforces the
-// once-per-(session, reason) budget across replicas.
+// SpiralShadowStore persists shadow spiral detections (router.spiral_shadow_events).
+// CountSpiralShadowEvents enforces the once-per-(session, reason) budget across replicas.
 type SpiralShadowStore interface {
 	InsertSpiralShadowEvent(ctx context.Context, p SpiralShadowEvent) error
 	CountSpiralShadowEvents(ctx context.Context, sessionKey []byte, role, reason string) (count int64, err error)
 }
 
 // SpiralShadowEvent mirrors one router.spiral_shadow_events row. All signal
-// values are recorded on every event regardless of which reason fired, so
-// thresholds can be re-tuned offline without re-running traffic.
+// values are recorded regardless of which reason fired, so thresholds can
+// be re-tuned offline without re-running traffic.
 type SpiralShadowEvent struct {
 	InstallationID   string
 	SessionKey       []byte
@@ -124,9 +109,8 @@ func computeSpiralSignals(env *translate.RequestEnvelope, messageCount int) spir
 		messageCount:  messageCount,
 	}
 
-	// Same-file edit thrash: max number of edit-class calls targeting one
-	// path. The path itself is recorded only as a hash — enough to confirm
-	// "the same file" offline without persisting customer file names.
+	// Path recorded as a hash only — confirms "same file" offline without
+	// persisting customer file names.
 	pathCounts := make(map[string]int)
 	for _, fp := range env.AssistantToolCallFilePaths() {
 		if _, isEdit := editToolNames[fp.Name]; !isEdit {
@@ -140,9 +124,8 @@ func computeSpiralSignals(env *translate.RequestEnvelope, messageCount int) spir
 		}
 	}
 
-	// Recent-window repetition: fraction of the last spiralRepeatWindow
-	// signatures that have a duplicate within that window. Catches rhyming
-	// re-grind that the exact tight-loop detector's 5-identical bar misses.
+	// Catches rhyming re-grind that the exact tight-loop detector's
+	// 5-identical bar misses.
 	if len(sigs) >= spiralRepeatWindow {
 		window := sigs[len(sigs)-spiralRepeatWindow:]
 		counts := make(map[string]int, len(window))
@@ -182,10 +165,9 @@ func spiralReasons(s spiralSignals) []string {
 	return reasons
 }
 
-// spiralFiredCache de-duplicates shadow fires per (session, role, reason) on
-// this replica, so the durable budget query only runs on the first crossing
-// each ~hour rather than on every turn of a stuck session. Cross-replica
-// duplicates are still possible in the gap before the durable count lands;
+// spiralFiredCache de-dupes shadow fires per (session, role, reason) per
+// replica so the durable budget query runs once per ~hour, not every turn.
+// Cross-replica dupes are still possible before the durable count lands;
 // offline analysis de-dupes by (session_key, reason).
 const (
 	spiralFiredCacheSize = 8192
@@ -206,11 +188,9 @@ func spiralFiredKey(sessionKey [sessionpin.SessionKeyLen]byte, role, reason stri
 	return string(sessionKey[:]) + "\x00" + role + "\x00" + reason
 }
 
-// handleSpiralShadow records shadow-mode spiral detections: one durable
-// event + one structured log line per (session, role, reason). It takes NO
-// routing action — that is the point of shadow mode. Gated upstream by
-// spiralShadowEnabled and the turn-type guard (main-loop/tool-result turns
-// only).
+// handleSpiralShadow records one durable event + one log line per
+// (session, role, reason). Takes no routing action. Gated upstream by
+// spiralShadowEnabled and the turn-type guard.
 func (s *Service) handleSpiralShadow(
 	ctx context.Context,
 	sig spiralSignals,
@@ -228,9 +208,8 @@ func (s *Service) handleSpiralShadow(
 			continue
 		}
 
-		// Durable once-per-(session, reason) budget, mirroring the
-		// loop-escalation budget pattern. Best-effort: a lookup failure
-		// proceeds (an extra row beats a lost one in shadow mode).
+		// Best-effort: a lookup failure proceeds — an extra row beats a
+		// lost one in shadow mode.
 		if s.spiralShadowStore != nil && installationID != uuid.Nil {
 			count, err := s.spiralShadowStore.CountSpiralShadowEvents(ctx, sessionKey[:], role, reason)
 			if err != nil {

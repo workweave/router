@@ -10,12 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"workweave/router/internal/observability"
-	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/providers/httputil"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/timing"
 )
 
 const DefaultBaseURL = "https://api.anthropic.com"
@@ -24,6 +23,17 @@ type Client struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
+	// sseIdleTimeout overrides httputil.DefaultSSEIdleTimeout when > 0; tests set
+	// it small so the output-stall watchdog fires before this one.
+	sseIdleTimeout time.Duration
+	// outputStall overrides httputil.DefaultOutputStallTimeout when > 0; used by
+	// tests to trip output-stall without waiting out the real budget.
+	outputStall time.Duration
+	// throughput* override the minimum-throughput watchdog budgets when set.
+	throughputWindow     time.Duration
+	throughputMinElapsed time.Duration
+	throughputMinDeltas  int
+	throughputOverride   bool
 }
 
 func NewClient(apiKey, baseURL string) *Client {
@@ -35,6 +45,41 @@ func NewClient(apiKey, baseURL string) *Client {
 		baseURL: baseURL,
 		http:    &http.Client{Transport: httputil.NewTransport(10*time.Second, 10*time.Second)},
 	}
+}
+
+// NewClientWithStallTimeouts is NewClient with watchdog budgets injected for testing.
+func NewClientWithStallTimeouts(apiKey, baseURL string, sseIdleTimeout, outputStall time.Duration) *Client {
+	c := NewClient(apiKey, baseURL)
+	c.sseIdleTimeout = sseIdleTimeout
+	c.outputStall = outputStall
+	return c
+}
+
+// idleTimeout returns the byte-idle watchdog budget: the injected test override
+// when set, else httputil.DefaultSSEIdleTimeout.
+func (c *Client) idleTimeout() time.Duration {
+	if c.sseIdleTimeout > 0 {
+		return c.sseIdleTimeout
+	}
+	return httputil.DefaultSSEIdleTimeout
+}
+
+// outputStallTimeout returns the output-progress watchdog budget: the injected
+// test override when set, else httputil.DefaultOutputStallTimeout.
+func (c *Client) outputStallTimeout() time.Duration {
+	if c.outputStall > 0 {
+		return c.outputStall
+	}
+	return httputil.DefaultOutputStallTimeout
+}
+
+// throughputParams returns the minimum-throughput watchdog budgets: the injected
+// test overrides when set, else the httputil defaults.
+func (c *Client) throughputParams() (window, minElapsed time.Duration, minDeltas int) {
+	if c.throughputOverride {
+		return c.throughputWindow, c.throughputMinElapsed, c.throughputMinDeltas
+	}
+	return httputil.DefaultThroughputWindow, httputil.DefaultThroughputMinElapsed, httputil.DefaultMinThroughputDeltasPerWindow
 }
 
 // oauthBetaToken is the anthropic-beta flag Anthropic requires for Claude
@@ -49,6 +94,9 @@ const subscriptionTokenPrefix = "sk-ant-oat"
 // credential (subscription/BYOK/client), deployment key, then client-sent auth
 // headers. A subscription OAuth credential authenticates via Authorization:
 // Bearer and must NOT send x-api-key; everything else uses x-api-key.
+//
+// The passthrough tier scrubs router-issued Bearer tokens via
+// httputil.SanitizeInboundAuthHeader before relaying inbound auth upstream.
 func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *http.Request) {
 	if creds := proxy.CredentialsFromContext(ctx); creds != nil {
 		if creds.OAuth {
@@ -62,7 +110,7 @@ func (c *Client) setAuth(ctx context.Context, upstream *http.Request, inbound *h
 		upstream.Header.Set("x-api-key", c.apiKey)
 		return
 	}
-	if v := inbound.Header.Get("authorization"); v != "" {
+	if v := httputil.SanitizeInboundAuthHeader(inbound.Header.Get("authorization")); v != "" {
 		upstream.Header.Set("authorization", v)
 	}
 	if v := inbound.Header.Get("x-api-key"); v != "" {
@@ -127,7 +175,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		upstream.Header.Set("accept", v)
 	}
 
-	t := otel.TimingFrom(ctx)
+	t := timing.TimingFrom(ctx)
 	t.StampUpstreamRequest()
 	resp, err := c.http.Do(upstream)
 	if err != nil {
@@ -141,22 +189,22 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	providers.ObserveUpstreamHeaders(ctx, resp.Header)
 
 	if resp.StatusCode >= 400 {
-		bufBody, totalRead, drainErr := readCapped(resp.Body, providers.MaxBufferedErrorBytes)
+		bufBody, totalRead, drainErr := httputil.ReadCapped(resp.Body, providers.MaxBufferedErrorBytes)
 		if len(bufBody) > 0 {
 			t.StampUpstreamFirstByte()
 		}
 		if drainErr == nil {
 			t.StampUpstreamEOF()
 		}
-		logUpstreamStatus(
+		httputil.LogUpstreamStatus(
 			"Upstream Anthropic returned error status",
 			resp.StatusCode,
 			"routed_model", decision.Model,
-			"body_preview", previewBytes(bufBody),
+			"body_preview", httputil.PreviewBytes(bufBody),
 			"body_total_bytes", totalRead,
 		)
 		errHeaders := http.Header{}
-		providers.CopyUpstreamHeaders(headerCapture{errHeaders}, resp)
+		providers.CopyUpstreamHeaders(httputil.HeaderCapture{H: errHeaders}, resp)
 		return &providers.UpstreamErrorResponse{
 			Status:  resp.StatusCode,
 			Headers: errHeaders,
@@ -166,7 +214,28 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
-	return httputil.StreamBody(ctx, cancel, httputil.DefaultSSEIdleTimeout, resp.Body, resp.StatusCode, w, t)
+
+	// Anthropic ping keepalives reset the byte-idle watchdog, so also arm
+	// output-progress + throughput watchdogs — a ping-alive/zero-output stream
+	// (prod: sonnet-5 stuck at 0 output, no failover) otherwise never aborts.
+	if arm, ok := w.(providers.OutputProgressArmer); ok {
+		outMark, outStop := httputil.StartIdleWatchdogCause(ctx, cancel, c.outputStallTimeout(), httputil.ErrUpstreamOutputStall)
+		tpWindow, tpMinElapsed, tpMinDeltas := c.throughputParams()
+		tpMark, tpStop := httputil.StartThroughputWatchdog(ctx, cancel, tpWindow, tpMinElapsed, tpMinDeltas, httputil.ErrUpstreamSlowThroughput)
+		combined := func() {
+			outMark()
+			tpMark()
+		}
+		if arm.ArmOutputProgress(combined) {
+			defer outStop()
+			defer tpStop()
+		} else {
+			outStop()
+			tpStop()
+		}
+	}
+
+	return httputil.StreamBody(ctx, cancel, c.idleTimeout(), resp.Body, resp.StatusCode, w, t)
 }
 
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
@@ -200,62 +269,10 @@ func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 	if resp.StatusCode >= 400 {
-		var snip [1024]byte
-		n, _ := io.ReadFull(resp.Body, snip[:])
-		_, snipWriteErr := w.Write(snip[:n])
-		rest, copyErr := io.Copy(w, resp.Body)
-		logUpstreamStatus(
-			"Upstream Anthropic returned error status (passthrough)",
-			resp.StatusCode,
-			"path", r.URL.Path,
-			"body_preview", string(snip[:n]),
-			"body_total_bytes", int64(n)+rest,
-		)
-		if snipWriteErr != nil {
-			return snipWriteErr
-		}
-		if copyErr != nil {
-			return copyErr
-		}
-		return &providers.UpstreamStatusError{Status: resp.StatusCode}
+		return httputil.WritePassthroughError(w, resp, nil, nil, "Upstream Anthropic returned error status (passthrough)", "path", r.URL.Path)
 	}
 	_, err = io.Copy(w, resp.Body)
 	return err
 }
-
-func logUpstreamStatus(msg string, status int, attrs ...any) {
-	merged := append([]any{"status", status}, attrs...)
-	if status >= 500 || (status >= 400 && status != http.StatusTooManyRequests) {
-		observability.Get().Error(msg, merged...)
-		return
-	}
-	observability.Get().Warn(msg, merged...)
-}
-
-func readCapped(r io.Reader, limit int) ([]byte, int64, error) {
-	prefix, err := io.ReadAll(io.LimitReader(r, int64(limit)))
-	totalRead := int64(len(prefix))
-	if err != nil {
-		return prefix, totalRead, err
-	}
-	const maxDrain = 1 << 20 // 1 MiB
-	rest, drainErr := io.Copy(io.Discard, io.LimitReader(r, maxDrain))
-	totalRead += rest
-	return prefix, totalRead, drainErr
-}
-
-func previewBytes(body []byte) string {
-	const previewLimit = 1024
-	if len(body) > previewLimit {
-		return string(body[:previewLimit])
-	}
-	return string(body)
-}
-
-type headerCapture struct{ h http.Header }
-
-func (c headerCapture) Header() http.Header       { return c.h }
-func (c headerCapture) Write([]byte) (int, error) { return 0, nil }
-func (c headerCapture) WriteHeader(int)           {}
 
 var _ providers.Client = (*Client)(nil)

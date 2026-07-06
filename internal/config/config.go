@@ -6,6 +6,7 @@ import (
 	"os"
 )
 
+// MustGet returns the env var value for key, panicking if it is unset or empty.
 func MustGet(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
@@ -14,6 +15,7 @@ func MustGet(key string) string {
 	return v
 }
 
+// GetOr returns the env var value for key, or defaultValue if it is unset or empty.
 func GetOr(key, defaultValue string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

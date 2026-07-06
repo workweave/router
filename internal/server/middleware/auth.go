@@ -23,19 +23,15 @@ const (
 // RouterKeyHeader carries the Weave Router key when clients need to preserve Authorization / x-api-key for the upstream provider.
 const RouterKeyHeader = "X-Weave-Router-Key"
 
-// AnthropicSubscriptionHeader carries a caller's Claude subscription OAuth token
-// (sk-ant-oat-) on router-keyed requests, where Authorization already holds the
-// rk_ router key. The proxy forwards it to Anthropic for Claude-model turns so
-// the caller's own subscription pays, instead of the deployment API key.
+// AnthropicSubscriptionHeader carries a caller's Claude subscription OAuth
+// token (sk-ant-oat-) alongside an rk_ router key, so the proxy can bill
+// Claude-model turns to the caller's subscription instead of the deployment key.
 const AnthropicSubscriptionHeader = "X-Weave-Anthropic-Subscription"
 
-// OpenAISubscriptionHeader and OpenAIAccountIDHeader carry a caller's Codex
-// (ChatGPT) subscription on router-keyed requests, where Authorization already
-// holds the rk_ router key. The subscription header holds the ChatGPT OAuth JWT
-// and the account-id header holds the paired ChatGPT-Account-ID; both are
-// required because the Codex backend 401/403s on a token without its account id.
-// The proxy forwards them to OpenAI's Codex backend for OpenAI-model turns so
-// the caller's own ChatGPT plan pays, instead of the deployment API key.
+// OpenAISubscriptionHeader/OpenAIAccountIDHeader carry a caller's Codex
+// (ChatGPT) OAuth JWT and its paired ChatGPT-Account-ID alongside an rk_
+// router key, so Codex turns bill to the caller's ChatGPT plan. Both are
+// required — the Codex backend 401/403s on a token without its account id.
 const (
 	OpenAISubscriptionHeader = "X-Weave-OpenAI-Subscription"
 	OpenAIAccountIDHeader    = "X-Weave-OpenAI-Account-ID"
@@ -43,22 +39,18 @@ const (
 
 // WithAuth validates the inbound request via a bearer rk_ token only. Used on data-plane routes (`/v1/*`). On failure, short-circuits 401.
 //
-// byokDisabled drops any BYOK (customer-owned provider) keys at the middleware
-// boundary so downstream proxy code can't see them. Managed-mode deployments
-// pass true: they bill via prepaid credits against the platform key and must
-// never honor a leftover row in router.model_router_external_api_keys, or the
-// customer would be charged twice (once upstream, once via credits).
-// Self-hosted passes false; BYOK is the only credentialing path there.
+// byokDisabled strips BYOK (customer-owned provider) keys before downstream
+// proxy code sees them. Managed-mode deployments pass true: they bill via
+// prepaid credits, so honoring a leftover BYOK row would double-charge the
+// customer. Self-hosted passes false; BYOK is the only credentialing path there.
 func WithAuth(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 	return withAPIKey(svc, byokDisabled)
 }
 
 // WithAdminOrAuth accepts either a signed admin session cookie OR a bearer rk_ token.
-//
-// Do not use on `/v1/*` data-plane routes — a dashboard cookie must not call provider proxy endpoints.
-// Do not use on control-plane mutations — a leaked rk_ must not mint fresh keys or rotate provider credentials; use WithAdminOnly instead.
-//
-// See WithAuth for the byokDisabled semantics.
+// Don't use on `/v1/*` data-plane routes (a cookie shouldn't call provider proxy endpoints)
+// or on control-plane mutations (a leaked rk_ shouldn't mint keys or rotate credentials —
+// use WithAdminOnly there). See WithAuth for byokDisabled.
 func WithAdminOrAuth(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 	apiKeyMW := withAPIKey(svc, byokDisabled)
 	return func(c *gin.Context) {
@@ -90,11 +82,10 @@ func WithAdminOnly(svc *auth.Service) gin.HandlerFunc {
 
 // withAPIKey is the bearer-only auth path shared by WithAuth and the fall-through branch of WithAdminOrAuth.
 //
-// When byokDisabled is true, BYOK rows returned by svc.VerifyAPIKey are
-// dropped before reaching the request context. Every downstream consumer of
-// the BYOK ctx value (proxy credential resolution, provider gating, usage
-// bookkeeping) reads from that single key, so gating it here makes the entire
-// code path BYOK-blind without further surgery.
+// When byokDisabled is true, BYOK rows from svc.VerifyAPIKey are dropped
+// before reaching the request context. Every downstream BYOK consumer
+// (credential resolution, provider gating, usage bookkeeping) reads that
+// single ctx key, so gating it here makes the whole path BYOK-blind.
 func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractToken(c)
@@ -126,9 +117,8 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 				ctx = context.WithValue(ctx, proxy.InstallationPreferredModelsContextKey{}, installation.PreferredModels)
 			}
 			if installation.RoutingQualityWeight != nil {
-				// The stored weight is the user-facing dial position, so it
-				// flows in as QualityBias (per-cluster, dispersion-aware), not
-				// the uniform Alpha sledgehammer. See router.Overrides.
+				// User-facing dial position flows in as QualityBias (per-cluster,
+				// dispersion-aware), not the uniform Alpha. See router.Overrides.
 				ctx = context.WithValue(ctx, proxy.InstallationRoutingKnobsContextKey{}, &router.Overrides{
 					QualityBias: installation.RoutingQualityWeight,
 				})
@@ -154,9 +144,7 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 		if sub := strings.TrimSpace(c.GetHeader(AnthropicSubscriptionHeader)); sub != "" {
 			ctx = context.WithValue(ctx, proxy.AnthropicSubscriptionContextKey{}, sub)
 		}
-		// Codex (ChatGPT) subscription, router-keyed path: stash the OAuth JWT
-		// and its paired ChatGPT-Account-ID raw; the proxy validates shape and
-		// decides precedence. Never logged.
+		// Codex (ChatGPT) subscription: stash JWT + account ID raw for the proxy. Never logged.
 		if sub := strings.TrimSpace(c.GetHeader(OpenAISubscriptionHeader)); sub != "" {
 			ctx = context.WithValue(ctx, proxy.OpenAISubscriptionContextKey{}, sub)
 		}
@@ -211,9 +199,9 @@ func handleAuthError(c *gin.Context, err error) {
 	logger := observability.FromGin(c)
 	switch {
 	case errors.Is(err, auth.ErrInvalidPrefix):
-		logger.Info("Auth rejected: invalid bearer prefix (expected rk_...)")
+		logger.Debug("Auth rejected: invalid bearer prefix (expected rk_...)")
 	case errors.Is(err, auth.ErrInvalidToken):
-		logger.Info("Auth rejected: bearer token did not match an active key")
+		logger.Debug("Auth rejected: bearer token did not match an active key")
 	default:
 		// Infra failure (DB unreachable, etc.). Still 401 to the caller; logged as Error for on-call.
 		logger.Error("Auth check errored", "err", err)

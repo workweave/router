@@ -1,6 +1,5 @@
-// Package translate converts request and response bodies between OpenAI and
-// Anthropic wire formats. Request translation uses RequestEnvelope; this file
-// handles non-streaming response helpers.
+// Package translate converts request/response bodies between OpenAI and
+// Anthropic wire formats. This file handles non-streaming responses.
 package translate
 
 import (
@@ -166,15 +165,14 @@ func AnthropicToOpenAIError(body []byte) []byte {
 // OpenAIToAnthropicResponse converts a non-streaming OpenAI response to
 // Anthropic Messages format.
 func OpenAIToAnthropicResponse(body []byte, requestModel string) ([]byte, error) {
-	out, _, err := openAIToAnthropicResponse(body, requestModel, nil, false)
+	out, _, err := openAIToAnthropicResponse(body, requestModel, nil, false, false)
 	return out, err
 }
 
 // openAIToAnthropicResponse is the validator-aware variant: tool_use inputs
-// are checked (and safely repaired) against the request's tool schemas via
-// toolValidator, with one toolcheck.Issue returned per offending block. A nil
-// validator degrades to syntax-check-only.
-func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *toolcheck.Validator, thinkTagReasoning bool) ([]byte, []toolcheck.Issue, error) {
+// are checked/repaired against the request's tool schemas, returning one
+// toolcheck.Issue per offending block. A nil validator is syntax-check-only.
+func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *toolcheck.Validator, thinkTagReasoning, escapeNormalize bool) ([]byte, []toolcheck.Issue, error) {
 	if !gjson.ValidBytes(body) {
 		return nil, nil, fmt.Errorf("unmarshal openai response: invalid JSON")
 	}
@@ -192,16 +190,12 @@ func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *
 	firstChoice := gjson.GetBytes(body, "choices.0")
 	message := firstChoice.Get("message")
 	finishReason := firstChoice.Get("finish_reason").String()
-	// Anthropic invariant: a tool_use stop_reason holds iff at least one
-	// tool_use block exists. Some OpenAI-compat upstreams (GLM-5.1 on
-	// DeepInfra, vLLM Qwen/MiMo serves) violate it in both directions, so we
-	// correct both — mirroring the streaming path in emitMessageDelta:
-	//   - Promote: a named tool call is present but the turn closed with
-	//     finish_reason="stop" instead of "tool_calls".
-	//   - Demote: finish_reason="tool_calls" but every call was nameless and
-	//     dropped by writeAnthropicContentFromOpenAI (or the call leaked into
-	//     text). Left as tool_use it would ship a tool_use stop_reason with
-	//     zero tool_use blocks and dead-end the client.
+	// Anthropic invariant: tool_use stop_reason iff a tool_use block exists.
+	// Some OpenAI-compat upstreams (GLM-5.1/DeepInfra, vLLM Qwen/MiMo) violate
+	// it both ways, so we correct both, mirroring emitMessageDelta:
+	//   - Promote: named tool call present but finish_reason="stop".
+	//   - Demote: finish_reason="tool_calls" but every call was nameless
+	//     (dropped below) — else we'd ship tool_use with zero blocks.
 	if anyNamedToolCall(message.Get("tool_calls")) {
 		finishReason = "tool_calls"
 	} else if finishReason == "tool_calls" {
@@ -219,7 +213,7 @@ func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *
 	jw.Key("model")
 	jw.Str(model)
 	jw.Key("content")
-	issues := writeAnthropicContentFromOpenAI(jw, message, toolValidator, thinkTagReasoning)
+	issues := writeAnthropicContentFromOpenAI(jw, message, toolValidator, thinkTagReasoning, escapeNormalize)
 	jw.Key("stop_reason")
 	jw.Str(openAIFinishToAnthropicStopReason(finishReason))
 	jw.Key("stop_sequence")
@@ -239,7 +233,7 @@ func writeAnthropicThinkingBlock(jw *jsonWriter, thinking string) {
 	jw.EndObj()
 }
 
-func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolValidator *toolcheck.Validator, thinkTagReasoning bool) (issues []toolcheck.Issue) {
+func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolValidator *toolcheck.Validator, thinkTagReasoning, escapeNormalize bool) (issues []toolcheck.Issue) {
 	jw.Arr()
 	reasoning := message.Get("reasoning_content").String()
 	if reasoning == "" {
@@ -259,10 +253,8 @@ func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolV
 				prose.WriteString(seg.text)
 			}
 		}
-		// Fold tag-derived reasoning into the same thinking block as
-		// reasoning_content/reasoning, matching the streaming translator
-		// (appendThinking reuses an open thinking block) so a payload with both
-		// channels shapes identically for stream:false clients.
+		// Fold into the same thinking block as reasoning_content/reasoning,
+		// matching the streaming translator so both channels shape identically.
 		reasoning += think.String()
 		text = prose.String()
 	}
@@ -287,18 +279,17 @@ func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolV
 		}
 		argsStr := tc.Get("function.arguments").String()
 
-		if EnableEditEscapeNormalize && isEditToolName(name) {
+		if escapeNormalize && isEditToolName(name) {
 			var inputMap map[string]any
 			if json.Unmarshal([]byte(argsStr), &inputMap) == nil {
-				normalizeEditEscapes(name, inputMap)
+				normalizeEditEscapes(escapeNormalize, name, inputMap)
 				if b, err := json.Marshal(inputMap); err == nil {
 					argsStr = string(b)
 				}
 			}
 		}
-		// Validate (and safely repair) the args against the request's tool
-		// schema; with a nil validator this degrades to the historic
-		// syntax-check + `{}` substitution.
+		// Validate (and safely repair) args against the request's tool schema;
+		// nil validator degrades to syntax-check + `{}` substitution.
 		verdict := toolValidator.Check(name, argsStr)
 		if verdict.Issue != nil {
 			issues = append(issues, *verdict.Issue)
@@ -321,13 +312,11 @@ func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolV
 	return issues
 }
 
-// anyNamedToolCall reports whether the OpenAI tool_calls array contains at
-// least one call with a non-empty function name. A nameless tool_call is
-// malformed: OpenAI-compat upstreams (GLM, Qwen, Kimi, gpt-oss on
-// vLLM/SGLang/DeepInfra) intermittently emit one, often alongside
-// finish_reason="stop". Forwarding it as an Anthropic tool_use block makes the
-// client invoke tool "" -> "No such tool available" -> retry -> infinite loop,
-// so such calls are dropped and must not drive the stop_reason promotion.
+// anyNamedToolCall reports whether tool_calls has a call with a non-empty
+// function name. Nameless tool_calls (seen intermittently from GLM/Qwen/Kimi/
+// gpt-oss on vLLM/SGLang/DeepInfra) are malformed: forwarded as-is they make
+// the client invoke tool "" and infinite-loop retrying, so they're dropped
+// and must not drive stop_reason promotion.
 func anyNamedToolCall(toolCalls gjson.Result) bool {
 	found := false
 	toolCalls.ForEach(func(_, tc gjson.Result) bool {
@@ -342,7 +331,7 @@ func anyNamedToolCall(toolCalls gjson.Result) bool {
 
 // isEditToolName reports whether name is a file-edit tool subject to escape normalization.
 func isEditToolName(name string) bool {
-	_, ok := editToolNames[strings.ToLower(name)]
+	_, ok := escapeNormalizeToolNames[strings.ToLower(name)]
 	return ok
 }
 

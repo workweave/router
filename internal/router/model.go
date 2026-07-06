@@ -10,11 +10,8 @@ const (
 	CapExtendedThinking ModelCapability = "extended_thinking"
 	CapReasoning        ModelCapability = "reasoning"
 	CapExtendedContext  ModelCapability = "extended_context"
-	// CapXhighEffort marks Anthropic adaptive models whose output_config.effort
-	// menu includes "xhigh". All adaptive models accept low/medium/high/max;
-	// xhigh is opus-4-7+ only — claude-sonnet-4-6 rejects it with 400 "This
-	// model does not support effort level 'xhigh'". Emit clamps xhigh to "max"
-	// when the target lacks this capability.
+	// CapXhighEffort marks models supporting effort "xhigh" (opus-4-7+ only;
+	// sonnet-4-6 400s on it). Emit clamps to "max" when unsupported.
 	CapXhighEffort ModelCapability = "xhigh_effort"
 )
 
@@ -41,13 +38,19 @@ func NewSpec(caps ...ModelCapability) ModelSpec {
 // dateSuffix matches Anthropic (-20251001) and OpenAI (-2024-08-06) trailing date stamps.
 var dateSuffix = regexp.MustCompile(`-\d{4}-?\d{2}-?\d{2}$`)
 
+// StripDateSuffix removes a trailing Anthropic-style (-20251001) or OpenAI-style
+// (-2024-08-06) date stamp from a model ID. Returns the input unchanged when no suffix matches.
+func StripDateSuffix(model string) string {
+	return dateSuffix.ReplaceAllString(model, "")
+}
+
 // Lookup returns the spec for a known model ID. Dated variants (e.g.
 // "-20251001") fall back to the base model; unknown models get zero-value.
 func Lookup(model string) ModelSpec {
 	if s, ok := registry[model]; ok {
 		return s
 	}
-	if base := dateSuffix.ReplaceAllString(model, ""); base != model {
+	if base := StripDateSuffix(model); base != model {
 		if s, ok := registry[base]; ok {
 			return s
 		}
@@ -56,11 +59,9 @@ func Lookup(model string) ModelSpec {
 }
 
 var (
-	// claude-opus-4-6+ and claude-sonnet-4-6+ only accept thinking.type=adaptive;
-	// the legacy thinking.type=enabled shape returns 400 from Anthropic since the
-	// rollout of output_config.effort.
-	// Opus 4.6+, Opus 4.7+, Opus 4.8, and Sonnet 4.6 support 1M context via
-	// context-1m-2025-08-07 beta; Haiku 4.5 and Sonnet 4.5 are limited to 200K.
+	// Opus/Sonnet 4.6+ only accept thinking.type=adaptive (legacy "enabled" 400s
+	// since output_config.effort rollout) and support 1M context via the
+	// context-1m-2025-08-07 beta; Haiku 4.5 and Sonnet 4.5 top out at 200K.
 	anthropicAdaptive = NewSpec(CapAdaptiveThinking, CapExtendedContext)
 	// Opus 4.7+ (and fable) additionally accept effort level "xhigh"; the
 	// older adaptive models (opus-4-6, sonnet-4-6) top out at "max".
@@ -80,22 +81,19 @@ var googleBase = NewSpec()
 var openAICompatBase = NewSpec()
 
 var registry = map[string]ModelSpec{
-	// claude-fable-5: adaptive thinking is always on (thinking.type=disabled
-	// is rejected); 1M context is native, so CapExtendedContext only makes the
-	// context-1m beta header a harmless no-op.
+	// claude-fable-5 has adaptive thinking always on (disabled is rejected);
+	// 1M context is native, so CapExtendedContext's beta header is a no-op.
 	"claude-fable-5":  anthropicAdaptiveXhigh,
 	"claude-opus-4-8": anthropicAdaptiveXhigh,
 	"claude-opus-4-7": anthropicAdaptiveXhigh,
-	// claude-sonnet-5: adaptive-only, 1M context behind the beta header. Mirrors
-	// sonnet-4-6 (no xhigh — the Sonnet line tops out at effort "max"; marking
-	// xhigh unsupported clamps it to max rather than 400ing a mid-session switch).
+	// claude-sonnet-5 mirrors sonnet-4-6: no xhigh, since Sonnet tops out at
+	// effort "max" and marking xhigh unsupported clamps rather than 400s.
 	"claude-sonnet-5":   anthropicAdaptive,
 	"claude-sonnet-4-6": anthropicAdaptive,
 	"claude-opus-4-6":   anthropicAdaptive,
 
-	// claude-haiku-4-5 returns 400 "adaptive thinking is not supported on
-	// this model" when a Claude Code body with thinking.type=adaptive is
-	// forwarded through the router after a downgrade from opus.
+	// claude-haiku-4-5 400s on thinking.type=adaptive, which Claude Code
+	// bodies carry after a downgrade from opus.
 	"claude-haiku-4-5": anthropicExtended,
 	"claude-opus-4-5":  anthropicExtended,
 	"claude-opus-4-1":  anthropicExtended,

@@ -1,6 +1,10 @@
 package catalog
 
-import "workweave/router/internal/providers"
+import (
+	"math"
+
+	"workweave/router/internal/providers"
+)
 
 // EffectiveInputCost returns the true USD input cost after applying cache
 // pricing. Fresh tokens at base rate; cache-creation at 1.25x; cache-read
@@ -27,4 +31,18 @@ func EffectiveInputCost(inputTokens, cacheCreation, cacheRead int, pricePer1M fl
 // have no caching multipliers — straight tokens × per-1M price.
 func EffectiveOutputCost(outputTokens int, pricePer1M float64) float64 {
 	return float64(outputTokens) / 1_000_000 * pricePer1M
+}
+
+// USDToMicros rounds a float64 USD value to BIGINT micros (USD x 1e6) for
+// persistence/debit math. NaN, Inf, and negative values collapse to 0 — we
+// never want to write nonsense or debit/charge a negative amount.
+//
+// Single source of truth for the billing debit hook's notional-cost math
+// and the telemetry write path's stored cost columns; both used to
+// hand-roll this rounding independently.
+func USDToMicros(f float64) int64 {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+		return 0
+	}
+	return int64(math.Round(f * 1_000_000))
 }

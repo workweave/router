@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
+	"workweave/router/internal/timing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,9 +59,46 @@ func TestStreamBody_NoWatchdogPath(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 
-	err := StreamBody(ctx, nil, 0, r, 200, w, &otel.Timing{})
+	err := StreamBody(ctx, nil, 0, r, 200, w, &timing.Timing{})
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", w.Body.String())
+}
+
+func TestStreamBody_OnChunkFiresFirstOnlyOnFirstNonEmptyRead(t *testing.T) {
+	ctx := context.Background()
+	r := &pacedReader{
+		ctx:    ctx,
+		chunks: []string{"hello ", "world"},
+		delays: []time.Duration{1 * time.Millisecond, 1 * time.Millisecond},
+	}
+	w := httptest.NewRecorder()
+
+	var seen []string
+	var firstFlags []bool
+	onChunk := func(chunk []byte, first bool) {
+		seen = append(seen, string(chunk))
+		firstFlags = append(firstFlags, first)
+	}
+
+	err := StreamBody(ctx, nil, 0, r, 200, w, &timing.Timing{}, WithOnChunk(onChunk))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"hello ", "world"}, seen)
+	assert.Equal(t, []bool{true, false}, firstFlags)
+}
+
+func TestStreamBody_NilOnChunkIsSafe(t *testing.T) {
+	ctx := context.Background()
+	r := &pacedReader{
+		ctx:    ctx,
+		chunks: []string{"hello"},
+		delays: []time.Duration{0},
+	}
+	r.delays[0] = 1 * time.Millisecond
+	w := httptest.NewRecorder()
+
+	err := StreamBody(ctx, nil, 0, r, 200, w, &timing.Timing{})
+	require.NoError(t, err)
+	assert.Equal(t, "hello", w.Body.String())
 }
 
 func TestStreamBody_WatchdogDoesNotFireOnLivelyStream(t *testing.T) {
@@ -74,7 +111,7 @@ func TestStreamBody_WatchdogDoesNotFireOnLivelyStream(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 
-	err := StreamBody(ctx, cancel, 200*time.Millisecond, r, 200, w, &otel.Timing{})
+	err := StreamBody(ctx, cancel, 200*time.Millisecond, r, 200, w, &timing.Timing{})
 	require.NoError(t, err)
 	assert.Equal(t, "abcd", w.Body.String())
 }
@@ -93,7 +130,7 @@ func TestStreamBody_WatchdogFiresOnStall(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	start := time.Now()
-	err := StreamBody(ctx, cancel, 150*time.Millisecond, r, 200, w, &otel.Timing{})
+	err := StreamBody(ctx, cancel, 150*time.Millisecond, r, 200, w, &timing.Timing{})
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
@@ -114,7 +151,7 @@ func TestStreamBody_WatchdogFiresWithZeroPriorBytes(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 
-	err := StreamBody(ctx, cancel, 100*time.Millisecond, r, 200, w, &otel.Timing{})
+	err := StreamBody(ctx, cancel, 100*time.Millisecond, r, 200, w, &timing.Timing{})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrUpstreamIdleTimeout)
 }
@@ -125,7 +162,7 @@ func TestStreamBody_NonStreamingStatus(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 
-	err := StreamBody(ctx, cancel, 200*time.Millisecond, r, 500, w, &otel.Timing{})
+	err := StreamBody(ctx, cancel, 200*time.Millisecond, r, 500, w, &timing.Timing{})
 	var statusErr *providers.UpstreamStatusError
 	require.ErrorAs(t, err, &statusErr)
 	assert.Equal(t, 500, statusErr.Status)
@@ -289,4 +326,59 @@ func TestStartThroughputWatchdog_DoesNotFireOnHealthyStream(t *testing.T) {
 func TestErrUpstreamSlowThroughput_AliasIsRetryable(t *testing.T) {
 	assert.True(t, errors.Is(ErrUpstreamSlowThroughput, providers.ErrUpstreamSlowThroughput))
 	assert.True(t, providers.IsRetryable(ErrUpstreamSlowThroughput))
+}
+
+func TestSanitizeInboundAuthHeader(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "empty header passes through unchanged",
+			in:   "",
+			want: "",
+		},
+		{
+			name: "router key bearer is scrubbed",
+			in:   "Bearer rk_abcdefghijklmnopqrstuvwx",
+			want: "",
+		},
+		{
+			name: "router key bearer is scrubbed case-insensitively",
+			in:   "bearer rk_abcdefghijklmnopqrstuvwx",
+			want: "",
+		},
+		{
+			name: "router key bearer with mixed-case prefix is scrubbed",
+			in:   "BEARER rk_abcdefghijklmnopqrstuvwx",
+			want: "",
+		},
+		{
+			name: "BYOK anthropic subscription bearer is forwarded",
+			in:   "Bearer sk-ant-oat01-abcdefg",
+			want: "Bearer sk-ant-oat01-abcdefg",
+		},
+		{
+			name: "BYOK openai-shaped bearer is forwarded",
+			in:   "Bearer sk-proj-abcdefg",
+			want: "Bearer sk-proj-abcdefg",
+		},
+		{
+			name: "non-bearer auth scheme is forwarded untouched",
+			in:   "Basic dXNlcjpwYXNz",
+			want: "Basic dXNlcjpwYXNz",
+		},
+		{
+			name: "bearer with only rk-like substring (not prefixed) is forwarded",
+			in:   "Bearer sk-rk_notarealrouterkey",
+			want: "Bearer sk-rk_notarealrouterkey",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, SanitizeInboundAuthHeader(tt.in))
+		})
+	}
 }

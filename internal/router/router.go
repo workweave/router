@@ -4,21 +4,18 @@ package router
 import "context"
 
 type Overrides struct {
-	// Alpha is the raw per-cluster quality weight, applied UNIFORMLY across
-	// every cluster (the "sledgehammer"). This is the eval/debug lever set by
-	// the x-weave-routing-alpha header; it deliberately ignores per-cluster
-	// quality dispersion so a bake-off can probe a single global alpha.
+	// Alpha is the raw per-cluster quality weight applied UNIFORMLY across every
+	// cluster (the eval/debug "sledgehammer" set via x-weave-routing-alpha), so
+	// a bake-off can probe a single global alpha regardless of per-cluster
+	// quality dispersion.
 	Alpha *float64
-	// QualityBias is the user-facing "quality vs price" dial in [0, 1] (0 =
-	// fully price, 1 = fully quality). Unlike Alpha, the scorer maps it through
-	// a per-bundle calibration (see dialToAlpha / computeDialCalibration) that
-	// places the dial's travel where the routed model mix actually changes, so
-	// the slider's midrange produces a real model mix instead of a dead zone.
-	// The endpoints still pin to all-cheapest (0) and best-per-cluster top
-	// quality (1). Set by the per-installation routing-preference dial.
-	// routingKnobsForRequest returns either the header knobs or the installation
-	// knobs, never a merge, so Alpha and QualityBias do not normally coexist; if
-	// both are set, QualityBias wins (it is the higher-level intent).
+	// QualityBias is the user-facing "quality vs price" dial in [0, 1]. Unlike
+	// Alpha, it's mapped through a per-bundle calibration (dialToAlpha /
+	// computeDialCalibration) so the slider's midrange moves the routed model
+	// mix instead of hitting a dead zone; endpoints still pin to all-cheapest
+	// (0) and best-per-cluster quality (1). routingKnobsForRequest returns
+	// either header or installation knobs, never a merge, so if both Alpha and
+	// QualityBias are set, QualityBias wins.
 	QualityBias          *float64
 	SpeedWeight          *float64
 	OutputCostRatio      *float64
@@ -30,9 +27,8 @@ type Request struct {
 	RequestedModel       string
 	EstimatedInputTokens int
 	HasTools             bool
-	// HasImages is true when the request carries image content. The scorer
-	// drops text-only models from the eligible pool; the turn loop evicts a
-	// text-only session pin.
+	// HasImages: scorer drops text-only models from the eligible pool; turn
+	// loop evicts a text-only session pin.
 	HasImages  bool
 	PromptText string
 	// Per-request provider gating — nil means unrestricted.
@@ -40,24 +36,19 @@ type Request struct {
 	// Per-request model exclusion — nil or empty means no exclusion.
 	// If filtering empties eligible set, scorer returns ErrNoEligibleProvider.
 	ExcludedModels map[string]struct{}
-	// PreferredModels is the per-installation model priority ranking, in
-	// descending preference (index 0 = first preference). The scorer lifts each
-	// preferred model's blended score by a small, rank-decaying additive bonus
-	// (a soft "finger on the scale") so a preferred model wins close calls but
-	// never overrides a clearly-better model for the task. Entries not in the
-	// eligible pool are ignored. nil or empty means no preference.
+	// PreferredModels is the per-installation priority ranking (index 0 =
+	// first). The scorer adds a small rank-decaying bonus to each preferred
+	// model's score — enough to win close calls, not to override a clearly
+	// better model. Entries not in the eligible pool are ignored.
 	PreferredModels []string
 	RoutingKnobs    *Overrides // NEW: parsed dynamic knobs
 	// SubsidizedModelCostFactor is the per-model rate-limit headroom factor in
-	// [epsilon, 1] for models a caller's presented subscription covers, derived
-	// from observed headroom (see internal/proxy/usage): ~epsilon when the sub's
-	// window has slack, rising to 1 as the window binds. Absent entry = no
-	// subsidy; nil/empty = today's behavior. The cluster scorer reads it as a
-	// PREFERENCE signal — it lifts a covered model's score by a uniform per-family
-	// bonus proportional to (1−factor), leaving the cost axis at full catalog so
-	// the intra-family Haiku↔Opus spread is preserved. (The planner, separately,
-	// still reads it as a literal cost multiplier for its dollar-EV cache-switch
-	// math, where a prepaid model's marginal price really is ~factor×catalog.)
+	// [epsilon, 1] for models the caller's subscription covers (see
+	// internal/proxy/usage): ~epsilon when the window has slack, rising to 1 as
+	// it binds. Absent = no subsidy. The cluster scorer treats it as a
+	// preference signal (score bonus proportional to 1−factor, cost axis left
+	// at full catalog so Haiku↔Opus spread is preserved); the planner instead
+	// treats it as a literal cost multiplier for dollar-EV cache-switch math.
 	SubsidizedModelCostFactor map[string]float64
 }
 
@@ -77,28 +68,33 @@ type RoutingMetadata struct {
 	CandidateModels      []string
 	ChosenScore          float32
 	ClusterRouterVersion string
-	EffectiveKnobsHash   uint64 // NEW: canonical knobs hash for response-cache isolation
-	// CandidateScores is the full pre-argmax blended score per eligible model.
-	// Surfaced for off-policy analysis (the substrate a contextual bandit needs);
-	// nil for routers that don't compute a score vector. Does not affect routing.
+	// Strategy identifies opt-in sidecar routers ("rl", "hmm") when metadata
+	// is produced outside the default cluster scorer.
+	Strategy string
+	// RouteID is an opaque sidecar correlation id. Outcome reporters and logs
+	// use it to join route decisions to final dispatch usage.
+	RouteID string
+	// DisplayMarker is an optional, already-humanized route badge. Sidecars
+	// use this to show strategy-specific labels without moving their display
+	// logic into router-internal.
+	DisplayMarker      string
+	EffectiveKnobsHash uint64 // NEW: canonical knobs hash for response-cache isolation
+	// CandidateScores: full pre-argmax blended score per eligible model, for
+	// off-policy analysis (contextual bandit substrate). Doesn't affect routing.
 	CandidateScores map[string]float32
-	// CandidateProviders is the per-request resolved provider for each eligible
-	// model, so an exploration policy can switch to an in-band peer using this
-	// request's binding (correct under BYOK) instead of a boot-time default.
-	// nil for routers that don't resolve providers. Does not affect routing.
+	// CandidateProviders: per-request resolved provider per eligible model, so
+	// an exploration policy can switch to an in-band peer using this request's
+	// binding (correct under BYOK) rather than a boot-time default.
 	CandidateProviders map[string]string
 	// Propensity is the probability the chosen model was selected under the
-	// acting policy. 1.0 for a deterministic argmax; <1.0 only when an
-	// exploration policy randomizes. Logged so logged decisions carry the
-	// importance weight an off-policy estimator requires.
+	// acting policy: 1.0 for deterministic argmax, <1.0 under exploration.
+	// Logged as the importance weight an off-policy estimator needs.
 	Propensity float32
-	// PairedModel is the runner-up — the second-highest-scoring eligible model
-	// for this request, the other half of the {Model, PairedModel} band pair
-	// Stage 1 freezes into the session pin so a later per-turn policy can swap
-	// between the two without re-running the scorer. Empty when only one model
-	// is eligible. PairedProvider is its per-request resolved provider binding;
-	// PairedScore is its blended score (same scale as ChosenScore). These are
-	// informational — they do not affect this request's routing.
+	// PairedModel is the runner-up model — the other half of the {Model,
+	// PairedModel} band pair Stage 1 freezes into the session pin so a later
+	// per-turn policy can swap without re-running the scorer. Empty when only
+	// one model is eligible. PairedProvider/PairedScore are informational and
+	// don't affect this request's routing.
 	PairedModel    string
 	PairedProvider string
 	PairedScore    float32

@@ -21,29 +21,25 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// DefaultHandoverModel is the Anthropic model used to summarize prior
-// conversation before a mid-session model switch. Haiku-class is intentional:
-// summarization is one of the cheapest workloads available.
+// DefaultHandoverModel summarizes prior conversation before a mid-session
+// model switch. Haiku-class is intentional: summarization is cheap.
 const DefaultHandoverModel = "claude-haiku-4-5"
 
-// DefaultHandoverTimeout bounds the summarizer call so a slow upstream
-// cannot block the request path. Tuned to allow haiku-class summarization
-// of ~20k-token sessions, which observed ~5-7s p95 on Anthropic.
+// DefaultHandoverTimeout bounds the summarizer call. Tuned for ~5-7s p95
+// observed for haiku-class summarization of ~20k-token sessions.
 const DefaultHandoverTimeout = 8 * time.Second
 
 // DefaultHandoverMaxTokens caps the synthesized summary length.
 const DefaultHandoverMaxTokens = 800
 
-// handoverInstruction is appended as a final user message to elicit the
-// summary. Kept explicit about what must be preserved so a routing switch
-// does not lose decisions, file paths, or the user's latest intent.
+// handoverInstruction elicits the summary as a final user message, explicit
+// about what must survive the switch (decisions, paths, latest intent).
 const handoverInstruction = "Summarize the conversation so far in <= 800 tokens. " +
 	"Preserve all decisions, file paths, code snippets, and the user's latest intent. " +
 	"Output only the summary text — no preamble, no closing remark."
 
-// ProviderSummarizer adapts a providers.Client to the handover.Summarizer
-// interface by building a small Anthropic Messages request from the inbound
-// envelope's prior conversation.
+// ProviderSummarizer adapts a providers.Client to handover.Summarizer by
+// building a small Anthropic Messages request from the prior conversation.
 type ProviderSummarizer struct {
 	client    providers.Client
 	model     string
@@ -86,11 +82,10 @@ func (s *ProviderSummarizer) Provider() string {
 // assistant text was extractable.
 var ErrEmptySummary = errors.New("handover: upstream returned no summary text")
 
-// Summarize implements handover.Summarizer. Builds an Anthropic Messages call,
-// dispatches through the configured client under a hard timeout. Returns the
-// summary text and the upstream usage breakdown so callers can debit the
-// summary as a separate ledger row. On failure returns ("", zero Usage, err)
-// so the caller can pass the full prior history through unchanged.
+// Summarize implements handover.Summarizer: builds and dispatches an
+// Anthropic Messages call under a hard timeout, returning summary text plus
+// usage for a separate ledger row. On failure returns ("", zero Usage, err)
+// so the caller falls back to the full prior history.
 func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.RequestEnvelope) (string, handover.Usage, error) {
 	log := observability.FromContext(ctx)
 	if env == nil {
@@ -155,8 +150,7 @@ func (s *ProviderSummarizer) Summarize(ctx context.Context, env *translate.Reque
 }
 
 // extractAnthropicUsage pulls the usage block from an Anthropic non-streaming
-// Messages response. Missing fields are zero — the response shape is stable
-// enough that we don't bother distinguishing "absent" from "zero".
+// Messages response. Missing fields are zero; we don't distinguish "absent".
 func extractAnthropicUsage(body []byte) handover.Usage {
 	if !gjson.ValidBytes(body) {
 		return handover.Usage{}
@@ -173,9 +167,9 @@ func extractAnthropicUsage(body []byte) handover.Usage {
 	}
 }
 
-// buildHandoverRequestBody constructs a non-streaming Anthropic Messages
-// request from the inbound envelope's prior conversation, injecting a
-// summary instruction and overriding model/max_tokens/stream.
+// buildHandoverRequestBody builds a non-streaming Anthropic Messages request
+// from the envelope's prior conversation, injecting the summary instruction
+// and overriding model/max_tokens/stream.
 func buildHandoverRequestBody(env *translate.RequestEnvelope, model string, maxTokens int) ([]byte, error) {
 	prep, err := env.PrepareAnthropic(nil, translate.EmitOptions{TargetModel: model})
 	if err != nil {
@@ -254,18 +248,13 @@ func extractAnthropicAssistantText(body []byte) string {
 var _ handover.Summarizer = (*ProviderSummarizer)(nil)
 
 // runCompactionHandover rewrites env in-place with a handover summary when
-// Claude Code context compaction is detected on a non-Anthropic route. The
-// compaction already dropped old turns from the client's history; without this
-// step the non-Anthropic model has no awareness of edits or decisions that
-// lived only in those elided turns.
+// Claude Code context compaction is detected on a non-Anthropic route —
+// compaction already dropped old turns, so without this the non-Anthropic
+// model loses awareness of edits/decisions from those elided turns.
 //
-// Mirrors the model-switch handover in runTurnLoop: run the summarizer when
-// wired and credentials allow, and on any failure pass the compacted body
-// through unchanged rather than trimming it. Errors are logged but never
-// returned — a failed compaction rewrite is better than a failed request, and
-// passing the full compacted body keeps Claude Code's own compaction summary
-// intact (trimming to the last few turns would discard it).
-// Returns a handoverOutcome so the caller can bill the summary upstream call.
+// On any failure it logs and passes the compacted body through unchanged
+// (never trims it further, which would discard Claude Code's own compaction
+// summary). Returns a handoverOutcome so the caller can bill the summary call.
 func (s *Service) runCompactionHandover(ctx context.Context, env *translate.RequestEnvelope, reqHeaders http.Header, decisionModel string) handoverOutcome {
 	log := observability.FromContext(ctx)
 	var out handoverOutcome
@@ -295,9 +284,9 @@ func (s *Service) runCompactionHandover(ctx context.Context, env *translate.Requ
 		if sumCreds != nil {
 			summCtx = context.WithValue(ctx, CredentialsContextKey{}, sumCreds)
 		} else {
-			// Run on the deployment key: strip any request credential (notably a
-			// subscription OAuth token) the turn resolved, so this synthetic
-			// call doesn't inherit it from ctx and 401 / cross a tenant boundary.
+			// Strip any request credential (e.g. subscription OAuth token) so
+			// this synthetic call runs on the deployment key instead of
+			// inheriting one that could 401 or cross a tenant boundary.
 			summCtx = clearCredentials(ctx)
 		}
 		start := time.Now()

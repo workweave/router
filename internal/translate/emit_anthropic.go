@@ -1,6 +1,7 @@
 package translate
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -50,9 +51,8 @@ func deriveAnthropicHeaders(in http.Header, opts EmitOptions) http.Header {
 	return h
 }
 
-// context1MBeta is the Anthropic beta that unlocks the 1M-token context window
-// for CapExtendedContext models (Opus 4.6+, Sonnet 4.6). Native-1M models
-// (Fable 5) accept it as a harmless no-op.
+// context1MBeta unlocks the 1M-token context window for CapExtendedContext
+// models; native-1M models (Fable 5) accept it as a no-op.
 const context1MBeta = "context-1m-2025-08-07"
 
 // ensureBetaToken appends token to a comma-separated anthropic-beta list when
@@ -127,7 +127,8 @@ func (e *RequestEnvelope) buildAnthropicFromOpenAI(opts EmitOptions) ([]byte, er
 
 	// tool_choice "none" suppresses tools entirely — Anthropic has no direct
 	// equivalent, so omitting tools is the only way to prevent tool calls.
-	suppressTools := gjson.GetBytes(e.body, "tool_choice").String() == "none"
+	kind, _ := openAIToolChoice(e.body)
+	suppressTools := kind == toolChoiceNone
 	if !suppressTools {
 		writeAnthropicTools(jw, e.body)
 		writeAnthropicToolChoice(jw, e.body)
@@ -138,9 +139,8 @@ func (e *RequestEnvelope) buildAnthropicFromOpenAI(opts EmitOptions) ([]byte, er
 	return jw.Bytes(), nil
 }
 
-// writeAnthropicSystemAndMessages walks the OpenAI messages array, extracts
-// system-role messages into the Anthropic "system" field, and writes the
-// remaining messages as Anthropic-formatted content.
+// writeAnthropicSystemAndMessages extracts system-role messages into the
+// Anthropic "system" field and writes the rest as Anthropic content.
 func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.Exists() {
@@ -251,9 +251,7 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 		jw.Key("messages")
 		jw.Arr()
 		for i, m := range msgParts {
-			// Cache the conversation prefix up to this turn by marking the
-			// last block of the final message; on the next turn that block is
-			// a stable prefix and reads from cache.
+			// Mark the last block so the prefix reads from cache next turn.
 			if i == len(msgParts)-1 {
 				m = cacheControlOnLastBlock(m)
 			}
@@ -263,18 +261,16 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 	}
 }
 
-// cacheControlMember is the Anthropic prompt-cache breakpoint, serialized as a
-// JSON object member. OpenAI and Gemini clients never send cache_control, so on
-// the OpenAI->Anthropic path the router injects it: without breakpoints, clients
-// like Cursor re-bill the entire stable prefix (tools + system + prior turns) on
-// every turn at 0% cache hit, because Anthropic has no implicit prompt caching.
-// Below the model's minimum cacheable prefix the marker is a silent no-op, so it
-// is always safe to add.
+// cacheControlMember is the Anthropic prompt-cache breakpoint. OpenAI/Gemini
+// clients never send cache_control, and Anthropic has no implicit caching, so
+// the OpenAI->Anthropic path injects it or clients like Cursor re-bill the
+// whole stable prefix every turn. It's a no-op below the model's minimum
+// cacheable prefix, so always safe to add.
 const cacheControlMember = `"cache_control":{"type":"ephemeral"}`
 
 // appendCacheControl inserts the cache_control marker into a raw JSON content
-// block. The block is one we constructed, so its final byte is the closing brace
-// of the outer object; the guard keeps it fail-open on anything unexpected.
+// block we constructed (final byte is the closing brace); guard fails open on
+// anything unexpected.
 func appendCacheControl(block string) string {
 	if len(block) < 2 || block[len(block)-1] != '}' || !strings.Contains(block, ":") {
 		return block
@@ -282,11 +278,9 @@ func appendCacheControl(block string) string {
 	return block[:len(block)-1] + "," + cacheControlMember + "}"
 }
 
-// cacheControlOnLastBlock returns a raw Anthropic message object with a
-// cache_control breakpoint on its final content block. String content is
-// promoted to a single text block to carry the marker (Anthropic treats "x" and
-// [{"type":"text","text":"x"}] identically). Messages built on this path only
-// ever carry "role" and "content", so rebuilding from those two is lossless.
+// cacheControlOnLastBlock adds a cache_control breakpoint to a message's final
+// content block, promoting string content to a text block to carry it
+// (Anthropic treats "x" and [{"type":"text","text":"x"}] identically).
 func cacheControlOnLastBlock(msg string) string {
 	content := gjson.Get(msg, "content")
 	role := gjson.Get(msg, "role").String()
@@ -419,11 +413,9 @@ func buildAnthropicAssistantMessage(msg gjson.Result) string {
 		return string(jw.Bytes())
 	}
 
-	// Has tool calls: build content array with optional text prefix + tool_use blocks.
-	// Content may be a plain string or an OpenAI parts array ([{"type":"text",...}]);
-	// openAIContentTextGJSON flattens both. Using gjson's .String() here would
-	// serialize a parts array into the text field verbatim, wrapping it in a
-	// stringified {"type":"text",...} block that compounds on every agentic turn.
+	// openAIContentTextGJSON flattens string or parts-array content; gjson's
+	// .String() would instead serialize a parts array verbatim into the text
+	// field, compounding a stringified block on every agentic turn.
 	jw.Key("content")
 	jw.Arr()
 	if text := openAIContentTextGJSON(msg.Get("content")); text != "" {
@@ -474,8 +466,7 @@ func buildAnthropicUserMessage(role string, content gjson.Result) string {
 	return string(jw.Bytes())
 }
 
-// writeAnthropicContentValue writes a content value (string or array) in
-// Anthropic format. String content passes through verbatim; array content has
+// writeAnthropicContentValue writes string content verbatim; array content has
 // image_url parts converted to Anthropic image blocks.
 func writeAnthropicContentValue(jw *jsonWriter, content gjson.Result) {
 	if content.Type == gjson.String {
@@ -593,7 +584,7 @@ func writeAnthropicTools(jw *jsonWriter, body []byte) {
 		}
 		if params := fn.Get("parameters"); params.Exists() {
 			jw.Key("input_schema")
-			jw.Raw(params.Raw)
+			jw.Raw(anthropicToolSchemaRaw(params))
 		}
 		jw.EndObj()
 		return true
@@ -602,35 +593,26 @@ func writeAnthropicTools(jw *jsonWriter, body []byte) {
 }
 
 func writeAnthropicToolChoice(jw *jsonWriter, body []byte) {
-	r := gjson.GetBytes(body, "tool_choice")
-	if !r.Exists() {
-		return
-	}
-	if r.Type == gjson.String {
-		switch r.String() {
-		case "auto":
-			jw.Key("tool_choice")
-			jw.Raw(`{"type":"auto"}`)
-		case "required":
-			jw.Key("tool_choice")
-			jw.Raw(`{"type":"any"}`)
-		case "none":
-			// Handled upstream — tools and tool_choice both suppressed.
-		}
-		return
-	}
-	if r.IsObject() {
-		if name := r.Get("function.name").String(); name != "" {
-			tw := newJSONWriter()
-			tw.Obj()
-			tw.Key("type")
-			tw.Str("tool")
-			tw.Key("name")
-			tw.Str(name)
-			tw.EndObj()
-			jw.Key("tool_choice")
-			jw.Raw(string(tw.Bytes()))
-		}
+	kind, name := openAIToolChoice(body)
+	switch kind {
+	case toolChoiceAuto:
+		jw.Key("tool_choice")
+		jw.Raw(`{"type":"auto"}`)
+	case toolChoiceRequired:
+		jw.Key("tool_choice")
+		jw.Raw(`{"type":"any"}`)
+	case toolChoiceNone:
+		// Handled upstream — tools and tool_choice both suppressed.
+	case toolChoiceNamed:
+		tw := newJSONWriter()
+		tw.Obj()
+		tw.Key("type")
+		tw.Str("tool")
+		tw.Key("name")
+		tw.Str(name)
+		tw.EndObj()
+		jw.Key("tool_choice")
+		jw.Raw(string(tw.Bytes()))
 	}
 }
 
@@ -652,14 +634,11 @@ func (e *RequestEnvelope) buildAnthropicFromAnthropic(opts EmitOptions) ([]byte,
 	return applyOverrides(body, ov)
 }
 
-// hoistAnthropicSystemMessages moves any role:"system" entries out of the
-// "messages" array and merges their text into the top-level "system" field.
-// Anthropic's Messages API rejects a system role inside messages (400
-// "role 'system' must precede an 'assistant' message or end the array"); a
-// system-bearing body can reach this same-format emit path on a mid-session
-// switch back to an Anthropic model. The OpenAI->Anthropic emit path already
-// hoists in writeAnthropicSystemAndMessages; this is the same guarantee for the
-// same-format path. No-op when no system message is present.
+// hoistAnthropicSystemMessages moves role:"system" entries out of "messages"
+// into the top-level "system" field. Anthropic's Messages API 400s on a system
+// role inside messages, which can happen on a mid-session switch back to an
+// Anthropic model; this mirrors the hoisting writeAnthropicSystemAndMessages
+// already does on the OpenAI->Anthropic path. No-op if none present.
 func hoistAnthropicSystemMessages(body []byte) ([]byte, error) {
 	msgs := gjson.GetBytes(body, "messages")
 	if !msgs.IsArray() {
@@ -709,6 +688,73 @@ func hoistAnthropicSystemMessages(body []byte) ([]byte, error) {
 	return out, nil
 }
 
+func sanitizeAnthropicToolSchemasBytes(body []byte) ([]byte, error) {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {
+		return body, nil
+	}
+	raw, err := json.Marshal(sanitizeAnthropicTools(tools.Value()))
+	if err != nil {
+		return nil, err
+	}
+	return sjson.SetRawBytes(body, "tools", raw)
+}
+
+func anthropicToolSchemaRaw(schema gjson.Result) string {
+	raw, err := json.Marshal(sanitizeAnthropicSchema(schema.Value()))
+	if err != nil {
+		return schema.Raw
+	}
+	return string(raw)
+}
+
+func sanitizeAnthropicTools(v any) any {
+	tools, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	out := make([]any, 0, len(tools))
+	for _, item := range tools {
+		tool, ok := item.(map[string]any)
+		if !ok {
+			out = append(out, item)
+			continue
+		}
+		copied := make(map[string]any, len(tool))
+		for k, child := range tool {
+			if k == "input_schema" {
+				copied[k] = sanitizeAnthropicSchema(child)
+				continue
+			}
+			copied[k] = child
+		}
+		out = append(out, copied)
+	}
+	return out
+}
+
+func sanitizeAnthropicSchema(v any) any {
+	switch node := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(node))
+		for k, child := range node {
+			if k == "pattern" {
+				continue
+			}
+			out[k] = sanitizeAnthropicSchema(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(node))
+		for i, child := range node {
+			out[i] = sanitizeAnthropicSchema(child)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
 // anthropicSystemTexts extracts text strings from a system message's content,
 // which may be a plain string or an array of content blocks.
 func anthropicSystemTexts(content gjson.Result) []string {
@@ -743,15 +789,12 @@ func writeAnthropicTextBlock(jw *jsonWriter, text string) {
 	jw.EndObj()
 }
 
-// sanitizeToolUseID replaces characters that Anthropic rejects in tool_use.id
-// (required pattern: ^[a-zA-Z0-9_-]+$). Non-Anthropic upstreams (e.g.
-// Kimi-k2.6) emit IDs like "functions.Read:0" containing dots and colons; when
-// the router switches a session back to Anthropic those IDs cause a 400.
-//
-// Length is NOT clamped here: this helper is shared by the Anthropic and Gemini
-// emit paths, where a Gemini thoughtSignature smuggled into the id by
-// embedSignatureInID makes the id intentionally longer than 64 bytes. OpenAI's
-// 64-char limit is enforced separately in clampOpenAIToolCallID.
+// sanitizeToolUseID replaces characters Anthropic rejects in tool_use.id
+// (must match ^[a-zA-Z0-9_-]+$). Non-Anthropic upstreams (e.g. Kimi-k2.6) emit
+// IDs with dots/colons that 400 if a session switches back to Anthropic.
+// Length is not clamped: this is shared with the Gemini emit path, where
+// embedSignatureInID intentionally pushes ids past 64 bytes; OpenAI's 64-char
+// limit is enforced separately in clampOpenAIToolCallID.
 func sanitizeToolUseID(id string) string {
 	if id == "" {
 		return id

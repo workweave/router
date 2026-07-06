@@ -29,18 +29,13 @@ func (n *AutopayNotifier) NotifyRechargeNeeded(organizationID string) {
 	if organizationID == "" {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
-		defer cancel()
+	log := observability.Get().With("organization_id", organizationID)
+	observability.SafeGo(log, notifyTimeout, "NotifyRechargeNeeded", func(ctx context.Context) {
 		result := n.publisher.Publish(ctx, &gcppubsub.Message{Data: []byte(organizationID)})
 		if _, err := result.Get(ctx); err != nil {
-			observability.Get().Warn(
-				"Failed to publish autopay recharge signal",
-				"organization_id", organizationID,
-				"err", err,
-			)
+			log.Warn("Failed to publish autopay recharge signal", "err", err)
 		}
-	}()
+	})
 }
 
 // Stop flushes buffered messages and shuts the publisher's background

@@ -25,6 +25,7 @@ var sampleMarkers = []string{
 	"✦ **Weave Router** → gemini-3.1-flash-lite-preview · pinned for compaction / sub-agent\n\n",
 	"✦ **Weave Router** → deepseek/deepseek-v4-pro\n\n",
 	"✦ **Weave Router** → claude-haiku-4-5 · best pick for this turn · second-choice pick at low tier (would have used deepseek/deepseek-v4-pro)\n\n",
+	"✦ **Weave Router** → Delegating work with moonshotai/kimi-k2.7-code\n↳ label: delegated_work\n\n",
 }
 
 func TestStripRoutingMarker_AssistantBlockExactMatch(t *testing.T) {

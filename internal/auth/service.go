@@ -130,12 +130,10 @@ func (s *Service) ListAPIKeys(ctx context.Context, installationID string) ([]*AP
 }
 
 // RotateAPIKey soft-deletes the named key and issues a replacement under the
-// same installation, carrying forward the previous key's name. Returns
-// ErrAPIKeyNotFound when keyID does not match an active key owned by the
-// installation, so a tenant who learns a foreign key UUID cannot rotate it.
-//
-// Not wrapped in a tx: a brief "no active key" window is acceptable because
-// rotation's purpose is to invalidate the old token anyway.
+// same installation, carrying forward its name. Returns ErrAPIKeyNotFound if
+// keyID isn't an active key owned by installationID, so a foreign key UUID
+// can't be rotated. Not transactional: the brief "no active key" gap is fine
+// since rotation's whole point is invalidating the old token anyway.
 func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string, createdBy *string) (*APIKey, string, error) {
 	existing, err := s.apiKeys.ListForInstallation(ctx, installationID)
 	if err != nil {
@@ -162,11 +160,9 @@ func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string
 	return key, raw, nil
 }
 
-// DeleteAPIKey soft-deletes an API key and immediately invalidates the
-// installation's cache entry on this replica and all peers. Without the
-// invalidation the deleted key would remain usable for up to the positive
-// cache TTL (5 min) — the same window that RotateAPIKey closes via
-// invalidateInstallation.
+// DeleteAPIKey soft-deletes an API key and invalidates the installation's
+// cache entry on this replica and all peers, so the key doesn't stay usable
+// for the remainder of the positive cache TTL (5 min).
 func (s *Service) DeleteAPIKey(ctx context.Context, installationID, id string) error {
 	if err := s.apiKeys.SoftDelete(ctx, installationID, id); err != nil {
 		return err
@@ -280,10 +276,9 @@ func (s *Service) SetInstallationExcludedProviders(ctx context.Context, external
 }
 
 // SetInstallationRoutingPreference persists the routing quality weight (a
-// normalized fraction in [0, 1]) on the installation. Passing nil clears the
-// preference so the scorer reverts to its tuned per-cluster defaults.
-// Invalidates the API-key cache so the change takes effect on the next request
-// rather than after the cache TTL.
+// normalized fraction in [0, 1]). Passing nil clears it so the scorer reverts
+// to its tuned per-cluster defaults. Invalidates the cache so the change
+// applies on the next request instead of waiting out the TTL.
 func (s *Service) SetInstallationRoutingPreference(ctx context.Context, externalID, installationID string, qualityWeight *float64) error {
 	if err := s.installations.UpdateRoutingPreference(ctx, externalID, installationID, qualityWeight); err != nil {
 		return err
@@ -292,11 +287,10 @@ func (s *Service) SetInstallationRoutingPreference(ctx context.Context, external
 	return nil
 }
 
-// SetInstallationSubscriptionRoutingDisabled toggles subscription-aware routing
-// for the installation. When true, the scorer's subscription subsidy bonus is
-// suppressed so routing decides on merits and non-Claude models compete fairly.
-// Invalidates the API-key cache so the change takes effect on the next request
-// rather than after the cache TTL.
+// SetInstallationSubscriptionRoutingDisabled toggles subscription-aware
+// routing. When true, the scorer's subscription subsidy bonus is suppressed
+// so non-Claude models compete fairly. Invalidates the cache so the change
+// applies on the next request instead of waiting out the TTL.
 func (s *Service) SetInstallationSubscriptionRoutingDisabled(ctx context.Context, externalID, installationID string, disabled bool) error {
 	if err := s.installations.UpdateSubscriptionRoutingDisabled(ctx, externalID, installationID, disabled); err != nil {
 		return err
@@ -305,9 +299,9 @@ func (s *Service) SetInstallationSubscriptionRoutingDisabled(ctx context.Context
 	return nil
 }
 
-// VerifyAPIKey authenticates a raw bearer token against the API key cache then Postgres.
-// Returns ErrInvalidPrefix/ErrInvalidToken for unauthenticated cases.
-// Returned ExternalAPIKey slice has Plaintext populated; nil when none exist.
+// VerifyAPIKey authenticates a raw bearer token against the cache then Postgres,
+// returning ErrInvalidPrefix/ErrInvalidToken on failure. The returned
+// ExternalAPIKey slice has Plaintext populated, or nil if none exist.
 func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installation, *APIKey, []*ExternalAPIKey, error) {
 	if !HasAPIKeyPrefix(rawToken) {
 		return nil, nil, nil, ErrInvalidPrefix
@@ -349,11 +343,11 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 	return installation, apiKey, externalKeys, nil
 }
 
-// ResolveAndStashUser upserts a router user and stashes the ID on ctx.
-// Email takes precedence as the lookup key. When only claudeAccountUUID is present,
-// the row is keyed on account_uuid with NULL email. displayName is best-effort
-// metadata persisted alongside the identity; empty = leave existing value.
-// Best-effort: returns ctx unchanged on failure — must never fail an authenticated request.
+// ResolveAndStashUser upserts a router user and stashes the ID on ctx. Email
+// takes precedence as the lookup key; with only claudeAccountUUID, the row is
+// keyed on account_uuid with NULL email. displayName is best-effort (empty
+// leaves the existing value). Never fails an authenticated request — returns
+// ctx unchanged on error.
 func (s *Service) ResolveAndStashUser(ctx context.Context, installationID, email, claudeAccountUUID, displayName string) context.Context {
 	log := observability.Get()
 	if s.users == nil || installationID == "" {
@@ -420,15 +414,10 @@ func userIdentityKey(email, claudeAccountUUID string) string {
 // fireMarkUsed runs the last_used_at update off the request path. Uses context.Background because
 // the parent ctx is often canceled (response written) before the UPDATE completes.
 func (s *Service) fireMarkUsed(apiKeyID string) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
+	log := observability.Get().With("api_key_id", apiKeyID)
+	observability.SafeGo(log, 2*time.Second, "fireMarkUsed", func(ctx context.Context) {
 		if err := s.apiKeys.MarkUsed(ctx, apiKeyID); err != nil {
-			observability.Get().Warn(
-				"Failed to mark router api key used",
-				"api_key_id", apiKeyID,
-				"err", err,
-			)
+			log.Warn("Failed to mark router api key used", "err", err)
 		}
-	}()
+	})
 }

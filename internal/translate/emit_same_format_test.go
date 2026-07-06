@@ -68,13 +68,9 @@ func TestOpenAISameFormat_UnknownFieldsPreserved(t *testing.T) {
 	assert.Equal(t, "val", meta["key"])
 }
 
-// A Gemini turn earlier in the session left an off-spec thought_signature field
-// on content blocks (the router smuggles it to passthrough clients on text
-// blocks, and pre-id-embed sessions also carried it on tool_use blocks, which
-// Claude Code echoes back). Forwarding that field to an Anthropic upstream 400s
-// ("...tool_use.thought_signature: Extra inputs are not permitted"), so the
-// same-format Anthropic emit must drop it from every block. On tool_use the
-// signature still round-trips via the id; on text it is simply dropped.
+// An off-spec thought_signature field (smuggled from a Gemini turn) 400s an
+// Anthropic upstream, so same-format emit must strip it from every block. On
+// tool_use the signature still round-trips via the id; on text it's just dropped.
 func TestAnthropicSameFormat_StripsThoughtSignature(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[
 		{"role":"assistant","content":[
@@ -198,6 +194,72 @@ func TestAnthropicSameFormat_ModelRewrite(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", out["model"])
 	msgs, _ := out["messages"].([]any)
 	require.Len(t, msgs, 1)
+}
+
+func TestAnthropicSameFormat_StripsUnsupportedToolSchemaPattern(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hello"}],"max_tokens":1024,"tools":[{
+		"name":"DecimalTool",
+		"description":"uses a pydantic decimal schema",
+		"input_schema":{
+			"type":"object",
+			"properties":{
+				"amount":{"type":"string","pattern":"^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$","description":"decimal"}
+			},
+			"required":["amount"]
+		}
+	}]}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-7",
+		Capabilities: router.Lookup("claude-opus-4-7"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+
+	tools, _ := out["tools"].([]any)
+	require.Len(t, tools, 1)
+	tool, _ := tools[0].(map[string]any)
+	inputSchema, _ := tool["input_schema"].(map[string]any)
+	props, _ := inputSchema["properties"].(map[string]any)
+	amount, _ := props["amount"].(map[string]any)
+	assert.NotContains(t, amount, "pattern", "Anthropic rejects regex lookahead in JSON Schema patterns")
+	assert.Equal(t, "string", amount["type"])
+	assert.Equal(t, "decimal", amount["description"])
+}
+
+func TestOpenAIToAnthropic_StripsUnsupportedToolSchemaPattern(t *testing.T) {
+	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}],"tools":[{
+		"type":"function",
+		"function":{
+			"name":"DecimalTool",
+			"description":"uses a pydantic decimal schema",
+			"parameters":{
+				"type":"object",
+				"properties":{
+					"amount":{"type":"string","pattern":"^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$","description":"decimal"}
+				},
+				"required":["amount"]
+			}
+		}
+	}]}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-opus-4-7",
+		Capabilities: router.Lookup("claude-opus-4-7"),
+	}
+	env, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareAnthropic(http.Header{}, opts)
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+
+	tools, _ := out["tools"].([]any)
+	require.Len(t, tools, 1)
+	tool, _ := tools[0].(map[string]any)
+	inputSchema, _ := tool["input_schema"].(map[string]any)
+	props, _ := inputSchema["properties"].(map[string]any)
+	amount, _ := props["amount"].(map[string]any)
+	assert.NotContains(t, amount, "pattern", "Anthropic rejects regex lookahead in JSON Schema patterns")
+	assert.Equal(t, "string", amount["type"])
+	assert.Equal(t, "decimal", amount["description"])
 }
 
 func TestAnthropicSameFormat_SystemMessageHoistedWhenNoSystemField(t *testing.T) {
@@ -348,11 +410,9 @@ func TestAnthropicSameFormat_ThinkingBlocksKeptForCapableModel(t *testing.T) {
 	require.Len(t, content, 2, "thinking blocks should be preserved for capable models")
 }
 
-// Pi and other legacy Anthropic clients still send the pre-rollout
-// thinking.type=enabled shape. claude-opus-4-6+ rejects that with HTTP 400, so
-// the router must upconvert to thinking.type=adaptive and inject
-// output_config.effort derived from budget_tokens. Production session
-// 019e89de-f555-755b-a98b-d00cbef7a299 hit this on 2026-06-02.
+// Legacy clients still send thinking.type=enabled, which claude-opus-4-6+
+// rejects (400). The router must upconvert to type=adaptive and derive
+// output_config.effort from budget_tokens (prod incident 2026-06-02).
 func TestAnthropicSameFormat_EnabledThinkingUpconvertedToAdaptive(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -390,9 +450,7 @@ func TestAnthropicSameFormat_EnabledThinkingUpconvertedToAdaptive(t *testing.T) 
 	}
 }
 
-// Inbound clients that already specify output_config.effort should win over
-// the budget-derived default — the router only fills in a default when the
-// caller said nothing.
+// An explicit output_config.effort wins over the budget-derived default.
 func TestAnthropicSameFormat_EnabledThinkingPreservesExplicitEffort(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":8192},"output_config":{"effort":"high"}}`)
 	opts := translate.EmitOptions{
@@ -406,11 +464,8 @@ func TestAnthropicSameFormat_EnabledThinkingPreservesExplicitEffort(t *testing.T
 }
 
 func TestAnthropicSameFormat_ThinkingBlocksStrippedOnModelSwitch(t *testing.T) {
-	// A capable model would normally keep historical thinking blocks, but on a
-	// mid-session model switch their `signature`s were issued by the previous
-	// model and Anthropic rejects them with `Invalid signature in thinking
-	// block` (400). ModelSwitched forces the strip so the stale signature never
-	// reaches the upstream, while the text block survives.
+	// On a model switch, prior thinking blocks carry signatures from the old
+	// model; Anthropic 400s on those. ModelSwitched forces the strip.
 	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"thought","signature":"sig-from-other-model"},{"type":"text","text":"reply"}]}],"max_tokens":1024,"thinking":{"type":"adaptive"}}`)
 	opts := translate.EmitOptions{
 		TargetModel:   "claude-opus-4-7",
@@ -428,9 +483,8 @@ func TestAnthropicSameFormat_ThinkingBlocksStrippedOnModelSwitch(t *testing.T) {
 }
 
 func TestAnthropicSameFormat_ThinkingBlocksKeptWhenNoModelSwitch(t *testing.T) {
-	// Same capable model with ModelSwitched=false (the steady-state, same-model
-	// turn): thinking blocks and their valid signatures must be preserved so
-	// prompt-cache hits and reasoning continuity are not needlessly destroyed.
+	// Same-model turn (ModelSwitched=false): valid thinking blocks must survive
+	// to keep prompt-cache hits and reasoning continuity intact.
 	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"thought","signature":"valid-sig"},{"type":"text","text":"reply"}]}],"max_tokens":1024,"thinking":{"type":"adaptive"}}`)
 	opts := translate.EmitOptions{
 		TargetModel:   "claude-opus-4-7",
@@ -652,13 +706,10 @@ func TestAnthropicSameFormat_BodyIsImmutable(t *testing.T) {
 	assert.Equal(t, original, body, "original body bytes must not be modified")
 }
 
-// Prod repro (2026-06-09 customer benchmark): a session running with
-// output_config.effort="xhigh" (valid for the requested opus) was re-routed
-// mid-session to claude-sonnet-4-6, whose effort menu tops out at "max".
-// The body went through with only the model swapped and Anthropic rejected it
-// with a non-retryable 400 ("This model does not support effort level
-// 'xhigh'"), killing the session. The emit layer must clamp xhigh to max for
-// adaptive targets without CapXhighEffort.
+// Prod repro (2026-06-09): a session using effort="xhigh" was re-routed
+// mid-session to claude-sonnet-4-6 (tops out at "max"), and Anthropic
+// 400'd on the unsupported level, killing the session. Emit must clamp
+// xhigh to max for adaptive targets without CapXhighEffort.
 func TestAnthropicSameFormat_XhighEffortClampedOnReroute(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"}}`)
 	opts := translate.EmitOptions{
@@ -695,14 +746,9 @@ func TestAnthropicSameFormat_XhighEffortPreservedForCapableModel(t *testing.T) {
 	assert.Equal(t, "xhigh", outputConfig["effort"], "xhigh must pass through to models with CapXhighEffort")
 }
 
-// Exhaustive backstop for the 2026-06-09 production incident (see
-// TestAnthropicSameFormat_XhighEffortClampedOnReroute). The per-model clamp keys
-// on router.CapXhighEffort, so a newly added or re-tagged Anthropic model could
-// silently reintroduce the non-retryable 400. Rather than trust two hardcoded
-// pairs, walk every Anthropic model in the catalog and assert the wire-level
-// guarantee directly: effort "xhigh" survives emit only when the target advertises
-// CapXhighEffort. A model that lacks the capability but isn't clamped fails here
-// before it can reach a customer session.
+// Exhaustive backstop for the 2026-06-09 incident: a newly added or re-tagged
+// Anthropic model could silently reintroduce the 400. Walk every catalog model
+// and assert xhigh survives emit only when CapXhighEffort is advertised.
 func TestAnthropicSameFormat_XhighEffortNeverReachesIncapableModel(t *testing.T) {
 	var anthropicModels, capableModels int
 	for _, m := range catalog.Models {

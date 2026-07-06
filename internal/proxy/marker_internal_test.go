@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -282,6 +283,75 @@ func TestRoutingMarkerFor_DropsProviderEvenWhenSet(t *testing.T) {
 	assert.NotContains(t, got, "(anthropic)", "provider must not leak into the user-facing marker")
 	assert.NotContains(t, got, "()")
 	assert.Contains(t, got, "· "+markerReasonBestPick)
+}
+
+func TestRoutingMarkerFor_UsesSidecarDisplayMarker(t *testing.T) {
+	got := routingMarkerFor(turnLoopResult{
+		Decision: router.Decision{
+			Model:    "moonshotai/kimi-k2.7-code",
+			Provider: "openrouter",
+			Metadata: &router.RoutingMetadata{
+				DisplayMarker: "✦ **Weave Router** → Delegating work with moonshotai/kimi-k2.7-code\n↳ label: delegated_work",
+			},
+		},
+		PlannerDecision: planner.Decision{
+			Reason: planner.ReasonNoPin,
+		},
+	})
+
+	assert.Equal(t, "✦ **Weave Router** → Delegating work with moonshotai/kimi-k2.7-code\n↳ label: delegated_work\n\n", got)
+}
+
+func TestRoutingMarkerFor_SidecarDisplayMarkerStillRespectsSuggestionMode(t *testing.T) {
+	got := routingMarkerFor(turnLoopResult{
+		SuggestionMode: true,
+		Decision: router.Decision{
+			Model: "moonshotai/kimi-k2.7-code",
+			Metadata: &router.RoutingMetadata{
+				DisplayMarker: "✦ **Weave Router** → Delegating work with moonshotai/kimi-k2.7-code\n↳ label: delegated_work",
+			},
+		},
+		PlannerDecision: planner.Decision{
+			Reason: planner.ReasonNoPin,
+		},
+	})
+
+	assert.Empty(t, got)
+}
+
+func TestRoutingMarkerFor_RejectsMalformedSidecarDisplayMarker(t *testing.T) {
+	got := routingMarkerFor(turnLoopResult{
+		Decision: router.Decision{
+			Model: "moonshotai/kimi-k2.7-code",
+			Metadata: &router.RoutingMetadata{
+				DisplayMarker: "not a router marker\narbitrary sidecar text",
+			},
+		},
+		PlannerDecision: planner.Decision{
+			Reason: planner.ReasonNoPin,
+		},
+	})
+
+	assert.Contains(t, got, "✦ **Weave Router** → moonshotai/kimi-k2.7-code")
+	assert.Contains(t, got, markerReasonBestPick)
+	assert.NotContains(t, got, "arbitrary sidecar text")
+}
+
+func TestRoutingMarkerFor_ClampsSidecarDisplayMarker(t *testing.T) {
+	got := routingMarkerFor(turnLoopResult{
+		Decision: router.Decision{
+			Model: "moonshotai/kimi-k2.7-code",
+			Metadata: &router.RoutingMetadata{
+				DisplayMarker: "✦ **Weave Router** → " + strings.Repeat("x", maxSidecarDisplayMarkerRunes+100),
+			},
+		},
+		PlannerDecision: planner.Decision{
+			Reason: planner.ReasonNoPin,
+		},
+	})
+
+	assert.LessOrEqual(t, len([]rune(strings.TrimSpace(got))), maxSidecarDisplayMarkerRunes)
+	assert.Contains(t, got, "✦ **Weave Router** → ")
 }
 
 func TestHumanReasonFromPlanner_UnknownCodeIsSilenced(t *testing.T) {

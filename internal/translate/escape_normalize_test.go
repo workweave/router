@@ -2,6 +2,8 @@ package translate_test
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"workweave/router/internal/translate"
@@ -10,15 +12,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// withEscapeNormalize toggles the package-level flag for the duration of one
-// subtest and restores it after.
-func withEscapeNormalize(t *testing.T, enabled bool) {
+// translateWithEscapeNormalize routes resp through the buffered
+// (non-streaming) path of AnthropicSSETranslator with escape normalization
+// set to enabled, mirroring how proxy.Service threads the flag down instead
+// of a package-level global.
+func translateWithEscapeNormalize(t *testing.T, resp []byte, enabled bool) []byte {
 	t.Helper()
-	prior := translate.EnableEditEscapeNormalize
-	translate.EnableEditEscapeNormalize = enabled
-	t.Cleanup(func() {
-		translate.EnableEditEscapeNormalize = prior
-	})
+	rec := httptest.NewRecorder()
+	w := translate.NewAnthropicSSETranslator(rec, "deepseek/deepseek-v4-pro", nil).
+		WithEscapeNormalize(enabled)
+	require.NoError(t, w.Prelude(false)) // buffered path
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write(resp)
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+	return rec.Body.Bytes()
 }
 
 // editToolUseResponse builds a non-streaming OpenAI response with one tool_call
@@ -74,23 +82,19 @@ func firstToolUseInput(t *testing.T, body []byte) map[string]any {
 }
 
 func TestEscapeNormalize_FlagOff_DoesNothing(t *testing.T) {
-	withEscapeNormalize(t, false)
 	// JSON-encoded `\\n` lands as literal backslash-n after json.Unmarshal.
 	resp := editToolUseResponse(t, "Edit", `{"file_path":"a.go","old_string":"foo\\nbar","new_string":"baz"}`)
 
-	out, err := translate.OpenAIToAnthropicResponse(resp, "deepseek/deepseek-v4-pro")
-	require.NoError(t, err)
+	out := translateWithEscapeNormalize(t, resp, false)
 
 	input := firstToolUseInput(t, out)
 	assert.Equal(t, `foo\nbar`, input["old_string"], "flag off must leave literal backslash-n untouched")
 }
 
 func TestEscapeNormalize_FlagOn_RewritesEditArgs(t *testing.T) {
-	withEscapeNormalize(t, true)
 	resp := editToolUseResponse(t, "Edit", `{"file_path":"a.go","old_string":"foo\\nbar","new_string":"baz\\tqux"}`)
 
-	out, err := translate.OpenAIToAnthropicResponse(resp, "deepseek/deepseek-v4-pro")
-	require.NoError(t, err)
+	out := translateWithEscapeNormalize(t, resp, true)
 
 	input := firstToolUseInput(t, out)
 	assert.Equal(t, "foo\nbar", input["old_string"], "literal backslash-n must become real newline")
@@ -98,25 +102,21 @@ func TestEscapeNormalize_FlagOn_RewritesEditArgs(t *testing.T) {
 }
 
 func TestEscapeNormalize_FlagOn_LeavesRealNewlinesAlone(t *testing.T) {
-	withEscapeNormalize(t, true)
 	// `\n` in JSON decodes to a real newline before our code sees it; nothing to do.
 	resp := editToolUseResponse(t, "Edit", `{"old_string":"foo\nbar","new_string":"baz"}`)
 
-	out, err := translate.OpenAIToAnthropicResponse(resp, "deepseek/deepseek-v4-pro")
-	require.NoError(t, err)
+	out := translateWithEscapeNormalize(t, resp, true)
 
 	input := firstToolUseInput(t, out)
 	assert.Equal(t, "foo\nbar", input["old_string"], "already-correct newlines pass through unchanged")
 }
 
 func TestEscapeNormalize_FlagOn_SkipsNonEditTools(t *testing.T) {
-	withEscapeNormalize(t, true)
 	cases := []string{"Read", "Bash", "Grep"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			resp := editToolUseResponse(t, name, `{"command":"echo foo\\nbar"}`)
-			out, err := translate.OpenAIToAnthropicResponse(resp, "deepseek/deepseek-v4-pro")
-			require.NoError(t, err)
+			out := translateWithEscapeNormalize(t, resp, true)
 			input := firstToolUseInput(t, out)
 			assert.Equal(t, `echo foo\nbar`, input["command"], "non-edit tools must not be rewritten")
 		})
@@ -124,11 +124,9 @@ func TestEscapeNormalize_FlagOn_SkipsNonEditTools(t *testing.T) {
 }
 
 func TestEscapeNormalize_FlagOn_SkipsFilePath(t *testing.T) {
-	withEscapeNormalize(t, true)
 	resp := editToolUseResponse(t, "Edit", `{"file_path":"weird\\npath.go","old_string":"foo\\nbar"}`)
 
-	out, err := translate.OpenAIToAnthropicResponse(resp, "deepseek/deepseek-v4-pro")
-	require.NoError(t, err)
+	out := translateWithEscapeNormalize(t, resp, true)
 
 	input := firstToolUseInput(t, out)
 	assert.Equal(t, `weird\npath.go`, input["file_path"], "file_path is excluded — paths can have backslashes legitimately")
@@ -139,7 +137,6 @@ func TestEscapeNormalize_FlagOn_RewritesMultiEditNestedEdits(t *testing.T) {
 	// MultiEdit's real shape nests per-edit fields inside an `edits` array.
 	// A flat-only walk would silently skip the strings that actually need
 	// repairing.
-	withEscapeNormalize(t, true)
 	args := `{
 		"file_path":"a.go",
 		"edits":[
@@ -149,8 +146,7 @@ func TestEscapeNormalize_FlagOn_RewritesMultiEditNestedEdits(t *testing.T) {
 	}`
 	resp := editToolUseResponse(t, "MultiEdit", args)
 
-	out, err := translate.OpenAIToAnthropicResponse(resp, "deepseek/deepseek-v4-pro")
-	require.NoError(t, err)
+	out := translateWithEscapeNormalize(t, resp, true)
 
 	input := firstToolUseInput(t, out)
 	assert.Equal(t, "a.go", input["file_path"])
@@ -168,12 +164,10 @@ func TestEscapeNormalize_FlagOn_RewritesMultiEditNestedEdits(t *testing.T) {
 }
 
 func TestEscapeNormalize_FlagOn_CaseInsensitiveToolName(t *testing.T) {
-	withEscapeNormalize(t, true)
 	for _, name := range []string{"edit", "EDIT", "Write", "MultiEdit"} {
 		t.Run(name, func(t *testing.T) {
 			resp := editToolUseResponse(t, name, `{"old_string":"x\\nx","content":"y\\ny"}`)
-			out, err := translate.OpenAIToAnthropicResponse(resp, "deepseek/deepseek-v4-pro")
-			require.NoError(t, err)
+			out := translateWithEscapeNormalize(t, resp, true)
 			input := firstToolUseInput(t, out)
 			if v, ok := input["old_string"]; ok {
 				assert.Equal(t, "x\nx", v)

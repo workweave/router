@@ -63,6 +63,7 @@ type CreateInstallationParams struct {
 
 type InstallationRepository interface {
 	Create(ctx context.Context, params CreateInstallationParams) (*Installation, error)
+	// Get has no caller today; kept for a future admin detail view.
 	Get(ctx context.Context, externalID, id string) (*Installation, error)
 	ListForExternalID(ctx context.Context, externalID string) ([]*Installation, error)
 	SoftDelete(ctx context.Context, externalID, id string) error

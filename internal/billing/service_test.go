@@ -1,19 +1,39 @@
 package billing_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	"workweave/router/internal/billing"
+	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router/catalog"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// captureLogs swaps slog's default logger for one writing text lines into
+// the returned buffer, restoring the previous default on test cleanup.
+//
+// observability.Get() lazily installs its own default handler exactly once
+// (sync.Once) the first time any test calls it; if that happens after we've
+// installed our buffer handler, it clobbers it. Force that one-time init
+// first so our SetDefault below is the one that sticks.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	observability.Get()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
 
 // fakeRepo is an in-memory billing.Repo for testing the Service without
 // hitting Postgres. Atomic fields keep the concurrent-debit test honest.
@@ -101,8 +121,7 @@ func TestCheckBalance_Override(t *testing.T) {
 	res, err := svc.CheckBalance(context.Background(), "org_x")
 	require.NoError(t, err)
 	assert.True(t, res.HasOverride)
-	// When override is active the service must not bother reading the
-	// balance — the middleware doesn't need it and the row may be missing.
+	// Override path skips the balance read entirely; the row may be missing.
 	assert.Equal(t, int64(0), res.BalanceMicros, "balance must be skipped on override path")
 }
 
@@ -123,10 +142,8 @@ func TestCheckBalance_MissingRowPropagates(t *testing.T) {
 }
 
 func TestDebitForInference_MatchesExportedCostMath(t *testing.T) {
-	// The debit hook must compute the same notional cost as the OTel
-	// emitter and telemetry writer — they all go through the exported
-	// pricing functions now. If this drifts the customer sees a billed
-	// amount different from the dashboard cost.
+	// Debit cost must match the OTel emitter/telemetry writer (same pricing
+	// funcs) — drift means the billed amount diverges from the dashboard.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
@@ -152,10 +169,105 @@ func TestDebitForInference_MatchesExportedCostMath(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-5", repo.ledgerCalls[0].RouterModel)
 }
 
+func TestDebitForInference_WarnsOnZeroPricingForRealUsage(t *testing.T) {
+	// A model ID with no catalog.Models entry resolves to a zero-value
+	// Pricing (see catalog.PrimaryPriceFor). Debiting real token usage at
+	// that price silently charges $0 — this must surface as an Error log so
+	// the gap gets noticed instead of masked (finding [30]).
+	buf := captureLogs(t)
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
+	svc := billing.NewService(repo)
+	balance, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID:  "org_x",
+		RouterRequestID: "req_unknown",
+		Model:           "gpt-5.2",
+		Provider:        providers.ProviderOpenAI,
+		InputTokens:     1_000_000,
+		OutputTokens:    250_000,
+		Pricing:         catalog.Pricing{}, // zero value: model not in catalog
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(10_000_000), balance, "zero pricing charges nothing even though real tokens were used")
+	assert.Contains(t, buf.String(), "level=ERROR")
+	assert.Contains(t, buf.String(), "zero-value catalog pricing")
+	assert.Contains(t, buf.String(), "gpt-5.2")
+}
+
+func TestDebitForInference_WarnsOnZeroPricingForCacheOnlyUsage(t *testing.T) {
+	// A turn can be all cache reads/writes with zero fresh InputTokens/
+	// OutputTokens (e.g. a fully cache-hit prompt) — that's still real,
+	// billable usage and must not be treated as "nothing happened."
+	buf := captureLogs(t)
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
+	svc := billing.NewService(repo)
+	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID:  "org_x",
+		RouterRequestID: "req_cache_only",
+		Model:           "gpt-5.2",
+		Provider:        providers.ProviderOpenAI,
+		CacheRead:       500_000,
+		Pricing:         catalog.Pricing{}, // zero value: model not in catalog
+	})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "level=ERROR")
+	assert.Contains(t, buf.String(), "zero-value catalog pricing", "cache-only usage must still trip the unknown-pricing warning")
+}
+
+func TestDebitForInference_NoWarnOnKnownPricing(t *testing.T) {
+	buf := captureLogs(t)
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
+	svc := billing.NewService(repo)
+	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
+	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID: "org_x",
+		Model:          "claude-sonnet-4-5",
+		Provider:       providers.ProviderAnthropic,
+		InputTokens:    1_000_000,
+		OutputTokens:   250_000,
+		Pricing:        p,
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "zero-value catalog pricing", "a priced model must not trip the unknown-pricing warning")
+}
+
+func TestDebitForInference_NoWarnOnZeroPricingOverride(t *testing.T) {
+	// Override/subscription-served turns are intentionally free — a $0 debit
+	// there is expected behavior, not a pricing gap.
+	buf := captureLogs(t)
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 0}
+	svc := billing.NewService(repo)
+	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID: "org_internal",
+		Model:          "gpt-5.2",
+		Provider:       providers.ProviderOpenAI,
+		InputTokens:    1_000_000,
+		OutputTokens:   250_000,
+		Pricing:        catalog.Pricing{},
+		HasOverride:    true,
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "zero-value catalog pricing", "override turns are exempt from the unknown-pricing warning")
+}
+
+func TestDebitForInference_NoWarnOnZeroTokenUsage(t *testing.T) {
+	// 0-token usage (e.g. a failed request before generation) has zero
+	// pricing AND zero tokens — nothing was actually billed, so no warning.
+	buf := captureLogs(t)
+	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 5_000_000}
+	svc := billing.NewService(repo)
+	_, err := svc.DebitForInference(context.Background(), billing.DebitInferenceParams{
+		OrganizationID: "org_x",
+		Model:          "gpt-5.2",
+		Provider:       providers.ProviderOpenAI,
+		Pricing:        catalog.Pricing{},
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "zero-value catalog pricing")
+}
+
 func TestDebitForInference_OverrideWritesZeroDeltaWithNotional(t *testing.T) {
-	// Override path: ledger row must record the would-be charge in
-	// notional_cost_micros while leaving the balance untouched. This is
-	// the shadow billing trail the plan requires for capacity planning.
+	// Override: ledger records the would-be charge in notional_cost_micros
+	// but leaves balance untouched — the shadow trail for capacity planning.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 0}
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
@@ -176,9 +288,8 @@ func TestDebitForInference_OverrideWritesZeroDeltaWithNotional(t *testing.T) {
 }
 
 func TestDebitForInference_SubscriptionDebitsNothing(t *testing.T) {
-	// Served on the customer's own subscription: their plan already covers the
-	// tokens, so Weave charges nothing — the ledger debits 0 while the notional
-	// row still records the full would-be cost as a shadow trail.
+	// Subscription-served: the customer's plan covers the tokens, so the debit
+	// is 0 while notional still records the full would-be cost as a shadow trail.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
@@ -224,10 +335,8 @@ func TestDebitForInference_OverrideBeatsSubscription(t *testing.T) {
 }
 
 func TestDebitForInference_BalanceCanGoNegative(t *testing.T) {
-	// Concurrent-debit semantics: when two requests pass preflight with a
-	// thin balance and both debit, the second goes negative. The Service
-	// must accept this — no balance>=amount guard. The middleware's
-	// min-balance threshold bounds the typical dip.
+	// Two concurrent debits against a thin balance: the Service has no
+	// balance>=amount guard, so the second goes negative by design.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 500_000} // $0.50
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
@@ -249,10 +358,8 @@ func TestDebitForInference_BalanceCanGoNegative(t *testing.T) {
 }
 
 func TestDebitForInference_ZeroTokensYieldsZeroCharge(t *testing.T) {
-	// A real failure mode: upstream returns 0-token usage (timeouts, 5xx
-	// before any tokens were produced). Notional must be 0 and balance
-	// unchanged — billing the customer for "0 tokens worth of cost" would
-	// be confusing.
+	// 0-token usage (timeout/5xx before generation) must yield 0 notional
+	// cost and leave the balance unchanged.
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 5_000_000}
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
@@ -278,9 +385,8 @@ func TestDebitForInference_RepoErrorPropagates(t *testing.T) {
 }
 
 func TestDebitForInference_AttributesAPIKey(t *testing.T) {
-	// The api_key_id and the negative delta both flow to the repo so the CTE
-	// can bump the key's lifetime spent counter by the debit magnitude. On a
-	// real debit spent should grow by exactly the notional charge (= -delta).
+	// api_key_id and delta flow to the repo's CTE, which bumps the key's
+	// lifetime spend by the debit magnitude (-delta).
 	repo := &fakeRepo{balanceRowExists: true, balanceMicros: 10_000_000}
 	svc := billing.NewService(repo)
 	p := catalog.Pricing{InputUSDPer1M: 3.00, OutputUSDPer1M: 15.00, CacheReadMultiplier: 0.10}
