@@ -229,8 +229,7 @@ func (s *Service) bypassToAnthropic(
 	}
 
 	// Tap the response stream so the bypass span carries token usage for
-	// Weave's router cost-savings metric — subscription-served turns would
-	// otherwise be invisible to it.
+	// Weave's router cost-savings metric — subscription turns are otherwise invisible.
 	var extractor *otel.UsageExtractor
 	if s.usageRequired() {
 		extractor = otel.NewUsageExtractor(w, decision.Provider)

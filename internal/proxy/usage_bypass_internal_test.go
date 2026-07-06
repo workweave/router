@@ -306,8 +306,7 @@ func spanBool(t *testing.T, sp *tracev1.Span, key string) bool {
 }
 
 // TestBypass_EmitsUsageAndCost guards that the bypass span carries token usage
-// + catalog-priced cost — subscription turns are invisible to the savings metric
-// without it.
+// + catalog-priced cost — subscription turns are invisible to the savings metric without it.
 func TestBypass_EmitsUsageAndCost(t *testing.T) {
 	const (
 		inputTokens  = 1200
