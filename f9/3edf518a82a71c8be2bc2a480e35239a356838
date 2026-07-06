@@ -1,0 +1,27 @@
+internal/translate/emit_openai.go
+  s_9169e55d7b393a::t_f259f9462be02d 109,123
+internal/proxy/service.go
+  ai_agent 8,675-691,860,874,892
+internal/translate/billing_header_test.go
+  s_9169e55d7b393a::t_93fdc6e76190f8 1-54
+internal/translate/billing_header.go
+  s_9169e55d7b393a::t_9fadc296d97649 1-19
+internal/translate/emit_gemini.go
+  s_9169e55d7b393a::t_fdf790a4af52fa 446-447,457
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "f93edf518a82a71c8be2bc2a480e35239a356838",
+  "prompts": {},
+  "sessions": {
+    "s_9169e55d7b393a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "112842cf-818e-46fd-af51-617addeefd72",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

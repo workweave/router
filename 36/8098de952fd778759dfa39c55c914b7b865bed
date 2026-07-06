@@ -1,0 +1,178 @@
+internal/proxy/service_test.go
+  s_de7864f6f2b744::t_9b4e2093b94b30 250
+  s_de7864f6f2b744::t_28f7f5c2e890bc 135
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_cfb421a9e8bba8::t_89026dab947eb4 75-133,182-237,297-352
+  s_de7864f6f2b744::t_c712ab20c5f169 136,155,163,251,270,278
+  s_de7864f6f2b744::t_64ed8f671db457 1-74,134-135,137-154,156-162,164-181,238-250,252-269,271-277,279-296,353-522
+internal/api/admin/keys.go
+  s_cfb421a9e8bba8::t_c2013c43029edb 46-47,66-67,140-141,160-161,181-182
+  s_cfb421a9e8bba8::t_1fec89f48b6a09 91
+  s_de7864f6f2b744::t_2695c7f20e80c5 1-45,48-65,68-90,92-139,142-159,162-180,183-196
+internal/server/middleware/auth.go
+  s_cfb421a9e8bba8::t_f3e81a50d68d5f 17-19,26-31,34-39,71-90,142-143,161-171
+  s_de7864f6f2b744::t_0844a9bde2f4c9 52-58
+frontend/src/app/globals.css
+  s_de7864f6f2b744::t_324ccdb9da6e27 1-12,14-30,33-47,50-59,62-72,82-83
+  s_cfb421a9e8bba8::t_f245d64dc080c8 13,31-32,48-49,60-61,73-81
+internal/api/admin/metrics.go
+  s_cfb421a9e8bba8::t_0ebb1ac2ed5764 31-33,37-51,56,67-69,77-91
+  s_de7864f6f2b744::t_60b47262283027 1-30,34-36,52-55,57-66,70-76,92-126
+frontend/src/app/(auth)/login/page.tsx
+  s_cfb421a9e8bba8::t_4897cf8719e4be 1-88
+frontend/tailwind.config.ts
+  s_de7864f6f2b744::t_597891c5a1da0b 1-10,61-62,65,70-73,91-97
+  s_cfb421a9e8bba8::t_010b1ab779f139 11-60,63-64,66-69,74-90
+internal/api/admin/installation.go
+  s_cfb421a9e8bba8::t_79c53e51bd0755 1-37
+internal/auth/admin.go
+  s_cfb421a9e8bba8::t_dd2445938585c5 4
+  s_cfb421a9e8bba8::t_d2000aebbab2cd 41-51
+  s_cfb421a9e8bba8::t_3b13605e4ef8bd 1-3,5-6,8-21,24-26,29-35,39-40,55-60,64-69,71-95,97-101,106-127,152-183
+  s_cfb421a9e8bba8::t_debc19235f4478 128-148
+  s_cfb421a9e8bba8::t_66497ad663547d 7,22-23,27-28,36-38,52-54,61-63,70,96,102-105,149-151
+frontend/src/app/(app)/layout.tsx
+  s_cfb421a9e8bba8::t_fbcbfd8cb1f09a 1-47
+frontend/src/components/Card.tsx
+  s_de7864f6f2b744::t_894bdab17b4408 1-2,5-6,36-39,41,59-65,67-74,78-79,88-90
+  s_cfb421a9e8bba8::t_860b06d337b17b 3-4,7-35,40,42-58,66,75-77,80-87
+frontend/next-env.d.ts
+  s_de7864f6f2b744::t_e100a0df9f58ad 1-5
+frontend/src/components/charts/chartTheme.ts
+  s_cfb421a9e8bba8::t_6f8c6443b599be 1-40
+cmd/router/main.go
+  s_cfb421a9e8bba8::t_51320e516ee708 152-167
+  s_de7864f6f2b744::t_5404c545583f79 151
+frontend/src/app/(auth)/layout.tsx
+  s_cfb421a9e8bba8::t_e407e8f51b1377 1-3
+frontend/src/components/charts/RouterCostSavingsChart.tsx
+  s_cfb421a9e8bba8::t_9e0e9acddc0e07 17-155
+frontend/src/components/Button.tsx
+  s_de7864f6f2b744::t_3bec9dd1974236 2-3,13,19,36,39,48,50-55
+  s_cfb421a9e8bba8::t_8976aee9ad8bbf 1,4-12,14-18,20-35,37-38,40-47,49,56-57
+internal/proxy/telemetry.go
+  s_cfb421a9e8bba8::t_9377eff040fb6d 16-17
+  s_de7864f6f2b744::t_f8754eff6ae5ac 1-15,18-61
+internal/server/server.go
+  s_cfb421a9e8bba8::t_79044d313eb8cf 42-52
+  s_de7864f6f2b744::t_51d1f92ad1cfb3 6,27,35-38,53-62
+internal/sqlc/models.go
+  s_de7864f6f2b744::t_64ed8f671db457 75-102
+docker-compose.yml
+  s_de7864f6f2b744::t_affbafa5417c42 101-104
+internal/postgres/telemetry.go
+  s_de7864f6f2b744::t_ef0e0aaba688df 1-128,191-208
+  s_cfb421a9e8bba8::t_2ed9277dadec68 129-190
+frontend/src/components/Logo.tsx
+  s_cfb421a9e8bba8::t_463f2b3813e4a8 7-11,15-16
+  s_cfb421a9e8bba8::t_daf8e3b853a906 14
+  s_cfb421a9e8bba8::t_7f47bc749c61cd 1-6,12-13,17-19
+frontend/src/components/PageHeader.tsx
+  s_cfb421a9e8bba8::t_a7c1b3f442152e 1-27
+frontend/public/weave.svg
+  s_cfb421a9e8bba8::t_ce1c014e3ddb1f 1-8
+internal/proxy/service.go
+  s_de7864f6f2b744::t_28224a59b34eaa 659-686
+  s_de7864f6f2b744::t_d284851a8c525f 124-141
+  s_cfb421a9e8bba8::t_fa1a3cd4cf2d96 144-157,159
+  s_de7864f6f2b744::t_a301a94ae9b0a0 1031-1058
+  s_de7864f6f2b744::t_ca85037a4626f9 809-823
+  s_de7864f6f2b744::t_8bd521da087723 64-66
+db/migrations/0005_add_request_telemetry.up.sql
+  s_de7864f6f2b744::t_d5f8cd8e82a2e4 1-34
+frontend/src/lib/cn.ts
+  s_cfb421a9e8bba8::t_84af484f91b337 1-3
+frontend/src/components/Input.tsx
+  s_de7864f6f2b744::t_402a44f9d0fa0f 2,5-7,9,13-14,16-19,21-23,27-31
+  s_cfb421a9e8bba8::t_1ac18bad68001c 1,3-4,8,10-12,15,20,24-26,32-54
+internal/api/admin/config.go
+  s_de7864f6f2b744::t_3e3bd155953081 1-12,19-20,23,25-28,34-36
+  s_cfb421a9e8bba8::t_8e7edba4005fbf 13-18,21-22,24,29-33
+frontend/src/lib/api.ts
+  s_de7864f6f2b744::t_c3b48bb01a572f 1-3,24-82,88-92,102-138
+  s_cfb421a9e8bba8::t_d3ba92fe63ebeb 4-7,23
+  s_cfb421a9e8bba8::t_62766c1e3911dd 8-22,83-87,93-101
+frontend/src/components/Sidebar.tsx
+  s_cfb421a9e8bba8::t_330ee6c15782d3 62,83
+  s_de7864f6f2b744::t_c88ff8e59405c9 20
+  s_de7864f6f2b744::t_0ec86db24c7c3d 1-2,4,6-7,12-15,17-18,21-22,24,29-30,39,42-46,61,66,103-104
+  s_cfb421a9e8bba8::t_2671bb98fa41c1 33,41,47,49,60,63,67-75,77-82,86-89,102
+  s_cfb421a9e8bba8::t_ad0add066314aa 48,50-59
+  s_cfb421a9e8bba8::t_57ac176b717412 8,10-11,16,19,23,25-28,31-32,34,38,64-65,76,101
+  s_cfb421a9e8bba8::t_7bd0c7f4e21470 90-100
+  s_cfb421a9e8bba8::t_3443920fe400d6 3,5,9
+  s_cfb421a9e8bba8::t_aa793e3833d3a0 35-37,40,84-85
+frontend/src/app/page.tsx
+  s_de7864f6f2b744::t_268d48849692cb 4
+  s_de7864f6f2b744::t_ed26823444f430 1-3,5
+db/queries/model_router_request_telemetry.sql
+  s_de7864f6f2b744::t_c5b80dc48ceeff 118,132
+  s_de7864f6f2b744::t_1f5583a90ac1c1 1-53,98-117,119-131,133-141
+  s_cfb421a9e8bba8::t_7625556e276612 54-97
+frontend/postcss.config.js
+  s_de7864f6f2b744::t_fe5e137a690c7e 1-6
+frontend/src/components/charts/CostBreakdownChart.tsx
+  s_cfb421a9e8bba8::t_533ec79c940961 1-89
+Dockerfile
+  s_de7864f6f2b744::t_93e809fc1a8bf3 163-165
+  s_de7864f6f2b744::t_88afc958cb10be 27-35
+  s_de7864f6f2b744::t_69ce0ef01b24ad 9-11
+  s_de7864f6f2b744::t_2d5f4a78ae631d 128-129
+internal/api/admin/auth.go
+  s_cfb421a9e8bba8::t_85f4368fd64d44 1-126
+frontend/package.json
+  s_de7864f6f2b744::t_4fc05cb748e06a 1-29
+frontend/src/components/SidebarLayout.tsx
+  s_cfb421a9e8bba8::t_f3396d640834d4 1-17
+frontend/src/components/charts/SavingsRateChart.tsx
+  s_cfb421a9e8bba8::t_dd4b157a52e7f0 1-74
+internal/auth/service.go
+  s_de7864f6f2b744::t_9b256de5411812 22,44-70,72-79,83-123
+  s_cfb421a9e8bba8::t_e02559581af61d 23-28
+  s_de7864f6f2b744::t_a61d7174948ea5 80-82
+internal/postgres/repository.go
+  s_de7864f6f2b744::t_67021720339ff3 14,19,29
+db/migrations/0005_add_request_telemetry.down.sql
+  s_de7864f6f2b744::t_2db8e3505c79ca 1-5
+.gitignore
+  s_cfb421a9e8bba8::t_3a8a9409e0a812 61,63-67
+frontend/tsconfig.json
+  s_de7864f6f2b744::t_8ffc1e9c94cb57 1-2,8-18,24,30,41
+  s_de7864f6f2b744::t_e100a0df9f58ad 3-7,19-23,25-29,31-40
+frontend/src/app/layout.tsx
+  s_cfb421a9e8bba8::t_6781a93ca8e632 20
+  s_de7864f6f2b744::t_da19abdb8c9957 1,4,11-18,21-23
+  s_cfb421a9e8bba8::t_b91f529a64fb71 2-3,5-10,19
+frontend/src/components/charts/CumulativeSavingsChart.tsx
+  s_cfb421a9e8bba8::t_de0f0bae5d7ca8 1-82
+frontend/next.config.ts
+  s_cfb421a9e8bba8::t_3f55b9b0d88456 4,10-14,20-22
+  s_cfb421a9e8bba8::t_63c354eaf7595e 28
+  s_cfb421a9e8bba8::t_d1628e0e09ba48 15-19
+  s_cfb421a9e8bba8::t_253add98105895 3,5,7-9,23-26
+  s_de7864f6f2b744::t_a25aa6eac77084 1-2,6,27,29-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "368098de952fd778759dfa39c55c914b7b865bed",
+  "prompts": {},
+  "sessions": {
+    "s_cfb421a9e8bba8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "183b7a80-f394-482e-90b4-1ac11d9a0ec4",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_de7864f6f2b744": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f39a35e9-d816-450a-b60a-1988fece6a15",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,53 @@
+internal/proxy/service.go
+  s_18e3f40203cbfc::t_910b25c1197718 237
+  s_18e3f40203cbfc::t_5999668f92a660 536,548
+  s_18e3f40203cbfc::t_2b09425bf56ebf 247
+  s_18e3f40203cbfc::t_97d941e2b9f13f 222
+  s_18e3f40203cbfc::t_3ebb331224a6bc 881,893,902
+  s_18e3f40203cbfc::t_fcf0230c4d0aea 699
+cmd/router/main.go
+  s_18e3f40203cbfc::t_8e404d4c7d872b 563-569,573,576,583-584,588-589,593-594,602,604,606,608
+  s_18e3f40203cbfc::t_6a789fa2979651 112,121,127,133
+CLAUDE.md
+  s_18e3f40203cbfc::t_737205fc40da6f 304-311
+internal/proxy/service_test.go
+  s_18e3f40203cbfc::t_e1dd4d8edb3294 238,246
+  s_18e3f40203cbfc::t_32ad11b940d3d8 125,133
+  s_18e3f40203cbfc::t_a21889604deea0 56
+  s_18e3f40203cbfc::t_facf3a3346b498 99,107
+internal/proxy/credentials.go
+  s_18e3f40203cbfc::t_b98d4cf96c92b2 51,55
+  s_18e3f40203cbfc::t_e582a55ebd2532 8
+internal/providers/provider.go
+  s_18e3f40203cbfc::t_d7c73e8e35f5df 15-24
+internal/proxy/service_session_pin_test.go
+  s_18e3f40203cbfc::t_0b06cccf02d291 78-83,85-87
+  s_18e3f40203cbfc::t_883e7806ed72fc 250,257-259
+internal/proxy/service_cache_test.go
+  s_18e3f40203cbfc::t_42f63ae568aa18 92,123,147,170
+  s_18e3f40203cbfc::t_477282c36eaa5b 195
+AGENTS.md
+  s_18e3f40203cbfc::t_db234ce612a5bd 304-311
+internal/observability/otel/usage.go
+  s_18e3f40203cbfc::t_be37bd86be199d 133,135
+  s_18e3f40203cbfc::t_3c8b22719695eb 146
+  s_18e3f40203cbfc::t_c090962ee5ed0b 12-21
+  s_18e3f40203cbfc::t_71288e3e110318 205,208
+  s_18e3f40203cbfc::t_9fefa1ea852ade 197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "5fd6169ce36ee233dfed89c1fd26d458d0028642",
+  "prompts": {},
+  "sessions": {
+    "s_18e3f40203cbfc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ef3e74f-d410-4e73-87e1-e5c37122a3e2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

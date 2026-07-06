@@ -1,0 +1,59 @@
+internal/router/cluster/artifacts/v0.26/metadata.yaml
+  s_251692c3e5e2a3::t_12855dd0cefebd 22
+internal/router/cluster/artifacts/v0.36/metadata.yaml
+  s_251692c3e5e2a3::t_12855dd0cefebd 22
+internal/router/cluster/artifacts/v0.26/rankings.json
+  s_251692c3e5e2a3::t_12855dd0cefebd 28
+docker-compose.yml
+  s_251692c3e5e2a3::t_c84f1ba21ff60f 2-6
+  s_251692c3e5e2a3::t_6fb817b0f1dabe 21
+internal/router/cluster/artifacts/v0.25/rankings.json
+  s_251692c3e5e2a3::t_12855dd0cefebd 28
+internal/router/cluster/artifacts/v0.33/metadata.yaml
+  s_251692c3e5e2a3::t_12855dd0cefebd 22
+internal/router/cluster/artifacts/v0.36/rankings.json
+  s_251692c3e5e2a3::t_12855dd0cefebd 28
+.env.example
+  s_251692c3e5e2a3::t_9265f83a4c4a01 16
+  s_251692c3e5e2a3::t_cbe00b2b3922fd 54-55
+internal/router/cluster/artifacts/v0.27/rankings.json
+  s_251692c3e5e2a3::t_12855dd0cefebd 28
+internal/router/cluster/artifacts/v0.27/metadata.yaml
+  s_251692c3e5e2a3::t_12855dd0cefebd 22
+internal/router/cluster/artifacts/v0.33/rankings.json
+  s_251692c3e5e2a3::t_12855dd0cefebd 28
+internal/router/cluster/artifacts/v0.34/rankings.json
+  s_251692c3e5e2a3::t_12855dd0cefebd 28
+internal/router/cluster/artifacts/v0.34/metadata.yaml
+  s_251692c3e5e2a3::t_12855dd0cefebd 22
+internal/router/cluster/artifacts/v0.37/metadata.yaml
+  s_251692c3e5e2a3::t_12855dd0cefebd 23
+internal/router/cluster/artifacts/v0.32/metadata.yaml
+  s_251692c3e5e2a3::t_12855dd0cefebd 22
+internal/router/cluster/artifacts/v0.37/rankings.json
+  s_251692c3e5e2a3::t_12855dd0cefebd 28
+internal/router/cluster/artifacts/v0.35/metadata.yaml
+  s_251692c3e5e2a3::t_12855dd0cefebd 22
+internal/router/cluster/artifacts/v0.35/rankings.json
+  s_251692c3e5e2a3::t_12855dd0cefebd 28
+internal/router/cluster/artifacts/v0.32/rankings.json
+  s_251692c3e5e2a3::t_12855dd0cefebd 28
+internal/router/cluster/artifacts/v0.25/metadata.yaml
+  s_251692c3e5e2a3::t_12855dd0cefebd 22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "8a0706b83841cb4158c6a56fe7433ae55286d1cd",
+  "prompts": {},
+  "sessions": {
+    "s_251692c3e5e2a3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f7f31f4-019e-496e-b679-be05bb8583a4",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
