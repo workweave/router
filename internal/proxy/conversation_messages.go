@@ -19,10 +19,18 @@ func conversationMessagesForRouting(env *translate.RequestEnvelope) []router.Con
 				InputKeys: append([]string(nil), call.InputKeys...),
 			})
 		}
+		results := make([]router.ConversationToolResult, 0, len(msg.ToolResults))
+		for _, result := range msg.ToolResults {
+			results = append(results, router.ConversationToolResult{
+				ToolUseID: result.ToolUseID,
+				IsError:   result.IsError,
+			})
+		}
 		out = append(out, router.ConversationMessage{
-			Role:      msg.Role,
-			Text:      msg.Text,
-			ToolCalls: calls,
+			Role:        msg.Role,
+			Text:        msg.Text,
+			ToolCalls:   calls,
+			ToolResults: results,
 		})
 	}
 	return out

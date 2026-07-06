@@ -56,14 +56,20 @@ type Request struct {
 }
 
 type ConversationMessage struct {
-	Role      string
-	Text      string
-	ToolCalls []ConversationToolCall
+	Role        string
+	Text        string
+	ToolCalls   []ConversationToolCall
+	ToolResults []ConversationToolResult
 }
 
 type ConversationToolCall struct {
 	Name      string
 	InputKeys []string
+}
+
+type ConversationToolResult struct {
+	ToolUseID string
+	IsError   bool
 }
 
 type Decision struct {

@@ -41,6 +41,10 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 			{Role: "user", Text: "please explore the repo"},
 			{Role: "assistant", Text: "done"},
 			{Role: "tool", Text: "large raw tool result should not be sent"},
+			{Role: "user", ToolResults: []router.ConversationToolResult{{
+				ToolUseID: "toolu_123",
+				IsError:   true,
+			}}},
 			{
 				Role: "user",
 				Text: "latest hello",
@@ -62,14 +66,19 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 	assert.Equal(t, "hello", got.PromptText)
 	assert.Equal(t, "latest hello", got.LatestUserText)
 	assert.Equal(t, 1, got.TurnIndex)
-	require.Len(t, got.ConversationMessages, 3)
+	require.Len(t, got.ConversationMessages, 4)
 	assert.Equal(t, "user", got.ConversationMessages[0].Role)
 	assert.Equal(t, "please explore the repo", got.ConversationMessages[0].Text)
 	assert.Equal(t, "assistant", got.ConversationMessages[1].Role)
-	assert.Equal(t, "latest hello", got.ConversationMessages[2].Text)
-	require.Len(t, got.ConversationMessages[2].ToolCalls, 1)
-	assert.Equal(t, "Read", got.ConversationMessages[2].ToolCalls[0].Name)
-	assert.Equal(t, []string{"file_path"}, got.ConversationMessages[2].ToolCalls[0].InputKeys)
+	assert.Equal(t, "user", got.ConversationMessages[2].Role)
+	assert.Empty(t, got.ConversationMessages[2].Text)
+	require.Len(t, got.ConversationMessages[2].ToolResults, 1)
+	assert.Equal(t, "toolu_123", got.ConversationMessages[2].ToolResults[0].ToolUseID)
+	assert.True(t, got.ConversationMessages[2].ToolResults[0].IsError)
+	assert.Equal(t, "latest hello", got.ConversationMessages[3].Text)
+	require.Len(t, got.ConversationMessages[3].ToolCalls, 1)
+	assert.Equal(t, "Read", got.ConversationMessages[3].ToolCalls[0].Name)
+	assert.Equal(t, []string{"file_path"}, got.ConversationMessages[3].ToolCalls[0].InputKeys)
 	assert.True(t, got.HasTools)
 	assert.Equal(t, []string{"moonshotai/kimi-k2.7-code"}, got.CandidateModels)
 	assert.Equal(t, "moonshotai/kimi-k2.7-code", result.Model)

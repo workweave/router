@@ -9,14 +9,20 @@ import (
 )
 
 type ConversationMessage struct {
-	Role      string
-	Text      string
-	ToolCalls []ConversationToolCall
+	Role        string
+	Text        string
+	ToolCalls   []ConversationToolCall
+	ToolResults []ConversationToolResult
 }
 
 type ConversationToolCall struct {
 	Name      string
 	InputKeys []string
+}
+
+type ConversationToolResult struct {
+	ToolUseID string
+	IsError   bool
 }
 
 // ConversationMessages returns provider-neutral visible message history.
@@ -48,9 +54,10 @@ func (e *RequestEnvelope) anthropicConversationMessages() []ConversationMessage 
 		}
 		content := msg.Get("content")
 		out = append(out, ConversationMessage{
-			Role:      role,
-			Text:      textForRole(role, content),
-			ToolCalls: anthropicToolCalls(content),
+			Role:        role,
+			Text:        textForRole(role, content),
+			ToolCalls:   anthropicToolCalls(content),
+			ToolResults: anthropicToolResults(content),
 		})
 		return true
 	})
@@ -124,6 +131,24 @@ func anthropicToolCalls(content gjson.Result) []ConversationToolCall {
 		return true
 	})
 	return calls
+}
+
+func anthropicToolResults(content gjson.Result) []ConversationToolResult {
+	if !content.IsArray() {
+		return nil
+	}
+	results := make([]ConversationToolResult, 0)
+	content.ForEach(func(_, block gjson.Result) bool {
+		if block.Get("type").String() != "tool_result" {
+			return true
+		}
+		results = append(results, ConversationToolResult{
+			ToolUseID: strings.TrimSpace(block.Get("tool_use_id").String()),
+			IsError:   block.Get("is_error").Bool(),
+		})
+		return true
+	})
+	return results
 }
 
 func openAIToolCalls(value gjson.Result) []ConversationToolCall {
@@ -228,7 +253,7 @@ func compactConversationMessages(messages []ConversationMessage) []ConversationM
 	for _, msg := range messages {
 		msg.Role = strings.TrimSpace(msg.Role)
 		msg.Text = strings.TrimSpace(msg.Text)
-		if msg.Role == "" || (msg.Text == "" && len(msg.ToolCalls) == 0) {
+		if msg.Role == "" || (msg.Text == "" && len(msg.ToolCalls) == 0 && len(msg.ToolResults) == 0) {
 			continue
 		}
 		out = append(out, msg)

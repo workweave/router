@@ -89,14 +89,20 @@ type routeRequest struct {
 }
 
 type routeMessage struct {
-	Role      string          `json:"role"`
-	Text      string          `json:"text,omitempty"`
-	ToolCalls []routeToolCall `json:"tool_calls,omitempty"`
+	Role        string            `json:"role"`
+	Text        string            `json:"text,omitempty"`
+	ToolCalls   []routeToolCall   `json:"tool_calls,omitempty"`
+	ToolResults []routeToolResult `json:"tool_results,omitempty"`
 }
 
 type routeToolCall struct {
 	Name      string   `json:"name,omitempty"`
 	InputKeys []string `json:"input_keys,omitempty"`
+}
+
+type routeToolResult struct {
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	IsError   bool   `json:"is_error,omitempty"`
 }
 
 type routeResponse struct {
@@ -230,13 +236,21 @@ func routeMessages(messages []router.ConversationMessage) []routeMessage {
 				InputKeys: inputKeys,
 			})
 		}
-		if text == "" && len(calls) == 0 {
+		results := make([]routeToolResult, 0, len(msg.ToolResults))
+		for _, result := range msg.ToolResults {
+			results = append(results, routeToolResult{
+				ToolUseID: clipRouteText(result.ToolUseID, maxRouteToolCallInputChars),
+				IsError:   result.IsError,
+			})
+		}
+		if text == "" && len(calls) == 0 && len(results) == 0 {
 			continue
 		}
 		reversed = append(reversed, routeMessage{
-			Role:      role,
-			Text:      text,
-			ToolCalls: calls,
+			Role:        role,
+			Text:        text,
+			ToolCalls:   calls,
+			ToolResults: results,
 		})
 	}
 	out := make([]routeMessage, 0, len(reversed))
@@ -277,7 +291,7 @@ func latestUserText(messages []routeMessage) string {
 func turnIndex(messages []routeMessage) int {
 	count := 0
 	for _, msg := range messages {
-		if msg.Role == "user" {
+		if msg.Role == "user" && strings.TrimSpace(msg.Text) != "" {
 			count++
 		}
 	}
