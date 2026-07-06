@@ -68,3 +68,44 @@ func TestConversationMessagesPreservesAnthropicToolResultMarker(t *testing.T) {
 	assert.Equal(t, "toolu_123", messages[0].ToolResults[0].ToolUseID)
 	assert.True(t, messages[0].ToolResults[0].IsError)
 }
+
+func TestConversationMessagesPreservesOpenAIToolResultMarker(t *testing.T) {
+	env, err := translate.ParseOpenAI([]byte(`{
+		"model":"gpt-4o",
+		"messages":[
+			{"role":"assistant","content":null,"tool_calls":[{"id":"call_123","type":"function","function":{"name":"Read","arguments":"{\"file_path\":\"README.md\"}"}}]},
+			{"role":"tool","tool_call_id":"call_123","content":"large raw tool output"}
+		]
+	}`))
+	require.NoError(t, err)
+
+	messages := env.ConversationMessages()
+	require.Len(t, messages, 2)
+	assert.Equal(t, "assistant", messages[0].Role)
+	require.Len(t, messages[0].ToolCalls, 1)
+	assert.Equal(t, "Read", messages[0].ToolCalls[0].Name)
+	assert.Equal(t, "user", messages[1].Role)
+	assert.Empty(t, messages[1].Text)
+	require.Len(t, messages[1].ToolResults, 1)
+	assert.Equal(t, "call_123", messages[1].ToolResults[0].ToolUseID)
+}
+
+func TestConversationMessagesPreservesGeminiToolResultMarker(t *testing.T) {
+	env, err := translate.ParseGemini([]byte(`{
+		"contents":[
+			{"role":"model","parts":[{"functionCall":{"name":"Bash","args":{"command":"pwd"}}}]},
+			{"role":"user","parts":[{"functionResponse":{"name":"Bash","response":{"output":"large raw tool output"}}}]}
+		]
+	}`))
+	require.NoError(t, err)
+
+	messages := env.ConversationMessages()
+	require.Len(t, messages, 2)
+	assert.Equal(t, "assistant", messages[0].Role)
+	require.Len(t, messages[0].ToolCalls, 1)
+	assert.Equal(t, "Bash", messages[0].ToolCalls[0].Name)
+	assert.Equal(t, "user", messages[1].Role)
+	assert.Empty(t, messages[1].Text)
+	require.Len(t, messages[1].ToolResults, 1)
+	assert.Equal(t, "Bash", messages[1].ToolResults[0].ToolUseID)
+}

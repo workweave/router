@@ -71,6 +71,13 @@ func (e *RequestEnvelope) openAIConversationMessages() []ConversationMessage {
 		if role == "" {
 			return true
 		}
+		if role == "tool" || role == "function" {
+			out = append(out, ConversationMessage{
+				Role:        "user",
+				ToolResults: openAIToolResults(msg),
+			})
+			return true
+		}
 		out = append(out, ConversationMessage{
 			Role:      role,
 			Text:      strings.TrimSpace(openAIContentTextGJSON(msg.Get("content"))),
@@ -96,13 +103,11 @@ func (e *RequestEnvelope) geminiConversationMessages() []ConversationMessage {
 		}
 		parts := msg.Get("parts")
 		out = append(out, ConversationMessage{
-			Role:      role,
-			Text:      strings.TrimSpace(geminiPartsText(parts)),
-			ToolCalls: geminiToolCalls(parts),
+			Role:        role,
+			Text:        strings.TrimSpace(geminiPartsText(parts)),
+			ToolCalls:   geminiToolCalls(parts),
+			ToolResults: geminiToolResults(parts),
 		})
-		if toolText := strings.TrimSpace(geminiFunctionResponseText(parts)); toolText != "" {
-			out = append(out, ConversationMessage{Role: "tool", Text: toolText})
-		}
 		return true
 	})
 	return compactConversationMessages(out)
@@ -170,6 +175,14 @@ func openAIToolCalls(value gjson.Result) []ConversationToolCall {
 	return calls
 }
 
+func openAIToolResults(msg gjson.Result) []ConversationToolResult {
+	result := ConversationToolResult{
+		ToolUseID: strings.TrimSpace(msg.Get("tool_call_id").String()),
+		IsError:   msg.Get("is_error").Bool() || strings.EqualFold(strings.TrimSpace(msg.Get("status").String()), "error"),
+	}
+	return []ConversationToolResult{result}
+}
+
 func geminiToolCalls(parts gjson.Result) []ConversationToolCall {
 	if !parts.IsArray() {
 		return nil
@@ -196,11 +209,11 @@ func geminiToolCalls(parts gjson.Result) []ConversationToolCall {
 	return calls
 }
 
-func geminiFunctionResponseText(parts gjson.Result) string {
+func geminiToolResults(parts gjson.Result) []ConversationToolResult {
 	if !parts.IsArray() {
-		return ""
+		return nil
 	}
-	values := make([]string, 0)
+	results := make([]ConversationToolResult, 0)
 	parts.ForEach(func(_, part gjson.Result) bool {
 		resp := part.Get("functionResponse")
 		if !resp.Exists() {
@@ -209,15 +222,12 @@ func geminiFunctionResponseText(parts gjson.Result) string {
 		if !resp.Exists() {
 			return true
 		}
-		if name := strings.TrimSpace(resp.Get("name").String()); name != "" {
-			values = append(values, "Function response: "+name)
-		}
-		if raw := strings.TrimSpace(resp.Get("response").Raw); raw != "" {
-			values = append(values, raw)
-		}
+		results = append(results, ConversationToolResult{
+			ToolUseID: strings.TrimSpace(resp.Get("name").String()),
+		})
 		return true
 	})
-	return strings.Join(values, "\n")
+	return results
 }
 
 func objectKeys(value gjson.Result) []string {
