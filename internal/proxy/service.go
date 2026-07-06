@@ -1850,8 +1850,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	var compactionHandoverOutcome handoverOutcome
 	// Detection runs pre-routing in runTurnLoop; routeRes.PrefixTrimmed carries
 	// the verdict. Skip if a model-switch handover already rewrote env this
-	// turn — a second rewrite would double-trim it.
-	if decision.Provider != providers.ProviderAnthropic && !routeRes.HardPinned && !routeRes.Handover.Invoked && routeRes.PrefixTrimmed {
+	// turn — a second rewrite would double-trim it. Also skip when the proactive
+	// compaction cascade already ran this turn: it shrank env (which trips the
+	// client-trim detector as a false positive), so a compaction handover here
+	// would be a redundant summarizer call that also discards the recent-turn
+	// tail maybeCompact deliberately kept.
+	if decision.Provider != providers.ProviderAnthropic && !routeRes.HardPinned && !routeRes.Handover.Invoked && !compRes.Applied && routeRes.PrefixTrimmed {
 		log.Info("Context trimming detected on non-Anthropic route; rewriting context with handover summary",
 			"message_count", feats.MessageCount,
 			"tool_call_count", inboundToolCallCount,
