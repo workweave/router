@@ -1350,6 +1350,61 @@ func TestCrossFormat_AnthropicToOpenAI_InputSchemaBecomesParameters(t *testing.T
 	assert.Equal(t, "object", params["type"])
 	assert.NotContains(t, tool, "input_schema")
 }
+
+func TestCrossFormat_AnthropicToOpenAI_StripsUnsupportedToolSchemaPattern(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "user", "content": [{"type": "text", "text": "search"}]},
+			{"role": "assistant", "content": [
+				{"type": "tool_use", "id": "toolu_1", "name": "Grep", "input": {"pattern": "schema", "path": "/tmp"}}
+			]},
+			{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"}]}
+		],
+		"tools": [
+			{"name": "DecimalTool", "description": "uses a decimal schema",
+			 "input_schema": {
+				"type": "object",
+				"properties": {
+					"amount": {"type": "string", "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$", "description": "decimal"}
+				},
+				"required": ["amount"]
+			 }}
+		],
+		"max_tokens": 512
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{
+		TargetModel:    "moonshotai/kimi-k2.7",
+		TargetProvider: "fireworks",
+	})
+	require.NoError(t, err)
+
+	doc := unmarshalBody(t, prep.Body)
+	tools := getArray(t, doc, "tools")
+	require.Len(t, tools, 1)
+	fn := getMap(t, tools[0].(map[string]any), "function")
+	params := getMap(t, fn, "parameters")
+	props := getMap(t, params, "properties")
+	amount := getMap(t, props, "amount")
+	assert.NotContains(t, amount, "pattern", "OpenAI-compatible providers can reject unsupported JSON Schema regexes")
+	assert.Contains(t, amount["description"], "decimal")
+	assert.Contains(t, amount["description"], "pattern:")
+
+	msgs := getArray(t, doc, "messages")
+	assistant := msgAt(t, msgs, 1)
+	toolCalls := assistant["tool_calls"].([]any)
+	require.Len(t, toolCalls, 1)
+	tcFn := getMap(t, toolCalls[0].(map[string]any), "function")
+	argsStr, ok := tcFn["arguments"].(string)
+	require.True(t, ok)
+	var args map[string]any
+	require.NoError(t, json.Unmarshal([]byte(argsStr), &args))
+	assert.Equal(t, "schema", args["pattern"], "tool-call arguments named pattern are runtime data, not schema")
+}
+
 func TestCrossFormat_OpenAIToAnthropic_ConsecutiveToolResultsMerge(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4",
