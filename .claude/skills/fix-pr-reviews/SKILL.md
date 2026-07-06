@@ -1,15 +1,25 @@
 ---
 name: fix-pr-reviews
-description: Fetches review comments from a GitHub PR and fixes them immediately as they appear (comments before CI). Comments requiring a genuine human decision are NOT auto-fixed — they are escalated to the user with options grounded in existing patterns and best practices. After each fix batch, runs pre-commit validation and submits, then waits for CI only when no actionable threads remain. Loops until all review threads are resolved AND all CI checks have completed. Use when asked to fix PR comments, address review feedback, babysit a PR to merge-ready, or handle review comments.
+description: Fetches feedback from a GitHub PR — review-thread comments, ad-hoc PR comments (including those posted as a review's body without a thread), and bot/advisory review submissions — and fixes all of them as they appear (comments before CI). Bot comment-length nits apply verbatim; comments requiring a genuine human decision are NOT auto-fixed and are escalated to the user with options grounded in existing patterns and best practices. After each fix batch, runs pre-commit validation and submits, then waits for CI only when no actionable feedback remains. Loops until all feedback is resolved AND all CI checks have completed. Use when asked to fix PR comments, address review feedback, address PR-level bot reviews (e.g. workweave-bot advisory nits), babysit a PR to merge-ready, or handle review comments.
 ---
 
-# Fix PR Review Comments (Loop Until Done)
+# Fix PR Feedback (Loop Until Done)
 
-Automates fixing review comments on a GitHub PR, validating fixes, submitting them, **and then continuously looping** until the PR is merge-ready: all review threads resolved, all reviewers done, and all CI checks complete.
+Automates fixing PR feedback on a GitHub PR — review threads, ad-hoc PR comments, and bot/advisory reviews (e.g. `workweave-bot` COMMENTED-state reviews with nit lists) — then validating fixes, submitting them, **and continuously looping** until the PR is merge-ready: all feedback resolved, all reviewers done, and all CI checks complete.
 
-**Priority: comments first, CI second.** Never sit in a CI wait while unresolved review threads exist. As soon as polling surfaces a new comment, stop waiting and fix it before resuming CI.
+**Three sources of feedback — treat all three as first-class:**
 
-**Do not auto-fix decisions that belong to a human.** Some comments don't have one objectively correct resolution — they involve a product/architecture/scope trade-off, multiple defensible approaches, or intent only the author knows. **Never guess on these.** Classify them as **Escalate**: pause that thread, surface it to the user with concrete options grounded in the existing codebase patterns and best practices, and let the human choose before you touch the code.
+1. **Review-thread comments** (`reviewThreads` in GraphQL) — line-anchored feedback attached to a code review.
+2. **Issue comments on the PR** (`gh api repos/.../pulls/.../comments`) — ad-hoc PR comments not attached to any review. These include comments posted as a review's body text (visible as the review's `body` field but with `comments: null`/zero threads) — do not skip them just because they are not in `reviewThreads`.
+3. **Bot/advisory reviews** with no per-line threads but a populated review body — e.g. `workweave-bot` posting `COMMENTED` reviews that list 6-10 nit-level comment-length suggestions across multiple files. The review body's contents are themselves actionable items even though no GraphQL reviewThread exists.
+
+Fetch all three every iteration. Do not skip the issue-comments and review-body sources just because `reviewThreads` returned items.
+
+**Priority: feedback first, CI second.** Never sit in a CI wait while unresolved feedback exists. As soon as polling surfaces a new item, stop waiting and fix it before resuming CI.
+
+**Do not auto-fix decisions that belong to a human.** Some items don't have one objectively correct resolution — they involve a product/architecture/scope trade-off, multiple defensible approaches, or intent only the author knows. **Never guess on these.** Classify them as **Escalate**: pause that item, surface it to the user with concrete options grounded in the existing codebase patterns and best practices, and let the human choose before you touch the code.
+
+**Bot nit rules — still Fix category, treat as authoritative:** When a bot (e.g. `workweave-bot`, `greptile-apps[bot]`, `cubic`) suggests a concrete code-replacement via a fenced ```suggestion``` block, apply the suggested replacement verbatim. Do not paraphrase, do not push back, do not skip because "the existing wording is fine." The bot's replacement is the authoritative version of "concise." For free-form bot feedback without a `suggestion` block, triage it like any other comment: Fix if straightforward, Escalate if it requires a judgment call.
 
 ## Prerequisites
 
@@ -81,10 +91,16 @@ Verify `git branch --show-current` matches `headRefName`. Run `git checkout <hea
 
 ### Step 1: Fetch Fresh PR State (every iteration)
 
-Re-fetch all four signals at the start of every iteration. Never reuse stale data.
+Re-fetch **all feedback signals** at the start of every iteration. Never reuse stale data. Three sources, all first-class:
+
+1. `reviewThreads` — line-anchored review comments (GraphQL)
+2. `review.body` + `review.comments.nodes` per review — including bot/advisory reviews with populated bodies but zero threads (e.g. `workweave-bot` listing nit suggestions in the review body)
+3. Issue comments on the PR (REST `/issues/:n/comments`) — ad-hoc PR comments and any unreviewed bot commentary
 
 ```bash
-# Threads, reviews, review-requests (with pagination support)
+# 1. Threads + reviews (with review bodies and per-review comments) + review-requests.
+#    latestReviews pulls both the review.body string AND any comments posted at
+#    the review level (reviews can have a populated body and zero threads).
 gh api graphql -f query='
   query($owner: String!, $repo: String!, $pr: Int!, $threadCursor: String, $reviewRequestCursor: String, $reviewCursor: String) {
     repository(owner: $owner, name: $repo) {
@@ -102,7 +118,12 @@ gh api graphql -f query='
           pageInfo { hasNextPage endCursor }
         }
         latestReviews(first: 50, after: $reviewCursor) {
-          nodes { author { login } state submittedAt }
+          nodes {
+            id author { login }
+            state submittedAt
+            body      # full review-body text — bot nitlists often live here, not in threads
+            comments(first: 10) { nodes { id body path line author { login } } }
+          }
           pageInfo { hasNextPage endCursor }
         }
       }
@@ -110,12 +131,17 @@ gh api graphql -f query='
   }
 ' -f owner="$OWNER" -f repo="$REPO" -F pr="$PR_NUMBER"
 
-# For production implementations, iterate through all pages:
-# - Continue fetching reviewThreads with after=endCursor until !hasNextPage
-# - Continue fetching reviewRequests with after=endCursor until !hasNextPage
-# - Continue fetching latestReviews with after=endCursor until !hasNextPage
+# 2. Issue comments on the PR (ad-hoc, plus unreviewed bot commentary).
+#    These do NOT surface in GraphQL reviewThreads.
+gh api "repos/$OWNER/$REPO/issues/$PR_NUMBER/comments?per_page=100" --paginate \
+  --jq '.[] | {id, user: .user.login, body, created_at}'
 
-# CI checks
+# 3. Per-commit review comments (REST). Authoritative source of line-anchored
+#    feedback and the only path that cleanly surfaces ```suggestion``` blocks.
+gh api "repos/$OWNER/$REPO/pulls/$PR_NUMBER/comments?per_page=100" --paginate \
+  --jq '.[] | {id, user: .user.login, path, line, body, created_at}'
+
+# 4. CI checks
 gh pr checks "$PR_NUMBER" --json name,state,bucket,link
 ```
 
@@ -123,8 +149,11 @@ gh pr checks "$PR_NUMBER" --json name,state,bucket,link
 - Continue fetching `reviewThreads` with `after: endCursor` until `pageInfo.hasNextPage` is false
 - Continue fetching `reviewRequests` with `after: endCursor` until `pageInfo.hasNextPage` is false  
 - Continue fetching `latestReviews` with `after: endCursor` until `pageInfo.hasNextPage` is false
+- Page REST endpoints via `gh api --paginate`
 
 For production implementations, iterate through all pages before computing DONE flags. For brevity in this skill spec, we show only the first page fetch.
+
+**Build a unified list before triage.** A bot review whose body lists 6 nits becomes **6 actionable items**, not just one review. A PR-level ad-hoc comment is one item. A review-thread comment is one item. Merge sources 1+2+3 into a single feedback list sorted by `created_at` ascending, then triage from that list — **not** from `reviewThreads` alone.
 
 Compute the five DONE flags. If all true, **exit the loop**.
 
@@ -132,10 +161,11 @@ Compute the five DONE flags. If all true, **exit the loop**.
 - `reviewThreads`: continue with `after: endCursor` until `!hasNextPage`
 - `reviewRequests`: continue with `after: endCursor` until `!hasNextPage`
 - `latestReviews`: continue with `after: endCursor` until `!hasNextPage`
+- REST endpoints: `gh api ... --paginate`
 
 Only compute DONE after collecting all pages.
 
-**Comment-first branch:** If any thread is `isResolved: false` AND `isOutdated: false` and is not Skip-category → go to Steps 2–5 immediately. **Do not** wait for CI first, even if checks are still running or failed.
+**Comment-first branch:** If anything in the unified feedback list is unresolved/unactioned and is not Skip-category → go to Steps 2–5 immediately. **Do not** wait for CI first, even if checks are still running or failed.
 
 **CI-wait branch:** Only when there are zero actionable threads → Step 6.
 
@@ -258,18 +288,26 @@ gh api graphql -f query='
 ' -f threadId='{THREAD_ID}'
 ```
 
-Then commit and push. Skip if no files changed (e.g. all-Decline iteration):
+For bot reviews with nitlist bodies: post a single reply on the review summarizing "applied N/M suggestions with these commits" so the bot/author can audit coverage without re-running the whole list.
+
+For ad-hoc issue comments that are not in any thread (rare, but they happen for first-pass bot reviews that pre-date threaded mode): there's no thread to resolve — the comment just sits on the PR. Track them in your unified list and mark them as "addressed in commit X" when you push.
+
+For threaded review comments: resolve per-thread via the GraphQL mutation below. Then commit and push. Skip if no files changed (e.g. all-Decline iteration):
 
 ```bash
 # 1. Stage specific files only
 git add path/to/fixed1.go path/to/fixed2.tsx
 
 # 2. Commit
-git commit -m "fix: address PR review feedback (iteration N)
+git commit -m "fix: address PR feedback (iteration N)
 
 Fixed:
 - [summary of fix 1]
 - [summary of fix 2]
+
+Applied from <bot-name> review:
+- [summary of bot-fix 1]
+- [summary of bot-fix 2]
 
 Declined (with explanation):
 - [summary of declined 1]"
@@ -284,25 +322,36 @@ git push
 NEW_SHA=$(git rev-parse HEAD)
 ```
 
-### Mandatory post-push thread audit (do not skip)
+### Mandatory post-push feedback audit (do not skip)
 
 Immediately after `git push` succeeds, **go back to Step 1** before Step 6. Do not enter CI wait on the same iteration you pushed.
 
-Auto-reviewers (`cursor[bot]`, `greptile-apps[bot]`, `cubic`, etc.) often file **new** threads on the new commit asynchronously. Treat "zero actionable threads right before push" as meaningless for the new SHA.
+Auto-reviewers (`cursor[bot]`, `greptile-apps[bot]`, `cubic`, `workweave-bot`, etc.) often file **new** feedback on the new commit asynchronously — both review-thread comments and review-body nitlists. Treat "zero actionable feedback right before push" as meaningless for the new SHA.
 
-Count actionable threads:
+Count actionable items across **all three sources** (reviewThreads + review.body nitlist splits + REST issue & PR comments):
 
 ```bash
-# actionable = isResolved == false AND isOutdated == false AND NOT Skip-category
+# 1. Unresolved review-thread comments
 gh api graphql ... # same query as Step 1 | \
-  jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false and .isOutdated == false)] | length'
+  jq '[.data.repository.pullRequest.reviewThreads.nodes[] \
+        | select(.isResolved == false and .isOutdated == false)] | length'
+
+# 2. Unresolved threads in review bodies (review comments, not thread comments)
+gh api graphql ... # same query as Step 1 | \
+  jq '[.data.repository.pullRequest.latestReviews.nodes[] \
+        | .comments.nodes[] \
+        | select(...) ] | length'
+
+# 3. Unactioned issue comments (POST-push only — pre-push already covered these)
+gh api "repos/$OWNER/$REPO/issues/$PR_NUMBER/comments?per_page=100" --paginate | \
+  jq '[.[] | select(. created_at > LAST_PUSH_SHA_TIMESTAMP)] | length'
 ```
 
-**Note:** The jq query above counts all unresolved non-outdated threads, but Skip-category threads should be excluded from "actionable" for CI-wait decisions. In practice:
-- If you explicitly classified a thread as Skip earlier in this iteration, it should not count as actionable
-- For the post-push audit, assume any unresolved non-outdated thread needs attention unless you've already classified it as Skip
+A unified actionable count > 0 → triage/fix (Steps 2–5). Only when count == 0 across all three sources → Step 6 CI wait.
 
-While count > 0 → triage/fix (Steps 2–5). Only when count == 0 → Step 6 CI wait.
+**Note:** Skip-category threads should be excluded from "actionable" for CI-wait decisions. In practice:
+- If you explicitly classified an item as Skip earlier in this iteration, it should not count as actionable
+- For the post-push audit, assume any unresolved non-outdated item needs attention unless you've already classified it as Skip
 
 If `git push` errors with "branch is out of date with remote" or similar after a previous PR in the stack merged, run `git fetch origin` → `git rebase origin/main` (or appropriate base) if needed, then retry `git push`.
 
@@ -410,6 +459,9 @@ If after **5 full iterations** the loop hasn't terminated, stop and surface the 
 | Fixed batch 1, pushed, then CI-wait without re-fetch | Bugbot posts new threads on the fix commit; user sees open comments | **Post-push thread audit** every time; Step 1 before Step 6 on same iteration |
 | Resolved one thread and stopped babysitting | Other threads still open; lazy-pr-fix incomplete | Resolve/reply all actionable threads; print termination summary only when DONE |
 | Ending session during CI poll | Miss late bot comments and failing checks | Resume with Step 1 thread fetch; continue interruptible CI loop |
+| Treating bot `COMMENTED` reviews as "no feedback" because `reviewThreads` is empty | Missed the entire nitlist (e.g. workweave-bot's 6-file comment-length fixup on PR #580) | Always fetch `review.body` + REST issue comments; bot nitlists live in bodies, not threads |
+| Rephrasing the bot's suggested replacement instead of applying it verbatim | Lost the "concise" wins the bot was pushing for; subjective drift on what "concise" means | Apply the bot's fenced ```suggestion``` block as-is — never paraphrase, never reword |
+| Closing the loop after the last review-thread comment resolves | Bot advisory review body still has open nits filed against it | Treat each nit in a bot review body as its own actionable item; count individually |
 
 ## Error Handling
 
