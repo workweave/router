@@ -228,12 +228,9 @@ func (s *Service) bypassToAnthropic(
 		return fmt.Errorf("emit bypass body: %w", emitErr)
 	}
 
-	// Tap the response stream for token usage. The bypass path skips billing
-	// (the customer's own subscription pays), but Weave's router cost-savings
-	// metric still needs the would-have-cost of this turn — otherwise every
-	// subscription-served request is invisible to it. The extractor forwards
-	// bytes to the real writer untouched and yields (0,0) when usage isn't
-	// streamed, matching the routed path's Anthropic-native attempt.
+	// Tap the response stream so the bypass span carries token usage for
+	// Weave's router cost-savings metric — subscription-served turns would
+	// otherwise be invisible to it.
 	var extractor *otel.UsageExtractor
 	if s.usageRequired() {
 		extractor = otel.NewUsageExtractor(w, decision.Provider)
@@ -259,10 +256,8 @@ func (s *Service) bypassToAnthropic(
 		flushUpstreamErrorAsAnthropic(w, proxyErr)
 		proxyErr = nil
 	}
-	// Bypass never substitutes the model, so requested == actual cost: both are
-	// the API cost of running feats.Model directly. Weave credits actual to $0
-	// downstream when cost.subscription_served is set, turning that cost into
-	// the savings the subscription delivered.
+	// Bypass never substitutes the model, so requested == actual; Weave credits
+	// actual to $0 downstream when cost.subscription_served is set.
 	in, out := extractor.Tokens()
 	cacheCreation, cacheRead := extractor.CacheTokens()
 	pricing, _ := catalog.PriceFor(decision.Provider, decision.Model)
@@ -283,9 +278,7 @@ func (s *Service) bypassToAnthropic(
 			String("router_user_id", auth.UserIDFrom(ctx)).
 			String("client.app", clientID.ClientApp).
 			String("client.session_id", clientID.SessionID).
-			// Bypass never substitutes, so the requested model IS the served
-			// model; emit it so the savings drilldown's requested/decision
-			// columns match the routed path's shape.
+			// Bypass never substitutes, so requested model IS the served model.
 			String("requested.model", decision.Model).
 			String("decision.model", decision.Model).
 			String("decision.provider", decision.Provider).

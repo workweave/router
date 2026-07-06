@@ -307,12 +307,9 @@ func spanBool(t *testing.T, sp *tracev1.Span, key string) bool {
 	return false
 }
 
-// TestBypass_EmitsUsageAndCost is the regression guard for the router
-// cost-savings metric: the subscription bypass path skips billing, so unless it
-// emits token usage + the would-have-cost on its span, every subscription-served
-// turn is invisible to Weave's savings drilldown. A fake upstream streams a
-// known Anthropic usage envelope; the span must carry those tokens and the
-// catalog-priced cost of running the model directly.
+// TestBypass_EmitsUsageAndCost guards that the bypass span carries token usage
+// + catalog-priced cost — subscription turns are invisible to the savings metric
+// without it.
 func TestBypass_EmitsUsageAndCost(t *testing.T) {
 	const (
 		inputTokens  = 1200
