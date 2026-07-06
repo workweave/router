@@ -1627,9 +1627,7 @@ func (o *refusalObserver) Header() http.Header { return o.inner.Header() }
 func (o *refusalObserver) WriteHeader(status int) { o.inner.WriteHeader(status) }
 
 func (o *refusalObserver) Write(p []byte) (int, error) {
-	// Accumulate a bounded prefix (so a signal split across SSE chunks is still
-	// caught) and re-scan until the signal is found or the cap is reached. Never
-	// alters the bytes forwarded to the client.
+	// Accumulate up to refusalScanCap so signals split across SSE chunks are caught.
 	if !o.refused && len(o.buf) < refusalScanCap {
 		prevLen := len(o.buf)
 		room := refusalScanCap - len(o.buf)
