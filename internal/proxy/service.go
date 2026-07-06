@@ -1022,12 +1022,14 @@ func (s *Service) WithSummarizer(sz handover.Summarizer) *Service {
 }
 
 // WithCompaction installs the summarizer and trigger threshold for the
-// proactive context-window compaction cascade (maybeCompact). A zero or
-// out-of-range pct falls back to compactionTriggerPctDefault; a nil summarizer
-// leaves Tier-3 summarization off (Tier-1 cleanup + trim rescue still run).
+// proactive context-window compaction cascade (maybeCompact). pct == 0
+// disables compaction (operators set ROUTER_COMPACTION_PCT=0 to turn the
+// cascade off); an out-of-range pct (negative or > 1) falls back to
+// DefaultCompactionTriggerPct. A nil summarizer leaves Tier-3 summarization off
+// (Tier-1 cleanup + trim rescue still run).
 func (s *Service) WithCompaction(cs CompactionSummarizer, pct float64) *Service {
 	s.compactionSummarizer = cs
-	if pct <= 0 || pct > 1 {
+	if pct < 0 || pct > 1 {
 		pct = DefaultCompactionTriggerPct
 	}
 	s.compactionTriggerPct = pct
@@ -1705,7 +1707,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// session is compacted (à la Claude Code) instead of dead-ending in the
 	// scorer with no eligible provider. Mutates env; feats is recomputed after.
 	maxEligibleWindow := s.maxEligibleContextWindow(baseExcluded)
-	compRes, compErr := s.maybeCompact(ctx, env, outputReserve, maxEligibleWindow, r.Header)
+	compRes, compErr := s.maybeCompact(ctx, env, turntype.DetectFromEnvelope(env, feats, ""), outputReserve, maxEligibleWindow, r.Header)
 	if compErr != nil {
 		log.Warn("Compaction could not fit request to any eligible model",
 			"err", compErr, "final_estimate", compRes.FinalEstimate, "max_window", maxEligibleWindow, "requested_model", feats.Model)
@@ -3471,7 +3473,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	if !codexPassthrough {
 		maxEligibleWindowOAI := s.maxEligibleContextWindow(baseExcludedOAI)
 		var compErrOAI error
-		compResOAI, compErrOAI = s.maybeCompact(ctx, env, outputReserveOAI, maxEligibleWindowOAI, r.Header)
+		compResOAI, compErrOAI = s.maybeCompact(ctx, env, turntype.DetectFromEnvelope(env, feats, subAgentHint), outputReserveOAI, maxEligibleWindowOAI, r.Header)
 		if compErrOAI != nil {
 			log.Warn("Compaction could not fit request to any eligible model",
 				"err", compErrOAI, "final_estimate", compResOAI.FinalEstimate, "max_window", maxEligibleWindowOAI, "requested_model", feats.Model)

@@ -10,15 +10,13 @@ import (
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/handover"
+	"workweave/router/internal/router/turntype"
 	"workweave/router/internal/translate"
 )
 
-// ErrContextWindowExceeded is returned when a request's estimated context —
-// even after the full compaction cascade (tool-result cleanup, structured
-// summarization, and recent-turn trimming) — still exceeds the largest context
-// window any eligible model offers. It maps to HTTP 413, distinguishing a
-// genuinely-too-large request from the "no provider keys" flavor of
-// ErrNoEligibleProvider.
+// ErrContextWindowExceeded is returned after the full compaction cascade
+// (tool-result cleanup, summarization, trim) still can't fit any eligible
+// model's window. Maps to HTTP 413, distinct from ErrNoEligibleProvider.
 var ErrContextWindowExceeded = errors.New("proxy: request context exceeds every eligible model's window")
 
 const (
@@ -97,18 +95,17 @@ func (s *Service) selectCompactionSummarizer(historyTokens int) string {
 	return ""
 }
 
-// maybeCompact runs the proactive compaction cascade when the request is at or
-// over compactionTriggerPct of maxWindow (the largest eligible model's window).
-// It mutates env in place — the caller MUST recompute feats/estimates when
-// res.Applied is true. Mirrors Claude Code's tiered cascade: (1) clear old tool
-// results, (2) structured summarization with a window-aware model, (3) trim
-// recent turns. Returns ErrContextWindowExceeded when even a maximally-trimmed
-// request cannot fit maxWindow. A nil/zero-threshold Service, or a request
-// already comfortably under threshold, is a no-op returning res.Applied=false.
-func (s *Service) maybeCompact(ctx context.Context, env *translate.RequestEnvelope, outputReserve, maxWindow int, reqHeaders http.Header) (compactionResult, error) {
+// maybeCompact runs the compaction cascade when needed ≥ compactionTriggerPct
+// of maxWindow: (1) clear old tool results, (2) summarize with a window-aware
+// model, (3) progressive trim. Mutates env in place — caller MUST recompute
+// estimates when res.Applied is true. Returns ErrContextWindowExceeded if the
+// history overflows even after all tiers; no-ops when pct is zero/unset, below
+// threshold, or the turn is hard-pinned (Claude Code's own compaction turn must
+// not be rewritten, and probe/title-gen/classifier turns bypass the scorer).
+func (s *Service) maybeCompact(ctx context.Context, env *translate.RequestEnvelope, tt turntype.TurnType, outputReserve, maxWindow int, reqHeaders http.Header) (compactionResult, error) {
 	log := observability.FromContext(ctx)
 	var res compactionResult
-	if s.compactionTriggerPct <= 0 || maxWindow <= 0 || env == nil {
+	if s.compactionTriggerPct <= 0 || maxWindow <= 0 || env == nil || s.isHardPinnedTurn(tt) {
 		return res, nil
 	}
 

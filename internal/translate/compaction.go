@@ -13,15 +13,11 @@ import (
 // (human or model) recognizes that the content was elided, not lost.
 const ClearedToolResultPlaceholder = "[Old tool result content cleared]"
 
-// ClearOldToolResults replaces the content of every tool result EXCEPT the most
-// recent keepRecent with ClearedToolResultPlaceholder, leaving message and
-// tool-call structure intact. This is the cheap, model-free first tier of
-// compaction: tool results (file reads, command output) dominate an agentic
-// session's tokens, so clearing stale ones alone often brings a request back
-// under a model's window without summarizing. Returns the number of tool
-// results cleared. No-ops (returns 0) when there are at most keepRecent.
-//
-// Pure: no I/O. keepRecent < 0 is treated as 0.
+// ClearOldToolResults replaces every tool result except the most recent
+// keepRecent with ClearedToolResultPlaceholder, leaving structure intact and
+// returning the number cleared. Tool results dominate agentic-session tokens;
+// clearing stale ones is the cheap, model-free Tier-1 step that often avoids a
+// full summarization. Pure: no I/O. keepRecent < 0 is treated as 0.
 func (e *RequestEnvelope) ClearOldToolResults(keepRecent int) int {
 	if e == nil {
 		return 0
@@ -39,17 +35,12 @@ func (e *RequestEnvelope) ClearOldToolResults(keepRecent int) int {
 	}
 }
 
-// RewriteForCompaction keeps system context + a synthesized summary + the most
-// recent keepRecentTurns non-system messages, eliding everything older. Unlike
-// RewriteForHandover (which keeps only the latest user message), this preserves
-// a tail of recent turns so the model retains immediate working context, which
-// is what Claude Code's own compaction does. Tool results orphaned by the trim
-// (their tool_use fell in the elided region) are stripped so the request stays
-// wire-valid. The recent window is aligned to begin on a user message so the
-// [summary, ...recent] sequence alternates roles correctly. Returns the number
-// of original messages elided.
-//
-// Pure: no I/O. keepRecentTurns <= 0 is treated as 1 (summary + latest user).
+// RewriteForCompaction rewrites history to [summary + recent keepRecentTurns
+// non-system messages], aligned to begin on a user turn so roles alternate.
+// Orphaned tool results (whose tool_use was elided) are stripped to keep the
+// request wire-valid. Unlike RewriteForHandover, a tail is kept so the model
+// retains immediate working context. Returns the number of messages elided.
+// Pure: no I/O. keepRecentTurns <= 0 is treated as 1.
 func (e *RequestEnvelope) RewriteForCompaction(summary string, keepRecentTurns int) int {
 	if e == nil {
 		return 0
@@ -72,10 +63,7 @@ func (e *RequestEnvelope) RewriteForCompaction(summary string, keepRecentTurns i
 // message so the window starts on a user turn. Falls back to the last user
 // message's index when the window contains none.
 func userAlignedStart(msgs []gjson.Result, keepRecent int) int {
-	start := len(msgs) - keepRecent
-	if start < 0 {
-		start = 0
-	}
+	start := max(len(msgs)-keepRecent, 0)
 	for start < len(msgs) && msgs[start].Get("role").String() != "user" {
 		start++
 	}

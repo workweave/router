@@ -10,6 +10,7 @@ import (
 
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router/handover"
+	"workweave/router/internal/router/turntype"
 	"workweave/router/internal/translate"
 
 	"github.com/stretchr/testify/assert"
@@ -76,7 +77,7 @@ func TestMaybeCompact_UnderThresholdIsNoop(t *testing.T) {
 	require.NoError(t, err)
 	before := env.ContextOverflowTokenEstimate()
 
-	res, err := s.maybeCompact(context.Background(), env, 0, 1_000_000, http.Header{})
+	res, err := s.maybeCompact(context.Background(), env, turntype.MainLoop, 0, 1_000_000, http.Header{})
 	require.NoError(t, err)
 	assert.False(t, res.Applied, "a small request must not be compacted")
 	assert.Equal(t, before, env.ContextOverflowTokenEstimate(), "env must be untouched below threshold")
@@ -86,7 +87,7 @@ func TestMaybeCompact_DisabledWhenPctZero(t *testing.T) {
 	s := &Service{} // compactionTriggerPct == 0 disables the cascade
 	env, err := translate.ParseAnthropic(alternatingAnthropicBody(20, 200))
 	require.NoError(t, err)
-	res, err := s.maybeCompact(context.Background(), env, 0, 500, http.Header{})
+	res, err := s.maybeCompact(context.Background(), env, turntype.MainLoop, 0, 500, http.Header{})
 	require.NoError(t, err)
 	assert.False(t, res.Applied)
 }
@@ -99,7 +100,7 @@ func TestMaybeCompact_Tier1ClearsToolResults(t *testing.T) {
 	// maxWindow between post-Tier-1 and pre-Tier-1 estimates so Tier-1 alone fits.
 	maxWindow := before * 3 / 4
 
-	res, err := s.maybeCompact(context.Background(), env, 0, maxWindow, http.Header{})
+	res, err := s.maybeCompact(context.Background(), env, turntype.MainLoop, 0, maxWindow, http.Header{})
 	require.NoError(t, err)
 	assert.True(t, res.Applied)
 	assert.Positive(t, res.ToolResultsCleared, "old tool results should be cleared")
@@ -115,7 +116,7 @@ func TestMaybeCompact_Tier3Summarizes(t *testing.T) {
 
 	// Window that Tier-1 (no tool results here) can't satisfy but a
 	// summarize + recent-12 rewrite can.
-	res, err := s.maybeCompact(context.Background(), env, 0, 900, http.Header{})
+	res, err := s.maybeCompact(context.Background(), env, turntype.MainLoop, 0, 900, http.Header{})
 	require.NoError(t, err)
 	assert.True(t, res.Applied)
 	assert.True(t, res.Summarized)
@@ -130,9 +131,36 @@ func TestMaybeCompact_ExceedsFloorReturnsSentinel(t *testing.T) {
 	require.NoError(t, err)
 
 	// A window so small that even trimming to a single (large) message overflows.
-	_, err = s.maybeCompact(context.Background(), env, 0, 30, http.Header{})
+	_, err = s.maybeCompact(context.Background(), env, turntype.MainLoop, 0, 30, http.Header{})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrContextWindowExceeded))
+}
+
+func TestMaybeCompact_SkipsHardPinnedTurns(t *testing.T) {
+	fake := &fakeCompactionSummarizer{summary: "x"}
+	s := &Service{compactionTriggerPct: DefaultCompactionTriggerPct, compactionSummarizer: fake}
+	env, err := translate.ParseAnthropic(alternatingAnthropicBody(20, 200))
+	require.NoError(t, err)
+	before := env.ContextOverflowTokenEstimate()
+
+	// A Compaction turn is Claude Code's own compaction request — the router
+	// must not rewrite it, even when it's over threshold.
+	res, err := s.maybeCompact(context.Background(), env, turntype.Compaction, 0, 900, http.Header{})
+	require.NoError(t, err)
+	assert.False(t, res.Applied, "hard-pinned turns must skip compaction")
+	assert.Equal(t, 0, fake.calls, "summarizer must not be called for a Compaction turn")
+	assert.Equal(t, before, env.ContextOverflowTokenEstimate(), "env must be untouched")
+}
+
+func TestWithCompaction_ZeroPctDisables(t *testing.T) {
+	// ROUTER_COMPACTION_PCT=0 must disable, not fall back to the default.
+	s := (&Service{}).WithCompaction(nil, 0)
+	assert.Equal(t, 0.0, s.compactionTriggerPct)
+	// A negative/out-of-range value falls back to the default.
+	s = (&Service{}).WithCompaction(nil, -1)
+	assert.Equal(t, DefaultCompactionTriggerPct, s.compactionTriggerPct)
+	s = (&Service{}).WithCompaction(nil, 2)
+	assert.Equal(t, DefaultCompactionTriggerPct, s.compactionTriggerPct)
 }
 
 func TestSelectCompactionSummarizer_WindowAware(t *testing.T) {
