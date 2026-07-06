@@ -48,10 +48,8 @@ type UserRepository interface {
 	UpsertByEmail(ctx context.Context, params UpsertUserParams) (*User, error)
 	// UpsertByAccountUUID finds-or-creates an email-NULL row keyed on (installation_id, claude_account_uuid).
 	UpsertByAccountUUID(ctx context.Context, params UpsertUserByAccountUUIDParams) (*User, error)
-	// Get and ListForInstallation have no caller today (only Upsert* sit on the
-	// request path); they're the natural extension point for a future
-	// per-installation users admin view, mirroring auth.APIKeyRepository's
-	// ListForInstallation (wired to internal/api/admin/keys.go).
+	// Get and ListForInstallation have no caller today; natural extension point
+	// for a future per-installation users admin view (cf. APIKeyRepository.ListForInstallation).
 	Get(ctx context.Context, id string) (*User, error)
 	ListForInstallation(ctx context.Context, installationID string) ([]*User, error)
 }

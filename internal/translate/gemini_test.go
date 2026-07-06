@@ -407,9 +407,8 @@ func TestGeminiToOpenAIResponse_FinishReasonMapping(t *testing.T) {
 // drops the off-spec thought_signature field on deserialization — the
 // signature must still be smuggled back via the id channel.
 func TestPrepareGemini_FromAnthropic_ToolUseSignatureSurvivesUnknownFieldStripping(t *testing.T) {
-	// Turn 1: build the Anthropic-shaped tool_use block a real response
-	// translator would have produced, with the signature smuggled into the
-	// id the same way embedSignatureInID does (id + "__thought__" + base64).
+	// Turn 1: construct the tool_use block by hand, replicating what
+	// embedSignatureInID produces (id + "__thought__" + base64(sig)).
 	smuggledID := "toolu_test__thought__" + base64.RawURLEncoding.EncodeToString([]byte("OPAQUE_GEMINI_SIG"))
 	tu := map[string]any{
 		"type":  "tool_use",

@@ -88,10 +88,8 @@ func TestWithVersion_EmptyStringIsNoOp(t *testing.T) {
 	assert.Empty(t, VersionFromContext(ctx))
 }
 
-// DefaultDeployedModels must read the DEFAULT version's candidate list, not
-// just any built version — the two fixture scorers below carry deliberately
-// different registries so the assertion breaks if Multiversion picked the
-// wrong one.
+// DefaultDeployedModels must read the DEFAULT version's candidates — two
+// fixture scorers carry different registries so the assertion breaks if wrong.
 func TestMultiversion_DefaultDeployedModels_ReadsDefaultVersionOnly(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	v01 := scorerForVersion(t, "v0.1", emb) // twoClusterArtifacts: opus + haiku
@@ -113,9 +111,7 @@ func TestMultiversion_DefaultDeployedModels_ReadsDefaultVersionOnly(t *testing.T
 		"DefaultDeployedModels must return the default version's (v0.2) candidates, not v0.1's opus+haiku pair")
 }
 
-// DefaultRoutingDistribution must delegate to the default version's Scorer
-// with the caller's exact grid/exclusion arguments — verified by checking
-// the projection matches calling RoutingDistribution directly on that Scorer.
+// DefaultRoutingDistribution must delegate to the default Scorer and match its output.
 func TestMultiversion_DefaultRoutingDistribution_DelegatesToDefaultScorer(t *testing.T) {
 	bundle, err := LoadBundle("v0.67")
 	require.NoError(t, err)
@@ -133,10 +129,8 @@ func TestMultiversion_DefaultRoutingDistribution_DelegatesToDefaultScorer(t *tes
 	got, err := multi.DefaultRoutingDistribution(grid, nil, nil)
 	require.NoError(t, err)
 
-	// Compare with a tolerance rather than assert.Equal: RoutingDistribution
-	// tallies shares by iterating a map internally, so two independent calls
-	// can accumulate the same floats in a different order and differ in the
-	// last ULP without indicating any real behavioral divergence.
+	// Use InDelta: map iteration order means two RoutingDistribution calls can
+	// accumulate the same floats in different order, differing by a ULP.
 	require.Len(t, got, len(want))
 	for i := range want {
 		assert.Equal(t, want[i].QualityBias, got[i].QualityBias, "point %d dial position", i)
@@ -149,10 +143,8 @@ func TestMultiversion_DefaultRoutingDistribution_DelegatesToDefaultScorer(t *tes
 	}
 }
 
-// A default version whose Scorer disappears from the map after construction
-// (shouldn't happen given NewMultiversion's invariant, but exercises the
-// defensive branch) must surface ErrClusterUnavailable, not a generic error
-// or a panic.
+// Scorer removed after construction (violates NewMultiversion's invariant) must
+// return ErrClusterUnavailable, not a generic error or panic.
 func TestMultiversion_DefaultRoutingDistribution_MissingDefaultReturnsClusterUnavailable(t *testing.T) {
 	emb := &fakeEmbedder{vec: makeOpusVec()}
 	v01 := scorerForVersion(t, "v0.1", emb)
