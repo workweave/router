@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
@@ -227,6 +228,18 @@ func (s *Service) bypassToAnthropic(
 		return fmt.Errorf("emit bypass body: %w", emitErr)
 	}
 
+	// Tap the response stream for token usage. The bypass path skips billing
+	// (the customer's own subscription pays), but Weave's router cost-savings
+	// metric still needs the would-have-cost of this turn — otherwise every
+	// subscription-served request is invisible to it. The extractor forwards
+	// bytes to the real writer untouched and yields (0,0) when usage isn't
+	// streamed, matching the routed path's Anthropic-native attempt.
+	var extractor *otel.UsageExtractor
+	if s.usageRequired() {
+		extractor = otel.NewUsageExtractor(w, decision.Provider)
+		w = extractor
+	}
+
 	proxyStart := time.Now()
 	proxyErr := p.Proxy(ctx, decision, prep, w, r)
 	// The Anthropic adapter returns a buffered *UpstreamErrorResponse on 4xx/5xx
@@ -246,17 +259,46 @@ func (s *Service) bypassToAnthropic(
 		flushUpstreamErrorAsAnthropic(w, proxyErr)
 		proxyErr = nil
 	}
+	// Bypass never substitutes the model, so requested == actual cost: both are
+	// the API cost of running feats.Model directly. Weave credits actual to $0
+	// downstream when cost.subscription_served is set, turning that cost into
+	// the savings the subscription delivered.
+	in, out := extractor.Tokens()
+	cacheCreation, cacheRead := extractor.CacheTokens()
+	pricing, _ := catalog.PriceFor(decision.Provider, decision.Model)
+	inputCost := catalog.EffectiveInputCost(in, cacheCreation, cacheRead, pricing.InputUSDPer1M, pricing, decision.Provider)
+	outputCost := catalog.EffectiveOutputCost(out, pricing.OutputUSDPer1M)
+
+	// Same identity block the routed upstream span carries, so Weave's savings
+	// drilldown groups bypass turns by user / session / tool instead of folding
+	// them into an anonymous "Unknown session" bucket.
+	clientID := ClientIdentityFrom(ctx)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.usage_bypass",
 		Start: requestStart,
 		End:   time.Now(),
-		Attrs: otel.NewAttrBuilder(6).
+		Attrs: otel.NewAttrBuilder(18).
 			String("request_id", requestID).
 			String("external_id", externalID).
+			String("router_user_id", auth.UserIDFrom(ctx)).
+			String("client.app", clientID.ClientApp).
+			String("client.session_id", clientID.SessionID).
+			// Bypass never substitutes, so the requested model IS the served
+			// model; emit it so the savings drilldown's requested/decision
+			// columns match the routed path's shape.
+			String("requested.model", decision.Model).
 			String("decision.model", decision.Model).
 			String("decision.provider", decision.Provider).
 			String("decision.reason", decision.Reason).
 			Bool("cost.subscription_served", servedOnSubscription(ctx)).
+			Int64("usage.input_tokens", int64(in)).
+			Int64("usage.output_tokens", int64(out)).
+			Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
+			Int64("usage.cache_read_input_tokens", int64(cacheRead)).
+			Float64("cost.requested_input_usd", inputCost).
+			Float64("cost.requested_output_usd", outputCost).
+			Float64("cost.actual_input_usd", inputCost).
+			Float64("cost.actual_output_usd", outputCost).
 			Build(),
 	})
 	otel.Flush(ctx)

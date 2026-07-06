@@ -3,18 +3,27 @@ package proxy
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/translate"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+
+	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
+	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
 )
 
 // bypassFakeProvider is an internal-package fake providers.Client for
@@ -22,6 +31,7 @@ import (
 // test can assert no bytes were committed on a retryable error.
 type bypassFakeProvider struct {
 	proxyErr     error
+	respBody     string
 	dispatches   int
 	capturedW    http.ResponseWriter
 	capturedBody []byte
@@ -37,6 +47,9 @@ func (f *bypassFakeProvider) Proxy(ctx context.Context, decision router.Decision
 	f.capturedW = w
 	f.capturedR = r
 	f.capturedBody = append([]byte(nil), prep.Body...)
+	if f.respBody != "" {
+		_, _ = io.WriteString(w, f.respBody)
+	}
 	return f.proxyErr
 }
 
@@ -208,4 +221,163 @@ func TestSubscriptionFailover_EligibilityAndSuppression(t *testing.T) {
 		assert.False(t, servedOnSubscription(suppressed),
 			"a suppressed subscription must not resolve back as the served credential")
 	})
+}
+
+// bypassSpanCollector runs an httptest OTLP endpoint and records every exported
+// span keyed by name, so a test can assert the attributes emitted on the
+// router.usage_bypass span.
+type bypassSpanCollector struct {
+	srv    *httptest.Server
+	mu     sync.Mutex
+	byName map[string][]*tracev1.Span
+}
+
+func newBypassSpanCollector(t *testing.T) *bypassSpanCollector {
+	t.Helper()
+	c := &bypassSpanCollector{byName: make(map[string][]*tracev1.Span)}
+	c.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		var req coltracepb.ExportTraceServiceRequest
+		require.NoError(t, proto.Unmarshal(body, &req))
+		c.mu.Lock()
+		for _, rs := range req.ResourceSpans {
+			for _, ss := range rs.ScopeSpans {
+				for _, sp := range ss.Spans {
+					c.byName[sp.Name] = append(c.byName[sp.Name], sp)
+				}
+			}
+		}
+		c.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(c.srv.Close)
+	return c
+}
+
+func spanStr(t *testing.T, sp *tracev1.Span, key string) string {
+	t.Helper()
+	for _, kv := range sp.Attributes {
+		if kv.Key == key {
+			sv, ok := kv.Value.Value.(*commonv1.AnyValue_StringValue)
+			require.True(t, ok, "attr %q must be a string", key)
+			return sv.StringValue
+		}
+	}
+	t.Fatalf("attr %q not present on span", key)
+	return ""
+}
+
+func spanInt(t *testing.T, sp *tracev1.Span, key string) int64 {
+	t.Helper()
+	for _, kv := range sp.Attributes {
+		if kv.Key == key {
+			iv, ok := kv.Value.Value.(*commonv1.AnyValue_IntValue)
+			require.True(t, ok, "attr %q must be an int", key)
+			return iv.IntValue
+		}
+	}
+	t.Fatalf("attr %q not present on span", key)
+	return 0
+}
+
+func spanFloat(t *testing.T, sp *tracev1.Span, key string) float64 {
+	t.Helper()
+	for _, kv := range sp.Attributes {
+		if kv.Key == key {
+			dv, ok := kv.Value.Value.(*commonv1.AnyValue_DoubleValue)
+			require.True(t, ok, "attr %q must be a double", key)
+			return dv.DoubleValue
+		}
+	}
+	t.Fatalf("attr %q not present on span", key)
+	return 0
+}
+
+func spanBool(t *testing.T, sp *tracev1.Span, key string) bool {
+	t.Helper()
+	for _, kv := range sp.Attributes {
+		if kv.Key == key {
+			bv, ok := kv.Value.Value.(*commonv1.AnyValue_BoolValue)
+			require.True(t, ok, "attr %q must be a bool", key)
+			return bv.BoolValue
+		}
+	}
+	t.Fatalf("attr %q not present on span", key)
+	return false
+}
+
+// TestBypass_EmitsUsageAndCost is the regression guard for the router
+// cost-savings metric: the subscription bypass path skips billing, so unless it
+// emits token usage + the would-have-cost on its span, every subscription-served
+// turn is invisible to Weave's savings drilldown. A fake upstream streams a
+// known Anthropic usage envelope; the span must carry those tokens and the
+// catalog-priced cost of running the model directly.
+func TestBypass_EmitsUsageAndCost(t *testing.T) {
+	const (
+		inputTokens  = 1200
+		outputTokens = 340
+		model        = "claude-sonnet-4-6"
+	)
+	sse := "event: message_start\n" +
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":1200,"output_tokens":1}}}` + "\n\n" +
+		"event: message_delta\n" +
+		`data: {"type":"message_delta","usage":{"output_tokens":340}}` + "\n\n"
+
+	collector := newBypassSpanCollector(t)
+	emitter, err := otel.NewEmitter(otel.EmitterConfig{
+		Endpoint:      collector.srv.URL,
+		Workers:       1,
+		QueueSize:     100,
+		BatchSize:     1,
+		FlushInterval: 10 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = emitter.Shutdown(context.Background()) })
+
+	upstream := &bypassFakeProvider{respBody: sse}
+	svc := newBypassService(upstream)
+	svc.emitter = emitter // makes usageRequired() true so the extractor runs
+
+	env := bypassAnthropicEnvelope(t)
+	feats := env.RoutingFeatures(false)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+
+	buf := otel.NewBuffer(emitter)
+	ctx := buf.WithContext(context.Background())
+	err = svc.bypassToAnthropic(ctx, env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	require.NoError(t, err)
+	buf.Flush()
+
+	require.Eventually(t, func() bool {
+		collector.mu.Lock()
+		defer collector.mu.Unlock()
+		return len(collector.byName["router.usage_bypass"]) == 1
+	}, time.Second, 5*time.Millisecond, "the bypass span must be exported")
+
+	collector.mu.Lock()
+	sp := collector.byName["router.usage_bypass"][0]
+	collector.mu.Unlock()
+
+	assert.Equal(t, model, spanStr(t, sp, "requested.model"), "bypass requested model IS the served model")
+	assert.Equal(t, model, spanStr(t, sp, "decision.model"))
+	assert.Equal(t, int64(inputTokens), spanInt(t, sp, "usage.input_tokens"))
+	assert.Equal(t, int64(outputTokens), spanInt(t, sp, "usage.output_tokens"))
+	// No OAuth credential in this unit context, so the turn is not
+	// subscription-served — but the flag must still be emitted (spanBool fatals
+	// if the attribute is absent, guarding the contract Weave ingests).
+	assert.False(t, spanBool(t, sp, "cost.subscription_served"))
+
+	pricing, ok := catalog.PriceFor(providers.ProviderAnthropic, model)
+	require.True(t, ok, "test model must have catalog pricing")
+	wantOut := catalog.EffectiveOutputCost(outputTokens, pricing.OutputUSDPer1M)
+	wantIn := catalog.EffectiveInputCost(inputTokens, 0, 0, pricing.InputUSDPer1M, pricing, providers.ProviderAnthropic)
+
+	// Bypass never substitutes the model, so requested == actual on the span;
+	// Weave zeroes actual downstream when subscription_served is set.
+	assert.InDelta(t, wantOut, spanFloat(t, sp, "cost.actual_output_usd"), 1e-9)
+	assert.InDelta(t, wantIn, spanFloat(t, sp, "cost.actual_input_usd"), 1e-9)
+	assert.InDelta(t, wantOut, spanFloat(t, sp, "cost.requested_output_usd"), 1e-9)
+	assert.InDelta(t, wantIn, spanFloat(t, sp, "cost.requested_input_usd"), 1e-9)
 }
