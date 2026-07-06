@@ -477,6 +477,63 @@ func TestService_HardPin_ExploreRoutesToHaikuWhenFlagOn(t *testing.T) {
 	}
 }
 
+func TestService_HardPin_HMMExploreBypassesBootHardPin(t *testing.T) {
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-opus-4-7",
+		Reason:   "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
+	}}
+	svc := proxy.NewService(
+		fr,
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil,
+		false,
+		nil,
+		store,
+		true,
+		providers.ProviderAnthropic,
+		"claude-haiku-4-5",
+		nil,
+	).WithHMMRouter(fr)
+
+	ctx := router.WithStrategy(authedCtx(uuid.New().String()), router.StrategyHMM)
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(exploreBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "HMM strategy must classify subagent dispatch instead of boot-hard-pinning Explore")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel))
+}
+
+func TestService_HMMSubAgentKeepsExecutionPin(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderAnthropic,
+		Model:       "claude-haiku-4-5",
+		Reason:      "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		PinnedUntil: time.Now().Add(time.Hour),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-opus-4-7",
+		Reason:   "hmm_policy(label=Complex Design)",
+		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
+	}}
+	svc := newPinSvc(fr, store).WithHMMRouter(fr)
+
+	ctx := router.WithStrategy(authedCtx(uuid.New().String()), router.StrategyHMM)
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(exploreBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "subagent HMM turns may still score for diagnostics")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"an HMM Explore subagent must keep its selected execution model for the subagent session")
+}
+
 func TestService_HardPin_ExploreFallsThroughWhenFlagOff(t *testing.T) {
 	store := newFakePinStore()
 	fr := &fakeRouter{decision: router.Decision{Provider: "anthropic", Model: "claude-opus-4-7", Reason: "cluster"}}

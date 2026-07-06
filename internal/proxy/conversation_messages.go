@@ -35,3 +35,14 @@ func conversationMessagesForRouting(env *translate.RequestEnvelope) []router.Con
 	}
 	return out
 }
+
+func availableToolsForRouting(env *translate.RequestEnvelope) []string {
+	if env == nil {
+		return nil
+	}
+	names := env.AvailableToolNames()
+	if len(names) == 0 {
+		return nil
+	}
+	return append([]string(nil), names...)
+}

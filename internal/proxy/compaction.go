@@ -114,7 +114,7 @@ func (s *Service) selectCompactionSummarizer(historyTokens int) string {
 func (s *Service) maybeCompact(ctx context.Context, env *translate.RequestEnvelope, tt turntype.TurnType, outputReserve, maxWindow int, reqHeaders http.Header) (compactionResult, error) {
 	log := observability.FromContext(ctx)
 	var res compactionResult
-	if s.compactionTriggerPct <= 0 || maxWindow <= 0 || env == nil || s.isHardPinnedTurn(tt) {
+	if s.compactionTriggerPct <= 0 || maxWindow <= 0 || env == nil || s.isHardPinnedTurn(ctx, tt) {
 		return res, nil
 	}
 

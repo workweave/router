@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"workweave/router/internal/observability"
@@ -110,6 +111,35 @@ func (r turnLoopResult) modelSwitched() bool {
 	return transition || r.SessionEverSwitched
 }
 
+func isHMMDecision(dec router.Decision) bool {
+	if dec.Metadata != nil && dec.Metadata.Strategy == string(router.StrategyHMM) {
+		return true
+	}
+	return strings.HasPrefix(strings.TrimSpace(dec.Reason), "hmm_policy")
+}
+
+func isHMMToolExecutionReason(reason string) bool {
+	return strings.HasPrefix(strings.TrimSpace(reason), "hmm_policy:tool_execution")
+}
+
+func shouldServeFreshHMMToolResult(turnType turntype.TurnType, subAgentHint string, pin sessionpin.Pin, fresh router.Decision) bool {
+	if subAgentHint != "" || turnType != turntype.ToolResult {
+		return false
+	}
+	return isHMMToolExecutionReason(pin.Reason) && isHMMDecision(fresh) && !isHMMToolExecutionReason(fresh.Reason)
+}
+
+func shouldServeFreshHMMToolExecution(pin sessionpin.Pin, fresh router.Decision) bool {
+	return isHMMDecision(fresh) && isHMMToolExecutionReason(fresh.Reason) && !isHMMToolExecutionReason(pin.Reason)
+}
+
+func isHMMSubAgentExecutionLock(turnType turntype.TurnType, subAgentHint string, pin sessionpin.Pin, fresh router.Decision) bool {
+	if !isHMMDecision(fresh) || !isHMMToolExecutionReason(pin.Reason) {
+		return false
+	}
+	return turnType == turntype.SubAgentDispatch || subAgentHint != ""
+}
+
 // handoverOutcome describes the synchronous handover step.
 type handoverOutcome struct {
 	Invoked       bool
@@ -129,11 +159,14 @@ type handoverOutcome struct {
 // also skipped by proactive compaction: they are either tiny (probe/title-gen/
 // classifier) or carry their own dedicated flow (Claude Code's compaction turn,
 // whose request the router must not rewrite).
-func (s *Service) isHardPinnedTurn(tt turntype.TurnType) bool {
+func (s *Service) isHardPinnedTurn(ctx context.Context, tt turntype.TurnType) bool {
 	switch tt {
 	case turntype.Compaction, turntype.Probe, turntype.TitleGen, turntype.Classifier:
 		return true
 	case turntype.SubAgentDispatch:
+		if router.StrategyFromContext(ctx) == router.StrategyHMM {
+			return false
+		}
 		return s.hardPinExplore
 	default:
 		return false
@@ -179,7 +212,7 @@ func (s *Service) runTurnLoop(
 	// probes before the first real turn, and Claude Code fires title-gen
 	// ~25ms before the real-conv call — an anchored pin would leak the
 	// cheap-model decision into the conversation that follows.
-	if s.isHardPinnedTurn(res.TurnType) {
+	if s.isHardPinnedTurn(ctx, res.TurnType) {
 		provider, model := s.hardPinProvider, s.hardPinModel
 		// The boot-time hard-pin was computed over every registered provider,
 		// but a BYOK request may only authenticate to a subset. Resolve
@@ -509,6 +542,39 @@ func (s *Service) runTurnLoop(
 		"fresh_reason", fresh.Reason,
 	)
 	res.Fresh = fresh
+	hmmToolExecutionFresh := pinFound && shouldServeFreshHMMToolExecution(pin, fresh)
+	hmmToolResultFresh := pinFound && shouldServeFreshHMMToolResult(res.TurnType, subAgentHint, pin, fresh)
+	hmmToolExecutionContinue := pinFound && isHMMToolExecutionReason(pin.Reason) && isHMMToolExecutionReason(fresh.Reason)
+	if hmmToolExecutionContinue || (pinFound && isHMMSubAgentExecutionLock(res.TurnType, subAgentHint, pin, fresh)) {
+		decision := pinDecision(pin)
+		res.Decision = decision
+		res.StickyHit = true
+		if hmmToolExecutionContinue {
+			res.PinTier = "hmm_tool_execution_lock"
+		} else {
+			res.PinTier = "hmm_subagent_execution_lock"
+		}
+		s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, decision)
+		return res, nil
+	}
+	if (hmmToolExecutionFresh || hmmToolResultFresh) && fresh.Provider == pin.Provider && fresh.Model == pin.Model {
+		res.Decision = fresh
+		if hmmToolExecutionFresh {
+			res.PinTier = "hmm_tool_execution_fresh_same_model"
+		} else {
+			res.PinTier = "hmm_tool_result_fresh_same_model"
+		}
+		s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, fresh)
+		return res, nil
+	}
+	if isHMMDecision(fresh) {
+		res.Decision = fresh
+		if pinFound {
+			res.PinTier = "hmm_fresh"
+		}
+		s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, fresh)
+		return res, nil
+	}
 
 	// Expired-pin re-anchor: when the pin lapsed mid-session (!pinFound but
 	// pin.Model != "", not a first-turn miss), prefer the prior model over a
@@ -582,6 +648,11 @@ func (s *Service) runTurnLoop(
 		plannerIn.Pin = sessionpin.Pin{}
 	}
 	decision := planner.Decide(plannerIn, s.planner)
+	if hmmToolExecutionFresh && decision.Outcome == planner.OutcomeStay {
+		decision = planner.Decision{Outcome: planner.OutcomeSwitch, Reason: "tool_execution_fresh"}
+	} else if hmmToolResultFresh && decision.Outcome == planner.OutcomeStay {
+		decision = planner.Decision{Outcome: planner.OutcomeSwitch, Reason: "tool_result_fresh"}
+	}
 	res.PlannerDecision = decision
 
 	if decision.Outcome == planner.OutcomeStay && pinFound {

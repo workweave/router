@@ -147,3 +147,28 @@ func TestConversationMessagesDropsNamelessGeminiToolCalls(t *testing.T) {
 	require.Len(t, messages[0].ToolCalls, 1)
 	assert.Equal(t, "Read", messages[0].ToolCalls[0].Name)
 }
+
+func TestAvailableToolNamesProviderNeutral(t *testing.T) {
+	anthropicEnv, err := translate.ParseAnthropic([]byte(`{
+		"model":"claude-opus-4-7",
+		"tools":[
+			{"name":"Read","input_schema":{"type":"object"}},
+			{"name":"Grep","input_schema":{"type":"object"}},
+			{"name":"Read","input_schema":{"type":"object"}}
+		],
+		"messages":[{"role":"user","content":"inspect"}]
+	}`))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Grep", "Read"}, anthropicEnv.AvailableToolNames())
+
+	openAIEnv, err := translate.ParseOpenAI([]byte(`{
+		"model":"gpt-4o",
+		"tools":[
+			{"type":"function","function":{"name":"Bash","parameters":{"type":"object"}}},
+			{"type":"function","function":{"name":"","parameters":{"type":"object"}}}
+		],
+		"messages":[{"role":"user","content":"inspect"}]
+	}`))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Bash"}, openAIEnv.AvailableToolNames())
+}

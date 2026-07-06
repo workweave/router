@@ -81,6 +81,7 @@ type routeRequest struct {
 	LatestUserText       string            `json:"latest_user_text,omitempty"`
 	TurnIndex            int               `json:"turn_index"`
 	ConversationMessages []routeMessage    `json:"conversation_messages,omitempty"`
+	AvailableTools       []string          `json:"available_tools,omitempty"`
 	EstimatedInputTokens int               `json:"estimated_input_tokens"`
 	HasTools             bool              `json:"has_tools"`
 	HasImages            bool              `json:"has_images"`
@@ -106,20 +107,26 @@ type routeToolResult struct {
 }
 
 type routeResponse struct {
-	RouteID       string                 `json:"route_id"`
-	Model         string                 `json:"model"`
-	Score         float64                `json:"score"`
-	ScoreKind     string                 `json:"score_kind"`
-	Reason        string                 `json:"reason"`
-	PolicyState   string                 `json:"policy_state"`
-	PolicyGroup   string                 `json:"policy_group"`
-	PolicyLabel   string                 `json:"policy_label"`
-	Confidence    *float64               `json:"confidence"`
-	Margin        *float64               `json:"margin"`
-	Propensity    float64                `json:"propensity"`
-	DisplayMarker string                 `json:"display_marker"`
-	Debug         map[string]interface{} `json:"debug"`
-	Error         string                 `json:"error"`
+	RouteID              string                 `json:"route_id"`
+	Model                string                 `json:"model"`
+	Score                float64                `json:"score"`
+	ScoreKind            string                 `json:"score_kind"`
+	ScoreLabel           string                 `json:"score_label"`
+	Reason               string                 `json:"reason"`
+	PolicyState          string                 `json:"policy_state"`
+	StateLabel           string                 `json:"state_label"`
+	PolicyGroup          string                 `json:"policy_group"`
+	Cluster              string                 `json:"cluster"`
+	PolicyLabel          string                 `json:"policy_label"`
+	ComplexityLabel      string                 `json:"complexity_label"`
+	Confidence           *float64               `json:"confidence"`
+	ClassifierConfidence *float64               `json:"classifier_confidence"`
+	Margin               *float64               `json:"margin"`
+	ClassifierMargin     *float64               `json:"classifier_margin"`
+	Propensity           float64                `json:"propensity"`
+	DisplayMarker        string                 `json:"display_marker"`
+	Debug                map[string]interface{} `json:"debug"`
+	Error                string                 `json:"error"`
 }
 
 func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
@@ -136,6 +143,7 @@ func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
 		LatestUserText:       latestUserText(messages),
 		TurnIndex:            turnIndex(messages),
 		ConversationMessages: messages,
+		AvailableTools:       clipRouteValues(q.AvailableTools, maxRouteToolCallInputKeys, maxRouteToolCallInputChars),
 		EstimatedInputTokens: q.EstimatedInputTokens,
 		HasTools:             q.HasTools,
 		HasImages:            q.HasImages,
@@ -180,13 +188,13 @@ func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
 		RouteID:       parsed.RouteID,
 		Model:         parsed.Model,
 		Score:         parsed.Score,
-		ScoreKind:     parsed.ScoreKind,
+		ScoreKind:     firstNonEmpty(parsed.ScoreKind, parsed.ScoreLabel),
 		Reason:        parsed.Reason,
-		PolicyState:   parsed.PolicyState,
-		PolicyGroup:   parsed.PolicyGroup,
-		PolicyLabel:   parsed.PolicyLabel,
-		Confidence:    parsed.Confidence,
-		Margin:        parsed.Margin,
+		PolicyState:   firstNonEmpty(parsed.PolicyState, parsed.StateLabel),
+		PolicyGroup:   firstNonEmpty(parsed.PolicyGroup, parsed.Cluster),
+		PolicyLabel:   firstNonEmpty(parsed.PolicyLabel, parsed.ComplexityLabel),
+		Confidence:    firstFloat(parsed.Confidence, parsed.ClassifierConfidence),
+		Margin:        firstFloat(parsed.Margin, parsed.ClassifierMargin),
 		Propensity:    parsed.Propensity,
 		DisplayMarker: parsed.DisplayMarker,
 		Debug:         parsed.Debug,
@@ -306,7 +314,48 @@ func turnIndex(messages []routeMessage) int {
 }
 
 func isPromptTextRole(role string) bool {
-	return role == "user" || role == "developer"
+	return role == "user"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstFloat(values ...*float64) *float64 {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func clipRouteValues(values []string, maxValues int, maxChars int) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	if maxValues > 0 && len(values) > maxValues {
+		values = values[:maxValues]
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		clipped := clipRouteText(value, maxChars)
+		if clipped == "" {
+			continue
+		}
+		if _, ok := seen[clipped]; ok {
+			continue
+		}
+		seen[clipped] = struct{}{}
+		out = append(out, clipped)
+	}
+	return out
 }
 
 var _ Decider = (*HTTPDecider)(nil)

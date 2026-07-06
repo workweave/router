@@ -248,6 +248,207 @@ func TestTurnLoop_ToolResultScoringEnabledSwitchesSafely(t *testing.T) {
 		"handover must strip the orphaned tool_result on a mid-tool-use switch")
 }
 
+func TestTurnLoop_HMMToolResultCommunicationFollowsFreshDecision(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderAnthropic,
+		Model:       "claude-haiku-4-5",
+		Reason:      "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		PinnedUntil: time.Now().Add(time.Hour),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-sonnet-4-5",
+		Reason:   "hmm_policy(label=Simple Followup)",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-1",
+		},
+	}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultPinnedBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "tool_result must ask HMM for a fresh communication decision")
+	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"a completed tool result must not stay pinned to the tool-execution model")
+}
+
+func TestTurnLoop_HMMToolResultContinuesToolExecutionPin(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:    providers.ProviderAnthropic,
+		Model:       "claude-haiku-4-5",
+		Reason:      "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		PinnedUntil: time.Now().Add(time.Hour),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-sonnet-4-5",
+		Reason:   "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-1",
+		},
+	}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultPinnedBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "tool_result still scores so HMM can decide whether execution continues")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"ongoing tool execution keeps the existing execution pin")
+}
+
+func TestTurnLoop_HMMToolExecutionLockBeatsPlannerSwitch(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-sonnet-5",
+		Reason:          "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 5000,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-1",
+		},
+	}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "ongoing HMM execution still scores to see if execution continues")
+	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"ongoing tool execution must keep its selected model instead of planner-switching mid-execution")
+}
+
+func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-haiku-4-5",
+		Reason:          "hmm_policy(label=Simple Followup)",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 5000,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-sonnet-5",
+		Reason:   "hmm_policy(label=Complex Design)",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-1",
+		},
+	}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "HMM conversation turns must score fresh")
+	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"HMM normal conversation routing must follow the fresh sidecar decision instead of EV-staying on the old pin")
+}
+
+func TestTurnLoop_HMMToolExecutionBreaksConversationalPin(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-sonnet-4-5",
+		Reason:          "hmm_policy(label=Complex Followup)",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 5000,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-sonnet-5",
+		Reason:   "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-1",
+		},
+	}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "main-loop HMM turn must ask for a fresh decision")
+	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"a fresh HMM tool/explore execution decision must break a conversational pin")
+
+	waitForUpsert(t, store)
+	require.NotEmpty(t, store.upserts)
+	last := store.upserts[len(store.upserts)-1]
+	assert.Equal(t, "claude-sonnet-5", last.Model)
+	assert.True(t, strings.HasPrefix(last.Reason, "hmm_policy:tool_execution"),
+		"the execution phase must be persisted so later tool-result routing can detect it")
+}
+
+func TestTurnLoop_HMMToolExecutionSameModelUpdatesPinReason(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-sonnet-4-5",
+		Reason:          "hmm_policy(label=Complex Followup)",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 5000,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-sonnet-4-5",
+		Reason:   "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-1",
+		},
+	}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	assert.Equal(t, 1, fr.routeCalls, "main-loop HMM turn must ask for a fresh decision")
+	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel))
+
+	waitForUpsert(t, store)
+	require.NotEmpty(t, store.upserts)
+	last := store.upserts[len(store.upserts)-1]
+	assert.Equal(t, "claude-sonnet-4-5", last.Model)
+	assert.True(t, strings.HasPrefix(last.Reason, "hmm_policy:tool_execution"),
+		"same-model fresh execution decisions must still rewrite the pin phase")
+}
+
 // TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer verifies that a pin
 // on an excluded provider falls through to the scorer rather than being served sticky.
 func TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer(t *testing.T) {

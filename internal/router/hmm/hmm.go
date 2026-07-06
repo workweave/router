@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -27,6 +28,7 @@ type Query struct {
 	RouteID              string
 	PromptText           string
 	ConversationMessages []router.ConversationMessage
+	AvailableTools       []string
 	EstimatedInputTokens int
 	HasTools             bool
 	HasImages            bool
@@ -162,6 +164,7 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 		RouteID:              requestRouteID,
 		PromptText:           req.PromptText,
 		ConversationMessages: req.ConversationMessages,
+		AvailableTools:       req.AvailableTools,
 		EstimatedInputTokens: req.EstimatedInputTokens,
 		HasTools:             req.HasTools,
 		HasImages:            req.HasImages,
@@ -215,13 +218,26 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 }
 
 func reasonFor(res Result) string {
+	prefix := "hmm_policy"
+	if isToolExecutionResult(res) {
+		prefix = "hmm_policy:tool_execution"
+	}
 	if res.Reason != "" {
-		return "hmm_policy(" + res.Reason + ")"
+		return prefix + "(" + res.Reason + ")"
 	}
 	if res.PolicyLabel != "" {
-		return "hmm_policy(label=" + res.PolicyLabel + ")"
+		return prefix + "(label=" + res.PolicyLabel + ")"
 	}
-	return "hmm_policy"
+	return prefix
+}
+
+func isToolExecutionResult(res Result) bool {
+	group := strings.TrimSpace(strings.ToLower(res.PolicyGroup))
+	if group == "explore" {
+		return true
+	}
+	label := strings.TrimSpace(strings.ToLower(res.PolicyLabel))
+	return label == "spawn_explore" || strings.Contains(label, "tool_call")
 }
 
 var _ router.Router = (*Router)(nil)

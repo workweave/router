@@ -34,6 +34,8 @@ type Request struct {
 	// ConversationMessages is provider-neutral visible history for sidecar
 	// routers that need multi-turn context.
 	ConversationMessages []ConversationMessage
+	// AvailableTools is a bounded list of tool names declared on this request.
+	AvailableTools []string
 	// Per-request provider gating — nil means unrestricted.
 	EnabledProviders map[string]struct{}
 	// Per-request model exclusion — nil or empty means no exclusion.

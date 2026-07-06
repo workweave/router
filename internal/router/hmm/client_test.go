@@ -20,15 +20,17 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 		require.Equal(t, "/route", r.URL.Path)
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
 		_ = json.NewEncoder(w).Encode(routeResponse{
-			RouteID:       "route-1",
-			Model:         "moonshotai/kimi-k2.7-code",
-			Score:         0.91,
-			ScoreKind:     "policy_confidence",
-			Reason:        "policy",
-			PolicyGroup:   "standard",
-			PolicyLabel:   "short_turn",
-			Propensity:    1.0,
-			DisplayMarker: "display marker",
+			RouteID:              "route-1",
+			Model:                "moonshotai/kimi-k2.7-code",
+			Score:                0.91,
+			ScoreLabel:           "classifier_confidence",
+			Reason:               "policy",
+			Cluster:              "medium",
+			ComplexityLabel:      "Simple Followup",
+			ClassifierConfidence: floatPtr(0.91),
+			ClassifierMargin:     floatPtr(0.22),
+			Propensity:           1.0,
+			DisplayMarker:        "display marker",
 		})
 	}))
 	defer server.Close()
@@ -54,6 +56,7 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 				}},
 			},
 		},
+		AvailableTools:       []string{"Read", "Grep", "Read", ""},
 		EstimatedInputTokens: 123,
 		HasTools:             true,
 		Candidates: []Candidate{{
@@ -80,9 +83,21 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 	assert.Equal(t, "Read", got.ConversationMessages[3].ToolCalls[0].Name)
 	assert.Equal(t, []string{"file_path"}, got.ConversationMessages[3].ToolCalls[0].InputKeys)
 	assert.True(t, got.HasTools)
+	assert.Equal(t, []string{"Read", "Grep"}, got.AvailableTools)
 	assert.Equal(t, []string{"moonshotai/kimi-k2.7-code"}, got.CandidateModels)
 	assert.Equal(t, "moonshotai/kimi-k2.7-code", result.Model)
+	assert.Equal(t, "classifier_confidence", result.ScoreKind)
+	assert.Equal(t, "medium", result.PolicyGroup)
+	assert.Equal(t, "Simple Followup", result.PolicyLabel)
+	require.NotNil(t, result.Confidence)
+	assert.Equal(t, 0.91, *result.Confidence)
+	require.NotNil(t, result.Margin)
+	assert.Equal(t, 0.22, *result.Margin)
 	assert.Equal(t, "display marker", result.DisplayMarker)
+}
+
+func floatPtr(value float64) *float64 {
+	return &value
 }
 
 func TestRouteMessagesPreservesLatestUserWhenPayloadIsCapped(t *testing.T) {
@@ -100,7 +115,7 @@ func TestRouteMessagesPreservesLatestUserWhenPayloadIsCapped(t *testing.T) {
 	}
 }
 
-func TestRouteMessagesTreatsDeveloperTextAsPromptText(t *testing.T) {
+func TestRouteMessagesTreatsDeveloperTextAsContextNotPromptText(t *testing.T) {
 	messages := routeMessages([]router.ConversationMessage{
 		{Role: "user", Text: "earlier user request"},
 		{Role: "assistant", Text: "earlier answer"},
@@ -111,8 +126,8 @@ func TestRouteMessagesTreatsDeveloperTextAsPromptText(t *testing.T) {
 		}},
 	})
 
-	assert.Equal(t, "latest developer prompt", latestUserText(messages))
-	assert.Equal(t, 1, turnIndex(messages))
+	assert.Equal(t, "earlier user request", latestUserText(messages))
+	assert.Equal(t, 0, turnIndex(messages))
 	require.Len(t, messages, 4)
 	require.Len(t, messages[3].ToolCalls, 1)
 	assert.Equal(t, "Read", messages[3].ToolCalls[0].Name)
