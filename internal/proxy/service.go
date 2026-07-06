@@ -139,9 +139,8 @@ type Service struct {
 	// Runs the embedder on ToolResult traffic (majority of turns).
 	scoreToolResultTurns bool
 	// cyberRefusalRepin is the kill switch (ROUTER_CYBER_REFUSAL_REPIN, default
-	// false). When true, a refusal on the anthropic-native path (opus's cyber
-	// classifier declines ~45% of security coding; sonnet 0%) re-pins the session
-	// off the refusing model. Observe-only — bytes are never modified.
+	// false). When true, a safety refusal on the anthropic-native path re-pins
+	// the session off the refusing model (opus ~45% refusal rate; sonnet 0%).
 	cyberRefusalRepin bool
 	// cyberRefusalFallbackModel is the model to re-pin to on a cyber refusal
 	// when the session pin carries no runner-up (PairedModel). Set from
