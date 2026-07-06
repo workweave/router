@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"workweave/router/internal/api/admin"
+	"workweave/router/internal/providers"
 	"workweave/router/internal/router/cluster"
 
 	"github.com/gin-gonic/gin"
@@ -24,10 +25,10 @@ func TestCatalogModelsHandler_SortsByProviderThenModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	src := fakeDeployedModels{entries: []cluster.DeployedEntry{
-		{Model: "gpt-5.5", Provider: "openai"},
-		{Model: "claude-opus-4-7", Provider: "anthropic"},
-		{Model: "claude-haiku-4-5", Provider: "anthropic"},
-		{Model: "gpt-5.4-mini", Provider: "openai"},
+		{Model: "gpt-5.5", Provider: providers.ProviderOpenAI},
+		{Model: "claude-opus-4-7", Provider: providers.ProviderAnthropic},
+		{Model: "claude-haiku-4-5", Provider: providers.ProviderAnthropic},
+		{Model: "gpt-5.4-mini", Provider: providers.ProviderOpenAI},
 	}}
 
 	engine := gin.New()
@@ -43,13 +44,13 @@ func TestCatalogModelsHandler_SortsByProviderThenModel(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 
 	require.Len(t, got.Models, 4)
-	assert.Equal(t, "anthropic", got.Models[0].Provider)
+	assert.Equal(t, providers.ProviderAnthropic, got.Models[0].Provider)
 	assert.Equal(t, "claude-haiku-4-5", got.Models[0].Model)
-	assert.Equal(t, "anthropic", got.Models[1].Provider)
+	assert.Equal(t, providers.ProviderAnthropic, got.Models[1].Provider)
 	assert.Equal(t, "claude-opus-4-7", got.Models[1].Model)
-	assert.Equal(t, "openai", got.Models[2].Provider)
+	assert.Equal(t, providers.ProviderOpenAI, got.Models[2].Provider)
 	assert.Equal(t, "gpt-5.4-mini", got.Models[2].Model)
-	assert.Equal(t, "openai", got.Models[3].Provider)
+	assert.Equal(t, providers.ProviderOpenAI, got.Models[3].Provider)
 	assert.Equal(t, "gpt-5.5", got.Models[3].Model)
 }
 

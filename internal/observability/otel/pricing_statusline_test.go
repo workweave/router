@@ -1,4 +1,4 @@
-package otel
+package otel_test
 
 import (
 	"math"
@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"workweave/router/internal/observability/otel"
 
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +33,7 @@ func TestStatuslinePricingMatchesTable(t *testing.T) {
 	inputPrices := parseStatuslineSection(t, block, "input")
 	outputPrices := parseStatuslineSection(t, block, "output")
 
-	table := AllPricing()
+	table := otel.AllPricing()
 	for model, want := range table {
 		gotIn, ok := inputPrices[model]
 		require.True(t, ok, "cc-statusline.sh missing input price for %q", model)

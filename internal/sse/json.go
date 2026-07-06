@@ -2,9 +2,22 @@ package sse
 
 import (
 	"bufio"
-	"fmt"
 	"strconv"
 )
+
+const hexDigits = "0123456789abcdef"
+
+// writeJSONUnicodeEscape writes c as a \uXXXX escape to w via a manual
+// fixed-width hex encode, avoiding fmt.Fprintf's reflection overhead on this
+// package's zero-alloc SSE framing path.
+func writeJSONUnicodeEscape(w *bufio.Writer, c rune) {
+	w.WriteByte('\\')
+	w.WriteByte('u')
+	w.WriteByte(hexDigits[(c>>12)&0xf])
+	w.WriteByte(hexDigits[(c>>8)&0xf])
+	w.WriteByte(hexDigits[(c>>4)&0xf])
+	w.WriteByte(hexDigits[c&0xf])
+}
 
 // WriteJSONString writes s as a quoted, JSON-escaped string to w.
 func WriteJSONString(w *bufio.Writer, s string) {
@@ -18,7 +31,7 @@ func WriteJSONString(w *bufio.Writer, s string) {
 			w.WriteByte('\\')
 			w.WriteByte('\\')
 		case c < 0x20, c == '\u2028', c == '\u2029':
-			fmt.Fprintf(w, `\u%04x`, c)
+			writeJSONUnicodeEscape(w, c)
 		default:
 			w.WriteRune(c)
 		}

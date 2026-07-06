@@ -44,6 +44,19 @@ func (s *Scorer) defaultActiveKnobs() DefaultRoutingKnobs {
 	return knobs
 }
 
+// allCentroidTopClusters computes each centroid's top-P nearest clusters,
+// which depend only on cluster geometry, not on dial position or knobs.
+// Shared by RoutingDistribution and computeDialCalibration so both compute it
+// once instead of per grid step.
+func (s *Scorer) allCentroidTopClusters() [][]int {
+	k := s.centroids.K
+	centroidTopClusters := make([][]int, k)
+	for c := 0; c < k; c++ {
+		centroidTopClusters[c] = topPNearest(s.centroids.Row(c), s.centroids, s.cfg.TopP)
+	}
+	return centroidTopClusters
+}
+
 // defaultDistributionGrid is the default dial-position count: 21 points = 0.05
 // steps, fine enough for a smooth dashboard curve.
 const defaultDistributionGrid = 21
@@ -77,12 +90,7 @@ func (s *Scorer) RoutingDistribution(gridN int, excludedModels, excludedProvider
 		return nil, fmt.Errorf("exclusions leave no eligible candidates: %w", ErrNoEligibleProvider)
 	}
 
-	// Each centroid's top-P clusters depend only on cluster geometry, not on
-	// the dial position, so compute them once instead of per grid step.
-	centroidTopClusters := make([][]int, k)
-	for c := 0; c < k; c++ {
-		centroidTopClusters[c] = topPNearest(s.centroids.Row(c), s.centroids, s.cfg.TopP)
-	}
+	centroidTopClusters := s.allCentroidTopClusters()
 
 	points := make([]DistributionPoint, 0, gridN)
 	for g := 0; g < gridN; g++ {

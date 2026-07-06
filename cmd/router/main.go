@@ -110,7 +110,7 @@ func main() {
 		encryptor, err = auth.NewTinkEncryptor(keysetJSON)
 		if err != nil {
 			logger.Error("Failed to create Tink encryptor from keyset", "err", err)
-			os.Exit(1)
+			panic(err)
 		}
 	}
 
@@ -307,13 +307,13 @@ func main() {
 		panic(err)
 	}
 
-	rtr, err := buildClusterScorer(availableProviders)
+	rtr, defaultEmbedderID, err := buildClusterScorer(availableProviders)
 	if err != nil {
 		// Ops alerts on Cloud Run boot failures; silent degradation would mask quality regressions.
 		logger.Error("Cluster scorer failed to build; refusing to boot", "err", err)
 		panic(err)
 	}
-	logger.Info("Routing via cluster scorer", "embedder", "jina-v2-base-code-int8")
+	logger.Info("Routing via cluster scorer", "embedder", defaultEmbedderID)
 
 	cache := auth.NewLRUAPIKeyCache(10000, 50000, 5*time.Minute, 60*time.Second)
 	userCache := auth.NewLRUUserCache(50000, 10*time.Minute)
@@ -836,14 +836,16 @@ func parseOtelHeaders(raw string) map[string]string {
 
 // buildClusterScorer constructs the cluster.Multiversion router, sharing one
 // ONNX embedder across versions. Errors force the caller to panic rather
-// than silently degrade to a default model.
-func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, error) {
+// than silently degrade to a default model. Also returns the default
+// version's embedder ID so the caller can log the resolved value rather than
+// a hardcoded literal.
+func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, string, error) {
 	logger := observability.Get()
 
 	requestedVersion := config.GetOr("ROUTER_CLUSTER_VERSION", cluster.LatestVersion)
 	defaultVersion, err := cluster.ResolveVersion(requestedVersion)
 	if err != nil {
-		return nil, fmt.Errorf("Resolve cluster version %q: %w", requestedVersion, err)
+		return nil, "", fmt.Errorf("Resolve cluster version %q: %w", requestedVersion, err)
 	}
 
 	// Builds only the served version by default. ROUTER_CLUSTER_BUILD_ALL_VERSIONS=true
@@ -854,7 +856,7 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 	if buildAll {
 		versions, err = cluster.ListVersions()
 		if err != nil {
-			return nil, fmt.Errorf("List cluster versions: %w", err)
+			return nil, "", fmt.Errorf("List cluster versions: %w", err)
 		}
 	} else {
 		versions = []string{defaultVersion}
@@ -862,7 +864,7 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 
 	embedders, err := cluster.NewEmbedderSet()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	cfg := cluster.DefaultConfig()
@@ -886,11 +888,15 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 	}
 	scorers := make(map[string]*cluster.Scorer, len(versions))
 	warmed := make(map[string]cluster.Embedder)
+	var defaultEmbedderID string
 	for _, v := range versions {
 		bundle, err := cluster.LoadBundle(v)
 		if err != nil {
 			_ = embedders.Close()
-			return nil, fmt.Errorf("Load bundle %s: %w", v, err)
+			return nil, "", fmt.Errorf("Load bundle %s: %w", v, err)
+		}
+		if v == defaultVersion {
+			defaultEmbedderID = bundle.EmbedderID()
 		}
 
 		missingProviders := map[string][]string{}
@@ -917,7 +923,7 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 			// versions degrade like any other per-version build failure.
 			if v == defaultVersion {
 				_ = embedders.Close()
-				return nil, fmt.Errorf("Construct embedder %q for default cluster version %s: %w", bundle.EmbedderID(), v, err)
+				return nil, "", fmt.Errorf("Construct embedder %q for default cluster version %s: %w", bundle.EmbedderID(), v, err)
 			}
 			logger.Warn("Cluster scorer version skipped; embedder unavailable", "cluster_version", v, "embedder", bundle.EmbedderID(), "err", err)
 			continue
@@ -935,13 +941,13 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 
 	if _, ok := scorers[defaultVersion]; !ok {
 		_ = embedders.Close()
-		return nil, fmt.Errorf("Default cluster version %q failed to build (likely no registered provider covers its deployed_models); set ROUTER_CLUSTER_VERSION to a version that does, or register the missing provider key", defaultVersion)
+		return nil, "", fmt.Errorf("Default cluster version %q failed to build (likely no registered provider covers its deployed_models); set ROUTER_CLUSTER_VERSION to a version that does, or register the missing provider key", defaultVersion)
 	}
 
 	multi, err := cluster.NewMultiversion(defaultVersion, scorers)
 	if err != nil {
 		_ = embedders.Close()
-		return nil, fmt.Errorf("Build multiversion router: %w", err)
+		return nil, "", fmt.Errorf("Build multiversion router: %w", err)
 	}
 	logger.Info(
 		"Cluster multiversion router ready",
@@ -966,7 +972,7 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 		case res := <-warmupDone:
 			if res.err != nil {
 				_ = embedders.Close()
-				return nil, fmt.Errorf("Warm embedder %q: %w", id, res.err)
+				return nil, "", fmt.Errorf("Warm embedder %q: %w", id, res.err)
 			}
 		case <-time.After(15 * time.Second):
 			// Drain the goroutine before closing to avoid use-after-free.
@@ -974,12 +980,12 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 				<-warmupDone
 				_ = embedders.Close()
 			}()
-			return nil, fmt.Errorf("Cluster embedder %q warmup timed out after 15s", id)
+			return nil, "", fmt.Errorf("Cluster embedder %q warmup timed out after 15s", id)
 		}
 		logger.Info("Cluster embedder warmed", "embedder", id, "embed_dim", embedder.Dim())
 	}
 
-	return multi, nil
+	return multi, defaultEmbedderID, nil
 }
 
 // buildOtelEmitter constructs the OTel span emitter from environment

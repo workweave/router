@@ -246,10 +246,7 @@ const qualityBiasCalibrationGrid = 401
 // back to the identity.
 func (s *Scorer) computeDialCalibration() []float64 {
 	k := s.centroids.K
-	centroidTopClusters := make([][]int, k)
-	for c := 0; c < k; c++ {
-		centroidTopClusters[c] = topPNearest(s.centroids.Row(c), s.centroids, s.cfg.TopP)
-	}
+	centroidTopClusters := s.allCentroidTopClusters()
 
 	base := s.defaultActiveKnobs()
 	breakpoints := make([]float64, 0, 32)
