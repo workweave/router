@@ -154,9 +154,8 @@ const toolResultPinnedBody = `{
 	]
 }`
 
-// TestTurnLoop_ToolResultScoringDisabledSkipsScorer pins down the kill-switch
-// (WithScoreToolResultTurns(false)) legacy behavior: a trailing tool_result
-// turn reuses the pin verbatim without consulting the scorer or planner.
+// TestTurnLoop_ToolResultScoringDisabledSkipsScorer verifies kill-switch-off:
+// a pinned tool_result reuses the pin verbatim without scorer or planner.
 func TestTurnLoop_ToolResultScoringDisabledSkipsScorer(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
