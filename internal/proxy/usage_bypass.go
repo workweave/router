@@ -264,9 +264,7 @@ func (s *Service) bypassToAnthropic(
 	inputCost := catalog.EffectiveInputCost(in, cacheCreation, cacheRead, pricing.InputUSDPer1M, pricing, decision.Provider)
 	outputCost := catalog.EffectiveOutputCost(out, pricing.OutputUSDPer1M)
 
-	// Same identity block the routed upstream span carries, so Weave's savings
-	// drilldown groups bypass turns by user / session / tool instead of folding
-	// them into an anonymous "Unknown session" bucket.
+	// Same identity block as the routed upstream span so Weave groups bypass turns by user/session.
 	clientID := ClientIdentityFrom(ctx)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.usage_bypass",

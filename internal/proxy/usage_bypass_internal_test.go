@@ -223,9 +223,7 @@ func TestSubscriptionFailover_EligibilityAndSuppression(t *testing.T) {
 	})
 }
 
-// bypassSpanCollector runs an httptest OTLP endpoint and records every exported
-// span keyed by name, so a test can assert the attributes emitted on the
-// router.usage_bypass span.
+// bypassSpanCollector is an in-process OTLP endpoint that records spans by name for assertion.
 type bypassSpanCollector struct {
 	srv    *httptest.Server
 	mu     sync.Mutex
@@ -361,9 +359,7 @@ func TestBypass_EmitsUsageAndCost(t *testing.T) {
 	assert.Equal(t, model, spanStr(t, sp, "decision.model"))
 	assert.Equal(t, int64(inputTokens), spanInt(t, sp, "usage.input_tokens"))
 	assert.Equal(t, int64(outputTokens), spanInt(t, sp, "usage.output_tokens"))
-	// No OAuth credential in this unit context, so the turn is not
-	// subscription-served — but the flag must still be emitted (spanBool fatals
-	// if the attribute is absent, guarding the contract Weave ingests).
+	// No subscription credential here, but spanBool fatals if the attribute is absent — guards the emitted contract.
 	assert.False(t, spanBool(t, sp, "cost.subscription_served"))
 
 	pricing, ok := catalog.PriceFor(providers.ProviderAnthropic, model)
