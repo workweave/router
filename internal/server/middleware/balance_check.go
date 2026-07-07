@@ -52,12 +52,9 @@ func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerF
 
 		orgID := installation.ExternalID
 
-		// Subscription turns debit $0 (SubscriptionServed → delta=0), so gating
-		// them on prepaid credits blocks free traffic. Both conditions required
-		// so non-subscription requests from bypass orgs stay gated, and the
-		// subscription must cover THIS route (a Codex bearer can't serve
-		// /v1/messages) or the turn routes to a paid model. Computed here but
-		// applied only to the balance-depleted 402s below — CheckBalance still
+		// Subscription turns debit $0, so gating them on prepaid credits blocks
+		// free traffic. Covers only the route's matching family (Codex can't serve
+		// /v1/messages) and is applied only to 402 paths below — CheckBalance still
 		// runs so an active override is detected and its context flag set.
 		subscriptionExempt := installation.UsageBypassEnabled &&
 			proxy.RequestPresentsCoveringSubscription(c.Request.Context(), c.Request.Header, c.FullPath())
