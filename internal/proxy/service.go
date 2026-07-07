@@ -3247,10 +3247,7 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 // env key is the correct fallback there.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
-	// Skip the caller's subscription OAuth token (fall through to BYOK / the
-	// deployment key) when it's exhausted (Anthropic-only, a 429 would just
-	// repeat) or the installation turned off "use my subscription first"
-	// (provider-wide, so Codex is suppressed too).
+	// Skip subscription OAuth (fall through to BYOK / deployment key): exhausted (Anthropic-only, avoid re-429) or toggle off (provider-wide).
 	subDisabled := subscriptionRoutingDisabledForRequest(ctx)
 	suppressClaudeSub := claudeSubscriptionSuppressed(ctx) || subDisabled
 	suppressCodexSub := subDisabled
