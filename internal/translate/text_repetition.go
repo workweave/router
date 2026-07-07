@@ -6,20 +6,13 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// AssistantTextMessages returns, in order, the visible narration text of each
-// assistant message — the concatenation of its `text` blocks, with `thinking`
-// and `tool_use` blocks ignored. Messages with no text contribute an empty
-// string so callers can reason about position if they need to; empties are
-// skipped here to keep the slice to real narration. Anthropic format only
-// (Claude Code's wire format); other formats return nil.
-//
-// Feeds the proxy's enforcing text-repetition detector
-// (internal/proxy/text_repetition.go): a model can defeat the tool-call and
-// no-progress detectors by issuing a fresh tool call every turn while
-// repeating the same narration verbatim, and that repeated text is the only
-// durable tell. Pure function of the request body — the full history arrives
-// on every turn, so no cross-turn state is needed.
-func (e *RequestEnvelope) AssistantTextMessages() []string {
+// TrailingAssistantTexts returns the visible narration of each assistant
+// message since the last real user turn, in order — the concatenation of a
+// message's `text` blocks, with `thinking` and `tool_use` ignored and empty
+// messages dropped. A user message with any non-tool_result content bounds the
+// run: repetition before it belongs to a prior task, so a re-route after a
+// break starts from a clean window. Anthropic format only; others return nil.
+func (e *RequestEnvelope) TrailingAssistantTexts() []string {
 	if e.format != FormatAnthropic {
 		return nil
 	}
@@ -27,37 +20,50 @@ func (e *RequestEnvelope) AssistantTextMessages() []string {
 	if !msgs.IsArray() {
 		return nil
 	}
-	var out []string
-	msgs.ForEach(func(_, msg gjson.Result) bool {
-		if msg.Get("role").String() != "assistant" {
+	all := msgs.Array()
+	var rev []string
+loop:
+	for i := len(all) - 1; i >= 0; i-- {
+		msg := all[i]
+		switch msg.Get("role").String() {
+		case "user":
+			if userHasNonToolResultContent(msg) {
+				break loop
+			}
+		case "assistant":
+			if s := assistantMessageText(msg); s != "" {
+				rev = append(rev, s)
+			}
+		}
+	}
+	// Collected tail-first; reverse to chronological order so callers can take
+	// the most-recent window off the end.
+	for l, r := 0, len(rev)-1; l < r; l, r = l+1, r-1 {
+		rev[l], rev[r] = rev[r], rev[l]
+	}
+	return rev
+}
+
+// assistantMessageText joins the text blocks of one assistant message,
+// skipping thinking/tool_use. A plain-string content is the text itself.
+func assistantMessageText(msg gjson.Result) string {
+	content := msg.Get("content")
+	if content.Type == gjson.String {
+		return content.String()
+	}
+	if !content.IsArray() {
+		return ""
+	}
+	var b strings.Builder
+	content.ForEach(func(_, block gjson.Result) bool {
+		if block.Get("type").String() != "text" {
 			return true
 		}
-		content := msg.Get("content")
-		// A plain-string assistant message is itself the text.
-		if content.Type == gjson.String {
-			if s := content.String(); s != "" {
-				out = append(out, s)
-			}
-			return true
-		}
-		if !content.IsArray() {
-			return true
-		}
-		var b strings.Builder
-		content.ForEach(func(_, block gjson.Result) bool {
-			if block.Get("type").String() != "text" {
-				return true
-			}
-			if b.Len() > 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString(block.Get("text").String())
-			return true
-		})
 		if b.Len() > 0 {
-			out = append(out, b.String())
+			b.WriteByte('\n')
 		}
+		b.WriteString(block.Get("text").String())
 		return true
 	})
-	return out
+	return b.String()
 }

@@ -61,6 +61,24 @@ func TestDetectTextRepetition_BelowThresholdDoesNotFire(t *testing.T) {
 	}
 }
 
+func TestDetectTextRepetition_RealUserTurnResetsWindow(t *testing.T) {
+	// After a break clears the pin, the stale loop narration is still in the
+	// body. Once the user sends a real follow-up, that narration is before the
+	// turn boundary and must not re-trip the break before the fresh model runs
+	// (Cursor Bugbot #665). Three restatements, then a real user turn.
+	turns := []string{
+		"text:" + loopNarration, `call:Read:{"file_path":"/src/x.go"}`, "result:ok",
+		"text:" + loopNarration, `call:Read:{"file_path":"/src/y.go"}`, "result:ok",
+		"text:" + loopNarration, `call:Read:{"file_path":"/src/z.go"}`, "result:ok",
+		"user:please try a different approach",
+	}
+	env := parseSpiralEnv(t, turns)
+
+	if looped, count, _ := detectTextRepetition(env); looped {
+		t.Fatalf("a real user turn must reset the repetition window; count=%d", count)
+	}
+}
+
 func TestDetectTextRepetition_IgnoresShortLines(t *testing.T) {
 	// "Done." style acknowledgements repeat benignly and must not count.
 	turns := []string{

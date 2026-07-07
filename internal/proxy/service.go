@@ -2018,12 +2018,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 	}
 
-	// Enforcing text-repetition break: a model can keep issuing fresh tool
-	// calls each turn — defeating the no-progress fingerprint's tool-progress
-	// marker — while repeating the same narration verbatim and never
-	// converging. Catch that specific loop by the repeated text and re-route.
-	// Main-loop / tool-result turns only, matching the spiral detector's
-	// turn-type guard (hard-pinned turn types carry mimicking history shapes).
+	// Text-repetition break: fresh tool calls each turn defeat the no-progress
+	// fingerprint; repeated narration is the durable tell. See text_repetition.go.
+	// Main-loop / tool-result turns only, matching the spiral turn-type guard.
 	if s.textRepetitionBreakEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
 		if looped, count, sampleHash := detectTextRepetition(env); looped {
 			role := roleForTier(catalog.TierFor(feats.Model))

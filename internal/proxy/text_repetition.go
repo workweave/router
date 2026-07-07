@@ -17,23 +17,17 @@ import (
 
 // Enforcing assistant-text repetition detector.
 //
-// The tool-call loop, no-progress, and shadow-spiral detectors all key on
-// stagnation evidence — identical tool signatures, errored results, no tool
-// activity, same-file thrash. A distinct failure mode slips under all of them:
-// the model keeps issuing fresh, mostly-succeeding tool calls (so the
-// tool-call count grows and the no-progress fingerprint's tool-progress marker
-// advances every turn) while narrating the *same intent* verbatim — "I'll read
-// the test file and then implement the fix", "Now sending to the channel and
-// then the follow-up messages" — never converging. The repeated narration is
+// Other detectors key on stagnation evidence (identical tool signatures,
+// errored results, no tool activity). A distinct failure mode slips under all
+// of them: fresh tool calls each turn advance the no-progress fingerprint
+// while the assistant narrates the same intent verbatim — the repeated text is
 // the only durable tell.
 //
-// This scans the inbound history (present in full on every turn, so no
-// cross-turn state) and fires when one normalized assistant text of
-// non-trivial length recurs textRepetitionThreshold+ times within the last
-// textRepetitionWindow assistant messages. On a fire it breaks the turn and
-// clears the pin, so the next message re-routes off the stuck model — the same
-// remedy as handleNoProgressBreak. Gated by the ROUTER_TEXT_REPETITION_BREAK_ENABLED
-// kill switch.
+// Scans assistant narration since the last user turn (so a re-route after a
+// break starts clean) and fires when a normalized text of at least
+// textRepetitionMinLen chars recurs textRepetitionThreshold+ times within the
+// last textRepetitionWindow messages. Breaks the turn and clears the pin —
+// same remedy as handleNoProgressBreak. Gated by ROUTER_TEXT_REPETITION_BREAK_ENABLED.
 const (
 	// textRepetitionWindow bounds the scan to the most recent assistant texts,
 	// so an early duplicate that the agent already recovered from doesn't
@@ -47,20 +41,19 @@ const (
 	textRepetitionMinLen = 40
 )
 
-// normalizeAssistantText lower-cases and collapses runs of whitespace so
-// cosmetic drift (a trailing newline, soft re-wrap) doesn't defeat the
-// exact-match count.
+// normalizeAssistantText lowercases and collapses whitespace so cosmetic
+// drift (re-wrap, trailing newline) doesn't defeat the exact-match count.
 func normalizeAssistantText(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }
 
 // detectTextRepetition reports whether a single normalized assistant text of at
 // least textRepetitionMinLen chars recurs textRepetitionThreshold+ times within
-// the last textRepetitionWindow assistant messages. Returns the recurrence
-// count and an 8-byte hash of the offending text (safe for logs — never the
-// customer's prose).
+// the last textRepetitionWindow assistant messages of the current turn. Returns
+// the recurrence count and an 8-byte hash of the offending text (safe for logs
+// — never the customer's prose).
 func detectTextRepetition(env *translate.RequestEnvelope) (looped bool, count int, sampleHash string) {
-	texts := env.AssistantTextMessages()
+	texts := env.TrailingAssistantTexts()
 	if len(texts) < textRepetitionThreshold {
 		return false, 0, ""
 	}
