@@ -132,10 +132,8 @@ func TestBuildObservationContext_StickyHMMRouteIDFromFresh(t *testing.T) {
 	assert.Equal(t, "hmm", obs.Strategy, "active strategy labels the sticky turn even with a metadata-less pin")
 }
 
-// TestBuildObservationContext_HardPinLeavesStrategyNull: a hard-pin (force-model,
-// escalation, compaction) bypasses routing — no served metadata and no fresh
-// re-score — so strategy must stay NULL rather than inheriting the session's
-// active strategy, which would inflate per-strategy decision counts.
+// TestBuildObservationContext_HardPinLeavesStrategyNull verifies that turns bypassing routing
+// (no served metadata and no fresh re-score) leave strategy NULL, not the session's active strategy.
 func TestBuildObservationContext_HardPinLeavesStrategyNull(t *testing.T) {
 	served := router.Decision{Provider: "anthropic", Model: "claude-opus-4-8", Reason: "user_forced"}
 
