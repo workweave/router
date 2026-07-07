@@ -53,12 +53,8 @@ type observationContext struct {
 // pin); fresh's scores are captured separately to measure the hysteresis downgrade lever.
 func buildObservationContext(ctx context.Context, decision, fresh router.Decision) observationContext {
 	obs := observationContext{}
-	// Label the row with the active strategy only when a router actually ran this
-	// turn — the served decision came from a scorer (has metadata), or the fresh
-	// scorer ran on a STAY (fresh.Model set). Hard-pins (force-model, escalation,
-	// compaction) bypass routing entirely, so leave strategy NULL rather than
-	// over-claiming the session's strategy produced a decision it never made;
-	// decision_reason already records the pin path on those turns.
+	// Only label when a router actually ran: served decision has metadata, or fresh scorer ran on STAY.
+	// Hard-pins bypass routing entirely — leave strategy NULL so pin-served turns don't inflate counts.
 	if decision.Metadata != nil || fresh.Model != "" {
 		obs.Strategy = string(router.StrategyFromContext(ctx))
 	}
