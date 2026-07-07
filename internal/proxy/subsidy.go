@@ -60,7 +60,11 @@ func (s *Service) WithUsageObserver(obs *usage.Observer) *Service {
 // subsidy works for all three harnesses, not just opencode. The token doubles as
 // the usage-observer key, and equals the eventually-resolved credential, so
 // record and read agree regardless of source.
-func (s *Service) presentSubscriptionTokens(ctx context.Context, headers http.Header) (codex, anthropic string) {
+//
+// A free function (not a *Service method) because it reads only ctx + headers:
+// the prepaid balance gate (server/middleware) has no Service handle but must
+// agree with this path on what counts as "a subscription is present".
+func presentSubscriptionTokens(ctx context.Context, headers http.Header) (codex, anthropic string) {
 	if codexSubscriptionFromContext(ctx) != nil {
 		codex = openaiSubscriptionFromContext(ctx)
 	} else if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
@@ -74,6 +78,22 @@ func (s *Service) presentSubscriptionTokens(ctx context.Context, headers http.He
 	return codex, anthropic
 }
 
+// RequestPresentsSubscription reports whether the inbound request carries a
+// caller subscription credential — a Claude (Pro/Max) sk-ant-oat… bearer or a
+// Codex (ChatGPT) subscription JWT — via either the dedicated
+// X-Weave-*-Subscription headers or the inbound Authorization bearer.
+//
+// The prepaid balance gate uses this to exempt subscription traffic: those
+// turns are served on the customer's own plan and debit $0 (see
+// billing.DebitForInference: SubscriptionServed → delta=0), so 402'ing them for
+// lack of prepaid credits blocks free traffic at the door, before routing can
+// serve it. Mirrors presentSubscriptionTokens so the gate's notion of "has a
+// subscription" agrees with the pass-through / subsidy path.
+func RequestPresentsSubscription(ctx context.Context, headers http.Header) bool {
+	codex, anthropic := presentSubscriptionTokens(ctx, headers)
+	return codex != "" || anthropic != ""
+}
+
 // withUsageObserver installs a context header observer that records the present
 // subscription's rate-limit headroom from upstream response headers. No-op
 // (returns ctx) when the feature is off or no subscription is present.
@@ -81,7 +101,7 @@ func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) co
 	if s.usageObserver == nil {
 		return ctx
 	}
-	codexTok, anthroTok := s.presentSubscriptionTokens(ctx, headers)
+	codexTok, anthroTok := presentSubscriptionTokens(ctx, headers)
 	if codexTok == "" && anthroTok == "" {
 		return ctx
 	}
@@ -138,7 +158,7 @@ func (s *Service) subsidyFactors(ctx context.Context, headers http.Header) map[s
 	if subscriptionRoutingDisabledForRequest(ctx) {
 		return nil
 	}
-	codexTok, anthroTok := s.presentSubscriptionTokens(ctx, headers)
+	codexTok, anthroTok := presentSubscriptionTokens(ctx, headers)
 	factors := make(map[string]float64)
 	if codexTok != "" {
 		f := s.observedOrOptimisticFactor(codexTok)

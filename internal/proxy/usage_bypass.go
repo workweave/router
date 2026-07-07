@@ -73,7 +73,7 @@ func (s *Service) usageBypassEngaged(ctx context.Context, headers http.Header, r
 	if _, excluded := req.ExcludedModels[model]; excluded {
 		return false
 	}
-	_, anthroTok := s.presentSubscriptionTokens(ctx, headers)
+	_, anthroTok := presentSubscriptionTokens(ctx, headers)
 	if anthroTok == "" {
 		return false
 	}
@@ -109,7 +109,7 @@ func (s *Service) claudeSubscriptionExhausted(ctx context.Context, headers http.
 	if s.usageObserver == nil {
 		return false
 	}
-	_, anthroTok := s.presentSubscriptionTokens(ctx, headers)
+	_, anthroTok := presentSubscriptionTokens(ctx, headers)
 	if anthroTok == "" {
 		return false
 	}

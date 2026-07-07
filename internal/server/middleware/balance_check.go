@@ -7,6 +7,7 @@ import (
 
 	"workweave/router/internal/billing"
 	"workweave/router/internal/observability"
+	"workweave/router/internal/proxy"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,6 +21,9 @@ const TopUpURL = "https://app.workweave.ai/settings/billing/router-credits"
 // installation lookup below is guaranteed to be populated.
 //
 // Behavior:
+//   - Subscription usage-bypass request (installation gate on + a Claude/Codex
+//     subscription credential present) → pass through; the turn is served on
+//     the caller's own plan and debits $0, so prepaid credits don't apply.
 //   - Override row present → pass through; flag the request context so
 //     the proxy's debit hook writes a delta=0 ledger row.
 //   - Balance ≤ minBalanceMicros → HTTP 402 with structured JSON body.
@@ -41,6 +45,23 @@ func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerF
 			// 401'd. Log Debug rather than Error so a synthetic request
 			// missing the auth setup doesn't page on-call.
 			log.Debug("Balance check skipped: no installation on request context")
+			c.Next()
+			return
+		}
+
+		// Subscription usage-bypass orgs serve turns on the caller's own
+		// Claude/Codex subscription, which debit $0 (billing.DebitForInference:
+		// SubscriptionServed → delta=0). Requiring prepaid credits for those
+		// turns is wrong — a 402 here blocks free subscription traffic at the
+		// door, before routing can serve it. Exempt a request only when BOTH
+		// hold: the installation has the subscription usage-bypass gate on, AND
+		// the request actually carries a subscription credential. A bypass org
+		// sending a non-subscription request still routes to a paid model and
+		// stays gated, so this opens no unbilled-usage window.
+		if installation.UsageBypassEnabled &&
+			proxy.RequestPresentsSubscription(c.Request.Context(), c.Request.Header) {
+			log.Debug("Balance check skipped: subscription usage-bypass request",
+				"organization_id", installation.ExternalID)
 			c.Next()
 			return
 		}
