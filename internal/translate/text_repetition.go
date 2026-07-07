@@ -72,9 +72,7 @@ func userIsHumanTurn(msg gjson.Result) bool {
 }
 
 // isHumanText reports whether s is real human input rather than empty text or
-// one of Claude Code's injected wrapper blocks (<system-reminder>,
-// <command-name>, <local-command-*>, …). Reuses isClaudeCodeInjectedBlock so
-// this stays in sync with how the rest of translate classifies user text.
+// one of Claude Code's injected wrapper blocks (<system-reminder>, <command-name>, <local-command-*>, …).
 func isHumanText(s string) bool {
 	return strings.TrimSpace(s) != "" && !isClaudeCodeInjectedBlock(s)
 }

@@ -87,9 +87,8 @@ func TestTrailingAssistantTexts_SystemReminderToolResultTurnIsNotABoundary(t *te
 }
 
 func TestTrailingAssistantTexts_CommandInjectionIsNotABoundary(t *testing.T) {
-	// CC injects other wrapper blocks besides <system-reminder> (e.g.
-	// <command-name>). A turn carrying only an injected block must not reset the
-	// window, matching isClaudeCodeInjectedBlock's classification elsewhere.
+	// CC injects wrapper blocks beyond <system-reminder> (e.g. <command-name>);
+	// those turns must not reset the repetition window.
 	body := mustMarshalJSON(t, map[string]any{
 		"model": "claude-sonnet-4-6",
 		"messages": []any{
