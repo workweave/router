@@ -202,9 +202,7 @@ func TestStrictify_TypelessAnyOfBranchBails(t *testing.T) {
 	require.False(t, ok, "typeless anyOf branch must fall back to non-strict emission")
 }
 
-// An object branch inside an anyOf that omits its own type (relying on its
-// properties to imply object) must be stamped type:"object" so strict mode
-// accepts it rather than 400'ing on the missing type key.
+// An object-by-properties anyOf branch without an explicit type must be stamped type:"object".
 func TestStrictify_ObjectBranchGetsExplicitType(t *testing.T) {
 	out, ok := strictifyFromJSON(t, `{
 		"type":"object",
