@@ -3306,11 +3306,8 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	if creds != nil {
 		return context.WithValue(ctx, CredentialsContextKey{}, creds)
 	}
-	// Clear explicitly: on a router-keyed / no-BYOK request ctx still carries the
-	// subscription credential from an earlier attempt, and the provider client
-	// only falls back to its deployment key when ctx carries NO credential. For
-	// the disabled-toggle case the deployment / prepaid key is the intended path
-	// (the balance gate governs spend).
+	// Clear explicitly: router-keyed / no-BYOK ctx still carries the subscription credential from an earlier attempt;
+	// provider client only falls back to the deployment key when ctx carries NO credential.
 	if (suppressClaudeSub && provider == providers.ProviderAnthropic) ||
 		(suppressCodexSub && provider == providers.ProviderOpenAI) {
 		return clearCredentials(ctx)
