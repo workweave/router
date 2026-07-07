@@ -842,6 +842,12 @@ func codexSubscriptionFromContext(ctx context.Context) *Credentials {
 // even on router-keyed requests (Codex CLI keeps its auth in Authorization
 // while the router key rides in X-Weave-Router-Key).
 func codexResponsesRequest(ctx context.Context, headers http.Header) bool {
+	// Subscription routing disabled suppresses the Codex credential, so the turn
+	// must not take the verbatim passthrough path — route it through normal
+	// chat->Responses translation and bill prepaid on the deployment key.
+	if subscriptionRoutingDisabledForRequest(ctx) {
+		return false
+	}
 	if codexSubscriptionFromContext(ctx) != nil {
 		return true
 	}

@@ -75,11 +75,9 @@ func (s *Service) WithUsageObserver(obs *usage.Observer) *Service {
 // the prepaid balance gate (server/middleware) has no Service handle but must
 // agree with this path on what counts as "a subscription is present".
 func presentSubscriptionTokens(ctx context.Context, headers http.Header) (codex, anthropic string) {
-	// "Use my subscription first" off: the installation opted out of its
-	// subscription entirely, so report none. Every subscription-keyed path then
-	// agrees — no subsidy, no usage-bypass, no balance-gate exemption, no usage
-	// observer — matching resolveAndInjectCredentials, which suppresses the actual
-	// credential so the turn bills prepaid on the deployment key.
+	// Subscription routing disabled: report none so every keyed path (subsidy,
+	// usage-bypass, balance gate) agrees the turn is prepaid, matching the
+	// credential suppression in resolveAndInjectCredentials.
 	if subscriptionRoutingDisabledForRequest(ctx) {
 		return "", ""
 	}

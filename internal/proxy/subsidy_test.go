@@ -49,11 +49,8 @@ func TestPresentSubscriptionTokens_InboundBearerHarnesses(t *testing.T) {
 	})
 }
 
-// With "use my subscription first" off, a present Claude sub must NOT count as
-// present anywhere: resolveAndInjectCredentials suppresses the credential and
-// bills prepaid, so the usage-bypass gate and the balance-gate exemption (both
-// keyed on presentSubscriptionTokens / RequestPresentsCoveringSubscription) must
-// agree the turn is prepaid — otherwise it runs free on the deployment key.
+// Toggle off: presentSubscriptionTokens must report none so the usage-bypass and
+// balance-gate paths agree the turn is prepaid, not free on the deployment key.
 func TestPresentSubscriptionTokens_DisabledReportsNone(t *testing.T) {
 	h := http.Header{}
 	h.Set("Authorization", "Bearer sk-ant-oat01-live-token")

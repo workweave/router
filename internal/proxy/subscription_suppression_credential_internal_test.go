@@ -105,6 +105,19 @@ func TestResolveAndInjectCredentials_DisabledSuppressesCodexSubscription(t *test
 		"toggle off must suppress the Codex subscription so the turn bills prepaid")
 }
 
+// Toggle off must also drop the Codex /v1/responses verbatim-passthrough path,
+// so the turn takes normal chat->Responses translation and bills prepaid.
+func TestCodexResponsesRequest_DisabledDropsPassthrough(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer eyJhbGciOi.codex.jwt")
+	headers.Set("ChatGPT-Account-ID", "acct-1")
+
+	assert.True(t, codexResponsesRequest(routerKeyedCtx(), headers),
+		"a Codex sub normally takes the passthrough path")
+	assert.False(t, codexResponsesRequest(subscriptionDisabledCtx(), headers),
+		"toggle off must drop the Codex passthrough path")
+}
+
 // Regression guard: an inbound Codex subscription bearer on the router-key path
 // must not slip back in via the client-credential branch when the toggle is off.
 func TestResolveAndInjectCredentials_DisabledCodexNotReResolvedFromContext(t *testing.T) {
