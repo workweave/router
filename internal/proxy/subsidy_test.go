@@ -49,6 +49,27 @@ func TestPresentSubscriptionTokens_InboundBearerHarnesses(t *testing.T) {
 	})
 }
 
+// With "use my subscription first" off, a present Claude sub must NOT count as
+// present anywhere: resolveAndInjectCredentials suppresses the credential and
+// bills prepaid, so the usage-bypass gate and the balance-gate exemption (both
+// keyed on presentSubscriptionTokens / RequestPresentsCoveringSubscription) must
+// agree the turn is prepaid — otherwise it runs free on the deployment key.
+func TestPresentSubscriptionTokens_DisabledReportsNone(t *testing.T) {
+	h := http.Header{}
+	h.Set("Authorization", "Bearer sk-ant-oat01-live-token")
+	ctx := context.WithValue(context.Background(), InstallationSubscriptionRoutingDisabledContextKey{}, true)
+
+	codex, anthro := presentSubscriptionTokens(ctx, h)
+	assert.Empty(t, anthro, "toggle off must report no Claude sub so billing paths gate prepaid")
+	assert.Empty(t, codex)
+
+	assert.False(t, RequestPresentsCoveringSubscription(ctx, h, routePathMessages),
+		"toggle off must not exempt the balance gate")
+
+	// Sanity: the same request WITH the toggle on does present the sub.
+	assert.True(t, RequestPresentsCoveringSubscription(context.Background(), h, routePathMessages))
+}
+
 // End-to-end: the key withUsageObserver records under must equal the key
 // subsidyFactors reads, or the discount never materializes. Drives the real
 // observer closure (as a provider would) with a resolved Codex credential and an
