@@ -508,6 +508,9 @@ func main() {
 	// Shadow mode is log-only, so it ships enabled; the switch just sheds the
 	// per-turn signal-scan cost if it misbehaves.
 	spiralShadowEnabled := config.GetOr("ROUTER_SPIRAL_SHADOW_ENABLED", "true") == "true"
+	// Enforcing text-repetition break ships enabled; the switch is the kill
+	// switch if it ever false-positives on legit repeated narration.
+	textRepetitionBreakEnabled := config.GetOr("ROUTER_TEXT_REPETITION_BREAK_ENABLED", "true") == "true"
 	plannerCfg := planner.EVConfig{
 		ThresholdUSD:           parseEnvFloat("ROUTER_SWITCH_EV_THRESHOLD_USD", proxy.DefaultPlannerThresholdUSD),
 		ExpectedRemainingTurns: parseEnvInt("ROUTER_SWITCH_EXPECTED_REMAINING_TURNS", proxy.DefaultPlannerExpectedRemainingTurns),
@@ -627,6 +630,7 @@ func main() {
 		WithLoopEscalationStore(repo.Telemetry).
 		WithSpiralShadowConfig(spiralShadowEnabled).
 		WithSpiralShadowStore(repo.Telemetry).
+		WithTextRepetitionBreak(textRepetitionBreakEnabled).
 		WithRouterFeedbackStore(repo.Telemetry).
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
@@ -637,6 +641,7 @@ func main() {
 	logger.Info("Effort escalation configured", "enabled", effortEscalation)
 	logger.Info("Loop escalation configured", "enabled", loopEscalationEnabled, "holdout_pct", loopEscalationHoldoutPct)
 	logger.Info("Spiral shadow detector configured", "enabled", spiralShadowEnabled)
+	logger.Info("Text-repetition break configured", "enabled", textRepetitionBreakEnabled)
 	logger.Info("Planner configured", "enabled", plannerEnabled, "threshold_usd", plannerCfg.ThresholdUSD, "expected_remaining_turns", plannerCfg.ExpectedRemainingTurns, "tier_upgrade_enabled", plannerCfg.TierUpgradeEnabled, "cold_pin_follow_fresh", plannerCfg.ColdPinFollowFresh, "prefix_trim_free_switch", prefixTrimFreeSwitch, "available_models_count", len(availableModels))
 	logger.Info("Tool-result scoring configured", "enabled", scoreToolResultTurns)
 
