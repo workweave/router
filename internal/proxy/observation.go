@@ -22,6 +22,12 @@ type observationContext struct {
 	ChosenScore *float64
 	// ClusterRouterVersion is the artifact version that produced this decision.
 	ClusterRouterVersion string
+	// Strategy is the routing model that produced this decision ("cluster", "hmm", "rl", "bandit").
+	// NULL on hard-pins that bypass routing so per-strategy decision counts aren't inflated.
+	Strategy string
+	// RouteID is the opaque sidecar correlation id (HMM/RL) that joins a route
+	// decision to its outcome report. Empty for the default cluster scorer.
+	RouteID string
 	// TTFTMs is the upstream-request-to-first-byte delta in ms. Pointer because
 	// zero is a legitimate sub-millisecond measurement.
 	TTFTMs *int64
@@ -47,6 +53,11 @@ type observationContext struct {
 // pin); fresh's scores are captured separately to measure the hysteresis downgrade lever.
 func buildObservationContext(ctx context.Context, decision, fresh router.Decision) observationContext {
 	obs := observationContext{}
+	// Only label when a router actually ran: served decision has metadata, or fresh scorer ran on STAY.
+	// Hard-pins bypass routing entirely — leave strategy NULL so pin-served turns don't inflate counts.
+	if decision.Metadata != nil || fresh.Model != "" {
+		obs.Strategy = string(router.StrategyFromContext(ctx))
+	}
 	// Captured independently of the final decision so STAY turns (decision ==
 	// pin, no metadata) still record what a re-score would have picked.
 	if fresh.Model != "" {
@@ -74,11 +85,16 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 		score := float64(md.ChosenScore)
 		obs.ChosenScore = &score
 		obs.ClusterRouterVersion = md.ClusterRouterVersion
-		// Propensity is meaningful only alongside a score vector; gate on
-		// CandidateScores so a non-scoring router leaves NULL, not a false 0.0.
-		if len(md.CandidateScores) > 0 {
+		if md.Strategy != "" {
+			obs.Strategy = md.Strategy
+		}
+		obs.RouteID = md.RouteID
+		// Gate on Propensity>0, not CandidateScores: sidecar routers (HMM) set Propensity without a score vector.
+		if md.Propensity > 0 {
 			prop := float64(md.Propensity)
 			obs.Propensity = &prop
+		}
+		if len(md.CandidateScores) > 0 {
 			if b, err := json.Marshal(md.CandidateScores); err == nil {
 				obs.CandidateScores = b
 			} else {
@@ -87,6 +103,11 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 				observability.Get().Debug("Failed to marshal candidate_scores for telemetry", "err", err)
 			}
 		}
+	}
+	// Sticky HMM turns: served pin has nil metadata while fresh holds the sidecar RouteID
+	// hmmOutcomeRoute reports against — fall back or telemetry route_id goes NULL on joins.
+	if obs.RouteID == "" && fresh.Metadata != nil {
+		obs.RouteID = fresh.Metadata.RouteID
 	}
 	if t := timing.TimingFrom(ctx); t != nil {
 		if ms := t.Ms(&t.UpstreamRequestNanos, &t.UpstreamFirstByteNanos); ms > 0 {
@@ -117,6 +138,12 @@ func (o observationContext) applySpanAttrs(b *otel.AttrBuilder) {
 	}
 	if o.ClusterRouterVersion != "" {
 		b.String("routing.cluster_version", o.ClusterRouterVersion)
+	}
+	if o.Strategy != "" {
+		b.String("routing.strategy", o.Strategy)
+	}
+	if o.RouteID != "" {
+		b.String("routing.route_id", o.RouteID)
 	}
 	if o.TTFTMs != nil {
 		b.Int64("latency.ttft_ms", *o.TTFTMs)

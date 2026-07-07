@@ -73,6 +73,8 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		Propensity:             p.Propensity,
 		AlphaBreakdown:         p.AlphaBreakdown,
 		ClusterRouterVersion:   stringPtrOrNil(p.ClusterRouterVersion),
+		Strategy:               stringPtrOrNil(p.Strategy),
+		RouteID:                stringPtrOrNil(p.RouteID),
 		TtftMs:                 p.TTFTMs,
 		CacheCreationTokens:    p.CacheCreationTokens,
 		CacheReadTokens:        p.CacheReadTokens,

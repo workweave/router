@@ -63,3 +63,84 @@ func TestBuildObservationContext_NoScorerLeavesFreshNull(t *testing.T) {
 	assert.Empty(t, obs.FreshDecisionModel)
 	assert.Nil(t, obs.FreshCandidateScores)
 }
+
+// TestBuildObservationContext_CapturesHMMStrategy verifies Strategy, RouteID, and Propensity
+// survive when the decision carries Propensity without a candidate-score vector.
+func TestBuildObservationContext_CapturesHMMStrategy(t *testing.T) {
+	served := router.Decision{
+		Provider: "anthropic",
+		Model:    "claude-haiku-4-5",
+		Reason:   "hmm_policy(label=explore)",
+		Metadata: &router.RoutingMetadata{
+			CandidateModels: []string{"claude-opus-4-8", "claude-haiku-4-5"},
+			ChosenScore:     0.71,
+			Strategy:        string(router.StrategyHMM),
+			RouteID:         "route-abc-123",
+			Propensity:      1.0,
+		},
+	}
+
+	obs := buildObservationContext(context.Background(), served, router.Decision{})
+
+	assert.Equal(t, "hmm", obs.Strategy)
+	assert.Equal(t, "route-abc-123", obs.RouteID)
+	require.NotNil(t, obs.Propensity, "HMM propensity must survive without a score vector")
+	assert.InDelta(t, 1.0, *obs.Propensity, 1e-6)
+	// Sidecar sent no candidate-score map, so that column stays NULL.
+	assert.Nil(t, obs.CandidateScores)
+}
+
+// TestBuildObservationContext_DefaultsStrategyToActive verifies Strategy falls back to the
+// request's active strategy and RouteID stays empty when metadata carries no sidecar strategy.
+func TestBuildObservationContext_DefaultsStrategyToActive(t *testing.T) {
+	served := router.Decision{
+		Provider: "anthropic",
+		Model:    "claude-opus-4-8",
+		Reason:   "cluster:v-test",
+		Metadata: &router.RoutingMetadata{
+			CandidateModels: []string{"claude-opus-4-8"},
+			ChosenScore:     0.9,
+		},
+	}
+
+	obs := buildObservationContext(context.Background(), served, router.Decision{})
+
+	assert.Equal(t, string(router.StrategyCluster), obs.Strategy)
+	assert.Empty(t, obs.RouteID)
+}
+
+// TestBuildObservationContext_StickyHMMRouteIDFromFresh verifies route_id falls back to
+// fresh.Metadata on a sticky HMM turn so the telemetry row joins to the same id hmmOutcomeRoute reports.
+func TestBuildObservationContext_StickyHMMRouteIDFromFresh(t *testing.T) {
+	// Served pin — no metadata, the sticky shape.
+	served := router.Decision{Provider: "anthropic", Model: "claude-opus-4-8", Reason: "pin"}
+	// Fresh HMM re-score this turn carries the correlation id.
+	fresh := router.Decision{
+		Provider: "anthropic",
+		Model:    "claude-haiku-4-5",
+		Reason:   "hmm_policy(label=explore)",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-sticky-1",
+		},
+	}
+
+	ctx := router.WithStrategy(context.Background(), router.StrategyHMM)
+	obs := buildObservationContext(ctx, served, fresh)
+
+	assert.Equal(t, "route-sticky-1", obs.RouteID, "route_id must fall back to fresh on a sticky HMM turn")
+	assert.Equal(t, "hmm", obs.Strategy, "active strategy labels the sticky turn even with a metadata-less pin")
+}
+
+// TestBuildObservationContext_HardPinLeavesStrategyNull verifies that turns bypassing routing
+// (no served metadata and no fresh re-score) leave strategy NULL, not the session's active strategy.
+func TestBuildObservationContext_HardPinLeavesStrategyNull(t *testing.T) {
+	served := router.Decision{Provider: "anthropic", Model: "claude-opus-4-8", Reason: "user_forced"}
+
+	// Request opted into HMM, but this turn was hard-pinned and never scored.
+	ctx := router.WithStrategy(context.Background(), router.StrategyHMM)
+	obs := buildObservationContext(ctx, served, router.Decision{})
+
+	assert.Empty(t, obs.Strategy, "hard-pin turn must not claim the active strategy produced it")
+	assert.Empty(t, obs.RouteID)
+}
