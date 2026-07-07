@@ -23,7 +23,8 @@ type observationContext struct {
 	// ClusterRouterVersion is the artifact version that produced this decision.
 	ClusterRouterVersion string
 	// Strategy is the routing model that produced this decision ("cluster", "hmm", "rl", "bandit").
-	// Defaults to the request's active strategy so every row is labeled even without metadata.
+	// Set to the active strategy when a router ran (served metadata or a STAY re-score); NULL on
+	// hard-pins that bypass routing, so strategy counts aren't inflated by pin-served turns.
 	Strategy string
 	// RouteID is the opaque sidecar correlation id (HMM/RL) that joins a route
 	// decision to its outcome report. Empty for the default cluster scorer.
@@ -52,8 +53,16 @@ type observationContext struct {
 // this turn, which differs from decision on STAY (decision rehydrates from the
 // pin); fresh's scores are captured separately to measure the hysteresis downgrade lever.
 func buildObservationContext(ctx context.Context, decision, fresh router.Decision) observationContext {
-	// Default to active strategy; overridden below if decision metadata names a sidecar strategy.
-	obs := observationContext{Strategy: string(router.StrategyFromContext(ctx))}
+	obs := observationContext{}
+	// Label the row with the active strategy only when a router actually ran this
+	// turn — the served decision came from a scorer (has metadata), or the fresh
+	// scorer ran on a STAY (fresh.Model set). Hard-pins (force-model, escalation,
+	// compaction) bypass routing entirely, so leave strategy NULL rather than
+	// over-claiming the session's strategy produced a decision it never made;
+	// decision_reason already records the pin path on those turns.
+	if decision.Metadata != nil || fresh.Model != "" {
+		obs.Strategy = string(router.StrategyFromContext(ctx))
+	}
 	// Captured independently of the final decision so STAY turns (decision ==
 	// pin, no metadata) still record what a re-score would have picked.
 	if fresh.Model != "" {
@@ -100,9 +109,8 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 			}
 		}
 	}
-	// Sticky HMM turns serve a pin (nil metadata) while fresh carries the sidecar
-	// RouteID; hmmOutcomeRoute reports the outcome against that fresh id, so fall
-	// back to it here or telemetry route_id goes NULL exactly where a join exists.
+	// Sticky HMM turns: served pin has nil metadata while fresh holds the sidecar RouteID
+	// hmmOutcomeRoute reports against — fall back or telemetry route_id goes NULL on joins.
 	if obs.RouteID == "" && fresh.Metadata != nil {
 		obs.RouteID = fresh.Metadata.RouteID
 	}

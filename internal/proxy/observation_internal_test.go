@@ -64,8 +64,8 @@ func TestBuildObservationContext_NoScorerLeavesFreshNull(t *testing.T) {
 	assert.Nil(t, obs.FreshCandidateScores)
 }
 
-// TestBuildObservationContext_CapturesHMMStrategy verifies that Strategy, RouteID, and Propensity
-// survive when the decision carries no candidate-score vector.
+// TestBuildObservationContext_CapturesHMMStrategy verifies Strategy, RouteID, and Propensity
+// survive when the decision carries Propensity without a candidate-score vector.
 func TestBuildObservationContext_CapturesHMMStrategy(t *testing.T) {
 	served := router.Decision{
 		Provider: "anthropic",
@@ -110,8 +110,7 @@ func TestBuildObservationContext_DefaultsStrategyToActive(t *testing.T) {
 }
 
 // TestBuildObservationContext_StickyHMMRouteIDFromFresh verifies route_id falls back to
-// fresh on a sticky HMM turn (served pin has nil metadata; fresh carries the sidecar id
-// hmmOutcomeRoute reports against) so the telemetry row joins to that outcome, not NULL.
+// fresh.Metadata on a sticky HMM turn so the telemetry row joins to the same id hmmOutcomeRoute reports.
 func TestBuildObservationContext_StickyHMMRouteIDFromFresh(t *testing.T) {
 	// Served pin — no metadata, the sticky shape.
 	served := router.Decision{Provider: "anthropic", Model: "claude-opus-4-8", Reason: "pin"}
@@ -131,4 +130,19 @@ func TestBuildObservationContext_StickyHMMRouteIDFromFresh(t *testing.T) {
 
 	assert.Equal(t, "route-sticky-1", obs.RouteID, "route_id must fall back to fresh on a sticky HMM turn")
 	assert.Equal(t, "hmm", obs.Strategy, "active strategy labels the sticky turn even with a metadata-less pin")
+}
+
+// TestBuildObservationContext_HardPinLeavesStrategyNull: a hard-pin (force-model,
+// escalation, compaction) bypasses routing — no served metadata and no fresh
+// re-score — so strategy must stay NULL rather than inheriting the session's
+// active strategy, which would inflate per-strategy decision counts.
+func TestBuildObservationContext_HardPinLeavesStrategyNull(t *testing.T) {
+	served := router.Decision{Provider: "anthropic", Model: "claude-opus-4-8", Reason: "user_forced"}
+
+	// Request opted into HMM, but this turn was hard-pinned and never scored.
+	ctx := router.WithStrategy(context.Background(), router.StrategyHMM)
+	obs := buildObservationContext(ctx, served, router.Decision{})
+
+	assert.Empty(t, obs.Strategy, "hard-pin turn must not claim the active strategy produced it")
+	assert.Empty(t, obs.RouteID)
 }
