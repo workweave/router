@@ -17,17 +17,14 @@ import (
 
 // Enforcing assistant-text repetition detector.
 //
-// Other detectors key on stagnation evidence (identical tool signatures,
-// errored results, no tool activity). A distinct failure mode slips under all
-// of them: fresh tool calls each turn advance the no-progress fingerprint
-// while the assistant narrates the same intent verbatim — the repeated text is
-// the only durable tell.
+// Existing detectors key on stagnation evidence (identical tool signatures,
+// errored results, no tool activity). Fresh tool calls each turn advance the
+// no-progress fingerprint while the assistant narrates the same intent
+// verbatim — the repeated text is the only durable tell.
 //
-// Scans assistant narration since the last user turn (so a re-route after a
-// break starts clean) and fires when a normalized text of at least
-// textRepetitionMinLen chars recurs textRepetitionThreshold+ times within the
-// last textRepetitionWindow messages. Breaks the turn and clears the pin —
-// same remedy as handleNoProgressBreak. Gated by ROUTER_TEXT_REPETITION_BREAK_ENABLED.
+// Scans narration since the last real user turn; fires when a normalized text
+// of ≥textRepetitionMinLen chars recurs ≥textRepetitionThreshold times within
+// textRepetitionWindow messages. Gated by ROUTER_TEXT_REPETITION_BREAK_ENABLED.
 const (
 	// textRepetitionWindow bounds the scan to recent messages so an early
 	// duplicate the agent recovered from doesn't count against it.
@@ -46,11 +43,9 @@ func normalizeAssistantText(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }
 
-// detectTextRepetition reports whether a single normalized assistant text of at
-// least textRepetitionMinLen chars recurs textRepetitionThreshold+ times within
-// the last textRepetitionWindow assistant messages of the current turn. Returns
-// the recurrence count and an 8-byte hash of the offending text (safe for logs
-// — never the customer's prose).
+// detectTextRepetition reports whether a normalized assistant text recurs
+// textRepetitionThreshold+ times within textRepetitionWindow messages. Returns
+// count and an 8-byte hash of the offending text (safe for logs).
 func detectTextRepetition(env *translate.RequestEnvelope) (looped bool, count int, sampleHash string) {
 	texts := env.TrailingAssistantTexts()
 	if len(texts) < textRepetitionThreshold {

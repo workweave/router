@@ -6,12 +6,12 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// TrailingAssistantTexts returns the visible narration of each assistant
-// message since the last real human turn, in order — the concatenation of a
+// TrailingAssistantTexts returns, in order, the narration text of each
+// assistant message since the last real human turn — the concatenation of a
 // message's `text` blocks, with `thinking` and `tool_use` ignored and empty
-// messages dropped. A genuine human user turn (see userIsHumanTurn) bounds the
-// run: repetition before it belongs to a prior task, so a re-route after a
-// break starts from a clean window. Anthropic format only; others return nil.
+// messages dropped. Tool-result turns with CC `<system-reminder>` injections
+// are not treated as human boundaries (see userIsHumanTurn). Anthropic only;
+// others return nil.
 func (e *RequestEnvelope) TrailingAssistantTexts() []string {
 	if e.format != FormatAnthropic {
 		return nil
@@ -45,12 +45,9 @@ loop:
 }
 
 // userIsHumanTurn reports whether a user message carries genuine human input:
-// text that is neither a tool_result nor one of Claude Code's injected
-// <system-reminder> blocks. CC appends those reminders on the same user turn as
-// tool_result payloads every iteration, so treating any non-tool_result content
-// as a boundary (as userHasNonToolResultContent does) would stop the backward
-// scan on exactly the tool-result turns this detector guards, collecting no
-// narration. Only real human text resets the repetition window.
+// text that is neither a tool_result nor a CC-injected <system-reminder> block.
+// Those reminder-bearing turns must not reset the repetition window or the
+// backward scan collects nothing on the tool-result turns it guards.
 func userIsHumanTurn(msg gjson.Result) bool {
 	content := msg.Get("content")
 	if content.Type == gjson.String {
