@@ -1,0 +1,105 @@
+# candidate-k12: K=12 re-cluster on real prod turns (embed_input geometry) with quality
+# from our OWN in-harness execution grades (harness-faithful mine_bakeoff), NOT AA/DeepSWE
+# imputed priors. alpha=0.7 (offline-screen sweet spot for this candidate: glm-5.2 + fable-5
+# mix, best coding_solve at ~opus cost). Bake-off candidate for a 3-way live comparison vs
+# v0.72. NOT promoted; artifacts/latest is unchanged.
+format_version: 2
+version: candidate-k12-fixed
+parent: v0.72
+status: candidate
+embedder:
+  model: jina-v2-base-code-int8
+  embed_dim: 768
+  max_tokens: 256
+training:
+  k: 12
+  top_p: 4
+  alpha: 0.7
+  shrinkage_k0: 10.0
+  score_normalization: per_cluster_minmax
+  seed: 42
+  default_routing_knobs:
+    # Uniform per-cluster quality weight = 0.7 (the offline-screen sweet spot).
+    # For v2 bundles the runtime scorer re-blends live from quality_means.json
+    # using THIS vector, so alpha=0.7 here is what serves the glm-5.2 / fable-5
+    # coding mix the screen selected (SCREEN.json alpha=0.7 row: glm-5.2 61%,
+    # fable-5 39%, coding_solve 0.6938 at pct_opus_equiv 0.944). Length must
+    # equal K=12 or the bundle fails to load.
+    alpha:
+    - 0.96  # c0
+    - 0.96  # c1
+    - 0.96  # c2
+    - 0.96  # c3
+    - 0.96  # c4
+    - 0.96  # c5
+    - 0.96  # c6
+    - 0.96  # c7
+    - 0.96  # c8
+    - 0.96  # c9
+    - 0.96  # c10
+    - 0.96  # c11
+    speed_weight: 0.0
+    output_cost_ratio: 0.0
+    expected_output_tokens: 2000
+    per_model_verbosity: true
+deployed_providers:
+- anthropic
+- bedrock
+- deepinfra
+- fireworks
+- google
+- openai
+deployed_models:
+- claude-haiku-4-5
+- gemini-3.1-flash-lite-preview
+- gemini-3.1-pro-preview
+- gemini-3.5-flash
+- gpt-5.4-mini
+- gpt-5.5
+- qwen/qwen3-coder-next
+- qwen/qwen3-next-80b-a3b-instruct
+- deepseek/deepseek-v4-flash
+- deepseek/deepseek-v4-pro
+- xiaomi/mimo-v2.5-pro
+- claude-opus-4-8
+- z-ai/glm-5.2
+- minimax/minimax-m3
+- qwen/qwen3.7-plus
+- moonshotai/kimi-k2.7
+- claude-sonnet-5
+- claude-fable-5
+cost_per_1k_input_usd:
+  claude-haiku-4-5: 0.0008
+  gemini-3.1-flash-lite-preview: 0.0001
+  gemini-3.1-pro-preview: 0.002
+  gemini-3.5-flash: 0.0015
+  gpt-5.4-mini: 0.0004
+  gpt-5.5: 0.005
+  qwen/qwen3-coder-next: 0.0005
+  qwen/qwen3-next-80b-a3b-instruct: 0.00015
+  deepseek/deepseek-v4-flash: 0.00014
+  deepseek/deepseek-v4-pro: 0.00174
+  xiaomi/mimo-v2.5-pro: 0.001
+  claude-opus-4-8: 0.005
+  z-ai/glm-5.2: 0.0014
+  minimax/minimax-m3: 0.0006
+  qwen/qwen3.7-plus: 0.0004
+  moonshotai/kimi-k2.7: 0.00095
+  claude-sonnet-5: 0.003
+  claude-fable-5: 0.01
+changelog: 'candidate-k12 is a fresh K=12 re-cluster of real production turns (Jina
+  v2 code embeddings over prod embed_input geometry) paired with per-(cluster, model)
+  quality drawn from our OWN in-harness execution grades (harness-faithful mine_bakeoff:
+  146 faithful cells + 94 faithful-shrunk + 12 shrunk, 0 AA-imputed for the coding
+  roster) rather than AA/DeepSWE imputed priors. rankings.json is the offline alpha-blend
+  of quality_means + per-model input cost at alpha=0.7 (per-cluster min-max normalize
+  quality + cost, then alpha*q_norm + (1-alpha)*(1-c_norm)); for v2 bundles the runtime
+  scorer re-blends live from quality_means.json using default_routing_knobs.alpha, so
+  the served mix follows alpha=0.7. This geometry is INTENTIONALLY different from v0.72''s
+  frozen K=16 v0.68-derived geometry — the whole point of the candidate is to test the
+  prod-turn re-cluster + in-house quality against the incumbent. alpha=0.7 is the
+  offline-screen sweet spot (SCREEN.json): coding_solve 0.6938, pct_opus_equiv 0.944,
+  routed mix glm-5.2 ~61% + fable-5 ~39%. Per-cluster top-1 winners: glm-5.2 on 8 clusters
+  (c0,c2,c3,c4,c5,c6,c8,c9), fable-5 on 4 (c1,c7,c10,c11). For a 3-way live bake-off vs
+  v0.72; NOT promoted — artifacts/latest is unchanged. Servable on a staging router
+  (ROUTER_CLUSTER_BUILD_ALL_VERSIONS=true) via x-weave-cluster-version: candidate-k12.'
