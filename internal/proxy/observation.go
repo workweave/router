@@ -89,10 +89,7 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 			obs.Strategy = md.Strategy
 		}
 		obs.RouteID = md.RouteID
-		// Propensity is the importance weight an off-policy estimator needs, so
-		// capture it whenever a router populated it (>0). The cluster scorer sets
-		// it alongside a score vector; sidecar routers (HMM) set it without one,
-		// so gating on CandidateScores would silently drop their weight.
+		// Gate on Propensity>0, not CandidateScores: sidecar routers (HMM) set Propensity without a score vector.
 		if md.Propensity > 0 {
 			prop := float64(md.Propensity)
 			obs.Propensity = &prop
