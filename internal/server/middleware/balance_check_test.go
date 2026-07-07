@@ -386,3 +386,23 @@ func TestWithBalanceCheck_402sCodexSubscriptionOnAnthropicRoute(t *testing.T) {
 	assert.False(t, reached, "a Codex sub must not exempt an Anthropic-route request")
 	assert.Equal(t, http.StatusPaymentRequired, w.Code)
 }
+
+func TestWithBalanceCheck_SubscriptionOverdraftAllowsNegativeBalance(t *testing.T) {
+	// A subscription-covered request stays optimistic: a small negative balance
+	// (e.g. paid failover) within the overdraft floor still passes.
+	repo := &stubBillingRepo{balance: billing.SubscriptionOverdraftFloorMicros / 2}
+	setInstall := func(c *gin.Context) { withUsageBypassInstallation(c, "org_sub") }
+	w, reached := runMiddlewareWith(t, repo, 0, "/v1/messages", setInstall, "Bearer sk-ant-oat-abc123")
+	assert.True(t, reached, "subscription request within the overdraft floor must pass")
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestWithBalanceCheck_SubscriptionGatedBelowOverdraftFloor(t *testing.T) {
+	// Past the overdraft floor, even a subscription-covered request 402s — the
+	// optimism is bounded.
+	repo := &stubBillingRepo{balance: billing.SubscriptionOverdraftFloorMicros - 1}
+	setInstall := func(c *gin.Context) { withUsageBypassInstallation(c, "org_sub") }
+	w, reached := runMiddlewareWith(t, repo, 0, "/v1/messages", setInstall, "Bearer sk-ant-oat-abc123")
+	assert.False(t, reached, "subscription request below the overdraft floor must gate")
+	assert.Equal(t, http.StatusPaymentRequired, w.Code)
+}

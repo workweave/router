@@ -23,11 +23,11 @@ const TopUpURL = "https://app.workweave.ai/settings/billing/router-credits"
 // Behavior (evaluated in order):
 //   - Override row present → pass through; flag the request context so
 //     the proxy's debit hook writes a delta=0 ledger row.
-//   - Balance ≤ minBalanceMicros (or no balance row) → HTTP 402, UNLESS the
-//     request is subscription-exempt (bypass gate on + a validated Claude/Codex
-//     subscription credential): those turns are served on the caller's own plan
-//     and debit $0, so prepaid credits don't apply. The exemption suppresses
-//     only the 402 — override detection above still runs.
+//   - Balance ≤ minBalanceMicros (or no balance row) → HTTP 402. A
+//     subscription-exempt request (UsageBypassEnabled + a validated Claude/Codex
+//     cred that covers this route) instead gates at a negative overdraft floor,
+//     so free traffic keeps flowing while any paid failover is bounded. Override
+//     detection above still runs.
 //   - Otherwise → pass through.
 //
 // The balance read is a single indexed SELECT (~2-5ms in-region). Any
@@ -98,11 +98,22 @@ func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerF
 			return
 		}
 
-		if result.BalanceMicros <= minBalanceMicros && !subscriptionExempt {
+		// Subscription-covered requests may run negative to a bounded overdraft
+		// floor before gating (see SubscriptionOverdraftFloorMicros): the turn is
+		// expected to be free but can fail over to a paid model, and we'd rather
+		// stay optimistic than 402 free traffic at $0. Everyone else gates at
+		// minBalanceMicros.
+		threshold := minBalanceMicros
+		if subscriptionExempt {
+			threshold = billing.SubscriptionOverdraftFloorMicros
+		}
+
+		if result.BalanceMicros <= threshold {
 			log.Info("Balance check rejected: balance at or below threshold",
 				"organization_id", orgID,
 				"balance_usd_micros", result.BalanceMicros,
-				"threshold_usd_micros", minBalanceMicros,
+				"threshold_usd_micros", threshold,
+				"subscription_exempt", subscriptionExempt,
 			)
 			c.AbortWithStatusJSON(http.StatusPaymentRequired, gin.H{
 				"error":              "insufficient_credits",
