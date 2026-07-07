@@ -80,12 +80,10 @@ func presentSubscriptionTokens(ctx context.Context, headers http.Header) (codex,
 	} else if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
 		codex = string(c.APIKey)
 	}
-	// Validate the dedicated Anthropic header through the same
-	// subscriptionCredsFromHeaderValue path credential injection uses (requires
-	// an sk-ant-oat token), NOT a bare non-empty check. A junk header value is
-	// never injected as a subscription, so treating it as "present" would let
-	// the balance gate exempt a turn that then routes to a paid model, and would
-	// bias the subsidy toward Claude on a header that never serves.
+	// Validate the dedicated Anthropic header via subscriptionCredsFromHeaderValue
+	// (requires sk-ant-oat), NOT a bare non-empty check: a junk header is never
+	// injected as a subscription, so treating it as present would let the balance
+	// gate exempt a turn that then routes to a paid model.
 	if creds := subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)); creds != nil {
 		anthropic = string(creds.APIKey)
 	} else if c := ExtractClientCredentials(providers.ProviderAnthropic, headers); c != nil && c.OAuth {
