@@ -180,12 +180,8 @@ func TestStrictify_PropertyNamesDroppedToDescription(t *testing.T) {
 	assert.Contains(t, desc, "propertyNames", "dropped constraint must survive as description guidance")
 }
 
-// Prod repro (2026-07-07): the respan MCP server's bulk_create_dataset_logs
-// tool types `expected_output` as a Union whose first anyOf branch is a typeless
-// "any"/`{}` schema. Pre-fix strictify emitted strict:true carrying that
-// typeless branch and OpenAI 400'd the whole request with
-// "In context=('properties','logs','items','properties','expected_output','anyOf','0'),
-// schema must have a 'type' key" — killing the session on the first call.
+// A typeless anyOf branch (e.g. "any"/`{}`) cannot be expressed in strict
+// mode; strictify must bail rather than emit a schema OpenAI 400s on.
 func TestStrictify_TypelessAnyOfBranchBails(t *testing.T) {
 	_, ok := strictifyFromJSON(t, `{
 		"type":"object",
