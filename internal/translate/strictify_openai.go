@@ -104,12 +104,8 @@ func strictifyNode(node map[string]any, depth int, propCount *int) (out map[stri
 			if !sok {
 				return nil, false
 			}
-			// OpenAI strict mode requires every anyOf branch to carry a
-			// concrete type; a typeless branch — e.g. an "any"/`{}` member of a
-			// Union (respan's bulk_create_dataset_logs `expected_output`) — is
-			// not expressible strictly. Bail to the non-strict fallback rather
-			// than emit a branch OpenAI 400s with
-			// "In context=(...anyOf...), schema must have a 'type' key".
+			// OpenAI strict mode: every anyOf branch needs a concrete type; bail
+			// rather than emit a typeless branch that 400s.
 			if !schemaHasStrictType(sb) {
 				return nil, false
 			}
