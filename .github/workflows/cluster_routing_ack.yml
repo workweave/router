@@ -27,8 +27,8 @@ jobs:
     name: Routing review acknowledge
     if: >-
       github.event.issue.pull_request != null &&
-      github.event.sender.login != 'weave-bot' &&
-      github.event.comment.user.login == 'weave-bot' &&
+      github.event.sender.login != 'workweave-bot' &&
+      github.event.comment.user.login == 'workweave-bot' &&
       contains(github.event.comment.body, '<!-- cluster-routing-report:')
     runs-on: ubuntu-latest
     permissions:

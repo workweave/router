@@ -41,7 +41,7 @@ concurrency:
 env:
   CHECK_CONTEXT: cluster-routing/acknowledged
   COMMENT_MARKER_PREFIX: "<!-- cluster-routing-report:"
-  BOT_LOGIN: "weave-bot"
+  BOT_LOGIN: "workweave-bot"
   LATEST_PATH: internal/router/cluster/artifacts/latest
 
 jobs:
@@ -72,7 +72,7 @@ jobs:
       - name: Upsert comment and set status
         uses: actions/github-script@v7
         with:
-          # PAT so the sticky comment is authored by weave-bot (cluster_routing_ack
+          # PAT so the sticky comment is authored by workweave-bot (cluster_routing_ack
           # keys the acknowledgment gate off this author login). Needs issues:write,
           # pull-requests:read, statuses:write on this repo.
           github-token: ${{ secrets.WEAVE_BOT_TOKEN }}
