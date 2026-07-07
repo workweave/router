@@ -22,6 +22,14 @@ type observationContext struct {
 	ChosenScore *float64
 	// ClusterRouterVersion is the artifact version that produced this decision.
 	ClusterRouterVersion string
+	// Strategy names the routing model that produced this decision ("cluster",
+	// "hmm", "rl", "bandit"). Always populated: sidecar routers stamp it on the
+	// metadata, and non-sidecar paths fall back to the request's active strategy
+	// (cluster by default) so every telemetry row is labeled by routing model.
+	Strategy string
+	// RouteID is the opaque sidecar correlation id (HMM/RL) that joins a route
+	// decision to its outcome report. Empty for the default cluster scorer.
+	RouteID string
 	// TTFTMs is the upstream-request-to-first-byte delta in ms. Pointer because
 	// zero is a legitimate sub-millisecond measurement.
 	TTFTMs *int64
@@ -46,7 +54,10 @@ type observationContext struct {
 // this turn, which differs from decision on STAY (decision rehydrates from the
 // pin); fresh's scores are captured separately to measure the hysteresis downgrade lever.
 func buildObservationContext(ctx context.Context, decision, fresh router.Decision) observationContext {
-	obs := observationContext{}
+	// Default to the request's active strategy so non-sidecar paths (cluster
+	// scorer, pins, hard-pins) are still labeled by routing model. Overridden
+	// below when the decision metadata names a specific sidecar strategy.
+	obs := observationContext{Strategy: string(router.StrategyFromContext(ctx))}
 	// Captured independently of the final decision so STAY turns (decision ==
 	// pin, no metadata) still record what a re-score would have picked.
 	if fresh.Model != "" {
@@ -74,11 +85,19 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 		score := float64(md.ChosenScore)
 		obs.ChosenScore = &score
 		obs.ClusterRouterVersion = md.ClusterRouterVersion
-		// Propensity is meaningful only alongside a score vector; gate on
-		// CandidateScores so a non-scoring router leaves NULL, not a false 0.0.
-		if len(md.CandidateScores) > 0 {
+		if md.Strategy != "" {
+			obs.Strategy = md.Strategy
+		}
+		obs.RouteID = md.RouteID
+		// Propensity is the importance weight an off-policy estimator needs, so
+		// capture it whenever a router populated it (>0). The cluster scorer sets
+		// it alongside a score vector; sidecar routers (HMM) set it without one,
+		// so gating on CandidateScores would silently drop their weight.
+		if md.Propensity > 0 {
 			prop := float64(md.Propensity)
 			obs.Propensity = &prop
+		}
+		if len(md.CandidateScores) > 0 {
 			if b, err := json.Marshal(md.CandidateScores); err == nil {
 				obs.CandidateScores = b
 			} else {
@@ -117,6 +136,12 @@ func (o observationContext) applySpanAttrs(b *otel.AttrBuilder) {
 	}
 	if o.ClusterRouterVersion != "" {
 		b.String("routing.cluster_version", o.ClusterRouterVersion)
+	}
+	if o.Strategy != "" {
+		b.String("routing.strategy", o.Strategy)
+	}
+	if o.RouteID != "" {
+		b.String("routing.route_id", o.RouteID)
 	}
 	if o.TTFTMs != nil {
 		b.Int64("latency.ttft_ms", *o.TTFTMs)

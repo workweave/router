@@ -151,6 +151,8 @@ type RouterModelRouterRequestTelemetry struct {
 	// Which credential precedence branch served the turn: subscription, codex_subscription, byok, or client. NULL on deployment-key turns.
 	CredentialSource *string
 	APIKeyID         pgtype.UUID
+	Strategy         *string
+	RouteID          *string
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.

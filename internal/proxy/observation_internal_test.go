@@ -63,3 +63,52 @@ func TestBuildObservationContext_NoScorerLeavesFreshNull(t *testing.T) {
 	assert.Empty(t, obs.FreshDecisionModel)
 	assert.Nil(t, obs.FreshCandidateScores)
 }
+
+// TestBuildObservationContext_CapturesHMMStrategy: a sidecar (HMM) decision
+// stamps Strategy + RouteID on the metadata and sets Propensity WITHOUT a score
+// vector. All three must be captured so the routing model, the outcome-join id,
+// and the off-policy weight survive to telemetry.
+func TestBuildObservationContext_CapturesHMMStrategy(t *testing.T) {
+	served := router.Decision{
+		Provider: "anthropic",
+		Model:    "claude-haiku-4-5",
+		Reason:   "hmm_policy(label=explore)",
+		Metadata: &router.RoutingMetadata{
+			CandidateModels: []string{"claude-opus-4-8", "claude-haiku-4-5"},
+			ChosenScore:     0.71,
+			Strategy:        string(router.StrategyHMM),
+			RouteID:         "route-abc-123",
+			Propensity:      1.0,
+		},
+	}
+
+	obs := buildObservationContext(context.Background(), served, router.Decision{})
+
+	assert.Equal(t, "hmm", obs.Strategy)
+	assert.Equal(t, "route-abc-123", obs.RouteID)
+	require.NotNil(t, obs.Propensity, "HMM propensity must survive without a score vector")
+	assert.InDelta(t, 1.0, *obs.Propensity, 1e-6)
+	// Sidecar sent no candidate-score map, so that column stays NULL.
+	assert.Nil(t, obs.CandidateScores)
+}
+
+// TestBuildObservationContext_DefaultsStrategyToActive: the cluster scorer
+// doesn't stamp a strategy, so Strategy falls back to the request's active
+// strategy — cluster by default — leaving no telemetry row unlabeled. RouteID
+// stays empty for the non-sidecar path.
+func TestBuildObservationContext_DefaultsStrategyToActive(t *testing.T) {
+	served := router.Decision{
+		Provider: "anthropic",
+		Model:    "claude-opus-4-8",
+		Reason:   "cluster:v-test",
+		Metadata: &router.RoutingMetadata{
+			CandidateModels: []string{"claude-opus-4-8"},
+			ChosenScore:     0.9,
+		},
+	}
+
+	obs := buildObservationContext(context.Background(), served, router.Decision{})
+
+	assert.Equal(t, string(router.StrategyCluster), obs.Strategy)
+	assert.Empty(t, obs.RouteID)
+}
