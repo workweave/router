@@ -9,6 +9,16 @@ import (
 	"workweave/router/internal/router/catalog"
 )
 
+// Inference route paths (gin FullPath templates) whose upstream cost a caller
+// subscription can cover: the Anthropic Messages API is served by a Claude
+// subscription, the OpenAI chat/responses APIs by a Codex subscription. Other
+// gated routes (Gemini /v1beta, /v1/route) have no consumer subscription.
+const (
+	routePathMessages        = "/v1/messages"
+	routePathChatCompletions = "/v1/chat/completions"
+	routePathResponses       = "/v1/responses"
+)
+
 // codexCoveredModels is the conservative set of GPT models a ChatGPT/Codex
 // subscription actually pays for via the Codex backend (chatgpt.com/backend-api/
 // codex). Deliberately a curated allowlist, not "every OpenAI model": the plan
@@ -84,13 +94,27 @@ func presentSubscriptionTokens(ctx context.Context, headers http.Header) (codex,
 	return codex, anthropic
 }
 
-// RequestPresentsSubscription reports whether the request carries a validated
-// Claude (sk-ant-oat…) or Codex subscription credential, via the dedicated
-// X-Weave-*-Subscription headers or the inbound Authorization bearer. Used by
-// the prepaid balance gate to exempt $0-debit subscription turns from gating.
-func RequestPresentsSubscription(ctx context.Context, headers http.Header) bool {
+// RequestPresentsCoveringSubscription reports whether the request carries a
+// validated subscription credential capable of serving inference on routePath:
+// a Claude (sk-ant-oat…) sub for the Anthropic Messages API, a Codex sub for the
+// OpenAI chat/responses APIs (sourced from the dedicated X-Weave-*-Subscription
+// headers or the inbound Authorization bearer). Any other route returns false.
+//
+// The prepaid balance gate uses this to exempt $0-debit subscription turns. It
+// must be scoped to the route's covering family, NOT "any subscription present":
+// a Codex bearer on /v1/messages (or a Claude bearer on /v1/responses) can't
+// serve that route, so the turn would route to a paid model — exempting it would
+// let a depleted-balance org incur an unbilled debit.
+func RequestPresentsCoveringSubscription(ctx context.Context, headers http.Header, routePath string) bool {
 	codex, anthropic := presentSubscriptionTokens(ctx, headers)
-	return codex != "" || anthropic != ""
+	switch routePath {
+	case routePathMessages:
+		return anthropic != ""
+	case routePathChatCompletions, routePathResponses:
+		return codex != ""
+	default:
+		return false
+	}
 }
 
 // withUsageObserver installs a context header observer that records the present
