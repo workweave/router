@@ -23,8 +23,7 @@ type observationContext struct {
 	// ClusterRouterVersion is the artifact version that produced this decision.
 	ClusterRouterVersion string
 	// Strategy is the routing model that produced this decision ("cluster", "hmm", "rl", "bandit").
-	// Set to the active strategy when a router ran (served metadata or a STAY re-score); NULL on
-	// hard-pins that bypass routing, so strategy counts aren't inflated by pin-served turns.
+	// NULL on hard-pins that bypass routing so per-strategy decision counts aren't inflated.
 	Strategy string
 	// RouteID is the opaque sidecar correlation id (HMM/RL) that joins a route
 	// decision to its outcome report. Empty for the default cluster scorer.
