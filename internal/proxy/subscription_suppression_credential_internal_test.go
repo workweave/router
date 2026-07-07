@@ -74,3 +74,53 @@ func TestResolveAndInjectCredentials_SuppressionDoesNotClearCodexOpenAITurn(t *t
 	require.NotNil(t, got, "a Codex subscription must still resolve for its OpenAI turn")
 	assert.Equal(t, credSourceCodexSubscription, got.Source)
 }
+
+// subscriptionDisabledCtx mimics a router-keyed request whose installation has
+// turned off "use my subscription first" (stored inverted as
+// subscription_routing_disabled), stashed on ctx by the auth middleware.
+func subscriptionDisabledCtx() context.Context {
+	return context.WithValue(routerKeyedCtx(), InstallationSubscriptionRoutingDisabledContextKey{}, true)
+}
+
+// With the toggle off, the installation opted to ignore its subscription and
+// bill through prepaid, so an inbound Claude subscription bearer must be
+// suppressed and cleared just like the exhaustion case — the turn serves on the
+// deployment key and debits prepaid credits.
+func TestResolveAndInjectCredentials_DisabledSuppressesClaudeSubscription(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer sk-ant-oat01-live")
+
+	out := resolveAndInjectCredentials(subscriptionDisabledCtx(), providers.ProviderAnthropic, headers)
+
+	assert.Nil(t, CredentialsFromContext(out),
+		"toggle off must suppress the Claude subscription so the turn bills prepaid")
+}
+
+// Unlike exhaustion (Anthropic-only), the toggle is provider-wide: with it off
+// a Codex subscription must ALSO be suppressed so OpenAI turns bill prepaid
+// rather than the caller's ChatGPT plan.
+func TestResolveAndInjectCredentials_DisabledSuppressesCodexSubscription(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer eyJhbGciOi.codex.jwt")
+	headers.Set("ChatGPT-Account-ID", "acct-1")
+
+	out := resolveAndInjectCredentials(subscriptionDisabledCtx(), providers.ProviderOpenAI, headers)
+
+	assert.Nil(t, CredentialsFromContext(out),
+		"toggle off must suppress the Codex subscription so the turn bills prepaid")
+}
+
+// Regression guard: an inbound Codex subscription bearer on the router-key path
+// must not slip back in via the client-credential branch when the toggle is off.
+func TestResolveAndInjectCredentials_DisabledCodexNotReResolvedFromContext(t *testing.T) {
+	spentCodex := &Credentials{APIKey: []byte("eyJhbGciOi.codex.jwt"), AccountID: []byte("acct-1"), Source: credSourceCodexSubscription, OAuth: true}
+	ctx := context.WithValue(subscriptionDisabledCtx(), CredentialsContextKey{}, spentCodex)
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer eyJhbGciOi.codex.jwt")
+	headers.Set("ChatGPT-Account-ID", "acct-1")
+
+	out := resolveAndInjectCredentials(ctx, providers.ProviderOpenAI, headers)
+
+	assert.Nil(t, CredentialsFromContext(out),
+		"a disabled Codex subscription carried on ctx must be cleared, not re-resolved")
+}

@@ -3247,11 +3247,18 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 // env key is the correct fallback there.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
-	// When the caller's Claude subscription is observed-exhausted, skip its OAuth
-	// token so resolution falls through to BYOK / the deployment key instead of
-	// re-hitting a token that will just 429. Anthropic only — a Codex
-	// subscription on the same request still pays for its OpenAI turns.
-	suppressClaudeSub := claudeSubscriptionSuppressed(ctx)
+	// Two independent reasons to skip a caller's subscription OAuth token and let
+	// resolution fall through to BYOK / the deployment key (prepaid billing):
+	//   1. claudeSubscriptionSuppressed — the Claude subscription is observed-
+	//      exhausted, so re-hitting it would just 429. Anthropic only; a Codex
+	//      subscription on the same request still pays for its OpenAI turns.
+	//   2. subscriptionRoutingDisabledForRequest — the installation turned off
+	//      "use my subscription first", opting to ignore its subscription and
+	//      bill every turn through prepaid. Provider-wide, so it suppresses the
+	//      Codex subscription too.
+	subDisabled := subscriptionRoutingDisabledForRequest(ctx)
+	suppressClaudeSub := claudeSubscriptionSuppressed(ctx) || subDisabled
+	suppressCodexSub := subDisabled
 	if provider == providers.ProviderAnthropic && !suppressClaudeSub {
 		// Subscription-first (subscription -> BYOK -> deployment), resolved here
 		// explicitly rather than relying on BYOK being absent off the router-key
@@ -3272,7 +3279,7 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 			return context.WithValue(ctx, CredentialsContextKey{}, inbound)
 		}
 	}
-	if provider == providers.ProviderOpenAI {
+	if provider == providers.ProviderOpenAI && !suppressCodexSub {
 		// Codex (ChatGPT) subscription-first, mirroring the Anthropic block above.
 		if sub := codexSubscriptionFromContext(ctx); sub != nil {
 			observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", sub.Source)
@@ -3295,11 +3302,13 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	}
 	if creds == nil && !routerKeyed {
 		client := ExtractClientCredentials(provider, headers)
-		// A suppressed Claude subscription must not slip back in here: off the
-		// router-key path the spent sk-ant-oat bearer would otherwise re-resolve
-		// as the subscription, undoing the skip above. Scoped to the Anthropic
-		// OAuth bearer only.
-		if suppressClaudeSub && provider == providers.ProviderAnthropic && client != nil && client.OAuth {
+		// A suppressed subscription must not slip back in here: off the router-key
+		// path the caller's OAuth bearer would otherwise re-resolve as the
+		// subscription, undoing the skip above. Scoped to the OAuth bearer of the
+		// provider whose subscription is suppressed.
+		if client != nil && client.OAuth &&
+			((provider == providers.ProviderAnthropic && suppressClaudeSub) ||
+				(provider == providers.ProviderOpenAI && suppressCodexSub)) {
 			client = nil
 		}
 		creds = client
@@ -3309,11 +3318,13 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	}
 	// Explicitly clear rather than leave as-is: on a router-keyed request with
 	// no BYOK, none of the branches above resolve anything, so ctx would still
-	// carry the primary attempt's subscription credential — re-sending the
-	// spent sk-ant-oat the suppression meant to drop. The provider client only
-	// falls back to its deployment key when ctx carries NO credential. Safe
-	// because suppression is only ever set when a fallback key exists.
-	if suppressClaudeSub && provider == providers.ProviderAnthropic {
+	// carry the primary attempt's subscription credential — re-sending the token
+	// the suppression meant to drop. The provider client only falls back to its
+	// deployment key when ctx carries NO credential. For the exhaustion case a
+	// fallback key always exists; for the disabled-toggle case the deployment /
+	// prepaid key is the intended path (and the balance gate governs spend).
+	if (suppressClaudeSub && provider == providers.ProviderAnthropic) ||
+		(suppressCodexSub && provider == providers.ProviderOpenAI) {
 		return clearCredentials(ctx)
 	}
 	return ctx
