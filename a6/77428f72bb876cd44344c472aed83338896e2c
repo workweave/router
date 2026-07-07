@@ -1,0 +1,19 @@
+scripts/export_qwen3_onnx.py
+  s_7ac34f6a1d3d7e::t_715a36963b0949 229
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "a677428f72bb876cd44344c472aed83338896e2c",
+  "prompts": {},
+  "sessions": {
+    "s_7ac34f6a1d3d7e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8ceefb5b-60a3-4752-9391-55a83dfbd039",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

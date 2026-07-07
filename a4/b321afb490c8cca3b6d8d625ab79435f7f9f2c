@@ -1,0 +1,35 @@
+internal/router/cluster/scorer.go
+  s_87662230642b48::t_8fd4dcdf276ec0 330-335,349-352,355-364,367-382,384-387
+  s_87662230642b48::t_336ded8b981415 622-628,633
+  s_87662230642b48::t_89e6305f22d339 348,353-354,365-366,383,388-395
+  s_87662230642b48::t_4066d4418c0148 336-347
+internal/router/cluster/distribution_test.go
+  s_87662230642b48::t_2ba4485e3a6fd4 260-268,270-271
+  s_87662230642b48::t_c9c728908c05af 174-259,269,272-273
+cmd/routing-report/main.go
+  s_87662230642b48::t_c9ecb1e7cfe61e 145
+  s_87662230642b48::t_932916b3d86517 210
+  s_87662230642b48::t_1ed7031051f749 178,184
+  s_87662230642b48::t_00d0bf6ead2d9b 234,237
+  s_87662230642b48::t_1b10b31f8a757c 235-236,238,240
+cmd/routing-report/main_test.go
+  s_87662230642b48::t_7356eddad64aab 61
+internal/router/cluster/distribution.go
+  s_87662230642b48::t_c00194b95497c2 89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.11",
+  "base_commit_sha": "a4b321afb490c8cca3b6d8d625ab79435f7f9f2c",
+  "prompts": {},
+  "sessions": {
+    "s_87662230642b48": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2606008a-5ca1-4183-9ff0-2340c0d06738",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

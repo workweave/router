@@ -1,0 +1,19 @@
+internal/proxy/service.go
+  s_d0bb2d20c76140::t_9b5053cd382318 1523-1525,2598-2600
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "ee8cbfcd6f0ed434622d73d564ceb2953264898a",
+  "prompts": {},
+  "sessions": {
+    "s_d0bb2d20c76140": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "296a5c75-453b-41e5-8632-6487b3c94b7c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

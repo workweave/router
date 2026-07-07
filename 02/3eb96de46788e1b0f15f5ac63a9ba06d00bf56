@@ -1,0 +1,55 @@
+internal/proxy/handover.go
+  s_167f3d2e5fd205::t_3bff6e776191a3 93
+  s_167f3d2e5fd205::t_3c7e6c564e4c04 263-267
+  s_167f3d2e5fd205::t_9851e4696cbaab 288-289,291-292,303-304,306-307
+internal/proxy/AGENTS.md
+  s_167f3d2e5fd205::t_6c1bdb2edf11c2 38
+  s_167f3d2e5fd205::t_0385c7482e8c94 71
+internal/proxy/service.go
+  s_167f3d2e5fd205::t_0ede74bfdbebba 1671
+  s_167f3d2e5fd205::t_39f3de6c96b017 90
+  s_167f3d2e5fd205::t_7a6476020c17ec 1487-1488
+  s_167f3d2e5fd205::t_32fb1b0b99e0d5 371-372
+  s_167f3d2e5fd205::t_1d436adc63b40d 869-872
+  s_167f3d2e5fd205::t_0c15167d7a8779 1391
+  s_167f3d2e5fd205::t_9af2d04ab37ac6 1355
+  s_167f3d2e5fd205::t_3b5c9de8e8c5ed 1308
+internal/router/handover/summarizer.go
+  s_167f3d2e5fd205::t_1a19b772b0c160 62-71
+  s_167f3d2e5fd205::t_450228d4b942e9 37-38
+internal/router/handover/CLAUDE.md
+  s_167f3d2e5fd205::t_6340144d3c40dc 13
+  s_167f3d2e5fd205::t_02b4f3ce7ac1eb 18
+internal/proxy/turnloop.go
+  s_167f3d2e5fd205::t_515a9468828a9c 112-120
+  s_167f3d2e5fd205::t_1b21f9ab1da0f3 402-404,413-414
+  s_167f3d2e5fd205::t_96082ca1c2756d 430-431,434-435,447-448,450-451
+internal/proxy/CLAUDE.md
+  s_167f3d2e5fd205::t_39035d008ee400 38
+  s_167f3d2e5fd205::t_0e8230dcbda2ed 71
+internal/router/handover/AGENTS.md
+  s_167f3d2e5fd205::t_c98b8ad5011b01 18
+  s_167f3d2e5fd205::t_3ba5e786f350f3 13
+internal/proxy/turnloop_test.go
+  s_167f3d2e5fd205::t_4775992a8d0674 368
+  s_167f3d2e5fd205::t_5f215a358545e1 344
+  s_167f3d2e5fd205::t_6c5515a0dec444 23
+  s_167f3d2e5fd205::t_4681b0b5b5a0d3 107-151
+  s_167f3d2e5fd205::t_0f7ba09b2af199 247-252,265-266,271,273,275-276,279-283,296,301,304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "023eb96de46788e1b0f15f5ac63a9ba06d00bf56",
+  "prompts": {},
+  "sessions": {
+    "s_167f3d2e5fd205": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8209b90-7072-4f88-875c-2bed5bfe0894",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

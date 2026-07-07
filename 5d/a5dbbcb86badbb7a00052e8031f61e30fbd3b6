@@ -1,0 +1,23 @@
+internal/proxy/provider_fallback.go
+  s_5009b1e9ae1308::t_f4de8f8685bbb9 98-106
+internal/proxy/provider_fallback_internal_test.go
+  s_5009b1e9ae1308::t_ba3c0f48d5947e 313
+  s_5009b1e9ae1308::t_c037309df5e13c 24-26,34,41
+  s_5009b1e9ae1308::t_4a0c2d3b9bc011 296-312,314-335
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "5da5dbbcb86badbb7a00052e8031f61e30fbd3b6",
+  "prompts": {},
+  "sessions": {
+    "s_5009b1e9ae1308": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aab652f1-c261-4101-bb65-5f0a83b1a661",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
