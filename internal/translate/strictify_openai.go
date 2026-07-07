@@ -140,10 +140,8 @@ func strictifyNode(node map[string]any, depth int, propCount *int) (out map[stri
 	}
 
 	// Object node: additionalProperties:false, all properties required,
-	// originally-optional properties become nullable. Stamp an explicit
-	// type:"object" — a node OpenAI must read as an object (it has properties)
-	// but that omitted its own type would otherwise emit typeless and 400 when
-	// it sits inside an anyOf branch.
+	// originally-optional properties become nullable. Stamp type:"object" so
+	// a properties-only node inside anyOf carries an explicit type.
 	res["type"] = "object"
 	res["additionalProperties"] = false
 	originallyRequired := make(map[string]struct{})
