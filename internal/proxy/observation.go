@@ -23,10 +23,8 @@ type observationContext struct {
 	// ClusterRouterVersion is the artifact version that produced this decision.
 	ClusterRouterVersion string
 	// Strategy names the routing model that produced this decision ("cluster",
-	// "hmm", "rl", "bandit"). Always populated: sidecar routers stamp it on the
-	// metadata, and non-sidecar paths fall back to the request's active strategy
-	// (cluster by default) so every telemetry row is labeled by routing model.
-	Strategy string
+	// Strategy is the routing model that produced this decision ("cluster", "hmm", "rl", "bandit").
+	// Defaults to the request's active strategy so every row is labeled even without metadata.
 	// RouteID is the opaque sidecar correlation id (HMM/RL) that joins a route
 	// decision to its outcome report. Empty for the default cluster scorer.
 	RouteID string
