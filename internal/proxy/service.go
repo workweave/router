@@ -3247,15 +3247,10 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 // env key is the correct fallback there.
 func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
-	// Two independent reasons to skip a caller's subscription OAuth token and let
-	// resolution fall through to BYOK / the deployment key (prepaid billing):
-	//   1. claudeSubscriptionSuppressed — the Claude subscription is observed-
-	//      exhausted, so re-hitting it would just 429. Anthropic only; a Codex
-	//      subscription on the same request still pays for its OpenAI turns.
-	//   2. subscriptionRoutingDisabledForRequest — the installation turned off
-	//      "use my subscription first", opting to ignore its subscription and
-	//      bill every turn through prepaid. Provider-wide, so it suppresses the
-	//      Codex subscription too.
+	// Skip the caller's subscription OAuth token (fall through to BYOK / the
+	// deployment key) when it's exhausted (Anthropic-only, a 429 would just
+	// repeat) or the installation turned off "use my subscription first"
+	// (provider-wide, so Codex is suppressed too).
 	subDisabled := subscriptionRoutingDisabledForRequest(ctx)
 	suppressClaudeSub := claudeSubscriptionSuppressed(ctx) || subDisabled
 	suppressCodexSub := subDisabled
@@ -3302,10 +3297,8 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	}
 	if creds == nil && !routerKeyed {
 		client := ExtractClientCredentials(provider, headers)
-		// A suppressed subscription must not slip back in here: off the router-key
-		// path the caller's OAuth bearer would otherwise re-resolve as the
-		// subscription, undoing the skip above. Scoped to the OAuth bearer of the
-		// provider whose subscription is suppressed.
+		// A suppressed subscription must not slip back in as the inbound OAuth
+		// bearer off the router-key path, undoing the skip above.
 		if client != nil && client.OAuth &&
 			((provider == providers.ProviderAnthropic && suppressClaudeSub) ||
 				(provider == providers.ProviderOpenAI && suppressCodexSub)) {
@@ -3316,13 +3309,11 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	if creds != nil {
 		return context.WithValue(ctx, CredentialsContextKey{}, creds)
 	}
-	// Explicitly clear rather than leave as-is: on a router-keyed request with
-	// no BYOK, none of the branches above resolve anything, so ctx would still
-	// carry the primary attempt's subscription credential — re-sending the token
-	// the suppression meant to drop. The provider client only falls back to its
-	// deployment key when ctx carries NO credential. For the exhaustion case a
-	// fallback key always exists; for the disabled-toggle case the deployment /
-	// prepaid key is the intended path (and the balance gate governs spend).
+	// Clear explicitly: on a router-keyed / no-BYOK request ctx still carries the
+	// subscription credential from an earlier attempt, and the provider client
+	// only falls back to its deployment key when ctx carries NO credential. For
+	// the disabled-toggle case the deployment / prepaid key is the intended path
+	// (the balance gate governs spend).
 	if (suppressClaudeSub && provider == providers.ProviderAnthropic) ||
 		(suppressCodexSub && provider == providers.ProviderOpenAI) {
 		return clearCredentials(ctx)

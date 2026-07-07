@@ -75,17 +75,13 @@ func TestResolveAndInjectCredentials_SuppressionDoesNotClearCodexOpenAITurn(t *t
 	assert.Equal(t, credSourceCodexSubscription, got.Source)
 }
 
-// subscriptionDisabledCtx mimics a router-keyed request whose installation has
-// turned off "use my subscription first" (stored inverted as
-// subscription_routing_disabled), stashed on ctx by the auth middleware.
+// subscriptionDisabledCtx returns a router-keyed ctx with subscription routing
+// disabled (the "use my subscription first" toggle off).
 func subscriptionDisabledCtx() context.Context {
 	return context.WithValue(routerKeyedCtx(), InstallationSubscriptionRoutingDisabledContextKey{}, true)
 }
 
-// With the toggle off, the installation opted to ignore its subscription and
-// bill through prepaid, so an inbound Claude subscription bearer must be
-// suppressed and cleared just like the exhaustion case — the turn serves on the
-// deployment key and debits prepaid credits.
+// Toggle off must suppress the Claude subscription so the turn bills prepaid.
 func TestResolveAndInjectCredentials_DisabledSuppressesClaudeSubscription(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("Authorization", "Bearer sk-ant-oat01-live")
@@ -96,9 +92,8 @@ func TestResolveAndInjectCredentials_DisabledSuppressesClaudeSubscription(t *tes
 		"toggle off must suppress the Claude subscription so the turn bills prepaid")
 }
 
-// Unlike exhaustion (Anthropic-only), the toggle is provider-wide: with it off
-// a Codex subscription must ALSO be suppressed so OpenAI turns bill prepaid
-// rather than the caller's ChatGPT plan.
+// Unlike exhaustion (Anthropic-only), the disabled toggle is provider-wide and
+// must suppress Codex too.
 func TestResolveAndInjectCredentials_DisabledSuppressesCodexSubscription(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("Authorization", "Bearer eyJhbGciOi.codex.jwt")
