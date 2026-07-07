@@ -172,6 +172,10 @@ type Service struct {
 	// death-march signals; see spiral_detection.go). Defaults true — shadow mode
 	// changes no routing behavior.
 	spiralShadowEnabled bool
+	// textRepetitionBreakEnabled gates the enforcing assistant-text repetition
+	// detector (see text_repetition.go). Defaults true; kill switch is
+	// ROUTER_TEXT_REPETITION_BREAK_ENABLED.
+	textRepetitionBreakEnabled bool
 	// spiralTracker de-duplicates shadow fires per (session, role, reason) on
 	// this replica.
 	spiralTracker *spiralTracker
@@ -866,21 +870,22 @@ const DefaultPlannerColdPinFollowFresh = false
 
 func NewService(r router.Router, providerMap map[string]providers.Client, emitter TelemetryEmitter, embedOnlyUserMessage bool, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
 	return &Service{
-		router:               r,
-		providers:            providerMap,
-		emitter:              emitter,
-		embedOnlyUserMessage: embedOnlyUserMessage,
-		semanticCache:        semanticCache,
-		pinStore:             pinStore,
-		noProgress:           newNoProgressTracker(),
-		compaction:           newCompactionTracker(),
-		prefixTrimFreeSwitch: true,
-		spiralTracker:        newSpiralTracker(),
-		spiralShadowEnabled:  true,
-		hardPinExplore:       hardPinExplore,
-		hardPinProvider:      hardPinProvider,
-		hardPinModel:         hardPinModel,
-		telemetry:            telemetry,
+		router:                     r,
+		providers:                  providerMap,
+		emitter:                    emitter,
+		embedOnlyUserMessage:       embedOnlyUserMessage,
+		semanticCache:              semanticCache,
+		pinStore:                   pinStore,
+		noProgress:                 newNoProgressTracker(),
+		compaction:                 newCompactionTracker(),
+		prefixTrimFreeSwitch:       true,
+		spiralTracker:              newSpiralTracker(),
+		spiralShadowEnabled:        true,
+		textRepetitionBreakEnabled: true,
+		hardPinExplore:             hardPinExplore,
+		hardPinProvider:            hardPinProvider,
+		hardPinModel:               hardPinModel,
+		telemetry:                  telemetry,
 		planner: planner.EVConfig{
 			ThresholdUSD:           DefaultPlannerThresholdUSD,
 			ExpectedRemainingTurns: DefaultPlannerExpectedRemainingTurns,
@@ -1006,6 +1011,14 @@ func (s *Service) WithLoopEscalationStore(store LoopEscalationStore) *Service {
 // cost if it ever misbehaves.
 func (s *Service) WithSpiralShadowConfig(enabled bool) *Service {
 	s.spiralShadowEnabled = enabled
+	return s
+}
+
+// WithTextRepetitionBreak sets the enforcing text-repetition detector kill
+// switch (default on). enabled=false skips the per-turn scan entirely. See
+// text_repetition.go.
+func (s *Service) WithTextRepetitionBreak(enabled bool) *Service {
+	s.textRepetitionBreakEnabled = enabled
 	return s
 }
 
@@ -2002,6 +2015,15 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
 			return s.handleNoProgressBreak(ctx, w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider, feats.Tokens)
+		}
+	}
+
+	// Text-repetition break: fresh tool calls each turn defeat the no-progress
+	// fingerprint; repeated narration is the durable tell. See text_repetition.go.
+	if s.textRepetitionBreakEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
+		if looped, count, sampleHash := detectTextRepetition(env); looped {
+			role := roleForTier(catalog.TierFor(feats.Model))
+			return s.handleTextRepetitionBreak(ctx, w, env, count, sampleHash, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider, feats.Tokens)
 		}
 	}
 
