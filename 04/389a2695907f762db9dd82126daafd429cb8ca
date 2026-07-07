@@ -1,0 +1,33 @@
+internal/router/cluster/candidate_k12_test.go
+  s_ad266a1f33b81c::t_2d1e3b788385d0 50-58,61,65
+  s_ad266a1f33b81c::t_c4bda987e0f6f6 81-82
+  s_ad266a1f33b81c::t_633d28b66aa11b 1-49,59-60,62-64,66-80,83-97
+internal/router/cluster/artifacts/candidate-k12/metadata.yaml
+  s_ad266a1f33b81c::t_b22796eee06e86 1-111
+internal/router/cluster/artifacts/candidate-k12/model_axes.json
+  s_ad266a1f33b81c::t_3f11e447b2b6da 1-154
+internal/router/cluster/artifacts/candidate-k12/model_features.json
+  s_ad266a1f33b81c::t_bc6fb1e6705150 1-494
+internal/router/cluster/artifacts/candidate-k12/model_registry.json
+  s_ad266a1f33b81c::t_ee5cf65c9cf94a 1-204
+internal/router/cluster/artifacts/candidate-k12/quality_means.json
+  s_ad266a1f33b81c::t_ba48269b579bf7 1-318
+internal/router/cluster/artifacts/candidate-k12/rankings.json
+  s_ad266a1f33b81c::t_f34a4728de1b30 1-314
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "04389a2695907f762db9dd82126daafd429cb8ca",
+  "prompts": {},
+  "sessions": {
+    "s_ad266a1f33b81c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "38da743a-ec24-4e46-9146-bce9c32e91cc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
