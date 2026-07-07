@@ -94,15 +94,12 @@ func presentSubscriptionTokens(ctx context.Context, headers http.Header) (codex,
 
 // RequestPresentsCoveringSubscription reports whether the request carries a
 // validated subscription credential capable of serving inference on routePath:
-// a Claude (sk-ant-oat…) sub for the Anthropic Messages API, a Codex sub for the
-// OpenAI chat/responses APIs (sourced from the dedicated X-Weave-*-Subscription
-// headers or the inbound Authorization bearer). Any other route returns false.
+// a Claude (sk-ant-oat…) sub for /v1/messages, a Codex sub for /v1/chat/completions
+// and /v1/responses. Any other route returns false.
 //
-// The prepaid balance gate uses this to exempt $0-debit subscription turns. It
-// must be scoped to the route's covering family, NOT "any subscription present":
-// a Codex bearer on /v1/messages (or a Claude bearer on /v1/responses) can't
-// serve that route, so the turn would route to a paid model — exempting it would
-// let a depleted-balance org incur an unbilled debit.
+// Scoped to the covering family (not "any subscription present") so a Codex
+// bearer on /v1/messages — which can't serve that route — doesn't exempt a
+// turn that would debit the prepaid balance.
 func RequestPresentsCoveringSubscription(ctx context.Context, headers http.Header, routePath string) bool {
 	codex, anthropic := presentSubscriptionTokens(ctx, headers)
 	switch routePath {
