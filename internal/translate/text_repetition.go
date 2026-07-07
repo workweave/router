@@ -45,10 +45,8 @@ loop:
 }
 
 // userIsHumanTurn reports whether a user message carries genuine human input:
-// text that is neither a tool_result nor a CC-injected wrapper block (reminder,
-// command, local-command output). Those injected turns must not reset the
-// repetition window or the backward scan collects nothing on the tool-result
-// turns it guards.
+// text that is neither a tool_result nor a CC-injected wrapper block.
+// Injected turns must not reset the window or the backward scan collects nothing.
 func userIsHumanTurn(msg gjson.Result) bool {
 	content := msg.Get("content")
 	if content.Type == gjson.String {
