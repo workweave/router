@@ -180,6 +180,56 @@ func TestStrictify_PropertyNamesDroppedToDescription(t *testing.T) {
 	assert.Contains(t, desc, "propertyNames", "dropped constraint must survive as description guidance")
 }
 
+// Prod repro (2026-07-07): the respan MCP server's bulk_create_dataset_logs
+// tool types `expected_output` as a Union whose first anyOf branch is a typeless
+// "any"/`{}` schema. Pre-fix strictify emitted strict:true carrying that
+// typeless branch and OpenAI 400'd the whole request with
+// "In context=('properties','logs','items','properties','expected_output','anyOf','0'),
+// schema must have a 'type' key" — killing the session on the first call.
+func TestStrictify_TypelessAnyOfBranchBails(t *testing.T) {
+	_, ok := strictifyFromJSON(t, `{
+		"type":"object",
+		"properties":{
+			"logs":{
+				"type":"array",
+				"items":{
+					"type":"object",
+					"properties":{
+						"expected_output":{"anyOf":[{},{"type":"null"}]}
+					},
+					"required":["expected_output"]
+				}
+			}
+		},
+		"required":["logs"]
+	}`)
+	require.False(t, ok, "typeless anyOf branch must fall back to non-strict emission")
+}
+
+// An object branch inside an anyOf that omits its own type (relying on its
+// properties to imply object) must be stamped type:"object" so strict mode
+// accepts it rather than 400'ing on the missing type key.
+func TestStrictify_ObjectBranchGetsExplicitType(t *testing.T) {
+	out, ok := strictifyFromJSON(t, `{
+		"type":"object",
+		"properties":{
+			"payload":{"anyOf":[
+				{"properties":{"id":{"type":"string"}},"required":["id"]},
+				{"type":"null"}
+			]}
+		},
+		"required":["payload"]
+	}`)
+	require.True(t, ok)
+
+	payload := out["properties"].(map[string]any)["payload"].(map[string]any)
+	branches := payload["anyOf"].([]any)
+	objBranch := branches[0].(map[string]any)
+	assert.Equal(t, "object", objBranch["type"],
+		"an object-by-properties branch must be stamped type:object for strict mode")
+	assert.Equal(t, false, objBranch["additionalProperties"])
+}
+
 // Schema-defining keywords strict mode cannot express must bail to the
 // non-strict fallback rather than emit a lossy strict schema.
 func TestStrictify_UnevaluatedPropertiesBails(t *testing.T) {

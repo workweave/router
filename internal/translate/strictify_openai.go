@@ -104,6 +104,15 @@ func strictifyNode(node map[string]any, depth int, propCount *int) (out map[stri
 			if !sok {
 				return nil, false
 			}
+			// OpenAI strict mode requires every anyOf branch to carry a
+			// concrete type; a typeless branch — e.g. an "any"/`{}` member of a
+			// Union (respan's bulk_create_dataset_logs `expected_output`) — is
+			// not expressible strictly. Bail to the non-strict fallback rather
+			// than emit a branch OpenAI 400s with
+			// "In context=(...anyOf...), schema must have a 'type' key".
+			if !schemaHasStrictType(sb) {
+				return nil, false
+			}
 			outBranches = append(outBranches, sb)
 		}
 		res["anyOf"] = outBranches
@@ -135,7 +144,11 @@ func strictifyNode(node map[string]any, depth int, propCount *int) (out map[stri
 	}
 
 	// Object node: additionalProperties:false, all properties required,
-	// originally-optional properties become nullable.
+	// originally-optional properties become nullable. Stamp an explicit
+	// type:"object" — a node OpenAI must read as an object (it has properties)
+	// but that omitted its own type would otherwise emit typeless and 400 when
+	// it sits inside an anyOf branch.
+	res["type"] = "object"
 	res["additionalProperties"] = false
 	originallyRequired := make(map[string]struct{})
 	if reqList, present := res["required"].([]any); present {
@@ -201,6 +214,24 @@ func makeNullable(node map[string]any) map[string]any {
 	}
 	// No type and no anyOf (e.g. bare enum): wrap the node itself.
 	return map[string]any{"anyOf": []any{node, map[string]any{"type": "null"}}}
+}
+
+// schemaHasStrictType reports whether a strictified node carries a type OpenAI
+// strict mode can consume: an explicit "type", a nested "anyOf" (whose branches
+// were themselves strictified and type-checked), or an "enum" (strict mode
+// infers the type from the enum values). A node with none of these — e.g. a
+// bare "any"/`{}` schema — is not expressible in strict mode.
+func schemaHasStrictType(node map[string]any) bool {
+	if _, ok := node["type"]; ok {
+		return true
+	}
+	if _, ok := node["anyOf"]; ok {
+		return true
+	}
+	if _, ok := node["enum"]; ok {
+		return true
+	}
+	return false
 }
 
 // compactJSONValue renders a dropped constraint value for a description note.
