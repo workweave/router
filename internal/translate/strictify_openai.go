@@ -216,11 +216,8 @@ func makeNullable(node map[string]any) map[string]any {
 	return map[string]any{"anyOf": []any{node, map[string]any{"type": "null"}}}
 }
 
-// schemaHasStrictType reports whether a strictified node carries a type OpenAI
-// strict mode can consume: an explicit "type", a nested "anyOf" (whose branches
-// were themselves strictified and type-checked), or an "enum" (strict mode
-// infers the type from the enum values). A node with none of these — e.g. a
-// bare "any"/`{}` schema — is not expressible in strict mode.
+// schemaHasStrictType reports whether node carries a type OpenAI strict mode
+// can consume: an explicit "type", a nested "anyOf", or an "enum".
 func schemaHasStrictType(node map[string]any) bool {
 	if _, ok := node["type"]; ok {
 		return true
