@@ -370,9 +370,13 @@ var Models = []Model{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.10}},
 	}},
 	// kimi-k2.7 "Code" variant: same rates as k2.6, ~30% less thinking-token
-	// usage. Fireworks-only — not yet on OpenRouter, so no fallback binding.
+	// usage. Fireworks primary; Together added as a cross-provider fallback
+	// (identical $0.95/$4.00 list price) so a Fireworks outage fails over
+	// instead of hard-killing the turn — the binding previously stood alone.
 	{ID: "moonshotai/kimi-k2.7", Tier: TierHigh, ContextWindow: 262_144, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/kimi-k2p7-code",
+			Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.20}},
+		{Provider: providers.ProviderTogether, UpstreamID: "moonshotai/Kimi-K2.7-Code",
 			Price: Pricing{InputUSDPer1M: 0.950, OutputUSDPer1M: 4.000, CacheReadMultiplier: 0.20}},
 	}},
 	// AA top-performer additions (2026-05-18): ranked by composite of quality
