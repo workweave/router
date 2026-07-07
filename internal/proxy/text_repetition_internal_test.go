@@ -1,6 +1,11 @@
 package proxy
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+
+	"workweave/router/internal/translate"
+)
 
 // A substantive narration line (>= textRepetitionMinLen) that a stuck model
 // restates verbatim each turn while still issuing fresh tool calls.
@@ -58,6 +63,39 @@ func TestDetectTextRepetition_BelowThresholdDoesNotFire(t *testing.T) {
 
 	if looped, count, _ := detectTextRepetition(env); looped {
 		t.Fatalf("two restatements must not trip the break; count=%d", count)
+	}
+}
+
+func TestDetectTextRepetition_FiresThroughSystemReminderToolResults(t *testing.T) {
+	// Production shape (Redwood): Claude Code appends a <system-reminder> text
+	// block on the same user turn as the tool_result every iteration. Those
+	// turns must NOT count as human boundaries, or the backward scan collects
+	// nothing on exactly the turns this detector guards. The loop must fire.
+	var msgs []map[string]any
+	for i := 0; i < 4; i++ {
+		msgs = append(msgs,
+			map[string]any{"role": "assistant", "content": []map[string]any{
+				{"type": "text", "text": loopNarration},
+				{"type": "tool_use", "id": "t", "name": "Read", "input": map[string]any{"file_path": "/src/x.go"}},
+			}},
+			map[string]any{"role": "user", "content": []map[string]any{
+				{"type": "tool_result", "tool_use_id": "t", "content": "ok"},
+				{"type": "text", "text": "<system-reminder>The task tools haven't been used recently.</system-reminder>"},
+			}},
+		)
+	}
+	body, err := json.Marshal(map[string]any{"model": "claude-sonnet-4-6", "messages": msgs, "max_tokens": 256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := translate.ParseAnthropic(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	looped, count, _ := detectTextRepetition(env)
+	if !looped {
+		t.Fatalf("loop through reminder-bearing tool_result turns must fire; count=%d", count)
 	}
 }
 

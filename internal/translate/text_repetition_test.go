@@ -63,6 +63,29 @@ func TestTrailingAssistantTexts_ResetsAtLastRealUserTurn(t *testing.T) {
 		"only narration since the last real user turn is in scope")
 }
 
+func TestTrailingAssistantTexts_SystemReminderToolResultTurnIsNotABoundary(t *testing.T) {
+	// Claude Code appends a <system-reminder> text block alongside tool_result
+	// payloads. That turn must NOT reset the window (else the scan collects
+	// nothing on tool-result turns) — only genuine human text is a boundary.
+	body := mustMarshalJSON(t, map[string]any{
+		"model": "claude-sonnet-4-6",
+		"messages": []any{
+			map[string]any{"role": "assistant", "content": "narration one from the loop"},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "1", "content": "ok"},
+				map[string]any{"type": "text", "text": "<system-reminder>reminder text</system-reminder>"},
+			}},
+			map[string]any{"role": "assistant", "content": "narration two from the loop"},
+		},
+		"max_tokens": 256,
+	})
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"narration one from the loop", "narration two from the loop"},
+		env.TrailingAssistantTexts(), "a reminder-bearing tool_result turn must not reset the window")
+}
+
 func TestTrailingAssistantTexts_PlainStringContent(t *testing.T) {
 	body := mustMarshalJSON(t, map[string]any{
 		"model": "claude-sonnet-4-6",

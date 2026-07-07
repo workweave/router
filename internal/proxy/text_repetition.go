@@ -29,9 +29,8 @@ import (
 // last textRepetitionWindow messages. Breaks the turn and clears the pin —
 // same remedy as handleNoProgressBreak. Gated by ROUTER_TEXT_REPETITION_BREAK_ENABLED.
 const (
-	// textRepetitionWindow bounds the scan to the most recent assistant texts,
-	// so an early duplicate that the agent already recovered from doesn't
-	// count against it.
+	// textRepetitionWindow bounds the scan to recent messages so an early
+	// duplicate the agent recovered from doesn't count against it.
 	textRepetitionWindow = 12
 	// textRepetitionThreshold: verbatim recurrences of one line that trip the
 	// break. Three identical substantive turns is a loop, not a coincidence.
