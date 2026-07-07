@@ -361,6 +361,12 @@ const routingMarkerHeader = "X-Weave-Routing-Marker"
 const routingMarkerPrefix = "✦ **Weave Router** → "
 const maxSidecarDisplayMarkerRunes = 512
 const hmmOutcomeReportTimeout = 2 * time.Second
+const hmmOutcomeResponseMaxBytes = 256 * 1024
+
+type hmmOutcomeResponse struct {
+	Body      []byte
+	Truncated bool
+}
 
 // suppressMarkerIfRequested returns "" when the request opted out via
 // routingMarkerHeader, otherwise the marker unchanged. Only applies to the
@@ -2155,6 +2161,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 	}
 	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
+	contentSink, hmmOutcomeCap := s.captureHMMOutcomeResponse(contentSink, routeRes, decision)
 	preludeBuf := newPreludeBuffer(contentSink)
 	var rootSink http.ResponseWriter = preludeBuf
 	var captureW *captureWriter
@@ -2767,7 +2774,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider || subscriptionFailoverUsed, "subscription_failover", subscriptionFailoverUsed, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "gemini_validated_tool_mode", reqStats.GeminiValidatedToolMode, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
-	s.reportHMMOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr)
+	hmmRespBody, hmmRespTrunc := capturedResponse(hmmOutcomeCap)
+	var hmmResp *hmmOutcomeResponse
+	if hmmOutcomeCap != nil {
+		hmmResp = &hmmOutcomeResponse{Body: hmmRespBody, Truncated: hmmRespTrunc}
+	}
+	s.reportHMMOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, hmmResp)
 	return proxyErr
 }
 
@@ -2866,10 +2878,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedModel string, in, ou
 	}
 }
 
-func (s *Service) reportHMMOutcome(ctx context.Context, res turnLoopResult, decision router.Decision, finalProvider string, estimatedInputTokens, inputTokens, outputTokens, cacheCreation, cacheRead int, routeMs, proxyMs int64, proxyErr error) {
-	if s.hmmOutcomeReporter == nil {
-		return
-	}
+func hmmOutcomeRoute(res turnLoopResult, decision router.Decision) (router.Decision, *router.RoutingMetadata, bool) {
 	routeDecision := decision
 	routeMetadata := decision.Metadata
 	if routeMetadata == nil || routeMetadata.Strategy != string(router.StrategyHMM) || routeMetadata.RouteID == "" {
@@ -2877,6 +2886,28 @@ func (s *Service) reportHMMOutcome(ctx context.Context, res turnLoopResult, deci
 		routeMetadata = res.Fresh.Metadata
 	}
 	if routeMetadata == nil || routeMetadata.Strategy != string(router.StrategyHMM) || routeMetadata.RouteID == "" {
+		return router.Decision{}, nil, false
+	}
+	return routeDecision, routeMetadata, true
+}
+
+func (s *Service) captureHMMOutcomeResponse(w http.ResponseWriter, res turnLoopResult, decision router.Decision) (http.ResponseWriter, *captureWriter) {
+	if s.hmmOutcomeReporter == nil {
+		return w, nil
+	}
+	if _, _, ok := hmmOutcomeRoute(res, decision); !ok {
+		return w, nil
+	}
+	capture := newCaptureWriter(w, hmmOutcomeResponseMaxBytes)
+	return capture, capture
+}
+
+func (s *Service) reportHMMOutcome(ctx context.Context, res turnLoopResult, decision router.Decision, finalProvider string, estimatedInputTokens, inputTokens, outputTokens, cacheCreation, cacheRead int, routeMs, proxyMs int64, proxyErr error, response *hmmOutcomeResponse) {
+	if s.hmmOutcomeReporter == nil {
+		return
+	}
+	routeDecision, routeMetadata, ok := hmmOutcomeRoute(res, decision)
+	if !ok {
 		return
 	}
 	payload := map[string]interface{}{
@@ -2897,6 +2928,13 @@ func (s *Service) reportHMMOutcome(ctx context.Context, res turnLoopResult, deci
 		"upstream_latency_ms":    proxyMs,
 		"turn_type":              string(res.TurnType),
 		"sticky_hit":             res.StickyHit,
+	}
+	if response != nil {
+		payload["response_body_truncated"] = response.Truncated
+		if len(response.Body) > 0 {
+			payload["response_body"] = string(response.Body)
+			payload["response_body_format"] = "client_anthropic"
+		}
 	}
 	if proxyErr != nil {
 		payload["error"] = proxyErr.Error()
@@ -4205,7 +4243,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
-	s.reportHMMOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr)
+	s.reportHMMOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, nil)
 	return proxyErr
 }
 

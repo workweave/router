@@ -44,7 +44,10 @@ func TestReportHMMOutcome_UsesFreshMetadataForStickyServedDecision(t *testing.T)
 		Provider: "anthropic",
 	}
 
-	s.reportHMMOutcome(context.Background(), routeRes, served, "anthropic", 100, 90, 10, 0, 0, 12, 34, nil)
+	s.reportHMMOutcome(context.Background(), routeRes, served, "anthropic", 100, 90, 10, 0, 0, 12, 34, nil, &hmmOutcomeResponse{
+		Body:      []byte(`{"content":[{"type":"text","text":"done"}]}`),
+		Truncated: false,
+	})
 
 	select {
 	case payload := <-reporter.ch:
@@ -54,6 +57,9 @@ func TestReportHMMOutcome_UsesFreshMetadataForStickyServedDecision(t *testing.T)
 		assert.Equal(t, "moonshotai/kimi-k2.7", payload["decision_model"])
 		assert.Equal(t, "fireworks", payload["decision_provider"])
 		assert.Equal(t, true, payload["sticky_hit"])
+		assert.Equal(t, `{"content":[{"type":"text","text":"done"}]}`, payload["response_body"])
+		assert.Equal(t, "client_anthropic", payload["response_body_format"])
+		assert.Equal(t, false, payload["response_body_truncated"])
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for HMM outcome payload")
 	}
