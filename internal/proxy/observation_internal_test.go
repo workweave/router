@@ -92,10 +92,8 @@ func TestBuildObservationContext_CapturesHMMStrategy(t *testing.T) {
 	assert.Nil(t, obs.CandidateScores)
 }
 
-// TestBuildObservationContext_DefaultsStrategyToActive: the cluster scorer
-// doesn't stamp a strategy, so Strategy falls back to the request's active
-// strategy — cluster by default — leaving no telemetry row unlabeled. RouteID
-// stays empty for the non-sidecar path.
+// TestBuildObservationContext_DefaultsStrategyToActive verifies Strategy falls back to the
+// request's active strategy and RouteID stays empty when metadata carries no sidecar strategy.
 func TestBuildObservationContext_DefaultsStrategyToActive(t *testing.T) {
 	served := router.Decision{
 		Provider: "anthropic",
