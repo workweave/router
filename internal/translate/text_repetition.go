@@ -45,9 +45,10 @@ loop:
 }
 
 // userIsHumanTurn reports whether a user message carries genuine human input:
-// text that is neither a tool_result nor a CC-injected <system-reminder> block.
-// Those reminder-bearing turns must not reset the repetition window or the
-// backward scan collects nothing on the tool-result turns it guards.
+// text that is neither a tool_result nor a CC-injected wrapper block (reminder,
+// command, local-command output). Those injected turns must not reset the
+// repetition window or the backward scan collects nothing on the tool-result
+// turns it guards.
 func userIsHumanTurn(msg gjson.Result) bool {
 	content := msg.Get("content")
 	if content.Type == gjson.String {
@@ -70,11 +71,12 @@ func userIsHumanTurn(msg gjson.Result) bool {
 	return found
 }
 
-// isHumanText reports whether s is real human input rather than empty text or a
-// Claude Code injected <system-reminder> block.
+// isHumanText reports whether s is real human input rather than empty text or
+// one of Claude Code's injected wrapper blocks (<system-reminder>,
+// <command-name>, <local-command-*>, …). Reuses isClaudeCodeInjectedBlock so
+// this stays in sync with how the rest of translate classifies user text.
 func isHumanText(s string) bool {
-	s = strings.TrimSpace(s)
-	return s != "" && !strings.HasPrefix(s, "<system-reminder")
+	return strings.TrimSpace(s) != "" && !isClaudeCodeInjectedBlock(s)
 }
 
 // assistantMessageText joins the text blocks of one assistant message,
