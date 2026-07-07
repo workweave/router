@@ -22,9 +22,9 @@ type observationContext struct {
 	ChosenScore *float64
 	// ClusterRouterVersion is the artifact version that produced this decision.
 	ClusterRouterVersion string
-	// Strategy names the routing model that produced this decision ("cluster",
 	// Strategy is the routing model that produced this decision ("cluster", "hmm", "rl", "bandit").
 	// Defaults to the request's active strategy so every row is labeled even without metadata.
+	Strategy string
 	// RouteID is the opaque sidecar correlation id (HMM/RL) that joins a route
 	// decision to its outcome report. Empty for the default cluster scorer.
 	RouteID string
@@ -52,9 +52,7 @@ type observationContext struct {
 // this turn, which differs from decision on STAY (decision rehydrates from the
 // pin); fresh's scores are captured separately to measure the hysteresis downgrade lever.
 func buildObservationContext(ctx context.Context, decision, fresh router.Decision) observationContext {
-	// Default to the request's active strategy so non-sidecar paths (cluster
-	// scorer, pins, hard-pins) are still labeled by routing model. Overridden
-	// below when the decision metadata names a specific sidecar strategy.
+	// Default to active strategy; overridden below if decision metadata names a sidecar strategy.
 	obs := observationContext{Strategy: string(router.StrategyFromContext(ctx))}
 	// Captured independently of the final decision so STAY turns (decision ==
 	// pin, no metadata) still record what a re-score would have picked.
@@ -101,6 +99,12 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 				observability.Get().Debug("Failed to marshal candidate_scores for telemetry", "err", err)
 			}
 		}
+	}
+	// Sticky HMM turns serve a pin (nil metadata) while fresh carries the sidecar
+	// RouteID; hmmOutcomeRoute reports the outcome against that fresh id, so fall
+	// back to it here or telemetry route_id goes NULL exactly where a join exists.
+	if obs.RouteID == "" && fresh.Metadata != nil {
+		obs.RouteID = fresh.Metadata.RouteID
 	}
 	if t := timing.TimingFrom(ctx); t != nil {
 		if ms := t.Ms(&t.UpstreamRequestNanos, &t.UpstreamFirstByteNanos); ms > 0 {

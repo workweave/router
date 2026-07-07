@@ -64,10 +64,8 @@ func TestBuildObservationContext_NoScorerLeavesFreshNull(t *testing.T) {
 	assert.Nil(t, obs.FreshCandidateScores)
 }
 
-// TestBuildObservationContext_CapturesHMMStrategy: a sidecar (HMM) decision
-// stamps Strategy + RouteID on the metadata and sets Propensity WITHOUT a score
-// vector. All three must be captured so the routing model, the outcome-join id,
-// and the off-policy weight survive to telemetry.
+// TestBuildObservationContext_CapturesHMMStrategy verifies that Strategy, RouteID, and Propensity
+// survive when the decision carries no candidate-score vector.
 func TestBuildObservationContext_CapturesHMMStrategy(t *testing.T) {
 	served := router.Decision{
 		Provider: "anthropic",
@@ -109,4 +107,28 @@ func TestBuildObservationContext_DefaultsStrategyToActive(t *testing.T) {
 
 	assert.Equal(t, string(router.StrategyCluster), obs.Strategy)
 	assert.Empty(t, obs.RouteID)
+}
+
+// TestBuildObservationContext_StickyHMMRouteIDFromFresh verifies route_id falls back to
+// fresh on a sticky HMM turn (served pin has nil metadata; fresh carries the sidecar id
+// hmmOutcomeRoute reports against) so the telemetry row joins to that outcome, not NULL.
+func TestBuildObservationContext_StickyHMMRouteIDFromFresh(t *testing.T) {
+	// Served pin — no metadata, the sticky shape.
+	served := router.Decision{Provider: "anthropic", Model: "claude-opus-4-8", Reason: "pin"}
+	// Fresh HMM re-score this turn carries the correlation id.
+	fresh := router.Decision{
+		Provider: "anthropic",
+		Model:    "claude-haiku-4-5",
+		Reason:   "hmm_policy(label=explore)",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-sticky-1",
+		},
+	}
+
+	ctx := router.WithStrategy(context.Background(), router.StrategyHMM)
+	obs := buildObservationContext(ctx, served, fresh)
+
+	assert.Equal(t, "route-sticky-1", obs.RouteID, "route_id must fall back to fresh on a sticky HMM turn")
+	assert.Equal(t, "hmm", obs.Strategy, "active strategy labels the sticky turn even with a metadata-less pin")
 }
