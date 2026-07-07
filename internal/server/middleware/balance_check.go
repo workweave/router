@@ -20,13 +20,14 @@ const TopUpURL = "https://app.workweave.ai/settings/billing/router-credits"
 // Attached only in managed mode and only after WithAuth, so the
 // installation lookup below is guaranteed to be populated.
 //
-// Behavior:
-//   - Subscription usage-bypass request (installation gate on + a Claude/Codex
-//     subscription credential present) → pass through; the turn is served on
-//     the caller's own plan and debits $0, so prepaid credits don't apply.
+// Behavior (evaluated in order):
 //   - Override row present → pass through; flag the request context so
 //     the proxy's debit hook writes a delta=0 ledger row.
-//   - Balance ≤ minBalanceMicros → HTTP 402 with structured JSON body.
+//   - Balance ≤ minBalanceMicros (or no balance row) → HTTP 402, UNLESS the
+//     request is subscription-exempt (bypass gate on + a validated Claude/Codex
+//     subscription credential): those turns are served on the caller's own plan
+//     and debit $0, so prepaid credits don't apply. The exemption suppresses
+//     only the 402 — override detection above still runs.
 //   - Otherwise → pass through.
 //
 // The balance read is a single indexed SELECT (~2-5ms in-region). Any
@@ -49,27 +50,27 @@ func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerF
 			return
 		}
 
-		// Subscription usage-bypass orgs serve turns on the caller's own
-		// Claude/Codex subscription, which debit $0 (billing.DebitForInference:
-		// SubscriptionServed → delta=0). Requiring prepaid credits for those
-		// turns is wrong — a 402 here blocks free subscription traffic at the
-		// door, before routing can serve it. Exempt a request only when BOTH
-		// hold: the installation has the subscription usage-bypass gate on, AND
-		// the request actually carries a subscription credential. A bypass org
-		// sending a non-subscription request still routes to a paid model and
-		// stays gated, so this opens no unbilled-usage window.
-		if installation.UsageBypassEnabled &&
-			proxy.RequestPresentsSubscription(c.Request.Context(), c.Request.Header) {
-			log.Debug("Balance check skipped: subscription usage-bypass request",
-				"organization_id", installation.ExternalID)
-			c.Next()
-			return
-		}
-
 		orgID := installation.ExternalID
+
+		// Subscription turns debit $0 (SubscriptionServed → delta=0), so gating
+		// them on prepaid credits blocks free traffic. Both conditions required
+		// so non-subscription requests from bypass orgs stay gated. Computed
+		// here but applied only to the balance-depleted 402s below — CheckBalance
+		// still runs so an active override is detected and its context flag set.
+		subscriptionExempt := installation.UsageBypassEnabled &&
+			proxy.RequestPresentsSubscription(c.Request.Context(), c.Request.Header)
+
 		result, err := svc.CheckBalance(c.Request.Context(), orgID)
 		if err != nil {
 			if errors.Is(err, billing.ErrBalanceRowMissing) {
+				// A subscription usage-bypass org may never have had a balance
+				// row; its turns are free, so exempt them here too.
+				if subscriptionExempt {
+					log.Debug("Balance check skipped: subscription usage-bypass request, no balance row",
+						"organization_id", orgID)
+					c.Next()
+					return
+				}
 				log.Info("Balance check rejected: balance row missing", "organization_id", orgID)
 				c.AbortWithStatusJSON(http.StatusPaymentRequired, gin.H{
 					"error":              "insufficient_credits",
@@ -98,7 +99,7 @@ func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerF
 			return
 		}
 
-		if result.BalanceMicros <= minBalanceMicros {
+		if result.BalanceMicros <= minBalanceMicros && !subscriptionExempt {
 			log.Info("Balance check rejected: balance at or below threshold",
 				"organization_id", orgID,
 				"balance_usd_micros", result.BalanceMicros,

@@ -70,25 +70,24 @@ func presentSubscriptionTokens(ctx context.Context, headers http.Header) (codex,
 	} else if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
 		codex = string(c.APIKey)
 	}
-	if t := anthropicSubscriptionFromContext(ctx); t != "" {
-		anthropic = t
+	// Validate the dedicated Anthropic header through the same
+	// subscriptionCredsFromHeaderValue path credential injection uses (requires
+	// an sk-ant-oat token), NOT a bare non-empty check. A junk header value is
+	// never injected as a subscription, so treating it as "present" would let
+	// the balance gate exempt a turn that then routes to a paid model, and would
+	// bias the subsidy toward Claude on a header that never serves.
+	if creds := subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)); creds != nil {
+		anthropic = string(creds.APIKey)
 	} else if c := ExtractClientCredentials(providers.ProviderAnthropic, headers); c != nil && c.OAuth {
 		anthropic = string(c.APIKey)
 	}
 	return codex, anthropic
 }
 
-// RequestPresentsSubscription reports whether the inbound request carries a
-// caller subscription credential — a Claude (Pro/Max) sk-ant-oat… bearer or a
-// Codex (ChatGPT) subscription JWT — via either the dedicated
-// X-Weave-*-Subscription headers or the inbound Authorization bearer.
-//
-// The prepaid balance gate uses this to exempt subscription traffic: those
-// turns are served on the customer's own plan and debit $0 (see
-// billing.DebitForInference: SubscriptionServed → delta=0), so 402'ing them for
-// lack of prepaid credits blocks free traffic at the door, before routing can
-// serve it. Mirrors presentSubscriptionTokens so the gate's notion of "has a
-// subscription" agrees with the pass-through / subsidy path.
+// RequestPresentsSubscription reports whether the request carries a validated
+// Claude (sk-ant-oat…) or Codex subscription credential, via the dedicated
+// X-Weave-*-Subscription headers or the inbound Authorization bearer. Used by
+// the prepaid balance gate to exempt $0-debit subscription turns from gating.
 func RequestPresentsSubscription(ctx context.Context, headers http.Header) bool {
 	codex, anthropic := presentSubscriptionTokens(ctx, headers)
 	return codex != "" || anthropic != ""

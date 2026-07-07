@@ -10,6 +10,7 @@ import (
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
+	"workweave/router/internal/proxy"
 	"workweave/router/internal/server/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -262,4 +263,91 @@ func TestWithBalanceCheck_402sSubscriptionWithoutUsageBypass(t *testing.T) {
 	w, reached := runMiddlewareWith(t, repo, 0, setInstall, "Bearer sk-ant-oat-abc123")
 	assert.False(t, reached, "exemption must not apply without the usage-bypass gate")
 	assert.Equal(t, http.StatusPaymentRequired, w.Code)
+}
+
+func TestWithBalanceCheck_ExemptsSubscriptionWhenBalanceRowMissing(t *testing.T) {
+	// The original 402 bug: a subscription org that never had a balance row.
+	// Its turns are free, so a missing row must exempt, not 402.
+	repo := &stubBillingRepo{balanceErr: billing.ErrBalanceRowMissing}
+	setInstall := func(c *gin.Context) { withUsageBypassInstallation(c, "org_sub") }
+	w, reached := runMiddlewareWith(t, repo, 0, setInstall, "Bearer sk-ant-oat-abc123")
+	assert.True(t, reached, "subscription request with no balance row must pass")
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// runMiddlewarePrep drives WithBalanceCheck with a caller-supplied prep hook
+// that runs before the middleware (to stash installation + request-context
+// values the way WithAuth would), returning the recorder, whether the handler
+// was reached, and whether the override context flag was planted.
+func runMiddlewarePrep(t *testing.T, repo billing.Repo, threshold int64, prep func(*gin.Context)) (*httptest.ResponseRecorder, bool, bool) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	svc := billing.NewService(repo)
+	engine := gin.New()
+	reached := false
+	hasOverride := false
+	engine.GET("/probe", func(c *gin.Context) {
+		prep(c)
+		middleware.WithBalanceCheck(svc, threshold)(c)
+		if c.IsAborted() {
+			return
+		}
+		reached = true
+		hasOverride = billing.HasOverrideFromContext(c.Request.Context())
+		c.Status(http.StatusOK)
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	engine.ServeHTTP(w, req)
+	return w, reached, hasOverride
+}
+
+// stashAnthropicSub plants a dedicated X-Weave-Anthropic-Subscription value on
+// the request context the way WithAuth does (raw, unvalidated).
+func stashAnthropicSub(c *gin.Context, value string) {
+	ctx := context.WithValue(c.Request.Context(), proxy.AnthropicSubscriptionContextKey{}, value)
+	c.Request = c.Request.WithContext(ctx)
+}
+
+func TestWithBalanceCheck_402sJunkDedicatedAnthropicSubHeader(t *testing.T) {
+	// A junk X-Weave-Anthropic-Subscription value is never injected as a
+	// subscription (injection requires sk-ant-oat), so the gate must NOT treat
+	// it as one — otherwise a bypass org routes paid turns on deployment keys at
+	// $0. Detection validates the dedicated header, not a bare presence check.
+	repo := &stubBillingRepo{balance: 0}
+	prep := func(c *gin.Context) {
+		withUsageBypassInstallation(c, "org_sub")
+		stashAnthropicSub(c, "not-a-real-token")
+	}
+	w, reached, _ := runMiddlewarePrep(t, repo, 0, prep)
+	assert.False(t, reached, "junk subscription header must not exempt the gate")
+	assert.Equal(t, http.StatusPaymentRequired, w.Code)
+}
+
+func TestWithBalanceCheck_ExemptsValidDedicatedAnthropicSubHeader(t *testing.T) {
+	// A valid sk-ant-oat token in the dedicated header (opencode / router-keyed
+	// path) must exempt, mirroring credential injection's acceptance.
+	repo := &stubBillingRepo{balance: 0}
+	prep := func(c *gin.Context) {
+		withUsageBypassInstallation(c, "org_sub")
+		stashAnthropicSub(c, "sk-ant-oat01-valid-token")
+	}
+	w, reached, _ := runMiddlewarePrep(t, repo, 0, prep)
+	assert.True(t, reached, "a valid dedicated-header subscription must exempt the gate")
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestWithBalanceCheck_OverrideFlagSetEvenForSubscriptionRequest(t *testing.T) {
+	// An override org that also presents a subscription credential must still get
+	// the override context flag (so the debit hook writes delta=0 for ALL turns),
+	// not be short-circuited by the subscription exemption before CheckBalance.
+	repo := &stubBillingRepo{override: true}
+	prep := func(c *gin.Context) {
+		withUsageBypassInstallation(c, "org_override")
+		stashAnthropicSub(c, "sk-ant-oat01-valid-token")
+	}
+	w, reached, hasOverride := runMiddlewarePrep(t, repo, 0, prep)
+	assert.True(t, reached, "override org must reach the handler")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, hasOverride, "override flag must be planted even when a subscription is present")
 }
