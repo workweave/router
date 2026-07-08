@@ -261,6 +261,23 @@ func TestRecordTurnUsage_HMMEVStayWritesHistoryOnly(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-5", store.lastUsage.ServedModel)
 }
 
+func TestStickyStateRole_HMMEVStayTargetsHistory(t *testing.T) {
+	res := turnLoopResult{
+		StickyHit:  true,
+		PinRole:    sessionpin.DefaultRole,
+		StickyRole: hmmHistoryRole(sessionpin.DefaultRole),
+	}
+	assert.Equal(t, hmmHistoryRole(sessionpin.DefaultRole), stickyStateRole(res))
+}
+
+func TestStickyStateRole_DefaultsToActivePinRole(t *testing.T) {
+	res := turnLoopResult{
+		StickyHit: true,
+		PinRole:   sessionpin.DefaultRole,
+	}
+	assert.Equal(t, sessionpin.DefaultRole, stickyStateRole(res))
+}
+
 func TestHMMCostGate_StaysOnWarmCacheWhenCheaperFreshDoesNotClearEV(t *testing.T) {
 	svc := NewService(
 		nil,

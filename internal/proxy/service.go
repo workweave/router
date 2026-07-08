@@ -2670,7 +2670,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			)
 			// Evict the pin so the next turn re-scores instead of repeating the
 			// same misbehaving model — this turn already streamed and can't retry.
-			s.evictPinAfterDegenerateResponse(ctx, stickyHit, decision.Reason, installationID, routeRes.SessionKey, routeRes.PinRole)
+			s.evictPinAfterDegenerateResponse(ctx, stickyHit, decision.Reason, installationID, routeRes.SessionKey, stickyStateRole(routeRes))
 		}
 		s.fireTelemetry(InsertTelemetryParams{
 			InstallationID:         installationID.String(),
@@ -2780,7 +2780,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Two-strike eviction: a session pinned to a model returning non-retryable
 	// 4xx wedges until manually /force-model'd out. Expires the pin after a
 	// persistent counter hits threshold; successful turns reset it.
-	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, routeRes.PinRole)
+	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, stickyStateRole(routeRes))
 
 	// Re-pin the session off the refusing model if a cyber refusal was observed.
 	s.maybeRepinOnRefusal(ctx, refusalObs, routeRes.SessionKey, routeRes.PinRole, decision)
@@ -2861,6 +2861,13 @@ func plannerLogFields(res turnLoopResult) []any {
 		"planner_chosen_model", res.Decision.Model,
 		"planner_pin_cache_warm", pinCacheWarm,
 	}
+}
+
+func stickyStateRole(res turnLoopResult) string {
+	if res.StickyHit && res.StickyRole != "" {
+		return res.StickyRole
+	}
+	return res.PinRole
 }
 
 // logPlannerOutcome emits a structured log line for the planner's verdict.
@@ -4280,7 +4287,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	// See ProxyMessages for the two-strike eviction rationale.
-	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationIDFromContext(ctx), routeRes.SessionKey, routeRes.PinRole)
+	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationIDFromContext(ctx), routeRes.SessionKey, stickyStateRole(routeRes))
 
 	installationIDOAI, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	if installationIDOAI != "" {
