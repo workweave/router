@@ -123,7 +123,7 @@ func assertOnlyHMMHistoryUpserts(t *testing.T, store *fakePinStore) {
 	for _, p := range store.upserts {
 		assert.True(t, strings.HasSuffix(p.Role, "_hmm_history"), "HMM must not write the active routing pin role")
 		assert.Equal(t, "hmm_history", p.Reason)
-		assert.Empty(t, p.Provider, "HMM history rows must not be routable")
+		assert.NotEmpty(t, p.Provider, "HMM history rows retain provider for cache TTL math")
 		assert.Empty(t, p.Model, "HMM history rows must not be routable")
 	}
 }

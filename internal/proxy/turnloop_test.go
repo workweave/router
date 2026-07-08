@@ -314,7 +314,7 @@ func TestTurnLoop_HMMToolResultToolExecutionUsesFreshDecision(t *testing.T) {
 	store.mu.Unlock()
 }
 
-func TestTurnLoop_HMMToolExecutionDoesNotServeExistingPin(t *testing.T) {
+func TestTurnLoop_HMMToolExecutionStaysWhenWarmCacheEVBeatsCheapFresh(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -342,8 +342,8 @@ func TestTurnLoop_HMMToolExecutionDoesNotServeExistingPin(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "ongoing HMM execution still scores to see if execution continues")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel),
-		"HMM tool execution must not keep an existing session pin")
+	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"HMM should stay when switching to a cheaper tool model would not beat warm-cache eviction cost")
 	store.mu.Lock()
 	assertOnlyHMMHistoryUpserts(t, store)
 	store.mu.Unlock()
@@ -365,8 +365,9 @@ func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
 		Model:    "claude-sonnet-5",
 		Reason:   "hmm_policy(label=Complex Design)",
 		Metadata: &router.RoutingMetadata{
-			Strategy: string(router.StrategyHMM),
-			RouteID:  "route-1",
+			Strategy:    string(router.StrategyHMM),
+			RouteID:     "route-1",
+			ChosenScore: 0.90,
 		},
 	}}
 	svc := newPinSvc(fr, store)
@@ -384,7 +385,7 @@ func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
 	store.mu.Unlock()
 }
 
-func TestTurnLoop_HMMToolExecutionBreaksConversationalPin(t *testing.T) {
+func TestTurnLoop_HMMToolExecutionStaysOnLateralWarmCacheWhenEVNegative(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -412,8 +413,8 @@ func TestTurnLoop_HMMToolExecutionBreaksConversationalPin(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "main-loop HMM turn must ask for a fresh decision")
-	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
-		"a fresh HMM tool/explore execution decision must break a conversational pin")
+	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"lateral HMM tool/explore decisions should not break a warm cache when EV is negative")
 
 	store.mu.Lock()
 	assertOnlyHMMHistoryUpserts(t, store)

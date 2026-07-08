@@ -249,7 +249,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 
 	// Persist last-turn usage to the pin row so the next turn's planner
 	// has cache-hit evidence. Off the request path; drops on saturation.
-	s.recordTurnUsage(routeRes, decision.Model, in, out, cacheCreation, cacheRead)
+	s.recordTurnUsage(routeRes, decision.Provider, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)

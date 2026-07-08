@@ -2650,7 +2650,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	s.recordCallLog(ctx, upstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
 	otel.Flush(ctx)
 
-	s.recordTurnUsage(routeRes, decision.Model, in, out, cacheCreation, cacheRead)
+	s.recordTurnUsage(routeRes, finalProvider, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if installationID != uuid.Nil {
 		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
@@ -2886,8 +2886,13 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 		)
 		return
 	}
-	log.Info("router stayed on pinned model",
+	message := "router stayed on pinned model"
+	if isHMMDecision(res.Fresh) {
+		message = "router stayed on previous HMM model"
+	}
+	log.Info(message,
 		"model", res.Decision.Model,
+		"pin_model", res.PinModel,
 		"reason", res.PlannerDecision.Reason,
 		"expected_savings_usd", res.PlannerDecision.ExpectedSavingsUSD,
 		"eviction_cost_usd", res.PlannerDecision.EvictionCostUSD,
@@ -2896,12 +2901,12 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 	)
 }
 
-func (s *Service) recordTurnUsage(res turnLoopResult, servedModel string, in, out, cacheCreation, cacheRead int) {
+func (s *Service) recordTurnUsage(res turnLoopResult, servedProvider, servedModel string, in, out, cacheCreation, cacheRead int) {
 	if s.pinStore == nil || res.HardPinned {
 		return
 	}
 	if isHMMDecision(res.Decision) {
-		s.recordHMMTurnHistory(res, servedModel)
+		s.recordHMMTurnHistory(res, servedProvider, servedModel)
 		return
 	}
 	var zeroKey [sessionpin.SessionKeyLen]byte
@@ -2928,7 +2933,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedModel string, in, ou
 	}
 }
 
-func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedModel string) {
+func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, servedModel string) {
 	if servedModel == "" || res.InstallationID == uuid.Nil {
 		return
 	}
@@ -2941,6 +2946,7 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedModel string) {
 		SessionKey:     res.SessionKey,
 		Role:           role,
 		InstallationID: res.InstallationID,
+		Provider:       servedProvider,
 		Reason:         hmmHistoryReason,
 		TurnCount:      1,
 		PinnedUntil:    pinExpiry(hmmHistoryReason),
@@ -4250,7 +4256,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		emitCallLog()
 	}
 
-	s.recordTurnUsage(routeRes, decision.Model, in, out, cacheCreation, cacheRead)
+	s.recordTurnUsage(routeRes, finalProvider, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)

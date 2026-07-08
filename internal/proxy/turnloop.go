@@ -120,6 +120,12 @@ func isHMMDecision(dec router.Decision) bool {
 }
 
 const hmmHistoryReason = "hmm_history"
+const hmmUpgradeConfidenceThreshold = 0.85
+
+const (
+	hmmReasonConfidentUpgrade     = "hmm_confident_upgrade"
+	hmmReasonUpgradeConfidenceLow = "hmm_upgrade_confidence_low"
+)
 
 func hmmHistoryRole(role string) string {
 	if role == "" {
@@ -532,9 +538,29 @@ func (s *Service) runTurnLoop(
 	)
 	res.Fresh = fresh
 	if isHMMDecision(fresh) {
-		res.Decision = fresh
-		if pinFound {
+		hmmDecision, hmmPlannerDecision, hmmSticky, hmmStayModel := s.hmmCostGatedDecision(
+			req,
+			pin,
+			hmmHistory,
+			fresh,
+			feats.Tokens,
+			prefixBroken,
+		)
+		res.Decision = hmmDecision
+		res.PlannerDecision = hmmPlannerDecision
+		if hmmStayModel != "" {
+			res.PinModel = hmmStayModel
+		}
+		if hmmSticky {
+			res.StickyHit = true
+			res.PinTier = "hmm_ev_stay_" + hmmPlannerDecision.Reason
+		} else {
 			res.PinTier = "hmm_fresh_unpinned"
+			if hmmPlannerDecision.Outcome == planner.OutcomeStay && hmmPlannerDecision.Reason != "" {
+				res.PinTier = "hmm_ev_same_" + hmmPlannerDecision.Reason
+			} else if hmmPlannerDecision.Reason != "" && hmmPlannerDecision.Reason != planner.ReasonNoPin {
+				res.PinTier = "hmm_ev_switch_" + hmmPlannerDecision.Reason
+			}
 		}
 		return res, nil
 	}
@@ -697,6 +723,145 @@ func (s *Service) runTurnLoop(
 	}
 	s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, fresh)
 	return res, nil
+}
+
+func (s *Service) hmmCostGatedDecision(
+	req router.Request,
+	activePin sessionpin.Pin,
+	hmmHistory sessionpin.Pin,
+	fresh router.Decision,
+	estimatedInputTokens int,
+	prefixBroken bool,
+) (router.Decision, planner.Decision, bool, string) {
+	stayPin, ok := s.hmmStayPin(req, activePin, hmmHistory)
+	if !ok {
+		return fresh, planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonNoPin}, false, ""
+	}
+
+	cfg := s.planner
+	// HMM owns semantic upgrades. The generic planner tier guard is too coarse
+	// here because HMM clusters and router catalog tiers are not the same axis.
+	cfg.TierUpgradeEnabled = false
+	base := planner.Decide(planner.Inputs{
+		Pin:                  stayPin,
+		Fresh:                fresh,
+		EstimatedInputTokens: estimatedInputTokens,
+		AvailableModels:      s.availableModels,
+		PinCacheCold:         !cacheWarm(stayPin) || prefixBroken,
+		SubsidizedCostFactor: req.SubsidizedModelCostFactor,
+	}, cfg)
+
+	if hmmFreshIsMoreExpensive(stayPin.Model, fresh.Model, req.SubsidizedModelCostFactor) {
+		confidence, ok := hmmDecisionConfidence(fresh)
+		if ok && confidence >= hmmUpgradeConfidenceThreshold {
+			base.Outcome = planner.OutcomeSwitch
+			base.Reason = hmmReasonConfidentUpgrade
+		} else {
+			base.Outcome = planner.OutcomeStay
+			base.Reason = hmmReasonUpgradeConfidenceLow
+		}
+	}
+
+	if base.Outcome == planner.OutcomeStay && stayPin.Model != fresh.Model {
+		return pinDecision(stayPin), base, true, stayPin.Model
+	}
+	return fresh, base, false, stayPin.Model
+}
+
+func (s *Service) hmmStayPin(req router.Request, activePin sessionpin.Pin, hmmHistory sessionpin.Pin) (sessionpin.Pin, bool) {
+	var (
+		best sessionpin.Pin
+		ok   bool
+	)
+	for _, candidate := range []sessionpin.Pin{activePin, hmmHistory} {
+		normalized, candidateOK := s.normalizeHMMStayPin(req, candidate)
+		if !candidateOK {
+			continue
+		}
+		if !ok || normalized.LastTurnEndedAt.After(best.LastTurnEndedAt) {
+			best = normalized
+			ok = true
+		}
+	}
+	return best, ok
+}
+
+func (s *Service) normalizeHMMStayPin(req router.Request, p sessionpin.Pin) (sessionpin.Pin, bool) {
+	model := p.LastServedModel
+	if model == "" {
+		model = p.Model
+	}
+	if model == "" {
+		return sessionpin.Pin{}, false
+	}
+	if p.LastTurnEndedAt.IsZero() {
+		return sessionpin.Pin{}, false
+	}
+	if req.ExcludedModels != nil {
+		if _, excluded := req.ExcludedModels[model]; excluded {
+			return sessionpin.Pin{}, false
+		}
+	}
+	if s.availableModels != nil {
+		if _, available := s.availableModels[model]; !available {
+			return sessionpin.Pin{}, false
+		}
+	}
+	if req.HasImages && !catalog.AcceptsImages(model) {
+		return sessionpin.Pin{}, false
+	}
+	p.Model = model
+	if p.Provider != "" {
+		if req.EnabledProviders == nil {
+			return p, true
+		}
+		if _, ok := req.EnabledProviders[p.Provider]; ok {
+			return p, true
+		}
+		return sessionpin.Pin{}, false
+	}
+	providerSet := req.EnabledProviders
+	if providerSet == nil {
+		providerSet = make(map[string]struct{}, len(s.providers))
+		for provider := range s.providers {
+			providerSet[provider] = struct{}{}
+		}
+	}
+	binding, ok := catalog.ResolveBinding(model, providerSet)
+	if !ok {
+		return sessionpin.Pin{}, false
+	}
+	p.Provider = binding.Provider
+	return p, true
+}
+
+func hmmDecisionConfidence(dec router.Decision) (float64, bool) {
+	if dec.Metadata == nil {
+		return 0, false
+	}
+	confidence := float64(dec.Metadata.ChosenScore)
+	if confidence <= 0 {
+		return 0, false
+	}
+	return confidence, true
+}
+
+func hmmFreshIsMoreExpensive(stayModel, freshModel string, factors map[string]float64) bool {
+	stay, okStay := hmmEffectiveInputUSDPer1M(stayModel, factors)
+	fresh, okFresh := hmmEffectiveInputUSDPer1M(freshModel, factors)
+	return okStay && okFresh && fresh > stay
+}
+
+func hmmEffectiveInputUSDPer1M(model string, factors map[string]float64) (float64, bool) {
+	price, ok := catalog.PrimaryPriceFor(model)
+	if !ok {
+		return 0, false
+	}
+	value := price.InputUSDPer1M
+	if factor, covered := factors[model]; covered {
+		value *= factor
+	}
+	return value, true
 }
 
 // roleForTier maps a requested-model tier to its session-pin role. Each tier
