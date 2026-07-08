@@ -48,11 +48,12 @@ func cacheWarm(pin sessionpin.Pin) bool {
 
 // turnLoopResult bundles the routing decision and pin/planner state.
 type turnLoopResult struct {
-	Decision   router.Decision
-	SessionKey [sessionpin.SessionKeyLen]byte
-	TurnType   turntype.TurnType
-	StickyHit  bool
-	HardPinned bool
+	Decision       router.Decision
+	SessionKey     [sessionpin.SessionKeyLen]byte
+	InstallationID uuid.UUID
+	TurnType       turntype.TurnType
+	StickyHit      bool
+	HardPinned     bool
 	// UsageBypass is true when the caller's own subscription has headroom:
 	// ProxyMessages must serve the requested model straight through with no
 	// billing debit, bypassing Decision's normal dispatch.
@@ -118,26 +119,19 @@ func isHMMDecision(dec router.Decision) bool {
 	return strings.HasPrefix(strings.TrimSpace(dec.Reason), "hmm_policy")
 }
 
-func isHMMToolExecutionReason(reason string) bool {
-	return strings.HasPrefix(strings.TrimSpace(reason), "hmm_policy:tool_execution")
-}
+const hmmHistoryReason = "hmm_history"
+const hmmUpgradeConfidenceThreshold = 0.85
 
-func shouldServeFreshHMMToolResult(turnType turntype.TurnType, subAgentHint string, pin sessionpin.Pin, fresh router.Decision) bool {
-	if subAgentHint != "" || turnType != turntype.ToolResult {
-		return false
+const (
+	hmmReasonConfidentUpgrade     = "hmm_confident_upgrade"
+	hmmReasonUpgradeConfidenceLow = "hmm_upgrade_confidence_low"
+)
+
+func hmmHistoryRole(role string) string {
+	if role == "" {
+		role = sessionpin.DefaultRole
 	}
-	return isHMMToolExecutionReason(pin.Reason) && isHMMDecision(fresh) && !isHMMToolExecutionReason(fresh.Reason)
-}
-
-func shouldServeFreshHMMToolExecution(pin sessionpin.Pin, fresh router.Decision) bool {
-	return isHMMDecision(fresh) && isHMMToolExecutionReason(fresh.Reason) && !isHMMToolExecutionReason(pin.Reason)
-}
-
-func isHMMSubAgentExecutionLock(turnType turntype.TurnType, subAgentHint string, pin sessionpin.Pin, fresh router.Decision) bool {
-	if !isHMMDecision(fresh) || !isHMMToolExecutionReason(pin.Reason) {
-		return false
-	}
-	return turnType == turntype.SubAgentDispatch || subAgentHint != ""
+	return role + "_hmm_history"
 }
 
 // handoverOutcome describes the synchronous handover step.
@@ -191,9 +185,10 @@ func (s *Service) runTurnLoop(
 ) (turnLoopResult, error) {
 	log := observability.FromContext(ctx)
 	res := turnLoopResult{
-		TurnType:      turntype.DetectFromEnvelope(env, feats, subAgentHint),
-		PinTier:       "miss",
-		RequestedTier: catalog.TierFor(feats.Model),
+		InstallationID: installationID,
+		TurnType:       turntype.DetectFromEnvelope(env, feats, subAgentHint),
+		PinTier:        "miss",
+		RequestedTier:  catalog.TierFor(feats.Model),
 	}
 	res.PinRole = roleForTier(res.RequestedTier)
 	log.Info("turnloop classified",
@@ -294,8 +289,8 @@ func (s *Service) runTurnLoop(
 	res.SessionKey = sessionKey
 
 	pin, pinFound := s.loadPin(ctx, res.SessionKey, res.PinRole)
-	res.PriorServedModel = pin.LastServedModel
-	res.SessionEverSwitched = pin.HasEverSwitched
+	hmmHistory := s.loadHMMHistory(ctx, res.SessionKey, res.PinRole)
+	res.PriorServedModel, res.SessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
 	// Computed before any same-turn pin-drop guards below so it reflects the
 	// prior turn's outcome; Service.effortEscalation gates whether it's acted on.
 	res.EscalateEffort = pinFound && !pin.LastTurnEndedAt.IsZero() &&
@@ -364,10 +359,7 @@ func (s *Service) runTurnLoop(
 		// model can be the paired member, so pin.Model could name the wrong
 		// (healthy) model and leave the broken one eligible. Fall back to
 		// pin.Model for older rows written before LastServedModel existed.
-		maxedModel := pin.LastServedModel
-		if maxedModel == "" {
-			maxedModel = pin.Model
-		}
+		maxedModel := maxedOutServedModel(pin)
 		log.Info("Session pin maxed out on previous turn; excluding for this turn",
 			"pin_model", pin.Model,
 			"pin_provider", pin.Provider,
@@ -383,6 +375,21 @@ func (s *Service) runTurnLoop(
 		req.ExcludedModels = excluded
 		pinFound = false
 		pin = sessionpin.Pin{}
+	}
+	if maxedModel := maxedOutServedModel(hmmHistory); maxedModel != "" {
+		// No expiry gate: match the active-pin maxed path so the degenerate
+		// auto-continue loop cannot re-select a saturated model after TTL lapses.
+		log.Info("HMM history maxed out on previous turn; excluding for this turn",
+			"history_provider", hmmHistory.Provider,
+			"maxed_model", maxedModel,
+			"last_output_tokens", hmmHistory.LastOutputTokens,
+		)
+		excluded := make(map[string]struct{}, len(req.ExcludedModels)+1)
+		for k := range req.ExcludedModels {
+			excluded[k] = struct{}{}
+		}
+		excluded[maxedModel] = struct{}{}
+		req.ExcludedModels = excluded
 	}
 
 	// If the pre-filter excluded the pinned model for context overflow,
@@ -542,37 +549,35 @@ func (s *Service) runTurnLoop(
 		"fresh_reason", fresh.Reason,
 	)
 	res.Fresh = fresh
-	hmmToolExecutionFresh := pinFound && shouldServeFreshHMMToolExecution(pin, fresh)
-	hmmToolResultFresh := pinFound && shouldServeFreshHMMToolResult(res.TurnType, subAgentHint, pin, fresh)
-	hmmToolExecutionContinue := pinFound && isHMMToolExecutionReason(pin.Reason) && isHMMToolExecutionReason(fresh.Reason)
-	if hmmToolExecutionContinue || (pinFound && isHMMSubAgentExecutionLock(res.TurnType, subAgentHint, pin, fresh)) {
-		decision := pinDecision(pin)
-		res.Decision = decision
-		res.StickyHit = true
-		if hmmToolExecutionContinue {
-			res.PinTier = "hmm_tool_execution_lock"
-		} else {
-			res.PinTier = "hmm_subagent_execution_lock"
-		}
-		s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, decision)
-		return res, nil
-	}
-	if (hmmToolExecutionFresh || hmmToolResultFresh) && fresh.Provider == pin.Provider && fresh.Model == pin.Model {
-		res.Decision = fresh
-		if hmmToolExecutionFresh {
-			res.PinTier = "hmm_tool_execution_fresh_same_model"
-		} else {
-			res.PinTier = "hmm_tool_result_fresh_same_model"
-		}
-		s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, fresh)
-		return res, nil
-	}
 	if isHMMDecision(fresh) {
-		res.Decision = fresh
+		activePin := sessionpin.Pin{}
 		if pinFound {
-			res.PinTier = "hmm_fresh"
+			activePin = pin
 		}
-		s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, fresh)
+		hmmDecision, hmmPlannerDecision, hmmSticky, hmmStayModel := s.hmmCostGatedDecision(
+			req,
+			activePin,
+			hmmHistory,
+			fresh,
+			feats.Tokens,
+			prefixBroken,
+		)
+		res.Decision = hmmDecision
+		res.PlannerDecision = hmmPlannerDecision
+		if hmmStayModel != "" {
+			res.PinModel = hmmStayModel
+		}
+		if hmmSticky {
+			res.StickyHit = true
+			res.PinTier = "hmm_ev_stay_" + hmmPlannerDecision.Reason
+		} else {
+			res.PinTier = "hmm_fresh_unpinned"
+			if hmmPlannerDecision.Outcome == planner.OutcomeStay && hmmPlannerDecision.Reason != "" {
+				res.PinTier = "hmm_ev_same_" + hmmPlannerDecision.Reason
+			} else if hmmPlannerDecision.Reason != "" && hmmPlannerDecision.Reason != planner.ReasonNoPin {
+				res.PinTier = "hmm_ev_switch_" + hmmPlannerDecision.Reason
+			}
+		}
 		return res, nil
 	}
 
@@ -648,11 +653,6 @@ func (s *Service) runTurnLoop(
 		plannerIn.Pin = sessionpin.Pin{}
 	}
 	decision := planner.Decide(plannerIn, s.planner)
-	if hmmToolExecutionFresh && decision.Outcome == planner.OutcomeStay {
-		decision = planner.Decision{Outcome: planner.OutcomeSwitch, Reason: "tool_execution_fresh"}
-	} else if hmmToolResultFresh && decision.Outcome == planner.OutcomeStay {
-		decision = planner.Decision{Outcome: planner.OutcomeSwitch, Reason: "tool_result_fresh"}
-	}
 	res.PlannerDecision = decision
 
 	if decision.Outcome == planner.OutcomeStay && pinFound {
@@ -741,6 +741,175 @@ func (s *Service) runTurnLoop(
 	return res, nil
 }
 
+func (s *Service) hmmCostGatedDecision(
+	req router.Request,
+	activePin sessionpin.Pin,
+	hmmHistory sessionpin.Pin,
+	fresh router.Decision,
+	estimatedInputTokens int,
+	prefixBroken bool,
+) (router.Decision, planner.Decision, bool, string) {
+	stayPin, ok := s.hmmStayPin(req, activePin, hmmHistory)
+	if !ok {
+		return fresh, planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonNoPin}, false, ""
+	}
+
+	cfg := s.planner
+	// HMM owns semantic upgrades. The generic planner tier guard is too coarse
+	// here because HMM clusters and router catalog tiers are not the same axis.
+	cfg.TierUpgradeEnabled = false
+	base := planner.Decide(planner.Inputs{
+		Pin:                  stayPin,
+		Fresh:                fresh,
+		EstimatedInputTokens: estimatedInputTokens,
+		AvailableModels:      s.availableModels,
+		PinCacheCold:         !cacheWarm(stayPin) || prefixBroken,
+		SubsidizedCostFactor: req.SubsidizedModelCostFactor,
+	}, cfg)
+
+	if hmmFreshIsMoreExpensive(stayPin.Model, fresh.Model, req.SubsidizedModelCostFactor) {
+		confidence, ok := hmmDecisionConfidence(fresh)
+		if ok && confidence >= hmmUpgradeConfidenceThreshold {
+			base.Outcome = planner.OutcomeSwitch
+			base.Reason = hmmReasonConfidentUpgrade
+		} else {
+			base.Outcome = planner.OutcomeStay
+			base.Reason = hmmReasonUpgradeConfidenceLow
+		}
+	}
+
+	if base.Outcome == planner.OutcomeStay && stayPin.Model != fresh.Model {
+		return pinDecision(stayPin), base, true, stayPin.Model
+	}
+	return fresh, base, false, stayPin.Model
+}
+
+func (s *Service) hmmStayPin(req router.Request, activePin sessionpin.Pin, hmmHistory sessionpin.Pin) (sessionpin.Pin, bool) {
+	var (
+		best sessionpin.Pin
+		ok   bool
+	)
+	// Only HMM-written pins are stay candidates; a cluster/planner pin from a
+	// prior non-HMM stretch must not steer an HMM EV stay.
+	if !isHMMPinReason(activePin.Reason) {
+		activePin = sessionpin.Pin{}
+	}
+	for _, candidate := range []sessionpin.Pin{activePin, hmmHistory} {
+		normalized, candidateOK := s.normalizeHMMStayPin(req, candidate)
+		if !candidateOK {
+			continue
+		}
+		if !ok || normalized.LastTurnEndedAt.After(best.LastTurnEndedAt) {
+			best = normalized
+			ok = true
+		}
+	}
+	return best, ok
+}
+
+// isHMMPinReason reports whether a stored pin's Reason marks it as HMM-written
+// (either the hmm_history sentinel or an hmm_policy* sidecar reason). Used to
+// keep a stale cluster/planner pin from steering an HMM turn's EV stay.
+func isHMMPinReason(reason string) bool {
+	return reason == hmmHistoryReason ||
+		strings.HasPrefix(strings.TrimSpace(reason), "hmm_policy")
+}
+
+func (s *Service) normalizeHMMStayPin(req router.Request, p sessionpin.Pin) (sessionpin.Pin, bool) {
+	model := p.LastServedModel
+	if model == "" {
+		model = p.Model
+	}
+	if model == "" {
+		return sessionpin.Pin{}, false
+	}
+	if p.LastTurnEndedAt.IsZero() {
+		return sessionpin.Pin{}, false
+	}
+	if !p.PinnedUntil.IsZero() && !p.PinnedUntil.After(time.Now()) {
+		return sessionpin.Pin{}, false
+	}
+	if p.LastOutputTokens >= prevTurnMaxedOutThreshold {
+		return sessionpin.Pin{}, false
+	}
+	if req.ExcludedModels != nil {
+		if _, excluded := req.ExcludedModels[model]; excluded {
+			return sessionpin.Pin{}, false
+		}
+	}
+	if s.availableModels != nil {
+		if _, available := s.availableModels[model]; !available {
+			return sessionpin.Pin{}, false
+		}
+	}
+	if req.HasImages && !catalog.AcceptsImages(model) {
+		return sessionpin.Pin{}, false
+	}
+	p.Model = model
+	if p.Provider != "" {
+		if req.EnabledProviders == nil {
+			return p, true
+		}
+		if _, ok := req.EnabledProviders[p.Provider]; ok {
+			return p, true
+		}
+		return sessionpin.Pin{}, false
+	}
+	providerSet := req.EnabledProviders
+	if providerSet == nil {
+		providerSet = make(map[string]struct{}, len(s.providers))
+		for provider := range s.providers {
+			providerSet[provider] = struct{}{}
+		}
+	}
+	binding, ok := catalog.ResolveBinding(model, providerSet)
+	if !ok {
+		return sessionpin.Pin{}, false
+	}
+	p.Provider = binding.Provider
+	return p, true
+}
+
+func hmmDecisionConfidence(dec router.Decision) (float64, bool) {
+	if dec.Metadata == nil {
+		return 0, false
+	}
+	confidence := float64(dec.Metadata.ChosenScore)
+	if confidence <= 0 {
+		return 0, false
+	}
+	return confidence, true
+}
+
+func hmmFreshIsMoreExpensive(stayModel, freshModel string, factors map[string]float64) bool {
+	stay, okStay := hmmEffectiveInputUSDPer1M(stayModel, factors)
+	fresh, okFresh := hmmEffectiveInputUSDPer1M(freshModel, factors)
+	return okStay && okFresh && fresh > stay
+}
+
+func hmmEffectiveInputUSDPer1M(model string, factors map[string]float64) (float64, bool) {
+	price, ok := catalog.PrimaryPriceFor(model)
+	if !ok {
+		return 0, false
+	}
+	value := price.InputUSDPer1M
+	if factor, covered := factors[model]; covered {
+		value *= factor
+	}
+	return value, true
+}
+
+func maxedOutServedModel(pin sessionpin.Pin) string {
+	if pin.LastOutputTokens < prevTurnMaxedOutThreshold {
+		return ""
+	}
+	model := pin.LastServedModel
+	if model == "" {
+		model = pin.Model
+	}
+	return model
+}
+
 // roleForTier maps a requested-model tier to its session-pin role. Each tier
 // gets its own row so separate-tier turns never share a pin. TierUnknown
 // falls back to DefaultRole.
@@ -775,6 +944,34 @@ func (s *Service) loadPin(ctx context.Context, sessionKey [sessionpin.SessionKey
 		return pin, false
 	}
 	return pin, true
+}
+
+func (s *Service) loadHMMHistory(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) sessionpin.Pin {
+	log := observability.FromContext(ctx)
+	pin, found, err := s.pinStore.Get(ctx, sessionKey, hmmHistoryRole(role))
+	if err != nil {
+		log.Error("HMM switch-history store unavailable", "err", err)
+		return sessionpin.Pin{}
+	}
+	if !found {
+		return sessionpin.Pin{}
+	}
+	return pin
+}
+
+func switchHistoryFromPins(activePin, hmmHistory sessionpin.Pin) (string, bool) {
+	priorServedModel := activePin.LastServedModel
+	sessionEverSwitched := activePin.HasEverSwitched || hmmHistory.HasEverSwitched
+	if hmmHistory.LastServedModel != "" &&
+		(priorServedModel == "" || hmmHistory.LastTurnEndedAt.After(activePin.LastTurnEndedAt)) {
+		priorServedModel = hmmHistory.LastServedModel
+	}
+	if activePin.LastServedModel != "" &&
+		hmmHistory.LastServedModel != "" &&
+		activePin.LastServedModel != hmmHistory.LastServedModel {
+		sessionEverSwitched = true
+	}
+	return priorServedModel, sessionEverSwitched
 }
 
 // refreshPin extends the TTL on an existing pin. Carries the existing pin's

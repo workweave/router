@@ -276,9 +276,12 @@ func TestTurnLoop_HMMToolResultCommunicationFollowsFreshDecision(t *testing.T) {
 	assert.Equal(t, 1, fr.routeCalls, "tool_result must ask HMM for a fresh communication decision")
 	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel),
 		"a completed tool result must not stay pinned to the tool-execution model")
+	store.mu.Lock()
+	assertOnlyHMMHistoryUpserts(t, store)
+	store.mu.Unlock()
 }
 
-func TestTurnLoop_HMMToolResultContinuesToolExecutionPin(t *testing.T) {
+func TestTurnLoop_HMMToolResultToolExecutionUsesFreshDecision(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -304,11 +307,14 @@ func TestTurnLoop_HMMToolResultContinuesToolExecutionPin(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultPinnedBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "tool_result still scores so HMM can decide whether execution continues")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel),
-		"ongoing tool execution keeps the existing execution pin")
+	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"HMM tool execution must follow the fresh sidecar decision instead of an existing session pin")
+	store.mu.Lock()
+	assertOnlyHMMHistoryUpserts(t, store)
+	store.mu.Unlock()
 }
 
-func TestTurnLoop_HMMToolExecutionLockBeatsPlannerSwitch(t *testing.T) {
+func TestTurnLoop_HMMToolExecutionStaysWhenWarmCacheEVBeatsCheapFresh(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -337,7 +343,81 @@ func TestTurnLoop_HMMToolExecutionLockBeatsPlannerSwitch(t *testing.T) {
 
 	assert.Equal(t, 1, fr.routeCalls, "ongoing HMM execution still scores to see if execution continues")
 	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
-		"ongoing tool execution must keep its selected model instead of planner-switching mid-execution")
+		"HMM should stay when switching to a cheaper tool model would not beat warm-cache eviction cost")
+	store.mu.Lock()
+	assertOnlyHMMHistoryUpserts(t, store)
+	store.mu.Unlock()
+}
+
+func TestTurnLoop_HMMHistoryMaxedOutExcludesServedModelBeforeRouting(t *testing.T) {
+	store := newFakePinStore()
+	store.hasHMMHistory = true
+	store.hmmHistory = sessionpin.Pin{
+		Provider:         providers.ProviderAnthropic,
+		LastServedModel:  "claude-sonnet-5",
+		LastOutputTokens: 8192,
+		LastTurnEndedAt:  time.Now().Add(-30 * time.Second),
+		PinnedUntil:      time.Now().Add(time.Hour),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-1",
+		},
+	}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	require.NotNil(t, fr.capturedReq)
+	assert.Contains(t, fr.capturedReq.ExcludedModels, "claude-sonnet-5",
+		"HMM history saturation must exclude the prior served model before sidecar routing")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
+	store.mu.Lock()
+	assertOnlyHMMHistoryUpserts(t, store)
+	store.mu.Unlock()
+}
+
+func TestTurnLoop_HMMExpiredHistoryMaxedOutStillExcludesServedModel(t *testing.T) {
+	store := newFakePinStore()
+	store.hasHMMHistory = true
+	// Expired history row (PinnedUntil in the past) that maxed out its output
+	// cap: the maxed model must still be excluded, matching the active-pin path.
+	store.hmmHistory = sessionpin.Pin{
+		Provider:         providers.ProviderAnthropic,
+		LastServedModel:  "claude-sonnet-5",
+		LastOutputTokens: 8192,
+		LastTurnEndedAt:  time.Now().Add(-time.Hour),
+		PinnedUntil:      time.Now().Add(-time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-1",
+		},
+	}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	require.NotNil(t, fr.capturedReq)
+	assert.Contains(t, fr.capturedReq.ExcludedModels, "claude-sonnet-5",
+		"a maxed-out model must stay excluded even after the history row's TTL lapses")
+	store.mu.Lock()
+	assertOnlyHMMHistoryUpserts(t, store)
+	store.mu.Unlock()
 }
 
 func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
@@ -356,8 +436,9 @@ func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
 		Model:    "claude-sonnet-5",
 		Reason:   "hmm_policy(label=Complex Design)",
 		Metadata: &router.RoutingMetadata{
-			Strategy: string(router.StrategyHMM),
-			RouteID:  "route-1",
+			Strategy:    string(router.StrategyHMM),
+			RouteID:     "route-1",
+			ChosenScore: 0.90,
 		},
 	}}
 	svc := newPinSvc(fr, store)
@@ -370,9 +451,12 @@ func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
 	assert.Equal(t, 1, fr.routeCalls, "HMM conversation turns must score fresh")
 	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
 		"HMM normal conversation routing must follow the fresh sidecar decision instead of EV-staying on the old pin")
+	store.mu.Lock()
+	assertOnlyHMMHistoryUpserts(t, store)
+	store.mu.Unlock()
 }
 
-func TestTurnLoop_HMMToolExecutionBreaksConversationalPin(t *testing.T) {
+func TestTurnLoop_HMMToolExecutionStaysOnLateralWarmCacheWhenEVNegative(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -400,18 +484,15 @@ func TestTurnLoop_HMMToolExecutionBreaksConversationalPin(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "main-loop HMM turn must ask for a fresh decision")
-	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
-		"a fresh HMM tool/explore execution decision must break a conversational pin")
+	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"lateral HMM tool/explore decisions should not break a warm cache when EV is negative")
 
-	waitForUpsert(t, store)
-	require.NotEmpty(t, store.upserts)
-	last := store.upserts[len(store.upserts)-1]
-	assert.Equal(t, "claude-sonnet-5", last.Model)
-	assert.True(t, strings.HasPrefix(last.Reason, "hmm_policy:tool_execution"),
-		"the execution phase must be persisted so later tool-result routing can detect it")
+	store.mu.Lock()
+	assertOnlyHMMHistoryUpserts(t, store)
+	store.mu.Unlock()
 }
 
-func TestTurnLoop_HMMToolExecutionSameModelUpdatesPinReason(t *testing.T) {
+func TestTurnLoop_HMMToolExecutionSameModelDoesNotRewritePin(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -441,12 +522,9 @@ func TestTurnLoop_HMMToolExecutionSameModelUpdatesPinReason(t *testing.T) {
 	assert.Equal(t, 1, fr.routeCalls, "main-loop HMM turn must ask for a fresh decision")
 	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 
-	waitForUpsert(t, store)
-	require.NotEmpty(t, store.upserts)
-	last := store.upserts[len(store.upserts)-1]
-	assert.Equal(t, "claude-sonnet-4-5", last.Model)
-	assert.True(t, strings.HasPrefix(last.Reason, "hmm_policy:tool_execution"),
-		"same-model fresh execution decisions must still rewrite the pin phase")
+	store.mu.Lock()
+	assertOnlyHMMHistoryUpserts(t, store)
+	store.mu.Unlock()
 }
 
 // TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer verifies that a pin

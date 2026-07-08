@@ -1970,17 +1970,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		// discounts Anthropic correctly on reroute.
 		req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, r.Header)
 
-		// Bypass returns early without loading the pin, so load it now for
+		// Bypass returns early without loading pin history, so load it now for
 		// modelSwitched() to correctly detect a switch away from it.
 		var priorServedModel string
 		var sessionEverSwitched bool
 		if s.pinStore != nil {
 			sessionKey := DeriveSessionKey(env, apiKeyID)
-			pin, pinFound := s.loadPin(ctx, sessionKey, roleForTier(catalog.TierFor(feats.Model)))
-			if pinFound {
-				priorServedModel = pin.LastServedModel
-				sessionEverSwitched = pin.HasEverSwitched
-			}
+			role := roleForTier(catalog.TierFor(feats.Model))
+			pin, _ := s.loadPin(ctx, sessionKey, role)
+			hmmHistory := s.loadHMMHistory(ctx, sessionKey, role)
+			priorServedModel, sessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
 		}
 
 		log.Info("usage-bypass pre-commit failure, rerouting via scorer",
@@ -2650,7 +2649,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	s.recordCallLog(ctx, upstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
 	otel.Flush(ctx)
 
-	s.recordTurnUsage(routeRes, decision.Model, in, out, cacheCreation, cacheRead)
+	s.recordTurnUsage(routeRes, finalProvider, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if installationID != uuid.Nil {
 		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
@@ -2801,7 +2800,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		)
 	}
 
-	log.Info("ProxyMessages complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider || subscriptionFailoverUsed, "subscription_failover", subscriptionFailoverUsed, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "gemini_validated_tool_mode", reqStats.GeminiValidatedToolMode, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed())
+	log.Info("ProxyMessages complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider || subscriptionFailoverUsed, "subscription_failover", subscriptionFailoverUsed, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "gemini_validated_tool_mode", reqStats.GeminiValidatedToolMode, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed()}, plannerLogFields(routeRes)...)...)
 	hmmRespBody, hmmRespTrunc := capturedResponse(hmmOutcomeCap)
 	var hmmResp *hmmOutcomeResponse
 	if hmmOutcomeCap != nil {
@@ -2846,6 +2845,24 @@ func plannerOutcomeAttr(res turnLoopResult) string {
 	}
 }
 
+func plannerLogFields(res turnLoopResult) []any {
+	var pinCacheWarm any
+	if res.PlannerDecision.Reason != "" {
+		pinCacheWarm = !res.PlannerDecision.PinCacheCold
+	}
+	return []any{
+		"planner_outcome", plannerOutcomeAttr(res),
+		"planner_reason", res.PlannerDecision.Reason,
+		"planner_expected_savings_usd", res.PlannerDecision.ExpectedSavingsUSD,
+		"planner_eviction_cost_usd", res.PlannerDecision.EvictionCostUSD,
+		"planner_threshold_usd", res.PlannerDecision.ThresholdUSD,
+		"planner_pin_model", res.PinModel,
+		"planner_fresh_model", res.Fresh.Model,
+		"planner_chosen_model", res.Decision.Model,
+		"planner_pin_cache_warm", pinCacheWarm,
+	}
+}
+
 // logPlannerOutcome emits a structured log line for the planner's verdict.
 // Switch turns are Info; stay turns are Debug.
 func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
@@ -2868,8 +2885,13 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 		)
 		return
 	}
-	log.Info("router stayed on pinned model",
+	message := "router stayed on pinned model"
+	if isHMMDecision(res.Fresh) {
+		message = "router stayed on previous HMM model"
+	}
+	log.Info(message,
 		"model", res.Decision.Model,
+		"pin_model", res.PinModel,
 		"reason", res.PlannerDecision.Reason,
 		"expected_savings_usd", res.PlannerDecision.ExpectedSavingsUSD,
 		"eviction_cost_usd", res.PlannerDecision.EvictionCostUSD,
@@ -2878,8 +2900,12 @@ func (s *Service) logPlannerOutcome(ctx context.Context, res turnLoopResult) {
 	)
 }
 
-func (s *Service) recordTurnUsage(res turnLoopResult, servedModel string, in, out, cacheCreation, cacheRead int) {
+func (s *Service) recordTurnUsage(res turnLoopResult, servedProvider, servedModel string, in, out, cacheCreation, cacheRead int) {
 	if s.pinStore == nil || res.HardPinned {
+		return
+	}
+	if isHMMTurn(res) {
+		s.recordHMMTurnHistory(res, servedProvider, servedModel, in, out, cacheCreation, cacheRead)
 		return
 	}
 	var zeroKey [sessionpin.SessionKeyLen]byte
@@ -2903,6 +2929,57 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedModel string, in, ou
 	}
 	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, usage); err != nil {
 		observability.Get().Error("session pin usage writeback failed", "err", err)
+	}
+}
+
+func isHMMTurn(res turnLoopResult) bool {
+	return isHMMDecision(res.Decision) || isHMMDecision(res.Fresh)
+}
+
+func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, servedModel string, in, out, cacheCreation, cacheRead int) {
+	if servedModel == "" || res.InstallationID == uuid.Nil {
+		return
+	}
+	var zeroKey [sessionpin.SessionKeyLen]byte
+	if res.SessionKey == zeroKey {
+		return
+	}
+	role := hmmHistoryRole(res.PinRole)
+	// The upsert only refreshes the row's TTL/turn_count/provider (ON CONFLICT
+	// leaves the usage columns untouched), so it is always safe to run.
+	s.upsertPin(context.Background(), sessionpin.Pin{
+		SessionKey:     res.SessionKey,
+		Role:           role,
+		InstallationID: res.InstallationID,
+		Provider:       servedProvider,
+		Reason:         hmmHistoryReason,
+		TurnCount:      1,
+		PinnedUntil:    pinExpiry(hmmHistoryReason),
+	})
+	// Zero tokens means a failed/empty upstream turn — don't clobber prior
+	// usage counters; the TTL-refreshing upsert above already ran.
+	if in == 0 && out == 0 && cacheCreation == 0 && cacheRead == 0 {
+		return
+	}
+	now := time.Now()
+	if res.PriorServedModel != "" && res.PriorServedModel != servedModel {
+		if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
+			EndedAt:     now,
+			ServedModel: res.PriorServedModel,
+		}); err != nil {
+			observability.Get().Error("HMM switch-history prior writeback failed", "err", err)
+			return
+		}
+	}
+	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
+		InputTokens:       in,
+		CachedReadTokens:  cacheRead,
+		CachedWriteTokens: cacheCreation,
+		OutputTokens:      out,
+		EndedAt:           now,
+		ServedModel:       servedModel,
+	}); err != nil {
+		observability.Get().Error("HMM switch-history writeback failed", "err", err)
 	}
 }
 
@@ -4193,7 +4270,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		emitCallLog()
 	}
 
-	s.recordTurnUsage(routeRes, decision.Model, in, out, cacheCreation, cacheRead)
+	s.recordTurnUsage(routeRes, finalProvider, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
@@ -4268,7 +4345,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", "requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText)/4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr))
+	log.Info("ProxyOpenAIChatCompletion complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr)}, plannerLogFields(routeRes)...)...)
 	s.reportHMMOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, nil)
 	return proxyErr
 }

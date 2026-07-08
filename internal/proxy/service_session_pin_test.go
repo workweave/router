@@ -30,6 +30,8 @@ type fakePinStore struct {
 	mu               sync.Mutex
 	pin              sessionpin.Pin
 	hasPin           bool
+	hmmHistory       sessionpin.Pin
+	hasHMMHistory    bool
 	getErr           error
 	getCalls         int
 	upserts          []sessionpin.Pin
@@ -54,6 +56,15 @@ func (f *fakePinStore) Get(ctx context.Context, key [sessionpin.SessionKeyLen]by
 	f.getCalls++
 	if f.getErr != nil {
 		return sessionpin.Pin{}, false, f.getErr
+	}
+	if strings.HasSuffix(role, "_hmm_history") {
+		if !f.hasHMMHistory {
+			return sessionpin.Pin{}, false, nil
+		}
+		pin := f.hmmHistory
+		pin.SessionKey = key
+		pin.Role = role
+		return pin, true, nil
 	}
 	if !f.hasPin {
 		return sessionpin.Pin{}, false, nil
@@ -111,6 +122,17 @@ func waitForUpsert(t *testing.T, store *fakePinStore) {
 	case <-store.upsertCh:
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected an async pin upsert within 2s; none observed")
+	}
+}
+
+func assertOnlyHMMHistoryUpserts(t *testing.T, store *fakePinStore) {
+	t.Helper()
+	require.NotEmpty(t, store.upserts, "HMM turns should persist switch history")
+	for _, p := range store.upserts {
+		assert.True(t, strings.HasSuffix(p.Role, "_hmm_history"), "HMM must not write the active routing pin role")
+		assert.Equal(t, "hmm_history", p.Reason)
+		assert.NotEmpty(t, p.Provider, "HMM history rows retain provider for cache TTL math")
+		assert.Empty(t, p.Model, "HMM history rows must not be routable")
 	}
 }
 
@@ -229,13 +251,13 @@ func TestService_SessionPin_EveryTurnReadsPostgres(t *testing.T) {
 	httpReq1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec1, httpReq1))
 	require.Equal(t, 1, fr.routeCalls)
-	require.Equal(t, 1, store.getCalls, "first turn must read the pin store")
+	require.Equal(t, 2, store.getCalls, "first turn must read the active pin and HMM history roles")
 
 	rec2 := httptest.NewRecorder()
 	httpReq2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec2, httpReq2))
 	assert.Equal(t, 2, fr.routeCalls, "planner re-evaluates every MainLoop turn")
-	assert.Equal(t, 2, store.getCalls, "second turn must also read Postgres — there is no in-process cache")
+	assert.Equal(t, 4, store.getCalls, "second turn must also read Postgres — there is no in-process cache")
 }
 
 func TestService_SessionPin_StoreErrorFallsThroughToFreshRoute(t *testing.T) {
@@ -288,7 +310,7 @@ func TestService_SessionPin_EvalOverrideHeaderKeepsSessionKeyPinning(t *testing.
 
 	// Scorer still runs, but the pin wins under ReasonNoPriorUsage.
 	assert.Equal(t, 1, fr.routeCalls, "scorer runs every MainLoop turn under the planner")
-	assert.Equal(t, 1, store.getCalls)
+	assert.Equal(t, 2, store.getCalls)
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
@@ -507,7 +529,7 @@ func TestService_HardPin_HMMExploreBypassesBootHardPin(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
-func TestService_HMMSubAgentKeepsExecutionPin(t *testing.T) {
+func TestService_HMMSubAgentUsesFreshDecision(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -530,8 +552,11 @@ func TestService_HMMSubAgentKeepsExecutionPin(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(exploreBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "subagent HMM turns may still score for diagnostics")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel),
-		"an HMM Explore subagent must keep its selected execution model for the subagent session")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel),
+		"an HMM Explore subagent must follow the fresh sidecar decision instead of an existing execution pin")
+	store.mu.Lock()
+	assertOnlyHMMHistoryUpserts(t, store)
+	store.mu.Unlock()
 }
 
 func TestService_HardPin_ExploreFallsThroughWhenFlagOff(t *testing.T) {
