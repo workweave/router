@@ -85,10 +85,8 @@ func TestComputeNoProgressFingerprint_MessageCountStillCountsWithoutMarker(t *te
 }
 
 func TestNoProgressTracker_TripsOnFrozenMarkerDespiteRisingMessageCount(t *testing.T) {
-	// End-to-end: the Kimi churn loop. Frozen tool-progress marker (dropped
-	// duplicate-id calls never advance it) plus a message_count that climbs each
-	// turn must now trip the detector at the threshold, where before the rising
-	// count kept every fingerprint unique and it never fired.
+	// Regression: frozen tool-progress marker + rising message_count must
+	// still trip the detector (count excluded from hash when marker present).
 	tr := newNoProgressTracker()
 	key := sessionKeyFromString("session-kimi-churn")
 	install := uuid.New()

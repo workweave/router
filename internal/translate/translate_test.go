@@ -548,9 +548,7 @@ func TestAnthropicSSETranslator_StreamingToolUse(t *testing.T) {
 	body := rec.Body.String()
 	assert.Contains(t, body, "event: message_start")
 	assert.Contains(t, body, `"type":"tool_use"`)
-	// The upstream id "call_1" is suffixed with a per-response nonce so a
-	// deterministic upstream id doesn't repeat across turns (Claude Code drops
-	// duplicate tool_use ids). See uniqueToolUseID / the toolIDNonce field.
+	// Upstream id carries a per-response nonce (uniqueToolUseIDWithNonce).
 	assert.Regexp(t, `"id":"call_1_[0-9a-f]{12}"`, body, "streamed tool_use id must carry the per-response nonce")
 	assert.Contains(t, body, `"get_weather"`)
 	assert.Contains(t, body, `"type":"input_json_delta"`)
@@ -678,9 +676,7 @@ func TestAnthropicSSETranslator_StreamingToolUsePreservesThoughtSignature(t *tes
 	assert.Contains(t, body, `"type":"tool_use"`)
 	assert.NotContains(t, body, `"thought_signature"`, "off-spec field must not be emitted")
 	encoded := base64.RawURLEncoding.EncodeToString([]byte("OPAQUE_SIG"))
-	// The upstream id "call_x" now carries a per-response nonce before the
-	// signature is embedded (uniqueToolUseID), so the wire form is
-	// call_x_<nonce>__thought__<sig>. The signature must still survive intact.
+	// Nonce precedes the signature: call_x_<nonce>__thought__<sig>.
 	assert.Regexp(t, `call_x_[0-9a-f]{12}__thought__`+encoded, body, "upstream id (plus nonce) is embedded with the signature")
 }
 

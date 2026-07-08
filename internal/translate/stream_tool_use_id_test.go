@@ -66,10 +66,8 @@ func streamedToolUseIDs(out string) []string {
 	return ids
 }
 
-// Regression: deterministic upstreams (Kimi-k2.x on Fireworks) emit the same
-// tool_call id every turn; after sanitization the id repeated. Claude Code
-// dedupes by id and drops repeats, stalling the session. Each translated
-// response must yield a distinct tool_use.id even for byte-identical upstream ids.
+// Regression: deterministic upstreams reuse a stable tool_call id every turn;
+// each translated response must yield a distinct tool_use.id.
 func TestAnthropicSSETranslator_StreamedToolUseIDUniqueAcrossResponses(t *testing.T) {
 	feedOnce := func() string {
 		rec := httptest.NewRecorder()
