@@ -231,17 +231,6 @@ func main() {
 	}
 
 	{
-		// DeepInfra uses HuggingFace-form model IDs vs. the router's slash-form
-		// slugs; modelIDMap comes from the catalog's per-binding UpstreamID.
-		deepInfraBaseURL := config.GetOr("DEEPINFRA_BASE_URL", openaiCompatProvider.DeepInfraBaseURL)
-		registerDeploymentKeyedProvider(providerMap, envKeyedProviders, logger,
-			providers.ProviderDeepInfra, "DeepInfra", "DEEPINFRA_API_KEY", deepInfraBaseURL, byokOnly,
-			func(key, baseURL string) providers.Client {
-				return openaiCompatProvider.NewClientWithModelIDMap(key, baseURL, upstreamIDsForProvider(providers.ProviderDeepInfra))
-			})
-	}
-
-	{
 		// Makora uses DeepSeek-canonical model IDs vs. the router's slash-form
 		// slugs; modelIDMap comes from the catalog's per-binding UpstreamID.
 		makoraBaseURL := config.GetOr("MAKORA_BASE_URL", openaiCompatProvider.MakoraBaseURL)
@@ -1313,8 +1302,8 @@ func envVarHint(provider string) string {
 // key (respecting byokOnly), constructs its client via newClient, registers
 // it in providerMap, and logs its BYOK/keyed/passthrough state. Shared by the
 // providers whose registration collapses to "resolve key -> build client ->
-// three-way log switch" (Fireworks, DeepInfra, Makora, Together, Bedrock,
-// Google); OpenRouter and Anthropic/OpenAI have genuinely different gating
+// three-way log switch" (Fireworks, Makora, Together, Bedrock, Google);
+// OpenRouter and Anthropic/OpenAI have genuinely different gating
 // logic and stay bespoke. extraLogAttrs are appended only to the
 // deployment-keyed log line (e.g. Bedrock's region).
 func registerDeploymentKeyedProvider(

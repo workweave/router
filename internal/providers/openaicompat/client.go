@@ -24,9 +24,6 @@ import (
 const (
 	DefaultBaseURL   = "https://openrouter.ai/api/v1"
 	FireworksBaseURL = "https://api.fireworks.ai/inference/v1"
-	// DeepInfraBaseURL uses HuggingFace-form model IDs; pair with
-	// NewClientWithModelIDMap to rewrite the router's slash-form slugs.
-	DeepInfraBaseURL = "https://api.deepinfra.com/v1/openai"
 	// MakoraBaseURL serves DeepSeek V4 (and other OSS models) at higher
 	// throughput than commodity providers; pair with NewClientWithModelIDMap
 	// to rewrite slugs to Makora's upstream IDs.
@@ -57,7 +54,7 @@ type Client struct {
 	http    *http.Client
 	// modelIDMap rewrites the request body's "model" field before sending, when
 	// the router's public slug differs from the upstream's canonical ID
-	// (Bedrock dot-form, DeepInfra HuggingFace-form). Nil/empty = no rewrite.
+	// (Bedrock dot-form, Makora/Together HuggingFace-form). Nil/empty = no rewrite.
 	modelIDMap map[string]string
 	// sseIdleTimeout overrides httputil.DefaultSSEIdleTimeout when > 0; tests
 	// set it small so the output-stall watchdog fires before this one.

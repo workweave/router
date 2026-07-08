@@ -47,7 +47,7 @@ var allProviders = enabled(
 	providers.ProviderAnthropic,
 	providers.ProviderOpenAI,
 	providers.ProviderGoogle,
-	providers.ProviderDeepInfra,
+	providers.ProviderMakora,
 	providers.ProviderFireworks,
 	providers.ProviderBedrock,
 )
@@ -60,7 +60,7 @@ func TestRouteMapsRosterChoiceBackToCatalogModel(t *testing.T) {
 
 	decision, err := r.Route(context.Background(), router.Request{
 		PromptText:       "refactor the auth module",
-		EnabledProviders: enabled(providers.ProviderAnthropic, providers.ProviderDeepInfra),
+		EnabledProviders: enabled(providers.ProviderAnthropic, providers.ProviderMakora),
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "claude-opus-4-8", decision.Model)
@@ -75,7 +75,7 @@ func TestRouteMapsRosterChoiceBackToCatalogModel(t *testing.T) {
 		rosterIDs[c.RosterID] = c.Provider
 	}
 	assert.Equal(t, providers.ProviderAnthropic, rosterIDs["anthropic/claude-opus-4-8"])
-	assert.Equal(t, providers.ProviderDeepInfra, rosterIDs["deepseek/deepseek-v4-flash"])
+	assert.Equal(t, providers.ProviderMakora, rosterIDs["deepseek/deepseek-v4-flash"])
 }
 
 func TestRouteOmitsModelsWithNoEnabledProvider(t *testing.T) {
@@ -89,7 +89,7 @@ func TestRouteOmitsModelsWithNoEnabledProvider(t *testing.T) {
 	require.NoError(t, err)
 	for _, c := range dec.got.Candidates {
 		assert.NotEqual(t, "deepseek/deepseek-v4-flash", c.RosterID,
-			"deepinfra not enabled, so the deepseek model must not be offered")
+			"makora not enabled, so the deepseek model must not be offered")
 	}
 }
 
@@ -99,7 +99,7 @@ func TestRouteExcludesRequestedExclusions(t *testing.T) {
 
 	_, err := r.Route(context.Background(), router.Request{
 		PromptText:       "hi",
-		EnabledProviders: enabled(providers.ProviderAnthropic, providers.ProviderDeepInfra),
+		EnabledProviders: enabled(providers.ProviderAnthropic, providers.ProviderMakora),
 		ExcludedModels:   map[string]struct{}{"claude-opus-4-8": {}},
 	})
 	require.NoError(t, err)

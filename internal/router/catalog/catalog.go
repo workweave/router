@@ -69,7 +69,7 @@ type ProviderBinding struct {
 	// UpstreamID is the model ID the upstream API expects. Empty means
 	// "same as Model.ID" (no rewrite). Non-empty is fed to the
 	// openaicompat client's modelIDMap so the body's "model" field is
-	// rewritten at proxy time (e.g. Bedrock's dot-form, DeepInfra's
+	// rewritten at proxy time (e.g. Bedrock's dot-form, Makora's
 	// HuggingFace form).
 	UpstreamID string
 	// Price is the per-provider pricing for this binding.
@@ -105,8 +105,8 @@ const (
 // ImageInput marks whether a model accepts image content parts.
 // ImageInputUnknown (zero value) = no restriction; first-party models default
 // here since they're all multimodal. ImageInputUnsupported flags text-only
-// models that 4xx on image parts (e.g. DeepInfra's GLM-5.1). The scorer
-// excludes the ImageInputUnsupported set from image-bearing requests.
+// models that 4xx on image parts (e.g. GLM-5.1). The scorer excludes the
+// ImageInputUnsupported set from image-bearing requests.
 type ImageInput int
 
 const (
@@ -311,7 +311,7 @@ var Models = []Model{
 	// --- OSS pool ---
 	//
 	// Each row carries an ordered Providers list. Managed-prod ships only the
-	// SOC-2 primary key (Fireworks/DeepInfra/Bedrock/OpenAI/Anthropic/Google)
+	// SOC-2 primary key (Fireworks/Makora/Bedrock/OpenAI/Anthropic/Google)
 	// and drops the trailing OpenRouter binding; self-hosters with only an
 	// OpenRouter key route every OSS model via that fallback.
 	//
@@ -343,8 +343,6 @@ var Models = []Model{
 	{ID: "deepseek/deepseek-v4-flash", Tier: TierLow, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, AgenticUse: AgenticLow, Providers: []ProviderBinding{
 		{Provider: providers.ProviderMakora, UpstreamID: "deepseek-ai/DeepSeek-V4-Flash",
 			Price: Pricing{InputUSDPer1M: 0.1134, OutputUSDPer1M: 0.2791, CacheReadMultiplier: 0.20}},
-		{Provider: providers.ProviderDeepInfra, UpstreamID: "deepseek-ai/DeepSeek-V4-Flash",
-			Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.140, OutputUSDPer1M: 0.280, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "deepseek/deepseek-v4-pro", Tier: TierHigh, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
@@ -388,8 +386,6 @@ var Models = []Model{
 	// tool_use, hallucinated tool names, repeat-args loops — matches OpenCode
 	// #24095 and Crush #1699). The pro variant doesn't show the instability.
 	{ID: "xiaomi/mimo-v2.5-pro", Tier: TierHigh, ContextWindow: 1_048_576, ImageInput: ImageInputUnsupported, ThinkTagReasoning: true, Providers: []ProviderBinding{
-		{Provider: providers.ProviderDeepInfra, UpstreamID: "XiaomiMiMo/MiMo-V2.5-Pro",
-			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.000, CacheReadMultiplier: 0.10}},
 	}},
 	// TierLow despite MoE size: active-parameter budget + AA Coding Index put
@@ -397,8 +393,6 @@ var Models = []Model{
 	{ID: "qwen/qwen3.6-35b-a3b", Tier: TierLow, ContextWindow: 262_144, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderMakora, UpstreamID: "unsloth/Qwen3.6-35B-A3B-NVFP4",
 			Price: Pricing{InputUSDPer1M: 0.1720, OutputUSDPer1M: 1.2002, CacheReadMultiplier: 0.75}},
-		{Provider: providers.ProviderDeepInfra, UpstreamID: "Qwen/Qwen3.6-35B-A3B",
-			Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 0.950}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.150, OutputUSDPer1M: 1.000, CacheReadMultiplier: 0.10}},
 	}},
 	// Context window is 204,800 on Fireworks and OpenRouter despite MiniMax's
@@ -420,13 +414,9 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.20}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
 	}},
-	// Fireworks primary: DeepInfra's FP8 GLM serving is an order of magnitude
-	// slower (~33 t/s, ~90s TTFT vs Fireworks' ~180 t/s), the dominant timeout source.
 	{ID: "z-ai/glm-5", Tier: TierHigh, ContextWindow: 202_752, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/glm-5",
 			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 3.200, CacheReadMultiplier: 0.20}},
-		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5",
-			Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 2.080}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.600, OutputUSDPer1M: 1.920, CacheReadMultiplier: 0.10}},
 	}},
 	// GLM-5.1 ships the streaming tool-call fix GLM-5 lacks (tool_stream=true);
@@ -438,8 +428,6 @@ var Models = []Model{
 			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400, CacheReadMultiplier: 0.26 / 1.400}},
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/glm-5p1",
 			Price: Pricing{InputUSDPer1M: 1.400, OutputUSDPer1M: 4.400, CacheReadMultiplier: 0.26 / 1.40}},
-		{Provider: providers.ProviderDeepInfra, UpstreamID: "zai-org/GLM-5.1",
-			Price: Pricing{InputUSDPer1M: 1.050, OutputUSDPer1M: 3.500}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.980, OutputUSDPer1M: 3.080, CacheReadMultiplier: 0.18 / 0.98}},
 	}},
 	// ContextWindow held at glm-family 202_752 pending confirmation of the

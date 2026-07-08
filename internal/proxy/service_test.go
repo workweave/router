@@ -431,19 +431,18 @@ func TestService_ProxyOpenAIChatCompletion_NativeOpenRouter(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"chat.completion"`)
 }
 
-// DeepInfra, Bedrock, Makora, and Together are direct providers served by the
+// Bedrock, Makora, and Together are direct providers served by the
 // openaicompat client and must route through the OpenAI-emission case, not
 // the default "no translation path" branch. Regression: Makora/Together
 // (DeepSeek-V4 primaries) were missing from the old literal dispatch list and
 // 502'd in prod. Keying dispatch off the translation family fixes all of
 // them.
-func TestService_ProxyMessages_DispatchesDeepInfraAndBedrock(t *testing.T) {
+func TestService_ProxyMessages_DispatchesBedrockMakoraTogether(t *testing.T) {
 	cases := []struct {
 		name     string
 		provider string
 		model    string
 	}{
-		{"deepinfra", providers.ProviderDeepInfra, "deepseek/deepseek-v4-flash"},
 		{"bedrock", providers.ProviderBedrock, "moonshotai/kimi-k2.5"},
 		{"makora", providers.ProviderMakora, "deepseek/deepseek-v4-pro"},
 		{"together", providers.ProviderTogether, "deepseek/deepseek-v4-pro"},
@@ -472,13 +471,12 @@ func TestService_ProxyMessages_DispatchesDeepInfraAndBedrock(t *testing.T) {
 	}
 }
 
-func TestService_ProxyOpenAIChatCompletion_DispatchesDeepInfraAndBedrock(t *testing.T) {
+func TestService_ProxyOpenAIChatCompletion_DispatchesBedrockMakoraTogether(t *testing.T) {
 	cases := []struct {
 		name     string
 		provider string
 		model    string
 	}{
-		{"deepinfra", providers.ProviderDeepInfra, "deepseek/deepseek-v4-flash"},
 		{"bedrock", providers.ProviderBedrock, "qwen/qwen3-coder-next"},
 		{"makora", providers.ProviderMakora, "deepseek/deepseek-v4-pro"},
 		{"together", providers.ProviderTogether, "deepseek/deepseek-v4-pro"},

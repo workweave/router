@@ -3960,8 +3960,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	switch providers.FamilyFor(decision.Provider) {
 	case providers.FamilyOpenAICompat:
 		// Prep rebuilt per attempt: targetIsOpenRouter(opts) gates four
-		// OpenRouter-only body fields that Fireworks/DeepInfra/Bedrock should
-		// not see. On failover to OpenRouter the body must be re-emitted.
+		// OpenRouter-only body fields that Fireworks/Bedrock/Makora/Together
+		// should not see. On failover to OpenRouter the body must be re-emitted.
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
 			var prep providers.PreparedRequest
 			if codexPassthrough && d.Provider == providers.ProviderOpenAI {

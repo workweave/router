@@ -194,8 +194,8 @@ func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *
 	message := firstChoice.Get("message")
 	finishReason := firstChoice.Get("finish_reason").String()
 	// Anthropic invariant: tool_use stop_reason iff a tool_use block exists.
-	// Some OpenAI-compat upstreams (GLM-5.1/DeepInfra, vLLM Qwen/MiMo) violate
-	// it both ways, so we correct both, mirroring emitMessageDelta:
+	// Some OpenAI-compat upstreams (GLM-5.1, vLLM Qwen/MiMo) violate it both
+	// ways, so we correct both, mirroring emitMessageDelta:
 	//   - Promote: named tool call present but finish_reason="stop".
 	//   - Demote: finish_reason="tool_calls" but every call was nameless
 	//     (dropped below) — else we'd ship tool_use with zero blocks.
@@ -317,9 +317,9 @@ func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolV
 
 // anyNamedToolCall reports whether tool_calls has a call with a non-empty
 // function name. Nameless tool_calls (seen intermittently from GLM/Qwen/Kimi/
-// gpt-oss on vLLM/SGLang/DeepInfra) are malformed: forwarded as-is they make
-// the client invoke tool "" and infinite-loop retrying, so they're dropped
-// and must not drive stop_reason promotion.
+// gpt-oss on vLLM/SGLang) are malformed: forwarded as-is they make the client
+// invoke tool "" and infinite-loop retrying, so they're dropped and must not
+// drive stop_reason promotion.
 func anyNamedToolCall(toolCalls gjson.Result) bool {
 	found := false
 	toolCalls.ForEach(func(_, tc gjson.Result) bool {

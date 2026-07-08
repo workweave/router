@@ -71,8 +71,8 @@ var forceModelAliases = map[string]string{
 	"kimi":           "moonshotai/kimi-k2.7",
 	"kimi-k2.7":      "moonshotai/kimi-k2.7",
 	"kimi-k2.6":      "moonshotai/kimi-k2.6",
-	// Generic glm/zai aliases stay on 5.1 (DeepInfra+OpenRouter, no Fireworks
-	// key needed); 5.2 is Fireworks-only day-0, so it requires an explicit pin.
+	// Generic glm/zai aliases stay on 5.1 (Together/Fireworks/OpenRouter);
+	// 5.2 is Fireworks-only day-0, so it requires an explicit pin.
 	"glm":          "z-ai/glm-5.1",
 	"zai":          "z-ai/glm-5.1",
 	"z-ai":         "z-ai/glm-5.1",

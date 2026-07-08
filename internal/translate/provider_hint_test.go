@@ -175,7 +175,7 @@ func TestPrepareOpenAI_NoReasoningOverrideForOtherModels(t *testing.T) {
 }
 
 // SOC 2 isolation routes deepseek/moonshotai/qwen slugs to direct
-// upstreams (Fireworks/DeepInfra/Bedrock) where the OpenRouter-only
+// upstreams (Fireworks/Bedrock/Makora) where the OpenRouter-only
 // `provider` and `reasoning` body fields cause a 400. The emit path
 // must gate those fields on the resolved target provider.
 func TestPrepareOpenAI_AnthropicSource_SkipsHintsForNonOpenRouterProvider(t *testing.T) {
@@ -186,7 +186,7 @@ func TestPrepareOpenAI_AnthropicSource_SkipsHintsForNonOpenRouterProvider(t *tes
 		provider string
 	}{
 		{"fireworks dispatches deepseek", "deepseek/deepseek-v4-pro", providers.ProviderFireworks},
-		{"deepinfra dispatches deepseek", "deepseek/deepseek-v4-flash", providers.ProviderDeepInfra},
+		{"makora dispatches deepseek", "deepseek/deepseek-v4-flash", providers.ProviderMakora},
 		{"bedrock dispatches moonshotai", "moonshotai/kimi-k2.5", providers.ProviderBedrock},
 		{"bedrock dispatches qwen", "qwen/qwen3-coder-next", providers.ProviderBedrock},
 	}
