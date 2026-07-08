@@ -132,8 +132,11 @@ var synthToolID = regexp.MustCompile(`^call_[0-9a-f]{8}$`)
 // nonceSuffixedToolID matches an upstream-echoed tool-call id that
 // uniqueToolUseIDWithNonce suffixed with a per-response 12-hex-char nonce
 // (functions_Bash_0_<nonce>). The nonce is volatile per response, so redact
-// only the suffix and keep the readable upstream prefix in the golden.
-var nonceSuffixedToolID = regexp.MustCompile(`^(.*)_[0-9a-f]{12}$`)
+// only the suffix and keep the readable upstream prefix in the golden. The
+// prefix is anchored to a tool-call id shape (call_/toolu_/functions_/tc_…) so
+// an unrelated stable id that merely ends in _<12hex> is left untouched and its
+// real changes still show in the golden diff.
+var nonceSuffixedToolID = regexp.MustCompile(`^((?:call_|toolu_|tc_|functions?[._]).*)_[0-9a-f]{12}$`)
 
 // redactVolatile walks a decoded frame, replacing message ids and synthesized
 // tool-call ids with placeholders and dropping wire timestamps.
