@@ -812,3 +812,22 @@ func sanitizeToolUseID(id string) string {
 	}
 	return string(b)
 }
+
+// uniqueToolUseIDWithNonce sanitizes id and appends a per-response nonce so
+// tool_use.id is unique across turns. Deterministic upstreams (Kimi-k2.x,
+// some vLLM/SGLang hosts) reuse a stable id every turn; Claude Code dedupes
+// by id and silently drops repeats, stalling the session. Nonce shared per
+// response so ids pair within a turn. Idempotent; empty id gets synthetic one.
+func uniqueToolUseIDWithNonce(id, nonce string) string {
+	if nonce == "" {
+		return sanitizeToolUseID(id)
+	}
+	clean := sanitizeToolUseID(id)
+	if clean == "" {
+		return "toolu_router_" + nonce
+	}
+	if strings.HasSuffix(clean, "_"+nonce) {
+		return clean
+	}
+	return clean + "_" + nonce
+}

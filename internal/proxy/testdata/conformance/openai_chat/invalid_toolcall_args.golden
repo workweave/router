@@ -22,7 +22,7 @@
     "event": "content_block_start",
     "data": {
       "content_block": {
-        "id": "call_bad",
+        "id": "call_bad_<nonce>",
         "input": {},
         "name": "Read",
         "type": "tool_use"

@@ -2009,14 +2009,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	routeMs := time.Since(routeStart).Milliseconds()
 	s.logPlannerOutcome(ctx, routeRes)
 
-	// Cross-envelope no-progress detector: if this session dispatches the same
-	// (decision, message_count, tool-progress, prompt-prefix) fingerprint
-	// repeatedly within a window, the agent is stuck (sub-agent spawn loop, or
-	// a re-issued identical call) — break the pin and emit a synthetic stop.
-	// The tool-progress marker is the key guard: a genuinely progressing agent
-	// appends a new tool call each turn, so it never false-positives even when
-	// top-level message count stays flat (as with Explore sub-agents).
-	if fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env)); s.noProgress != nil {
+	// Cross-envelope no-progress detector: repeated identical fingerprints in a
+	// window mean the agent is stuck — break the pin and emit a synthetic stop.
+	// Gated to tool-bearing turns so a frozen marker + frozen prompt prefix
+	// can't collide on healthy text-only turns.
+	toolBearingTurn := inboundToolCallCount > 0 || inboundLastUser.HasToolResult
+	if toolBearingTurn && s.noProgress != nil {
+		fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env))
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
 			return s.handleNoProgressBreak(ctx, w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider, feats.Tokens)

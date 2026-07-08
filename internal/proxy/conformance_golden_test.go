@@ -129,6 +129,12 @@ func redactJSON(t *testing.T, data []byte) map[string]interface{} {
 // echoed ids like "call_abc" don't match this pattern and stay in the golden.
 var synthToolID = regexp.MustCompile(`^call_[0-9a-f]{8}$`)
 
+// nonceSuffixedToolID matches an upstream-echoed tool-call id that
+// uniqueToolUseIDWithNonce suffixed with a per-response 12-hex-char nonce.
+// Prefix is anchored to tool-call id shapes (call_/toolu_/functions_/tc_…) so
+// an unrelated stable id ending in _<12hex> is left untouched in goldens.
+var nonceSuffixedToolID = regexp.MustCompile(`^((?:call_|toolu_|tc_|functions?[._]).*)_[0-9a-f]{12}$`)
+
 // redactVolatile walks a decoded frame, replacing message ids and synthesized
 // tool-call ids with placeholders and dropping wire timestamps.
 func redactVolatile(v interface{}) {
@@ -146,9 +152,22 @@ func redactVolatile(v interface{}) {
 		}
 		delete(x, "created")
 		for k, val := range x {
-			if s, ok := val.(string); ok && synthToolID.MatchString(s) {
-				x[k] = "<tool_id>"
-				continue
+			if s, ok := val.(string); ok {
+				// Nonce suffix (uniqueToolUseIDWithNonce) is volatile; strip it,
+				// then redact a synthetic prefix or keep an upstream-echoed one.
+				prefix := s
+				hasNonce := false
+				if m := nonceSuffixedToolID.FindStringSubmatch(s); m != nil {
+					prefix, hasNonce = m[1], true
+				}
+				if synthToolID.MatchString(prefix) {
+					x[k] = "<tool_id>"
+					continue
+				}
+				if hasNonce && (k == "id" || k == "tool_use_id") {
+					x[k] = prefix + "_<nonce>"
+					continue
+				}
 			}
 			redactVolatile(val)
 		}
