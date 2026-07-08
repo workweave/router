@@ -103,6 +103,46 @@ func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	assert.False(t, store.lastUsage.EndedAt.IsZero(), "EndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
 
+func TestRecordTurnUsage_SkipsHMMDecision(t *testing.T) {
+	store := newStubPinStore()
+	svc := NewService(
+		nil,
+		nil,
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	for i := range sessionKey {
+		sessionKey[i] = byte(i + 1)
+	}
+
+	res := turnLoopResult{
+		Decision: router.Decision{
+			Provider: "anthropic",
+			Model:    "claude-sonnet-5",
+			Reason:   "hmm_policy(label=Complex Followup)",
+			Metadata: &router.RoutingMetadata{
+				Strategy: string(router.StrategyHMM),
+				RouteID:  "route-1",
+			},
+		},
+		SessionKey: sessionKey,
+		PinRole:    sessionpin.DefaultRole,
+		PinTier:    "hmm_fresh_unpinned",
+	}
+	svc.recordTurnUsage(res, res.Decision.Model, 1200, 80, 200, 900)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Equal(t, 0, store.usageHits, "HMM turns do not own session pins and must not mutate stale pin usage")
+}
+
 // TestLoadPin_DoesNotServeExpiredPostgresPinButKeepsEmitHistory: expired rows
 // are routing misses, but has_ever_switched/last_served_model must survive so
 // Anthropic emit still strips poisoned thinking blocks.

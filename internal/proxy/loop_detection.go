@@ -321,8 +321,8 @@ func (s *Service) handleToolCallLoopBreak(
 	installationID uuid.UUID,
 	sessionKey [sessionpin.SessionKeyLen]byte,
 	role string,
-	decisionModel string,
-	decisionProvider string,
+	loopingModel string,
+	loopingProvider string,
 	inputTokens int,
 ) error {
 	log := observability.FromContext(ctx)
@@ -342,8 +342,9 @@ func (s *Service) handleToolCallLoopBreak(
 		"tool_name", sig.Name,
 		"repeat_count", count,
 		"window_size", loopDetectionWindowSize,
-		"decision_model", decisionModel,
-		"decision_provider", decisionProvider,
+		"decision_source", "synthetic_tool_call_loop_break",
+		"looping_model", loopingModel,
+		"looping_provider", loopingProvider,
 		"session_key_prefix", shortSessionKey(sessionKey),
 		"role", role,
 	)
