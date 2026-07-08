@@ -2009,14 +2009,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	routeMs := time.Since(routeStart).Milliseconds()
 	s.logPlannerOutcome(ctx, routeRes)
 
-	// Cross-envelope no-progress detector: repeated identical dispatch
-	// fingerprints within a window mean the agent is stuck (sub-agent spawn
-	// loop, or a re-issued identical call) — break the pin and emit a synthetic
-	// stop.
-	//
-	// Gated to tool-bearing turns (tool_use in history or tool_result this turn)
-	// because a frozen marker + frozen prompt prefix collide on healthy text-only
-	// turns, causing false trips; only re-issue loops produce tool-bearing turns.
+	// Cross-envelope no-progress detector: repeated identical fingerprints in a
+	// window mean the agent is stuck — break the pin and emit a synthetic stop.
+	// Gated to tool-bearing turns so a frozen marker + frozen prompt prefix
+	// can't collide on healthy text-only turns.
 	toolBearingTurn := inboundToolCallCount > 0 || inboundLastUser.HasToolResult
 	if toolBearingTurn && s.noProgress != nil {
 		fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env))
