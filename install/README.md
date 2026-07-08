@@ -89,7 +89,7 @@ the target flag:
 
 | Path                                  | Purpose                                                       |
 | ------------------------------------- | ------------------------------------------------------------- |
-| `~/.claude/settings.json`             | Sets `env.ANTHROPIC_BASE_URL`, `env.ANTHROPIC_CUSTOM_HEADERS` with `X-Weave-Router-Key`, and `statusLine`. Other keys preserved. |
+| `~/.claude/settings.json`             | Sets `env.ANTHROPIC_BASE_URL`, `env.ANTHROPIC_CUSTOM_HEADERS` with `X-Weave-Router-Key`, `env.ENABLE_TOOL_SEARCH=auto` (a custom base URL otherwise disables Claude Code's MCP tool-search deferral), and `statusLine`. Other keys preserved. |
 | `~/.weave/cc-statusline.sh`           | The status line script. Reads the router's decisions log + the CC transcript to show routed-model + savings. |
 
 **Project scope (`--scope project`):**

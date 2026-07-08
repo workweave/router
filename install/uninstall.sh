@@ -475,13 +475,13 @@ else
 fi
 
 if [ -f "$settings_file" ]; then
-  # Only remove keys we actually installed: scrub our two env vars, and only
+  # Only remove keys we actually installed: scrub our env vars, and only
   # delete `statusLine` / `apiKeyHelper` when they point at scripts this
   # installer used in older versions. Otherwise an unrelated user-configured
   # statusLine or apiKeyHelper would be silently clobbered.
   cleaned="$(jq '
     if .env then
-      .env |= (del(.ANTHROPIC_BASE_URL, .ANTHROPIC_AUTH_TOKEN, .ANTHROPIC_CUSTOM_HEADERS))
+      .env |= (del(.ANTHROPIC_BASE_URL, .ANTHROPIC_AUTH_TOKEN, .ANTHROPIC_CUSTOM_HEADERS, .ENABLE_TOOL_SEARCH))
       | (if (.env | length) == 0 then del(.env) else . end)
     else . end
     | (if (.statusLine.command // "" | tostring | endswith("cc-statusline.sh"))
@@ -501,7 +501,7 @@ if [ -n "$local_settings_file" ] && [ -f "$local_settings_file" ]; then
   # uninstall fully reverts a toggled-off install.
   cleaned="$(jq '
     if .env then
-      .env |= (del(.ANTHROPIC_BASE_URL, .ANTHROPIC_AUTH_TOKEN, .ANTHROPIC_CUSTOM_HEADERS))
+      .env |= (del(.ANTHROPIC_BASE_URL, .ANTHROPIC_AUTH_TOKEN, .ANTHROPIC_CUSTOM_HEADERS, .ENABLE_TOOL_SEARCH))
       | (if (.env | length) == 0 then del(.env) else . end)
     else . end
     | del(.apiKeyHelper)

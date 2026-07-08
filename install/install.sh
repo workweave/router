@@ -1403,9 +1403,9 @@ toggle_claude() {
       else
         # Park just the router-owned env keys, then strip them so Claude Code
         # falls back to its own Anthropic login.
-        jq '{env: ((.env // {}) | {ANTHROPIC_BASE_URL, ANTHROPIC_CUSTOM_HEADERS} | with_entries(select(.value != null)))}' "$settings_file" >"$parked"
+        jq '{env: ((.env // {}) | {ANTHROPIC_BASE_URL, ANTHROPIC_CUSTOM_HEADERS, ENABLE_TOOL_SEARCH} | with_entries(select(.value != null)))}' "$settings_file" >"$parked"
         chmod 600 "$parked"
-        merged="$(jq '(.env // {}) |= del(.ANTHROPIC_BASE_URL, .ANTHROPIC_CUSTOM_HEADERS)
+        merged="$(jq '(.env // {}) |= del(.ANTHROPIC_BASE_URL, .ANTHROPIC_CUSTOM_HEADERS, .ENABLE_TOOL_SEARCH)
                       | (if (.env // {} | length) == 0 then del(.env) else . end)' "$settings_file")"
         printf '%s\n' "$merged" >"$settings_file"
       fi
@@ -2431,14 +2431,19 @@ if [ -n "$user_name" ]; then
 fi
 custom_headers="$custom_headers"$'\n'"X-App: claude-code"
 
+# Setting ANTHROPIC_BASE_URL makes Claude Code treat us as non-first-party and
+# disable MCP tool-search deferral, inlining every tool schema into every request
+# — a large uncompactable prefix that can push a session into an autocompact
+# thrash loop. ENABLE_TOOL_SEARCH=auto restores on-demand loading (Claude Code's
+# own first-party default).
 if [ "$scope" = "project" ] && [ -z "$install_dir" ]; then
   jq -n --arg url "$base_url" --arg sl "$statusline_path_for_settings" '{
-    env: { ANTHROPIC_BASE_URL: $url },
+    env: { ANTHROPIC_BASE_URL: $url, ENABLE_TOOL_SEARCH: "auto" },
     statusLine: { type: "command", command: $sl }
   }' >"$tmp_patch"
 else
   jq -n --arg url "$base_url" --arg header "$custom_headers" --arg sl "$statusline_path_for_settings" '{
-    env: { ANTHROPIC_BASE_URL: $url, ANTHROPIC_CUSTOM_HEADERS: $header },
+    env: { ANTHROPIC_BASE_URL: $url, ANTHROPIC_CUSTOM_HEADERS: $header, ENABLE_TOOL_SEARCH: "auto" },
     statusLine: { type: "command", command: $sl }
   }' >"$tmp_patch"
 fi
