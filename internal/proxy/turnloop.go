@@ -66,6 +66,9 @@ type turnLoopResult struct {
 	// PinRole is the session-pin role used for this turn, preventing a
 	// low-tier background turn and a high-tier main turn from sharing a pin.
 	PinRole string
+	// StickyRole is the stored state role that backed a sticky decision. It is
+	// PinRole for active pins and _hmm_history for HMM EV stays.
+	StickyRole string
 	// Fresh is the scorer's recommendation for this turn when the scorer ran.
 	Fresh router.Decision
 	// PlannerDecision holds the planner's verdict and EV math when the planner ran.
@@ -125,6 +128,7 @@ const defaultHMMUpgradeConfidenceThreshold = 0.85
 const (
 	hmmReasonConfidentUpgrade     = "hmm_confident_upgrade"
 	hmmReasonUpgradeConfidenceLow = "hmm_upgrade_confidence_low"
+	hmmReasonPhaseChange          = "hmm_phase_change"
 )
 
 func hmmHistoryRole(role string) string {
@@ -570,6 +574,7 @@ func (s *Service) runTurnLoop(
 		if hmmSticky {
 			res.StickyHit = true
 			res.PinTier = "hmm_ev_stay_" + hmmPlannerDecision.Reason
+			res.StickyRole = hmmHistoryRole(res.PinRole)
 		} else {
 			res.PinTier = "hmm_fresh_unpinned"
 			if hmmPlannerDecision.Outcome == planner.OutcomeStay && hmmPlannerDecision.Reason != "" {
@@ -753,6 +758,9 @@ func (s *Service) hmmCostGatedDecision(
 	if !ok {
 		return fresh, planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonNoPin}, false, ""
 	}
+	if hmmToolExecutionPhaseChanged(stayPin.Reason, fresh.Reason) {
+		return fresh, planner.Decision{Outcome: planner.OutcomeSwitch, Reason: hmmReasonPhaseChange}, false, stayPin.Model
+	}
 
 	cfg := s.planner
 	// HMM owns semantic upgrades. The generic planner tier guard is too coarse
@@ -769,11 +777,10 @@ func (s *Service) hmmCostGatedDecision(
 
 	if hmmFreshIsMoreExpensive(stayPin.Model, fresh.Model, req.SubsidizedModelCostFactor) {
 		confidence, ok := hmmDecisionConfidence(fresh)
-		// Configurable via ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD; lower if sidecar scores exceed [0,1].
 		if ok && confidence >= s.hmmUpgradeConfidenceThreshold {
 			base.Outcome = planner.OutcomeSwitch
 			base.Reason = hmmReasonConfidentUpgrade
-		} else {
+		} else if base.Outcome != planner.OutcomeSwitch {
 			base.Outcome = planner.OutcomeStay
 			base.Reason = hmmReasonUpgradeConfidenceLow
 		}
@@ -808,12 +815,19 @@ func (s *Service) hmmStayPin(req router.Request, activePin sessionpin.Pin, hmmHi
 	return best, ok
 }
 
-// isHMMPinReason reports whether a stored pin's Reason marks it as HMM-written
-// (either the hmm_history sentinel or an hmm_policy* sidecar reason). Used to
-// keep a stale cluster/planner pin from steering an HMM turn's EV stay.
+// isHMMPinReason reports whether reason is HMM-written (hmm_history or hmm_policy*);
+// guards against a stale cluster/planner pin steering an HMM turn's EV stay.
 func isHMMPinReason(reason string) bool {
 	return reason == hmmHistoryReason ||
 		strings.HasPrefix(strings.TrimSpace(reason), "hmm_policy")
+}
+
+func isHMMToolExecutionReason(reason string) bool {
+	return strings.HasPrefix(strings.TrimSpace(reason), "hmm_policy:tool_execution")
+}
+
+func hmmToolExecutionPhaseChanged(stayReason, freshReason string) bool {
+	return isHMMToolExecutionReason(stayReason) != isHMMToolExecutionReason(freshReason)
 }
 
 func (s *Service) normalizeHMMStayPin(req router.Request, p sessionpin.Pin) (sessionpin.Pin, bool) {

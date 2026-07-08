@@ -352,7 +352,7 @@ func (s *Service) handleToolCallLoopBreak(
 	// Expire the pin in Postgres (not just the in-proc cache) so a racing
 	// reader on another pod can't repopulate the LRU from the stale row.
 	if s.pinStore != nil && installationID != uuid.Nil {
-		if err := s.expireSessionPin(ctx, installationID, sessionKey, role, "tool_call_loop_break"); err != nil {
+		if err := s.expireSessionPinAndHMMHistory(ctx, installationID, sessionKey, role, "tool_call_loop_break"); err != nil {
 			log.Error("loop-break: pin store upsert failed", "err", err)
 		}
 	}

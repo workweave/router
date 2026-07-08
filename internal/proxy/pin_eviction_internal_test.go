@@ -138,6 +138,33 @@ func TestMaybeEvictPin_SecondStrikeExpires(t *testing.T) {
 		"eviction reason is the audit trail that distinguishes this path from force-model / loop-break")
 }
 
+func TestExpireSessionPinAndHMMHistoryExpiresBothRoles(t *testing.T) {
+	store := &evictionStubPinStore{}
+	svc := newEvictionTestService(store)
+	installationID := uuid.New()
+	sessionKey := nonZeroSessionKey()
+
+	err := svc.expireSessionPinAndHMMHistory(
+		context.Background(),
+		installationID,
+		sessionKey,
+		sessionpin.DefaultRole,
+		"tool_call_loop_break",
+	)
+
+	require.NoError(t, err)
+	require.Len(t, store.upserts, 2)
+	assert.Equal(t, sessionpin.DefaultRole, store.upserts[0].Role)
+	assert.Equal(t, hmmHistoryRole(sessionpin.DefaultRole), store.upserts[1].Role)
+	for _, expired := range store.upserts {
+		assert.Equal(t, installationID, expired.InstallationID)
+		assert.Empty(t, expired.Provider)
+		assert.Empty(t, expired.Model)
+		assert.Equal(t, "tool_call_loop_break", expired.Reason)
+		assert.True(t, expired.PinnedUntil.Before(time.Now()))
+	}
+}
+
 // A successful turn must clear the counter so strikes track consecutive
 // failures, not lifetime ones.
 func TestMaybeEvictPin_SuccessResets(t *testing.T) {

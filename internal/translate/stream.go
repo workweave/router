@@ -456,6 +456,11 @@ type AnthropicSSETranslator struct {
 	// Anthropic `error` event instead.
 	upstreamErrorStatus int
 	upstreamErrorBody   strings.Builder
+
+	// toolIDNonce is a per-response suffix appended to every translated
+	// tool_use.id so deterministic upstreams don't repeat ids across turns
+	// (see uniqueToolUseIDWithNonce). Lazily seeded on first use.
+	toolIDNonce string
 }
 
 // upstreamErrorBodyCap bounds how much of an upstream error body is retained
@@ -1354,11 +1359,21 @@ func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name, 
 	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"content_block\":{\"type\":\"tool_use\",\"id\":")
-	sse.WriteJSONString(t.bw, embedSignatureInID(sanitizeToolUseID(id), sig))
+	sse.WriteJSONString(t.bw, embedSignatureInID(t.uniqueToolUseID(id), sig))
 	t.bw.WriteString(",\"name\":")
 	sse.WriteJSONString(t.bw, name)
 	t.bw.WriteString(",\"input\":{}}}\n\n")
 	return t.flushEvent()
+}
+
+// uniqueToolUseID wraps uniqueToolUseIDWithNonce with this response's nonce,
+// seeding it once on first use so all blocks in the response share one nonce.
+// Kept short (12 hex chars) to stay under clampOpenAIToolCallID's 64-char limit.
+func (t *AnthropicSSETranslator) uniqueToolUseID(id string) string {
+	if t.toolIDNonce == "" {
+		t.toolIDNonce = randomHex(6)
+	}
+	return uniqueToolUseIDWithNonce(id, t.toolIDNonce)
 }
 
 func (t *AnthropicSSETranslator) emitContentBlockStartThinking(index int) error {

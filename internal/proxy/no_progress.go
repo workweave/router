@@ -63,23 +63,25 @@ func toolProgressMarker(env *translate.RequestEnvelope) string {
 	return strconv.Itoa(len(sigs)) + "\x00" + last.Name + "\x00" + last.InputHash
 }
 
-// computeNoProgressFingerprint hashes routed (model, provider), message
-// count, a tool-call progress marker, and the prompt prefix.
+// computeNoProgressFingerprint hashes routed (model, provider), a tool-call
+// progress marker, the prompt prefix, and — only when there is no progress
+// marker — the message count.
 //
-// The prompt prefix alone is constant across a healthy agentic task (it's
-// just the user's typed task, tool results stripped), so it can't be the
-// sole key — every dispatch would collide. progressMarker is the main
-// guard: it advances on real progress and stays constant when stuck, so
-// only stuck loops accumulate matching fingerprints. messageCount is a
-// secondary signal for tool-free loops, but not sufficient alone: Claude
-// Code's Explore sub-agent holds message count flat while genuinely
-// progressing.
+// progressMarker is the primary stuck signal; it stays frozen while the same
+// tool call re-issues, so matching fingerprints accumulate. messageCount is
+// excluded when a marker is present because retries/continuations still append
+// messages even when stuck — folding it in defeats detection. For the tool-free
+// case (empty marker) it remains the sole fallback signal.
 func computeNoProgressFingerprint(decision router.Decision, promptText string, messageCount int, progressMarker string) noProgressFingerprint {
 	p := promptText
 	if len(p) > noProgressPromptPrefix {
 		p = p[:noProgressPromptPrefix]
 	}
-	return sha256.Sum256([]byte(decision.Model + "\x00" + decision.Provider + "\x00" + strconv.Itoa(messageCount) + "\x00" + progressMarker + "\x00" + p))
+	countPart := ""
+	if progressMarker == "" {
+		countPart = strconv.Itoa(messageCount)
+	}
+	return sha256.Sum256([]byte(decision.Model + "\x00" + decision.Provider + "\x00" + countPart + "\x00" + progressMarker + "\x00" + p))
 }
 
 type fingerprintEntry struct {
@@ -282,7 +284,7 @@ func (s *Service) handleNoProgressBreak(
 	// Skip when sessionKey is zero: a zero-keyed pin row would be a zombie
 	// entry shared by every zero-keyed session.
 	if s.pinStore != nil && installationID != uuid.Nil && sessionKey != ([sessionpin.SessionKeyLen]byte{}) {
-		if err := s.expireSessionPin(ctx, installationID, sessionKey, role, "no_progress_loop_break"); err != nil {
+		if err := s.expireSessionPinAndHMMHistory(ctx, installationID, sessionKey, role, "no_progress_loop_break"); err != nil {
 			log.Error("no-progress-break: pin store upsert failed", "err", err)
 		}
 	}

@@ -64,6 +64,82 @@ func TestComputeNoProgressFingerprint_DistinguishesToolProgress(t *testing.T) {
 	assert.NotEqual(t, a, b, "an advancing tool-progress marker must change the fingerprint")
 }
 
+func TestComputeNoProgressFingerprint_IgnoresMessageCountWhenMarkerPresent(t *testing.T) {
+	// Regression: a frozen tool-progress marker combined with a rising
+	// message_count must produce identical fingerprints (marker excluded from
+	// hash when present, so count noise doesn't defeat detection).
+	d := router.Decision{Model: "moonshotai/kimi-k2.7", Provider: "fireworks"}
+	marker := "57\x00Bash\x00frozen-hash"
+	a := computeNoProgressFingerprint(d, "create a PR from staging to prod", 90, marker)
+	b := computeNoProgressFingerprint(d, "create a PR from staging to prod", 109, marker)
+	assert.Equal(t, a, b, "a frozen tool-progress marker must collide regardless of rising message count")
+}
+
+func TestComputeNoProgressFingerprint_MessageCountStillCountsWithoutMarker(t *testing.T) {
+	// The tool-free path keeps message_count as its only fallback signal, so a
+	// growing transcript with no marker must still change the fingerprint.
+	d := router.Decision{Model: "gemini-3.1-pro-preview", Provider: "google"}
+	a := computeNoProgressFingerprint(d, "explore RSVP files", 10, "")
+	b := computeNoProgressFingerprint(d, "explore RSVP files", 12, "")
+	assert.NotEqual(t, a, b, "without a marker, message_count must still distinguish turns")
+}
+
+func TestNoProgressTracker_TripsOnFrozenMarkerDespiteRisingMessageCount(t *testing.T) {
+	// Regression: frozen tool-progress marker + rising message_count must
+	// still trip the detector (count excluded from hash when marker present).
+	tr := newNoProgressTracker()
+	key := sessionKeyFromString("session-kimi-churn")
+	install := uuid.New()
+	d := router.Decision{Model: "moonshotai/kimi-k2.7", Provider: "fireworks"}
+	now := time.Now()
+	marker := "57\x00Bash\x00frozen-hash"
+
+	var looped bool
+	var count int
+	for i := 0; i < noProgressMatchThreshold; i++ {
+		fp := computeNoProgressFingerprint(d, "create a PR from staging to prod", 90+3*i, marker)
+		looped, count = tr.recordAndDetect(key, install, "high", fp, now)
+	}
+	assert.True(t, looped, "a frozen-marker loop with rising message count must trip the detector")
+	assert.Equal(t, noProgressMatchThreshold, count)
+}
+
+// Gate: the no-progress detector only runs on tool-bearing turns so a
+// frozen marker + frozen prompt prefix can't trip it on healthy text-only turns.
+func TestNoProgressGate_TextOnlyTurnIsNotToolBearing(t *testing.T) {
+	textOnly := []byte(`{"model":"kimi","messages":[` +
+		`{"role":"user","content":"explain the design"},` +
+		`{"role":"assistant","content":[{"type":"text","text":"Here is the design ..."}]}` +
+		`]}`)
+	env, err := translate.ParseAnthropic(textOnly)
+	require.NoError(t, err)
+	toolBearing := len(env.AssistantToolCallSignatures()) > 0 || env.LastUserMessage().HasToolResult
+	assert.False(t, toolBearing, "a text-only turn must not feed the no-progress detector")
+}
+
+func TestNoProgressGate_ToolTurnsAreToolBearing(t *testing.T) {
+	// tool_use in history (the frozen-marker Kimi case).
+	withToolUse := []byte(`{"model":"kimi","messages":[` +
+		`{"role":"user","content":"create a PR"},` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Bash","input":{"command":"gh pr create"}}]}` +
+		`]}`)
+	env1, err := translate.ParseAnthropic(withToolUse)
+	require.NoError(t, err)
+	assert.True(t, len(env1.AssistantToolCallSignatures()) > 0 || env1.LastUserMessage().HasToolResult,
+		"a turn with a tool_use in history must feed the detector")
+
+	// tool_result this turn (agent just ran a tool).
+	withToolResult := []byte(`{"model":"kimi","messages":[` +
+		`{"role":"user","content":"create a PR"},` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Bash","input":{"command":"gh pr create"}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"1","content":"done"}]}` +
+		`]}`)
+	env2, err := translate.ParseAnthropic(withToolResult)
+	require.NoError(t, err)
+	assert.True(t, len(env2.AssistantToolCallSignatures()) > 0 || env2.LastUserMessage().HasToolResult,
+		"a tool_result turn must feed the detector")
+}
+
 func TestNoProgressTracker_DoesNotTripWhenMessageCountGrows(t *testing.T) {
 	// Regression: a fast tool-call loop can exceed the dispatch threshold for
 	// one (model, provider) while the prompt prefix stays constant, but must

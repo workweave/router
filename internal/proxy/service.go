@@ -130,6 +130,9 @@ type Service struct {
 	passthroughEligibleProviders map[string]struct{}
 	// planner parameterizes the Prism-style EV policy for stay-vs-switch.
 	planner planner.EVConfig
+	// hmmUpgradeConfidenceThreshold is the minimum classifier confidence needed
+	// for HMM to switch upward to a more expensive model despite cache inertia.
+	hmmUpgradeConfidenceThreshold float64
 	// plannerEnabled is the kill switch. When false, the orchestrator falls
 	// back to first-decision-wins behavior.
 	plannerEnabled bool
@@ -146,10 +149,6 @@ type Service struct {
 	// when the session pin carries no runner-up (PairedModel). Set from
 	// ROUTER_CYBER_REFUSAL_FALLBACK_MODEL; defaults to claude-sonnet-5.
 	cyberRefusalFallbackModel string
-	// hmmUpgradeConfidenceThreshold is the minimum HMM sidecar ChosenScore that
-	// lets a fresh upgrade to a more expensive model beat an EV stay. Protects
-	// against low-confidence thrash. Set via ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD.
-	hmmUpgradeConfidenceThreshold float64
 	// effortEscalation enables the escalate-on-failure reasoning-effort policy:
 	// gpt-5.x serves low effort by default and high after an observed
 	// failed/no-progress turn; gemini is pinned low. Off by default (set from
@@ -900,12 +899,12 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 			ExpectedRemainingTurns: DefaultPlannerExpectedRemainingTurns,
 			TierUpgradeEnabled:     DefaultPlannerTierUpgradeEnabled,
 		},
+		hmmUpgradeConfidenceThreshold: defaultHMMUpgradeConfidenceThreshold,
 		plannerEnabled:                true,
 		scoreToolResultTurns:          true,
 		loopEscalationEnabled:         true,
 		cyberRefusalRepin:             false,
 		cyberRefusalFallbackModel:     "claude-sonnet-5",
-		hmmUpgradeConfidenceThreshold: defaultHMMUpgradeConfidenceThreshold,
 	}
 }
 
@@ -952,8 +951,8 @@ func (s *Service) WithCyberRefusalFallbackModel(model string) *Service {
 }
 
 // WithHMMUpgradeConfidenceThreshold sets the minimum HMM sidecar ChosenScore
-// for a fresh upgrade to beat an EV stay on the cheaper pinned model. Out-of-range
-// values ([0,1] only) are rejected silently. Wired from ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD.
+// for a fresh upgrade to beat an EV stay on the cheaper pinned model.
+// Out-of-range values ([0,1] only) are ignored.
 func (s *Service) WithHMMUpgradeConfidenceThreshold(v float64) *Service {
 	if v < 0 || v > 1 {
 		return s
@@ -2024,14 +2023,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	routeMs := time.Since(routeStart).Milliseconds()
 	s.logPlannerOutcome(ctx, routeRes)
 
-	// Cross-envelope no-progress detector: if this session dispatches the same
-	// (decision, message_count, tool-progress, prompt-prefix) fingerprint
-	// repeatedly within a window, the agent is stuck (sub-agent spawn loop, or
-	// a re-issued identical call) — break the pin and emit a synthetic stop.
-	// The tool-progress marker is the key guard: a genuinely progressing agent
-	// appends a new tool call each turn, so it never false-positives even when
-	// top-level message count stays flat (as with Explore sub-agents).
-	if fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env)); s.noProgress != nil {
+	// Cross-envelope no-progress detector: repeated identical fingerprints in a
+	// window mean the agent is stuck — break the pin and emit a synthetic stop.
+	// Gated to tool-bearing turns so a frozen marker + frozen prompt prefix
+	// can't collide on healthy text-only turns.
+	toolBearingTurn := inboundToolCallCount > 0 || inboundLastUser.HasToolResult
+	if toolBearingTurn && s.noProgress != nil {
+		fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env))
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
 			return s.handleNoProgressBreak(ctx, w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider, feats.Tokens)
@@ -2687,7 +2685,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			)
 			// Evict the pin so the next turn re-scores instead of repeating the
 			// same misbehaving model — this turn already streamed and can't retry.
-			s.evictPinAfterDegenerateResponse(ctx, stickyHit, decision.Reason, installationID, routeRes.SessionKey, routeRes.PinRole)
+			s.evictPinAfterDegenerateResponse(ctx, stickyHit, decision.Reason, installationID, routeRes.SessionKey, stickyStateRole(routeRes))
 		}
 		s.fireTelemetry(InsertTelemetryParams{
 			InstallationID:         installationID.String(),
@@ -2797,10 +2795,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Two-strike eviction: a session pinned to a model returning non-retryable
 	// 4xx wedges until manually /force-model'd out. Expires the pin after a
 	// persistent counter hits threshold; successful turns reset it.
-	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, routeRes.PinRole)
+	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, stickyStateRole(routeRes))
 
 	// Re-pin the session off the refusing model if a cyber refusal was observed.
-	s.maybeRepinOnRefusal(ctx, refusalObs, routeRes.SessionKey, routeRes.PinRole, decision)
+	s.maybeRepinOnRefusal(ctx, refusalObs, routeRes.SessionKey, stickyStateRole(routeRes), decision)
 
 	// One event per tool_use block that failed toolcheck validation, including
 	// repaired ones — doubles as a per-model×provider tool-calling-quality signal.
@@ -2878,6 +2876,13 @@ func plannerLogFields(res turnLoopResult) []any {
 		"planner_chosen_model", res.Decision.Model,
 		"planner_pin_cache_warm", pinCacheWarm,
 	}
+}
+
+func stickyStateRole(res turnLoopResult) string {
+	if res.StickyHit && res.StickyRole != "" {
+		return res.StickyRole
+	}
+	return res.PinRole
 }
 
 // logPlannerOutcome emits a structured log line for the planner's verdict.
@@ -2969,7 +2974,7 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		Role:           role,
 		InstallationID: res.InstallationID,
 		Provider:       servedProvider,
-		Reason:         hmmHistoryReason,
+		Reason:         hmmHistoryStoredReason(res),
 		TurnCount:      1,
 		PinnedUntil:    pinExpiry(hmmHistoryReason),
 	})
@@ -2979,15 +2984,6 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		return
 	}
 	now := time.Now()
-	if res.PriorServedModel != "" && res.PriorServedModel != servedModel {
-		if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
-			EndedAt:     now,
-			ServedModel: res.PriorServedModel,
-		}); err != nil {
-			observability.Get().Error("HMM switch-history prior writeback failed", "err", err)
-			return
-		}
-	}
 	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
 		InputTokens:       in,
 		CachedReadTokens:  cacheRead,
@@ -2998,6 +2994,16 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 	}); err != nil {
 		observability.Get().Error("HMM switch-history writeback failed", "err", err)
 	}
+}
+
+func hmmHistoryStoredReason(res turnLoopResult) string {
+	if isHMMDecision(res.Fresh) {
+		return res.Fresh.Reason
+	}
+	if isHMMDecision(res.Decision) {
+		return res.Decision.Reason
+	}
+	return hmmHistoryReason
 }
 
 func hmmOutcomeRoute(res turnLoopResult, decision router.Decision) (router.Decision, *router.RoutingMetadata, bool) {
@@ -4297,7 +4303,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	// See ProxyMessages for the two-strike eviction rationale.
-	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationIDFromContext(ctx), routeRes.SessionKey, routeRes.PinRole)
+	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationIDFromContext(ctx), routeRes.SessionKey, stickyStateRole(routeRes))
 
 	installationIDOAI, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	if installationIDOAI != "" {
