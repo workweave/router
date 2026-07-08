@@ -284,7 +284,7 @@ func (s *Service) handleNoProgressBreak(
 	// Skip when sessionKey is zero: a zero-keyed pin row would be a zombie
 	// entry shared by every zero-keyed session.
 	if s.pinStore != nil && installationID != uuid.Nil && sessionKey != ([sessionpin.SessionKeyLen]byte{}) {
-		if err := s.expireSessionPin(ctx, installationID, sessionKey, role, "no_progress_loop_break"); err != nil {
+		if err := s.expireSessionPinAndHMMHistory(ctx, installationID, sessionKey, role, "no_progress_loop_break"); err != nil {
 			log.Error("no-progress-break: pin store upsert failed", "err", err)
 		}
 	}

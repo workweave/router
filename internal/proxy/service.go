@@ -2783,7 +2783,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, stickyStateRole(routeRes))
 
 	// Re-pin the session off the refusing model if a cyber refusal was observed.
-	s.maybeRepinOnRefusal(ctx, refusalObs, routeRes.SessionKey, routeRes.PinRole, decision)
+	s.maybeRepinOnRefusal(ctx, refusalObs, routeRes.SessionKey, stickyStateRole(routeRes), decision)
 
 	// One event per tool_use block that failed toolcheck validation, including
 	// repaired ones — doubles as a per-model×provider tool-calling-quality signal.
@@ -2959,7 +2959,7 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		Role:           role,
 		InstallationID: res.InstallationID,
 		Provider:       servedProvider,
-		Reason:         hmmHistoryReason,
+		Reason:         hmmHistoryStoredReason(res),
 		TurnCount:      1,
 		PinnedUntil:    pinExpiry(hmmHistoryReason),
 	})
@@ -2975,7 +2975,6 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 			ServedModel: res.PriorServedModel,
 		}); err != nil {
 			observability.Get().Error("HMM switch-history prior writeback failed", "err", err)
-			return
 		}
 	}
 	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
@@ -2988,6 +2987,16 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 	}); err != nil {
 		observability.Get().Error("HMM switch-history writeback failed", "err", err)
 	}
+}
+
+func hmmHistoryStoredReason(res turnLoopResult) string {
+	if isHMMDecision(res.Fresh) {
+		return res.Fresh.Reason
+	}
+	if isHMMDecision(res.Decision) {
+		return res.Decision.Reason
+	}
+	return hmmHistoryReason
 }
 
 func hmmOutcomeRoute(res turnLoopResult, decision router.Decision) (router.Decision, *router.RoutingMetadata, bool) {

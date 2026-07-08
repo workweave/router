@@ -456,7 +456,7 @@ func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
 	store.mu.Unlock()
 }
 
-func TestTurnLoop_HMMToolExecutionStaysOnLateralWarmCacheWhenEVNegative(t *testing.T) {
+func TestTurnLoop_HMMToolExecutionPhaseChangeUsesFreshDecision(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -484,8 +484,8 @@ func TestTurnLoop_HMMToolExecutionStaysOnLateralWarmCacheWhenEVNegative(t *testi
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "main-loop HMM turn must ask for a fresh decision")
-	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel),
-		"lateral HMM tool/explore decisions should not break a warm cache when EV is negative")
+	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"HMM tool/explore phase changes should follow the fresh sidecar decision")
 
 	store.mu.Lock()
 	assertOnlyHMMHistoryUpserts(t, store)

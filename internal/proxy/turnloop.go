@@ -128,6 +128,7 @@ const hmmUpgradeConfidenceThreshold = 0.85
 const (
 	hmmReasonConfidentUpgrade     = "hmm_confident_upgrade"
 	hmmReasonUpgradeConfidenceLow = "hmm_upgrade_confidence_low"
+	hmmReasonPhaseChange          = "hmm_phase_change"
 )
 
 func hmmHistoryRole(role string) string {
@@ -757,6 +758,9 @@ func (s *Service) hmmCostGatedDecision(
 	if !ok {
 		return fresh, planner.Decision{Outcome: planner.OutcomeSwitch, Reason: planner.ReasonNoPin}, false, ""
 	}
+	if hmmToolExecutionPhaseChanged(stayPin.Reason, fresh.Reason) {
+		return fresh, planner.Decision{Outcome: planner.OutcomeSwitch, Reason: hmmReasonPhaseChange}, false, stayPin.Model
+	}
 
 	cfg := s.planner
 	// HMM owns semantic upgrades. The generic planner tier guard is too coarse
@@ -776,7 +780,7 @@ func (s *Service) hmmCostGatedDecision(
 		if ok && confidence >= hmmUpgradeConfidenceThreshold {
 			base.Outcome = planner.OutcomeSwitch
 			base.Reason = hmmReasonConfidentUpgrade
-		} else {
+		} else if base.Outcome != planner.OutcomeSwitch {
 			base.Outcome = planner.OutcomeStay
 			base.Reason = hmmReasonUpgradeConfidenceLow
 		}
@@ -816,6 +820,14 @@ func (s *Service) hmmStayPin(req router.Request, activePin sessionpin.Pin, hmmHi
 func isHMMPinReason(reason string) bool {
 	return reason == hmmHistoryReason ||
 		strings.HasPrefix(strings.TrimSpace(reason), "hmm_policy")
+}
+
+func isHMMToolExecutionReason(reason string) bool {
+	return strings.HasPrefix(strings.TrimSpace(reason), "hmm_policy:tool_execution")
+}
+
+func hmmToolExecutionPhaseChanged(stayReason, freshReason string) bool {
+	return isHMMToolExecutionReason(stayReason) != isHMMToolExecutionReason(freshReason)
 }
 
 func (s *Service) normalizeHMMStayPin(req router.Request, p sessionpin.Pin) (sessionpin.Pin, bool) {

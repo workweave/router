@@ -48,6 +48,23 @@ func (s *Service) expireSessionPin(
 	return s.pinStore.Upsert(context.Background(), expired)
 }
 
+func (s *Service) expireSessionPinAndHMMHistory(
+	ctx context.Context,
+	installationID uuid.UUID,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+	role string,
+	reason string,
+) error {
+	if err := s.expireSessionPin(ctx, installationID, sessionKey, role, reason); err != nil {
+		return err
+	}
+	historyRole := hmmHistoryRole(role)
+	if historyRole == role {
+		return nil
+	}
+	return s.expireSessionPin(ctx, installationID, sessionKey, historyRole, reason)
+}
+
 // evictPinAfterDegenerateResponse expires the session pin after a degenerate
 // response (end_turn, no tool calls, too few output tokens). The current
 // turn already streamed and can't be retried, but evicting ensures the next
