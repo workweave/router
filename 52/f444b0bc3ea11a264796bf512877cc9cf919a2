@@ -1,0 +1,44 @@
+internal/sse/chunked_writer.go
+  s_c4ecee41717be0::t_22488dcd784317 1-61,71-72,75-77
+  s_c4ecee41717be0::t_a51332b4d6f71f 62-70,73-74
+internal/translate/CLAUDE.md
+  s_c4ecee41717be0::t_9e3f85e4666115 18
+internal/translate/gemini_stream.go
+  s_c4ecee41717be0::t_df8535e1baca79 378
+internal/translate/anthropic_marker.go
+  s_c4ecee41717be0::t_41b4074bfa44c5 17,24,33-35,40
+  s_c4ecee41717be0::t_90b50b9e57e710 69-73,77-78,87-91,94,97-99,102,104
+  s_c4ecee41717be0::t_d54cf22c23656a 48,50
+  s_c4ecee41717be0::t_3c80ffe4a95cd5 122,145,151-156,163,176
+internal/translate/responses_to_anthropic_writer.go
+  s_c4ecee41717be0::t_1916326ae32689 984
+internal/translate/openai_marker.go
+  s_c4ecee41717be0::t_cb814a9e6d31c4 17,22,44-46,51,59,62
+  s_c4ecee41717be0::t_21873735b532a8 145-149,154-155,161-171
+  s_c4ecee41717be0::t_872fea172c732a 73
+internal/sse/chunked_writer_test.go
+  s_c4ecee41717be0::t_8ad40d30bf8ead 1-130
+internal/translate/gemini_marker.go
+  s_c4ecee41717be0::t_39e46cc2f4779e 13,17,25-26,31,39,48-52,56-57,63-67
+internal/translate/stream.go
+  s_c4ecee41717be0::t_1a1de8b5386d4c 1447
+  s_c4ecee41717be0::t_6eda10fc2891b3 319
+internal/translate/AGENTS.md
+  s_c4ecee41717be0::t_cbc74b209c16a8 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "52f444b0bc3ea11a264796bf512877cc9cf919a2",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
