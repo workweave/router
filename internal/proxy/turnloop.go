@@ -118,28 +118,6 @@ func isHMMDecision(dec router.Decision) bool {
 	return strings.HasPrefix(strings.TrimSpace(dec.Reason), "hmm_policy")
 }
 
-func isHMMToolExecutionReason(reason string) bool {
-	return strings.HasPrefix(strings.TrimSpace(reason), "hmm_policy:tool_execution")
-}
-
-func shouldServeFreshHMMToolResult(turnType turntype.TurnType, subAgentHint string, pin sessionpin.Pin, fresh router.Decision) bool {
-	if subAgentHint != "" || turnType != turntype.ToolResult {
-		return false
-	}
-	return isHMMToolExecutionReason(pin.Reason) && isHMMDecision(fresh) && !isHMMToolExecutionReason(fresh.Reason)
-}
-
-func shouldServeFreshHMMToolExecution(pin sessionpin.Pin, fresh router.Decision) bool {
-	return isHMMDecision(fresh) && isHMMToolExecutionReason(fresh.Reason) && !isHMMToolExecutionReason(pin.Reason)
-}
-
-func isHMMSubAgentExecutionLock(turnType turntype.TurnType, subAgentHint string, pin sessionpin.Pin, fresh router.Decision) bool {
-	if !isHMMDecision(fresh) || !isHMMToolExecutionReason(pin.Reason) {
-		return false
-	}
-	return turnType == turntype.SubAgentDispatch || subAgentHint != ""
-}
-
 // handoverOutcome describes the synchronous handover step.
 type handoverOutcome struct {
 	Invoked       bool
@@ -542,37 +520,11 @@ func (s *Service) runTurnLoop(
 		"fresh_reason", fresh.Reason,
 	)
 	res.Fresh = fresh
-	hmmToolExecutionFresh := pinFound && shouldServeFreshHMMToolExecution(pin, fresh)
-	hmmToolResultFresh := pinFound && shouldServeFreshHMMToolResult(res.TurnType, subAgentHint, pin, fresh)
-	hmmToolExecutionContinue := pinFound && isHMMToolExecutionReason(pin.Reason) && isHMMToolExecutionReason(fresh.Reason)
-	if hmmToolExecutionContinue || (pinFound && isHMMSubAgentExecutionLock(res.TurnType, subAgentHint, pin, fresh)) {
-		decision := pinDecision(pin)
-		res.Decision = decision
-		res.StickyHit = true
-		if hmmToolExecutionContinue {
-			res.PinTier = "hmm_tool_execution_lock"
-		} else {
-			res.PinTier = "hmm_subagent_execution_lock"
-		}
-		s.refreshPin(ctx, installationID, res.SessionKey, pin, res.PinRole, decision)
-		return res, nil
-	}
-	if (hmmToolExecutionFresh || hmmToolResultFresh) && fresh.Provider == pin.Provider && fresh.Model == pin.Model {
-		res.Decision = fresh
-		if hmmToolExecutionFresh {
-			res.PinTier = "hmm_tool_execution_fresh_same_model"
-		} else {
-			res.PinTier = "hmm_tool_result_fresh_same_model"
-		}
-		s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, fresh)
-		return res, nil
-	}
 	if isHMMDecision(fresh) {
 		res.Decision = fresh
 		if pinFound {
-			res.PinTier = "hmm_fresh"
+			res.PinTier = "hmm_fresh_unpinned"
 		}
-		s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, fresh)
 		return res, nil
 	}
 
@@ -648,11 +600,6 @@ func (s *Service) runTurnLoop(
 		plannerIn.Pin = sessionpin.Pin{}
 	}
 	decision := planner.Decide(plannerIn, s.planner)
-	if hmmToolExecutionFresh && decision.Outcome == planner.OutcomeStay {
-		decision = planner.Decision{Outcome: planner.OutcomeSwitch, Reason: "tool_execution_fresh"}
-	} else if hmmToolResultFresh && decision.Outcome == planner.OutcomeStay {
-		decision = planner.Decision{Outcome: planner.OutcomeSwitch, Reason: "tool_result_fresh"}
-	}
 	res.PlannerDecision = decision
 
 	if decision.Outcome == planner.OutcomeStay && pinFound {

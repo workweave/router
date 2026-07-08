@@ -276,9 +276,12 @@ func TestTurnLoop_HMMToolResultCommunicationFollowsFreshDecision(t *testing.T) {
 	assert.Equal(t, 1, fr.routeCalls, "tool_result must ask HMM for a fresh communication decision")
 	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel),
 		"a completed tool result must not stay pinned to the tool-execution model")
+	store.mu.Lock()
+	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	store.mu.Unlock()
 }
 
-func TestTurnLoop_HMMToolResultContinuesToolExecutionPin(t *testing.T) {
+func TestTurnLoop_HMMToolResultToolExecutionUsesFreshDecision(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -304,11 +307,14 @@ func TestTurnLoop_HMMToolResultContinuesToolExecutionPin(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultPinnedBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "tool_result still scores so HMM can decide whether execution continues")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel),
-		"ongoing tool execution keeps the existing execution pin")
+	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"HMM tool execution must follow the fresh sidecar decision instead of an existing session pin")
+	store.mu.Lock()
+	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	store.mu.Unlock()
 }
 
-func TestTurnLoop_HMMToolExecutionLockBeatsPlannerSwitch(t *testing.T) {
+func TestTurnLoop_HMMToolExecutionDoesNotServeExistingPin(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -336,8 +342,11 @@ func TestTurnLoop_HMMToolExecutionLockBeatsPlannerSwitch(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "ongoing HMM execution still scores to see if execution continues")
-	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
-		"ongoing tool execution must keep its selected model instead of planner-switching mid-execution")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel),
+		"HMM tool execution must not keep an existing session pin")
+	store.mu.Lock()
+	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	store.mu.Unlock()
 }
 
 func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
@@ -370,6 +379,9 @@ func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
 	assert.Equal(t, 1, fr.routeCalls, "HMM conversation turns must score fresh")
 	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
 		"HMM normal conversation routing must follow the fresh sidecar decision instead of EV-staying on the old pin")
+	store.mu.Lock()
+	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	store.mu.Unlock()
 }
 
 func TestTurnLoop_HMMToolExecutionBreaksConversationalPin(t *testing.T) {
@@ -403,15 +415,12 @@ func TestTurnLoop_HMMToolExecutionBreaksConversationalPin(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
 		"a fresh HMM tool/explore execution decision must break a conversational pin")
 
-	waitForUpsert(t, store)
-	require.NotEmpty(t, store.upserts)
-	last := store.upserts[len(store.upserts)-1]
-	assert.Equal(t, "claude-sonnet-5", last.Model)
-	assert.True(t, strings.HasPrefix(last.Reason, "hmm_policy:tool_execution"),
-		"the execution phase must be persisted so later tool-result routing can detect it")
+	store.mu.Lock()
+	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	store.mu.Unlock()
 }
 
-func TestTurnLoop_HMMToolExecutionSameModelUpdatesPinReason(t *testing.T) {
+func TestTurnLoop_HMMToolExecutionSameModelDoesNotRewritePin(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -441,12 +450,9 @@ func TestTurnLoop_HMMToolExecutionSameModelUpdatesPinReason(t *testing.T) {
 	assert.Equal(t, 1, fr.routeCalls, "main-loop HMM turn must ask for a fresh decision")
 	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 
-	waitForUpsert(t, store)
-	require.NotEmpty(t, store.upserts)
-	last := store.upserts[len(store.upserts)-1]
-	assert.Equal(t, "claude-sonnet-4-5", last.Model)
-	assert.True(t, strings.HasPrefix(last.Reason, "hmm_policy:tool_execution"),
-		"same-model fresh execution decisions must still rewrite the pin phase")
+	store.mu.Lock()
+	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	store.mu.Unlock()
 }
 
 // TestTurnLoop_ToolResultPinOnExcludedProviderFallsThroughToScorer verifies that a pin

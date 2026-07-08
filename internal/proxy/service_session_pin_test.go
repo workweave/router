@@ -507,7 +507,7 @@ func TestService_HardPin_HMMExploreBypassesBootHardPin(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
-func TestService_HMMSubAgentKeepsExecutionPin(t *testing.T) {
+func TestService_HMMSubAgentUsesFreshDecision(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
 	store.pin = sessionpin.Pin{
@@ -530,8 +530,11 @@ func TestService_HMMSubAgentKeepsExecutionPin(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(exploreBody), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "subagent HMM turns may still score for diagnostics")
-	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel),
-		"an HMM Explore subagent must keep its selected execution model for the subagent session")
+	assert.Equal(t, "claude-opus-4-7", rec.Header().Get(proxy.HeaderRouterModel),
+		"an HMM Explore subagent must follow the fresh sidecar decision instead of an existing execution pin")
+	store.mu.Lock()
+	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	store.mu.Unlock()
 }
 
 func TestService_HardPin_ExploreFallsThroughWhenFlagOff(t *testing.T) {
