@@ -120,7 +120,7 @@ func isHMMDecision(dec router.Decision) bool {
 }
 
 const hmmHistoryReason = "hmm_history"
-const hmmUpgradeConfidenceThreshold = 0.85
+const defaultHMMUpgradeConfidenceThreshold = 0.85
 
 const (
 	hmmReasonConfidentUpgrade     = "hmm_confident_upgrade"
@@ -768,7 +768,11 @@ func (s *Service) hmmCostGatedDecision(
 
 	if hmmFreshIsMoreExpensive(stayPin.Model, fresh.Model, req.SubsidizedModelCostFactor) {
 		confidence, ok := hmmDecisionConfidence(fresh)
-		if ok && confidence >= hmmUpgradeConfidenceThreshold {
+		// Threshold configurable per-deploy via ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD
+		// (turnloop.go-bound to Package proxy.Service via WithHMMUpgradeConfidenceThreshold).
+		// Default 0.85 — calibrated assumes the sidecar's ChosenScore is a [0,1]
+		// posterior probability; lower if the sidecar returns scores on a wider range.
+		if ok && confidence >= s.hmmUpgradeConfidenceThreshold {
 			base.Outcome = planner.OutcomeSwitch
 			base.Reason = hmmReasonConfidentUpgrade
 		} else {

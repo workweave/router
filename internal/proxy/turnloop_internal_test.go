@@ -616,3 +616,103 @@ func TestModelSwitched(t *testing.T) {
 		})
 	}
 }
+
+// TestService_NewService_HMMUpgradeConfidenceDefaults: the HMM "upgrade to
+// more expensive model" ChosenScore threshold must default to 0.85 so a fresh
+// deploy behaves like the previous hardcoded behavior. Without a default the
+// floor becomes 0 and every fresh HMM "upgrade" picks would beat an EV stay.
+func TestService_NewService_HMMUpgradeConfidenceDefaults(t *testing.T) {
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderAnthropic: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	assert.Equal(t, defaultHMMUpgradeConfidenceThreshold, svc.hmmUpgradeConfidenceThreshold,
+		"new deploys must default to the documented 0.85 threshold")
+}
+
+// TestService_WithHMMUpgradeConfidenceThreshold: setter accepts in-range and
+// rejects out-of-range. Out-of-range values must not the existing threshold —
+// failing silently on bad input would let a single typo disable upgrade
+// gating permanently.
+func TestService_WithHMMUpgradeConfidenceThreshold(t *testing.T) {
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderAnthropic: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	svc.WithHMMUpgradeConfidenceThreshold(0.50)
+	assert.Equal(t, 0.50, svc.hmmUpgradeConfidenceThreshold,
+		"in-range threshold must be applied")
+
+	svc.WithHMMUpgradeConfidenceThreshold(-0.10)
+	assert.Equal(t, 0.50, svc.hmmUpgradeConfidenceThreshold,
+		"negative threshold must be rejected")
+
+	svc.WithHMMUpgradeConfidenceThreshold(1.50)
+	assert.Equal(t, 0.50, svc.hmmUpgradeConfidenceThreshold,
+		"threshold above 1.0 must be rejected")
+
+	svc.WithHMMUpgradeConfidenceThreshold(0.0)
+	assert.Equal(t, 0.0, svc.hmmUpgradeConfidenceThreshold,
+		"zero is a legitimate value, not an error")
+}
+
+// TestHMMCostGate_UpgradeThresholdConfigurable: lower the threshold so a
+// ChosenScore that the default 0.85 rejects is accepted. Verifies the wiring
+// between withHMMUpgradeConfidenceThreshold and the cost-gate switch path.
+func TestHMMCostGate_UpgradeThresholdConfigurable(t *testing.T) {
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderAnthropic: nil, providers.ProviderFireworks: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	svc.WithHMMUpgradeConfidenceThreshold(0.20)
+	history := sessionpin.Pin{
+		Provider:        providers.ProviderFireworks,
+		LastServedModel: "moonshotai/kimi-k2.7",
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fresh := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-sonnet-5",
+		Reason:   "hmm_policy(classifier 'Complex Followup')",
+		Metadata: &router.RoutingMetadata{
+			Strategy:    string(router.StrategyHMM),
+			RouteID:     "route-1",
+			ChosenScore: 0.30,
+		},
+	}
+
+	decision, plan, sticky, stayModel := svc.hmmCostGatedDecision(
+		router.Request{},
+		sessionpin.Pin{},
+		history,
+		fresh,
+		10_000,
+		false,
+	)
+	assert.False(t, sticky, "0.30 must clear 0.20 threshold")
+	assert.Equal(t, "claude-sonnet-5", decision.Model)
+	assert.Equal(t, planner.OutcomeSwitch, plan.Outcome)
+	assert.Equal(t, hmmReasonConfidentUpgrade, plan.Reason)
+	assert.Equal(t, "moonshotai/kimi-k2.7", stayModel)
+}

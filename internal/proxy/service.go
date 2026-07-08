@@ -146,6 +146,14 @@ type Service struct {
 	// when the session pin carries no runner-up (PairedModel). Set from
 	// ROUTER_CYBER_REFUSAL_FALLBACK_MODEL; defaults to claude-sonnet-5.
 	cyberRefusalFallbackModel string
+	// hmmUpgradeConfidenceThreshold is the minimum fresh-decision ChosenScore on
+	// the HMM strategy that overrides an EV stay for a *more expensive* fresh
+	// model. Below it the stay-pin holds even if the sidecar prefers an
+	// upgrade — protects against the sidecar occasionally returning a low-
+	// confidence "upgrade" suggestion that would otherwise thrash the prompt
+	// cache. Set via ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD. Out-of-range
+	// values are rejected by the setter and the default sticks.
+	hmmUpgradeConfidenceThreshold float64
 	// effortEscalation enables the escalate-on-failure reasoning-effort policy:
 	// gpt-5.x serves low effort by default and high after an observed
 	// failed/no-progress turn; gemini is pinned low. Off by default (set from
@@ -896,11 +904,12 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 			ExpectedRemainingTurns: DefaultPlannerExpectedRemainingTurns,
 			TierUpgradeEnabled:     DefaultPlannerTierUpgradeEnabled,
 		},
-		plannerEnabled:            true,
-		scoreToolResultTurns:      true,
-		loopEscalationEnabled:     true,
-		cyberRefusalRepin:         false,
-		cyberRefusalFallbackModel: "claude-sonnet-5",
+		plannerEnabled:                true,
+		scoreToolResultTurns:          true,
+		loopEscalationEnabled:         true,
+		cyberRefusalRepin:             false,
+		cyberRefusalFallbackModel:     "claude-sonnet-5",
+		hmmUpgradeConfidenceThreshold: defaultHMMUpgradeConfidenceThreshold,
 	}
 }
 
@@ -943,6 +952,22 @@ func (s *Service) WithCyberRefusalFallbackModel(model string) *Service {
 	if strings.TrimSpace(model) != "" {
 		s.cyberRefusalFallbackModel = strings.TrimSpace(model)
 	}
+	return s
+}
+
+// WithHMMUpgradeConfidenceThreshold sets the minimum ChosenScore from the HMM
+// sidecar that lets a fresh "upgrade to a more expensive model" decision beat
+// the planner's EV stay on the cheaper pinned model. Below this threshold an
+// EV stay holds even if the sidecar prefers an upgrade — protects against
+// occasional low-confidence "upgrade" suggestions that would thrash the prompt
+// cache for no real benefit. Out-of-range values (not in [0,1]) are rejected
+// and the existing threshold stays. Wired from
+// ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD.
+func (s *Service) WithHMMUpgradeConfidenceThreshold(v float64) *Service {
+	if v < 0 || v > 1 {
+		return s
+	}
+	s.hmmUpgradeConfidenceThreshold = v
 	return s
 }
 
