@@ -377,10 +377,8 @@ func (s *Service) runTurnLoop(
 		pin = sessionpin.Pin{}
 	}
 	if maxedModel := maxedOutServedModel(hmmHistory); maxedModel != "" {
-		// No expiry gate: a model that saturated its output cap must be excluded
-		// even after the history row's TTL lapses, matching the active-pin maxed
-		// path above — otherwise the degenerate auto-continue loop can re-select
-		// it on the very next turn.
+		// No expiry gate: match the active-pin maxed path so the degenerate
+		// auto-continue loop cannot re-select a saturated model after TTL lapses.
 		log.Info("HMM history maxed out on previous turn; excluding for this turn",
 			"history_provider", hmmHistory.Provider,
 			"maxed_model", maxedModel,
@@ -792,10 +790,8 @@ func (s *Service) hmmStayPin(req router.Request, activePin sessionpin.Pin, hmmHi
 		best sessionpin.Pin
 		ok   bool
 	)
-	// The active routing pin is only an HMM stay candidate when it was itself
-	// written by an HMM turn. A cluster/planner pin from a prior non-HMM stretch
-	// (e.g. the session's strategy header changed mid-flight) must not win an
-	// HMM turn's EV stay — the _hmm_history row is the authoritative source.
+	// Only HMM-written pins are stay candidates; a cluster/planner pin from a
+	// prior non-HMM stretch must not steer an HMM EV stay.
 	if !isHMMPinReason(activePin.Reason) {
 		activePin = sessionpin.Pin{}
 	}

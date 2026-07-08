@@ -2973,11 +2973,8 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		TurnCount:      1,
 		PinnedUntil:    pinExpiry(hmmHistoryReason),
 	})
-	// Mirror recordTurnUsage's zero-usage guard for the UpdateUsage writebacks:
-	// a failed/empty upstream turn carries no tokens, and writing it would
-	// overwrite the history row's prior token counts and last_turn_ended_at —
-	// making the next turn's EV-stay and cache-warm checks read a warm session
-	// as cold or usage-less. The TTL-refreshing upsert above still ran.
+	// Zero tokens means a failed/empty upstream turn — don't clobber prior
+	// usage counters; the TTL-refreshing upsert above already ran.
 	if in == 0 && out == 0 && cacheCreation == 0 && cacheRead == 0 {
 		return
 	}
