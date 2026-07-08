@@ -182,10 +182,8 @@ func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *
 		// by message id, so a constant placeholder undercounts tokens/cost.
 		id = "msg_translated_" + randomHex(8)
 	}
-	// Per-response nonce appended to every tool_use.id (see uniqueToolUseID on
-	// the streaming translator for the full rationale): deterministic upstreams
-	// (Kimi-k2.x on Fireworks) reuse a stable id like "functions.Bash:0" every
-	// turn, which Claude Code dedupes and drops, stalling the session.
+	// Per-response nonce so deterministic upstream ids don't repeat across turns
+	// (see uniqueToolUseIDWithNonce for full rationale).
 	toolIDNonce := randomHex(6)
 	model := gjson.GetBytes(body, "model").String()
 	if model == "" {

@@ -130,12 +130,9 @@ func redactJSON(t *testing.T, data []byte) map[string]interface{} {
 var synthToolID = regexp.MustCompile(`^call_[0-9a-f]{8}$`)
 
 // nonceSuffixedToolID matches an upstream-echoed tool-call id that
-// uniqueToolUseIDWithNonce suffixed with a per-response 12-hex-char nonce
-// (functions_Bash_0_<nonce>). The nonce is volatile per response, so redact
-// only the suffix and keep the readable upstream prefix in the golden. The
-// prefix is anchored to a tool-call id shape (call_/toolu_/functions_/tc_…) so
-// an unrelated stable id that merely ends in _<12hex> is left untouched and its
-// real changes still show in the golden diff.
+// uniqueToolUseIDWithNonce suffixed with a per-response 12-hex-char nonce.
+// Prefix is anchored to tool-call id shapes (call_/toolu_/functions_/tc_…) so
+// an unrelated stable id ending in _<12hex> is left untouched in goldens.
 var nonceSuffixedToolID = regexp.MustCompile(`^((?:call_|toolu_|tc_|functions?[._]).*)_[0-9a-f]{12}$`)
 
 // redactVolatile walks a decoded frame, replacing message ids and synthesized
@@ -156,11 +153,8 @@ func redactVolatile(v interface{}) {
 		delete(x, "created")
 		for k, val := range x {
 			if s, ok := val.(string); ok {
-				// Tool-use ids and their paired tool_use_id carry a per-response
-				// nonce suffix (uniqueToolUseIDWithNonce). Strip the volatile
-				// suffix first, then redact the prefix: a fully-synthetic prefix
-				// (Gemini's "call_<8hex>") is itself volatile and collapses to
-				// <tool_id>; an upstream-echoed prefix stays readable.
+				// Nonce suffix (uniqueToolUseIDWithNonce) is volatile; strip it,
+				// then redact a synthetic prefix or keep an upstream-echoed one.
 				prefix := s
 				hasNonce := false
 				if m := nonceSuffixedToolID.FindStringSubmatch(s); m != nil {
