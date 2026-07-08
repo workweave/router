@@ -2009,21 +2009,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	routeMs := time.Since(routeStart).Milliseconds()
 	s.logPlannerOutcome(ctx, routeRes)
 
-	// Cross-envelope no-progress detector: if this session dispatches the same
-	// (decision, tool-progress, prompt-prefix) fingerprint repeatedly within a
-	// window, the agent is stuck (sub-agent spawn loop, or a re-issued identical
-	// call) — break the pin and emit a synthetic stop. The tool-progress marker
-	// is the key guard: a genuinely progressing agent appends a new tool call
-	// each turn, so it never false-positives even when top-level message count
-	// stays flat (as with Explore sub-agents).
+	// Cross-envelope no-progress detector: repeated identical dispatch
+	// fingerprints within a window mean the agent is stuck (sub-agent spawn
+	// loop, or a re-issued identical call) — break the pin and emit a synthetic
+	// stop.
 	//
-	// Gated to turns that carry tool activity — a tool_use in history
-	// (inboundToolCallCount > 0) or a tool_result this turn. The fingerprint
-	// drops message_count when a marker is present, so in a long session
-	// (transcript past the prompt-prefix cap) a frozen marker + frozen prefix
-	// would otherwise let a run of healthy TEXT-ONLY assistant turns collide and
-	// falsely trip the break. Tool-bearing turns are the only ones a stuck
-	// re-issue loop produces, so gating here costs no real detection.
+	// Gated to tool-bearing turns (tool_use in history or tool_result this turn)
+	// because a frozen marker + frozen prompt prefix collide on healthy text-only
+	// turns, causing false trips; only re-issue loops produce tool-bearing turns.
 	toolBearingTurn := inboundToolCallCount > 0 || inboundLastUser.HasToolResult
 	if toolBearingTurn && s.noProgress != nil {
 		fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env))

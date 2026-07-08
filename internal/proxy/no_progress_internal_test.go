@@ -104,12 +104,8 @@ func TestNoProgressTracker_TripsOnFrozenMarkerDespiteRisingMessageCount(t *testi
 	assert.Equal(t, noProgressMatchThreshold, count)
 }
 
-// The no-progress detector is gated to tool-bearing turns (a tool_use in
-// history or a tool_result this turn). A run of healthy text-only assistant
-// turns in a long session freezes both the marker and the (capped) prompt
-// prefix, so without this gate they would collide and falsely trip the break.
-// This mirrors the ProxyMessages gate: toolBearingTurn = inboundToolCallCount
-// > 0 || inboundLastUser.HasToolResult.
+// Gate: the no-progress detector only runs on tool-bearing turns so a
+// frozen marker + frozen prompt prefix can't trip it on healthy text-only turns.
 func TestNoProgressGate_TextOnlyTurnIsNotToolBearing(t *testing.T) {
 	textOnly := []byte(`{"model":"kimi","messages":[` +
 		`{"role":"user","content":"explain the design"},` +
