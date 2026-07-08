@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -16,13 +17,14 @@ import (
 // stubPinStore is a minimal sessionpin.Store for testing recordTurnUsage.
 // getPin/getFound configure Get's response and default to a miss.
 type stubPinStore struct {
-	mu        sync.Mutex
-	lastUsage sessionpin.Usage
-	usageHits int
-	getPin    sessionpin.Pin
-	getFound  bool
-	upserts   []sessionpin.Pin
-	upsertErr error
+	mu         sync.Mutex
+	lastUsage  sessionpin.Usage
+	usageHits  int
+	usageRoles []string
+	getPin     sessionpin.Pin
+	getFound   bool
+	upserts    []sessionpin.Pin
+	upsertErr  error
 }
 
 func newStubPinStore() *stubPinStore {
@@ -45,11 +47,12 @@ func (s *stubPinStore) Upsert(_ context.Context, p sessionpin.Pin) error {
 	return nil
 }
 
-func (s *stubPinStore) UpdateUsage(_ context.Context, _ [sessionpin.SessionKeyLen]byte, _ string, u sessionpin.Usage) error {
+func (s *stubPinStore) UpdateUsage(_ context.Context, _ [sessionpin.SessionKeyLen]byte, role string, u sessionpin.Usage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastUsage = u
 	s.usageHits++
+	s.usageRoles = append(s.usageRoles, role)
 	return nil
 }
 
@@ -103,7 +106,7 @@ func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	assert.False(t, store.lastUsage.EndedAt.IsZero(), "EndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
 
-func TestRecordTurnUsage_SkipsHMMDecision(t *testing.T) {
+func TestRecordTurnUsage_HMMDecisionWritesHistoryOnly(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(
 		nil,
@@ -123,6 +126,7 @@ func TestRecordTurnUsage_SkipsHMMDecision(t *testing.T) {
 	}
 
 	res := turnLoopResult{
+		InstallationID: uuid.New(),
 		Decision: router.Decision{
 			Provider: "anthropic",
 			Model:    "claude-sonnet-5",
@@ -135,12 +139,24 @@ func TestRecordTurnUsage_SkipsHMMDecision(t *testing.T) {
 		SessionKey: sessionKey,
 		PinRole:    sessionpin.DefaultRole,
 		PinTier:    "hmm_fresh_unpinned",
+		// Simulate a prior HMM/default-route model so the history role can
+		// latch has_ever_switched without mutating the active routing role.
+		PriorServedModel: "claude-haiku-4-5",
 	}
 	svc.recordTurnUsage(res, res.Decision.Model, 1200, 80, 200, 900)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	assert.Equal(t, 0, store.usageHits, "HMM turns do not own session pins and must not mutate stale pin usage")
+	require.Len(t, store.upserts, 1)
+	assert.Equal(t, hmmHistoryRole(sessionpin.DefaultRole), store.upserts[0].Role)
+	assert.Equal(t, hmmHistoryReason, store.upserts[0].Reason)
+	assert.Empty(t, store.upserts[0].Model, "HMM history rows must not be routable pins")
+	assert.Equal(t, []string{
+		hmmHistoryRole(sessionpin.DefaultRole),
+		hmmHistoryRole(sessionpin.DefaultRole),
+	}, store.usageRoles)
+	assert.NotContains(t, store.usageRoles, sessionpin.DefaultRole, "HMM turns must not mutate the active routing pin role")
+	assert.Equal(t, "claude-sonnet-5", store.lastUsage.ServedModel)
 }
 
 // TestLoadPin_DoesNotServeExpiredPostgresPinButKeepsEmitHistory: expired rows
@@ -228,6 +244,23 @@ func TestLoadPin_ServesFreshPostgresPin(t *testing.T) {
 	require.True(t, found, "non-expired Postgres row must be returned")
 	assert.Equal(t, "claude-opus-4-7", pin.Model)
 	assert.Equal(t, "anthropic", pin.Provider)
+}
+
+func TestSwitchHistoryFromPins_UsesHMMHistory(t *testing.T) {
+	now := time.Now()
+	active := sessionpin.Pin{
+		LastServedModel: "claude-haiku-4-5",
+		LastTurnEndedAt: now.Add(-time.Minute),
+	}
+	hmmHistory := sessionpin.Pin{
+		LastServedModel: "claude-sonnet-5",
+		LastTurnEndedAt: now,
+	}
+
+	prior, everSwitched := switchHistoryFromPins(active, hmmHistory)
+
+	assert.Equal(t, "claude-sonnet-5", prior)
+	assert.True(t, everSwitched, "different active/history models must preserve thinking-block stripping")
 }
 
 // TestModelSwitched covers switch → stay → stay: once a session has served

@@ -277,7 +277,7 @@ func TestTurnLoop_HMMToolResultCommunicationFollowsFreshDecision(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel),
 		"a completed tool result must not stay pinned to the tool-execution model")
 	store.mu.Lock()
-	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	assertOnlyHMMHistoryUpserts(t, store)
 	store.mu.Unlock()
 }
 
@@ -310,7 +310,7 @@ func TestTurnLoop_HMMToolResultToolExecutionUsesFreshDecision(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel),
 		"HMM tool execution must follow the fresh sidecar decision instead of an existing session pin")
 	store.mu.Lock()
-	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	assertOnlyHMMHistoryUpserts(t, store)
 	store.mu.Unlock()
 }
 
@@ -345,7 +345,7 @@ func TestTurnLoop_HMMToolExecutionDoesNotServeExistingPin(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel),
 		"HMM tool execution must not keep an existing session pin")
 	store.mu.Lock()
-	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	assertOnlyHMMHistoryUpserts(t, store)
 	store.mu.Unlock()
 }
 
@@ -380,7 +380,7 @@ func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-5", rec.Header().Get(proxy.HeaderRouterModel),
 		"HMM normal conversation routing must follow the fresh sidecar decision instead of EV-staying on the old pin")
 	store.mu.Lock()
-	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	assertOnlyHMMHistoryUpserts(t, store)
 	store.mu.Unlock()
 }
 
@@ -416,7 +416,7 @@ func TestTurnLoop_HMMToolExecutionBreaksConversationalPin(t *testing.T) {
 		"a fresh HMM tool/explore execution decision must break a conversational pin")
 
 	store.mu.Lock()
-	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	assertOnlyHMMHistoryUpserts(t, store)
 	store.mu.Unlock()
 }
 
@@ -451,7 +451,7 @@ func TestTurnLoop_HMMToolExecutionSameModelDoesNotRewritePin(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-5", rec.Header().Get(proxy.HeaderRouterModel))
 
 	store.mu.Lock()
-	assert.Empty(t, store.upserts, "fresh HMM decisions must not write session pins")
+	assertOnlyHMMHistoryUpserts(t, store)
 	store.mu.Unlock()
 }
 

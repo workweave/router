@@ -48,11 +48,12 @@ func cacheWarm(pin sessionpin.Pin) bool {
 
 // turnLoopResult bundles the routing decision and pin/planner state.
 type turnLoopResult struct {
-	Decision   router.Decision
-	SessionKey [sessionpin.SessionKeyLen]byte
-	TurnType   turntype.TurnType
-	StickyHit  bool
-	HardPinned bool
+	Decision       router.Decision
+	SessionKey     [sessionpin.SessionKeyLen]byte
+	InstallationID uuid.UUID
+	TurnType       turntype.TurnType
+	StickyHit      bool
+	HardPinned     bool
 	// UsageBypass is true when the caller's own subscription has headroom:
 	// ProxyMessages must serve the requested model straight through with no
 	// billing debit, bypassing Decision's normal dispatch.
@@ -118,6 +119,15 @@ func isHMMDecision(dec router.Decision) bool {
 	return strings.HasPrefix(strings.TrimSpace(dec.Reason), "hmm_policy")
 }
 
+const hmmHistoryReason = "hmm_history"
+
+func hmmHistoryRole(role string) string {
+	if role == "" {
+		role = sessionpin.DefaultRole
+	}
+	return role + "_hmm_history"
+}
+
 // handoverOutcome describes the synchronous handover step.
 type handoverOutcome struct {
 	Invoked       bool
@@ -169,9 +179,10 @@ func (s *Service) runTurnLoop(
 ) (turnLoopResult, error) {
 	log := observability.FromContext(ctx)
 	res := turnLoopResult{
-		TurnType:      turntype.DetectFromEnvelope(env, feats, subAgentHint),
-		PinTier:       "miss",
-		RequestedTier: catalog.TierFor(feats.Model),
+		InstallationID: installationID,
+		TurnType:       turntype.DetectFromEnvelope(env, feats, subAgentHint),
+		PinTier:        "miss",
+		RequestedTier:  catalog.TierFor(feats.Model),
 	}
 	res.PinRole = roleForTier(res.RequestedTier)
 	log.Info("turnloop classified",
@@ -272,8 +283,8 @@ func (s *Service) runTurnLoop(
 	res.SessionKey = sessionKey
 
 	pin, pinFound := s.loadPin(ctx, res.SessionKey, res.PinRole)
-	res.PriorServedModel = pin.LastServedModel
-	res.SessionEverSwitched = pin.HasEverSwitched
+	hmmHistory := s.loadHMMHistory(ctx, res.SessionKey, res.PinRole)
+	res.PriorServedModel, res.SessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
 	// Computed before any same-turn pin-drop guards below so it reflects the
 	// prior turn's outcome; Service.effortEscalation gates whether it's acted on.
 	res.EscalateEffort = pinFound && !pin.LastTurnEndedAt.IsZero() &&
@@ -722,6 +733,34 @@ func (s *Service) loadPin(ctx context.Context, sessionKey [sessionpin.SessionKey
 		return pin, false
 	}
 	return pin, true
+}
+
+func (s *Service) loadHMMHistory(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) sessionpin.Pin {
+	log := observability.FromContext(ctx)
+	pin, found, err := s.pinStore.Get(ctx, sessionKey, hmmHistoryRole(role))
+	if err != nil {
+		log.Error("HMM switch-history store unavailable", "err", err)
+		return sessionpin.Pin{}
+	}
+	if !found {
+		return sessionpin.Pin{}
+	}
+	return pin
+}
+
+func switchHistoryFromPins(activePin, hmmHistory sessionpin.Pin) (string, bool) {
+	priorServedModel := activePin.LastServedModel
+	sessionEverSwitched := activePin.HasEverSwitched || hmmHistory.HasEverSwitched
+	if hmmHistory.LastServedModel != "" &&
+		(priorServedModel == "" || hmmHistory.LastTurnEndedAt.After(activePin.LastTurnEndedAt)) {
+		priorServedModel = hmmHistory.LastServedModel
+	}
+	if activePin.LastServedModel != "" &&
+		hmmHistory.LastServedModel != "" &&
+		activePin.LastServedModel != hmmHistory.LastServedModel {
+		sessionEverSwitched = true
+	}
+	return priorServedModel, sessionEverSwitched
 }
 
 // refreshPin extends the TTL on an existing pin. Carries the existing pin's

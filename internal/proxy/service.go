@@ -1970,17 +1970,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		// discounts Anthropic correctly on reroute.
 		req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, r.Header)
 
-		// Bypass returns early without loading the pin, so load it now for
+		// Bypass returns early without loading pin history, so load it now for
 		// modelSwitched() to correctly detect a switch away from it.
 		var priorServedModel string
 		var sessionEverSwitched bool
 		if s.pinStore != nil {
 			sessionKey := DeriveSessionKey(env, apiKeyID)
-			pin, pinFound := s.loadPin(ctx, sessionKey, roleForTier(catalog.TierFor(feats.Model)))
-			if pinFound {
-				priorServedModel = pin.LastServedModel
-				sessionEverSwitched = pin.HasEverSwitched
-			}
+			role := roleForTier(catalog.TierFor(feats.Model))
+			pin, _ := s.loadPin(ctx, sessionKey, role)
+			hmmHistory := s.loadHMMHistory(ctx, sessionKey, role)
+			priorServedModel, sessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
 		}
 
 		log.Info("usage-bypass pre-commit failure, rerouting via scorer",
@@ -2902,6 +2901,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedModel string, in, ou
 		return
 	}
 	if isHMMDecision(res.Decision) {
+		s.recordHMMTurnHistory(res, servedModel)
 		return
 	}
 	var zeroKey [sessionpin.SessionKeyLen]byte
@@ -2925,6 +2925,41 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedModel string, in, ou
 	}
 	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, usage); err != nil {
 		observability.Get().Error("session pin usage writeback failed", "err", err)
+	}
+}
+
+func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedModel string) {
+	if servedModel == "" || res.InstallationID == uuid.Nil {
+		return
+	}
+	var zeroKey [sessionpin.SessionKeyLen]byte
+	if res.SessionKey == zeroKey {
+		return
+	}
+	role := hmmHistoryRole(res.PinRole)
+	s.upsertPin(context.Background(), sessionpin.Pin{
+		SessionKey:     res.SessionKey,
+		Role:           role,
+		InstallationID: res.InstallationID,
+		Reason:         hmmHistoryReason,
+		TurnCount:      1,
+		PinnedUntil:    pinExpiry(hmmHistoryReason),
+	})
+	now := time.Now()
+	if res.PriorServedModel != "" && res.PriorServedModel != servedModel {
+		if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
+			EndedAt:     now,
+			ServedModel: res.PriorServedModel,
+		}); err != nil {
+			observability.Get().Error("HMM switch-history prior writeback failed", "err", err)
+			return
+		}
+	}
+	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
+		EndedAt:     now,
+		ServedModel: servedModel,
+	}); err != nil {
+		observability.Get().Error("HMM switch-history writeback failed", "err", err)
 	}
 }
 
