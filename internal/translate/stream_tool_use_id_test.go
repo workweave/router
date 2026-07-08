@@ -49,3 +49,74 @@ func TestAnthropicSSETranslator_SanitizesStreamedToolUseID(t *testing.T) {
 	}
 	assert.True(t, sawToolUse, "expected a tool_use content_block_start event")
 }
+
+// streamedToolUseIDs returns every tool_use.id from an Anthropic SSE body.
+func streamedToolUseIDs(out string) []string {
+	var ids []string
+	for _, line := range strings.Split(out, "\n") {
+		const p = "data: "
+		if !strings.HasPrefix(line, p) {
+			continue
+		}
+		block := gjson.Get(line[len(p):], "content_block")
+		if block.Get("type").String() == "tool_use" {
+			ids = append(ids, block.Get("id").String())
+		}
+	}
+	return ids
+}
+
+// Regression (Kimi-k2.x churn loop): deterministic OpenAI-compat upstreams
+// (Kimi on Fireworks) emit the SAME tool_call id — e.g. "functions.Bash:0" —
+// on every turn. sanitizeToolUseID normalizes the characters but not the value,
+// so the id "functions_Bash_0" repeated across turns. Claude Code dedupes
+// tool_use blocks by id and silently drops a repeat, so the model's call is
+// never executed, its result never returns, and the session churns re-issuing
+// the same call (58 Kimi turns, ~$3, no progress in one observed session).
+// Each translated response must therefore yield a distinct tool_use.id even
+// when the upstream id is byte-identical.
+func TestAnthropicSSETranslator_StreamedToolUseIDUniqueAcrossResponses(t *testing.T) {
+	feedOnce := func() string {
+		rec := httptest.NewRecorder()
+		w := translate.NewAnthropicSSETranslator(rec, "moonshotai/kimi-k2.7", nil)
+		require.NoError(t, w.Prelude(true))
+		feedChat(t, w,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"functions.Bash:0","function":{"name":"Bash","arguments":""}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`,
+		)
+		ids := streamedToolUseIDs(rec.Body.String())
+		require.Len(t, ids, 1)
+		return ids[0]
+	}
+
+	first := feedOnce()
+	second := feedOnce()
+
+	// Both must be sanitized (no dots/colons) and both must derive from the
+	// upstream id, but the per-response nonce must make them differ.
+	assert.Regexp(t, `^functions_Bash_0_[0-9a-f]{12}$`, first)
+	assert.Regexp(t, `^functions_Bash_0_[0-9a-f]{12}$`, second)
+	assert.NotEqual(t, first, second, "identical upstream ids must translate to distinct tool_use ids across responses")
+}
+
+// Within a single response, all blocks share one nonce so a tool_use.id and
+// its later tool_result.tool_use_id (which the client echoes back) still pair,
+// and distinct upstream ids stay distinct.
+func TestAnthropicSSETranslator_StreamedToolUseIDStableWithinResponse(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewAnthropicSSETranslator(rec, "moonshotai/kimi-k2.7", nil)
+	require.NoError(t, w.Prelude(true))
+	feedChat(t, w,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"functions.Bash:0","function":{"name":"Bash","arguments":"{}"}}]},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"functions.Read:1","function":{"name":"Read","arguments":"{}"}}]},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+	)
+	ids := streamedToolUseIDs(rec.Body.String())
+	require.Len(t, ids, 2)
+	assert.Regexp(t, `^functions_Bash_0_[0-9a-f]{12}$`, ids[0])
+	assert.Regexp(t, `^functions_Read_1_[0-9a-f]{12}$`, ids[1])
+	// Same response → same nonce suffix on both.
+	suffix := func(id string) string { return id[strings.LastIndex(id, "_")+1:] }
+	assert.Equal(t, suffix(ids[0]), suffix(ids[1]), "all tool_use ids in one response share the response nonce")
+	assert.NotEqual(t, ids[0], ids[1], "distinct upstream ids stay distinct")
+}

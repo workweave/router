@@ -182,6 +182,11 @@ func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *
 		// by message id, so a constant placeholder undercounts tokens/cost.
 		id = "msg_translated_" + randomHex(8)
 	}
+	// Per-response nonce appended to every tool_use.id (see uniqueToolUseID on
+	// the streaming translator for the full rationale): deterministic upstreams
+	// (Kimi-k2.x on Fireworks) reuse a stable id like "functions.Bash:0" every
+	// turn, which Claude Code dedupes and drops, stalling the session.
+	toolIDNonce := randomHex(6)
 	model := gjson.GetBytes(body, "model").String()
 	if model == "" {
 		model = requestModel
@@ -213,7 +218,7 @@ func openAIToAnthropicResponse(body []byte, requestModel string, toolValidator *
 	jw.Key("model")
 	jw.Str(model)
 	jw.Key("content")
-	issues := writeAnthropicContentFromOpenAI(jw, message, toolValidator, thinkTagReasoning, escapeNormalize)
+	issues := writeAnthropicContentFromOpenAI(jw, message, toolValidator, thinkTagReasoning, escapeNormalize, toolIDNonce)
 	jw.Key("stop_reason")
 	jw.Str(openAIFinishToAnthropicStopReason(finishReason))
 	jw.Key("stop_sequence")
@@ -233,7 +238,7 @@ func writeAnthropicThinkingBlock(jw *jsonWriter, thinking string) {
 	jw.EndObj()
 }
 
-func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolValidator *toolcheck.Validator, thinkTagReasoning, escapeNormalize bool) (issues []toolcheck.Issue) {
+func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolValidator *toolcheck.Validator, thinkTagReasoning, escapeNormalize bool, toolIDNonce string) (issues []toolcheck.Issue) {
 	jw.Arr()
 	reasoning := message.Get("reasoning_content").String()
 	if reasoning == "" {
@@ -300,7 +305,7 @@ func writeAnthropicContentFromOpenAI(jw *jsonWriter, message gjson.Result, toolV
 		jw.Key("type")
 		jw.Str("tool_use")
 		jw.Key("id")
-		jw.Str(id)
+		jw.Str(uniqueToolUseIDWithNonce(id, toolIDNonce))
 		jw.Key("name")
 		jw.Str(name)
 		jw.Key("input")

@@ -812,3 +812,27 @@ func sanitizeToolUseID(id string) string {
 	}
 	return string(b)
 }
+
+// uniqueToolUseIDWithNonce sanitizes id and appends a per-response nonce so the
+// resulting tool_use.id is unique across turns. Deterministic OpenAI-compat
+// upstreams (Kimi-k2.x on Fireworks, some vLLM/SGLang hosts) emit a stable id
+// like "functions.Bash:0" on every turn; sanitizeToolUseID normalizes the
+// characters but not the value, so the id repeats. Claude Code dedupes tool_use
+// blocks by id and silently drops a repeat, so the model's call is never
+// executed and the session churns re-issuing it. The nonce is generated once
+// per translated response and shared by every block in it, so ids stay stable
+// within a turn but differ between turns. Idempotent for a value already
+// carrying this nonce. Empty ids get a synthetic router-owned id.
+func uniqueToolUseIDWithNonce(id, nonce string) string {
+	if nonce == "" {
+		return sanitizeToolUseID(id)
+	}
+	clean := sanitizeToolUseID(id)
+	if clean == "" {
+		return "toolu_router_" + nonce
+	}
+	if strings.HasSuffix(clean, "_"+nonce) {
+		return clean
+	}
+	return clean + "_" + nonce
+}

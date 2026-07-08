@@ -64,6 +64,52 @@ func TestComputeNoProgressFingerprint_DistinguishesToolProgress(t *testing.T) {
 	assert.NotEqual(t, a, b, "an advancing tool-progress marker must change the fingerprint")
 }
 
+func TestComputeNoProgressFingerprint_IgnoresMessageCountWhenMarkerPresent(t *testing.T) {
+	// Regression (Kimi-k2.x churn loop): when Claude Code drops the upstream's
+	// repeated tool calls, they never enter history, so the tool-progress marker
+	// FREEZES — the correct "stuck" signal. But the session still appends real
+	// assistant/user/router messages each turn, so message_count keeps rising.
+	// Folding message_count into the hash while a marker exists made every turn's
+	// fingerprint unique and silently defeated the detector. With a frozen marker
+	// the fingerprint must be identical regardless of message_count.
+	d := router.Decision{Model: "moonshotai/kimi-k2.7", Provider: "fireworks"}
+	marker := "57\x00Bash\x00frozen-hash"
+	a := computeNoProgressFingerprint(d, "create a PR from staging to prod", 90, marker)
+	b := computeNoProgressFingerprint(d, "create a PR from staging to prod", 109, marker)
+	assert.Equal(t, a, b, "a frozen tool-progress marker must collide regardless of rising message count")
+}
+
+func TestComputeNoProgressFingerprint_MessageCountStillCountsWithoutMarker(t *testing.T) {
+	// The tool-free path keeps message_count as its only fallback signal, so a
+	// growing transcript with no marker must still change the fingerprint.
+	d := router.Decision{Model: "gemini-3.1-pro-preview", Provider: "google"}
+	a := computeNoProgressFingerprint(d, "explore RSVP files", 10, "")
+	b := computeNoProgressFingerprint(d, "explore RSVP files", 12, "")
+	assert.NotEqual(t, a, b, "without a marker, message_count must still distinguish turns")
+}
+
+func TestNoProgressTracker_TripsOnFrozenMarkerDespiteRisingMessageCount(t *testing.T) {
+	// End-to-end: the Kimi churn loop. Frozen tool-progress marker (dropped
+	// duplicate-id calls never advance it) plus a message_count that climbs each
+	// turn must now trip the detector at the threshold, where before the rising
+	// count kept every fingerprint unique and it never fired.
+	tr := newNoProgressTracker()
+	key := sessionKeyFromString("session-kimi-churn")
+	install := uuid.New()
+	d := router.Decision{Model: "moonshotai/kimi-k2.7", Provider: "fireworks"}
+	now := time.Now()
+	marker := "57\x00Bash\x00frozen-hash"
+
+	var looped bool
+	var count int
+	for i := 0; i < noProgressMatchThreshold; i++ {
+		fp := computeNoProgressFingerprint(d, "create a PR from staging to prod", 90+3*i, marker)
+		looped, count = tr.recordAndDetect(key, install, "high", fp, now)
+	}
+	assert.True(t, looped, "a frozen-marker loop with rising message count must trip the detector")
+	assert.Equal(t, noProgressMatchThreshold, count)
+}
+
 func TestNoProgressTracker_DoesNotTripWhenMessageCountGrows(t *testing.T) {
 	// Regression: a fast tool-call loop can exceed the dispatch threshold for
 	// one (model, provider) while the prompt prefix stays constant, but must

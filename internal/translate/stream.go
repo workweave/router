@@ -456,6 +456,17 @@ type AnthropicSSETranslator struct {
 	// Anthropic `error` event instead.
 	upstreamErrorStatus int
 	upstreamErrorBody   strings.Builder
+
+	// toolIDNonce is a per-response suffix appended to every translated
+	// tool_use.id (see uniqueToolUseID). Deterministic upstreams (Kimi-k2.x on
+	// Fireworks, some vLLM/SGLang hosts) emit stable ids like "functions.Bash:0"
+	// on every turn; sanitizeToolUseID normalizes the characters but not the
+	// value, so the id repeats across turns. Claude Code dedupes tool_use blocks
+	// by id and silently drops a repeat, so the model's call is never executed,
+	// its result never returns, and the session churns re-issuing the same call.
+	// A nonce unique to this response makes each turn's ids collision-free.
+	// Lazily seeded on first use so it shares message_start's randomness budget.
+	toolIDNonce string
 }
 
 // upstreamErrorBodyCap bounds how much of an upstream error body is retained
@@ -1354,11 +1365,25 @@ func (t *AnthropicSSETranslator) emitContentBlockStartTool(index int, id, name, 
 	t.bw.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":")
 	sse.WriteJSONInt(t.bw, int64(index))
 	t.bw.WriteString(",\"content_block\":{\"type\":\"tool_use\",\"id\":")
-	sse.WriteJSONString(t.bw, embedSignatureInID(sanitizeToolUseID(id), sig))
+	sse.WriteJSONString(t.bw, embedSignatureInID(t.uniqueToolUseID(id), sig))
 	t.bw.WriteString(",\"name\":")
 	sse.WriteJSONString(t.bw, name)
 	t.bw.WriteString(",\"input\":{}}}\n\n")
 	return t.flushEvent()
+}
+
+// uniqueToolUseID sanitizes id and appends this response's nonce so the
+// resulting tool_use.id is unique across turns (see uniqueToolUseIDWithNonce
+// and the toolIDNonce field for the full rationale). The nonce is a short
+// per-response random suffix, seeded once on first use and reused for every
+// block in the response so ids stay stable within the turn. Kept short (12 hex
+// chars) so a re-route to OpenAI rarely trips clampOpenAIToolCallID's 64-char
+// hash fallback.
+func (t *AnthropicSSETranslator) uniqueToolUseID(id string) string {
+	if t.toolIDNonce == "" {
+		t.toolIDNonce = randomHex(6)
+	}
+	return uniqueToolUseIDWithNonce(id, t.toolIDNonce)
 }
 
 func (t *AnthropicSSETranslator) emitContentBlockStartThinking(index int) error {

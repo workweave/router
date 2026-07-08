@@ -63,23 +63,38 @@ func toolProgressMarker(env *translate.RequestEnvelope) string {
 	return strconv.Itoa(len(sigs)) + "\x00" + last.Name + "\x00" + last.InputHash
 }
 
-// computeNoProgressFingerprint hashes routed (model, provider), message
-// count, a tool-call progress marker, and the prompt prefix.
+// computeNoProgressFingerprint hashes routed (model, provider), a tool-call
+// progress marker, the prompt prefix, and — only when there is no progress
+// marker — the message count.
 //
 // The prompt prefix alone is constant across a healthy agentic task (it's
 // just the user's typed task, tool results stripped), so it can't be the
 // sole key — every dispatch would collide. progressMarker is the main
 // guard: it advances on real progress and stays constant when stuck, so
-// only stuck loops accumulate matching fingerprints. messageCount is a
-// secondary signal for tool-free loops, but not sufficient alone: Claude
-// Code's Explore sub-agent holds message count flat while genuinely
-// progressing.
+// only stuck loops accumulate matching fingerprints.
+//
+// messageCount is deliberately EXCLUDED whenever progressMarker is non-empty.
+// A stuck agentic session still appends real assistant/user messages each turn
+// (retries, router markers, empty-body continuations), so messageCount climbs
+// even while no tool progress is made — folding it into the hash makes every
+// turn's fingerprint distinct and silently defeats the detector. This was the
+// failure mode behind a Kimi-k2.x churn loop: the model re-issued the same
+// tool calls for 20+ turns with a frozen tool-progress marker, but the rising
+// messageCount kept the fingerprints unique so the loop was never caught. When
+// there IS a marker, it fully captures progress; messageCount adds only noise.
+// It stays in the hash for the tool-free case (empty marker), where it is the
+// sole fallback signal — Claude Code's Explore sub-agent holds it flat while
+// genuinely progressing, so the tool-free path still tolerates false matches.
 func computeNoProgressFingerprint(decision router.Decision, promptText string, messageCount int, progressMarker string) noProgressFingerprint {
 	p := promptText
 	if len(p) > noProgressPromptPrefix {
 		p = p[:noProgressPromptPrefix]
 	}
-	return sha256.Sum256([]byte(decision.Model + "\x00" + decision.Provider + "\x00" + strconv.Itoa(messageCount) + "\x00" + progressMarker + "\x00" + p))
+	countPart := ""
+	if progressMarker == "" {
+		countPart = strconv.Itoa(messageCount)
+	}
+	return sha256.Sum256([]byte(decision.Model + "\x00" + decision.Provider + "\x00" + countPart + "\x00" + progressMarker + "\x00" + p))
 }
 
 type fingerprintEntry struct {

@@ -350,7 +350,11 @@ func TestOpenAIToAnthropicResponse_ToolUse(t *testing.T) {
 	require.Len(t, blocks, 1)
 	blk, _ := blocks[0].(map[string]any)
 	assert.Equal(t, "tool_use", blk["type"])
-	assert.Equal(t, "call_r1", blk["id"])
+	// The upstream id is suffixed with a per-response nonce so deterministic
+	// upstream ids (Kimi's "functions.Bash:0") don't repeat across turns and
+	// get dropped by Claude Code's id dedupe. See uniqueToolUseIDWithNonce.
+	id, _ := blk["id"].(string)
+	assert.Regexp(t, `^call_r1_[0-9a-f]{12}$`, id, "tool_use id must be the upstream id plus a per-response nonce")
 	assert.Equal(t, "Read", blk["name"])
 
 	input, _ := blk["input"].(map[string]any)
@@ -392,7 +396,8 @@ func TestOpenAIToAnthropicResponse_MixedTextAndToolCalls(t *testing.T) {
 
 	toolBlk, _ := blocks[1].(map[string]any)
 	assert.Equal(t, "tool_use", toolBlk["type"])
-	assert.Equal(t, "call_m1", toolBlk["id"])
+	id, _ := toolBlk["id"].(string)
+	assert.Regexp(t, `^call_m1_[0-9a-f]{12}$`, id, "tool_use id must be the upstream id plus a per-response nonce")
 }
 
 func TestOpenAIToAnthropicResponse_StopReasonMapping(t *testing.T) {

@@ -22,7 +22,7 @@
     "event": "content_block_start",
     "data": {
       "content_block": {
-        "id": "call_abc",
+        "id": "call_abc_<nonce>",
         "input": {},
         "name": "get_weather",
         "type": "tool_use"
