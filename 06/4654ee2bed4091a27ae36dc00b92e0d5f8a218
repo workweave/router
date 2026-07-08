@@ -1,0 +1,21 @@
+db/queries/model_router_users.sql
+  s_e92ea435dbd560::t_fcb053a9cd27aa 16-25,36-41
+internal/sqlc/model_router_users.sql.go
+  s_e92ea435dbd560::t_6309538aa1336c 167-172,233-242,252-257
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "064654ee2bed4091a27ae36dc00b92e0d5f8a218",
+  "prompts": {},
+  "sessions": {
+    "s_e92ea435dbd560": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "989bf375-5e1a-4018-95d3-06ed217182d4",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

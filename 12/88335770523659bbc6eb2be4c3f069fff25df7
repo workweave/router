@@ -1,0 +1,110 @@
+internal/translate/strictify_openai_test.go
+  s_be66dcd9ca26e3::t_fe840c59750e1f 1-154
+internal/translate/envelope.go
+  s_be66dcd9ca26e3::t_544f51f38d0978 11
+  s_be66dcd9ca26e3::t_79f77f6e2093ff 290-297,301-305
+internal/translate/toolcheck/jsonfix_test.go
+  s_be66dcd9ca26e3::t_444273f419be34 1-44
+internal/translate/tool_args_validation_test.go
+  s_be66dcd9ca26e3::t_bb3672ab0d74cd 47,50-52,62-73,75-90,93
+  s_be66dcd9ca26e3::t_4edfb4f2a4ef33 17-24
+  s_be66dcd9ca26e3::t_96bd3e875ae0ef 114-116,119,126-128
+internal/translate/toolcheck/toolcheck.go
+  s_be66dcd9ca26e3::t_e22c7c9084d20f 260
+  s_be66dcd9ca26e3::t_c483a4ee92ba50 219-222
+  s_be66dcd9ca26e3::t_a9fdb2a9e6527e 1-28,31-33,37-184,189-218,223-259,261-399
+  s_be66dcd9ca26e3::t_7cbf63ba42f830 185-188
+  s_be66dcd9ca26e3::t_01593c29ef9a25 29-30,34-36
+internal/proxy/service.go
+  s_be66dcd9ca26e3::t_5d410f53b5b053 1155-1158
+  s_be66dcd9ca26e3::t_a40cefdeb2195e 1241,1246-1247
+  s_be66dcd9ca26e3::t_b3da13072a81cb 1290-1291
+  s_be66dcd9ca26e3::t_d93280eb937526 1471-1487
+  s_be66dcd9ca26e3::t_4e31aa1a6f1d9b 1488
+internal/proxy/conformance_openai_test.go
+  s_be66dcd9ca26e3::t_689c429bd679e5 25-29
+  s_be66dcd9ca26e3::t_76268baf487c93 112-137
+internal/translate/emit_openai_responses.go
+  s_be66dcd9ca26e3::t_b4d242126d1ffd 262-271,286,291-297,312-313
+  s_be66dcd9ca26e3::t_6ae0e0f7c49fa4 9
+internal/proxy/testdata/conformance/openai_chat/toolcall_repaired_args.upstream.sse
+  s_be66dcd9ca26e3::t_144f2b6497143d 1-8
+internal/translate/translate.go
+  s_be66dcd9ca26e3::t_e38aed7b977f88 165-173,175
+  s_be66dcd9ca26e3::t_df80e66bc8b8f0 216,224,227
+  s_be66dcd9ca26e3::t_83634bcf731531 12-13
+  s_be66dcd9ca26e3::t_6fadd0825b8c38 290
+  s_be66dcd9ca26e3::t_4913fced05f531 264,268-275
+internal/translate/strictify_openai.go
+  s_be66dcd9ca26e3::t_2c5617e38222f9 1-217
+internal/proxy/testdata/conformance/responses/invalid_toolcall.upstream.sse
+  s_be66dcd9ca26e3::t_d8b526aa0daf45 1-17
+internal/translate/toolcheck/jsonfix.go
+  s_be66dcd9ca26e3::t_3976f4cd79eb8d 1-58,65-81,85-90,96,98,103,107-116,118-138,141-142,144-147,150,157-172
+  s_be66dcd9ca26e3::t_0823d5872c82ac 59-64,82-84,91-95,97,99-102,104-106,117,139-140,143,148-149,151-156
+internal/translate/strict_decode_emit_test.go
+  s_be66dcd9ca26e3::t_07d75519db7a27 1-151
+internal/proxy/testdata/conformance/openai_chat/invalid_toolcall_args.upstream.sse
+  s_be66dcd9ca26e3::t_1eb32d024c8ba9 1-8
+internal/proxy/conformance_responses_test.go
+  s_be66dcd9ca26e3::t_b2420b390c4fca 76-116
+internal/translate/stream.go
+  s_be66dcd9ca26e3::t_787c49d4b842f3 538-542
+  s_be66dcd9ca26e3::t_5e432a72940b5a 372-381
+  s_be66dcd9ca26e3::t_9727f1726e5364 462,467-472
+  s_be66dcd9ca26e3::t_8570a188903b2b 678-679
+  s_be66dcd9ca26e3::t_5f43577fee821f 559
+  s_be66dcd9ca26e3::t_b9de6c2f072972 899
+  s_be66dcd9ca26e3::t_897aed0eb78f1f 14
+  s_be66dcd9ca26e3::t_47755bbc56c5e5 934-942,949-966,968
+internal/translate/emit_gemini.go
+  s_be66dcd9ca26e3::t_904cbac077afcb 708
+  s_be66dcd9ca26e3::t_d4ef03d6baf9da 1035-1042,1044-1056,1059
+internal/translate/toolcheck/repair.go
+  s_be66dcd9ca26e3::t_902004b77e8453 33
+  s_be66dcd9ca26e3::t_ed8b49d6c610cd 1-18,23-32,34-168
+  s_be66dcd9ca26e3::t_139875144584c3 19-22
+internal/translate/responses_response.go
+  s_be66dcd9ca26e3::t_2b11689d393cac 111-116,118
+  s_be66dcd9ca26e3::t_d16a02482e6d36 6-7
+  s_be66dcd9ca26e3::t_992254714ceced 16-17,20-24,26
+  s_be66dcd9ca26e3::t_76bd0b073cb0b2 69
+  s_be66dcd9ca26e3::t_118c84fa08b18c 144
+internal/translate/responses_to_anthropic_writer_stream_test.go
+  s_be66dcd9ca26e3::t_0f32dd66bbe59f 237
+  s_be66dcd9ca26e3::t_73739b3d12a555 267
+  s_be66dcd9ca26e3::t_54e8985c74dedf 211
+  s_be66dcd9ca26e3::t_f6dbabb651dd18 175-192,195
+  s_be66dcd9ca26e3::t_749868eb4909ae 314
+  s_be66dcd9ca26e3::t_3161bceb57c58a 10
+internal/proxy/conformance_gemini_test.go
+  s_be66dcd9ca26e3::t_80759ab849139e 102-134
+internal/translate/toolcheck/cache.go
+  s_be66dcd9ca26e3::t_742bd64f0bc5df 1-31
+internal/translate/toolcheck/toolcheck_test.go
+  s_be66dcd9ca26e3::t_d69fdb794d1417 1-58,63-64,74-288
+  s_be66dcd9ca26e3::t_15f35b8a032858 59-62,65-73
+internal/translate/responses_to_anthropic_writer.go
+  s_be66dcd9ca26e3::t_5f288ae0fa65aa 12
+  s_be66dcd9ca26e3::t_c67682a5f3573a 68,70-76
+  s_be66dcd9ca26e3::t_c3a0c2da0361b1 199-202
+  s_be66dcd9ca26e3::t_6a0a76364499d6 550-551
+  s_be66dcd9ca26e3::t_dd909ba7d572bf 109-113
+  s_be66dcd9ca26e3::t_03e4d6dff7148c 764-770,778-798,801
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1288335770523659bbc6eb2be4c3f069fff25df7",
+  "prompts": {},
+  "sessions": {
+    "s_be66dcd9ca26e3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8bfae3b8-002f-4272-96d1-de4abff3889d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

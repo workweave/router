@@ -1,0 +1,30 @@
+scripts/repro-empty-response.sh
+  s_838f318952ec2a::t_9a9d87cc79260f 1-51,56-57,59-71,73-79,81-110
+  s_838f318952ec2a::t_355a6ba7143408 80
+  s_838f318952ec2a::t_62203d10fdd56c 52-55,58
+  s_838f318952ec2a::t_011f8ee7229818 72
+internal/translate/stream.go
+  s_838f318952ec2a::t_9ba627e98017bc 672
+  s_838f318952ec2a::t_ce87279c6481d3 402-437
+  s_838f318952ec2a::t_fef3e66f9a1153 705
+  s_838f318952ec2a::t_885cc542187de7 356-369
+  s_838f318952ec2a::t_10f8f76763e3b4 503-505
+internal/translate/translate_test.go
+  s_838f318952ec2a::t_dbd9444c82189e 4
+  s_838f318952ec2a::t_479c41c0c7fb99 473-533
+cmd/router/main.go
+  s_838f318952ec2a::t_8d470dc91a1482 565
+  s_838f318952ec2a::t_42f806454cc5b0 566
+internal/proxy/service.go
+  s_838f318952ec2a::t_aa777543402c57 105-110
+  s_838f318952ec2a::t_4bc8177836702a 901-905,911
+  s_838f318952ec2a::t_c337e92b0de5db 618-681
+  s_838f318952ec2a::t_a472380086a27b 4
+  s_838f318952ec2a::t_e7644dc3926bf0 929-933,941
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "b1e98c415f95f0fc4bd2f706a24a3ec05b5b41a4",
+  "prompts": {}
+}

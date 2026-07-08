@@ -1,0 +1,21 @@
+internal/router/bandswap/bandswap_test.go
+  s_e314738a9195df::t_283ca3fed40936 3-41
+internal/router/bandswap/testdata/parity_cases.json
+  s_e314738a9195df::t_b8abfb119f3b5c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "633cb2f552f9b346ad5587029e0aa4bfe621994c",
+  "prompts": {},
+  "sessions": {
+    "s_e314738a9195df": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "17bb5105-1a4b-4d8b-8633-f796bbc7df06",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

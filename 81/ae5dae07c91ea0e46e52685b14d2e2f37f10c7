@@ -1,0 +1,72 @@
+internal/router/sessionpin/ledger.go
+  s_cf79539a01ae3d::t_da616cd82422c6 1-17,24-65
+  s_cf79539a01ae3d::t_bdc1440c398e77 18-23
+internal/router/cluster/artifacts.go
+  s_6a96e4c5d68a4a::t_77578b269b89df 164-168
+internal/postgres/session_pin_repo.go
+  s_cf79539a01ae3d::t_0b69a25107fd9d 80-81
+  s_cf79539a01ae3d::t_59f785f6e79c58 140-144,151-174
+  s_cf79539a01ae3d::t_2bc1110356a850 6,13
+internal/router/sessionpin/ledger_test.go
+  s_cf79539a01ae3d::t_0f2c7459d4bf46 1-65
+internal/proxy/service.go
+  s_cf79539a01ae3d::t_6f3a613fb98e6a 1566,2554
+  s_cf79539a01ae3d::t_92d18ea8aa22f9 1731,1742-1743,1751-1752
+internal/sqlc/session_pins.sql.go
+  s_cf79539a01ae3d::t_46b001bdb99417 181-182,193,260-261,271
+  s_cf79539a01ae3d::t_6b3a4deb18a958 16,34,60-64,154-157,192,216-223,233-236,270
+  s_cf79539a01ae3d::t_26522333dbf398 158-179,237-258
+db/queries/session_pins.sql
+  s_cf79539a01ae3d::t_f698f619fa84cf 89-104,106-110
+  s_cf79539a01ae3d::t_6f8c68d8ecef06 105
+  s_cf79539a01ae3d::t_a91f341d3d3132 68-75,85-88
+internal/router/cluster/scorer.go
+  s_6a96e4c5d68a4a::t_77578b269b89df 550-566,569-570,572-575,577-589,592-599,604-608,611-618,621,623-632,634-636,638-645,648-650,653-660,662,664,666-670,672-690,693-703
+internal/router/sessionpin/store.go
+  s_cf79539a01ae3d::t_4a31df185f12c6 67-83
+  s_cf79539a01ae3d::t_7e2badc78083b4 95-100
+db/migrations/0019_phase0_trajectory_cache_ledger.down.sql
+  s_cf79539a01ae3d::t_51986429b52217 1,3-10,12-17,19
+  h_66ba6bc4d87222 2,11,18
+internal/proxy/gemini.go
+  s_cf79539a01ae3d::t_6f3a613fb98e6a 217
+internal/sqlc/models.go
+  s_cf79539a01ae3d::t_6b3a4deb18a958 123,125,127,129,131,133,135,203-212
+  h_66ba6bc4d87222 122,124,126,128,130,132,134
+db/migrations/0019_phase0_trajectory_cache_ledger.up.sql
+  s_cf79539a01ae3d::t_888d5ae7343d0d 1-71
+internal/router/cluster/scorer_test.go
+  s_6a96e4c5d68a4a::t_77578b269b89df 1070-1071
+internal/proxy/turnloop_internal_test.go
+  s_cf79539a01ae3d::t_d31fe824d7dc44 96-98,108-109
+  s_cf79539a01ae3d::t_14f2902212d716 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "81ae5dae07c91ea0e46e52685b14d2e2f37f10c7",
+  "prompts": {},
+  "humans": {
+    "h_66ba6bc4d87222": {
+      "author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_6a96e4c5d68a4a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0c324095-456d-49d9-a3c4-423df593fc52",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_cf79539a01ae3d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "2c6ce7d0-4bdc-4676-9cef-590d2e4483a6",
+        "model": "claude-fable-5"
+      },
+      "human_author": null
+    }
+  }
+}

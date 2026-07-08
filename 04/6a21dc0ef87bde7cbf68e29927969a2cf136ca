@@ -1,0 +1,25 @@
+internal/proxy/turnloop_test.go
+  s_ca193d6cfeab4a::t_e2268ba0990d4b 183-184,208-209,252-253
+internal/proxy/service_session_pin_test.go
+  s_ca193d6cfeab4a::t_e2268ba0990d4b 657-658
+internal/proxy/turnloop.go
+  s_ca193d6cfeab4a::t_e2268ba0990d4b 451-455
+internal/proxy/service.go
+  s_ca193d6cfeab4a::t_e2268ba0990d4b 135-138,900
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "046a21dc0ef87bde7cbf68e29927969a2cf136ca",
+  "prompts": {},
+  "sessions": {
+    "s_ca193d6cfeab4a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "942a65d8-2cbc-4d61-9502-bbb89526d81e",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

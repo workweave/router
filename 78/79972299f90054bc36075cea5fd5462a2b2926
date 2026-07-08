@@ -1,0 +1,72 @@
+internal/api/openai/completions.go
+  s_31c42848655666::t_6e09cf1b4469cd 101-114
+  s_31c42848655666::t_be7e03227d6f18 10,15
+  s_31c42848655666::t_cc26d2bc9f310d 24-26,42
+  s_31c42848655666::t_792ed9a55d3709 94
+cmd/router/main.go
+  s_31c42848655666::t_fe1efcd35e28de 154
+internal/server/middleware/auth_test.go
+  s_31c42848655666::t_68cdd8631872a8 86
+  s_31c42848655666::t_f93bcf9318273f 116
+internal/api/anthropic/messages.go
+  s_31c42848655666::t_60d248c100d167 144-157
+  s_31c42848655666::t_1ad0f0a5a6b877 124-125,129-132,134-135,137
+  s_31c42848655666::t_80864acef7119b 14,19
+  s_31c42848655666::t_b3624e28eaf7cf 55-57,73
+internal/proxy/client_identity_test.go
+  s_31c42848655666::t_7f54c620710bfa 1-32
+internal/sqlc/model_router_users.sql.go
+  s_31c42848655666::t_f9b36ed919ea5b 1-141
+internal/auth/user_test.go
+  s_31c42848655666::t_914e89784a91d4 1-112
+internal/postgres/user_repo.go
+  s_31c42848655666::t_1092194fc790ca 1-94
+internal/proxy/client_identity.go
+  s_31c42848655666::t_0057651496d249 6,11-13,18,35-38,42,45-48,50,52,54,56-63
+internal/server/server.go
+  s_31c42848655666::t_f2be4670261bfe 46
+  s_31c42848655666::t_7c5a496fdb0d36 57,62
+internal/auth/service_test.go
+  s_31c42848655666::t_cd0f61cdeaf50a 295
+  s_31c42848655666::t_71953b0c8789b7 126
+  s_31c42848655666::t_fb7d0fd21b4397 422
+  s_31c42848655666::t_74bab37fb6fb65 518
+db/queries/model_router_users.sql
+  s_31c42848655666::t_d72621cfbda4f3 1-34
+internal/auth/user.go
+  s_31c42848655666::t_a589280fbc4ca2 1-7,20-53
+  s_31c42848655666::t_53b4abb996f495 8-19
+db/migrations/0006_add_model_router_users.up.sql
+  s_31c42848655666::t_61b04fb21600db 1-24
+internal/sqlc/models.go
+  s_31c42848655666::t_f9b36ed919ea5b 60-72
+db/migrations/0006_add_model_router_users.down.sql
+  s_31c42848655666::t_643583f20d5c69 1-5
+internal/postgres/repository.go
+  s_31c42848655666::t_b5810a0c25d2ae 19,29
+internal/auth/service.go
+  s_31c42848655666::t_d19e87e96d9ce4 96-126
+  s_31c42848655666::t_402350a2809b44 20,29,37
+internal/api/gemini/generate_content.go
+  s_31c42848655666::t_dfc0f706088bed 160-173
+  s_31c42848655666::t_a9f3af584e5b72 180
+  s_31c42848655666::t_702aacaf3026e5 74
+  s_31c42848655666::t_a881d9cf77a0af 15,20
+  s_31c42848655666::t_9d53dbcfabdc15 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "7879972299f90054bc36075cea5fd5462a2b2926",
+  "prompts": {},
+  "sessions": {
+    "s_31c42848655666": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "313f0d67-15b7-431a-8c69-c0d98360b5b4",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

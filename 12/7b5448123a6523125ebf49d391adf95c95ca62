@@ -1,0 +1,35 @@
+internal/server/middleware/balance_check.go
+  s_b18bc9729f39f4::t_11ef55d2511c2d 57-61,63
+internal/server/middleware/balance_check_test.go
+  s_b18bc9729f39f4::t_c05534a7b345dc 330
+  s_b18bc9729f39f4::t_5d8fa05fb86b64 343
+  s_b18bc9729f39f4::t_a998b873fc7517 263
+  s_b18bc9729f39f4::t_6e04bf54c6d783 273
+  s_b18bc9729f39f4::t_ebbb9b8d9c4891 318,357,362-388
+  s_b18bc9729f39f4::t_3877396309a7a9 92-95,101,111
+  s_b18bc9729f39f4::t_46f46c31449862 282,289,300,312-316
+  s_b18bc9729f39f4::t_55c8813a60a61e 242
+  s_b18bc9729f39f4::t_90316e919be0fd 252
+  s_b18bc9729f39f4::t_24cf94ce99a844 317
+  s_b18bc9729f39f4::t_022b6c7b1ea6a5 319
+internal/proxy/subsidy.go
+  s_b18bc9729f39f4::t_40d875483ff877 12-19
+  s_b18bc9729f39f4::t_e45aadd71a2a53 97-108,110-117
+  s_b18bc9729f39f4::t_10323fd29f6de3 20-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "127b5448123a6523125ebf49d391adf95c95ca62",
+  "prompts": {},
+  "sessions": {
+    "s_b18bc9729f39f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11211f04-6285-4698-b0d4-08eceec415a4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

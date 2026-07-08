@@ -1,0 +1,23 @@
+internal/postgres/telemetry.go
+  s_c4ecee41717be0::t_73a8790b9ea718 501-548
+  s_c4ecee41717be0::t_494b6a5c224739 433
+  s_c4ecee41717be0::t_dbce5d7314a495 418
+  s_c4ecee41717be0::t_e4f63c2179453d 229-230,232-237,239-248,250-266
+  s_c4ecee41717be0::t_7122f8d9a0655e 291-326,328-334,337,339-341,343,345-347,349-398
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "656cac4f9b973f06fac55b5271bf91f2b686239c",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

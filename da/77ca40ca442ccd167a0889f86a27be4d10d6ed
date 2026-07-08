@@ -1,0 +1,43 @@
+internal/router/cluster/artifacts/v0.73/quality_means.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-33,34,35-41,42-78,79,80-86,87-98,99,100-106,107-118,119,120-126,127-138,139,140-146,147-158,159,160-166,167-178,179,180-186,187-198,199,200-206,207-218,219,220-226,227-238,239,240-246,247-258,259,260-266,267-278,279,280-286,287-298,299,300-306,307-318,319,320-326,327-338,339,340-346,347-358,359,360-366,367-378,379,380-386,387-398
+internal/router/cluster/artifacts/v0.73/model_axes.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-9,10-16,17-65,66-161,162,163-169,170-206
+internal/router/cluster/artifacts/v0.73/metadata.yaml
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 2-4,7-187,189-221
+  s_aec95a8ffbca65::t_aa780ade21efdf 5-6
+internal/router/cluster/artifacts_test.go
+  s_aec95a8ffbca65::t_e9a64f0b639c04 225-228
+  s_aec95a8ffbca65::t_1b49bb2dc4d7b5 7
+  s_aec95a8ffbca65::t_c1c2f73eb10c49 229-245
+internal/router/cluster/artifacts/v0.73/model_registry.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-2,6-180
+  s_aec95a8ffbca65::t_f4fc0a37a5a226 5
+internal/router/cluster/artifacts/v0.73/model_features.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-4,7-36,37-63,64-252,253-497
+internal/router/cluster/artifacts/v0.73/rankings.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-33,34,35-41,42-85,86,87-95,96-105,106,107-115,116-125,126,127-135,136-145,146,147-155,156-165,166,167-175,176-185,186,187-195,196-205,206,207-215,216-225,226,227-235,236-245,246,247-255,256-265,266,267-275,276-285,286,287-295,296-305,306,307-315,316-325,326,327-335,336-345,346,347-355,356-365,366,367-375,376-385,386,387-395,396-404
+internal/router/catalog/family_test.go
+  s_aec95a8ffbca65::t_5f5fae3e57ddea 1-47,50-115
+  s_aec95a8ffbca65::t_d1027c15798425 48-49
+internal/router/catalog/family.go
+  s_aec95a8ffbca65::t_8be58c53f7eb33 8,14,37
+  s_aec95a8ffbca65::t_5ea1c5cdc12904 50
+  s_aec95a8ffbca65::t_1499e0c334f687 1-7,9-10,15,21-36,38-49,51-103
+  s_aec95a8ffbca65::t_abcde2f93aa3ac 11-13,16-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "da77ca40ca442ccd167a0889f86a27be4d10d6ed",
+  "prompts": {},
+  "sessions": {
+    "s_aec95a8ffbca65": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5171f88b-c1be-400a-a996-54fc547b3115",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": null
+    }
+  }
+}

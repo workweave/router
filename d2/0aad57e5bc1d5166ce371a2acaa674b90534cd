@@ -1,0 +1,26 @@
+internal/router/cluster/scorer.go
+  s_7c7039c29ee5b5::t_fbb42a9288ff39 220-223
+  s_7c7039c29ee5b5::t_86cc4e57f1a04d 415-418,423-439,445
+  s_7c7039c29ee5b5::t_7487a8fbaeb2a6 46-52,58-62,215-219,224-228
+  s_7c7039c29ee5b5::t_5764d63ee44783 53-57
+internal/router/cluster/distribution_test.go
+  s_7c7039c29ee5b5::t_bbe294bbe5587c 309-323
+internal/router/cluster/distribution.go
+  s_7c7039c29ee5b5::t_3dc70e9e802203 86-88,90-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "d20aad57e5bc1d5166ce371a2acaa674b90534cd",
+  "prompts": {},
+  "sessions": {
+    "s_7c7039c29ee5b5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f6dc8e0-2bf8-43a4-b08e-4de992aae282",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
