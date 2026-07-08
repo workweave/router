@@ -104,6 +104,46 @@ func TestNoProgressTracker_TripsOnFrozenMarkerDespiteRisingMessageCount(t *testi
 	assert.Equal(t, noProgressMatchThreshold, count)
 }
 
+// The no-progress detector is gated to tool-bearing turns (a tool_use in
+// history or a tool_result this turn). A run of healthy text-only assistant
+// turns in a long session freezes both the marker and the (capped) prompt
+// prefix, so without this gate they would collide and falsely trip the break.
+// This mirrors the ProxyMessages gate: toolBearingTurn = inboundToolCallCount
+// > 0 || inboundLastUser.HasToolResult.
+func TestNoProgressGate_TextOnlyTurnIsNotToolBearing(t *testing.T) {
+	textOnly := []byte(`{"model":"kimi","messages":[` +
+		`{"role":"user","content":"explain the design"},` +
+		`{"role":"assistant","content":[{"type":"text","text":"Here is the design ..."}]}` +
+		`]}`)
+	env, err := translate.ParseAnthropic(textOnly)
+	require.NoError(t, err)
+	toolBearing := len(env.AssistantToolCallSignatures()) > 0 || env.LastUserMessage().HasToolResult
+	assert.False(t, toolBearing, "a text-only turn must not feed the no-progress detector")
+}
+
+func TestNoProgressGate_ToolTurnsAreToolBearing(t *testing.T) {
+	// tool_use in history (the frozen-marker Kimi case).
+	withToolUse := []byte(`{"model":"kimi","messages":[` +
+		`{"role":"user","content":"create a PR"},` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Bash","input":{"command":"gh pr create"}}]}` +
+		`]}`)
+	env1, err := translate.ParseAnthropic(withToolUse)
+	require.NoError(t, err)
+	assert.True(t, len(env1.AssistantToolCallSignatures()) > 0 || env1.LastUserMessage().HasToolResult,
+		"a turn with a tool_use in history must feed the detector")
+
+	// tool_result this turn (agent just ran a tool).
+	withToolResult := []byte(`{"model":"kimi","messages":[` +
+		`{"role":"user","content":"create a PR"},` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Bash","input":{"command":"gh pr create"}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"1","content":"done"}]}` +
+		`]}`)
+	env2, err := translate.ParseAnthropic(withToolResult)
+	require.NoError(t, err)
+	assert.True(t, len(env2.AssistantToolCallSignatures()) > 0 || env2.LastUserMessage().HasToolResult,
+		"a tool_result turn must feed the detector")
+}
+
 func TestNoProgressTracker_DoesNotTripWhenMessageCountGrows(t *testing.T) {
 	// Regression: a fast tool-call loop can exceed the dispatch threshold for
 	// one (model, provider) while the prompt prefix stays constant, but must
