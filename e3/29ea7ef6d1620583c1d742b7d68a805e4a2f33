@@ -1,0 +1,24 @@
+internal/providers/openaicompat/client_test.go
+  s_124bf81c6b9738::t_e20292d1953018 115-187
+internal/providers/openaicompat/client.go
+  s_124bf81c6b9738::t_29d4f93e8ee8fa 195-216
+  s_124bf81c6b9738::t_a2961dd045a006 7,25,28-32,34-37,40-41,43-51,56-59
+  s_124bf81c6b9738::t_443c1169b36b1c 75-83
+internal/providers/provider.go
+  s_124bf81c6b9738::t_c08fe1ab9e187f 20,30
+internal/router/cluster/artifacts/v0.38/metadata.yaml
+  s_124bf81c6b9738::t_00fa3658d469f3 29
+cmd/router/main.go
+  s_124bf81c6b9738::t_ca0af2dd735bdd 244-268
+internal/router/pricing/pricing.go
+  s_124bf81c6b9738::t_f2e14b10738d8c 95
+internal/router/cluster/artifacts/v0.38/model_registry.json
+  s_124bf81c6b9738::t_29393fe6ecea58 24
+  s_124bf81c6b9738::t_0ac8a5e2293091 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "e329ea7ef6d1620583c1d742b7d68a805e4a2f33",
+  "prompts": {}
+}

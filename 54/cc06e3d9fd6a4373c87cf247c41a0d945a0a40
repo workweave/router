@@ -1,0 +1,21 @@
+install/commands/router-status.md
+  s_d3fc1c517ba243::t_5b123be1c2c117 6
+install/npm/bin.js
+  s_d3fc1c517ba243::t_0dd1e60ae6dc1d 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "54cc06e3d9fd6a4373c87cf247c41a0d945a0a40",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

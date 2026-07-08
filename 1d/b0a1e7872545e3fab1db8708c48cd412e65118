@@ -1,0 +1,49 @@
+internal/proxy/telemetry.go
+  s_760f8bcb45aa21::t_d656fa06af82d4 20-21
+  s_760f8bcb45aa21::t_c81514ca829332 78,80-89,92-104
+  s_760f8bcb45aa21::t_528a09394bbfbc 79,90-91
+internal/postgres/telemetry.go
+  s_760f8bcb45aa21::t_9292b871627f31 407
+  s_760f8bcb45aa21::t_337194b99fe832 329-406,408-454
+internal/server/middleware/auth.go
+  s_760f8bcb45aa21::t_02a2b8f7074db2 5
+  s_760f8bcb45aa21::t_9d1cafaf4aef1a 169-185
+cmd/router/main.go
+  s_760f8bcb45aa21::t_bb7eb0fd4279a1 578-583
+internal/proxy/turnloop_test.go
+  s_760f8bcb45aa21::t_299f4beffb2c37 379-384
+internal/api/admin/internal_metrics.go
+  s_760f8bcb45aa21::t_c0c46ae9a83150 22-23
+  s_760f8bcb45aa21::t_a1923c950b232d 1-21,24-131
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_760f8bcb45aa21::t_8c4fb83cb7adae 15-400
+internal/server/server.go
+  s_760f8bcb45aa21::t_b95119d8ff1b12 104-112
+  s_760f8bcb45aa21::t_2ae88e978e379d 58
+internal/server/server_test.go
+  s_760f8bcb45aa21::t_796d372718c2d3 65-70,74,82-84,89,97-113
+internal/proxy/service_observation_test.go
+  s_760f8bcb45aa21::t_eaa6238c93ddc7 69-71,73-75
+  s_760f8bcb45aa21::t_dda101bb3bd955 72
+  s_760f8bcb45aa21::t_f1f3933d97daeb 68
+db/queries/model_router_request_telemetry.sql
+  s_760f8bcb45aa21::t_dc4f8300560313 221-307
+internal/proxy/service.go
+  s_760f8bcb45aa21::t_7beb24b21d8688 479-494
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "1db0a1e7872545e3fab1db8708c48cd412e65118",
+  "prompts": {},
+  "sessions": {
+    "s_760f8bcb45aa21": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e6ea464-fc09-4cf2-a17a-ed91b589c58f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+internal/observability/otel/emitter.go
+  s_c4ecee41717be0::t_62d8a0c34d3804 105-111
+cmd/router/main.go
+  s_c4ecee41717be0::t_1fbb6a8bfbc8fc 453-460
+  s_c4ecee41717be0::t_7f0177eb929714 638
+internal/proxy/service.go
+  s_c4ecee41717be0::t_b827c4dcc777fd 37-48
+  s_c4ecee41717be0::t_9abc320850220e 1082-1092
+  s_c4ecee41717be0::t_1f989f6ae04fba 791
+  s_c4ecee41717be0::t_e4eb27eda4553b 62
+  s_c4ecee41717be0::t_2218e5443a7a70 1468,3182
+internal/proxy/feedback.go
+  s_c4ecee41717be0::t_91cf4f72668705 147
+internal/proxy/gemini.go
+  s_c4ecee41717be0::t_5fa009a0b6798f 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "aba083626e6b0b17aea129b3c88bc375b38285d1",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

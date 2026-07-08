@@ -1,0 +1,19 @@
+internal/api/admin/metrics.go
+  s_2274d9627f3cc1::t_bfaa5c51a8ace9 107-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "9c54def463fe68a8fdf84a3e9efe05b9eef7181d",
+  "prompts": {},
+  "sessions": {
+    "s_2274d9627f3cc1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "38dc655b-e066-47f6-bbfa-0e097310f0ee",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

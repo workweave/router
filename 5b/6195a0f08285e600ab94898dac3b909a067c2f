@@ -1,0 +1,30 @@
+internal/proxy/service.go
+  s_74c1d8358797be::t_aee8e40e8cd707 925-929,939
+  s_74c1d8358797be::t_c25454c30e7657 896-899,907
+  s_74c1d8358797be::t_bee16a41d1275d 1350
+  s_74c1d8358797be::t_aae58ad3d9e58c 901-906
+  s_74c1d8358797be::t_8463a57314527a 2561
+.env.example
+  s_74c1d8358797be::t_1cf6ca596abe13 176
+cmd/router/main.go
+  s_74c1d8358797be::t_d3ced7c9649923 1034-1039,1042-1051
+internal/proxy/service_cache_test.go
+  s_74c1d8358797be::t_4ac99efcad4878 182-229
+  s_74c1d8358797be::t_75d811e43cd385 10,12,18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "5b6195a0f08285e600ab94898dac3b909a067c2f",
+  "prompts": {},
+  "sessions": {
+    "s_74c1d8358797be": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3922321c-192c-48af-aa2f-c6638fdf350c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

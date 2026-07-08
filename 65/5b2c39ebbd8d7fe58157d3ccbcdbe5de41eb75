@@ -1,0 +1,38 @@
+internal/proxy/service.go
+  s_c207deb4defaf3::t_9257d0e9a5b4c1 692-703
+  s_c207deb4defaf3::t_5367d9720de622 1508-1515
+internal/translate/emit_openai.go
+  s_c207deb4defaf3::t_50b787bb5f240f 72-80
+  s_c207deb4defaf3::t_dafc7e92047f3c 147-154
+internal/translate/provider_hint.go
+  s_c207deb4defaf3::t_fb08f68df3f16c 55-67
+internal/translate/loop_detection_test.go
+  s_c207deb4defaf3::t_45cc5a60ec1810 1-121
+internal/proxy/loop_detection_test.go
+  s_c207deb4defaf3::t_43e11ba50fd9d5 1-67,69-145
+  s_c207deb4defaf3::t_ecb142f20a3661 68
+internal/proxy/loop_detection.go
+  s_c207deb4defaf3::t_5fb668ecce93b8 1-131
+internal/translate/qwen3_sampling_test.go
+  s_c207deb4defaf3::t_3da85b735c2a4b 1-84
+internal/translate/loop_detection.go
+  s_c207deb4defaf3::t_3aa48d00d560b5 6
+  s_c207deb4defaf3::t_f7a7feff0ecba7 1-5,7-121,128-138,140-141,143,147,149,151-153,155-156,158-159,161,163-206
+  s_c207deb4defaf3::t_fc74497f8c98aa 122-127,139,142,144-146,148,150,154,157,160,162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "655b2c39ebbd8d7fe58157d3ccbcdbe5de41eb75",
+  "prompts": {},
+  "sessions": {
+    "s_c207deb4defaf3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "314e9d13-8230-492c-b72a-db9a7a3dd1f5",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
