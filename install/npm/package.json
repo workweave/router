@@ -1,6 +1,6 @@
 {
   "name": "@workweave/router",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "One-command installer that points Claude Code, Codex, opencode, or pi at the Weave Router. For pi it also ships the routing extension, loaded via pi.extensions.",
   "bin": {
     "weave-router": "bin.js"
