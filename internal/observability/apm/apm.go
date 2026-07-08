@@ -16,16 +16,19 @@ package apm
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	otelgin "go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	promexporter "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -45,6 +48,10 @@ var (
 	initOnce       sync.Once
 	tracerProvider *sdktrace.TracerProvider
 	meterProvider  *sdkmetric.MeterProvider
+	// promHandler serves the OTel metrics registered by this SDK over the
+	// Prometheus text format. Set during init when the Prometheus reader is
+	// wired; nil until then, guarded by PrometheusHandler.
+	promHandler http.Handler
 )
 
 // Init wires the OTel SDK against the SigNoz collector. Reads
@@ -59,12 +66,6 @@ func Init() {
 
 func initLocked() {
 	log := observability.Get()
-
-	endpoint := config.GetOr("WV_APM_OTLP_ENDPOINT", "")
-	if endpoint == "" {
-		log.Info("APM disabled: WV_APM_OTLP_ENDPOINT unset")
-		return
-	}
 
 	ctx := context.Background()
 	deployEnv := config.GetOr("ROUTER_DEPLOYMENT_ENV", config.GetOr("ENV", "dev"))
@@ -83,6 +84,23 @@ func initLocked() {
 		return
 	}
 
+	// Metric readers are additive: the Prometheus reader is always wired so
+	// /metrics is scrapeable in every deployment, and the OTLP push reader is
+	// added only when a SigNoz collector endpoint is configured.
+	readers := []sdkmetric.Reader{}
+
+	// The Prometheus exporter is itself an sdkmetric.Reader that renders the
+	// collected metrics on demand via promhttp. It registers with the default
+	// Prometheus registry, which promhttp.Handler() serves.
+	promReader, err := promexporter.New()
+	if err != nil {
+		log.Error("APM init: prometheus exporter failed", "err", err)
+	} else {
+		readers = append(readers, promReader)
+		promHandler = promhttp.Handler()
+	}
+
+	endpoint := config.GetOr("WV_APM_OTLP_ENDPOINT", "")
 	// TLS by default. The router runs outside the cluster the SigNoz
 	// collector is on for some deployments, so silently shipping spans over
 	// plaintext gRPC would leak whatever's in attributes (api_key_id, model
@@ -91,51 +109,74 @@ func initLocked() {
 	// is reachable only over a trusted internal network.
 	insecure := config.GetOr("WV_APM_OTLP_INSECURE", "false") == "true"
 
-	traceExporter, err := newTraceExporter(ctx, endpoint, insecure)
-	if err != nil {
-		log.Error("APM init: trace exporter failed", "err", err)
+	if endpoint != "" {
+		traceExporter, terr := newTraceExporter(ctx, endpoint, insecure)
+		if terr != nil {
+			log.Error("APM init: trace exporter failed", "err", terr)
+		} else {
+			tracerProvider = sdktrace.NewTracerProvider(
+				sdktrace.WithBatcher(traceExporter),
+				sdktrace.WithResource(res),
+				sdktrace.WithSampler(sdktrace.AlwaysSample()),
+			)
+			otel.SetTracerProvider(tracerProvider)
+			otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+				propagation.TraceContext{},
+				propagation.Baggage{},
+			))
+		}
+
+		metricExporter, merr := otlpmetricgrpc.New(ctx, metricGRPCOpts(endpoint, insecure)...)
+		if merr != nil {
+			log.Error("APM init: metric exporter failed", "err", merr)
+		} else {
+			readers = append(readers, sdkmetric.NewPeriodicReader(metricExporter,
+				sdkmetric.WithInterval(60*time.Second),
+			))
+		}
+	}
+
+	if len(readers) == 0 {
+		log.Info("APM disabled: no metric readers wired")
 		return
 	}
-	tracerProvider = sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceExporter),
-		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-	)
-	otel.SetTracerProvider(tracerProvider)
 
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
-
-	metricExporter, err := otlpmetricgrpc.New(ctx, metricGRPCOpts(endpoint, insecure)...)
-	if err != nil {
-		log.Error("APM init: metric exporter failed", "err", err)
-		return
+	opts := []sdkmetric.Option{sdkmetric.WithResource(res)}
+	for _, r := range readers {
+		opts = append(opts, sdkmetric.WithReader(r))
 	}
-	meterProvider = sdkmetric.NewMeterProvider(
-		sdkmetric.WithResource(res),
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter,
-			sdkmetric.WithInterval(60*time.Second),
-		)),
-	)
+	meterProvider = sdkmetric.NewMeterProvider(opts...)
 	otel.SetMeterProvider(meterProvider)
 
 	// Without this the MeterProvider has no instruments registered against
-	// it and the only metric SigNoz receives is the empty resource heartbeat.
+	// it and the only metric exported is the empty resource heartbeat.
 	// otelruntime.Start hooks runtime/metrics (goroutines, heap, GC pauses,
 	// cgo calls) into the global MeterProvider just set above.
 	if err := otelruntime.Start(otelruntime.WithMinimumReadMemStatsInterval(15 * time.Second)); err != nil {
-		log.Warn("APM init: runtime instrumentation failed; SDK traces still active", "err", err)
+		log.Warn("APM init: runtime instrumentation failed", "err", err)
 	}
 
 	log.Info("APM enabled",
-		"endpoint", endpoint,
+		"otlp_endpoint", endpoint,
+		"prometheus", promHandler != nil,
 		"service", serviceName,
 		"deployment_env", deployEnv,
 		"version", version.Commit,
 		"insecure", insecure,
 	)
+}
+
+// PrometheusHandler returns an http.Handler that serves the OTel metrics
+// registered by this SDK in the Prometheus text format. When Init was never
+// called or the exporter failed to wire, it returns a handler that replies 503
+// so mounting the route is always safe.
+func PrometheusHandler() http.Handler {
+	if promHandler == nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "prometheus metrics unavailable", http.StatusServiceUnavailable)
+		})
+	}
+	return promHandler
 }
 
 func newTraceExporter(ctx context.Context, endpoint string, insecure bool) (sdktrace.SpanExporter, error) {

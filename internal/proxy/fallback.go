@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"time"
@@ -244,6 +245,19 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 			return i, provErr
 		}
 
+		// Circuit breaker gate: skip a binding whose breaker is open when
+		// another binding remains to try. On the last (or only) binding we
+		// fail open — a possibly-dead upstream beats a guaranteed 502 — and
+		// recordOutcome is a no-op, so the open breaker isn't fed more signal.
+		recordOutcome, breakerOpen := s.breakers.allow(breakerKey(b.Provider, decision.Model))
+		if breakerOpen && i < len(in.bindings)-1 {
+			log.Warn("dispatchWithFallback: skipping binding, circuit breaker open",
+				"provider", b.Provider,
+				"model", decision.Model,
+				"attempt_index", i)
+			continue
+		}
+
 		// Same-binding retry loop. A retryable transient blip on this
 		// provider often clears on a quick in-place retry — but only for
 		// single-binding models, which have no other provider to walk to.
@@ -271,6 +285,7 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 
 			attemptErr = in.attempt(attemptCtx, decision, p)
 			if attemptErr == nil {
+				recordOutcome(true)
 				if i > 0 {
 					log.Info("dispatchWithFallback: succeeded on fallback",
 						"model", decision.Model,
@@ -286,6 +301,7 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 			// must return its error — even if the error type itself would be
 			// retryable in isolation.
 			if committed(in.buf) {
+				recordOutcome(!providers.IsRetryable(attemptErr))
 				return i, attemptErr
 			}
 
@@ -378,9 +394,12 @@ const (
 )
 
 // sameBindingBackoff is the delay before same-binding retry attempt+1
-// (0-indexed): exponential off sameBindingBackoffBase.
+// (0-indexed): exponential off sameBindingBackoffBase with +/-10% jitter so
+// requests that hit the same provider blip at once don't retry in lockstep.
 func sameBindingBackoff(attempt int) time.Duration {
-	return sameBindingBackoffBase << attempt
+	base := sameBindingBackoffBase << attempt
+	jitter := 0.9 + 0.2*rand.Float64()
+	return time.Duration(float64(base) * jitter)
 }
 
 // sleepWithContext waits d, returning early with ctx.Err() if ctx is

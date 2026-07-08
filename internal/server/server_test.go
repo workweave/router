@@ -45,6 +45,7 @@ func TestRegister_DeploymentMode(t *testing.T) {
 	// Self-hoster dashboard surface — gated by DeploymentModeSelfHosted.
 	dashboardRoutes := []string{
 		"GET /",
+		"GET /metrics",
 		"GET /ui/*filepath",
 		"HEAD /ui/*filepath",
 		"POST /admin/v1/auth/login",

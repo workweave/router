@@ -15,6 +15,7 @@ import (
 	openaiapi "workweave/router/internal/api/openai"
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
+	"workweave/router/internal/observability/apm"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/server/middleware"
 
@@ -102,6 +103,12 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	if mode == DeploymentModeSelfHosted {
 		engine.GET("/", func(c *gin.Context) { c.Redirect(http.StatusFound, "/ui") })
 		registerUIStatic(engine, "./assets/ui")
+
+		// Prometheus scrape endpoint for self-hosters running their own
+		// monitoring stack. Serves the OTel runtime + HTTP metrics in the
+		// Prometheus text format. Managed deployments scrape via the OTLP
+		// push pipeline (WV_APM_OTLP_ENDPOINT), so this is selfhosted-only.
+		engine.GET("/metrics", gin.WrapH(apm.PrometheusHandler()))
 
 		// Public — mounting inside WithAuth would be a chicken-and-egg
 		// deadlock for users who don't yet have a cookie.

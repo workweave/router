@@ -644,8 +644,12 @@ func TestDispatchWithFallback_SingleBindingBackoffAbortsOnCancel(t *testing.T) {
 }
 
 func TestSameBindingBackoff(t *testing.T) {
-	assert.Equal(t, 250*time.Millisecond, sameBindingBackoff(0))
-	assert.Equal(t, 500*time.Millisecond, sameBindingBackoff(1))
+	// Jitter is +/-10% off the exponential base (250ms, 500ms). Assert the
+	// value lands within that band rather than an exact figure.
+	for i := 0; i < 100; i++ {
+		assert.InDelta(t, 250*time.Millisecond, sameBindingBackoff(0), float64(25*time.Millisecond))
+		assert.InDelta(t, 500*time.Millisecond, sameBindingBackoff(1), float64(50*time.Millisecond))
+	}
 }
 
 func TestSleepWithContext(t *testing.T) {

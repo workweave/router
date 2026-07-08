@@ -172,7 +172,7 @@ If new helper doesn't fit, justify new package in code comment before creating.
 
 `ROUTER_DEPLOYMENT_MODE` read at boot in `cmd/router/main.go`:
 
-- **`selfhosted`** (default): full dashboard at `/ui/*`, `/admin/v1/*` API (auth, metrics, keys, provider-keys, config, excluded-models), dashboard cookie auth all mounted. Provider keys read from env vars; missing keys keep providers registered for client-passthrough but exclude from hard-pin resolution.
+- **`selfhosted`** (default): full dashboard at `/ui/*`, `/admin/v1/*` API (auth, metrics, keys, provider-keys, config, excluded-models), a Prometheus `/metrics` scrape endpoint (OTel runtime + HTTP metrics, served via `apm.PrometheusHandler`), dashboard cookie auth all mounted. Provider keys read from env vars; missing keys keep providers registered for client-passthrough but exclude from hard-pin resolution.
 - **`managed`**: dashboard + `/admin/v1/*` not mounted at all — Weave-managed deploys have separate control plane. Every provider registered with empty deployment key; proxy service in BYOK-only mode, so request without BYOK or client-supplied auth for chosen provider 400s rather than silently spending platform budget. Setting variable to any other value panics at boot.
 
 When adding new endpoint, put inside `selfhosted` block in `server.Register` unless part of product surface (`/v1/*`, `/v1beta/*`, `/health`, `/validate`). Do not re-expose admin surface in managed mode.

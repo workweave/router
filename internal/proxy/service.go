@@ -182,6 +182,11 @@ type Service struct {
 	// dispatchWithFallback. Tests inject a no-op to avoid real delays; prod
 	// leaves it nil and falls back to sleepWithContext.
 	retrySleep func(context.Context, time.Duration) error
+	// breakers tracks per-(provider, model) binding health for
+	// dispatchWithFallback. Nil-safe: a bare &Service{} (most unit tests)
+	// has breakers == nil, so allow() always permits. NewService wires a
+	// real registry. See breaker.go.
+	breakers *breakerRegistry
 	// feedbackRepo persists per-request human feedback (router.request_feedback)
 	// and reads it back for the no-login feedback page. Nil leaves the feedback
 	// endpoints' DB access disabled (Get/Submit return ErrFeedbackUnavailable).
@@ -850,6 +855,7 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		hardPinProvider:      hardPinProvider,
 		hardPinModel:         hardPinModel,
 		telemetry:            telemetry,
+		breakers:             newBreakerRegistry(),
 		planner: planner.EVConfig{
 			ThresholdUSD:           DefaultPlannerThresholdUSD,
 			ExpectedRemainingTurns: DefaultPlannerExpectedRemainingTurns,
