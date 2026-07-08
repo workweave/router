@@ -67,24 +67,11 @@ func toolProgressMarker(env *translate.RequestEnvelope) string {
 // progress marker, the prompt prefix, and — only when there is no progress
 // marker — the message count.
 //
-// The prompt prefix alone is constant across a healthy agentic task (it's
-// just the user's typed task, tool results stripped), so it can't be the
-// sole key — every dispatch would collide. progressMarker is the main
-// guard: it advances on real progress and stays constant when stuck, so
-// only stuck loops accumulate matching fingerprints.
-//
-// messageCount is deliberately EXCLUDED whenever progressMarker is non-empty.
-// A stuck agentic session still appends real assistant/user messages each turn
-// (retries, router markers, empty-body continuations), so messageCount climbs
-// even while no tool progress is made — folding it into the hash makes every
-// turn's fingerprint distinct and silently defeats the detector. This was the
-// failure mode behind a Kimi-k2.x churn loop: the model re-issued the same
-// tool calls for 20+ turns with a frozen tool-progress marker, but the rising
-// messageCount kept the fingerprints unique so the loop was never caught. When
-// there IS a marker, it fully captures progress; messageCount adds only noise.
-// It stays in the hash for the tool-free case (empty marker), where it is the
-// sole fallback signal — Claude Code's Explore sub-agent holds it flat while
-// genuinely progressing, so the tool-free path still tolerates false matches.
+// progressMarker is the primary stuck signal; it stays frozen while the same
+// tool call re-issues, so matching fingerprints accumulate. messageCount is
+// excluded when a marker is present because retries/continuations still append
+// messages even when stuck — folding it in defeats detection. For the tool-free
+// case (empty marker) it remains the sole fallback signal.
 func computeNoProgressFingerprint(decision router.Decision, promptText string, messageCount int, progressMarker string) noProgressFingerprint {
 	p := promptText
 	if len(p) > noProgressPromptPrefix {

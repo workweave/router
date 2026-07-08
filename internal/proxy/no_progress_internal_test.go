@@ -65,13 +65,9 @@ func TestComputeNoProgressFingerprint_DistinguishesToolProgress(t *testing.T) {
 }
 
 func TestComputeNoProgressFingerprint_IgnoresMessageCountWhenMarkerPresent(t *testing.T) {
-	// Regression (Kimi-k2.x churn loop): when Claude Code drops the upstream's
-	// repeated tool calls, they never enter history, so the tool-progress marker
-	// FREEZES — the correct "stuck" signal. But the session still appends real
-	// assistant/user/router messages each turn, so message_count keeps rising.
-	// Folding message_count into the hash while a marker exists made every turn's
-	// fingerprint unique and silently defeated the detector. With a frozen marker
-	// the fingerprint must be identical regardless of message_count.
+	// Regression: a frozen tool-progress marker combined with a rising
+	// message_count must produce identical fingerprints (marker excluded from
+	// hash when present, so count noise doesn't defeat detection).
 	d := router.Decision{Model: "moonshotai/kimi-k2.7", Provider: "fireworks"}
 	marker := "57\x00Bash\x00frozen-hash"
 	a := computeNoProgressFingerprint(d, "create a PR from staging to prod", 90, marker)

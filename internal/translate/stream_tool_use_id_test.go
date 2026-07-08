@@ -66,15 +66,10 @@ func streamedToolUseIDs(out string) []string {
 	return ids
 }
 
-// Regression (Kimi-k2.x churn loop): deterministic OpenAI-compat upstreams
-// (Kimi on Fireworks) emit the SAME tool_call id — e.g. "functions.Bash:0" —
-// on every turn. sanitizeToolUseID normalizes the characters but not the value,
-// so the id "functions_Bash_0" repeated across turns. Claude Code dedupes
-// tool_use blocks by id and silently drops a repeat, so the model's call is
-// never executed, its result never returns, and the session churns re-issuing
-// the same call (58 Kimi turns, ~$3, no progress in one observed session).
-// Each translated response must therefore yield a distinct tool_use.id even
-// when the upstream id is byte-identical.
+// Regression: deterministic upstreams (Kimi-k2.x on Fireworks) emit the same
+// tool_call id every turn; after sanitization the id repeated. Claude Code
+// dedupes by id and drops repeats, stalling the session. Each translated
+// response must yield a distinct tool_use.id even for byte-identical upstream ids.
 func TestAnthropicSSETranslator_StreamedToolUseIDUniqueAcrossResponses(t *testing.T) {
 	feedOnce := func() string {
 		rec := httptest.NewRecorder()
