@@ -376,8 +376,11 @@ func (s *Service) runTurnLoop(
 		pinFound = false
 		pin = sessionpin.Pin{}
 	}
-	if maxedModel := maxedOutServedModel(hmmHistory); maxedModel != "" &&
-		(hmmHistory.PinnedUntil.IsZero() || hmmHistory.PinnedUntil.After(time.Now())) {
+	if maxedModel := maxedOutServedModel(hmmHistory); maxedModel != "" {
+		// No expiry gate: a model that saturated its output cap must be excluded
+		// even after the history row's TTL lapses, matching the active-pin maxed
+		// path above — otherwise the degenerate auto-continue loop can re-select
+		// it on the very next turn.
 		log.Info("HMM history maxed out on previous turn; excluding for this turn",
 			"history_provider", hmmHistory.Provider,
 			"maxed_model", maxedModel,
@@ -768,10 +771,7 @@ func (s *Service) hmmCostGatedDecision(
 
 	if hmmFreshIsMoreExpensive(stayPin.Model, fresh.Model, req.SubsidizedModelCostFactor) {
 		confidence, ok := hmmDecisionConfidence(fresh)
-		// Threshold configurable per-deploy via ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD
-		// (turnloop.go-bound to Package proxy.Service via WithHMMUpgradeConfidenceThreshold).
-		// Default 0.85 — calibrated assumes the sidecar's ChosenScore is a [0,1]
-		// posterior probability; lower if the sidecar returns scores on a wider range.
+		// Configurable via ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD; lower if sidecar scores exceed [0,1].
 		if ok && confidence >= s.hmmUpgradeConfidenceThreshold {
 			base.Outcome = planner.OutcomeSwitch
 			base.Reason = hmmReasonConfidentUpgrade
@@ -792,6 +792,13 @@ func (s *Service) hmmStayPin(req router.Request, activePin sessionpin.Pin, hmmHi
 		best sessionpin.Pin
 		ok   bool
 	)
+	// The active routing pin is only an HMM stay candidate when it was itself
+	// written by an HMM turn. A cluster/planner pin from a prior non-HMM stretch
+	// (e.g. the session's strategy header changed mid-flight) must not win an
+	// HMM turn's EV stay — the _hmm_history row is the authoritative source.
+	if !isHMMPinReason(activePin.Reason) {
+		activePin = sessionpin.Pin{}
+	}
 	for _, candidate := range []sessionpin.Pin{activePin, hmmHistory} {
 		normalized, candidateOK := s.normalizeHMMStayPin(req, candidate)
 		if !candidateOK {
@@ -803,6 +810,14 @@ func (s *Service) hmmStayPin(req router.Request, activePin sessionpin.Pin, hmmHi
 		}
 	}
 	return best, ok
+}
+
+// isHMMPinReason reports whether a stored pin's Reason marks it as HMM-written
+// (either the hmm_history sentinel or an hmm_policy* sidecar reason). Used to
+// keep a stale cluster/planner pin from steering an HMM turn's EV stay.
+func isHMMPinReason(reason string) bool {
+	return reason == hmmHistoryReason ||
+		strings.HasPrefix(strings.TrimSpace(reason), "hmm_policy")
 }
 
 func (s *Service) normalizeHMMStayPin(req router.Request, p sessionpin.Pin) (sessionpin.Pin, bool) {

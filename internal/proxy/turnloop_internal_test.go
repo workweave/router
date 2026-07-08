@@ -166,6 +166,50 @@ func TestRecordTurnUsage_HMMDecisionWritesHistoryOnly(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-5", store.lastUsage.ServedModel)
 }
 
+func TestRecordHMMTurnHistory_ZeroUsageRefreshesTTLButSkipsUsageWriteback(t *testing.T) {
+	store := newStubPinStore()
+	svc := NewService(
+		nil,
+		nil,
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	for i := range sessionKey {
+		sessionKey[i] = byte(i + 1)
+	}
+
+	res := turnLoopResult{
+		InstallationID: uuid.New(),
+		Decision: router.Decision{
+			Provider: providers.ProviderAnthropic,
+			Model:    "claude-sonnet-5",
+			Reason:   "hmm_policy(label=Complex Followup)",
+			Metadata: &router.RoutingMetadata{
+				Strategy: string(router.StrategyHMM),
+				RouteID:  "route-1",
+			},
+		},
+		SessionKey: sessionKey,
+		PinRole:    sessionpin.DefaultRole,
+	}
+	// A failed/empty upstream turn: all usage counts zero.
+	svc.recordTurnUsage(res, res.Decision.Provider, res.Decision.Model, 0, 0, 0, 0)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.Len(t, store.upserts, 1, "TTL-refreshing upsert must still run on a zero-usage turn")
+	assert.Equal(t, hmmHistoryRole(sessionpin.DefaultRole), store.upserts[0].Role)
+	assert.Empty(t, store.usageRoles, "zero-usage turn must not clobber the history row's usage columns")
+	assert.Equal(t, 0, store.usageHits)
+}
+
 func TestRecordTurnUsage_HMMEVStayWritesHistoryOnly(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(
@@ -412,6 +456,104 @@ func TestHMMCostGate_IgnoresExpiredActivePin(t *testing.T) {
 	assert.Equal(t, planner.ReasonNoPin, plan.Reason)
 }
 
+func TestHMMCostGate_IgnoresNonHMMActivePin(t *testing.T) {
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderAnthropic: nil, providers.ProviderMakora: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	// A warm cluster/planner pin (non-HMM reason) must NOT steer an HMM turn's
+	// EV stay — otherwise HMM turns silently reuse ordinary session pins.
+	clusterPin := sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-sonnet-5",
+		LastServedModel: "claude-sonnet-5",
+		Reason:          "cluster:v0.2",
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+		PinnedUntil:     time.Now().Add(time.Hour),
+	}
+	fresh := router.Decision{
+		Provider: providers.ProviderMakora,
+		Model:    "deepseek/deepseek-v4-flash",
+		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Metadata: &router.RoutingMetadata{
+			Strategy:    string(router.StrategyHMM),
+			RouteID:     "route-1",
+			ChosenScore: 0.70,
+		},
+	}
+
+	decision, plan, sticky, stayModel := svc.hmmCostGatedDecision(
+		router.Request{},
+		clusterPin,
+		sessionpin.Pin{},
+		fresh,
+		100,
+		false,
+	)
+
+	assert.False(t, sticky, "a non-HMM cluster pin must not win an HMM EV stay")
+	assert.Equal(t, "deepseek/deepseek-v4-flash", decision.Model)
+	assert.Empty(t, stayModel)
+	assert.Equal(t, planner.OutcomeSwitch, plan.Outcome)
+	assert.Equal(t, planner.ReasonNoPin, plan.Reason)
+}
+
+func TestHMMCostGate_HonorsHMMReasonedActivePin(t *testing.T) {
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderAnthropic: nil, providers.ProviderMakora: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	// The active pin IS HMM-reasoned, so it remains a valid stay candidate: a
+	// cheaper fresh pick that doesn't clear EV must stay on it.
+	hmmPin := sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-sonnet-5",
+		LastServedModel: "claude-sonnet-5",
+		Reason:          "hmm_policy(label=Complex Followup)",
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+		PinnedUntil:     time.Now().Add(time.Hour),
+	}
+	fresh := router.Decision{
+		Provider: providers.ProviderMakora,
+		Model:    "deepseek/deepseek-v4-flash",
+		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Metadata: &router.RoutingMetadata{
+			Strategy:    string(router.StrategyHMM),
+			RouteID:     "route-1",
+			ChosenScore: 0.70,
+		},
+	}
+
+	decision, plan, sticky, stayModel := svc.hmmCostGatedDecision(
+		router.Request{},
+		hmmPin,
+		sessionpin.Pin{},
+		fresh,
+		100,
+		false,
+	)
+
+	assert.True(t, sticky, "an HMM-reasoned active pin remains a valid stay candidate")
+	assert.Equal(t, "claude-sonnet-5", decision.Model)
+	assert.Equal(t, "claude-sonnet-5", stayModel)
+	assert.Equal(t, planner.OutcomeStay, plan.Outcome)
+	assert.Equal(t, planner.ReasonEVNegative, plan.Reason)
+}
+
 func TestHMMCostGate_IgnoresMaxedHistory(t *testing.T) {
 	svc := NewService(
 		nil,
@@ -617,10 +759,8 @@ func TestModelSwitched(t *testing.T) {
 	}
 }
 
-// TestService_NewService_HMMUpgradeConfidenceDefaults: the HMM "upgrade to
-// more expensive model" ChosenScore threshold must default to 0.85 so a fresh
-// deploy behaves like the previous hardcoded behavior. Without a default the
-// floor becomes 0 and every fresh HMM "upgrade" picks would beat an EV stay.
+// TestService_NewService_HMMUpgradeConfidenceDefaults: must default to 0.85;
+// a zero default would let every HMM upgrade beat an EV stay.
 func TestService_NewService_HMMUpgradeConfidenceDefaults(t *testing.T) {
 	svc := NewService(
 		nil,
@@ -637,10 +777,8 @@ func TestService_NewService_HMMUpgradeConfidenceDefaults(t *testing.T) {
 		"new deploys must default to the documented 0.85 threshold")
 }
 
-// TestService_WithHMMUpgradeConfidenceThreshold: setter accepts in-range and
-// rejects out-of-range. Out-of-range values must not the existing threshold —
-// failing silently on bad input would let a single typo disable upgrade
-// gating permanently.
+// TestService_WithHMMUpgradeConfidenceThreshold: accepts in-range, rejects
+// out-of-range silently (a typo must not disable upgrade gating permanently).
 func TestService_WithHMMUpgradeConfidenceThreshold(t *testing.T) {
 	svc := NewService(
 		nil,
@@ -671,8 +809,7 @@ func TestService_WithHMMUpgradeConfidenceThreshold(t *testing.T) {
 }
 
 // TestHMMCostGate_UpgradeThresholdConfigurable: lower the threshold so a
-// ChosenScore that the default 0.85 rejects is accepted. Verifies the wiring
-// between withHMMUpgradeConfidenceThreshold and the cost-gate switch path.
+// ChosenScore that the default 0.85 rejects is accepted.
 func TestHMMCostGate_UpgradeThresholdConfigurable(t *testing.T) {
 	svc := NewService(
 		nil,

@@ -146,13 +146,9 @@ type Service struct {
 	// when the session pin carries no runner-up (PairedModel). Set from
 	// ROUTER_CYBER_REFUSAL_FALLBACK_MODEL; defaults to claude-sonnet-5.
 	cyberRefusalFallbackModel string
-	// hmmUpgradeConfidenceThreshold is the minimum fresh-decision ChosenScore on
-	// the HMM strategy that overrides an EV stay for a *more expensive* fresh
-	// model. Below it the stay-pin holds even if the sidecar prefers an
-	// upgrade — protects against the sidecar occasionally returning a low-
-	// confidence "upgrade" suggestion that would otherwise thrash the prompt
-	// cache. Set via ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD. Out-of-range
-	// values are rejected by the setter and the default sticks.
+	// hmmUpgradeConfidenceThreshold is the minimum HMM sidecar ChosenScore that
+	// lets a fresh upgrade to a more expensive model beat an EV stay. Protects
+	// against low-confidence thrash. Set via ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD.
 	hmmUpgradeConfidenceThreshold float64
 	// effortEscalation enables the escalate-on-failure reasoning-effort policy:
 	// gpt-5.x serves low effort by default and high after an observed
@@ -955,14 +951,9 @@ func (s *Service) WithCyberRefusalFallbackModel(model string) *Service {
 	return s
 }
 
-// WithHMMUpgradeConfidenceThreshold sets the minimum ChosenScore from the HMM
-// sidecar that lets a fresh "upgrade to a more expensive model" decision beat
-// the planner's EV stay on the cheaper pinned model. Below this threshold an
-// EV stay holds even if the sidecar prefers an upgrade — protects against
-// occasional low-confidence "upgrade" suggestions that would thrash the prompt
-// cache for no real benefit. Out-of-range values (not in [0,1]) are rejected
-// and the existing threshold stays. Wired from
-// ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD.
+// WithHMMUpgradeConfidenceThreshold sets the minimum HMM sidecar ChosenScore
+// for a fresh upgrade to beat an EV stay on the cheaper pinned model. Out-of-range
+// values ([0,1] only) are rejected silently. Wired from ROUTER_HMM_UPGRADE_CONFIDENCE_THRESHOLD.
 func (s *Service) WithHMMUpgradeConfidenceThreshold(v float64) *Service {
 	if v < 0 || v > 1 {
 		return s
@@ -2971,6 +2962,8 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		return
 	}
 	role := hmmHistoryRole(res.PinRole)
+	// The upsert only refreshes the row's TTL/turn_count/provider (ON CONFLICT
+	// leaves the usage columns untouched), so it is always safe to run.
 	s.upsertPin(context.Background(), sessionpin.Pin{
 		SessionKey:     res.SessionKey,
 		Role:           role,
@@ -2980,6 +2973,14 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		TurnCount:      1,
 		PinnedUntil:    pinExpiry(hmmHistoryReason),
 	})
+	// Mirror recordTurnUsage's zero-usage guard for the UpdateUsage writebacks:
+	// a failed/empty upstream turn carries no tokens, and writing it would
+	// overwrite the history row's prior token counts and last_turn_ended_at —
+	// making the next turn's EV-stay and cache-warm checks read a warm session
+	// as cold or usage-less. The TTL-refreshing upsert above still ran.
+	if in == 0 && out == 0 && cacheCreation == 0 && cacheRead == 0 {
+		return
+	}
 	now := time.Now()
 	if res.PriorServedModel != "" && res.PriorServedModel != servedModel {
 		if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{

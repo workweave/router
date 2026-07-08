@@ -384,6 +384,42 @@ func TestTurnLoop_HMMHistoryMaxedOutExcludesServedModelBeforeRouting(t *testing.
 	store.mu.Unlock()
 }
 
+func TestTurnLoop_HMMExpiredHistoryMaxedOutStillExcludesServedModel(t *testing.T) {
+	store := newFakePinStore()
+	store.hasHMMHistory = true
+	// Expired history row (PinnedUntil in the past) that maxed out its output
+	// cap: the maxed model must still be excluded, matching the active-pin path.
+	store.hmmHistory = sessionpin.Pin{
+		Provider:         providers.ProviderAnthropic,
+		LastServedModel:  "claude-sonnet-5",
+		LastOutputTokens: 8192,
+		LastTurnEndedAt:  time.Now().Add(-time.Hour),
+		PinnedUntil:      time.Now().Add(-time.Minute),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-1",
+		},
+	}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	require.NotNil(t, fr.capturedReq)
+	assert.Contains(t, fr.capturedReq.ExcludedModels, "claude-sonnet-5",
+		"a maxed-out model must stay excluded even after the history row's TTL lapses")
+	store.mu.Lock()
+	assertOnlyHMMHistoryUpserts(t, store)
+	store.mu.Unlock()
+}
+
 func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
