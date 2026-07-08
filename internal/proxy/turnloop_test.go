@@ -349,6 +349,41 @@ func TestTurnLoop_HMMToolExecutionStaysWhenWarmCacheEVBeatsCheapFresh(t *testing
 	store.mu.Unlock()
 }
 
+func TestTurnLoop_HMMHistoryMaxedOutExcludesServedModelBeforeRouting(t *testing.T) {
+	store := newFakePinStore()
+	store.hasHMMHistory = true
+	store.hmmHistory = sessionpin.Pin{
+		Provider:         providers.ProviderAnthropic,
+		LastServedModel:  "claude-sonnet-5",
+		LastOutputTokens: 8192,
+		LastTurnEndedAt:  time.Now().Add(-30 * time.Second),
+		PinnedUntil:      time.Now().Add(time.Hour),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Metadata: &router.RoutingMetadata{
+			Strategy: string(router.StrategyHMM),
+			RouteID:  "route-1",
+		},
+	}}
+	svc := newPinSvc(fr, store)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec, httpReq))
+
+	require.NotNil(t, fr.capturedReq)
+	assert.Contains(t, fr.capturedReq.ExcludedModels, "claude-sonnet-5",
+		"HMM history saturation must exclude the prior served model before sidecar routing")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
+	store.mu.Lock()
+	assertOnlyHMMHistoryUpserts(t, store)
+	store.mu.Unlock()
+}
+
 func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true

@@ -359,10 +359,7 @@ func (s *Service) runTurnLoop(
 		// model can be the paired member, so pin.Model could name the wrong
 		// (healthy) model and leave the broken one eligible. Fall back to
 		// pin.Model for older rows written before LastServedModel existed.
-		maxedModel := pin.LastServedModel
-		if maxedModel == "" {
-			maxedModel = pin.Model
-		}
+		maxedModel := maxedOutServedModel(pin)
 		log.Info("Session pin maxed out on previous turn; excluding for this turn",
 			"pin_model", pin.Model,
 			"pin_provider", pin.Provider,
@@ -378,6 +375,20 @@ func (s *Service) runTurnLoop(
 		req.ExcludedModels = excluded
 		pinFound = false
 		pin = sessionpin.Pin{}
+	}
+	if maxedModel := maxedOutServedModel(hmmHistory); maxedModel != "" &&
+		(hmmHistory.PinnedUntil.IsZero() || hmmHistory.PinnedUntil.After(time.Now())) {
+		log.Info("HMM history maxed out on previous turn; excluding for this turn",
+			"history_provider", hmmHistory.Provider,
+			"maxed_model", maxedModel,
+			"last_output_tokens", hmmHistory.LastOutputTokens,
+		)
+		excluded := make(map[string]struct{}, len(req.ExcludedModels)+1)
+		for k := range req.ExcludedModels {
+			excluded[k] = struct{}{}
+		}
+		excluded[maxedModel] = struct{}{}
+		req.ExcludedModels = excluded
 	}
 
 	// If the pre-filter excluded the pinned model for context overflow,
@@ -538,9 +549,13 @@ func (s *Service) runTurnLoop(
 	)
 	res.Fresh = fresh
 	if isHMMDecision(fresh) {
+		activePin := sessionpin.Pin{}
+		if pinFound {
+			activePin = pin
+		}
 		hmmDecision, hmmPlannerDecision, hmmSticky, hmmStayModel := s.hmmCostGatedDecision(
 			req,
-			pin,
+			activePin,
 			hmmHistory,
 			fresh,
 			feats.Tokens,
@@ -797,6 +812,12 @@ func (s *Service) normalizeHMMStayPin(req router.Request, p sessionpin.Pin) (ses
 	if p.LastTurnEndedAt.IsZero() {
 		return sessionpin.Pin{}, false
 	}
+	if !p.PinnedUntil.IsZero() && !p.PinnedUntil.After(time.Now()) {
+		return sessionpin.Pin{}, false
+	}
+	if p.LastOutputTokens >= prevTurnMaxedOutThreshold {
+		return sessionpin.Pin{}, false
+	}
 	if req.ExcludedModels != nil {
 		if _, excluded := req.ExcludedModels[model]; excluded {
 			return sessionpin.Pin{}, false
@@ -862,6 +883,17 @@ func hmmEffectiveInputUSDPer1M(model string, factors map[string]float64) (float6
 		value *= factor
 	}
 	return value, true
+}
+
+func maxedOutServedModel(pin sessionpin.Pin) string {
+	if pin.LastOutputTokens < prevTurnMaxedOutThreshold {
+		return ""
+	}
+	model := pin.LastServedModel
+	if model == "" {
+		model = pin.Model
+	}
+	return model
 }
 
 // roleForTier maps a requested-model tier to its session-pin role. Each tier

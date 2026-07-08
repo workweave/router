@@ -2905,8 +2905,8 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedProvider, servedMode
 	if s.pinStore == nil || res.HardPinned {
 		return
 	}
-	if isHMMDecision(res.Decision) {
-		s.recordHMMTurnHistory(res, servedProvider, servedModel)
+	if isHMMTurn(res) {
+		s.recordHMMTurnHistory(res, servedProvider, servedModel, in, out, cacheCreation, cacheRead)
 		return
 	}
 	var zeroKey [sessionpin.SessionKeyLen]byte
@@ -2933,7 +2933,11 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedProvider, servedMode
 	}
 }
 
-func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, servedModel string) {
+func isHMMTurn(res turnLoopResult) bool {
+	return isHMMDecision(res.Decision) || isHMMDecision(res.Fresh)
+}
+
+func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, servedModel string, in, out, cacheCreation, cacheRead int) {
 	if servedModel == "" || res.InstallationID == uuid.Nil {
 		return
 	}
@@ -2962,8 +2966,12 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		}
 	}
 	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
-		EndedAt:     now,
-		ServedModel: servedModel,
+		InputTokens:       in,
+		CachedReadTokens:  cacheRead,
+		CachedWriteTokens: cacheCreation,
+		OutputTokens:      out,
+		EndedAt:           now,
+		ServedModel:       servedModel,
 	}); err != nil {
 		observability.Get().Error("HMM switch-history writeback failed", "err", err)
 	}

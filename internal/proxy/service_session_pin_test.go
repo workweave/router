@@ -30,6 +30,8 @@ type fakePinStore struct {
 	mu               sync.Mutex
 	pin              sessionpin.Pin
 	hasPin           bool
+	hmmHistory       sessionpin.Pin
+	hasHMMHistory    bool
 	getErr           error
 	getCalls         int
 	upserts          []sessionpin.Pin
@@ -56,7 +58,13 @@ func (f *fakePinStore) Get(ctx context.Context, key [sessionpin.SessionKeyLen]by
 		return sessionpin.Pin{}, false, f.getErr
 	}
 	if strings.HasSuffix(role, "_hmm_history") {
-		return sessionpin.Pin{}, false, nil
+		if !f.hasHMMHistory {
+			return sessionpin.Pin{}, false, nil
+		}
+		pin := f.hmmHistory
+		pin.SessionKey = key
+		pin.Role = role
+		return pin, true, nil
 	}
 	if !f.hasPin {
 		return sessionpin.Pin{}, false, nil
