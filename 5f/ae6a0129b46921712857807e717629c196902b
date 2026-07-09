@@ -1,0 +1,31 @@
+internal/translate/handover.go
+  s_8df74e21a4407f::t_a9d6f8ca369997 238-239,241,248
+  s_8df74e21a4407f::t_a85e61ed162752 80-86
+  s_8df74e21a4407f::t_a4a2d3951eb1d9 132,139
+  s_8df74e21a4407f::t_6d4c59937838f0 319-434
+internal/translate/emit_gemini.go
+  s_8df74e21a4407f::t_168b22fc4debfd 253-255
+  s_8df74e21a4407f::t_d291b613208a44 718-720
+internal/router/handover/summarizer_test.go
+  s_8df74e21a4407f::t_1ae396a98b2d14 4,12
+  s_8df74e21a4407f::t_a1c204692740d2 207-334
+  s_8df74e21a4407f::t_b81938d01bbeb2 335-410
+internal/translate/gemini_test.go
+  s_8df74e21a4407f::t_4efb15d96a959b 220-270
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "5fae6a0129b46921712857807e717629c196902b",
+  "prompts": {},
+  "sessions": {
+    "s_8df74e21a4407f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "be9de11a-13e0-46a9-9e63-07cd4bd6635a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}

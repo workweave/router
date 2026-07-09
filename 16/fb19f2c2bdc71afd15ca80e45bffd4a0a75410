@@ -1,0 +1,19 @@
+internal/router/cluster/artifacts/v0.55/model_registry.json
+  s_7afb9e056514df::t_5cedd35a067f48 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "16fb19f2c2bdc71afd15ca80e45bffd4a0a75410",
+  "prompts": {},
+  "sessions": {
+    "s_7afb9e056514df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "596a4cc9-3880-47a2-b704-bdcec26a947a",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

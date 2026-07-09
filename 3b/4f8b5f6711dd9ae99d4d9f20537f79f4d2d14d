@@ -1,0 +1,23 @@
+internal/router/catalog/catalog.go
+  s_0d150871c5d814::t_1d195c9684bee1 415-416
+install/cc-statusline.sh
+  s_0d150871c5d814::t_c0db441870232f 180,236
+install/install.sh
+  s_0d150871c5d814::t_c0db441870232f 2120,2176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "3b4f8b5f6711dd9ae99d4d9f20537f79f4d2d14d",
+  "prompts": {},
+  "sessions": {
+    "s_0d150871c5d814": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "61f3f057-5b24-4e76-b870-376afe9fb928",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

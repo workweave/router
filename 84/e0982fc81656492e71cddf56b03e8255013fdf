@@ -1,0 +1,23 @@
+internal/translate/text_repetition.go
+  s_6d259d23791b23::t_18217ae0476ebe 48-50
+  s_6d259d23791b23::t_bf43924f0a7184 9-10,12-14
+internal/proxy/text_repetition.go
+  s_6d259d23791b23::t_9184397dcdf3ab 46-48
+  s_6d259d23791b23::t_2476846b09281d 20-23,25-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "84e0982fc81656492e71cddf56b03e8255013fdf",
+  "prompts": {},
+  "sessions": {
+    "s_6d259d23791b23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a52423c3-9d52-4a6a-bb28-ac4c96a85b4d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

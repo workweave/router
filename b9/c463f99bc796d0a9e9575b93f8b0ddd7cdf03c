@@ -1,0 +1,29 @@
+internal/proxy/gemini.go
+  s_6497efcbf5fbe7::t_0d0be9949fe728 48-51,53-54
+internal/proxy/service.go
+  s_6497efcbf5fbe7::t_443037a115463c 1344-1350
+internal/proxy/client_identity.go
+  s_6497efcbf5fbe7::t_065dc24bb0ac40 194-195
+internal/proxy/router_feedback.go
+  s_6497efcbf5fbe7::t_0504e52f762c8c 180
+internal/translate/openai_footer.go
+  s_6497efcbf5fbe7::t_8492f569892f69 147-149,154,160
+internal/translate/gemini_footer.go
+  s_6497efcbf5fbe7::t_e287b5d0df4e78 154-156,161,167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "b9c463f99bc796d0a9e9575b93f8b0ddd7cdf03c",
+  "prompts": {},
+  "sessions": {
+    "s_6497efcbf5fbe7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7e6c8c31-340d-4213-89f1-db9abfc036e8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
