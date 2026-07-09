@@ -73,6 +73,64 @@ func TestRouterKeepsGeneratedRouteIDWhenSidecarOmitsIt(t *testing.T) {
 	assert.Equal(t, decider.query.RouteID, decision.Metadata.RouteID)
 }
 
+func TestRouterForwardsHarnessAndPreferenceSignals(t *testing.T) {
+	decider := &fakeDecider{res: Result{Model: "moonshotai/kimi-k2.7-code"}}
+	r := New(
+		decider,
+		map[string]struct{}{
+			"moonshotai/kimi-k2.7": {},
+			"claude-sonnet-5":      {},
+		},
+		map[string]struct{}{
+			providers.ProviderFireworks: {},
+			providers.ProviderAnthropic: {},
+		},
+	)
+	alpha := 0.25
+	qualityBias := 0.9
+
+	_, err := r.Route(context.Background(), router.Request{
+		PromptText:      "hello",
+		Harness:         router.HarnessClaudeCode,
+		PreferredModels: []string{"moonshotai/kimi-k2.7"},
+		ExcludedModels: map[string]struct{}{
+			"claude-sonnet-5": {},
+		},
+		RoutingKnobs: &router.Overrides{
+			Alpha:       &alpha,
+			QualityBias: &qualityBias,
+		},
+		SubsidizedModelCostFactor: map[string]float64{
+			"moonshotai/kimi-k2.7": 0.15,
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, router.HarnessClaudeCode, decider.query.Harness)
+	require.NotNil(t, decider.query.RoutingPreferences)
+	require.NotNil(t, decider.query.RoutingPreferences.Alpha)
+	require.NotNil(t, decider.query.RoutingPreferences.QualityBias)
+	assert.Equal(t, alpha, *decider.query.RoutingPreferences.Alpha)
+	assert.Equal(t, qualityBias, *decider.query.RoutingPreferences.QualityBias)
+	assert.Equal(t, []string{"moonshotai/kimi-k2.7-code"}, decider.query.RoutingPreferences.PreferredModels)
+	assert.Equal(t, []string{"anthropic/claude-sonnet-5"}, decider.query.RoutingPreferences.ExcludedModels)
+	assert.Equal(t, map[string]float64{"moonshotai/kimi-k2.7-code": 0.15}, decider.query.RoutingPreferences.SubsidizedModelCostFactor)
+}
+
+func TestRosterIDsForCatalogIDSetIsDeterministic(t *testing.T) {
+	ids := map[string]struct{}{
+		"moonshotai/kimi-k2.7": {},
+		"claude-sonnet-5":      {},
+	}
+
+	for range 10 {
+		assert.Equal(t,
+			[]string{"anthropic/claude-sonnet-5", "moonshotai/kimi-k2.7-code"},
+			rosterIDsForCatalogIDSet(ids),
+		)
+	}
+}
+
 func TestRouterFailsClosedOnUnknownReturnedModel(t *testing.T) {
 	decider := &fakeDecider{res: Result{Model: "unknown/model"}}
 	r := New(decider, map[string]struct{}{"moonshotai/kimi-k2.7": {}}, map[string]struct{}{"fireworks": {}})

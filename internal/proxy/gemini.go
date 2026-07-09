@@ -88,6 +88,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
 		RequestedModel:       feats.Model,
+		Harness:              clientIdentityHarnessForRequest(ctx),
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		HasImages:            feats.HasImages,

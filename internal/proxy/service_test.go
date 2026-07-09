@@ -31,6 +31,52 @@ func (f *fakeRouter) Route(ctx context.Context, req router.Request) (router.Deci
 	return f.decision, f.err
 }
 
+func TestService_RouteAnthropicRequestSetsHarnessFromClientIdentity(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-3-5-sonnet-20241022",
+		"messages":[{"role":"user","content":"hello"}]
+	}`)
+	for _, tc := range []struct {
+		name      string
+		clientApp string
+		want      router.Harness
+	}{
+		{name: "generic_api", want: router.HarnessAPI},
+		{name: "claude_code", clientApp: proxy.ClientAppClaudeCode, want: router.HarnessClaudeCode},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := &fakeRouter{
+				decision: router.Decision{
+					Provider: providers.ProviderAnthropic,
+					Model:    "claude-haiku-4-5",
+				},
+			}
+			svc := proxy.NewService(fr,
+				map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+				nil,
+				false,
+				nil,
+				nil,
+				false,
+				providers.ProviderAnthropic, "claude-haiku-4-5",
+				nil,
+			)
+			ctx := context.Background()
+			if tc.clientApp != "" {
+				ctx = context.WithValue(ctx, proxy.ClientIdentityContextKey{}, proxy.ClientIdentity{
+					ClientApp: tc.clientApp,
+				})
+			}
+
+			_, err := svc.RouteAnthropicRequest(ctx, body)
+
+			require.NoError(t, err)
+			require.NotNil(t, fr.capturedReq)
+			assert.Equal(t, tc.want, fr.capturedReq.Harness)
+		})
+	}
+}
+
 type fakeProvider struct {
 	proxyBodies   [][]byte
 	proxyResponse func(w http.ResponseWriter)

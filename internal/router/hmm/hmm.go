@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -27,12 +28,22 @@ type Candidate struct {
 type Query struct {
 	RouteID              string
 	PromptText           string
+	Harness              router.Harness
 	ConversationMessages []router.ConversationMessage
 	AvailableTools       []string
 	EstimatedInputTokens int
 	HasTools             bool
 	HasImages            bool
 	Candidates           []Candidate
+	RoutingPreferences   *RoutingPreferences
+}
+
+type RoutingPreferences struct {
+	Alpha                     *float64           `json:"alpha,omitempty"`
+	QualityBias               *float64           `json:"quality_bias,omitempty"`
+	PreferredModels           []string           `json:"preferred_models,omitempty"`
+	ExcludedModels            []string           `json:"excluded_models,omitempty"`
+	SubsidizedModelCostFactor map[string]float64 `json:"subsidized_model_cost_factor,omitempty"`
 }
 
 type Result struct {
@@ -163,12 +174,14 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 	res, err := r.decider.Decide(ctx, Query{
 		RouteID:              requestRouteID,
 		PromptText:           req.PromptText,
+		Harness:              req.Harness,
 		ConversationMessages: req.ConversationMessages,
 		AvailableTools:       req.AvailableTools,
 		EstimatedInputTokens: req.EstimatedInputTokens,
 		HasTools:             req.HasTools,
 		HasImages:            req.HasImages,
 		Candidates:           candidates,
+		RoutingPreferences:   routingPreferencesFromRequest(req),
 	})
 	if err != nil {
 		log.Error("HMM router: sidecar decide failed; returning ErrHMMUnavailable", "err", err)
@@ -242,3 +255,85 @@ func isToolExecutionResult(res Result) bool {
 
 var _ router.Router = (*Router)(nil)
 var _ OutcomeReporter = (*Router)(nil)
+
+func routingPreferencesFromRequest(req router.Request) *RoutingPreferences {
+	prefs := RoutingPreferences{}
+	if req.RoutingKnobs != nil {
+		prefs.Alpha = req.RoutingKnobs.Alpha
+		prefs.QualityBias = req.RoutingKnobs.QualityBias
+	}
+	prefs.PreferredModels = rosterIDsForCatalogIDs(req.PreferredModels)
+	prefs.ExcludedModels = rosterIDsForCatalogIDSet(req.ExcludedModels)
+	prefs.SubsidizedModelCostFactor = rosterSubsidyFactors(req.SubsidizedModelCostFactor)
+	if prefs.Alpha == nil &&
+		prefs.QualityBias == nil &&
+		len(prefs.PreferredModels) == 0 &&
+		len(prefs.ExcludedModels) == 0 &&
+		len(prefs.SubsidizedModelCostFactor) == 0 {
+		return nil
+	}
+	return &prefs
+}
+
+func rosterIDsForCatalogIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	seen := map[string]struct{}{}
+	for _, id := range ids {
+		rosterID := rosterIDForModelID(id)
+		if rosterID == "" {
+			continue
+		}
+		if _, ok := seen[rosterID]; ok {
+			continue
+		}
+		seen[rosterID] = struct{}{}
+		out = append(out, rosterID)
+	}
+	return out
+}
+
+func rosterIDsForCatalogIDSet(ids map[string]struct{}) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	seen := map[string]struct{}{}
+	for id := range ids {
+		rosterID := rosterIDForModelID(id)
+		if rosterID == "" {
+			continue
+		}
+		if _, ok := seen[rosterID]; ok {
+			continue
+		}
+		seen[rosterID] = struct{}{}
+		out = append(out, rosterID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func rosterSubsidyFactors(factors map[string]float64) map[string]float64 {
+	if len(factors) == 0 {
+		return nil
+	}
+	out := make(map[string]float64, len(factors))
+	for id, factor := range factors {
+		rosterID := rosterIDForModelID(id)
+		if rosterID == "" {
+			continue
+		}
+		out[rosterID] = factor
+	}
+	return out
+}
+
+func rosterIDForModelID(id string) string {
+	if model, ok := catalog.ByID(id); ok {
+		return rosterIDFor(model)
+	}
+	return id
+}

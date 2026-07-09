@@ -541,6 +541,33 @@ func routingKnobsForRequest(ctx context.Context) *router.Overrides {
 	return nil
 }
 
+func anthropicHarnessForRequest(ctx context.Context) router.Harness {
+	return clientIdentityHarnessForRequest(ctx)
+}
+
+func clientIdentityHarnessForRequest(ctx context.Context) router.Harness {
+	switch ClientIdentityFrom(ctx).ClientApp {
+	case ClientAppClaudeCode:
+		return router.HarnessClaudeCode
+	case ClientAppCodex:
+		return router.HarnessCodex
+	case ClientAppCursor:
+		return router.HarnessCursor
+	default:
+		return router.HarnessAPI
+	}
+}
+
+func openAIHarnessForRequest(ctx context.Context, headers http.Header) router.Harness {
+	if codexSubscriptionFromContext(ctx) != nil {
+		return router.HarnessCodex
+	}
+	if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
+		return router.HarnessCodex
+	}
+	return clientIdentityHarnessForRequest(ctx)
+}
+
 // excludedModelsForRequest returns the request's model exclusion set.
 // Env override wins; otherwise the installation list is converted to a set.
 func (s *Service) excludedModelsForRequest(ctx context.Context) map[string]struct{} {
@@ -1522,6 +1549,7 @@ func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte) (decis
 
 	decision, err = s.Route(ctx, router.Request{
 		RequestedModel:       feats.Model,
+		Harness:              anthropicHarnessForRequest(ctx),
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		PromptText:           promptText,
@@ -1954,6 +1982,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	routeStart := time.Now()
 	req := router.Request{
 		RequestedModel:       feats.Model,
+		Harness:              anthropicHarnessForRequest(ctx),
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		HasImages:            feats.HasImages,
@@ -3860,6 +3889,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
 		RequestedModel:       feats.Model,
+		Harness:              openAIHarnessForRequest(ctx, r.Header),
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		HasImages:            feats.HasImages,
