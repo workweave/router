@@ -541,6 +541,20 @@ func routingKnobsForRequest(ctx context.Context) *router.Overrides {
 	return nil
 }
 
+func anthropicHarnessForRequest(context.Context) router.Harness {
+	return router.HarnessClaudeCode
+}
+
+func openAIHarnessForRequest(ctx context.Context) router.Harness {
+	if body, ok := ctx.Value(codexResponsesBodyContextKey{}).([]byte); ok && len(body) > 0 {
+		return router.HarnessCodex
+	}
+	if openaiSubscriptionFromContext(ctx) != "" {
+		return router.HarnessCodex
+	}
+	return router.HarnessAPI
+}
+
 // excludedModelsForRequest returns the request's model exclusion set.
 // Env override wins; otherwise the installation list is converted to a set.
 func (s *Service) excludedModelsForRequest(ctx context.Context) map[string]struct{} {
@@ -1522,6 +1536,7 @@ func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte) (decis
 
 	decision, err = s.Route(ctx, router.Request{
 		RequestedModel:       feats.Model,
+		Harness:              anthropicHarnessForRequest(ctx),
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		PromptText:           promptText,
@@ -1954,6 +1969,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	routeStart := time.Now()
 	req := router.Request{
 		RequestedModel:       feats.Model,
+		Harness:              anthropicHarnessForRequest(ctx),
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		HasImages:            feats.HasImages,
@@ -3860,6 +3876,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
 		RequestedModel:       feats.Model,
+		Harness:              openAIHarnessForRequest(ctx),
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		HasImages:            feats.HasImages,

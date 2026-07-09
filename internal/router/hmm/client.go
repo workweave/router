@@ -76,17 +76,19 @@ func (d *HTTPDecider) ReportOutcome(ctx context.Context, payload map[string]inte
 }
 
 type routeRequest struct {
-	RouteID              string            `json:"route_id"`
-	PromptText           string            `json:"prompt_text"`
-	LatestUserText       string            `json:"latest_user_text,omitempty"`
-	TurnIndex            int               `json:"turn_index"`
-	ConversationMessages []routeMessage    `json:"conversation_messages,omitempty"`
-	AvailableTools       []string          `json:"available_tools,omitempty"`
-	EstimatedInputTokens int               `json:"estimated_input_tokens"`
-	HasTools             bool              `json:"has_tools"`
-	HasImages            bool              `json:"has_images"`
-	CandidateModels      []string          `json:"candidate_models"`
-	CandidateProviders   map[string]string `json:"candidate_providers"`
+	RouteID              string              `json:"route_id"`
+	PromptText           string              `json:"prompt_text"`
+	LatestUserText       string              `json:"latest_user_text,omitempty"`
+	TurnIndex            int                 `json:"turn_index"`
+	Harness              string              `json:"harness,omitempty"`
+	ConversationMessages []routeMessage      `json:"conversation_messages,omitempty"`
+	AvailableTools       []string            `json:"available_tools,omitempty"`
+	EstimatedInputTokens int                 `json:"estimated_input_tokens"`
+	HasTools             bool                `json:"has_tools"`
+	HasImages            bool                `json:"has_images"`
+	CandidateModels      []string            `json:"candidate_models"`
+	CandidateProviders   map[string]string   `json:"candidate_providers"`
+	RoutingPreferences   *RoutingPreferences `json:"routing_preferences,omitempty"`
 }
 
 type routeMessage struct {
@@ -142,6 +144,7 @@ func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
 		PromptText:           q.PromptText,
 		LatestUserText:       latestUserText(messages),
 		TurnIndex:            turnIndex(messages),
+		Harness:              string(q.Harness),
 		ConversationMessages: messages,
 		AvailableTools:       clipRouteValues(q.AvailableTools, maxRouteToolCallInputKeys, maxRouteToolCallInputChars),
 		EstimatedInputTokens: q.EstimatedInputTokens,
@@ -149,6 +152,7 @@ func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
 		HasImages:            q.HasImages,
 		CandidateModels:      models,
 		CandidateProviders:   providers,
+		RoutingPreferences:   q.RoutingPreferences,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal route request: %w", err)

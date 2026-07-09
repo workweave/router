@@ -36,9 +36,11 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 	defer server.Close()
 
 	decider := NewHTTPDecider(server.URL, server.Client(), 0)
+	alpha := 0.7
 	result, err := decider.Decide(context.Background(), Query{
 		RouteID:    "route-1",
 		PromptText: "hello",
+		Harness:    router.HarnessClaudeCode,
 		ConversationMessages: []router.ConversationMessage{
 			{Role: "user", Text: "please explore the repo"},
 			{Role: "assistant", Text: "done"},
@@ -63,6 +65,12 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 			RosterID: "moonshotai/kimi-k2.7-code",
 			Provider: "openrouter",
 		}},
+		RoutingPreferences: &RoutingPreferences{
+			Alpha:                     &alpha,
+			PreferredModels:           []string{"moonshotai/kimi-k2.7-code"},
+			ExcludedModels:            []string{"openai/gpt-5.5"},
+			SubsidizedModelCostFactor: map[string]float64{"moonshotai/kimi-k2.7-code": 0.2},
+		},
 	})
 
 	require.NoError(t, err)
@@ -85,6 +93,13 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 	assert.True(t, got.HasTools)
 	assert.Equal(t, []string{"Read", "Grep"}, got.AvailableTools)
 	assert.Equal(t, []string{"moonshotai/kimi-k2.7-code"}, got.CandidateModels)
+	assert.Equal(t, "claude_code", got.Harness)
+	require.NotNil(t, got.RoutingPreferences)
+	require.NotNil(t, got.RoutingPreferences.Alpha)
+	assert.Equal(t, 0.7, *got.RoutingPreferences.Alpha)
+	assert.Equal(t, []string{"moonshotai/kimi-k2.7-code"}, got.RoutingPreferences.PreferredModels)
+	assert.Equal(t, []string{"openai/gpt-5.5"}, got.RoutingPreferences.ExcludedModels)
+	assert.Equal(t, map[string]float64{"moonshotai/kimi-k2.7-code": 0.2}, got.RoutingPreferences.SubsidizedModelCostFactor)
 	assert.Equal(t, "moonshotai/kimi-k2.7-code", result.Model)
 	assert.Equal(t, "classifier_confidence", result.ScoreKind)
 	assert.Equal(t, "medium", result.PolicyGroup)

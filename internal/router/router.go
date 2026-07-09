@@ -3,6 +3,16 @@ package router
 
 import "context"
 
+type Harness string
+
+const (
+	HarnessClaudeCode Harness = "claude_code"
+	HarnessCodex      Harness = "codex"
+	HarnessCursor     Harness = "cursor"
+	HarnessAPI        Harness = "api"
+	HarnessUnknown    Harness = "unknown"
+)
+
 type Overrides struct {
 	// Alpha is the raw per-cluster quality weight applied UNIFORMLY across every
 	// cluster (the eval/debug "sledgehammer" set via x-weave-routing-alpha), so
@@ -25,6 +35,7 @@ type Overrides struct {
 
 type Request struct {
 	RequestedModel       string
+	Harness              Harness
 	EstimatedInputTokens int
 	HasTools             bool
 	// HasImages: scorer drops text-only models from the eligible pool; turn
