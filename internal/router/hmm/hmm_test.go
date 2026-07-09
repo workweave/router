@@ -45,6 +45,8 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 			Text: "latest hello",
 		}},
 		EstimatedInputTokens: 10,
+		FeedbackKey:          "feedback-session",
+		FeedbackRole:         "default",
 	})
 
 	require.NoError(t, err)
@@ -55,6 +57,8 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 	assert.Equal(t, "hmm", decision.Metadata.Strategy)
 	assert.Equal(t, float32(0.9), decision.Metadata.Propensity)
 	assert.Equal(t, "hello", decider.query.PromptText)
+	assert.Equal(t, "feedback-session", decider.query.FeedbackKey)
+	assert.Equal(t, "default", decider.query.FeedbackRole)
 	assert.Equal(t, []router.ConversationMessage{{Role: "user", Text: "latest hello"}}, decider.query.ConversationMessages)
 	assert.Equal(t, []Candidate{{RosterID: "moonshotai/kimi-k2.7-code", Provider: "fireworks"}}, decider.query.Candidates)
 }

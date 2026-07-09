@@ -31,6 +31,22 @@ func (f *fakeFeedbackStore) InsertRouterFeedback(ctx context.Context, p proxy.Ro
 	return nil
 }
 
+type fakePolicyFeedbackRouter struct {
+	mu       sync.Mutex
+	payloads []map[string]interface{}
+}
+
+func (f *fakePolicyFeedbackRouter) Route(ctx context.Context, req router.Request) (router.Decision, error) {
+	return router.Decision{}, nil
+}
+
+func (f *fakePolicyFeedbackRouter) ReportFeedback(ctx context.Context, payload map[string]interface{}) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.payloads = append(f.payloads, payload)
+	return nil
+}
+
 func TestService_RouterFeedbackCommand_PersistsAndAcks(t *testing.T) {
 	const body = `{
 		"model":"claude-sonnet-4-6",
@@ -70,6 +86,63 @@ func TestService_RouterFeedbackCommand_PersistsAndAcks(t *testing.T) {
 	first, _ := blocks[0].(map[string]any)
 	text, _ := first["text"].(string)
 	assert.Contains(t, text, "Feedback recorded")
+}
+
+func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf- label=\"Complex Followup\" model=\"anthropic/claude-sonnet-5\" should have used the deeper route"}
+		]
+	}`
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", LastServedModel: "claude-haiku-4-5"}
+	feedback := &fakeFeedbackStore{}
+	policyFeedback := &fakePolicyFeedbackRouter{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	svc := newPinSvc(fr, store).
+		WithRouterFeedbackStore(feedback).
+		WithHMMRouter(policyFeedback)
+
+	installationID := uuid.New().String()
+	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyHMM)
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls)
+	require.Len(t, feedback.events, 1)
+	require.Len(t, policyFeedback.payloads, 1)
+	payload := policyFeedback.payloads[0]
+	assert.Equal(t, "down", payload["rating"])
+	assert.Equal(t, "label=\"Complex Followup\" model=\"anthropic/claude-sonnet-5\" should have used the deeper route", payload["feedback"])
+	assert.Equal(t, "claude-sonnet-4-6", payload["requested_model"])
+	assert.Equal(t, "claude-haiku-4-5", payload["served_model"])
+	assert.Equal(t, installationID, payload["installation_id"])
+	assert.NotEmpty(t, payload["feedback_key"])
+	assert.NotEmpty(t, payload["feedback_role"])
+}
+
+func TestService_RouterFeedbackCommand_DoesNotForwardPolicyFeedbackOutsideHMM(t *testing.T) {
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf+"}
+		]
+	}`
+	store := newFakePinStore()
+	policyFeedback := &fakePolicyFeedbackRouter{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	svc := newPinSvc(fr, store).WithHMMRouter(policyFeedback)
+
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(authedCtx(uuid.NewString()), []byte(body), rec, httpReq))
+
+	assert.Empty(t, policyFeedback.payloads)
 }
 
 func TestService_RouterFeedbackCommand_OpenAIIngress(t *testing.T) {

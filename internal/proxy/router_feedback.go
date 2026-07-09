@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/hex"
 	"net/http"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
+	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
@@ -111,6 +113,9 @@ func (s *Service) handleRouterFeedbackCommand(
 			return err
 		}
 	}
+	if router.StrategyFromContext(ctx) == router.StrategyHMM {
+		s.reportRouterFeedback(ctx, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback)
+	}
 
 	now := time.Now()
 	otel.Record(ctx, otel.Span{
@@ -142,6 +147,40 @@ func (s *Service) handleRouterFeedbackCommand(
 	)
 
 	return writeSyntheticCommandResponse(w, env, routerFeedbackAck(env.SourceFormat(), rating), inputTokens)
+}
+
+func (s *Service) reportRouterFeedback(
+	ctx context.Context,
+	installationID uuid.UUID,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+	role string,
+	routerUserID string,
+	clientID ClientIdentity,
+	requestedModel string,
+	servedModel string,
+	rating string,
+	feedback string,
+) {
+	if s.hmmFeedbackReporter == nil {
+		return
+	}
+	payload := map[string]interface{}{
+		"feedback_key":      hex.EncodeToString(sessionKey[:]),
+		"feedback_role":     role,
+		"rating":            rating,
+		"feedback":          feedback,
+		"requested_model":   requestedModel,
+		"served_model":      servedModel,
+		"router_user_id":    routerUserID,
+		"client_app":        clientID.ClientApp,
+		"client_session_id": clientID.SessionID,
+	}
+	if installationID != uuid.Nil {
+		payload["installation_id"] = installationID.String()
+	}
+	if err := s.hmmFeedbackReporter.ReportFeedback(context.Background(), payload); err != nil {
+		observability.FromContext(ctx).Error("/router-feedback: sidecar feedback report failed", "err", err)
+	}
 }
 
 // routerFeedbackAck renders the acknowledgment, echoing the verdict. The

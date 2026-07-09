@@ -44,23 +44,31 @@ func NewHTTPDecider(baseURL string, client *http.Client, timeout time.Duration) 
 
 // ReportOutcome posts final dispatch usage/status back to the policy sidecar.
 func (d *HTTPDecider) ReportOutcome(ctx context.Context, payload map[string]interface{}) error {
+	return d.post(ctx, "/outcome", payload, "outcome")
+}
+
+func (d *HTTPDecider) ReportFeedback(ctx context.Context, payload map[string]interface{}) error {
+	return d.post(ctx, "/feedback", payload, "feedback")
+}
+
+func (d *HTTPDecider) post(ctx context.Context, path string, payload map[string]interface{}, label string) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("marshal outcome request: %w", err)
+		return fmt.Errorf("marshal %s request: %w", label, err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.baseURL+"/outcome", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.baseURL+path, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("build outcome request: %w", err)
+		return fmt.Errorf("build %s request: %w", label, err)
 	}
 	req.Header.Set("content-type", "application/json")
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("call HMM outcome endpoint: %w", err)
+		return fmt.Errorf("call HMM %s endpoint: %w", label, err)
 	}
 	defer resp.Body.Close()
 	payloadBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if readErr != nil {
-		return fmt.Errorf("read HMM outcome response: %w", readErr)
+		return fmt.Errorf("read HMM %s response: %w", label, readErr)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var parsed struct {
@@ -68,9 +76,9 @@ func (d *HTTPDecider) ReportOutcome(ctx context.Context, payload map[string]inte
 		}
 		_ = json.Unmarshal(payloadBytes, &parsed)
 		if parsed.Error != "" {
-			return fmt.Errorf("HMM outcome status %d: %s", resp.StatusCode, parsed.Error)
+			return fmt.Errorf("HMM %s status %d: %s", label, resp.StatusCode, parsed.Error)
 		}
-		return fmt.Errorf("HMM outcome status %d", resp.StatusCode)
+		return fmt.Errorf("HMM %s status %d", label, resp.StatusCode)
 	}
 	return nil
 }
@@ -82,6 +90,8 @@ type routeRequest struct {
 	TurnIndex            int               `json:"turn_index"`
 	ConversationMessages []routeMessage    `json:"conversation_messages,omitempty"`
 	AvailableTools       []string          `json:"available_tools,omitempty"`
+	FeedbackKey          string            `json:"feedback_key,omitempty"`
+	FeedbackRole         string            `json:"feedback_role,omitempty"`
 	EstimatedInputTokens int               `json:"estimated_input_tokens"`
 	HasTools             bool              `json:"has_tools"`
 	HasImages            bool              `json:"has_images"`
@@ -144,6 +154,8 @@ func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
 		TurnIndex:            turnIndex(messages),
 		ConversationMessages: messages,
 		AvailableTools:       clipRouteValues(q.AvailableTools, maxRouteToolCallInputKeys, maxRouteToolCallInputChars),
+		FeedbackKey:          q.FeedbackKey,
+		FeedbackRole:         q.FeedbackRole,
 		EstimatedInputTokens: q.EstimatedInputTokens,
 		HasTools:             q.HasTools,
 		HasImages:            q.HasImages,

@@ -29,6 +29,8 @@ type Query struct {
 	PromptText           string
 	ConversationMessages []router.ConversationMessage
 	AvailableTools       []string
+	FeedbackKey          string
+	FeedbackRole         string
 	EstimatedInputTokens int
 	HasTools             bool
 	HasImages            bool
@@ -59,24 +61,31 @@ type OutcomeReporter interface {
 	ReportOutcome(ctx context.Context, payload map[string]interface{}) error
 }
 
+type FeedbackReporter interface {
+	ReportFeedback(ctx context.Context, payload map[string]interface{}) error
+}
+
 type Router struct {
-	decider   Decider
-	reporter  OutcomeReporter
-	deployed  map[string]struct{}
-	available map[string]struct{}
-	toolLow   map[string]struct{}
-	imageLow  map[string]struct{}
+	decider          Decider
+	reporter         OutcomeReporter
+	feedbackReporter FeedbackReporter
+	deployed         map[string]struct{}
+	available        map[string]struct{}
+	toolLow          map[string]struct{}
+	imageLow         map[string]struct{}
 }
 
 func New(decider Decider, deployed, available map[string]struct{}) *Router {
 	reporter, _ := decider.(OutcomeReporter)
+	feedbackReporter, _ := decider.(FeedbackReporter)
 	return &Router{
-		decider:   decider,
-		reporter:  reporter,
-		deployed:  deployed,
-		available: available,
-		toolLow:   catalog.ToolUseLowSet(),
-		imageLow:  catalog.ImageUnsupportedSet(),
+		decider:          decider,
+		reporter:         reporter,
+		feedbackReporter: feedbackReporter,
+		deployed:         deployed,
+		available:        available,
+		toolLow:          catalog.ToolUseLowSet(),
+		imageLow:         catalog.ImageUnsupportedSet(),
 	}
 }
 
@@ -85,6 +94,13 @@ func (r *Router) ReportOutcome(ctx context.Context, payload map[string]interface
 		return nil
 	}
 	return r.reporter.ReportOutcome(ctx, payload)
+}
+
+func (r *Router) ReportFeedback(ctx context.Context, payload map[string]interface{}) error {
+	if r.feedbackReporter == nil {
+		return nil
+	}
+	return r.feedbackReporter.ReportFeedback(ctx, payload)
 }
 
 type eligibleCand struct {
@@ -165,6 +181,8 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 		PromptText:           req.PromptText,
 		ConversationMessages: req.ConversationMessages,
 		AvailableTools:       req.AvailableTools,
+		FeedbackKey:          req.FeedbackKey,
+		FeedbackRole:         req.FeedbackRole,
 		EstimatedInputTokens: req.EstimatedInputTokens,
 		HasTools:             req.HasTools,
 		HasImages:            req.HasImages,

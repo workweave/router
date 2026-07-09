@@ -37,8 +37,10 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 
 	decider := NewHTTPDecider(server.URL, server.Client(), 0)
 	result, err := decider.Decide(context.Background(), Query{
-		RouteID:    "route-1",
-		PromptText: "hello",
+		RouteID:      "route-1",
+		PromptText:   "hello",
+		FeedbackKey:  "feedback-session",
+		FeedbackRole: "default",
 		ConversationMessages: []router.ConversationMessage{
 			{Role: "user", Text: "please explore the repo"},
 			{Role: "assistant", Text: "done"},
@@ -84,6 +86,8 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 	assert.Equal(t, []string{"file_path"}, got.ConversationMessages[3].ToolCalls[0].InputKeys)
 	assert.True(t, got.HasTools)
 	assert.Equal(t, []string{"Read", "Grep"}, got.AvailableTools)
+	assert.Equal(t, "feedback-session", got.FeedbackKey)
+	assert.Equal(t, "default", got.FeedbackRole)
 	assert.Equal(t, []string{"moonshotai/kimi-k2.7-code"}, got.CandidateModels)
 	assert.Equal(t, "moonshotai/kimi-k2.7-code", result.Model)
 	assert.Equal(t, "classifier_confidence", result.ScoreKind)
@@ -150,4 +154,27 @@ func TestHTTPDeciderReportsOutcome(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "route-1", got["route_id"])
+}
+
+func TestHTTPDeciderReportsFeedback(t *testing.T) {
+	var got map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/feedback", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+	}))
+	defer server.Close()
+
+	decider := NewHTTPDecider(server.URL, server.Client(), 0)
+	err := decider.ReportFeedback(context.Background(), map[string]interface{}{
+		"feedback_key":  "feedback-session",
+		"feedback_role": "default",
+		"rating":        "down",
+		"feedback":      "label=Complex Followup",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "feedback-session", got["feedback_key"])
+	assert.Equal(t, "default", got["feedback_role"])
+	assert.Equal(t, "down", got["rating"])
 }

@@ -36,6 +36,10 @@ type Request struct {
 	ConversationMessages []ConversationMessage
 	// AvailableTools is a bounded list of tool names declared on this request.
 	AvailableTools []string
+	// FeedbackKey/FeedbackRole are optional opaque correlation fields for
+	// sidecar routers that accept per-session feedback.
+	FeedbackKey  string
+	FeedbackRole string
 	// Per-request provider gating — nil means unrestricted.
 	EnabledProviders map[string]struct{}
 	// Per-request model exclusion — nil or empty means no exclusion.
