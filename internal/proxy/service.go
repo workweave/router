@@ -541,8 +541,17 @@ func routingKnobsForRequest(ctx context.Context) *router.Overrides {
 	return nil
 }
 
-func anthropicHarnessForRequest(context.Context) router.Harness {
-	return router.HarnessClaudeCode
+func anthropicHarnessForRequest(ctx context.Context) router.Harness {
+	switch ClientIdentityFrom(ctx).ClientApp {
+	case ClientAppClaudeCode:
+		return router.HarnessClaudeCode
+	case ClientAppCodex:
+		return router.HarnessCodex
+	case ClientAppCursor:
+		return router.HarnessCursor
+	default:
+		return router.HarnessAPI
+	}
 }
 
 func openAIHarnessForRequest(ctx context.Context) router.Harness {
