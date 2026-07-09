@@ -178,9 +178,12 @@ func (s *Service) reportRouterFeedback(
 	if installationID != uuid.Nil {
 		payload["installation_id"] = installationID.String()
 	}
-	if err := s.hmmFeedbackReporter.ReportFeedback(context.Background(), payload); err != nil {
-		observability.FromContext(ctx).Error("/router-feedback: sidecar feedback report failed", "err", err)
-	}
+	log := observability.FromContext(ctx)
+	observability.SafeGo(log, hmmFeedbackReportTimeout, "reportHMMFeedback", func(reportCtx context.Context) {
+		if err := s.hmmFeedbackReporter.ReportFeedback(reportCtx, payload); err != nil {
+			log.Error("/router-feedback: sidecar feedback report failed", "err", err)
+		}
+	})
 }
 
 // routerFeedbackAck renders the acknowledgment, echoing the verdict. The

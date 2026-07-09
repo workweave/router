@@ -2,17 +2,20 @@ package proxy_test
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/sessionpin"
+	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -33,11 +36,16 @@ func (f *fakeFeedbackStore) InsertRouterFeedback(ctx context.Context, p proxy.Ro
 
 type fakePolicyFeedbackRouter struct {
 	mu       sync.Mutex
+	decision router.Decision
+	requests []router.Request
 	payloads []map[string]interface{}
 }
 
 func (f *fakePolicyFeedbackRouter) Route(ctx context.Context, req router.Request) (router.Decision, error) {
-	return router.Decision{}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests = append(f.requests, req)
+	return f.decision, nil
 }
 
 func (f *fakePolicyFeedbackRouter) ReportFeedback(ctx context.Context, payload map[string]interface{}) error {
@@ -45,6 +53,41 @@ func (f *fakePolicyFeedbackRouter) ReportFeedback(ctx context.Context, payload m
 	defer f.mu.Unlock()
 	f.payloads = append(f.payloads, payload)
 	return nil
+}
+
+func (f *fakePolicyFeedbackRouter) Payloads() []map[string]interface{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]map[string]interface{}(nil), f.payloads...)
+}
+
+func (f *fakePolicyFeedbackRouter) Requests() []router.Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]router.Request(nil), f.requests...)
+}
+
+type blockingPolicyFeedbackRouter struct {
+	started chan bool
+	release chan struct{}
+}
+
+func (f *blockingPolicyFeedbackRouter) Route(ctx context.Context, req router.Request) (router.Decision, error) {
+	return router.Decision{}, nil
+}
+
+func (f *blockingPolicyFeedbackRouter) ReportFeedback(ctx context.Context, payload map[string]interface{}) error {
+	_, hasDeadline := ctx.Deadline()
+	select {
+	case f.started <- hasDeadline:
+	default:
+	}
+	select {
+	case <-f.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func TestService_RouterFeedbackCommand_PersistsAndAcks(t *testing.T) {
@@ -114,8 +157,12 @@ func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
 
 	assert.Equal(t, 0, fr.routeCalls)
 	require.Len(t, feedback.events, 1)
-	require.Len(t, policyFeedback.payloads, 1)
-	payload := policyFeedback.payloads[0]
+	require.Eventually(t, func() bool {
+		return len(policyFeedback.Payloads()) == 1
+	}, time.Second, 10*time.Millisecond)
+	payloads := policyFeedback.Payloads()
+	require.Len(t, payloads, 1)
+	payload := payloads[0]
 	assert.Equal(t, "down", payload["rating"])
 	assert.Equal(t, "label=\"Complex Followup\" model=\"anthropic/claude-sonnet-5\" should have used the deeper route", payload["feedback"])
 	assert.Equal(t, "claude-sonnet-4-6", payload["requested_model"])
@@ -123,6 +170,109 @@ func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
 	assert.Equal(t, installationID, payload["installation_id"])
 	assert.NotEmpty(t, payload["feedback_key"])
 	assert.NotEmpty(t, payload["feedback_role"])
+}
+
+func TestService_RouterFeedbackCommand_AcksBeforePolicyFeedbackCompletes(t *testing.T) {
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf+"}
+		]
+	}`
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	policyFeedback := &blockingPolicyFeedbackRouter{
+		started: make(chan bool, 1),
+		release: make(chan struct{}),
+	}
+	defer close(policyFeedback.release)
+	svc := newPinSvc(fr, store).WithHMMRouter(policyFeedback)
+
+	ctx := router.WithStrategy(authedCtx(uuid.NewString()), router.StrategyHMM)
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.ProxyMessages(ctx, []byte(body), rec, httpReq)
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("router-feedback acknowledgment waited for policy feedback")
+	}
+	select {
+	case hasDeadline := <-policyFeedback.started:
+		assert.True(t, hasDeadline, "background policy feedback must have a bounded context")
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for policy feedback dispatch")
+	}
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	blocks, ok := resp["content"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, blocks)
+	first, _ := blocks[0].(map[string]any)
+	assert.Contains(t, first["text"], "Feedback recorded")
+}
+
+func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T) {
+	routeBody := []byte(`{
+		"model":"claude-haiku-4-5",
+		"max_tokens":195000,
+		"messages":[
+			{"role":"user","content":"` + strings.Repeat("x", 30_000) + `"},
+			{"role":"assistant","content":"working"},
+			{"role":"user","content":"latest request"}
+		]
+	}`)
+	routeEnv, err := translate.ParseAnthropic(routeBody)
+	require.NoError(t, err)
+	rawSessionKey := proxy.DeriveSessionKey(routeEnv, "key-1")
+	rawFeedbackKey := hex.EncodeToString(rawSessionKey[:])
+
+	store := newFakePinStore()
+	policyFeedback := &fakePolicyFeedbackRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "hmm_policy(label=Simple Followup)",
+		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
+	}}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
+	svc := newPinSvc(fr, store).
+		WithHMMRouter(policyFeedback).
+		WithAvailableModels(map[string]struct{}{"claude-haiku-4-5": {}}).
+		WithCompaction(nil, proxy.DefaultCompactionTriggerPct)
+	ctx := router.WithStrategy(authedCtx(uuid.NewString()), router.StrategyHMM)
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, routeBody, httptest.NewRecorder(), httpReq))
+
+	requests := policyFeedback.Requests()
+	require.Len(t, requests, 1)
+	assert.Equal(t, rawFeedbackKey, requests[0].FeedbackKey)
+
+	feedbackBody := []byte(`{
+		"model":"claude-haiku-4-5",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"` + strings.Repeat("x", 30_000) + `"},
+			{"role":"assistant","content":"working"},
+			{"role":"user","content":"latest request"},
+			{"role":"assistant","content":"done"},
+			{"role":"user","content":"/rf+"}
+		]
+	}`)
+	require.NoError(t, svc.ProxyMessages(ctx, feedbackBody, httptest.NewRecorder(), httpReq))
+	require.Eventually(t, func() bool {
+		return len(policyFeedback.Payloads()) == 1
+	}, time.Second, 10*time.Millisecond)
+	payloads := policyFeedback.Payloads()
+	require.Len(t, payloads, 1)
+	assert.Equal(t, requests[0].FeedbackKey, payloads[0]["feedback_key"])
+	assert.Equal(t, requests[0].FeedbackRole, payloads[0]["feedback_role"])
 }
 
 func TestService_RouterFeedbackCommand_DoesNotForwardPolicyFeedbackOutsideHMM(t *testing.T) {
@@ -142,7 +292,7 @@ func TestService_RouterFeedbackCommand_DoesNotForwardPolicyFeedbackOutsideHMM(t 
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(authedCtx(uuid.NewString()), []byte(body), rec, httpReq))
 
-	assert.Empty(t, policyFeedback.payloads)
+	assert.Empty(t, policyFeedback.Payloads())
 }
 
 func TestService_RouterFeedbackCommand_OpenAIIngress(t *testing.T) {

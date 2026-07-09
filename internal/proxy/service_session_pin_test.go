@@ -560,7 +560,7 @@ func TestService_HMMSubAgentUsesFreshDecision(t *testing.T) {
 	store.mu.Unlock()
 }
 
-func TestService_HMMFeedbackKeyUsesPostCompactionSession(t *testing.T) {
+func TestService_HMMFeedbackKeyUsesClientSessionBeforeCompaction(t *testing.T) {
 	body := []byte(`{
 		"model":"claude-haiku-4-5",
 		"max_tokens":195000,
@@ -600,11 +600,12 @@ func TestService_HMMFeedbackKeyUsesPostCompactionSession(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 
 	require.NotNil(t, fr.capturedReq)
-	assert.Equal(t, afterKey, fr.capturedReq.FeedbackKey)
+	assert.Equal(t, beforeKey, fr.capturedReq.FeedbackKey)
+	assert.NotEqual(t, afterKey, fr.capturedReq.FeedbackKey)
 	assert.Equal(t, "latest request", fr.capturedReq.ConversationMessages[0].Text)
 }
 
-func TestService_HMMFeedbackKeyOpenAIUsesPostCompactionSession(t *testing.T) {
+func TestService_HMMFeedbackKeyOpenAIUsesClientSessionBeforeCompaction(t *testing.T) {
 	body := []byte(`{
 		"model":"gpt-4o",
 		"max_tokens":123000,
@@ -644,7 +645,8 @@ func TestService_HMMFeedbackKeyOpenAIUsesPostCompactionSession(t *testing.T) {
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, body, rec, httpReq))
 
 	require.NotNil(t, fr.capturedReq)
-	assert.Equal(t, afterKey, fr.capturedReq.FeedbackKey)
+	assert.Equal(t, beforeKey, fr.capturedReq.FeedbackKey)
+	assert.NotEqual(t, afterKey, fr.capturedReq.FeedbackKey)
 	assert.Equal(t, "latest request", fr.capturedReq.ConversationMessages[0].Text)
 }
 
