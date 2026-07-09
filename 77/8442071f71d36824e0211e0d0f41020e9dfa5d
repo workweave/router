@@ -1,0 +1,21 @@
+internal/proxy/service.go
+  s_a103b61fe98308::t_4e3f5c6e49bd11 1627-1631
+internal/proxy/pin_eviction.go
+  s_a103b61fe98308::t_85d170b6fd354c 25-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "778442071f71d36824e0211e0d0f41020e9dfa5d",
+  "prompts": {},
+  "sessions": {
+    "s_a103b61fe98308": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4f011fb9-147f-40bf-8c31-e760cf0e525d",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

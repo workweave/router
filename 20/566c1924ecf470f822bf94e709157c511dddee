@@ -1,0 +1,29 @@
+internal/router/catalog/catalog.go
+  s_ab5391bf3f0f5b::t_9c3502a6132f8e 268,271
+  s_ab5391bf3f0f5b::t_c5c4a40b3d0b48 248,251,254,257
+  s_ab5391bf3f0f5b::t_3ecbe361ad95cd 163-164,166
+install/cc-statusline.sh
+  s_ab5391bf3f0f5b::t_843c8880e5c7f2 133,165-168,194,226-230,233
+install/install.sh
+  s_ab5391bf3f0f5b::t_fd193e752e4b42 2074,2106-2109,2135,2167-2171,2174
+internal/observability/otel/pricing_test.go
+  s_ab5391bf3f0f5b::t_d8ddd43a9855f8 25,28-29,34-37,66
+internal/router/planner/policy_test.go
+  s_ab5391bf3f0f5b::t_a273649c8a72e6 17,216-217,228-229,233,244,248-249,254,260-261,264-265,270,276-277,310,325,341-343,348,360,394,411
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "20566c1924ecf470f822bf94e709157c511dddee",
+  "prompts": {},
+  "sessions": {
+    "s_ab5391bf3f0f5b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "decb7594-b4a2-4805-8b41-8610246a5aef",
+        "model": "claude-fable-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

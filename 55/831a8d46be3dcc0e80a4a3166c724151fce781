@@ -1,0 +1,19 @@
+.github/workflows/publish_cluster_routing.yml
+  s_79f8df07484ce6::t_81bf9ae9132edb 8-10,17-25,45,58,78-79,81-84,86-98,101-102,104-121,124,127-135,137-150,152-163,165,167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "55831a8d46be3dcc0e80a4a3166c724151fce781",
+  "prompts": {},
+  "sessions": {
+    "s_79f8df07484ce6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8edf70c1-5d09-4ad5-99d2-05339a44c3db",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

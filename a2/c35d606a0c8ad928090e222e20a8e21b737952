@@ -1,0 +1,20 @@
+internal/router/catalog/catalog.go
+  s_5009b1e9ae1308::t_952d2a0abab04f 86-98,125-128
+  s_5009b1e9ae1308::t_e3be012eb3c720 311-316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a2c35d606a0c8ad928090e222e20a8e21b737952",
+  "prompts": {},
+  "sessions": {
+    "s_5009b1e9ae1308": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aab652f1-c261-4101-bb65-5f0a83b1a661",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

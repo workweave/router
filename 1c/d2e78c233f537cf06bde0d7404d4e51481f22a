@@ -1,0 +1,26 @@
+internal/proxy/service.go
+  s_09ca5e2e44a0ed::t_38991785524f6c 3115-3123
+install/opencode-weave/test/capture.test.ts
+  s_09ca5e2e44a0ed::t_b9068bc781a9f6 223-232
+  s_09ca5e2e44a0ed::t_fceaf4ba5a389a 260-291
+install/opencode-weave/src/index.ts
+  s_09ca5e2e44a0ed::t_3172cae8a39047 219-223
+  s_09ca5e2e44a0ed::t_18b217ec82ad84 419-422
+  s_09ca5e2e44a0ed::t_f9283b380c8b8c 426-428
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "1cd2e78c233f537cf06bde0d7404d4e51481f22a",
+  "prompts": {},
+  "sessions": {
+    "s_09ca5e2e44a0ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35ef0a9f-52c3-476b-b860-781312b3d039",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
