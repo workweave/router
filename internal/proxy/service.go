@@ -2991,6 +2991,7 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		OutputTokens:      out,
 		EndedAt:           now,
 		ServedModel:       servedModel,
+		PriorServedModel:  res.PriorServedModel,
 	}); err != nil {
 		observability.Get().Error("HMM switch-history writeback failed", "err", err)
 	}

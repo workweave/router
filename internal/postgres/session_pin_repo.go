@@ -73,6 +73,7 @@ func (r *SessionPinRepo) UpdateUsage(ctx context.Context, sessionKey [sessionpin
 		LastOutputTokens:      int32(usage.OutputTokens),
 		LastTurnEndedAt:       pgtype.Timestamptz{Time: endedAt.UTC(), Valid: true},
 		LastServedModel:       usage.ServedModel,
+		PriorServedModel:      usage.PriorServedModel,
 	})
 }
 

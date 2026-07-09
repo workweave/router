@@ -75,6 +75,10 @@ type Usage struct {
 	EndedAt           time.Time
 	// ServedModel is the model that served the turn this usage came from.
 	ServedModel string
+	// PriorServedModel is optional prior-turn evidence known by the caller.
+	// UpdateUsage uses it to latch HasEverSwitched when the stored row is new
+	// or has no last_served_model yet.
+	PriorServedModel string
 }
 
 // Store is the I/O surface for session pins. Get returns (zero, false, nil)
