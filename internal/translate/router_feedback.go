@@ -2,6 +2,8 @@ package translate
 
 import (
 	"strings"
+
+	"github.com/tidwall/gjson"
 )
 
 // RouterFeedbackResult holds the parsed outcome of a /router-feedback command.
@@ -41,6 +43,51 @@ func (env *RequestEnvelope) ExtractRouterFeedbackCommand() (RouterFeedbackResult
 	return res, found
 }
 
+// StripRouterFeedbackArtifacts removes prior router-feedback command turns and
+// synthetic ack turns from model-visible history. The current trailing user
+// command is preserved so ExtractRouterFeedbackCommand can still record it.
+func (env *RequestEnvelope) StripRouterFeedbackArtifacts() int {
+	switch env.format {
+	case FormatAnthropic, FormatOpenAI:
+	default:
+		return 0
+	}
+	msgs := gjson.GetBytes(env.body, "messages")
+	if !msgs.IsArray() {
+		return 0
+	}
+
+	lastUserIdx := -1
+	msgs.ForEach(func(key, msg gjson.Result) bool {
+		if msg.Get("role").String() == "user" {
+			lastUserIdx = int(key.Int())
+		}
+		return true
+	})
+
+	removed := 0
+	rebuilt := make([]string, 0, len(msgs.Array()))
+	msgs.ForEach(func(key, msg gjson.Result) bool {
+		idx := int(key.Int())
+		role := msg.Get("role").String()
+		content := msg.Get("content")
+		if role == "user" && idx != lastUserIdx && isRouterFeedbackCommandOnlyContent(content) {
+			removed++
+			return true
+		}
+		if role == "assistant" && isRouterFeedbackAckOnlyContent(content) {
+			removed++
+			return true
+		}
+		rebuilt = append(rebuilt, msg.Raw)
+		return true
+	})
+	if removed == 0 {
+		return 0
+	}
+	return env.setMessages(rebuilt, removed)
+}
+
 // parseRouterFeedbackCommand scans text for a /router-feedback (alias /rf)
 // directive on the first non-empty line, applying the same leading-line +
 // injected-prefix guards as parseForceModelCommand (see that function for the
@@ -75,6 +122,79 @@ func parseRouterFeedbackCommand(text string) (res RouterFeedbackResult, found bo
 		rating, feedback = splitLeadingRating(feedback)
 	}
 	return RouterFeedbackResult{Rating: rating, Feedback: feedback}, true, strings.TrimSpace(prefix)
+}
+
+func isRouterFeedbackCommandOnlyContent(content gjson.Result) bool {
+	switch {
+	case content.Type == gjson.String:
+		_, found, stripped := parseRouterFeedbackCommand(content.String())
+		return found && isOnlyInjectedCommandText(stripped)
+	case content.Type == gjson.JSON && content.IsArray():
+		seenCommand := false
+		allSynthetic := true
+		content.ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() != "text" {
+				allSynthetic = false
+				return false
+			}
+			text := block.Get("text").String()
+			if strings.TrimSpace(text) == "" || isClaudeCodeInjectedBlock(text) {
+				return true
+			}
+			_, found, stripped := parseRouterFeedbackCommand(text)
+			if found && isOnlyInjectedCommandText(stripped) {
+				seenCommand = true
+				return true
+			}
+			allSynthetic = false
+			return false
+		})
+		return seenCommand && allSynthetic
+	default:
+		return false
+	}
+}
+
+func isOnlyInjectedCommandText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return trimmed == "" || leadingInjectedPrefixEnd(trimmed) == len(trimmed)
+}
+
+func isRouterFeedbackAckOnlyContent(content gjson.Result) bool {
+	switch {
+	case content.Type == gjson.String:
+		return isRouterFeedbackAckText(content.String())
+	case content.Type == gjson.JSON && content.IsArray():
+		seenAck := false
+		allSynthetic := true
+		content.ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() != "text" {
+				allSynthetic = false
+				return false
+			}
+			text := block.Get("text").String()
+			if strings.TrimSpace(text) == "" {
+				return true
+			}
+			if isRouterFeedbackAckText(text) {
+				seenAck = true
+				return true
+			}
+			allSynthetic = false
+			return false
+		})
+		return seenAck && allSynthetic
+	default:
+		return false
+	}
+}
+
+func isRouterFeedbackAckText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return strings.HasPrefix(trimmed, "Weave Router: Feedback recorded") ||
+		strings.HasPrefix(trimmed, "Weave Router: router-feedback needs a verdict") ||
+		strings.HasPrefix(trimmed, "✦ **Weave Router** → Feedback recorded") ||
+		strings.HasPrefix(trimmed, "✦ **Weave Router** → Router-feedback needs a verdict")
 }
 
 // matchRouterFeedbackCommand recognizes the command token at the start of the

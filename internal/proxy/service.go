@@ -1817,6 +1817,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		log.Error("Failed to parse Anthropic request", "err", parseErr)
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
+	if removed := env.StripRouterFeedbackArtifacts(); removed > 0 {
+		log.Info("Stripped router-feedback artifacts from Anthropic history", "removed_messages", removed)
+	}
 
 	embedFlag := s.embedOnlyUserMessage
 	if v, ok := embedOnlyUserMessageOverride(ctx); ok {
@@ -3730,6 +3733,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	if parseErr != nil {
 		log.Error("Failed to parse OpenAI request", "err", parseErr)
 		return fmt.Errorf("parse request: %w", parseErr)
+	}
+	if removed := env.StripRouterFeedbackArtifacts(); removed > 0 {
+		log.Info("Stripped router-feedback artifacts from OpenAI history", "removed_messages", removed)
 	}
 	embedFlag := s.embedOnlyUserMessage
 	if v, ok := embedOnlyUserMessageOverride(ctx); ok {
