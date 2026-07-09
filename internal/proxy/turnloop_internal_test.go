@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -28,7 +27,6 @@ type stubPinStore struct {
 	getFound   bool
 	upserts    []sessionpin.Pin
 	upsertErr  error
-	usageErrs  []error
 }
 
 func newStubPinStore() *stubPinStore {
@@ -57,13 +55,6 @@ func (s *stubPinStore) UpdateUsage(_ context.Context, _ [sessionpin.SessionKeyLe
 	s.lastUsage = u
 	s.usageHits++
 	s.usageRoles = append(s.usageRoles, role)
-	if len(s.usageErrs) > 0 {
-		err := s.usageErrs[0]
-		s.usageErrs = s.usageErrs[1:]
-		if err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -163,21 +154,18 @@ func TestRecordTurnUsage_HMMDecisionWritesHistoryOnly(t *testing.T) {
 	assert.Equal(t, "hmm_policy(label=Complex Followup)", store.upserts[0].Reason)
 	assert.Equal(t, providers.ProviderAnthropic, store.upserts[0].Provider)
 	assert.Empty(t, store.upserts[0].Model, "HMM history rows must not be routable pins")
-	assert.Equal(t, []string{
-		hmmHistoryRole(sessionpin.DefaultRole),
-		hmmHistoryRole(sessionpin.DefaultRole),
-	}, store.usageRoles)
+	assert.Equal(t, []string{hmmHistoryRole(sessionpin.DefaultRole)}, store.usageRoles)
 	assert.NotContains(t, store.usageRoles, sessionpin.DefaultRole, "HMM turns must not mutate the active routing pin role")
 	assert.Equal(t, 1200, store.lastUsage.InputTokens)
 	assert.Equal(t, 900, store.lastUsage.CachedReadTokens)
 	assert.Equal(t, 200, store.lastUsage.CachedWriteTokens)
 	assert.Equal(t, 80, store.lastUsage.OutputTokens)
 	assert.Equal(t, "claude-sonnet-5", store.lastUsage.ServedModel)
+	assert.Equal(t, "claude-haiku-4-5", store.lastUsage.PriorServedModel)
 }
 
-func TestRecordTurnUsage_HMMPriorWritebackErrorStillWritesCurrentUsage(t *testing.T) {
+func TestRecordTurnUsage_HMMModelChangeWritesCurrentUsageOnly(t *testing.T) {
 	store := newStubPinStore()
-	store.usageErrs = []error{errors.New("transient writeback failure")}
 	svc := NewService(
 		nil,
 		nil,
@@ -215,14 +203,12 @@ func TestRecordTurnUsage_HMMPriorWritebackErrorStillWritesCurrentUsage(t *testin
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	assert.Equal(t, 2, store.usageHits)
-	assert.Equal(t, []string{
-		hmmHistoryRole(sessionpin.DefaultRole),
-		hmmHistoryRole(sessionpin.DefaultRole),
-	}, store.usageRoles)
+	assert.Equal(t, 1, store.usageHits)
+	assert.Equal(t, []string{hmmHistoryRole(sessionpin.DefaultRole)}, store.usageRoles)
 	assert.Equal(t, 1200, store.lastUsage.InputTokens)
 	assert.Equal(t, 80, store.lastUsage.OutputTokens)
 	assert.Equal(t, "claude-sonnet-5", store.lastUsage.ServedModel)
+	assert.Equal(t, "claude-haiku-4-5", store.lastUsage.PriorServedModel)
 }
 
 func TestRecordHMMTurnHistory_ZeroUsageRefreshesTTLButSkipsUsageWriteback(t *testing.T) {
@@ -975,4 +961,91 @@ func TestModelSwitched(t *testing.T) {
 			assert.Equal(t, tc.want, res.modelSwitched())
 		})
 	}
+}
+
+func TestService_NewService_HMMUpgradeConfidenceDefaults(t *testing.T) {
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderAnthropic: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	assert.Equal(t, defaultHMMUpgradeConfidenceThreshold, svc.hmmUpgradeConfidenceThreshold)
+}
+
+func TestService_WithHMMUpgradeConfidenceThreshold(t *testing.T) {
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderAnthropic: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+
+	svc.WithHMMUpgradeConfidenceThreshold(0.50)
+	assert.Equal(t, 0.50, svc.hmmUpgradeConfidenceThreshold)
+
+	svc.WithHMMUpgradeConfidenceThreshold(-0.10)
+	assert.Equal(t, 0.50, svc.hmmUpgradeConfidenceThreshold)
+
+	svc.WithHMMUpgradeConfidenceThreshold(1.50)
+	assert.Equal(t, 0.50, svc.hmmUpgradeConfidenceThreshold)
+
+	svc.WithHMMUpgradeConfidenceThreshold(0.0)
+	assert.Equal(t, 0.0, svc.hmmUpgradeConfidenceThreshold)
+}
+
+func TestHMMCostGate_UpgradeThresholdConfigurable(t *testing.T) {
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderAnthropic: nil, providers.ProviderFireworks: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	svc.WithHMMUpgradeConfidenceThreshold(0.20)
+
+	history := sessionpin.Pin{
+		Provider:        providers.ProviderFireworks,
+		LastServedModel: "moonshotai/kimi-k2.7",
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fresh := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-sonnet-5",
+		Reason:   "hmm_policy(classifier 'Complex Followup')",
+		Metadata: &router.RoutingMetadata{
+			Strategy:    string(router.StrategyHMM),
+			RouteID:     "route-1",
+			ChosenScore: 0.30,
+		},
+	}
+
+	decision, plan, sticky, stayModel := svc.hmmCostGatedDecision(
+		router.Request{},
+		sessionpin.Pin{},
+		history,
+		fresh,
+		10_000,
+		false,
+	)
+
+	assert.False(t, sticky)
+	assert.Equal(t, "claude-sonnet-5", decision.Model)
+	assert.Equal(t, planner.OutcomeSwitch, plan.Outcome)
+	assert.Equal(t, hmmReasonConfidentUpgrade, plan.Reason)
+	assert.Equal(t, "moonshotai/kimi-k2.7", stayModel)
 }

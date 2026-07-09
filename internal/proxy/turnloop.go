@@ -123,7 +123,7 @@ func isHMMDecision(dec router.Decision) bool {
 }
 
 const hmmHistoryReason = "hmm_history"
-const hmmUpgradeConfidenceThreshold = 0.85
+const defaultHMMUpgradeConfidenceThreshold = 0.85
 
 const (
 	hmmReasonConfidentUpgrade     = "hmm_confident_upgrade"
@@ -777,7 +777,7 @@ func (s *Service) hmmCostGatedDecision(
 
 	if hmmFreshIsMoreExpensive(stayPin.Model, fresh.Model, req.SubsidizedModelCostFactor) {
 		confidence, ok := hmmDecisionConfidence(fresh)
-		if ok && confidence >= hmmUpgradeConfidenceThreshold {
+		if ok && confidence >= s.hmmUpgradeConfidenceThreshold {
 			base.Outcome = planner.OutcomeSwitch
 			base.Reason = hmmReasonConfidentUpgrade
 		} else if base.Outcome != planner.OutcomeSwitch {

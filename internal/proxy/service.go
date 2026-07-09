@@ -130,6 +130,9 @@ type Service struct {
 	passthroughEligibleProviders map[string]struct{}
 	// planner parameterizes the Prism-style EV policy for stay-vs-switch.
 	planner planner.EVConfig
+	// hmmUpgradeConfidenceThreshold is the minimum classifier confidence needed
+	// for HMM to switch upward to a more expensive model despite cache inertia.
+	hmmUpgradeConfidenceThreshold float64
 	// plannerEnabled is the kill switch. When false, the orchestrator falls
 	// back to first-decision-wins behavior.
 	plannerEnabled bool
@@ -896,11 +899,12 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 			ExpectedRemainingTurns: DefaultPlannerExpectedRemainingTurns,
 			TierUpgradeEnabled:     DefaultPlannerTierUpgradeEnabled,
 		},
-		plannerEnabled:            true,
-		scoreToolResultTurns:      true,
-		loopEscalationEnabled:     true,
-		cyberRefusalRepin:         false,
-		cyberRefusalFallbackModel: "claude-sonnet-5",
+		hmmUpgradeConfidenceThreshold: defaultHMMUpgradeConfidenceThreshold,
+		plannerEnabled:                true,
+		scoreToolResultTurns:          true,
+		loopEscalationEnabled:         true,
+		cyberRefusalRepin:             false,
+		cyberRefusalFallbackModel:     "claude-sonnet-5",
 	}
 }
 
@@ -943,6 +947,17 @@ func (s *Service) WithCyberRefusalFallbackModel(model string) *Service {
 	if strings.TrimSpace(model) != "" {
 		s.cyberRefusalFallbackModel = strings.TrimSpace(model)
 	}
+	return s
+}
+
+// WithHMMUpgradeConfidenceThreshold sets the minimum HMM sidecar ChosenScore
+// for a fresh upgrade to beat an EV stay on the cheaper pinned model.
+// Out-of-range values ([0,1] only) are ignored.
+func (s *Service) WithHMMUpgradeConfidenceThreshold(v float64) *Service {
+	if v < 0 || v > 1 {
+		return s
+	}
+	s.hmmUpgradeConfidenceThreshold = v
 	return s
 }
 
@@ -2969,14 +2984,6 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		return
 	}
 	now := time.Now()
-	if res.PriorServedModel != "" && res.PriorServedModel != servedModel {
-		if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
-			EndedAt:     now,
-			ServedModel: res.PriorServedModel,
-		}); err != nil {
-			observability.Get().Error("HMM switch-history prior writeback failed", "err", err)
-		}
-	}
 	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
 		InputTokens:       in,
 		CachedReadTokens:  cacheRead,
@@ -2984,6 +2991,7 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		OutputTokens:      out,
 		EndedAt:           now,
 		ServedModel:       servedModel,
+		PriorServedModel:  res.PriorServedModel,
 	}); err != nil {
 		observability.Get().Error("HMM switch-history writeback failed", "err", err)
 	}

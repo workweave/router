@@ -93,13 +93,12 @@ ON CONFLICT (session_key, role) DO UPDATE SET
 -- /force-model upsert cannot overwrite the genuinely-last-served model
 -- before the next turn reads it to detect a mid-session model switch.
 -- has_ever_switched latches true the first time the just-served model
--- differs from a prior non-empty last_served_model. ModelSwitched (derived
--- from last_served_model) strips stale Anthropic thinking-block signatures
--- only on the single transition turn, but Claude Code re-sends its full
--- transcript every turn, so once a session has switched at all, the latch
--- keeps the emit path stripping on every subsequent same-model turn for the
--- session's life — the only window in which those poisoned blocks would
--- otherwise reach Anthropic and 400.
+-- differs from a prior non-empty last_served_model, including caller-supplied
+-- prior-served evidence when the stored row is new. ModelSwitched (derived from
+-- last_served_model) strips stale Anthropic thinking-block signatures only on
+-- the single transition turn, but Claude Code re-sends its full transcript
+-- every turn, so once a session has switched at all, the latch keeps the emit
+-- path stripping on every subsequent same-model turn for the session's life.
 -- name: UpdateSessionPinUsage :exec
 UPDATE router.session_pins
 SET last_input_tokens        = @last_input_tokens::int,
@@ -108,7 +107,8 @@ SET last_input_tokens        = @last_input_tokens::int,
     last_output_tokens       = @last_output_tokens::int,
     last_turn_ended_at       = @last_turn_ended_at::timestamptz,
     has_ever_switched        = has_ever_switched
-      OR (last_served_model <> '' AND last_served_model <> @last_served_model::varchar),
+      OR (last_served_model <> '' AND last_served_model <> @last_served_model::varchar)
+      OR (@prior_served_model::varchar <> '' AND @prior_served_model::varchar <> @last_served_model::varchar),
     last_served_model        = @last_served_model::varchar
 WHERE session_key = @session_key::bytea
   AND role        = @role::varchar;

@@ -147,10 +147,11 @@ SET last_input_tokens        = $1::int,
     last_output_tokens       = $4::int,
     last_turn_ended_at       = $5::timestamptz,
     has_ever_switched        = has_ever_switched
-      OR (last_served_model <> '' AND last_served_model <> $6::varchar),
+      OR (last_served_model <> '' AND last_served_model <> $6::varchar)
+      OR ($7::varchar <> '' AND $7::varchar <> $6::varchar),
     last_served_model        = $6::varchar
-WHERE session_key = $7::bytea
-  AND role        = $8::varchar
+WHERE session_key = $8::bytea
+  AND role        = $9::varchar
 `
 
 type UpdateSessionPinUsageParams struct {
@@ -160,6 +161,7 @@ type UpdateSessionPinUsageParams struct {
 	LastOutputTokens      int32
 	LastTurnEndedAt       pgtype.Timestamptz
 	LastServedModel       string
+	PriorServedModel      string
 	SessionKey            []byte
 	Role                  string
 }
@@ -175,13 +177,12 @@ type UpdateSessionPinUsageParams struct {
 // /force-model upsert cannot overwrite the genuinely-last-served model
 // before the next turn reads it to detect a mid-session model switch.
 // has_ever_switched latches true the first time the just-served model
-// differs from a prior non-empty last_served_model. ModelSwitched (derived
-// from last_served_model) strips stale Anthropic thinking-block signatures
-// only on the single transition turn, but Claude Code re-sends its full
-// transcript every turn, so once a session has switched at all, the latch
-// keeps the emit path stripping on every subsequent same-model turn for the
-// session's life — the only window in which those poisoned blocks would
-// otherwise reach Anthropic and 400.
+// differs from a prior non-empty last_served_model, including caller-supplied
+// prior-served evidence when the stored row is new. ModelSwitched (derived from
+// last_served_model) strips stale Anthropic thinking-block signatures only on
+// the single transition turn, but Claude Code re-sends its full transcript
+// every turn, so once a session has switched at all, the latch keeps the emit
+// path stripping on every subsequent same-model turn for the session's life.
 //
 //	UPDATE router.session_pins
 //	SET last_input_tokens        = $1::int,
@@ -190,10 +191,11 @@ type UpdateSessionPinUsageParams struct {
 //	    last_output_tokens       = $4::int,
 //	    last_turn_ended_at       = $5::timestamptz,
 //	    has_ever_switched        = has_ever_switched
-//	      OR (last_served_model <> '' AND last_served_model <> $6::varchar),
+//	      OR (last_served_model <> '' AND last_served_model <> $6::varchar)
+//	      OR ($7::varchar <> '' AND $7::varchar <> $6::varchar),
 //	    last_served_model        = $6::varchar
-//	WHERE session_key = $7::bytea
-//	  AND role        = $8::varchar
+//	WHERE session_key = $8::bytea
+//	  AND role        = $9::varchar
 func (q *Queries) UpdateSessionPinUsage(ctx context.Context, arg UpdateSessionPinUsageParams) error {
 	_, err := q.db.Exec(ctx, updateSessionPinUsage,
 		arg.LastInputTokens,
@@ -202,6 +204,7 @@ func (q *Queries) UpdateSessionPinUsage(ctx context.Context, arg UpdateSessionPi
 		arg.LastOutputTokens,
 		arg.LastTurnEndedAt,
 		arg.LastServedModel,
+		arg.PriorServedModel,
 		arg.SessionKey,
 		arg.Role,
 	)
