@@ -542,6 +542,10 @@ func routingKnobsForRequest(ctx context.Context) *router.Overrides {
 }
 
 func anthropicHarnessForRequest(ctx context.Context) router.Harness {
+	return clientIdentityHarnessForRequest(ctx)
+}
+
+func clientIdentityHarnessForRequest(ctx context.Context) router.Harness {
 	switch ClientIdentityFrom(ctx).ClientApp {
 	case ClientAppClaudeCode:
 		return router.HarnessClaudeCode
@@ -558,16 +562,7 @@ func openAIHarnessForRequest(ctx context.Context) router.Harness {
 	if codexSubscriptionFromContext(ctx) != nil {
 		return router.HarnessCodex
 	}
-	identity := ClientIdentityFrom(ctx)
-	switch identity.ClientApp {
-	case ClientAppClaudeCode:
-		return router.HarnessClaudeCode
-	case ClientAppCodex:
-		return router.HarnessCodex
-	case ClientAppCursor:
-		return router.HarnessCursor
-	}
-	return router.HarnessAPI
+	return clientIdentityHarnessForRequest(ctx)
 }
 
 // excludedModelsForRequest returns the request's model exclusion set.
