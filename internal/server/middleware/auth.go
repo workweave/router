@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/config"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
@@ -19,6 +20,8 @@ const (
 	ctxKeyAPIKey         = "router_api_key"
 	ctxKeyAdminPrincipal = "router_admin_principal"
 )
+
+var forceAnthropicDeploymentCredentials = config.GetOr("ROUTER_FORCE_ANTHROPIC_DEPLOYMENT_CREDENTIALS", "false") == "true"
 
 // RouterKeyHeader carries the Weave Router key when clients need to preserve Authorization / x-api-key for the upstream provider.
 const RouterKeyHeader = "X-Weave-Router-Key"
@@ -138,6 +141,9 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 		}
 		if installation != nil && installation.ID != "" {
 			ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, installation.ID)
+		}
+		if forceAnthropicDeploymentCredentials {
+			ctx = context.WithValue(ctx, proxy.ForceAnthropicDeploymentCredentialsContextKey{}, true)
 		}
 		// Stash the dedicated subscription header (router-keyed path) raw; the
 		// proxy validates its shape and decides precedence. Never logged.

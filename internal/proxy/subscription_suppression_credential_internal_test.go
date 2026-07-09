@@ -59,6 +59,20 @@ func TestResolveAndInjectCredentials_UnsuppressedSubStillForwarded(t *testing.T)
 	assert.True(t, got.OAuth)
 }
 
+// Deployment policy can force router-keyed Anthropic turns onto BYOK /
+// deployment credentials (ANTHROPIC_API_KEY), even when a subscription bearer
+// is present in Authorization.
+func TestResolveAndInjectCredentials_ForceAnthropicDeploymentCredentials(t *testing.T) {
+	ctx := context.WithValue(routerKeyedCtx(), ForceAnthropicDeploymentCredentialsContextKey{}, true)
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer sk-ant-oat01-live")
+
+	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
+
+	assert.Nil(t, CredentialsFromContext(out),
+		"forced deployment credentials must suppress Anthropic subscription resolution")
+}
+
 // The clear must be scoped to Anthropic: a suppressed-Claude request that also
 // carries a Codex subscription for an OpenAI turn must still resolve the Codex
 // credential (its OpenAI turns bill the caller's ChatGPT plan, unaffected).

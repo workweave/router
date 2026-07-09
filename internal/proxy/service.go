@@ -335,6 +335,12 @@ type InstallationUsageBypassContextKey struct{}
 // routing decides on merits. See subscriptionRoutingDisabledForRequest.
 type InstallationSubscriptionRoutingDisabledContextKey struct{}
 
+// ForceAnthropicDeploymentCredentialsContextKey is the context key for a
+// deployment-wide policy that suppresses Anthropic subscription OAuth on
+// router-keyed requests so credential resolution falls through to BYOK /
+// deployment ANTHROPIC_API_KEY. Carried as bool; absent == false.
+type ForceAnthropicDeploymentCredentialsContextKey struct{}
+
 // UsageBypassConfig is the per-installation subscription usage-bypass setting,
 // stashed on ctx by the auth middleware. Threshold is nil when the toggle is on
 // but no value has been chosen yet; the request path falls back to
@@ -525,6 +531,11 @@ func installationExcludedModelsFromContext(ctx context.Context) []string {
 func subscriptionRoutingDisabledForRequest(ctx context.Context) bool {
 	disabled, _ := ctx.Value(InstallationSubscriptionRoutingDisabledContextKey{}).(bool)
 	return disabled
+}
+
+func forceAnthropicDeploymentCredentialsForRequest(ctx context.Context) bool {
+	force, _ := ctx.Value(ForceAnthropicDeploymentCredentialsContextKey{}).(bool)
+	return force
 }
 
 // routingKnobsForRequest resolves the routing knobs for a request. The
@@ -3356,7 +3367,9 @@ func resolveAndInjectCredentials(ctx context.Context, provider string, headers h
 	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
 	// Skip subscription OAuth (fall through to BYOK / deployment key): exhausted (Anthropic-only, avoid re-429) or toggle off (provider-wide).
 	subDisabled := subscriptionRoutingDisabledForRequest(ctx)
-	suppressClaudeSub := claudeSubscriptionSuppressed(ctx) || subDisabled
+	forceAnthropicDeploymentCreds := provider == providers.ProviderAnthropic &&
+		routerKeyed && forceAnthropicDeploymentCredentialsForRequest(ctx)
+	suppressClaudeSub := claudeSubscriptionSuppressed(ctx) || subDisabled || forceAnthropicDeploymentCreds
 	suppressCodexSub := subDisabled
 	if provider == providers.ProviderAnthropic && !suppressClaudeSub {
 		// Subscription-first (subscription -> BYOK -> deployment), resolved here
