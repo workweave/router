@@ -765,6 +765,53 @@ func TestHMMEVStay_RespectsCyberRefusalRepin(t *testing.T) {
 	assert.Equal(t, planner.ReasonEVNegative, plan.Reason)
 }
 
+func TestHMMEVStay_CyberRefusalRepinBlocksConfidentUpgrade(t *testing.T) {
+	t.Parallel()
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderAnthropic: nil, providers.ProviderMakora: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	activePin := sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-sonnet-5",
+		LastServedModel: "claude-sonnet-5",
+		Reason:          "cyber-refusal-repin",
+		PinnedUntil:     time.Now().Add(time.Hour),
+	}
+	fresh := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-opus-4-8",
+		Reason:   "hmm_policy(mock_hmm_sidecar)",
+		Metadata: &router.RoutingMetadata{
+			Strategy:    string(router.StrategyHMM),
+			RouteID:     "route-1",
+			ChosenScore: 0.99,
+		},
+	}
+
+	decision, plan, sticky, stayModel := svc.hmmCostGatedDecision(
+		router.Request{},
+		activePin,
+		sessionpin.Pin{},
+		fresh,
+		100,
+		false,
+	)
+
+	assert.True(t, sticky)
+	assert.Equal(t, "claude-sonnet-5", decision.Model)
+	assert.Equal(t, "claude-sonnet-5", stayModel)
+	assert.Equal(t, planner.OutcomeStay, plan.Outcome)
+	assert.NotEqual(t, hmmReasonConfidentUpgrade, plan.Reason)
+}
+
 func TestHMMCostGate_HonorsHMMReasonedActivePin(t *testing.T) {
 	svc := NewService(
 		nil,

@@ -775,7 +775,7 @@ func (s *Service) hmmCostGatedDecision(
 		SubsidizedCostFactor: req.SubsidizedModelCostFactor,
 	}, cfg)
 
-	if hmmFreshIsMoreExpensive(stayPin.Model, fresh.Model, req.SubsidizedModelCostFactor) {
+	if stayPin.Reason != "cyber-refusal-repin" && hmmFreshIsMoreExpensive(stayPin.Model, fresh.Model, req.SubsidizedModelCostFactor) {
 		confidence, ok := hmmDecisionConfidence(fresh)
 		if ok && confidence >= s.hmmUpgradeConfidenceThreshold {
 			base.Outcome = planner.OutcomeSwitch
@@ -841,7 +841,7 @@ func (s *Service) normalizeHMMStayPin(req router.Request, p sessionpin.Pin) (ses
 	if model == "" {
 		return sessionpin.Pin{}, false
 	}
-	if p.LastTurnEndedAt.IsZero() {
+	if p.LastTurnEndedAt.IsZero() && p.Reason != "cyber-refusal-repin" {
 		return sessionpin.Pin{}, false
 	}
 	if !p.PinnedUntil.IsZero() && !p.PinnedUntil.After(time.Now()) {
