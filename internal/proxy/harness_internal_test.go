@@ -31,6 +31,27 @@ func TestOpenAIHarnessForRequestRequiresUsableCodexSubscription(t *testing.T) {
 			want: router.HarnessAPI,
 		},
 		{
+			name: "codex client identity",
+			ctx: context.WithValue(context.Background(), ClientIdentityContextKey{}, ClientIdentity{
+				ClientApp: ClientAppCodex,
+			}),
+			want: router.HarnessCodex,
+		},
+		{
+			name: "cursor client identity",
+			ctx: context.WithValue(context.Background(), ClientIdentityContextKey{}, ClientIdentity{
+				ClientApp: ClientAppCursor,
+			}),
+			want: router.HarnessCursor,
+		},
+		{
+			name: "claude code client identity",
+			ctx: context.WithValue(context.Background(), ClientIdentityContextKey{}, ClientIdentity{
+				ClientApp: ClientAppClaudeCode,
+			}),
+			want: router.HarnessClaudeCode,
+		},
+		{
 			name: "complete codex subscription",
 			ctx: func() context.Context {
 				ctx := context.WithValue(context.Background(), OpenAISubscriptionContextKey{}, codexTestJWT)
