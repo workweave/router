@@ -43,8 +43,8 @@ const MinBalanceMicros int64 = 0
 // is rate-limit exhausted, or the scorer routes to a non-covered model). Rather
 // than 402 free subscription traffic at zero balance, allow the balance to run
 // negative to this floor, then gate — staying optimistic while bounding the
-// unbilled-failover window. -$20.
-const SubscriptionOverdraftFloorMicros int64 = -20_000_000
+// unbilled-failover window. -$5.
+const SubscriptionOverdraftFloorMicros int64 = -5_000_000
 
 // Service orchestrates balance reads and debits. No I/O of its own — all
 // persistence flows through the Repo interface.

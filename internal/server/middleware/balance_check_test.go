@@ -388,6 +388,8 @@ func TestWithBalanceCheck_402sCodexSubscriptionOnAnthropicRoute(t *testing.T) {
 }
 
 func TestWithBalanceCheck_SubscriptionOverdraftAllowsNegativeBalance(t *testing.T) {
+	assert.Equal(t, int64(-5_000_000), billing.SubscriptionOverdraftFloorMicros)
+
 	// A subscription-covered request stays optimistic: a small negative balance
 	// (e.g. paid failover) within the overdraft floor still passes.
 	repo := &stubBillingRepo{balance: billing.SubscriptionOverdraftFloorMicros / 2}
