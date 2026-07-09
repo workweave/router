@@ -739,9 +739,9 @@ func TestHMMEVStay_RespectsCyberRefusalRepin(t *testing.T) {
 		PinnedUntil:     now.Add(time.Hour),
 	}
 	fresh := router.Decision{
-		Provider: providers.ProviderAnthropic,
-		Model:    "claude-opus-4-8",
-		Reason:   "hmm_policy(classifier 'Complex Followup')",
+		Provider: providers.ProviderMakora,
+		Model:    "deepseek/deepseek-v4-flash",
+		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",

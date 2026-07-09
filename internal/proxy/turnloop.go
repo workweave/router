@@ -801,6 +801,8 @@ func (s *Service) hmmStayPin(req router.Request, activePin sessionpin.Pin, hmmHi
 	// prior non-HMM stretch must not steer an HMM EV stay.
 	if !isHMMPinReason(activePin.Reason) {
 		activePin = sessionpin.Pin{}
+	} else if activePin.Reason == "cyber-refusal-repin" {
+		hmmHistory = sessionpin.Pin{}
 	}
 	for _, candidate := range []sessionpin.Pin{activePin, hmmHistory} {
 		normalized, candidateOK := s.normalizeHMMStayPin(req, candidate)
@@ -819,6 +821,7 @@ func (s *Service) hmmStayPin(req router.Request, activePin sessionpin.Pin, hmmHi
 // guards against a stale cluster/planner pin steering an HMM turn's EV stay.
 func isHMMPinReason(reason string) bool {
 	return reason == hmmHistoryReason ||
+		reason == "cyber-refusal-repin" ||
 		strings.HasPrefix(strings.TrimSpace(reason), "hmm_policy")
 }
 
