@@ -1817,6 +1817,18 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		log.Error("Failed to parse Anthropic request", "err", parseErr)
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
+
+	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
+	externalID, _ := ctx.Value(ExternalIDContextKey{}).(string)
+	installationID := installationIDFromContext(ctx)
+	clientID := ClientIdentityFrom(ctx)
+	bypassEval := hasEvalOverrideHeader(r)
+
+	// Bind session_key/request_id/api_key_id/ingress onto a ctx-scoped logger
+	// before stripping router-only history. The derived key is reused below to
+	// avoid a second hash + divergent key if env.body mutates mid-flow.
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "anthropic_messages")
 	if removed := env.StripRouterFeedbackArtifacts(); removed > 0 {
 		log.Info("Stripped router-feedback artifacts from Anthropic history", "removed_messages", removed)
 	}
@@ -1833,17 +1845,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		embedInput = "only_user_message"
 	}
 
-	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
-	externalID, _ := ctx.Value(ExternalIDContextKey{}).(string)
-	installationID := installationIDFromContext(ctx)
-	clientID := ClientIdentityFrom(ctx)
-	bypassEval := hasEvalOverrideHeader(r)
-
-	// Bind session_key/request_id/api_key_id/ingress onto a ctx-scoped logger.
-	// The derived key is reused below to avoid a second hash + a divergent key
-	// if env.body mutates mid-flow.
-	var sessionKey [sessionpin.SessionKeyLen]byte
-	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "anthropic_messages")
 	log.Info("ProxyMessages start",
 		"requested_model", feats.Model,
 		"stream", env.Stream(),
@@ -3734,6 +3735,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		log.Error("Failed to parse OpenAI request", "err", parseErr)
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
+
+	// Bind session-scoped logger before stripping router-only history; see the
+	// matching Anthropic block for why the raw client session shape owns pins.
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "openai_chat_completions")
 	if removed := env.StripRouterFeedbackArtifacts(); removed > 0 {
 		log.Info("Stripped router-feedback artifacts from OpenAI history", "removed_messages", removed)
 	}
@@ -3751,10 +3757,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	bypassEval := hasEvalOverrideHeader(r)
 
-	// Bind session-scoped logger; see the matching block in ProxyMessages for
-	// the rationale around deriving the key once and reusing it.
-	var sessionKey [sessionpin.SessionKeyLen]byte
-	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "openai_chat_completions")
 	log.Info("ProxyOpenAIChatCompletion start",
 		"requested_model", feats.Model,
 		"stream", env.Stream(),
