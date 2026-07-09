@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +14,7 @@ func TestOpenAIHarnessForRequestRequiresUsableCodexSubscription(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		ctx  context.Context
+		hdr  http.Header
 		want router.Harness
 	}{
 		{
@@ -29,6 +31,21 @@ func TestOpenAIHarnessForRequestRequiresUsableCodexSubscription(t *testing.T) {
 			name: "token without account id",
 			ctx:  context.WithValue(context.Background(), OpenAISubscriptionContextKey{}, codexTestJWT),
 			want: router.HarnessAPI,
+		},
+		{
+			name: "plain OpenAI bearer",
+			hdr: http.Header{
+				"Authorization": []string{"Bearer sk-oai-client-key"},
+			},
+			want: router.HarnessAPI,
+		},
+		{
+			name: "codex bearer subscription",
+			hdr: http.Header{
+				"Authorization":      []string{"Bearer " + codexTestJWT},
+				"Chatgpt-Account-Id": []string{"acct-1"},
+			},
+			want: router.HarnessCodex,
 		},
 		{
 			name: "codex client identity",
@@ -61,7 +78,11 @@ func TestOpenAIHarnessForRequestRequiresUsableCodexSubscription(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, openAIHarnessForRequest(tc.ctx))
+			ctx := tc.ctx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			assert.Equal(t, tc.want, openAIHarnessForRequest(ctx, tc.hdr))
 		})
 	}
 }

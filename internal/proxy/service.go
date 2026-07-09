@@ -558,8 +558,11 @@ func clientIdentityHarnessForRequest(ctx context.Context) router.Harness {
 	}
 }
 
-func openAIHarnessForRequest(ctx context.Context) router.Harness {
+func openAIHarnessForRequest(ctx context.Context, headers http.Header) router.Harness {
 	if codexSubscriptionFromContext(ctx) != nil {
+		return router.HarnessCodex
+	}
+	if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
 		return router.HarnessCodex
 	}
 	return clientIdentityHarnessForRequest(ctx)
@@ -3886,7 +3889,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
 		RequestedModel:       feats.Model,
-		Harness:              openAIHarnessForRequest(ctx),
+		Harness:              openAIHarnessForRequest(ctx, r.Header),
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		HasImages:            feats.HasImages,
