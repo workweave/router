@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -311,6 +312,7 @@ func rosterIDsForCatalogIDSet(ids map[string]struct{}) []string {
 		seen[rosterID] = struct{}{}
 		out = append(out, rosterID)
 	}
+	sort.Strings(out)
 	return out
 }
 

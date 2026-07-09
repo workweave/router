@@ -555,10 +555,7 @@ func anthropicHarnessForRequest(ctx context.Context) router.Harness {
 }
 
 func openAIHarnessForRequest(ctx context.Context) router.Harness {
-	if body, ok := ctx.Value(codexResponsesBodyContextKey{}).([]byte); ok && len(body) > 0 {
-		return router.HarnessCodex
-	}
-	if openaiSubscriptionFromContext(ctx) != "" {
+	if codexSubscriptionFromContext(ctx) != nil {
 		return router.HarnessCodex
 	}
 	return router.HarnessAPI

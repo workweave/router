@@ -117,6 +117,20 @@ func TestRouterForwardsHarnessAndPreferenceSignals(t *testing.T) {
 	assert.Equal(t, map[string]float64{"moonshotai/kimi-k2.7-code": 0.15}, decider.query.RoutingPreferences.SubsidizedModelCostFactor)
 }
 
+func TestRosterIDsForCatalogIDSetIsDeterministic(t *testing.T) {
+	ids := map[string]struct{}{
+		"moonshotai/kimi-k2.7": {},
+		"claude-sonnet-5":      {},
+	}
+
+	for range 10 {
+		assert.Equal(t,
+			[]string{"anthropic/claude-sonnet-5", "moonshotai/kimi-k2.7-code"},
+			rosterIDsForCatalogIDSet(ids),
+		)
+	}
+}
+
 func TestRouterFailsClosedOnUnknownReturnedModel(t *testing.T) {
 	decider := &fakeDecider{res: Result{Model: "unknown/model"}}
 	r := New(decider, map[string]struct{}{"moonshotai/kimi-k2.7": {}}, map[string]struct{}{"fireworks": {}})
