@@ -2,6 +2,7 @@ package proxy_test
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -557,6 +558,94 @@ func TestService_HMMSubAgentUsesFreshDecision(t *testing.T) {
 	store.mu.Lock()
 	assertOnlyHMMHistoryUpserts(t, store)
 	store.mu.Unlock()
+}
+
+func TestService_HMMFeedbackKeyUsesPostCompactionSession(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-haiku-4-5",
+		"max_tokens":195000,
+		"messages":[
+			{"role":"user","content":"` + strings.Repeat("x", 30_000) + `"},
+			{"role":"assistant","content":"working"},
+			{"role":"user","content":"latest request"}
+		]
+	}`)
+
+	before, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	after, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	require.Positive(t, after.TrimLastNMessages(1))
+	beforeSessionKey := proxy.DeriveSessionKey(before, "key-1")
+	afterSessionKey := proxy.DeriveSessionKey(after, "key-1")
+	beforeKey := hex.EncodeToString(beforeSessionKey[:])
+	afterKey := hex.EncodeToString(afterSessionKey[:])
+	require.NotEqual(t, beforeKey, afterKey)
+
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "hmm_policy(label=Simple Followup)",
+		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
+	}}
+	svc := newPinSvc(fr, store).
+		WithHMMRouter(fr).
+		WithAvailableModels(map[string]struct{}{"claude-haiku-4-5": {}}).
+		WithCompaction(nil, proxy.DefaultCompactionTriggerPct)
+
+	ctx := router.WithStrategy(authedCtx(uuid.NewString()), router.StrategyHMM)
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+
+	require.NotNil(t, fr.capturedReq)
+	assert.Equal(t, afterKey, fr.capturedReq.FeedbackKey)
+	assert.Equal(t, "latest request", fr.capturedReq.ConversationMessages[0].Text)
+}
+
+func TestService_HMMFeedbackKeyOpenAIUsesPostCompactionSession(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-4o",
+		"max_tokens":123000,
+		"messages":[
+			{"role":"user","content":"` + strings.Repeat("x", 30_000) + `"},
+			{"role":"assistant","content":"working"},
+			{"role":"user","content":"latest request"}
+		]
+	}`)
+
+	before, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	after, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	require.Positive(t, after.TrimLastNMessages(1))
+	beforeSessionKey := proxy.DeriveSessionKey(before, "key-1")
+	afterSessionKey := proxy.DeriveSessionKey(after, "key-1")
+	beforeKey := hex.EncodeToString(beforeSessionKey[:])
+	afterKey := hex.EncodeToString(afterSessionKey[:])
+	require.NotEqual(t, beforeKey, afterKey)
+
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderOpenAI,
+		Model:    "gpt-4o",
+		Reason:   "hmm_policy(label=Simple Followup)",
+		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
+	}}
+	svc := newOpenAIPinSvc(fr, store).
+		WithHMMRouter(fr).
+		WithAvailableModels(map[string]struct{}{"gpt-4o": {}}).
+		WithCompaction(nil, proxy.DefaultCompactionTriggerPct)
+
+	ctx := router.WithStrategy(authedCtx(uuid.NewString()), router.StrategyHMM)
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, body, rec, httpReq))
+
+	require.NotNil(t, fr.capturedReq)
+	assert.Equal(t, afterKey, fr.capturedReq.FeedbackKey)
+	assert.Equal(t, "latest request", fr.capturedReq.ConversationMessages[0].Text)
 }
 
 func TestService_HardPin_ExploreFallsThroughWhenFlagOff(t *testing.T) {

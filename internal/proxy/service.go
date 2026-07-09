@@ -1958,6 +1958,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	routeStart := time.Now()
+	routingSessionKey := DeriveSessionKey(env, apiKeyID)
 	req := router.Request{
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
@@ -1966,7 +1967,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		PromptText:           promptText,
 		ConversationMessages: conversationMessagesForRouting(env),
 		AvailableTools:       availableToolsForRouting(env),
-		FeedbackKey:          hex.EncodeToString(sessionKey[:]),
+		FeedbackKey:          hex.EncodeToString(routingSessionKey[:]),
 		FeedbackRole:         roleForTier(catalog.TierFor(feats.Model)),
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excluded,
@@ -3866,6 +3867,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	routeStart := time.Now()
+	routingSessionKey := DeriveSessionKey(env, apiKeyID)
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
@@ -3874,7 +3876,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		PromptText:           promptText,
 		ConversationMessages: conversationMessagesForRouting(env),
 		AvailableTools:       availableToolsForRouting(env),
-		FeedbackKey:          hex.EncodeToString(sessionKey[:]),
+		FeedbackKey:          hex.EncodeToString(routingSessionKey[:]),
 		FeedbackRole:         roleForTier(catalog.TierFor(feats.Model)),
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excludedOAI,
