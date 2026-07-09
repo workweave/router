@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -73,6 +74,82 @@ func (f *fakeAPIKeyRepository) MarkUsed(ctx context.Context, id string) error {
 
 func (f *fakeAPIKeyRepository) SoftDelete(ctx context.Context, installationID, id string) error {
 	return f.override
+}
+
+func (f *fakeAPIKeyRepository) UpdateDefaultStrategy(ctx context.Context, installationID, id, defaultStrategy string) error {
+	return errors.New("not used by these tests")
+}
+
+// fakeIssueAPIKeyRepository is a minimal in-memory auth.APIKeyRepository
+// backing IssueAPIKey/RotateAPIKey/SetAPIKeyDefaultStrategy tests. Distinct
+// from fakeAPIKeyRepository above (which is keyed by hash for VerifyAPIKey
+// tests and deliberately errors on Create/List/SoftDelete/UpdateDefaultStrategy).
+type fakeIssueAPIKeyRepository struct {
+	mu     sync.Mutex
+	keys   []*auth.APIKey
+	nextID int
+}
+
+func (f *fakeIssueAPIKeyRepository) Create(_ context.Context, params auth.CreateAPIKeyParams) (*auth.APIKey, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextID++
+	key := &auth.APIKey{
+		ID:              fmt.Sprintf("key-%d", f.nextID),
+		InstallationID:  params.InstallationID,
+		ExternalID:      params.ExternalID,
+		Name:            params.Name,
+		KeyPrefix:       params.KeyPrefix,
+		KeyHash:         params.KeyHash,
+		KeySuffix:       params.KeySuffix,
+		DefaultStrategy: params.DefaultStrategy,
+		CreatedBy:       params.CreatedBy,
+	}
+	f.keys = append(f.keys, key)
+	return key, nil
+}
+
+func (f *fakeIssueAPIKeyRepository) GetActiveByHashWithInstallation(context.Context, string) (*auth.APIKey, *auth.Installation, error) {
+	return nil, nil, errors.New("not used by these tests")
+}
+
+func (f *fakeIssueAPIKeyRepository) ListForInstallation(_ context.Context, installationID string) ([]*auth.APIKey, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]*auth.APIKey, 0, len(f.keys))
+	for _, k := range f.keys {
+		if k.InstallationID == installationID && k.DeletedAt == nil {
+			out = append(out, k)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeIssueAPIKeyRepository) MarkUsed(context.Context, string) error { return nil }
+
+func (f *fakeIssueAPIKeyRepository) SoftDelete(_ context.Context, installationID, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, k := range f.keys {
+		if k.ID == id && k.InstallationID == installationID && k.DeletedAt == nil {
+			now := time.Now()
+			k.DeletedAt = &now
+			return nil
+		}
+	}
+	return nil
+}
+
+func (f *fakeIssueAPIKeyRepository) UpdateDefaultStrategy(_ context.Context, installationID, id, defaultStrategy string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, k := range f.keys {
+		if k.ID == id && k.InstallationID == installationID && k.DeletedAt == nil {
+			k.DefaultStrategy = defaultStrategy
+			return nil
+		}
+	}
+	return auth.ErrAPIKeyNotFound
 }
 
 type fakeExternalAPIKeyRepo struct {
@@ -835,6 +912,88 @@ func TestService_SetInstallation_NotFoundDoesNotInvalidate(t *testing.T) {
 				"a no-op update must not invalidate the cache — nothing changed to pick up")
 		})
 	}
+}
+
+// TestService_IssueAPIKey_RejectsUnknownDefaultStrategy verifies IssueAPIKey
+// validates default_strategy against the same recognized set the header path
+// enforces (WithRouterStrategyOverride) -- a key default can't smuggle in a
+// value the header would reject.
+func TestService_IssueAPIKey_RejectsUnknownDefaultStrategy(t *testing.T) {
+	svc := auth.NewService(&fakeInstallationRepository{}, &fakeIssueAPIKeyRepository{}, nil, nil, auth.NoOpAPIKeyCache{}, nil, frozenClock())
+
+	_, _, err := svc.IssueAPIKey(context.Background(), "inst-1", nil, "not-a-strategy", nil)
+
+	require.ErrorIs(t, err, auth.ErrUnknownStrategy)
+}
+
+func TestService_IssueAPIKey_PersistsDefaultStrategy(t *testing.T) {
+	repo := &fakeIssueAPIKeyRepository{}
+	svc := auth.NewService(&fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, nil, frozenClock())
+
+	key, _, err := svc.IssueAPIKey(context.Background(), "inst-1", nil, "hmm", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "hmm", key.DefaultStrategy)
+}
+
+// TestService_RotateAPIKey_CarriesForwardNameAndDefaultStrategy is the
+// Cursor-key lifecycle case: rotating a key that was minted with
+// --default-strategy hmm must not silently drop back to the deployment
+// default on the replacement token.
+func TestService_RotateAPIKey_CarriesForwardNameAndDefaultStrategy(t *testing.T) {
+	repo := &fakeIssueAPIKeyRepository{}
+	svc := auth.NewService(&fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, nil, frozenClock())
+	name := "cursor-hmm"
+	old, _, err := svc.IssueAPIKey(context.Background(), "inst-1", &name, "hmm", nil)
+	require.NoError(t, err)
+
+	rotated, _, err := svc.RotateAPIKey(context.Background(), "inst-1", old.ID, nil)
+
+	require.NoError(t, err)
+	assert.NotEqual(t, old.ID, rotated.ID, "rotation must issue a new key id")
+	require.NotNil(t, rotated.Name)
+	assert.Equal(t, name, *rotated.Name, "rotation must carry forward the old key's name")
+	assert.Equal(t, "hmm", rotated.DefaultStrategy, "rotation must carry forward the old key's default_strategy")
+}
+
+func TestService_SetAPIKeyDefaultStrategy_RejectsUnknownValue(t *testing.T) {
+	repo := &fakeIssueAPIKeyRepository{}
+	svc := auth.NewService(&fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, nil, frozenClock())
+	key, _, err := svc.IssueAPIKey(context.Background(), "inst-1", nil, "", nil)
+	require.NoError(t, err)
+
+	err = svc.SetAPIKeyDefaultStrategy(context.Background(), "inst-1", key.ID, "not-a-strategy")
+
+	require.ErrorIs(t, err, auth.ErrUnknownStrategy)
+}
+
+// TestService_SetAPIKeyDefaultStrategy_NotFoundDoesNotInvalidate mirrors
+// TestService_SetInstallation_NotFoundDoesNotInvalidate's guard: a zero-row
+// update (stale/cross-tenant id) must not invalidate the cache, or the write
+// looks successful when nothing changed.
+func TestService_SetAPIKeyDefaultStrategy_NotFoundDoesNotInvalidate(t *testing.T) {
+	cache := newRecordingAPIKeyCache()
+	repo := &fakeIssueAPIKeyRepository{}
+	svc := auth.NewService(&fakeInstallationRepository{}, repo, nil, nil, cache, nil, frozenClock())
+
+	err := svc.SetAPIKeyDefaultStrategy(context.Background(), "inst-1", "missing-key", "hmm")
+
+	require.ErrorIs(t, err, auth.ErrAPIKeyNotFound)
+	assert.Empty(t, cache.invalidationSnapshot(),
+		"a no-op update must not invalidate the cache — nothing changed to pick up")
+}
+
+func TestService_SetAPIKeyDefaultStrategy_InvalidatesCache(t *testing.T) {
+	cache := newRecordingAPIKeyCache()
+	repo := &fakeIssueAPIKeyRepository{}
+	svc := auth.NewService(&fakeInstallationRepository{}, repo, nil, nil, cache, nil, frozenClock())
+	key, _, err := svc.IssueAPIKey(context.Background(), "inst-1", nil, "", nil)
+	require.NoError(t, err)
+
+	err = svc.SetAPIKeyDefaultStrategy(context.Background(), "inst-1", key.ID, "hmm")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"inst-1"}, cache.invalidationSnapshot())
 }
 
 type recordingNotifier struct {

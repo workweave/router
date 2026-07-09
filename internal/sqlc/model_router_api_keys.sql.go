@@ -19,6 +19,7 @@ INSERT INTO router.model_router_api_keys (
     key_prefix,
     key_hash,
     key_suffix,
+    default_strategy,
     created_by
 )
 VALUES (
@@ -28,19 +29,21 @@ VALUES (
     $4::varchar,
     $5::varchar,
     $6::varchar,
-    $7
+    $7,
+    $8
 )
-RETURNING id, installation_id, external_id, name, key_prefix, key_hash, key_suffix, last_used_at, created_at, deleted_at, created_by, spend_cap_usd_micros, spent_usd_micros
+RETURNING id, installation_id, external_id, name, key_prefix, key_hash, key_suffix, last_used_at, created_at, deleted_at, created_by, spend_cap_usd_micros, spent_usd_micros, default_strategy
 `
 
 type CreateModelRouterAPIKeyParams struct {
-	InstallationID uuid.UUID
-	ExternalID     string
-	Name           *string
-	KeyPrefix      string
-	KeyHash        string
-	KeySuffix      string
-	CreatedBy      *string
+	InstallationID  uuid.UUID
+	ExternalID      string
+	Name            *string
+	KeyPrefix       string
+	KeyHash         string
+	KeySuffix       string
+	DefaultStrategy *string
+	CreatedBy       *string
 }
 
 // CreateModelRouterAPIKey
@@ -52,6 +55,7 @@ type CreateModelRouterAPIKeyParams struct {
 //	    key_prefix,
 //	    key_hash,
 //	    key_suffix,
+//	    default_strategy,
 //	    created_by
 //	)
 //	VALUES (
@@ -61,9 +65,10 @@ type CreateModelRouterAPIKeyParams struct {
 //	    $4::varchar,
 //	    $5::varchar,
 //	    $6::varchar,
-//	    $7
+//	    $7,
+//	    $8
 //	)
-//	RETURNING id, installation_id, external_id, name, key_prefix, key_hash, key_suffix, last_used_at, created_at, deleted_at, created_by, spend_cap_usd_micros, spent_usd_micros
+//	RETURNING id, installation_id, external_id, name, key_prefix, key_hash, key_suffix, last_used_at, created_at, deleted_at, created_by, spend_cap_usd_micros, spent_usd_micros, default_strategy
 func (q *Queries) CreateModelRouterAPIKey(ctx context.Context, arg CreateModelRouterAPIKeyParams) (RouterModelRouterAPIKey, error) {
 	row := q.db.QueryRow(ctx, createModelRouterAPIKey,
 		arg.InstallationID,
@@ -72,6 +77,7 @@ func (q *Queries) CreateModelRouterAPIKey(ctx context.Context, arg CreateModelRo
 		arg.KeyPrefix,
 		arg.KeyHash,
 		arg.KeySuffix,
+		arg.DefaultStrategy,
 		arg.CreatedBy,
 	)
 	var i RouterModelRouterAPIKey
@@ -89,12 +95,13 @@ func (q *Queries) CreateModelRouterAPIKey(ctx context.Context, arg CreateModelRo
 		&i.CreatedBy,
 		&i.SpendCapUsdMicros,
 		&i.SpentUsdMicros,
+		&i.DefaultStrategy,
 	)
 	return i, err
 }
 
 const getActiveModelRouterAPIKeyWithInstallationByHash = `-- name: GetActiveModelRouterAPIKeyWithInstallationByHash :one
-SELECT k.id, k.installation_id, k.external_id, k.name, k.key_prefix, k.key_hash, k.key_suffix, k.last_used_at, k.created_at, k.deleted_at, k.created_by, k.spend_cap_usd_micros, k.spent_usd_micros, i.id, i.external_id, i.name, i.created_at, i.updated_at, i.deleted_at, i.created_by, i.excluded_models, i.excluded_providers, i.routing_quality_weight, i.usage_bypass_enabled, i.usage_bypass_threshold, i.preferred_models, i.subscription_routing_disabled
+SELECT k.id, k.installation_id, k.external_id, k.name, k.key_prefix, k.key_hash, k.key_suffix, k.last_used_at, k.created_at, k.deleted_at, k.created_by, k.spend_cap_usd_micros, k.spent_usd_micros, k.default_strategy, i.id, i.external_id, i.name, i.created_at, i.updated_at, i.deleted_at, i.created_by, i.excluded_models, i.excluded_providers, i.routing_quality_weight, i.usage_bypass_enabled, i.usage_bypass_threshold, i.preferred_models, i.subscription_routing_disabled
 FROM router.model_router_api_keys k
 INNER JOIN router.model_router_installations i ON i.id = k.installation_id
 WHERE k.key_hash = $1::varchar
@@ -113,7 +120,7 @@ type GetActiveModelRouterAPIKeyWithInstallationByHashRow struct {
 // both sides so a soft-deleted installation invalidates all its keys without per-key
 // updates.
 //
-//	SELECT k.id, k.installation_id, k.external_id, k.name, k.key_prefix, k.key_hash, k.key_suffix, k.last_used_at, k.created_at, k.deleted_at, k.created_by, k.spend_cap_usd_micros, k.spent_usd_micros, i.id, i.external_id, i.name, i.created_at, i.updated_at, i.deleted_at, i.created_by, i.excluded_models, i.excluded_providers, i.routing_quality_weight, i.usage_bypass_enabled, i.usage_bypass_threshold, i.preferred_models, i.subscription_routing_disabled
+//	SELECT k.id, k.installation_id, k.external_id, k.name, k.key_prefix, k.key_hash, k.key_suffix, k.last_used_at, k.created_at, k.deleted_at, k.created_by, k.spend_cap_usd_micros, k.spent_usd_micros, k.default_strategy, i.id, i.external_id, i.name, i.created_at, i.updated_at, i.deleted_at, i.created_by, i.excluded_models, i.excluded_providers, i.routing_quality_weight, i.usage_bypass_enabled, i.usage_bypass_threshold, i.preferred_models, i.subscription_routing_disabled
 //	FROM router.model_router_api_keys k
 //	INNER JOIN router.model_router_installations i ON i.id = k.installation_id
 //	WHERE k.key_hash = $1::varchar
@@ -136,6 +143,7 @@ func (q *Queries) GetActiveModelRouterAPIKeyWithInstallationByHash(ctx context.C
 		&i.RouterModelRouterAPIKey.CreatedBy,
 		&i.RouterModelRouterAPIKey.SpendCapUsdMicros,
 		&i.RouterModelRouterAPIKey.SpentUsdMicros,
+		&i.RouterModelRouterAPIKey.DefaultStrategy,
 		&i.RouterModelRouterInstallation.ID,
 		&i.RouterModelRouterInstallation.ExternalID,
 		&i.RouterModelRouterInstallation.Name,
@@ -184,7 +192,7 @@ func (q *Queries) GetModelRouterAPIKeySpend(ctx context.Context, id uuid.UUID) (
 }
 
 const listModelRouterAPIKeysForInstallation = `-- name: ListModelRouterAPIKeysForInstallation :many
-SELECT id, installation_id, external_id, name, key_prefix, key_hash, key_suffix, last_used_at, created_at, deleted_at, created_by, spend_cap_usd_micros, spent_usd_micros
+SELECT id, installation_id, external_id, name, key_prefix, key_hash, key_suffix, last_used_at, created_at, deleted_at, created_by, spend_cap_usd_micros, spent_usd_micros, default_strategy
 FROM router.model_router_api_keys
 WHERE installation_id = $1::uuid
   AND deleted_at IS NULL
@@ -193,7 +201,7 @@ ORDER BY created_at DESC
 
 // Lists active keys for an installation (dashboard / CRUD; not on the request path).
 //
-//	SELECT id, installation_id, external_id, name, key_prefix, key_hash, key_suffix, last_used_at, created_at, deleted_at, created_by, spend_cap_usd_micros, spent_usd_micros
+//	SELECT id, installation_id, external_id, name, key_prefix, key_hash, key_suffix, last_used_at, created_at, deleted_at, created_by, spend_cap_usd_micros, spent_usd_micros, default_strategy
 //	FROM router.model_router_api_keys
 //	WHERE installation_id = $1::uuid
 //	  AND deleted_at IS NULL
@@ -221,6 +229,7 @@ func (q *Queries) ListModelRouterAPIKeysForInstallation(ctx context.Context, ins
 			&i.CreatedBy,
 			&i.SpendCapUsdMicros,
 			&i.SpentUsdMicros,
+			&i.DefaultStrategy,
 		); err != nil {
 			return nil, err
 		}
@@ -274,4 +283,37 @@ type SoftDeleteModelRouterAPIKeyParams struct {
 func (q *Queries) SoftDeleteModelRouterAPIKey(ctx context.Context, arg SoftDeleteModelRouterAPIKeyParams) error {
 	_, err := q.db.Exec(ctx, softDeleteModelRouterAPIKey, arg.ID, arg.InstallationID)
 	return err
+}
+
+const updateModelRouterAPIKeyDefaultStrategy = `-- name: UpdateModelRouterAPIKeyDefaultStrategy :execrows
+UPDATE router.model_router_api_keys
+SET default_strategy = $1
+WHERE id = $2::uuid
+  AND installation_id = $3::uuid
+  AND deleted_at IS NULL
+`
+
+type UpdateModelRouterAPIKeyDefaultStrategyParams struct {
+	DefaultStrategy *string
+	ID              uuid.UUID
+	InstallationID  uuid.UUID
+}
+
+// Sets the per-key routing-strategy default, scoped to installation_id to
+// prevent cross-tenant updates. NULL clears it so the key falls back to the
+// deployment default (cluster) absent an x-weave-router-strategy header. The
+// header always wins over this column when both are present; see
+// WithRouterStrategyOverride.
+//
+//	UPDATE router.model_router_api_keys
+//	SET default_strategy = $1
+//	WHERE id = $2::uuid
+//	  AND installation_id = $3::uuid
+//	  AND deleted_at IS NULL
+func (q *Queries) UpdateModelRouterAPIKeyDefaultStrategy(ctx context.Context, arg UpdateModelRouterAPIKeyDefaultStrategyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateModelRouterAPIKeyDefaultStrategy, arg.DefaultStrategy, arg.ID, arg.InstallationID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

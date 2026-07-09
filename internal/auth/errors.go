@@ -17,4 +17,11 @@ var (
 	// UPDATE looks like success, so the caller would invalidate the cache and
 	// report the change as applied when nothing changed.
 	ErrInstallationNotFound = errors.New("installation not found")
+
+	// ErrUnknownStrategy is returned when an API key's default_strategy is set
+	// to a value outside the recognized router.Strategy set (or empty, which
+	// clears it). Mirrors the header path's own validation in
+	// WithRouterStrategyOverride so a key default can't smuggle in a value the
+	// header would reject.
+	ErrUnknownStrategy = errors.New("unknown router strategy")
 )

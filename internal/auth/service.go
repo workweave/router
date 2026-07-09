@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"workweave/router/internal/observability"
+	"workweave/router/internal/router"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
 )
@@ -104,19 +105,39 @@ func (s *Service) invalidateInstallation(installationID string) {
 	s.notifier.NotifyInstallationChanged(installationID)
 }
 
+// validAPIKeyDefaultStrategy reports whether s is empty (no key default) or a
+// recognized router.Strategy value. Mirrors the header's own recognized set
+// in WithRouterStrategyOverride so a key default can't smuggle in a value the
+// header path would reject.
+func validAPIKeyDefaultStrategy(s string) bool {
+	switch router.Strategy(s) {
+	case "", router.StrategyCluster, router.StrategyRL, router.StrategyHMM, router.StrategyBandit:
+		return true
+	default:
+		return false
+	}
+}
+
 // IssueAPIKey creates a new router API key and returns the raw token.
-func (s *Service) IssueAPIKey(ctx context.Context, installationID string, name *string, createdBy *string) (*APIKey, string, error) {
+// defaultStrategy is the per-key routing-strategy default (empty for none);
+// see APIKey.DefaultStrategy. Returns ErrUnknownStrategy for an unrecognized
+// value.
+func (s *Service) IssueAPIKey(ctx context.Context, installationID string, name *string, defaultStrategy string, createdBy *string) (*APIKey, string, error) {
+	if !validAPIKeyDefaultStrategy(defaultStrategy) {
+		return nil, "", fmt.Errorf("%w: %q", ErrUnknownStrategy, defaultStrategy)
+	}
 	rawToken := GenerateID(APIKeyPrefix)
 	keyHash, keyPrefix, keySuffix := APITokenFingerprint(rawToken)
 	externalID := GenerateID("kid")
 	key, err := s.apiKeys.Create(ctx, CreateAPIKeyParams{
-		InstallationID: installationID,
-		ExternalID:     externalID,
-		Name:           name,
-		KeyPrefix:      keyPrefix,
-		KeyHash:        keyHash,
-		KeySuffix:      keySuffix,
-		CreatedBy:      createdBy,
+		InstallationID:  installationID,
+		ExternalID:      externalID,
+		Name:            name,
+		KeyPrefix:       keyPrefix,
+		KeyHash:         keyHash,
+		KeySuffix:       keySuffix,
+		DefaultStrategy: defaultStrategy,
+		CreatedBy:       createdBy,
 	})
 	if err != nil {
 		return nil, "", err
@@ -130,10 +151,11 @@ func (s *Service) ListAPIKeys(ctx context.Context, installationID string) ([]*AP
 }
 
 // RotateAPIKey soft-deletes the named key and issues a replacement under the
-// same installation, carrying forward its name. Returns ErrAPIKeyNotFound if
-// keyID isn't an active key owned by installationID, so a foreign key UUID
-// can't be rotated. Not transactional: the brief "no active key" gap is fine
-// since rotation's whole point is invalidating the old token anyway.
+// same installation, carrying forward its name and default_strategy. Returns
+// ErrAPIKeyNotFound if keyID isn't an active key owned by installationID, so
+// a foreign key UUID can't be rotated. Not transactional: the brief "no
+// active key" gap is fine since rotation's whole point is invalidating the
+// old token anyway.
 func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string, createdBy *string) (*APIKey, string, error) {
 	existing, err := s.apiKeys.ListForInstallation(ctx, installationID)
 	if err != nil {
@@ -152,12 +174,31 @@ func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string
 	if err := s.apiKeys.SoftDelete(ctx, installationID, target.ID); err != nil {
 		return nil, "", err
 	}
-	key, raw, err := s.IssueAPIKey(ctx, installationID, target.Name, createdBy)
+	key, raw, err := s.IssueAPIKey(ctx, installationID, target.Name, target.DefaultStrategy, createdBy)
 	if err != nil {
 		return nil, "", err
 	}
 	s.invalidateInstallation(installationID)
 	return key, raw, nil
+}
+
+// SetAPIKeyDefaultStrategy sets the per-key routing-strategy default used
+// when the caller can't send x-weave-router-strategy (e.g. Cursor's Override
+// Base URL has no custom-header field). The header always wins over this
+// value when present; see WithRouterStrategyOverride. Empty clears the
+// default so the key falls back to the deployment default (cluster). Returns
+// ErrUnknownStrategy for an unrecognized value, or ErrAPIKeyNotFound if keyID
+// isn't an active key owned by installationID. Invalidates the cache so the
+// change applies on the next request instead of waiting out the TTL.
+func (s *Service) SetAPIKeyDefaultStrategy(ctx context.Context, installationID, keyID, defaultStrategy string) error {
+	if !validAPIKeyDefaultStrategy(defaultStrategy) {
+		return fmt.Errorf("%w: %q", ErrUnknownStrategy, defaultStrategy)
+	}
+	if err := s.apiKeys.UpdateDefaultStrategy(ctx, installationID, keyID, defaultStrategy); err != nil {
+		return err
+	}
+	s.invalidateInstallation(installationID)
+	return nil
 }
 
 // DeleteAPIKey soft-deletes an API key and invalidates the installation's

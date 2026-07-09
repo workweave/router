@@ -44,6 +44,7 @@ type RouterModelRouterAPIKey struct {
 	CreatedBy         *string
 	SpendCapUsdMicros *int64
 	SpentUsdMicros    int64
+	DefaultStrategy   *string
 }
 
 // Customer-owned provider API keys for BYOK routing

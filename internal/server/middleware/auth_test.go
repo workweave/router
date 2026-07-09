@@ -81,6 +81,10 @@ func (f *fakeAPIKeyRepository) SoftDelete(ctx context.Context, installationID, i
 	return errors.New("not used")
 }
 
+func (f *fakeAPIKeyRepository) UpdateDefaultStrategy(ctx context.Context, installationID, id, defaultStrategy string) error {
+	return errors.New("not used")
+}
+
 type fakeInstallationRepository struct{}
 
 func (fakeInstallationRepository) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
