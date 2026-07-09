@@ -1,0 +1,206 @@
+{
+ "axes": {
+  "claude-haiku-4-5": {
+   "input_per_1k_usd": 0.0008,
+   "output_per_1k_usd": 0.004,
+   "tps": 100.688,
+   "ttft_s": 0.697,
+   "verbosity_tokens": null
+  },
+  "claude-opus-4-8": {
+   "input_per_1k_usd": 0.005,
+   "output_per_1k_usd": 0.025,
+   "tps": 58.9,
+   "ttft_s": 19.53,
+   "verbosity_tokens": null
+  },
+  "deepseek/deepseek-v4-flash": {
+   "input_per_1k_usd": 0.00014,
+   "output_per_1k_usd": 0.00028,
+   "tps": 98.429,
+   "ttft_s": 0.797,
+   "verbosity_tokens": null
+  },
+  "deepseek/deepseek-v4-pro": {
+   "input_per_1k_usd": 0.00174,
+   "output_per_1k_usd": 0.00348,
+   "tps": 28.962,
+   "ttft_s": 1.154,
+   "verbosity_tokens": null
+  },
+  "gemini-3.1-flash-lite-preview": {
+   "input_per_1k_usd": 0.0001,
+   "output_per_1k_usd": 0.0004,
+   "tps": 292.193,
+   "ttft_s": 4.924,
+   "verbosity_tokens": null
+  },
+  "gemini-3.1-pro-preview": {
+   "input_per_1k_usd": 0.002,
+   "output_per_1k_usd": 0.008,
+   "tps": 124.978,
+   "ttft_s": 21.672,
+   "verbosity_tokens": null
+  },
+  "gemini-3.5-flash": {
+   "input_per_1k_usd": 0.0015,
+   "output_per_1k_usd": 0.009,
+   "tps": 279.018,
+   "ttft_s": 13.981,
+   "verbosity_tokens": null
+  },
+  "gpt-5.4-mini": {
+   "input_per_1k_usd": 0.0004,
+   "output_per_1k_usd": 0.0016,
+   "tps": 162.901,
+   "ttft_s": 4.544,
+   "verbosity_tokens": null
+  },
+  "gpt-5.5": {
+   "input_per_1k_usd": 0.005,
+   "output_per_1k_usd": 0.04,
+   "tps": 65.144,
+   "ttft_s": 50.034,
+   "verbosity_tokens": null
+  },
+  "qwen/qwen3-coder-next": {
+   "input_per_1k_usd": 0.0005,
+   "output_per_1k_usd": 0.0012,
+   "tps": 81.409,
+   "ttft_s": 1.079,
+   "verbosity_tokens": null
+  },
+  "qwen/qwen3-next-80b-a3b-instruct": {
+   "input_per_1k_usd": 0.00015,
+   "output_per_1k_usd": 0.0012,
+   "tps": 152.115,
+   "ttft_s": 1.207,
+   "verbosity_tokens": null
+  },
+  "xiaomi/mimo-v2.5-pro": {
+   "input_per_1k_usd": 0.001,
+   "output_per_1k_usd": 0.003,
+   "tps": 54.844,
+   "ttft_s": 2.253,
+   "verbosity_tokens": null
+  },
+  "z-ai/glm-5.2": {
+   "input_per_1k_usd": 0.0014,
+   "output_per_1k_usd": 0.0044,
+   "tps": null,
+   "ttft_s": null,
+   "verbosity_tokens": null
+  },
+  "minimax/minimax-m3": {
+   "input_per_1k_usd": 0.0006,
+   "output_per_1k_usd": 0.0024,
+   "tps": null,
+   "ttft_s": null,
+   "verbosity_tokens": null
+  },
+  "moonshotai/kimi-k2.7": {
+   "input_per_1k_usd": 0.00095,
+   "output_per_1k_usd": 0.004,
+   "tps": null,
+   "ttft_s": null,
+   "verbosity_tokens": null
+  },
+  "qwen/qwen3.7-plus": {
+   "input_per_1k_usd": 0.0004,
+   "output_per_1k_usd": 0.0016,
+   "tps": null,
+   "ttft_s": null,
+   "verbosity_tokens": null
+  },
+  "claude-sonnet-5": {
+   "input_per_1k_usd": 0.003,
+   "output_per_1k_usd": 0.015,
+   "tps": 48.426,
+   "ttft_s": 1.076,
+   "verbosity_tokens": null
+  },
+  "claude-fable-5": {
+   "input_per_1k_usd": 0.01,
+   "output_per_1k_usd": 0.05,
+   "tps": 58.9,
+   "ttft_s": 19.53,
+   "verbosity_tokens": null
+  }
+ },
+ "meta": {
+  "aa_evidence_scale": 3.0,
+  "aa_label_residuals": {
+   "fraction_under_threshold": 0.8876404494382022,
+   "max": 0.2636900631579798,
+   "mean": 0.05666298416741266,
+   "median": 0.03600941472238445,
+   "n_cells": 178,
+   "p90": 0.15338418701568313
+  },
+  "aa_label_tier_weights": {
+   "AIDER_POLYGLOT_GO": 1.0,
+   "AIDER_POLYGLOT_RUST_CPP_JAVA": 1.0,
+   "BFCL_V4_PARALLEL_MULTI": 0.8,
+   "BFCL_V4_SIMPLE": 0.3,
+   "GPQA_DIAMOND": 0.3,
+   "IFBENCH": 0.3,
+   "LIVECODEBENCH": 1.0,
+   "LIVECODEBENCH_TS": 1.0,
+   "MATH_500": 0.3,
+   "MMLU_PRO": 0.3,
+   "SCICODE": 1.0,
+   "SWE_BENCH_VERIFIED": 1.0,
+   "TAU2_BENCH_TELECOM": 1.0,
+   "TERMINAL_BENCH_HARD": 1.0
+  },
+  "alpha": 0.9,
+  "bench_coding_only": false,
+  "benchmark_corpus_loaders": "aider-polyglot-go,aider-polyglot-rust-cpp-java,livecodebench-ts-and-aider-polyglot-ts,bfcl-v4-simple,bfcl-v4-parallel-multi",
+  "cold_model_aa_boost": 1.0,
+  "cost_per_1k_input_usd": {
+   "claude-haiku-4-5": 0.0008,
+   "claude-opus-4-8": 0.005,
+   "deepseek/deepseek-v4-flash": 0.00014,
+   "deepseek/deepseek-v4-pro": 0.00174,
+   "gemini-3.1-flash-lite-preview": 0.0001,
+   "gemini-3.1-pro-preview": 0.002,
+   "gemini-3.5-flash": 0.0015,
+   "gpt-5.4-mini": 0.0004,
+   "gpt-5.5": 0.005,
+   "qwen/qwen3-coder-next": 0.0005,
+   "qwen/qwen3-next-80b-a3b-instruct": 0.00015,
+   "xiaomi/mimo-v2.5-pro": 0.001,
+   "claude-sonnet-5": 0.003,
+   "claude-fable-5": 0.01
+  },
+  "embedder_model": "jina-v2-base-code-int8",
+  "exclude_prompts": null,
+  "expected_output_tokens": 2000,
+  "include_aa_labels": "aa_quality_priors_v0.64.json",
+  "include_benchmark_corpus": true,
+  "include_routerarena_labels": "routerarena_labels_combined.jsonl",
+  "k": 16,
+  "measured_speed_source": null,
+  "measured_verbosity_source": null,
+  "n_excluded_prompts": 0,
+  "n_prompts": 1775,
+  "output_cost_ratio": 0.0,
+  "per_model_verbosity": true,
+  "per_model_zscore": false,
+  "router_version": "weave-router-v0.1-bootstrap",
+  "routerarena_only": false,
+  "score_normalization": "per_prompt_zscore_across_bench_columns",
+  "seed": 42,
+  "shrinkage_k0": 10.0,
+  "source_fractions": {
+   "routerarena": 0.1
+  },
+  "speed_weight": 0.0,
+  "top_p": 4,
+  "training_data_mix": {
+   "d1": 1.0,
+   "d2": 0.0,
+   "d3": 0.0
+  }
+ }
+}

@@ -39,7 +39,7 @@ func TestHTTPDeciderPostsContractAndParsesResult(t *testing.T) {
 		TurnIndex:  3,
 		Candidates: []rl.Candidate{
 			{RosterID: "anthropic/claude-opus-4-8", Provider: providers.ProviderAnthropic},
-			{RosterID: "deepseek/deepseek-v4-flash", Provider: providers.ProviderDeepInfra},
+			{RosterID: "deepseek/deepseek-v4-flash", Provider: providers.ProviderMakora},
 		},
 	})
 	require.NoError(t, err)

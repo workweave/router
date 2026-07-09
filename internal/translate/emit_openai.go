@@ -70,7 +70,7 @@ func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (provi
 // turn can land on a cold replica and pay a full prefill (the
 // deepseek-v4-pro/Fireworks incident: 60k-token turn, zero cache read, 26s
 // TTFT). Each upstream takes a different knob: OpenAI-compat serverless
-// (Fireworks/DeepInfra/Makora/Together/…) gets x-session-affinity (the
+// (Fireworks/Makora/Together/…) gets x-session-affinity (the
 // default for any OpenAI-compat target, so new upstreams need no edit here),
 // OpenRouter gets x-session-id, OpenAI gets the prompt_cache_key body field.
 // Bedrock's explicit cachePoint caching is centrally routed, so it gets nothing.
@@ -198,7 +198,7 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 }
 
 // targetIsOpenRouter reports whether the emit target is OpenRouter — direct
-// upstreams (Fireworks/DeepInfra/Bedrock) reject OpenRouter-only fields like
+// upstreams (Fireworks/Bedrock/Makora/Together) reject OpenRouter-only fields like
 // `provider`/`reasoning`. Empty TargetProvider falls back to the model-slug
 // match for callers not yet plumbed through (the handover summarizer).
 func targetIsOpenRouter(opts EmitOptions) bool {
@@ -307,10 +307,10 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, pr
 // both leaving client-set values alone:
 //   - tool_stream=true — without it GLM-5.1 reproduces the GLM-5 empty-input
 //     loop (docs/investigations/2026-05-26-glm5-empty-tool-loop.md).
-//   - chat_template_kwargs.enable_thinking=false — disables vLLM/DeepInfra's
-//     default-on thinking mode so reasoning doesn't leak into the response
-//     stream. Skipped for OpenRouter, which disables thinking via its own
-//     reasoning={enabled:false} hint instead.
+//   - chat_template_kwargs.enable_thinking=false — disables the vLLM chat
+//     template's default-on thinking mode (Fireworks/Together) so reasoning
+//     doesn't leak into the response stream. Skipped for OpenRouter, which
+//     disables thinking via its own reasoning={enabled:false} hint instead.
 func applyGLM51FlagsIfNeeded(body []byte, opts EmitOptions) ([]byte, error) {
 	if !isGLM51(opts.TargetModel) {
 		return body, nil

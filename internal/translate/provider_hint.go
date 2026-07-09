@@ -51,8 +51,9 @@ func openRouterForcesToolTemperatureZero(model string) bool {
 // isGLM51 reports whether the model id is z-ai/glm-5.1. GLM-5.1's streaming
 // tool-call fix is opt-in (tool_stream=true, docs.z.ai/guides/capabilities/stream-tool);
 // without it tool_call envelopes arrive with empty arguments like GLM-5. We
-// also disable thinking-mode on the DeepInfra path so reasoning doesn't leak
-// into the stream; OpenRouter's case is handled by openRouterReasoningHint.
+// also disable thinking-mode on the vLLM path (Fireworks/Together) so
+// reasoning doesn't leak into the stream; OpenRouter's case is handled by
+// openRouterReasoningHint.
 func isGLM51(model string) bool {
 	return model == "z-ai/glm-5.1"
 }

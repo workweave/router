@@ -287,8 +287,8 @@ func (e *RequestEnvelope) ToolValidator() *toolcheck.Validator {
 }
 
 // HasImages reports whether any message carries image content. Used to keep
-// such turns off text-only models, which 4xx on image parts (e.g. DeepInfra's
-// GLM-5.1). Checks the whole history since clients like Cursor re-send earlier
+// such turns off text-only models, which 4xx on image parts (e.g. GLM-5.1).
+// Checks the whole history since clients like Cursor re-send earlier
 // screenshots on every turn.
 func (e *RequestEnvelope) HasImages() bool {
 	switch e.format {

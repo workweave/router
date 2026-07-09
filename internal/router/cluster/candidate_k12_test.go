@@ -48,12 +48,13 @@ func TestCandidateK12Loads(t *testing.T) {
 	}
 
 	// Provider set covering every provider the 21-model roster binds to (the
-	// staging bake-off deploy carries keys for all six). Restricting to a subset
-	// would drop OSS models (e.g. glm-5.2 on fireworks) from the eligible pool
-	// and the per-cluster argmax would no longer reflect the offline screen.
+	// staging bake-off deploy carries keys for all seven). Restricting to a
+	// subset would drop OSS models (e.g. glm-5.2 on fireworks) from the
+	// eligible pool and the per-cluster argmax would no longer reflect the
+	// offline screen.
 	providers := map[string]struct{}{
 		"anthropic": {}, "openai": {}, "google": {},
-		"fireworks": {}, "deepinfra": {}, "bedrock": {},
+		"fireworks": {}, "makora": {}, "openrouter": {}, "bedrock": {},
 	}
 
 	// Build a real Scorer through the jina-v2 fake embedder (matches id/dim, so

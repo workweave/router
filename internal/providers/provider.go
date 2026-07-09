@@ -51,7 +51,6 @@ const (
 	ProviderGoogle     = "google"
 	ProviderOpenRouter = "openrouter"
 	ProviderFireworks  = "fireworks"
-	ProviderDeepInfra  = "deepinfra"
 	ProviderBedrock    = "bedrock"
 	ProviderMakora     = "makora"
 	ProviderTogether   = "together"
@@ -71,7 +70,7 @@ const (
 	FamilyAnthropic
 	// FamilyOpenAICompat speaks the OpenAI Chat Completions wire format
 	// (OpenAI itself plus every OpenAI-compatible upstream: OpenRouter,
-	// Fireworks, DeepInfra, Bedrock's OpenAI-compat surface, Makora, Together).
+	// Fireworks, Bedrock's OpenAI-compat surface, Makora, Together).
 	FamilyOpenAICompat
 	// FamilyGemini speaks the Google Generative Language (Gemini) wire format.
 	FamilyGemini
@@ -85,7 +84,6 @@ var ProviderFamilies = map[string]TranslationFamily{
 	ProviderGoogle:     FamilyGemini,
 	ProviderOpenRouter: FamilyOpenAICompat,
 	ProviderFireworks:  FamilyOpenAICompat,
-	ProviderDeepInfra:  FamilyOpenAICompat,
 	ProviderBedrock:    FamilyOpenAICompat,
 	ProviderMakora:     FamilyOpenAICompat,
 	ProviderTogether:   FamilyOpenAICompat,
@@ -139,7 +137,6 @@ var APIKeyEnvVars = map[string]string{
 	ProviderGoogle:     "GOOGLE_API_KEY",
 	ProviderOpenRouter: "OPENROUTER_API_KEY",
 	ProviderFireworks:  "FIREWORKS_API_KEY",
-	ProviderDeepInfra:  "DEEPINFRA_API_KEY",
 	ProviderBedrock:    "AWS_BEARER_TOKEN_BEDROCK",
 	ProviderMakora:     "MAKORA_API_KEY",
 	ProviderTogether:   "TOGETHER_API_KEY",
@@ -162,7 +159,6 @@ var CacheTTL = map[string]time.Duration{
 	ProviderGoogle:     5 * time.Minute,
 	ProviderOpenRouter: 5 * time.Minute,
 	ProviderFireworks:  5 * time.Minute,
-	ProviderDeepInfra:  5 * time.Minute,
 	ProviderBedrock:    5 * time.Minute,
 }
 

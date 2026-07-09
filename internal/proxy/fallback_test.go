@@ -197,7 +197,7 @@ func TestDispatchWithFallback_RetriesOnTransportError(t *testing.T) {
 
 func TestDispatchWithFallback_RetriesOnResponseHeaderTimeout(t *testing.T) {
 	primary := &fakeClient{
-		name:     "deepinfra",
+		name:     "makora",
 		outcomes: []fakeOutcome{{err: responseHeaderTimeoutErr(t)}},
 	}
 	fallback := &fakeClient{
@@ -206,7 +206,7 @@ func TestDispatchWithFallback_RetriesOnResponseHeaderTimeout(t *testing.T) {
 	}
 
 	s := newServiceWithProviders(t, map[string]providers.Client{
-		providers.ProviderDeepInfra:  primary,
+		providers.ProviderMakora:     primary,
 		providers.ProviderOpenRouter: fallback,
 	})
 
@@ -219,7 +219,7 @@ func TestDispatchWithFallback_RetriesOnResponseHeaderTimeout(t *testing.T) {
 		buf:             buf,
 		initialDecision: router.Decision{Model: "deepseek/deepseek-v4-flash"},
 		bindings: []catalog.ProviderBinding{
-			{Provider: providers.ProviderDeepInfra},
+			{Provider: providers.ProviderMakora},
 			{Provider: providers.ProviderOpenRouter},
 		},
 		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
@@ -233,7 +233,7 @@ func TestDispatchWithFallback_RetriesOnResponseHeaderTimeout(t *testing.T) {
 	assert.Equal(t, 1, primary.calls)
 	assert.Equal(t, 1, fallback.calls)
 	assert.Equal(t, "rescued", rec.Body.String())
-	assert.Equal(t, providers.ProviderDeepInfra, rec.Header().Get(HeaderRouterFallbackFrom))
+	assert.Equal(t, providers.ProviderMakora, rec.Header().Get(HeaderRouterFallbackFrom))
 }
 
 // Covers the mid-stream stall watchdog (prod incident 2026-06-09: streams

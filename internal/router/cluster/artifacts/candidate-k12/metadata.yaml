@@ -45,10 +45,11 @@ training:
 deployed_providers:
 - anthropic
 - bedrock
-- deepinfra
 - fireworks
 - google
+- makora
 - openai
+- openrouter
 deployed_models:
 - claude-haiku-4-5
 - claude-sonnet-4-6

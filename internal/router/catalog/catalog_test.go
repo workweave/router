@@ -31,7 +31,6 @@ func TestCatalog_BindingsReferenceCanonicalProviders(t *testing.T) {
 		providers.ProviderGoogle:     {},
 		providers.ProviderOpenRouter: {},
 		providers.ProviderFireworks:  {},
-		providers.ProviderDeepInfra:  {},
 		providers.ProviderBedrock:    {},
 		providers.ProviderMakora:     {},
 		providers.ProviderTogether:   {},
@@ -215,8 +214,8 @@ func TestModel_AgenticUseDefaultsToUnknown(t *testing.T) {
 }
 
 func TestImageUnsupportedSet_IncludesTextOnlyModels(t *testing.T) {
-	// Text-only OSS models reject image parts with a 4xx (DeepInfra 405 on
-	// GLM-5.1 is the canonical case), so they must be flagged.
+	// Text-only OSS models reject image parts with a 4xx (GLM-5.1 is the
+	// canonical case), so they must be flagged.
 	set := ImageUnsupportedSet()
 	for _, id := range []string{"z-ai/glm-5.1", "z-ai/glm-5", "deepseek/deepseek-v4-pro", "moonshotai/kimi-k2.6", "qwen/qwen3-coder"} {
 		_, found := set[id]

@@ -373,7 +373,7 @@ func imageFilterArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBl
 	}`)
 	registryBlob = []byte(`{
 		"deployed_models": [
-			{"model": "z-ai/glm-5.1", "provider": "deepinfra", "bench_column": "x", "proxy": true},
+			{"model": "z-ai/glm-5.1", "provider": "fireworks", "bench_column": "x", "proxy": true},
 			{"model": "claude-opus-4-7", "provider": "anthropic", "bench_column": "y", "proxy": true}
 		]
 	}`)
@@ -383,7 +383,7 @@ func imageFilterArtifacts(t *testing.T) (centroidsBlob, rankingsBlob, registryBl
 func TestScorer_DropsTextOnlyModelOnImageTurn(t *testing.T) {
 	cb, rb, regb := imageFilterArtifacts(t)
 	bundle := bundleFromBlobs(t, "v-test", cb, rb, regb)
-	available := map[string]struct{}{"anthropic": {}, "deepinfra": {}}
+	available := map[string]struct{}{"anthropic": {}, "fireworks": {}}
 	s, err := NewScorer(bundle, cfgForTest(), &fakeEmbedder{vec: makeOpusVec()}, available)
 	require.NoError(t, err)
 
@@ -406,9 +406,9 @@ func TestScorer_KeepsTextOnlyPoolWhenNoImageCapableCandidate(t *testing.T) {
 	c0[0] = 1
 	cb := buildCentroidsBlob(t, 1, dim, c0)
 	rb := []byte(`{"rankings": {"0": {"z-ai/glm-5.1": 0.9}}}`)
-	regb := []byte(`{"deployed_models": [{"model": "z-ai/glm-5.1", "provider": "deepinfra", "bench_column": "x", "proxy": true}]}`)
+	regb := []byte(`{"deployed_models": [{"model": "z-ai/glm-5.1", "provider": "fireworks", "bench_column": "x", "proxy": true}]}`)
 	bundle := bundleFromBlobs(t, "v-test", cb, rb, regb)
-	s, err := NewScorer(bundle, cfgForTest(), &fakeEmbedder{vec: makeOpusVec()}, map[string]struct{}{"deepinfra": {}})
+	s, err := NewScorer(bundle, cfgForTest(), &fakeEmbedder{vec: makeOpusVec()}, map[string]struct{}{"fireworks": {}})
 	require.NoError(t, err)
 
 	// No image-capable candidate deployed: the scorer still returns a

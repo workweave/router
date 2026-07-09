@@ -77,7 +77,8 @@ func TestV2MatchesV1(t *testing.T) {
 		"google":     {},
 		"openrouter": {},
 		"fireworks":  {},
-		"deepinfra":  {},
+		"makora":     {},
+		"together":   {},
 		"bedrock":    {},
 	}
 	v1Scorer, err := NewScorer(v1Bundle, cfg, emb, available)

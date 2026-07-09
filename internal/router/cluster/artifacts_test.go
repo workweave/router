@@ -449,18 +449,18 @@ func TestFastestModelInSet(t *testing.T) {
 			"mid-model":  1.00,
 		},
 		TokPerS: map[string]map[string]float64{
-			"google":    {"flash-lite": 158.0, "mid-model": 35.0},
-			"deepinfra": {"v4-flash": 24.0},
+			"google": {"flash-lite": 158.0, "mid-model": 35.0},
+			"makora": {"v4-flash": 24.0},
 		},
 	}
 	registry := &ModelRegistry{
 		DeployedModels: []DeployedEntry{
 			{Model: "flash-lite", Provider: "google", BenchColumn: "col-fl"},
-			{Model: "v4-flash", Provider: "deepinfra", BenchColumn: "col-vf"},
+			{Model: "v4-flash", Provider: "makora", BenchColumn: "col-vf"},
 			{Model: "mid-model", Provider: "google", BenchColumn: "col-mid"},
 		},
 	}
-	available := map[string]struct{}{"google": {}, "deepinfra": {}}
+	available := map[string]struct{}{"google": {}, "makora": {}}
 
 	t.Run("low-tier clamp prefers fast flash-lite over cheap v4-flash", func(t *testing.T) {
 		// Mirrors the real haiku-tier clamp, where cost-only picks the slow v4-flash.
@@ -476,7 +476,7 @@ func TestFastestModelInSet(t *testing.T) {
 		allow := map[string]struct{}{"flash-lite": {}, "v4-flash": {}}
 		p, m, ok := FastestModelInSet(metaNoSpeed, registry, available, nil, allow)
 		require.True(t, ok)
-		assert.Equal(t, "deepinfra", p)
+		assert.Equal(t, "makora", p)
 		assert.Equal(t, "v4-flash", m, "no speed → cheapest in allowSet")
 	})
 

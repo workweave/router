@@ -42,20 +42,6 @@ func TestSessionAffinity_FireworksSetsHeaderNotBody(t *testing.T) {
 	assert.False(t, hasBody, "Fireworks must not carry the OpenAI prompt_cache_key body field")
 }
 
-func TestSessionAffinity_DeepInfraSetsHeader(t *testing.T) {
-	env, err := translate.ParseAnthropic(anthropicSrc())
-	require.NoError(t, err)
-
-	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
-		TargetModel:     "deepseek/deepseek-v4-flash",
-		TargetProvider:  providers.ProviderDeepInfra,
-		SessionAffinity: affinityKey,
-	})
-	require.NoError(t, err)
-
-	assert.Equal(t, affinityKey, out.Headers.Get("x-session-affinity"))
-}
-
 // Makora and Together are serverless OpenAI-compat upstreams that were missing
 // from the old literal affinity list, so their turns paid a cold-replica
 // prefill. Keying the header off the OpenAI-compat family gives them replica
