@@ -347,6 +347,10 @@ type PolicyRoutingIntentContextKey struct{}
 // PolicyRolloutIDContextKey carries the installation-level rollout identifier.
 type PolicyRolloutIDContextKey struct{}
 
+// PolicyShadowStrategyContextKey carries an optional comparison-only strategy.
+// Its decision is collected asynchronously and never affects dispatch.
+type PolicyShadowStrategyContextKey struct{}
+
 // UsageBypassConfig is the per-installation subscription usage-bypass setting,
 // stashed on ctx by the auth middleware. Threshold is nil when the toggle is on
 // but no value has been chosen yet; the request path falls back to
@@ -381,6 +385,7 @@ const routingMarkerPrefix = "✦ **Weave Router** → "
 const maxSidecarDisplayMarkerRunes = 512
 const policyOutcomeReportTimeout = 2 * time.Second
 const policyFeedbackReportTimeout = 2 * time.Second
+const policyShadowDecisionTimeout = 3 * time.Second
 const policyOutcomeResponseMaxBytes = 256 * 1024
 
 type policyOutcomeResponse struct {
@@ -1477,6 +1482,16 @@ func (s *Service) PolicyCapabilities(strategy router.Strategy) (policy.Capabilit
 	return registered.capabilities, ok
 }
 
+// PolicyStrategyAvailable reports whether a strategy has a live router;
+// registration stays visible when a sidecar is absent so callers see the gap.
+func (s *Service) PolicyStrategyAvailable(strategy router.Strategy) bool {
+	if strategy == router.StrategyCluster {
+		return s != nil && s.router != nil
+	}
+	registered, ok := s.strategies[strategy]
+	return ok && registered.router != nil
+}
+
 // RegisteredStrategies returns every configured non-default strategy in
 // deterministic order. Middleware uses this list instead of hardcoding IDs.
 func (s *Service) RegisteredStrategies() []router.Strategy {
@@ -1516,6 +1531,7 @@ func (s *Service) WithHMMRouter(r router.Router) *Service {
 			HonorsPreferredModels:    true,
 			HonorsQualityPriceBias:   true,
 			SupportsDebugRouteDetail: true,
+			SupportsShadow:           true,
 		},
 	})
 }
@@ -1539,7 +1555,14 @@ func (s *Service) WithBanditRouter(r router.Router) *Service {
 func (s *Service) routeFor(ctx context.Context, req router.Request) (router.Decision, error) {
 	req = s.withPolicyRequestContext(ctx, req)
 	strategy := router.StrategyFromContext(ctx)
+	return s.routeWithStrategy(ctx, strategy, req)
+}
+
+func (s *Service) routeWithStrategy(ctx context.Context, strategy router.Strategy, req router.Request) (router.Decision, error) {
 	if strategy == router.StrategyCluster {
+		if s.router == nil {
+			return router.Decision{}, fmt.Errorf("strategy %q requested but no router configured: %w", strategy, router.ErrStrategyUnavailable)
+		}
 		return s.router.Route(ctx, req)
 	}
 	registered, ok := s.strategies[strategy]
@@ -2091,6 +2114,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if routeRes.UsageBypass {
 		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
 		if !errors.Is(err, errBypassRetryable) {
+			s.firePolicyShadowForServingDecision(ctx, routeRes.Decision, req)
 			return err
 		}
 		// Bypass hit a pre-commit retryable error (e.g. Anthropic 429 weekly-limit
@@ -2129,6 +2153,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision
+	s.firePolicyShadowForServingDecision(ctx, decision, req)
 	tt := routeRes.TurnType
 	stickyHit := routeRes.StickyHit
 	pinTier := routeRes.PinTier
@@ -3997,8 +4022,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		)
 	}
 
-	routeStart := time.Now()
-	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, router.Request{
+	routeRequest := router.Request{
 		RequestedModel:       feats.Model,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
@@ -4014,7 +4038,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		ExcludedModels:   excludedOAI,
 		PreferredModels:  s.preferredModelsForRequest(ctx),
 		RoutingKnobs:     routingKnobsForRequest(ctx),
-	})
+	}
+	routeStart := time.Now()
+	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, routeRequest)
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {
 		log.Error("Routing failed for OpenAI request", "err", err, "route_ms", routeMs, "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
@@ -4022,6 +4048,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision
+	s.firePolicyShadowForServingDecision(ctx, decision, routeRequest)
 	tt := routeRes.TurnType
 	stickyHit := routeRes.StickyHit
 	pinTier := routeRes.PinTier

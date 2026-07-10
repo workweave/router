@@ -9,6 +9,11 @@ import (
 // SchemaVersionV1 is the first stable policy-sidecar wire contract.
 const SchemaVersionV1 = "policy_router_v1"
 
+const (
+	ExecutionModeServing = "serving"
+	ExecutionModeShadow  = "shadow"
+)
+
 // Capabilities declares which optional harness behaviors a policy supports.
 type Capabilities struct {
 	SchemaVersion            string `json:"schema_version"`
@@ -18,6 +23,7 @@ type Capabilities struct {
 	HonorsQualityPriceBias   bool   `json:"honors_quality_price_bias"`
 	SupportsDebugRouteDetail bool   `json:"supports_debug_route_detail"`
 	SupportsPreview          bool   `json:"supports_preview"`
+	SupportsShadow           bool   `json:"supports_shadow"`
 }
 
 // StrategySpec is the complete proxy registration for one policy strategy.
@@ -32,6 +38,7 @@ type StrategySpec struct {
 // Query contains the strategy-neutral request context supplied to a policy.
 type Query struct {
 	Strategy             router.Strategy
+	ExecutionMode        string
 	RouteID              string
 	OrganizationID       string
 	InstallationID       string
@@ -62,6 +69,7 @@ type Result struct {
 	Model                string
 	Provider             string
 	Score                float64
+	CandidateScores      map[string]float32
 	ScoreKind            string
 	Reason               string
 	PolicyState          string

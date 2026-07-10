@@ -82,8 +82,8 @@ type RouterModelRouterInstallation struct {
 	UsageBypassThreshold        *float64
 	PreferredModels             []string
 	SubscriptionRoutingDisabled bool
-	// Canonical serving strategy. Defaults to cluster until the installation is allowlisted.
-	RoutingStrategy              string
+	// Optional serving-strategy override. NULL follows the deployment default.
+	RoutingStrategy              *string
 	RoutingRolloutID             *string
 	PolicyShadowStrategy         *string
 	PolicyDebugEnabled           bool
@@ -231,6 +231,34 @@ type RouterOrganizationCreditLedger struct {
 	RouterModel           *string
 	CreatedAt             pgtype.Timestamptz
 	Memo                  *string
+}
+
+// Content-free serving-vs-shadow policy comparisons; shadow decisions never dispatch or enter online learning
+type RouterPolicyShadowDecision struct {
+	ID                          uuid.UUID
+	CreatedAt                   pgtype.Timestamptz
+	InstallationID              uuid.UUID
+	OrganizationID              *string
+	RolloutID                   *string
+	ClientApp                   *string
+	TrainingAllowed             bool
+	ServingStrategy             string
+	ServingModel                string
+	ServingProvider             string
+	ServingRouteID              *string
+	ServingPolicyRouteKey       *string
+	ServingPolicyArtifactID     *string
+	ServingPolicyArtifactSha256 *string
+	ShadowStrategy              string
+	ShadowModel                 *string
+	ShadowProvider              *string
+	ShadowRouteID               *string
+	ShadowPolicyRouteKey        *string
+	ShadowPolicyArtifactID      *string
+	ShadowPolicyArtifactSha256  *string
+	ShadowLatencyMs             int64
+	ShadowError                 *string
+	ModelsAgree                 bool
 }
 
 type RouterProductionRequestTelemetry struct {

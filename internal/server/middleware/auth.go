@@ -135,6 +135,9 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 			if installation.RoutingRolloutID != "" {
 				ctx = context.WithValue(ctx, proxy.PolicyRolloutIDContextKey{}, installation.RoutingRolloutID)
 			}
+			if installation.PolicyShadowStrategy != "" {
+				ctx = context.WithValue(ctx, proxy.PolicyShadowStrategyContextKey{}, installation.PolicyShadowStrategy)
+			}
 			if installation.PolicyDebugEnabled {
 				ctx = context.WithValue(ctx, proxy.PolicyDebugEnabledContextKey{}, true)
 			}

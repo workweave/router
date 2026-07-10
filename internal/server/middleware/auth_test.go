@@ -12,6 +12,7 @@ import (
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/router"
 	"workweave/router/internal/server/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -124,7 +125,8 @@ func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 	apiKey := &auth.APIKey{ID: "key-1", KeyHash: hash, KeyPrefix: prefix, KeySuffix: suffix}
 	installation := &auth.Installation{
 		ID: "inst-1", ExternalID: "ext-1", RoutingRolloutID: "rollout-1",
-		PolicyDebugEnabled: true, PolicyRoutingIntent: "high", AITrainingAllowed: true,
+		PolicyShadowStrategy: "future-policy", PolicyDebugEnabled: true,
+		PolicyRoutingIntent: "high", AITrainingAllowed: true,
 	}
 	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
 		hash: {apiKey: apiKey, installation: installation},
@@ -140,6 +142,7 @@ func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 		assert.Equal(t, apiKey, middleware.APIKeyFrom(c))
 		ctx := c.Request.Context()
 		assert.Equal(t, "rollout-1", ctx.Value(proxy.PolicyRolloutIDContextKey{}))
+		assert.Equal(t, router.Strategy("future-policy"), ctx.Value(proxy.PolicyShadowStrategyContextKey{}))
 		assert.Equal(t, true, ctx.Value(proxy.PolicyDebugEnabledContextKey{}))
 		assert.Equal(t, "high", ctx.Value(proxy.PolicyRoutingIntentContextKey{}))
 		assert.Equal(t, true, ctx.Value(proxy.PolicyTrainingAllowedContextKey{}))

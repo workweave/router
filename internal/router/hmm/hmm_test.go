@@ -31,6 +31,7 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 		Model:                "moonshotai/kimi-k2.7-code",
 		Provider:             providers.ProviderFireworks,
 		Score:                0.8,
+		CandidateScores:      map[string]float32{"moonshotai/kimi-k2.7-code": 0.8},
 		Reason:               "policy",
 		Propensity:           0.9,
 		DisplayMarker:        "display marker",
@@ -58,6 +59,7 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 			Text: "latest hello",
 		}},
 		EstimatedInputTokens: 10,
+		DebugEnabled:         true,
 		FeedbackKey:          "feedback-session",
 		FeedbackRole:         "default",
 	})
@@ -75,6 +77,7 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 	assert.Equal(t, "roster-v2", decision.Metadata.RosterVersion)
 	assert.Equal(t, "policy_router_v1", decision.Metadata.SidecarSchemaVersion)
 	assert.Equal(t, "debug-1", decision.Metadata.DebugRef)
+	assert.Equal(t, map[string]float32{"moonshotai/kimi-k2.7": 0.8}, decision.Metadata.CandidateScores)
 	assert.Equal(t, "hello", decider.query.PromptText)
 	assert.Equal(t, router.StrategyHMM, decider.query.Strategy)
 	assert.Equal(t, "org-1", decider.query.OrganizationID)
@@ -84,7 +87,18 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 	assert.Equal(t, "feedback-session", decider.query.FeedbackKey)
 	assert.Equal(t, "default", decider.query.FeedbackRole)
 	assert.Equal(t, []router.ConversationMessage{{Role: "user", Text: "latest hello"}}, decider.query.ConversationMessages)
-	assert.Equal(t, []Candidate{{RosterID: "moonshotai/kimi-k2.7-code", CatalogID: "moonshotai/kimi-k2.7", Provider: providers.ProviderFireworks}}, decider.query.Candidates)
+	require.Len(t, decider.query.Candidates, 1)
+	candidate := decider.query.Candidates[0]
+	assert.Equal(t, "moonshotai/kimi-k2.7-code", candidate.RosterID)
+	assert.Equal(t, "moonshotai/kimi-k2.7", candidate.CatalogID)
+	assert.Equal(t, providers.ProviderFireworks, candidate.Provider)
+	assert.Equal(t, 0.95, candidate.InputUSDPer1M)
+	assert.Equal(t, 4.0, candidate.OutputUSDPer1M)
+	assert.InDelta(t, 0.0000095, candidate.EstimatedCostUSD, 1e-12)
+	assert.Equal(t, 262144, candidate.Capabilities.ContextWindow)
+	assert.Equal(t, "high", candidate.Capabilities.Tier)
+	assert.True(t, candidate.Capabilities.SupportsTools)
+	assert.False(t, candidate.Capabilities.SupportsImages)
 }
 
 func TestRouterKeepsGeneratedRouteIDWhenSidecarOmitsIt(t *testing.T) {

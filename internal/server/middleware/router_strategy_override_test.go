@@ -66,6 +66,59 @@ func TestRouterStrategyOverride_NoHeaderDefaultsToCluster(t *testing.T) {
 	assert.Equal(t, router.StrategyCluster, got, "absent header must leave the default cluster strategy")
 }
 
+func TestRouterStrategyOverride_UsesDeploymentDefaultWithoutInstallationOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Set("router_installation", &auth.Installation{ID: "inst-global"})
+		c.Next()
+	})
+	engine.Use(middleware.WithRouterStrategyDefault(
+		router.StrategyHMM,
+		router.StrategyHMM,
+	))
+	var observed router.Strategy
+	engine.GET("/probe", func(c *gin.Context) {
+		observed = router.StrategyFromContext(c.Request.Context())
+		c.Status(http.StatusOK)
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	engine.ServeHTTP(httptest.NewRecorder(), request)
+
+	assert.Equal(t, router.StrategyHMM, observed)
+}
+
+func TestRouterStrategyOverride_ExplicitClusterWinsOverDeploymentDefault(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Set("router_installation", &auth.Installation{
+			ID: "inst-cluster-holdout", RoutingStrategy: router.StrategyCluster,
+		})
+		c.Next()
+	})
+	engine.Use(middleware.WithRouterStrategyDefault(
+		router.StrategyHMM,
+		router.StrategyHMM,
+	))
+	var observed router.Strategy
+	engine.GET("/probe", func(c *gin.Context) {
+		observed = router.StrategyFromContext(c.Request.Context())
+		c.Status(http.StatusOK)
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	engine.ServeHTTP(httptest.NewRecorder(), request)
+
+	assert.Equal(t, router.StrategyCluster, observed)
+}
+
+func TestNormalizeRouterStrategyDefault(t *testing.T) {
+	assert.Equal(t, router.StrategyHMM, middleware.NormalizeRouterStrategyDefault(router.StrategyHMM, router.StrategyHMM))
+	assert.Equal(t, router.StrategyCluster, middleware.NormalizeRouterStrategyDefault(router.Strategy("typo"), router.StrategyHMM))
+}
+
 func TestRouterStrategyOverride_UnknownValueIgnored(t *testing.T) {
 	got := runStrategyOverride(t, overrideEnabledInstallation(), "bogus")
 	assert.Equal(t, router.StrategyCluster, got, "unrecognized strategy must fall through to the default")

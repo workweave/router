@@ -50,6 +50,8 @@ const (
 	ExclusionToolCapability ExclusionReason = "tool_capability"
 	// ExclusionAmbiguousRoster means multiple catalog models mapped to one roster ID.
 	ExclusionAmbiguousRoster ExclusionReason = "ambiguous_roster_id"
+	// ExclusionContextWindow means the estimated input cannot fit the model.
+	ExclusionContextWindow ExclusionReason = "context_window"
 )
 
 // Diagnostic describes one candidate exclusion for conformance checks and
@@ -62,10 +64,24 @@ type Diagnostic struct {
 
 // Candidate is one catalog-backed model offered to a policy sidecar.
 type Candidate struct {
-	RosterID       string `json:"roster_id"`
-	CatalogID      string `json:"catalog_id"`
-	Provider       string `json:"provider"`
-	PreferenceRank *int   `json:"preference_rank,omitempty"`
+	RosterID         string                `json:"roster_id"`
+	CatalogID        string                `json:"catalog_id"`
+	Provider         string                `json:"provider"`
+	UpstreamID       string                `json:"upstream_id"`
+	PreferenceRank   *int                  `json:"preference_rank,omitempty"`
+	InputUSDPer1M    float64               `json:"input_usd_per_1m"`
+	OutputUSDPer1M   float64               `json:"output_usd_per_1m"`
+	EstimatedCostUSD float64               `json:"estimated_cost_usd"`
+	Capabilities     CandidateCapabilities `json:"capabilities"`
+}
+
+// CandidateCapabilities describes only dispatch-relevant catalog facts. It is
+// deliberately compact and versioned by the enclosing policy contract.
+type CandidateCapabilities struct {
+	ContextWindow  int    `json:"context_window"`
+	Tier           string `json:"tier"`
+	SupportsTools  bool   `json:"supports_tools"`
+	SupportsImages bool   `json:"supports_images"`
 }
 
 // Binding is the authoritative dispatch binding for an offered roster ID.
@@ -95,6 +111,20 @@ func (r ResolvedCandidates) CandidateProviders() map[string]string {
 	result := make(map[string]string, len(r.Candidates))
 	for _, candidate := range r.Candidates {
 		result[candidate.CatalogID] = candidate.Provider
+	}
+	return result
+}
+
+// CatalogCandidateScores translates sidecar roster IDs to telemetry catalog IDs.
+func (r ResolvedCandidates) CatalogCandidateScores(scores map[string]float32) map[string]float32 {
+	result := make(map[string]float32, len(scores))
+	for rosterID, score := range scores {
+		if binding, ok := r.ByRosterID[rosterID]; ok {
+			result[binding.CatalogID] = score
+		}
+	}
+	if len(result) == 0 {
+		return nil
 	}
 	return result
 }
@@ -153,6 +183,11 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 			diagnostics = append(diagnostics, Diagnostic{CatalogID: id, Reason: ExclusionUnmappedRoster})
 			continue
 		}
+		contextWindow := catalog.ContextWindowFor(id)
+		if requiredContextTokens(req) > contextWindow {
+			diagnostics = append(diagnostics, Diagnostic{CatalogID: id, RosterID: rosterID, Reason: ExclusionContextWindow})
+			continue
+		}
 
 		providerSet := req.EnabledProviders
 		if providerSet == nil {
@@ -169,10 +204,20 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 		}
 
 		base = append(base, eligibleCandidate{Candidate: Candidate{
-			RosterID:       rosterID,
-			CatalogID:      id,
-			Provider:       binding.Provider,
-			PreferenceRank: preferenceRanks[id],
+			RosterID:         rosterID,
+			CatalogID:        id,
+			Provider:         binding.Provider,
+			UpstreamID:       upstreamID(id, binding.UpstreamID),
+			PreferenceRank:   preferenceRanks[id],
+			InputUSDPer1M:    binding.Price.InputUSDPer1M,
+			OutputUSDPer1M:   binding.Price.OutputUSDPer1M,
+			EstimatedCostUSD: estimatedCostUSD(req, binding.Price),
+			Capabilities: CandidateCapabilities{
+				ContextWindow:  contextWindow,
+				Tier:           model.Tier.String(),
+				SupportsTools:  model.ToolUseQuality != catalog.ToolUseLow && model.AgenticUse != catalog.AgenticLow,
+				SupportsImages: model.ImageInput != catalog.ImageInputUnsupported,
+			},
 		}})
 	}
 
@@ -202,6 +247,30 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 		resolved.ByRosterID[candidate.RosterID] = Binding{CatalogID: candidate.CatalogID, Provider: candidate.Provider}
 	}
 	return resolved
+}
+
+func upstreamID(catalogID, bindingID string) string {
+	if bindingID != "" {
+		return bindingID
+	}
+	return catalogID
+}
+
+func estimatedCostUSD(req router.Request, pricing catalog.Pricing) float64 {
+	outputTokens := expectedOutputTokens(req)
+	return (float64(req.EstimatedInputTokens)*pricing.InputUSDPer1M +
+		float64(outputTokens)*pricing.OutputUSDPer1M) / 1_000_000
+}
+
+func requiredContextTokens(req router.Request) int {
+	return max(req.EstimatedInputTokens, 0) + expectedOutputTokens(req)
+}
+
+func expectedOutputTokens(req router.Request) int {
+	if req.RoutingKnobs == nil || req.RoutingKnobs.ExpectedOutputTokens == nil {
+		return 0
+	}
+	return max(*req.RoutingKnobs.ExpectedOutputTokens, 0)
 }
 
 func (r *Resolver) allowedProviders(in map[string]struct{}) map[string]struct{} {
