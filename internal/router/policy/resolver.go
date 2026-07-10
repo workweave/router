@@ -19,9 +19,7 @@ type ProviderPolicy struct {
 	Denied map[string]struct{}
 }
 
-// ManagedProviderPolicy returns the production provider policy for managed
-// policy routers. OpenRouter remains available to other router paths, but is
-// never offered as a policy candidate.
+// ManagedProviderPolicy excludes OpenRouter from managed policy candidates.
 func ManagedProviderPolicy() ProviderPolicy {
 	return ProviderPolicy{Denied: map[string]struct{}{providers.ProviderOpenRouter: {}}}
 }
