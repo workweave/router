@@ -128,9 +128,8 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 			}
 		}
 	}
-	// Sticky policy turns: the served pin has nil metadata while fresh holds the
-	// sidecar decision policyOutcomeRoute reports against. Fill only policy
-	// fields here; final-decision score fields intentionally remain NULL.
+	// Sticky policy turns: served pin has nil metadata; fresh holds the sidecar
+	// decision policyOutcomeRoute reports against. Score fields remain NULL here.
 	if md := fresh.Metadata; md != nil {
 		if obs.RouteID == "" {
 			obs.RouteID = md.RouteID
