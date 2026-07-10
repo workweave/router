@@ -331,6 +331,35 @@ func TestProxyMessages_PersistsRolloutID(t *testing.T) {
 	assert.Equal(t, rolloutID, row.RolloutID)
 }
 
+func TestProxyMessages_PersistedPolicyRolloutIDOverridesClientIdentity(t *testing.T) {
+	const installID = "66666666-6666-6666-6666-666666666666"
+	const rolloutID = "policy-rollout-42"
+	decision := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "pin",
+	}
+	telem := newCaptureTelemetry()
+	svc := proxy.NewService(
+		&fakeRouter{decision: decision},
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil, false, nil, nil, false,
+		providers.ProviderAnthropic, "claude-haiku-4-5",
+		telem,
+	)
+
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
+	ctx = context.WithValue(ctx, proxy.ClientIdentityContextKey{}, proxy.ClientIdentity{RolloutID: "header-rollout"})
+	ctx = context.WithValue(ctx, proxy.PolicyRolloutIDContextKey{}, rolloutID)
+	rec := httptest.NewRecorder()
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`)
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+
+	row := telem.firstRow(t)
+	assert.Equal(t, rolloutID, row.RolloutID)
+}
+
 // TestProxyMessages_PersistsSessionKeyAndRole: session_key/role are the join
 // key to router.spiral_shadow_events, so they must match spiral's encoding
 // byte-for-byte. role is keyed off the *requested* model (opus-4-7 ->

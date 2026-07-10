@@ -1558,15 +1558,19 @@ func (s *Service) withPolicyRequestContext(ctx context.Context, req router.Reque
 	req.InstallationID, _ = ctx.Value(InstallationIDContextKey{}).(string)
 	clientIdentity := ClientIdentityFrom(ctx)
 	req.ClientApp = clientIdentity.ClientApp
-	req.RolloutID = clientIdentity.RolloutID
-	if rolloutID, ok := ctx.Value(PolicyRolloutIDContextKey{}).(string); ok && rolloutID != "" {
-		req.RolloutID = rolloutID
-	}
+	req.RolloutID = policyRolloutIDFromContext(ctx)
 	req.CaptureMode = s.captureMode.String()
 	req.TrainingAllowed, _ = ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
 	req.DebugEnabled, _ = ctx.Value(PolicyDebugEnabledContextKey{}).(bool)
 	req.RoutingIntent, _ = ctx.Value(PolicyRoutingIntentContextKey{}).(string)
 	return req
+}
+
+func policyRolloutIDFromContext(ctx context.Context) string {
+	if rolloutID, ok := ctx.Value(PolicyRolloutIDContextKey{}).(string); ok && rolloutID != "" {
+		return rolloutID
+	}
+	return ClientIdentityFrom(ctx).RolloutID
 }
 
 func defaultStrategyUnavailable(strategy router.Strategy) error {
@@ -2823,7 +2827,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			RouterUserID:           auth.UserIDFrom(ctx),
 			ClientApp:              clientID.ClientApp,
 			TurnType:               string(routeRes.TurnType),
-			RolloutID:              clientID.RolloutID,
+			RolloutID:              policyRolloutIDFromContext(ctx),
 			UpstreamFinishReason:   stringPtrOrEmpty(respSummary.UpstreamFinishReason),
 			StopReason:             stringPtrOrEmpty(respSummary.StopReason),
 			// Only valid when a translator ran (StopReason populated) — the
@@ -3138,17 +3142,13 @@ func (s *Service) reportPolicyOutcome(ctx context.Context, res turnLoopResult, d
 	installationID, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
 	clientIdentity := ClientIdentityFrom(ctx)
-	rolloutID := clientIdentity.RolloutID
-	if persistedRolloutID, ok := ctx.Value(PolicyRolloutIDContextKey{}).(string); ok && persistedRolloutID != "" {
-		rolloutID = persistedRolloutID
-	}
 	payload := map[string]interface{}{
 		"route_id":               routeMetadata.RouteID,
 		"strategy":               routeMetadata.Strategy,
 		"organization_id":        organizationID,
 		"installation_id":        installationID,
 		"client_app":             clientIdentity.ClientApp,
-		"rollout_id":             rolloutID,
+		"rollout_id":             policyRolloutIDFromContext(ctx),
 		"training_allowed":       trainingAllowed,
 		"capture_mode":           s.captureMode.String(),
 		"policy_route_key":       routeMetadata.PolicyRouteKey,
@@ -4472,7 +4472,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			RouterUserID:           auth.UserIDFrom(ctx),
 			ClientApp:              clientID.ClientApp,
 			TurnType:               string(routeRes.TurnType),
-			RolloutID:              clientID.RolloutID,
+			RolloutID:              policyRolloutIDFromContext(ctx),
 			FailoverUsed:           boolPtrTrue(finalProvider != primaryProvider),
 			// (session_key, role) join key — see the Anthropic-path write site.
 			SessionKey: sessionKey[:],
