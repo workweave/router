@@ -33,6 +33,8 @@ type Request struct {
 	// ClientApp is the normalized request harness (for example claude-code,
 	// codex, cursor, or api).
 	ClientApp string
+	// RolloutID correlates eval/shadow traffic across route and outcome events.
+	RolloutID string
 	HasTools  bool
 	// HasImages: scorer drops text-only models from the eligible pool; turn
 	// loop evicts a text-only session pin.

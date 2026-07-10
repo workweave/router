@@ -176,7 +176,10 @@ func (s *Service) reportRouterFeedback(
 		"router_user_id":    routerUserID,
 		"client_app":        clientID.ClientApp,
 		"client_session_id": clientID.SessionID,
+		"rollout_id":        clientID.RolloutID,
 	}
+	trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
+	payload["training_allowed"] = trainingAllowed
 	if installationID != uuid.Nil {
 		payload["installation_id"] = installationID.String()
 	}

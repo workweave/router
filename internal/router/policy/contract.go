@@ -36,6 +36,7 @@ type Query struct {
 	OrganizationID       string
 	InstallationID       string
 	ClientApp            string
+	RolloutID            string
 	RequestedModel       string
 	PromptText           string
 	ConversationMessages []router.ConversationMessage

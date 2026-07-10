@@ -72,6 +72,7 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 		OrganizationID:       req.OrganizationID,
 		InstallationID:       req.InstallationID,
 		ClientApp:            req.ClientApp,
+		RolloutID:            req.RolloutID,
 		RequestedModel:       req.RequestedModel,
 		PromptText:           req.PromptText,
 		ConversationMessages: req.ConversationMessages,

@@ -122,6 +122,7 @@ type routeRequest struct {
 	InstallationID       string             `json:"installation_id,omitempty"`
 	ClientApp            string             `json:"client_app,omitempty"`
 	Harness              string             `json:"harness,omitempty"`
+	RolloutID            string             `json:"rollout_id,omitempty"`
 	RequestedModel       string             `json:"requested_model,omitempty"`
 	PromptText           string             `json:"prompt_text"`
 	LatestUserText       string             `json:"latest_user_text,omitempty"`
@@ -220,6 +221,7 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 		InstallationID:       query.InstallationID,
 		ClientApp:            query.ClientApp,
 		Harness:              query.ClientApp,
+		RolloutID:            query.RolloutID,
 		RequestedModel:       query.RequestedModel,
 		PromptText:           query.PromptText,
 		LatestUserText:       latestUserText(messages),

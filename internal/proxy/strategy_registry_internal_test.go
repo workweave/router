@@ -15,10 +15,12 @@ import (
 type registryRouter struct {
 	decision router.Decision
 	calls    int
+	request  router.Request
 }
 
-func (r *registryRouter) Route(context.Context, router.Request) (router.Decision, error) {
+func (r *registryRouter) Route(_ context.Context, request router.Request) (router.Decision, error) {
 	r.calls++
+	r.request = request
 	return r.decision, nil
 }
 
@@ -35,12 +37,29 @@ func TestPolicyStrategyRegistryRoutesFutureStrategyWithoutServiceChanges(t *test
 		},
 	})
 
-	decision, err := svc.Route(router.WithStrategy(context.Background(), strategy), router.Request{})
+	ctx := context.WithValue(context.Background(), ExternalIDContextKey{}, "org-1")
+	ctx = context.WithValue(ctx, InstallationIDContextKey{}, "installation-1")
+	ctx = context.WithValue(ctx, ClientIdentityContextKey{}, ClientIdentity{ClientApp: ClientAppCodex, RolloutID: "rollout-1"})
+	ctx = context.WithValue(ctx, PolicyTrainingAllowedContextKey{}, true)
+	ctx = context.WithValue(ctx, PolicyDebugEnabledContextKey{}, true)
+	ctx = context.WithValue(ctx, PolicyRoutingIntentContextKey{}, "high")
+	ctx = router.WithStrategy(ctx, strategy)
+	svc.captureMode = CaptureFull
+
+	decision, err := svc.Route(ctx, router.Request{})
 
 	require.NoError(t, err)
 	assert.Equal(t, "claude-opus-4-8", decision.Model)
 	assert.Equal(t, 1, futureRouter.calls)
 	assert.Zero(t, defaultRouter.calls)
+	assert.Equal(t, "org-1", futureRouter.request.OrganizationID)
+	assert.Equal(t, "installation-1", futureRouter.request.InstallationID)
+	assert.Equal(t, ClientAppCodex, futureRouter.request.ClientApp)
+	assert.Equal(t, "rollout-1", futureRouter.request.RolloutID)
+	assert.Equal(t, "full", futureRouter.request.CaptureMode)
+	assert.True(t, futureRouter.request.TrainingAllowed)
+	assert.True(t, futureRouter.request.DebugEnabled)
+	assert.Equal(t, "high", futureRouter.request.RoutingIntent)
 	capabilities, ok := svc.PolicyCapabilities(strategy)
 	require.True(t, ok)
 	assert.True(t, capabilities.ReportsFeedback)

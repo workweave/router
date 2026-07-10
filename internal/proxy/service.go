@@ -334,6 +334,16 @@ type InstallationUsageBypassContextKey struct{}
 // routing decides on merits. See subscriptionRoutingDisabledForRequest.
 type InstallationSubscriptionRoutingDisabledContextKey struct{}
 
+// PolicyTrainingAllowedContextKey carries the installation's explicit
+// learning eligibility. Absence is fail-closed (false).
+type PolicyTrainingAllowedContextKey struct{}
+
+// PolicyDebugEnabledContextKey carries persisted or internal-request debug mode.
+type PolicyDebugEnabledContextKey struct{}
+
+// PolicyRoutingIntentContextKey carries a strategy-neutral routing preset.
+type PolicyRoutingIntentContextKey struct{}
+
 // UsageBypassConfig is the per-installation subscription usage-bypass setting,
 // stashed on ctx by the auth middleware. Threshold is nil when the toggle is on
 // but no value has been chosen yet; the request path falls back to
@@ -1510,6 +1520,7 @@ func (s *Service) WithBanditRouter(r router.Router) *Service {
 // ErrPolicyUnavailable (→ HTTP 503) — never a silent fallback that would mask
 // which strategy actually served the turn.
 func (s *Service) routeFor(ctx context.Context, req router.Request) (router.Decision, error) {
+	req = s.withPolicyRequestContext(ctx, req)
 	strategy := router.StrategyFromContext(ctx)
 	if strategy == router.StrategyCluster {
 		return s.router.Route(ctx, req)
@@ -1523,6 +1534,19 @@ func (s *Service) routeFor(ctx context.Context, req router.Request) (router.Deci
 		return router.Decision{}, fmt.Errorf("strategy %q requested but no router configured: %w", strategy, unavailable)
 	}
 	return registered.router.Route(ctx, req)
+}
+
+func (s *Service) withPolicyRequestContext(ctx context.Context, req router.Request) router.Request {
+	req.OrganizationID, _ = ctx.Value(ExternalIDContextKey{}).(string)
+	req.InstallationID, _ = ctx.Value(InstallationIDContextKey{}).(string)
+	clientIdentity := ClientIdentityFrom(ctx)
+	req.ClientApp = clientIdentity.ClientApp
+	req.RolloutID = clientIdentity.RolloutID
+	req.CaptureMode = s.captureMode.String()
+	req.TrainingAllowed, _ = ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
+	req.DebugEnabled, _ = ctx.Value(PolicyDebugEnabledContextKey{}).(bool)
+	req.RoutingIntent, _ = ctx.Value(PolicyRoutingIntentContextKey{}).(string)
+	return req
 }
 
 func defaultStrategyUnavailable(strategy router.Strategy) error {
@@ -2252,7 +2276,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 	}
 	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
-	contentSink, policyOutcomeCap := s.capturePolicyOutcomeResponse(contentSink, routeRes, decision)
+	contentSink, policyOutcomeCap := s.capturePolicyOutcomeResponse(ctx, contentSink, routeRes, decision)
 	preludeBuf := newPreludeBuffer(contentSink)
 	var rootSink http.ResponseWriter = preludeBuf
 	var captureW *captureWriter
@@ -3073,7 +3097,11 @@ func (s *Service) policyOutcomeRoute(res turnLoopResult, decision router.Decisio
 	return router.Decision{}, nil, nil, false
 }
 
-func (s *Service) capturePolicyOutcomeResponse(w http.ResponseWriter, res turnLoopResult, decision router.Decision) (http.ResponseWriter, *captureWriter) {
+func (s *Service) capturePolicyOutcomeResponse(ctx context.Context, w http.ResponseWriter, res turnLoopResult, decision router.Decision) (http.ResponseWriter, *captureWriter) {
+	trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
+	if !trainingAllowed {
+		return w, nil
+	}
 	if _, _, _, ok := s.policyOutcomeRoute(res, decision); !ok {
 		return w, nil
 	}
@@ -3086,9 +3114,19 @@ func (s *Service) reportPolicyOutcome(ctx context.Context, res turnLoopResult, d
 	if !ok {
 		return
 	}
+	organizationID, _ := ctx.Value(ExternalIDContextKey{}).(string)
+	installationID, _ := ctx.Value(InstallationIDContextKey{}).(string)
+	trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
+	clientIdentity := ClientIdentityFrom(ctx)
 	payload := map[string]interface{}{
 		"route_id":               routeMetadata.RouteID,
 		"strategy":               routeMetadata.Strategy,
+		"organization_id":        organizationID,
+		"installation_id":        installationID,
+		"client_app":             clientIdentity.ClientApp,
+		"rollout_id":             clientIdentity.RolloutID,
+		"training_allowed":       trainingAllowed,
+		"capture_mode":           s.captureMode.String(),
 		"policy_route_key":       routeMetadata.PolicyRouteKey,
 		"policy_artifact_id":     routeMetadata.PolicyArtifactID,
 		"policy_artifact_sha256": routeMetadata.PolicyArtifactSHA256,
@@ -3110,7 +3148,7 @@ func (s *Service) reportPolicyOutcome(ctx context.Context, res turnLoopResult, d
 		"turn_type":              string(res.TurnType),
 		"sticky_hit":             res.StickyHit,
 	}
-	if response != nil {
+	if trainingAllowed && response != nil {
 		payload["response_body_truncated"] = response.Truncated
 		if len(response.Body) > 0 {
 			payload["response_body"] = string(response.Body)

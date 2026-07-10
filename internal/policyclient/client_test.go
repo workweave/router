@@ -51,6 +51,7 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 		OrganizationID:  "org-1",
 		InstallationID:  "installation-1",
 		ClientApp:       "codex",
+		RolloutID:       "rollout-1",
 		RequestedModel:  "Weave",
 		PromptText:      "hello",
 		RoutingIntent:   "high",
@@ -79,6 +80,7 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	assert.Equal(t, "installation-1", got.InstallationID)
 	assert.Equal(t, "codex", got.ClientApp)
 	assert.Equal(t, "codex", got.Harness)
+	assert.Equal(t, "rollout-1", got.RolloutID)
 	assert.Equal(t, "high", got.RoutingIntent)
 	assert.Equal(t, []string{"moonshotai/kimi-k2.7"}, got.PreferredModels)
 	require.NotNil(t, got.QualityBias)

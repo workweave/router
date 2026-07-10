@@ -51,6 +51,7 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 		OrganizationID: "org-1",
 		InstallationID: "installation-1",
 		ClientApp:      "codex",
+		RolloutID:      "rollout-1",
 		PromptText:     "hello",
 		ConversationMessages: []router.ConversationMessage{{
 			Role: "user",
@@ -79,6 +80,7 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 	assert.Equal(t, "org-1", decider.query.OrganizationID)
 	assert.Equal(t, "installation-1", decider.query.InstallationID)
 	assert.Equal(t, "codex", decider.query.ClientApp)
+	assert.Equal(t, "rollout-1", decider.query.RolloutID)
 	assert.Equal(t, "feedback-session", decider.query.FeedbackKey)
 	assert.Equal(t, "default", decider.query.FeedbackRole)
 	assert.Equal(t, []router.ConversationMessage{{Role: "user", Text: "latest hello"}}, decider.query.ConversationMessages)
