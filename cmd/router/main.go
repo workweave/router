@@ -44,6 +44,7 @@ import (
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/hmm"
 	"workweave/router/internal/router/planner"
+	"workweave/router/internal/router/policy"
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/server"
@@ -600,9 +601,15 @@ func main() {
 	}
 
 	proxySvc := proxy.NewService(routeEntry, providerMap, telemetryEmitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
-		WithRLRouter(rlRouter).
-		WithHMMRouter(hmmRouter).
-		WithBanditRouter(banditRouter).
+		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyRL, Router: rlRouter, Unavailable: rl.ErrPolicyUnavailable}).
+		WithPolicyStrategy(policy.StrategySpec{
+			Strategy: router.StrategyHMM, Router: hmmRouter, Unavailable: hmm.ErrHMMUnavailable,
+			Capabilities: policy.Capabilities{
+				SchemaVersion: policy.SchemaVersionV1, ReportsOutcomes: true, ReportsFeedback: true,
+				HonorsPreferredModels: true, HonorsQualityPriceBias: true, SupportsDebugRouteDetail: true,
+			},
+		}).
+		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyBandit, Router: banditRouter, Unavailable: bandit.ErrBanditUnavailable}).
 		WithContentCapture(captureMode, captureMaxBytes, nil).
 		WithFeedback(repo.Feedback, feedbackSigner, feedbackBaseURL).
 		WithByokOnly(byokOnly).

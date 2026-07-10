@@ -110,7 +110,7 @@ func TestBuildObservationContext_DefaultsStrategyToActive(t *testing.T) {
 }
 
 // TestBuildObservationContext_StickyHMMRouteIDFromFresh verifies route_id falls back to
-// fresh.Metadata on a sticky HMM turn so the telemetry row joins to the same id hmmOutcomeRoute reports.
+// fresh.Metadata on a sticky HMM turn so telemetry joins to the same id policyOutcomeRoute reports.
 func TestBuildObservationContext_StickyHMMRouteIDFromFresh(t *testing.T) {
 	// Served pin — no metadata, the sticky shape.
 	served := router.Decision{Provider: "anthropic", Model: "claude-opus-4-8", Reason: "pin"}

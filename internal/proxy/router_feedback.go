@@ -12,6 +12,7 @@ import (
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
+	"workweave/router/internal/router/policy"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
@@ -113,8 +114,9 @@ func (s *Service) handleRouterFeedbackCommand(
 			return err
 		}
 	}
-	if router.StrategyFromContext(ctx) == router.StrategyHMM {
-		s.reportRouterFeedback(ctx, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback)
+	strategy := router.StrategyFromContext(ctx)
+	if registered, ok := s.strategies[strategy]; ok && registered.feedback != nil {
+		s.reportRouterFeedback(ctx, registered.feedback, strategy, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback)
 	}
 
 	now := time.Now()
@@ -151,6 +153,8 @@ func (s *Service) handleRouterFeedbackCommand(
 
 func (s *Service) reportRouterFeedback(
 	ctx context.Context,
+	reporter policy.FeedbackReporter,
+	strategy router.Strategy,
 	installationID uuid.UUID,
 	sessionKey [sessionpin.SessionKeyLen]byte,
 	role string,
@@ -161,10 +165,8 @@ func (s *Service) reportRouterFeedback(
 	rating string,
 	feedback string,
 ) {
-	if s.hmmFeedbackReporter == nil {
-		return
-	}
 	payload := map[string]interface{}{
+		"strategy":          string(strategy),
 		"feedback_key":      hex.EncodeToString(sessionKey[:]),
 		"feedback_role":     role,
 		"rating":            rating,
@@ -179,9 +181,9 @@ func (s *Service) reportRouterFeedback(
 		payload["installation_id"] = installationID.String()
 	}
 	log := observability.FromContext(ctx)
-	observability.SafeGo(log, hmmFeedbackReportTimeout, "reportHMMFeedback", func(reportCtx context.Context) {
-		if err := s.hmmFeedbackReporter.ReportFeedback(reportCtx, payload); err != nil {
-			log.Error("/router-feedback: sidecar feedback report failed", "err", err)
+	observability.SafeGo(log, policyFeedbackReportTimeout, "reportPolicyFeedback", func(reportCtx context.Context) {
+		if err := reporter.ReportFeedback(reportCtx, payload); err != nil {
+			log.Error("/router-feedback: policy feedback report failed", "strategy", strategy, "err", err)
 		}
 	})
 }

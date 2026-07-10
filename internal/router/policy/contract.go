@@ -20,6 +20,15 @@ type Capabilities struct {
 	SupportsPreview          bool   `json:"supports_preview"`
 }
 
+// StrategySpec is the complete proxy registration for one policy strategy.
+// Reporter capabilities are discovered from Router when the spec is installed.
+type StrategySpec struct {
+	Strategy     router.Strategy
+	Router       router.Router
+	Unavailable  error
+	Capabilities Capabilities
+}
+
 // Query contains the strategy-neutral request context supplied to a policy.
 type Query struct {
 	Strategy             router.Strategy
