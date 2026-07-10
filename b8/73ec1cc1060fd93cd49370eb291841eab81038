@@ -1,0 +1,27 @@
+internal/proxy/gemini.go
+  s_181299bbd674e9::t_90402a58b09dac 88,100-102,110
+internal/proxy/service_observation_test.go
+  s_181299bbd674e9::t_90402a58b09dac 128-131,148,164,172,186
+internal/proxy/turnloop.go
+  s_181299bbd674e9::t_90402a58b09dac 284,529,543
+internal/proxy/policy_shadow.go
+  s_181299bbd674e9::t_90402a58b09dac 46-50
+internal/proxy/service.go
+  s_181299bbd674e9::t_90402a58b09dac 1558,2128,2141,4010,4026-4028,4036
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b873ec1cc1060fd93cd49370eb291841eab81038",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
