@@ -12,6 +12,7 @@ import (
 
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/policy"
 
@@ -188,6 +189,45 @@ func TestPolicyShadowComparisonSkipsDryRunAndCollectsServingRoute(t *testing.T) 
 	assert.Equal(t, "gpt-5.5", row.ShadowModel)
 	assert.Equal(t, "shadow-route-1", row.ShadowRouteID)
 	assert.Equal(t, "future-prod", row.ShadowPolicyArtifactID)
+	assert.False(t, row.ModelsAgree)
+}
+
+func TestPolicyShadowComparisonCollectsUsageBypassRoute(t *testing.T) {
+	const installID = "77777777-7777-7777-7777-777777777777"
+	shadowStrategy := router.Strategy("future-policy")
+	shadowRouter := &shadowRequestRouter{
+		decision: router.Decision{
+			Provider: providers.ProviderOpenAI,
+			Model:    "gpt-5.5",
+		},
+		requests: make(chan router.Request, 1),
+	}
+	telem := newCaptureTelemetry()
+	observer := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	observer.Record(observer.Key([]byte(bypassSubToken)), usage.Snapshot{
+		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+	})
+	svc := proxy.NewService(
+		&fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}},
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil, false, nil, nil, false,
+		providers.ProviderAnthropic, bypassScorerPickMdl, telem,
+	).WithSubscriptionAwareRouting(observer, 0.05, 2.0).
+		WithPolicyStrategy(policy.StrategySpec{Strategy: shadowStrategy, Router: shadowRouter})
+
+	ctx := bypassCtx(0.80)
+	ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, installID)
+	ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, "org-bypass")
+	ctx = context.WithValue(ctx, proxy.PolicyTrainingAllowedContextKey{}, true)
+	ctx = context.WithValue(ctx, proxy.PolicyShadowStrategyContextKey{}, shadowStrategy)
+	recorder, request, body := bypassRequest(t)
+
+	require.NoError(t, svc.ProxyMessages(ctx, body, recorder, request))
+
+	row := telem.firstShadowRow(t)
+	assert.Equal(t, installID, row.InstallationID)
+	assert.Equal(t, bypassRequestedMdl, row.ServingModel)
+	assert.Equal(t, "gpt-5.5", row.ShadowModel)
 	assert.False(t, row.ModelsAgree)
 }
 
