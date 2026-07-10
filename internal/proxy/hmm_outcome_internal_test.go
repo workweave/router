@@ -98,6 +98,7 @@ func TestReportPolicyOutcome_OmitsResponseBodyWhenTrainingIsNotAllowed(t *testin
 	case payload := <-reporter.ch:
 		assert.Equal(t, false, payload["training_allowed"])
 		assert.NotContains(t, payload, "response_body")
+		assert.NotContains(t, payload, "response_body_truncated")
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for policy outcome payload")
 	}
