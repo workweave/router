@@ -16,18 +16,25 @@ import (
 	"workweave/router/internal/router/cluster"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // fakeRouter lets tests control exactly what routing decision (or error) the
 // proxy.Service's scorer step returns, without needing a real cluster router.
+// `got` records the last router.Request the Service forwarded, for tests that
+// need to assert field-level forwarding (e.g. InstallationID handling).
 type fakeRouter struct {
 	decision router.Decision
 	err      error
+	got      *router.Request
 }
 
-func (f *fakeRouter) Route(_ context.Context, _ router.Request) (router.Decision, error) {
+func (f *fakeRouter) Route(_ context.Context, req router.Request) (router.Decision, error) {
+	if f.got != nil {
+		*f.got = req
+	}
 	return f.decision, f.err
 }
 
@@ -314,6 +321,66 @@ func TestRouteHandler_HappyPathReturnsDecision(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", got["model"])
 	assert.Equal(t, providers.ProviderAnthropic, got["provider"])
 	assert.Equal(t, "cheap_and_cheerful", got["reason"])
+}
+
+// --- RouteAnthropicRequest InstallationID forwarding ---
+//
+// RouteAnthropicRequest is the dry-run /v1/route entry. It must forward
+// InstallationID through the same uuid.Parse gate as ProxyMessages: any invalid
+// string in the auth-stashed context value collapses to "" (so the HMM
+// sidecar's `omitempty` drops the field), and a valid UUID round-trips.
+
+func TestRouteAnthropicRequest_ForwardsValidInstallationIDUUIDVerbatim(t *testing.T) {
+	installID := uuid.New()
+	decision := router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}
+	var got router.Request
+	svc := newTestService(&fakeRouter{decision: decision, got: &got}, "", nil)
+
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID.String())
+	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody))
+	require.NoError(t, err)
+	assert.Equal(t, installID.String(), got.InstallationID,
+		"valid installation UUID must round-trip to the HMM sidecar unchanged")
+}
+
+func TestRouteAnthropicRequest_DropsMalformedInstallationIDInsteadOfForwardingRaw(t *testing.T) {
+	decision := router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}
+	var got router.Request
+	svc := newTestService(&fakeRouter{decision: decision, got: &got}, "", nil)
+
+	// "not-a-uuid" is the regression case: pre-fix leaked through verbatim,
+	// diverging tenant attribution from ProxyMessages (which drops invalid IDs).
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, "not-a-uuid")
+	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody))
+	require.NoError(t, err)
+	assert.Equal(t, "", got.InstallationID,
+		"malformed installation ID must collapse to empty string so the HMM "+
+			"sidecar omits the field, matching ProxyMessages's runTurnLoop behavior")
+}
+
+func TestRouteAnthropicRequest_DropsEmptyInstallationIDInsteadOfForwardingRaw(t *testing.T) {
+	decision := router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}
+	var got router.Request
+	svc := newTestService(&fakeRouter{decision: decision, got: &got}, "", nil)
+
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, "")
+	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody))
+	require.NoError(t, err)
+	assert.Equal(t, "", got.InstallationID,
+		"empty installation ID must collapse to empty string")
+}
+
+func TestRouteAnthropicRequest_DropsMissingInstallationIDInsteadOfForwardingRaw(t *testing.T) {
+	decision := router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}
+	var got router.Request
+	svc := newTestService(&fakeRouter{decision: decision, got: &got}, "", nil)
+
+	// No WithValue — request reached RouteAnthropicRequest with no
+	// InstallationIDContextKey on the context at all.
+	_, err := svc.RouteAnthropicRequest(context.Background(), []byte(validAnthropicBody))
+	require.NoError(t, err)
+	assert.Equal(t, "", got.InstallationID,
+		"missing installation ID context value must collapse to empty string")
 }
 
 // --- PassthroughHandler ---

@@ -1527,7 +1527,10 @@ func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte) (decis
 		promptText = feats.OnlyUserMessageText
 	}
 	organizationID, _ := ctx.Value(ExternalIDContextKey{}).(string)
-	installationID, _ := ctx.Value(InstallationIDContextKey{}).(string)
+	installationID := ""
+	if id := installationIDFromContext(ctx); id != uuid.Nil {
+		installationID = id.String()
+	}
 
 	decision, err = s.Route(ctx, router.Request{
 		RequestedModel:       feats.Model,
