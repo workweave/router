@@ -38,7 +38,7 @@ func TestPolicyStrategyRegistryRoutesFutureStrategyWithoutServiceChanges(t *test
 	})
 
 	ctx := context.WithValue(context.Background(), ExternalIDContextKey{}, "org-1")
-	ctx = context.WithValue(ctx, InstallationIDContextKey{}, "installation-1")
+	ctx = context.WithValue(ctx, InstallationIDContextKey{}, "11111111-1111-1111-1111-111111111111")
 	ctx = context.WithValue(ctx, ClientIdentityContextKey{}, ClientIdentity{ClientApp: ClientAppCodex, RolloutID: "rollout-1"})
 	ctx = context.WithValue(ctx, PolicyTrainingAllowedContextKey{}, true)
 	ctx = context.WithValue(ctx, PolicyDebugEnabledContextKey{}, true)
@@ -53,7 +53,7 @@ func TestPolicyStrategyRegistryRoutesFutureStrategyWithoutServiceChanges(t *test
 	assert.Equal(t, 1, futureRouter.calls)
 	assert.Zero(t, defaultRouter.calls)
 	assert.Equal(t, "org-1", futureRouter.request.OrganizationID)
-	assert.Equal(t, "installation-1", futureRouter.request.InstallationID)
+	assert.Equal(t, "11111111-1111-1111-1111-111111111111", futureRouter.request.InstallationID)
 	assert.Equal(t, ClientAppCodex, futureRouter.request.ClientApp)
 	assert.Equal(t, "rollout-1", futureRouter.request.RolloutID)
 	assert.Equal(t, "full", futureRouter.request.CaptureMode)

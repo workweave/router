@@ -1555,7 +1555,10 @@ func (s *Service) routeFor(ctx context.Context, req router.Request) (router.Deci
 
 func (s *Service) withPolicyRequestContext(ctx context.Context, req router.Request) router.Request {
 	req.OrganizationID, _ = ctx.Value(ExternalIDContextKey{}).(string)
-	req.InstallationID, _ = ctx.Value(InstallationIDContextKey{}).(string)
+	req.InstallationID = ""
+	if installationID := installationIDFromContext(ctx); installationID != uuid.Nil {
+		req.InstallationID = installationID.String()
+	}
 	clientIdentity := ClientIdentityFrom(ctx)
 	req.ClientApp = clientIdentity.ClientApp
 	req.RolloutID = policyRolloutIDFromContext(ctx)
