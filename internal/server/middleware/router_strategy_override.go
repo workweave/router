@@ -16,10 +16,8 @@ import (
 // default.
 const RouterStrategyOverrideHeader = "x-weave-router-strategy"
 
-// WithRouterStrategyOverride applies the installation's canonical strategy,
-// then permits an internal/eval header override only when the installation
-// explicitly authorizes policy headers. available comes from the proxy
-// registry so adding a strategy does not require middleware changes.
+// WithRouterStrategyOverride applies the persisted installation strategy and permits
+// an eval header override when authorized; available is injected by the proxy registry.
 func WithRouterStrategyOverride(available ...router.Strategy) gin.HandlerFunc {
 	allowed := make(map[router.Strategy]struct{}, len(available)+1)
 	allowed[router.StrategyCluster] = struct{}{}
