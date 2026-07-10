@@ -67,6 +67,7 @@ type Candidate struct {
 	RosterID         string                `json:"roster_id"`
 	CatalogID        string                `json:"catalog_id"`
 	Provider         string                `json:"provider"`
+	UpstreamID       string                `json:"upstream_id"`
 	PreferenceRank   *int                  `json:"preference_rank,omitempty"`
 	InputUSDPer1M    float64               `json:"input_usd_per_1m"`
 	OutputUSDPer1M   float64               `json:"output_usd_per_1m"`
@@ -206,6 +207,7 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 			RosterID:         rosterID,
 			CatalogID:        id,
 			Provider:         binding.Provider,
+			UpstreamID:       upstreamID(id, binding.UpstreamID),
 			PreferenceRank:   preferenceRanks[id],
 			InputUSDPer1M:    binding.Price.InputUSDPer1M,
 			OutputUSDPer1M:   binding.Price.OutputUSDPer1M,
@@ -245,6 +247,13 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 		resolved.ByRosterID[candidate.RosterID] = Binding{CatalogID: candidate.CatalogID, Provider: candidate.Provider}
 	}
 	return resolved
+}
+
+func upstreamID(catalogID, bindingID string) string {
+	if bindingID != "" {
+		return bindingID
+	}
+	return catalogID
 }
 
 func estimatedCostUSD(req router.Request, pricing catalog.Pricing) float64 {

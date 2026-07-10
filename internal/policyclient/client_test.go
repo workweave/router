@@ -70,6 +70,7 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 			RosterID:       "moonshotai/kimi-k2.7-code",
 			CatalogID:      "moonshotai/kimi-k2.7",
 			Provider:       providers.ProviderFireworks,
+			UpstreamID:     "accounts/fireworks/models/kimi-k2p5",
 			PreferenceRank: &preferenceRank,
 		}},
 	})
@@ -93,6 +94,7 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	assert.Equal(t, []string{"Read", "Grep"}, got.AvailableTools)
 	require.Len(t, got.Candidates, 1)
 	assert.Equal(t, "moonshotai/kimi-k2.7", got.Candidates[0].CatalogID)
+	assert.Equal(t, "accounts/fireworks/models/kimi-k2p5", got.Candidates[0].UpstreamID)
 	assert.Equal(t, "medium|open", result.PolicyRouteKey)
 	assert.Equal(t, providers.ProviderFireworks, result.Provider)
 	assert.Equal(t, "hmm-prod", result.PolicyArtifactID)

@@ -27,11 +27,26 @@ func TestManagedResolverUsesCurrentProvidersAndNeverOpenRouter(t *testing.T) {
 	require.Len(t, resolved.Candidates, 1)
 	assert.Equal(t, "deepseek/deepseek-v4-pro", resolved.Candidates[0].CatalogID)
 	assert.Equal(t, providers.ProviderFireworks, resolved.Candidates[0].Provider)
+	assert.Equal(t, "accounts/fireworks/models/deepseek-v4-pro", resolved.Candidates[0].UpstreamID)
 	assert.Contains(t, resolved.Diagnostics, policy.Diagnostic{
 		CatalogID: "xiaomi/mimo-v2.5-pro",
 		RosterID:  "xiaomi/mimo-v2.5-pro",
 		Reason:    policy.ExclusionProviderPolicy,
 	})
+}
+
+func TestResolverDefaultsUpstreamIDToCatalogID(t *testing.T) {
+	resolver := policy.NewResolver(
+		set("claude-opus-4-8"),
+		set(providers.ProviderAnthropic),
+		catalogRosterID,
+		policy.ManagedProviderPolicy(),
+	)
+
+	resolved := resolver.Resolve(router.Request{})
+
+	require.Len(t, resolved.Candidates, 1)
+	assert.Equal(t, "claude-opus-4-8", resolved.Candidates[0].UpstreamID)
 }
 
 func TestResolverAppliesHardFiltersAndPreferenceRanks(t *testing.T) {
