@@ -1,0 +1,21 @@
+internal/server/middleware/router_strategy_override.go
+  s_a81d8efc38ee57::t_8fb176bb8bc884 37
+internal/server/middleware/router_strategy_override_test.go
+  s_a81d8efc38ee57::t_8fb176bb8bc884 79-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "9f83c89142d16c4845e18647a06a8ec595bd410f",
+  "prompts": {},
+  "sessions": {
+    "s_a81d8efc38ee57": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4d24-a314-7332-876a-e20e37d646b5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
