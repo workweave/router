@@ -1553,10 +1553,18 @@ func (s *Service) WithBanditRouter(r router.Router) *Service {
 // ErrPolicyUnavailable (→ HTTP 503) — never a silent fallback that would mask
 // which strategy actually served the turn.
 func (s *Service) routeFor(ctx context.Context, req router.Request) (router.Decision, error) {
+	return s.routeForMode(ctx, req, false)
+}
+
+func (s *Service) routeForServing(ctx context.Context, req router.Request) (router.Decision, error) {
+	return s.routeForMode(ctx, req, true)
+}
+
+func (s *Service) routeForMode(ctx context.Context, req router.Request, collectShadow bool) (router.Decision, error) {
 	req = s.withPolicyRequestContext(ctx, req)
 	strategy := router.StrategyFromContext(ctx)
 	decision, err := s.routeWithStrategy(ctx, strategy, req)
-	if err == nil {
+	if err == nil && collectShadow {
 		s.firePolicyShadowDecision(ctx, strategy, decision, req)
 	}
 	return decision, err
@@ -2129,7 +2137,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			"requested_model", feats.Model,
 		)
 		routeRes.UsageBypass = false
-		decision, routeErr := s.routeFor(ctx, req)
+		decision, routeErr := s.routeForServing(ctx, req)
 		if routeErr != nil {
 			log.Error("Reroute after usage-bypass failure failed", "err", routeErr)
 			return routeErr

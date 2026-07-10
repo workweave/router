@@ -119,7 +119,7 @@ func (r *shadowRequestRouter) Route(_ context.Context, request router.Request) (
 	return r.decision, nil
 }
 
-func TestRoute_CollectsNonBlockingPolicyShadowComparison(t *testing.T) {
+func TestPolicyShadowComparisonSkipsDryRunAndCollectsServingRoute(t *testing.T) {
 	const installID = "66666666-6666-6666-6666-666666666666"
 	serving := router.Decision{
 		Provider: providers.ProviderAnthropic,
@@ -141,8 +141,10 @@ func TestRoute_CollectsNonBlockingPolicyShadowComparison(t *testing.T) {
 	telem := newCaptureTelemetry()
 	shadowStrategy := router.Strategy("future-policy")
 	svc := proxy.NewService(
-		&fakeRouter{decision: serving}, nil, nil, false, nil, nil, false,
-		"", "", telem,
+		&fakeRouter{decision: serving},
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil, false, nil, nil, false,
+		providers.ProviderAnthropic, "claude-haiku-4-5", telem,
 	).WithPolicyStrategy(policy.StrategySpec{Strategy: shadowStrategy, Router: shadowRouter})
 
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
@@ -156,6 +158,17 @@ func TestRoute_CollectsNonBlockingPolicyShadowComparison(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, serving, decision)
+	select {
+	case <-shadowRouter.requests:
+		t.Fatal("dry-run route must not call the shadow policy")
+	default:
+	}
+
+	recorder := httptest.NewRecorder()
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, body, recorder, request))
+
 	shadowRequest := <-shadowRouter.requests
 	assert.True(t, shadowRequest.ShadowMode)
 	assert.False(t, shadowRequest.TrainingAllowed)
