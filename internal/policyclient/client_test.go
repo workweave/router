@@ -49,6 +49,7 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	client := New(server.URL, server.Client(), 0)
 	result, err := client.Decide(context.Background(), policy.Query{
 		Strategy:        router.StrategyHMM,
+		ExecutionMode:   policy.ExecutionModeShadow,
 		RouteID:         "route-1",
 		OrganizationID:  "org-1",
 		InstallationID:  "installation-1",
@@ -79,6 +80,7 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, policy.SchemaVersionV1, got.SchemaVersion)
 	assert.Equal(t, string(router.StrategyHMM), got.Strategy)
+	assert.Equal(t, policy.ExecutionModeShadow, got.ExecutionMode)
 	assert.Equal(t, "org-1", got.OrganizationID)
 	assert.Equal(t, "installation-1", got.InstallationID)
 	assert.Equal(t, "codex", got.ClientApp)

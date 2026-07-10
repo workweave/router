@@ -347,6 +347,10 @@ type PolicyRoutingIntentContextKey struct{}
 // PolicyRolloutIDContextKey carries the installation-level rollout identifier.
 type PolicyRolloutIDContextKey struct{}
 
+// PolicyShadowStrategyContextKey carries an optional comparison-only strategy.
+// Its decision is collected asynchronously and never affects dispatch.
+type PolicyShadowStrategyContextKey struct{}
+
 // UsageBypassConfig is the per-installation subscription usage-bypass setting,
 // stashed on ctx by the auth middleware. Threshold is nil when the toggle is on
 // but no value has been chosen yet; the request path falls back to
@@ -381,6 +385,7 @@ const routingMarkerPrefix = "✦ **Weave Router** → "
 const maxSidecarDisplayMarkerRunes = 512
 const policyOutcomeReportTimeout = 2 * time.Second
 const policyFeedbackReportTimeout = 2 * time.Second
+const policyShadowDecisionTimeout = 3 * time.Second
 const policyOutcomeResponseMaxBytes = 256 * 1024
 
 type policyOutcomeResponse struct {
@@ -1549,7 +1554,18 @@ func (s *Service) WithBanditRouter(r router.Router) *Service {
 func (s *Service) routeFor(ctx context.Context, req router.Request) (router.Decision, error) {
 	req = s.withPolicyRequestContext(ctx, req)
 	strategy := router.StrategyFromContext(ctx)
+	decision, err := s.routeWithStrategy(ctx, strategy, req)
+	if err == nil {
+		s.firePolicyShadowDecision(ctx, strategy, decision, req)
+	}
+	return decision, err
+}
+
+func (s *Service) routeWithStrategy(ctx context.Context, strategy router.Strategy, req router.Request) (router.Decision, error) {
 	if strategy == router.StrategyCluster {
+		if s.router == nil {
+			return router.Decision{}, fmt.Errorf("strategy %q requested but no router configured: %w", strategy, router.ErrStrategyUnavailable)
+		}
 		return s.router.Route(ctx, req)
 	}
 	registered, ok := s.strategies[strategy]

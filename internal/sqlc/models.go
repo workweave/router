@@ -233,6 +233,34 @@ type RouterOrganizationCreditLedger struct {
 	Memo                  *string
 }
 
+// Content-free serving-vs-shadow policy comparisons; shadow decisions never dispatch or enter online learning
+type RouterPolicyShadowDecision struct {
+	ID                          uuid.UUID
+	CreatedAt                   pgtype.Timestamptz
+	InstallationID              uuid.UUID
+	OrganizationID              *string
+	RolloutID                   *string
+	ClientApp                   *string
+	TrainingAllowed             bool
+	ServingStrategy             string
+	ServingModel                string
+	ServingProvider             string
+	ServingRouteID              *string
+	ServingPolicyRouteKey       *string
+	ServingPolicyArtifactID     *string
+	ServingPolicyArtifactSha256 *string
+	ShadowStrategy              string
+	ShadowModel                 *string
+	ShadowProvider              *string
+	ShadowRouteID               *string
+	ShadowPolicyRouteKey        *string
+	ShadowPolicyArtifactID      *string
+	ShadowPolicyArtifactSha256  *string
+	ShadowLatencyMs             int64
+	ShadowError                 *string
+	ModelsAgree                 bool
+}
+
 type RouterProductionRequestTelemetry struct {
 	ID                     uuid.UUID
 	InstallationID         uuid.UUID

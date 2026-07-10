@@ -82,6 +82,7 @@ func TestSidecarRouterOnboardsFutureStrategyWithoutProxyChanges(t *testing.T) {
 	assert.Equal(t, map[string]float32{"gpt-5.5": 0.9}, decision.Metadata.CandidateScores)
 	assert.Empty(t, decision.Metadata.DebugRef)
 	assert.Equal(t, strategy, decider.query.Strategy)
+	assert.Equal(t, policy.ExecutionModeServing, decider.query.ExecutionMode)
 	assert.Equal(t, "org-1", decider.query.OrganizationID)
 	assert.Equal(t, "cursor", decider.query.ClientApp)
 	assert.True(t, decider.query.TrainingAllowed)
@@ -95,4 +96,25 @@ func TestSidecarRouterOnboardsFutureStrategyWithoutProxyChanges(t *testing.T) {
 	require.NoError(t, adapter.ReportFeedback(context.Background(), map[string]interface{}{"feedback": "positive"}))
 	assert.Equal(t, "route-future", decider.outcome["route_id"])
 	assert.Equal(t, "positive", decider.feedback["feedback"])
+}
+
+func TestSidecarRouterMarksShadowDecisionsNonLearning(t *testing.T) {
+	decider := &recordingPolicy{result: policy.Result{Model: "gpt-5.5"}}
+	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
+		Strategy: router.Strategy("future-policy"),
+	}, decider, policy.NewResolver(
+		set("gpt-5.5"),
+		set(providers.ProviderOpenAI),
+		func(model catalog.Model) string { return model.ID },
+		policy.ManagedProviderPolicy(),
+	))
+
+	_, err := adapter.Route(context.Background(), router.Request{
+		ShadowMode: true, TrainingAllowed: true, DebugEnabled: true,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, policy.ExecutionModeShadow, decider.query.ExecutionMode)
+	assert.False(t, decider.query.TrainingAllowed)
+	assert.False(t, decider.query.DebugEnabled)
 }

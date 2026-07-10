@@ -123,6 +123,7 @@ func (c *Client) post(ctx context.Context, path string, payload map[string]inter
 type routeRequest struct {
 	SchemaVersion        string             `json:"schema_version"`
 	Strategy             string             `json:"strategy"`
+	ExecutionMode        string             `json:"execution_mode"`
 	RouteID              string             `json:"route_id"`
 	OrganizationID       string             `json:"organization_id,omitempty"`
 	InstallationID       string             `json:"installation_id,omitempty"`
@@ -224,6 +225,7 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 	body, err := json.Marshal(routeRequest{
 		SchemaVersion:        policy.SchemaVersionV1,
 		Strategy:             string(query.Strategy),
+		ExecutionMode:        query.ExecutionMode,
 		RouteID:              query.RouteID,
 		OrganizationID:       query.OrganizationID,
 		InstallationID:       query.InstallationID,

@@ -13,6 +13,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/policy"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -22,13 +23,18 @@ import (
 // captureTelemetry records every InsertTelemetryParams the proxy fires.
 // notify channel is the rendezvous for the async goroutine.
 type captureTelemetry struct {
-	mu     sync.Mutex
-	rows   []proxy.InsertTelemetryParams
-	notify chan struct{}
+	mu           sync.Mutex
+	rows         []proxy.InsertTelemetryParams
+	shadowRows   []proxy.PolicyShadowDecision
+	notify       chan struct{}
+	shadowNotify chan struct{}
 }
 
 func newCaptureTelemetry() *captureTelemetry {
-	return &captureTelemetry{notify: make(chan struct{}, 4)}
+	return &captureTelemetry{
+		notify:       make(chan struct{}, 4),
+		shadowNotify: make(chan struct{}, 4),
+	}
 }
 
 func (c *captureTelemetry) InsertRequestTelemetry(_ context.Context, p proxy.InsertTelemetryParams) error {
@@ -37,6 +43,17 @@ func (c *captureTelemetry) InsertRequestTelemetry(_ context.Context, p proxy.Ins
 	c.mu.Unlock()
 	select {
 	case c.notify <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (c *captureTelemetry) InsertPolicyShadowDecision(_ context.Context, event proxy.PolicyShadowDecision) error {
+	c.mu.Lock()
+	c.shadowRows = append(c.shadowRows, event)
+	c.mu.Unlock()
+	select {
+	case c.shadowNotify <- struct{}{}:
 	default:
 	}
 	return nil
@@ -77,6 +94,83 @@ func (c *captureTelemetry) firstRow(t *testing.T) proxy.InsertTelemetryParams {
 	defer c.mu.Unlock()
 	require.NotEmpty(t, c.rows)
 	return c.rows[0]
+}
+
+func (c *captureTelemetry) firstShadowRow(t *testing.T) proxy.PolicyShadowDecision {
+	t.Helper()
+	select {
+	case <-c.shadowNotify:
+	case <-time.After(4 * time.Second):
+		t.Fatal("expected an async policy shadow insert within 4s; none observed")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	require.NotEmpty(t, c.shadowRows)
+	return c.shadowRows[0]
+}
+
+type shadowRequestRouter struct {
+	decision router.Decision
+	requests chan router.Request
+}
+
+func (r *shadowRequestRouter) Route(_ context.Context, request router.Request) (router.Decision, error) {
+	r.requests <- request
+	return r.decision, nil
+}
+
+func TestRoute_CollectsNonBlockingPolicyShadowComparison(t *testing.T) {
+	const installID = "66666666-6666-6666-6666-666666666666"
+	serving := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+	}
+	shadowRouter := &shadowRequestRouter{
+		decision: router.Decision{
+			Provider: providers.ProviderOpenAI,
+			Model:    "gpt-5.5",
+			Metadata: &router.RoutingMetadata{
+				RouteID:              "shadow-route-1",
+				PolicyRouteKey:       "high",
+				PolicyArtifactID:     "future-prod",
+				PolicyArtifactSHA256: "sha256:future",
+			},
+		},
+		requests: make(chan router.Request, 1),
+	}
+	telem := newCaptureTelemetry()
+	shadowStrategy := router.Strategy("future-policy")
+	svc := proxy.NewService(
+		&fakeRouter{decision: serving}, nil, nil, false, nil, nil, false,
+		"", "", telem,
+	).WithPolicyStrategy(policy.StrategySpec{Strategy: shadowStrategy, Router: shadowRouter})
+
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
+	ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, "org-1")
+	ctx = context.WithValue(ctx, proxy.PolicyRolloutIDContextKey{}, "rollout-1")
+	ctx = context.WithValue(ctx, proxy.PolicyTrainingAllowedContextKey{}, true)
+	ctx = context.WithValue(ctx, proxy.PolicyDebugEnabledContextKey{}, true)
+	ctx = context.WithValue(ctx, proxy.PolicyShadowStrategyContextKey{}, shadowStrategy)
+
+	decision, err := svc.Route(ctx, router.Request{})
+
+	require.NoError(t, err)
+	assert.Equal(t, serving, decision)
+	shadowRequest := <-shadowRouter.requests
+	assert.True(t, shadowRequest.ShadowMode)
+	assert.False(t, shadowRequest.TrainingAllowed)
+	assert.False(t, shadowRequest.DebugEnabled)
+	row := telem.firstShadowRow(t)
+	assert.Equal(t, installID, row.InstallationID)
+	assert.Equal(t, "org-1", row.OrganizationID)
+	assert.Equal(t, "rollout-1", row.RolloutID)
+	assert.True(t, row.TrainingAllowed)
+	assert.Equal(t, "cluster", row.ServingStrategy)
+	assert.Equal(t, "future-policy", row.ShadowStrategy)
+	assert.Equal(t, "gpt-5.5", row.ShadowModel)
+	assert.Equal(t, "shadow-route-1", row.ShadowRouteID)
+	assert.Equal(t, "future-prod", row.ShadowPolicyArtifactID)
+	assert.False(t, row.ModelsAgree)
 }
 
 // TestProxyMessages_RecordsClusterObservation asserts cluster-routed decisions

@@ -64,6 +64,13 @@ func (r *SidecarRouter) ReportFeedback(ctx context.Context, payload map[string]i
 
 func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	strategy := r.config.Strategy
+	executionMode := ExecutionModeServing
+	if req.ShadowMode {
+		executionMode = ExecutionModeShadow
+		// Shadow decisions are operational comparisons, never learning events.
+		req.TrainingAllowed = false
+		req.DebugEnabled = false
+	}
 	resolved := r.resolver.Resolve(req)
 	if len(resolved.Candidates) == 0 {
 		return router.Decision{}, fmt.Errorf("%s: no eligible candidate: %w", strategy, r.config.Unavailable)
@@ -71,6 +78,7 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 	requestRouteID := uuid.NewString()
 	res, err := r.decider.Decide(ctx, Query{
 		Strategy:             strategy,
+		ExecutionMode:        executionMode,
 		RouteID:              requestRouteID,
 		OrganizationID:       req.OrganizationID,
 		InstallationID:       req.InstallationID,
@@ -126,6 +134,7 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 
 	observability.FromContext(ctx).Info("Policy router decided",
 		"strategy", strategy,
+		"execution_mode", executionMode,
 		"route_id", routeID,
 		"model", binding.CatalogID,
 		"provider", binding.Provider,

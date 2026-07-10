@@ -71,6 +71,9 @@ type Request struct {
 	CaptureMode string
 	// DebugEnabled gates detailed policy diagnostics in requests and responses.
 	DebugEnabled bool
+	// ShadowMode marks a decision-only comparison that must never be treated as
+	// served traffic or admitted into online-learning inputs.
+	ShadowMode bool
 	// SubsidizedModelCostFactor is the per-model rate-limit headroom factor in
 	// [epsilon, 1] for models the caller's subscription covers (see
 	// internal/proxy/usage): ~epsilon when the window has slack, rising to 1 as
