@@ -114,6 +114,11 @@ func TestRouterStrategyOverride_ExplicitClusterWinsOverDeploymentDefault(t *test
 	assert.Equal(t, router.StrategyCluster, observed)
 }
 
+func TestNormalizeRouterStrategyDefault(t *testing.T) {
+	assert.Equal(t, router.StrategyHMM, middleware.NormalizeRouterStrategyDefault(router.StrategyHMM, router.StrategyHMM))
+	assert.Equal(t, router.StrategyCluster, middleware.NormalizeRouterStrategyDefault(router.Strategy("typo"), router.StrategyHMM))
+}
+
 func TestRouterStrategyOverride_UnknownValueIgnored(t *testing.T) {
 	got := runStrategyOverride(t, overrideEnabledInstallation(), "bogus")
 	assert.Equal(t, router.StrategyCluster, got, "unrecognized strategy must fall through to the default")

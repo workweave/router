@@ -67,10 +67,15 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	// /v1/version reports the binary's git commit + build time (via -ldflags),
 	// used by the README's managed-deployment badge. Public build metadata, unauthed like /health.
 	engine.GET("/v1/version", middleware.WithTimeout(healthTimeout), admin.VersionHandler)
+	var registeredStrategies []router.Strategy
+	if proxySvc != nil {
+		registeredStrategies = proxySvc.RegisteredStrategies()
+	}
 	defaultStrategy := router.Strategy(strings.ToLower(strings.TrimSpace(os.Getenv("ROUTER_DEFAULT_STRATEGY"))))
 	if defaultStrategy == "" {
 		defaultStrategy = router.StrategyCluster
 	}
+	defaultStrategy = middleware.NormalizeRouterStrategyDefault(defaultStrategy, registeredStrategies...)
 	engine.GET(
 		"/v1/router/policies",
 		middleware.WithTimeout(healthTimeout),
@@ -140,10 +145,6 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	}
 	if billingSvc != nil {
 		messagesMiddleware = append(messagesMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros), middleware.WithAPIKeySpendCap(billingSvc))
-	}
-	var registeredStrategies []router.Strategy
-	if proxySvc != nil {
-		registeredStrategies = proxySvc.RegisteredStrategies()
 	}
 	messagesMiddleware = append(messagesMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),

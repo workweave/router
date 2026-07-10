@@ -33,9 +33,7 @@ func WithRouterStrategyDefault(defaultStrategy router.Strategy, available ...rou
 	for _, strategy := range available {
 		allowed[strategy] = struct{}{}
 	}
-	if !strategyAllowed(defaultStrategy, allowed) {
-		defaultStrategy = router.StrategyCluster
-	}
+	defaultStrategy = normalizeRouterStrategyDefault(defaultStrategy, allowed)
 	return func(c *gin.Context) {
 		installation := InstallationFrom(c)
 		if installation == nil {
@@ -74,6 +72,23 @@ func WithRouterStrategyDefault(defaultStrategy router.Strategy, available ...rou
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
+}
+
+// NormalizeRouterStrategyDefault clamps an unregistered deployment default to cluster.
+func NormalizeRouterStrategyDefault(defaultStrategy router.Strategy, available ...router.Strategy) router.Strategy {
+	allowed := make(map[router.Strategy]struct{}, len(available)+1)
+	allowed[router.StrategyCluster] = struct{}{}
+	for _, strategy := range available {
+		allowed[strategy] = struct{}{}
+	}
+	return normalizeRouterStrategyDefault(defaultStrategy, allowed)
+}
+
+func normalizeRouterStrategyDefault(defaultStrategy router.Strategy, allowed map[router.Strategy]struct{}) router.Strategy {
+	if !strategyAllowed(defaultStrategy, allowed) {
+		return router.StrategyCluster
+	}
+	return defaultStrategy
 }
 
 func strategyAllowed(strategy router.Strategy, allowed map[router.Strategy]struct{}) bool {
