@@ -62,10 +62,10 @@ type Diagnostic struct {
 
 // Candidate is one catalog-backed model offered to a policy sidecar.
 type Candidate struct {
-	RosterID       string
-	CatalogID      string
-	Provider       string
-	PreferenceRank *int
+	RosterID       string `json:"roster_id"`
+	CatalogID      string `json:"catalog_id"`
+	Provider       string `json:"provider"`
+	PreferenceRank *int   `json:"preference_rank,omitempty"`
 }
 
 // Binding is the authoritative dispatch binding for an offered roster ID.

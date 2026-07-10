@@ -27,21 +27,31 @@ func (f *fakeDecider) Decide(_ context.Context, q Query) (Result, error) {
 
 func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 	decider := &fakeDecider{res: Result{
-		RouteID:       "route-1",
-		Model:         "moonshotai/kimi-k2.7-code",
-		Score:         0.8,
-		Reason:        "policy",
-		Propensity:    0.9,
-		DisplayMarker: "display marker",
-		PolicyLabel:   "short_turn",
-		PolicyGroup:   "standard",
+		RouteID:              "route-1",
+		Model:                "moonshotai/kimi-k2.7-code",
+		Provider:             providers.ProviderFireworks,
+		Score:                0.8,
+		Reason:               "policy",
+		Propensity:           0.9,
+		DisplayMarker:        "display marker",
+		PolicyLabel:          "short_turn",
+		PolicyGroup:          "standard",
+		PolicyRouteKey:       "standard|open",
+		PolicyArtifactID:     "hmm-prod",
+		PolicyArtifactSHA256: "sha256:abc",
+		RosterVersion:        "roster-v2",
+		SchemaVersion:        "policy_router_v1",
+		DebugRef:             "debug-1",
 	}}
 	deployed := map[string]struct{}{"moonshotai/kimi-k2.7": {}}
 	available := map[string]struct{}{providers.ProviderFireworks: {}}
 	r := New(decider, deployed, available)
 
 	decision, err := r.Route(context.Background(), router.Request{
-		PromptText: "hello",
+		OrganizationID: "org-1",
+		InstallationID: "installation-1",
+		ClientApp:      "codex",
+		PromptText:     "hello",
 		ConversationMessages: []router.ConversationMessage{{
 			Role: "user",
 			Text: "latest hello",
@@ -58,7 +68,17 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 	assert.Equal(t, "route-1", decision.Metadata.RouteID)
 	assert.Equal(t, "hmm", decision.Metadata.Strategy)
 	assert.Equal(t, float32(0.9), decision.Metadata.Propensity)
+	assert.Equal(t, "standard|open", decision.Metadata.PolicyRouteKey)
+	assert.Equal(t, "hmm-prod", decision.Metadata.PolicyArtifactID)
+	assert.Equal(t, "sha256:abc", decision.Metadata.PolicyArtifactSHA256)
+	assert.Equal(t, "roster-v2", decision.Metadata.RosterVersion)
+	assert.Equal(t, "policy_router_v1", decision.Metadata.SidecarSchemaVersion)
+	assert.Equal(t, "debug-1", decision.Metadata.DebugRef)
 	assert.Equal(t, "hello", decider.query.PromptText)
+	assert.Equal(t, router.StrategyHMM, decider.query.Strategy)
+	assert.Equal(t, "org-1", decider.query.OrganizationID)
+	assert.Equal(t, "installation-1", decider.query.InstallationID)
+	assert.Equal(t, "codex", decider.query.ClientApp)
 	assert.Equal(t, "feedback-session", decider.query.FeedbackKey)
 	assert.Equal(t, "default", decider.query.FeedbackRole)
 	assert.Equal(t, []router.ConversationMessage{{Role: "user", Text: "latest hello"}}, decider.query.ConversationMessages)
@@ -81,6 +101,16 @@ func TestRouterKeepsGeneratedRouteIDWhenSidecarOmitsIt(t *testing.T) {
 
 func TestRouterFailsClosedOnUnknownReturnedModel(t *testing.T) {
 	decider := &fakeDecider{res: Result{Model: "unknown/model"}}
+	r := New(decider, map[string]struct{}{"moonshotai/kimi-k2.7": {}}, map[string]struct{}{providers.ProviderFireworks: {}})
+
+	_, err := r.Route(context.Background(), router.Request{PromptText: "hello"})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrHMMUnavailable)
+}
+
+func TestRouterFailsClosedOnReturnedProviderMismatch(t *testing.T) {
+	decider := &fakeDecider{res: Result{Model: "moonshotai/kimi-k2.7-code", Provider: providers.ProviderOpenRouter}}
 	r := New(decider, map[string]struct{}{"moonshotai/kimi-k2.7": {}}, map[string]struct{}{providers.ProviderFireworks: {}})
 
 	_, err := r.Route(context.Background(), router.Request{PromptText: "hello"})

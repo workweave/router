@@ -26,7 +26,14 @@ type Overrides struct {
 type Request struct {
 	RequestedModel       string
 	EstimatedInputTokens int
-	HasTools             bool
+	// OrganizationID and InstallationID are opaque external identifiers used
+	// to correlate policy decisions with rollout and privacy state.
+	OrganizationID string
+	InstallationID string
+	// ClientApp is the normalized request harness (for example claude-code,
+	// codex, cursor, or api).
+	ClientApp string
+	HasTools  bool
 	// HasImages: scorer drops text-only models from the eligible pool; turn
 	// loop evicts a text-only session pin.
 	HasImages  bool
@@ -50,7 +57,18 @@ type Request struct {
 	// model's score — enough to win close calls, not to override a clearly
 	// better model. Entries not in the eligible pool are ignored.
 	PreferredModels []string
-	RoutingKnobs    *Overrides // NEW: parsed dynamic knobs
+	// RoutingIntent is a strategy-neutral preset for future low/medium/high
+	// routing modes. Empty means use the installation's normal policy.
+	RoutingIntent string
+	RoutingKnobs  *Overrides // NEW: parsed dynamic knobs
+	// TrainingAllowed is false unless the organization is explicitly eligible
+	// for policy learning. Serving must continue when it is false.
+	TrainingAllowed bool
+	// CaptureMode describes the operational content-retention mode without
+	// granting permission for policy learning.
+	CaptureMode string
+	// DebugEnabled gates detailed policy diagnostics in requests and responses.
+	DebugEnabled bool
 	// SubsidizedModelCostFactor is the per-model rate-limit headroom factor in
 	// [epsilon, 1] for models the caller's subscription covers (see
 	// internal/proxy/usage): ~epsilon when the window has slack, rising to 1 as
@@ -100,6 +118,15 @@ type RoutingMetadata struct {
 	// RouteID is an opaque sidecar correlation id. Outcome reporters and logs
 	// use it to join route decisions to final dispatch usage.
 	RouteID string
+	// PolicyRouteKey is the generic policy-internal bucket/arm key used for
+	// online learning. HMM routing_bucket values map here.
+	PolicyRouteKey string
+	// Policy artifact metadata identifies the immutable production package.
+	PolicyArtifactID     string
+	PolicyArtifactSHA256 string
+	RosterVersion        string
+	SidecarSchemaVersion string
+	DebugRef             string
 	// DisplayMarker is an optional, already-humanized route badge. Sidecars
 	// use this to show strategy-specific labels without moving their display
 	// logic into router-internal.

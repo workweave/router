@@ -21,46 +21,11 @@ var ErrHMMUnavailable = errors.New("hmm: policy router unavailable")
 
 type Candidate = policy.Candidate
 
-type Query struct {
-	RouteID              string
-	PromptText           string
-	ConversationMessages []router.ConversationMessage
-	AvailableTools       []string
-	FeedbackKey          string
-	FeedbackRole         string
-	EstimatedInputTokens int
-	HasTools             bool
-	HasImages            bool
-	Candidates           []Candidate
-}
-
-type Result struct {
-	RouteID       string
-	Model         string
-	Score         float64
-	ScoreKind     string
-	Reason        string
-	PolicyState   string
-	PolicyGroup   string
-	PolicyLabel   string
-	Confidence    *float64
-	Margin        *float64
-	Propensity    float64
-	DisplayMarker string
-	Debug         map[string]interface{}
-}
-
-type Decider interface {
-	Decide(ctx context.Context, q Query) (Result, error)
-}
-
-type OutcomeReporter interface {
-	ReportOutcome(ctx context.Context, payload map[string]interface{}) error
-}
-
-type FeedbackReporter interface {
-	ReportFeedback(ctx context.Context, payload map[string]interface{}) error
-}
+type Query = policy.Query
+type Result = policy.Result
+type Decider = policy.Decider
+type OutcomeReporter = policy.OutcomeReporter
+type FeedbackReporter = policy.FeedbackReporter
 
 type Router struct {
 	decider          Decider
@@ -102,7 +67,12 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 	}
 	requestRouteID := uuid.NewString()
 	res, err := r.decider.Decide(ctx, Query{
+		Strategy:             router.StrategyHMM,
 		RouteID:              requestRouteID,
+		OrganizationID:       req.OrganizationID,
+		InstallationID:       req.InstallationID,
+		ClientApp:            req.ClientApp,
+		RequestedModel:       req.RequestedModel,
 		PromptText:           req.PromptText,
 		ConversationMessages: req.ConversationMessages,
 		AvailableTools:       req.AvailableTools,
@@ -111,6 +81,12 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 		EstimatedInputTokens: req.EstimatedInputTokens,
 		HasTools:             req.HasTools,
 		HasImages:            req.HasImages,
+		RoutingIntent:        req.RoutingIntent,
+		PreferredModels:      req.PreferredModels,
+		RoutingKnobs:         req.RoutingKnobs,
+		TrainingAllowed:      req.TrainingAllowed,
+		CaptureMode:          req.CaptureMode,
+		DebugEnabled:         req.DebugEnabled,
 		Candidates:           resolved.Candidates,
 	})
 	if err != nil {
@@ -120,6 +96,9 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 	binding, ok := resolved.ByRosterID[res.Model]
 	if !ok {
 		return router.Decision{}, fmt.Errorf("hmm: sidecar returned unknown model %q: %w", res.Model, ErrHMMUnavailable)
+	}
+	if res.Provider != "" && res.Provider != binding.Provider {
+		return router.Decision{}, fmt.Errorf("hmm: sidecar returned provider %q for %q, expected %q: %w", res.Provider, res.Model, binding.Provider, ErrHMMUnavailable)
 	}
 	propensity := float32(res.Propensity)
 	if propensity <= 0 {
@@ -143,13 +122,19 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 		Model:    binding.CatalogID,
 		Reason:   reasonFor(res),
 		Metadata: &router.RoutingMetadata{
-			CandidateModels:    resolved.CandidateModels(),
-			CandidateProviders: resolved.CandidateProviders(),
-			ChosenScore:        float32(res.Score),
-			Propensity:         propensity,
-			DisplayMarker:      res.DisplayMarker,
-			RouteID:            routeID,
-			Strategy:           string(router.StrategyHMM),
+			CandidateModels:      resolved.CandidateModels(),
+			CandidateProviders:   resolved.CandidateProviders(),
+			ChosenScore:          float32(res.Score),
+			Propensity:           propensity,
+			DisplayMarker:        res.DisplayMarker,
+			RouteID:              routeID,
+			Strategy:             string(router.StrategyHMM),
+			PolicyRouteKey:       res.PolicyRouteKey,
+			PolicyArtifactID:     res.PolicyArtifactID,
+			PolicyArtifactSHA256: res.PolicyArtifactSHA256,
+			RosterVersion:        res.RosterVersion,
+			SidecarSchemaVersion: res.SchemaVersion,
+			DebugRef:             res.DebugRef,
 		},
 	}, nil
 }
