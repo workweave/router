@@ -22,9 +22,7 @@ type SidecarRouterConfig struct {
 	Reason      ReasonRenderer
 }
 
-// SidecarRouter owns the lifecycle shared by out-of-process policy routers:
-// candidate resolution, request context, fail-closed result validation,
-// metadata projection, and outcome/feedback forwarding.
+// SidecarRouter is a shared adapter for out-of-process policy routers.
 type SidecarRouter struct {
 	config           SidecarRouterConfig
 	decider          Decider
