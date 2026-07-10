@@ -64,6 +64,7 @@ func TestPolicyCatalogHandlerReportsDefaultAndCapabilities(t *testing.T) {
 	require.Len(t, payload.Strategies, 2)
 	assert.Equal(t, "cluster", payload.Strategies[0].Strategy)
 	assert.True(t, payload.Strategies[0].Capabilities.SupportsPreview)
+	assert.True(t, payload.Strategies[0].Capabilities.SupportsShadow)
 	assert.Equal(t, "hmm", payload.Strategies[1].Strategy)
 	assert.True(t, payload.Strategies[1].Available)
 }

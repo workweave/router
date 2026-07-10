@@ -1531,6 +1531,7 @@ func (s *Service) WithHMMRouter(r router.Router) *Service {
 			HonorsPreferredModels:    true,
 			HonorsQualityPriceBias:   true,
 			SupportsDebugRouteDetail: true,
+			SupportsShadow:           true,
 		},
 	})
 }

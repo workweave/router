@@ -29,6 +29,7 @@ func PolicyCatalogHandler(service *proxy.Service, defaultStrategy router.Strateg
 				HonorsPreferredModels:  true,
 				HonorsQualityPriceBias: true,
 				SupportsPreview:        true,
+				SupportsShadow:         true,
 			},
 		}}
 		if service != nil {

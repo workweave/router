@@ -23,6 +23,7 @@ type Capabilities struct {
 	HonorsQualityPriceBias   bool   `json:"honors_quality_price_bias"`
 	SupportsDebugRouteDetail bool   `json:"supports_debug_route_detail"`
 	SupportsPreview          bool   `json:"supports_preview"`
+	SupportsShadow           bool   `json:"supports_shadow"`
 }
 
 // StrategySpec is the complete proxy registration for one policy strategy.
