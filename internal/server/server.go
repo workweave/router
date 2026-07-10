@@ -16,6 +16,7 @@ import (
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/router"
 	"workweave/router/internal/server/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -131,7 +132,10 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	if billingSvc != nil {
 		messagesMiddleware = append(messagesMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros), middleware.WithAPIKeySpendCap(billingSvc))
 	}
-	registeredStrategies := proxySvc.RegisteredStrategies()
+	var registeredStrategies []router.Strategy
+	if proxySvc != nil {
+		registeredStrategies = proxySvc.RegisteredStrategies()
+	}
 	messagesMiddleware = append(messagesMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
