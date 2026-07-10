@@ -1,0 +1,44 @@
+internal/router/percallband/artifacts/percall_band_metadata.json
+  s_e314738a9195df::t_9ff9324eb7f0c9 1-188
+internal/router/percallband/features.go
+  s_e314738a9195df::t_cb0060924789ba 1-142,153-332
+  s_e314738a9195df::t_bff16078a0bc67 143-152
+go.sum
+  s_e314738a9195df::t_97eceb18aef2cd 68-69
+internal/router/percallband/testdata/percall_feature_fixture.json
+  s_e314738a9195df::t_9ff9324eb7f0c9 1-22448
+internal/router/percallband/artifacts/percall_band_markov.txt
+  s_e314738a9195df::t_9ff9324eb7f0c9 1-5909
+go.mod
+  s_e314738a9195df::t_44a81adcd34f9c 9
+internal/router/percallband/artifacts/percall_band_markov_emb.txt
+  s_e314738a9195df::t_9ff9324eb7f0c9 1-6665
+internal/router/percallband/head.go
+  s_e314738a9195df::t_a8e0aceb273c4d 1-36,40-51,55,58-158
+  s_e314738a9195df::t_6308cffd4a45b4 37-39,52-54,56-57
+internal/router/percallband/actions.go
+  s_e314738a9195df::t_4fe77b9889749c 74-75,92-93
+  s_e314738a9195df::t_f7657caeb4868d 1-73,76-91,94-104
+internal/router/percallband/head_test.go
+  s_e314738a9195df::t_0719bc15309b38 1-117
+internal/router/percallband/testdata/percall_band_parity.json
+  s_e314738a9195df::t_9ff9324eb7f0c9 1-37537
+internal/router/percallband/features_test.go
+  s_e314738a9195df::t_aac4ac5f5d2647 1-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "3bba507daaa91489757218209cf04e86a098f37f",
+  "prompts": {},
+  "sessions": {
+    "s_e314738a9195df": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "17bb5105-1a4b-4d8b-8633-f796bbc7df06",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}

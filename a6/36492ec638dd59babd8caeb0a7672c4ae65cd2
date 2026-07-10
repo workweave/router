@@ -1,0 +1,70 @@
+internal/router/catalog/lookup.go
+  s_26343b7a14df66::t_f489cce2f3fc7f 1,9-10,12-15,19-31,33-46,49-58,61,64-70,72-73,75-82,84,87-90,97-98,100-116,118,123-126,128-135,142-159
+internal/router/catalog/CLAUDE.md
+  s_26343b7a14df66::t_501a1297dc496b 11-12,14
+  s_26343b7a14df66::t_8b20c04e61908c 1,5,9-10,13,15-28,32-37,39,41-43
+AGENTS.md
+  s_26343b7a14df66::t_03ab76293753da 1,3,63-66
+internal/router/AGENTS.md
+  s_26343b7a14df66::t_41e454a44634ba 11
+  s_26343b7a14df66::t_a2aef173640f30 1,3
+internal/proxy/service.go
+  s_26343b7a14df66::t_b04b2efbf84db5 21,63,156,158,160,344,752-755,873-876,913-916,941,1269,1507-1510,1616-1619,1661-1664,1682
+  s_26343b7a14df66::t_53a4e0d7ad75be 353,1290
+internal/router/planner/policy.go
+  s_26343b7a14df66::t_b04b2efbf84db5 12,19,132-134
+  s_26343b7a14df66::t_53a4e0d7ad75be 95-96
+internal/router/planner/AGENTS.md
+  s_26343b7a14df66::t_af8263e534a934 1,3,18,28
+internal/router/catalog/AGENTS.md
+  s_26343b7a14df66::t_207105fcffadf5 11-12,14
+  s_26343b7a14df66::t_ac9244eec4bdf8 1,5,7,9-10,13,15-28,32-37,39,41-43
+internal/billing/service.go
+  s_26343b7a14df66::t_b04b2efbf84db5 7,103,133-134
+internal/router/catalog/catalog_test.go
+  s_26343b7a14df66::t_aa0fa9541775f1 116-117,119
+  s_26343b7a14df66::t_6048512293343f 1,6-7,12-18,21-25,27-40,43-49,52-56,59-60,64-67,70-71,73-74,77-84,86-88,91-94,97-105,108-110,112-114,118
+internal/observability/otel/pricing.go
+  s_26343b7a14df66::t_b04b2efbf84db5 1,6,13,22
+  s_26343b7a14df66::t_53a4e0d7ad75be 17,25
+internal/proxy/turnloop.go
+  s_26343b7a14df66::t_b04b2efbf84db5 12,50,101,284,286,288,290,302,308,311
+CLAUDE.md
+  s_26343b7a14df66::t_46adf331842c9b 63-66
+internal/proxy/marker_internal_test.go
+  s_26343b7a14df66::t_b04b2efbf84db5 9,21,35,47
+internal/proxy/service_session_pin_test.go
+  s_26343b7a14df66::t_b04b2efbf84db5 17,582,616-617,638,670,684,698,729,772
+internal/router/catalog/catalog.go
+  s_26343b7a14df66::t_a8c69c08945ed8 1-252
+internal/proxy/gemini.go
+  s_26343b7a14df66::t_b04b2efbf84db5 14,114-117,170-173
+internal/billing/service_test.go
+  s_26343b7a14df66::t_b04b2efbf84db5 12,100,129,153,178,195
+internal/router/CLAUDE.md
+  s_26343b7a14df66::t_cb50ecfd4ae58f 11
+cmd/router/main.go
+  s_26343b7a14df66::t_2a5c608443d54b 473
+  s_26343b7a14df66::t_b04b2efbf84db5 35,391,397-398
+internal/router/catalog/cost.go
+  s_26343b7a14df66::t_d4ebf013213294 1,3,6-9,26-27
+internal/router/planner/CLAUDE.md
+  s_26343b7a14df66::t_f3c24c1bb93596 18
+  s_26343b7a14df66::t_80a7a1e9425197 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "a636492ec638dd59babd8caeb0a7672c4ae65cd2",
+  "prompts": {},
+  "sessions": {
+    "s_26343b7a14df66": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2aa13dfc-2c78-48ac-858e-b5f4e8be7eef",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null
+    }
+  }
+}

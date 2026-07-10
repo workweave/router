@@ -1,0 +1,25 @@
+internal/router/cluster/CLAUDE.md
+  s_f789c084d984ae::t_d439a6593199a2 13
+internal/router/cluster/scorer.go
+  s_f789c084d984ae::t_f15ba7ff890002 39-42
+internal/router/cluster/AGENTS.md
+  s_f789c084d984ae::t_5db0e5e64c6ce4 13
+internal/router/cluster/embedder_onnx.go
+  s_f789c084d984ae::t_461d2151ab8ad1 82,85-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "aa7879f9a6e8992342e63657dbeb4b6437bbcdc5",
+  "prompts": {},
+  "sessions": {
+    "s_f789c084d984ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff5468d1-d94c-44d7-bae7-d296e69fc3c5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

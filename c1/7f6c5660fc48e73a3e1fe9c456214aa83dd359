@@ -1,0 +1,32 @@
+internal/router/cluster/artifacts/candidate-k12-fixed/model_features.json
+  s_ad266a1f33b81c::t_aa9597bdc67c44 265-276
+  s_ad266a1f33b81c::t_dc8f311ba2a996 1-264,277-425
+internal/router/cluster/artifacts/candidate-k12-fixed/model_axes.json
+  s_ad266a1f33b81c::t_dc8f311ba2a996 1-133
+internal/router/cluster/artifacts/candidate-k12-fixed/metadata.yaml
+  s_ad266a1f33b81c::t_dc8f311ba2a996 1-105
+internal/router/cluster/candidate_k12_fixed_test.go
+  s_ad266a1f33b81c::t_5b20f1c707074e 1-50
+internal/router/cluster/artifacts/candidate-k12-fixed/model_registry.json
+  s_ad266a1f33b81c::t_dc8f311ba2a996 1-177
+internal/router/cluster/artifacts/candidate-k12-fixed/rankings.json
+  s_ad266a1f33b81c::t_dc8f311ba2a996 1-278
+internal/router/cluster/artifacts/candidate-k12-fixed/quality_means.json
+  s_ad266a1f33b81c::t_dc8f311ba2a996 1-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c17f6c5660fc48e73a3e1fe9c456214aa83dd359",
+  "prompts": {},
+  "sessions": {
+    "s_ad266a1f33b81c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "38da743a-ec24-4e46-9146-bce9c32e91cc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

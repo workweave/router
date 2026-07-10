@@ -1,0 +1,38 @@
+internal/proxy/gemini.go
+  s_9d0bcc14b37a3f::t_85bb86e1ae1dd1 101-103
+internal/proxy/gemini_test.go
+  s_9d0bcc14b37a3f::t_881e121343cea4 47-48
+internal/proxy/service_cache_test.go
+  s_9d0bcc14b37a3f::t_881e121343cea4 105,129,200
+internal/proxy/service.go
+  s_9d0bcc14b37a3f::t_28fe6d4bffc003 608-610,974-976,1963-1965
+  s_9d0bcc14b37a3f::t_4c067b047a3881 611
+internal/proxy/failover_integration_test.go
+  s_9d0bcc14b37a3f::t_881e121343cea4 106-107,232
+internal/proxy/service_session_pin_test.go
+  s_9d0bcc14b37a3f::t_881e121343cea4 182,244,267,322,367,399,419,467,613,661,676,715,746,768,799,829-830,859-860,892,965,1000,1038
+internal/proxy/headers.go
+  s_9d0bcc14b37a3f::t_9cfc9e2c29859c 1-27
+internal/proxy/fallback.go
+  s_9d0bcc14b37a3f::t_87245ffc21d4fc 243,245-246
+internal/proxy/fallback_test.go
+  s_9d0bcc14b37a3f::t_881e121343cea4 140,468,480
+internal/proxy/turnloop_test.go
+  s_9d0bcc14b37a3f::t_881e121343cea4 139,164,192,225,253,286,317,341,414,443
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "756628962d6c61da1fb7c447286d55f475610ac6",
+  "prompts": {},
+  "sessions": {
+    "s_9d0bcc14b37a3f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d3163b21-663c-4687-b3ce-22590c69cb20",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

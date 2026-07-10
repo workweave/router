@@ -1,0 +1,26 @@
+install/install.sh
+  s_d3fc1c517ba243::t_752b7cdf9529f6 1822
+  s_d3fc1c517ba243::t_f2788f11c96a1a 1351
+  s_d3fc1c517ba243::t_baaddbb8d65d99 1327
+  s_d3fc1c517ba243::t_e9637b2876e29f 1428
+  s_d3fc1c517ba243::t_bb0568fb225317 1485
+  s_d3fc1c517ba243::t_1190eca5a5a416 1443
+  s_d3fc1c517ba243::t_87fc8dfeb6082b 1509
+  s_d3fc1c517ba243::t_1398703ce2fa4f 1390
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "442e81d1327282284e58ade123f76343078f97f4",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+internal/api/admin/keys.go
+  s_44940354a45fcf::t_dbf832282f275b 216-225
+  s_44940354a45fcf::t_db35018bae3096 9-10
+internal/api/admin/keys_test.go
+  s_44940354a45fcf::t_ad0e4d7e394abe 1-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "791b689de94d75e0a0db33fca9ad3819c772dee3",
+  "prompts": {},
+  "sessions": {
+    "s_44940354a45fcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63c0ede1-f992-4243-bc61-e6781eb3fd11",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

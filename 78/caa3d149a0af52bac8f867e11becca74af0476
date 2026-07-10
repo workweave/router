@@ -1,0 +1,24 @@
+internal/router/catalog/lookup.go
+  s_c4ecee41717be0::t_094bac1fd035f1 22-25,30
+  s_c4ecee41717be0::t_2c3e3b6aff7ae0 7-8
+internal/router/model.go
+  s_c4ecee41717be0::t_b7c36756c1e34f 41-49,56
+internal/router/catalog/catalog_test.go
+  s_c4ecee41717be0::t_e0e6f130163a31 63-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "78caa3d149a0af52bac8f867e11becca74af0476",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
