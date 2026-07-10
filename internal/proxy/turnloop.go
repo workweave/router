@@ -281,7 +281,7 @@ func (s *Service) runTurnLoop(
 			res.UsageBypass = true
 			return res, nil
 		}
-		decision, err := s.routeForServing(ctx, req)
+		decision, err := s.routeFor(ctx, req)
 		if err != nil {
 			return res, err
 		}
@@ -526,7 +526,7 @@ func (s *Service) runTurnLoop(
 		if constrained, ok := s.restrictToTier(req.ExcludedModels, forcedTierFloor); ok {
 			tierReq := req
 			tierReq.ExcludedModels = constrained
-			if dec, derr := s.routeForServing(ctx, tierReq); derr == nil {
+			if dec, derr := s.routeFor(ctx, tierReq); derr == nil {
 				fresh, routed = dec, true
 				log.Info("user-forced model evicted; rerouted to next-best in same tier",
 					"forced_tier", forcedTierFloor.String(),
@@ -540,7 +540,7 @@ func (s *Service) runTurnLoop(
 		}
 	}
 	if !routed {
-		dec, err := s.routeForServing(ctx, req)
+		dec, err := s.routeFor(ctx, req)
 		if err != nil {
 			log.Error("turnloop scorer failed", "err", err, "requested_model", req.RequestedModel)
 			return res, err

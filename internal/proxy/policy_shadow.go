@@ -43,6 +43,11 @@ type PolicyShadowDecision struct {
 	ModelsAgree                bool
 }
 
+func (s *Service) firePolicyShadowForServingDecision(ctx context.Context, serving router.Decision, req router.Request) {
+	req = s.withPolicyRequestContext(ctx, req)
+	s.firePolicyShadowDecision(ctx, router.StrategyFromContext(ctx), serving, req)
+}
+
 func (s *Service) firePolicyShadowDecision(ctx context.Context, servingStrategy router.Strategy, serving router.Decision, req router.Request) {
 	shadowStrategy, _ := ctx.Value(PolicyShadowStrategyContextKey{}).(router.Strategy)
 	if shadowStrategy == "" || shadowStrategy == servingStrategy {

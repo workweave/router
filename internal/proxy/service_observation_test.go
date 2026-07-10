@@ -125,6 +125,10 @@ func TestPolicyShadowComparisonSkipsDryRunAndCollectsServingRoute(t *testing.T) 
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-haiku-4-5",
 	}
+	scorerDecision := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-opus-4-7",
+	}
 	shadowRouter := &shadowRequestRouter{
 		decision: router.Decision{
 			Provider: providers.ProviderOpenAI,
@@ -141,7 +145,7 @@ func TestPolicyShadowComparisonSkipsDryRunAndCollectsServingRoute(t *testing.T) 
 	telem := newCaptureTelemetry()
 	shadowStrategy := router.Strategy("future-policy")
 	svc := proxy.NewService(
-		&fakeRouter{decision: serving},
+		&fakeRouter{decision: scorerDecision},
 		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
 		nil, false, nil, nil, false,
 		providers.ProviderAnthropic, "claude-haiku-4-5", telem,
@@ -157,7 +161,7 @@ func TestPolicyShadowComparisonSkipsDryRunAndCollectsServingRoute(t *testing.T) 
 	decision, err := svc.Route(ctx, router.Request{})
 
 	require.NoError(t, err)
-	assert.Equal(t, serving, decision)
+	assert.Equal(t, scorerDecision, decision)
 	select {
 	case <-shadowRouter.requests:
 		t.Fatal("dry-run route must not call the shadow policy")
@@ -165,7 +169,7 @@ func TestPolicyShadowComparisonSkipsDryRunAndCollectsServingRoute(t *testing.T) 
 	}
 
 	recorder := httptest.NewRecorder()
-	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"claude-opus-4-7","tools":[],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}}},"messages":[{"role":"user","content":"hello"}]}`)
 	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, recorder, request))
 
@@ -179,6 +183,7 @@ func TestPolicyShadowComparisonSkipsDryRunAndCollectsServingRoute(t *testing.T) 
 	assert.Equal(t, "rollout-1", row.RolloutID)
 	assert.True(t, row.TrainingAllowed)
 	assert.Equal(t, "cluster", row.ServingStrategy)
+	assert.Equal(t, serving.Model, row.ServingModel)
 	assert.Equal(t, "future-policy", row.ShadowStrategy)
 	assert.Equal(t, "gpt-5.5", row.ShadowModel)
 	assert.Equal(t, "shadow-route-1", row.ShadowRouteID)
