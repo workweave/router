@@ -73,6 +73,7 @@ func TestBuildConfiguredPolicySidecarsRejectsReservedAndInvalidConfiguration(t *
 	for _, raw := range []string{
 		`{"hmm":"https://sidecar.internal"}`,
 		`{"future":"not-a-url"}`,
+		`{"future policy":"https://sidecar.internal"}`,
 		`{"Future":"https://one.internal","future":"https://two.internal"}`,
 	} {
 		_, err := buildConfiguredPolicySidecars(

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +19,8 @@ import (
 )
 
 const maxConfiguredPolicySidecars = 16
+
+var configuredPolicyStrategyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 var reservedPolicyStrategies = map[router.Strategy]struct{}{
 	router.StrategyCluster: {},
@@ -59,6 +62,9 @@ func buildConfiguredPolicySidecars(
 		strategy := router.Strategy(strings.ToLower(strings.TrimSpace(configuredName)))
 		if strategy == "" {
 			return nil, fmt.Errorf("ROUTER_POLICY_SIDECARS contains an empty strategy")
+		}
+		if !configuredPolicyStrategyPattern.MatchString(string(strategy)) {
+			return nil, fmt.Errorf("ROUTER_POLICY_SIDECARS strategy %q must match %s", strategy, configuredPolicyStrategyPattern)
 		}
 		if _, reserved := reservedPolicyStrategies[strategy]; reserved {
 			return nil, fmt.Errorf("ROUTER_POLICY_SIDECARS strategy %q is reserved", strategy)
