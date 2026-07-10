@@ -153,6 +153,10 @@ export default function SettingsPage() {
 // gets tedious; for a couple of keys a search bar is just noise.
 const KEY_SEARCH_THRESHOLD = 5;
 
+// Shown in place of a name for keys created without one; kept in one place so the
+// list row and the search haystack stay in sync.
+const UNNAMED_KEY_LABEL = "Unnamed key";
+
 // Alphabetical by name, with unnamed keys pushed to the bottom.
 function compareKeysByName(a: APIKey, b: APIKey): number {
   if (a.name == null && b.name == null) return 0;
@@ -161,11 +165,15 @@ function compareKeysByName(a: APIKey, b: APIKey): number {
   return a.name.localeCompare(b.name);
 }
 
-// Case-insensitive substring match over the name and the visible key fragments,
-// so pasting the last few characters of a token also finds it.
+// Case-insensitive substring match over what the row actually shows: the label
+// ("Unnamed key" when there's no name), the raw prefix/suffix (so the last few
+// characters of a token match), and the exact "prefix…suffix" fingerprint that's
+// rendered, so pasting the visible fingerprint verbatim also finds it.
 function keyMatchesQuery(k: APIKey, query: string): boolean {
   if (query === "") return true;
-  const haystack = `${k.name ?? ""} ${k.key_prefix} ${k.key_suffix}`.toLowerCase();
+  const label = k.name ?? UNNAMED_KEY_LABEL;
+  const haystack =
+    `${label} ${k.key_prefix} ${k.key_suffix} ${k.key_prefix}…${k.key_suffix}`.toLowerCase();
   return haystack.includes(query);
 }
 
@@ -354,7 +362,7 @@ function RouterKeysPanel() {
                 <li key={k.id} className="flex items-center justify-between gap-3 px-5 py-3">
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-medium text-foreground">
-                      {k.name ?? "Unnamed key"}
+                      {k.name ?? UNNAMED_KEY_LABEL}
                     </div>
                     <p className="mt-0.5 truncate font-mono text-2xs text-muted-foreground">
                       {k.key_prefix}…{k.key_suffix}
