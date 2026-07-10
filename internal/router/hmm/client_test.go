@@ -37,10 +37,12 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 
 	decider := NewHTTPDecider(server.URL, server.Client(), 0)
 	result, err := decider.Decide(context.Background(), Query{
-		RouteID:      "route-1",
-		PromptText:   "hello",
-		FeedbackKey:  "feedback-session",
-		FeedbackRole: "default",
+		RouteID:        "route-1",
+		PromptText:     "hello",
+		FeedbackKey:    "feedback-session",
+		FeedbackRole:   "default",
+		OrganizationID: "org-test",
+		InstallationID: "installation-test",
 		ConversationMessages: []router.ConversationMessage{
 			{Role: "user", Text: "please explore the repo"},
 			{Role: "assistant", Text: "done"},
@@ -48,6 +50,7 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 			{Role: "user", ToolResults: []router.ConversationToolResult{{
 				ToolUseID: "toolu_123",
 				IsError:   true,
+				Text:      "large raw tool output",
 			}}},
 			{
 				Role: "user",
@@ -55,6 +58,7 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 				ToolCalls: []router.ConversationToolCall{{
 					Name:      "Read",
 					InputKeys: []string{"file_path"},
+					InputJSON: `{"file_path":"README.md"}`,
 				}},
 			},
 		},
@@ -88,6 +92,15 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 	assert.Equal(t, []string{"Read", "Grep"}, got.AvailableTools)
 	assert.Equal(t, "feedback-session", got.FeedbackKey)
 	assert.Equal(t, "default", got.FeedbackRole)
+	assert.Equal(t, "org-test", got.OrganizationID)
+	assert.Equal(t, "installation-test", got.InstallationID)
+	require.Len(t, got.TrainingMessages, 4)
+	require.Len(t, got.TrainingMessages[2].ToolResults, 1)
+	assert.Equal(t, "large raw tool output", got.TrainingMessages[2].ToolResults[0].Text)
+	assert.Empty(t, got.ConversationMessages[2].ToolResults[0].Text)
+	require.Len(t, got.TrainingMessages[3].ToolCalls, 1)
+	assert.Equal(t, `{"file_path":"README.md"}`, got.TrainingMessages[3].ToolCalls[0].InputJSON)
+	assert.Empty(t, got.ConversationMessages[3].ToolCalls[0].InputJSON)
 	assert.Equal(t, []string{"moonshotai/kimi-k2.7-code"}, got.CandidateModels)
 	assert.Equal(t, "moonshotai/kimi-k2.7-code", result.Model)
 	assert.Equal(t, "classifier_confidence", result.ScoreKind)

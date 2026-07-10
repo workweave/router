@@ -31,6 +31,8 @@ type Query struct {
 	AvailableTools       []string
 	FeedbackKey          string
 	FeedbackRole         string
+	OrganizationID       string
+	InstallationID       string
 	EstimatedInputTokens int
 	HasTools             bool
 	HasImages            bool
@@ -183,6 +185,8 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 		AvailableTools:       req.AvailableTools,
 		FeedbackKey:          req.FeedbackKey,
 		FeedbackRole:         req.FeedbackRole,
+		OrganizationID:       req.OrganizationID,
+		InstallationID:       req.InstallationID,
 		EstimatedInputTokens: req.EstimatedInputTokens,
 		HasTools:             req.HasTools,
 		HasImages:            req.HasImages,

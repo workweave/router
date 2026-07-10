@@ -188,6 +188,10 @@ func (s *Service) runTurnLoop(
 	req router.Request,
 ) (turnLoopResult, error) {
 	log := observability.FromContext(ctx)
+	req.OrganizationID, _ = ctx.Value(ExternalIDContextKey{}).(string)
+	if installationID != uuid.Nil {
+		req.InstallationID = installationID.String()
+	}
 	res := turnLoopResult{
 		InstallationID: installationID,
 		TurnType:       turntype.DetectFromEnvelope(env, feats, subAgentHint),

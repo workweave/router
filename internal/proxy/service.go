@@ -1526,6 +1526,8 @@ func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte) (decis
 	if embedFlag && feats.OnlyUserMessageText != "" {
 		promptText = feats.OnlyUserMessageText
 	}
+	organizationID, _ := ctx.Value(ExternalIDContextKey{}).(string)
+	installationID, _ := ctx.Value(InstallationIDContextKey{}).(string)
 
 	decision, err = s.Route(ctx, router.Request{
 		RequestedModel:       feats.Model,
@@ -1534,6 +1536,8 @@ func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte) (decis
 		PromptText:           promptText,
 		ConversationMessages: conversationMessagesForRouting(env),
 		AvailableTools:       availableToolsForRouting(env),
+		OrganizationID:       organizationID,
+		InstallationID:       installationID,
 		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
 	return decision, err

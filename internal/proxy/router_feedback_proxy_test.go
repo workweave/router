@@ -151,6 +151,7 @@ func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
 
 	installationID := uuid.New().String()
 	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyHMM)
+	ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, "org-test")
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
@@ -168,6 +169,7 @@ func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-6", payload["requested_model"])
 	assert.Equal(t, "claude-haiku-4-5", payload["served_model"])
 	assert.Equal(t, installationID, payload["installation_id"])
+	assert.Equal(t, "org-test", payload["organization_id"])
 	assert.NotEmpty(t, payload["feedback_key"])
 	assert.NotEmpty(t, payload["feedback_role"])
 }
@@ -189,7 +191,9 @@ func TestService_RouterFeedbackCommand_AcksBeforePolicyFeedbackCompletes(t *test
 	defer close(policyFeedback.release)
 	svc := newPinSvc(fr, store).WithHMMRouter(policyFeedback)
 
-	ctx := router.WithStrategy(authedCtx(uuid.NewString()), router.StrategyHMM)
+	installationID := uuid.NewString()
+	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyHMM)
+	ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, "org-test")
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	done := make(chan error, 1)
@@ -246,13 +250,17 @@ func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T)
 		WithHMMRouter(policyFeedback).
 		WithAvailableModels(map[string]struct{}{"claude-haiku-4-5": {}}).
 		WithCompaction(nil, proxy.DefaultCompactionTriggerPct)
-	ctx := router.WithStrategy(authedCtx(uuid.NewString()), router.StrategyHMM)
+	installationID := uuid.NewString()
+	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyHMM)
+	ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, "org-test")
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, routeBody, httptest.NewRecorder(), httpReq))
 
 	requests := policyFeedback.Requests()
 	require.Len(t, requests, 1)
 	assert.Equal(t, rawFeedbackKey, requests[0].FeedbackKey)
+	assert.Equal(t, "org-test", requests[0].OrganizationID)
+	assert.Equal(t, installationID, requests[0].InstallationID)
 
 	feedbackBody := []byte(`{
 		"model":"claude-haiku-4-5",

@@ -89,9 +89,12 @@ type routeRequest struct {
 	LatestUserText       string            `json:"latest_user_text,omitempty"`
 	TurnIndex            int               `json:"turn_index"`
 	ConversationMessages []routeMessage    `json:"conversation_messages,omitempty"`
+	TrainingMessages     []routeMessage    `json:"training_conversation_messages,omitempty"`
 	AvailableTools       []string          `json:"available_tools,omitempty"`
 	FeedbackKey          string            `json:"feedback_key,omitempty"`
 	FeedbackRole         string            `json:"feedback_role,omitempty"`
+	OrganizationID       string            `json:"organization_id,omitempty"`
+	InstallationID       string            `json:"installation_id,omitempty"`
 	EstimatedInputTokens int               `json:"estimated_input_tokens"`
 	HasTools             bool              `json:"has_tools"`
 	HasImages            bool              `json:"has_images"`
@@ -109,11 +112,13 @@ type routeMessage struct {
 type routeToolCall struct {
 	Name      string   `json:"name,omitempty"`
 	InputKeys []string `json:"input_keys,omitempty"`
+	InputJSON string   `json:"input_json,omitempty"`
 }
 
 type routeToolResult struct {
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	IsError   bool   `json:"is_error,omitempty"`
+	Text      string `json:"text,omitempty"`
 }
 
 type routeResponse struct {
@@ -147,15 +152,19 @@ func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
 		providers[c.RosterID] = c.Provider
 	}
 	messages := routeMessages(q.ConversationMessages)
+	trainingMessages := trainingRouteMessages(q.ConversationMessages)
 	body, err := json.Marshal(routeRequest{
 		RouteID:              q.RouteID,
 		PromptText:           q.PromptText,
 		LatestUserText:       latestUserText(messages),
 		TurnIndex:            turnIndex(messages),
 		ConversationMessages: messages,
+		TrainingMessages:     trainingMessages,
 		AvailableTools:       clipRouteValues(q.AvailableTools, maxRouteToolCallInputKeys, maxRouteToolCallInputChars),
 		FeedbackKey:          q.FeedbackKey,
 		FeedbackRole:         q.FeedbackRole,
+		OrganizationID:       q.OrganizationID,
+		InstallationID:       q.InstallationID,
 		EstimatedInputTokens: q.EstimatedInputTokens,
 		HasTools:             q.HasTools,
 		HasImages:            q.HasImages,
@@ -213,13 +222,40 @@ func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
 	}, nil
 }
 
+type routeMessageLimits struct {
+	maxMessages           int
+	maxTextChars          int
+	maxTotalTextChars     int
+	maxToolCallInputKeys  int
+	maxToolCallInputChars int
+	includeToolCallInput  bool
+	includeToolResultText bool
+}
+
 func routeMessages(messages []router.ConversationMessage) []routeMessage {
+	return convertRouteMessages(messages, routeMessageLimits{
+		maxMessages:           maxRouteMessages,
+		maxTextChars:          maxRouteMessageTextChars,
+		maxTotalTextChars:     maxRouteMessageTotalChars,
+		maxToolCallInputKeys:  maxRouteToolCallInputKeys,
+		maxToolCallInputChars: maxRouteToolCallInputChars,
+	})
+}
+
+func trainingRouteMessages(messages []router.ConversationMessage) []routeMessage {
+	return convertRouteMessages(messages, routeMessageLimits{
+		includeToolCallInput:  true,
+		includeToolResultText: true,
+	})
+}
+
+func convertRouteMessages(messages []router.ConversationMessage, limits routeMessageLimits) []routeMessage {
 	if len(messages) == 0 {
 		return nil
 	}
 	start := 0
-	if len(messages) > maxRouteMessages {
-		start = len(messages) - maxRouteMessages
+	if limits.maxMessages > 0 && len(messages) > limits.maxMessages {
+		start = len(messages) - limits.maxMessages
 	}
 	reversed := make([]routeMessage, 0, len(messages)-start)
 	totalText := 0
@@ -229,9 +265,9 @@ func routeMessages(messages []router.ConversationMessage) []routeMessage {
 		if role == "" {
 			continue
 		}
-		text := clipRouteText(msg.Text, maxRouteMessageTextChars)
-		if totalText+len(text) > maxRouteMessageTotalChars {
-			remaining := maxRouteMessageTotalChars - totalText
+		text := clipRouteText(msg.Text, limits.maxTextChars)
+		if limits.maxTotalTextChars > 0 && totalText+len(text) > limits.maxTotalTextChars {
+			remaining := limits.maxTotalTextChars - totalText
 			if remaining <= 0 {
 				text = ""
 			} else {
@@ -241,31 +277,39 @@ func routeMessages(messages []router.ConversationMessage) []routeMessage {
 		totalText += len(text)
 		calls := make([]routeToolCall, 0, len(msg.ToolCalls))
 		for _, call := range msg.ToolCalls {
-			name := clipRouteText(call.Name, maxRouteToolCallInputChars)
+			name := clipRouteText(call.Name, limits.maxToolCallInputChars)
 			if name == "" {
 				continue
 			}
 			keys := call.InputKeys
-			if len(keys) > maxRouteToolCallInputKeys {
-				keys = keys[:maxRouteToolCallInputKeys]
+			if limits.maxToolCallInputKeys > 0 && len(keys) > limits.maxToolCallInputKeys {
+				keys = keys[:limits.maxToolCallInputKeys]
 			}
 			inputKeys := make([]string, 0, len(keys))
 			for _, key := range keys {
-				if clipped := clipRouteText(key, maxRouteToolCallInputChars); clipped != "" {
+				if clipped := clipRouteText(key, limits.maxToolCallInputChars); clipped != "" {
 					inputKeys = append(inputKeys, clipped)
 				}
 			}
-			calls = append(calls, routeToolCall{
+			routeCall := routeToolCall{
 				Name:      name,
 				InputKeys: inputKeys,
-			})
+			}
+			if limits.includeToolCallInput {
+				routeCall.InputJSON = clipRouteText(call.InputJSON, limits.maxTextChars)
+			}
+			calls = append(calls, routeCall)
 		}
 		results := make([]routeToolResult, 0, len(msg.ToolResults))
 		for _, result := range msg.ToolResults {
-			results = append(results, routeToolResult{
-				ToolUseID: clipRouteText(result.ToolUseID, maxRouteToolCallInputChars),
+			routeResult := routeToolResult{
+				ToolUseID: clipRouteText(result.ToolUseID, limits.maxToolCallInputChars),
 				IsError:   result.IsError,
-			})
+			}
+			if limits.includeToolResultText {
+				routeResult.Text = clipRouteText(result.Text, limits.maxTextChars)
+			}
+			results = append(results, routeResult)
 		}
 		if text == "" && len(calls) == 0 && len(results) == 0 {
 			continue

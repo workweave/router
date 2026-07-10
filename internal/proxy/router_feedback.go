@@ -114,7 +114,7 @@ func (s *Service) handleRouterFeedbackCommand(
 		}
 	}
 	if router.StrategyFromContext(ctx) == router.StrategyHMM {
-		s.reportRouterFeedback(ctx, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback)
+		s.reportRouterFeedback(ctx, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback)
 	}
 
 	now := time.Now()
@@ -151,6 +151,7 @@ func (s *Service) handleRouterFeedbackCommand(
 
 func (s *Service) reportRouterFeedback(
 	ctx context.Context,
+	organizationID string,
 	installationID uuid.UUID,
 	sessionKey [sessionpin.SessionKeyLen]byte,
 	role string,
@@ -174,6 +175,9 @@ func (s *Service) reportRouterFeedback(
 		"router_user_id":    routerUserID,
 		"client_app":        clientID.ClientApp,
 		"client_session_id": clientID.SessionID,
+	}
+	if organizationID != "" {
+		payload["organization_id"] = organizationID
 	}
 	if installationID != uuid.Nil {
 		payload["installation_id"] = installationID.String()

@@ -40,6 +40,10 @@ type Request struct {
 	// sidecar routers that accept per-session feedback.
 	FeedbackKey  string
 	FeedbackRole string
+	// OrganizationID and InstallationID attribute durable sidecar learning
+	// records to the authenticated tenant. They never affect model selection.
+	OrganizationID string
+	InstallationID string
 	// Per-request provider gating — nil means unrestricted.
 	EnabledProviders map[string]struct{}
 	// Per-request model exclusion — nil or empty means no exclusion.
@@ -71,11 +75,13 @@ type ConversationMessage struct {
 type ConversationToolCall struct {
 	Name      string
 	InputKeys []string
+	InputJSON string
 }
 
 type ConversationToolResult struct {
 	ToolUseID string
 	IsError   bool
+	Text      string
 }
 
 type Decision struct {

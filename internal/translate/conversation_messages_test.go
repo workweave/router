@@ -67,6 +67,7 @@ func TestConversationMessagesPreservesAnthropicToolResultMarker(t *testing.T) {
 	require.Len(t, messages[0].ToolResults, 1)
 	assert.Equal(t, "toolu_123", messages[0].ToolResults[0].ToolUseID)
 	assert.True(t, messages[0].ToolResults[0].IsError)
+	assert.Equal(t, "large raw tool output", messages[0].ToolResults[0].Text)
 }
 
 func TestConversationMessagesPreservesOpenAIToolResultMarker(t *testing.T) {
@@ -84,10 +85,12 @@ func TestConversationMessagesPreservesOpenAIToolResultMarker(t *testing.T) {
 	assert.Equal(t, "assistant", messages[0].Role)
 	require.Len(t, messages[0].ToolCalls, 1)
 	assert.Equal(t, "Read", messages[0].ToolCalls[0].Name)
+	assert.Equal(t, `{"file_path":"README.md"}`, messages[0].ToolCalls[0].InputJSON)
 	assert.Equal(t, "user", messages[1].Role)
 	assert.Empty(t, messages[1].Text)
 	require.Len(t, messages[1].ToolResults, 1)
 	assert.Equal(t, "call_123", messages[1].ToolResults[0].ToolUseID)
+	assert.Equal(t, "large raw tool output", messages[1].ToolResults[0].Text)
 }
 
 func TestConversationMessagesPreservesGeminiToolResultMarker(t *testing.T) {

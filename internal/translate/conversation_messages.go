@@ -18,11 +18,13 @@ type ConversationMessage struct {
 type ConversationToolCall struct {
 	Name      string
 	InputKeys []string
+	InputJSON string
 }
 
 type ConversationToolResult struct {
 	ToolUseID string
 	IsError   bool
+	Text      string
 }
 
 // ConversationMessages returns provider-neutral visible message history.
@@ -136,6 +138,7 @@ func anthropicToolCalls(content gjson.Result) []ConversationToolCall {
 		calls = append(calls, ConversationToolCall{
 			Name:      name,
 			InputKeys: objectKeys(block.Get("input")),
+			InputJSON: strings.TrimSpace(block.Get("input").Raw),
 		})
 		return true
 	})
@@ -154,6 +157,7 @@ func anthropicToolResults(content gjson.Result) []ConversationToolResult {
 		results = append(results, ConversationToolResult{
 			ToolUseID: strings.TrimSpace(block.Get("tool_use_id").String()),
 			IsError:   block.Get("is_error").Bool(),
+			Text:      strings.TrimSpace(contentTextGJSON(block.Get("content"))),
 		})
 		return true
 	})
@@ -177,6 +181,7 @@ func openAIToolCalls(value gjson.Result) []ConversationToolCall {
 		calls = append(calls, ConversationToolCall{
 			Name:      name,
 			InputKeys: jsonObjectKeys(function.Get("arguments").String()),
+			InputJSON: strings.TrimSpace(function.Get("arguments").String()),
 		})
 		return true
 	})
@@ -187,6 +192,7 @@ func openAIToolResults(msg gjson.Result) []ConversationToolResult {
 	result := ConversationToolResult{
 		ToolUseID: strings.TrimSpace(msg.Get("tool_call_id").String()),
 		IsError:   msg.Get("is_error").Bool() || strings.EqualFold(strings.TrimSpace(msg.Get("status").String()), "error"),
+		Text:      strings.TrimSpace(openAIContentTextGJSON(msg.Get("content"))),
 	}
 	return []ConversationToolResult{result}
 }
@@ -215,6 +221,7 @@ func geminiToolCalls(parts gjson.Result) []ConversationToolCall {
 		calls = append(calls, ConversationToolCall{
 			Name:      name,
 			InputKeys: objectKeys(args),
+			InputJSON: strings.TrimSpace(args.Raw),
 		})
 		return true
 	})
@@ -236,10 +243,25 @@ func geminiToolResults(parts gjson.Result) []ConversationToolResult {
 		}
 		results = append(results, ConversationToolResult{
 			ToolUseID: strings.TrimSpace(resp.Get("name").String()),
+			Text:      strings.TrimSpace(geminiFunctionResponseText(resp)),
 		})
 		return true
 	})
 	return results
+}
+
+func geminiFunctionResponseText(resp gjson.Result) string {
+	response := resp.Get("response")
+	if !response.Exists() {
+		return ""
+	}
+	if result := response.Get("result"); result.Exists() {
+		if result.Type == gjson.String {
+			return result.String()
+		}
+		return result.Raw
+	}
+	return response.Raw
 }
 
 func objectKeys(value gjson.Result) []string {

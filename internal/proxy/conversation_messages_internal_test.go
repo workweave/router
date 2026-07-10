@@ -31,9 +31,11 @@ func TestConversationMessagesForRoutingConvertsAtProxyBoundary(t *testing.T) {
 	require.Len(t, messages[0].ToolCalls, 1)
 	assert.Equal(t, "Read", messages[0].ToolCalls[0].Name)
 	assert.Equal(t, []string{"file_path"}, messages[0].ToolCalls[0].InputKeys)
+	assert.Equal(t, `{"file_path":"README.md"}`, messages[0].ToolCalls[0].InputJSON)
 	assert.Equal(t, "user", messages[1].Role)
 	assert.Empty(t, messages[1].Text)
 	require.Len(t, messages[1].ToolResults, 1)
 	assert.Equal(t, "toolu_123", messages[1].ToolResults[0].ToolUseID)
 	assert.True(t, messages[1].ToolResults[0].IsError)
+	assert.Equal(t, "raw output", messages[1].ToolResults[0].Text)
 }
