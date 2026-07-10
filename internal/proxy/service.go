@@ -1477,9 +1477,9 @@ func (s *Service) PolicyCapabilities(strategy router.Strategy) (policy.Capabilit
 	return registered.capabilities, ok
 }
 
-// PolicyStrategyAvailable reports whether a strategy has a live serving
-// implementation. Registration remains visible when a sidecar is missing so
-// that configuration fails closed instead of silently changing strategies.
+// PolicyStrategyAvailable reports whether a strategy has a live router.
+// Registration stays visible when a sidecar is absent so callers see the gap
+// rather than silently falling back to a different strategy.
 func (s *Service) PolicyStrategyAvailable(strategy router.Strategy) bool {
 	if strategy == router.StrategyCluster {
 		return s != nil && s.router != nil
