@@ -163,6 +163,8 @@ Settings → Models override above. See [install/README.md](install/README.md#sw
 
 - 📐 [**Configuration reference**](docs/CONFIGURATION.md): every env var,
   BYOK encryption, OTel knobs, cluster routing.
+- [**Policy router harness**](docs/POLICY_ROUTER_HARNESS.md): contract and
+  rollout checklist for adding an out-of-process policy model.
 - 🛠️ [**Contributing**](CONTRIBUTING.md): layering rules, hot-reload dev,
   migrations, tests, the whole engineering loop.
 - 🏗️ [**Architecture**](AGENTS.md): package layout, import contracts,

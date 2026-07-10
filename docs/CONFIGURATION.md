@@ -10,6 +10,7 @@ This page is the exhaustive reference; the [README](../README.md) has the
 - [Postgres](#postgres)
 - [Server](#server)
 - [Routing](#routing)
+- [Policy sidecars](#policy-sidecars)
 - [BYOK encryption](#byok-encryption)
 - [Telemetry (OpenTelemetry)](#telemetry-opentelemetry)
 - [Cluster-routing artifacts](#cluster-routing-artifacts)
@@ -64,6 +65,7 @@ Set `DATABASE_URL` directly, or compose it from the individual vars:
 
 | Variable                          | Default                      | Purpose |
 | --------------------------------- | ---------------------------- | ------- |
+| `ROUTER_DEFAULT_STRATEGY`         | `cluster`                    | Strategy used when an installation has no persisted strategy. Change only after the policy rollout gate passes. |
 | `ROUTER_CLUSTER_VERSION`          | *(reads `artifacts/latest`)* | Pin a specific cluster artifact version (e.g. `v0.27`). |
 | `ROUTER_CLUSTER_EMBED_TIMEOUT_MS` | `200`                        | Per-request ONNX embed timeout. Increase for slower hosts. |
 | `ROUTER_EMBED_ONLY_USER_MESSAGE`  | `true`                       | Feed only user-role text to the embedder. Set `false` to embed the full concatenated turn. |
@@ -78,6 +80,44 @@ Set `DATABASE_URL` directly, or compose it from the individual vars:
 If the cluster scorer can't run (missing model, embed timeout, etc.), the
 router returns HTTP 503 — it does *not* silently fall back to a default
 model. Failures are loud by design.
+
+## Policy sidecars
+
+Out-of-process policy routers use the versioned contract in
+[Policy router harness](POLICY_ROUTER_HARNESS.md). The router remains the
+authority for candidate eligibility, provider binding, dispatch, retries,
+privacy context, and telemetry.
+
+| Variable                           | Default | Purpose |
+| ---------------------------------- | ------- | ------- |
+| `ROUTER_POLICY_SIDECARS`           | *(none)* | JSON object mapping a new strategy ID to its sidecar origin, for example `{"quality-v2":"https://quality-v2.internal"}`. IDs must match `[a-z][a-z0-9_-]{0,63}`. At most 16 may be configured. `cluster`, `rl`, `hmm`, and `bandit` are reserved. |
+| `ROUTER_POLICY_SIDECAR_TIMEOUT_MS` | `3000`  | Total timeout for each generic policy decision, including transient retries. Also bounds startup capability discovery. |
+| `ROUTER_HMM_SIDECAR_URL`           | *(none)* | Legacy built-in HMM registration. Prefer the generic map for new strategies. |
+| `ROUTER_HMM_SIDECAR_TIMEOUT_MS`    | `3000`  | Total HMM decision timeout. |
+| `ROUTER_RL_SIDECAR_URL`            | *(none)* | Legacy built-in RL registration. Prefer the generic map for new strategies. |
+| `ROUTER_RL_SIDECAR_TIMEOUT_MS`     | `3000`  | Total RL decision timeout. |
+
+`GET /capabilities` is queried at router startup. A failed probe does not
+silently remove the strategy: serving stays registered and fails closed if
+`POST /route` is unavailable, while optional outcome and feedback callbacks
+remain disabled until the next successful restart. This keeps persisted
+rollout state visible without pretending that a different strategy served.
+
+Policy route requests retry network failures and HTTP 500, 502, 503, and 504
+up to three attempts within the configured total timeout. Other failures are
+not retried. An unavailable or invalid policy decision returns HTTP 503; it
+never falls back to cluster or another policy.
+
+Selection precedence is:
+
+1. An authorized internal `x-weave-router-strategy` request override.
+2. The installation's persisted strategy.
+3. `ROUTER_DEFAULT_STRATEGY`.
+
+The request header is ignored unless the installation explicitly enables
+policy-header overrides. `x-weave-router-debug` follows the same authorization
+rule and cannot enable training. Shadow decisions are always non-dispatching,
+non-debug, and non-learning.
 
 ## BYOK encryption
 
