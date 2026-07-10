@@ -28,6 +28,17 @@ type observationContext struct {
 	// RouteID is the opaque sidecar correlation id (HMM/RL) that joins a route
 	// decision to its outcome report. Empty for the default cluster scorer.
 	RouteID string
+	// Policy contract metadata is strategy-neutral and remains stable as new
+	// policy routers are registered.
+	PolicyRouteKey       string
+	PolicyArtifactID     string
+	PolicyArtifactSHA256 string
+	RosterVersion        string
+	SidecarSchemaVersion string
+	TrainingAllowed      bool
+	CaptureMode          string
+	// DebugRef is retained only for requests with authorized debug mode.
+	DebugRef string
 	// TTFTMs is the upstream-request-to-first-byte delta in ms. Pointer because
 	// zero is a legitimate sub-millisecond measurement.
 	TTFTMs *int64
@@ -51,8 +62,13 @@ type observationContext struct {
 // decision and request context. Nil-safe. fresh is the scorer's recommendation
 // this turn, which differs from decision on STAY (decision rehydrates from the
 // pin); fresh's scores are captured separately to measure the hysteresis downgrade lever.
-func buildObservationContext(ctx context.Context, decision, fresh router.Decision) observationContext {
-	obs := observationContext{}
+func buildObservationContext(ctx context.Context, decision, fresh router.Decision, captureMode ContentCaptureMode) observationContext {
+	trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
+	debugEnabled, _ := ctx.Value(PolicyDebugEnabledContextKey{}).(bool)
+	obs := observationContext{
+		TrainingAllowed: trainingAllowed,
+		CaptureMode:     captureMode.String(),
+	}
 	// Only label when a router actually ran: served decision has metadata, or fresh scorer ran on STAY.
 	// Hard-pins bypass routing entirely — leave strategy NULL so pin-served turns don't inflate counts.
 	if decision.Metadata != nil || fresh.Model != "" {
@@ -89,6 +105,14 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 			obs.Strategy = md.Strategy
 		}
 		obs.RouteID = md.RouteID
+		obs.PolicyRouteKey = md.PolicyRouteKey
+		obs.PolicyArtifactID = md.PolicyArtifactID
+		obs.PolicyArtifactSHA256 = md.PolicyArtifactSHA256
+		obs.RosterVersion = md.RosterVersion
+		obs.SidecarSchemaVersion = md.SidecarSchemaVersion
+		if debugEnabled {
+			obs.DebugRef = md.DebugRef
+		}
 		// Gate on Propensity>0, not CandidateScores: sidecar routers (HMM) set Propensity without a score vector.
 		if md.Propensity > 0 {
 			prop := float64(md.Propensity)
@@ -104,10 +128,31 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 			}
 		}
 	}
-	// Sticky HMM turns: served pin has nil metadata while fresh holds the sidecar RouteID
-	// policyOutcomeRoute reports against — fall back or telemetry route_id goes NULL on joins.
-	if obs.RouteID == "" && fresh.Metadata != nil {
-		obs.RouteID = fresh.Metadata.RouteID
+	// Sticky policy turns: the served pin has nil metadata while fresh holds the
+	// sidecar decision policyOutcomeRoute reports against. Fill only policy
+	// fields here; final-decision score fields intentionally remain NULL.
+	if md := fresh.Metadata; md != nil {
+		if obs.RouteID == "" {
+			obs.RouteID = md.RouteID
+		}
+		if obs.PolicyRouteKey == "" {
+			obs.PolicyRouteKey = md.PolicyRouteKey
+		}
+		if obs.PolicyArtifactID == "" {
+			obs.PolicyArtifactID = md.PolicyArtifactID
+		}
+		if obs.PolicyArtifactSHA256 == "" {
+			obs.PolicyArtifactSHA256 = md.PolicyArtifactSHA256
+		}
+		if obs.RosterVersion == "" {
+			obs.RosterVersion = md.RosterVersion
+		}
+		if obs.SidecarSchemaVersion == "" {
+			obs.SidecarSchemaVersion = md.SidecarSchemaVersion
+		}
+		if debugEnabled && obs.DebugRef == "" {
+			obs.DebugRef = md.DebugRef
+		}
 	}
 	if t := timing.TimingFrom(ctx); t != nil {
 		if ms := t.Ms(&t.UpstreamRequestNanos, &t.UpstreamFirstByteNanos); ms > 0 {
@@ -144,6 +189,26 @@ func (o observationContext) applySpanAttrs(b *otel.AttrBuilder) {
 	}
 	if o.RouteID != "" {
 		b.String("routing.route_id", o.RouteID)
+	}
+	if o.PolicyRouteKey != "" {
+		b.String("routing.policy_route_key", o.PolicyRouteKey)
+	}
+	if o.PolicyArtifactID != "" {
+		b.String("routing.policy_artifact_id", o.PolicyArtifactID)
+	}
+	if o.PolicyArtifactSHA256 != "" {
+		b.String("routing.policy_artifact_sha256", o.PolicyArtifactSHA256)
+	}
+	if o.RosterVersion != "" {
+		b.String("routing.roster_version", o.RosterVersion)
+	}
+	if o.SidecarSchemaVersion != "" {
+		b.String("routing.sidecar_schema_version", o.SidecarSchemaVersion)
+	}
+	b.Bool("routing.training_allowed", o.TrainingAllowed)
+	b.String("routing.capture_mode", o.CaptureMode)
+	if o.DebugRef != "" {
+		b.String("routing.debug_ref", o.DebugRef)
 	}
 	if o.TTFTMs != nil {
 		b.Int64("latency.ttft_ms", *o.TTFTMs)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/router"
 
 	"github.com/stretchr/testify/assert"
@@ -37,7 +38,7 @@ func TestBuildObservationContext_CapturesFreshOnStay(t *testing.T) {
 		},
 	}
 
-	obs := buildObservationContext(context.Background(), served, fresh)
+	obs := buildObservationContext(context.Background(), served, fresh, CaptureOff)
 
 	// Final-decision columns stay NULL on a STAY (served pin has no metadata).
 	assert.Nil(t, obs.CandidateScores, "final CandidateScores must be NULL on a STAY")
@@ -58,7 +59,7 @@ func TestBuildObservationContext_CapturesFreshOnStay(t *testing.T) {
 func TestBuildObservationContext_NoScorerLeavesFreshNull(t *testing.T) {
 	served := router.Decision{Provider: "anthropic", Model: "claude-opus-4-8", Reason: "tool_result_sc"}
 
-	obs := buildObservationContext(context.Background(), served, router.Decision{})
+	obs := buildObservationContext(context.Background(), served, router.Decision{}, CaptureOff)
 
 	assert.Empty(t, obs.FreshDecisionModel)
 	assert.Nil(t, obs.FreshCandidateScores)
@@ -72,22 +73,68 @@ func TestBuildObservationContext_CapturesHMMStrategy(t *testing.T) {
 		Model:    "claude-haiku-4-5",
 		Reason:   "hmm_policy(label=explore)",
 		Metadata: &router.RoutingMetadata{
-			CandidateModels: []string{"claude-opus-4-8", "claude-haiku-4-5"},
-			ChosenScore:     0.71,
-			Strategy:        string(router.StrategyHMM),
-			RouteID:         "route-abc-123",
-			Propensity:      1.0,
+			CandidateModels:      []string{"claude-opus-4-8", "claude-haiku-4-5"},
+			ChosenScore:          0.71,
+			Strategy:             string(router.StrategyHMM),
+			RouteID:              "route-abc-123",
+			PolicyRouteKey:       "medium|open",
+			PolicyArtifactID:     "hmm-prod",
+			PolicyArtifactSHA256: "sha256:abc",
+			RosterVersion:        "roster-v2",
+			SidecarSchemaVersion: "policy_router_v1",
+			DebugRef:             "debug-1",
+			Propensity:           1.0,
 		},
 	}
 
-	obs := buildObservationContext(context.Background(), served, router.Decision{})
+	ctx := context.WithValue(context.Background(), PolicyTrainingAllowedContextKey{}, true)
+	ctx = context.WithValue(ctx, PolicyDebugEnabledContextKey{}, true)
+	obs := buildObservationContext(ctx, served, router.Decision{}, CaptureHashed)
 
 	assert.Equal(t, "hmm", obs.Strategy)
 	assert.Equal(t, "route-abc-123", obs.RouteID)
+	assert.Equal(t, "medium|open", obs.PolicyRouteKey)
+	assert.Equal(t, "hmm-prod", obs.PolicyArtifactID)
+	assert.Equal(t, "sha256:abc", obs.PolicyArtifactSHA256)
+	assert.Equal(t, "roster-v2", obs.RosterVersion)
+	assert.Equal(t, "policy_router_v1", obs.SidecarSchemaVersion)
+	assert.True(t, obs.TrainingAllowed)
+	assert.Equal(t, "hashed", obs.CaptureMode)
+	assert.Equal(t, "debug-1", obs.DebugRef)
 	require.NotNil(t, obs.Propensity, "HMM propensity must survive without a score vector")
 	assert.InDelta(t, 1.0, *obs.Propensity, 1e-6)
 	// Sidecar sent no candidate-score map, so that column stays NULL.
 	assert.Nil(t, obs.CandidateScores)
+
+	builder := otel.NewAttrBuilder(16)
+	obs.applySpanAttrs(builder)
+	attrs := make(map[string]any)
+	for _, attr := range builder.Build() {
+		switch attr.Key {
+		case "routing.training_allowed":
+			attrs[attr.Key] = attr.Value.GetBoolValue()
+		default:
+			attrs[attr.Key] = attr.Value.GetStringValue()
+		}
+	}
+	assert.Equal(t, "medium|open", attrs["routing.policy_route_key"])
+	assert.Equal(t, "hmm-prod", attrs["routing.policy_artifact_id"])
+	assert.Equal(t, "sha256:abc", attrs["routing.policy_artifact_sha256"])
+	assert.Equal(t, "roster-v2", attrs["routing.roster_version"])
+	assert.Equal(t, "policy_router_v1", attrs["routing.sidecar_schema_version"])
+	assert.Equal(t, true, attrs["routing.training_allowed"])
+	assert.Equal(t, "hashed", attrs["routing.capture_mode"])
+	assert.Equal(t, "debug-1", attrs["routing.debug_ref"])
+}
+
+func TestBuildObservationContext_SuppressesDebugRefWithoutDebugMode(t *testing.T) {
+	served := router.Decision{Metadata: &router.RoutingMetadata{DebugRef: "private-debug-ref"}}
+
+	obs := buildObservationContext(context.Background(), served, router.Decision{}, CaptureOff)
+
+	assert.Empty(t, obs.DebugRef)
+	assert.False(t, obs.TrainingAllowed)
+	assert.Equal(t, "off", obs.CaptureMode)
 }
 
 // TestBuildObservationContext_DefaultsStrategyToActive verifies Strategy falls back to the
@@ -103,7 +150,7 @@ func TestBuildObservationContext_DefaultsStrategyToActive(t *testing.T) {
 		},
 	}
 
-	obs := buildObservationContext(context.Background(), served, router.Decision{})
+	obs := buildObservationContext(context.Background(), served, router.Decision{}, CaptureOff)
 
 	assert.Equal(t, string(router.StrategyCluster), obs.Strategy)
 	assert.Empty(t, obs.RouteID)
@@ -126,7 +173,7 @@ func TestBuildObservationContext_StickyHMMRouteIDFromFresh(t *testing.T) {
 	}
 
 	ctx := router.WithStrategy(context.Background(), router.StrategyHMM)
-	obs := buildObservationContext(ctx, served, fresh)
+	obs := buildObservationContext(ctx, served, fresh, CaptureOff)
 
 	assert.Equal(t, "route-sticky-1", obs.RouteID, "route_id must fall back to fresh on a sticky HMM turn")
 	assert.Equal(t, "hmm", obs.Strategy, "active strategy labels the sticky turn even with a metadata-less pin")
@@ -139,7 +186,7 @@ func TestBuildObservationContext_HardPinLeavesStrategyNull(t *testing.T) {
 
 	// Request opted into HMM, but this turn was hard-pinned and never scored.
 	ctx := router.WithStrategy(context.Background(), router.StrategyHMM)
-	obs := buildObservationContext(ctx, served, router.Decision{})
+	obs := buildObservationContext(ctx, served, router.Decision{}, CaptureOff)
 
 	assert.Empty(t, obs.Strategy, "hard-pin turn must not claim the active strategy produced it")
 	assert.Empty(t, obs.RouteID)

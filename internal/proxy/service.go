@@ -2750,7 +2750,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	applyPlannerAttrs(upstreamBuilder, routeRes)
 	addTimingAttrs(ctx, upstreamBuilder)
 
-	obs := buildObservationContext(ctx, decision, routeRes.Fresh)
+	obs := buildObservationContext(ctx, decision, routeRes.Fresh, s.captureMode)
 	obs.applySpanAttrs(upstreamBuilder)
 
 	otel.Record(ctx, otel.Span{
@@ -2819,6 +2819,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			ClusterRouterVersion:   obs.ClusterRouterVersion,
 			Strategy:               obs.Strategy,
 			RouteID:                obs.RouteID,
+			PolicyRouteKey:         obs.PolicyRouteKey,
+			PolicyArtifactID:       obs.PolicyArtifactID,
+			PolicyArtifactSHA256:   obs.PolicyArtifactSHA256,
+			RosterVersion:          obs.RosterVersion,
+			SidecarSchemaVersion:   obs.SidecarSchemaVersion,
+			TrainingAllowed:        obs.TrainingAllowed,
+			CaptureMode:            obs.CaptureMode,
+			DebugRef:               obs.DebugRef,
 			TTFTMs:                 obs.TTFTMs,
 			CacheCreationTokens:    cacheTokenPtr(cacheCreation),
 			CacheReadTokens:        cacheTokenPtr(cacheRead),
@@ -4387,7 +4395,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	applyPlannerAttrs(openaiUpstreamBuilder, routeRes)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
 
-	openaiObs := buildObservationContext(ctx, decision, routeRes.Fresh)
+	openaiObs := buildObservationContext(ctx, decision, routeRes.Fresh, s.captureMode)
 	openaiObs.applySpanAttrs(openaiUpstreamBuilder)
 
 	otel.Record(ctx, otel.Span{
@@ -4464,6 +4472,14 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			ClusterRouterVersion:   openaiObs.ClusterRouterVersion,
 			Strategy:               openaiObs.Strategy,
 			RouteID:                openaiObs.RouteID,
+			PolicyRouteKey:         openaiObs.PolicyRouteKey,
+			PolicyArtifactID:       openaiObs.PolicyArtifactID,
+			PolicyArtifactSHA256:   openaiObs.PolicyArtifactSHA256,
+			RosterVersion:          openaiObs.RosterVersion,
+			SidecarSchemaVersion:   openaiObs.SidecarSchemaVersion,
+			TrainingAllowed:        openaiObs.TrainingAllowed,
+			CaptureMode:            openaiObs.CaptureMode,
+			DebugRef:               openaiObs.DebugRef,
 			TTFTMs:                 openaiObs.TTFTMs,
 			CacheCreationTokens:    cacheTokenPtr(cacheCreation),
 			CacheReadTokens:        cacheTokenPtr(cacheRead),
