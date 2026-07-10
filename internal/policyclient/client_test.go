@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -132,6 +133,52 @@ func TestClientRejectsUnknownRouteSchema(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported policy route schema")
+}
+
+func TestClientRetriesTransientRouteFailureWithoutFallback(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "replica unavailable"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"schema_version":     policy.SchemaVersionV1,
+			"selected_roster_id": "model-a",
+		})
+	}))
+	defer server.Close()
+
+	result, err := New(server.URL, server.Client(), time.Second).Decide(
+		context.Background(),
+		policy.Query{Candidates: []policy.Candidate{{RosterID: "model-a"}}},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "model-a", result.Model)
+	assert.Equal(t, 3, attempts)
+}
+
+func TestClientReturnsErrorAfterTransientRetriesExhausted(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "no ready replica"})
+	}))
+	defer server.Close()
+
+	_, err := New(server.URL, server.Client(), time.Second).Decide(
+		context.Background(),
+		policy.Query{Candidates: []policy.Candidate{{RosterID: "model-a"}}},
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "retries exhausted")
+	assert.Contains(t, err.Error(), "no ready replica")
+	assert.Equal(t, 3, attempts)
 }
 
 func TestClientCapabilities(t *testing.T) {

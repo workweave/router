@@ -20,6 +20,11 @@ import (
 const DefaultTimeout = 3 * time.Second
 
 const (
+	defaultRouteAttempts = 3
+	routeRetryBackoff    = 50 * time.Millisecond
+)
+
+const (
 	maxRouteMessages           = 96
 	maxRouteMessageTextChars   = 3000
 	maxRouteMessageTotalChars  = 48000
@@ -31,17 +36,18 @@ const (
 type Client struct {
 	baseURL string
 	client  *http.Client
+	timeout time.Duration
 }
 
 // New builds a policy sidecar client. A nil HTTP client uses a bounded default.
 func New(baseURL string, client *http.Client, timeout time.Duration) *Client {
-	if client == nil {
-		if timeout <= 0 {
-			timeout = DefaultTimeout
-		}
-		client = &http.Client{Timeout: timeout}
+	if timeout <= 0 {
+		timeout = DefaultTimeout
 	}
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), client: client}
+	if client == nil {
+		client = &http.Client{}
+	}
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), client: client, timeout: timeout}
 }
 
 // ReportOutcome posts final dispatch usage/status to the policy sidecar.
@@ -250,19 +256,11 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 		return policy.Result{}, fmt.Errorf("marshal policy route request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/route", bytes.NewReader(body))
+	requestCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	resp, payload, err := c.doRoute(requestCtx, body)
 	if err != nil {
-		return policy.Result{}, fmt.Errorf("build policy route request: %w", err)
-	}
-	req.Header.Set("content-type", "application/json")
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return policy.Result{}, fmt.Errorf("call policy sidecar: %w", err)
-	}
-	defer resp.Body.Close()
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return policy.Result{}, fmt.Errorf("read policy route response: %w", err)
+		return policy.Result{}, err
 	}
 
 	var parsed routeResponse
@@ -309,6 +307,60 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 		DebugRef:             parsed.DebugRef,
 		Debug:                parsed.Debug,
 	}, nil
+}
+
+func (c *Client) doRoute(ctx context.Context, body []byte) (*http.Response, []byte, error) {
+	var lastErr error
+	for attempt := 1; attempt <= defaultRouteAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/route", bytes.NewReader(body))
+		if err != nil {
+			return nil, nil, fmt.Errorf("build policy route request: %w", err)
+		}
+		req.Header.Set("content-type", "application/json")
+		resp, err := c.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("call policy sidecar: %w", err)
+		} else {
+			payload, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			if readErr != nil {
+				lastErr = fmt.Errorf("read policy route response: %w", readErr)
+			} else if !isTransientPolicyStatus(resp.StatusCode) {
+				return resp, payload, nil
+			} else {
+				lastErr = policyStatusError(resp.StatusCode, payload)
+			}
+		}
+		if attempt == defaultRouteAttempts {
+			break
+		}
+		timer := time.NewTimer(time.Duration(attempt) * routeRetryBackoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, nil, fmt.Errorf("policy sidecar retries exhausted: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+	return nil, nil, fmt.Errorf("policy sidecar retries exhausted: %w", lastErr)
+}
+
+func isTransientPolicyStatus(status int) bool {
+	return status == http.StatusInternalServerError ||
+		status == http.StatusBadGateway ||
+		status == http.StatusServiceUnavailable ||
+		status == http.StatusGatewayTimeout
+}
+
+func policyStatusError(status int, payload []byte) error {
+	var parsed struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(payload, &parsed)
+	if parsed.Error != "" {
+		return fmt.Errorf("policy sidecar status %d: %s", status, parsed.Error)
+	}
+	return fmt.Errorf("policy sidecar status %d", status)
 }
 
 func wireRoutingKnobs(knobs *router.Overrides) *routingKnobs {
