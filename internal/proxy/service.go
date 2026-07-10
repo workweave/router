@@ -2860,7 +2860,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			RouterUserID:           auth.UserIDFrom(ctx),
 			ClientApp:              clientID.ClientApp,
 			TurnType:               string(routeRes.TurnType),
-			RolloutID:              policyRolloutIDFromContext(ctx),
+			RolloutID:              obs.RolloutID,
 			UpstreamFinishReason:   stringPtrOrEmpty(respSummary.UpstreamFinishReason),
 			StopReason:             stringPtrOrEmpty(respSummary.StopReason),
 			// Only valid when a translator ran (StopReason populated) — the
@@ -4515,7 +4515,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			RouterUserID:           auth.UserIDFrom(ctx),
 			ClientApp:              clientID.ClientApp,
 			TurnType:               string(routeRes.TurnType),
-			RolloutID:              policyRolloutIDFromContext(ctx),
+			RolloutID:              openaiObs.RolloutID,
 			FailoverUsed:           boolPtrTrue(finalProvider != primaryProvider),
 			// (session_key, role) join key — see the Anthropic-path write site.
 			SessionKey: sessionKey[:],

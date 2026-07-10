@@ -37,6 +37,7 @@ type observationContext struct {
 	SidecarSchemaVersion string
 	TrainingAllowed      bool
 	CaptureMode          string
+	RolloutID            string
 	// DebugRef is retained only for requests with authorized debug mode.
 	DebugRef string
 	// TTFTMs is the upstream-request-to-first-byte delta in ms. Pointer because
@@ -68,6 +69,10 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 	obs := observationContext{
 		TrainingAllowed: trainingAllowed,
 		CaptureMode:     captureMode.String(),
+		RolloutID:       ClientIdentityFrom(ctx).RolloutID,
+	}
+	if rolloutID, ok := ctx.Value(PolicyRolloutIDContextKey{}).(string); ok && rolloutID != "" {
+		obs.RolloutID = rolloutID
 	}
 	// Only label when a router actually ran: served decision has metadata, or fresh scorer ran on STAY.
 	// Hard-pins bypass routing entirely — leave strategy NULL so pin-served turns don't inflate counts.
@@ -206,6 +211,9 @@ func (o observationContext) applySpanAttrs(b *otel.AttrBuilder) {
 	}
 	b.Bool("routing.training_allowed", o.TrainingAllowed)
 	b.String("routing.capture_mode", o.CaptureMode)
+	if o.RolloutID != "" {
+		b.String("routing.rollout_id", o.RolloutID)
+	}
 	if o.DebugRef != "" {
 		b.String("routing.debug_ref", o.DebugRef)
 	}

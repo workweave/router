@@ -89,6 +89,7 @@ func TestBuildObservationContext_CapturesHMMStrategy(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), PolicyTrainingAllowedContextKey{}, true)
 	ctx = context.WithValue(ctx, PolicyDebugEnabledContextKey{}, true)
+	ctx = context.WithValue(ctx, PolicyRolloutIDContextKey{}, "rollout-1")
 	obs := buildObservationContext(ctx, served, router.Decision{}, CaptureHashed)
 
 	assert.Equal(t, "hmm", obs.Strategy)
@@ -98,6 +99,7 @@ func TestBuildObservationContext_CapturesHMMStrategy(t *testing.T) {
 	assert.Equal(t, "sha256:abc", obs.PolicyArtifactSHA256)
 	assert.Equal(t, "roster-v2", obs.RosterVersion)
 	assert.Equal(t, "policy_router_v1", obs.SidecarSchemaVersion)
+	assert.Equal(t, "rollout-1", obs.RolloutID)
 	assert.True(t, obs.TrainingAllowed)
 	assert.Equal(t, "hashed", obs.CaptureMode)
 	assert.Equal(t, "debug-1", obs.DebugRef)
@@ -124,6 +126,7 @@ func TestBuildObservationContext_CapturesHMMStrategy(t *testing.T) {
 	assert.Equal(t, "policy_router_v1", attrs["routing.sidecar_schema_version"])
 	assert.Equal(t, true, attrs["routing.training_allowed"])
 	assert.Equal(t, "hashed", attrs["routing.capture_mode"])
+	assert.Equal(t, "rollout-1", attrs["routing.rollout_id"])
 	assert.Equal(t, "debug-1", attrs["routing.debug_ref"])
 }
 
