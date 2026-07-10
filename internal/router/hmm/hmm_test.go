@@ -77,7 +77,7 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 	assert.Equal(t, "roster-v2", decision.Metadata.RosterVersion)
 	assert.Equal(t, "policy_router_v1", decision.Metadata.SidecarSchemaVersion)
 	assert.Equal(t, "debug-1", decision.Metadata.DebugRef)
-	assert.Equal(t, map[string]float32{"moonshotai/kimi-k2.7-code": 0.8}, decision.Metadata.CandidateScores)
+	assert.Equal(t, map[string]float32{"moonshotai/kimi-k2.7": 0.8}, decision.Metadata.CandidateScores)
 	assert.Equal(t, "hello", decider.query.PromptText)
 	assert.Equal(t, router.StrategyHMM, decider.query.Strategy)
 	assert.Equal(t, "org-1", decider.query.OrganizationID)

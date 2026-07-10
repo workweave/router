@@ -114,6 +114,20 @@ func (r ResolvedCandidates) CandidateProviders() map[string]string {
 	return result
 }
 
+// CatalogCandidateScores translates sidecar roster IDs to telemetry catalog IDs.
+func (r ResolvedCandidates) CatalogCandidateScores(scores map[string]float32) map[string]float32 {
+	result := make(map[string]float32, len(scores))
+	for rosterID, score := range scores {
+		if binding, ok := r.ByRosterID[rosterID]; ok {
+			result[binding.CatalogID] = score
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 // Resolver builds the eligible catalog-backed candidate set for a policy.
 type Resolver struct {
 	deployed       map[string]struct{}
@@ -169,7 +183,7 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 			continue
 		}
 		contextWindow := catalog.ContextWindowFor(id)
-		if req.EstimatedInputTokens > 0 && req.EstimatedInputTokens >= contextWindow {
+		if requiredContextTokens(req) >= contextWindow {
 			diagnostics = append(diagnostics, Diagnostic{CatalogID: id, RosterID: rosterID, Reason: ExclusionContextWindow})
 			continue
 		}
@@ -234,12 +248,20 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 }
 
 func estimatedCostUSD(req router.Request, pricing catalog.Pricing) float64 {
-	outputTokens := 0
-	if req.RoutingKnobs != nil && req.RoutingKnobs.ExpectedOutputTokens != nil && *req.RoutingKnobs.ExpectedOutputTokens > 0 {
-		outputTokens = *req.RoutingKnobs.ExpectedOutputTokens
-	}
+	outputTokens := expectedOutputTokens(req)
 	return (float64(req.EstimatedInputTokens)*pricing.InputUSDPer1M +
 		float64(outputTokens)*pricing.OutputUSDPer1M) / 1_000_000
+}
+
+func requiredContextTokens(req router.Request) int {
+	return max(req.EstimatedInputTokens, 0) + expectedOutputTokens(req)
+}
+
+func expectedOutputTokens(req router.Request) int {
+	if req.RoutingKnobs == nil || req.RoutingKnobs.ExpectedOutputTokens == nil {
+		return 0
+	}
+	return max(*req.RoutingKnobs.ExpectedOutputTokens, 0)
 }
 
 func (r *Resolver) allowedProviders(in map[string]struct{}) map[string]struct{} {

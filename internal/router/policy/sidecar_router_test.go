@@ -41,10 +41,10 @@ func TestSidecarRouterOnboardsFutureStrategyWithoutProxyChanges(t *testing.T) {
 	decider := &recordingPolicy{result: policy.Result{
 		SchemaVersion:        policy.SchemaVersionV1,
 		RouteID:              "route-future",
-		Model:                "gpt-5.5",
+		Model:                "future/gpt-5.5",
 		Provider:             providers.ProviderOpenAI,
 		Score:                0.9,
-		CandidateScores:      map[string]float32{"gpt-5.5": 0.9},
+		CandidateScores:      map[string]float32{"future/gpt-5.5": 0.9},
 		PolicyRouteKey:       "high",
 		PolicyArtifactID:     "future-prod",
 		PolicyArtifactSHA256: "sha256:future",
@@ -54,7 +54,7 @@ func TestSidecarRouterOnboardsFutureStrategyWithoutProxyChanges(t *testing.T) {
 	resolver := policy.NewResolver(
 		set("gpt-5.5"),
 		set(providers.ProviderOpenAI),
-		func(model catalog.Model) string { return model.ID },
+		func(model catalog.Model) string { return "future/" + model.ID },
 		policy.ManagedProviderPolicy(),
 	)
 	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
@@ -87,6 +87,7 @@ func TestSidecarRouterOnboardsFutureStrategyWithoutProxyChanges(t *testing.T) {
 	assert.True(t, decider.query.TrainingAllowed)
 	assert.Equal(t, "hashed", decider.query.CaptureMode)
 	require.Len(t, decider.query.Candidates, 1)
+	assert.Equal(t, "future/gpt-5.5", decider.query.Candidates[0].RosterID)
 	assert.Greater(t, decider.query.Candidates[0].InputUSDPer1M, 0.0)
 	assert.Greater(t, decider.query.Candidates[0].Capabilities.ContextWindow, 0)
 

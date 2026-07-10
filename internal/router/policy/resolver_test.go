@@ -106,6 +106,28 @@ func TestResolverRejectsCandidatesThatCannotFitEstimatedInput(t *testing.T) {
 	})
 }
 
+func TestResolverIncludesExpectedOutputInContextBudget(t *testing.T) {
+	resolver := policy.NewResolver(
+		set("claude-opus-4-8"),
+		set(providers.ProviderAnthropic),
+		catalogRosterID,
+		policy.ManagedProviderPolicy(),
+	)
+	expectedOutputTokens := 2_000
+
+	resolved := resolver.Resolve(router.Request{
+		EstimatedInputTokens: catalog.ContextWindowFor("claude-opus-4-8") - 1_000,
+		RoutingKnobs:         &router.Overrides{ExpectedOutputTokens: &expectedOutputTokens},
+	})
+
+	assert.Empty(t, resolved.Candidates)
+	assert.Contains(t, resolved.Diagnostics, policy.Diagnostic{
+		CatalogID: "claude-opus-4-8",
+		RosterID:  "claude-opus-4-8",
+		Reason:    policy.ExclusionContextWindow,
+	})
+}
+
 func set(values ...string) map[string]struct{} {
 	result := make(map[string]struct{}, len(values))
 	for _, value := range values {

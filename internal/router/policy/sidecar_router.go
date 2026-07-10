@@ -139,7 +139,7 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 		Metadata: &router.RoutingMetadata{
 			CandidateModels:      resolved.CandidateModels(),
 			CandidateProviders:   resolved.CandidateProviders(),
-			CandidateScores:      res.CandidateScores,
+			CandidateScores:      resolved.CatalogCandidateScores(res.CandidateScores),
 			ChosenScore:          float32(res.Score),
 			Propensity:           propensity,
 			DisplayMarker:        res.DisplayMarker,
