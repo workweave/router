@@ -208,6 +208,13 @@ func TestClientReportsOutcomeAndFeedback(t *testing.T) {
 	assert.Equal(t, []string{"/outcome", "/feedback"}, paths)
 }
 
+func TestClientUsesBoundedDefaultHTTPClient(t *testing.T) {
+	configuredTimeout := 250 * time.Millisecond
+
+	assert.Equal(t, configuredTimeout, New("http://policy", nil, configuredTimeout).client.Timeout)
+	assert.Equal(t, DefaultTimeout, New("http://policy", nil, 0).client.Timeout)
+}
+
 func TestRouteMessagesPreservesLatestUserWhenPayloadIsCapped(t *testing.T) {
 	messages := routeMessages([]router.ConversationMessage{
 		{Role: "user", Text: strings.Repeat("a", maxRouteMessageTotalChars+100)},

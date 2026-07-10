@@ -45,7 +45,7 @@ func New(baseURL string, client *http.Client, timeout time.Duration) *Client {
 		timeout = DefaultTimeout
 	}
 	if client == nil {
-		client = &http.Client{}
+		client = &http.Client{Timeout: timeout}
 	}
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), client: client, timeout: timeout}
 }
