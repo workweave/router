@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/policy"
 )
 
 type captureHMMOutcomeReporter struct {
@@ -24,9 +25,13 @@ func (r *captureHMMOutcomeReporter) ReportOutcome(ctx context.Context, payload m
 	}
 }
 
-func TestReportHMMOutcome_UsesFreshMetadataForStickyServedDecision(t *testing.T) {
+func (r *captureHMMOutcomeReporter) Route(context.Context, router.Request) (router.Decision, error) {
+	return router.Decision{}, nil
+}
+
+func TestReportPolicyOutcome_UsesFreshMetadataForStickyServedDecision(t *testing.T) {
 	reporter := &captureHMMOutcomeReporter{ch: make(chan map[string]interface{}, 1)}
-	s := &Service{hmmOutcomeReporter: reporter}
+	s := (&Service{}).WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyHMM, Router: reporter})
 
 	routeRes := turnLoopResult{
 		StickyHit: true,
@@ -34,8 +39,10 @@ func TestReportHMMOutcome_UsesFreshMetadataForStickyServedDecision(t *testing.T)
 			Model:    "moonshotai/kimi-k2.7",
 			Provider: "fireworks",
 			Metadata: &router.RoutingMetadata{
-				RouteID:  "route-fresh",
-				Strategy: string(router.StrategyHMM),
+				RouteID:          "route-fresh",
+				Strategy:         string(router.StrategyHMM),
+				PolicyRouteKey:   "medium|mid",
+				PolicyArtifactID: "hmm-prod",
 			},
 		},
 	}
@@ -44,7 +51,7 @@ func TestReportHMMOutcome_UsesFreshMetadataForStickyServedDecision(t *testing.T)
 		Provider: "anthropic",
 	}
 
-	s.reportHMMOutcome(context.Background(), routeRes, served, "anthropic", 100, 90, 10, 0, 0, 12, 34, nil, &hmmOutcomeResponse{
+	s.reportPolicyOutcome(context.Background(), routeRes, served, "anthropic", 100, 90, 10, 0, 0, 12, 34, nil, &policyOutcomeResponse{
 		Body:      []byte(`{"content":[{"type":"text","text":"done"}]}`),
 		Truncated: false,
 	})
@@ -56,6 +63,8 @@ func TestReportHMMOutcome_UsesFreshMetadataForStickyServedDecision(t *testing.T)
 		assert.Equal(t, "anthropic", payload["served_provider"])
 		assert.Equal(t, "moonshotai/kimi-k2.7", payload["decision_model"])
 		assert.Equal(t, "fireworks", payload["decision_provider"])
+		assert.Equal(t, "medium|mid", payload["policy_route_key"])
+		assert.Equal(t, "hmm-prod", payload["policy_artifact_id"])
 		assert.Equal(t, true, payload["sticky_hit"])
 		assert.Equal(t, `{"content":[{"type":"text","text":"done"}]}`, payload["response_body"])
 		assert.Equal(t, "client_anthropic", payload["response_body_format"])

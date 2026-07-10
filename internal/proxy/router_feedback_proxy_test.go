@@ -14,6 +14,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/policy"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
@@ -147,10 +148,10 @@ func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
 	svc := newPinSvc(fr, store).
 		WithRouterFeedbackStore(feedback).
-		WithHMMRouter(policyFeedback)
+		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyRL, Router: policyFeedback})
 
 	installationID := uuid.New().String()
-	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyHMM)
+	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyRL)
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
@@ -168,6 +169,7 @@ func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-6", payload["requested_model"])
 	assert.Equal(t, "claude-haiku-4-5", payload["served_model"])
 	assert.Equal(t, installationID, payload["installation_id"])
+	assert.Equal(t, string(router.StrategyRL), payload["strategy"])
 	assert.NotEmpty(t, payload["feedback_key"])
 	assert.NotEmpty(t, payload["feedback_role"])
 }

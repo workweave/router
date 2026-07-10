@@ -105,7 +105,7 @@ func buildObservationContext(ctx context.Context, decision, fresh router.Decisio
 		}
 	}
 	// Sticky HMM turns: served pin has nil metadata while fresh holds the sidecar RouteID
-	// hmmOutcomeRoute reports against — fall back or telemetry route_id goes NULL on joins.
+	// policyOutcomeRoute reports against — fall back or telemetry route_id goes NULL on joins.
 	if obs.RouteID == "" && fresh.Metadata != nil {
 		obs.RouteID = fresh.Metadata.RouteID
 	}
