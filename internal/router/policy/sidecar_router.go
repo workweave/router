@@ -29,6 +29,8 @@ type SidecarRouter struct {
 	reporter         OutcomeReporter
 	feedbackReporter FeedbackReporter
 	resolver         *Resolver
+	capabilitiesSet  bool
+	supportsShadow   bool
 }
 
 // NewSidecarRouter constructs a reusable policy adapter. Strategy packages
@@ -50,6 +52,8 @@ func NewSidecarRouter(config SidecarRouterConfig, decider Decider, resolver *Res
 
 // WithCapabilities gates optional outcome/feedback callbacks based on the sidecar's negotiated support.
 func (r *SidecarRouter) WithCapabilities(capabilities Capabilities) *SidecarRouter {
+	r.capabilitiesSet = true
+	r.supportsShadow = capabilities.SupportsShadow
 	if !capabilities.ReportsOutcomes {
 		r.reporter = nil
 	}
@@ -75,6 +79,9 @@ func (r *SidecarRouter) ReportFeedback(ctx context.Context, payload map[string]i
 
 func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	strategy := r.config.Strategy
+	if req.ShadowMode && r.capabilitiesSet && !r.supportsShadow {
+		return router.Decision{}, fmt.Errorf("%s: sidecar does not support shadow routing: %w", strategy, r.config.Unavailable)
+	}
 	executionMode := ExecutionModeServing
 	if req.ShadowMode {
 		executionMode = ExecutionModeShadow

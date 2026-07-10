@@ -119,6 +119,20 @@ func TestSidecarRouterMarksShadowDecisionsNonLearning(t *testing.T) {
 	assert.False(t, decider.query.DebugEnabled)
 }
 
+func TestSidecarRouterCapabilitiesRejectUnsupportedShadow(t *testing.T) {
+	unavailable := errors.New("future unavailable")
+	decider := &recordingPolicy{}
+	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
+		Strategy:    router.Strategy("future-policy"),
+		Unavailable: unavailable,
+	}, decider, nil).WithCapabilities(policy.Capabilities{})
+
+	_, err := adapter.Route(context.Background(), router.Request{ShadowMode: true})
+
+	require.ErrorIs(t, err, unavailable)
+	assert.Empty(t, decider.query.ExecutionMode)
+}
+
 func TestSidecarRouterCapabilitiesGateOptionalLifecycleCalls(t *testing.T) {
 	decider := &recordingPolicy{}
 	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
