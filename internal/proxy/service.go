@@ -1978,6 +1978,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		PromptText:           promptText,
 		ConversationMessages: conversationMessagesForRouting(env),
 		AvailableTools:       availableToolsForRouting(env),
+		OrganizationID:       externalID,
 		// Keep this tied to client-visible history so a later feedback command
 		// can correlate with the route even if local compaction rewrites env.
 		FeedbackKey:      hex.EncodeToString(sessionKey[:]),
@@ -1986,6 +1987,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		ExcludedModels:   excluded,
 		PreferredModels:  s.preferredModelsForRequest(ctx),
 		RoutingKnobs:     routingKnobsForRequest(ctx),
+	}
+	if installationID != uuid.Nil {
+		req.InstallationID = installationID.String()
 	}
 	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, req)
 	if routeErr != nil {

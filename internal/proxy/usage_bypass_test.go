@@ -343,10 +343,17 @@ func TestProxyMessages_BypassWeeklyLimit_FallsBackToRoutedDispatch(t *testing.T)
 		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
 
 	rec, req, body := bypassRequest(t)
-	require.NoError(t, svc.ProxyMessages(bypassCtx(0.80), body, rec, req))
+	const organizationID = "org-bypass-reroute"
+	installationID := uuid.New()
+	ctx := context.WithValue(bypassCtx(0.80), proxy.ExternalIDContextKey{}, organizationID)
+	ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, installationID.String())
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, req))
 
 	assert.Equal(t, 1, fr.routeCalls,
 		"the scorer must run once on the reroute (zero on the bypass attempt, one after the 429)")
+	require.NotNil(t, fr.capturedReq)
+	assert.Equal(t, organizationID, fr.capturedReq.OrganizationID)
+	assert.Equal(t, installationID.String(), fr.capturedReq.InstallationID)
 	assert.NotEqual(t, http.StatusTooManyRequests, rec.Code,
 		"the 429 must NOT be flushed — the client must not see the bypass failure")
 	assert.Equal(t, bypassScorerPickMdl, rec.Header().Get("x-router-model"),
