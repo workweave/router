@@ -183,7 +183,7 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 			continue
 		}
 		contextWindow := catalog.ContextWindowFor(id)
-		if requiredContextTokens(req) >= contextWindow {
+		if requiredContextTokens(req) > contextWindow {
 			diagnostics = append(diagnostics, Diagnostic{CatalogID: id, RosterID: rosterID, Reason: ExclusionContextWindow})
 			continue
 		}

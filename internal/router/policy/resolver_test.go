@@ -96,7 +96,7 @@ func TestResolverRejectsCandidatesThatCannotFitEstimatedInput(t *testing.T) {
 		policy.ManagedProviderPolicy(),
 	)
 
-	resolved := resolver.Resolve(router.Request{EstimatedInputTokens: catalog.ContextWindowFor("claude-opus-4-8")})
+	resolved := resolver.Resolve(router.Request{EstimatedInputTokens: catalog.ContextWindowFor("claude-opus-4-8") + 1})
 
 	assert.Empty(t, resolved.Candidates)
 	assert.Contains(t, resolved.Diagnostics, policy.Diagnostic{
@@ -104,6 +104,20 @@ func TestResolverRejectsCandidatesThatCannotFitEstimatedInput(t *testing.T) {
 		RosterID:  "claude-opus-4-8",
 		Reason:    policy.ExclusionContextWindow,
 	})
+}
+
+func TestResolverAllowsExactContextFit(t *testing.T) {
+	resolver := policy.NewResolver(
+		set("claude-opus-4-8"),
+		set(providers.ProviderAnthropic),
+		catalogRosterID,
+		policy.ManagedProviderPolicy(),
+	)
+
+	resolved := resolver.Resolve(router.Request{EstimatedInputTokens: catalog.ContextWindowFor("claude-opus-4-8")})
+
+	assert.Equal(t, []string{"claude-opus-4-8"}, resolved.CandidateModels())
+	assert.Empty(t, resolved.Diagnostics)
 }
 
 func TestResolverIncludesExpectedOutputInContextBudget(t *testing.T) {
