@@ -76,6 +76,11 @@ func TestRouterStrategyOverride_AppliesPersistedStrategyWithoutHeader(t *testing
 	assert.Equal(t, router.StrategyHMM, got)
 }
 
+func TestRouterStrategyOverride_NormalizesPersistedStrategy(t *testing.T) {
+	got := runStrategyOverride(t, &auth.Installation{ID: "inst-allowlisted", RoutingStrategy: router.Strategy("  HMM  ")}, "")
+	assert.Equal(t, router.StrategyHMM, got)
+}
+
 func TestRouterStrategyOverride_UnauthorizedHeaderPreservesPersistedStrategy(t *testing.T) {
 	got := runStrategyOverride(t, &auth.Installation{ID: "inst-customer", RoutingStrategy: router.StrategyHMM}, "rl")
 	assert.Equal(t, router.StrategyHMM, got)

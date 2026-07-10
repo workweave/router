@@ -34,7 +34,7 @@ func WithRouterStrategyOverride(available ...router.Strategy) gin.HandlerFunc {
 			return
 		}
 
-		strategy := installation.RoutingStrategy
+		strategy := router.Strategy(strings.ToLower(strings.TrimSpace(string(installation.RoutingStrategy))))
 		if strategy == "" {
 			strategy = router.StrategyCluster
 		}
