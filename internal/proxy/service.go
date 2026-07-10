@@ -1477,6 +1477,17 @@ func (s *Service) PolicyCapabilities(strategy router.Strategy) (policy.Capabilit
 	return registered.capabilities, ok
 }
 
+// PolicyStrategyAvailable reports whether a strategy has a live serving
+// implementation. Registration remains visible when a sidecar is missing so
+// that configuration fails closed instead of silently changing strategies.
+func (s *Service) PolicyStrategyAvailable(strategy router.Strategy) bool {
+	if strategy == router.StrategyCluster {
+		return s != nil && s.router != nil
+	}
+	registered, ok := s.strategies[strategy]
+	return ok && registered.router != nil
+}
+
 // RegisteredStrategies returns every configured non-default strategy in
 // deterministic order. Middleware uses this list instead of hardcoding IDs.
 func (s *Service) RegisteredStrategies() []router.Strategy {

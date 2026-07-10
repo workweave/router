@@ -36,10 +36,11 @@ func TestToAuthInstallationPolicyRouting(t *testing.T) {
 	rolloutID := "rollout-1"
 	shadow := "future-policy"
 	intent := "high"
+	strategy := string(router.StrategyHMM)
 	inst := toAuthInstallation(sqlc.RouterModelRouterInstallation{
 		ID:                           uuid.New(),
 		ExternalID:                   "org-1",
-		RoutingStrategy:              string(router.StrategyHMM),
+		RoutingStrategy:              &strategy,
 		RoutingRolloutID:             &rolloutID,
 		PolicyShadowStrategy:         &shadow,
 		PolicyDebugEnabled:           true,

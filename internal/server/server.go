@@ -67,6 +67,15 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	// /v1/version reports the binary's git commit + build time (via -ldflags),
 	// used by the README's managed-deployment badge. Public build metadata, unauthed like /health.
 	engine.GET("/v1/version", middleware.WithTimeout(healthTimeout), admin.VersionHandler)
+	defaultStrategy := router.Strategy(strings.ToLower(strings.TrimSpace(os.Getenv("ROUTER_DEFAULT_STRATEGY"))))
+	if defaultStrategy == "" {
+		defaultStrategy = router.StrategyCluster
+	}
+	engine.GET(
+		"/v1/router/policies",
+		middleware.WithTimeout(healthTimeout),
+		admin.PolicyCatalogHandler(proxySvc, defaultStrategy),
+	)
 
 	// /v1/router/models lets the Weave control plane validate per-org exclusion
 	// submissions against the live deployed-models universe instead of
@@ -139,7 +148,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	messagesMiddleware = append(messagesMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
-		middleware.WithRouterStrategyOverride(registeredStrategies...),
+		middleware.WithRouterStrategyDefault(defaultStrategy, registeredStrategies...),
 		middleware.WithPolicyDebugOverride(),
 		middleware.WithRoutingKnobsOverride(),
 	)
@@ -157,7 +166,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	chatCompletionMiddleware = append(chatCompletionMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
-		middleware.WithRouterStrategyOverride(registeredStrategies...),
+		middleware.WithRouterStrategyDefault(defaultStrategy, registeredStrategies...),
 		middleware.WithPolicyDebugOverride(),
 		middleware.WithRoutingKnobsOverride(),
 	)
@@ -190,7 +199,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	routeMiddleware = append(routeMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
-		middleware.WithRouterStrategyOverride(registeredStrategies...),
+		middleware.WithRouterStrategyDefault(defaultStrategy, registeredStrategies...),
 		middleware.WithPolicyDebugOverride(),
 		middleware.WithRoutingKnobsOverride(),
 	)

@@ -19,6 +19,13 @@ const RouterStrategyOverrideHeader = "x-weave-router-strategy"
 // WithRouterStrategyOverride applies the persisted installation strategy and permits
 // an eval header override when authorized; available is injected by the proxy registry.
 func WithRouterStrategyOverride(available ...router.Strategy) gin.HandlerFunc {
+	return WithRouterStrategyDefault(router.StrategyCluster, available...)
+}
+
+// WithRouterStrategyDefault applies a deployment default to installations
+// without an explicit override. This supports allowlist-first rollout followed
+// by a one-flag global rollout.
+func WithRouterStrategyDefault(defaultStrategy router.Strategy, available ...router.Strategy) gin.HandlerFunc {
 	allowed := make(map[router.Strategy]struct{}, len(available)+1)
 	allowed[router.StrategyCluster] = struct{}{}
 	if len(available) == 0 {
@@ -26,6 +33,9 @@ func WithRouterStrategyOverride(available ...router.Strategy) gin.HandlerFunc {
 	}
 	for _, strategy := range available {
 		allowed[strategy] = struct{}{}
+	}
+	if !strategyAllowed(defaultStrategy, allowed) {
+		defaultStrategy = router.StrategyCluster
 	}
 	return func(c *gin.Context) {
 		installation := InstallationFrom(c)
@@ -36,7 +46,7 @@ func WithRouterStrategyOverride(available ...router.Strategy) gin.HandlerFunc {
 
 		strategy := router.Strategy(strings.ToLower(strings.TrimSpace(string(installation.RoutingStrategy))))
 		if strategy == "" {
-			strategy = router.StrategyCluster
+			strategy = defaultStrategy
 		}
 		if _, ok := allowed[strategy]; !ok {
 			observability.FromGin(c).Warn(

@@ -82,8 +82,8 @@ type RouterModelRouterInstallation struct {
 	UsageBypassThreshold        *float64
 	PreferredModels             []string
 	SubscriptionRoutingDisabled bool
-	// Canonical serving strategy. Defaults to cluster until the installation is allowlisted.
-	RoutingStrategy              string
+	// Optional serving-strategy override. NULL follows the deployment default.
+	RoutingStrategy              *string
 	RoutingRolloutID             *string
 	PolicyShadowStrategy         *string
 	PolicyDebugEnabled           bool
