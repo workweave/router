@@ -114,7 +114,7 @@ func (s *Service) handleRouterFeedbackCommand(
 		}
 	}
 	if router.StrategyFromContext(ctx) == router.StrategyHMM {
-		s.reportRouterFeedback(ctx, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback)
+		s.reportRouterFeedback(ctx, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback, routerFeedbackTrainingDelta(env))
 	}
 
 	now := time.Now()
@@ -161,6 +161,7 @@ func (s *Service) reportRouterFeedback(
 	servedModel string,
 	rating string,
 	feedback string,
+	trainingDelta []router.ConversationMessage,
 ) {
 	if s.hmmFeedbackReporter == nil {
 		return
@@ -182,12 +183,45 @@ func (s *Service) reportRouterFeedback(
 	if installationID != uuid.Nil {
 		payload["installation_id"] = installationID.String()
 	}
+	if len(trainingDelta) > 0 {
+		payload["training_conversation_delta"] = trainingDelta
+	}
 	log := observability.FromContext(ctx)
 	observability.SafeGo(log, hmmFeedbackReportTimeout, "reportHMMFeedback", func(reportCtx context.Context) {
 		if err := s.hmmFeedbackReporter.ReportFeedback(reportCtx, payload); err != nil {
 			log.Error("/router-feedback: sidecar feedback report failed", "err", err)
 		}
 	})
+}
+
+func routerFeedbackTrainingDelta(env *translate.RequestEnvelope) []router.ConversationMessage {
+	messages := conversationMessagesForRouting(env)
+	if len(messages) == 0 {
+		return nil
+	}
+	ratedAssistant := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(messages[i].Role), "assistant") {
+			ratedAssistant = i
+			break
+		}
+	}
+	if ratedAssistant < 0 {
+		return nil
+	}
+	start := 0
+	for i := ratedAssistant - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(messages[i].Role), "assistant") {
+			start = i + 1
+			break
+		}
+	}
+	if start == 0 {
+		for start < ratedAssistant && !strings.EqualFold(strings.TrimSpace(messages[start].Role), "user") {
+			start++
+		}
+	}
+	return append([]router.ConversationMessage(nil), messages[start:ratedAssistant+1]...)
 }
 
 // routerFeedbackAck renders the acknowledgment, echoing the verdict. The

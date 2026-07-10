@@ -89,7 +89,7 @@ type routeRequest struct {
 	LatestUserText       string            `json:"latest_user_text,omitempty"`
 	TurnIndex            int               `json:"turn_index"`
 	ConversationMessages []routeMessage    `json:"conversation_messages,omitempty"`
-	TrainingMessages     []routeMessage    `json:"training_conversation_messages,omitempty"`
+	TrainingMessageDelta []routeMessage    `json:"training_conversation_delta,omitempty"`
 	AvailableTools       []string          `json:"available_tools,omitempty"`
 	FeedbackKey          string            `json:"feedback_key,omitempty"`
 	FeedbackRole         string            `json:"feedback_role,omitempty"`
@@ -152,14 +152,14 @@ func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
 		providers[c.RosterID] = c.Provider
 	}
 	messages := routeMessages(q.ConversationMessages)
-	trainingMessages := trainingRouteMessages(q.ConversationMessages)
+	trainingMessageDelta := trainingRouteMessageDelta(q.ConversationMessages)
 	body, err := json.Marshal(routeRequest{
 		RouteID:              q.RouteID,
 		PromptText:           q.PromptText,
 		LatestUserText:       latestUserText(messages),
 		TurnIndex:            turnIndex(messages),
 		ConversationMessages: messages,
-		TrainingMessages:     trainingMessages,
+		TrainingMessageDelta: trainingMessageDelta,
 		AvailableTools:       clipRouteValues(q.AvailableTools, maxRouteToolCallInputKeys, maxRouteToolCallInputChars),
 		FeedbackKey:          q.FeedbackKey,
 		FeedbackRole:         q.FeedbackRole,
@@ -242,8 +242,33 @@ func routeMessages(messages []router.ConversationMessage) []routeMessage {
 	})
 }
 
-func trainingRouteMessages(messages []router.ConversationMessage) []routeMessage {
-	return convertRouteMessages(messages, routeMessageLimits{
+func trainingRouteMessageDelta(messages []router.ConversationMessage) []routeMessage {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	// A request is routed immediately before the next assistant response. The
+	// prior assistant message and everything after it are therefore the new
+	// exchange since the previous route call. The first call has no prior
+	// assistant message and sends its complete initial context.
+	start := 0
+	latestUser := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if routeRole(messages[i].Role) == "user" {
+			latestUser = i
+			break
+		}
+	}
+	if latestUser >= 0 {
+		for i := latestUser - 1; i >= 0; i-- {
+			if routeRole(messages[i].Role) == "assistant" {
+				start = i
+				break
+			}
+		}
+	}
+
+	return convertRouteMessages(messages[start:], routeMessageLimits{
 		includeToolCallInput:  true,
 		includeToolResultText: true,
 	})

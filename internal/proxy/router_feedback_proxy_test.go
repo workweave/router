@@ -281,6 +281,13 @@ func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T)
 	require.Len(t, payloads, 1)
 	assert.Equal(t, requests[0].FeedbackKey, payloads[0]["feedback_key"])
 	assert.Equal(t, requests[0].FeedbackRole, payloads[0]["feedback_role"])
+	delta, ok := payloads[0]["training_conversation_delta"].([]router.ConversationMessage)
+	require.True(t, ok)
+	require.Len(t, delta, 2)
+	assert.Equal(t, "user", delta[0].Role)
+	assert.Equal(t, "latest request", delta[0].Text)
+	assert.Equal(t, "assistant", delta[1].Role)
+	assert.Equal(t, "done", delta[1].Text)
 }
 
 func TestService_RouterFeedbackCommand_DoesNotForwardPolicyFeedbackOutsideHMM(t *testing.T) {

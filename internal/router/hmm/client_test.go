@@ -94,12 +94,13 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 	assert.Equal(t, "default", got.FeedbackRole)
 	assert.Equal(t, "org-test", got.OrganizationID)
 	assert.Equal(t, "installation-test", got.InstallationID)
-	require.Len(t, got.TrainingMessages, 4)
-	require.Len(t, got.TrainingMessages[2].ToolResults, 1)
-	assert.Equal(t, "large raw tool output", got.TrainingMessages[2].ToolResults[0].Text)
+	require.Len(t, got.TrainingMessageDelta, 3)
+	assert.Equal(t, "assistant", got.TrainingMessageDelta[0].Role)
+	require.Len(t, got.TrainingMessageDelta[1].ToolResults, 1)
+	assert.Equal(t, "large raw tool output", got.TrainingMessageDelta[1].ToolResults[0].Text)
 	assert.Empty(t, got.ConversationMessages[2].ToolResults[0].Text)
-	require.Len(t, got.TrainingMessages[3].ToolCalls, 1)
-	assert.Equal(t, `{"file_path":"README.md"}`, got.TrainingMessages[3].ToolCalls[0].InputJSON)
+	require.Len(t, got.TrainingMessageDelta[2].ToolCalls, 1)
+	assert.Equal(t, `{"file_path":"README.md"}`, got.TrainingMessageDelta[2].ToolCalls[0].InputJSON)
 	assert.Empty(t, got.ConversationMessages[3].ToolCalls[0].InputJSON)
 	assert.Equal(t, []string{"moonshotai/kimi-k2.7-code"}, got.CandidateModels)
 	assert.Equal(t, "moonshotai/kimi-k2.7-code", result.Model)
@@ -111,6 +112,36 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 	require.NotNil(t, result.Margin)
 	assert.Equal(t, 0.22, *result.Margin)
 	assert.Equal(t, "display marker", result.DisplayMarker)
+}
+
+func TestTrainingRouteMessageDeltaReconstructsConversationAcrossRoutes(t *testing.T) {
+	messages := []router.ConversationMessage{
+		{Role: "system", Text: "system context"},
+		{Role: "user", Text: "first request"},
+		{Role: "assistant", Text: "first answer"},
+		{Role: "user", Text: "second request"},
+		{Role: "assistant", Text: "second answer", ToolCalls: []router.ConversationToolCall{{
+			Name:      "Read",
+			InputKeys: []string{"file_path"},
+			InputJSON: `{"file_path":"large.go"}`,
+		}}},
+		{Role: "user", ToolResults: []router.ConversationToolResult{{
+			ToolUseID: "toolu_current",
+			Text:      "current tool output",
+		}}},
+		{Role: "user", Text: "current request"},
+	}
+
+	streamed := append([]routeMessage{}, trainingRouteMessageDelta(messages[:2])...)
+	streamed = append(streamed, trainingRouteMessageDelta(messages[:4])...)
+	streamed = append(streamed, trainingRouteMessageDelta(messages)...)
+	expected := convertRouteMessages(messages, routeMessageLimits{
+		includeToolCallInput:  true,
+		includeToolResultText: true,
+	})
+
+	assert.Equal(t, expected, streamed)
+	require.Len(t, trainingRouteMessageDelta(messages), 3)
 }
 
 func floatPtr(value float64) *float64 {

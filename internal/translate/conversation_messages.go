@@ -261,6 +261,12 @@ func geminiFunctionResponseText(resp gjson.Result) string {
 		}
 		return result.Raw
 	}
+	if output := response.Get("output"); output.Exists() {
+		if output.Type == gjson.String {
+			return output.String()
+		}
+		return output.Raw
+	}
 	return response.Raw
 }
 

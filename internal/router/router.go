@@ -66,22 +66,22 @@ type Request struct {
 }
 
 type ConversationMessage struct {
-	Role        string
-	Text        string
-	ToolCalls   []ConversationToolCall
-	ToolResults []ConversationToolResult
+	Role        string                   `json:"role"`
+	Text        string                   `json:"text,omitempty"`
+	ToolCalls   []ConversationToolCall   `json:"tool_calls,omitempty"`
+	ToolResults []ConversationToolResult `json:"tool_results,omitempty"`
 }
 
 type ConversationToolCall struct {
-	Name      string
-	InputKeys []string
-	InputJSON string
+	Name      string   `json:"name,omitempty"`
+	InputKeys []string `json:"input_keys,omitempty"`
+	InputJSON string   `json:"input_json,omitempty"`
 }
 
 type ConversationToolResult struct {
-	ToolUseID string
-	IsError   bool
-	Text      string
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	IsError   bool   `json:"is_error,omitempty"`
+	Text      string `json:"text,omitempty"`
 }
 
 type Decision struct {

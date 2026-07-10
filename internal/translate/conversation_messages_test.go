@@ -111,6 +111,7 @@ func TestConversationMessagesPreservesGeminiToolResultMarker(t *testing.T) {
 	assert.Empty(t, messages[1].Text)
 	require.Len(t, messages[1].ToolResults, 1)
 	assert.Equal(t, "Bash", messages[1].ToolResults[0].ToolUseID)
+	assert.Equal(t, "large raw tool output", messages[1].ToolResults[0].Text)
 }
 
 func TestConversationMessagesDropsNamelessOpenAIToolCalls(t *testing.T) {
