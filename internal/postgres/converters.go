@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/router"
 	"workweave/router/internal/sqlc"
 
 	"github.com/google/uuid"
@@ -24,20 +25,27 @@ func toAuthInstallation(row sqlc.RouterModelRouterInstallation) *auth.Installati
 		preferred = []string{}
 	}
 	return &auth.Installation{
-		ID:                          row.ID.String(),
-		ExternalID:                  row.ExternalID,
-		Name:                        row.Name,
-		CreatedAt:                   timestampOrZero(row.CreatedAt),
-		UpdatedAt:                   timestampOrZero(row.UpdatedAt),
-		DeletedAt:                   timestampPtr(row.DeletedAt),
-		CreatedBy:                   row.CreatedBy,
-		ExcludedModels:              excluded,
-		ExcludedProviders:           excludedProviders,
-		PreferredModels:             preferred,
-		RoutingQualityWeight:        row.RoutingQualityWeight,
-		UsageBypassEnabled:          row.UsageBypassEnabled,
-		UsageBypassThreshold:        row.UsageBypassThreshold,
-		SubscriptionRoutingDisabled: row.SubscriptionRoutingDisabled,
+		ID:                           row.ID.String(),
+		ExternalID:                   row.ExternalID,
+		Name:                         row.Name,
+		CreatedAt:                    timestampOrZero(row.CreatedAt),
+		UpdatedAt:                    timestampOrZero(row.UpdatedAt),
+		DeletedAt:                    timestampPtr(row.DeletedAt),
+		CreatedBy:                    row.CreatedBy,
+		ExcludedModels:               excluded,
+		ExcludedProviders:            excludedProviders,
+		PreferredModels:              preferred,
+		RoutingQualityWeight:         row.RoutingQualityWeight,
+		UsageBypassEnabled:           row.UsageBypassEnabled,
+		UsageBypassThreshold:         row.UsageBypassThreshold,
+		SubscriptionRoutingDisabled:  row.SubscriptionRoutingDisabled,
+		RoutingStrategy:              router.Strategy(row.RoutingStrategy),
+		RoutingRolloutID:             derefString(row.RoutingRolloutID),
+		PolicyShadowStrategy:         router.Strategy(derefString(row.PolicyShadowStrategy)),
+		PolicyDebugEnabled:           row.PolicyDebugEnabled,
+		PolicyHeaderOverridesEnabled: row.PolicyHeaderOverridesEnabled,
+		PolicyRoutingIntent:          derefString(row.PolicyRoutingIntent),
+		AITrainingAllowed:            row.AiTrainingAllowed,
 	}
 }
 

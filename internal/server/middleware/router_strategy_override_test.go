@@ -14,7 +14,7 @@ import (
 )
 
 // runStrategyOverride reports the strategy observed on the request context after WithRouterStrategyOverride runs.
-func runStrategyOverride(t *testing.T, installation *auth.Installation, header string) router.Strategy {
+func runStrategyOverride(t *testing.T, installation *auth.Installation, header string, available ...router.Strategy) router.Strategy {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
@@ -24,7 +24,7 @@ func runStrategyOverride(t *testing.T, installation *auth.Installation, header s
 		}
 		c.Next()
 	})
-	engine.Use(middleware.WithRouterStrategyOverride())
+	engine.Use(middleware.WithRouterStrategyOverride(available...))
 
 	var observed router.Strategy
 	engine.GET("/probe", func(c *gin.Context) {
@@ -42,22 +42,22 @@ func runStrategyOverride(t *testing.T, installation *auth.Installation, header s
 }
 
 func TestRouterStrategyOverride_AppliesRL(t *testing.T) {
-	got := runStrategyOverride(t, &auth.Installation{ID: "inst-eval"}, "rl")
+	got := runStrategyOverride(t, overrideEnabledInstallation(), "rl")
 	assert.Equal(t, router.StrategyRL, got, "rl header must select the RL strategy")
 }
 
 func TestRouterStrategyOverride_AppliesBandit(t *testing.T) {
-	got := runStrategyOverride(t, &auth.Installation{ID: "inst-eval"}, "bandit")
+	got := runStrategyOverride(t, overrideEnabledInstallation(), "bandit")
 	assert.Equal(t, router.StrategyBandit, got, "bandit header must select the bandit strategy")
 }
 
 func TestRouterStrategyOverride_AppliesHMM(t *testing.T) {
-	got := runStrategyOverride(t, &auth.Installation{ID: "inst-eval"}, "hmm")
+	got := runStrategyOverride(t, overrideEnabledInstallation(), "hmm")
 	assert.Equal(t, router.StrategyHMM, got, "hmm header must select the HMM strategy")
 }
 
 func TestRouterStrategyOverride_CaseInsensitiveAndTrimmed(t *testing.T) {
-	got := runStrategyOverride(t, &auth.Installation{ID: "inst-eval"}, "  RL  ")
+	got := runStrategyOverride(t, overrideEnabledInstallation(), "  RL  ")
 	assert.Equal(t, router.StrategyRL, got, "value must be lowercased and trimmed before matching")
 }
 
@@ -67,11 +67,32 @@ func TestRouterStrategyOverride_NoHeaderDefaultsToCluster(t *testing.T) {
 }
 
 func TestRouterStrategyOverride_UnknownValueIgnored(t *testing.T) {
-	got := runStrategyOverride(t, &auth.Installation{ID: "inst-eval"}, "bogus")
+	got := runStrategyOverride(t, overrideEnabledInstallation(), "bogus")
 	assert.Equal(t, router.StrategyCluster, got, "unrecognized strategy must fall through to the default")
+}
+
+func TestRouterStrategyOverride_AppliesPersistedStrategyWithoutHeader(t *testing.T) {
+	got := runStrategyOverride(t, &auth.Installation{ID: "inst-allowlisted", RoutingStrategy: router.StrategyHMM}, "")
+	assert.Equal(t, router.StrategyHMM, got)
+}
+
+func TestRouterStrategyOverride_UnauthorizedHeaderPreservesPersistedStrategy(t *testing.T) {
+	got := runStrategyOverride(t, &auth.Installation{ID: "inst-customer", RoutingStrategy: router.StrategyHMM}, "rl")
+	assert.Equal(t, router.StrategyHMM, got)
+}
+
+func TestRouterStrategyOverride_AcceptsFutureRegisteredStrategy(t *testing.T) {
+	future := router.Strategy("future-policy")
+	installation := overrideEnabledInstallation()
+	got := runStrategyOverride(t, installation, string(future), future)
+	assert.Equal(t, future, got)
 }
 
 func TestRouterStrategyOverride_NoOpsWhenInstallationMissing(t *testing.T) {
 	got := runStrategyOverride(t, nil, "rl")
 	assert.Equal(t, router.StrategyCluster, got, "missing installation (WithAuth bypassed) must not flip strategy")
+}
+
+func overrideEnabledInstallation() *auth.Installation {
+	return &auth.Installation{ID: "inst-eval", PolicyHeaderOverridesEnabled: true}
 }

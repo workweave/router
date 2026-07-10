@@ -82,6 +82,15 @@ type RouterModelRouterInstallation struct {
 	UsageBypassThreshold        *float64
 	PreferredModels             []string
 	SubscriptionRoutingDisabled bool
+	// Canonical serving strategy. Defaults to cluster until the installation is allowlisted.
+	RoutingStrategy              string
+	RoutingRolloutID             *string
+	PolicyShadowStrategy         *string
+	PolicyDebugEnabled           bool
+	PolicyHeaderOverridesEnabled bool
+	PolicyRoutingIntent          *string
+	// Privacy snapshot synced from the organization AI-training setting. False disables policy learning.
+	AiTrainingAllowed bool
 }
 
 type RouterModelRouterRequestTelemetry struct {

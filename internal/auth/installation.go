@@ -5,6 +5,8 @@ package auth
 import (
 	"context"
 	"time"
+
+	"workweave/router/internal/router"
 )
 
 type Installation struct {
@@ -53,6 +55,21 @@ type Installation struct {
 	// subscription token exactly as before, so the prepaid billing path is
 	// unchanged. Defaults false -- preserves today's behavior.
 	SubscriptionRoutingDisabled bool
+	// RoutingStrategy is the canonical strategy selected for this installation.
+	// Existing installations default to the cluster scorer until allowlisted.
+	RoutingStrategy router.Strategy
+	// RoutingRolloutID correlates every route/outcome during a controlled rollout.
+	RoutingRolloutID string
+	// PolicyShadowStrategy optionally identifies a non-serving comparison policy.
+	PolicyShadowStrategy router.Strategy
+	// PolicyDebugEnabled enables detailed policy diagnostics for this installation.
+	PolicyDebugEnabled bool
+	// PolicyHeaderOverridesEnabled authorizes internal/eval request overrides.
+	PolicyHeaderOverridesEnabled bool
+	// PolicyRoutingIntent is a strategy-neutral preset such as low/medium/high.
+	PolicyRoutingIntent string
+	// AITrainingAllowed is the fail-closed privacy snapshot used by online learning.
+	AITrainingAllowed bool
 }
 
 type CreateInstallationParams struct {

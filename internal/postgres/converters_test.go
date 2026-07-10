@@ -3,6 +3,7 @@ package postgres
 import (
 	"testing"
 
+	"workweave/router/internal/router"
 	"workweave/router/internal/sqlc"
 
 	"github.com/google/uuid"
@@ -29,4 +30,29 @@ func TestToAuthInstallationRoutingQualityWeight(t *testing.T) {
 		})
 		assert.Nil(t, inst.RoutingQualityWeight)
 	})
+}
+
+func TestToAuthInstallationPolicyRouting(t *testing.T) {
+	rolloutID := "rollout-1"
+	shadow := "future-policy"
+	intent := "high"
+	inst := toAuthInstallation(sqlc.RouterModelRouterInstallation{
+		ID:                           uuid.New(),
+		ExternalID:                   "org-1",
+		RoutingStrategy:              string(router.StrategyHMM),
+		RoutingRolloutID:             &rolloutID,
+		PolicyShadowStrategy:         &shadow,
+		PolicyDebugEnabled:           true,
+		PolicyHeaderOverridesEnabled: true,
+		PolicyRoutingIntent:          &intent,
+		AiTrainingAllowed:            true,
+	})
+
+	assert.Equal(t, router.StrategyHMM, inst.RoutingStrategy)
+	assert.Equal(t, "rollout-1", inst.RoutingRolloutID)
+	assert.Equal(t, router.Strategy("future-policy"), inst.PolicyShadowStrategy)
+	assert.True(t, inst.PolicyDebugEnabled)
+	assert.True(t, inst.PolicyHeaderOverridesEnabled)
+	assert.Equal(t, "high", inst.PolicyRoutingIntent)
+	assert.True(t, inst.AITrainingAllowed)
 }

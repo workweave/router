@@ -122,7 +122,10 @@ func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 	const routerToken = "rk_router"
 	hash, prefix, suffix := auth.APITokenFingerprint(routerToken)
 	apiKey := &auth.APIKey{ID: "key-1", KeyHash: hash, KeyPrefix: prefix, KeySuffix: suffix}
-	installation := &auth.Installation{ID: "inst-1", ExternalID: "ext-1"}
+	installation := &auth.Installation{
+		ID: "inst-1", ExternalID: "ext-1", RoutingRolloutID: "rollout-1",
+		PolicyDebugEnabled: true, PolicyRoutingIntent: "high", AITrainingAllowed: true,
+	}
 	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
 		hash: {apiKey: apiKey, installation: installation},
 	}}
@@ -135,6 +138,11 @@ func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
 	engine.GET("/probe", func(c *gin.Context) {
 		assert.Equal(t, installation, middleware.InstallationFrom(c))
 		assert.Equal(t, apiKey, middleware.APIKeyFrom(c))
+		ctx := c.Request.Context()
+		assert.Equal(t, "rollout-1", ctx.Value(proxy.PolicyRolloutIDContextKey{}))
+		assert.Equal(t, true, ctx.Value(proxy.PolicyDebugEnabledContextKey{}))
+		assert.Equal(t, "high", ctx.Value(proxy.PolicyRoutingIntentContextKey{}))
+		assert.Equal(t, true, ctx.Value(proxy.PolicyTrainingAllowedContextKey{}))
 		c.Status(http.StatusOK)
 	})
 

@@ -344,6 +344,9 @@ type PolicyDebugEnabledContextKey struct{}
 // PolicyRoutingIntentContextKey carries a strategy-neutral routing preset.
 type PolicyRoutingIntentContextKey struct{}
 
+// PolicyRolloutIDContextKey carries the installation-level rollout identifier.
+type PolicyRolloutIDContextKey struct{}
+
 // UsageBypassConfig is the per-installation subscription usage-bypass setting,
 // stashed on ctx by the auth middleware. Threshold is nil when the toggle is on
 // but no value has been chosen yet; the request path falls back to
@@ -1474,6 +1477,20 @@ func (s *Service) PolicyCapabilities(strategy router.Strategy) (policy.Capabilit
 	return registered.capabilities, ok
 }
 
+// RegisteredStrategies returns every configured non-default strategy in
+// deterministic order. Middleware uses this list instead of hardcoding IDs.
+func (s *Service) RegisteredStrategies() []router.Strategy {
+	if s == nil {
+		return nil
+	}
+	strategies := make([]router.Strategy, 0, len(s.strategies))
+	for strategy := range s.strategies {
+		strategies = append(strategies, strategy)
+	}
+	sort.Slice(strategies, func(i, j int) bool { return strategies[i] < strategies[j] })
+	return strategies
+}
+
 // WithRLRouter is retained for source compatibility. New wiring should call
 // WithPolicyStrategy directly.
 func (s *Service) WithRLRouter(r router.Router) *Service {
@@ -1542,6 +1559,9 @@ func (s *Service) withPolicyRequestContext(ctx context.Context, req router.Reque
 	clientIdentity := ClientIdentityFrom(ctx)
 	req.ClientApp = clientIdentity.ClientApp
 	req.RolloutID = clientIdentity.RolloutID
+	if rolloutID, ok := ctx.Value(PolicyRolloutIDContextKey{}).(string); ok && rolloutID != "" {
+		req.RolloutID = rolloutID
+	}
 	req.CaptureMode = s.captureMode.String()
 	req.TrainingAllowed, _ = ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
 	req.DebugEnabled, _ = ctx.Value(PolicyDebugEnabledContextKey{}).(bool)
@@ -3118,13 +3138,17 @@ func (s *Service) reportPolicyOutcome(ctx context.Context, res turnLoopResult, d
 	installationID, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
 	clientIdentity := ClientIdentityFrom(ctx)
+	rolloutID := clientIdentity.RolloutID
+	if persistedRolloutID, ok := ctx.Value(PolicyRolloutIDContextKey{}).(string); ok && persistedRolloutID != "" {
+		rolloutID = persistedRolloutID
+	}
 	payload := map[string]interface{}{
 		"route_id":               routeMetadata.RouteID,
 		"strategy":               routeMetadata.Strategy,
 		"organization_id":        organizationID,
 		"installation_id":        installationID,
 		"client_app":             clientIdentity.ClientApp,
-		"rollout_id":             clientIdentity.RolloutID,
+		"rollout_id":             rolloutID,
 		"training_allowed":       trainingAllowed,
 		"capture_mode":           s.captureMode.String(),
 		"policy_route_key":       routeMetadata.PolicyRouteKey,

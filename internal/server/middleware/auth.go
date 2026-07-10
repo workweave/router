@@ -132,6 +132,18 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 			if installation.SubscriptionRoutingDisabled {
 				ctx = context.WithValue(ctx, proxy.InstallationSubscriptionRoutingDisabledContextKey{}, true)
 			}
+			if installation.RoutingRolloutID != "" {
+				ctx = context.WithValue(ctx, proxy.PolicyRolloutIDContextKey{}, installation.RoutingRolloutID)
+			}
+			if installation.PolicyDebugEnabled {
+				ctx = context.WithValue(ctx, proxy.PolicyDebugEnabledContextKey{}, true)
+			}
+			if installation.PolicyRoutingIntent != "" {
+				ctx = context.WithValue(ctx, proxy.PolicyRoutingIntentContextKey{}, installation.PolicyRoutingIntent)
+			}
+			if installation.AITrainingAllowed {
+				ctx = context.WithValue(ctx, proxy.PolicyTrainingAllowedContextKey{}, true)
+			}
 		}
 		if externalKeys != nil && !byokDisabled {
 			ctx = context.WithValue(ctx, proxy.ExternalAPIKeysContextKey{}, externalKeys)
