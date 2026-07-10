@@ -600,6 +600,20 @@ func main() {
 		logger.Info("Bandit strategy router disabled (ROUTER_BANDIT_POSTERIOR_FILE unset); x-weave-router-strategy: bandit will return 503")
 	}
 
+	configuredPolicySpecs, err := buildConfiguredPolicySidecars(
+		context.Background(),
+		config.GetOr("ROUTER_POLICY_SIDECARS", ""),
+		parseEnvDurationMs("ROUTER_POLICY_SIDECAR_TIMEOUT_MS", policyclient.DefaultTimeout),
+		availableModels,
+		availableProviders,
+		nil,
+		logger,
+	)
+	if err != nil {
+		logger.Error("Generic policy sidecar configuration is invalid", "err", err)
+		panic(err)
+	}
+
 	proxySvc := proxy.NewService(routeEntry, providerMap, telemetryEmitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
 		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyRL, Router: rlRouter, Unavailable: rl.ErrPolicyUnavailable}).
 		WithPolicyStrategy(policy.StrategySpec{
@@ -607,6 +621,7 @@ func main() {
 			Capabilities: policy.Capabilities{
 				SchemaVersion: policy.SchemaVersionV1, ReportsOutcomes: true, ReportsFeedback: true,
 				HonorsPreferredModels: true, HonorsQualityPriceBias: true, SupportsDebugRouteDetail: true,
+				SupportsShadow: true,
 			},
 		}).
 		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyBandit, Router: banditRouter, Unavailable: bandit.ErrBanditUnavailable}).
@@ -637,6 +652,10 @@ func main() {
 		WithAvailableModels(availableModels).
 		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
 		WithBillingService(billingSvc)
+	for _, spec := range configuredPolicySpecs {
+		proxySvc = proxySvc.WithPolicyStrategy(spec)
+		logger.Info("Generic policy sidecar wired", "strategy", spec.Strategy, "candidate_models", len(availableModels))
+	}
 	logger.Info("Effort escalation configured", "enabled", effortEscalation)
 	logger.Info("Loop escalation configured", "enabled", loopEscalationEnabled, "holdout_pct", loopEscalationHoldoutPct)
 	logger.Info("Spiral shadow detector configured", "enabled", spiralShadowEnabled)
