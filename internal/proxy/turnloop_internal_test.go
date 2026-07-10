@@ -132,7 +132,7 @@ func TestRecordTurnUsage_HMMDecisionWritesHistoryOnly(t *testing.T) {
 		Decision: router.Decision{
 			Provider: "anthropic",
 			Model:    "claude-sonnet-5",
-			Reason:   "hmm_policy(label=Complex Followup)",
+			Reason:   "hmm_policy(label=high)",
 			Metadata: &router.RoutingMetadata{
 				Strategy: string(router.StrategyHMM),
 				RouteID:  "route-1",
@@ -151,7 +151,7 @@ func TestRecordTurnUsage_HMMDecisionWritesHistoryOnly(t *testing.T) {
 	defer store.mu.Unlock()
 	require.Len(t, store.upserts, 1)
 	assert.Equal(t, hmmHistoryRole(sessionpin.DefaultRole), store.upserts[0].Role)
-	assert.Equal(t, "hmm_policy(label=Complex Followup)", store.upserts[0].Reason)
+	assert.Equal(t, "hmm_policy(label=high)", store.upserts[0].Reason)
 	assert.Equal(t, providers.ProviderAnthropic, store.upserts[0].Provider)
 	assert.Empty(t, store.upserts[0].Model, "HMM history rows must not be routable pins")
 	assert.Equal(t, []string{hmmHistoryRole(sessionpin.DefaultRole)}, store.usageRoles)
@@ -188,7 +188,7 @@ func TestRecordTurnUsage_HMMModelChangeWritesCurrentUsageOnly(t *testing.T) {
 		Decision: router.Decision{
 			Provider: providers.ProviderAnthropic,
 			Model:    "claude-sonnet-5",
-			Reason:   "hmm_policy(label=Complex Followup)",
+			Reason:   "hmm_policy(label=high)",
 			Metadata: &router.RoutingMetadata{
 				Strategy: string(router.StrategyHMM),
 				RouteID:  "route-1",
@@ -235,7 +235,7 @@ func TestRecordHMMTurnHistory_ZeroUsageRefreshesTTLButSkipsUsageWriteback(t *tes
 		Decision: router.Decision{
 			Provider: providers.ProviderAnthropic,
 			Model:    "claude-sonnet-5",
-			Reason:   "hmm_policy(label=Complex Followup)",
+			Reason:   "hmm_policy(label=high)",
 			Metadata: &router.RoutingMetadata{
 				Strategy: string(router.StrategyHMM),
 				RouteID:  "route-1",
@@ -284,7 +284,7 @@ func TestRecordTurnUsage_HMMEVStayWritesHistoryOnly(t *testing.T) {
 		Fresh: router.Decision{
 			Provider: providers.ProviderMakora,
 			Model:    "deepseek/deepseek-v4-flash",
-			Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+			Reason:   "hmm_policy(classifier 'fast')",
 			Metadata: &router.RoutingMetadata{
 				Strategy: string(router.StrategyHMM),
 				RouteID:  "route-1",
@@ -343,7 +343,7 @@ func TestHMMCostGate_StaysOnWarmCacheWhenCheaperFreshDoesNotClearEV(t *testing.T
 	fresh := router.Decision{
 		Provider: providers.ProviderMakora,
 		Model:    "deepseek/deepseek-v4-flash",
-		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Reason:   "hmm_policy(classifier 'fast')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",
@@ -388,7 +388,7 @@ func TestHMMCostGate_SwitchesCheaperFreshWhenEVPositive(t *testing.T) {
 	fresh := router.Decision{
 		Provider: providers.ProviderMakora,
 		Model:    "deepseek/deepseek-v4-flash",
-		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Reason:   "hmm_policy(classifier 'fast')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",
@@ -428,14 +428,14 @@ func TestHMMCostGate_PhaseChangeFollowsFreshDecision(t *testing.T) {
 		Provider:        providers.ProviderAnthropic,
 		Model:           "claude-sonnet-5",
 		LastServedModel: "claude-sonnet-5",
-		Reason:          "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Reason:          "hmm_policy:tool_execution(label=explore)",
 		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
 		PinnedUntil:     time.Now().Add(time.Hour),
 	}
 	fresh := router.Decision{
 		Provider: providers.ProviderMakora,
 		Model:    "deepseek/deepseek-v4-flash",
-		Reason:   "hmm_policy(classifier 'Simple Followup')",
+		Reason:   "hmm_policy(classifier 'balanced')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",
@@ -474,14 +474,14 @@ func TestHMMCostGate_HistoryPhaseChangeFollowsFreshDecision(t *testing.T) {
 	history := sessionpin.Pin{
 		Provider:        providers.ProviderAnthropic,
 		LastServedModel: "claude-sonnet-5",
-		Reason:          "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Reason:          "hmm_policy:tool_execution(label=explore)",
 		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
 		PinnedUntil:     time.Now().Add(time.Hour),
 	}
 	fresh := router.Decision{
 		Provider: providers.ProviderMakora,
 		Model:    "deepseek/deepseek-v4-flash",
-		Reason:   "hmm_policy(classifier 'Simple Followup')",
+		Reason:   "hmm_policy(classifier 'balanced')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",
@@ -525,7 +525,7 @@ func TestHMMCostGate_ExpensiveUpgradeRequiresHighConfidence(t *testing.T) {
 	fresh := router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-sonnet-5",
-		Reason:   "hmm_policy(classifier 'Complex Followup')",
+		Reason:   "hmm_policy(classifier 'high')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",
@@ -590,7 +590,7 @@ func TestHMMCostGate_LowConfidenceUpgradeKeepsIndependentPlannerSwitch(t *testin
 	fresh := router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-sonnet-5",
-		Reason:   "hmm_policy(classifier 'Complex Followup')",
+		Reason:   "hmm_policy(classifier 'high')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",
@@ -636,7 +636,7 @@ func TestHMMCostGate_IgnoresExpiredActivePin(t *testing.T) {
 	fresh := router.Decision{
 		Provider: providers.ProviderMakora,
 		Model:    "deepseek/deepseek-v4-flash",
-		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Reason:   "hmm_policy(classifier 'fast')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",
@@ -685,7 +685,7 @@ func TestHMMCostGate_IgnoresNonHMMActivePin(t *testing.T) {
 	fresh := router.Decision{
 		Provider: providers.ProviderMakora,
 		Model:    "deepseek/deepseek-v4-flash",
-		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Reason:   "hmm_policy(classifier 'fast')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",
@@ -727,14 +727,14 @@ func TestHMMCostGate_HonorsHMMReasonedActivePin(t *testing.T) {
 		Provider:        providers.ProviderAnthropic,
 		Model:           "claude-sonnet-5",
 		LastServedModel: "claude-sonnet-5",
-		Reason:          "hmm_policy(label=Complex Followup)",
+		Reason:          "hmm_policy(label=high)",
 		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
 		PinnedUntil:     time.Now().Add(time.Hour),
 	}
 	fresh := router.Decision{
 		Provider: providers.ProviderMakora,
 		Model:    "deepseek/deepseek-v4-flash",
-		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Reason:   "hmm_policy(classifier 'fast')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",
@@ -780,7 +780,7 @@ func TestHMMCostGate_IgnoresMaxedHistory(t *testing.T) {
 	fresh := router.Decision{
 		Provider: providers.ProviderMakora,
 		Model:    "deepseek/deepseek-v4-flash",
-		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Reason:   "hmm_policy(classifier 'fast')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",
@@ -1026,7 +1026,7 @@ func TestHMMCostGate_UpgradeThresholdConfigurable(t *testing.T) {
 	fresh := router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-sonnet-5",
-		Reason:   "hmm_policy(classifier 'Complex Followup')",
+		Reason:   "hmm_policy(classifier 'high')",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",

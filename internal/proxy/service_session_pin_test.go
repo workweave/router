@@ -505,7 +505,7 @@ func TestService_HardPin_HMMExploreBypassesBootHardPin(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-opus-4-7",
-		Reason:   "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Reason:   "hmm_policy:tool_execution(label=explore)",
 		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
 	}}
 	svc := proxy.NewService(
@@ -536,13 +536,13 @@ func TestService_HMMSubAgentUsesFreshDecision(t *testing.T) {
 	store.pin = sessionpin.Pin{
 		Provider:    providers.ProviderAnthropic,
 		Model:       "claude-haiku-4-5",
-		Reason:      "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Reason:      "hmm_policy:tool_execution(label=explore)",
 		PinnedUntil: time.Now().Add(time.Hour),
 	}
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-opus-4-7",
-		Reason:   "hmm_policy(label=Complex Design)",
+		Reason:   "hmm_policy(label=maximum)",
 		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
 	}}
 	svc := newPinSvc(fr, store).WithHMMRouter(fr)
@@ -586,7 +586,7 @@ func TestService_HMMFeedbackKeyUsesClientSessionBeforeCompaction(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-haiku-4-5",
-		Reason:   "hmm_policy(label=Simple Followup)",
+		Reason:   "hmm_policy(label=balanced)",
 		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
 	}}
 	svc := newPinSvc(fr, store).
@@ -631,7 +631,7 @@ func TestService_HMMFeedbackKeyOpenAIUsesClientSessionBeforeCompaction(t *testin
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderOpenAI,
 		Model:    "gpt-4o",
-		Reason:   "hmm_policy(label=Simple Followup)",
+		Reason:   "hmm_policy(label=balanced)",
 		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
 	}}
 	svc := newOpenAIPinSvc(fr, store).

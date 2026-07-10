@@ -254,13 +254,13 @@ func TestTurnLoop_HMMToolResultCommunicationFollowsFreshDecision(t *testing.T) {
 	store.pin = sessionpin.Pin{
 		Provider:    providers.ProviderAnthropic,
 		Model:       "claude-haiku-4-5",
-		Reason:      "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Reason:      "hmm_policy:tool_execution(label=explore)",
 		PinnedUntil: time.Now().Add(time.Hour),
 	}
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-sonnet-4-5",
-		Reason:   "hmm_policy(label=Simple Followup)",
+		Reason:   "hmm_policy(label=balanced)",
 		Metadata: &router.RoutingMetadata{
 			Strategy: string(router.StrategyHMM),
 			RouteID:  "route-1",
@@ -287,13 +287,13 @@ func TestTurnLoop_HMMToolResultToolExecutionUsesFreshDecision(t *testing.T) {
 	store.pin = sessionpin.Pin{
 		Provider:    providers.ProviderAnthropic,
 		Model:       "claude-haiku-4-5",
-		Reason:      "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Reason:      "hmm_policy:tool_execution(label=explore)",
 		PinnedUntil: time.Now().Add(time.Hour),
 	}
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-sonnet-4-5",
-		Reason:   "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Reason:   "hmm_policy:tool_execution(label=explore)",
 		Metadata: &router.RoutingMetadata{
 			Strategy: string(router.StrategyHMM),
 			RouteID:  "route-1",
@@ -320,7 +320,7 @@ func TestTurnLoop_HMMToolExecutionStaysWhenWarmCacheEVBeatsCheapFresh(t *testing
 	store.pin = sessionpin.Pin{
 		Provider:        providers.ProviderAnthropic,
 		Model:           "claude-sonnet-5",
-		Reason:          "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Reason:          "hmm_policy:tool_execution(label=explore)",
 		PinnedUntil:     time.Now().Add(time.Hour),
 		LastInputTokens: 5000,
 		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
@@ -328,7 +328,7 @@ func TestTurnLoop_HMMToolExecutionStaysWhenWarmCacheEVBeatsCheapFresh(t *testing
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-haiku-4-5",
-		Reason:   "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Reason:   "hmm_policy:tool_execution(label=explore)",
 		Metadata: &router.RoutingMetadata{
 			Strategy: string(router.StrategyHMM),
 			RouteID:  "route-1",
@@ -362,7 +362,7 @@ func TestTurnLoop_HMMHistoryMaxedOutExcludesServedModelBeforeRouting(t *testing.
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-haiku-4-5",
-		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Reason:   "hmm_policy(classifier 'fast')",
 		Metadata: &router.RoutingMetadata{
 			Strategy: string(router.StrategyHMM),
 			RouteID:  "route-1",
@@ -399,7 +399,7 @@ func TestTurnLoop_HMMExpiredHistoryMaxedOutStillExcludesServedModel(t *testing.T
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-haiku-4-5",
-		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Reason:   "hmm_policy(classifier 'fast')",
 		Metadata: &router.RoutingMetadata{
 			Strategy: string(router.StrategyHMM),
 			RouteID:  "route-1",
@@ -426,7 +426,7 @@ func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
 	store.pin = sessionpin.Pin{
 		Provider:        providers.ProviderAnthropic,
 		Model:           "claude-haiku-4-5",
-		Reason:          "hmm_policy(label=Simple Followup)",
+		Reason:          "hmm_policy(label=balanced)",
 		PinnedUntil:     time.Now().Add(time.Hour),
 		LastInputTokens: 5000,
 		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
@@ -434,7 +434,7 @@ func TestTurnLoop_HMMConversationFollowsFreshDecision(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-sonnet-5",
-		Reason:   "hmm_policy(label=Complex Design)",
+		Reason:   "hmm_policy(label=maximum)",
 		Metadata: &router.RoutingMetadata{
 			Strategy:    string(router.StrategyHMM),
 			RouteID:     "route-1",
@@ -462,7 +462,7 @@ func TestTurnLoop_HMMToolExecutionPhaseChangeUsesFreshDecision(t *testing.T) {
 	store.pin = sessionpin.Pin{
 		Provider:        providers.ProviderAnthropic,
 		Model:           "claude-sonnet-4-5",
-		Reason:          "hmm_policy(label=Complex Followup)",
+		Reason:          "hmm_policy(label=high)",
 		PinnedUntil:     time.Now().Add(time.Hour),
 		LastInputTokens: 5000,
 		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
@@ -470,7 +470,7 @@ func TestTurnLoop_HMMToolExecutionPhaseChangeUsesFreshDecision(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-sonnet-5",
-		Reason:   "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Reason:   "hmm_policy:tool_execution(label=explore)",
 		Metadata: &router.RoutingMetadata{
 			Strategy: string(router.StrategyHMM),
 			RouteID:  "route-1",
@@ -498,7 +498,7 @@ func TestTurnLoop_HMMToolExecutionSameModelDoesNotRewritePin(t *testing.T) {
 	store.pin = sessionpin.Pin{
 		Provider:        providers.ProviderAnthropic,
 		Model:           "claude-sonnet-4-5",
-		Reason:          "hmm_policy(label=Complex Followup)",
+		Reason:          "hmm_policy(label=high)",
 		PinnedUntil:     time.Now().Add(time.Hour),
 		LastInputTokens: 5000,
 		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
@@ -506,7 +506,7 @@ func TestTurnLoop_HMMToolExecutionSameModelDoesNotRewritePin(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-sonnet-4-5",
-		Reason:   "hmm_policy:tool_execution(label=SPAWN_EXPLORE)",
+		Reason:   "hmm_policy:tool_execution(label=explore)",
 		Metadata: &router.RoutingMetadata{
 			Strategy: string(router.StrategyHMM),
 			RouteID:  "route-1",

@@ -25,8 +25,8 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 			Score:                0.91,
 			ScoreLabel:           "classifier_confidence",
 			Reason:               "policy",
-			Cluster:              "medium",
-			ComplexityLabel:      "Simple Followup",
+			Cluster:              "balanced",
+			ComplexityLabel:      "balanced",
 			ClassifierConfidence: floatPtr(0.91),
 			ClassifierMargin:     floatPtr(0.22),
 			Propensity:           1.0,
@@ -105,8 +105,8 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 	assert.Equal(t, []string{"moonshotai/kimi-k2.7-code"}, got.CandidateModels)
 	assert.Equal(t, "moonshotai/kimi-k2.7-code", result.Model)
 	assert.Equal(t, "classifier_confidence", result.ScoreKind)
-	assert.Equal(t, "medium", result.PolicyGroup)
-	assert.Equal(t, "Simple Followup", result.PolicyLabel)
+	assert.Equal(t, "balanced", result.PolicyGroup)
+	assert.Equal(t, "balanced", result.PolicyLabel)
 	require.NotNil(t, result.Confidence)
 	assert.Equal(t, 0.91, *result.Confidence)
 	require.NotNil(t, result.Margin)
@@ -214,7 +214,7 @@ func TestHTTPDeciderReportsFeedback(t *testing.T) {
 		"feedback_key":  "feedback-session",
 		"feedback_role": "default",
 		"rating":        "down",
-		"feedback":      "label=Complex Followup",
+		"feedback":      "label=high",
 	})
 
 	require.NoError(t, err)
