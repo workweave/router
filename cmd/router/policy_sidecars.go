@@ -29,9 +29,7 @@ var reservedPolicyStrategies = map[router.Strategy]struct{}{
 	router.StrategyBandit:  {},
 }
 
-// buildConfiguredPolicySidecars turns a JSON strategy-to-URL map into generic
-// policy registrations. Sidecars own model-specific logic; the router owns
-// candidate resolution, provider binding, retries, validation, and lifecycle.
+// buildConfiguredPolicySidecars turns a JSON strategy-to-URL map into policy.StrategySpec registrations; sidecars own model logic, the router owns candidate resolution and lifecycle.
 func buildConfiguredPolicySidecars(
 	ctx context.Context,
 	raw string,
