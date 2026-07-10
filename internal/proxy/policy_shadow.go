@@ -8,9 +8,8 @@ import (
 	"workweave/router/internal/router"
 )
 
-// PolicyShadowStore persists comparison-only decisions independently from
-// served request telemetry. Implementations are optional; shadow routing still
-// emits an operational log when no durable store is wired.
+// PolicyShadowStore persists comparison-only policy decisions; if nil,
+// shadow routing still logs results without durable storage.
 type PolicyShadowStore interface {
 	InsertPolicyShadowDecision(ctx context.Context, event PolicyShadowDecision) error
 }
