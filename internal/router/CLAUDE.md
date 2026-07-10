@@ -10,6 +10,7 @@ Inner-ring `Router` interface + `Request`/`Decision`/`ModelSpec`/`ModelRegistry`
 |---|---|---|
 | [`catalog/`](catalog) | **Single source of truth** for per-model data (tier, ordered provider bindings, pricing, cost math). Add a model here. | [catalog/CLAUDE.md](catalog/CLAUDE.md) |
 | [`cluster/`](cluster) | AvengersPro-derived primary `Router` impl (P0) | [cluster/CLAUDE.md](cluster/CLAUDE.md) |
+| [`policy/`](policy) | Shared candidate resolution and conformance primitives for external policy routers | — |
 | [`planner/`](planner) | Cache-aware EV policy (STAY vs SWITCH) | [planner/CLAUDE.md](planner/CLAUDE.md) |
 | [`handover/`](handover) | `Summarizer` interface + envelope rewrite | [handover/CLAUDE.md](handover/CLAUDE.md) |
 | [`cache/`](cache) | Cross-request semantic response cache | [cache/CLAUDE.md](cache/CLAUDE.md) |

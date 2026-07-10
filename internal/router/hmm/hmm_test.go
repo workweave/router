@@ -16,9 +16,11 @@ type fakeDecider struct {
 	query Query
 	res   Result
 	err   error
+	calls int
 }
 
 func (f *fakeDecider) Decide(_ context.Context, q Query) (Result, error) {
+	f.calls++
 	f.query = q
 	return f.res, f.err
 }
@@ -35,7 +37,7 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 		PolicyGroup:   "standard",
 	}}
 	deployed := map[string]struct{}{"moonshotai/kimi-k2.7": {}}
-	available := map[string]struct{}{"fireworks": {}}
+	available := map[string]struct{}{providers.ProviderFireworks: {}}
 	r := New(decider, deployed, available)
 
 	decision, err := r.Route(context.Background(), router.Request{
@@ -60,14 +62,14 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 	assert.Equal(t, "feedback-session", decider.query.FeedbackKey)
 	assert.Equal(t, "default", decider.query.FeedbackRole)
 	assert.Equal(t, []router.ConversationMessage{{Role: "user", Text: "latest hello"}}, decider.query.ConversationMessages)
-	assert.Equal(t, []Candidate{{RosterID: "moonshotai/kimi-k2.7-code", Provider: "fireworks"}}, decider.query.Candidates)
+	assert.Equal(t, []Candidate{{RosterID: "moonshotai/kimi-k2.7-code", CatalogID: "moonshotai/kimi-k2.7", Provider: providers.ProviderFireworks}}, decider.query.Candidates)
 }
 
 func TestRouterKeepsGeneratedRouteIDWhenSidecarOmitsIt(t *testing.T) {
 	decider := &fakeDecider{res: Result{
 		Model: "moonshotai/kimi-k2.7-code",
 	}}
-	r := New(decider, map[string]struct{}{"moonshotai/kimi-k2.7": {}}, map[string]struct{}{"fireworks": {}})
+	r := New(decider, map[string]struct{}{"moonshotai/kimi-k2.7": {}}, map[string]struct{}{providers.ProviderFireworks: {}})
 
 	decision, err := r.Route(context.Background(), router.Request{PromptText: "hello"})
 
@@ -79,12 +81,83 @@ func TestRouterKeepsGeneratedRouteIDWhenSidecarOmitsIt(t *testing.T) {
 
 func TestRouterFailsClosedOnUnknownReturnedModel(t *testing.T) {
 	decider := &fakeDecider{res: Result{Model: "unknown/model"}}
-	r := New(decider, map[string]struct{}{"moonshotai/kimi-k2.7": {}}, map[string]struct{}{"fireworks": {}})
+	r := New(decider, map[string]struct{}{"moonshotai/kimi-k2.7": {}}, map[string]struct{}{providers.ProviderFireworks: {}})
 
 	_, err := r.Route(context.Background(), router.Request{PromptText: "hello"})
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrHMMUnavailable)
+}
+
+func TestRouterDoesNotOfferOpenRouterFallbackCandidates(t *testing.T) {
+	decider := &fakeDecider{res: Result{Model: "minimax/minimax-m3"}}
+	r := New(
+		decider,
+		map[string]struct{}{"minimax/minimax-m3": {}},
+		map[string]struct{}{providers.ProviderOpenRouter: {}},
+	)
+
+	candidates := r.resolver.Resolve(router.Request{}).Candidates
+
+	assert.Empty(t, candidates)
+
+	_, err := r.Route(context.Background(), router.Request{PromptText: "hello"})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrHMMUnavailable)
+	assert.Zero(t, decider.calls)
+}
+
+func TestCurrentHMMRosterCatalogArmsResolveToCurrentProviders(t *testing.T) {
+	deployed := map[string]struct{}{
+		"deepseek/deepseek-v4-flash": {},
+		"qwen/qwen3-coder-next":      {},
+		"gpt-5.4-nano":               {},
+		"minimax/minimax-m3":         {},
+		"moonshotai/kimi-k2.7":       {},
+		"deepseek/deepseek-v4-pro":   {},
+		"gemini-3.5-flash":           {},
+		"claude-sonnet-5":            {},
+		"claude-opus-4-8":            {},
+		"gpt-5.5":                    {},
+		"z-ai/glm-5.2":               {},
+		"gemini-3.1-pro-preview":     {},
+		"claude-fable-5":             {},
+	}
+	available := map[string]struct{}{
+		providers.ProviderAnthropic:  {},
+		providers.ProviderOpenAI:     {},
+		providers.ProviderGoogle:     {},
+		providers.ProviderOpenRouter: {},
+		providers.ProviderFireworks:  {},
+		providers.ProviderBedrock:    {},
+		providers.ProviderMakora:     {},
+		providers.ProviderTogether:   {},
+	}
+	r := New(&fakeDecider{}, deployed, available)
+
+	candidates := r.resolver.Resolve(router.Request{}).Candidates
+
+	gotRosterIDs := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		assert.NotEqual(t, providers.ProviderOpenRouter, candidate.Provider, candidate.RosterID)
+		gotRosterIDs = append(gotRosterIDs, candidate.RosterID)
+	}
+	assert.ElementsMatch(t, []string{
+		"deepseek/deepseek-v4-flash",
+		"qwen/qwen3-coder-next",
+		"openai/gpt-5.4-nano",
+		"minimax/minimax-m3",
+		"moonshotai/kimi-k2.7-code",
+		"deepseek/deepseek-v4-pro",
+		"google/gemini-3.5-flash",
+		"anthropic/claude-sonnet-5",
+		"anthropic/claude-opus-4.8",
+		"openai/gpt-5.5",
+		"z-ai/glm-5.2",
+		"google/gemini-3.1-pro-preview",
+		"anthropic/claude-fable-5",
+	}, gotRosterIDs)
 }
 
 func TestRosterIDForSkipsAmbiguousBareProviderIDs(t *testing.T) {

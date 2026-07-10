@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 )
 
@@ -62,8 +63,9 @@ func TestHTTPDeciderPostsRouteAndParsesDisplayMetadata(t *testing.T) {
 		EstimatedInputTokens: 123,
 		HasTools:             true,
 		Candidates: []Candidate{{
-			RosterID: "moonshotai/kimi-k2.7-code",
-			Provider: "openrouter",
+			RosterID:  "moonshotai/kimi-k2.7-code",
+			CatalogID: "moonshotai/kimi-k2.7",
+			Provider:  providers.ProviderFireworks,
 		}},
 	})
 
