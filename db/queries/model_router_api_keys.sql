@@ -6,6 +6,7 @@ INSERT INTO router.model_router_api_keys (
     key_prefix,
     key_hash,
     key_suffix,
+    default_strategy,
     created_by
 )
 VALUES (
@@ -15,6 +16,7 @@ VALUES (
     @key_prefix::varchar,
     @key_hash::varchar,
     @key_suffix::varchar,
+    @default_strategy,
     @created_by
 )
 RETURNING *;
@@ -63,6 +65,18 @@ WHERE id = @id::uuid
 -- name: SoftDeleteModelRouterAPIKey :exec
 UPDATE router.model_router_api_keys
 SET deleted_at = NOW()
+WHERE id = @id::uuid
+  AND installation_id = @installation_id::uuid
+  AND deleted_at IS NULL;
+
+-- Sets the per-key routing-strategy default, scoped to installation_id to
+-- prevent cross-tenant updates. NULL clears it so the key falls back to the
+-- deployment default (cluster) absent an x-weave-router-strategy header. The
+-- header always wins over this column when both are present; see
+-- WithRouterStrategyOverride.
+-- name: UpdateModelRouterAPIKeyDefaultStrategy :execrows
+UPDATE router.model_router_api_keys
+SET default_strategy = sqlc.narg('default_strategy')
 WHERE id = @id::uuid
   AND installation_id = @installation_id::uuid
   AND deleted_at IS NULL;

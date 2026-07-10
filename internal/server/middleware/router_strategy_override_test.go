@@ -16,11 +16,21 @@ import (
 // runStrategyOverride reports the strategy observed on the request context after WithRouterStrategyOverride runs.
 func runStrategyOverride(t *testing.T, installation *auth.Installation, header string) router.Strategy {
 	t.Helper()
+	return runStrategyOverrideWithKey(t, installation, nil, header)
+}
+
+// runStrategyOverrideWithKey is runStrategyOverride plus an authed API key, so
+// tests can exercise the key-default fallback (APIKeyFrom(c)).
+func runStrategyOverrideWithKey(t *testing.T, installation *auth.Installation, apiKey *auth.APIKey, header string) router.Strategy {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
 		if installation != nil {
 			c.Set("router_installation", installation)
+		}
+		if apiKey != nil {
+			c.Set("router_api_key", apiKey)
 		}
 		c.Next()
 	})
@@ -74,4 +84,34 @@ func TestRouterStrategyOverride_UnknownValueIgnored(t *testing.T) {
 func TestRouterStrategyOverride_NoOpsWhenInstallationMissing(t *testing.T) {
 	got := runStrategyOverride(t, nil, "rl")
 	assert.Equal(t, router.StrategyCluster, got, "missing installation (WithAuth bypassed) must not flip strategy")
+}
+
+func TestRouterStrategyOverride_HeaderAbsentFallsBackToKeyDefault(t *testing.T) {
+	apiKey := &auth.APIKey{ID: "key-1", DefaultStrategy: "hmm"}
+	got := runStrategyOverrideWithKey(t, &auth.Installation{ID: "inst-eval"}, apiKey, "")
+	assert.Equal(t, router.StrategyHMM, got, "absent header must fall back to the key's default_strategy (the Cursor path)")
+}
+
+func TestRouterStrategyOverride_HeaderWinsOverKeyDefault(t *testing.T) {
+	apiKey := &auth.APIKey{ID: "key-1", DefaultStrategy: "hmm"}
+	got := runStrategyOverrideWithKey(t, &auth.Installation{ID: "inst-eval"}, apiKey, "cluster")
+	assert.Equal(t, router.StrategyCluster, got, "an explicit header must win over the key's default_strategy")
+}
+
+func TestRouterStrategyOverride_UnrecognizedHeaderFallsBackToKeyDefault(t *testing.T) {
+	apiKey := &auth.APIKey{ID: "key-1", DefaultStrategy: "hmm"}
+	got := runStrategyOverrideWithKey(t, &auth.Installation{ID: "inst-eval"}, apiKey, "bogus")
+	assert.Equal(t, router.StrategyHMM, got, "an unrecognized header must fall through to the key's default_strategy, not straight to cluster")
+}
+
+func TestRouterStrategyOverride_UnknownKeyDefaultIgnored(t *testing.T) {
+	apiKey := &auth.APIKey{ID: "key-1", DefaultStrategy: "not-a-real-strategy"}
+	got := runStrategyOverrideWithKey(t, &auth.Installation{ID: "inst-eval"}, apiKey, "")
+	assert.Equal(t, router.StrategyCluster, got, "an unrecognized stored default_strategy must fall through to cluster, not error")
+}
+
+func TestRouterStrategyOverride_EmptyKeyDefaultLeavesCluster(t *testing.T) {
+	apiKey := &auth.APIKey{ID: "key-1", DefaultStrategy: ""}
+	got := runStrategyOverrideWithKey(t, &auth.Installation{ID: "inst-eval"}, apiKey, "")
+	assert.Equal(t, router.StrategyCluster, got, "a key with no default_strategy set must leave the deployment default")
 }

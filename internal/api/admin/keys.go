@@ -13,16 +13,22 @@ import (
 )
 
 type apiKeyResponse struct {
-	ID         string     `json:"id"`
-	Name       *string    `json:"name"`
-	KeyPrefix  string     `json:"key_prefix"`
-	KeySuffix  string     `json:"key_suffix"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	CreatedAt  time.Time  `json:"created_at"`
+	ID              string     `json:"id"`
+	Name            *string    `json:"name"`
+	KeyPrefix       string     `json:"key_prefix"`
+	KeySuffix       string     `json:"key_suffix"`
+	LastUsedAt      *time.Time `json:"last_used_at"`
+	CreatedAt       time.Time  `json:"created_at"`
+	DefaultStrategy string     `json:"default_strategy"`
 }
 
 type issueAPIKeyRequest struct {
 	Name string `json:"name"`
+	// DefaultStrategy is the per-key routing-strategy default; see
+	// auth.APIKey.DefaultStrategy. Empty (the common case) means no key
+	// default -- the deployment default (cluster) applies unless the caller
+	// sends x-weave-router-strategy.
+	DefaultStrategy string `json:"default_strategy"`
 }
 
 type issueAPIKeyResponse struct {
@@ -30,15 +36,35 @@ type issueAPIKeyResponse struct {
 	Token string         `json:"token"`
 }
 
+type updateAPIKeyDefaultStrategyRequest struct {
+	DefaultStrategy string `json:"default_strategy"`
+}
+
 func toAPIKeyResponse(k *auth.APIKey) apiKeyResponse {
 	return apiKeyResponse{
-		ID:         k.ID,
-		Name:       k.Name,
-		KeyPrefix:  k.KeyPrefix,
-		KeySuffix:  k.KeySuffix,
-		LastUsedAt: k.LastUsedAt,
-		CreatedAt:  k.CreatedAt,
+		ID:              k.ID,
+		Name:            k.Name,
+		KeyPrefix:       k.KeyPrefix,
+		KeySuffix:       k.KeySuffix,
+		LastUsedAt:      k.LastUsedAt,
+		CreatedAt:       k.CreatedAt,
+		DefaultStrategy: k.DefaultStrategy,
 	}
+}
+
+// writeAPIKeyServiceError maps IssueAPIKey/RotateAPIKey/SetAPIKeyDefaultStrategy
+// errors to HTTP responses. Callers pass the "action" fallback message (e.g.
+// "issue", "rotate") used when the error isn't one of the recognized sentinels.
+func writeAPIKeyServiceError(c *gin.Context, err error, action string) {
+	if errors.Is(err, auth.ErrUnknownStrategy) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Unknown default_strategy. Must be one of: cluster, rl, hmm, bandit."})
+		return
+	}
+	if errors.Is(err, auth.ErrAPIKeyNotFound) {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "API key not found."})
+		return
+	}
+	c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to " + action + " API key."})
 }
 
 func ListAPIKeysHandler(authSvc *auth.Service) gin.HandlerFunc {
@@ -75,9 +101,9 @@ func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 		if req.Name != "" {
 			name = &req.Name
 		}
-		key, rawToken, err := authSvc.IssueAPIKey(c.Request.Context(), installation.ID, name, nil)
+		key, rawToken, err := authSvc.IssueAPIKey(c.Request.Context(), installation.ID, name, req.DefaultStrategy, nil)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to issue API key."})
+			writeAPIKeyServiceError(c, err, "issue")
 			return
 		}
 		c.JSON(http.StatusCreated, issueAPIKeyResponse{
@@ -88,8 +114,9 @@ func IssueAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 }
 
 // RotateAPIKeyHandler soft-deletes the specified key and issues a replacement
-// against the same installation, carrying forward the previous key's name.
-// 404 when the id is not owned by the caller's installation.
+// against the same installation, carrying forward the previous key's name
+// and default_strategy. 404 when the id is not owned by the caller's
+// installation.
 func RotateAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		installation, ok := resolveInstallation(c, authSvc)
@@ -103,17 +130,41 @@ func RotateAPIKeyHandler(authSvc *auth.Service) gin.HandlerFunc {
 		}
 		key, rawToken, err := authSvc.RotateAPIKey(c.Request.Context(), installation.ID, id, nil)
 		if err != nil {
-			if errors.Is(err, auth.ErrAPIKeyNotFound) {
-				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "API key not found."})
-				return
-			}
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to rotate API key."})
+			writeAPIKeyServiceError(c, err, "rotate")
 			return
 		}
 		c.JSON(http.StatusCreated, issueAPIKeyResponse{
 			Key:   toAPIKeyResponse(key),
 			Token: rawToken,
 		})
+	}
+}
+
+// UpdateAPIKeyDefaultStrategyHandler flips a key's default_strategy without
+// rotating (invalidating) the token itself -- the Cursor path: mint a key
+// once, then flip its default strategy as needed. 404 when the id is not
+// owned by the caller's installation; 400 for an unrecognized strategy.
+func UpdateAPIKeyDefaultStrategyHandler(authSvc *auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		installation, ok := resolveInstallation(c, authSvc)
+		if !ok {
+			return
+		}
+		id := c.Param("id")
+		if id == "" {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Missing ID."})
+			return
+		}
+		var req updateAPIKeyDefaultStrategyRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid request body."})
+			return
+		}
+		if err := authSvc.SetAPIKeyDefaultStrategy(c.Request.Context(), installation.ID, id, req.DefaultStrategy); err != nil {
+			writeAPIKeyServiceError(c, err, "update")
+			return
+		}
+		c.Status(http.StatusNoContent)
 	}
 }
 

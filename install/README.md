@@ -211,6 +211,14 @@ What each `off` does (and `on` reverses byte-for-byte):
 settings UI. To toggle it, open **Settings → Models → Override OpenAI Base
 URL** and turn the override (`<base-url>/v1`) on or off there.
 
+Cursor also can't send custom headers, so it can't select a routing strategy
+via `x-weave-router-strategy` the way Claude Code / evals do. To opt a Cursor
+key into HMM (or another non-default strategy), mint it with
+`wv mr seed-key --default-strategy hmm` and paste that token into the OpenAI
+API key field — the key's stored default applies whenever no header is
+present. A header still overrides the key default when both are set, so the
+same key works unmodified for Claude Code / eval traffic that does send one.
+
 ## Verifying
 
 **Claude Code:**

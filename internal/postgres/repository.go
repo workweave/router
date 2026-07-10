@@ -208,13 +208,14 @@ func (r *apiKeyRepo) Create(ctx context.Context, params auth.CreateAPIKeyParams)
 	}
 	q := sqlc.New(r.tx)
 	row, err := q.CreateModelRouterAPIKey(ctx, sqlc.CreateModelRouterAPIKeyParams{
-		InstallationID: installationID,
-		ExternalID:     params.ExternalID,
-		Name:           params.Name,
-		KeyPrefix:      params.KeyPrefix,
-		KeyHash:        params.KeyHash,
-		KeySuffix:      params.KeySuffix,
-		CreatedBy:      params.CreatedBy,
+		InstallationID:  installationID,
+		ExternalID:      params.ExternalID,
+		Name:            params.Name,
+		KeyPrefix:       params.KeyPrefix,
+		KeyHash:         params.KeyHash,
+		KeySuffix:       params.KeySuffix,
+		DefaultStrategy: stringPtrOrNil(params.DefaultStrategy),
+		CreatedBy:       params.CreatedBy,
 	})
 	if err != nil {
 		return nil, err
@@ -271,4 +272,28 @@ func (r *apiKeyRepo) SoftDelete(ctx context.Context, installationID, id string) 
 		ID:             parsed,
 		InstallationID: installationUUID,
 	})
+}
+
+func (r *apiKeyRepo) UpdateDefaultStrategy(ctx context.Context, installationID, id, defaultStrategy string) error {
+	installationUUID, err := uuid.Parse(installationID)
+	if err != nil {
+		return err
+	}
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return err
+	}
+	q := sqlc.New(r.tx)
+	rows, err := q.UpdateModelRouterAPIKeyDefaultStrategy(ctx, sqlc.UpdateModelRouterAPIKeyDefaultStrategyParams{
+		ID:              parsed,
+		InstallationID:  installationUUID,
+		DefaultStrategy: stringPtrOrNil(defaultStrategy),
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return auth.ErrAPIKeyNotFound
+	}
+	return nil
 }

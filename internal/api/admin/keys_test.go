@@ -33,15 +33,16 @@ func (f *fakeAPIKeyRepository) Create(_ context.Context, params auth.CreateAPIKe
 	defer f.mu.Unlock()
 	f.nextID++
 	key := &auth.APIKey{
-		ID:             fmt.Sprintf("key-%d", f.nextID),
-		InstallationID: params.InstallationID,
-		ExternalID:     params.ExternalID,
-		Name:           params.Name,
-		KeyPrefix:      params.KeyPrefix,
-		KeyHash:        params.KeyHash,
-		KeySuffix:      params.KeySuffix,
-		CreatedBy:      params.CreatedBy,
-		CreatedAt:      time.Now(),
+		ID:              fmt.Sprintf("key-%d", f.nextID),
+		InstallationID:  params.InstallationID,
+		ExternalID:      params.ExternalID,
+		Name:            params.Name,
+		KeyPrefix:       params.KeyPrefix,
+		KeyHash:         params.KeyHash,
+		KeySuffix:       params.KeySuffix,
+		DefaultStrategy: params.DefaultStrategy,
+		CreatedBy:       params.CreatedBy,
+		CreatedAt:       time.Now(),
 	}
 	f.keys = append(f.keys, key)
 	return key, nil
@@ -78,6 +79,18 @@ func (f *fakeAPIKeyRepository) SoftDelete(_ context.Context, installationID, id 
 	return nil
 }
 
+func (f *fakeAPIKeyRepository) UpdateDefaultStrategy(_ context.Context, installationID, id, defaultStrategy string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, k := range f.keys {
+		if k.ID == id && k.InstallationID == installationID && k.DeletedAt == nil {
+			k.DefaultStrategy = defaultStrategy
+			return nil
+		}
+	}
+	return auth.ErrAPIKeyNotFound
+}
+
 func (f *fakeAPIKeyRepository) softDeletedSnapshot() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -102,6 +115,7 @@ func apiKeysEngine(svc *auth.Service) *gin.Engine {
 	engine.GET("/admin/v1/keys", inject, admin.ListAPIKeysHandler(svc))
 	engine.POST("/admin/v1/keys", inject, admin.IssueAPIKeyHandler(svc))
 	engine.POST("/admin/v1/keys/:id/rotate", inject, admin.RotateAPIKeyHandler(svc))
+	engine.PUT("/admin/v1/keys/:id/default-strategy", inject, admin.UpdateAPIKeyDefaultStrategyHandler(svc))
 	engine.GET("/admin/v1/provider-keys", inject, admin.ListExternalKeysHandler(svc))
 	return engine
 }
@@ -113,10 +127,10 @@ func newAuthServiceForKeyTests(apiKeys auth.APIKeyRepository, externalKeys auth.
 func TestListAPIKeysHandler_ReturnsKeysForInstallation(t *testing.T) {
 	repo := &fakeAPIKeyRepository{}
 	svc := newAuthServiceForKeyTests(repo, nil)
-	_, _, err := svc.IssueAPIKey(context.Background(), testInstallationID, nil, nil)
+	_, _, err := svc.IssueAPIKey(context.Background(), testInstallationID, nil, "", nil)
 	require.NoError(t, err)
 	// A key on a different installation must not leak into this installation's list.
-	_, _, err = svc.IssueAPIKey(context.Background(), "other-inst", nil, nil)
+	_, _, err = svc.IssueAPIKey(context.Background(), "other-inst", nil, "", nil)
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
@@ -170,7 +184,7 @@ func TestIssueAPIKeyHandler_ReturnsTokenMatchingFingerprint(t *testing.T) {
 func TestRotateAPIKeyHandler_SoftDeletesOldKeyAndIssuesNew(t *testing.T) {
 	repo := &fakeAPIKeyRepository{}
 	svc := newAuthServiceForKeyTests(repo, nil)
-	oldKey, _, err := svc.IssueAPIKey(context.Background(), testInstallationID, nil, nil)
+	oldKey, _, err := svc.IssueAPIKey(context.Background(), testInstallationID, nil, "", nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/v1/keys/"+oldKey.ID+"/rotate", nil)
@@ -195,7 +209,7 @@ func TestRotateAPIKeyHandler_ForeignKeyIDReturnsNotFound(t *testing.T) {
 	repo := &fakeAPIKeyRepository{}
 	svc := newAuthServiceForKeyTests(repo, nil)
 	// Key belongs to a different installation than the one injected by apiKeysEngine.
-	foreignKey, _, err := svc.IssueAPIKey(context.Background(), "other-inst", nil, nil)
+	foreignKey, _, err := svc.IssueAPIKey(context.Background(), "other-inst", nil, "", nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/v1/keys/"+foreignKey.ID+"/rotate", nil)
@@ -206,6 +220,111 @@ func TestRotateAPIKeyHandler_ForeignKeyIDReturnsNotFound(t *testing.T) {
 		"rotating a key id owned by a foreign installation must map auth.ErrAPIKeyNotFound to 404")
 	assert.Empty(t, repo.softDeletedSnapshot(),
 		"a rejected rotation must not soft-delete the foreign key")
+}
+
+func TestRotateAPIKeyHandler_CarriesForwardDefaultStrategy(t *testing.T) {
+	repo := &fakeAPIKeyRepository{}
+	svc := newAuthServiceForKeyTests(repo, nil)
+	oldKey, _, err := svc.IssueAPIKey(context.Background(), testInstallationID, nil, "hmm", nil)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/v1/keys/"+oldKey.ID+"/rotate", nil)
+	rec := httptest.NewRecorder()
+	apiKeysEngine(svc).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var resp struct {
+		Key struct {
+			DefaultStrategy string `json:"default_strategy"`
+		} `json:"key"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "hmm", resp.Key.DefaultStrategy,
+		"rotation must carry forward the old key's default_strategy")
+}
+
+func TestIssueAPIKeyHandler_PersistsDefaultStrategy(t *testing.T) {
+	repo := &fakeAPIKeyRepository{}
+	svc := newAuthServiceForKeyTests(repo, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "cursor-hmm", "default_strategy": "hmm"})
+	req := httptest.NewRequest(http.MethodPost, "/admin/v1/keys", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	apiKeysEngine(svc).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var resp struct {
+		Key struct {
+			DefaultStrategy string `json:"default_strategy"`
+		} `json:"key"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "hmm", resp.Key.DefaultStrategy)
+}
+
+func TestIssueAPIKeyHandler_RejectsUnknownDefaultStrategy(t *testing.T) {
+	repo := &fakeAPIKeyRepository{}
+	svc := newAuthServiceForKeyTests(repo, nil)
+
+	body, _ := json.Marshal(map[string]string{"default_strategy": "not-a-strategy"})
+	req := httptest.NewRequest(http.MethodPost, "/admin/v1/keys", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	apiKeysEngine(svc).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Empty(t, repo.keys, "an invalid default_strategy must not persist a key")
+}
+
+func TestUpdateAPIKeyDefaultStrategyHandler_FlipsWithoutRotating(t *testing.T) {
+	repo := &fakeAPIKeyRepository{}
+	svc := newAuthServiceForKeyTests(repo, nil)
+	key, _, err := svc.IssueAPIKey(context.Background(), testInstallationID, nil, "", nil)
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(map[string]string{"default_strategy": "hmm"})
+	req := httptest.NewRequest(http.MethodPut, "/admin/v1/keys/"+key.ID+"/default-strategy", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	apiKeysEngine(svc).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	keys, err := svc.ListAPIKeys(context.Background(), testInstallationID)
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	assert.Equal(t, key.ID, keys[0].ID, "the token itself must be unchanged — this is a flip, not a rotate")
+	assert.Equal(t, "hmm", keys[0].DefaultStrategy)
+}
+
+func TestUpdateAPIKeyDefaultStrategyHandler_ForeignKeyIDReturnsNotFound(t *testing.T) {
+	repo := &fakeAPIKeyRepository{}
+	svc := newAuthServiceForKeyTests(repo, nil)
+	foreignKey, _, err := svc.IssueAPIKey(context.Background(), "other-inst", nil, "", nil)
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(map[string]string{"default_strategy": "hmm"})
+	req := httptest.NewRequest(http.MethodPut, "/admin/v1/keys/"+foreignKey.ID+"/default-strategy", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	apiKeysEngine(svc).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestUpdateAPIKeyDefaultStrategyHandler_RejectsUnknownValue(t *testing.T) {
+	repo := &fakeAPIKeyRepository{}
+	svc := newAuthServiceForKeyTests(repo, nil)
+	key, _, err := svc.IssueAPIKey(context.Background(), testInstallationID, nil, "", nil)
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(map[string]string{"default_strategy": "not-a-strategy"})
+	req := httptest.NewRequest(http.MethodPut, "/admin/v1/keys/"+key.ID+"/default-strategy", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	apiKeysEngine(svc).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestListExternalKeysHandler_ReturnsProviderKeysForInstallation(t *testing.T) {
