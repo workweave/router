@@ -118,3 +118,15 @@ func TestSidecarRouterMarksShadowDecisionsNonLearning(t *testing.T) {
 	assert.False(t, decider.query.TrainingAllowed)
 	assert.False(t, decider.query.DebugEnabled)
 }
+
+func TestSidecarRouterCapabilitiesGateOptionalLifecycleCalls(t *testing.T) {
+	decider := &recordingPolicy{}
+	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
+		Strategy: router.Strategy("future-policy"),
+	}, decider, nil).WithCapabilities(policy.Capabilities{})
+
+	require.NoError(t, adapter.ReportOutcome(context.Background(), map[string]interface{}{"route_id": "route-1"}))
+	require.NoError(t, adapter.ReportFeedback(context.Background(), map[string]interface{}{"feedback": "positive"}))
+	assert.Nil(t, decider.outcome)
+	assert.Nil(t, decider.feedback)
+}

@@ -48,6 +48,19 @@ func NewSidecarRouter(config SidecarRouterConfig, decider Decider, resolver *Res
 	}
 }
 
+// WithCapabilities applies the sidecar's negotiated lifecycle support. Route
+// decisions remain available when optional outcome or feedback callbacks are
+// not implemented.
+func (r *SidecarRouter) WithCapabilities(capabilities Capabilities) *SidecarRouter {
+	if !capabilities.ReportsOutcomes {
+		r.reporter = nil
+	}
+	if !capabilities.ReportsFeedback {
+		r.feedbackReporter = nil
+	}
+	return r
+}
+
 func (r *SidecarRouter) ReportOutcome(ctx context.Context, payload map[string]interface{}) error {
 	if r.reporter == nil {
 		return nil

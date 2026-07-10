@@ -97,7 +97,7 @@ func buildConfiguredPolicySidecars(
 		adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
 			Strategy:    strategy,
 			Unavailable: unavailable,
-		}, client, resolver)
+		}, client, resolver).WithCapabilities(capabilities)
 		registrations = append(registrations, policy.StrategySpec{
 			Strategy:     strategy,
 			Router:       adapter,
