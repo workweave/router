@@ -184,10 +184,14 @@ function RouterKeysPanel() {
   const hasKey = keys.length > 0;
   const showSearch = keys.length >= KEY_SEARCH_THRESHOLD;
   const normalizedQuery = query.trim().toLowerCase();
+  // Only filter while the search box is actually shown; otherwise a stale query
+  // from before the list shrank below the threshold would hide keys with no
+  // visible input to clear it.
+  const activeQuery = showSearch ? normalizedQuery : "";
   const visibleKeys = keys
     .slice()
     .sort(compareKeysByName)
-    .filter(k => keyMatchesQuery(k, normalizedQuery));
+    .filter(k => keyMatchesQuery(k, activeQuery));
 
   function load() {
     api.keys
