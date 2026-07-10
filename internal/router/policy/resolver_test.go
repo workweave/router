@@ -88,6 +88,24 @@ func TestResolverRejectsAmbiguousRosterMappings(t *testing.T) {
 	assert.Len(t, resolved.Diagnostics, 2)
 }
 
+func TestResolverRejectsCandidatesThatCannotFitEstimatedInput(t *testing.T) {
+	resolver := policy.NewResolver(
+		set("claude-opus-4-8"),
+		set(providers.ProviderAnthropic),
+		catalogRosterID,
+		policy.ManagedProviderPolicy(),
+	)
+
+	resolved := resolver.Resolve(router.Request{EstimatedInputTokens: catalog.ContextWindowFor("claude-opus-4-8")})
+
+	assert.Empty(t, resolved.Candidates)
+	assert.Contains(t, resolved.Diagnostics, policy.Diagnostic{
+		CatalogID: "claude-opus-4-8",
+		RosterID:  "claude-opus-4-8",
+		Reason:    policy.ExclusionContextWindow,
+	})
+}
+
 func set(values ...string) map[string]struct{} {
 	result := make(map[string]struct{}, len(values))
 	for _, value := range values {

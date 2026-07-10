@@ -62,6 +62,7 @@ type Result struct {
 	Model                string
 	Provider             string
 	Score                float64
+	CandidateScores      map[string]float32
 	ScoreKind            string
 	Reason               string
 	PolicyState          string

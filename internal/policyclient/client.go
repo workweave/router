@@ -177,6 +177,8 @@ type routeResponse struct {
 	SelectedProvider     string                 `json:"selected_provider"`
 	Model                string                 `json:"model"`
 	Score                float64                `json:"score"`
+	ChosenScore          *float64               `json:"chosen_score"`
+	CandidateScores      map[string]float32     `json:"candidate_scores"`
 	ScoreKind            string                 `json:"score_kind"`
 	ScoreLabel           string                 `json:"score_label"`
 	Reason               string                 `json:"reason"`
@@ -280,12 +282,17 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 	if selectedModel == "" {
 		return policy.Result{}, fmt.Errorf("policy sidecar returned empty model")
 	}
+	score := parsed.Score
+	if parsed.ChosenScore != nil {
+		score = *parsed.ChosenScore
+	}
 	return policy.Result{
 		SchemaVersion:        parsed.SchemaVersion,
 		RouteID:              parsed.RouteID,
 		Model:                selectedModel,
 		Provider:             parsed.SelectedProvider,
-		Score:                parsed.Score,
+		Score:                score,
+		CandidateScores:      parsed.CandidateScores,
 		ScoreKind:            firstNonEmpty(parsed.ScoreKind, parsed.ScoreLabel),
 		Reason:               parsed.Reason,
 		PolicyState:          firstNonEmpty(parsed.PolicyState, parsed.StateLabel),

@@ -26,7 +26,8 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 			RouteID:              "route-1",
 			SelectedRosterID:     "moonshotai/kimi-k2.7-code",
 			SelectedProvider:     providers.ProviderFireworks,
-			Score:                0.91,
+			ChosenScore:          floatPtr(0.91),
+			CandidateScores:      map[string]float32{"moonshotai/kimi-k2.7-code": 0.91},
 			ScoreLabel:           "classifier_confidence",
 			Cluster:              "medium",
 			ComplexityLabel:      "Simple Followup",
@@ -98,6 +99,8 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	assert.Equal(t, "sha256:abc", result.PolicyArtifactSHA256)
 	assert.Equal(t, "roster-v2", result.RosterVersion)
 	assert.Equal(t, "debug-1", result.DebugRef)
+	assert.Equal(t, 0.91, result.Score)
+	assert.Equal(t, map[string]float32{"moonshotai/kimi-k2.7-code": 0.91}, result.CandidateScores)
 }
 
 func TestClientAcceptsLegacyRouteResponse(t *testing.T) {
