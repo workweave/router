@@ -25,6 +25,7 @@ import (
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/apm"
 	"workweave/router/internal/observability/otel"
+	"workweave/router/internal/policyclient"
 	"workweave/router/internal/postgres"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/providers/anthropic"
@@ -43,6 +44,7 @@ import (
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/hmm"
 	"workweave/router/internal/router/planner"
+	"workweave/router/internal/router/policy"
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/server"
@@ -571,8 +573,8 @@ func main() {
 	// hmm then routes through it. Unset fails closed with 503.
 	var hmmRouter router.Router
 	if hmmSidecarURL := config.GetOr("ROUTER_HMM_SIDECAR_URL", ""); hmmSidecarURL != "" {
-		hmmTimeout := parseEnvDurationMs("ROUTER_HMM_SIDECAR_TIMEOUT_MS", hmm.DefaultTimeout)
-		hmmRouter = hmm.New(hmm.NewHTTPDecider(hmmSidecarURL, nil, hmmTimeout), availableModels, availableProviders)
+		hmmTimeout := parseEnvDurationMs("ROUTER_HMM_SIDECAR_TIMEOUT_MS", policyclient.DefaultTimeout)
+		hmmRouter = hmm.New(policyclient.New(hmmSidecarURL, nil, hmmTimeout), availableModels, availableProviders)
 		logger.Info("HMM policy router wired", "sidecar_url", hmmSidecarURL, "timeout_ms", hmmTimeout.Milliseconds(), "candidate_models", len(availableModels))
 	} else {
 		logger.Info("HMM policy router disabled (ROUTER_HMM_SIDECAR_URL unset); x-weave-router-strategy: hmm will return 503")
@@ -599,9 +601,15 @@ func main() {
 	}
 
 	proxySvc := proxy.NewService(routeEntry, providerMap, telemetryEmitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
-		WithRLRouter(rlRouter).
-		WithHMMRouter(hmmRouter).
-		WithBanditRouter(banditRouter).
+		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyRL, Router: rlRouter, Unavailable: rl.ErrPolicyUnavailable}).
+		WithPolicyStrategy(policy.StrategySpec{
+			Strategy: router.StrategyHMM, Router: hmmRouter, Unavailable: hmm.ErrHMMUnavailable,
+			Capabilities: policy.Capabilities{
+				SchemaVersion: policy.SchemaVersionV1, ReportsOutcomes: true, ReportsFeedback: true,
+				HonorsPreferredModels: true, HonorsQualityPriceBias: true, SupportsDebugRouteDetail: true,
+			},
+		}).
+		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyBandit, Router: banditRouter, Unavailable: bandit.ErrBanditUnavailable}).
 		WithContentCapture(captureMode, captureMaxBytes, nil).
 		WithFeedback(repo.Feedback, feedbackSigner, feedbackBaseURL).
 		WithByokOnly(byokOnly).

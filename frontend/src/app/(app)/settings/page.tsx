@@ -16,7 +16,7 @@ import {
   type ExternalKey,
   type RouterConfig,
 } from "@/lib/api";
-import { ChevronDown, Copy, Filter, KeyRound, Network, Plug, RotateCw, Settings as SettingsIcon, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ChevronDown, Copy, Filter, KeyRound, Network, Plug, RotateCw, Search, Settings as SettingsIcon, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export default function SettingsPage() {
@@ -149,8 +149,37 @@ export default function SettingsPage() {
 }
 
 
+// Show the search box only once the list is long enough that scanning it by eye
+// gets tedious; for a couple of keys a search bar is just noise.
+const KEY_SEARCH_THRESHOLD = 5;
+
+// Shown in place of a name for keys created without one; kept in one place so the
+// list row and the search haystack stay in sync.
+const UNNAMED_KEY_LABEL = "Unnamed key";
+
+// Alphabetical by name, with unnamed keys pushed to the bottom.
+function compareKeysByName(a: APIKey, b: APIKey): number {
+  if (a.name == null && b.name == null) return 0;
+  if (a.name == null) return 1;
+  if (b.name == null) return -1;
+  return a.name.localeCompare(b.name);
+}
+
+// Case-insensitive substring match over what the row actually shows: the label
+// ("Unnamed key" when there's no name), the raw prefix/suffix (so the last few
+// characters of a token match), and the exact "prefix…suffix" fingerprint that's
+// rendered, so pasting the visible fingerprint verbatim also finds it.
+function keyMatchesQuery(k: APIKey, query: string): boolean {
+  if (query === "") return true;
+  const label = k.name ?? UNNAMED_KEY_LABEL;
+  const haystack =
+    `${label} ${k.key_prefix} ${k.key_suffix} ${k.key_prefix}…${k.key_suffix}`.toLowerCase();
+  return haystack.includes(query);
+}
+
 function RouterKeysPanel() {
   const [keys, setKeys] = useState<APIKey[]>([]);
+  const [query, setQuery] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -161,6 +190,16 @@ function RouterKeysPanel() {
   const [copied, setCopied] = useState(false);
 
   const hasKey = keys.length > 0;
+  const showSearch = keys.length >= KEY_SEARCH_THRESHOLD;
+  const normalizedQuery = query.trim().toLowerCase();
+  // Only filter while the search box is actually shown; otherwise a stale query
+  // from before the list shrank below the threshold would hide keys with no
+  // visible input to clear it.
+  const activeQuery = showSearch ? normalizedQuery : "";
+  const visibleKeys = keys
+    .slice()
+    .sort(compareKeysByName)
+    .filter(k => keyMatchesQuery(k, activeQuery));
 
   function load() {
     api.keys
@@ -296,16 +335,34 @@ function RouterKeysPanel() {
 
       {hasKey ? (
         <Card className="p-0">
-          <Card.Header className="border-b border-border px-5 py-3">
+          <Card.Header className="flex-row items-center justify-between gap-3 border-b border-border px-5 py-3">
             <Card.Title variant="h4">Active router keys</Card.Title>
+            {showSearch && (
+              <div className="relative w-48">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  aria-label="Search router keys"
+                  placeholder="Search keys"
+                  className="h-8 pl-8 text-xs"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                />
+              </div>
+            )}
           </Card.Header>
           <Card.Content>
+            {visibleKeys.length === 0 ? (
+              <div className="px-5 py-8 text-center text-2xs text-muted-foreground">
+                No keys match “{query.trim()}”.
+              </div>
+            ) : (
             <ul className="divide-y divide-border">
-              {keys.map(k => (
+              {visibleKeys.map(k => (
                 <li key={k.id} className="flex items-center justify-between gap-3 px-5 py-3">
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-medium text-foreground">
-                      {k.name ?? "Unnamed key"}
+                      {k.name ?? UNNAMED_KEY_LABEL}
                     </div>
                     <p className="mt-0.5 truncate font-mono text-2xs text-muted-foreground">
                       {k.key_prefix}…{k.key_suffix}
@@ -339,6 +396,7 @@ function RouterKeysPanel() {
                 </li>
               ))}
             </ul>
+            )}
           </Card.Content>
         </Card>
       ) : loaded ? (

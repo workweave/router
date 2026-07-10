@@ -139,6 +139,53 @@ func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 	assert.Nil(t, row.CacheReadTokens)
 }
 
+func TestProxyMessages_RecordsPolicyObservation(t *testing.T) {
+	const installID = "55555555-5555-5555-5555-555555555555"
+	decision := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "policy:hmm",
+		Metadata: &router.RoutingMetadata{
+			Strategy:             string(router.StrategyHMM),
+			RouteID:              "route-1",
+			PolicyRouteKey:       "medium|open",
+			PolicyArtifactID:     "hmm-prod",
+			PolicyArtifactSHA256: "sha256:abc",
+			RosterVersion:        "roster-v2",
+			SidecarSchemaVersion: "policy_router_v1",
+			DebugRef:             "debug-1",
+		},
+	}
+	telem := newCaptureTelemetry()
+	svc := proxy.NewService(
+		&fakeRouter{decision: decision},
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil, false, nil, nil, false,
+		providers.ProviderAnthropic, "claude-haiku-4-5",
+		telem,
+	).WithContentCapture(proxy.CaptureHashed, 0, nil)
+
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
+	ctx = context.WithValue(ctx, proxy.PolicyTrainingAllowedContextKey{}, true)
+	ctx = context.WithValue(ctx, proxy.PolicyDebugEnabledContextKey{}, true)
+	rec := httptest.NewRecorder()
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`)
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+
+	row := telem.firstRow(t)
+	assert.Equal(t, "hmm", row.Strategy)
+	assert.Equal(t, "route-1", row.RouteID)
+	assert.Equal(t, "medium|open", row.PolicyRouteKey)
+	assert.Equal(t, "hmm-prod", row.PolicyArtifactID)
+	assert.Equal(t, "sha256:abc", row.PolicyArtifactSHA256)
+	assert.Equal(t, "roster-v2", row.RosterVersion)
+	assert.Equal(t, "policy_router_v1", row.SidecarSchemaVersion)
+	assert.True(t, row.TrainingAllowed)
+	assert.Equal(t, "hashed", row.CaptureMode)
+	assert.Equal(t, "debug-1", row.DebugRef)
+}
+
 // TestProxyMessages_PersistsCacheTokens: cache_creation/read_input_tokens
 // reported upstream must land on the telemetry row (W-1309 regression guard).
 func TestProxyMessages_PersistsCacheTokens(t *testing.T) {
@@ -322,6 +369,35 @@ func TestProxyMessages_PersistsRolloutID(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
 	ctx = context.WithValue(ctx, proxy.ClientIdentityContextKey{}, proxy.ClientIdentity{RolloutID: rolloutID})
+	rec := httptest.NewRecorder()
+	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`)
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
+
+	row := telem.firstRow(t)
+	assert.Equal(t, rolloutID, row.RolloutID)
+}
+
+func TestProxyMessages_PersistedPolicyRolloutIDOverridesClientIdentity(t *testing.T) {
+	const installID = "66666666-6666-6666-6666-666666666666"
+	const rolloutID = "policy-rollout-42"
+	decision := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-haiku-4-5",
+		Reason:   "pin",
+	}
+	telem := newCaptureTelemetry()
+	svc := proxy.NewService(
+		&fakeRouter{decision: decision},
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil, false, nil, nil, false,
+		providers.ProviderAnthropic, "claude-haiku-4-5",
+		telem,
+	)
+
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
+	ctx = context.WithValue(ctx, proxy.ClientIdentityContextKey{}, proxy.ClientIdentity{RolloutID: "header-rollout"})
+	ctx = context.WithValue(ctx, proxy.PolicyRolloutIDContextKey{}, rolloutID)
 	rec := httptest.NewRecorder()
 	body := []byte(`{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))

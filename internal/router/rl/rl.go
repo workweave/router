@@ -23,7 +23,7 @@ import (
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router"
-	"workweave/router/internal/router/catalog"
+	"workweave/router/internal/router/policy"
 )
 
 // ErrPolicyUnavailable signals the RL strategy could not produce a decision
@@ -34,10 +34,7 @@ var ErrPolicyUnavailable = errors.New("rl: policy router unavailable")
 
 // Candidate is one eligible model offered to the policy: the roster ID the
 // policy was trained on plus the provider the router would dispatch it to.
-type Candidate struct {
-	RosterID string
-	Provider string
-}
+type Candidate = policy.Candidate
 
 // Query is the decision request handed to a Decider.
 type Query struct {
@@ -66,11 +63,8 @@ type Decider interface {
 // Router selects a model via the RL policy and returns a router.Decision whose
 // provider is resolved from the catalog so dispatch uses Weave's own providers.
 type Router struct {
-	decider   Decider
-	deployed  map[string]struct{}
-	available map[string]struct{}
-	toolLow   map[string]struct{}
-	imageLow  map[string]struct{}
+	decider  Decider
+	resolver *policy.Resolver
 }
 
 // New builds an RL Router. deployed is the set of deployable catalog model IDs
@@ -80,92 +74,9 @@ type Router struct {
 // request does not restrict providers.
 func New(decider Decider, deployed, available map[string]struct{}) *Router {
 	return &Router{
-		decider:   decider,
-		deployed:  deployed,
-		available: available,
-		toolLow:   catalog.ToolUseLowSet(),
-		imageLow:  catalog.ImageUnsupportedSet(),
+		decider:  decider,
+		resolver: policy.NewResolver(deployed, available, rosterIDFor, policy.ManagedProviderPolicy()),
 	}
-}
-
-// eligibleCand pairs the offered roster ID with the catalog model + dispatch
-// provider it maps back to.
-type eligibleCand struct {
-	catalogID string
-	rosterID  string
-	provider  string
-}
-
-// eligible builds the candidate list and a roster-ID → catalog model index for
-// mapping the policy's choice back. It mirrors the cluster scorer's
-// eligibility: deployed models resolvable under the request's enabled providers
-// (nil = unrestricted), minus excluded models, minus image-unsupported models
-// on image turns, minus ToolUseLow models on tool turns — each soft filter
-// relaxed only if it would empty the pool. The index is built from the FINAL
-// returned slice so a soft-filtered model can never sneak back via the
-// response-mapping guard.
-func (r *Router) eligible(req router.Request) ([]Candidate, map[string]candidateBinding) {
-	base := make([]eligibleCand, 0, len(r.deployed))
-	for id := range r.deployed {
-		if req.ExcludedModels != nil {
-			if _, excluded := req.ExcludedModels[id]; excluded {
-				continue
-			}
-		}
-		model, ok := catalog.ByID(id)
-		if !ok {
-			continue
-		}
-		// nil EnabledProviders means unrestricted (router.Request contract); the
-		// cluster scorer's unrestricted path resolves the binding against the
-		// deployment's keyed providers, not the catalog primary, so mirror that
-		// by resolving against r.available. A non-nil set gates per-request.
-		providerSet := req.EnabledProviders
-		if providerSet == nil {
-			providerSet = r.available
-		}
-		binding, ok := catalog.ResolveBinding(id, providerSet)
-		if !ok {
-			continue
-		}
-		base = append(base, eligibleCand{catalogID: id, rosterID: rosterIDFor(model), provider: binding.Provider})
-	}
-
-	base = r.softFilter(base, req.HasImages, r.imageLow)
-	base = r.softFilter(base, req.HasTools, r.toolLow)
-
-	candidates := make([]Candidate, 0, len(base))
-	idx := make(map[string]candidateBinding, len(base))
-	for _, c := range base {
-		candidates = append(candidates, Candidate{RosterID: c.rosterID, Provider: c.provider})
-		idx[c.rosterID] = candidateBinding{catalogID: c.catalogID, provider: c.provider}
-	}
-	return candidates, idx
-}
-
-// softFilter drops candidates whose catalog ID is in drop when active, but
-// keeps the unfiltered pool if the filter would empty it — the same empty-pool
-// fallback the cluster scorer uses for its tool-use and image filters.
-func (r *Router) softFilter(in []eligibleCand, active bool, drop map[string]struct{}) []eligibleCand {
-	if !active || len(drop) == 0 {
-		return in
-	}
-	kept := make([]eligibleCand, 0, len(in))
-	for _, c := range in {
-		if _, bad := drop[c.catalogID]; bad {
-			continue
-		}
-		kept = append(kept, c)
-	}
-	if len(kept) == 0 {
-		return in
-	}
-	return kept
-}
-
-type candidateBinding struct {
-	catalogID string
-	provider  string
 }
 
 // Route asks the policy to choose among the eligible catalog candidates and
@@ -173,8 +84,8 @@ type candidateBinding struct {
 // ErrPolicyUnavailable; the proxy never falls back to the cluster scorer.
 func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	log := observability.FromContext(ctx)
-	candidates, idx := r.eligible(req)
-	if len(candidates) == 0 {
+	resolved := r.resolver.Resolve(req)
+	if len(resolved.Candidates) == 0 {
 		log.Warn("RL router: no eligible candidate for request; returning ErrPolicyUnavailable",
 			"requested_model", req.RequestedModel,
 			"has_tools", req.HasTools,
@@ -190,14 +101,14 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 	res, err := r.decider.Decide(ctx, Query{
 		PromptText: req.PromptText,
 		TurnIndex:  0,
-		Candidates: candidates,
+		Candidates: resolved.Candidates,
 	})
 	if err != nil {
 		log.Error("RL router: policy decide failed; returning ErrPolicyUnavailable", "err", err)
 		return router.Decision{}, fmt.Errorf("rl: policy decide: %w: %w", err, ErrPolicyUnavailable)
 	}
 
-	binding, ok := idx[res.Model]
+	binding, ok := resolved.ByRosterID[res.Model]
 	if !ok {
 		log.Error("RL router: policy returned model not in candidate set; returning ErrPolicyUnavailable",
 			"returned_model", res.Model,
@@ -205,25 +116,24 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 		return router.Decision{}, fmt.Errorf("rl: policy returned unknown model %q: %w", res.Model, ErrPolicyUnavailable)
 	}
 
-	catalogIDs := make([]string, 0, len(idx))
-	for _, b := range idx {
-		catalogIDs = append(catalogIDs, b.catalogID)
-	}
 	log.Info("RL router decided",
-		"model", binding.catalogID,
-		"provider", binding.provider,
+		"model", binding.CatalogID,
+		"provider", binding.Provider,
 		"roster_model", res.Model,
 		"score", res.Score,
 		"state", res.StateLabel,
-		"candidate_count", len(candidates),
+		"candidate_count", len(resolved.Candidates),
 	)
 	return router.Decision{
-		Provider: binding.provider,
-		Model:    binding.catalogID,
+		Provider: binding.Provider,
+		Model:    binding.CatalogID,
 		Reason:   reasonFor(res),
 		Metadata: &router.RoutingMetadata{
-			CandidateModels: catalogIDs,
-			ChosenScore:     float32(res.Score),
+			CandidateModels:    resolved.CandidateModels(),
+			CandidateProviders: resolved.CandidateProviders(),
+			ChosenScore:        float32(res.Score),
+			Strategy:           string(router.StrategyRL),
+			Propensity:         1,
 		},
 	}, nil
 }

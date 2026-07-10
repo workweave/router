@@ -1,6 +1,13 @@
 package router
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrStrategyUnavailable signals that a selected strategy has no configured
+// implementation. Strategy-specific sentinels may wrap this error.
+var ErrStrategyUnavailable = errors.New("router: strategy unavailable")
 
 // Strategy names a routing strategy a request can opt into via the
 // x-weave-router-strategy header. The zero value ("") means the deployment

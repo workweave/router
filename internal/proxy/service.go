@@ -27,6 +27,7 @@ import (
 	"workweave/router/internal/router/handover"
 	"workweave/router/internal/router/hmm"
 	"workweave/router/internal/router/planner"
+	"workweave/router/internal/router/policy"
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/router/turntype"
@@ -48,20 +49,9 @@ type TelemetryEmitter interface {
 // Service orchestrates routing decisions and provider dispatch.
 type Service struct {
 	router router.Router
-	// rlRouter is the opt-in RL/DPO policy router, selected per-request via the
-	// x-weave-router-strategy: rl header. Nil when no policy sidecar is wired
-	// (ROUTER_RL_SIDECAR_URL unset); the strategy header then 503s rather than
-	// silently serving the cluster scorer.
-	rlRouter router.Router
-	// hmmRouter is the opt-in policy router selected per-request via
-	// x-weave-router-strategy: hmm.
-	hmmRouter           router.Router
-	hmmOutcomeReporter  hmm.OutcomeReporter
-	hmmFeedbackReporter hmm.FeedbackReporter
-	// banditRouter is the opt-in Thompson-sampling router, selected per-request
-	// via x-weave-router-strategy: bandit. Nil when ROUTER_BANDIT_POSTERIOR_FILE
-	// is unset at boot; the strategy header then 503s.
-	banditRouter         router.Router
+	// strategies contains every non-default router and its optional lifecycle
+	// reporters. Adding a strategy does not require another Service field.
+	strategies           map[router.Strategy]registeredStrategy
 	providers            map[string]providers.Client
 	emitter              TelemetryEmitter
 	embedOnlyUserMessage bool
@@ -242,6 +232,14 @@ type Service struct {
 	subsidyGamma   float64
 }
 
+type registeredStrategy struct {
+	router       router.Router
+	unavailable  error
+	capabilities policy.Capabilities
+	outcomes     policy.OutcomeReporter
+	feedback     policy.FeedbackReporter
+}
+
 // pinSessionTTL mirrors Anthropic's prompt-cache TTL on Sonnet/Haiku/Opus 4.5+
 // so the pin lifecycle tracks the cache it's keeping warm.
 const pinSessionTTL = time.Hour
@@ -336,6 +334,19 @@ type InstallationUsageBypassContextKey struct{}
 // routing decides on merits. See subscriptionRoutingDisabledForRequest.
 type InstallationSubscriptionRoutingDisabledContextKey struct{}
 
+// PolicyTrainingAllowedContextKey carries the installation's explicit
+// learning eligibility. Absence is fail-closed (false).
+type PolicyTrainingAllowedContextKey struct{}
+
+// PolicyDebugEnabledContextKey carries persisted or internal-request debug mode.
+type PolicyDebugEnabledContextKey struct{}
+
+// PolicyRoutingIntentContextKey carries a strategy-neutral routing preset.
+type PolicyRoutingIntentContextKey struct{}
+
+// PolicyRolloutIDContextKey carries the installation-level rollout identifier.
+type PolicyRolloutIDContextKey struct{}
+
 // UsageBypassConfig is the per-installation subscription usage-bypass setting,
 // stashed on ctx by the auth middleware. Threshold is nil when the toggle is on
 // but no value has been chosen yet; the request path falls back to
@@ -368,11 +379,11 @@ func usageBypassFromContext(ctx context.Context) (UsageBypassConfig, bool) {
 const routingMarkerHeader = "X-Weave-Routing-Marker"
 const routingMarkerPrefix = "✦ **Weave Router** → "
 const maxSidecarDisplayMarkerRunes = 512
-const hmmOutcomeReportTimeout = 2 * time.Second
-const hmmFeedbackReportTimeout = 2 * time.Second
-const hmmOutcomeResponseMaxBytes = 256 * 1024
+const policyOutcomeReportTimeout = 2 * time.Second
+const policyFeedbackReportTimeout = 2 * time.Second
+const policyOutcomeResponseMaxBytes = 256 * 1024
 
-type hmmOutcomeResponse struct {
+type policyOutcomeResponse struct {
 	Body      []byte
 	Truncated bool
 }
@@ -1440,39 +1451,84 @@ func (s *Service) provider(name string) (providers.Client, error) {
 	return p, nil
 }
 
-// WithRLRouter installs the opt-in RL/DPO policy router. nil leaves the
-// x-weave-router-strategy: rl header with no backing router, in which case
-// routeFor 503s for that header rather than silently serving the cluster
-// scorer.
+// WithPolicyStrategy registers one non-default router and its lifecycle
+// capabilities. Outcome and feedback reporters are discovered from the router.
+func (s *Service) WithPolicyStrategy(spec policy.StrategySpec) *Service {
+	if spec.Strategy == "" || spec.Strategy == router.StrategyCluster {
+		return s
+	}
+	if s.strategies == nil {
+		s.strategies = make(map[router.Strategy]registeredStrategy)
+	}
+	registered := registeredStrategy{
+		router:       spec.Router,
+		unavailable:  spec.Unavailable,
+		capabilities: spec.Capabilities,
+	}
+	registered.outcomes, _ = spec.Router.(policy.OutcomeReporter)
+	registered.feedback, _ = spec.Router.(policy.FeedbackReporter)
+	s.strategies[spec.Strategy] = registered
+	return s
+}
+
+// PolicyCapabilities returns a registered strategy's declared capabilities.
+func (s *Service) PolicyCapabilities(strategy router.Strategy) (policy.Capabilities, bool) {
+	registered, ok := s.strategies[strategy]
+	return registered.capabilities, ok
+}
+
+// RegisteredStrategies returns every configured non-default strategy in
+// deterministic order. Middleware uses this list instead of hardcoding IDs.
+func (s *Service) RegisteredStrategies() []router.Strategy {
+	if s == nil {
+		return nil
+	}
+	strategies := make([]router.Strategy, 0, len(s.strategies))
+	for strategy := range s.strategies {
+		strategies = append(strategies, strategy)
+	}
+	sort.Slice(strategies, func(i, j int) bool { return strategies[i] < strategies[j] })
+	return strategies
+}
+
+// WithRLRouter is retained for source compatibility. New wiring should call
+// WithPolicyStrategy directly.
 func (s *Service) WithRLRouter(r router.Router) *Service {
-	s.rlRouter = r
-	return s
+	return s.WithPolicyStrategy(policy.StrategySpec{
+		Strategy:     router.StrategyRL,
+		Router:       r,
+		Unavailable:  rl.ErrPolicyUnavailable,
+		Capabilities: policy.Capabilities{},
+	})
 }
 
-// WithHMMRouter installs the opt-in HMM routing sidecar. nil leaves the
-// x-weave-router-strategy: hmm header with no backing router; routeFor then
-// 503s rather than silently serving the cluster scorer.
+// WithHMMRouter is retained for source compatibility. New wiring should call
+// WithPolicyStrategy directly.
 func (s *Service) WithHMMRouter(r router.Router) *Service {
-	s.hmmRouter = r
-	if reporter, ok := r.(hmm.OutcomeReporter); ok {
-		s.hmmOutcomeReporter = reporter
-	} else {
-		s.hmmOutcomeReporter = nil
-	}
-	if reporter, ok := r.(hmm.FeedbackReporter); ok {
-		s.hmmFeedbackReporter = reporter
-	} else {
-		s.hmmFeedbackReporter = nil
-	}
-	return s
+	return s.WithPolicyStrategy(policy.StrategySpec{
+		Strategy:    router.StrategyHMM,
+		Router:      r,
+		Unavailable: hmm.ErrHMMUnavailable,
+		Capabilities: policy.Capabilities{
+			SchemaVersion:            policy.SchemaVersionV1,
+			ReportsOutcomes:          true,
+			ReportsFeedback:          true,
+			HonorsPreferredModels:    true,
+			HonorsQualityPriceBias:   true,
+			SupportsDebugRouteDetail: true,
+		},
+	})
 }
 
-// WithBanditRouter installs the opt-in Thompson-sampling bandit router. nil
-// leaves x-weave-router-strategy: bandit with no backing router, in which case
-// routeFor 503s rather than silently serving the cluster scorer.
+// WithBanditRouter is retained for source compatibility. New wiring should
+// call WithPolicyStrategy directly.
 func (s *Service) WithBanditRouter(r router.Router) *Service {
-	s.banditRouter = r
-	return s
+	return s.WithPolicyStrategy(policy.StrategySpec{
+		Strategy:     router.StrategyBandit,
+		Router:       r,
+		Unavailable:  bandit.ErrBanditUnavailable,
+		Capabilities: policy.Capabilities{},
+	})
 }
 
 // routeFor picks the active router for the request's strategy. The default
@@ -1481,24 +1537,52 @@ func (s *Service) WithBanditRouter(r router.Router) *Service {
 // ErrPolicyUnavailable (→ HTTP 503) — never a silent fallback that would mask
 // which strategy actually served the turn.
 func (s *Service) routeFor(ctx context.Context, req router.Request) (router.Decision, error) {
-	switch router.StrategyFromContext(ctx) {
-	case router.StrategyRL:
-		if s.rlRouter == nil {
-			return router.Decision{}, fmt.Errorf("rl strategy requested but no policy sidecar configured: %w", rl.ErrPolicyUnavailable)
-		}
-		return s.rlRouter.Route(ctx, req)
-	case router.StrategyHMM:
-		if s.hmmRouter == nil {
-			return router.Decision{}, fmt.Errorf("hmm strategy requested but no policy sidecar configured: %w", hmm.ErrHMMUnavailable)
-		}
-		return s.hmmRouter.Route(ctx, req)
-	case router.StrategyBandit:
-		if s.banditRouter == nil {
-			return router.Decision{}, fmt.Errorf("bandit strategy requested but no posterior configured: %w", bandit.ErrBanditUnavailable)
-		}
-		return s.banditRouter.Route(ctx, req)
-	default:
+	req = s.withPolicyRequestContext(ctx, req)
+	strategy := router.StrategyFromContext(ctx)
+	if strategy == router.StrategyCluster {
 		return s.router.Route(ctx, req)
+	}
+	registered, ok := s.strategies[strategy]
+	if !ok || registered.router == nil {
+		unavailable := defaultStrategyUnavailable(strategy)
+		if ok && registered.unavailable != nil {
+			unavailable = registered.unavailable
+		}
+		return router.Decision{}, fmt.Errorf("strategy %q requested but no router configured: %w", strategy, unavailable)
+	}
+	return registered.router.Route(ctx, req)
+}
+
+func (s *Service) withPolicyRequestContext(ctx context.Context, req router.Request) router.Request {
+	req.OrganizationID, _ = ctx.Value(ExternalIDContextKey{}).(string)
+	req.InstallationID, _ = ctx.Value(InstallationIDContextKey{}).(string)
+	clientIdentity := ClientIdentityFrom(ctx)
+	req.ClientApp = clientIdentity.ClientApp
+	req.RolloutID = policyRolloutIDFromContext(ctx)
+	req.CaptureMode = s.captureMode.String()
+	req.TrainingAllowed, _ = ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
+	req.DebugEnabled, _ = ctx.Value(PolicyDebugEnabledContextKey{}).(bool)
+	req.RoutingIntent, _ = ctx.Value(PolicyRoutingIntentContextKey{}).(string)
+	return req
+}
+
+func policyRolloutIDFromContext(ctx context.Context) string {
+	if rolloutID, ok := ctx.Value(PolicyRolloutIDContextKey{}).(string); ok && rolloutID != "" {
+		return rolloutID
+	}
+	return ClientIdentityFrom(ctx).RolloutID
+}
+
+func defaultStrategyUnavailable(strategy router.Strategy) error {
+	switch strategy {
+	case router.StrategyRL:
+		return rl.ErrPolicyUnavailable
+	case router.StrategyHMM:
+		return hmm.ErrHMMUnavailable
+	case router.StrategyBandit:
+		return bandit.ErrBanditUnavailable
+	default:
+		return router.ErrStrategyUnavailable
 	}
 }
 
@@ -2227,7 +2311,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		}
 	}
 	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
-	contentSink, hmmOutcomeCap := s.captureHMMOutcomeResponse(contentSink, routeRes, decision)
+	contentSink, policyOutcomeCap := s.capturePolicyOutcomeResponse(ctx, contentSink, routeRes, decision)
 	preludeBuf := newPreludeBuffer(contentSink)
 	var rootSink http.ResponseWriter = preludeBuf
 	var captureW *captureWriter
@@ -2677,7 +2761,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	applyPlannerAttrs(upstreamBuilder, routeRes)
 	addTimingAttrs(ctx, upstreamBuilder)
 
-	obs := buildObservationContext(ctx, decision, routeRes.Fresh)
+	obs := buildObservationContext(ctx, decision, routeRes.Fresh, s.captureMode)
 	obs.applySpanAttrs(upstreamBuilder)
 
 	otel.Record(ctx, otel.Span{
@@ -2746,6 +2830,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			ClusterRouterVersion:   obs.ClusterRouterVersion,
 			Strategy:               obs.Strategy,
 			RouteID:                obs.RouteID,
+			PolicyRouteKey:         obs.PolicyRouteKey,
+			PolicyArtifactID:       obs.PolicyArtifactID,
+			PolicyArtifactSHA256:   obs.PolicyArtifactSHA256,
+			RosterVersion:          obs.RosterVersion,
+			SidecarSchemaVersion:   obs.SidecarSchemaVersion,
+			TrainingAllowed:        obs.TrainingAllowed,
+			CaptureMode:            obs.CaptureMode,
+			DebugRef:               obs.DebugRef,
 			TTFTMs:                 obs.TTFTMs,
 			CacheCreationTokens:    cacheTokenPtr(cacheCreation),
 			CacheReadTokens:        cacheTokenPtr(cacheRead),
@@ -2754,7 +2846,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			RouterUserID:           auth.UserIDFrom(ctx),
 			ClientApp:              clientID.ClientApp,
 			TurnType:               string(routeRes.TurnType),
-			RolloutID:              clientID.RolloutID,
+			RolloutID:              policyRolloutIDFromContext(ctx),
 			UpstreamFinishReason:   stringPtrOrEmpty(respSummary.UpstreamFinishReason),
 			StopReason:             stringPtrOrEmpty(respSummary.StopReason),
 			// Only valid when a translator ran (StopReason populated) — the
@@ -2842,12 +2934,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	log.Info("ProxyMessages complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider || subscriptionFailoverUsed, "subscription_failover", subscriptionFailoverUsed, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "message_count", feats.MessageCount, "last_kind", feats.LastKind, "last_preview", feats.LastPreview, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr), "upstream_finish_reason", respSummary.UpstreamFinishReason, "resp_stop_reason", respSummary.StopReason, "stop_reason_promoted", respSummary.StopReasonPromoted, "tool_use_blocks", respSummary.ToolUseBlocks, "invalid_tool_args_blocks", respSummary.InvalidToolArgsBlocks, "text_only_turn_nudged", respSummary.TextOnlyTurnNudged, "stop_reason_demoted", respSummary.StopReasonDemoted, "suppressed_tool_calls", respSummary.SuppressedToolCalls, "tool_call_invalid_blocks", len(respSummary.ToolCallIssues), "cc_only_tools_stripped", reqStats.CCOnlyToolsStripped, "gemini_reminder_injected", reqStats.GeminiReminderInjected, "gemini_validated_tool_mode", reqStats.GeminiValidatedToolMode, "resp_output_tokens", respSummary.OutputTokens, "prelude_committed", preludeBuf.Committed()}, plannerLogFields(routeRes)...)...)
-	hmmRespBody, hmmRespTrunc := capturedResponse(hmmOutcomeCap)
-	var hmmResp *hmmOutcomeResponse
-	if hmmOutcomeCap != nil {
-		hmmResp = &hmmOutcomeResponse{Body: hmmRespBody, Truncated: hmmRespTrunc}
+	policyRespBody, policyRespTrunc := capturedResponse(policyOutcomeCap)
+	var policyResp *policyOutcomeResponse
+	if policyOutcomeCap != nil {
+		policyResp = &policyOutcomeResponse{Body: policyRespBody, Truncated: policyRespTrunc}
 	}
-	s.reportHMMOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, hmmResp)
+	s.reportPolicyOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, policyResp)
 	return proxyErr
 }
 
@@ -3033,41 +3125,56 @@ func hmmHistoryStoredReason(res turnLoopResult) string {
 	return hmmHistoryReason
 }
 
-func hmmOutcomeRoute(res turnLoopResult, decision router.Decision) (router.Decision, *router.RoutingMetadata, bool) {
-	routeDecision := decision
-	routeMetadata := decision.Metadata
-	if routeMetadata == nil || routeMetadata.Strategy != string(router.StrategyHMM) || routeMetadata.RouteID == "" {
-		routeDecision = res.Fresh
-		routeMetadata = res.Fresh.Metadata
+func (s *Service) policyOutcomeRoute(res turnLoopResult, decision router.Decision) (router.Decision, *router.RoutingMetadata, policy.OutcomeReporter, bool) {
+	for _, routeDecision := range []router.Decision{decision, res.Fresh} {
+		routeMetadata := routeDecision.Metadata
+		if routeMetadata == nil || routeMetadata.Strategy == "" || routeMetadata.RouteID == "" {
+			continue
+		}
+		registered, ok := s.strategies[router.Strategy(routeMetadata.Strategy)]
+		if !ok || registered.outcomes == nil {
+			continue
+		}
+		return routeDecision, routeMetadata, registered.outcomes, true
 	}
-	if routeMetadata == nil || routeMetadata.Strategy != string(router.StrategyHMM) || routeMetadata.RouteID == "" {
-		return router.Decision{}, nil, false
-	}
-	return routeDecision, routeMetadata, true
+	return router.Decision{}, nil, nil, false
 }
 
-func (s *Service) captureHMMOutcomeResponse(w http.ResponseWriter, res turnLoopResult, decision router.Decision) (http.ResponseWriter, *captureWriter) {
-	if s.hmmOutcomeReporter == nil {
+func (s *Service) capturePolicyOutcomeResponse(ctx context.Context, w http.ResponseWriter, res turnLoopResult, decision router.Decision) (http.ResponseWriter, *captureWriter) {
+	trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
+	if !trainingAllowed {
 		return w, nil
 	}
-	if _, _, ok := hmmOutcomeRoute(res, decision); !ok {
+	if _, _, _, ok := s.policyOutcomeRoute(res, decision); !ok {
 		return w, nil
 	}
-	capture := newCaptureWriter(w, hmmOutcomeResponseMaxBytes)
+	capture := newCaptureWriter(w, policyOutcomeResponseMaxBytes)
 	return capture, capture
 }
 
-func (s *Service) reportHMMOutcome(ctx context.Context, res turnLoopResult, decision router.Decision, finalProvider string, estimatedInputTokens, inputTokens, outputTokens, cacheCreation, cacheRead int, routeMs, proxyMs int64, proxyErr error, response *hmmOutcomeResponse) {
-	if s.hmmOutcomeReporter == nil {
-		return
-	}
-	routeDecision, routeMetadata, ok := hmmOutcomeRoute(res, decision)
+func (s *Service) reportPolicyOutcome(ctx context.Context, res turnLoopResult, decision router.Decision, finalProvider string, estimatedInputTokens, inputTokens, outputTokens, cacheCreation, cacheRead int, routeMs, proxyMs int64, proxyErr error, response *policyOutcomeResponse) {
+	routeDecision, routeMetadata, reporter, ok := s.policyOutcomeRoute(res, decision)
 	if !ok {
 		return
 	}
+	organizationID, _ := ctx.Value(ExternalIDContextKey{}).(string)
+	installationID, _ := ctx.Value(InstallationIDContextKey{}).(string)
+	trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
+	clientIdentity := ClientIdentityFrom(ctx)
 	payload := map[string]interface{}{
 		"route_id":               routeMetadata.RouteID,
 		"strategy":               routeMetadata.Strategy,
+		"organization_id":        organizationID,
+		"installation_id":        installationID,
+		"client_app":             clientIdentity.ClientApp,
+		"rollout_id":             policyRolloutIDFromContext(ctx),
+		"training_allowed":       trainingAllowed,
+		"capture_mode":           s.captureMode.String(),
+		"policy_route_key":       routeMetadata.PolicyRouteKey,
+		"policy_artifact_id":     routeMetadata.PolicyArtifactID,
+		"policy_artifact_sha256": routeMetadata.PolicyArtifactSHA256,
+		"roster_version":         routeMetadata.RosterVersion,
+		"sidecar_schema_version": routeMetadata.SidecarSchemaVersion,
 		"served_model":           decision.Model,
 		"served_provider":        finalProvider,
 		"decision_model":         routeDecision.Model,
@@ -3084,7 +3191,7 @@ func (s *Service) reportHMMOutcome(ctx context.Context, res turnLoopResult, deci
 		"turn_type":              string(res.TurnType),
 		"sticky_hit":             res.StickyHit,
 	}
-	if response != nil {
+	if trainingAllowed && response != nil {
 		payload["response_body_truncated"] = response.Truncated
 		if len(response.Body) > 0 {
 			payload["response_body"] = string(response.Body)
@@ -3096,12 +3203,12 @@ func (s *Service) reportHMMOutcome(ctx context.Context, res turnLoopResult, deci
 	}
 	log := observability.FromContext(ctx).With("route_id", routeMetadata.RouteID)
 	if err := ctx.Err(); err != nil {
-		log.Debug("Skipping HMM outcome report for canceled request", "err", err)
+		log.Debug("Skipping policy outcome report for canceled request", "err", err)
 		return
 	}
-	observability.SafeGo(log, hmmOutcomeReportTimeout, "reportHMMOutcome", func(reportCtx context.Context) {
-		if err := s.hmmOutcomeReporter.ReportOutcome(reportCtx, payload); err != nil {
-			log.Error("HMM outcome report failed", "err", err)
+	observability.SafeGo(log, policyOutcomeReportTimeout, "reportPolicyOutcome", func(reportCtx context.Context) {
+		if err := reporter.ReportOutcome(reportCtx, payload); err != nil {
+			log.Error("Policy outcome report failed", "strategy", routeMetadata.Strategy, "err", err)
 		}
 	})
 }
@@ -4299,7 +4406,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	applyPlannerAttrs(openaiUpstreamBuilder, routeRes)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
 
-	openaiObs := buildObservationContext(ctx, decision, routeRes.Fresh)
+	openaiObs := buildObservationContext(ctx, decision, routeRes.Fresh, s.captureMode)
 	openaiObs.applySpanAttrs(openaiUpstreamBuilder)
 
 	otel.Record(ctx, otel.Span{
@@ -4376,6 +4483,14 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			ClusterRouterVersion:   openaiObs.ClusterRouterVersion,
 			Strategy:               openaiObs.Strategy,
 			RouteID:                openaiObs.RouteID,
+			PolicyRouteKey:         openaiObs.PolicyRouteKey,
+			PolicyArtifactID:       openaiObs.PolicyArtifactID,
+			PolicyArtifactSHA256:   openaiObs.PolicyArtifactSHA256,
+			RosterVersion:          openaiObs.RosterVersion,
+			SidecarSchemaVersion:   openaiObs.SidecarSchemaVersion,
+			TrainingAllowed:        openaiObs.TrainingAllowed,
+			CaptureMode:            openaiObs.CaptureMode,
+			DebugRef:               openaiObs.DebugRef,
 			TTFTMs:                 openaiObs.TTFTMs,
 			CacheCreationTokens:    cacheTokenPtr(cacheCreation),
 			CacheReadTokens:        cacheTokenPtr(cacheRead),
@@ -4384,7 +4499,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			RouterUserID:           auth.UserIDFrom(ctx),
 			ClientApp:              clientID.ClientApp,
 			TurnType:               string(routeRes.TurnType),
-			RolloutID:              clientID.RolloutID,
+			RolloutID:              policyRolloutIDFromContext(ctx),
 			FailoverUsed:           boolPtrTrue(finalProvider != primaryProvider),
 			// (session_key, role) join key — see the Anthropic-path write site.
 			SessionKey: sessionKey[:],
@@ -4404,7 +4519,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	log.Info("ProxyOpenAIChatCompletion complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr)}, plannerLogFields(routeRes)...)...)
-	s.reportHMMOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, nil)
+	s.reportPolicyOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, nil)
 	return proxyErr
 }
 

@@ -82,6 +82,15 @@ type RouterModelRouterInstallation struct {
 	UsageBypassThreshold        *float64
 	PreferredModels             []string
 	SubscriptionRoutingDisabled bool
+	// Canonical serving strategy. Defaults to cluster until the installation is allowlisted.
+	RoutingStrategy              string
+	RoutingRolloutID             *string
+	PolicyShadowStrategy         *string
+	PolicyDebugEnabled           bool
+	PolicyHeaderOverridesEnabled bool
+	PolicyRoutingIntent          *string
+	// Privacy snapshot synced from the organization AI-training setting. False disables policy learning.
+	AiTrainingAllowed bool
 }
 
 type RouterModelRouterRequestTelemetry struct {
@@ -149,10 +158,18 @@ type RouterModelRouterRequestTelemetry struct {
 	// Safe display suffix (last 4 characters) of the upstream credential that served the turn. NULL on deployment-key turns or very short credentials.
 	CredentialKeySuffix *string
 	// Which credential precedence branch served the turn: subscription, codex_subscription, byok, or client. NULL on deployment-key turns.
-	CredentialSource *string
-	APIKeyID         pgtype.UUID
-	Strategy         *string
-	RouteID          *string
+	CredentialSource     *string
+	APIKeyID             pgtype.UUID
+	Strategy             *string
+	RouteID              *string
+	PolicyRouteKey       *string
+	PolicyArtifactID     *string
+	PolicyArtifactSha256 *string
+	RosterVersion        *string
+	SidecarSchemaVersion *string
+	TrainingAllowed      *bool
+	CaptureMode          *string
+	DebugRef             *string
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.

@@ -14,67 +14,24 @@ import (
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router"
-	"workweave/router/internal/router/catalog"
+	"workweave/router/internal/router/policy"
 )
 
 var ErrHMMUnavailable = errors.New("hmm: policy router unavailable")
 
-type Candidate struct {
-	RosterID string
-	Provider string
-}
+type Candidate = policy.Candidate
 
-type Query struct {
-	RouteID              string
-	PromptText           string
-	ConversationMessages []router.ConversationMessage
-	AvailableTools       []string
-	FeedbackKey          string
-	FeedbackRole         string
-	OrganizationID       string
-	InstallationID       string
-	EstimatedInputTokens int
-	HasTools             bool
-	HasImages            bool
-	Candidates           []Candidate
-}
-
-type Result struct {
-	RouteID       string
-	Model         string
-	Score         float64
-	ScoreKind     string
-	Reason        string
-	PolicyState   string
-	PolicyGroup   string
-	PolicyLabel   string
-	Confidence    *float64
-	Margin        *float64
-	Propensity    float64
-	DisplayMarker string
-	Debug         map[string]interface{}
-}
-
-type Decider interface {
-	Decide(ctx context.Context, q Query) (Result, error)
-}
-
-type OutcomeReporter interface {
-	ReportOutcome(ctx context.Context, payload map[string]interface{}) error
-}
-
-type FeedbackReporter interface {
-	ReportFeedback(ctx context.Context, payload map[string]interface{}) error
-}
+type Query = policy.Query
+type Result = policy.Result
+type Decider = policy.Decider
+type OutcomeReporter = policy.OutcomeReporter
+type FeedbackReporter = policy.FeedbackReporter
 
 type Router struct {
 	decider          Decider
 	reporter         OutcomeReporter
 	feedbackReporter FeedbackReporter
-	deployed         map[string]struct{}
-	available        map[string]struct{}
-	toolLow          map[string]struct{}
-	imageLow         map[string]struct{}
+	resolver         *policy.Resolver
 }
 
 func New(decider Decider, deployed, available map[string]struct{}) *Router {
@@ -84,10 +41,7 @@ func New(decider Decider, deployed, available map[string]struct{}) *Router {
 		decider:          decider,
 		reporter:         reporter,
 		feedbackReporter: feedbackReporter,
-		deployed:         deployed,
-		available:        available,
-		toolLow:          catalog.ToolUseLowSet(),
-		imageLow:         catalog.ImageUnsupportedSet(),
+		resolver:         policy.NewResolver(deployed, available, rosterIDFor, policy.ManagedProviderPolicy()),
 	}
 }
 
@@ -105,106 +59,47 @@ func (r *Router) ReportFeedback(ctx context.Context, payload map[string]interfac
 	return r.feedbackReporter.ReportFeedback(ctx, payload)
 }
 
-type eligibleCand struct {
-	catalogID string
-	rosterID  string
-	provider  string
-}
-
-type candidateBinding struct {
-	catalogID string
-	provider  string
-}
-
-func (r *Router) eligible(req router.Request) ([]Candidate, map[string]candidateBinding) {
-	base := make([]eligibleCand, 0, len(r.deployed))
-	for id := range r.deployed {
-		if req.ExcludedModels != nil {
-			if _, excluded := req.ExcludedModels[id]; excluded {
-				continue
-			}
-		}
-		model, ok := catalog.ByID(id)
-		if !ok {
-			continue
-		}
-		rosterID := rosterIDFor(model)
-		if rosterID == "" {
-			continue
-		}
-		providerSet := req.EnabledProviders
-		if providerSet == nil {
-			providerSet = r.available
-		}
-		binding, ok := catalog.ResolveBinding(id, providerSet)
-		if !ok {
-			continue
-		}
-		base = append(base, eligibleCand{catalogID: id, rosterID: rosterID, provider: binding.Provider})
-	}
-	base = r.softFilter(base, req.HasImages, r.imageLow)
-	base = r.softFilter(base, req.HasTools, r.toolLow)
-
-	candidates := make([]Candidate, 0, len(base))
-	idx := make(map[string]candidateBinding, len(base))
-	for _, c := range base {
-		candidates = append(candidates, Candidate{RosterID: c.rosterID, Provider: c.provider})
-		idx[c.rosterID] = candidateBinding{catalogID: c.catalogID, provider: c.provider}
-	}
-	return candidates, idx
-}
-
-func (r *Router) softFilter(in []eligibleCand, active bool, drop map[string]struct{}) []eligibleCand {
-	if !active || len(drop) == 0 {
-		return in
-	}
-	kept := make([]eligibleCand, 0, len(in))
-	for _, c := range in {
-		if _, bad := drop[c.catalogID]; bad {
-			continue
-		}
-		kept = append(kept, c)
-	}
-	if len(kept) == 0 {
-		return in
-	}
-	return kept
-}
-
 func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	log := observability.FromContext(ctx)
-	candidates, idx := r.eligible(req)
-	if len(candidates) == 0 {
+	resolved := r.resolver.Resolve(req)
+	if len(resolved.Candidates) == 0 {
 		return router.Decision{}, fmt.Errorf("hmm: no eligible candidate: %w", ErrHMMUnavailable)
 	}
 	requestRouteID := uuid.NewString()
 	res, err := r.decider.Decide(ctx, Query{
+		Strategy:             router.StrategyHMM,
 		RouteID:              requestRouteID,
+		OrganizationID:       req.OrganizationID,
+		InstallationID:       req.InstallationID,
+		ClientApp:            req.ClientApp,
+		RolloutID:            req.RolloutID,
+		RequestedModel:       req.RequestedModel,
 		PromptText:           req.PromptText,
 		ConversationMessages: req.ConversationMessages,
 		AvailableTools:       req.AvailableTools,
 		FeedbackKey:          req.FeedbackKey,
 		FeedbackRole:         req.FeedbackRole,
-		OrganizationID:       req.OrganizationID,
-		InstallationID:       req.InstallationID,
 		EstimatedInputTokens: req.EstimatedInputTokens,
 		HasTools:             req.HasTools,
 		HasImages:            req.HasImages,
-		Candidates:           candidates,
+		RoutingIntent:        req.RoutingIntent,
+		PreferredModels:      req.PreferredModels,
+		RoutingKnobs:         req.RoutingKnobs,
+		TrainingAllowed:      req.TrainingAllowed,
+		CaptureMode:          req.CaptureMode,
+		DebugEnabled:         req.DebugEnabled,
+		Candidates:           resolved.Candidates,
 	})
 	if err != nil {
 		log.Error("HMM router: sidecar decide failed; returning ErrHMMUnavailable", "err", err)
 		return router.Decision{}, fmt.Errorf("hmm: sidecar decide: %w: %w", err, ErrHMMUnavailable)
 	}
-	binding, ok := idx[res.Model]
+	binding, ok := resolved.ByRosterID[res.Model]
 	if !ok {
 		return router.Decision{}, fmt.Errorf("hmm: sidecar returned unknown model %q: %w", res.Model, ErrHMMUnavailable)
 	}
-	catalogIDs := make([]string, 0, len(idx))
-	providers := make(map[string]string, len(idx))
-	for _, b := range idx {
-		catalogIDs = append(catalogIDs, b.catalogID)
-		providers[b.catalogID] = b.provider
+	if res.Provider != "" && res.Provider != binding.Provider {
+		return router.Decision{}, fmt.Errorf("hmm: sidecar returned provider %q for %q, expected %q: %w", res.Provider, res.Model, binding.Provider, ErrHMMUnavailable)
 	}
 	propensity := float32(res.Propensity)
 	if propensity <= 0 {
@@ -216,25 +111,31 @@ func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision
 	}
 	log.Info("HMM router decided",
 		"route_id", routeID,
-		"model", binding.catalogID,
-		"provider", binding.provider,
+		"model", binding.CatalogID,
+		"provider", binding.Provider,
 		"roster_model", res.Model,
 		"score", res.Score,
 		"label", res.PolicyLabel,
 		"group", res.PolicyGroup,
 	)
 	return router.Decision{
-		Provider: binding.provider,
-		Model:    binding.catalogID,
+		Provider: binding.Provider,
+		Model:    binding.CatalogID,
 		Reason:   reasonFor(res),
 		Metadata: &router.RoutingMetadata{
-			CandidateModels:    catalogIDs,
-			CandidateProviders: providers,
-			ChosenScore:        float32(res.Score),
-			Propensity:         propensity,
-			DisplayMarker:      res.DisplayMarker,
-			RouteID:            routeID,
-			Strategy:           string(router.StrategyHMM),
+			CandidateModels:      resolved.CandidateModels(),
+			CandidateProviders:   resolved.CandidateProviders(),
+			ChosenScore:          float32(res.Score),
+			Propensity:           propensity,
+			DisplayMarker:        res.DisplayMarker,
+			RouteID:              routeID,
+			Strategy:             string(router.StrategyHMM),
+			PolicyRouteKey:       res.PolicyRouteKey,
+			PolicyArtifactID:     res.PolicyArtifactID,
+			PolicyArtifactSHA256: res.PolicyArtifactSHA256,
+			RosterVersion:        res.RosterVersion,
+			SidecarSchemaVersion: res.SchemaVersion,
+			DebugRef:             res.DebugRef,
 		},
 	}, nil
 }

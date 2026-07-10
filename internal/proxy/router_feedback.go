@@ -12,6 +12,7 @@ import (
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
+	"workweave/router/internal/router/policy"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
@@ -113,8 +114,14 @@ func (s *Service) handleRouterFeedbackCommand(
 			return err
 		}
 	}
-	if router.StrategyFromContext(ctx) == router.StrategyHMM {
-		s.reportRouterFeedback(ctx, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback, routerFeedbackTrainingDelta(env))
+	strategy := router.StrategyFromContext(ctx)
+	if registered, ok := s.strategies[strategy]; ok && registered.feedback != nil {
+		trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
+		var trainingDelta []router.ConversationMessage
+		if strategy == router.StrategyHMM && trainingAllowed {
+			trainingDelta = routerFeedbackTrainingDelta(env)
+		}
+		s.reportRouterFeedback(ctx, registered.feedback, strategy, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback, trainingDelta)
 	}
 
 	now := time.Now()
@@ -151,6 +158,8 @@ func (s *Service) handleRouterFeedbackCommand(
 
 func (s *Service) reportRouterFeedback(
 	ctx context.Context,
+	reporter policy.FeedbackReporter,
+	strategy router.Strategy,
 	organizationID string,
 	installationID uuid.UUID,
 	sessionKey [sessionpin.SessionKeyLen]byte,
@@ -163,10 +172,8 @@ func (s *Service) reportRouterFeedback(
 	feedback string,
 	trainingDelta []router.ConversationMessage,
 ) {
-	if s.hmmFeedbackReporter == nil {
-		return
-	}
 	payload := map[string]interface{}{
+		"strategy":          string(strategy),
 		"feedback_key":      hex.EncodeToString(sessionKey[:]),
 		"feedback_role":     role,
 		"rating":            rating,
@@ -180,16 +187,23 @@ func (s *Service) reportRouterFeedback(
 	if organizationID != "" {
 		payload["organization_id"] = organizationID
 	}
+	rolloutID := clientID.RolloutID
+	if persistedRolloutID, ok := ctx.Value(PolicyRolloutIDContextKey{}).(string); ok && persistedRolloutID != "" {
+		rolloutID = persistedRolloutID
+	}
+	payload["rollout_id"] = rolloutID
+	trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
+	payload["training_allowed"] = trainingAllowed
 	if installationID != uuid.Nil {
 		payload["installation_id"] = installationID.String()
 	}
-	if len(trainingDelta) > 0 {
+	if strategy == router.StrategyHMM && trainingAllowed && len(trainingDelta) > 0 {
 		payload["training_conversation_delta"] = trainingDelta
 	}
 	log := observability.FromContext(ctx)
-	observability.SafeGo(log, hmmFeedbackReportTimeout, "reportHMMFeedback", func(reportCtx context.Context) {
-		if err := s.hmmFeedbackReporter.ReportFeedback(reportCtx, payload); err != nil {
-			log.Error("/router-feedback: sidecar feedback report failed", "err", err)
+	observability.SafeGo(log, policyFeedbackReportTimeout, "reportPolicyFeedback", func(reportCtx context.Context) {
+		if err := reporter.ReportFeedback(reportCtx, payload); err != nil {
+			log.Error("/router-feedback: policy feedback report failed", "strategy", strategy, "err", err)
 		}
 	})
 }

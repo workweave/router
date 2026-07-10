@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"workweave/router/internal/providers"
+	"workweave/router/internal/router"
 	"workweave/router/internal/router/bandit"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/hmm"
@@ -33,6 +34,7 @@ const (
 	DispatchErrorRLPolicyUnavailable
 	DispatchErrorBanditUnavailable
 	DispatchErrorHMMUnavailable
+	DispatchErrorPolicyUnavailable
 	DispatchErrorClusterUnavailable
 )
 
@@ -140,6 +142,15 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 			RetryAfter: true,
 			LogLevel:   "error",
 			LogMessage: "HMM routing unavailable",
+		}, true
+	case errors.Is(err, router.ErrStrategyUnavailable):
+		return DispatchErrorClass{
+			Kind:       DispatchErrorPolicyUnavailable,
+			Status:     http.StatusServiceUnavailable,
+			Message:    "Router unavailable: selected policy router is not configured.",
+			RetryAfter: true,
+			LogLevel:   "error",
+			LogMessage: "Policy routing unavailable",
 		}, true
 	case errors.Is(err, cluster.ErrClusterUnavailable):
 		return DispatchErrorClass{

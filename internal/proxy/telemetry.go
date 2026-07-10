@@ -60,7 +60,18 @@ type InsertTelemetryParams struct {
 	Strategy string
 	// RouteID is the opaque sidecar correlation id (HMM/RL) joining a decision
 	// to its outcome report. Empty for the default cluster scorer → NULL column.
-	RouteID             string
+	RouteID string
+	// Policy fields mirror the versioned sidecar contract. They remain generic
+	// so a future strategy is collected without adding a strategy-specific row.
+	PolicyRouteKey       string
+	PolicyArtifactID     string
+	PolicyArtifactSHA256 string
+	RosterVersion        string
+	SidecarSchemaVersion string
+	TrainingAllowed      bool
+	CaptureMode          string
+	// DebugRef is populated only when authorized policy debug mode is enabled.
+	DebugRef            string
 	TTFTMs              *int64
 	CacheCreationTokens *int32
 	CacheReadTokens     *int32

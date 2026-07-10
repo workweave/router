@@ -16,40 +16,61 @@ import (
 // default.
 const RouterStrategyOverrideHeader = "x-weave-router-strategy"
 
-// WithRouterStrategyOverride stashes the requested routing strategy on the
-// request context when the header is set to a recognized value. Like the
-// cluster-version override it gates on a resolved installation so anonymous
-// traffic can't flip strategies, and it never silently picks a model — the rl
-// and hmm strategies fail closed (HTTP 503) when no policy sidecar is wired.
-func WithRouterStrategyOverride() gin.HandlerFunc {
+// WithRouterStrategyOverride applies the persisted installation strategy and permits
+// an eval header override when authorized; available is injected by the proxy registry.
+func WithRouterStrategyOverride(available ...router.Strategy) gin.HandlerFunc {
+	allowed := make(map[router.Strategy]struct{}, len(available)+1)
+	allowed[router.StrategyCluster] = struct{}{}
+	if len(available) == 0 {
+		available = []router.Strategy{router.StrategyRL, router.StrategyHMM, router.StrategyBandit}
+	}
+	for _, strategy := range available {
+		allowed[strategy] = struct{}{}
+	}
 	return func(c *gin.Context) {
-		raw := strings.ToLower(strings.TrimSpace(c.GetHeader(RouterStrategyOverrideHeader)))
-		if raw == "" {
-			c.Next()
-			return
-		}
 		installation := InstallationFrom(c)
 		if installation == nil {
 			c.Next()
 			return
 		}
-		strategy := router.Strategy(raw)
-		if strategy != router.StrategyCluster && strategy != router.StrategyRL && strategy != router.StrategyHMM && strategy != router.StrategyBandit {
-			observability.FromGin(c).Warn(
-				"Router-strategy override ignored: unrecognized value",
-				"installation_id", installation.ID,
-				"requested_strategy", raw,
-			)
-			c.Next()
-			return
+
+		strategy := router.Strategy(strings.ToLower(strings.TrimSpace(string(installation.RoutingStrategy))))
+		if strategy == "" {
+			strategy = router.StrategyCluster
 		}
+		if _, ok := allowed[strategy]; !ok {
+			observability.FromGin(c).Warn(
+				"Persisted router strategy is not registered; using cluster",
+				"installation_id", installation.ID,
+				"persisted_strategy", strategy,
+			)
+			strategy = router.StrategyCluster
+		}
+
+		raw := strings.ToLower(strings.TrimSpace(c.GetHeader(RouterStrategyOverrideHeader)))
+		if raw != "" {
+			requested := router.Strategy(raw)
+			switch {
+			case !installation.PolicyHeaderOverridesEnabled:
+				observability.FromGin(c).Warn("Router-strategy override ignored: installation is not authorized for policy headers", "installation_id", installation.ID)
+			case !strategyAllowed(requested, allowed):
+				observability.FromGin(c).Warn("Router-strategy override ignored: strategy is not registered", "installation_id", installation.ID, "requested_strategy", raw)
+			default:
+				strategy = requested
+				observability.FromGin(c).Info("Router-strategy override applied", "installation_id", installation.ID, "requested_strategy", raw)
+			}
+		}
+
 		ctx := router.WithStrategy(c.Request.Context(), strategy)
 		c.Request = c.Request.WithContext(ctx)
-		observability.FromGin(c).Info(
-			"Router-strategy override applied",
-			"installation_id", installation.ID,
-			"requested_strategy", raw,
-		)
 		c.Next()
 	}
+}
+
+func strategyAllowed(strategy router.Strategy, allowed map[router.Strategy]struct{}) bool {
+	if strategy == "" {
+		return false
+	}
+	_, ok := allowed[strategy]
+	return ok
 }

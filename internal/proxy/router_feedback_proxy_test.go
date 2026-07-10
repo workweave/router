@@ -14,6 +14,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/policy"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
@@ -136,7 +137,7 @@ func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
 		"model":"claude-sonnet-4-6",
 		"max_tokens":1024,
 		"messages":[
-			{"role":"user","content":"/rf- label=\"high\" model=\"anthropic/claude-sonnet-5\" should have used the deeper route"}
+			{"role":"user","content":"/rf- label=\"Complex Followup\" model=\"anthropic/claude-sonnet-5\" should have used the deeper route"}
 		]
 	}`
 	store := newFakePinStore()
@@ -147,11 +148,10 @@ func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
 	svc := newPinSvc(fr, store).
 		WithRouterFeedbackStore(feedback).
-		WithHMMRouter(policyFeedback)
+		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyRL, Router: policyFeedback})
 
 	installationID := uuid.New().String()
-	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyHMM)
-	ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, "org-test")
+	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyRL)
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
@@ -165,11 +165,12 @@ func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
 	require.Len(t, payloads, 1)
 	payload := payloads[0]
 	assert.Equal(t, "down", payload["rating"])
-	assert.Equal(t, "label=\"high\" model=\"anthropic/claude-sonnet-5\" should have used the deeper route", payload["feedback"])
+	assert.Equal(t, "label=\"Complex Followup\" model=\"anthropic/claude-sonnet-5\" should have used the deeper route", payload["feedback"])
 	assert.Equal(t, "claude-sonnet-4-6", payload["requested_model"])
 	assert.Equal(t, "claude-haiku-4-5", payload["served_model"])
 	assert.Equal(t, installationID, payload["installation_id"])
-	assert.Equal(t, "org-test", payload["organization_id"])
+	assert.Equal(t, string(router.StrategyRL), payload["strategy"])
+	assert.NotContains(t, payload, "training_conversation_delta")
 	assert.NotEmpty(t, payload["feedback_key"])
 	assert.NotEmpty(t, payload["feedback_role"])
 }
@@ -191,9 +192,7 @@ func TestService_RouterFeedbackCommand_AcksBeforePolicyFeedbackCompletes(t *test
 	defer close(policyFeedback.release)
 	svc := newPinSvc(fr, store).WithHMMRouter(policyFeedback)
 
-	installationID := uuid.NewString()
-	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyHMM)
-	ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, "org-test")
+	ctx := router.WithStrategy(authedCtx(uuid.NewString()), router.StrategyHMM)
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	done := make(chan error, 1)
@@ -223,6 +222,31 @@ func TestService_RouterFeedbackCommand_AcksBeforePolicyFeedbackCompletes(t *test
 	assert.Contains(t, first["text"], "Feedback recorded")
 }
 
+func TestService_RouterFeedbackCommand_OmitsTrainingTranscriptWithoutPermission(t *testing.T) {
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"first request"},
+			{"role":"assistant","content":"first response"},
+			{"role":"user","content":"/rf+"}
+		]
+	}`
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	policyFeedback := &fakePolicyFeedbackRouter{}
+	svc := newPinSvc(fr, store).WithHMMRouter(policyFeedback)
+
+	ctx := router.WithStrategy(authedCtx(uuid.NewString()), router.StrategyHMM)
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))))
+	require.Eventually(t, func() bool {
+		return len(policyFeedback.Payloads()) == 1
+	}, time.Second, 10*time.Millisecond)
+	payload := policyFeedback.Payloads()[0]
+	assert.Equal(t, false, payload["training_allowed"])
+	assert.NotContains(t, payload, "training_conversation_delta")
+}
+
 func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T) {
 	routeBody := []byte(`{
 		"model":"claude-haiku-4-5",
@@ -242,7 +266,7 @@ func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T)
 	policyFeedback := &fakePolicyFeedbackRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-haiku-4-5",
-		Reason:   "hmm_policy(label=balanced)",
+		Reason:   "hmm_policy(label=Simple Followup)",
 		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
 	}}
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
@@ -253,6 +277,7 @@ func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T)
 	installationID := uuid.NewString()
 	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyHMM)
 	ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, "org-test")
+	ctx = context.WithValue(ctx, proxy.PolicyTrainingAllowedContextKey{}, true)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, routeBody, httptest.NewRecorder(), httpReq))
 
@@ -281,6 +306,8 @@ func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T)
 	require.Len(t, payloads, 1)
 	assert.Equal(t, requests[0].FeedbackKey, payloads[0]["feedback_key"])
 	assert.Equal(t, requests[0].FeedbackRole, payloads[0]["feedback_role"])
+	assert.Equal(t, "org-test", payloads[0]["organization_id"])
+	assert.Equal(t, true, payloads[0]["training_allowed"])
 	delta, ok := payloads[0]["training_conversation_delta"].([]router.ConversationMessage)
 	require.True(t, ok)
 	require.Len(t, delta, 2)

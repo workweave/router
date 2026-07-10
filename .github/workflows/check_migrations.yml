@@ -20,7 +20,13 @@ jobs:
       - name: Fetch base branch
         run: |
           BASE_REF="${{ github.base_ref || 'main' }}"
-          git fetch origin ${BASE_REF}:refs/remotes/origin/${BASE_REF}
+          if ! git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"; then
+            if [[ "$BASE_REF" != graphite-base/* ]]; then
+              exit 1
+            fi
+            BASE_REF=main
+            git fetch origin main:refs/remotes/origin/main
+          fi
           echo "BASE_REF=${BASE_REF}" >> $GITHUB_ENV
 
       - name: Check migration format and ordering

@@ -16,6 +16,7 @@ import (
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
 	"workweave/router/internal/proxy"
+	"workweave/router/internal/router"
 	"workweave/router/internal/server/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -131,10 +132,15 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	if billingSvc != nil {
 		messagesMiddleware = append(messagesMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros), middleware.WithAPIKeySpendCap(billingSvc))
 	}
+	var registeredStrategies []router.Strategy
+	if proxySvc != nil {
+		registeredStrategies = proxySvc.RegisteredStrategies()
+	}
 	messagesMiddleware = append(messagesMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
-		middleware.WithRouterStrategyOverride(),
+		middleware.WithRouterStrategyOverride(registeredStrategies...),
+		middleware.WithPolicyDebugOverride(),
 		middleware.WithRoutingKnobsOverride(),
 	)
 	messagesGroup := engine.Group("", messagesMiddleware...)
@@ -151,7 +157,8 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	chatCompletionMiddleware = append(chatCompletionMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
-		middleware.WithRouterStrategyOverride(),
+		middleware.WithRouterStrategyOverride(registeredStrategies...),
+		middleware.WithPolicyDebugOverride(),
 		middleware.WithRoutingKnobsOverride(),
 	)
 	chatCompletionGroup := engine.Group("", chatCompletionMiddleware...)
@@ -183,7 +190,8 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	routeMiddleware = append(routeMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithClusterVersionOverride(),
-		middleware.WithRouterStrategyOverride(),
+		middleware.WithRouterStrategyOverride(registeredStrategies...),
+		middleware.WithPolicyDebugOverride(),
 		middleware.WithRoutingKnobsOverride(),
 	)
 	routeGroup := engine.Group("", routeMiddleware...)
