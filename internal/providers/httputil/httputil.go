@@ -233,6 +233,18 @@ func StartIdleWatchdogCause(ctx context.Context, cancel context.CancelCauseFunc,
 // call mark() on every output-bearing delta, and stop() via defer.
 // minDeltas <= 0, window <= 0, or cancel == nil disables the watchdog (no-op).
 // minElapsed <= 0 evaluates as soon as a full window of data exists.
+//
+// A window with ZERO marks never fires: total silence is a stall, owned by the
+// output-stall watchdog and its much larger budget. Models with hidden
+// reasoning (e.g. Fable-5 interleaved thinking) legitimately stream nothing
+// output-bearing for minutes between tool calls; treating that as "slow
+// throughput" degenerated this watchdog into a window-length stall detector
+// (prod 2026-07-11: two long-thinking turns killed ~20s into reasoning). Only
+// a window that is producing — but below floor — is the dribble this guards,
+// and it must be persistent: firing requires two consecutive sub-floor
+// productive windows, since a single one is just a short burst straddling a
+// window boundary (silence → tool-call burst → silence). A zero-mark window
+// resets the streak — silence is evidence of a reasoning pause, not a dribble.
 func StartThroughputWatchdog(ctx context.Context, cancel context.CancelCauseFunc, window, minElapsed time.Duration, minDeltas int, cause error) (mark func(), stop func()) {
 	if minDeltas <= 0 || window <= 0 || cancel == nil {
 		return func() {}, func() {}
@@ -250,6 +262,7 @@ func StartThroughputWatchdog(ctx context.Context, cancel context.CancelCauseFunc
 		// Anchors the trailing window: marks-in-window = current - snapshot.
 		var windowStartCount int64
 		windowStart := start
+		subFloorStreak := 0
 		for {
 			select {
 			case <-ctx.Done():
@@ -272,10 +285,16 @@ func StartThroughputWatchdog(ctx context.Context, cancel context.CancelCauseFunc
 					continue
 				}
 				cur := count.Load()
-				rate := float64(cur-windowStartCount) / elapsed.Seconds()
-				if rate < floorRate {
-					cancel(cause)
-					return
+				marks := cur - windowStartCount
+				rate := float64(marks) / elapsed.Seconds()
+				if marks > 0 && rate < floorRate {
+					subFloorStreak++
+					if subFloorStreak >= 2 {
+						cancel(cause)
+						return
+					}
+				} else {
+					subFloorStreak = 0
 				}
 				// Slide the window forward.
 				windowStartCount = cur

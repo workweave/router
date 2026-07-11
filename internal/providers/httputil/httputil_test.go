@@ -323,6 +323,49 @@ func TestStartThroughputWatchdog_DoesNotFireOnHealthyStream(t *testing.T) {
 	assert.NoError(t, context.Cause(ctx), "healthy throughput must not trip the watchdog")
 }
 
+func TestStartThroughputWatchdog_DoesNotFireOnSilence(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	// Zero marks after warmup: a totally silent stream is a stall (the
+	// output-stall watchdog's job), not slow throughput. Hidden-reasoning models
+	// stream nothing output-bearing for long stretches; the watchdog must stay
+	// quiet through many full windows of silence.
+	_, stop := StartThroughputWatchdog(ctx, cancel, 60*time.Millisecond, 30*time.Millisecond, 5, ErrUpstreamSlowThroughput)
+	defer stop()
+
+	select {
+	case <-ctx.Done():
+		t.Fatalf("watchdog fired on a silent stream: %v", context.Cause(ctx))
+	case <-time.After(500 * time.Millisecond):
+	}
+	assert.NoError(t, context.Cause(ctx), "silence must defer to the output-stall watchdog, not trip slow-throughput")
+}
+
+func TestStartThroughputWatchdog_DoesNotFireOnBurstThenSilence(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	// A reasoning model's shape: silence, then a short burst (tool call), then
+	// silence again. A single window catching the burst's tail is sub-floor but
+	// productive; the following silent window must reset the streak so one
+	// straddled boundary never kills the stream.
+	mark, stop := StartThroughputWatchdog(ctx, cancel, 60*time.Millisecond, 30*time.Millisecond, 10, ErrUpstreamSlowThroughput)
+	defer stop()
+
+	end := time.Now().Add(900 * time.Millisecond)
+	for time.Now().Before(end) {
+		// One mark per ~250ms against ~100ms evaluation windows: every productive
+		// window is sub-floor, but marks are spaced far enough apart that at
+		// least one zero-mark window sits between them, resetting the streak.
+		mark()
+		select {
+		case <-ctx.Done():
+			t.Fatalf("watchdog fired on burst-then-silence: %v", context.Cause(ctx))
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	assert.NoError(t, context.Cause(ctx), "isolated sub-floor windows separated by silence must not accumulate")
+}
+
 func TestErrUpstreamSlowThroughput_AliasIsRetryable(t *testing.T) {
 	assert.True(t, errors.Is(ErrUpstreamSlowThroughput, providers.ErrUpstreamSlowThroughput))
 	assert.True(t, providers.IsRetryable(ErrUpstreamSlowThroughput))
