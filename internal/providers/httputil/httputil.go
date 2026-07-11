@@ -234,17 +234,10 @@ func StartIdleWatchdogCause(ctx context.Context, cancel context.CancelCauseFunc,
 // minDeltas <= 0, window <= 0, or cancel == nil disables the watchdog (no-op).
 // minElapsed <= 0 evaluates as soon as a full window of data exists.
 //
-// A window with ZERO marks never fires: total silence is a stall, owned by the
-// output-stall watchdog and its much larger budget. Models with hidden
-// reasoning (e.g. Fable-5 interleaved thinking) legitimately stream nothing
-// output-bearing for minutes between tool calls; treating that as "slow
-// throughput" degenerated this watchdog into a window-length stall detector
-// (prod 2026-07-11: two long-thinking turns killed ~20s into reasoning). Only
-// a window that is producing — but below floor — is the dribble this guards,
-// and it must be persistent: firing requires two consecutive sub-floor
-// productive windows, since a single one is just a short burst straddling a
-// window boundary (silence → tool-call burst → silence). A zero-mark window
-// resets the streak — silence is evidence of a reasoning pause, not a dribble.
+// Zero-mark windows never fire: silence is a stall (output-stall watchdog's domain).
+// Reasoning models (e.g. interleaved thinking) can produce nothing output-bearing
+// for minutes; only persistent dribble is the target. Firing requires two consecutive
+// sub-floor productive windows; a zero-mark window resets the streak.
 func StartThroughputWatchdog(ctx context.Context, cancel context.CancelCauseFunc, window, minElapsed time.Duration, minDeltas int, cause error) (mark func(), stop func()) {
 	if minDeltas <= 0 || window <= 0 || cancel == nil {
 		return func() {}, func() {}
