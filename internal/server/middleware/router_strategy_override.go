@@ -1,9 +1,12 @@
 package middleware
 
 import (
+	"fmt"
+	"net/http"
 	"strings"
 
 	"workweave/router/internal/observability"
+	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 
 	"github.com/gin-gonic/gin"
@@ -45,14 +48,6 @@ func WithRouterStrategyDefault(defaultStrategy router.Strategy, available ...rou
 		if strategy == "" {
 			strategy = defaultStrategy
 		}
-		if _, ok := allowed[strategy]; !ok {
-			observability.FromGin(c).Warn(
-				"Persisted router strategy is not registered; using cluster",
-				"installation_id", installation.ID,
-				"persisted_strategy", strategy,
-			)
-			strategy = router.StrategyCluster
-		}
 
 		raw := strings.ToLower(strings.TrimSpace(c.GetHeader(RouterStrategyOverrideHeader)))
 		if raw != "" {
@@ -66,6 +61,25 @@ func WithRouterStrategyDefault(defaultStrategy router.Strategy, available ...rou
 				strategy = requested
 				observability.FromGin(c).Info("Router-strategy override applied", "installation_id", installation.ID, "requested_strategy", raw)
 			}
+		}
+
+		if _, ok := allowed[strategy]; !ok {
+			log := observability.FromGin(c).With(
+				"installation_id", installation.ID,
+				"persisted_strategy", strategy,
+			)
+			err := fmt.Errorf("strategy %q requested but no router configured: %w", strategy, router.ErrStrategyUnavailable)
+			cls, ok := proxy.ClassifyDispatchError(err)
+			if !ok {
+				c.AbortWithStatus(http.StatusServiceUnavailable)
+				return
+			}
+			proxy.LogDispatchErrorClass(log, cls, err)
+			if cls.RetryAfter {
+				c.Header("Retry-After", "1")
+			}
+			abortStrategyUnavailable(c, cls.Status, cls.Message)
+			return
 		}
 
 		ctx := router.WithStrategy(c.Request.Context(), strategy)
@@ -97,4 +111,36 @@ func strategyAllowed(strategy router.Strategy, allowed map[router.Strategy]struc
 	}
 	_, ok := allowed[strategy]
 	return ok
+}
+
+// abortStrategyUnavailable writes a 503 with the error envelope matching the
+// route's API format — same detectAPIFormat branching as abortInvalidKnob.
+func abortStrategyUnavailable(c *gin.Context, status int, message string) {
+	switch detectAPIFormat(c.Request.URL.Path) {
+	case apiFormatAnthropic:
+		c.AbortWithStatusJSON(status, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"type":    "api_error",
+				"message": message,
+			},
+		})
+	case apiFormatGemini:
+		c.AbortWithStatusJSON(status, gin.H{
+			"error": gin.H{
+				"code":    status,
+				"message": message,
+				"status":  "UNAVAILABLE",
+			},
+		})
+	default:
+		c.AbortWithStatusJSON(status, gin.H{
+			"error": gin.H{
+				"type":    "api_error",
+				"message": message,
+				"param":   nil,
+				"code":    nil,
+			},
+		})
+	}
 }
