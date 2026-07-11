@@ -14,6 +14,7 @@ The Go router owns:
 - preferred-model ranks and quality/price inputs;
 - the exact provider and upstream binding for each candidate;
 - upstream dispatch, credentials, retries, billing, and telemetry;
+- managed service-to-service authentication for policy sidecar calls;
 - installation rollout state, debug authorization, and training eligibility;
 - validation that the sidecar selected one offered roster ID and provider.
 
@@ -152,6 +153,8 @@ resolve `latest`, local files, or an unverified mutable URL.
 4. Deploy at least two production replicas with startup, readiness, and
    liveness probes. Confirm a fresh replica loads the pinned artifact before it
    becomes ready.
+   Managed Cloud Run sidecars must require an identity token whose audience is
+   the exact sidecar origin and grant invocation only to the router identity.
 5. Add the sidecar origin to `ROUTER_POLICY_SIDECARS`, restart the router, and
    verify `GET /v1/router/policies` reports the strategy and capabilities.
 6. Exercise serving and shadow traffic for every supported harness. Verify
@@ -186,6 +189,7 @@ A policy is ready for production only when all of these are true:
 - opted-out and shadow requests cannot enter any learning sink;
 - sidecar loss produces bounded retries and an observable 503, never fallback;
 - at least two ready replicas survive a single-replica loss test;
+- managed sidecar invocation is authenticated and restricted to the router identity;
 - serving and shadow telemetry include strategy, rollout, route ID, artifact,
   roster, route key, selected model/provider, latency, status, and privacy mode;
 - the internal policy catalog and dashboard reflect live capabilities and

@@ -5,6 +5,7 @@ go 1.25.0
 toolchain go1.25.9
 
 require (
+	cloud.google.com/go/auth v0.18.2
 	cloud.google.com/go/pubsub/v2 v2.4.0
 	github.com/dmitryikh/leaves v0.0.0-20230708180554-25d19a787328
 	github.com/gin-gonic/gin v1.10.1
@@ -36,7 +37,6 @@ require (
 
 require (
 	cloud.google.com/go v0.123.0 // indirect
-	cloud.google.com/go/auth v0.18.2 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/iam v1.5.3 // indirect

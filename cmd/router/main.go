@@ -574,8 +574,14 @@ func main() {
 	var hmmRouter router.Router
 	if hmmSidecarURL := config.GetOr("ROUTER_HMM_SIDECAR_URL", ""); hmmSidecarURL != "" {
 		hmmTimeout := parseEnvDurationMs("ROUTER_HMM_SIDECAR_TIMEOUT_MS", policyclient.DefaultTimeout)
-		hmmRouter = hmm.New(policyclient.New(hmmSidecarURL, nil, hmmTimeout), availableModels, availableProviders)
-		logger.Info("HMM policy router wired", "sidecar_url", hmmSidecarURL, "timeout_ms", hmmTimeout.Milliseconds(), "candidate_models", len(availableModels))
+		hmmAuthMode := config.GetOr("ROUTER_HMM_SIDECAR_AUTH", policySidecarAuthNone)
+		hmmClient, clientErr := buildHMMPolicyClient(hmmSidecarURL, hmmAuthMode, hmmTimeout)
+		if clientErr != nil {
+			logger.Error("HMM policy sidecar client failed to build; refusing to boot", "auth_mode", hmmAuthMode, "err", clientErr)
+			panic(clientErr)
+		}
+		hmmRouter = hmm.New(hmmClient, availableModels, availableProviders)
+		logger.Info("HMM policy router wired", "sidecar_url", hmmSidecarURL, "auth_mode", hmmAuthMode, "timeout_ms", hmmTimeout.Milliseconds(), "candidate_models", len(availableModels))
 	} else {
 		logger.Info("HMM policy router disabled (ROUTER_HMM_SIDECAR_URL unset); x-weave-router-strategy: hmm will return 503")
 	}
