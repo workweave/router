@@ -16,6 +16,12 @@ import (
 // runStrategyOverride reports the strategy observed on the request context after WithRouterStrategyOverride runs.
 func runStrategyOverride(t *testing.T, installation *auth.Installation, header string, available ...router.Strategy) router.Strategy {
 	t.Helper()
+	_, observed := runStrategyOverrideResult(t, installation, header, available...)
+	return observed
+}
+
+func runStrategyOverrideResult(t *testing.T, installation *auth.Installation, header string, available ...router.Strategy) (int, router.Strategy) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
@@ -38,7 +44,7 @@ func runStrategyOverride(t *testing.T, installation *auth.Installation, header s
 	}
 	rr := httptest.NewRecorder()
 	engine.ServeHTTP(rr, req)
-	return observed
+	return rr.Code, observed
 }
 
 func TestRouterStrategyOverride_AppliesRL(t *testing.T) {
@@ -144,6 +150,16 @@ func TestRouterStrategyOverride_AcceptsFutureRegisteredStrategy(t *testing.T) {
 	installation := overrideEnabledInstallation()
 	got := runStrategyOverride(t, installation, string(future), future)
 	assert.Equal(t, future, got)
+}
+
+func TestRouterStrategyOverride_RejectsUnregisteredPersistedStrategy(t *testing.T) {
+	unregistered := router.Strategy("quality-v2")
+	status, got := runStrategyOverrideResult(t, &auth.Installation{
+		ID:              "inst-custom",
+		RoutingStrategy: unregistered,
+	}, "")
+	assert.Equal(t, http.StatusServiceUnavailable, status)
+	assert.NotEqual(t, router.StrategyCluster, got, "must not silently rewrite to cluster")
 }
 
 func TestRouterStrategyOverride_NoOpsWhenInstallationMissing(t *testing.T) {
