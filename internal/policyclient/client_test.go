@@ -30,9 +30,9 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 			ChosenScore:          floatPtr(0.91),
 			CandidateScores:      map[string]float32{"moonshotai/kimi-k2.7-code": 0.91},
 			ScoreLabel:           "classifier_confidence",
-			Cluster:              "medium",
-			ComplexityLabel:      "Simple Followup",
-			RoutingBucket:        "medium|open",
+			Cluster:              "balanced",
+			ComplexityLabel:      "balanced",
+			RoutingBucket:        "balanced|open",
 			ClassifierConfidence: floatPtr(0.91),
 			ClassifierMargin:     floatPtr(0.22),
 			Propensity:           1,
@@ -107,7 +107,7 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	require.Len(t, got.Candidates, 1)
 	assert.Equal(t, "moonshotai/kimi-k2.7", got.Candidates[0].CatalogID)
 	assert.Equal(t, "accounts/fireworks/models/kimi-k2p5", got.Candidates[0].UpstreamID)
-	assert.Equal(t, "medium|open", result.PolicyRouteKey)
+	assert.Equal(t, "balanced|open", result.PolicyRouteKey)
 	assert.Equal(t, providers.ProviderFireworks, result.Provider)
 	assert.Equal(t, "hmm-prod", result.PolicyArtifactID)
 	assert.Equal(t, "sha256:abc", result.PolicyArtifactSHA256)
