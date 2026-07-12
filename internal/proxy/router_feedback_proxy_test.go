@@ -137,7 +137,7 @@ func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
 		"model":"claude-sonnet-4-6",
 		"max_tokens":1024,
 		"messages":[
-			{"role":"user","content":"/rf- label=\"Complex Followup\" model=\"anthropic/claude-sonnet-5\" should have used the deeper route"}
+			{"role":"user","content":"/rf- label=\"high\" model=\"anthropic/claude-sonnet-5\" should have used the deeper route"}
 		]
 	}`
 	store := newFakePinStore()
@@ -165,7 +165,7 @@ func TestService_RouterFeedbackCommand_ForwardsPolicyFeedback(t *testing.T) {
 	require.Len(t, payloads, 1)
 	payload := payloads[0]
 	assert.Equal(t, "down", payload["rating"])
-	assert.Equal(t, "label=\"Complex Followup\" model=\"anthropic/claude-sonnet-5\" should have used the deeper route", payload["feedback"])
+	assert.Equal(t, "label=\"high\" model=\"anthropic/claude-sonnet-5\" should have used the deeper route", payload["feedback"])
 	assert.Equal(t, "claude-sonnet-4-6", payload["requested_model"])
 	assert.Equal(t, "claude-haiku-4-5", payload["served_model"])
 	assert.Equal(t, installationID, payload["installation_id"])
@@ -266,7 +266,7 @@ func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T)
 	policyFeedback := &fakePolicyFeedbackRouter{decision: router.Decision{
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-haiku-4-5",
-		Reason:   "hmm_policy(label=Simple Followup)",
+		Reason:   "hmm_policy(label=balanced)",
 		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
 	}}
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
