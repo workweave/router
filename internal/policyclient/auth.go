@@ -3,6 +3,7 @@ package policyclient
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -11,14 +12,12 @@ import (
 	"cloud.google.com/go/auth/httptransport"
 )
 
-// NewGoogleIDToken builds a policy client that authenticates every request
-// with a Google-signed ID token whose audience is the exact sidecar origin.
-// It is intended for managed Cloud Run sidecars; local and self-hosted callers
-// should continue to use New with an ordinary HTTP client.
+// NewGoogleIDToken builds a Client that attaches a Google-signed ID token
+// (audience = sidecar origin) to every request; for Cloud Run sidecars only.
 func NewGoogleIDToken(baseURL string, timeout time.Duration) (*Client, error) {
-	audience := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if audience == "" {
-		return nil, fmt.Errorf("build Google ID-token policy client: sidecar URL is empty")
+	normalizedBaseURL, audience, err := googleIDTokenURLs(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("build Google ID-token policy client: %w", err)
 	}
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -31,11 +30,35 @@ func NewGoogleIDToken(baseURL string, timeout time.Duration) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build Google ID-token HTTP client for %q: %w", audience, err)
 	}
-	return New(audience, httpClient, timeout), nil
+	return New(normalizedBaseURL, httpClient, timeout), nil
+}
+
+func googleIDTokenURLs(baseURL string) (string, string, error) {
+	normalized := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if normalized == "" {
+		return "", "", fmt.Errorf("sidecar URL is empty")
+	}
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return "", "", fmt.Errorf("parse sidecar URL: %w", err)
+	}
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "", "", fmt.Errorf("sidecar URL must be an absolute HTTP(S) URL")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", "", fmt.Errorf("sidecar URL must not contain a query or fragment")
+	}
+	audience := (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host}).String()
+	return normalized, audience, nil
 }
 
 func newGoogleIDTokenHTTPClient(credentials *auth.Credentials, timeout time.Duration) (*http.Client, error) {
-	client := &http.Client{Timeout: timeout}
+	client := &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	if err := httptransport.AddAuthorizationMiddleware(client, credentials); err != nil {
 		return nil, err
 	}

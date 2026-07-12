@@ -66,3 +66,34 @@ func TestNewGoogleIDTokenRejectsEmptySidecarURL(t *testing.T) {
 	assert.Nil(t, client)
 	assert.Contains(t, err.Error(), "sidecar URL is empty")
 }
+
+func TestGoogleIDTokenURLsUseOriginAsAudience(t *testing.T) {
+	baseURL, audience, err := googleIDTokenURLs(" https://service.run.app/policy/ ")
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://service.run.app/policy", baseURL)
+	assert.Equal(t, "https://service.run.app", audience)
+}
+
+func TestGoogleIDTokenClientDoesNotFollowRedirects(t *testing.T) {
+	redirected := false
+	destination := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		redirected = true
+	}))
+	defer destination.Close()
+
+	source := httptest.NewServer(http.RedirectHandler(destination.URL, http.StatusTemporaryRedirect))
+	defer source.Close()
+
+	httpClient, err := newGoogleIDTokenHTTPClient(
+		&auth.Credentials{TokenProvider: staticTokenProvider{}},
+		time.Second,
+	)
+	require.NoError(t, err)
+
+	response, err := httpClient.Get(source.URL)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	assert.Equal(t, http.StatusTemporaryRedirect, response.StatusCode)
+	assert.False(t, redirected)
+}
