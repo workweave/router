@@ -154,6 +154,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		Float64("catalog.actual_output_per_1m", actPricing.OutputUSDPer1M).
 		Int64("latency.route_ms", routeMs)
 	applyPlannerAttrs(geminiDecisionBuilder, routeRes)
+	applyRoutingStateAttrs(geminiDecisionBuilder, routeRes, decision.Model)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.decision",
 		Start: requestStart,
@@ -239,6 +240,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
 		Bool("routing.cross_format", false)
 	applyPlannerAttrs(geminiUpstreamBuilder, routeRes)
+	applyRoutingStateAttrs(geminiUpstreamBuilder, routeRes, decision.Model)
 	addTimingAttrs(ctx, geminiUpstreamBuilder)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.upstream",

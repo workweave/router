@@ -2297,6 +2297,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Float64("catalog.actual_output_per_1m", actPricing.OutputUSDPer1M).
 		Int64("latency.route_ms", routeMs)
 	applyPlannerAttrs(decisionBuilder, routeRes)
+	applyRoutingStateAttrs(decisionBuilder, routeRes, decision.Model)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.decision",
 		Start: requestStart,
@@ -2794,6 +2795,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Bool("dispatch.baseline_failover", baselineFailoverUsed).
 		Bool("dispatch.subscription_failover", subscriptionFailoverUsed)
 	applyPlannerAttrs(upstreamBuilder, routeRes)
+	applyRoutingStateAttrs(upstreamBuilder, routeRes, decision.Model)
 	addTimingAttrs(ctx, upstreamBuilder)
 
 	obs := buildObservationContext(ctx, decision, routeRes.Fresh, s.captureMode)
@@ -2979,23 +2981,35 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 }
 
 // applyPlannerAttrs stamps planner and handover attributes onto a span
-// attribute builder. Safe when the planner didn't run (uses "skipped" outcome).
+// attribute builder. Planner details are omitted when the planner did not run
+// so downstream nullable columns do not turn zero values into false evidence.
 func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilder {
-	outcome := plannerOutcomeAttr(res)
-	b.String("planner.outcome", outcome).
-		String("planner.reason", res.PlannerDecision.Reason).
-		Float64("planner.expected_savings_usd", res.PlannerDecision.ExpectedSavingsUSD).
-		Float64("planner.eviction_cost_usd", res.PlannerDecision.EvictionCostUSD).
-		Float64("planner.threshold_usd", res.PlannerDecision.ThresholdUSD).
-		String("planner.pin_model", res.PinModel).
-		String("planner.fresh_model", res.Fresh.Model).
-		String("planner.chosen_model", res.Decision.Model).
-		Bool("planner.pin_cache_warm", !res.PlannerDecision.PinCacheCold).
-		Bool("handover.invoked", res.Handover.Invoked).
+	if res.PlannerDecision.Reason != "" {
+		b.String("planner.outcome", plannerOutcomeAttr(res)).
+			String("planner.reason", res.PlannerDecision.Reason).
+			Float64("planner.expected_savings_usd", res.PlannerDecision.ExpectedSavingsUSD).
+			Float64("planner.eviction_cost_usd", res.PlannerDecision.EvictionCostUSD).
+			Float64("planner.threshold_usd", res.PlannerDecision.ThresholdUSD).
+			String("planner.pin_model", res.PinModel).
+			String("planner.fresh_model", res.Fresh.Model).
+			String("planner.chosen_model", res.Decision.Model).
+			Bool("planner.pin_cache_warm", !res.PlannerDecision.PinCacheCold)
+	}
+	b.Bool("handover.invoked", res.Handover.Invoked).
 		Int64("handover.latency_ms", res.Handover.LatencyMS).
 		Int64("handover.summary_tokens", int64(res.Handover.SummaryTokens)).
 		Bool("handover.fallback_to_full_history", res.Handover.FallbackToFullHistory)
 	return b
+}
+
+// applyRoutingStateAttrs emits the privacy-safe, exact thread/transition
+// identity used to distinguish real model changes from first-turn selection
+// and interleaved sub-agent calls.
+func applyRoutingStateAttrs(b *otel.AttrBuilder, res turnLoopResult, servedModel string) *otel.AttrBuilder {
+	return b.String("routing.session_key", sessionKeyHex(res.SessionKey)).
+		String("routing.pin_role", res.PinRole).
+		String("routing.prior_served_model", res.PriorServedModel).
+		Bool("routing.model_changed", res.PriorServedModel != "" && res.PriorServedModel != servedModel)
 }
 
 // plannerOutcomeAttr maps the planner's typed outcome to an OTel string.
@@ -4136,6 +4150,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Float64("catalog.actual_output_per_1m", actPricing.OutputUSDPer1M).
 		Int64("latency.route_ms", routeMs)
 	applyPlannerAttrs(openaiDecisionBuilder, routeRes)
+	applyRoutingStateAttrs(openaiDecisionBuilder, routeRes, decision.Model)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.decision",
 		Start: requestStart,
@@ -4451,6 +4466,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Int64("dispatch.fallback_attempts", int64(winnerIdx)).
 		Bool("dispatch.failover_used", finalProvider != primaryProvider)
 	applyPlannerAttrs(openaiUpstreamBuilder, routeRes)
+	applyRoutingStateAttrs(openaiUpstreamBuilder, routeRes, decision.Model)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
 
 	openaiObs := buildObservationContext(ctx, decision, routeRes.Fresh, s.captureMode)

@@ -17,7 +17,20 @@ import (
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 
 	"workweave/router/internal/observability/otel"
+	"workweave/router/internal/router"
+	"workweave/router/internal/router/planner"
+	"workweave/router/internal/router/sessionpin"
+
+	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 )
+
+func attrsByKey(attrs []*commonv1.KeyValue) map[string]*commonv1.AnyValue {
+	out := make(map[string]*commonv1.AnyValue, len(attrs))
+	for _, attr := range attrs {
+		out[attr.Key] = attr.Value
+	}
+	return out
+}
 
 func TestParseCaptureMode(t *testing.T) {
 	assert.Equal(t, CaptureOff, ParseCaptureMode(""))
@@ -247,4 +260,68 @@ func TestRecordCallLog_RedactorApplied(t *testing.T) {
 	a := coll.attrs(t)
 	assert.Equal(t, "REDACTED-REQ", a["io.request_body"])
 	assert.Equal(t, "REDACTED-RESP", a["io.response_body"])
+}
+
+func TestApplyRoutingStateAttrs_EmitsExactThreadAndTransition(t *testing.T) {
+	var key [sessionpin.SessionKeyLen]byte
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+	res := turnLoopResult{
+		SessionKey:       key,
+		PinRole:          "default_high",
+		PriorServedModel: "claude-haiku-4-5",
+	}
+	b := otel.NewAttrBuilder(4)
+	applyRoutingStateAttrs(b, res, "claude-opus-4-7")
+	attrs := attrsByKey(b.Build())
+
+	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", attrs["routing.session_key"].GetStringValue())
+	assert.Equal(t, "default_high", attrs["routing.pin_role"].GetStringValue())
+	assert.Equal(t, "claude-haiku-4-5", attrs["routing.prior_served_model"].GetStringValue())
+	assert.True(t, attrs["routing.model_changed"].GetBoolValue())
+}
+
+func TestApplyRoutingStateAttrs_FirstSelectionIsNotAChange(t *testing.T) {
+	b := otel.NewAttrBuilder(4)
+	applyRoutingStateAttrs(b, turnLoopResult{PinRole: sessionpin.DefaultRole}, "claude-haiku-4-5")
+	attrs := attrsByKey(b.Build())
+
+	assert.Empty(t, attrs["routing.session_key"].GetStringValue())
+	assert.Empty(t, attrs["routing.prior_served_model"].GetStringValue())
+	assert.False(t, attrs["routing.model_changed"].GetBoolValue())
+}
+
+func TestApplyPlannerAttrs_OmitsDetailsWhenSkipped(t *testing.T) {
+	b := otel.NewAttrBuilder(8)
+	applyPlannerAttrs(b, turnLoopResult{})
+	attrs := attrsByKey(b.Build())
+
+	assert.NotContains(t, attrs, "planner.outcome")
+	assert.NotContains(t, attrs, "planner.pin_cache_warm")
+	assert.Contains(t, attrs, "handover.invoked")
+}
+
+func TestApplyPlannerAttrs_EmitsDetailsWhenEvaluated(t *testing.T) {
+	res := turnLoopResult{
+		Decision: router.Decision{Model: "claude-haiku-4-5"},
+		Fresh:    router.Decision{Model: "claude-opus-4-7"},
+		PinModel: "claude-haiku-4-5",
+		PlannerDecision: planner.Decision{
+			Outcome:            planner.OutcomeStay,
+			Reason:             planner.ReasonEVNegative,
+			ExpectedSavingsUSD: 0.002,
+			EvictionCostUSD:    0.003,
+			ThresholdUSD:       0.001,
+			PinCacheCold:       false,
+		},
+	}
+	b := otel.NewAttrBuilder(16)
+	applyPlannerAttrs(b, res)
+	attrs := attrsByKey(b.Build())
+
+	assert.Equal(t, "stay", attrs["planner.outcome"].GetStringValue())
+	assert.Equal(t, planner.ReasonEVNegative, attrs["planner.reason"].GetStringValue())
+	assert.True(t, attrs["planner.pin_cache_warm"].GetBoolValue())
+	assert.InDelta(t, 0.003, attrs["planner.eviction_cost_usd"].GetDoubleValue(), 1e-12)
 }
