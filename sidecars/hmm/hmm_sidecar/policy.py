@@ -20,6 +20,35 @@ from .hmm import FrozenHMM
 from .schemas import Candidate, RouteResult
 
 
+def select_roster_arm(
+    *,
+    probabilities: dict[str, float],
+    classes: tuple[str, ...],
+    clusters: dict[str, Any],
+    available_roster_ids: set[str],
+) -> tuple[str, str]:
+    ranked_labels = sorted(
+        probabilities,
+        key=lambda label: (-probabilities[label], classes.index(label)),
+    )
+    for label in ranked_labels:
+        cluster = clusters.get(label) or {}
+        for roster_id in cluster.get("arms") or []:
+            if roster_id in available_roster_ids:
+                return label, roster_id
+    raise ValueError("no candidate is present in the frozen HMM roster")
+
+
+def selected_margin(probabilities: dict[str, float], selected_label: str) -> float:
+    selected = float(probabilities[selected_label])
+    alternatives = [
+        float(score)
+        for label, score in probabilities.items()
+        if label != selected_label
+    ]
+    return selected - max(alternatives) if alternatives else selected
+
+
 class FrozenPolicy:
     def __init__(self, artifacts: FrozenArtifacts, embedder: Embedder) -> None:
         self.artifacts = artifacts
@@ -61,26 +90,12 @@ class FrozenPolicy:
             tool_context=tool_context_features(payload),
         )
         classification = self.classifier.predict(feature_row)
-        ranked_labels = sorted(
-            classification.probabilities,
-            key=lambda label: (
-                -classification.probabilities[label],
-                tuple(self.classifier.classes).index(label),
-            ),
+        selected_label, selected_roster = select_roster_arm(
+            probabilities=classification.probabilities,
+            classes=tuple(self.classifier.classes),
+            clusters=self.clusters,
+            available_roster_ids=set(by_roster),
         )
-        selected_label = ""
-        selected_roster = ""
-        for label in ranked_labels:
-            cluster = self.clusters.get(label) or {}
-            for roster_id in cluster.get("arms") or []:
-                if roster_id in by_roster:
-                    selected_label = label
-                    selected_roster = roster_id
-                    break
-            if selected_roster:
-                break
-        if not selected_roster:
-            raise ValueError("no candidate is present in the frozen HMM roster")
         selected = by_roster[selected_roster]
         card = self.state_cards.get(readout.state, {})
         state_label = str(card.get("name") or f"state_{readout.state}")
@@ -96,24 +111,27 @@ class FrozenPolicy:
             for candidate in candidates
         }
         route_id = str(payload.get("route_id") or "")
+        score = float(classification.probabilities[selected_label])
+        margin = selected_margin(classification.probabilities, selected_label)
         reason = (
-            f"classifier {classification.label!r} "
-            f"(p={classification.confidence:.3f}, margin={classification.margin:.3f}); "
+            f"classifier group {selected_label!r} "
+            f"(p={score:.3f}, margin={margin:.3f}, "
+            f"raw_top={classification.label!r}); "
             f"frozen roster arm {selected_roster!r}"
         )
         return RouteResult(
             route_id=route_id,
             selected_roster_id=selected.roster_id,
             selected_provider=selected.provider,
-            score=float(classification.probabilities[selected_label]),
+            score=score,
             candidate_scores=candidate_scores,
             reason=reason,
             state_label=state_label,
             policy_group=selected_label,
             policy_label=selected_label,
             policy_route_key=f"hmm:{readout.state}:{selected_label}",
-            confidence=float(classification.probabilities[selected_label]),
-            margin=classification.margin,
+            confidence=score,
+            margin=margin,
             propensity=1.0,
             policy_artifact_id=self.artifacts.manifest.model_id,
             policy_artifact_sha256=self.artifacts.package_sha256,

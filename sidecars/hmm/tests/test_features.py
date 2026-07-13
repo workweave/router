@@ -33,6 +33,28 @@ def test_conversation_sequence_pairs_only_completed_turns() -> None:
     assert "Request:\nNow fix the bug." in turns[2].text
 
 
+def test_final_tool_result_closes_the_pending_agent_turn() -> None:
+    turns = conversation_sequence(
+        {
+            "conversation_messages": [
+                {"role": "user", "text": "Inspect the repository."},
+                {
+                    "role": "assistant",
+                    "tool_calls": [{"name": "Read", "input_keys": ["path"]}],
+                },
+                {
+                    "role": "user",
+                    "tool_results": [{"name": "Read", "is_error": False}],
+                },
+            ]
+        }
+    )
+
+    assert [turn.kind for turn in turns] == ["user", "agent"]
+    assert "[Read] input keys: path" in turns[1].text
+    assert "Observed outcome:\nTool result returned." in turns[1].text
+
+
 def test_tool_intent_requires_tools_and_is_inferred_from_latest_user_text() -> None:
     without_tools = tool_context_features(
         {"has_tools": False, "latest_user_text": "Please inspect the repository"}

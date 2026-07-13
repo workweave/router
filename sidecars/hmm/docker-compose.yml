@@ -1,8 +1,5 @@
 services:
   server:
-    depends_on:
-      hmm-sidecar:
-        condition: service_healthy
     environment:
       ROUTER_HMM_SIDECAR_URL: http://hmm-sidecar:8093
       ROUTER_HMM_SIDECAR_AUTH: none

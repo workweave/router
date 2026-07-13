@@ -137,10 +137,11 @@ def conversation_sequence(payload: dict[str, Any]) -> list[SequenceTurn]:
     agent_goal = ""
     agent_outcome = ""
     agent_groups: list[str] = []
+    pending_tool_result = False
 
     def close_pending() -> None:
         nonlocal pending_user_text, pending_user_context
-        nonlocal agent_goal, agent_outcome, agent_groups
+        nonlocal agent_goal, agent_outcome, agent_groups, pending_tool_result
         if not pending_user_text:
             agent_goal = ""
             agent_outcome = ""
@@ -168,6 +169,7 @@ def conversation_sequence(payload: dict[str, Any]) -> list[SequenceTurn]:
         agent_goal = ""
         agent_outcome = ""
         agent_groups = []
+        pending_tool_result = False
 
     for message in messages:
         if not isinstance(message, dict):
@@ -186,6 +188,7 @@ def conversation_sequence(payload: dict[str, Any]) -> list[SequenceTurn]:
         elif role == "user" and tool_result_summary:
             if pending_user_text:
                 agent_outcome = tool_result_summary
+                pending_tool_result = True
             else:
                 context_lines.append(f"tool context: {tool_result_summary}")
         elif role == "assistant":
@@ -198,12 +201,15 @@ def conversation_sequence(payload: dict[str, Any]) -> list[SequenceTurn]:
         elif role in {"system", "developer"} and text:
             context_lines.append(f"{role} context: {text}")
     if pending_user_text:
-        turns.append(
-            SequenceTurn(
-                user_document(user_index, pending_user_text, pending_user_context),
-                "user",
+        if pending_tool_result:
+            close_pending()
+        else:
+            turns.append(
+                SequenceTurn(
+                    user_document(user_index, pending_user_text, pending_user_context),
+                    "user",
+                )
             )
-        )
     if not turns:
         turns.append(
             SequenceTurn(
