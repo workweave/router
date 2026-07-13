@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+
 import numpy as np
 import pytest
 import respx
 from httpx import Response
 
+import hmm_sidecar.embeddings as embedding_module
 from hmm_sidecar.embeddings import (
+    CachedEmbedder,
     EmbeddingError,
     GoogleEmbedder,
     OpenAICompatibleEmbedder,
@@ -20,6 +24,18 @@ class FakeEmbedder:
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return [self.vector for _ in texts]
+
+
+class DelayedEmbedder:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        if texts == ["delayed"]:
+            self.started.set()
+            await self.release.wait()
+        return [[1.0, 2.0, 3.0] for _ in texts]
 
 
 def contract() -> EmbeddingContract:
@@ -99,3 +115,23 @@ async def test_openai_compatible_provider_restores_response_order(
     vectors = await OpenAICompatibleEmbedder(contract()).embed(["a", "b"])
 
     assert vectors == [[1, 2, 3], [4, 5, 6]]
+
+
+async def test_cache_returns_hits_that_are_evicted_during_a_concurrent_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(embedding_module, "MAX_CACHE_ITEMS", 1)
+    inner = DelayedEmbedder()
+    embedder = CachedEmbedder(inner, dimensions=3)
+    await embedder.embed(["cached"])
+
+    delayed = asyncio.create_task(embedder.embed(["cached", "delayed"]))
+    await inner.started.wait()
+    await embedder.embed(["evicting"])
+    inner.release.set()
+
+    vectors = await delayed
+
+    assert len(vectors) == 2
+    np.testing.assert_array_equal(vectors[0], [1.0, 2.0, 3.0])
+    np.testing.assert_array_equal(vectors[1], [1.0, 2.0, 3.0])

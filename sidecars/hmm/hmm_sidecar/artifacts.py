@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import fcntl
 import shutil
 import tarfile
 import tempfile
@@ -113,21 +114,22 @@ def _verify_manifest(root: Path) -> FrozenPackageManifest:
 def _materialize_archive(archive: Path, package_sha256: str, cache: Path) -> Path:
     root = cache / f"package-{package_sha256[:16]}"
     marker = root / ".complete"
-    if marker.is_file():
-        return root
-    temporary = cache / f"extract-{package_sha256[:16]}-{os.getpid()}"
-    shutil.rmtree(temporary, ignore_errors=True)
-    try:
-        temporary.mkdir(parents=True)
-        _safe_extract(archive, temporary)
-        _verify_manifest(temporary)
-        (temporary / ".complete").write_text("complete\n")
-        try:
-            temporary.replace(root)
-        except FileExistsError:
-            shutil.rmtree(temporary, ignore_errors=True)
-    finally:
+    lock_path = cache / f"package-{package_sha256[:16]}.lock"
+    with lock_path.open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if marker.is_file():
+            return root
+        temporary = cache / f"extract-{package_sha256[:16]}-{os.getpid()}"
         shutil.rmtree(temporary, ignore_errors=True)
+        try:
+            temporary.mkdir(parents=True)
+            _safe_extract(archive, temporary)
+            _verify_manifest(temporary)
+            (temporary / ".complete").write_text("complete\n")
+            shutil.rmtree(root, ignore_errors=True)
+            temporary.replace(root)
+        finally:
+            shutil.rmtree(temporary, ignore_errors=True)
     return root
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 from collections import OrderedDict
@@ -174,21 +175,28 @@ class CachedEmbedder:
         self.inner = inner
         self.dimensions = dimensions
         self.cache: OrderedDict[str, np.ndarray] = OrderedDict()
+        self.lock = asyncio.Lock()
 
     async def embed(self, texts: list[str]) -> list[np.ndarray]:
         unique = list(dict.fromkeys(texts))
-        missing = [text for text in unique if text not in self.cache]
+        async with self.lock:
+            cached = {text: self.cache[text] for text in unique if text in self.cache}
+            for text in cached:
+                self.cache.move_to_end(text)
+        missing = [text for text in unique if text not in cached]
+        fetched: dict[str, np.ndarray] = {}
         if missing:
             values = validate_vectors(
                 await self.inner.embed(missing),
                 expected_count=len(missing),
                 dimensions=self.dimensions,
             )
-            for text, vector in zip(missing, values, strict=True):
+            fetched = dict(zip(missing, values, strict=True))
+        async with self.lock:
+            for text, vector in fetched.items():
                 self.cache[text] = vector
                 self.cache.move_to_end(text)
             while len(self.cache) > MAX_CACHE_ITEMS:
                 self.cache.popitem(last=False)
-        for text in unique:
-            self.cache.move_to_end(text)
-        return [self.cache[text] for text in texts]
+        resolved = {**cached, **fetched}
+        return [resolved[text] for text in texts]

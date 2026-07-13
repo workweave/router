@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import hmm_sidecar.artifacts as artifact_module
 from hmm_sidecar.artifacts import _safe_extract, resolve_artifacts
 from scripts.export_artifact import (
     deterministic_tar,
@@ -102,3 +103,27 @@ def test_url_requires_a_pinned_digest(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ValueError, match="required with HMM_PACKAGE_URL"):
         resolve_artifacts()
+
+
+def test_materialize_archive_replaces_an_incomplete_cache_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "package.tar.gz"
+    archive.write_bytes(b"fixture")
+    package_sha256 = "a" * 64
+    stale = tmp_path / f"package-{package_sha256[:16]}"
+    stale.mkdir()
+    (stale / "broken").write_text("incomplete")
+
+    def fake_extract(source: Path, destination: Path) -> None:
+        assert source == archive
+        (destination / "payload").write_text("verified")
+
+    monkeypatch.setattr(artifact_module, "_safe_extract", fake_extract)
+    monkeypatch.setattr(artifact_module, "_verify_manifest", lambda root: None)
+
+    root = artifact_module._materialize_archive(archive, package_sha256, tmp_path)
+
+    assert (root / ".complete").is_file()
+    assert (root / "payload").read_text() == "verified"
+    assert not (root / "broken").exists()
