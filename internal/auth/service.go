@@ -94,6 +94,19 @@ func (s *Service) WithInstallationChangeNotifier(n InstallationChangeNotifier) *
 	return s
 }
 
+// InvalidateInstallationCache evicts this replica's auth cache for
+// installationID and fans out to peer replicas via the configured notifier.
+// Use after an external writer (e.g. the Weave control plane) updates
+// installation columns that are loaded into the auth cache — there is no
+// HTTP write path in this repo for those columns, so the writer must trigger
+// invalidation explicitly. Set* methods on this service already call
+// invalidateInstallation as part of their own write path — do not pair this
+// with an in-repo write; it exists for callers outside this repo's write path.
+// Empty IDs are a no-op.
+func (s *Service) InvalidateInstallationCache(installationID string) {
+	s.invalidateInstallation(installationID)
+}
+
 // invalidateInstallation evicts the local cache and fans out to peer replicas.
 // Always called after a successful DB commit so listeners observe the new state.
 func (s *Service) invalidateInstallation(installationID string) {
