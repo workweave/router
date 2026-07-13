@@ -22,8 +22,8 @@ class Embedder(Protocol):
 
 
 def _google_model_name(model: str) -> str:
-    normalized = model.removeprefix("google/").removeprefix("models/")
-    return os.environ.get("HMM_EMBEDDING_MODEL", normalized)
+    configured = os.environ.get("HMM_EMBEDDING_MODEL", model)
+    return configured.removeprefix("google/").removeprefix("models/")
 
 
 class GoogleEmbedder:

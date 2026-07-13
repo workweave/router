@@ -63,6 +63,7 @@ async def test_google_provider_uses_the_artifact_model_and_dimensions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    monkeypatch.setenv("HMM_EMBEDDING_MODEL", "google/gemini-embedding-2")
     request = respx.post(
         "https://generativelanguage.googleapis.com/v1beta/models/"
         "gemini-embedding-2:batchEmbedContents?key=test-key"
