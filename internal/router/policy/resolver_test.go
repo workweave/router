@@ -103,7 +103,25 @@ func TestResolverRejectsAmbiguousRosterMappings(t *testing.T) {
 	assert.Len(t, resolved.Diagnostics, 2)
 }
 
-func TestResolverRejectsCandidatesThatCannotFitEstimatedInput(t *testing.T) {
+func TestResolverRejectsNonExtendedModelAboveCatalogWindow(t *testing.T) {
+	resolver := policy.NewResolver(
+		set("claude-haiku-4-5"),
+		set(providers.ProviderAnthropic),
+		catalogRosterID,
+		policy.ManagedProviderPolicy(),
+	)
+
+	resolved := resolver.Resolve(router.Request{EstimatedInputTokens: catalog.ContextWindowFor("claude-haiku-4-5") + 1})
+
+	assert.Empty(t, resolved.Candidates)
+	assert.Contains(t, resolved.Diagnostics, policy.Diagnostic{
+		CatalogID: "claude-haiku-4-5",
+		RosterID:  "claude-haiku-4-5",
+		Reason:    policy.ExclusionContextWindow,
+	})
+}
+
+func TestResolverRejectsExtendedContextModelAboveEffectiveWindow(t *testing.T) {
 	resolver := policy.NewResolver(
 		set("claude-opus-4-8"),
 		set(providers.ProviderAnthropic),
@@ -111,7 +129,9 @@ func TestResolverRejectsCandidatesThatCannotFitEstimatedInput(t *testing.T) {
 		policy.ManagedProviderPolicy(),
 	)
 
-	resolved := resolver.Resolve(router.Request{EstimatedInputTokens: catalog.ContextWindowFor("claude-opus-4-8") + 1})
+	// CapExtendedContext expands eligibility to 1M; above that the model must
+	// still be excluded so the fix does not invent infinite headroom.
+	resolved := resolver.Resolve(router.Request{EstimatedInputTokens: 1_000_001})
 
 	assert.Empty(t, resolved.Candidates)
 	assert.Contains(t, resolved.Diagnostics, policy.Diagnostic{
@@ -119,6 +139,31 @@ func TestResolverRejectsCandidatesThatCannotFitEstimatedInput(t *testing.T) {
 		RosterID:  "claude-opus-4-8",
 		Reason:    policy.ExclusionContextWindow,
 	})
+}
+
+// TestResolverKeepsExtendedContextModelAboveCatalogWindow is the live-bug
+// regression: CapExtendedContext models (catalog 200K, dispatch 1M) must remain
+// candidates when requiredContextTokens is catalogCW+1 (200_001). Filtering on
+// catalog.ContextWindowFor alone wrongly excludes them.
+func TestResolverKeepsExtendedContextModelAboveCatalogWindow(t *testing.T) {
+	resolver := policy.NewResolver(
+		set("claude-opus-4-8"),
+		set(providers.ProviderAnthropic),
+		catalogRosterID,
+		policy.ManagedProviderPolicy(),
+	)
+
+	resolved := resolver.Resolve(router.Request{
+		EstimatedInputTokens: catalog.ContextWindowFor("claude-opus-4-8") + 1,
+	})
+
+	assert.Equal(t, []string{"claude-opus-4-8"}, resolved.CandidateModels(),
+		"opus-4-8 must stay eligible at catalogCW+1 (serves at 1M via CapExtendedContext)")
+	assert.Empty(t, resolved.Diagnostics)
+	if assert.Len(t, resolved.Candidates, 1) {
+		assert.Equal(t, 1_000_000, resolved.Candidates[0].Capabilities.ContextWindow,
+			"candidate capabilities must advertise the effective 1M window, not catalog 200K")
+	}
 }
 
 func TestResolverAllowsExactContextFit(t *testing.T) {
@@ -137,7 +182,7 @@ func TestResolverAllowsExactContextFit(t *testing.T) {
 
 func TestResolverIncludesExpectedOutputInContextBudget(t *testing.T) {
 	resolver := policy.NewResolver(
-		set("claude-opus-4-8"),
+		set("claude-haiku-4-5"),
 		set(providers.ProviderAnthropic),
 		catalogRosterID,
 		policy.ManagedProviderPolicy(),
@@ -145,14 +190,14 @@ func TestResolverIncludesExpectedOutputInContextBudget(t *testing.T) {
 	expectedOutputTokens := 2_000
 
 	resolved := resolver.Resolve(router.Request{
-		EstimatedInputTokens: catalog.ContextWindowFor("claude-opus-4-8") - 1_000,
+		EstimatedInputTokens: catalog.ContextWindowFor("claude-haiku-4-5") - 1_000,
 		RoutingKnobs:         &router.Overrides{ExpectedOutputTokens: &expectedOutputTokens},
 	})
 
 	assert.Empty(t, resolved.Candidates)
 	assert.Contains(t, resolved.Diagnostics, policy.Diagnostic{
-		CatalogID: "claude-opus-4-8",
-		RosterID:  "claude-opus-4-8",
+		CatalogID: "claude-haiku-4-5",
+		RosterID:  "claude-haiku-4-5",
 		Reason:    policy.ExclusionContextWindow,
 	})
 }
