@@ -14,7 +14,6 @@ Composition root. Only place that constructs concrete adapters + wires them toge
   - `buildOtelEmitter` — OTel span exporter
   - `runSessionPinSweep` — TTL sweep loop
   - `resolveHardPinModel` / `resolveDefaultBaselineModel` / `resolveAvailableModels` — boot-time model resolution
-  - `retryPolicyCapabilitiesUntilAvailable` — non-blocking sidecar capability convergence after a startup race
   - `registerDeploymentKeyedProvider` — shared "resolve key → build client → log" registration for the providers whose gating collapses to that shape (Fireworks, Makora, Together, Bedrock, Google); OpenRouter and Anthropic/OpenAI stay bespoke
   - small env parsers (e.g. `envVarHint`, `parseEnvInt`, `parseEnvFloat`, `parseEnvDurationMs`)
 - **No more heuristic-fallback router.** If cluster routing fails to boot, `main.go` panics. Misconfiguration must abort the process rather than silently degrade.
