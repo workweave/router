@@ -13,9 +13,7 @@ type policyCapabilityClient interface {
 	Capabilities(context.Context) (policy.Capabilities, error)
 }
 
-// retryPolicyCapabilitiesUntilAvailable keeps optional behavior conservative
-// while a sidecar starts, then applies its declaration without blocking the
-// core router's startup.
+// retryPolicyCapabilitiesUntilAvailable polls the sidecar until Capabilities returns without error, then calls apply; it does not block the caller.
 func retryPolicyCapabilitiesUntilAvailable(
 	ctx context.Context,
 	client policyCapabilityClient,

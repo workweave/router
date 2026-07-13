@@ -26,9 +26,8 @@ type Capabilities struct {
 	SupportsShadow           bool   `json:"supports_shadow"`
 }
 
-// CapabilitySource exposes the sidecar capabilities currently applied by a router.
-// Implementations must be safe for concurrent request-path reads and
-// background capability refreshes.
+// CapabilitySource returns the live capability set of a sidecar router.
+// Implementations must be safe for concurrent reads and background writes.
 type CapabilitySource interface {
 	CurrentCapabilities() Capabilities
 }
