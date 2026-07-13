@@ -111,7 +111,7 @@ def test_materialize_archive_replaces_an_incomplete_cache_directory(
     archive = tmp_path / "package.tar.gz"
     archive.write_bytes(b"fixture")
     package_sha256 = "a" * 64
-    stale = tmp_path / f"package-{package_sha256[:16]}"
+    stale = tmp_path / f"package-{package_sha256}"
     stale.mkdir()
     (stale / "broken").write_text("incomplete")
 
@@ -124,6 +124,7 @@ def test_materialize_archive_replaces_an_incomplete_cache_directory(
 
     root = artifact_module._materialize_archive(archive, package_sha256, tmp_path)
 
+    assert root.name == f"package-{package_sha256}"
     assert (root / ".complete").is_file()
     assert (root / "payload").read_text() == "verified"
     assert not (root / "broken").exists()

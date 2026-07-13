@@ -112,14 +112,14 @@ def _verify_manifest(root: Path) -> FrozenPackageManifest:
 
 
 def _materialize_archive(archive: Path, package_sha256: str, cache: Path) -> Path:
-    root = cache / f"package-{package_sha256[:16]}"
+    root = cache / f"package-{package_sha256}"
     marker = root / ".complete"
-    lock_path = cache / f"package-{package_sha256[:16]}.lock"
+    lock_path = cache / f"package-{package_sha256}.lock"
     with lock_path.open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if marker.is_file():
             return root
-        temporary = cache / f"extract-{package_sha256[:16]}-{os.getpid()}"
+        temporary = cache / f"extract-{package_sha256}-{os.getpid()}"
         shutil.rmtree(temporary, ignore_errors=True)
         try:
             temporary.mkdir(parents=True)
@@ -144,7 +144,7 @@ def resolve_artifacts() -> FrozenArtifacts:
     if package_url:
         if expected is None:
             raise ValueError("HMM_PACKAGE_SHA256 is required with HMM_PACKAGE_URL")
-        archive = cache / f"download-{expected[:16]}.tar.gz"
+        archive = cache / f"download-{expected}.tar.gz"
         if not archive.is_file():
             _download(package_url, archive)
     else:
