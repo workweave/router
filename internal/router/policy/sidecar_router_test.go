@@ -3,6 +3,7 @@ package policy_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -143,4 +144,45 @@ func TestSidecarRouterCapabilitiesGateOptionalLifecycleCalls(t *testing.T) {
 	require.NoError(t, adapter.ReportFeedback(context.Background(), map[string]interface{}{"feedback": "positive"}))
 	assert.Nil(t, decider.outcome)
 	assert.Nil(t, decider.feedback)
+}
+
+func TestSidecarRouterCapabilitiesCanRefreshAfterStartup(t *testing.T) {
+	decider := &recordingPolicy{}
+	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
+		Strategy: router.Strategy("future-policy"),
+	}, decider, nil).WithCapabilities(policy.Capabilities{})
+
+	adapter.WithCapabilities(policy.Capabilities{
+		SchemaVersion:   policy.SchemaVersionV1,
+		ReportsOutcomes: true,
+		ReportsFeedback: true,
+		SupportsShadow:  true,
+	})
+
+	require.NoError(t, adapter.ReportOutcome(context.Background(), map[string]interface{}{"route_id": "route-2"}))
+	require.NoError(t, adapter.ReportFeedback(context.Background(), map[string]interface{}{"feedback": "positive"}))
+	assert.Equal(t, "route-2", decider.outcome["route_id"])
+	assert.Equal(t, "positive", decider.feedback["feedback"])
+	assert.True(t, adapter.CurrentCapabilities().SupportsShadow)
+}
+
+func TestSidecarRouterCapabilityRefreshIsConcurrentSafe(t *testing.T) {
+	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
+		Strategy: router.Strategy("future-policy"),
+	}, &recordingPolicy{}, nil).WithCapabilities(policy.Capabilities{})
+	var workers sync.WaitGroup
+
+	for i := 0; i < 100; i++ {
+		workers.Add(2)
+		go func(supportsShadow bool) {
+			defer workers.Done()
+			adapter.WithCapabilities(policy.Capabilities{SupportsShadow: supportsShadow})
+		}(i%2 == 0)
+		go func() {
+			defer workers.Done()
+			_ = adapter.CurrentCapabilities()
+		}()
+	}
+
+	workers.Wait()
 }

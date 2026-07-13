@@ -26,6 +26,13 @@ type Capabilities struct {
 	SupportsShadow           bool   `json:"supports_shadow"`
 }
 
+// CapabilitySource exposes the sidecar capabilities currently applied by a router.
+// Implementations must be safe for concurrent request-path reads and
+// background capability refreshes.
+type CapabilitySource interface {
+	CurrentCapabilities() Capabilities
+}
+
 // StrategySpec is the complete proxy registration for one policy strategy.
 // Reporter capabilities are discovered from Router when the spec is installed.
 type StrategySpec struct {

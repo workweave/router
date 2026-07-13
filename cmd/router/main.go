@@ -590,6 +590,24 @@ func main() {
 		}
 		hmmPolicyRouter := hmm.New(hmmClient, availableModels, availableProviders)
 		hmmPolicyRouter.WithCapabilities(hmmCapabilities)
+		if capabilityErr != nil {
+			go func() {
+				retryErr := retryPolicyCapabilitiesUntilAvailable(
+					context.Background(),
+					hmmClient,
+					hmmTimeout,
+					hmmCapabilityRetryInterval,
+					func(capabilities policy.Capabilities) {
+						hmmPolicyRouter.WithCapabilities(capabilities)
+					},
+				)
+				if retryErr != nil {
+					logger.Warn("HMM policy sidecar capability refresh stopped", "sidecar_url", hmmSidecarURL, "err", retryErr)
+					return
+				}
+				logger.Info("HMM policy sidecar capabilities discovered after boot", "sidecar_url", hmmSidecarURL)
+			}()
+		}
 		hmmRouter = hmmPolicyRouter
 		logger.Info("HMM policy router wired", "sidecar_url", hmmSidecarURL, "auth_mode", hmmAuthMode, "timeout_ms", hmmTimeout.Milliseconds(), "candidate_models", len(availableModels))
 	} else {
