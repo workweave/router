@@ -32,6 +32,17 @@ def test_capabilities_are_frozen_and_do_not_request_content_callbacks() -> None:
     assert payload["learning"]["state"] == "frozen_policy"
 
 
+def test_disabled_callbacks_are_contract_compatible_noops() -> None:
+    with TestClient(app) as client:
+        outcome = client.post("/outcome", json={"response_text": "not retained"})
+        feedback = client.post("/feedback", json={"feedback": "not retained"})
+
+    assert outcome.status_code == 204
+    assert feedback.status_code == 204
+    assert outcome.content == b""
+    assert feedback.content == b""
+
+
 def test_readiness_fails_closed_without_an_artifact() -> None:
     with TestClient(app) as client:
         response = client.get("/readyz")

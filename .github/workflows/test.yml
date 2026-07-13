@@ -143,6 +143,8 @@ jobs:
           poetry run python -m scripts.verify_artifact \
             /tmp/hmm-router-frozen-v1.tar.gz \
             --sha256 b326bda644aac86831bae47d0b69de008046f62324a4b93a1eba702581c174df
+          HMM_TEST_PACKAGE=/tmp/hmm-router-frozen-v1.tar.gz \
+            poetry run pytest -q tests/test_policy.py
 
       - name: Build sidecar image
         run: docker build --file sidecars/hmm/Dockerfile --tag router-hmm-sidecar:test .

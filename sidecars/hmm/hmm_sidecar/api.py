@@ -99,6 +99,16 @@ def capabilities() -> JSONResponse:
     )
 
 
+@app.post("/outcome", status_code=204)
+def outcome() -> None:
+    return None
+
+
+@app.post("/feedback", status_code=204)
+def feedback() -> None:
+    return None
+
+
 @app.post("/route")
 async def route(payload: dict[str, Any]) -> JSONResponse:
     policy: FrozenPolicy | None = getattr(app.state, "policy", None)

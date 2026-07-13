@@ -17,6 +17,9 @@ ENV VERSION=${VERSION} \
     OPENBLAS_NUM_THREADS=1 \
     MKL_NUM_THREADS=1 \
     NUMEXPR_NUM_THREADS=1 \
+    HMM_PACKAGE_URL=https://github.com/workweave/router/releases/download/hmm-model-v1/hmm-router-frozen-v1.tar.gz \
+    HMM_PACKAGE_SHA256=b326bda644aac86831bae47d0b69de008046f62324a4b93a1eba702581c174df \
+    HMM_EMBEDDING_PROVIDER=google \
     PORT=8093
 WORKDIR /app
 RUN apt-get update \

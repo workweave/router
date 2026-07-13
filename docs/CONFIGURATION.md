@@ -120,7 +120,7 @@ operator explicitly chooses the `hmm` strategy.
 | --- | --- | --- |
 | `HMM_PACKAGE_URL` | Published `hmm-model-v1` GitHub Release asset | HTTPS URL for the portable frozen package. |
 | `HMM_PACKAGE_PATH` | *(none)* | Local package path when running the sidecar outside Compose. Set exactly one of path or URL. |
-| `HMM_PACKAGE_SHA256` | Pinned release digest in Compose | Required digest for URL downloads; optional but recommended with a local path. |
+| `HMM_PACKAGE_SHA256` | Pinned release digest in the sidecar image | Required digest for URL downloads; optional but recommended with a local path. |
 | `HMM_ARTIFACT_CACHE_DIR` | `/tmp/workweave-hmm-artifacts` | Atomic download/extraction cache. |
 | `HMM_EMBEDDING_PROVIDER` | `google` | `google` or `openai-compatible`. |
 | `GOOGLE_API_KEY` | *(none)* | Google Gemini API key for the exact embedding model named by the artifact. |

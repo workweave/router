@@ -149,9 +149,6 @@ services:
       - path: .env.local
         required: false
     environment:
-      HMM_PACKAGE_URL: ${HMM_PACKAGE_URL:-https://github.com/workweave/router/releases/download/hmm-model-v1/hmm-router-frozen-v1.tar.gz}
-      HMM_PACKAGE_SHA256: ${HMM_PACKAGE_SHA256:-b326bda644aac86831bae47d0b69de008046f62324a4b93a1eba702581c174df}
-      HMM_EMBEDDING_PROVIDER: ${HMM_EMBEDDING_PROVIDER:-google}
       PORT: "8093"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8093/readyz >/dev/null || exit 1"]
