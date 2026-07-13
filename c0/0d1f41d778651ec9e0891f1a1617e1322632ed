@@ -1,0 +1,21 @@
+sidecars/hmm/hmm_sidecar/embeddings.py
+  s_a81d8efc38ee57::t_cbed7c9123f104 25-26
+sidecars/hmm/tests/test_embedding_contract.py
+  s_a81d8efc38ee57::t_cbed7c9123f104 66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "c00d1f41d778651ec9e0891f1a1617e1322632ed",
+  "prompts": {},
+  "sessions": {
+    "s_a81d8efc38ee57": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4d24-a314-7332-876a-e20e37d646b5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
