@@ -109,6 +109,37 @@ up to three attempts within the configured total timeout. Other failures are
 not retried. An unavailable or invalid policy decision returns HTTP 503; it
 never falls back to cluster or another policy.
 
+### Self-hosted frozen HMM sidecar
+
+The repository includes an optional companion container under
+`sidecars/hmm/`. Start it with `make up-hmm`; the normal `make up` and
+`make full-setup` paths remain cluster-only. HMM is not selected unless an
+operator explicitly chooses the `hmm` strategy.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HMM_PACKAGE_URL` | Published `hmm-model-v1` GitHub Release asset | HTTPS URL for the portable frozen package. |
+| `HMM_PACKAGE_PATH` | *(none)* | Local package path when running the sidecar outside Compose. Set exactly one of path or URL. |
+| `HMM_PACKAGE_SHA256` | Pinned release digest in Compose | Required digest for URL downloads; optional but recommended with a local path. |
+| `HMM_ARTIFACT_CACHE_DIR` | `/tmp/workweave-hmm-artifacts` | Atomic download/extraction cache. |
+| `HMM_EMBEDDING_PROVIDER` | `google` | `google` or `openai-compatible`. |
+| `GOOGLE_API_KEY` | *(none)* | Google Gemini API key for the exact embedding model named by the artifact. |
+| `HMM_EMBEDDING_BASE_URL` | *(none)* | Base URL for an OpenAI-compatible `/embeddings` endpoint. |
+| `HMM_EMBEDDING_API_KEY` | *(none)* | Optional bearer token for that endpoint. |
+| `HMM_EMBEDDING_MODEL` | Artifact model ID | Model sent to an OpenAI-compatible endpoint. |
+
+The published v1 package is tied to `google/gemini-embedding-2` at 3,072
+dimensions. Those embedding values are direct classifier features and define
+the HMM emission space, so another 3,072-dimensional model is not a substitute.
+At startup the sidecar embeds a fixed probe and compares it to the reference
+vector stored in the artifact. Readiness fails closed when the endpoint serves
+an incompatible vector space. A fully local embedder is supported only with a
+separately trained package that declares and probes that embedder.
+
+The self-hosted sidecar is frozen: it keeps only a bounded in-memory embedding
+cache, advertises no learning/outcome/feedback callbacks, and never persists
+request or response content.
+
 Selection precedence is:
 
 1. An authorized internal `x-weave-router-strategy` request override.

@@ -134,6 +134,32 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
+  # Optional frozen HMM policy. It is not part of the default stack and does
+  # not change the router's default strategy. Start it through `make up-hmm`,
+  # which also supplies the sidecar URL to the router via the HMM override.
+  hmm-sidecar:
+    profiles:
+      - hmm
+    build:
+      context: .
+      dockerfile: sidecars/hmm/Dockerfile
+    env_file:
+      - path: .env.development
+        required: false
+      - path: .env.local
+        required: false
+    environment:
+      HMM_PACKAGE_URL: ${HMM_PACKAGE_URL:-https://github.com/workweave/router/releases/download/hmm-model-v1/hmm-router-frozen-v1.tar.gz}
+      HMM_PACKAGE_SHA256: ${HMM_PACKAGE_SHA256:-8f15e161ddc20de008173ec0aa10c892e4f80de39c02d9f42af83ec707680904}
+      HMM_EMBEDDING_PROVIDER: ${HMM_EMBEDDING_PROVIDER:-google}
+      PORT: "8093"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8093/readyz >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
   # One-shot seed runner. Creates a local-dev installation + API key and
   # prints the raw token with paste-ready configuration for Claude Code and
   # Cursor. Not started by `docker compose up`; invoke explicitly:

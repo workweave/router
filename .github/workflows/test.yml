@@ -105,3 +105,61 @@ jobs:
 
       - name: Run tests
         run: go test -count=1 ./...
+
+  test-hmm-sidecar:
+    name: Test frozen HMM sidecar
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.3"
+
+      - name: Install Poetry
+        run: pip install poetry==1.8.4
+
+      - name: Install dependencies
+        working-directory: sidecars/hmm
+        run: poetry install --no-interaction
+
+      - name: Check formatting
+        working-directory: sidecars/hmm
+        run: poetry run black --check hmm_sidecar scripts tests
+
+      - name: Run tests
+        working-directory: sidecars/hmm
+        run: poetry run pytest -q
+
+      - name: Verify published artifact
+        working-directory: sidecars/hmm
+        run: |
+          curl --fail --location --output /tmp/hmm-router-frozen-v1.tar.gz \
+            https://github.com/workweave/router/releases/download/hmm-model-v1/hmm-router-frozen-v1.tar.gz
+          echo "8f15e161ddc20de008173ec0aa10c892e4f80de39c02d9f42af83ec707680904  /tmp/hmm-router-frozen-v1.tar.gz" \
+            | sha256sum --check
+          poetry run python -m scripts.verify_artifact \
+            /tmp/hmm-router-frozen-v1.tar.gz \
+            --sha256 8f15e161ddc20de008173ec0aa10c892e4f80de39c02d9f42af83ec707680904
+
+      - name: Build sidecar image
+        run: docker build --file sidecars/hmm/Dockerfile --tag router-hmm-sidecar:test .
+
+      - name: Smoke-test liveness without credentials
+        run: |
+          trap 'docker rm --force router-hmm-sidecar-test >/dev/null 2>&1 || true' EXIT
+          docker run --detach --name router-hmm-sidecar-test \
+            --publish 8093:8093 router-hmm-sidecar:test
+          for attempt in $(seq 1 30); do
+            curl --fail http://127.0.0.1:8093/livez && exit 0
+            sleep 1
+          done
+          docker logs router-hmm-sidecar-test
+          exit 1
+
+      - name: Validate HMM Compose overlay
+        run: |
+          docker compose -f docker-compose.yml -f sidecars/hmm/docker-compose.yml \
+            --profile hmm config --quiet

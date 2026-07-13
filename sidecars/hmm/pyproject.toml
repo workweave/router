@@ -1,0 +1,38 @@
+[tool.poetry]
+name = "workweave-hmm-sidecar"
+version = "0.1.0"
+description = "Frozen HMM policy sidecar for the self-hosted Weave Router"
+authors = ["Weave Team <engineering@workweave.ai>"]
+license = "Elastic-2.0"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.123.0"
+uvicorn = "^0.32.0"
+pydantic = "^2.10.0"
+numpy = "^2.2.0"
+# XGBoost's normal Linux x86 wheel bundles CUDA/NCCL. Use the official
+# inference-compatible CPU distribution there; other platforms do not publish
+# xgboost-cpu and receive the platform-native standard wheel.
+xgboost-cpu = { version = "3.3.0", markers = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
+xgboost = { version = "3.3.0", markers = "sys_platform != 'linux' or platform_machine != 'x86_64'" }
+httpx = "^0.28.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "^25.1.0"
+pytest = "^8.3.0"
+pytest-asyncio = "^0.24.0"
+respx = "^0.22.0"
+
+[tool.black]
+line-length = 88
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
