@@ -18,6 +18,15 @@ type registryRouter struct {
 	request  router.Request
 }
 
+type dynamicCapabilityRouter struct {
+	registryRouter
+	capabilities policy.Capabilities
+}
+
+func (r *dynamicCapabilityRouter) CurrentCapabilities() policy.Capabilities {
+	return r.capabilities
+}
+
 func (r *registryRouter) Route(_ context.Context, request router.Request) (router.Decision, error) {
 	r.calls++
 	r.request = request
@@ -74,4 +83,23 @@ func TestPolicyStrategyRegistryFailsClosedForUnknownStrategy(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, router.ErrStrategyUnavailable)
 	assert.Zero(t, defaultRouter.calls)
+}
+
+func TestPolicyCapabilitiesReadsRefreshedRouterCapabilities(t *testing.T) {
+	strategy := router.Strategy("future-policy")
+	policyRouter := &dynamicCapabilityRouter{}
+	svc := (&Service{}).WithPolicyStrategy(policy.StrategySpec{
+		Strategy:     strategy,
+		Router:       policyRouter,
+		Capabilities: policy.Capabilities{},
+	})
+	policyRouter.capabilities = policy.Capabilities{
+		SchemaVersion:  policy.SchemaVersionV1,
+		SupportsShadow: true,
+	}
+
+	capabilities, ok := svc.PolicyCapabilities(strategy)
+
+	require.True(t, ok)
+	assert.True(t, capabilities.SupportsShadow)
 }

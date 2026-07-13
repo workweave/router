@@ -9,7 +9,7 @@
 #   (and .env.local if present). Start Postgres via `make db` or point
 #   DATABASE_URL at any Postgres you already have running.
 
-.PHONY: generate generate-statusline build test test-verbose initdb migrate-up migrate-down migrate-create seed setup full-setup db dev check fmt vet precommit install-hooks help install-cc uninstall-cc up down logs
+.PHONY: generate generate-statusline build test test-verbose initdb migrate-up migrate-down migrate-create seed setup full-setup db dev check fmt vet precommit install-hooks help install-cc uninstall-cc up up-hmm down down-hmm logs
 
 # Load DATABASE_URL from .env files (matches docker-compose defaults).
 -include .env.development
@@ -142,8 +142,16 @@ dev: ## Run with hot-reload (CompileDaemon)
 up: ## Start the compose stack in the background (no install.sh wiring)
 	docker compose up --build -d
 
-down: ## Stop the compose stack (keeps the postgres volume)
-	docker compose down
+up-hmm: ## Start the stack with the opt-in frozen HMM policy sidecar
+	docker compose -f docker-compose.yml -f sidecars/hmm/docker-compose.yml \
+		--profile hmm up --build -d
+
+down: ## Stop the compose stack, including the optional HMM sidecar (keeps the postgres volume)
+	docker compose --profile hmm down
+
+down-hmm: ## Stop the compose stack including the optional HMM sidecar
+	docker compose -f docker-compose.yml -f sidecars/hmm/docker-compose.yml \
+		--profile hmm down
 
 logs: ## Tail the server logs
 	docker compose logs -f server

@@ -1479,6 +1479,11 @@ func (s *Service) WithPolicyStrategy(spec policy.StrategySpec) *Service {
 // PolicyCapabilities returns a registered strategy's declared capabilities.
 func (s *Service) PolicyCapabilities(strategy router.Strategy) (policy.Capabilities, bool) {
 	registered, ok := s.strategies[strategy]
+	if ok {
+		if source, dynamic := registered.router.(policy.CapabilitySource); dynamic {
+			return source.CurrentCapabilities(), true
+		}
+	}
 	return registered.capabilities, ok
 }
 

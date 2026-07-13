@@ -572,6 +572,7 @@ func main() {
 	// Wired only when ROUTER_HMM_SIDECAR_URL is set; x-weave-router-strategy:
 	// hmm then routes through it. Unset fails closed with 503.
 	var hmmRouter router.Router
+	var hmmCapabilities policy.Capabilities
 	if hmmSidecarURL := config.GetOr("ROUTER_HMM_SIDECAR_URL", ""); hmmSidecarURL != "" {
 		hmmTimeout := parseEnvDurationMs("ROUTER_HMM_SIDECAR_TIMEOUT_MS", policyclient.DefaultTimeout)
 		hmmAuthMode := config.GetOr("ROUTER_HMM_SIDECAR_AUTH", policySidecarAuthNone)
@@ -580,7 +581,34 @@ func main() {
 			logger.Error("HMM policy sidecar client failed to build; refusing to boot", "auth_mode", hmmAuthMode, "err", clientErr)
 			panic(clientErr)
 		}
-		hmmRouter = hmm.New(hmmClient, availableModels, availableProviders)
+		capabilityCtx, cancelCapabilityDiscovery := context.WithTimeout(context.Background(), hmmTimeout)
+		var capabilityErr error
+		hmmCapabilities, capabilityErr = hmmClient.Capabilities(capabilityCtx)
+		cancelCapabilityDiscovery()
+		if capabilityErr != nil {
+			logger.Warn("HMM policy sidecar capabilities unavailable at boot; optional behavior remains disabled", "sidecar_url", hmmSidecarURL, "err", capabilityErr)
+		}
+		hmmPolicyRouter := hmm.New(hmmClient, availableModels, availableProviders)
+		hmmPolicyRouter.WithCapabilities(hmmCapabilities)
+		if capabilityErr != nil {
+			go func() {
+				retryErr := retryPolicyCapabilitiesUntilAvailable(
+					context.Background(),
+					hmmClient,
+					hmmTimeout,
+					hmmCapabilityRetryInterval,
+					func(capabilities policy.Capabilities) {
+						hmmPolicyRouter.WithCapabilities(capabilities)
+					},
+				)
+				if retryErr != nil {
+					logger.Warn("HMM policy sidecar capability refresh stopped", "sidecar_url", hmmSidecarURL, "err", retryErr)
+					return
+				}
+				logger.Info("HMM policy sidecar capabilities discovered after boot", "sidecar_url", hmmSidecarURL)
+			}()
+		}
+		hmmRouter = hmmPolicyRouter
 		logger.Info("HMM policy router wired", "sidecar_url", hmmSidecarURL, "auth_mode", hmmAuthMode, "timeout_ms", hmmTimeout.Milliseconds(), "candidate_models", len(availableModels))
 	} else {
 		logger.Info("HMM policy router disabled (ROUTER_HMM_SIDECAR_URL unset); x-weave-router-strategy: hmm will return 503")
@@ -624,11 +652,7 @@ func main() {
 		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyRL, Router: rlRouter, Unavailable: rl.ErrPolicyUnavailable}).
 		WithPolicyStrategy(policy.StrategySpec{
 			Strategy: router.StrategyHMM, Router: hmmRouter, Unavailable: hmm.ErrHMMUnavailable,
-			Capabilities: policy.Capabilities{
-				SchemaVersion: policy.SchemaVersionV1, ReportsOutcomes: true, ReportsFeedback: true,
-				HonorsPreferredModels: true, HonorsQualityPriceBias: true, SupportsDebugRouteDetail: true,
-				SupportsShadow: true,
-			},
+			Capabilities: hmmCapabilities,
 		}).
 		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyBandit, Router: banditRouter, Unavailable: bandit.ErrBanditUnavailable}).
 		WithContentCapture(captureMode, captureMaxBytes, nil).

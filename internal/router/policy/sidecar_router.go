@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -29,8 +30,9 @@ type SidecarRouter struct {
 	reporter         OutcomeReporter
 	feedbackReporter FeedbackReporter
 	resolver         *Resolver
+	capabilitiesMu   sync.RWMutex
+	capabilities     Capabilities
 	capabilitiesSet  bool
-	supportsShadow   bool
 }
 
 // NewSidecarRouter constructs a reusable policy adapter. Strategy packages
@@ -52,26 +54,36 @@ func NewSidecarRouter(config SidecarRouterConfig, decider Decider, resolver *Res
 
 // WithCapabilities gates optional outcome/feedback callbacks based on the sidecar's negotiated support.
 func (r *SidecarRouter) WithCapabilities(capabilities Capabilities) *SidecarRouter {
+	r.capabilitiesMu.Lock()
+	defer r.capabilitiesMu.Unlock()
+
+	r.capabilities = capabilities
 	r.capabilitiesSet = true
-	r.supportsShadow = capabilities.SupportsShadow
-	if !capabilities.ReportsOutcomes {
-		r.reporter = nil
-	}
-	if !capabilities.ReportsFeedback {
-		r.feedbackReporter = nil
-	}
 	return r
 }
 
+// CurrentCapabilities returns the currently applied capability set.
+func (r *SidecarRouter) CurrentCapabilities() Capabilities {
+	r.capabilitiesMu.RLock()
+	defer r.capabilitiesMu.RUnlock()
+	return r.capabilities
+}
+
 func (r *SidecarRouter) ReportOutcome(ctx context.Context, payload map[string]interface{}) error {
-	if r.reporter == nil {
+	r.capabilitiesMu.RLock()
+	enabled := !r.capabilitiesSet || r.capabilities.ReportsOutcomes
+	r.capabilitiesMu.RUnlock()
+	if !enabled || r.reporter == nil {
 		return nil
 	}
 	return r.reporter.ReportOutcome(ctx, payload)
 }
 
 func (r *SidecarRouter) ReportFeedback(ctx context.Context, payload map[string]interface{}) error {
-	if r.feedbackReporter == nil {
+	r.capabilitiesMu.RLock()
+	enabled := !r.capabilitiesSet || r.capabilities.ReportsFeedback
+	r.capabilitiesMu.RUnlock()
+	if !enabled || r.feedbackReporter == nil {
 		return nil
 	}
 	return r.feedbackReporter.ReportFeedback(ctx, payload)
@@ -79,7 +91,10 @@ func (r *SidecarRouter) ReportFeedback(ctx context.Context, payload map[string]i
 
 func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	strategy := r.config.Strategy
-	if req.ShadowMode && r.capabilitiesSet && !r.supportsShadow {
+	r.capabilitiesMu.RLock()
+	shadowUnsupported := r.capabilitiesSet && !r.capabilities.SupportsShadow
+	r.capabilitiesMu.RUnlock()
+	if req.ShadowMode && shadowUnsupported {
 		return router.Decision{}, fmt.Errorf("%s: sidecar does not support shadow routing: %w", strategy, r.config.Unavailable)
 	}
 	executionMode := ExecutionModeServing

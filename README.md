@@ -110,6 +110,20 @@ curl -sS http://localhost:8080/v1/chat/completions \
 curl -sS http://localhost:8080/v1/route -H "Authorization: Bearer rk_..." -d '...'
 ```
 
+### Optional: self-host the frozen HMM policy
+
+The default stack uses the in-process cluster scorer. To run the frozen HMM
+policy as a companion container, add a Google API key and use the opt-in target:
+
+```bash
+echo 'GOOGLE_API_KEY=...' >> .env.local
+make up-hmm
+```
+
+This does not change the default strategy. See
+[`sidecars/hmm/README.md`](sidecars/hmm/README.md) for artifact verification,
+embedding compatibility, and explicit HMM selection.
+
 ## Wire it into your tools
 
 **Claude Code.** Run `make install-cc` to wire Claude Code at the local
