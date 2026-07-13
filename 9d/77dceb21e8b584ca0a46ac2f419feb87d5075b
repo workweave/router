@@ -1,0 +1,19 @@
+internal/router/cluster/multiversion.go
+  s_2d837cadf754e2::t_4b1b81040a7a11 92-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "9d77dceb21e8b584ca0a46ac2f419feb87d5075b",
+  "prompts": {},
+  "sessions": {
+    "s_2d837cadf754e2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "10569733-a047-49c0-bd13-61a08a2839f3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

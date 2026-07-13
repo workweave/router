@@ -1,0 +1,19 @@
+.github/workflows/check_cluster_routing.yml
+  s_c5c3a4e3dd2fe4::t_594c47861565cb 23-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "3151cd330ffed4a680558df3bea76bda42e17bd9",
+  "prompts": {},
+  "sessions": {
+    "s_c5c3a4e3dd2fe4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8d2654f-a38b-4c45-aa60-fdc811fcf202",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+internal/api/anthropic/messages.go
+  s_c4ecee41717be0::t_a37121780d2880 106-116,118-119
+internal/api/openai/completions.go
+  s_c4ecee41717be0::t_65d8419a6997c1 34
+internal/proxy/client_identity.go
+  s_c4ecee41717be0::t_b53cef51ef64c3 6
+  s_c4ecee41717be0::t_75e8735d08ded9 37-52
+internal/api/openai/responses.go
+  s_c4ecee41717be0::t_54b18c7cab0df2 4
+  s_c4ecee41717be0::t_3c1e1f7e2822be 36
+internal/api/gemini/generate_content.go
+  s_c4ecee41717be0::t_5c4235f733ae29 60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3accf11621c4b2bb005fddebcb5528f553c4ddf3",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+internal/router/cache/cache_test.go
+  s_bbd46d33accca4::t_138b6e776e854e 235-239,241,255,259-279
+internal/router/cache/cache.go
+  s_bbd46d33accca4::t_f9bc3e65d31dda 3-4,59-65,68,74,98,105,133,152,165-168,197,205,219,231-233,236
+  s_bbd46d33accca4::t_28bab3c76d8a3d 29-30,32-43,49-54,67,69-73,86-90,104,106,202-204,214-218,220-226,235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "46b193c036c25f11cfcba14fed6a696a6be15eda",
+  "prompts": {},
+  "sessions": {
+    "s_bbd46d33accca4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ff3904c-b359-423e-97be-4a870494ad91",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

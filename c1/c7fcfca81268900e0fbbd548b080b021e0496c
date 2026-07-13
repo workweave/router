@@ -1,0 +1,20 @@
+internal/router/cluster/scorer.go
+  s_2c7de5224a6523::t_610f8221a880a9 151-161
+  s_2c7de5224a6523::t_52c3f4920b7082 390-395,397-403
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "c1c7fcfca81268900e0fbbd548b080b021e0496c",
+  "prompts": {},
+  "sessions": {
+    "s_2c7de5224a6523": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "566b5dea-595c-43ad-8748-cf1242eb8682",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

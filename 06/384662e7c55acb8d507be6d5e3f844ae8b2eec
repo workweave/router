@@ -1,0 +1,28 @@
+cmd/router/main.go
+  s_fa4a442294e030::t_61d511f3e8881d 737-742,744
+  s_fa4a442294e030::t_f7784485836ab6 118-121,123-128
+  s_fa4a442294e030::t_f09db58aebff28 309-310,321-331,334
+  s_fa4a442294e030::t_0381ae8c18a2eb 476
+  s_fa4a442294e030::t_5961d99ef6fb78 152-157
+internal/api/admin/config.go
+  s_fa4a442294e030::t_173bc30aae244f 7
+  s_fa4a442294e030::t_e25af9a672d662 26-33,43-45
+internal/providers/provider.go
+  s_fa4a442294e030::t_f45fcea4a21249 23-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "06384662e7c55acb8d507be6d5e3f844ae8b2eec",
+  "prompts": {},
+  "sessions": {
+    "s_fa4a442294e030": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f58c034-3915-4752-9df1-c191b196a6c3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

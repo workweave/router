@@ -1,0 +1,20 @@
+internal/server/server.go
+  s_181299bbd674e9::t_a2e85cefede657 135-138
+  s_181299bbd674e9::t_bf13b53698daeb 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7f08bdc6102282a759335977cf4235530aa97921",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

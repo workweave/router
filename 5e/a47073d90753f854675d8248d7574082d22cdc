@@ -1,0 +1,55 @@
+internal/proxy/turnloop.go
+  s_ebfa96f9db32d9::t_0631b75046e745 104-109
+  s_ebfa96f9db32d9::t_56c573b4c850a1 97
+  s_ebfa96f9db32d9::t_80cf0b35938ffb 215,260,270,297,318,386
+  s_ebfa96f9db32d9::t_dd2be4545af23f 177-185
+  s_ebfa96f9db32d9::t_43ee776d12867f 277,280-284,286-292
+  s_ebfa96f9db32d9::t_1cffc82bfcf055 439
+  s_ebfa96f9db32d9::t_9ac2d05a137574 473,492,497-499,501,514,519-525,531,534
+internal/proxy/handover.go
+  s_ebfa96f9db32d9::t_1cac0405add147 95
+internal/proxy/loop_detection.go
+  s_ebfa96f9db32d9::t_c02605b9aec046 78,89
+internal/observability/logger.go
+  s_ebfa96f9db32d9::t_d306f7851bc09d 4,18-46
+internal/proxy/gemini.go
+  s_ebfa96f9db32d9::t_ea06a68836c45f 33,61-69
+  s_ebfa96f9db32d9::t_f570b88983e133 93
+internal/proxy/session_key.go
+  s_ebfa96f9db32d9::t_c2c8194f6ab1f5 4,6-7,9,14-46
+internal/proxy/service.go
+  s_ebfa96f9db32d9::t_c4805688960ea5 644,684-698,707,720,724-727
+  s_ebfa96f9db32d9::t_7e781967ee36c0 1145,1149
+  s_ebfa96f9db32d9::t_4d8d94c94b6fb2 1585,1619-1631,1640,1649,1653
+  s_ebfa96f9db32d9::t_021944ddd1b221 721,1650
+  s_ebfa96f9db32d9::t_705730af5ffafd 763
+  s_ebfa96f9db32d9::t_72d90a98225aa4 708,1641
+  s_ebfa96f9db32d9::t_f570b88983e133 752,1679
+internal/proxy/log_io.go
+  s_ebfa96f9db32d9::t_1eeb082def8a40 1-3,5-37,39-74,76-102
+  s_ebfa96f9db32d9::t_5e2c0c768523cd 75
+  s_ebfa96f9db32d9::t_ecc343e4430ce4 4
+  s_ebfa96f9db32d9::t_905a1c31d5aa97 38
+internal/proxy/fallback.go
+  s_ebfa96f9db32d9::t_68c758a9b2a04e 201
+internal/proxy/no_progress.go
+  s_ebfa96f9db32d9::t_b4f84c42d94338 165,175
+internal/proxy/force_model.go
+  s_ebfa96f9db32d9::t_6c91b5f5075c69 76,83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "5ea47073d90753f854675d8248d7574082d22cdc",
+  "prompts": {},
+  "sessions": {
+    "s_ebfa96f9db32d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82f09df5-4976-4e25-8c8a-84dea4f84240",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
