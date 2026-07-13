@@ -68,6 +68,9 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 			{Role: "user", Text: "latest hello", ToolCalls: []router.ConversationToolCall{{Name: "Read", InputKeys: []string{"file_path"}, InputJSON: `{"file_path":"README.md"}`}}},
 		},
 		AvailableTools:  []string{"Read", "Grep", "Read", ""},
+		FeedbackKey:     "feedback-session",
+		FeedbackRole:    "default",
+		ClientSessionID: "client-session-abc",
 		TrainingAllowed: true,
 		Candidates: []policy.Candidate{{
 			RosterID:       "moonshotai/kimi-k2.7-code",
@@ -96,6 +99,9 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	assert.Equal(t, "latest hello", got.LatestUserText)
 	assert.Equal(t, 1, got.TurnIndex)
 	assert.Equal(t, []string{"Read", "Grep"}, got.AvailableTools)
+	assert.Equal(t, "feedback-session", got.FeedbackKey)
+	assert.Equal(t, "default", got.FeedbackRole)
+	assert.Equal(t, "client-session-abc", got.ClientSessionID)
 	require.Len(t, got.TrainingConversationDelta, 3)
 	assert.Equal(t, "assistant", got.TrainingConversationDelta[0].Role)
 	require.Len(t, got.TrainingConversationDelta[1].ToolResults, 1)

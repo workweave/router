@@ -62,6 +62,7 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 		DebugEnabled:         true,
 		FeedbackKey:          "feedback-session",
 		FeedbackRole:         "default",
+		ClientSessionID:      "client-session-abc",
 	})
 
 	require.NoError(t, err)
@@ -86,6 +87,7 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 	assert.Equal(t, "rollout-1", decider.query.RolloutID)
 	assert.Equal(t, "feedback-session", decider.query.FeedbackKey)
 	assert.Equal(t, "default", decider.query.FeedbackRole)
+	assert.Equal(t, "client-session-abc", decider.query.ClientSessionID)
 	assert.Equal(t, []router.ConversationMessage{{Role: "user", Text: "latest hello"}}, decider.query.ConversationMessages)
 	require.Len(t, decider.query.Candidates, 1)
 	candidate := decider.query.Candidates[0]

@@ -10,6 +10,7 @@ import (
 
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/policy"
 )
 
@@ -56,10 +57,19 @@ func TestReportPolicyOutcome_UsesFreshMetadataForStickyServedDecision(t *testing
 	ctx = context.WithValue(ctx, ExternalIDContextKey{}, "org-1")
 	ctx = context.WithValue(ctx, InstallationIDContextKey{}, "installation-1")
 	ctx = context.WithValue(ctx, ClientIdentityContextKey{}, ClientIdentity{ClientApp: ClientAppCodex, RolloutID: "rollout-1"})
-	s.reportPolicyOutcome(ctx, routeRes, served, providers.ProviderAnthropic, 100, 90, 10, 0, 0, 12, 34, nil, &policyOutcomeResponse{
+	const (
+		inputTokens  = 90
+		outputTokens = 10
+	)
+	s.reportPolicyOutcome(ctx, routeRes, served, providers.ProviderAnthropic, 100, inputTokens, outputTokens, 0, 0, 12, 34, nil, &policyOutcomeResponse{
 		Body:      []byte(`{"content":[{"type":"text","text":"done"}]}`),
 		Truncated: false,
 	})
+
+	price, ok := catalog.PriceFor(providers.ProviderAnthropic, "claude-haiku-4-5")
+	require.True(t, ok)
+	wantCost := catalog.EffectiveInputCost(inputTokens, 0, 0, price.InputUSDPer1M, price, providers.ProviderAnthropic) +
+		catalog.EffectiveOutputCost(outputTokens, price.OutputUSDPer1M)
 
 	select {
 	case payload := <-reporter.ch:
@@ -79,6 +89,7 @@ func TestReportPolicyOutcome_UsesFreshMetadataForStickyServedDecision(t *testing
 		assert.Equal(t, `{"content":[{"type":"text","text":"done"}]}`, payload["response_body"])
 		assert.Equal(t, "client_anthropic", payload["response_body_format"])
 		assert.Equal(t, false, payload["response_body_truncated"])
+		assert.Equal(t, wantCost, payload["cost_usd"])
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for HMM outcome payload")
 	}

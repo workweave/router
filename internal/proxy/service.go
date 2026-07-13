@@ -1651,6 +1651,7 @@ func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte) (decis
 		AvailableTools:       availableToolsForRouting(env),
 		OrganizationID:       organizationID,
 		InstallationID:       installationID,
+		ClientSessionID:      env.ClientSessionID(),
 		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
 	})
 	return decision, err
@@ -2093,6 +2094,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		// can correlate with the route even if local compaction rewrites env.
 		FeedbackKey:      hex.EncodeToString(sessionKey[:]),
 		FeedbackRole:     roleForTier(catalog.TierFor(feats.Model)),
+		ClientSessionID:  env.ClientSessionID(),
 		EnabledProviders: enabledProviders,
 		ExcludedModels:   excluded,
 		PreferredModels:  s.preferredModelsForRequest(ctx),
@@ -3229,6 +3231,15 @@ func (s *Service) reportPolicyOutcome(ctx context.Context, res turnLoopResult, d
 	if proxyErr != nil {
 		payload["error"] = proxyErr.Error()
 	}
+	price, ok := catalog.PriceFor(finalProvider, decision.Model)
+	if !ok {
+		price, ok = catalog.PrimaryPriceFor(decision.Model)
+	}
+	if ok {
+		inputCost := catalog.EffectiveInputCost(inputTokens, cacheCreation, cacheRead, price.InputUSDPer1M, price, finalProvider)
+		outputCost := catalog.EffectiveOutputCost(outputTokens, price.OutputUSDPer1M)
+		payload["cost_usd"] = inputCost + outputCost
+	}
 	log := observability.FromContext(ctx).With("route_id", routeMetadata.RouteID)
 	if err := ctx.Err(); err != nil {
 		log.Debug("Skipping policy outcome report for canceled request", "err", err)
@@ -4034,6 +4045,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		// can correlate with the route even if local compaction rewrites env.
 		FeedbackKey:      hex.EncodeToString(sessionKey[:]),
 		FeedbackRole:     roleForTier(catalog.TierFor(feats.Model)),
+		ClientSessionID:  env.ClientSessionID(),
 		EnabledProviders: enabledProviders,
 		ExcludedModels:   excludedOAI,
 		PreferredModels:  s.preferredModelsForRequest(ctx),

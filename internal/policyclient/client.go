@@ -139,6 +139,7 @@ type routeRequest struct {
 	AvailableTools            []string           `json:"available_tools,omitempty"`
 	FeedbackKey               string             `json:"feedback_key,omitempty"`
 	FeedbackRole              string             `json:"feedback_role,omitempty"`
+	ClientSessionID           string             `json:"client_session_id,omitempty"`
 	EstimatedInputTokens      int                `json:"estimated_input_tokens"`
 	HasTools                  bool               `json:"has_tools"`
 	HasImages                 bool               `json:"has_images"`
@@ -248,6 +249,7 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 		AvailableTools:            clipRouteValues(query.AvailableTools, maxRouteToolCallInputKeys, maxRouteToolCallInputChars),
 		FeedbackKey:               query.FeedbackKey,
 		FeedbackRole:              query.FeedbackRole,
+		ClientSessionID:           query.ClientSessionID,
 		EstimatedInputTokens:      query.EstimatedInputTokens,
 		HasTools:                  query.HasTools,
 		HasImages:                 query.HasImages,

@@ -50,6 +50,7 @@ type Query struct {
 	AvailableTools       []string
 	FeedbackKey          string
 	FeedbackRole         string
+	ClientSessionID      string
 	EstimatedInputTokens int
 	HasTools             bool
 	HasImages            bool

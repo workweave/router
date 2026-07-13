@@ -49,6 +49,9 @@ type Request struct {
 	// sidecar routers that accept per-session feedback.
 	FeedbackKey  string
 	FeedbackRole string
+	// ClientSessionID is the calling client's own session id (e.g. Claude
+	// Code metadata.user_id), when present on the inbound envelope.
+	ClientSessionID string
 	// Per-request provider gating — nil means unrestricted.
 	EnabledProviders map[string]struct{}
 	// Per-request model exclusion — nil or empty means no exclusion.

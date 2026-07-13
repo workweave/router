@@ -108,6 +108,7 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 		AvailableTools:       req.AvailableTools,
 		FeedbackKey:          req.FeedbackKey,
 		FeedbackRole:         req.FeedbackRole,
+		ClientSessionID:      req.ClientSessionID,
 		EstimatedInputTokens: req.EstimatedInputTokens,
 		HasTools:             req.HasTools,
 		HasImages:            req.HasImages,
