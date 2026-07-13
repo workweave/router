@@ -7,6 +7,64 @@ from pathlib import Path
 import pytest
 
 from hmm_sidecar.artifacts import _safe_extract, resolve_artifacts
+from scripts.export_artifact import (
+    deterministic_tar,
+    public_classifier_metadata,
+    public_roster,
+)
+
+
+def test_public_classifier_metadata_is_a_strict_runtime_allowlist() -> None:
+    metadata = public_classifier_metadata(
+        {
+            "classes": ["fast", "maximum"],
+            "feature_dim": 3431,
+            "private_provenance": {"fingerprint": "not-public"},
+            "private_training_metadata": {"value": "not-public"},
+        }
+    )
+
+    assert metadata == {"classes": ["fast", "maximum"], "feature_dim": 3431}
+
+
+def test_public_roster_keeps_only_runtime_model_arms() -> None:
+    roster = public_roster(
+        {
+            "private_routing_metadata": "not-public",
+            "clusters": {
+                "fast": {
+                    "arms": ["provider/fast"],
+                    "private_cluster_metadata": "not-public",
+                },
+                "maximum": {
+                    "arms": ["provider/maximum"],
+                    "private_cluster_metadata": "not-public",
+                },
+            },
+        },
+        ["fast", "maximum"],
+    )
+
+    assert roster == {
+        "schema_version": "hmm_router_public_roster_v1",
+        "clusters": {
+            "fast": {"arms": ["provider/fast"]},
+            "maximum": {"arms": ["provider/maximum"]},
+        },
+    }
+
+
+def test_public_archive_is_byte_for_byte_reproducible(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "model.json").write_text('{"weights": [1, 2, 3]}\n')
+    first = tmp_path / "first.tar.gz"
+    second = tmp_path / "second.tar.gz"
+
+    deterministic_tar(source, first)
+    deterministic_tar(source, second)
+
+    assert first.read_bytes() == second.read_bytes()
 
 
 def test_rejects_archive_path_traversal(tmp_path: Path) -> None:

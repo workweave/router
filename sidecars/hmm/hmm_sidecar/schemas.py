@@ -42,7 +42,6 @@ class FrozenPackageManifest(FrozenModel):
     hmm: HMMFiles
     roster: ComponentFiles
     state_cards: ComponentFiles
-    training_privacy: dict[str, Any]
     files: dict[str, str]
 
     @model_validator(mode="after")

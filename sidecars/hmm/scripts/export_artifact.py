@@ -9,6 +9,7 @@ runtime never deserializes executable Python objects.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import pickle
@@ -21,14 +22,7 @@ from typing import Any
 import numpy as np
 
 PACKAGE_SCHEMA = "hmm_router_frozen_package_v1"
-PATH_KEYS = {
-    "input_path",
-    "output_path",
-    "raw_conversation_csv",
-    "corpus",
-    "corpus_weavedata",
-    "source_path",
-}
+PUBLIC_ROSTER_SCHEMA = "hmm_router_public_roster_v1"
 
 
 class _StateShim:
@@ -62,18 +56,29 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def sanitize(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: sanitize(item)
-            for key, item in value.items()
-            if key not in PATH_KEYS and not key.endswith("_path")
-        }
-    if isinstance(value, list):
-        return [sanitize(item) for item in value]
-    if isinstance(value, str) and value.startswith("/"):
-        return "[redacted-local-path]"
-    return value
+def public_classifier_metadata(private: dict[str, Any]) -> dict[str, Any]:
+    """Return only fields required to validate classifier inference."""
+    return {
+        "classes": list(private["classes"]),
+        "feature_dim": int(private["feature_dim"]),
+    }
+
+
+def public_roster(private: dict[str, Any], classes: list[str]) -> dict[str, Any]:
+    """Return only the model arms needed by the frozen selection policy."""
+    private_clusters = private.get("clusters")
+    if not isinstance(private_clusters, dict):
+        raise ValueError("private roster lacks clusters")
+    clusters: dict[str, dict[str, list[str]]] = {}
+    for label in classes:
+        cluster = private_clusters.get(label)
+        if not isinstance(cluster, dict):
+            raise ValueError(f"private roster lacks cluster {label!r}")
+        arms = cluster.get("arms")
+        if not isinstance(arms, list) or not arms:
+            raise ValueError(f"private roster cluster {label!r} lacks arms")
+        clusters[label] = {"arms": [str(arm) for arm in arms]}
+    return {"schema_version": PUBLIC_ROSTER_SCHEMA, "clusters": clusters}
 
 
 def write_json(path: Path, value: Any) -> None:
@@ -119,7 +124,13 @@ def export_hmm(source: Path, destination: Path) -> int:
 
 def deterministic_tar(source: Path, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(output, "w:gz", format=tarfile.PAX_FORMAT) as archive:
+    with (
+        output.open("wb") as raw,
+        gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
+        tarfile.open(
+            fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT
+        ) as archive,
+    ):
         for path in sorted(source.rglob("*")):
             if not path.is_file():
                 continue
@@ -148,9 +159,10 @@ def main() -> int:
         classifier_out.mkdir()
         for filename in ("model.json", "classes.json"):
             shutil.copyfile(source / "classifier" / filename, classifier_out / filename)
-        metadata = sanitize(
-            json.loads((source / "classifier" / "metadata.json").read_text())
+        private_metadata = json.loads(
+            (source / "classifier" / "metadata.json").read_text()
         )
+        metadata = public_classifier_metadata(private_metadata)
         write_json(classifier_out / "metadata.json", metadata)
 
         hmm_out = root / "hmm" / "model.npz"
@@ -159,7 +171,11 @@ def main() -> int:
             source / "hmm_bundle" / "models" / "latent" / "model.pkl",
             hmm_out,
         )
-        shutil.copyfile(source / "roster.json", root / "roster.json")
+        roster = public_roster(
+            json.loads((source / "roster.json").read_text()),
+            metadata["classes"],
+        )
+        write_json(root / "roster.json", roster)
         shutil.copyfile(
             source / "hmm_bundle" / "cards" / "state_cards.json",
             root / "state_cards.json",
@@ -167,14 +183,13 @@ def main() -> int:
         probe = np.asarray(
             np.load(args.probe_vector, allow_pickle=False), dtype=np.float32
         )
-        embedding_dimensions = int(metadata["embedding_dim"])
+        embedding_dimensions = int(private_metadata["embedding_dim"])
         if probe.shape != (embedding_dimensions,):
             raise ValueError(
                 f"probe vector has shape {probe.shape}; expected ({embedding_dimensions},)"
             )
         np.save(root / "embedding_probe.f32.npy", probe, allow_pickle=False)
 
-        private_manifest = json.loads((source / "manifest.json").read_text())
         files = {
             str(path.relative_to(root)): sha256_file(path)
             for path in sorted(root.rglob("*"))
@@ -185,7 +200,7 @@ def main() -> int:
             "model_id": args.model_id,
             "package_sha256": None,
             "embedding_contract": {
-                "model": metadata["embedding_model"],
+                "model": private_metadata["embedding_model"],
                 "dimensions": embedding_dimensions,
                 "task_type": None,
                 "probe_text": args.probe_text,
@@ -199,7 +214,6 @@ def main() -> int:
             "hmm": {"path": "hmm/model.npz", "states": states},
             "roster": {"path": "roster.json"},
             "state_cards": {"path": "state_cards.json"},
-            "training_privacy": sanitize(private_manifest["training_privacy"]),
             "files": files,
         }
         write_json(root / "manifest.json", manifest)

@@ -138,11 +138,11 @@ jobs:
         run: |
           curl --fail --location --output /tmp/hmm-router-frozen-v1.tar.gz \
             https://github.com/workweave/router/releases/download/hmm-model-v1/hmm-router-frozen-v1.tar.gz
-          echo "8f15e161ddc20de008173ec0aa10c892e4f80de39c02d9f42af83ec707680904  /tmp/hmm-router-frozen-v1.tar.gz" \
+          echo "b326bda644aac86831bae47d0b69de008046f62324a4b93a1eba702581c174df  /tmp/hmm-router-frozen-v1.tar.gz" \
             | sha256sum --check
           poetry run python -m scripts.verify_artifact \
             /tmp/hmm-router-frozen-v1.tar.gz \
-            --sha256 8f15e161ddc20de008173ec0aa10c892e4f80de39c02d9f42af83ec707680904
+            --sha256 b326bda644aac86831bae47d0b69de008046f62324a4b93a1eba702581c174df
 
       - name: Build sidecar image
         run: docker build --file sidecars/hmm/Dockerfile --tag router-hmm-sidecar:test .
