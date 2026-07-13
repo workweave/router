@@ -1,0 +1,32 @@
+.claude/skills/fix-pr-reviews/SKILL.md
+  s_ca193d6cfeab4a::t_879390dd144e71 325,329,331,334,336-347,350,352-354
+  s_ca193d6cfeab4a::t_ac7643bbbf3801 94-98,101-103,121-126,134-142,144,152,156-157,164,168
+  s_ca193d6cfeab4a::t_96916e6efcd43c 291-295,302,308-310
+  s_ca193d6cfeab4a::t_8201c917b6a327 3,6,8,10,12-22
+  s_ca193d6cfeab4a::t_a14c8c5563a2ce 311
+  s_862511ba717148::t_20e6bf94da1ca3 462-464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "641f9fc23ff61de8c201678adfe7b2cfa04f86e2",
+  "prompts": {},
+  "sessions": {
+    "s_862511ba717148": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3828f08c-7416-4785-87ac-116db5e1d444",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_ca193d6cfeab4a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "942a65d8-2cbc-4d61-9502-bbb89526d81e",
+        "model": "minimax/minimax-m3"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

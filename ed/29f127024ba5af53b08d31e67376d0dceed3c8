@@ -1,0 +1,28 @@
+internal/router/catalog/catalog.go
+  s_6d259d23791b23::t_dd4919140c0e15 373-375,379
+  s_9be6bcd1692d03::t_2493c7e1deff89 380
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ed29f127024ba5af53b08d31e67376d0dceed3c8",
+  "prompts": {},
+  "sessions": {
+    "s_6d259d23791b23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a52423c3-9d52-4a6a-bb28-ac4c96a85b4d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_9be6bcd1692d03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3ae0-b43b-7760-a99e-7301743907f9",
+        "model": "gpt-5.5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
