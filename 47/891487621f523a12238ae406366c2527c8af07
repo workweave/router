@@ -1,0 +1,41 @@
+internal/policyclient/client_test.go
+  s_d6d80d91f14d3a::t_c6155fce05ace9 71-73
+  s_d6d80d91f14d3a::t_ae94bf9166f1ea 102-104
+internal/router/policy/sidecar_router.go
+  s_d6d80d91f14d3a::t_04fbf06a9ddfe7 111
+internal/proxy/service.go
+  s_d6d80d91f14d3a::t_09daac70152ed6 3234-3242
+  s_d6d80d91f14d3a::t_ebc8b15f059ed8 1654
+  s_d6d80d91f14d3a::t_6fda336dce18c1 4048
+  s_d6d80d91f14d3a::t_49afdf788dc130 2097
+internal/proxy/hmm_outcome_internal_test.go
+  s_d6d80d91f14d3a::t_c306df5b337863 60-64,69-73,92
+  s_d6d80d91f14d3a::t_6d7ee355e54720 13
+internal/proxy/gemini.go
+  s_d6d80d91f14d3a::t_89c0bf7381d6ae 96
+internal/router/policy/contract.go
+  s_d6d80d91f14d3a::t_e51f1a0b4697f5 53
+internal/router/router.go
+  s_d6d80d91f14d3a::t_311b79c5098416 52-54
+internal/router/hmm/hmm_test.go
+  s_d6d80d91f14d3a::t_747e038cedea81 65,90
+internal/policyclient/client.go
+  s_d6d80d91f14d3a::t_610e743c8bcf72 142
+  s_d6d80d91f14d3a::t_6ad39ce35458c4 252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "47891487621f523a12238ae406366c2527c8af07",
+  "prompts": {},
+  "sessions": {
+    "s_d6d80d91f14d3a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "36776dcf-772f-4fdc-947b-4946667896df",
+        "model": "grok-4.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
