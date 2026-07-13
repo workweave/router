@@ -193,8 +193,8 @@ var Models = []Model{
 	}},
 	// Opus 4.5+ is $5/$25 per MTok (down from $15/$75 on 4.1 and earlier).
 	// 4.6+/4.7+/4.8 support 1M context via the context-1m-2025-08-07 beta; the
-	// catalog reports 200K and the pre-filter expands to 1M when the beta
-	// header is present (contextWindowForRequest in proxy/service.go).
+	// catalog reports 200K and EffectiveContextWindowFor expands to 1M for
+	// CapExtendedContext models (proxy pre-filter + policy candidate filter).
 	{ID: "claude-opus-4-6", Tier: TierHigh, ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
