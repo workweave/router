@@ -146,8 +146,8 @@ up-hmm: ## Start the stack with the opt-in frozen HMM policy sidecar
 	docker compose -f docker-compose.yml -f sidecars/hmm/docker-compose.yml \
 		--profile hmm up --build -d
 
-down: ## Stop the compose stack (keeps the postgres volume)
-	docker compose down
+down: ## Stop the compose stack, including the optional HMM sidecar (keeps the postgres volume)
+	docker compose --profile hmm down
 
 down-hmm: ## Stop the compose stack including the optional HMM sidecar
 	docker compose -f docker-compose.yml -f sidecars/hmm/docker-compose.yml \

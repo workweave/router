@@ -12,6 +12,7 @@ Scoped guide for the public, self-hosted frozen HMM sidecar. Read the repository
 - Fetch artifacts from an immutable, versioned URL with an exact SHA-256. Never use `latest`, floating tags, or replace an already-published asset in place.
 - Preserve safe extraction and cache behavior: reject traversal, links, unexpected members, oversized files/archives, hash mismatches, and cache-key collisions.
 - The sidecar is optional. Its absence or startup failure must not prevent the core router from serving its default cluster-routing strategy.
+- Keep lifecycle commands symmetric: `make down` must include the `hmm` profile so containers created by `make up-hmm` are not orphaned.
 - Put image defaults in the Dockerfile or application. Do not add `${HMM_*:-default}` values to the Compose service's `environment`; those values override `.env.local` from `env_file` and break self-host overrides.
 - Keep the `policy_router_v1` contract aligned with `cmd/router/main.go`. The frozen policy advertises callback capabilities as false; `/outcome` and `/feedback` still exist and return `204` for protocol completeness.
 - Do not retain or log raw prompts, responses, embeddings, callback bodies, or other customer content.
