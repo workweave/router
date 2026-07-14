@@ -271,3 +271,19 @@ func TestRouteMessagesPreservesLatestUserWhenPayloadIsCapped(t *testing.T) {
 }
 
 func floatPtr(value float64) *float64 { return &value }
+
+// maxTrainingDeltaChars is the cap this fix introduces; mirrors proxy.policyOutcomeResponseMaxBytes.
+const maxTrainingDeltaChars = 256 * 1024
+
+func TestTrainingRouteMessageDeltaClipsOversizedToolResult(t *testing.T) {
+	oversized := strings.Repeat("x", maxTrainingDeltaChars+10_000)
+	delta := trainingRouteMessageDelta([]router.ConversationMessage{
+		{Role: "user", Text: "please inspect the repo"},
+		{Role: "assistant", Text: "reading file"},
+		{Role: "user", ToolResults: []router.ConversationToolResult{{ToolUseID: "toolu_1", Text: oversized}}},
+	})
+
+	require.Len(t, delta, 2)
+	require.Len(t, delta[1].ToolResults, 1)
+	assert.Equal(t, maxTrainingDeltaChars, len(delta[1].ToolResults[0].Text))
+}
