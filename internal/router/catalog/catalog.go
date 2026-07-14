@@ -271,9 +271,7 @@ var Models = []Model{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 30.00, OutputUSDPer1M: 180.00, CacheReadMultiplier: 1.0}},
 	}},
 
-	// --- xAI Grok ---
-	// Native SpaceXAI only (managed prod never dispatches OpenRouter; Jul 2026
-	// prod sample: 0/2000 Policy-router decisions on openrouter).
+	// --- xAI Grok --- native only; OpenRouter unused in prod.
 	{ID: "grok-4.5", Tier: TierHigh, ContextWindow: 500_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderXAI, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 6.00, CacheReadMultiplier: 0.25}},
 	}},

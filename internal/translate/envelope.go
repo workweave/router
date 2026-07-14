@@ -888,9 +888,20 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		ov.DeleteKeys = append(ov.DeleteKeys, "reasoning_effort")
 	}
 
+	supportsReasoning := opts.Capabilities.Supports(router.CapReasoning)
+	// Reasoning models (gpt-5.x, o-series, grok-4.5) reject stop / presence /
+	// frequency penalties on chat/completions. Cross-format Anthropic→OpenAI
+	// already omits stop; same-format must strip client-supplied fields too.
+	if supportsReasoning {
+		for _, key := range []string{"stop", "presence_penalty", "frequency_penalty"} {
+			if gjson.GetBytes(body, key).Exists() {
+				ov.DeleteKeys = append(ov.DeleteKeys, key)
+			}
+		}
+	}
+
 	hasMaxTokens := gjson.GetBytes(body, "max_tokens").Exists()
 	hasMaxComp := gjson.GetBytes(body, "max_completion_tokens").Exists()
-	supportsReasoning := opts.Capabilities.Supports(router.CapReasoning)
 
 	if hasMaxTokens && supportsReasoning {
 		if !hasMaxComp {
@@ -1045,6 +1056,7 @@ var modelMaxOutputTokens = map[string]int{
 	"gpt-5.4-mini": 128000, "gpt-5.4-nano": 128000,
 	"gpt-5.5": 128000, "gpt-5.5-pro": 128000, "gpt-5.5-mini": 128000,
 	"gpt-5.5-nano": 128000,
+	"grok-4.5":     131072,
 	"o1":           100000, "o1-pro": 100000, "o1-mini": 65536,
 	"o3": 100000, "o3-pro": 100000, "o3-mini": 100000,
 	"o4-mini":              100000,

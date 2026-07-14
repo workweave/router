@@ -150,6 +150,38 @@ func TestOpenAISameFormat_ReasoningEffortKeptForReasoning(t *testing.T) {
 	assert.Equal(t, "high", out["reasoning_effort"])
 }
 
+func TestOpenAISameFormat_ReasoningStripsUnsupportedSampling(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-5.5",
+		"messages":[{"role":"user","content":"hi"}],
+		"stop":["END"],
+		"presence_penalty":0.5,
+		"frequency_penalty":0.3
+	}`)
+	for _, model := range []string{"gpt-5.5", "grok-4.5"} {
+		t.Run(model, func(t *testing.T) {
+			opts := translate.EmitOptions{
+				TargetModel:  model,
+				Capabilities: router.Lookup(model),
+			}
+			out := parseAndEmit(t, body, "openai", opts)
+			assert.NotContains(t, out, "stop")
+			assert.NotContains(t, out, "presence_penalty")
+			assert.NotContains(t, out, "frequency_penalty")
+		})
+	}
+}
+
+func TestOpenAISameFormat_GrokMaxCompletionTokensCap(t *testing.T) {
+	body := []byte(`{"model":"grok-4.5","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":999999}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "grok-4.5",
+		Capabilities: router.Lookup("grok-4.5"),
+	}
+	out := parseAndEmit(t, body, "openai", opts)
+	assert.Equal(t, float64(131072), out["max_completion_tokens"])
+}
+
 func TestOpenAISameFormat_StreamUsageInjected(t *testing.T) {
 	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	opts := translate.EmitOptions{
