@@ -245,6 +245,113 @@ func TestService_RouterFeedbackCommand_OmitsTrainingTranscriptWithoutPermission(
 	payload := policyFeedback.Payloads()[0]
 	assert.Equal(t, false, payload["training_allowed"])
 	assert.NotContains(t, payload, "training_conversation_delta")
+	assert.NotContains(t, payload, "training_conversation_delta_truncated")
+}
+
+// TestService_RouterFeedbackCommand_CapsOversizedTrainingDelta locks the
+// class-4 feedback bug: a routine multi-100KB tool result in the rated
+// exchange must not be marshaled verbatim into ReportFeedback. Cap matches
+// policyOutcomeResponseMaxBytes (256 KiB); truncated flag must be present.
+func TestService_RouterFeedbackCommand_CapsOversizedTrainingDelta(t *testing.T) {
+	const maxFeedbackDeltaChars = 256 * 1024
+	oversized := strings.Repeat("H", maxFeedbackDeltaChars+10_000)
+	body, err := json.Marshal(map[string]any{
+		"model":      "claude-haiku-4-5",
+		"max_tokens": 1024,
+		"messages": []any{
+			map[string]any{"role": "user", "content": "Please read the large file."},
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "toolu_audit1", "name": "Read", "input": map[string]any{"file_path": "/tmp/big.txt"}},
+			}},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "toolu_audit1", "content": oversized},
+			}},
+			map[string]any{"role": "assistant", "content": "Done reading."},
+			map[string]any{"role": "user", "content": "/rf+"},
+		},
+	})
+	require.NoError(t, err)
+
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
+	policyFeedback := &fakePolicyFeedbackRouter{}
+	svc := newPinSvc(fr, store).WithHMMRouter(policyFeedback)
+
+	ctx := router.WithStrategy(authedCtx(uuid.NewString()), router.StrategyHMM)
+	ctx = context.WithValue(ctx, proxy.PolicyTrainingAllowedContextKey{}, true)
+	require.NoError(t, svc.ProxyMessages(ctx, body, httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))))
+	require.Eventually(t, func() bool {
+		return len(policyFeedback.Payloads()) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	payload := policyFeedback.Payloads()[0]
+	assert.Equal(t, true, payload["training_allowed"])
+	delta, ok := payload["training_conversation_delta"].([]router.ConversationMessage)
+	require.True(t, ok)
+	require.Len(t, delta, 2)
+	require.Len(t, delta[0].ToolResults, 1)
+	// Newest-first budgeting (#716 mirror): assistant text is charged first, so
+	// the tool_result gets the remainder of the shared 256 KiB total — never
+	// the raw oversized input.
+	assert.LessOrEqual(t, len(delta[0].ToolResults[0].Text), maxFeedbackDeltaChars)
+	assert.Equal(t, maxFeedbackDeltaChars-len(delta[1].Text), len(delta[0].ToolResults[0].Text),
+		"tool_result must consume the remaining shared budget after newer fields")
+	assert.Equal(t, "Done reading.", delta[1].Text)
+	assert.Less(t, len(delta[0].ToolResults[0].Text), len(oversized),
+		"oversized tool_result must not ship verbatim")
+	truncated, ok := payload["training_conversation_delta_truncated"].(bool)
+	require.True(t, ok, "truncated flag must be present whenever a delta is sent")
+	assert.True(t, truncated)
+}
+
+// TestService_RouterFeedbackCommand_PreservesSmallTrainingDelta is the
+// complementary case to CapsOversized: a routine small tool_result must ship
+// verbatim with training_conversation_delta_truncated explicitly false (present
+// as bool false — not omitted, not null).
+func TestService_RouterFeedbackCommand_PreservesSmallTrainingDelta(t *testing.T) {
+	const toolChars = 500
+	small := strings.Repeat("s", toolChars)
+	body, err := json.Marshal(map[string]any{
+		"model":      "claude-haiku-4-5",
+		"max_tokens": 1024,
+		"messages": []any{
+			map[string]any{"role": "user", "content": "Please read the small file."},
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "toolu_small1", "name": "Read", "input": map[string]any{"file_path": "/tmp/small.txt"}},
+			}},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "toolu_small1", "content": small},
+			}},
+			map[string]any{"role": "assistant", "content": "Done reading."},
+			map[string]any{"role": "user", "content": "/rf+"},
+		},
+	})
+	require.NoError(t, err)
+
+	store := newFakePinStore()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
+	policyFeedback := &fakePolicyFeedbackRouter{}
+	svc := newPinSvc(fr, store).WithHMMRouter(policyFeedback)
+
+	ctx := router.WithStrategy(authedCtx(uuid.NewString()), router.StrategyHMM)
+	ctx = context.WithValue(ctx, proxy.PolicyTrainingAllowedContextKey{}, true)
+	require.NoError(t, svc.ProxyMessages(ctx, body, httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))))
+	require.Eventually(t, func() bool {
+		return len(policyFeedback.Payloads()) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	payload := policyFeedback.Payloads()[0]
+	assert.Equal(t, true, payload["training_allowed"])
+	delta, ok := payload["training_conversation_delta"].([]router.ConversationMessage)
+	require.True(t, ok, "delta must be present when training is allowed")
+	require.Len(t, delta, 2)
+	require.Len(t, delta[0].ToolResults, 1)
+	assert.Equal(t, toolChars, len(delta[0].ToolResults[0].Text))
+	assert.Equal(t, small, delta[0].ToolResults[0].Text)
+	assert.Equal(t, "Done reading.", delta[1].Text)
+	truncated, ok := payload["training_conversation_delta_truncated"].(bool)
+	require.True(t, ok, "truncated flag must be present whenever a delta is sent")
+	assert.False(t, truncated)
 }
 
 func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T) {
@@ -315,6 +422,9 @@ func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T)
 	assert.Equal(t, "latest request", delta[0].Text)
 	assert.Equal(t, "assistant", delta[1].Role)
 	assert.Equal(t, "done", delta[1].Text)
+	truncated, ok := payloads[0]["training_conversation_delta_truncated"].(bool)
+	require.True(t, ok, "truncated flag must be present whenever a delta is sent")
+	assert.False(t, truncated)
 }
 
 func TestService_RouterFeedbackCommand_DoesNotForwardPolicyFeedbackOutsideHMM(t *testing.T) {
