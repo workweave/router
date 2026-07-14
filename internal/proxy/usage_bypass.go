@@ -20,8 +20,6 @@ import (
 
 // usageBypassDecision returns the strict pass-through decision when the
 // subscription usage-bypass gate should engage, false otherwise.
-// ExcludedModels/EnabledProviders already carry denylist + context-overflow
-// filters, so a blocked or over-capacity model can't slip through.
 func (s *Service) usageBypassDecision(ctx context.Context, headers http.Header, req router.Request) (router.Decision, bool) {
 	provider, engaged := s.usageBypassEngaged(ctx, headers, req)
 	if !engaged {

@@ -141,6 +141,10 @@ func TestUsageBypass_PreservesSwitchHistory(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", res.PriorServedModel)
 	assert.True(t, res.SessionEverSwitched)
 	assert.True(t, res.modelSwitched(), "bypass must retain switch history for Anthropic thinking-block stripping")
+	bucketKey, ok := noProgressBucketKey(res.SessionKey, uuid.Nil, res.PinRole)
+	require.True(t, ok)
+	_, tracked := svc.compaction.cache.Get(bucketKey)
+	assert.True(t, tracked, "bypass must retain compaction-trim tracking")
 }
 
 // TestBypass_429_ReturnsErrBypassRetryable_NoBytesWritten: when the Anthropic
