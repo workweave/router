@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"workweave/router/internal/auth"
@@ -17,38 +18,36 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// usageBypassDecision returns the passthrough decision when the subscription
-// usage-bypass gate should engage for this turn, and false otherwise. It is
-// consulted inside runTurnLoop only at the point a FRESH scorer decision would
-// be made — after the hard-pin, user-forced-pin, and tool-result sticky
-// branches have already returned — so those higher-precedence paths are never
-// preempted by the bypass. The req-level exclusion sets (EnabledProviders,
-// ExcludedModels) it reads already carry installation provider/model denylists
-// and the per-request context-overflow filter, so a policy-blocked or
-// over-capacity model can't be served via the bypass.
+// usageBypassDecision returns the strict pass-through decision when the
+// subscription usage-bypass gate should engage for this turn, and false
+// otherwise. The req-level exclusion sets (EnabledProviders, ExcludedModels)
+// it reads already carry installation provider/model denylists and the
+// per-request context-overflow filter, so a policy-blocked or over-capacity
+// model can't be served via the bypass.
 func (s *Service) usageBypassDecision(ctx context.Context, headers http.Header, req router.Request) (router.Decision, bool) {
-	if !s.usageBypassEngaged(ctx, headers, req) {
+	provider, engaged := s.usageBypassEngaged(ctx, headers, req)
+	if !engaged {
 		return router.Decision{}, false
 	}
 	return router.Decision{
-		Provider: providers.ProviderAnthropic,
+		Provider: provider,
 		Model:    req.RequestedModel,
 		Reason:   "usage_bypass",
 	}, true
 }
 
 // usageBypassEngaged reports whether the requested model should be served
-// straight through to the caller's own Claude subscription instead of routed.
-// It engages only when:
+// straight through to the matching caller subscription instead of routed. It
+// engages only when:
 //
 //   - the installation has turned the gate on (usageBypassFromContext),
 //   - the subscription usage observer is wired (it drives the threshold read),
-//   - the requested model is Anthropic-served (the only thing a Claude
-//     subscription can serve) and is neither provider- nor model-excluded for
-//     this request (denylist or context-overflow filter),
-//   - the request presents a Claude subscription credential (the turn is paid
-//     for by the customer's own plan — nothing for the router to save, nothing
-//     for us to bill), and
+//   - the requested model is covered by the matching Claude or Codex
+//     subscription and is neither provider- nor model-excluded for this request
+//     (denylist or context-overflow filter),
+//   - the request presents that subscription credential (the turn is paid for
+//     by the customer's own plan — nothing for the router to save, nothing for
+//     us to bill), and
 //   - observed utilization is still below the threshold, OR nothing has been
 //     observed yet (cold start: serve the first turn on the subscription so its
 //     response primes the observer, mirroring the subsidy bootstrap).
@@ -56,44 +55,58 @@ func (s *Service) usageBypassDecision(ctx context.Context, headers http.Header, 
 // Once observed utilization crosses the threshold the gate disengages and the
 // normal routing path (scorer + subscription-aware cost discounting) takes over,
 // so the caller starts conserving their remaining quota.
-func (s *Service) usageBypassEngaged(ctx context.Context, headers http.Header, req router.Request) bool {
+func (s *Service) usageBypassEngaged(ctx context.Context, headers http.Header, req router.Request) (string, bool) {
 	cfg, ok := usageBypassFromContext(ctx)
 	if !ok || s.usageObserver == nil {
-		return false
+		return "", false
 	}
 	model := req.RequestedModel
-	if m, found := catalog.ByID(model); !found || m.PrimaryProvider() != providers.ProviderAnthropic {
-		return false
+	m, found := catalog.ByID(model)
+	if !found {
+		return "", false
+	}
+	provider := m.PrimaryProvider()
+	codexTok, anthroTok := presentSubscriptionTokens(ctx, headers)
+	var token string
+	switch provider {
+	case providers.ProviderAnthropic:
+		token = anthroTok
+	case providers.ProviderOpenAI:
+		if !slices.Contains(codexCoveredModels, model) {
+			return "", false
+		}
+		token = codexTok
+	default:
+		return "", false
 	}
 	if req.EnabledProviders != nil {
-		if _, enabled := req.EnabledProviders[providers.ProviderAnthropic]; !enabled {
-			return false
+		if _, enabled := req.EnabledProviders[provider]; !enabled {
+			return "", false
 		}
 	}
 	if _, excluded := req.ExcludedModels[model]; excluded {
-		return false
+		return "", false
 	}
-	_, anthroTok := presentSubscriptionTokens(ctx, headers)
-	if anthroTok == "" {
-		return false
+	if token == "" {
+		return "", false
 	}
 	threshold := defaultUsageBypassThreshold
 	if cfg.Threshold != nil {
 		threshold = min(1, max(0, *cfg.Threshold))
 	}
-	snap, observed := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(anthroTok)))
+	snap, observed := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(token)))
 	if !observed {
-		return true
+		return provider, true
 	}
-	// Never bypass onto a spent subscription: a passthrough would inject a token
-	// the upstream 429s. Disengage regardless of the installation threshold (which
-	// may sit above exhaustedFraction) so the turn takes the routed path, where the
-	// exhaustion failover serves it on the deployment / BYOK Anthropic key.
+	// Never bypass onto a spent subscription: a pass-through would inject a token
+	// the upstream will reject. Disengage regardless of the installation threshold
+	// (which may sit above exhaustedFraction) so the normal route can select a
+	// fallback the caller can pay for.
 	if snap.Exhausted() {
-		return false
+		return "", false
 	}
 	util := max(snap.Primary.UsedPercent, snap.Secondary.UsedPercent)
-	return util < threshold
+	return provider, util < threshold
 }
 
 // claudeSubscriptionExhausted reports whether the caller's present Claude

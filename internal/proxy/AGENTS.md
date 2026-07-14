@@ -33,7 +33,7 @@ The per-turn flow is more than "scorer → dispatch". Pinned session, planner ve
 | STAY vs SWITCH | [`../router/planner`](../router/planner) | Cache-aware EV policy |
 | Handover summary on SWITCH | [`../router/handover`](../router/handover) | Bounds switch-turn input cost |
 | Semantic response cache | [`../router/cache`](../router/cache) | Cross-request, non-streaming only |
-| Anthropic usage-bypass gate | [`usage`](usage) | See [`usage/CLAUDE.md`](usage/CLAUDE.md) |
+| Subscription strict pass-through gate | [`usage`](usage) | See [`usage/CLAUDE.md`](usage/CLAUDE.md) |
 
 The provider-backed `Summarizer` implementation for handover lives in [`handover.go`](handover.go); the inner-ring `handover` package only defines the contract. On summarizer timeout or error, proxy keeps the full prior history unchanged (it does **not** trim) — a pricier switch turn beats silently dropping the conversation the switched-to model needs.
 

@@ -13,6 +13,7 @@ import (
 
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
+	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/translate"
@@ -71,6 +72,36 @@ func bypassAnthropicEnvelope(t *testing.T) *translate.RequestEnvelope {
 	env, err := translate.ParseAnthropic([]byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}]}`))
 	require.NoError(t, err)
 	return env
+}
+
+func TestUsageBypassDecision_CodexSubscriptionPreservesRequestedModel(t *testing.T) {
+	const codexToken = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0.signature"
+	threshold := 0.80
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(codexToken)), usage.Snapshot{
+		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+	})
+	svc := &Service{usageObserver: obs}
+	ctx := context.WithValue(context.Background(), OpenAISubscriptionContextKey{}, codexToken)
+	ctx = context.WithValue(ctx, OpenAIAccountIDContextKey{}, "account-1")
+	ctx = context.WithValue(ctx, InstallationUsageBypassContextKey{}, UsageBypassConfig{
+		Enabled:   true,
+		Threshold: &threshold,
+	})
+
+	decision, ok := svc.usageBypassDecision(ctx, http.Header{}, router.Request{
+		RequestedModel: "gpt-5.5",
+		EnabledProviders: map[string]struct{}{
+			providers.ProviderOpenAI: {},
+		},
+	})
+
+	require.True(t, ok)
+	assert.Equal(t, router.Decision{
+		Provider: providers.ProviderOpenAI,
+		Model:    "gpt-5.5",
+		Reason:   "usage_bypass",
+	}, decision)
 }
 
 // TestBypass_429_ReturnsErrBypassRetryable_NoBytesWritten: when the Anthropic

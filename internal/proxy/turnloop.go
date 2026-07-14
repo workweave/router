@@ -210,6 +210,15 @@ func (s *Service) runTurnLoop(
 	// headroom. nil (feature off / no headroom yet) leaves scoring unchanged.
 	req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, reqHeaders)
 
+	// The subscription bypass is a strict pass-through contract: it runs before
+	// any pin, planner, or scorer branch, so a stale or forced route can never
+	// substitute the caller's requested subscription-covered model.
+	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
+		res.Decision = dec
+		res.UsageBypass = true
+		return res, nil
+	}
+
 	// Hard pins bypass pin lookup/write, planner, and scorer entirely. Probes
 	// and title-gen must never create a session pin: the Anthropic SDK fires
 	// probes before the first real turn, and Claude Code fires title-gen
@@ -277,14 +286,8 @@ func (s *Service) runTurnLoop(
 		)
 	}
 
-	// Without a pin store, run the scorer and return its decision. The usage
-	// bypass intercepts the fresh scorer decision here too (no pins to honor).
+	// Without a pin store, run the scorer and return its decision.
 	if s.pinStore == nil {
-		if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
-			res.Decision = dec
-			res.UsageBypass = true
-			return res, nil
-		}
 		decision, err := s.routeFor(ctx, req)
 		if err != nil {
 			return res, err
@@ -483,17 +486,6 @@ func (s *Service) runTurnLoop(
 		)
 		pinFound = false
 		pin = sessionpin.Pin{}
-	}
-
-	// Positioned after hard-pin/forced-pin (higher precedence) but before the
-	// tool-result/planner-disabled stickies below, so a stale pin from a prior
-	// routed stretch can't make a tool_result continuation diverge from the
-	// bypassed tool_use turn. The pin itself is untouched and resumes once
-	// utilization crosses the threshold.
-	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
-		res.Decision = dec
-		res.UsageBypass = true
-		return res, nil
 	}
 
 	// Tool-result turns: by default, fall through to the scorer + planner for
