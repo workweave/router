@@ -1,0 +1,24 @@
+internal/proxy/fire_telemetry_panic_internal_test.go
+  s_c4ecee41717be0::t_9877e911f3fee2 51-52
+internal/auth/service_test.go
+  s_c4ecee41717be0::t_00ccad5eccaee6 25
+  s_c4ecee41717be0::t_72e3f11940fe63 430-431
+internal/pubsub/invalidation.go
+  s_c4ecee41717be0::t_5f85797c9bebea 94-95,97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3b32bb4a9c01e1c71fe3d78377e8aa98a8a2928e",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

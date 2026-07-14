@@ -1,0 +1,21 @@
+internal/proxy/subsidy.go
+  s_b894dfb8769471::t_42cb4daf6ff283 78-85
+internal/proxy/subsidy_test.go
+  s_b894dfb8769471::t_fe32787c73363e 52-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5a5dedc82b653d194823306bb22c652b90e5401f",
+  "prompts": {},
+  "sessions": {
+    "s_b894dfb8769471": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ad16610b-5bc6-47d5-a4f1-a6d17e422677",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

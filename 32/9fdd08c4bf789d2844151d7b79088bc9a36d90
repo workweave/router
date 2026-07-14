@@ -1,0 +1,19 @@
+.github/workflows/bump-workweave-pin.yml
+  s_27009343790121::t_8bf47a47d52064 132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "329fdd08c4bf789d2844151d7b79088bc9a36d90",
+  "prompts": {},
+  "sessions": {
+    "s_27009343790121": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4dd91ed1-da7d-4fc3-bba9-e23daad81014",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

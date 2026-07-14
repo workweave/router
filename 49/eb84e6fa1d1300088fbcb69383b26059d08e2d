@@ -1,0 +1,23 @@
+internal/router/cluster/scorer.go
+  s_6a96e4c5d68a4a::t_77578b269b89df 550-566,569-570,572-575,577-589,592-599,604-608,611-618,621,623-632,634-636,638-645,648-650,653-660,662,664,666-670,672-690,693-703
+internal/router/cluster/scorer_test.go
+  s_6a96e4c5d68a4a::t_77578b269b89df 1070-1071
+internal/router/cluster/artifacts.go
+  s_6a96e4c5d68a4a::t_77578b269b89df 164-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "49eb84e6fa1d1300088fbcb69383b26059d08e2d",
+  "prompts": {},
+  "sessions": {
+    "s_6a96e4c5d68a4a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0c324095-456d-49d9-a3c4-423df593fc52",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

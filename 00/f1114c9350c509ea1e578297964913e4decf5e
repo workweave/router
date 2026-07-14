@@ -1,0 +1,67 @@
+internal/providers/openai/codex_internal_test.go
+  s_95241084cc4056::t_848e77558d2c0a 1-94
+cmd/router/main.go
+  s_95241084cc4056::t_18655fec356cff 207-210
+internal/server/middleware/auth.go
+  s_95241084cc4056::t_57ff82ce11613b 31-42
+  s_95241084cc4056::t_00d6e6fbe61f2a 136-144
+internal/providers/openai/client.go
+  s_95241084cc4056::t_979716a6b50c07 26-30,40-53
+  s_95241084cc4056::t_33f656e38e200a 31-39
+  s_95241084cc4056::t_fa21ff7219f7f3 79-82
+  s_95241084cc4056::t_a5e4b683f34ac3 99-102
+  s_95241084cc4056::t_f5732883dacf2b 197-198,200-201,208-210,222-224,226-228
+  s_95241084cc4056::t_7c82ba864e940b 207
+  s_95241084cc4056::t_ab64a01c97a639 229
+internal/proxy/subscription_internal_test.go
+  s_95241084cc4056::t_d85b95838b7020 81-97
+  s_95241084cc4056::t_b3b9416d8ce886 139-220
+  s_95241084cc4056::t_5b160fc2e7d424 223-239
+internal/proxy/credentials.go
+  s_95241084cc4056::t_c610f34a6c36c4 17-22
+  s_95241084cc4056::t_babf8862395059 26-29,35-39,41-44
+  s_95241084cc4056::t_41455c323227af 114-125
+  s_95241084cc4056::t_c076ad69b5e062 164-187
+internal/observability/otel/usage.go
+  s_95241084cc4056::t_e44b04f510cce4 255-259,271-283
+internal/proxy/service.go
+  s_95241084cc4056::t_72447f155d5738 30
+  s_95241084cc4056::t_442579b0cf7720 215-222
+  s_95241084cc4056::t_e935447ba37a04 223-228
+  s_95241084cc4056::t_9b4c65fc9df9c8 565,569-574
+  s_95241084cc4056::t_21b7eb5d7f5c24 566-568,575-594
+  s_95241084cc4056::t_97e3c37fbc93b8 595-613
+  s_95241084cc4056::t_cb6ab556378a6a 2170-2181,2192-2193
+  s_95241084cc4056::t_7c62bd83c6bd2a 2194-2201,2203-2205
+  s_95241084cc4056::t_aba6e491809e6a 2266,2268-2275,2292,2317
+  s_95241084cc4056::t_7866e24fb55842 2294-2311
+  s_95241084cc4056::t_a6cc2e5ae5b922 2449-2459,2462-2464
+  s_95241084cc4056::t_93c6c1ca91736c 2705-2715
+  s_95241084cc4056::t_4dc710d528475d 2766
+  s_95241084cc4056::t_09a46b7dc0ed48 2878-2882
+  s_95241084cc4056::t_22c5e4646d2a2d 2914-2934,2951-2955
+  s_95241084cc4056::t_62c1785eec87e6 3194-3204
+internal/proxy/enabled_providers_internal_test.go
+  s_95241084cc4056::t_fabe547063bb05 102-132,156-171
+  s_95241084cc4056::t_01c0983cd5a796 172-221
+internal/observability/otel/usage_test.go
+  s_95241084cc4056::t_7955a75433c36d 79-116
+internal/proxy/credentials_test.go
+  s_95241084cc4056::t_016e81d54f8793 267-336
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "00f1114c9350c509ea1e578297964913e4decf5e",
+  "prompts": {},
+  "sessions": {
+    "s_95241084cc4056": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dbbdbe6a-260e-4a54-a444-863744ac2f0c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+cmd/router/main.go
+  s_942d75347ee776::t_b8ed5d21c48a7a 244-267
+internal/providers/openaicompat/client_test.go
+  s_942d75347ee776::t_8ad9737d6e3a9d 136-141
+internal/providers/provider.go
+  s_942d75347ee776::t_fd829ffbf201e2 20,24,31
+internal/providers/openaicompat/client.go
+  s_942d75347ee776::t_d93e80ec888545 24-30,33-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "510163529025ad4139389ff5fc79f6ba9c47a218",
+  "prompts": {},
+  "sessions": {
+    "s_942d75347ee776": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ce882e2-e1bf-40c7-bbbe-47a1dbec9236",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

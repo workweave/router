@@ -1,0 +1,13 @@
+install/npm/uninstall.sh
+  ai_agent 1-170
+install/npm/install.sh
+  ai_agent 1-805
+install/npm/cc-statusline.sh
+  ai_agent 1-284
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "a08b69da200fd4181de48282ba82e2c9e6f1ecbd",
+  "prompts": {}
+}

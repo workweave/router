@@ -1,0 +1,21 @@
+go.mod
+  s_4b9286f99dc5e4::t_b30316b343e990 32,98,101,104-105
+go.sum
+  s_4b9286f99dc5e4::t_00d8147dcf2d13 298-299,314-315,329-332,335-336
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c9659bc7257cb804c9bb4bd2c7ab9d97e5da1b67",
+  "prompts": {},
+  "sessions": {
+    "s_4b9286f99dc5e4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fff632b4-3c7c-4ad5-9bdb-4ece7b7d1f29",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+internal/router/rl/rl_test.go
+  s_ec15b0b8a35bc3::t_fbbbab14fef5d8 124-178
+internal/router/rl/rl.go
+  s_ec15b0b8a35bc3::t_48a1aaed881110 182-186
+  s_ec15b0b8a35bc3::t_d14c2f96cc836b 72,83,87-94,97-102,104,115-126,128-152,155,157-158,160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.11",
+  "base_commit_sha": "4a6e85dbb30bcb38f352684dc248c9bcb5f102b0",
+  "prompts": {},
+  "sessions": {
+    "s_ec15b0b8a35bc3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "91c17309-8b24-4205-9760-fb9fdefc8fd7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

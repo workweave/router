@@ -1,0 +1,31 @@
+.env.example
+  s_a81d8efc38ee57::t_84967a6e94cd51 90
+docker-compose.yml
+  s_a81d8efc38ee57::t_84967a6e94cd51 153
+sidecars/hmm/tests/test_artifacts.py
+  s_a81d8efc38ee57::t_4725233fa02b51 10-14,55-67
+  s_a81d8efc38ee57::t_259839e001ac0c 15-21,24-32,34-36,38-40,42-54
+  s_a81d8efc38ee57::t_15e2db9212d44d 22-23,33,37,41
+sidecars/hmm/scripts/export_artifact.py
+  s_a81d8efc38ee57::t_4725233fa02b51 12,127-129,133
+  s_a81d8efc38ee57::t_259839e001ac0c 25,59-81,162-163,165,174-178,186,203
+  s_a81d8efc38ee57::t_94225ae9cdb178 130-132
+.github/workflows/test.yml
+  s_a81d8efc38ee57::t_84967a6e94cd51 141,145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "987ef44e35cb04441cd45d838f741a8ae47acaa8",
+  "prompts": {},
+  "sessions": {
+    "s_a81d8efc38ee57": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4d24-a314-7332-876a-e20e37d646b5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

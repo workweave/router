@@ -1,0 +1,207 @@
+internal/providers/google/native_client_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 85
+internal/config/config.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 24,26-29,50
+internal/router/cluster/scorer.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 15-17,20-22,44-45,55-56,60,63-65,80-81,100,131-132,177,239-241,282-283,291-293,335,345
+internal/router/cluster/scorer_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 16-17,31-32,47-48,57,74-75,132,151,180,225-226,356,365,411-412,477-479,515-516,530-531,545-546,557-558
+internal/translate/cache_usage_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 32-33,51-52
+internal/proxy/session_route.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 17-19,32-33,46,48-50
+internal/translate/passthrough.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 11,24
+internal/router/cluster/embedder_onnx.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 17-19,22-24,27-30,35,39,48-49,66-69,84-85,101-103
+internal/router/cache/cache.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 3-5,8-15,18,33-34,37-38,45-47,49-51,55,65,69,72,93-94,108-109,117-118,126-128,139-140,155-157,169-170,179-180,196-197,212-214
+internal/server/middleware/observability_timing.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 9,11
+internal/providers/google/native_client.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 21-23,26-29,36,48-50,119-120,180-181,192
+internal/server/middleware/cluster_version_override_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 16
+internal/observability/otel/pricing_statusline_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 53-54,71-73
+internal/router/cluster/artifacts.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 17,24-26,32-33,36-37,41,46-47,51-52,61-64,67,83-85,94,99-101,115-116,129-130,134,136-137,139,158-159,168-170,191-192,215,242,292-293,308-309,322-324,345-346
+internal/proxy/cache_writer.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 8-12,49,56
+internal/translate/emit_gemini.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 16-19,21-22,76,85-87,98-99,200-202,235-236,249-250,260-262,286-287,416-418,465-466,662-665,699-701,727-728
+internal/auth/admin.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 18,21,24,27,30-31,34,40-41,44-45,48,51,58-59,65,77,84-85,90-91,102-105,128-129,152,154-156,190-191
+internal/providers/google/native_integration_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 24-28,89,151
+internal/auth/crypto.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 13-14,24-25
+internal/proxy/service.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 31,33-34,36-37,39-40,42,44-46,51-54,58-60,72-73,84,113-115,137,145,153,173-174,177-179,189-190,204-205,228,242-243,248-249,254-256,289,320-324,327-328,348-350,426,429,484,498-499,538,589-591,596-598,607-608,616,637,647-650,653-654,674-676,686-687,710,733-734,757,779-780,857,959
+internal/proxy/credentials.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 39-42
+internal/server/middleware/cluster_version_override.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 15
+internal/translate/emit_anthropic.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 285-286,311
+internal/auth/external_api_key.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 37,39
+internal/translate/gemini_stream.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 16-18,20,42,92-94,210-211,254-257,268
+internal/observability/otel/usage.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 12-15,36-39,52-55,98-100,110,118-120,128-129,238-239
+internal/postgres/repository.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 1,15,18,30
+internal/providers/httputil/httputil.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 1,17,35-36
+internal/server/server.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 1,30-33,37,39,44-45,49,57-58,64,70,103
+internal/proxy/gemini_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 22,52,54,59,79
+internal/proxy/gemini.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 19-21,24-26,28-30,116
+internal/auth/id.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 11
+internal/translate/translate.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 3-4,14-16,73,113-114,157-158,234-235,263-264
+internal/router/cluster/multiversion.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 22,29,82-83
+internal/observability/otel/pricing.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 86-88,101-102
+internal/server/server_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 12,24,57
+internal/providers/noop/client.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 1
+internal/api/admin/keys.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 64-66,73,105-106,125
+internal/proxy/service_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 74,80-81,112-113,136,151,233,252,279,282,284,288,313,315,341,343,347-350,371,374-375,378-380,398,411,415,426,428
+internal/providers/anthropic/client.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 40-42
+internal/translate/stream.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 18-19,22-23,36-37,44,68,98-99,178,334-335,352-353,367,425-426,506
+internal/router/router.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 1,10,12-13,21-22,26-27,30-31,33-34,36-38
+internal/router/cluster/embedder.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 3-4,6,11-13,16-18
+internal/providers/google/client.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 2-4,23-24,50,77-80,95
+internal/proxy/service_cache_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 20,38,52,65,114,148,162,181
+internal/router/cache/cache_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 15-16,33-34,72,93,163,173,189
+internal/observability/otel/buffer.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 8-9,17-18,65-66
+internal/auth/service.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 17,28,32,67,92,94-96,114,124,126,158,160-163,196,205,207-210,212-214,264-265,273-274
+internal/api/openai/completions.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 24,87-88
+internal/proxy/client_identity_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 16-17,38,50,105-106
+internal/proxy/service_observation_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 22,81,83,101-106,120-122,124-125,131-133,143,163,167-168,177,201
+internal/providers/provider.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 1,14,35-37,61-62,65-70,79-82,89-90,94-95
+internal/postgres/telemetry.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 157,176,235,272,304-305,357,365
+internal/router/cluster/embedder_stub.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 10-12,15
+internal/translate/features.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 26,115-116,129,142-143,193-196,226
+internal/router/model.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 11,14-15,34,37-38,61-63,65,68,73,77,83,87,93,99,110,119,128-130,137,144
+internal/translate/features_gemini.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 10,13,49-50,101-102,122,167
+internal/router/sessionpin/store.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 2-3,6,16-18,21-22,25-26,40
+internal/observability/otel/spans.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 12,36-37,79-82,95-96
+internal/server/middleware/auth.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 22,25,30,32-33,46,63,97,108,114,144,150,160,179
+internal/proxy/service_session_pin_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 79-82,84-87,121,132,140,159,178,183-185,198-200,203,210,227-229,249-252,260-261,273,280-281,284,326-327,349-350,376-377,380-382,416-417,437
+internal/router/cluster/artifacts_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 14-15,32,60,76,161-163,182
+internal/translate/envelope.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 17-23,36,44-45,47-48,68-69,77,88-90,102-106,115,120-121,126-127,141-142,150-151,165-166,189,198,200,202,204,206,209-210,214-215,222,281,298-300,459-460,518
+internal/translate/gemini_response.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 13-14,39,59,89,146-147,207-208,269
+internal/observability/otel/timing.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 11-12,21-22,27,35-36,44-45,53-54,62,70-71,83-84,104-105
+internal/router/turntype/detect.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 2-3,17-19,21-23,25-26,30-31,53,61,64-65
+internal/observability/logger.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 16-17,61-62
+internal/server/middleware/embed_override.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 16,31
+internal/server/middleware/timeout.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 10
+internal/observability/otel/emitter.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 34-35,98-99,117-118
+internal/api/admin/installation.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 13-16
+internal/postgres/converters.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 55
+internal/api/anthropic/messages.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 52-53,116-117
+internal/proxy/telemetry.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 22-24,50-60,79
+internal/router/cluster/embedder_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 17-18,27-29,31-32,36,64,74,83-84
+internal/proxy/client_identity.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 12-14,27,33-36,38-40,67-69,77-78,90-91,95-96,99-101,110-114
+internal/sse/parse.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 5
+internal/translate/gemini_envelope_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 154-155
+internal/auth/installation.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 31
+internal/translate/default_max_tokens_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 16,60-61,72-73,105,120,135,151
+internal/router/cluster/multiversion_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 14-15,54-55
+internal/postgres/session_pin_repo.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 19,72
+internal/proxy/session_key_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 42,55,71,75,90,110-111,124,128,141,145,157,161
+internal/api/admin/metrics.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 32-33,67-68,128-129,186
+internal/auth/user_cache.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 11-14,20,26-27
+internal/providers/openai/client.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 1,23-25,51,148
+internal/proxy/session_key.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 10-11,13-15,17-19,23,34
+internal/api/admin/auth.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 16-17,40-41,56-57,84,92,117-120
+internal/auth/apikey_cache.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 9,17-19,25,31-32
+internal/translate/gemini_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 383-384,423,427,434,441
+internal/auth/user.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 11,17-19,30-31,39,45,47-48,50
+internal/providers/openaicompat/client.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 2-5,47-48,116-119,175-176
+internal/proxy/observation.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 10-12,14,16,18-19,21,23-24,28-30,43-44,57-58,61
+internal/server/middleware/embed_override_test.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 16
+internal/api/gemini/generate_content.go
+  s_f38fd22db34ae3::t_d5f7ccfb0fb9be 1,31-34,117,134-136,149-150,161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "ffa8ca551912e8e336925e6444dc250fa2352272",
+  "prompts": {},
+  "sessions": {
+    "s_f38fd22db34ae3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8f040b75-cdb2-49b9-a25f-e463bc57a149",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

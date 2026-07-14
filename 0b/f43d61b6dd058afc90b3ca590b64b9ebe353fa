@@ -1,0 +1,35 @@
+db/migrations/0032_telemetry-planner-ev-shadow.up.sql
+  s_035d3d44682683::t_8b324ad6032525 32
+  s_035d3d44682683::t_edbba837390a3d 37-40
+internal/proxy/turnloop.go
+  s_035d3d44682683::t_6780e766b5e883 42-55
+  s_035d3d44682683::t_8e833abf07edc7 641
+internal/proxy/turnloop_internal_test.go
+  s_035d3d44682683::t_9d25ccad1d1c05 108-140
+internal/proxy/service.go
+  s_035d3d44682683::t_ad4c2e9a0ea859 2657,2659-2663,2668-2673
+db/migrations/0032_telemetry-planner-ev-shadow.down.sql
+  s_035d3d44682683::t_5298eae73db6e9 16-21,23-80
+internal/router/planner/policy.go
+  s_035d3d44682683::t_1acb73b293af55 50-56
+  s_035d3d44682683::t_5632d29dbb065c 179
+internal/proxy/planner_telemetry_internal_test.go
+  s_035d3d44682683::t_299fdc8f47269e 101
+  s_035d3d44682683::t_51068e3b18268f 29-55,69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "0bf43d61b6dd058afc90b3ca590b64b9ebe353fa",
+  "prompts": {},
+  "sessions": {
+    "s_035d3d44682683": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5c55d20d-8d65-432d-a371-d871e40baee0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

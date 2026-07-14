@@ -1,0 +1,21 @@
+internal/server/middleware/balance_check_test.go
+  s_9e9b032a66122b::t_15fee13c3db35e 391-392
+internal/billing/service.go
+  s_9e9b032a66122b::t_7a9d88b160284c 46-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4f4004f4406191e9f4d5c5c5a3971801e6a70d1c",
+  "prompts": {},
+  "sessions": {
+    "s_9e9b032a66122b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4541-24d5-7df3-b697-86009a568f09",
+        "model": "gpt-5.5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

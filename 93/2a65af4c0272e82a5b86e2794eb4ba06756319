@@ -1,0 +1,22 @@
+Dockerfile
+  s_7ac34f6a1d3d7e::t_723c1eedbf68bb 27-32
+docs/CONFIGURATION.md
+  s_7ac34f6a1d3d7e::t_5a9cbe6ea70972 143-145
+  s_7ac34f6a1d3d7e::t_615ec390f81e7b 135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "932a65af4c0272e82a5b86e2794eb4ba06756319",
+  "prompts": {},
+  "sessions": {
+    "s_7ac34f6a1d3d7e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8ceefb5b-60a3-4752-9391-55a83dfbd039",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
