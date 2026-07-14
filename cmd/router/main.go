@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"workweave/router/internal/api/admin"
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
 	"workweave/router/internal/config"
@@ -48,8 +49,6 @@ import (
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/server"
-
-	"workweave/router/internal/api/admin"
 
 	_ "time/tzdata"
 
@@ -575,6 +574,7 @@ func main() {
 	// hmm then routes through it. Unset fails closed with 503.
 	var hmmRouter router.Router
 	var hmmCapabilities policy.Capabilities
+	var hmmReadinessChecker admin.HealthChecker
 	if hmmSidecarURL := config.GetOr("ROUTER_HMM_SIDECAR_URL", ""); hmmSidecarURL != "" {
 		hmmTimeout := parseEnvDurationMs("ROUTER_HMM_SIDECAR_TIMEOUT_MS", policyclient.DefaultTimeout)
 		hmmAuthMode := config.GetOr("ROUTER_HMM_SIDECAR_AUTH", policySidecarAuthNone)
@@ -583,6 +583,7 @@ func main() {
 			logger.Error("HMM policy sidecar client failed to build; refusing to boot", "auth_mode", hmmAuthMode, "err", clientErr)
 			panic(clientErr)
 		}
+		hmmReadinessChecker = hmmClient
 		capabilityCtx, cancelCapabilityDiscovery := context.WithTimeout(context.Background(), hmmTimeout)
 		var capabilityErr error
 		hmmCapabilities, capabilityErr = hmmClient.Capabilities(capabilityCtx)
@@ -796,11 +797,7 @@ func main() {
 	// Lets the admin model-selection handler surface deployed models; nil
 	// fallback keeps non-cluster routers bootable.
 	deployedModels, _ := rtr.(*cluster.Multiversion)
-	var healthCheckers []admin.HealthChecker
-	if hmmSidecarURL := config.GetOr("ROUTER_HMM_SIDECAR_URL", ""); hmmSidecarURL != "" {
-		healthCheckers = append(healthCheckers, newSidecarHealthChecker(hmmSidecarURL, logger))
-	}
-	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc, healthCheckers...)
+	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc, hmmReadinessChecker)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),

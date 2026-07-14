@@ -234,6 +234,32 @@ func TestClientCapabilities(t *testing.T) {
 	assert.True(t, capabilities.ReportsFeedback)
 }
 
+func TestClientCheckHealth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		assert.Equal(t, http.MethodGet, request.Method)
+		assert.Equal(t, "/readyz", request.URL.Path)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer server.Close()
+
+	err := New(server.URL, server.Client(), 0).CheckHealth(context.Background())
+
+	require.NoError(t, err)
+}
+
+func TestClientCheckHealthRejectsUnreadySidecar(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"unhealthy"}`))
+	}))
+	defer server.Close()
+
+	err := New(server.URL, server.Client(), 0).CheckHealth(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "policy readiness status 503")
+}
+
 func TestClientReportsOutcomeAndFeedback(t *testing.T) {
 	paths := make([]string, 0, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

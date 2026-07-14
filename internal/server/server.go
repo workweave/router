@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	healthTimeout   = 1 * time.Second
-	validateTimeout = 1 * time.Second
+	healthTimeout    = 1 * time.Second
+	readinessTimeout = 2 * time.Second
+	validateTimeout  = 1 * time.Second
 
 	messagesTimeout       = 600 * time.Second
 	chatCompletionTimeout = 600 * time.Second
@@ -57,12 +58,15 @@ const (
 // billingSvc is set only in managed mode when credit-billing is enabled; it
 // gates every inference route on prepaid balance via WithBalanceCheck. nil
 // leaves inference routes open (BYOK/platform key still controls upstream auth).
-func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service, healthCheckers ...admin.HealthChecker) {
+//
+// readinessChecker gates /readyz only; /health remains process liveness.
+func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service, readinessChecker admin.HealthChecker) {
 	// Managed mode bills via platform-key credits; a leftover BYOK row would
 	// double-charge (upstream provider + Weave credits), so drop it here.
 	byokDisabled := mode == DeploymentModeManaged
 
-	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler(firstOrNil(healthCheckers)))
+	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
+	engine.GET("/readyz", middleware.WithTimeout(readinessTimeout), admin.ReadinessHandler(readinessChecker))
 
 	// /v1/version reports the binary's git commit + build time (via -ldflags),
 	// used by the README's managed-deployment badge. Public build metadata, unauthed like /health.

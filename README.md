@@ -171,7 +171,10 @@ Settings → Models override above. See [install/README.md](install/README.md#sw
 | `POST /v1beta/models/:action`  | Gemini `generateContent`, routed         |
 | `POST /v1/route`               | Returns the decision, no upstream call   |
 | `GET /v1/models` &nbsp;·&nbsp; `POST /v1/messages/count_tokens` | Anthropic passthrough |
-| `GET /health` &nbsp;·&nbsp; `GET /validate` | liveness + key check         |
+| `GET /health` &nbsp;·&nbsp; `GET /readyz` &nbsp;·&nbsp; `GET /validate` | liveness + dependency readiness + key check |
+
+Keep liveness probes on `/health`. Point startup or readiness probes at
+`/readyz` when configured policy sidecars must be ready before traffic arrives.
 
 ## Deeper docs
 

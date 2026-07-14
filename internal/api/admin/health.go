@@ -4,26 +4,28 @@ import (
 	"context"
 	"net/http"
 
+	"workweave/router/internal/observability"
+
 	"github.com/gin-gonic/gin"
 )
 
-// HealthChecker is an optional readiness gate. When non-nil and its
-// Check call returns an error, /health reports 503 so the platform
-// (Cloud Run) defers traffic until the dependency is ready.
+// HealthChecker reports whether a dependency is ready to serve traffic.
 type HealthChecker interface {
 	CheckHealth(ctx context.Context) error
 }
 
-// HealthHandler returns a gin handler that reports service health.
-// When checker is nil the handler always returns 200.
-func HealthHandler(checker HealthChecker) gin.HandlerFunc {
+// HealthHandler reports process liveness without checking optional dependencies.
+func HealthHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// ReadinessHandler reports whether optional dependencies are ready.
+func ReadinessHandler(checker HealthChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if checker != nil {
 			if err := checker.CheckHealth(c.Request.Context()); err != nil {
-				c.JSON(http.StatusServiceUnavailable, gin.H{
-					"status": "unhealthy",
-					"error":  err.Error(),
-				})
+				observability.FromGin(c).Debug("Readiness check failed", "err", err)
+				c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unhealthy"})
 				return
 			}
 		}

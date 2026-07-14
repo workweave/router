@@ -22,7 +22,7 @@ func (staticTokenProvider) Token(context.Context) (*auth.Token, error) {
 }
 
 func TestGoogleIDTokenClientAuthenticatesEveryEndpoint(t *testing.T) {
-	paths := make([]string, 0, 4)
+	paths := make([]string, 0, 5)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		assert.Equal(t, "Bearer test-id-token", request.Header.Get("Authorization"))
 		paths = append(paths, request.URL.Path)
@@ -47,6 +47,7 @@ func TestGoogleIDTokenClientAuthenticatesEveryEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	client := New(server.URL, httpClient, time.Second)
 
+	require.NoError(t, client.CheckHealth(context.Background()))
 	_, err = client.Capabilities(context.Background())
 	require.NoError(t, err)
 	_, err = client.Decide(context.Background(), policy.Query{
@@ -56,7 +57,7 @@ func TestGoogleIDTokenClientAuthenticatesEveryEndpoint(t *testing.T) {
 	require.NoError(t, client.ReportOutcome(context.Background(), map[string]any{"route_id": "route-1"}))
 	require.NoError(t, client.ReportFeedback(context.Background(), map[string]any{"route_id": "route-1"}))
 
-	assert.Equal(t, []string{"/capabilities", "/route", "/outcome", "/feedback"}, paths)
+	assert.Equal(t, []string{"/readyz", "/capabilities", "/route", "/outcome", "/feedback"}, paths)
 }
 
 func TestNewGoogleIDTokenRejectsEmptySidecarURL(t *testing.T) {

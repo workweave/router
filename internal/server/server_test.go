@@ -1,6 +1,10 @@
 package server_test
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"workweave/router/internal/router/cluster"
@@ -15,6 +19,12 @@ import (
 type fakeDeployedModelsSource struct{}
 
 func (fakeDeployedModelsSource) DefaultDeployedModels() []cluster.DeployedEntry { return nil }
+
+type healthCheckerFunc func(context.Context) error
+
+func (f healthCheckerFunc) CheckHealth(ctx context.Context) error {
+	return f(ctx)
+}
 
 // routeSet collects "METHOD path" pairs so assertions are robust to additions of unrelated product routes.
 func routeSet(engine *gin.Engine) map[string]struct{} {
@@ -31,6 +41,7 @@ func TestRegister_DeploymentMode(t *testing.T) {
 	// Product surface — always mounted regardless of deployment mode.
 	productRoutes := []string{
 		"GET /health",
+		"GET /readyz",
 		"GET /validate",
 		"GET /v1/router/models",
 		"POST /v1/messages",
@@ -66,7 +77,7 @@ func TestRegister_DeploymentMode(t *testing.T) {
 	t.Run("selfhosted mounts dashboard and product routes", func(t *testing.T) {
 		engine := gin.New()
 		// Nil services are fine: engine.Routes() inspection never invokes the closure-captured handlers.
-		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeSelfHosted, nil)
+		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeSelfHosted, nil, nil)
 		got := routeSet(engine)
 		for _, want := range productRoutes {
 			assert.Contains(t, got, want, "product route missing in selfhosted mode")
@@ -81,7 +92,7 @@ func TestRegister_DeploymentMode(t *testing.T) {
 		// Pass a non-nil DeployedModelsSource: managed prod always boots a
 		// *cluster.Multiversion router, so the catalog endpoint must mount
 		// even though the dashboard does not.
-		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeManaged, nil)
+		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeManaged, nil, nil)
 		got := routeSet(engine)
 		for _, want := range productRoutes {
 			assert.Contains(t, got, want, "product route missing in managed mode")
@@ -93,8 +104,31 @@ func TestRegister_DeploymentMode(t *testing.T) {
 
 	t.Run("nil deployed-models source skips catalog endpoint", func(t *testing.T) {
 		engine := gin.New()
-		server.Register(engine, nil, nil, nil, server.DeploymentModeManaged, nil)
+		server.Register(engine, nil, nil, nil, server.DeploymentModeManaged, nil, nil)
 		got := routeSet(engine)
 		assert.NotContains(t, got, "GET /v1/router/models", "catalog endpoint must not mount without a deployed-models source")
 	})
+}
+
+func TestRegisterSeparatesLivenessFromReadiness(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	checker := healthCheckerFunc(func(context.Context) error {
+		return errors.New("dependency unavailable")
+	})
+	server.Register(engine, nil, nil, nil, server.DeploymentModeManaged, nil, checker)
+
+	for _, test := range []struct {
+		path       string
+		wantStatus int
+	}{
+		{path: "/health", wantStatus: http.StatusOK},
+		{path: "/readyz", wantStatus: http.StatusServiceUnavailable},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.path, nil))
+			assert.Equal(t, test.wantStatus, response.Code)
+		})
+	}
 }
