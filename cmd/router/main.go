@@ -49,6 +49,8 @@ import (
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/server"
 
+	"workweave/router/internal/api/admin"
+
 	_ "time/tzdata"
 
 	gcppubsub "cloud.google.com/go/pubsub/v2"
@@ -794,7 +796,11 @@ func main() {
 	// Lets the admin model-selection handler surface deployed models; nil
 	// fallback keeps non-cluster routers bootable.
 	deployedModels, _ := rtr.(*cluster.Multiversion)
-	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc)
+	var healthCheckers []admin.HealthChecker
+	if hmmSidecarURL := config.GetOr("ROUTER_HMM_SIDECAR_URL", ""); hmmSidecarURL != "" {
+		healthCheckers = append(healthCheckers, newSidecarHealthChecker(hmmSidecarURL, logger))
+	}
+	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc, healthCheckers...)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),
