@@ -889,9 +889,7 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 	}
 
 	supportsReasoning := opts.Capabilities.Supports(router.CapReasoning)
-	// Reasoning models (gpt-5.x, o-series, grok-4.5) reject stop / presence /
-	// frequency penalties on chat/completions. Cross-format Anthropic→OpenAI
-	// already omits stop; same-format must strip client-supplied fields too.
+	// CapReasoning models reject stop / presence_penalty / frequency_penalty.
 	if supportsReasoning {
 		for _, key := range []string{"stop", "presence_penalty", "frequency_penalty"} {
 			if gjson.GetBytes(body, key).Exists() {
