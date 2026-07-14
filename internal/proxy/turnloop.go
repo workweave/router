@@ -216,6 +216,15 @@ func (s *Service) runTurnLoop(
 	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
 		res.Decision = dec
 		res.UsageBypass = true
+		// A strict bypass never serves a pin, but it must preserve the prior
+		// switch history so Anthropic emission still removes stale signed
+		// thinking blocks from a session that previously changed models.
+		if s.pinStore != nil {
+			res.SessionKey = DeriveSessionKey(env, apiKeyID)
+			pin, _ := s.loadPin(ctx, res.SessionKey, res.PinRole)
+			hmmHistory := s.loadHMMHistory(ctx, res.SessionKey, res.PinRole)
+			res.PriorServedModel, res.SessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
+		}
 		return res, nil
 	}
 

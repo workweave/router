@@ -19,11 +19,9 @@ import (
 )
 
 // usageBypassDecision returns the strict pass-through decision when the
-// subscription usage-bypass gate should engage for this turn, and false
-// otherwise. The req-level exclusion sets (EnabledProviders, ExcludedModels)
-// it reads already carry installation provider/model denylists and the
-// per-request context-overflow filter, so a policy-blocked or over-capacity
-// model can't be served via the bypass.
+// subscription usage-bypass gate should engage, false otherwise.
+// ExcludedModels/EnabledProviders already carry denylist + context-overflow
+// filters, so a blocked or over-capacity model can't slip through.
 func (s *Service) usageBypassDecision(ctx context.Context, headers http.Header, req router.Request) (router.Decision, bool) {
 	provider, engaged := s.usageBypassEngaged(ctx, headers, req)
 	if !engaged {
@@ -98,10 +96,9 @@ func (s *Service) usageBypassEngaged(ctx context.Context, headers http.Header, r
 	if !observed {
 		return provider, true
 	}
-	// Never bypass onto a spent subscription: a pass-through would inject a token
-	// the upstream will reject. Disengage regardless of the installation threshold
-	// (which may sit above exhaustedFraction) so the normal route can select a
-	// fallback the caller can pay for.
+	// Never bypass a spent subscription: the upstream will reject the token.
+	// Disengage even if the threshold is above exhaustedFraction so the normal
+	// route can pick a fallback the caller can pay for.
 	if snap.Exhausted() {
 		return "", false
 	}

@@ -2114,9 +2114,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return routeErr
 	}
 
-	// Native Anthropic pass-through keeps the subscription's pre-commit 429
-	// fallback: the rate-limit headers update the observer and this same turn
-	// immediately resumes normal routing instead of surfacing a spent-plan error.
+	// On a retryable 429 the bypass falls through to re-routing; rate-limit
+	// headers prime the observer so the retry discounts Anthropic.
 	if routeRes.UsageBypass && routeRes.Decision.Provider == providers.ProviderAnthropic {
 		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
 		if !errors.Is(err, errBypassRetryable) {
