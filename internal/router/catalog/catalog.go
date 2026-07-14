@@ -271,6 +271,13 @@ var Models = []Model{
 		{Provider: providers.ProviderOpenAI, Price: Pricing{InputUSDPer1M: 30.00, OutputUSDPer1M: 180.00, CacheReadMultiplier: 1.0}},
 	}},
 
+	// --- xAI Grok ---
+	// Native SpaceXAI only (managed prod never dispatches OpenRouter; Jul 2026
+	// prod sample: 0/2000 Policy-router decisions on openrouter).
+	{ID: "grok-4.5", Tier: TierHigh, ContextWindow: 500_000, Providers: []ProviderBinding{
+		{Provider: providers.ProviderXAI, Price: Pricing{InputUSDPer1M: 2.00, OutputUSDPer1M: 6.00, CacheReadMultiplier: 0.25}},
+	}},
+
 	// --- Google Gemini 2.x ---
 	{ID: "gemini-2.0-flash-lite", ContextWindow: 1_048_576, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.075, OutputUSDPer1M: 0.30, CacheReadMultiplier: 0.25}},

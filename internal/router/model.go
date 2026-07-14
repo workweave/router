@@ -107,6 +107,10 @@ var registry = map[string]ModelSpec{
 	"gpt-5.5-mini": openaiReasoning,
 	"gpt-5.5-nano": openaiReasoning,
 
+	// grok-4.5: reasoning_effort low/medium/high (default high); cannot disable;
+	// rejects stop / presence / frequency penalties (CapReasoning strips stop).
+	"grok-4.5": openaiReasoning,
+
 	"gpt-5.4":      openaiReasoning,
 	"gpt-5.4-pro":  openaiReasoning,
 	"gpt-5.4-mini": openaiReasoning,

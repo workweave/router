@@ -30,6 +30,9 @@ func TestLookup(t *testing.T) {
 		{name: "gpt-5.5-mini", model: "gpt-5.5-mini", wantInput: 0.50, wantOutput: 2.50},
 		{name: "gpt-5.5-nano", model: "gpt-5.5-nano", wantInput: 0.15, wantOutput: 0.60},
 
+		// ── xAI Grok ───────────────────────────────────────────
+		{name: "grok-4.5", model: "grok-4.5", wantInput: 2.00, wantOutput: 6.00},
+
 		// ── OpenAI GPT-5.4 ─────────────────────────────────────
 		{name: "gpt-5.4", model: "gpt-5.4", wantInput: 2.50, wantOutput: 15.00},
 		{name: "gpt-5.4-pro", model: "gpt-5.4-pro", wantInput: 30.00, wantOutput: 180.00},

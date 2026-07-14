@@ -72,8 +72,9 @@ func (e *RequestEnvelope) PrepareOpenAI(in http.Header, opts EmitOptions) (provi
 // TTFT). Each upstream takes a different knob: OpenAI-compat serverless
 // (Fireworks/Makora/Together/…) gets x-session-affinity (the
 // default for any OpenAI-compat target, so new upstreams need no edit here),
-// OpenRouter gets x-session-id, OpenAI gets the prompt_cache_key body field.
-// Bedrock's explicit cachePoint caching is centrally routed, so it gets nothing.
+// OpenRouter gets x-session-id, OpenAI gets the prompt_cache_key body field,
+// xAI Chat Completions gets x-grok-conv-id. Bedrock's explicit cachePoint
+// caching is centrally routed, so it gets nothing.
 //
 // The header-based hints are gated on a real session key — collapsing keyless
 // requests onto one synthetic bucket would herd unrelated conversations onto
@@ -112,6 +113,13 @@ func applySessionAffinity(body []byte, headers http.Header, opts EmitOptions) ([
 		return out, nil
 	case providers.ProviderBedrock:
 		// Explicit cachePoint caching, centrally routed — no replica roulette.
+		return body, nil
+	case providers.ProviderXAI:
+		// Chat Completions affinity header; Responses API uses prompt_cache_key
+		// (we stay on chat/completions for CapReasoning×xAI in Stage A).
+		if opts.SessionAffinity != "" {
+			headers.Set("x-grok-conv-id", opts.SessionAffinity)
+		}
 		return body, nil
 	}
 	// Other OpenAI-compat serverless upstreams get x-session-affinity, gated

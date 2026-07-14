@@ -606,7 +606,8 @@ write_opencode_config() {
         "claude-opus-4-8":   { name: "Claude Opus 4.8 (via Weave Router)" },
         "claude-haiku-4-5":  { name: "Claude Haiku 4.5 (via Weave Router)" },
         "gpt-5.5":           { name: "GPT-5.5 (via Weave Router)" },
-        "gpt-5.4":           { name: "GPT-5.4 (via Weave Router)" }
+        "gpt-5.4":           { name: "GPT-5.4 (via Weave Router)" },
+        "grok-4.5":          { name: "Grok 4.5 (via Weave Router)" }
       }
     }
   ')"
@@ -774,7 +775,8 @@ write_pi_models_config() {
         { id: "claude-opus-4-8",   name: "Claude Opus 4.8 (via Weave Router)",   reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 64000 },
         { id: "claude-opus-4-7",   name: "Claude Opus 4.7 (via Weave Router)",   reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 64000 },
         { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (via Weave Router)", reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 64000 },
-        { id: "claude-haiku-4-5",  name: "Claude Haiku 4.5 (via Weave Router)",  reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 32000 }
+        { id: "claude-haiku-4-5",  name: "Claude Haiku 4.5 (via Weave Router)",  reasoning: true, input: ["text","image"], contextWindow: 200000, maxTokens: 32000 },
+        { id: "grok-4.5",          name: "Grok 4.5 (via Weave Router)",          reasoning: true, input: ["text","image"], contextWindow: 500000, maxTokens: 131072 }
       ]
     }
   ')"
@@ -2111,6 +2113,7 @@ prices='{
     "gpt-5.5-mini":                     0.0005,
     "gpt-5.5-nano":                     0.00015,
     "gpt-5.5-pro":                      0.03,
+    "grok-4.5":                         0.002,
     "minimax/minimax-m2.7":             0.0003,
     "minimax/minimax-m3":               0.0003,
     "mistralai/mistral-small-2603":     0.0002,
@@ -2172,6 +2175,7 @@ prices='{
     "gpt-5.5-mini":                     0.0025,
     "gpt-5.5-nano":                     0.0006,
     "gpt-5.5-pro":                      0.18,
+    "grok-4.5":                         0.006,
     "minimax/minimax-m2.7":             0.0012,
     "minimax/minimax-m3":               0.0012,
     "mistralai/mistral-small-2603":     0.0006,

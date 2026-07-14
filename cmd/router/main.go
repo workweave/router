@@ -258,6 +258,15 @@ func main() {
 	}
 
 	{
+		xaiBaseURL := config.GetOr("XAI_BASE_URL", openaiCompatProvider.XAIBaseURL)
+		registerDeploymentKeyedProvider(providerMap, envKeyedProviders, logger,
+			providers.ProviderXAI, "XAI", "XAI_API_KEY", xaiBaseURL, byokOnly,
+			func(key, baseURL string) providers.Client {
+				return openaiCompatProvider.NewClient(key, baseURL)
+			})
+	}
+
+	{
 		// "bedrock-mantle" OpenAI-compatible surface (AWS-recommended over
 		// bedrock-runtime/InvokeModel). Auth is a static Bedrock API key
 		// (AWS_BEARER_TOKEN_BEDROCK), not SigV4, so the standard bearer flow

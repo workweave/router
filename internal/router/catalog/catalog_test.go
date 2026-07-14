@@ -34,6 +34,7 @@ func TestCatalog_BindingsReferenceCanonicalProviders(t *testing.T) {
 		providers.ProviderBedrock:    {},
 		providers.ProviderMakora:     {},
 		providers.ProviderTogether:   {},
+		providers.ProviderXAI:        {},
 	}
 	for _, m := range Models {
 		for i, b := range m.Providers {
