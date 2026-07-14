@@ -32,9 +32,10 @@ const (
 	maxRouteToolCallInputChars = 80
 )
 
-// maxTrainingDeltaChars mirrors proxy.policyOutcomeResponseMaxBytes (256 KiB):
-// the largest training payload field or delta text budget the sidecar should
-// receive on the synchronous /route path.
+// maxTrainingDeltaChars mirrors proxy.policyOutcomeResponseMaxBytes (256 KiB).
+// Per-field (maxTextChars) and total (maxTotalTextChars) use the same value
+// intentionally: no single field or combined delta may exceed the outcome-body
+// cap the sidecar already accepts on /outcome.
 const maxTrainingDeltaChars = 256 * 1024
 
 // Client calls a versioned policy sidecar.
@@ -141,7 +142,7 @@ type routeRequest struct {
 	TurnIndex                          int                `json:"turn_index"`
 	ConversationMessages               []routeMessage     `json:"conversation_messages,omitempty"`
 	TrainingConversationDelta          []routeMessage     `json:"training_conversation_delta,omitempty"`
-	TrainingConversationDeltaTruncated *bool              `json:"training_conversation_delta_truncated,omitempty"`
+	TrainingConversationDeltaTruncated *bool              `json:"training_conversation_delta_truncated,omitempty"` // set when delta non-empty and any clip occurred
 	AvailableTools                     []string           `json:"available_tools,omitempty"`
 	FeedbackKey                        string             `json:"feedback_key,omitempty"`
 	FeedbackRole                       string             `json:"feedback_role,omitempty"`
