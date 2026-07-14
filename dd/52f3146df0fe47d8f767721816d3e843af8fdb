@@ -1,0 +1,31 @@
+internal/proxy/service.go
+  abbf298219a668a7 26,64-67,71,357-361,431,448-449,471,497-499,503-506,649-653,718,735-736,746
+CLAUDE.md
+  abbf298219a668a7 398-399,581-626
+internal/postgres/external_api_key_repo.go
+  abbf298219a668a7 7,67-69,71
+internal/proxy/credentials.go
+  abbf298219a668a7 4,77-88
+AGENTS.md
+  abbf298219a668a7 388-390,570-615
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "dd52f3146df0fe47d8f767721816d3e843af8fdb",
+  "prompts": {
+    "abbf298219a668a7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "507cb8fc-9125-418c-9ac7-13472dc2bc37",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Drew Bailey",
+      "messages": [],
+      "total_additions": 146,
+      "total_deletions": 30,
+      "accepted_lines": 146,
+      "overriden_lines": 0
+    }
+  }
+}

@@ -1,0 +1,26 @@
+internal/router/planner/policy.go
+  s_09ca5e2e44a0ed::t_c8d3f596b4f976 170-181
+  s_09ca5e2e44a0ed::t_6e7ca7b7600971 126-132
+internal/router/planner/policy_test.go
+  s_09ca5e2e44a0ed::t_3a400aa4a4a8bb 55-79
+internal/router/cluster/scorer.go
+  s_09ca5e2e44a0ed::t_68a46160755382 636-639
+internal/proxy/turnloop.go
+  s_09ca5e2e44a0ed::t_bafdd4672196aa 566-569
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "1868b1d2f1709626e0d3845a325dbd06253be763",
+  "prompts": {},
+  "sessions": {
+    "s_09ca5e2e44a0ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35ef0a9f-52c3-476b-b860-781312b3d039",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

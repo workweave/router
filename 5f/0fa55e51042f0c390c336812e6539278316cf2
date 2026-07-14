@@ -1,0 +1,23 @@
+.github/workflows/comment_length_review.yml
+  s_ad3786285f31ea::t_98528339cf97f1 34
+  s_ad3786285f31ea::t_5cbaf240879481 13
+  s_ad3786285f31ea::t_54cc0f27dcbbaf 8-10
+  s_ad3786285f31ea::t_341840b8356d0f 41
+  s_ad3786285f31ea::t_5347375e986432 50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "5f0fa55e51042f0c390c336812e6539278316cf2",
+  "prompts": {},
+  "sessions": {
+    "s_ad3786285f31ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4535ac2c-ea10-491a-abc5-554ad5f269fc",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": null
+    }
+  }
+}

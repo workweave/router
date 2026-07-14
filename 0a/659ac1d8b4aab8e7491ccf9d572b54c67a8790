@@ -1,0 +1,13 @@
+install/cc-statusline.sh
+  ai_agent 167,171-172,175,217,221-222,225
+install/install.sh
+  ai_agent 1069,1073-1074,1077,1119,1123-1124,1127
+internal/router/catalog/catalog.go
+  ai_agent 240-242,244-245,247-248,326-344
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "0a659ac1d8b4aab8e7491ccf9d572b54c67a8790",
+  "prompts": {}
+}

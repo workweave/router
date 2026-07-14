@@ -1,0 +1,21 @@
+internal/router/capability/tier.go
+  s_3d8c0f5383d00c::t_72ec00d12f0d29 41-46
+internal/providers/openaicompat/client.go
+  s_3d8c0f5383d00c::t_72ec00d12f0d29 50-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "7134f5eafb663349dec9734eda590e4d6eba5502",
+  "prompts": {},
+  "sessions": {
+    "s_3d8c0f5383d00c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35f9c05c-af02-45a9-92b6-36f37f76767e",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

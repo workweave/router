@@ -1,0 +1,27 @@
+cmd/router/main.go
+  s_ebfa96f9db32d9::t_893317f3ae2628 596-601,608
+  s_ebfa96f9db32d9::t_8684f6f75667bb 25
+go.mod
+  s_ebfa96f9db32d9::t_d78ea5d08eeab5 20-26
+  s_ebfa96f9db32d9::t_e87a21dd9f6b01 38-40,42,47-48,54-55,70,75,92
+go.sum
+  ai_agent 27-28,30-31,34-35,54-55,79-82,98-101,169-170,199-200,256-257,264-271,282-285
+internal/observability/apm/apm.go
+  s_ebfa96f9db32d9::t_b2add8a2904d5b 1-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "16fabbaae6c619f01536f0769bbc4c3eda11214e",
+  "prompts": {},
+  "sessions": {
+    "s_ebfa96f9db32d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82f09df5-4976-4e25-8c8a-84dea4f84240",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

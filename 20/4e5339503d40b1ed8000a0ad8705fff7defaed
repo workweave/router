@@ -1,0 +1,85 @@
+internal/policyclient/client_test.go
+  s_181299bbd674e9::t_bd28667a5edb2e 52,83
+internal/proxy/policy_shadow.go
+  s_181299bbd674e9::t_45ff07ac889f33 1-10,13-19,22-45,51-62,65-140
+  s_181299bbd674e9::t_3e12789b46b901 20-21,63-64
+  s_181299bbd674e9::t_d155233e61f729 11-12
+  s_181299bbd674e9::t_90402a58b09dac 46-50
+internal/proxy/service_observation_test.go
+  s_181299bbd674e9::t_8e36d8401bb43e 17
+  s_181299bbd674e9::t_81fafea122dcfe 27-31,35-38,52-62,100-122,124-128,133-148,153-164,177-186,188-193
+  s_181299bbd674e9::t_95627df2170194 194
+  s_181299bbd674e9::t_1b9ea43e783648 123,150-152,166-172,174-176
+  s_181299bbd674e9::t_90402a58b09dac 129-132,149,165,173,187
+  s_181299bbd674e9::t_1a766a1951e801 15,195-230
+  s_2430aac9f9ff4f::t_bc51c0f93837d4 231-233
+db/migrations/0036_policy-shadow-decisions.up.sql
+  s_181299bbd674e9::t_45ff07ac889f33 1-39
+db/migrations/0036_policy-shadow-decisions.down.sql
+  s_181299bbd674e9::t_45ff07ac889f33 1-5
+internal/postgres/telemetry.go
+  s_181299bbd674e9::t_bbe8ace3f03c82 37-69
+internal/sqlc/policy_shadow_decisions.sql.go
+  s_181299bbd674e9::t_c9047f1e822eba 1-2,4-164
+  s_181299bbd674e9::t_5352fd805b67b4 3
+internal/sqlc/models.go
+  s_181299bbd674e9::t_c9047f1e822eba 236-261
+  s_181299bbd674e9::t_ec7c7142bc647e 262-263
+internal/router/policy/contract.go
+  s_181299bbd674e9::t_bd28667a5edb2e 12-16,41
+  s_181299bbd674e9::t_d2eaf9ce1528a3 26
+db/queries/policy_shadow_decisions.sql
+  s_181299bbd674e9::t_45ff07ac889f33 1-48
+internal/policyclient/client.go
+  s_181299bbd674e9::t_bd28667a5edb2e 126,228
+internal/server/middleware/auth_test.go
+  s_181299bbd674e9::t_bd28667a5edb2e 128-129,145
+  s_181299bbd674e9::t_34875ae2006e82 15
+internal/router/policy/sidecar_router_test.go
+  s_181299bbd674e9::t_bd28667a5edb2e 85,100-119
+  s_181299bbd674e9::t_149032ead9fe99 120
+internal/router/policy/sidecar_router.go
+  s_181299bbd674e9::t_bd28667a5edb2e 67-73,81,137
+internal/proxy/service.go
+  s_181299bbd674e9::t_b67a97d49cb7ec 350-353,388,1559-1561
+  s_181299bbd674e9::t_45ff07ac889f33 1563-1565
+  s_181299bbd674e9::t_cf5f8f9db5ed45 1534
+  s_181299bbd674e9::t_90402a58b09dac 1558,2129,2142,4011,4027-4029,4037
+  s_181299bbd674e9::t_1a766a1951e801 2103
+internal/server/middleware/auth.go
+  s_181299bbd674e9::t_bd28667a5edb2e 138-140
+internal/router/router.go
+  s_181299bbd674e9::t_bd28667a5edb2e 74-76
+internal/api/admin/policy_catalog_test.go
+  s_181299bbd674e9::t_d2eaf9ce1528a3 67
+internal/api/admin/policy_catalog.go
+  s_181299bbd674e9::t_d2eaf9ce1528a3 32
+internal/proxy/gemini.go
+  s_181299bbd674e9::t_90402a58b09dac 88,100-102,110
+internal/proxy/turnloop.go
+  s_181299bbd674e9::t_90402a58b09dac 284,529,543
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "204e5339503d40b1ed8000a0ad8705fff7defaed",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_2430aac9f9ff4f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a46-ab39-7920-822e-d6b7000f530d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
