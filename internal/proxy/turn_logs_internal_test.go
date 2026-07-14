@@ -273,7 +273,7 @@ func TestApplyRoutingStateAttrs_EmitsExactThreadAndTransition(t *testing.T) {
 		PriorServedModel: "claude-haiku-4-5",
 	}
 	b := otel.NewAttrBuilder(4)
-	applyRoutingStateAttrs(b, res, "claude-opus-4-7")
+	applyRoutingStateAttrs(b, res, "claude-opus-4-7", key)
 	attrs := attrsByKey(b.Build())
 
 	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", attrs["routing.session_key"].GetStringValue())
@@ -284,12 +284,21 @@ func TestApplyRoutingStateAttrs_EmitsExactThreadAndTransition(t *testing.T) {
 
 func TestApplyRoutingStateAttrs_FirstSelectionIsNotAChange(t *testing.T) {
 	b := otel.NewAttrBuilder(4)
-	applyRoutingStateAttrs(b, turnLoopResult{PinRole: sessionpin.DefaultRole}, "claude-haiku-4-5")
+	applyRoutingStateAttrs(b, turnLoopResult{PinRole: sessionpin.DefaultRole}, "claude-haiku-4-5", [sessionpin.SessionKeyLen]byte{})
 	attrs := attrsByKey(b.Build())
 
 	assert.Empty(t, attrs["routing.session_key"].GetStringValue())
 	assert.Empty(t, attrs["routing.prior_served_model"].GetStringValue())
 	assert.False(t, attrs["routing.model_changed"].GetBoolValue())
+}
+
+func TestApplyRoutingStateAttrs_UsesRequestKeyWhenRoutingKeyIsEmpty(t *testing.T) {
+	key := [sessionpin.SessionKeyLen]byte{1, 2, 3}
+	b := otel.NewAttrBuilder(4)
+	applyRoutingStateAttrs(b, turnLoopResult{}, "claude-haiku-4-5", key)
+	attrs := attrsByKey(b.Build())
+
+	assert.Equal(t, "01020300000000000000000000000000", attrs["routing.session_key"].GetStringValue())
 }
 
 func TestApplyPlannerAttrs_OmitsDetailsWhenSkipped(t *testing.T) {

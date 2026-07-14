@@ -2297,7 +2297,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Float64("catalog.actual_output_per_1m", actPricing.OutputUSDPer1M).
 		Int64("latency.route_ms", routeMs)
 	applyPlannerAttrs(decisionBuilder, routeRes)
-	applyRoutingStateAttrs(decisionBuilder, routeRes, decision.Model)
+	applyRoutingStateAttrs(decisionBuilder, routeRes, decision.Model, sessionKey)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.decision",
 		Start: requestStart,
@@ -2795,7 +2795,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Bool("dispatch.baseline_failover", baselineFailoverUsed).
 		Bool("dispatch.subscription_failover", subscriptionFailoverUsed)
 	applyPlannerAttrs(upstreamBuilder, routeRes)
-	applyRoutingStateAttrs(upstreamBuilder, routeRes, decision.Model)
+	applyRoutingStateAttrs(upstreamBuilder, routeRes, decision.Model, sessionKey)
 	addTimingAttrs(ctx, upstreamBuilder)
 
 	obs := buildObservationContext(ctx, decision, routeRes.Fresh, s.captureMode)
@@ -3002,11 +3002,15 @@ func applyPlannerAttrs(b *otel.AttrBuilder, res turnLoopResult) *otel.AttrBuilde
 	return b
 }
 
-// applyRoutingStateAttrs emits the privacy-safe, exact thread/transition
-// identity used to distinguish real model changes from first-turn selection
-// and interleaved sub-agent calls.
-func applyRoutingStateAttrs(b *otel.AttrBuilder, res turnLoopResult, servedModel string) *otel.AttrBuilder {
-	return b.String("routing.session_key", sessionKeyHex(res.SessionKey)).
+// applyRoutingStateAttrs stamps thread identity and transition attrs; it
+// distinguishes real model changes from first selection and sub-agent calls.
+func applyRoutingStateAttrs(
+	b *otel.AttrBuilder,
+	res turnLoopResult,
+	servedModel string,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+) *otel.AttrBuilder {
+	return b.String("routing.session_key", sessionKeyHex(sessionKey)).
 		String("routing.pin_role", res.PinRole).
 		String("routing.prior_served_model", res.PriorServedModel).
 		Bool("routing.model_changed", res.PriorServedModel != "" && res.PriorServedModel != servedModel)
@@ -4150,7 +4154,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Float64("catalog.actual_output_per_1m", actPricing.OutputUSDPer1M).
 		Int64("latency.route_ms", routeMs)
 	applyPlannerAttrs(openaiDecisionBuilder, routeRes)
-	applyRoutingStateAttrs(openaiDecisionBuilder, routeRes, decision.Model)
+	applyRoutingStateAttrs(openaiDecisionBuilder, routeRes, decision.Model, sessionKey)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.decision",
 		Start: requestStart,
@@ -4466,7 +4470,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Int64("dispatch.fallback_attempts", int64(winnerIdx)).
 		Bool("dispatch.failover_used", finalProvider != primaryProvider)
 	applyPlannerAttrs(openaiUpstreamBuilder, routeRes)
-	applyRoutingStateAttrs(openaiUpstreamBuilder, routeRes, decision.Model)
+	applyRoutingStateAttrs(openaiUpstreamBuilder, routeRes, decision.Model, sessionKey)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
 
 	openaiObs := buildObservationContext(ctx, decision, routeRes.Fresh, s.captureMode)

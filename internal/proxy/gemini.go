@@ -12,6 +12,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
+	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -71,7 +72,8 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		embedInput = "only_user_message"
 	}
 
-	ctx, log, _ = bindRequestLogger(ctx, env, apiKeyID, requestID, "gemini_generate_content")
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "gemini_generate_content")
 	log.Info("ProxyGeminiGenerateContent start",
 		"requested_model", feats.Model,
 		"stream", env.Stream(),
@@ -154,7 +156,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		Float64("catalog.actual_output_per_1m", actPricing.OutputUSDPer1M).
 		Int64("latency.route_ms", routeMs)
 	applyPlannerAttrs(geminiDecisionBuilder, routeRes)
-	applyRoutingStateAttrs(geminiDecisionBuilder, routeRes, decision.Model)
+	applyRoutingStateAttrs(geminiDecisionBuilder, routeRes, decision.Model, sessionKey)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.decision",
 		Start: requestStart,
@@ -240,7 +242,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		Int64("upstream.status_code", int64(upstreamStatus(proxyErr))).
 		Bool("routing.cross_format", false)
 	applyPlannerAttrs(geminiUpstreamBuilder, routeRes)
-	applyRoutingStateAttrs(geminiUpstreamBuilder, routeRes, decision.Model)
+	applyRoutingStateAttrs(geminiUpstreamBuilder, routeRes, decision.Model, sessionKey)
 	addTimingAttrs(ctx, geminiUpstreamBuilder)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.upstream",

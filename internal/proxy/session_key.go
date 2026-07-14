@@ -21,9 +21,8 @@ func shortKey(key [sessionpin.SessionKeyLen]byte) string {
 	return hex.EncodeToString(key[:8])
 }
 
-// sessionKeyHex returns the complete one-way session digest for durable
-// telemetry joins. Unlike shortKey (operator-facing log correlation), this
-// must retain all 16 bytes so parallel threads cannot collapse together.
+// sessionKeyHex returns the full 32-hex session digest for telemetry joins;
+// unlike shortKey, it retains all 16 bytes so parallel threads don't collapse.
 func sessionKeyHex(key [sessionpin.SessionKeyLen]byte) string {
 	var zero [sessionpin.SessionKeyLen]byte
 	if key == zero {
@@ -32,9 +31,8 @@ func sessionKeyHex(key [sessionpin.SessionKeyLen]byte) string {
 	return hex.EncodeToString(key[:])
 }
 
-// sessionAffinityHint returns the full hex session key as an upstream
-// prompt-cache stickiness hint, or "" for the zero key so sessionless
-// requests don't all collapse onto one affinity bucket.
+// sessionAffinityHint returns the session key hex for upstream prompt-cache
+// stickiness, or "" for the zero key so sessionless requests stay unbucketed.
 func sessionAffinityHint(key [sessionpin.SessionKeyLen]byte) string {
 	return sessionKeyHex(key)
 }
