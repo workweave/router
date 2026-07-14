@@ -94,9 +94,8 @@ func (s *Service) usageBypassEngaged(ctx context.Context, headers http.Header, r
 	if !observed {
 		return provider, true
 	}
-	// Never bypass a spent subscription: the upstream will reject the token.
-	// Disengage even if the threshold is above exhaustedFraction so the normal
-	// route can pick a fallback the caller can pay for.
+	// Never bypass a spent subscription: the upstream will reject the token
+	// even if the configured threshold sits above exhaustedFraction.
 	if snap.Exhausted() {
 		return "", false
 	}

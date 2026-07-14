@@ -210,9 +210,8 @@ func (s *Service) runTurnLoop(
 	// headroom. nil (feature off / no headroom yet) leaves scoring unchanged.
 	req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, reqHeaders)
 
-	// The subscription bypass is a strict pass-through contract: it runs before
-	// any pin, planner, or scorer branch, so a stale or forced route can never
-	// substitute the caller's requested subscription-covered model.
+	// Strict pass-through runs before any pin or scorer so a stale route can't
+	// substitute the caller's subscription-covered model.
 	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
 		res.Decision = dec
 		res.UsageBypass = true
@@ -221,9 +220,8 @@ func (s *Service) runTurnLoop(
 			sessionKey, installationID, res.PinRole,
 			feats.MessageCount, len(env.AssistantToolCallSignatures()),
 		)
-		// A strict bypass never serves a pin, but it must preserve the prior
-		// switch history so Anthropic emission still removes stale signed
-		// thinking blocks from a session that previously changed models.
+		// Load switch history so Anthropic emission can strip stale signed
+		// thinking blocks from sessions that previously changed models.
 		if s.pinStore != nil {
 			res.SessionKey = sessionKey
 			pin, _ := s.loadPin(ctx, res.SessionKey, res.PinRole)
