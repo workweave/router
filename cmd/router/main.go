@@ -1192,10 +1192,8 @@ func boolDefault(b bool) string {
 	return "false"
 }
 
-// rlSidecarHeadersFromEnv returns static headers for the RL sidecar HTTP
-// client. When ROUTER_RL_SIDECAR_MODAL_KEY + ROUTER_RL_SIDECAR_MODAL_SECRET
-// are set, they are sent as Modal-Key / Modal-Secret for Modal ASGI apps
-// deployed with requires_proxy_auth=True (staging band serve).
+// rlSidecarHeadersFromEnv builds Modal-Key / Modal-Secret headers when the
+// env vars are set — needed for Modal ASGI apps with requires_proxy_auth=True.
 func rlSidecarHeadersFromEnv() map[string]string {
 	key := strings.TrimSpace(config.GetOr("ROUTER_RL_SIDECAR_MODAL_KEY", ""))
 	secret := strings.TrimSpace(config.GetOr("ROUTER_RL_SIDECAR_MODAL_SECRET", ""))
