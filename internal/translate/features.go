@@ -22,12 +22,10 @@ const contentBytesPerToken = 4
 // base64 thought-signatures don't falsely evict extended-context models.
 const fullBytesPerToken = 6
 
-// imageTokenEstimate approximates one inline image's real token cost. Providers
-// tokenize images by pixel dimensions (Anthropic ≈ (w·h)/750, capped near 1600
-// for its 1568px max edge), NOT by base64 transport size. Both byte-based
-// estimators subtract base64 image payloads and add this back per image:
-// counting a page-sized image's base64 at the content ratio over-counts it ~40×,
-// which spuriously tripped context-window compaction on multi-page PDF reads.
+// imageTokenEstimate is a conservative per-image token cost. Providers
+// tokenize images by pixel dimensions (Anthropic ≈ (w·h)/750, capped ~1600),
+// not by base64 transport size; counting base64 bytes at the content ratio
+// over-estimates a typical image ~40×.
 const imageTokenEstimate = 1600
 
 // signatureFieldMarker precedes a base64 thought-signature payload in an
@@ -59,8 +57,7 @@ type RoutingFeatures struct {
 func (e *RequestEnvelope) FullTokenEstimate() int {
 	// ÷6, not ÷4: base64 thought signatures otherwise inflate byte length and
 	// falsely evict Opus for exceeding its context window. Base64 image payloads
-	// are repriced separately — the ÷6 blunt instrument still over-counts a
-	// multi-page PDF read (each page a ~250KB base64 image) by hundreds of K.
+	// are repriced separately (÷6 still over-counts them).
 	imgBytes, imgCount := e.base64ImageStats()
 	return (len(e.body)-imgBytes)/fullBytesPerToken + imgCount*imageTokenEstimate
 }
@@ -73,10 +70,8 @@ func (e *RequestEnvelope) FullTokenEstimate() int {
 // beta) calibration. Signature-STRIPPING targets subtract
 // SignatureTokenSavings from this — see excludeContextOverflowModels.
 func (e *RequestEnvelope) ContextOverflowTokenEstimate() int {
-	// Base64 image payloads are transport, not tokens: subtract their bytes and
-	// add a per-image estimate back, so a multi-page PDF read (each page a
-	// ~250KB base64 image) doesn't read as ~1.3M phantom tokens and force a
-	// spurious context-window compaction.
+	// Base64 image bytes are transport, not tokens; subtract them and reprice
+	// per image to avoid phantom token inflation on multi-page PDF reads.
 	imgBytes, imgCount := e.base64ImageStats()
 	return (len(e.body)-imgBytes)/contentBytesPerToken + imgCount*imageTokenEstimate
 }

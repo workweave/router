@@ -9,12 +9,9 @@ import (
 // dataURLBase64Marker precedes an OpenAI data-URL's base64 payload.
 const dataURLBase64Marker = ";base64,"
 
-// base64ImageStats returns the total base64 byte length and count of inline
-// image payloads in the body, dispatched by inbound format. Both byte-based
-// token estimators subtract these bytes and add imageTokenEstimate per image,
-// because base64 image transport size bears no relation to the model's
-// dimension-based image token cost. Referenced media (http image URLs, Gemini
-// fileData URIs) carry no in-body payload and are ignored.
+// base64ImageStats returns the total base64 payload byte length and image
+// count, dispatched by inbound format. Referenced media (http URLs, Gemini
+// fileData URIs) carry no in-body bytes and are skipped.
 func (e *RequestEnvelope) base64ImageStats() (bytes, count int) {
 	switch e.format {
 	case FormatAnthropic:

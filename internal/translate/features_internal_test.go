@@ -82,13 +82,9 @@ func TestBase64ImageStats(t *testing.T) {
 	assert.Equal(t, 2, c, "counts both inline parts")
 }
 
-// TestContextOverflowTokenEstimate_ImagesRepriced is the regression for the
-// multi-page-PDF compaction incident: Claude Code renders a PDF to one base64
-// image per page, so a 20-page read carries ~5MB of base64. Counting that at
-// the content ratio read as ~1.3M phantom tokens and force-compacted a session
-// whose real size was ~120K, which then trimmed to a single turn (the model
-// "forgot" the task). Images must be repriced to their dimension-based cost so
-// a handful of page images never trips context-window compaction.
+// TestContextOverflowTokenEstimate_ImagesRepriced is the regression for
+// phantom token inflation on multi-page PDF reads: base64 transport size
+// must not be counted at the content byte ratio.
 func TestContextOverflowTokenEstimate_ImagesRepriced(t *testing.T) {
 	const pages = 20
 	const pageBytes = 250_000 // ~250KB base64 per rendered page
