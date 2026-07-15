@@ -450,6 +450,58 @@ func TestResponsesWriter_StreamingToolCall(t *testing.T) {
 	}
 }
 
+func TestResponsesWriter_NonContiguousToolCallIndices(t *testing.T) {
+	// Upstream sends two tool calls with indices 0 and 2 (gap at 1); both
+	// must appear in the response.completed output.
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesWriter(rec, "gpt-5")
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(200)
+
+	chunks := []string{
+		// Tool call at index=0 (search)
+		`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"id":"call_a","function":{"name":"search","arguments":""}}]},"finish_reason":null}]}` + "\n\n",
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":\"x\"}"}}]},"finish_reason":null}]}` + "\n\n",
+		// Tool call at index=2 (gap at 1 — simulates non-contiguous upstream)
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"id":"call_b","function":{"name":"lookup","arguments":""}}]},"finish_reason":null}]}` + "\n\n",
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"function":{"arguments":"{\"id\":1}"}}]},"finish_reason":null}]}` + "\n\n",
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}` + "\n\n",
+		"data: [DONE]\n\n",
+	}
+	for _, c := range chunks {
+		_, err := w.Write([]byte(c))
+		require.NoError(t, err)
+	}
+	require.NoError(t, w.Finalize())
+
+	events := parseSSEEvents(t, rec.Body.Bytes())
+
+	// Find the response.completed event.
+	var completed map[string]any
+	for _, e := range events {
+		if e["type"] == "response.completed" {
+			completed = e
+			break
+		}
+	}
+	require.NotNil(t, completed, "response.completed event must be present")
+
+	response := completed["response"].(map[string]any)
+	output := response["output"].([]any)
+
+	// Both tool calls must appear in output — not just the first one.
+	require.Len(t, output, 2, "both tool calls must appear in output; got %d", len(output))
+
+	// Verify each tool call by name (order: index 0 then index 2).
+	first := output[0].(map[string]any)
+	assert.Equal(t, "search", first["name"], "first tool call must be 'search'")
+	assert.Equal(t, `{"q":"x"}`, first["arguments"])
+
+	second := output[1].(map[string]any)
+	assert.Equal(t, "lookup", second["name"], "second tool call must be 'lookup'")
+	assert.Equal(t, `{"id":1}`, second["arguments"])
+}
+
 func parseSSEEvents(t *testing.T, raw []byte) []map[string]any {
 	t.Helper()
 	var events []map[string]any
