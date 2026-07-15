@@ -35,9 +35,8 @@ func jsonStringBytes(v gjson.Result) int {
 	return 0
 }
 
-// anthropicImageBytes sums base64 image payloads in an Anthropic body, covering
-// both top-level image blocks and images nested inside tool_result content —
-// the shape the Read tool emits for a rendered PDF (one image block per page).
+// anthropicImageBytes sums base64 image payloads in an Anthropic body,
+// including images nested inside tool_result content blocks.
 func anthropicImageBytes(body []byte) (total, count int) {
 	addImage := func(block gjson.Result) {
 		if data := block.Get("source.data"); data.Exists() {

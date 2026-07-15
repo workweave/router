@@ -24,8 +24,7 @@ const fullBytesPerToken = 6
 
 // imageTokenEstimate is a conservative per-image token cost. Providers
 // tokenize images by pixel dimensions (Anthropic ≈ (w·h)/750, capped ~1600),
-// not by base64 transport size; counting base64 bytes at the content ratio
-// over-estimates a typical image ~40×.
+// not by base64 transport size.
 const imageTokenEstimate = 1600
 
 // signatureFieldMarker precedes a base64 thought-signature payload in an
