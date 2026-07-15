@@ -6,27 +6,29 @@ import (
 )
 
 type APIKey struct {
-	ID             string
-	InstallationID string
-	ExternalID     string
-	Name           *string
-	KeyPrefix      string
-	KeyHash        string
-	KeySuffix      string
-	LastUsedAt     *time.Time
-	CreatedAt      time.Time
-	DeletedAt      *time.Time
-	CreatedBy      *string
+	ID                string
+	InstallationID    string
+	ExternalID        string
+	Name              *string
+	KeyPrefix         string
+	KeyHash           string
+	KeySuffix         string
+	LastUsedAt        *time.Time
+	CreatedAt         time.Time
+	DeletedAt         *time.Time
+	CreatedBy         *string
+	SpendCapUsdMicros *int64
 }
 
 type CreateAPIKeyParams struct {
-	InstallationID string
-	ExternalID     string
-	Name           *string
-	KeyPrefix      string
-	KeyHash        string
-	KeySuffix      string
-	CreatedBy      *string
+	InstallationID    string
+	ExternalID        string
+	Name              *string
+	KeyPrefix         string
+	KeyHash           string
+	KeySuffix         string
+	CreatedBy         *string
+	SpendCapUsdMicros *int64
 }
 
 type APIKeyRepository interface {

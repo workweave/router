@@ -106,17 +106,24 @@ func (s *Service) invalidateInstallation(installationID string) {
 
 // IssueAPIKey creates a new router API key and returns the raw token.
 func (s *Service) IssueAPIKey(ctx context.Context, installationID string, name *string, createdBy *string) (*APIKey, string, error) {
+	return s.IssueAPIKeyWithCap(ctx, installationID, name, createdBy, nil)
+}
+
+// IssueAPIKeyWithCap creates a new router API key with an optional spend cap and returns the raw token.
+// Pass nil for spendCapUsdMicros to create an uncapped key.
+func (s *Service) IssueAPIKeyWithCap(ctx context.Context, installationID string, name *string, createdBy *string, spendCapUsdMicros *int64) (*APIKey, string, error) {
 	rawToken := GenerateID(APIKeyPrefix)
 	keyHash, keyPrefix, keySuffix := APITokenFingerprint(rawToken)
 	externalID := GenerateID("kid")
 	key, err := s.apiKeys.Create(ctx, CreateAPIKeyParams{
-		InstallationID: installationID,
-		ExternalID:     externalID,
-		Name:           name,
-		KeyPrefix:      keyPrefix,
-		KeyHash:        keyHash,
-		KeySuffix:      keySuffix,
-		CreatedBy:      createdBy,
+		InstallationID:    installationID,
+		ExternalID:        externalID,
+		Name:              name,
+		KeyPrefix:         keyPrefix,
+		KeyHash:           keyHash,
+		KeySuffix:         keySuffix,
+		CreatedBy:         createdBy,
+		SpendCapUsdMicros: spendCapUsdMicros,
 	})
 	if err != nil {
 		return nil, "", err
@@ -152,7 +159,7 @@ func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string
 	if err := s.apiKeys.SoftDelete(ctx, installationID, target.ID); err != nil {
 		return nil, "", err
 	}
-	key, raw, err := s.IssueAPIKey(ctx, installationID, target.Name, createdBy)
+	key, raw, err := s.IssueAPIKeyWithCap(ctx, installationID, target.Name, createdBy, target.SpendCapUsdMicros)
 	if err != nil {
 		return nil, "", err
 	}
