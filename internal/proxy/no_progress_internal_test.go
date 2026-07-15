@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -493,4 +495,65 @@ func TestCompactionTracker_SeparateSessionsAreIsolated(t *testing.T) {
 	// Drop on A must not affect B's baseline.
 	assert.True(t, ct.checkAndRecord(keyA, install, "high", 5, 3), "drop on A must be detected")
 	assert.False(t, ct.checkAndRecord(keyB, install, "high", 12, 6), "B growing from 10→12 must not be compaction")
+}
+
+// TestNoProgressTracker_ConcurrentFirstInsert_NoPanicOrDeadlock: concurrent
+// recordAndDetect calls on the same session key must not panic, deadlock, or
+// orphan rings (which would lose fingerprints and delay detection).
+func TestNoProgressTracker_ConcurrentFirstInsert_NoPanicOrDeadlock(t *testing.T) {
+	const workers = 50
+
+	tr := newNoProgressTracker()
+	install := uuid.New()
+	d := router.Decision{Model: "gemini-3.1-pro-preview", Provider: "google"}
+	now := time.Now()
+	fp := computeNoProgressFingerprint(d, "same stuck prompt", 1, "")
+
+	var wg sync.WaitGroup
+	var detected atomic.Int32
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := sessionKeyFromString("session-concurrent-no-panic")
+			for i := 0; i < noProgressMatchThreshold+2; i++ {
+				if looped, _ := tr.recordAndDetect(key, install, "high", fp, now); looped {
+					detected.Add(1)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	// If the detector never fires under this load, rings are being orphaned
+	// on first insert.
+	assert.Positive(t, detected.Load(),
+		"detector must fire at least once across %d concurrent workers", workers)
+}
+
+// TestNoProgressTracker_SequentialFiringGuarantee: sequential calls on the
+// same session key accumulate fingerprints faithfully and fire at exactly
+// noProgressMatchThreshold — not earlier, not later.
+func TestNoProgressTracker_SequentialFiringGuarantee(t *testing.T) {
+	tr := newNoProgressTracker()
+	key := sessionKeyFromString("session-sequential-guarantee")
+	install := uuid.New()
+	d := router.Decision{Model: "gemini-3.1-pro-preview", Provider: "google"}
+	now := time.Now()
+	fp := computeNoProgressFingerprint(d, "stuck prompt", 2, "1\x00Agent\x00same-hash")
+
+	var firedAt int
+	for i := 1; i <= noProgressMatchThreshold+2; i++ {
+		looped, _ := tr.recordAndDetect(key, install, "high", fp, now)
+		if looped && firedAt == 0 {
+			firedAt = i
+		}
+	}
+
+	assert.Equal(t, noProgressMatchThreshold, firedAt,
+		"sequential calls must fire at exactly noProgressMatchThreshold=%d; got %d — "+
+			"early firing suggests double-counting, late firing suggests fingerprint loss",
+		noProgressMatchThreshold, firedAt)
 }
