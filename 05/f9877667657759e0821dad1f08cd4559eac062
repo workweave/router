@@ -1,0 +1,36 @@
+internal/proxy/telemetry.go
+  s_3f8d95a685b537::t_e9fbf047e487c2 73-78
+internal/postgres/telemetry.go
+  s_3f8d95a685b537::t_e66e90bd6959fc 99-100
+db/migrations/0021_telemetry-session-key-join.up.sql
+  s_3f8d95a685b537::t_ecf503db0aa24a 1-32
+db/migrations/0021_telemetry-session-key-join.down.sql
+  s_3f8d95a685b537::t_2c6b0396802298 1-16
+internal/proxy/service_observation_test.go
+  s_3f8d95a685b537::t_be89901eafb3d2 344-378
+internal/proxy/service.go
+  s_3f8d95a685b537::t_2ee68b8efdeccd 1760,1769
+  s_3f8d95a685b537::t_f8706cc7502f90 2852,2854
+  s_3f8d95a685b537::t_4e163502d5eadb 1761-1768
+  s_3f8d95a685b537::t_0b1f49a05d5a6e 2853
+db/queries/model_router_request_telemetry.sql
+  s_3f8d95a685b537::t_958fe0d88d5069 12-13
+  s_3f8d95a685b537::t_f8b629363b474a 108-110
+  s_3f8d95a685b537::t_3814f3b0d5c570 60-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "05f9877667657759e0821dad1f08cd4559eac062",
+  "prompts": {},
+  "sessions": {
+    "s_3f8d95a685b537": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "86141471-a1a5-4e3a-bdf9-190038e3d42d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

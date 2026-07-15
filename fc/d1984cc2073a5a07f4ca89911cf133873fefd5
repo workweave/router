@@ -1,0 +1,22 @@
+internal/translate/emit_gemini.go
+  s_bf5d18fcd8272e::t_27b51f68f22074 780-812
+  s_bf5d18fcd8272e::t_13428e66d16bc9 753-758
+internal/translate/gemini_test.go
+  s_bf5d18fcd8272e::t_4f55f203fada18 638-681
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "fcd1984cc2073a5a07f4ca89911cf133873fefd5",
+  "prompts": {},
+  "sessions": {
+    "s_bf5d18fcd8272e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7dbafa04-e6d6-4dda-8a1d-22d6e453f2f4",
+        "model": "deepseek/deepseek-v4-pro-20260423"
+      },
+      "human_author": "Andrew Churchill <chu.andrew.8@gmail.com>"
+    }
+  }
+}

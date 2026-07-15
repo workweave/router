@@ -1,0 +1,19 @@
+internal/proxy/gemini.go
+  s_8a89760c761095::t_593ef974562d55 88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "cd41da07313fbee1523977ab542f72bef4a44463",
+  "prompts": {},
+  "sessions": {
+    "s_8a89760c761095": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ce447e8c-4c0a-47ec-9cba-27f8f7136d74",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

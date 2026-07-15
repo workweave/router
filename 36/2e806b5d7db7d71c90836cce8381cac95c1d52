@@ -1,0 +1,19 @@
+internal/proxy/turnloop.go
+  s_a4afee948c6289::t_1e42f8fb66a574 286-303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "362e806b5d7db7d71c90836cce8381cac95c1d52",
+  "prompts": {},
+  "sessions": {
+    "s_a4afee948c6289": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "749fc7b0-ee73-4de3-8d0a-c20ef2a34d10",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

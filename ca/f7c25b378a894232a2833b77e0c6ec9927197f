@@ -1,0 +1,19 @@
+internal/translate/envelope.go
+  s_c4ecee41717be0::t_f7dbbe88a096f8 481-491,508,510-511,517,525-535,539-541,543,559-570,573-575,581-582,584-595,597-604,606-609,611,613-615,623-624,626-628,630-633,635
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "caf7c25b378a894232a2833b77e0c6ec9927197f",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

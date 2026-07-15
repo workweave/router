@@ -1,0 +1,25 @@
+install/cc-statusline.sh
+  ai_agent 178-179,228-229
+internal/translate/glm51_flags_test.go
+  ai_agent 1-121
+internal/router/cluster/artifacts/v0.56/metadata.yaml
+  ai_agent 1-88
+internal/translate/emit_openai.go
+  ai_agent 77-80,175-218
+internal/translate/provider_hint.go
+  ai_agent 41-42,57-65
+internal/router/cluster/artifacts/v0.56/model_registry.json
+  ai_agent 1-27
+install/install.sh
+  ai_agent 1327-1328,1377-1378
+internal/router/cluster/artifacts/v0.56/rankings.json
+  ai_agent 1-339
+internal/router/catalog/catalog.go
+  ai_agent 354-361
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0b1444277060b70d4205de1022d7d990ade6f8e6",
+  "prompts": {}
+}

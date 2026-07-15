@@ -1,0 +1,25 @@
+internal/translate/gemini_error_masking_test.go
+  s_25a715cef6c883::t_0efb416ced73b3 1-72
+internal/translate/stream.go
+  s_25a715cef6c883::t_97bf062f5eea1b 458-468,471-473
+  s_25a715cef6c883::t_b5a0a49b257469 7
+  s_25a715cef6c883::t_88d87ab60413a2 659-672
+  s_25a715cef6c883::t_960d15c8e9ca4b 1244-1258,1273-1321
+  s_25a715cef6c883::t_02e46e04b3cfb5 602-608
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "40b4ffded6eef2dc5a968af4054331dbd70b507c",
+  "prompts": {},
+  "sessions": {
+    "s_25a715cef6c883": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e3367c8-83d3-45f3-b1de-c26764d81480",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
