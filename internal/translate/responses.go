@@ -898,7 +898,7 @@ func (t *ResponsesWriter) emitFailed() error {
 }
 
 func (t *ResponsesWriter) assembleOutput() []any {
-	out := make([]any, 0, 1+len(t.toolItems))
+	out := make([]any, 0, len(t.toolItems))
 	if t.textItem != nil {
 		out = append(out, map[string]any{
 			"id":     t.textItem.itemID,
