@@ -18,7 +18,7 @@ Opt-in `router.Router` that delegates model selection to a trained RL/DPO policy
 
 ## Wiring
 
-`cmd/router/main.go` constructs `rl.New(rl.NewHTTPDecider(ROUTER_RL_SIDECAR_URL, …), availableModels)` and injects it via `proxy.Service.WithRLRouter`. Unset URL → `WithRLRouter(nil)` → the strategy header 503s.
+`cmd/router/main.go` constructs `rl.New(rl.NewHTTPDeciderWithHeaders(ROUTER_RL_SIDECAR_URL, …, rlSidecarHeadersFromEnv()), availableModels)` and injects it via `proxy.Service.WithRLRouter`. Unset URL → `WithRLRouter(nil)` → the strategy header 503s. Optional `ROUTER_RL_SIDECAR_MODAL_KEY` / `ROUTER_RL_SIDECAR_MODAL_SECRET` attach Modal proxy-auth headers for staging Modal band serve.
 
 ## Tests
 

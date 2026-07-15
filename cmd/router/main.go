@@ -573,8 +573,19 @@ func main() {
 	var rlRouter router.Router
 	if rlSidecarURL := config.GetOr("ROUTER_RL_SIDECAR_URL", ""); rlSidecarURL != "" {
 		rlTimeout := parseEnvDurationMs("ROUTER_RL_SIDECAR_TIMEOUT_MS", rl.DefaultTimeout)
-		rlRouter = rl.New(rl.NewHTTPDecider(rlSidecarURL, nil, rlTimeout), availableModels, availableProviders)
-		logger.Info("RL policy router wired", "sidecar_url", rlSidecarURL, "timeout_ms", rlTimeout.Milliseconds(), "candidate_models", len(availableModels))
+		rlHeaders := rlSidecarHeadersFromEnv()
+		rlRouter = rl.New(
+			rl.NewHTTPDeciderWithHeaders(rlSidecarURL, nil, rlTimeout, rlHeaders),
+			availableModels,
+			availableProviders,
+		)
+		logger.Info(
+			"RL policy router wired",
+			"sidecar_url", rlSidecarURL,
+			"timeout_ms", rlTimeout.Milliseconds(),
+			"candidate_models", len(availableModels),
+			"modal_proxy_auth", len(rlHeaders) > 0,
+		)
 	} else {
 		logger.Info("RL policy router disabled (ROUTER_RL_SIDECAR_URL unset); x-weave-router-strategy: rl will return 503")
 	}
@@ -1179,6 +1190,22 @@ func boolDefault(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// rlSidecarHeadersFromEnv returns static headers for the RL sidecar HTTP
+// client. When ROUTER_RL_SIDECAR_MODAL_KEY + ROUTER_RL_SIDECAR_MODAL_SECRET
+// are set, they are sent as Modal-Key / Modal-Secret for Modal ASGI apps
+// deployed with requires_proxy_auth=True (staging band serve).
+func rlSidecarHeadersFromEnv() map[string]string {
+	key := strings.TrimSpace(config.GetOr("ROUTER_RL_SIDECAR_MODAL_KEY", ""))
+	secret := strings.TrimSpace(config.GetOr("ROUTER_RL_SIDECAR_MODAL_SECRET", ""))
+	if key == "" || secret == "" {
+		return nil
+	}
+	return map[string]string{
+		"Modal-Key":    key,
+		"Modal-Secret": secret,
+	}
 }
 
 // parseEnvDurationMs reads an env var as a millisecond integer and returns
