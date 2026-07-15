@@ -1,0 +1,68 @@
+internal/router/bandit/testdata/ts_posterior.json
+  s_a6b708a61b4a45::t_91cdbc5f809135 1-9
+.env.example
+  s_a6b708a61b4a45::t_c571a5e36d016c 79-83
+internal/router/bandit/bandit.go
+  s_a6b708a61b4a45::t_32e545cd0867de 1-149
+internal/router/bandit/testdata/empty_posterior.json
+  s_a6b708a61b4a45::t_3dd3e3de22a767 1
+internal/router/bandit/posterior_test.go
+  s_a6b708a61b4a45::t_cee43374a8cf8e 1-40
+cmd/router/main.go
+  s_a6b708a61b4a45::t_266e7ca2e6f3e9 604-624,627
+  s_a6b708a61b4a45::t_1ca2cd5029d881 39
+internal/api/openai/responses.go
+  s_a6b708a61b4a45::t_79e5d26c0f592f 86-91
+  s_a6b708a61b4a45::t_5ff26d5215ea6c 12
+internal/router/strategy.go
+  s_a6b708a61b4a45::t_4b3927048a1e05 16-19
+internal/server/middleware/router_strategy_override_test.go
+  s_a6b708a61b4a45::t_9b7502cf7758a7 49-53
+internal/api/gemini/generate_content.go
+  s_a6b708a61b4a45::t_3b4e7596037c87 15
+  s_a6b708a61b4a45::t_1481e720ffecc7 116-120
+  s_6ac53b8de8c1dc::t_9bfd92749cf291 114-115
+internal/router/bandit/bandit_test.go
+  s_a6b708a61b4a45::t_1802b0875e2184 1-140
+internal/api/anthropic/messages.go
+  s_a6b708a61b4a45::t_383e46338324e4 119-124
+  s_a6b708a61b4a45::t_eaf3f90b645f5a 15
+internal/proxy/service.go
+  s_a6b708a61b4a45::t_0046fc5e6967ba 1186-1193,1200-1201,1206-1212
+  s_a6b708a61b4a45::t_55d38813a9445c 22
+  s_a6b708a61b4a45::t_f3c99f13b0f033 43-47
+internal/router/bandit/posterior.go
+  s_a6b708a61b4a45::t_e7da6f3317740c 83
+  s_a6b708a61b4a45::t_8eb138c471b3b9 1-5,7-82,84-91
+  s_a6b708a61b4a45::t_b53c2552a7d754 6
+internal/api/openai/completions.go
+  s_a6b708a61b4a45::t_9fd7cd48328954 85-90
+  s_a6b708a61b4a45::t_0136b2c614ca82 14
+internal/server/middleware/router_strategy_override.go
+  s_a6b708a61b4a45::t_faad1f7db4e120 13-16
+  s_a6b708a61b4a45::t_e6ee46eefb3ef0 37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "e757f6ad9cbb8176767e2dd3fe7784310a0d2d75",
+  "prompts": {},
+  "sessions": {
+    "s_6ac53b8de8c1dc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "2aad668b-ef69-498d-b1eb-8c906cf85738",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_a6b708a61b4a45": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0d06bc9c-3412-4c93-8c5b-e689c3e53bdf",
+        "model": "composer-2.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

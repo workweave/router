@@ -1,0 +1,21 @@
+internal/router/policy/contract.go
+  s_1bd9528555e07b::t_27828acbe80ae3 29-30
+cmd/router/hmm_capabilities.go
+  s_1bd9528555e07b::t_27828acbe80ae3 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "76a902ddf775905f28e7fc4f8d9e2f990ad03ec3",
+  "prompts": {},
+  "sessions": {
+    "s_1bd9528555e07b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f591f-df79-7591-94f9-edeb03c45610",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

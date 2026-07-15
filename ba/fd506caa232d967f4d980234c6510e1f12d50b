@@ -1,0 +1,43 @@
+internal/server/middleware/router_strategy_override.go
+  s_181299bbd674e9::t_294276d985c3f2 22-24,27,46
+  s_181299bbd674e9::t_ab6b4c0fd6839d 25-26
+  s_181299bbd674e9::t_cd50ca7e3392d7 36,77-92
+  s_181299bbd674e9::t_3197eef34b61ff 93
+internal/server/server.go
+  s_181299bbd674e9::t_3042fabc69f22c 19,74-77,79-83,152,170,203
+  s_181299bbd674e9::t_cd50ca7e3392d7 70-73,78
+internal/proxy/service.go
+  s_181299bbd674e9::t_294276d985c3f2 1482-1489
+  s_181299bbd674e9::t_cd50ca7e3392d7 1480-1481
+internal/api/admin/policy_catalog.go
+  s_181299bbd674e9::t_3042fabc69f22c 1-51
+internal/postgres/converters_test.go
+  s_181299bbd674e9::t_98e5b5030725f8 39,43
+internal/postgres/converters.go
+  s_181299bbd674e9::t_e5b25cb79c2321 42
+internal/server/middleware/router_strategy_override_test.go
+  s_181299bbd674e9::t_e5b25cb79c2321 69-116
+  s_181299bbd674e9::t_cd50ca7e3392d7 117-121
+db/migrations/0034_installation-policy-routing.up.sql
+  s_181299bbd674e9::t_294276d985c3f2 4,13
+internal/api/admin/policy_catalog_test.go
+  s_181299bbd674e9::t_e5b25cb79c2321 1-69
+internal/sqlc/models.go
+  s_181299bbd674e9::t_20cbcc5d1f6e28 85-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bafd506caa232d967f4d980234c6510e1f12d50b",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+internal/router/planner/AGENTS.md
+  s_bded8a0631fa57::t_79d58c42f8075e 13-14,20
+internal/proxy/service.go
+  s_bded8a0631fa57::t_7ea344396e5a93 1254
+  s_bded8a0631fa57::t_cbf709131c7639 1216
+  s_bded8a0631fa57::t_1cedc86c0abb30 1267
+internal/proxy/turnloop.go
+  s_bded8a0631fa57::t_7114853cf4c2af 322
+  s_bded8a0631fa57::t_9e6de0cfe3da2a 11
+  s_bded8a0631fa57::t_5b319a7bcaf4f4 39-48
+  s_bded8a0631fa57::t_8a1ee938986c4a 197
+internal/router/planner/policy.go
+  s_bded8a0631fa57::t_0e8df4b728c6dc 48
+  s_bded8a0631fa57::t_70c64edf38acec 47,49
+  s_bded8a0631fa57::t_9559f5f6ac5fed 71-77
+  s_bded8a0631fa57::t_038af5674b160a 128,140
+  s_bded8a0631fa57::t_9235605abd0056 15-23
+  s_bded8a0631fa57::t_0055e141c0ef24 122-127,129-132
+internal/providers/cache_ttl_test.go
+  s_bded8a0631fa57::t_b3cc199ceeeb3a 1-26
+internal/router/planner/CLAUDE.md
+  s_bded8a0631fa57::t_34d437964c8b38 13-14,20
+internal/providers/provider.go
+  s_bded8a0631fa57::t_4ca22e3be8dde1 43-72
+  s_bded8a0631fa57::t_ac234d72d6ef34 10
+internal/router/planner/policy_test.go
+  s_bded8a0631fa57::t_395743dbf3f927 303-389
+  s_bded8a0631fa57::t_79fa332c146e0d 405
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bf1e8e4dae7fe94a209e0ff2b7b5a569c430cd32",
+  "prompts": {},
+  "sessions": {
+    "s_bded8a0631fa57": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "49c00db5-4a17-42bd-9439-e04fea48f879",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

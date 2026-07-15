@@ -1,0 +1,35 @@
+cmd/router/policy_sidecars_test.go
+  s_181299bbd674e9::t_6711a4f739edae 1-75,77-84
+  s_181299bbd674e9::t_b81a164594add6 76
+cmd/router/policy_sidecars.go
+  s_181299bbd674e9::t_6711a4f739edae 1-9,11-22,25-31,33-63,67-103,105-113
+  s_181299bbd674e9::t_0c7906e1fcfda4 104
+  s_181299bbd674e9::t_b81a164594add6 10,23-24,64-65
+  s_181299bbd674e9::t_86b02efedaf2fb 66
+  s_181299bbd674e9::t_6b2d9fee83bba3 32
+cmd/router/main.go
+  s_181299bbd674e9::t_6711a4f739edae 603-616,624,655-658
+internal/router/policy/sidecar_router.go
+  s_181299bbd674e9::t_0c7906e1fcfda4 54,57-65
+  s_181299bbd674e9::t_6b2d9fee83bba3 53
+  s_181299bbd674e9::t_74a1ff40412f79 32-33,55-56,82-84
+internal/router/policy/sidecar_router_test.go
+  s_181299bbd674e9::t_0c7906e1fcfda4 121,136-146
+  s_181299bbd674e9::t_74a1ff40412f79 122-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "68a538dfdce18ad166bd7acc87d878b58a4a6a30",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+internal/router/cluster/artifacts/v0.65/model_features.json
+  s_c7d590281f9730::t_8d0edf11c5085f 1-401
+internal/router/cluster/model_features_test.go
+  s_c7d590281f9730::t_c717d86e38bd6b 1-65
+internal/router/cluster/artifacts.go
+  s_c7d590281f9730::t_6ae291f0936ae9 561-608
+  s_c7d590281f9730::t_194c0e1fd8673c 341-362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "7f1552ad8a1ab12be0fa7fdecdaa838254b50d6b",
+  "prompts": {},
+  "sessions": {
+    "s_c7d590281f9730": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d9340557-709c-4347-8508-65fe26c95997",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

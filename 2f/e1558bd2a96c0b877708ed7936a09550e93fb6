@@ -1,0 +1,24 @@
+install/commands/force-model.md
+  s_d194893f3c9bb0::t_d20c2aeb1cfe08 2
+install/uninstall.sh
+  s_d194893f3c9bb0::t_701f983e96d880 159-172
+install/install.sh
+  s_d194893f3c9bb0::t_3b529c3f5da5bb 846-890,896
+  s_d194893f3c9bb0::t_39296349953906 1385-1386
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "2fe1558bd2a96c0b877708ed7936a09550e93fb6",
+  "prompts": {},
+  "sessions": {
+    "s_d194893f3c9bb0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "badae19b-6c59-4cb2-b815-7fcdc7dfce6f",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

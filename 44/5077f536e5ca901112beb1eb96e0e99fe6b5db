@@ -1,0 +1,55 @@
+internal/server/middleware/auth_test.go
+  s_3fd5826932f9db::t_178faf02429cc3 116-118
+internal/proxy/subsidy.go
+  s_3fd5826932f9db::t_fe2f09501c9b86 123-126,131-138
+  s_3fd5826932f9db::t_61d53942bff037 139-140
+internal/server/middleware/auth.go
+  s_3fd5826932f9db::t_8ae04f6209b0b6 142-144
+internal/auth/service.go
+  s_3fd5826932f9db::t_cef6747b514549 295-307
+internal/auth/installation.go
+  s_3fd5826932f9db::t_f3b3957c777e3d 47-55
+  s_3fd5826932f9db::t_98f934137a956a 83-86
+db/migrations/0029_installation-subscription-routing-disabled.up.sql
+  s_3fd5826932f9db::t_2b49c6139c8a6d 1-14
+internal/postgres/converters.go
+  s_3fd5826932f9db::t_22f9867ae3c193 37-40
+  s_3fd5826932f9db::t_9ca36419a3d0c0 27-36
+db/migrations/0029_installation-subscription-routing-disabled.down.sql
+  s_3fd5826932f9db::t_2b1f1e421215e0 1-6
+internal/proxy/service.go
+  s_3fd5826932f9db::t_e8deece0faf9c2 276-282
+  s_3fd5826932f9db::t_5ae0ba66c27f62 426-433
+internal/proxy/subsidy_test.go
+  s_3fd5826932f9db::t_084fe2ac057a37 103-125
+db/queries/model_router_installations.sql
+  s_3fd5826932f9db::t_aec96f630c5821 82-94
+internal/auth/service_test.go
+  s_3fd5826932f9db::t_91b1d68d2e678e 148-154
+  s_3fd5826932f9db::t_5f1c5d4eb34058 104
+  s_3fd5826932f9db::t_71e65633ce2e2e 97-103
+internal/postgres/repository.go
+  s_3fd5826932f9db::t_e41765654890b2 152-164
+internal/sqlc/model_router_api_keys.sql.go
+  s_3fd5826932f9db::t_23a166bc6297cc 95,114,148
+internal/sqlc/model_router_installations.sql.go
+  s_3fd5826932f9db::t_01aff6b57d366e 25,46,64,70,84,106,112,121,149,276-307
+internal/sqlc/models.go
+  s_3fd5826932f9db::t_7518f90162c0bc 69-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "445077f536e5ca901112beb1eb96e0e99fe6b5db",
+  "prompts": {},
+  "sessions": {
+    "s_3fd5826932f9db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a709cb25-412c-478c-abd3-0049ca661a44",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
