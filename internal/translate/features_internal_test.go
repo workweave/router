@@ -55,3 +55,58 @@ func TestContextOverflowTokenEstimate_TicketRegression(t *testing.T) {
 	assert.Greater(t, e.ContextOverflowTokenEstimate(), kimiWindow, "dense ~263K-token body must estimate above a 256K window")
 	assert.Less(t, e.FullTokenEstimate(), kimiWindow, "the old ÷6 estimate undercounted below the window — the bug this fixes")
 }
+
+// TestBase64ImageStats sums inline base64 image payloads per inbound format,
+// covering top-level and tool_result-nested Anthropic images, OpenAI data URLs
+// (http URLs skipped), and Gemini inlineData (camelCase + snake_case).
+func TestBase64ImageStats(t *testing.T) {
+	anthropic := []byte(`{"messages":[{"role":"user","content":[` +
+		`{"type":"image","source":{"type":"base64","data":"AAAA"}},` +
+		`{"type":"tool_result","content":[{"type":"image","source":{"data":"BBBBBB"}}]}]}]}`)
+	b, c := (&RequestEnvelope{body: anthropic, format: FormatAnthropic}).base64ImageStats()
+	assert.Equal(t, 10, b, "top-level (4) + tool_result-nested (6) image bytes")
+	assert.Equal(t, 2, c, "counts both images")
+
+	openai := []byte(`{"messages":[{"role":"user","content":[` +
+		`{"type":"image_url","image_url":{"url":"data:image/png;base64,ABCDEFGH"}},` +
+		`{"type":"image_url","image_url":{"url":"https://example.com/y.png"}}]}]}`)
+	b, c = (&RequestEnvelope{body: openai, format: FormatOpenAI}).base64ImageStats()
+	assert.Equal(t, 8, b, "only the data-URL base64 payload counts")
+	assert.Equal(t, 1, c, "http image URL is not an in-body payload")
+
+	gemini := []byte(`{"contents":[{"parts":[` +
+		`{"inlineData":{"mimeType":"image/png","data":"AAAA"}},` +
+		`{"inline_data":{"data":"BB"}}]}]}`)
+	b, c = (&RequestEnvelope{body: gemini, format: FormatGemini}).base64ImageStats()
+	assert.Equal(t, 6, b, "camelCase (4) + snake_case (2) inlineData bytes")
+	assert.Equal(t, 2, c, "counts both inline parts")
+}
+
+// TestContextOverflowTokenEstimate_ImagesRepriced is the regression for the
+// multi-page-PDF compaction incident: Claude Code renders a PDF to one base64
+// image per page, so a 20-page read carries ~5MB of base64. Counting that at
+// the content ratio read as ~1.3M phantom tokens and force-compacted a session
+// whose real size was ~120K, which then trimmed to a single turn (the model
+// "forgot" the task). Images must be repriced to their dimension-based cost so
+// a handful of page images never trips context-window compaction.
+func TestContextOverflowTokenEstimate_ImagesRepriced(t *testing.T) {
+	const pages = 20
+	const pageBytes = 250_000 // ~250KB base64 per rendered page
+	page := strings.Repeat("A", pageBytes)
+	blocks := make([]string, pages)
+	for i := range blocks {
+		blocks[i] = `{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"` + page + `"}}`
+	}
+	body := []byte(`{"messages":[{"role":"user","content":[` + strings.Join(blocks, ",") +
+		`,{"type":"text","text":"summarize this paper"}]}]}`)
+	e := &RequestEnvelope{body: body, format: FormatAnthropic}
+
+	imgBytes, imgCount := e.base64ImageStats()
+	assert.Equal(t, pages, imgCount, "counts one image per page")
+	assert.Equal(t, pages*pageBytes, imgBytes, "sums each page's base64 bytes")
+
+	// The naive len/4 estimate is a phantom >1M-token overflow (the bug).
+	assert.Greater(t, len(body)/contentBytesPerToken, 1_000_000, "raw body ÷4 falsely overflows")
+	// Repriced, the same body is well below any compaction trigger.
+	assert.Less(t, e.ContextOverflowTokenEstimate(), 100_000, "repriced estimate stays far below the window")
+}
