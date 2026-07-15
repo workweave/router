@@ -91,7 +91,7 @@ func TestBypass_429_ReturnsErrBypassRetryable_NoBytesWritten(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 
-	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, "", 0, time.Now(), "req-1", "ext-1", req, rec)
 
 	assert.ErrorIs(t, err, errBypassRetryable, "a retryable 429 must signal fall-through to routed dispatch")
 	assert.Equal(t, 1, upstream.dispatches, "the bypass attempt must hit the upstream exactly once")
@@ -116,7 +116,7 @@ func TestBypass_NonRetryableError_StillFlushes(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 
-	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, "", 0, time.Now(), "req-1", "ext-1", req, rec)
 
 	require.NoError(t, err, "a non-retryable 400 must flush and return nil — rerouting would mask a malformed request")
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "the 400 must be flushed to the client verbatim")
@@ -133,7 +133,7 @@ func TestBypass_NilError_ReturnsNil(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 
-	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, "", 0, time.Now(), "req-1", "ext-1", req, rec)
 	require.NoError(t, err)
 }
 
@@ -152,7 +152,7 @@ func TestBypass_TransportError_ReroutesViaScorer(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 
-	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, "", 0, time.Now(), "req-1", "ext-1", req, rec)
 
 	assert.ErrorIs(t, err, errBypassRetryable, "a transport error must signal fall-through to routed dispatch")
 	assert.Equal(t, 1, upstream.dispatches, "the bypass attempt must hit the upstream exactly once")
@@ -175,7 +175,7 @@ func TestBypass_LocalPrepError_PropagatesToClient(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 
-	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, "", 0, time.Now(), "req-1", "ext-1", req, rec)
 
 	require.Error(t, err, "provider-not-configured must surface as a real error")
 	assert.NotErrorIs(t, err, errBypassRetryable, "local prep errors must not trigger reroute — the client must see them")
@@ -340,7 +340,7 @@ func TestBypass_EmitsUsageAndCost(t *testing.T) {
 
 	buf := otel.NewBuffer(emitter)
 	ctx := buf.WithContext(context.Background())
-	err = svc.bypassToAnthropic(ctx, env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err = svc.bypassToAnthropic(ctx, env, feats, false, "", 0, time.Now(), "req-1", "ext-1", req, rec)
 	require.NoError(t, err)
 	buf.Flush()
 

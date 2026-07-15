@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -385,4 +386,119 @@ func (s *swapErrProvider) Proxy(ctx context.Context, decision router.Decision, p
 
 func (s *swapErrProvider) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {
 	return s.inner.Passthrough(ctx, prep, w, r)
+}
+
+// fakeTelemetryRepo captures InsertRequestTelemetry calls.
+type fakeTelemetryRepo struct {
+	mu     sync.Mutex
+	params []proxy.InsertTelemetryParams
+}
+
+func (f *fakeTelemetryRepo) InsertRequestTelemetry(_ context.Context, p proxy.InsertTelemetryParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.params = append(f.params, p)
+	return nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetrySummary(_ context.Context, _ string, _, _ time.Time) (proxy.TelemetrySummary, error) {
+	return proxy.TelemetrySummary{}, nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetryTimeseries(_ context.Context, _ string, _, _ time.Time, _ string) ([]proxy.TelemetryBucket, error) {
+	return nil, nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetrySummaryAll(_ context.Context, _, _ time.Time) (proxy.TelemetrySummary, error) {
+	return proxy.TelemetrySummary{}, nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetryTimeseriesAll(_ context.Context, _, _ time.Time, _ string) ([]proxy.TelemetryBucket, error) {
+	return nil, nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetryRows(_ context.Context, _ string, _, _ time.Time, _ int32) ([]proxy.TelemetryRow, error) {
+	return nil, nil
+}
+
+func (f *fakeTelemetryRepo) GetTelemetryRowsAll(_ context.Context, _, _ time.Time, _ int32) ([]proxy.TelemetryRow, error) {
+	return nil, nil
+}
+
+func (f *fakeTelemetryRepo) recorded() []proxy.InsertTelemetryParams {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]proxy.InsertTelemetryParams, len(f.params))
+	copy(out, f.params)
+	return out
+}
+
+// telemetryBypassCtx is bypassCtx plus an authenticated installation so
+// fireTelemetry has an installation to attribute the row to.
+func telemetryBypassCtx(installationID string, threshold float64) context.Context {
+	ctx := authedCtx(installationID)
+	ctx = context.WithValue(ctx, proxy.AnthropicSubscriptionContextKey{}, bypassSubToken)
+	return context.WithValue(ctx, proxy.InstallationUsageBypassContextKey{}, proxy.UsageBypassConfig{
+		Enabled:   true,
+		Threshold: &threshold,
+	})
+}
+
+// TestBypassToAnthropic_RecordsTelemetry: a usage-bypass turn must write a
+// router_request_telemetry row so it appears in dashboard metrics.
+func TestBypassToAnthropic_RecordsTelemetry(t *testing.T) {
+	telRepo := &fakeTelemetryRepo{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	p := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"` + bypassRequestedMdl + `","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
+		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+	})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, telRepo).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
+
+	rec, req, body := bypassRequest(t)
+	require.NoError(t, svc.ProxyMessages(telemetryBypassCtx(uuid.New().String(), 0.80), body, rec, req))
+
+	require.Eventually(t, func() bool {
+		return len(telRepo.recorded()) >= 1
+	}, 2*time.Second, 10*time.Millisecond, "fireTelemetry must fire for usage-bypass turns")
+
+	params := telRepo.recorded()
+	require.Len(t, params, 1)
+	got := params[0]
+	assert.Equal(t, "usage_bypass", got.DecisionReason)
+	assert.Equal(t, providers.ProviderAnthropic, got.DecisionProvider)
+	assert.Equal(t, bypassRequestedMdl, got.DecisionModel)
+	assert.Equal(t, int32(0), got.UpstreamStatusCode)
+}
+
+// TestBypassToAnthropic_RecordsTelemetry_UpstreamError: a buffered upstream
+// error is flushed to the client and proxyErr cleared; the telemetry row must
+// still carry the real upstream status.
+func TestBypassToAnthropic_RecordsTelemetry_UpstreamError(t *testing.T) {
+	telRepo := &fakeTelemetryRepo{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	p := &fakeProvider{proxyErr: &providers.UpstreamErrorResponse{Status: http.StatusBadRequest}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
+		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+	})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, telRepo).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
+
+	rec, req, body := bypassRequest(t)
+	require.NoError(t, svc.ProxyMessages(telemetryBypassCtx(uuid.New().String(), 0.80), body, rec, req))
+
+	require.Eventually(t, func() bool {
+		return len(telRepo.recorded()) >= 1
+	}, 2*time.Second, 10*time.Millisecond, "fireTelemetry must fire for usage-bypass turns")
+
+	params := telRepo.recorded()
+	require.Len(t, params, 1)
+	assert.Equal(t, int32(http.StatusBadRequest), params[0].UpstreamStatusCode)
 }
