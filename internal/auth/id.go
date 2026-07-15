@@ -17,15 +17,27 @@ func GenerateID(prefix string) string {
 	if len(prefix) > 10 {
 		panic("prefix must be 10 characters or less")
 	}
-	bytes := make([]byte, idLength)
-	if _, err := rand.Read(bytes); err != nil {
-		panic(err)
-	}
 	var b strings.Builder
 	b.WriteString(prefix)
 	b.WriteString("_")
-	for _, x := range bytes {
-		b.WriteByte(alphaNumericCharacters[int(x)%len(alphaNumericCharacters)])
+	// Rejection-sample to avoid modulo bias: 256 % 62 != 0, so a plain
+	// mod would skew toward the first characters of the alphabet.
+	limit := byte(256 - (256 % len(alphaNumericCharacters)))
+	buf := make([]byte, idLength)
+	for written := 0; written < idLength; {
+		if _, err := rand.Read(buf); err != nil {
+			panic(err)
+		}
+		for _, x := range buf {
+			if x >= limit {
+				continue
+			}
+			b.WriteByte(alphaNumericCharacters[int(x)%len(alphaNumericCharacters)])
+			written++
+			if written == idLength {
+				break
+			}
+		}
 	}
 	return b.String()
 }
