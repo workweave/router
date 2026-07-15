@@ -1192,12 +1192,23 @@ func boolDefault(b bool) string {
 	return "false"
 }
 
-// rlSidecarHeadersFromEnv builds Modal-Key / Modal-Secret headers when the
+// rlSidecarHeadersFromEnv builds Modal-Key / Modal-Secret headers when both
 // env vars are set — needed for Modal ASGI apps with requires_proxy_auth=True.
+// A partial pair (only one set) logs an error and returns nil so misconfig
+// surfaces at startup instead of as opaque 401/503s from the sidecar.
 func rlSidecarHeadersFromEnv() map[string]string {
 	key := strings.TrimSpace(config.GetOr("ROUTER_RL_SIDECAR_MODAL_KEY", ""))
 	secret := strings.TrimSpace(config.GetOr("ROUTER_RL_SIDECAR_MODAL_SECRET", ""))
+	if key == "" && secret == "" {
+		return nil
+	}
 	if key == "" || secret == "" {
+		observability.Get().Error(
+			"Partial Modal RL sidecar proxy auth config; omitting headers",
+			"has_key", key != "",
+			"has_secret", secret != "",
+			"hint", "set both ROUTER_RL_SIDECAR_MODAL_KEY and ROUTER_RL_SIDECAR_MODAL_SECRET",
+		)
 		return nil
 	}
 	return map[string]string{

@@ -14,9 +14,6 @@ import (
 // DefaultTimeout bounds a single policy decision. The sidecar embeds the
 // prompt (a network call to the embedding provider) before scoring, so the
 // budget is comparable to the cluster scorer's embed timeout.
-//
-// Band/Modal GPU serves are usually well under this; raise via
-// ROUTER_RL_SIDECAR_TIMEOUT_MS when pointing at a cold or CPU sidecar.
 const DefaultTimeout = 2 * time.Second
 
 // HTTPDecider calls the policy sidecar's POST /route endpoint.
