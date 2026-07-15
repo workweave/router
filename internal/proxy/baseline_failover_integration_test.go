@@ -14,6 +14,7 @@ import (
 	"workweave/router/internal/providers/openaicompat"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/translate"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -121,6 +122,44 @@ func TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 	// the cost-routed OSS id — otherwise next-turn switch detection is wrong.
 	require.NotEmpty(t, store.usages, "baseline failover must write pin usage")
 	assert.Equal(t, "claude-opus-4-8", store.usages[len(store.usages)-1].ServedModel, "pin usage records the served baseline model")
+}
+
+// TestProxyMessages_ForcedModelUnavailableDoesNotSubstituteAnthropic ensures
+// /force-model reports an unconfigured forced provider instead of silently
+// serving the request's Anthropic baseline.
+func TestProxyMessages_ForcedModelUnavailableDoesNotSubstituteAnthropic(t *testing.T) {
+	var anthropicCount int
+	var googleCount int
+	anthropic := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		anthropicCount++
+		w.WriteHeader(http.StatusOK)
+	}}
+	google := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		googleCount++
+		w.WriteHeader(http.StatusOK)
+	}}
+	svc := makeProxyService(
+		router.Decision{
+			Provider: providers.ProviderGoogle,
+			Model:    "gemini-3.1-pro-preview",
+			Reason:   translate.ReasonUserForceModel,
+		},
+		map[string]providers.Client{
+			providers.ProviderAnthropic: anthropic,
+			providers.ProviderGoogle:    google,
+		},
+	).WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderAnthropic: {}})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"claude-opus-4-8","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+
+	err := svc.ProxyMessages(context.Background(), body, rec, req)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Contains(t, rec.Body.String(), "forced model gemini-3.1-pro-preview unavailable: provider google not configured")
+	assert.Equal(t, 0, anthropicCount, "forced model requests must never substitute Anthropic")
+	assert.Equal(t, 0, googleCount, "unwired forced provider must not be dispatched")
 }
 
 // TestProxyMessages_OSSOutageNoBaselineWhenRequestedModelIsOSS: when the caller

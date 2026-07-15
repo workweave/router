@@ -2554,7 +2554,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	baselineModel := s.baselineFor(feats.Model)
 	baselineCatalog, baselineKnown := catalog.ByID(baselineModel)
 	_, anthropicExcluded := s.excludedProvidersForRequest(ctx)[providers.ProviderAnthropic]
-	baselineEligible := s.shouldFailover(ctx) &&
+	baselineEligible := decision.Reason != translate.ReasonUserForceModel &&
+		s.shouldFailover(ctx) &&
 		!anthropicExcluded &&
 		decision.Provider != providers.ProviderAnthropic &&
 		baselineModel != decision.Model &&
