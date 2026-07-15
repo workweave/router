@@ -1,0 +1,19 @@
+install/opencode-weave/src/index.ts
+  s_09ca5e2e44a0ed::t_4bf42965457de2 229-231,233-239,241,246,250,254,258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "ad45a98b6378983272dd2db298a6fba20f27086c",
+  "prompts": {},
+  "sessions": {
+    "s_09ca5e2e44a0ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35ef0a9f-52c3-476b-b860-781312b3d039",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+sidecars/hmm/hmm_sidecar/artifacts.py
+  s_a81d8efc38ee57::t_c364efdddb70c3 115,117,122,147
+sidecars/hmm/tests/test_artifacts.py
+  s_a81d8efc38ee57::t_c364efdddb70c3 114,127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "a7ecdfb0f23abdc7e9fc51049ca21532c6cbc0ee",
+  "prompts": {},
+  "sessions": {
+    "s_a81d8efc38ee57": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4d24-a314-7332-876a-e20e37d646b5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

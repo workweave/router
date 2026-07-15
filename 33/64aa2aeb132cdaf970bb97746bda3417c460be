@@ -1,0 +1,46 @@
+db/migrations/0030_session_pin_paired_model.up.sql
+  s_e314738a9195df::t_2985a0978c523b 1-16
+internal/proxy/turnloop.go
+  s_e314738a9195df::t_f72aeb71feea66 735-738
+  s_e314738a9195df::t_2b94ed440c62fd 756-765,776-777
+  s_e314738a9195df::t_a8604866dae22d 730-734
+internal/router/cluster/scorer_test.go
+  s_e314738a9195df::t_70d60240d5273c 322-363
+internal/sqlc/session_pins.sql.go
+  s_e314738a9195df::t_77758896d41610 16,34,60-61,214-215,219-220,242-243,265-270,273-274,278-279,300-301
+internal/router/cluster/scorer.go
+  s_e314738a9195df::t_48c0a1594add7e 885-888
+  s_e314738a9195df::t_7df6332d1a0bf7 850-865
+  s_e314738a9195df::t_754df28dbb520c 977-1001
+  s_e314738a9195df::t_83653b7b464949 897-899
+internal/postgres/session_pin_repo.go
+  s_e314738a9195df::t_f537dac88b39ee 125-126
+  s_e314738a9195df::t_2ee3c253a890ea 50-51
+db/migrations/0030_session_pin_paired_model.down.sql
+  s_e314738a9195df::t_2985a0978c523b 1-7
+db/queries/session_pins.sql
+  s_e314738a9195df::t_ce586b488292ce 28-33,37-38,42
+internal/sqlc/models.go
+  s_e314738a9195df::t_77758896d41610 307-308
+internal/router/router.go
+  s_e314738a9195df::t_e0c3765fb23cd1 95-104
+internal/router/sessionpin/store.go
+  s_e314738a9195df::t_a8604866dae22d 37-41
+  s_e314738a9195df::t_d1153b44f59b7b 42-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "3364aa2aeb132cdaf970bb97746bda3417c460be",
+  "prompts": {},
+  "sessions": {
+    "s_e314738a9195df": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "17bb5105-1a4b-4d8b-8633-f796bbc7df06",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

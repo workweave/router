@@ -1,0 +1,25 @@
+internal/api/CLAUDE.md
+  s_c4ecee41717be0::t_1642a012bed72a 27
+internal/api/AGENTS.md
+  s_c4ecee41717be0::t_b49100dae8221f 27
+AGENTS.md
+  s_c4ecee41717be0::t_84224f26de769f 114
+CLAUDE.md
+  s_c4ecee41717be0::t_b3ae1283057799 114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "07b95a29f8c64ea026440d1879a911398ce63fb9",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
