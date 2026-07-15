@@ -123,6 +123,7 @@ func isHMMDecision(dec router.Decision) bool {
 }
 
 const hmmHistoryReason = "hmm_history"
+const cyberRefusalRepinReason = "cyber-refusal-repin"
 const defaultHMMUpgradeConfidenceThreshold = 0.85
 
 const (
@@ -779,7 +780,7 @@ func (s *Service) hmmCostGatedDecision(
 		SubsidizedCostFactor: req.SubsidizedModelCostFactor,
 	}, cfg)
 
-	if hmmFreshIsMoreExpensive(stayPin.Model, fresh.Model, req.SubsidizedModelCostFactor) {
+	if stayPin.Reason != cyberRefusalRepinReason && hmmFreshIsMoreExpensive(stayPin.Model, fresh.Model, req.SubsidizedModelCostFactor) {
 		confidence, ok := hmmDecisionConfidence(fresh)
 		if ok && confidence >= s.hmmUpgradeConfidenceThreshold {
 			base.Outcome = planner.OutcomeSwitch
@@ -805,6 +806,8 @@ func (s *Service) hmmStayPin(req router.Request, activePin sessionpin.Pin, hmmHi
 	// prior non-HMM stretch must not steer an HMM EV stay.
 	if !isHMMPinReason(activePin.Reason) {
 		activePin = sessionpin.Pin{}
+	} else if activePin.Reason == cyberRefusalRepinReason {
+		hmmHistory = sessionpin.Pin{}
 	}
 	for _, candidate := range []sessionpin.Pin{activePin, hmmHistory} {
 		normalized, candidateOK := s.normalizeHMMStayPin(req, candidate)
@@ -823,6 +826,7 @@ func (s *Service) hmmStayPin(req router.Request, activePin sessionpin.Pin, hmmHi
 // guards against a stale cluster/planner pin steering an HMM turn's EV stay.
 func isHMMPinReason(reason string) bool {
 	return reason == hmmHistoryReason ||
+		reason == cyberRefusalRepinReason ||
 		strings.HasPrefix(strings.TrimSpace(reason), "hmm_policy")
 }
 
@@ -842,7 +846,7 @@ func (s *Service) normalizeHMMStayPin(req router.Request, p sessionpin.Pin) (ses
 	if model == "" {
 		return sessionpin.Pin{}, false
 	}
-	if p.LastTurnEndedAt.IsZero() {
+	if p.LastTurnEndedAt.IsZero() && p.Reason != cyberRefusalRepinReason {
 		return sessionpin.Pin{}, false
 	}
 	if !p.PinnedUntil.IsZero() && !p.PinnedUntil.After(time.Now()) {
