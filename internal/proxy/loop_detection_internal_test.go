@@ -111,6 +111,7 @@ func TestDetectToolCallLoop_AlternatingPairStillTripsOnRepeats(t *testing.T) {
 type toolCall struct {
 	name  string
 	input map[string]any
+	id    string // optional; auto-generated as toolu_N when empty
 }
 
 func buildBodyWithToolCalls(t *testing.T, calls []toolCall) []byte {
@@ -120,6 +121,9 @@ func buildBodyWithToolCalls(t *testing.T, calls []toolCall) []byte {
 	}
 	for i, c := range calls {
 		id := "toolu_" + itoa(i)
+		if c.id != "" {
+			id = c.id
+		}
 		msgs = append(msgs,
 			map[string]any{"role": "assistant", "content": []any{
 				map[string]any{"type": "tool_use", "id": id, "name": c.name, "input": c.input},
@@ -400,4 +404,32 @@ func TestHandleLoopEscalation_NilInstallationSkipsHoldout(t *testing.T) {
 
 	assert.Empty(t, events.events, "nil installation cannot record an event row")
 	assert.Empty(t, pins.upserts, "nil installation cannot pin either — but it must not be counted as holdout")
+}
+
+func TestDetectToolCallLoop_NudgeFalsePositive(t *testing.T) {
+	// Nudges carry a constant command, so alternating nudges with distinct
+	// real tool calls must not trip the frequency detector.
+	nudgeInput := map[string]any{
+		"command":     "echo '[router] previous turn produced no tool_use; use Edit/Write/Read/Bash/Grep — do not respond with prose or thinking tags only.'",
+		"description": "router recovery nudge: previous turn had no tool_use",
+	}
+	calls := []toolCall{
+		{name: "Bash", input: nudgeInput, id: "toolu_router_nudge_1"},
+		{name: "Read", input: map[string]any{"file_path": "/a.go"}},
+		{name: "Bash", input: nudgeInput, id: "toolu_router_nudge_2"},
+		{name: "Edit", input: map[string]any{"file_path": "/b.go", "old_string": "x", "new_string": "y"}},
+		{name: "Bash", input: nudgeInput, id: "toolu_router_nudge_3"},
+		{name: "Bash", input: map[string]any{"command": "go test ./..."}},
+		{name: "Bash", input: nudgeInput, id: "toolu_router_nudge_4"},
+		{name: "Read", input: map[string]any{"file_path": "/c.go"}},
+		{name: "Bash", input: nudgeInput, id: "toolu_router_nudge_5"},
+	}
+	body := buildBodyWithToolCalls(t, calls)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+
+	loop, sig, _ := detectToolCallLoop(env)
+	assert.False(t, loop,
+		"a model alternating nudges with distinct real tool calls must not trip the loop detector; "+
+			"got sig=%+v", sig)
 }

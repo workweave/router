@@ -106,6 +106,13 @@ func anthropicAssistantToolCallEntries(body []byte) []assistantToolCallEntry {
 				return true
 			}
 			name := block.Get("name").String()
+			// Router-synthesized nudges carry a constant command, so their
+			// identical sigs would trip the frequency detector on sessions
+			// making real progress; consecutive nudges are caught separately
+			// by detectConsecutiveNudgeLoop.
+			if strings.HasPrefix(block.Get("id").String(), routerNudgeIDPrefix) {
+				return true
+			}
 			if name == "" {
 				return true
 			}

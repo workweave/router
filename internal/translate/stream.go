@@ -1060,6 +1060,10 @@ func (t *AnthropicSSETranslator) emitValidatedToolArgsDelta(blockIdx int) error 
 // dispatchable; the echo surfaces as a tool_result nudging the model to act.
 const routerNudgeCommand = "echo '[router] previous turn produced no tool_use; use Edit/Write/Read/Bash/Grep — do not respond with prose or thinking tags only.'"
 
+// routerNudgeIDPrefix marks router-synthesized nudge tool_use ids so
+// downstream passes can distinguish them from model-emitted calls.
+const routerNudgeIDPrefix = "toolu_router_nudge_"
+
 // leadingContentCap bounds retained opening text for leadsWithToolishMarkup —
 // enough for any marker plus leading whitespace.
 const leadingContentCap = 64
@@ -1141,7 +1145,7 @@ func (t *AnthropicSSETranslator) synthesizeTextOnlyTurnNudge() error {
 		return nil
 	}
 	blockIdx := t.blockIdx
-	id := "toolu_router_nudge_" + t.messageID
+	id := routerNudgeIDPrefix + t.messageID
 	if err := t.emitContentBlockStartTool(blockIdx, id, "Bash", ""); err != nil {
 		return err
 	}
