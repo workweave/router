@@ -1192,9 +1192,13 @@ func boolDefault(b bool) string {
 	return "false"
 }
 
-// rlSidecarHeadersFromEnv builds Modal-Key / Modal-Secret headers when
-// both env vars are set (Modal ASGI requires_proxy_auth=True). A partial
-// pair logs an error and returns nil so misconfig surfaces at startup.
+// rlSidecarHeadersFromEnv builds auth headers for the RL sidecar when both
+// ROUTER_RL_SIDECAR_MODAL_KEY and ROUTER_RL_SIDECAR_MODAL_SECRET are set.
+//
+// Sends X-Weave-Band-Key / X-Weave-Band-Secret (and Authorization Bearer) for
+// the Modal tip_k3 band serve — Modal's edge strips Modal-Key/Modal-Secret
+// before they reach ASGI when requires_proxy_auth is false. Also still sends
+// Modal-Key/Modal-Secret for true Modal proxy-auth endpoints.
 func rlSidecarHeadersFromEnv() map[string]string {
 	key := strings.TrimSpace(config.GetOr("ROUTER_RL_SIDECAR_MODAL_KEY", ""))
 	secret := strings.TrimSpace(config.GetOr("ROUTER_RL_SIDECAR_MODAL_SECRET", ""))
@@ -1211,8 +1215,11 @@ func rlSidecarHeadersFromEnv() map[string]string {
 		return nil
 	}
 	return map[string]string{
-		"Modal-Key":    key,
-		"Modal-Secret": secret,
+		"X-Weave-Band-Key":    key,
+		"X-Weave-Band-Secret": secret,
+		"Authorization":       "Bearer " + key + ":" + secret,
+		"Modal-Key":           key,
+		"Modal-Secret":        secret,
 	}
 }
 
