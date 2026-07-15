@@ -1,0 +1,63 @@
+internal/proxy/compaction.go
+  s_5ab87f5bdd1452::t_5955d1accb0870 51,55
+  s_5ab87f5bdd1452::t_9785ccac88eb51 172-195
+  s_5ab87f5bdd1452::t_6d9edaea89f10f 25,29
+  s_5ab87f5bdd1452::t_e1988fd59e86a5 9
+  s_5ab87f5bdd1452::t_a06a4bd8e18958 1-8,10-24,26-28,30-50,52-54,56-171,196-233
+cmd/router/main.go
+  s_5ab87f5bdd1452::t_a0d0f5def90fa5 624
+  s_5ab87f5bdd1452::t_fdcad92b506723 518-521,523-525,530
+internal/proxy/dispatch_error.go
+  s_5ab87f5bdd1452::t_42c85418f1217d 164
+  s_5ab87f5bdd1452::t_42b450fd5a9ff7 31
+  s_5ab87f5bdd1452::t_da65d6310ddb0b 101-108
+internal/proxy/CLAUDE.md
+  s_5ab87f5bdd1452::t_d3f02f27aacecc 40-43
+internal/proxy/AGENTS.md
+  s_5ab87f5bdd1452::t_7c9eb0173f9b18 40-43
+internal/proxy/compaction_test.go
+  s_5ab87f5bdd1452::t_b1ede9fb9b1201 61
+  s_5ab87f5bdd1452::t_f65fd1bbfcff92 107
+  s_5ab87f5bdd1452::t_95d89c89d5a3e2 41
+  s_5ab87f5bdd1452::t_440261f4417a24 77,82
+  s_5ab87f5bdd1452::t_1197edeb7d685e 1-40,42-60,62-76,78-81,83-106,108-157
+internal/proxy/service.go
+  s_5ab87f5bdd1452::t_8b19b33b30fb99 173-175,177-180
+  s_5ab87f5bdd1452::t_d219112184b36f 1028,1031
+  s_5ab87f5bdd1452::t_d15eb58e613f89 176
+  s_5ab87f5bdd1452::t_8a24f9f0ffb7bc 3948-3950
+  s_5ab87f5bdd1452::t_d42ec405ce5aec 2536-2538
+  s_5ab87f5bdd1452::t_8f6a09f33279f1 3463-3491
+  s_5ab87f5bdd1452::t_c49aa80184c01e 1024-1027,1029-1030,1032-1036
+  s_5ab87f5bdd1452::t_5a049fbcbe2229 1691-1724
+internal/translate/compaction.go
+  s_5ab87f5bdd1452::t_c0ce1601cf497f 57
+  s_5ab87f5bdd1452::t_45329f61a6f0e6 1-28,30-56,58-367
+  s_5ab87f5bdd1452::t_271676ccb45371 29
+internal/translate/compaction_test.go
+  s_5ab87f5bdd1452::t_231c3a260b43f5 9
+  s_5ab87f5bdd1452::t_c075552c7dd949 1-8,10-164
+internal/proxy/handover.go
+  s_5ab87f5bdd1452::t_424ed97433abe6 218-221
+  s_5ab87f5bdd1452::t_3c78e117d8839e 115-137,146,148,166-167,172,176,181,187,191,195
+  s_5ab87f5bdd1452::t_719dcbd1d07677 41-65
+  s_5ab87f5bdd1452::t_0bf16b600eb3df 241
+docs/CONFIGURATION.md
+  s_5ab87f5bdd1452::t_36c195a8cba537 74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8f37c456c1ed02b30ba8385745b43c1f5226af17",
+  "prompts": {},
+  "sessions": {
+    "s_5ab87f5bdd1452": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f507480c-7641-4339-905b-f5621ee55bf6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

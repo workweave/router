@@ -1,0 +1,20 @@
+.github/workflows/comment_length_review.yml
+  s_35d220d3b4d057::t_28b9cf14892734 94-96
+  s_35d220d3b4d057::t_1a8ac9439e1a3e 7-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2e44b319d61da78c81047cc27e26fe3b9e54da5f",
+  "prompts": {},
+  "sessions": {
+    "s_35d220d3b4d057": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185bc586-038a-4c2a-a848-709b258e6130",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+internal/proxy/turnloop_internal_test.go
+  s_f1c78cd077965e::t_f89ce0967cd938 26
+  s_f1c78cd077965e::t_4b9a2f0c608627 42-44
+internal/proxy/loop_detection.go
+  s_f1c78cd077965e::t_a3c94470e35637 293-328,333-334
+  s_f1c78cd077965e::t_1a0e0b4f395fa8 253-258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5cabc2d8e465ad7774bde6fa3aab94b2043fbb59",
+  "prompts": {},
+  "sessions": {
+    "s_f1c78cd077965e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4071f91c-1ccf-476b-a5ac-376c38e38da5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

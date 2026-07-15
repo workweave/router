@@ -1,0 +1,29 @@
+go.sum
+  ai_agent 1-13,22,33,46,55-57,66-76,85,104-117,130-135,139-141,144-147,201-202,206,251-254,257-270,276-277,280,285-301,304-307,314-315,318-325,330-358,367-368
+cmd/router/main.go
+  s_826b70af1fd465::t_97e7e859b8a5b3 45
+  s_826b70af1fd465::t_c543eada78971b 258-269,274,276-277
+  s_826b70af1fd465::t_3c557361b2a67f 27
+internal/pubsub/invalidation.go
+  s_826b70af1fd465::t_2b7a7aab1b8169 1,13-14,17-18,27-30,38,58,67,72-74,76-79,81
+  s_826b70af1fd465::t_cc72984570061a 10,19,22-24,37,48-50,52-54,59,61-63,70-71
+go.mod
+  s_826b70af1fd465::t_d5ecbf3147eabd 8,78,85-86
+  s_826b70af1fd465::t_1393cd5352ccc3 26-30,33,39,44,55-57,79-84,87,92-93,98-103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "44cc1afee257e764589c7f42b79d57d523ff2aa3",
+  "prompts": {},
+  "sessions": {
+    "s_826b70af1fd465": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5bee7f31-2710-40df-94a7-593bff34f2ee",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

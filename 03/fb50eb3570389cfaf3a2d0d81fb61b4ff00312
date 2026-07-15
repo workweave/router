@@ -1,0 +1,28 @@
+internal/router/cluster/multiversion_test.go
+  s_c4ecee41717be0::t_a46ad92b8ab4f4 114
+  s_c4ecee41717be0::t_c3af452a806625 146-147
+  s_c4ecee41717be0::t_95b7a8924e0d02 91-92
+  s_c4ecee41717be0::t_d119ea5dcc6c20 132-133
+internal/translate/gemini_test.go
+  s_c4ecee41717be0::t_cc9a39d513bf74 410-411
+internal/auth/user.go
+  s_c4ecee41717be0::t_864e7c07e72741 51-52
+internal/auth/installation.go
+  s_c4ecee41717be0::t_ce7c6cde3a5627 66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "03fb50eb3570389cfaf3a2d0d81fb61b4ff00312",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

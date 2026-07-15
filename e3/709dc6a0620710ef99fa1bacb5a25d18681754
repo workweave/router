@@ -1,0 +1,21 @@
+cmd/router/main.go
+  s_7657b49d9760e9::t_40e15a9f32b80a 484-485
+internal/proxy/service.go
+  s_7657b49d9760e9::t_265899c68d676c 1605-1606
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e3709dc6a0620710ef99fa1bacb5a25d18681754",
+  "prompts": {},
+  "sessions": {
+    "s_7657b49d9760e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "110b90dc-00a0-4421-ada3-48c3a76b0f47",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

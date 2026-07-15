@@ -1,0 +1,29 @@
+internal/server/server.go
+  s_6497efcbf5fbe7::t_b4c1a7e04d4b62 208
+internal/api/feedback/rate_page_test.go
+  s_6497efcbf5fbe7::t_153d3ea38a95b5 1-26
+internal/api/feedback/feedback.go
+  s_6497efcbf5fbe7::t_56a3e58478cc27 134,140,142,144-148,161,165
+internal/api/feedback/feedback_test.go
+  s_6497efcbf5fbe7::t_93e4c908edb10d 192
+  s_6497efcbf5fbe7::t_a506d33338bb25 193
+internal/api/feedback/rate_page.go
+  s_6497efcbf5fbe7::t_77368d60079f3d 1-4,6-27,29,31-69,71-73,76,78-106
+  s_6497efcbf5fbe7::t_77c83d1a2ab501 5,28,30,70,74-75,77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.11",
+  "base_commit_sha": "8f8a8f69686ce7db33f1c32d08bf4bef098b79be",
+  "prompts": {},
+  "sessions": {
+    "s_6497efcbf5fbe7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7e6c8c31-340d-4213-89f1-db9abfc036e8",
+        "model": "composer-2.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
